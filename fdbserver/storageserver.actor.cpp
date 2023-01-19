@@ -111,6 +111,48 @@
 
 #define SHORT_CIRCUT_ACTUAL_STORAGE 0
 
+#define PERSIST_PREFIX "\xff\xff"
+
+FDB_BOOLEAN_PARAM(UnlimitedCommitBytes);
+
+// Immutable
+static const KeyValueRef persistFormat(PERSIST_PREFIX "Format"_sr, "FoundationDB/StorageServer/1/4"_sr);
+static const KeyValueRef persistShardAwareFormat(PERSIST_PREFIX "Format"_sr, "FoundationDB/StorageServer/1/5"_sr);
+static const KeyRangeRef persistFormatReadableRange("FoundationDB/StorageServer/1/2"_sr,
+                                                    "FoundationDB/StorageServer/1/6"_sr);
+static const KeyRef persistID = PERSIST_PREFIX "ID"_sr;
+static const KeyRef persistTssPairID = PERSIST_PREFIX "tssPairID"_sr;
+static const KeyRef persistSSPairID = PERSIST_PREFIX "ssWithTSSPairID"_sr;
+static const KeyRef persistTssQuarantine = PERSIST_PREFIX "tssQ"_sr;
+
+// (Potentially) change with the durable version or when fetchKeys completes
+static const KeyRef persistVersion = PERSIST_PREFIX "Version"_sr;
+static const KeyRangeRef persistShardAssignedKeys =
+    KeyRangeRef(PERSIST_PREFIX "ShardAssigned/"_sr, PERSIST_PREFIX "ShardAssigned0"_sr);
+static const KeyRangeRef persistShardAvailableKeys =
+    KeyRangeRef(PERSIST_PREFIX "ShardAvailable/"_sr, PERSIST_PREFIX "ShardAvailable0"_sr);
+static const KeyRangeRef persistByteSampleKeys = KeyRangeRef(PERSIST_PREFIX "BS/"_sr, PERSIST_PREFIX "BS0"_sr);
+static const KeyRangeRef persistByteSampleSampleKeys =
+    KeyRangeRef(PERSIST_PREFIX "BS/"_sr PERSIST_PREFIX "BS/"_sr, PERSIST_PREFIX "BS/"_sr PERSIST_PREFIX "BS0"_sr);
+static const KeyRef persistLogProtocol = PERSIST_PREFIX "LogProtocol"_sr;
+static const KeyRef persistPrimaryLocality = PERSIST_PREFIX "PrimaryLocality"_sr;
+static const KeyRangeRef persistChangeFeedKeys = KeyRangeRef(PERSIST_PREFIX "CF/"_sr, PERSIST_PREFIX "CF0"_sr);
+static const KeyRangeRef persistTenantMapKeys = KeyRangeRef(PERSIST_PREFIX "TM/"_sr, PERSIST_PREFIX "TM0"_sr);
+// data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
+
+static const KeyRangeRef persistStorageServerShardKeys =
+    KeyRangeRef(PERSIST_PREFIX "StorageServerShard/"_sr, PERSIST_PREFIX "StorageServerShard0"_sr);
+static const KeyRangeRef persistMoveInShardKeys =
+    KeyRangeRef(PERSIST_PREFIX "MoveInShard/"_sr, PERSIST_PREFIX "MoveInShard0"_sr);
+static const KeyRef persistMoveInUpdatesPrefix = PERSIST_PREFIX "MoveInShardUpdates/"_sr;
+
+// Checkpoint related prefixes.
+static const KeyRangeRef persistCheckpointKeys =
+    KeyRangeRef(PERSIST_PREFIX "Checkpoint/"_sr, PERSIST_PREFIX "Checkpoint0"_sr);
+static const KeyRangeRef persistPendingCheckpointKeys =
+    KeyRangeRef(PERSIST_PREFIX "PendingCheckpoint/"_sr, PERSIST_PREFIX "PendingCheckpoint0"_sr);
+static const std::string rocksdbCheckpointDirPrefix = "/rockscheckpoints_";
+
 namespace {
 enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE, CSK_ASSIGN_EMPTY };
 
@@ -158,46 +200,286 @@ bool canReplyWith(Error e) {
 		return false;
 	}
 }
+
+struct MoveInShardMetaData {
+	constexpr static FileIdentifier file_identifier = 3804366;
+
+	enum Phase {
+		Pending = 0,
+		Fetching = 1,
+		Ingesting = 2,
+		ApplyingUpdates = 3,
+		Complete = 4,
+		Deleting = 4,
+		Fail = 6,
+	};
+
+	UID id;
+	UID dataMoveId;
+	std::vector<KeyRange> ranges;
+	Version createVersion;
+	Version highWatermark; // The highest version that has been applied to the MoveInShard.
+	// Version version;
+	int8_t phase;
+	std::vector<CheckpointMetaData> checkpoints;
+	Optional<Error> error;
+	double startTime;
+
+	MoveInShardMetaData() = default;
+	MoveInShardMetaData(const UID& id,
+	                    const UID& dataMoveId,
+	                    std::vector<KeyRange> ranges,
+	                    const Version version,
+	                    Phase phase)
+	  : id(id), dataMoveId(dataMoveId), ranges(ranges), createVersion(version), highWatermark(version), phase(phase),
+	    startTime(now()) {}
+	MoveInShardMetaData(const UID& id, const UID& dataMoveId, std::vector<KeyRange> ranges, const Version version)
+	  : MoveInShardMetaData(id, dataMoveId, ranges, version, Fetching) {}
+	MoveInShardMetaData(const UID& dataMoveId, std::vector<KeyRange> ranges, const Version version)
+	  : MoveInShardMetaData(deterministicRandom()->randomUniqueID(), dataMoveId, ranges, version, Fetching) {}
+
+	bool operator<(const MoveInShardMetaData& rhs) const {
+		return this->ranges.front().begin < rhs.ranges.front().begin;
+	}
+
+	Phase getPhase() const { return static_cast<Phase>(this->phase); }
+
+	void setPhase(Phase phase) { this->phase = phase; }
+
+	// Key moveInShardKey() const {
+	// 	BinaryWriter wr(Unversioned());
+	// 	wr.serializeBytes(persistMoveInShardKeys.begin);
+	// 	wr << this->id;
+	// 	return wr.toValue();
+	// }
+
+	Value moveInShardValue() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
+
+	// KeyRange persistUpdatesKeyRange() const {
+	// 	BinaryWriter wr(Unversioned());
+	// 	wr.serializeBytes(persistMoveInUpdatesPrefix);
+	// 	wr << this->id;
+	// 	wr.serializeBytes("/"_sr);
+	// 	return prefixRange(wr.toValue());
+	// }
+
+	std::string toString() const {
+		return "MoveInShardMetaData: [Range]: " + describe(this->ranges) +
+		       " [DataMoveID]: " + this->dataMoveId.toString() +
+		       " [ShardCreateVersion]: " + std::to_string(this->createVersion) + " [ID]: " + this->id.shortString() +
+		       " [State]: " + std::to_string(static_cast<int>(this->phase));
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, id, dataMoveId, ranges, createVersion, highWatermark, phase, checkpoints);
+	}
+};
+
+KeyRange persistUpdatesKeyRange(const UID& id) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(persistMoveInUpdatesPrefix);
+	wr << id;
+	wr.serializeBytes("/"_sr);
+	return prefixRange(wr.toValue());
+}
+
+Key persistMoveInShardKey(const UID& id) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(persistMoveInShardKeys.begin);
+	wr << id;
+	return wr.toValue();
+}
+
+UID decodeMoveInShardKey(const KeyRef& key) {
+	UID id;
+	BinaryReader rd(key.removePrefix(persistMoveInShardKeys.begin), Unversioned());
+	rd >> id;
+	return id;
+}
+
+Value moveInShardValue(const MoveInShardMetaData& meta) {
+	return ObjectWriter::toValue(meta, IncludeVersion());
+}
+
+MoveInShardMetaData decodeMoveInShardValue(const ValueRef& value) {
+	MoveInShardMetaData shard;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(shard);
+	return shard;
+}
 } // namespace
 
-#define PERSIST_PREFIX "\xff\xff"
+struct MoveInUpdates {
 
-FDB_BOOLEAN_PARAM(UnlimitedCommitBytes);
+	MoveInUpdates() = default;
+	MoveInUpdates(UID id, Version version, struct StorageServer* data, IKeyValueStore* store)
+	  : id(id), oldestVersion(version), data(data), store(store), range(persistUpdatesKeyRange(id)),
+	    shardRemoved(false) {}
 
-// Immutable
-static const KeyValueRef persistFormat(PERSIST_PREFIX "Format"_sr, "FoundationDB/StorageServer/1/4"_sr);
-static const KeyValueRef persistShardAwareFormat(PERSIST_PREFIX "Format"_sr, "FoundationDB/StorageServer/1/5"_sr);
-static const KeyRangeRef persistFormatReadableRange("FoundationDB/StorageServer/1/2"_sr,
-                                                    "FoundationDB/StorageServer/1/6"_sr);
-static const KeyRef persistID = PERSIST_PREFIX "ID"_sr;
-static const KeyRef persistTssPairID = PERSIST_PREFIX "tssPairID"_sr;
-static const KeyRef persistSSPairID = PERSIST_PREFIX "ssWithTSSPairID"_sr;
-static const KeyRef persistTssQuarantine = PERSIST_PREFIX "tssQ"_sr;
+	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
 
-// (Potentially) change with the durable version or when fetchKeys completes
-static const KeyRef persistVersion = PERSIST_PREFIX "Version"_sr;
-static const KeyRangeRef persistShardAssignedKeys =
-    KeyRangeRef(PERSIST_PREFIX "ShardAssigned/"_sr, PERSIST_PREFIX "ShardAssigned0"_sr);
-static const KeyRangeRef persistShardAvailableKeys =
-    KeyRangeRef(PERSIST_PREFIX "ShardAvailable/"_sr, PERSIST_PREFIX "ShardAvailable0"_sr);
-static const KeyRangeRef persistByteSampleKeys = KeyRangeRef(PERSIST_PREFIX "BS/"_sr, PERSIST_PREFIX "BS0"_sr);
-static const KeyRangeRef persistByteSampleSampleKeys =
-    KeyRangeRef(PERSIST_PREFIX "BS/"_sr PERSIST_PREFIX "BS/"_sr, PERSIST_PREFIX "BS/"_sr PERSIST_PREFIX "BS0"_sr);
-static const KeyRef persistLogProtocol = PERSIST_PREFIX "LogProtocol"_sr;
-static const KeyRef persistPrimaryLocality = PERSIST_PREFIX "PrimaryLocality"_sr;
-static const KeyRangeRef persistChangeFeedKeys = KeyRangeRef(PERSIST_PREFIX "CF/"_sr, PERSIST_PREFIX "CF0"_sr);
-static const KeyRangeRef persistTenantMapKeys = KeyRangeRef(PERSIST_PREFIX "TM/"_sr, PERSIST_PREFIX "TM0"_sr);
-// data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
+	bool hasNext() const;
 
-static const KeyRangeRef persistStorageServerShardKeys =
-    KeyRangeRef(PERSIST_PREFIX "StorageServerShard/"_sr, PERSIST_PREFIX "StorageServerShard0"_sr);
+	std::vector<Standalone<VerUpdateRef>> next(const int byteLimit);
 
-// Checkpoint related prefixes.
-static const KeyRangeRef persistCheckpointKeys =
-    KeyRangeRef(PERSIST_PREFIX "Checkpoint/"_sr, PERSIST_PREFIX "Checkpoint0"_sr);
-static const KeyRangeRef persistPendingCheckpointKeys =
-    KeyRangeRef(PERSIST_PREFIX "PendingCheckpoint/"_sr, PERSIST_PREFIX "PendingCheckpoint0"_sr);
-static const std::string rocksdbCheckpointDirPrefix = "/rockscheckpoints_";
+	Future<Void> restore(Version begin) { return doRestore(this, begin); }
+
+	// void bufferWrite();
+
+	void clear();
+
+	UID id;
+	Version oldestVersion;
+	std::deque<Standalone<VerUpdateRef>> updates;
+	// std::deque<Standalone<VerUpdateRef>> newUpdates;
+	struct StorageServer* data;
+	IKeyValueStore* store;
+	KeyRange range;
+	bool shardRemoved;
+
+private:
+	ACTOR static Future<Void> doRestore(MoveInUpdates* self, Version begin) {
+		// ASSERT(self->updates.empty());
+		// TODO: read from `begin`.
+		RangeResult res = wait(self->store->readRange(self->range));
+		ASSERT(!res.more);
+		// state int i = 0;
+		std::map<Version, Standalone<VerUpdateRef>> restored;
+		for (int i = 0; i < res.size(); ++i) {
+			BinaryReader rd(res[i].key.removePrefix(self->range.begin), Unversioned());
+			Version version;
+			rd >> version;
+			Standalone<MutationRef> mutation =
+			    BinaryReader::fromStringRef<Standalone<MutationRef>>(res[i].value, IncludeVersion());
+			DEBUG_MUTATION("MoveInUpdatesRestore", version, mutation, self->id);
+			// TraceEvent(SevDebug, "MoveInUpdatesRestore", self->id)
+			//     .detail("Version", version)
+			//     .detail("Mutation", mutation);
+			auto& vur = restored[version];
+			vur.version = version;
+			vur.push_back_deep(vur.arena(), mutation);
+			// restored[version].push_back_deep(restored[version].arena(), mutation);
+			// wait(yield());
+		}
+
+		std::deque<Standalone<VerUpdateRef>> tmp(std::move(self->updates));
+		self->updates = std::deque<Standalone<VerUpdateRef>>();
+		for (const auto& [version, vur] : restored) {
+			ASSERT(version == vur.version);
+			if (version > begin) {
+				self->updates.push_back(vur);
+			}
+		}
+
+		while (!tmp.empty()) {
+			if (self->updates.empty() || tmp.front().version > self->updates.back().version) {
+				TraceEvent("MoveInUpdatesRestoreAddingNewUpdates", self->id)
+				    .detail("Version", tmp.front().version)
+				    .detail("Size", tmp.front().mutations.size());
+				self->updates.push_back(tmp.front());
+			}
+			tmp.pop_front();
+		}
+
+		return Void();
+	}
+
+	Key getPersistKey(const Version version, const int idx);
+	// std::string prefix;
+	// bool receivedUpdates = false;
+};
+
+bool MoveInUpdates::hasNext() const {
+	return !updates.empty();
+}
+
+std::vector<Standalone<VerUpdateRef>> MoveInUpdates::next(const int byteLimit) {
+	if (this->shardRemoved) {
+		throw operation_cancelled();
+	}
+	std::vector<Standalone<VerUpdateRef>> res;
+	while (!updates.empty()) {
+		res.push_back(updates.front());
+		updates.pop_front();
+	}
+	return res;
+}
+
+void MoveInUpdates::clear() {
+	updates.clear();
+}
+
+struct MoveInShard {
+	std::shared_ptr<MoveInShardMetaData> meta;
+	struct StorageServer* server;
+	std::shared_ptr<MoveInUpdates> updates;
+	Version transferredVersion;
+
+	Future<Void> fetchClient; // holds FetchShard() actor
+	Promise<Void> fetchComplete;
+	Promise<Void> readWrite;
+	PromiseStream<Key> changeFeedRemovals;
+
+	MoveInShard() = default;
+	MoveInShard(StorageServer* server,
+	            const UID& id,
+	            const UID& dataMoveId,
+	            KeyRange range,
+	            const Version version,
+	            MoveInShardMetaData::Phase phase);
+	MoveInShard(StorageServer* server, const UID& id, const UID& dataMoveId, KeyRange range, const Version version);
+	MoveInShard(StorageServer* server, const UID& dataMoveId, KeyRange range, const Version version);
+	MoveInShard(StorageServer* server, MoveInShardMetaData meta);
+	~MoveInShard() {
+		if (!fetchComplete.isSet()) {
+			fetchComplete.send(Void());
+		}
+		if (!readWrite.isSet()) {
+			readWrite.send(Void());
+		}
+	}
+
+	std::string toString() const {
+		if (meta != nullptr) {
+			return meta->toString();
+		} else {
+			return "Empty";
+		}
+	}
+
+	// Key moveInShardKey() const {
+	// 	BinaryWriter wr(Unversioned());
+	// 	wr.serializeBytes(persistMoveInShardKeys.begin);
+	// 	wr << this->meta->id;
+	// 	return wr.toValue();
+	// }
+
+	// Value moveInShardValue() const { return ObjectWriter::toValue(*this->meta, IncludeVersion()); }
+
+	// static UID decodeMoveInShardKey(const KeyRef& key) {
+	// 	UID id;
+	// 	BinaryReader rd(key.removePrefix(persistMoveInShardKeys.begin), Unversioned());
+	// 	rd >> id;
+	// 	return id;
+	// }
+
+	// static MoveInShardMetaData decodeMoveInShardValue(const ValueRef& value) {
+	// 	MoveInShardMetaData shard;
+	// 	ObjectReader reader(value.begin(), IncludeVersion());
+	// 	reader.deserialize(shard);
+	// 	return shard;
+	// }
+
+	// bool operator<(const MoveInShard& rhs) const { return this->meta->ranges.begin < rhs.meta->ranges.begin; }
+
+	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
+
+	MoveInShardMetaData::Phase getPhase() const { return static_cast<MoveInShardMetaData::Phase>(meta->phase); }
+	void setPhase(MoveInShardMetaData::Phase phase) { this->meta->phase = phase; }
+
+	bool isTransferred() const { return getPhase() == MoveInShardMetaData::Complete; }
+};
 
 struct AddingShard : NonCopyable {
 	KeyRange keys;
@@ -1995,9 +2277,7 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 	if (version <= data->version.get())
 		return version;
 	choose {
-		when(wait(data->version.whenAtLeast(version))) {
-			return version;
-		}
+		when(wait(data->version.whenAtLeast(version))) { return version; }
 		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
 			if (deterministicRandom()->random01() < 0.001)
 				TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
@@ -2399,6 +2679,22 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 	self->addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::ClearRange, persistCheckpointKey, keyAfter(persistCheckpointKey)));
 
+	return Void();
+}
+
+ACTOR Future<Void> deleteMoveInShardQ(StorageServer* self, Version version, MoveInShardMetaData shard) {
+	wait(self->durableVersion.whenAtLeast(version));
+
+	TraceEvent("DeleteMoveInShardBegin", self->thisServerID)
+	    .detail("MoveInShard", shard.toString())
+	    .detail("Version", version);
+	state int idx = 0;
+	for (; idx < shard.checkpoints.size(); ++idx) {
+		wait(deleteCheckpointQ(self, version, shard.checkpoints[idx]));
+	}
+	self->storage.clearRange(persistUpdatesKeyRange(shard.id));
+	self->storage.clearRange(singleKeyRange(persistMoveInShardKey(shard.id)));
+	wait(self->durableVersion.whenAtLeast(self->storageVersion() + 1));
 	return Void();
 }
 
@@ -6493,9 +6789,7 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		when(wait(changeFeedInfo->fetchLock.take())) {
 			feedFetchReleaser = FlowLock::Releaser(changeFeedInfo->fetchLock);
 		}
-		when(wait(changeFeedInfo->durableFetchVersion.whenAtLeast(endVersion))) {
-			return invalidVersion;
-		}
+		when(wait(changeFeedInfo->durableFetchVersion.whenAtLeast(endVersion))) { return invalidVersion; }
 	}
 
 	state Version startVersion = beginVersion;
@@ -7121,6 +7415,32 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
 		}
 		throw;
 	}
+}
+
+ACTOR Future<Void> updateMoveInShardMetaData(StorageServer* data, MoveInShardMetaData* shard) {
+	Optional<Value> pm = wait(data->storage.readValue(persistMoveInShardKey(shard->id)));
+	if (!pm.present()) {
+		TraceEvent(SevWarn, "UpdatedMoveInShardMetaDataNotFound", data->thisServerID)
+		    .detail("Shard", shard->toString())
+		    .detail("ShardKey", persistMoveInShardKey(shard->id))
+		    .detail("DurableVersion", data->durableVersion.get());
+		throw operation_cancelled();
+	}
+
+	data->storage.writeKeyValue(KeyValueRef(persistMoveInShardKey(shard->id), moveInShardValue(*shard)));
+	wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
+	TraceEvent(SevDebug, "UpdatedMoveInShardMetaData", data->thisServerID)
+	    .detail("Shard", shard->toString())
+	    .detail("ShardKey", persistMoveInShardKey(shard->id))
+	    .detail("DurableVersion", data->durableVersion.get());
+
+	// server->counters.logicalBytesMoveInOverhead += mutation.expectedSize();
+	// if (mutation.type == mutation.ClearRange) {
+	// 	ASSERT(keys.begin <= mutation.param1 && mutation.param2 <= keys.end);
+	// } else if (isSingleKeyMutation((MutationRef::Type)mutation.type)) {
+	// 	ASSERT(keys.contains(mutation.param1));
+	// }
+	return Void();
 }
 
 ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
@@ -10493,9 +10813,7 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 
 						  }*/
 					}
-					when(wait(timeout)) {
-						timedout = true;
-					}
+					when(wait(timeout)) { timedout = true; }
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled)
