@@ -391,7 +391,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 					}
 
 					if (bytes > FLOW_KNOBS->PACKET_WARNING) {
-						TraceEvent(!g_network->isSimulated() ? SevWarnAlways : SevWarn, "LargeTransaction")
+						TraceEvent(SevWarn, "LargeTransaction")
 						    .suppressFor(1.0)
 						    .detail("Size", bytes)
 						    .detail("Client", req.reply.getEndpoint().getPrimaryAddress());
