@@ -1330,7 +1330,6 @@ class Database(_TransactionCreator):
 class Tenant(_TransactionCreator):
     def __init__(self, tpointer):
         self.tpointer = tpointer
-        self.idFuture = None
 
     def __del__(self):
         self.capi.fdb_tenant_destroy(self.tpointer)
@@ -1341,9 +1340,7 @@ class Tenant(_TransactionCreator):
         return Transaction(pointer.value, self)
 
     def get_id(self):
-        if self.idFuture == None and self.tpointer != None:
-            self.idFuture = FutureInt64(self.capi.fdb_tenant_get_id(self.tpointer))
-        return self.idFuture
+        return FutureInt64(self.capi.fdb_tenant_get_id(self.tpointer))
 
 
 fill_operations()

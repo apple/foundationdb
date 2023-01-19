@@ -34,7 +34,6 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 	private final byte[] name;
 	private final Executor executor;
 	private final EventKeeper eventKeeper;
-	private FutureInt64 idFuture;
 
 	protected FDBTenant(long cPtr, Database database, byte[] name, Executor executor) {
 		this(cPtr, database, name, executor, null);
@@ -46,7 +45,6 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 		this.name = name;
 		this.executor = executor;
 		this.eventKeeper = eventKeeper;
-		this.idFuture = null;
 	}
 
 	@Override
@@ -202,15 +200,12 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 
 	@Override
 	public CompletableFuture<Long> getId(Executor e) {
-		if (this.idFuture == null) {
-			pointerReadLock.lock();
-			try {
-				this.idFuture = new FutureInt64(Tenant_getId(getPtr()), e);
-			} finally {
-				pointerReadLock.unlock();
-			}
+		pointerReadLock.lock();
+		try {
+			return new FutureInt64(Tenant_getId(getPtr()), e);
+		} finally {
+			pointerReadLock.unlock();
 		}
-		return this.idFuture;
 	}
 
 	@Override
