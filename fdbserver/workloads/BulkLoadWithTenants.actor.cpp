@@ -140,6 +140,8 @@ struct BulkSetupWorkload : TestWorkload {
 		return Void();
 	}
 
+	Future<Void> setup(Database const& cx) override { return Void(); }
+
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0) {
 			if (testDuration > 0) {
@@ -150,8 +152,6 @@ struct BulkSetupWorkload : TestWorkload {
 		}
 		return Void();
 	}
-
-	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<bool> check(Database const& cx) override { return true; }
 };

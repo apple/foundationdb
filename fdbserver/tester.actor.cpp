@@ -29,6 +29,8 @@
 #include "flow/DeterministicRandom.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
+#include "fdbclient/Audit.h"
+#include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
@@ -1077,6 +1079,44 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 	spec.options.push_back_deep(spec.options.arena(), options);
 
 	DistributedTestResults testResults = wait(runWorkload(cx, testers, spec, Optional<TenantName>()));
+
+	return Void();
+}
+
+ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+	state UID auditId;
+	TraceEvent("AuditStorageCorrectnessBegin");
+
+	loop {
+		try {
+			TriggerAuditRequest req(AuditType::ValidateHA, allKeys);
+			req.async = true;
+			UID auditId_ = wait(dbInfo->get().clusterInterface.clientInterface.triggerAudit.getReply(req));
+			auditId = auditId_;
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
+			wait(delay(1));
+		}
+	}
+
+	state Database cx = openDBOnServer(dbInfo);
+	loop {
+		try {
+			AuditStorageState auditState = wait(getAuditState(cx, AuditType::ValidateHA, auditId));
+			if (auditState.getPhase() != AuditPhase::Complete) {
+				ASSERT(auditState.getPhase() == AuditPhase::Running);
+				wait(delay(30));
+			} else {
+				TraceEvent(SevInfo, "AuditStorageResult").detail("AuditStorageState", auditState.toString());
+				ASSERT(auditState.getPhase() == AuditPhase::Complete);
+				break;
+			}
+		} catch (Error& e) {
+			TraceEvent("WaitAuditStorageError").errorUnsuppressed(e).detail("AuditID", auditId);
+			wait(delay(1));
+		}
+	}
 
 	return Void();
 }

@@ -1089,7 +1089,7 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 			// The first and last KV pairs are not restored so if the tenant is not found for the last key then it's ok
 			// to include it in the restore set
 			if (!payload.present() && !(reader->eof() || *reader->rptr == 0xFF)) {
-				TraceEvent("SnapshotRestoreTenantNotFound").detail("TenantId", tenantId);
+				TraceEvent(SevWarnAlways, "SnapshotRestoreTenantNotFound").detail("TenantId", tenantId);
 				CODE_PROBE(true, "Snapshot restore tenant not found");
 			} else {
 				results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
@@ -4694,7 +4694,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("RestoreVersion", restoreVersion)
 				    .detail("Dest", destVersion);
 				if (destVersion <= restoreVersion) {
-					CODE_PROBE(true, "Forcing restored cluster to higher version", probe::decoration::rare);
+					CODE_PROBE(true, "Forcing restored cluster to higher version");
 					tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(restoreVersion + 1, Unversioned()));
 					wait(tr->commit());
 				} else {
@@ -5294,14 +5294,16 @@ public:
 			oldRestore.clear(tr);
 		}
 
-		state int index;
-		for (index = 0; index < restoreRanges.size(); index++) {
-			KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
-			                                .removePrefix(removePrefix)
-			                                .withPrefix(addPrefix);
-			RangeResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
-			if (existingRows.size() > 0 && !onlyApplyMutationLogs) {
-				throw restore_destination_not_empty();
+		if (!onlyApplyMutationLogs) {
+			state int index;
+			for (index = 0; index < restoreRanges.size(); index++) {
+				KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
+				                                .removePrefix(removePrefix)
+				                                .withPrefix(addPrefix);
+				RangeResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
+				if (existingRows.size() > 0) {
+					throw restore_destination_not_empty();
+				}
 			}
 		}
 		// Make new restore config
