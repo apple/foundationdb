@@ -4,6 +4,30 @@
 Release Notes
 #############
 
+7.1.27
+======
+* Same as 7.1.26 release with AVX enabled.
+
+7.1.26
+======
+* Released with AVX disabled.
+* Added detection of disconnection to satellite TLog in gray failure detection. `(PR #9107) <https://github.com/apple/foundationdb/pull/9107>`_
+* Fixed (non)empty peeks stats in TLogMetrics. `(PR #9074) <https://github.com/apple/foundationdb/pull/9074>`_
+* Fixed a data distribution bug where exclusions can become stuck because DD cannot build new teams. `(PR #9035) <https://github.com/apple/foundationdb/pull/9035>`_
+* Added FoundationDB version to ProcessMetrics. `(PR #9037) <https://github.com/apple/foundationdb/pull/9037>`_
+* Removed RocksDB read iterator destruction from the commit path. `(PR #8971) <https://github.com/apple/foundationdb/pull/8971>`_
+* Added determinstic degraded server selection in gray failure detection. `(PR #9001) <https://github.com/apple/foundationdb/pull/9001>`_
+* Fixed an interger overflow bug that causes fetching backup files to fail. `(PR #8996) <https://github.com/apple/foundationdb/pull/8996>`_
+* Fixed a log router race condition that blocks remote tlogs forever. `(PR #8966) <https://github.com/apple/foundationdb/pull/8966>`_
+* Fixed a backup worker assertion failure. `(PR #8887) <https://github.com/apple/foundationdb/pull/8887>`_
+* Upgraded RocksDB to 7.7.3 version. `(PR #8880) <https://github.com/apple/foundationdb/pull/8880>`_
+* Added byte limit for index prefetch. `(PR #8802) <https://github.com/apple/foundationdb/pull/8802>`_
+* Added storage server read range bytes metrics. `(PR #8724) <https://github.com/apple/foundationdb/pull/8724>`_
+* Added counters for single key clear requests. `(PR #8792) <https://github.com/apple/foundationdb/pull/8792>`_
+* Added more RocksDB knobs. `(PR #8713) <https://github.com/apple/foundationdb/pull/8713>`_, `(PR #8862) <https://github.com/apple/foundationdb/pull/8862>`_, and `(PR #9165) <https://github.com/apple/foundationdb/pull/9165>`_
+* Added a new network option "retain_client_library_copies" to keep the client library copies. `(PR #8740) <https://github.com/apple/foundationdb/pull/8740>`_
+* Fixed a transaction_too_old error on storage servers when version vector is enabled. `(PR #8710) <https://github.com/apple/foundationdb/pull/8710>`_
+
 7.1.25
 ======
 * Same as 7.1.24 release with AVX enabled.
