@@ -279,21 +279,21 @@
 <section id="pattern">
 <h2>Pattern</h2>
 <p>We store each item in the queue within a subspace, which takes care of packing our integer indexes into byte strings.</p>
-<div class="highlight-java notranslate"><div class="highlight"><pre><span></span><span class="n">queue</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Subspace</span><span class="p">(</span><span class="n">Tuple</span><span class="p">.</span><span class="na">from</span><span class="p">(</span><span class="s">&quot;Q&quot;</span><span class="p">));</span><span class="w"></span>
+<div class="highlight-java notranslate"><div class="highlight"><pre><span></span><span class="n">queue</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Subspace</span><span class="p">(</span><span class="n">Tuple</span><span class="p">.</span><span class="na">from</span><span class="p">(</span><span class="s">&quot;Q&quot;</span><span class="p">));</span>
 </pre></div>
 </div>
 <p>As a first cut, we could store each item with a single key-value pair using increasing integer indexes for subsequent items:</p>
-<div class="highlight-java notranslate"><div class="highlight"><pre><span></span><span class="c1">// (queue, index) = value</span><span class="w"></span>
+<div class="highlight-java notranslate"><div class="highlight"><pre><span></span><span class="c1">// (queue, index) = value</span>
 </pre></div>
 </div>
 <p>However, this would leave concurrent enqueue operations vulnerable to conflicts. To minimize these conflicts, we can add a random integer to the key.</p>
-<div class="highlight-java notranslate"><div class="highlight"><pre><span></span><span class="c1">// (queue, index, random) = value</span><span class="w"></span>
+<div class="highlight-java notranslate"><div class="highlight"><pre><span></span><span class="c1">// (queue, index, random) = value</span>
 </pre></div>
 </div>
 <p>With this data model, items enqueued concurrently may be assigned the same index, but the keys as a whole will still be ordered (in this case, randomly). By using a <a class="reference internal" href="developer-guide.html#snapshot-isolation"><span class="std std-ref">snapshot read</span></a>, we guarantee that enqueuing will be conflict-free.</p>
 <p>To implement this model, we need an efficient way of finding the first and last index presently in use. FoundationDB’s range reads have limit and reverse options that let us accomplish this. We can find the first and last key-value pairs in the range of the subspace with:</p>
-<div class="highlight-java notranslate"><div class="highlight"><pre><span></span><span class="n">tr</span><span class="p">.</span><span class="na">getRange</span><span class="p">(</span><span class="n">queue</span><span class="p">.</span><span class="na">range</span><span class="p">(),</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w">       </span><span class="c1">// first</span><span class="w"></span>
-<span class="n">tr</span><span class="p">.</span><span class="na">getRange</span><span class="p">(</span><span class="n">queue</span><span class="p">.</span><span class="na">range</span><span class="p">(),</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="kc">true</span><span class="p">)</span><span class="w"> </span><span class="c1">// last</span><span class="w"></span>
+<div class="highlight-java notranslate"><div class="highlight"><pre><span></span><span class="n">tr</span><span class="p">.</span><span class="na">getRange</span><span class="p">(</span><span class="n">queue</span><span class="p">.</span><span class="na">range</span><span class="p">(),</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w">       </span><span class="c1">// first</span>
+<span class="n">tr</span><span class="p">.</span><span class="na">getRange</span><span class="p">(</span><span class="n">queue</span><span class="p">.</span><span class="na">range</span><span class="p">(),</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="kc">true</span><span class="p">)</span><span class="w"> </span><span class="c1">// last</span>
 </pre></div>
 </div>
 </section>
@@ -305,71 +305,71 @@
 <section id="code">
 <h2>Code</h2>
 <p>The following is a simple implementation of the basic pattern:</p>
-<div class="highlight-java notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">java.util.Random</span><span class="w"></span>
+<div class="highlight-java notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">java.util.Random</span>
 
-<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">MicroQueue</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="kd">public</span><span class="w"> </span><span class="kd">class</span> <span class="nc">MicroQueue</span><span class="w"> </span><span class="p">{</span>
 
-<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kd">final</span><span class="w"> </span><span class="n">FDB</span><span class="w"> </span><span class="n">fdb</span><span class="p">;</span><span class="w"></span>
-<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kd">final</span><span class="w"> </span><span class="n">Database</span><span class="w"> </span><span class="n">db</span><span class="p">;</span><span class="w"></span>
-<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kd">final</span><span class="w"> </span><span class="n">Subspace</span><span class="w"> </span><span class="n">queue</span><span class="p">;</span><span class="w"></span>
-<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kd">final</span><span class="w"> </span><span class="n">Random</span><span class="w"> </span><span class="n">randno</span><span class="p">;</span><span class="w"></span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kd">final</span><span class="w"> </span><span class="n">FDB</span><span class="w"> </span><span class="n">fdb</span><span class="p">;</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kd">final</span><span class="w"> </span><span class="n">Database</span><span class="w"> </span><span class="n">db</span><span class="p">;</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kd">final</span><span class="w"> </span><span class="n">Subspace</span><span class="w"> </span><span class="n">queue</span><span class="p">;</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kd">final</span><span class="w"> </span><span class="n">Random</span><span class="w"> </span><span class="n">randno</span><span class="p">;</span>
 
-<span class="w">    </span><span class="kd">static</span><span class="p">{</span><span class="w"></span>
-<span class="w">        </span><span class="n">fdb</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">FDB</span><span class="p">.</span><span class="na">selectAPIVersion</span><span class="p">(</span><span class="mi">720</span><span class="p">);</span><span class="w"></span>
-<span class="w">        </span><span class="n">db</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb</span><span class="p">.</span><span class="na">open</span><span class="p">();</span><span class="w"></span>
-<span class="w">        </span><span class="n">queue</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Subspace</span><span class="p">(</span><span class="n">Tuple</span><span class="p">.</span><span class="na">from</span><span class="p">(</span><span class="s">&quot;Q&quot;</span><span class="p">));</span><span class="w"></span>
-<span class="w">        </span><span class="n">randno</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Random</span><span class="p">();</span><span class="w"></span>
-<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="kd">static</span><span class="p">{</span>
+<span class="w">        </span><span class="n">fdb</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">FDB</span><span class="p">.</span><span class="na">selectAPIVersion</span><span class="p">(</span><span class="mi">720</span><span class="p">);</span>
+<span class="w">        </span><span class="n">db</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb</span><span class="p">.</span><span class="na">open</span><span class="p">();</span>
+<span class="w">        </span><span class="n">queue</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Subspace</span><span class="p">(</span><span class="n">Tuple</span><span class="p">.</span><span class="na">from</span><span class="p">(</span><span class="s">&quot;Q&quot;</span><span class="p">));</span>
+<span class="w">        </span><span class="n">randno</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Random</span><span class="p">();</span>
+<span class="w">    </span><span class="p">}</span>
 
-<span class="w">    </span><span class="c1">// Remove the top element from the queue.</span><span class="w"></span>
-<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="n">Object</span><span class="w"> </span><span class="nf">dequeue</span><span class="p">(</span><span class="n">TransactionContext</span><span class="w"> </span><span class="n">tcx</span><span class="p">){</span><span class="w"></span>
-<span class="w">        </span><span class="c1">// Remove from the top of the queue.</span><span class="w"></span>
-<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">tcx</span><span class="p">.</span><span class="na">run</span><span class="p">((</span><span class="n">Transaction</span><span class="w"> </span><span class="n">tr</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">            </span><span class="kd">final</span><span class="w"> </span><span class="n">KeyValue</span><span class="w"> </span><span class="n">item</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">firstItem</span><span class="p">(</span><span class="n">tr</span><span class="p">);</span><span class="w"></span>
-<span class="w">            </span><span class="k">if</span><span class="p">(</span><span class="n">item</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="kc">null</span><span class="p">){</span><span class="w"></span>
-<span class="w">                </span><span class="k">return</span><span class="w"> </span><span class="kc">null</span><span class="p">;</span><span class="w"></span>
-<span class="w">            </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="c1">// Remove the top element from the queue.</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="n">Object</span><span class="w"> </span><span class="nf">dequeue</span><span class="p">(</span><span class="n">TransactionContext</span><span class="w"> </span><span class="n">tcx</span><span class="p">){</span>
+<span class="w">        </span><span class="c1">// Remove from the top of the queue.</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">tcx</span><span class="p">.</span><span class="na">run</span><span class="p">((</span><span class="n">Transaction</span><span class="w"> </span><span class="n">tr</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="kd">final</span><span class="w"> </span><span class="n">KeyValue</span><span class="w"> </span><span class="n">item</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">firstItem</span><span class="p">(</span><span class="n">tr</span><span class="p">);</span>
+<span class="w">            </span><span class="k">if</span><span class="p">(</span><span class="n">item</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="kc">null</span><span class="p">){</span>
+<span class="w">                </span><span class="k">return</span><span class="w"> </span><span class="kc">null</span><span class="p">;</span>
+<span class="w">            </span><span class="p">}</span>
 
-<span class="w">            </span><span class="n">tr</span><span class="p">.</span><span class="na">clear</span><span class="p">(</span><span class="n">item</span><span class="p">.</span><span class="na">getKey</span><span class="p">());</span><span class="w"></span>
-<span class="w">            </span><span class="c1">// Return the old value.</span><span class="w"></span>
-<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">Tuple</span><span class="p">.</span><span class="na">fromBytes</span><span class="p">(</span><span class="n">item</span><span class="p">.</span><span class="na">getValue</span><span class="p">()).</span><span class="na">get</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span><span class="w"></span>
-<span class="w">        </span><span class="p">});</span><span class="w"></span>
+<span class="w">            </span><span class="n">tr</span><span class="p">.</span><span class="na">clear</span><span class="p">(</span><span class="n">item</span><span class="p">.</span><span class="na">getKey</span><span class="p">());</span>
+<span class="w">            </span><span class="c1">// Return the old value.</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">Tuple</span><span class="p">.</span><span class="na">fromBytes</span><span class="p">(</span><span class="n">item</span><span class="p">.</span><span class="na">getValue</span><span class="p">()).</span><span class="na">get</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span>
+<span class="w">        </span><span class="p">});</span>
 
-<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="p">}</span>
 
-<span class="w">    </span><span class="c1">// Add an element to the queue.</span><span class="w"></span>
-<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">enqueue</span><span class="p">(</span><span class="n">TransactionContext</span><span class="w"> </span><span class="n">tcx</span><span class="p">,</span><span class="w"> </span><span class="kd">final</span><span class="w"> </span><span class="n">Object</span><span class="w"> </span><span class="n">value</span><span class="p">){</span><span class="w"></span>
-<span class="w">        </span><span class="n">tcx</span><span class="p">.</span><span class="na">run</span><span class="p">((</span><span class="n">Transaction</span><span class="w"> </span><span class="n">tr</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">            </span><span class="kt">byte</span><span class="o">[]</span><span class="w"> </span><span class="n">rands</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="kt">byte</span><span class="o">[</span><span class="mi">20</span><span class="o">]</span><span class="p">;</span><span class="w"></span>
-<span class="w">            </span><span class="n">randno</span><span class="p">.</span><span class="na">nextBytes</span><span class="p">(</span><span class="n">rands</span><span class="p">);</span><span class="w"> </span><span class="c1">// Create random seed to avoid conflicts.</span><span class="w"></span>
-<span class="w">            </span><span class="n">tr</span><span class="p">.</span><span class="na">set</span><span class="p">(</span><span class="n">queue</span><span class="p">.</span><span class="na">subspace</span><span class="p">(</span><span class="n">Tuple</span><span class="p">.</span><span class="na">from</span><span class="p">(</span><span class="n">lastIndex</span><span class="p">(</span><span class="n">tr</span><span class="p">)</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">rands</span><span class="p">)).</span><span class="na">pack</span><span class="p">(),</span><span class="w"></span>
-<span class="w">                    </span><span class="n">Tuple</span><span class="p">.</span><span class="na">from</span><span class="p">(</span><span class="n">value</span><span class="p">).</span><span class="na">pack</span><span class="p">());</span><span class="w"></span>
+<span class="w">    </span><span class="c1">// Add an element to the queue.</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">enqueue</span><span class="p">(</span><span class="n">TransactionContext</span><span class="w"> </span><span class="n">tcx</span><span class="p">,</span><span class="w"> </span><span class="kd">final</span><span class="w"> </span><span class="n">Object</span><span class="w"> </span><span class="n">value</span><span class="p">){</span>
+<span class="w">        </span><span class="n">tcx</span><span class="p">.</span><span class="na">run</span><span class="p">((</span><span class="n">Transaction</span><span class="w"> </span><span class="n">tr</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="kt">byte</span><span class="o">[]</span><span class="w"> </span><span class="n">rands</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="kt">byte</span><span class="o">[</span><span class="mi">20</span><span class="o">]</span><span class="p">;</span>
+<span class="w">            </span><span class="n">randno</span><span class="p">.</span><span class="na">nextBytes</span><span class="p">(</span><span class="n">rands</span><span class="p">);</span><span class="w"> </span><span class="c1">// Create random seed to avoid conflicts.</span>
+<span class="w">            </span><span class="n">tr</span><span class="p">.</span><span class="na">set</span><span class="p">(</span><span class="n">queue</span><span class="p">.</span><span class="na">subspace</span><span class="p">(</span><span class="n">Tuple</span><span class="p">.</span><span class="na">from</span><span class="p">(</span><span class="n">lastIndex</span><span class="p">(</span><span class="n">tr</span><span class="p">)</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">rands</span><span class="p">)).</span><span class="na">pack</span><span class="p">(),</span>
+<span class="w">                    </span><span class="n">Tuple</span><span class="p">.</span><span class="na">from</span><span class="p">(</span><span class="n">value</span><span class="p">).</span><span class="na">pack</span><span class="p">());</span>
 
-<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="kc">null</span><span class="p">;</span><span class="w"></span>
-<span class="w">        </span><span class="p">});</span><span class="w"></span>
-<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="kc">null</span><span class="p">;</span>
+<span class="w">        </span><span class="p">});</span>
+<span class="w">    </span><span class="p">}</span>
 
-<span class="w">    </span><span class="c1">// Get the top element of the queue.</span><span class="w"></span>
-<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="n">KeyValue</span><span class="w"> </span><span class="nf">firstItem</span><span class="p">(</span><span class="n">TransactionContext</span><span class="w"> </span><span class="n">tcx</span><span class="p">){</span><span class="w"></span>
-<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">tcx</span><span class="p">.</span><span class="na">run</span><span class="p">((</span><span class="n">Transaction</span><span class="w"> </span><span class="n">tr</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">            </span><span class="k">for</span><span class="p">(</span><span class="n">KeyValue</span><span class="w"> </span><span class="n">kv</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="n">tr</span><span class="p">.</span><span class="na">getRange</span><span class="p">(</span><span class="n">queue</span><span class="p">.</span><span class="na">range</span><span class="p">(),</span><span class="w"> </span><span class="mi">1</span><span class="p">)){</span><span class="w"></span>
-<span class="w">                </span><span class="k">return</span><span class="w"> </span><span class="n">kv</span><span class="p">;</span><span class="w"></span>
-<span class="w">            </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="c1">// Get the top element of the queue.</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="n">KeyValue</span><span class="w"> </span><span class="nf">firstItem</span><span class="p">(</span><span class="n">TransactionContext</span><span class="w"> </span><span class="n">tcx</span><span class="p">){</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">tcx</span><span class="p">.</span><span class="na">run</span><span class="p">((</span><span class="n">Transaction</span><span class="w"> </span><span class="n">tr</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">for</span><span class="p">(</span><span class="n">KeyValue</span><span class="w"> </span><span class="n">kv</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="n">tr</span><span class="p">.</span><span class="na">getRange</span><span class="p">(</span><span class="n">queue</span><span class="p">.</span><span class="na">range</span><span class="p">(),</span><span class="w"> </span><span class="mi">1</span><span class="p">)){</span>
+<span class="w">                </span><span class="k">return</span><span class="w"> </span><span class="n">kv</span><span class="p">;</span>
+<span class="w">            </span><span class="p">}</span>
 
-<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="kc">null</span><span class="p">;</span><span class="w"> </span><span class="c1">// Empty queue. Should never be reached.</span><span class="w"></span>
-<span class="w">        </span><span class="p">});</span><span class="w"></span>
-<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="kc">null</span><span class="p">;</span><span class="w"> </span><span class="c1">// Empty queue. Should never be reached.</span>
+<span class="w">        </span><span class="p">});</span>
+<span class="w">    </span><span class="p">}</span>
 
-<span class="w">    </span><span class="c1">// Get the last index in the queue.</span><span class="w"></span>
-<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">long</span><span class="w"> </span><span class="nf">lastIndex</span><span class="p">(</span><span class="n">TransactionContext</span><span class="w"> </span><span class="n">tcx</span><span class="p">){</span><span class="w"></span>
-<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">tcx</span><span class="p">.</span><span class="na">run</span><span class="p">((</span><span class="n">Transaction</span><span class="w"> </span><span class="n">tr</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">            </span><span class="k">for</span><span class="p">(</span><span class="n">KeyValue</span><span class="w"> </span><span class="n">kv</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="n">tr</span><span class="p">.</span><span class="na">snapshot</span><span class="p">().</span><span class="na">getRange</span><span class="p">(</span><span class="n">queue</span><span class="p">.</span><span class="na">range</span><span class="p">(),</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="kc">true</span><span class="p">)){</span><span class="w"></span>
-<span class="w">                </span><span class="k">return</span><span class="w"> </span><span class="p">(</span><span class="kt">long</span><span class="p">)</span><span class="n">queue</span><span class="p">.</span><span class="na">unpack</span><span class="p">(</span><span class="n">kv</span><span class="p">.</span><span class="na">getKey</span><span class="p">()).</span><span class="na">get</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span><span class="w"></span>
-<span class="w">            </span><span class="p">}</span><span class="w"></span>
-<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="n">l</span><span class="p">;</span><span class="w"></span>
-<span class="w">        </span><span class="p">});</span><span class="w"></span>
-<span class="w">    </span><span class="p">}</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="c1">// Get the last index in the queue.</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">static</span><span class="w"> </span><span class="kt">long</span><span class="w"> </span><span class="nf">lastIndex</span><span class="p">(</span><span class="n">TransactionContext</span><span class="w"> </span><span class="n">tcx</span><span class="p">){</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">tcx</span><span class="p">.</span><span class="na">run</span><span class="p">((</span><span class="n">Transaction</span><span class="w"> </span><span class="n">tr</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">for</span><span class="p">(</span><span class="n">KeyValue</span><span class="w"> </span><span class="n">kv</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="n">tr</span><span class="p">.</span><span class="na">snapshot</span><span class="p">().</span><span class="na">getRange</span><span class="p">(</span><span class="n">queue</span><span class="p">.</span><span class="na">range</span><span class="p">(),</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="kc">true</span><span class="p">)){</span>
+<span class="w">                </span><span class="k">return</span><span class="w"> </span><span class="p">(</span><span class="kt">long</span><span class="p">)</span><span class="n">queue</span><span class="p">.</span><span class="na">unpack</span><span class="p">(</span><span class="n">kv</span><span class="p">.</span><span class="na">getKey</span><span class="p">()).</span><span class="na">get</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="mi">0</span><span class="n">l</span><span class="p">;</span>
+<span class="w">        </span><span class="p">});</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
 </pre></div>
 </div>
 </section>
@@ -395,7 +395,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 30, 2022.<br/>
+      Last updated on Jan 19, 2023.<br/>
     </p>
   </div>
 </footer>

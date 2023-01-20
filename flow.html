@@ -292,10 +292,10 @@
 <section id="a-first-look">
 <h2>A first look</h2>
 <p>Actors in Flow receive asynchronous messages from each other using a data type called a <em>future</em>. When an actor requires a data value to continue computation, it waits for it without blocking other actors. The following simple actor performs asynchronous addition. It takes a future integer and a normal integer as an offset, waits on the future integer, and returns the sum of the value and the offset:</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="n">Future</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">asyncAdd</span><span class="p">(</span><span class="n">Future</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">f</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">offset</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">wait</span><span class="p">(</span><span class="w"> </span><span class="n">f</span><span class="w"> </span><span class="p">);</span><span class="w"></span>
-<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">offset</span><span class="p">;</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="n">Future</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">asyncAdd</span><span class="p">(</span><span class="n">Future</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">f</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">offset</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">wait</span><span class="p">(</span><span class="w"> </span><span class="n">f</span><span class="w"> </span><span class="p">);</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">offset</span><span class="p">;</span>
+<span class="p">}</span>
 </pre></div>
 </div>
 </section>
@@ -336,23 +336,23 @@
 <h3>Example: A Server Interface</h3>
 <p>Below is a actor that runs on single server communicating over the network. Its functionality is to maintain a count in response to asynchronous messages from other actors. It supports an interface implemented with a loop containing a <code class="docutils literal notranslate"><span class="pre">choose</span></code> statement with a <code class="docutils literal notranslate"><span class="pre">when</span></code> for each request type. Each <code class="docutils literal notranslate"><span class="pre">when</span></code> uses <code class="docutils literal notranslate"><span class="pre">waitNext()</span></code> to asynchronously wait for the next request in the stream. The add and subtract interfaces modify the count itself, stored with a state variable. The get interface takes a <code class="docutils literal notranslate"><span class="pre">Promise&lt;int&gt;</span></code> instead of just an <code class="docutils literal notranslate"><span class="pre">int</span></code> to facilitate sending back the return message.</p>
 <p>To write the equivalent code directly in C++, a developer would have to implement a complex set of callbacks with exception-handling, requiring far more engineering effort. Flow makes it much easier to implement this sort of asynchronous coordination, with no loss of performance:</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">serveCountingServerInterface</span><span class="p">(</span><span class="w"></span>
-<span class="w">           </span><span class="n">CountingServerInterface</span><span class="w"> </span><span class="n">csi</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">state</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
-<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">        </span><span class="n">choose</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">            </span><span class="n">when</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">waitNext</span><span class="p">(</span><span class="n">csi</span><span class="p">.</span><span class="n">addCount</span><span class="p">.</span><span class="n">getFuture</span><span class="p">())){</span><span class="w"></span>
-<span class="w">                </span><span class="n">count</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">x</span><span class="p">;</span><span class="w"></span>
-<span class="w">            </span><span class="p">}</span><span class="w"></span>
-<span class="w">            </span><span class="n">when</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">waitNext</span><span class="p">(</span><span class="n">csi</span><span class="p">.</span><span class="n">subtractCount</span><span class="p">.</span><span class="n">getFuture</span><span class="p">())){</span><span class="w"></span>
-<span class="w">                </span><span class="n">count</span><span class="w"> </span><span class="o">-=</span><span class="w"> </span><span class="n">x</span><span class="p">;</span><span class="w"></span>
-<span class="w">            </span><span class="p">}</span><span class="w"></span>
-<span class="w">            </span><span class="n">when</span><span class="w"> </span><span class="p">(</span><span class="n">Promise</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">waitNext</span><span class="p">(</span><span class="n">csi</span><span class="p">.</span><span class="n">getCount</span><span class="p">.</span><span class="n">getFuture</span><span class="p">())){</span><span class="w"></span>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">serveCountingServerInterface</span><span class="p">(</span>
+<span class="w">           </span><span class="n">CountingServerInterface</span><span class="w"> </span><span class="n">csi</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">state</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">choose</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">when</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">waitNext</span><span class="p">(</span><span class="n">csi</span><span class="p">.</span><span class="n">addCount</span><span class="p">.</span><span class="n">getFuture</span><span class="p">())){</span>
+<span class="w">                </span><span class="n">count</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">x</span><span class="p">;</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">            </span><span class="n">when</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">waitNext</span><span class="p">(</span><span class="n">csi</span><span class="p">.</span><span class="n">subtractCount</span><span class="p">.</span><span class="n">getFuture</span><span class="p">())){</span>
+<span class="w">                </span><span class="n">count</span><span class="w"> </span><span class="o">-=</span><span class="w"> </span><span class="n">x</span><span class="p">;</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">            </span><span class="n">when</span><span class="w"> </span><span class="p">(</span><span class="n">Promise</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">waitNext</span><span class="p">(</span><span class="n">csi</span><span class="p">.</span><span class="n">getCount</span><span class="p">.</span><span class="n">getFuture</span><span class="p">())){</span>
 <span class="w">                </span><span class="n">r</span><span class="p">.</span><span class="n">send</span><span class="p">(</span><span class="w"> </span><span class="n">count</span><span class="w"> </span><span class="p">);</span><span class="w"> </span><span class="c1">// goes to client</span>
-<span class="w">            </span><span class="p">}</span><span class="w"></span>
-<span class="w">        </span><span class="p">}</span><span class="w"></span>
-<span class="w">    </span><span class="p">}</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
 </pre></div>
 </div>
 </section>
@@ -364,42 +364,42 @@
 <p>Some preprocessor definitions will not fix all issues though. When programming Flow the following things have to be taken care of by the programmer:</p>
 <ul>
 <li><p>Local variables don’t survive a call to <code class="docutils literal notranslate"><span class="pre">wait</span></code>. So this would be legal Flow code, but NOT legal C++ code:</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">foo</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
-<span class="w">    </span><span class="n">wait</span><span class="p">(</span><span class="n">someFuture</span><span class="p">);</span><span class="w"></span>
-<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w"></span>
-<span class="w">    </span><span class="n">wait</span><span class="p">(</span><span class="n">someOtherFuture</span><span class="p">)</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">foo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="n">wait</span><span class="p">(</span><span class="n">someFuture</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">    </span><span class="n">wait</span><span class="p">(</span><span class="n">someOtherFuture</span><span class="p">)</span>
+<span class="p">}</span>
 </pre></div>
 </div>
 <p>In order to make this not break IDE-support one can either rename the second occurrence of this variable or, if this is not desired as it might make the code unreadable, one can use scoping:</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">foo</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="p">{</span><span class="w"></span>
-<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"></span>
-<span class="w">        </span><span class="n">wait</span><span class="p">(</span><span class="n">someFuture</span><span class="p">);</span><span class="w"></span>
-<span class="w">    </span><span class="p">}</span><span class="w"></span>
-<span class="w">    </span><span class="p">{</span><span class="w"></span>
-<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w"></span>
-<span class="w">        </span><span class="n">wait</span><span class="p">(</span><span class="n">someOtherFuture</span><span class="p">)</span><span class="w"></span>
-<span class="w">    </span><span class="p">}</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">foo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">        </span><span class="n">wait</span><span class="p">(</span><span class="n">someFuture</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">        </span><span class="n">wait</span><span class="p">(</span><span class="n">someOtherFuture</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
 </pre></div>
 </div>
 </li>
 <li><p>An <code class="docutils literal notranslate"><span class="pre">ACTOR</span></code> is compiled into a class internally. Which means that within an actor-function, <code class="docutils literal notranslate"><span class="pre">this</span></code> is a valid pointer to this class. But using them explicitly (or as described later implicitly) will break IDE support. One can use <code class="docutils literal notranslate"><span class="pre">THIS</span></code> and <code class="docutils literal notranslate"><span class="pre">THIS_ADDR</span></code> instead. But be careful as <code class="docutils literal notranslate"><span class="pre">THIS</span></code> will be of type <code class="docutils literal notranslate"><span class="pre">nullptr_t</span></code> in IDE-mode and of the actor-type in normal compilation mode.</p></li>
 <li><p>Lambdas and state variables are weird in a sense. After actor compilation, a state variable is a member of the compiled actor class. In IDE mode it is considered a normal local variable. This can result in some surprising side-effects. So the following code will only compile if the method <code class="docutils literal notranslate"><span class="pre">Foo::bar</span></code> is defined as <code class="docutils literal notranslate"><span class="pre">const</span></code>:</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="nf">foo</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">state</span><span class="w"> </span><span class="n">Foo</span><span class="w"> </span><span class="n">f</span><span class="p">;</span><span class="w"></span>
-<span class="w">    </span><span class="n">foo</span><span class="p">([</span><span class="o">=</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">f</span><span class="p">.</span><span class="n">bar</span><span class="p">();</span><span class="w"> </span><span class="p">})</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="nf">foo</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">state</span><span class="w"> </span><span class="n">Foo</span><span class="w"> </span><span class="n">f</span><span class="p">;</span>
+<span class="w">    </span><span class="n">foo</span><span class="p">([</span><span class="o">=</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">f</span><span class="p">.</span><span class="n">bar</span><span class="p">();</span><span class="w"> </span><span class="p">})</span>
+<span class="p">}</span>
 </pre></div>
 </div>
 <p>If it is not, one has to pass the member explicitly as a reference:</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="nf">foo</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">state</span><span class="w"> </span><span class="n">Foo</span><span class="w"> </span><span class="n">f</span><span class="p">;</span><span class="w"></span>
-<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">f</span><span class="p">;</span><span class="w"></span>
-<span class="w">    </span><span class="n">foo</span><span class="p">([</span><span class="n">x</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">x</span><span class="o">-&gt;</span><span class="n">bar</span><span class="p">();</span><span class="w"> </span><span class="p">})</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">ACTOR</span><span class="w"> </span><span class="nf">foo</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">state</span><span class="w"> </span><span class="n">Foo</span><span class="w"> </span><span class="n">f</span><span class="p">;</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">f</span><span class="p">;</span>
+<span class="w">    </span><span class="n">foo</span><span class="p">([</span><span class="n">x</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">x</span><span class="o">-&gt;</span><span class="n">bar</span><span class="p">();</span><span class="w"> </span><span class="p">})</span>
+<span class="p">}</span>
 </pre></div>
 </div>
 </li>
@@ -428,7 +428,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 30, 2022.<br/>
+      Last updated on Jan 19, 2023.<br/>
     </p>
   </div>
 </footer>

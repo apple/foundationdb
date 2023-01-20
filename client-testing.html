@@ -372,14 +372,14 @@ might be hard to reproduce.</p>
 <p>To start a new thread, one has to “bind” operating system threads to their simulated processes. This can be done by setting the
 <code class="docutils literal notranslate"><span class="pre">ProcessId</span></code> in the child threads when they get created. In Java this is done by only starting new threads through the provided
 <code class="docutils literal notranslate"><span class="pre">Executor</span></code>. In the C++ API one can use the <code class="docutils literal notranslate"><span class="pre">FDBWorkloadContext</span></code> to do that. For example:</p>
-<div class="highlight-C++ notranslate"><div class="highlight"><pre><span></span><span class="k">template</span><span class="o">&lt;</span><span class="k">class</span><span class="w"> </span><span class="nc">Fun</span><span class="o">&gt;</span><span class="w"></span>
-<span class="n">std</span><span class="o">::</span><span class="kr">thread</span><span class="w"> </span><span class="n">startThread</span><span class="p">(</span><span class="n">FDBWorkloadContext</span><span class="o">*</span><span class="w"> </span><span class="n">context</span><span class="p">,</span><span class="w"> </span><span class="n">Fun</span><span class="w"> </span><span class="n">fun</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">processId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">context</span><span class="o">-&gt;</span><span class="n">getProcessID</span><span class="p">();</span><span class="w"></span>
-<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kr">thread</span><span class="p">([</span><span class="n">context</span><span class="p">,</span><span class="w"> </span><span class="n">processID</span><span class="p">,</span><span class="w"> </span><span class="n">fun</span><span class="p">](</span><span class="w"></span>
-<span class="w">        </span><span class="n">context</span><span class="o">-&gt;</span><span class="n">setProcessID</span><span class="p">(</span><span class="n">processID</span><span class="p">);</span><span class="w"></span>
-<span class="w">        </span><span class="n">fun</span><span class="p">();</span><span class="w"></span>
-<span class="w">    </span><span class="p">));</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
+<div class="highlight-C++ notranslate"><div class="highlight"><pre><span></span><span class="k">template</span><span class="o">&lt;</span><span class="k">class</span><span class="w"> </span><span class="nc">Fun</span><span class="o">&gt;</span>
+<span class="n">std</span><span class="o">::</span><span class="kr">thread</span><span class="w"> </span><span class="n">startThread</span><span class="p">(</span><span class="n">FDBWorkloadContext</span><span class="o">*</span><span class="w"> </span><span class="n">context</span><span class="p">,</span><span class="w"> </span><span class="n">Fun</span><span class="w"> </span><span class="n">fun</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">processId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">context</span><span class="o">-&gt;</span><span class="n">getProcessID</span><span class="p">();</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="kr">thread</span><span class="p">([</span><span class="n">context</span><span class="p">,</span><span class="w"> </span><span class="n">processID</span><span class="p">,</span><span class="w"> </span><span class="n">fun</span><span class="p">](</span>
+<span class="w">        </span><span class="n">context</span><span class="o">-&gt;</span><span class="n">setProcessID</span><span class="p">(</span><span class="n">processID</span><span class="p">);</span>
+<span class="w">        </span><span class="n">fun</span><span class="p">();</span>
+<span class="w">    </span><span class="p">));</span>
+<span class="p">}</span>
 </pre></div>
 </div>
 </section>
@@ -459,34 +459,34 @@ The multitester (or test orchestrator) will collect all metrics from all test cl
 <h2>Implementing a Java Workload</h2>
 <p>In order to implement your own workload in Java you can simply create an implementation of the abstract class <code class="docutils literal notranslate"><span class="pre">AbstractWorkload</span></code>.
 A minimal implementation will look like this:</p>
-<div class="highlight-java notranslate"><div class="highlight"><pre><span></span><span class="kn">package</span><span class="w"> </span><span class="nn">my.package</span><span class="p">;</span><span class="w"></span>
-<span class="kn">import</span><span class="w"> </span><span class="nn">com.apple.foundationdb.testing.Promise</span><span class="p">;</span><span class="w"></span>
-<span class="kn">import</span><span class="w"> </span><span class="nn">com.apple.foundationdb.testing.AbstractWorkload</span><span class="p">;</span><span class="w"></span>
-<span class="kn">import</span><span class="w"> </span><span class="nn">com.apple.foundationdb.testing.WorkloadContext</span><span class="p">;</span><span class="w"></span>
+<div class="highlight-java notranslate"><div class="highlight"><pre><span></span><span class="kn">package</span><span class="w"> </span><span class="nn">my.package</span><span class="p">;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">com.apple.foundationdb.testing.Promise</span><span class="p">;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">com.apple.foundationdb.testing.AbstractWorkload</span><span class="p">;</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">com.apple.foundationdb.testing.WorkloadContext</span><span class="p">;</span>
 
-<span class="kd">class</span> <span class="nc">MinimalWorkload</span><span class="w"> </span><span class="kd">extends</span><span class="w"> </span><span class="n">AbstractWorkload</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="nf">MinimalWorkload</span><span class="p">(</span><span class="n">WorkloadContext</span><span class="w"> </span><span class="n">ctx</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">        </span><span class="kd">super</span><span class="p">(</span><span class="n">ctx</span><span class="p">);</span><span class="w"></span>
-<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="kd">class</span> <span class="nc">MinimalWorkload</span><span class="w"> </span><span class="kd">extends</span><span class="w"> </span><span class="n">AbstractWorkload</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="nf">MinimalWorkload</span><span class="p">(</span><span class="n">WorkloadContext</span><span class="w"> </span><span class="n">ctx</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kd">super</span><span class="p">(</span><span class="n">ctx</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
 
-<span class="w">    </span><span class="nd">@Override</span><span class="w"></span>
-<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="n">Database</span><span class="w"> </span><span class="n">db</span><span class="p">,</span><span class="w"> </span><span class="n">Promise</span><span class="w"> </span><span class="n">promise</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">        </span><span class="n">log</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;WorkloadSetup&quot;</span><span class="p">,</span><span class="w"> </span><span class="kc">null</span><span class="p">);</span><span class="w"></span>
-<span class="w">        </span><span class="n">promise</span><span class="p">.</span><span class="na">send</span><span class="p">(</span><span class="kc">true</span><span class="p">);</span><span class="w"></span>
-<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="nd">@Override</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="n">Database</span><span class="w"> </span><span class="n">db</span><span class="p">,</span><span class="w"> </span><span class="n">Promise</span><span class="w"> </span><span class="n">promise</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">log</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;WorkloadSetup&quot;</span><span class="p">,</span><span class="w"> </span><span class="kc">null</span><span class="p">);</span>
+<span class="w">        </span><span class="n">promise</span><span class="p">.</span><span class="na">send</span><span class="p">(</span><span class="kc">true</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
 
-<span class="w">    </span><span class="nd">@Override</span><span class="w"></span>
-<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">start</span><span class="p">(</span><span class="n">Database</span><span class="w"> </span><span class="n">db</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">        </span><span class="n">log</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;WorkloadStarted&quot;</span><span class="p">,</span><span class="w"> </span><span class="kc">null</span><span class="p">);</span><span class="w"></span>
-<span class="w">        </span><span class="n">promise</span><span class="p">.</span><span class="na">send</span><span class="p">(</span><span class="kc">true</span><span class="p">);</span><span class="w"></span>
-<span class="w">    </span><span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="nd">@Override</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">start</span><span class="p">(</span><span class="n">Database</span><span class="w"> </span><span class="n">db</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">log</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;WorkloadStarted&quot;</span><span class="p">,</span><span class="w"> </span><span class="kc">null</span><span class="p">);</span>
+<span class="w">        </span><span class="n">promise</span><span class="p">.</span><span class="na">send</span><span class="p">(</span><span class="kc">true</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
 
-<span class="w">    </span><span class="nd">@Override</span><span class="w"></span>
-<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kt">boolean</span><span class="w"> </span><span class="nf">check</span><span class="p">(</span><span class="n">Database</span><span class="w"> </span><span class="n">db</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">        </span><span class="n">log</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;WorkloadFailureCheck&quot;</span><span class="p">,</span><span class="w"> </span><span class="kc">null</span><span class="p">);</span><span class="w"></span>
-<span class="w">        </span><span class="n">promise</span><span class="p">.</span><span class="na">send</span><span class="p">(</span><span class="kc">true</span><span class="p">);</span><span class="w"></span>
-<span class="w">    </span><span class="p">}</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
+<span class="w">    </span><span class="nd">@Override</span>
+<span class="w">    </span><span class="kd">public</span><span class="w"> </span><span class="kt">boolean</span><span class="w"> </span><span class="nf">check</span><span class="p">(</span><span class="n">Database</span><span class="w"> </span><span class="n">db</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">log</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;WorkloadFailureCheck&quot;</span><span class="p">,</span><span class="w"> </span><span class="kc">null</span><span class="p">);</span>
+<span class="w">        </span><span class="n">promise</span><span class="p">.</span><span class="na">send</span><span class="p">(</span><span class="kc">true</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
 </pre></div>
 </div>
 <p>The lifecycle of a test will look like this:</p>
@@ -601,7 +601,7 @@ conflict with each other as we never remove something from the classpath.</p></l
 <h3>Run the simulator</h3>
 <p>This step is very simple. You can simply run <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> with role simulator
 and pass the test with <code class="docutils literal notranslate"><span class="pre">-f</span></code>:</p>
-<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>fdbserver -r simulation -f testfile.txt
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>fdbserver<span class="w"> </span>-r<span class="w"> </span>simulation<span class="w"> </span>-f<span class="w"> </span>testfile.txt
 </pre></div>
 </div>
 </section>
@@ -620,39 +620,39 @@ processes with the class test. So above 2-step process becomes a bit more comple
 configuration. The main difference to a normal FoundationDB cluster is that some processes
 must have a test class assigned to them. This can be done in the <code class="docutils literal notranslate"><span class="pre">foundationdb.conf</span></code>. For
 example this file would create a server with 8 processes of which 4 would act as test clients.</p>
-<div class="highlight-ini notranslate"><div class="highlight"><pre><span></span><span class="k">[fdbmonitor]</span><span class="w"></span>
-<span class="na">user</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">foundationdb</span><span class="w"></span>
-<span class="na">group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">foundationdb</span><span class="w"></span>
+<div class="highlight-ini notranslate"><div class="highlight"><pre><span></span><span class="k">[fdbmonitor]</span>
+<span class="na">user</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">foundationdb</span>
+<span class="na">group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">foundationdb</span>
 
-<span class="k">[general]</span><span class="w"></span>
-<span class="na">restart-delay</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">60</span><span class="w"></span>
-<span class="na">cluster-file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/etc/foundationdb/fdb.cluster</span><span class="w"></span>
+<span class="k">[general]</span>
+<span class="na">restart-delay</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">60</span>
+<span class="na">cluster-file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/etc/foundationdb/fdb.cluster</span>
 
-<span class="c1">## Default parameters for individual fdbserver processes</span><span class="w"></span>
-<span class="k">[fdbserver]</span><span class="w"></span>
-<span class="na">command</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/usr/sbin/fdbserver</span><span class="w"></span>
-<span class="na">public-address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">auto:$ID</span><span class="w"></span>
-<span class="na">listen-address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">public</span><span class="w"></span>
-<span class="na">datadir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/var/lib/foundationdb/data/$ID</span><span class="w"></span>
-<span class="na">logdir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/var/log/foundationdb</span><span class="w"></span>
+<span class="c1">## Default parameters for individual fdbserver processes</span>
+<span class="k">[fdbserver]</span>
+<span class="na">command</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/usr/sbin/fdbserver</span>
+<span class="na">public-address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">auto:$ID</span>
+<span class="na">listen-address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">public</span>
+<span class="na">datadir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/var/lib/foundationdb/data/$ID</span>
+<span class="na">logdir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/var/log/foundationdb</span>
 
-<span class="k">[fdbserver.4500]</span><span class="w"></span>
-<span class="k">[fdbserver.4501]</span><span class="w"></span>
-<span class="k">[fdbserver.4502]</span><span class="w"></span>
-<span class="k">[fdbserver.4503]</span><span class="w"></span>
-<span class="k">[fdbserver.4510]</span><span class="w"></span>
-<span class="na">class</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">test</span><span class="w"></span>
-<span class="k">[fdbserver.4511]</span><span class="w"></span>
-<span class="na">class</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">test</span><span class="w"></span>
-<span class="k">[fdbserver.4512]</span><span class="w"></span>
-<span class="na">class</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">test</span><span class="w"></span>
-<span class="k">[fdbserver.4513]</span><span class="w"></span>
-<span class="na">class</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">test</span><span class="w"></span>
+<span class="k">[fdbserver.4500]</span>
+<span class="k">[fdbserver.4501]</span>
+<span class="k">[fdbserver.4502]</span>
+<span class="k">[fdbserver.4503]</span>
+<span class="k">[fdbserver.4510]</span>
+<span class="na">class</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">test</span>
+<span class="k">[fdbserver.4511]</span>
+<span class="na">class</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">test</span>
+<span class="k">[fdbserver.4512]</span>
+<span class="na">class</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">test</span>
+<span class="k">[fdbserver.4513]</span>
+<span class="na">class</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">test</span>
 </pre></div>
 </div>
 <p>Running the actual test can be done with <code class="docutils literal notranslate"><span class="pre">fdbserver</span></code> as well. For this you can call the process
 with the <code class="docutils literal notranslate"><span class="pre">multitest</span></code> role:</p>
-<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>fdbserver -r multitest -f testfile.txt
+<div class="highlight-sh notranslate"><div class="highlight"><pre><span></span>fdbserver<span class="w"> </span>-r<span class="w"> </span>multitest<span class="w"> </span>-f<span class="w"> </span>testfile.txt
 </pre></div>
 </div>
 <p>This command will block until all tests are completed.</p>
@@ -778,49 +778,49 @@ schedule any new task or transaction.</p>
 <p>The code below implements a workload that consists of only two transactions. The first one sets a
 randomly generated key to a randomly generated value, and the second one reads the key and checks if
 the returned value matches the written one.</p>
-<div class="highlight-C++ notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;TesterWorkload.h&quot;</span><span class="cp"></span>
-<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;TesterUtil.h&quot;</span><span class="cp"></span>
+<div class="highlight-C++ notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;TesterWorkload.h&quot;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;TesterUtil.h&quot;</span>
 
-<span class="k">namespace</span><span class="w"> </span><span class="nn">FdbApiTester</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="k">namespace</span><span class="w"> </span><span class="nn">FdbApiTester</span><span class="w"> </span><span class="p">{</span>
 
-<span class="k">class</span><span class="w"> </span><span class="nc">SetAndGetWorkload</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="k">public</span><span class="w"> </span><span class="n">WorkloadBase</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="k">public</span><span class="o">:</span><span class="w"></span>
-<span class="w">	</span><span class="n">fdb</span><span class="o">::</span><span class="n">Key</span><span class="w"> </span><span class="n">keyPrefix</span><span class="p">;</span><span class="w"></span>
-<span class="w">	</span><span class="n">Random</span><span class="w"> </span><span class="n">random</span><span class="p">;</span><span class="w"></span>
+<span class="k">class</span><span class="w"> </span><span class="nc">SetAndGetWorkload</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="k">public</span><span class="w"> </span><span class="n">WorkloadBase</span><span class="w"> </span><span class="p">{</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">	</span><span class="n">fdb</span><span class="o">::</span><span class="n">Key</span><span class="w"> </span><span class="n">keyPrefix</span><span class="p">;</span>
+<span class="w">	</span><span class="n">Random</span><span class="w"> </span><span class="n">random</span><span class="p">;</span>
 
-<span class="w">	</span><span class="n">SetAndGetWorkload</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">WorkloadConfig</span><span class="o">&amp;</span><span class="w"> </span><span class="n">config</span><span class="p">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">WorkloadBase</span><span class="p">(</span><span class="n">config</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">		</span><span class="n">keyPrefix</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb</span><span class="o">::</span><span class="n">toBytesRef</span><span class="p">(</span><span class="n">fmt</span><span class="o">::</span><span class="n">format</span><span class="p">(</span><span class="s">&quot;{}/&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">workloadId</span><span class="p">));</span><span class="w"></span>
-<span class="w">	</span><span class="p">}</span><span class="w"></span>
+<span class="w">	</span><span class="n">SetAndGetWorkload</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">WorkloadConfig</span><span class="o">&amp;</span><span class="w"> </span><span class="n">config</span><span class="p">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">WorkloadBase</span><span class="p">(</span><span class="n">config</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">		</span><span class="n">keyPrefix</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb</span><span class="o">::</span><span class="n">toBytesRef</span><span class="p">(</span><span class="n">fmt</span><span class="o">::</span><span class="n">format</span><span class="p">(</span><span class="s">&quot;{}/&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">workloadId</span><span class="p">));</span>
+<span class="w">	</span><span class="p">}</span>
 
-<span class="w">	</span><span class="kt">void</span><span class="w"> </span><span class="n">start</span><span class="p">()</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">setAndGet</span><span class="p">(</span><span class="n">NO_OP_TASK</span><span class="p">);</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
+<span class="w">	</span><span class="kt">void</span><span class="w"> </span><span class="n">start</span><span class="p">()</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">setAndGet</span><span class="p">(</span><span class="n">NO_OP_TASK</span><span class="p">);</span><span class="w"> </span><span class="p">}</span>
 
-<span class="w">	</span><span class="kt">void</span><span class="w"> </span><span class="n">setAndGet</span><span class="p">(</span><span class="n">TTaskFct</span><span class="w"> </span><span class="n">cont</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">		</span><span class="n">fdb</span><span class="o">::</span><span class="n">Key</span><span class="w"> </span><span class="n">key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">keyPrefix</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">random</span><span class="p">.</span><span class="n">randomByteStringLowerCase</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="mi">100</span><span class="p">);</span><span class="w"></span>
-<span class="w">		</span><span class="n">fdb</span><span class="o">::</span><span class="n">Value</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">random</span><span class="p">.</span><span class="n">randomByteStringLowerCase</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="mi">1000</span><span class="p">);</span><span class="w"></span>
-<span class="w">		</span><span class="n">execTransaction</span><span class="p">(</span><span class="w"></span>
-<span class="w">		    </span><span class="p">[</span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">](</span><span class="k">auto</span><span class="w"> </span><span class="n">ctx</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">			    </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">tx</span><span class="p">().</span><span class="n">set</span><span class="p">(</span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">);</span><span class="w"></span>
-<span class="w">			    </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">commit</span><span class="p">();</span><span class="w"></span>
-<span class="w">		    </span><span class="p">},</span><span class="w"></span>
-<span class="w">		    </span><span class="p">[</span><span class="k">this</span><span class="p">,</span><span class="w"> </span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">,</span><span class="w"> </span><span class="n">cont</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">			    </span><span class="n">execTransaction</span><span class="p">(</span><span class="w"></span>
-<span class="w">			        </span><span class="p">[</span><span class="k">this</span><span class="p">,</span><span class="w"> </span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">](</span><span class="k">auto</span><span class="w"> </span><span class="n">ctx</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">				        </span><span class="k">auto</span><span class="w"> </span><span class="n">future</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">tx</span><span class="p">().</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="nb">false</span><span class="p">);</span><span class="w"></span>
-<span class="w">				        </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">continueAfter</span><span class="p">(</span><span class="n">future</span><span class="p">,</span><span class="w"> </span><span class="p">[</span><span class="k">this</span><span class="p">,</span><span class="w"> </span><span class="n">ctx</span><span class="p">,</span><span class="w"> </span><span class="n">future</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">					        </span><span class="n">std</span><span class="o">::</span><span class="n">optional</span><span class="o">&lt;</span><span class="n">fdb</span><span class="o">::</span><span class="n">Value</span><span class="o">&gt;</span><span class="w"> </span><span class="n">res</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">copyValueRef</span><span class="p">(</span><span class="n">future</span><span class="p">.</span><span class="n">get</span><span class="p">());</span><span class="w"></span>
-<span class="w">					        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">res</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">value</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">						        </span><span class="n">error</span><span class="p">(</span><span class="n">fmt</span><span class="o">::</span><span class="n">format</span><span class="p">(</span><span class="w"></span>
-<span class="w">						            </span><span class="s">&quot;expected: {} actual: {}&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">fdb</span><span class="o">::</span><span class="n">toCharsRef</span><span class="p">(</span><span class="n">value</span><span class="p">),</span><span class="w"> </span><span class="n">fdb</span><span class="o">::</span><span class="n">toCharsRef</span><span class="p">(</span><span class="n">res</span><span class="p">.</span><span class="n">value</span><span class="p">())));</span><span class="w"></span>
-<span class="w">					        </span><span class="p">}</span><span class="w"></span>
-<span class="w">					        </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">done</span><span class="p">();</span><span class="w"></span>
-<span class="w">				        </span><span class="p">});</span><span class="w"></span>
-<span class="w">			        </span><span class="p">},</span><span class="w"></span>
-<span class="w">			        </span><span class="n">cont</span><span class="p">);</span><span class="w"></span>
-<span class="w">		    </span><span class="p">});</span><span class="w"></span>
-<span class="w">	</span><span class="p">}</span><span class="w"></span>
-<span class="p">};</span><span class="w"></span>
+<span class="w">	</span><span class="kt">void</span><span class="w"> </span><span class="n">setAndGet</span><span class="p">(</span><span class="n">TTaskFct</span><span class="w"> </span><span class="n">cont</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">		</span><span class="n">fdb</span><span class="o">::</span><span class="n">Key</span><span class="w"> </span><span class="n">key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">keyPrefix</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">random</span><span class="p">.</span><span class="n">randomByteStringLowerCase</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="mi">100</span><span class="p">);</span>
+<span class="w">		</span><span class="n">fdb</span><span class="o">::</span><span class="n">Value</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">random</span><span class="p">.</span><span class="n">randomByteStringLowerCase</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="mi">1000</span><span class="p">);</span>
+<span class="w">		</span><span class="n">execTransaction</span><span class="p">(</span>
+<span class="w">		    </span><span class="p">[</span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">](</span><span class="k">auto</span><span class="w"> </span><span class="n">ctx</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">			    </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">tx</span><span class="p">().</span><span class="n">set</span><span class="p">(</span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">);</span>
+<span class="w">			    </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">commit</span><span class="p">();</span>
+<span class="w">		    </span><span class="p">},</span>
+<span class="w">		    </span><span class="p">[</span><span class="k">this</span><span class="p">,</span><span class="w"> </span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">,</span><span class="w"> </span><span class="n">cont</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">			    </span><span class="n">execTransaction</span><span class="p">(</span>
+<span class="w">			        </span><span class="p">[</span><span class="k">this</span><span class="p">,</span><span class="w"> </span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">](</span><span class="k">auto</span><span class="w"> </span><span class="n">ctx</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">				        </span><span class="k">auto</span><span class="w"> </span><span class="n">future</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">tx</span><span class="p">().</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">,</span><span class="w"> </span><span class="nb">false</span><span class="p">);</span>
+<span class="w">				        </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">continueAfter</span><span class="p">(</span><span class="n">future</span><span class="p">,</span><span class="w"> </span><span class="p">[</span><span class="k">this</span><span class="p">,</span><span class="w"> </span><span class="n">ctx</span><span class="p">,</span><span class="w"> </span><span class="n">future</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">					        </span><span class="n">std</span><span class="o">::</span><span class="n">optional</span><span class="o">&lt;</span><span class="n">fdb</span><span class="o">::</span><span class="n">Value</span><span class="o">&gt;</span><span class="w"> </span><span class="n">res</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">copyValueRef</span><span class="p">(</span><span class="n">future</span><span class="p">.</span><span class="n">get</span><span class="p">());</span>
+<span class="w">					        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">res</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">value</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">						        </span><span class="n">error</span><span class="p">(</span><span class="n">fmt</span><span class="o">::</span><span class="n">format</span><span class="p">(</span>
+<span class="w">						            </span><span class="s">&quot;expected: {} actual: {}&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">fdb</span><span class="o">::</span><span class="n">toCharsRef</span><span class="p">(</span><span class="n">value</span><span class="p">),</span><span class="w"> </span><span class="n">fdb</span><span class="o">::</span><span class="n">toCharsRef</span><span class="p">(</span><span class="n">res</span><span class="p">.</span><span class="n">value</span><span class="p">())));</span>
+<span class="w">					        </span><span class="p">}</span>
+<span class="w">					        </span><span class="n">ctx</span><span class="o">-&gt;</span><span class="n">done</span><span class="p">();</span>
+<span class="w">				        </span><span class="p">});</span>
+<span class="w">			        </span><span class="p">},</span>
+<span class="w">			        </span><span class="n">cont</span><span class="p">);</span>
+<span class="w">		    </span><span class="p">});</span>
+<span class="w">	</span><span class="p">}</span>
+<span class="p">};</span>
 
-<span class="n">WorkloadFactory</span><span class="o">&lt;</span><span class="n">SetAndGetWorkload</span><span class="o">&gt;</span><span class="w"> </span><span class="n">SetAndGetWorkloadFactory</span><span class="p">(</span><span class="s">&quot;SetAndGet&quot;</span><span class="p">);</span><span class="w"></span>
+<span class="n">WorkloadFactory</span><span class="o">&lt;</span><span class="n">SetAndGetWorkload</span><span class="o">&gt;</span><span class="w"> </span><span class="n">SetAndGetWorkloadFactory</span><span class="p">(</span><span class="s">&quot;SetAndGet&quot;</span><span class="p">);</span>
 
 <span class="p">}</span><span class="w"> </span><span class="c1">// namespace FdbApiTester</span>
 </pre></div>
@@ -847,31 +847,31 @@ methods wrapping FDB C API calls and automate memory management by means of refe
 <p>Our basic workload executes just 2 transactions, but in practice we want to have workloads that generate
 multiple transactions. The following code demonstrates how we can modify our basic workload to generate
 multiple transactions in a loop.</p>
-<div class="highlight-C++ notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">SetAndGetWorkload</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="k">public</span><span class="w"> </span><span class="n">WorkloadBase</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="k">public</span><span class="o">:</span><span class="w"></span>
-<span class="w">   </span><span class="p">...</span><span class="w"></span>
-<span class="w">   </span><span class="kt">int</span><span class="w"> </span><span class="n">numIterations</span><span class="p">;</span><span class="w"></span>
-<span class="w">   </span><span class="kt">int</span><span class="w"> </span><span class="n">iterationsLeft</span><span class="p">;</span><span class="w"></span>
+<div class="highlight-C++ notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">SetAndGetWorkload</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="k">public</span><span class="w"> </span><span class="n">WorkloadBase</span><span class="w"> </span><span class="p">{</span>
+<span class="k">public</span><span class="o">:</span>
+<span class="w">   </span><span class="p">...</span>
+<span class="w">   </span><span class="kt">int</span><span class="w"> </span><span class="n">numIterations</span><span class="p">;</span>
+<span class="w">   </span><span class="kt">int</span><span class="w"> </span><span class="n">iterationsLeft</span><span class="p">;</span>
 
-<span class="w">   </span><span class="n">SetAndGetWorkload</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">WorkloadConfig</span><span class="o">&amp;</span><span class="w"> </span><span class="n">config</span><span class="p">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">WorkloadBase</span><span class="p">(</span><span class="n">config</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">      </span><span class="n">keyPrefix</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb</span><span class="o">::</span><span class="n">toBytesRef</span><span class="p">(</span><span class="n">fmt</span><span class="o">::</span><span class="n">format</span><span class="p">(</span><span class="s">&quot;{}/&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">workloadId</span><span class="p">));</span><span class="w"></span>
-<span class="w">      </span><span class="n">numIterations</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">config</span><span class="p">.</span><span class="n">getIntOption</span><span class="p">(</span><span class="s">&quot;numIterations&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">1000</span><span class="p">);</span><span class="w"></span>
-<span class="w">   </span><span class="p">}</span><span class="w"></span>
+<span class="w">   </span><span class="n">SetAndGetWorkload</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">WorkloadConfig</span><span class="o">&amp;</span><span class="w"> </span><span class="n">config</span><span class="p">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">WorkloadBase</span><span class="p">(</span><span class="n">config</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="n">keyPrefix</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb</span><span class="o">::</span><span class="n">toBytesRef</span><span class="p">(</span><span class="n">fmt</span><span class="o">::</span><span class="n">format</span><span class="p">(</span><span class="s">&quot;{}/&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">workloadId</span><span class="p">));</span>
+<span class="w">      </span><span class="n">numIterations</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">config</span><span class="p">.</span><span class="n">getIntOption</span><span class="p">(</span><span class="s">&quot;numIterations&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">1000</span><span class="p">);</span>
+<span class="w">   </span><span class="p">}</span>
 
-<span class="w">   </span><span class="kt">void</span><span class="w"> </span><span class="n">start</span><span class="p">()</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">      </span><span class="n">iterationsLeft</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">numIterations</span><span class="p">;</span><span class="w"></span>
-<span class="w">      </span><span class="n">setAndGetLoop</span><span class="p">();</span><span class="w"></span>
-<span class="w">   </span><span class="p">}</span><span class="w"></span>
+<span class="w">   </span><span class="kt">void</span><span class="w"> </span><span class="n">start</span><span class="p">()</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="n">iterationsLeft</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">numIterations</span><span class="p">;</span>
+<span class="w">      </span><span class="n">setAndGetLoop</span><span class="p">();</span>
+<span class="w">   </span><span class="p">}</span>
 
-<span class="w">   </span><span class="kt">void</span><span class="w"> </span><span class="n">setAndGetLoop</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">iterationsLeft</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">         </span><span class="k">return</span><span class="p">;</span><span class="w"></span>
-<span class="w">      </span><span class="p">}</span><span class="w"></span>
-<span class="w">      </span><span class="n">iterationsLeft</span><span class="o">--</span><span class="p">;</span><span class="w"></span>
-<span class="w">      </span><span class="n">setAndGet</span><span class="p">([</span><span class="k">this</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">setAndGetLoop</span><span class="p">();</span><span class="w"> </span><span class="p">});</span><span class="w"></span>
-<span class="w">   </span><span class="p">}</span><span class="w"></span>
-<span class="w">   </span><span class="p">...</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
+<span class="w">   </span><span class="kt">void</span><span class="w"> </span><span class="n">setAndGetLoop</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">iterationsLeft</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">         </span><span class="k">return</span><span class="p">;</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">      </span><span class="n">iterationsLeft</span><span class="o">--</span><span class="p">;</span>
+<span class="w">      </span><span class="n">setAndGet</span><span class="p">([</span><span class="k">this</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">setAndGetLoop</span><span class="p">();</span><span class="w"> </span><span class="p">});</span>
+<span class="w">   </span><span class="p">}</span>
+<span class="w">   </span><span class="p">...</span>
+<span class="p">}</span>
 </pre></div>
 </div>
 <p>We introduce a workload parameter <code class="docutils literal notranslate"><span class="pre">numIterations</span></code> to specify the number of iterations. If not specified
@@ -882,26 +882,26 @@ can see we don’t need any change in <code class="docutils literal notranslate"
 <p>The pattern of passing a continuation as a parameter also can be used to decompose the workload into a
 sequence of steps. For example,  we can introduce setup and cleanUp steps to our workload and modify the
 <code class="docutils literal notranslate"><span class="pre">setAndGetLoop</span></code> to make it composable with an arbitrary continuation:</p>
-<div class="highlight-C++ notranslate"><div class="highlight"><pre><span></span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">start</span><span class="p">()</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="n">setup</span><span class="p">([</span><span class="k">this</span><span class="p">](){</span><span class="w"></span>
-<span class="w">        </span><span class="n">iterationsLeft</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">numIterations</span><span class="p">;</span><span class="w"></span>
-<span class="w">        </span><span class="n">setAndGetLoop</span><span class="p">([</span><span class="k">this</span><span class="p">](){</span><span class="w"></span>
-<span class="w">            </span><span class="n">cleanup</span><span class="p">(</span><span class="n">NO_OP_TASK</span><span class="p">);</span><span class="w"></span>
-<span class="w">        </span><span class="p">});</span><span class="w"></span>
-<span class="w">    </span><span class="p">});</span><span class="w"></span>
-<span class="w"> </span><span class="p">}</span><span class="w"></span>
+<div class="highlight-C++ notranslate"><div class="highlight"><pre><span></span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">start</span><span class="p">()</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">setup</span><span class="p">([</span><span class="k">this</span><span class="p">](){</span>
+<span class="w">        </span><span class="n">iterationsLeft</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">numIterations</span><span class="p">;</span>
+<span class="w">        </span><span class="n">setAndGetLoop</span><span class="p">([</span><span class="k">this</span><span class="p">](){</span>
+<span class="w">            </span><span class="n">cleanup</span><span class="p">(</span><span class="n">NO_OP_TASK</span><span class="p">);</span>
+<span class="w">        </span><span class="p">});</span>
+<span class="w">    </span><span class="p">});</span>
+<span class="w"> </span><span class="p">}</span>
 
-<span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">setAndGetLoop</span><span class="p">(</span><span class="n">TTaskFct</span><span class="w"> </span><span class="n">cont</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">iterationsLeft</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">        </span><span class="n">schedule</span><span class="p">(</span><span class="n">cont</span><span class="p">);</span><span class="w"></span>
-<span class="w">    </span><span class="p">}</span><span class="w"></span>
-<span class="w">    </span><span class="n">iterationsLeft</span><span class="o">--</span><span class="p">;</span><span class="w"></span>
-<span class="w">    </span><span class="n">setAndGet</span><span class="p">([</span><span class="k">this</span><span class="p">,</span><span class="w"> </span><span class="n">cont</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">setAndGetLoop</span><span class="p">(</span><span class="n">cont</span><span class="p">);</span><span class="w"> </span><span class="p">});</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
+<span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">setAndGetLoop</span><span class="p">(</span><span class="n">TTaskFct</span><span class="w"> </span><span class="n">cont</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">iterationsLeft</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">schedule</span><span class="p">(</span><span class="n">cont</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="n">iterationsLeft</span><span class="o">--</span><span class="p">;</span>
+<span class="w">    </span><span class="n">setAndGet</span><span class="p">([</span><span class="k">this</span><span class="p">,</span><span class="w"> </span><span class="n">cont</span><span class="p">]()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">setAndGetLoop</span><span class="p">(</span><span class="n">cont</span><span class="p">);</span><span class="w"> </span><span class="p">});</span>
+<span class="p">}</span>
 
-<span class="kt">void</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="n">TTaskFct</span><span class="w"> </span><span class="n">cont</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">setup</span><span class="p">(</span><span class="n">TTaskFct</span><span class="w"> </span><span class="n">cont</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">}</span>
 
-<span class="kt">void</span><span class="w"> </span><span class="nf">cleanup</span><span class="p">(</span><span class="n">TTaskFct</span><span class="w"> </span><span class="n">cont</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">  </span><span class="p">...</span><span class="w"> </span><span class="p">}</span><span class="w"></span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">cleanup</span><span class="p">(</span><span class="n">TTaskFct</span><span class="w"> </span><span class="n">cont</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">  </span><span class="p">...</span><span class="w"> </span><span class="p">}</span>
 </pre></div>
 </div>
 <p>Note that we call <code class="docutils literal notranslate"><span class="pre">schedule(cont)</span></code> in <code class="docutils literal notranslate"><span class="pre">setAndGetLoop</span></code> instead of calling the continuation directly.
@@ -982,16 +982,16 @@ according to its specification. Before that we must create a FDB cluster and pas
 a parameter to <code class="docutils literal notranslate"><span class="pre">fdb_c_api_tester</span></code>. Note that multithreaded tests also need to be provided with an
 external client library.</p>
 <p>For example, we can create a temporary cluster and use it for execution of one of the existing API tests:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="si">${</span><span class="nv">srcDir</span><span class="si">}</span>/tests/TestRunner/tmp_cluster.py --build-dir <span class="si">${</span><span class="nv">buildDir</span><span class="si">}</span> -- <span class="se">\</span>
-   <span class="si">${</span><span class="nv">buildDir</span><span class="si">}</span>/bin/fdb_c_api_tester <span class="se">\</span>
-   --cluster-file @CLUSTER_FILE@ <span class="se">\</span>
-   --external-client-library<span class="o">=</span><span class="si">${</span><span class="nv">buildDir</span><span class="si">}</span>/bindings/c/libfdb_c_external.so <span class="se">\</span>
-   --test-file <span class="si">${</span><span class="nv">srcDir</span><span class="si">}</span>/bindings/c/test/apitester/tests/CApiCorrectnessMultiThr.toml
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="si">${</span><span class="nv">srcDir</span><span class="si">}</span>/tests/TestRunner/tmp_cluster.py<span class="w"> </span>--build-dir<span class="w"> </span><span class="si">${</span><span class="nv">buildDir</span><span class="si">}</span><span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
+<span class="w">   </span><span class="si">${</span><span class="nv">buildDir</span><span class="si">}</span>/bin/fdb_c_api_tester<span class="w"> </span><span class="se">\</span>
+<span class="w">   </span>--cluster-file<span class="w"> </span>@CLUSTER_FILE@<span class="w"> </span><span class="se">\</span>
+<span class="w">   </span>--external-client-library<span class="o">=</span><span class="si">${</span><span class="nv">buildDir</span><span class="si">}</span>/bindings/c/libfdb_c_external.so<span class="w"> </span><span class="se">\</span>
+<span class="w">   </span>--test-file<span class="w"> </span><span class="si">${</span><span class="nv">srcDir</span><span class="si">}</span>/bindings/c/test/apitester/tests/CApiCorrectnessMultiThr.toml
 </pre></div>
 </div>
 <p>The test specifications added to the <code class="docutils literal notranslate"><span class="pre">bindings/c/test/apitester/tests/</span></code> directory are executed as a part
 of the regression test suite. They can be executed using the <code class="docutils literal notranslate"><span class="pre">ctest</span></code> target <code class="docutils literal notranslate"><span class="pre">fdb_c_api_tests</span></code>:</p>
-<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>ctest -R fdb_c_api_tests -VV
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>ctest<span class="w"> </span>-R<span class="w"> </span>fdb_c_api_tests<span class="w"> </span>-VV
 </pre></div>
 </div>
 </section>
@@ -1017,7 +1017,7 @@ of the regression test suite. They can be executed using the <code class="docuti
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 30, 2022.<br/>
+      Last updated on Jan 19, 2023.<br/>
     </p>
   </div>
 </footer>

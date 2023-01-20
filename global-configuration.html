@@ -284,8 +284,8 @@ read a value, depending on if it is an object or a primitive.</p>
 or <code class="docutils literal notranslate"><span class="pre">defaultVal</span></code> if no key matching <code class="docutils literal notranslate"><span class="pre">name</span></code> exists. This templated
 function is enabled only when the <code class="docutils literal notranslate"><span class="pre">std::is_arithmetic&lt;T&gt;</span></code> specialization
 returns true.</p>
-<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">config</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GlobalConfig</span><span class="o">::</span><span class="n">globalConfig</span><span class="p">();</span><span class="w"></span>
-<span class="kt">double</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">config</span><span class="p">.</span><span class="n">get</span><span class="o">&lt;</span><span class="kt">double</span><span class="o">&gt;</span><span class="p">(</span><span class="s">&quot;path/to/key&quot;</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="p">);</span><span class="w"></span>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">config</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GlobalConfig</span><span class="o">::</span><span class="n">globalConfig</span><span class="p">();</span>
+<span class="kt">double</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">config</span><span class="p">.</span><span class="n">get</span><span class="o">&lt;</span><span class="kt">double</span><span class="o">&gt;</span><span class="p">(</span><span class="s">&quot;path/to/key&quot;</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="p">);</span>
 </pre></div>
 </div>
 </dd></dl>
@@ -294,13 +294,13 @@ returns true.</p>
 <dt class="sig sig-object cpp" id="_CPPv43get6KeyRef">
 <span id="_CPPv33get6KeyRef"></span><span id="_CPPv23get6KeyRef"></span><span id="get__KeyRef"></span><span class="k"><span class="pre">const</span></span><span class="w"> </span><span class="n"><span class="pre">Reference</span></span><span class="p"><span class="pre">&lt;</span></span><a class="reference internal" href="#_CPPv411ConfigValue" title="ConfigValue"><span class="n"><span class="pre">ConfigValue</span></span></a><span class="p"><span class="pre">&gt;</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">get</span></span></span><span class="sig-paren">(</span><span class="n"><span class="pre">KeyRef</span></span><span class="w"> </span><span class="n sig-param"><span class="pre">name</span></span><span class="sig-paren">)</span><br /></dt>
 <dd><p>Returns the value associated with <code class="docutils literal notranslate"><span class="pre">name</span></code> stored in global configuration.</p>
-<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">config</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GlobalConfig</span><span class="o">::</span><span class="n">globalConfig</span><span class="p">();</span><span class="w"></span>
-<span class="k">auto</span><span class="w"> </span><span class="n">configValue</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">config</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="s">&quot;path/to/key&quot;</span><span class="p">);</span><span class="w"></span>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">config</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GlobalConfig</span><span class="o">::</span><span class="n">globalConfig</span><span class="p">();</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">configValue</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">config</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="s">&quot;path/to/key&quot;</span><span class="p">);</span>
 
 <span class="c1">// Check if value exists</span>
-<span class="n">ASSERT</span><span class="p">(</span><span class="n">configValue</span><span class="p">.</span><span class="n">value</span><span class="p">.</span><span class="n">has_value</span><span class="p">());</span><span class="w"></span>
+<span class="n">ASSERT</span><span class="p">(</span><span class="n">configValue</span><span class="p">.</span><span class="n">value</span><span class="p">.</span><span class="n">has_value</span><span class="p">());</span>
 <span class="c1">// Cast to correct type</span>
-<span class="k">auto</span><span class="w"> </span><span class="n">str</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">any_cast</span><span class="o">&lt;</span><span class="n">StringRef</span><span class="o">&gt;</span><span class="p">(</span><span class="n">configValue</span><span class="p">.</span><span class="n">value</span><span class="p">);</span><span class="w"></span>
+<span class="k">auto</span><span class="w"> </span><span class="n">str</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">any_cast</span><span class="o">&lt;</span><span class="n">StringRef</span><span class="o">&gt;</span><span class="p">(</span><span class="n">configValue</span><span class="p">.</span><span class="n">value</span><span class="p">);</span>
 </pre></div>
 </div>
 </dd></dl>
@@ -315,10 +315,10 @@ returns true.</p>
 <dt class="sig sig-object cpp" id="_CPPv411ConfigValue">
 <span id="_CPPv311ConfigValue"></span><span id="_CPPv211ConfigValue"></span><span id="ConfigValue"></span><span class="k"><span class="pre">type</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">ConfigValue</span></span></span><br /></dt>
 <dd><p>Holds a global configuration value and the arena where it lives.</p>
-<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="k">struct</span><span class="w"> </span><span class="nc">ConfigValue</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">ReferenceCounted</span><span class="o">&lt;</span><span class="n">ConfigValue</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">   </span><span class="n">Arena</span><span class="w"> </span><span class="n">arena</span><span class="p">;</span><span class="w"></span>
-<span class="w">   </span><span class="n">std</span><span class="o">::</span><span class="n">any</span><span class="w"> </span><span class="n">value</span><span class="p">;</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="k">struct</span><span class="w"> </span><span class="nc">ConfigValue</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">ReferenceCounted</span><span class="o">&lt;</span><span class="n">ConfigValue</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<span class="w">   </span><span class="n">Arena</span><span class="w"> </span><span class="n">arena</span><span class="p">;</span>
+<span class="w">   </span><span class="n">std</span><span class="o">::</span><span class="n">any</span><span class="w"> </span><span class="n">value</span><span class="p">;</span>
+<span class="p">}</span>
 </pre></div>
 </div>
 <dl class="simple">
@@ -336,16 +336,16 @@ returns true.</p>
 special key space range <code class="docutils literal notranslate"><span class="pre">\xff\xff/global_config/</span> <span class="pre">-</span> <span class="pre">\xff\xff/global_config/0</span></code>.
 Values must always be encoded according to the <a class="reference internal" href="api-python.html#api-python-tuple-layer"><span class="std std-ref">Tuple layer</span></a>.</p>
 <div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="c1">// In GlobalConfig.actor.h</span>
-<span class="k">extern</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="n">KeyRef</span><span class="w"> </span><span class="n">myGlobalConfigKey</span><span class="p">;</span><span class="w"></span>
+<span class="k">extern</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="n">KeyRef</span><span class="w"> </span><span class="n">myGlobalConfigKey</span><span class="p">;</span>
 <span class="c1">// In GlobalConfig.actor.cpp</span>
-<span class="k">const</span><span class="w"> </span><span class="n">KeyRef</span><span class="w"> </span><span class="n">myGlobalConfigKey</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;config/key&quot;</span><span class="n">_sr</span><span class="p">;</span><span class="w"></span>
+<span class="k">const</span><span class="w"> </span><span class="n">KeyRef</span><span class="w"> </span><span class="n">myGlobalConfigKey</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;config/key&quot;</span><span class="n">_sr</span><span class="p">;</span>
 
 <span class="c1">// When you want to set the value..</span>
-<span class="n">Tuple</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Tuple</span><span class="o">::</span><span class="n">makeTuple</span><span class="p">((</span><span class="kt">double</span><span class="p">)</span><span class="mf">1.5</span><span class="p">);</span><span class="w"></span>
+<span class="n">Tuple</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Tuple</span><span class="o">::</span><span class="n">makeTuple</span><span class="p">((</span><span class="kt">double</span><span class="p">)</span><span class="mf">1.5</span><span class="p">);</span>
 
-<span class="n">FDBTransaction</span><span class="o">*</span><span class="w"> </span><span class="n">tr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...;</span><span class="w"></span>
-<span class="n">tr</span><span class="o">-&gt;</span><span class="n">setOption</span><span class="p">(</span><span class="n">FDBTransactionOptions</span><span class="o">::</span><span class="n">SPECIAL_KEY_SPACE_ENABLE_WRITES</span><span class="p">);</span><span class="w"></span>
-<span class="n">tr</span><span class="o">-&gt;</span><span class="n">set</span><span class="p">(</span><span class="n">GlobalConfig</span><span class="o">::</span><span class="n">prefixedKey</span><span class="p">(</span><span class="n">myGlobalConfigKey</span><span class="p">),</span><span class="w"> </span><span class="n">value</span><span class="p">.</span><span class="n">pack</span><span class="p">());</span><span class="w"></span>
+<span class="n">FDBTransaction</span><span class="o">*</span><span class="w"> </span><span class="n">tr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">...;</span>
+<span class="n">tr</span><span class="o">-&gt;</span><span class="n">setOption</span><span class="p">(</span><span class="n">FDBTransactionOptions</span><span class="o">::</span><span class="n">SPECIAL_KEY_SPACE_ENABLE_WRITES</span><span class="p">);</span>
+<span class="n">tr</span><span class="o">-&gt;</span><span class="n">set</span><span class="p">(</span><span class="n">GlobalConfig</span><span class="o">::</span><span class="n">prefixedKey</span><span class="p">(</span><span class="n">myGlobalConfigKey</span><span class="p">),</span><span class="w"> </span><span class="n">value</span><span class="p">.</span><span class="n">pack</span><span class="p">());</span>
 <span class="c1">// commit transaction</span>
 </pre></div>
 </div>
@@ -411,7 +411,7 @@ allocated object, its memory remains in control of global configuration.</p>
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 30, 2022.<br/>
+      Last updated on Jan 19, 2023.<br/>
     </p>
   </div>
 </footer>

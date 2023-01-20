@@ -318,7 +318,7 @@
 <h2>API versioning</h2>
 <p>Prior to including <code class="docutils literal notranslate"><span class="pre">fdb_c.h</span></code>, you must define the <code class="docutils literal notranslate"><span class="pre">FDB_API_VERSION</span></code> macro. This, together with the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_select_api_version()</span></code></a> function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is 720.</p>
 <div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#define FDB_API_VERSION 720</span>
-<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;foundationdb/fdb_c.h&gt;</span><span class="cp"></span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;foundationdb/fdb_c.h&gt;</span>
 </pre></div>
 </div>
 <dl class="c function">
@@ -401,20 +401,20 @@
 <dt class="sig sig-object c" id="c.fdb_stop_network">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t"><span class="n"><span class="pre">fdb_error_t</span></span></a><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">fdb_stop_network</span></span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><br /></dt>
 <dd><p>Signals the event loop invoked by <a class="reference internal" href="#c.fdb_run_network" title="fdb_run_network"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_run_network()</span></code></a> to terminate. You must call this function <strong>and wait for</strong> <a class="reference internal" href="#c.fdb_run_network" title="fdb_run_network"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_run_network()</span></code></a> <strong>to return</strong> before allowing your program to exit, or else the behavior is undefined. For example, when running <a class="reference internal" href="#c.fdb_run_network" title="fdb_run_network"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_run_network()</span></code></a> on a thread (using pthread), this will look like:</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">pthread_t</span><span class="w"> </span><span class="n">network_thread</span><span class="p">;</span><span class="w"> </span><span class="cm">/* handle for thread which invoked fdb_run_network() */</span><span class="w"></span>
-<span class="kt">int</span><span class="w"> </span><span class="n">err</span><span class="p">;</span><span class="w"></span>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">pthread_t</span><span class="w"> </span><span class="n">network_thread</span><span class="p">;</span><span class="w"> </span><span class="cm">/* handle for thread which invoked fdb_run_network() */</span>
+<span class="kt">int</span><span class="w"> </span><span class="n">err</span><span class="p">;</span>
 
-<span class="p">...</span><span class="w"></span>
+<span class="p">...</span>
 
-<span class="n">err</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb_stop_network</span><span class="p">();</span><span class="w"></span>
-<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="w"> </span><span class="n">err</span><span class="w"> </span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="cm">/* An error occurred (probably network not running) */</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
-<span class="n">err</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pthread_join</span><span class="p">(</span><span class="w"> </span><span class="n">network_thread</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="w"> </span><span class="p">);</span><span class="w"></span>
-<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="w"> </span><span class="n">err</span><span class="w"> </span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="cm">/* Unknown error */</span><span class="w"></span>
-<span class="p">}</span><span class="w"></span>
-<span class="n">exit</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span><span class="w"></span>
+<span class="n">err</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb_stop_network</span><span class="p">();</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="w"> </span><span class="n">err</span><span class="w"> </span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* An error occurred (probably network not running) */</span>
+<span class="p">}</span>
+<span class="n">err</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pthread_join</span><span class="p">(</span><span class="w"> </span><span class="n">network_thread</span><span class="p">,</span><span class="w"> </span><span class="nb">NULL</span><span class="w"> </span><span class="p">);</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="w"> </span><span class="n">err</span><span class="w"> </span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/* Unknown error */</span>
+<span class="p">}</span>
+<span class="n">exit</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span>
 </pre></div>
 </div>
 <p>This function may be called from any thread. Once the network is stopped it cannot be restarted during the lifetime of the running program.</p>
@@ -426,24 +426,24 @@
 <p>Most functions in the FoundationDB API are asynchronous, meaning that they may return to the caller before actually delivering their result. These functions always return <code class="docutils literal notranslate"><span class="pre">FDBFuture*</span></code>. An <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> object represents a result value or error to be delivered at some future time. You can wait for a Future to be “ready” – to have a value or error delivered – by setting a callback function, or by blocking a thread, or by polling. Once a Future is ready, you can extract either an error code or a value of the appropriate type (the documentation for the original function will tell you which <code class="docutils literal notranslate"><span class="pre">fdb_future_get_()</span></code> function you should call).</p>
 <p>To use the API in a synchronous way, you would typically do something like this for each asynchronous call:</p>
 <div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="c1">// Call an API that returns FDBFuture*, documented as returning type foo in the future</span>
-<span class="n">f</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb_something</span><span class="p">();</span><span class="w"></span>
+<span class="n">f</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb_something</span><span class="p">();</span>
 
 <span class="c1">// Wait for the Future to be *ready*</span>
-<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="w"> </span><span class="p">(</span><span class="n">fdb_future_block_until_ready</span><span class="p">(</span><span class="n">f</span><span class="p">))</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="w"> </span><span class="p">(</span><span class="n">fdb_future_block_until_ready</span><span class="p">(</span><span class="n">f</span><span class="p">))</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="c1">// Exceptional error (e.g. out of memory)</span>
-<span class="p">}</span><span class="w"></span>
+<span class="p">}</span>
 
-<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="w"> </span><span class="p">(</span><span class="n">err</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb_future_get_foo</span><span class="p">(</span><span class="n">f</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">result</span><span class="p">))</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="w"> </span><span class="p">(</span><span class="n">err</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb_future_get_foo</span><span class="p">(</span><span class="n">f</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">result</span><span class="p">))</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="c1">// Use result</span>
 <span class="w">    </span><span class="c1">// In some cases, you must be finished with result before calling</span>
 <span class="w">    </span><span class="c1">// fdb_future_destroy() (see the documentation for the specific</span>
 <span class="w">    </span><span class="c1">// fdb_future_get_*() method)</span>
-<span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
+<span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="c1">// Handle the error. If this is an error in a transaction, see</span>
 <span class="w">    </span><span class="c1">// fdb_transaction_on_error()</span>
-<span class="p">}</span><span class="w"></span>
+<span class="p">}</span>
 
-<span class="n">fdb_future_destroy</span><span class="p">(</span><span class="n">f</span><span class="p">);</span><span class="w"></span>
+<span class="n">fdb_future_destroy</span><span class="p">(</span><span class="n">f</span><span class="p">);</span>
 </pre></div>
 </div>
 <p>Futures make it easy to do multiple operations in parallel, by calling several asynchronous functions before waiting for any of the results. This can be important for reducing the latency of transactions.</p>
@@ -591,12 +591,12 @@
 <dt class="sig sig-object c" id="c.FDBKeyValue">
 <span class="k"><span class="pre">type</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">FDBKeyValue</span></span></span><br /></dt>
 <dd><p>Represents a single key-value pair in the output of <a class="reference internal" href="#c.fdb_future_get_keyvalue_array" title="fdb_future_get_keyvalue_array"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_future_get_keyvalue_array()</span></code></a>.</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">typedef</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="p">{</span><span class="w"></span>
-<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">key</span><span class="p">;</span><span class="w"></span>
-<span class="w">    </span><span class="kt">int</span><span class="w">         </span><span class="n">key_length</span><span class="p">;</span><span class="w"></span>
-<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">value</span><span class="p">;</span><span class="w"></span>
-<span class="w">    </span><span class="kt">int</span><span class="w">         </span><span class="n">value_length</span><span class="p">;</span><span class="w"></span>
-<span class="p">}</span><span class="w"> </span><span class="n">FDBKeyValue</span><span class="p">;</span><span class="w"></span>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">typedef</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">key</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int</span><span class="w">         </span><span class="n">key_length</span><span class="p">;</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="kt">void</span><span class="o">*</span><span class="w"> </span><span class="n">value</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int</span><span class="w">         </span><span class="n">value_length</span><span class="p">;</span>
+<span class="p">}</span><span class="w"> </span><span class="n">FDBKeyValue</span><span class="p">;</span>
 </pre></div>
 </div>
 <dl class="simple">
@@ -1179,11 +1179,11 @@
 <dd></dd></dl>
 
 <p>To use one of these macros, simply replace the four parameters in the function with one of <code class="docutils literal notranslate"><span class="pre">FDB_KEYSEL_*</span></code>:</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">future</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb_transaction_get_key</span><span class="p">(</span><span class="n">transaction</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;key&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span><span class="w"></span>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">future</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb_transaction_get_key</span><span class="p">(</span><span class="n">transaction</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;key&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span>
 </pre></div>
 </div>
 <p>could instead be written as:</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">future</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb_transaction_get_key</span><span class="p">(</span><span class="n">transaction</span><span class="p">,</span><span class="w"> </span><span class="n">FDB_KEYSEL_FIRST_GREATER_THAN</span><span class="p">(</span><span class="s">&quot;key&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">)</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span><span class="w"></span>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">future</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fdb_transaction_get_key</span><span class="p">(</span><span class="n">transaction</span><span class="p">,</span><span class="w"> </span><span class="n">FDB_KEYSEL_FIRST_GREATER_THAN</span><span class="p">(</span><span class="s">&quot;key&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">)</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">);</span>
 </pre></div>
 </div>
 </section>
@@ -1236,7 +1236,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 30, 2022.<br/>
+      Last updated on Jan 19, 2023.<br/>
     </p>
   </div>
 </footer>

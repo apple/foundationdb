@@ -278,14 +278,14 @@
 <p>Unless using the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">Multi-version client</span></a>, the installed client and server packages must have the same version. When upgrading a FoundationDB cluster, be sure also to upgrade all clients to the same version.</p>
 </div>
 <p>To install on <strong>Ubuntu</strong> use the dpkg command:</p>
-<pre class="literal-block">user&#64;host$ sudo dpkg -i foundationdb-clients_7.2.0-1_amd64.deb \
-foundationdb-server_7.2.0-1_amd64.deb</pre>
+<pre class="literal-block">user&#64;host$ sudo dpkg -i foundationdb-clients_7.2.3-1_amd64.deb \
+foundationdb-server_7.2.3-1_amd64.deb</pre>
 <p>To install on <strong>RHEL/CentOS 6</strong> use the rpm command:</p>
-<pre class="literal-block">user&#64;host$ sudo rpm -Uvh foundationdb-clients-7.2.0-1.el7.x86_64.rpm \
-foundationdb-server-7.2.0-1.el7.x86_64.rpm</pre>
+<pre class="literal-block">user&#64;host$ sudo rpm -Uvh foundationdb-clients-7.2.3-1.el7.x86_64.rpm \
+foundationdb-server-7.2.3-1.el7.x86_64.rpm</pre>
 <p>To install on <strong>RHEL/CentOS 7</strong> use the rpm command:</p>
-<pre class="literal-block">user&#64;host$ sudo rpm -Uvh foundationdb-clients-7.2.0-1.el7.x86_64.rpm \
-foundationdb-server-7.2.0-1.el7.x86_64.rpm</pre>
+<pre class="literal-block">user&#64;host$ sudo rpm -Uvh foundationdb-clients-7.2.3-1.el7.x86_64.rpm \
+foundationdb-server-7.2.3-1.el7.x86_64.rpm</pre>
 <p>FoundationDB installs in a single-server mode appropriate for a development workstation. In this mode data is not replicated, and therefore the database is <strong>not failure tolerant</strong>. This default database is also configured to use the memory storage engine which, while using the disk for durability, <strong>requires data to fit in RAM</strong>.</p>
 <p>By default FoundationDB uses the loopback IP (<code class="docutils literal notranslate"><span class="pre">127.0.0.1</span></code>). In this configuration all parts of FoundationDB, <strong>including client applications</strong>, must run on the same machine and communicate via <code class="docutils literal notranslate"><span class="pre">127.0.0.1</span></code>, not via external IPs.</p>
 </section>
@@ -382,7 +382,7 @@ Client time: Thu Mar 15 14:41:34 2018
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 30, 2022.<br/>
+      Last updated on Jan 19, 2023.<br/>
     </p>
   </div>
 </footer>

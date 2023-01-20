@@ -366,9 +366,9 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <section id="opening-a-database">
 <h2>Opening a database</h2>
 <p>After requiring the <code class="docutils literal notranslate"><span class="pre">FDB</span></code> gem and selecting an API version, you probably want to open a <a class="reference internal" href="#FDB::Database" title="FDB::Database"><code class="xref rb rb-class docutils literal notranslate"><span class="pre">Database</span></code></a> using <a class="reference internal" href="#FDB.open" title="FDB.open"><code class="xref rb rb-func docutils literal notranslate"><span class="pre">open</span></code></a>:</p>
-<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="nb">require</span> <span class="s1">&#39;fdb&#39;</span>
-<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span> <span class="mi">720</span>
-<span class="n">db</span> <span class="o">=</span> <span class="no">FDB</span><span class="o">.</span><span class="n">open</span>
+<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="nb">require</span><span class="w"> </span><span class="s1">&#39;fdb&#39;</span>
+<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span><span class="w"> </span><span class="mi">720</span>
+<span class="n">db</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">.</span><span class="n">open</span>
 </pre></div>
 </div>
 <dl class="rb function">
@@ -1000,10 +1000,10 @@ both the caching and the increased network bandwidth.</p>
 </div>
 <p>In each of the methods below, <code class="docutils literal notranslate"><span class="pre">param</span></code> should be a string appropriately packed to represent the desired value. For example:</p>
 <div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="c1"># wrong</span>
-<span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="s1">&#39;key&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+<span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="s1">&#39;key&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span>
 
 <span class="c1"># right</span>
-<span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="s1">&#39;key&#39;</span><span class="p">,</span> <span class="o">[</span><span class="mi">1</span><span class="o">].</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;q&lt;&#39;</span><span class="p">))</span>
+<span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="s1">&#39;key&#39;</span><span class="p">,</span><span class="w"> </span><span class="o">[</span><span class="mi">1</span><span class="o">].</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;q&lt;&#39;</span><span class="p">))</span>
 </pre></div>
 </div>
 <dl class="rb method">
@@ -1383,24 +1383,24 @@ both the caching and the increased network bandwidth.</p>
 <span id="transact"></span><h2>The transact method</h2>
 <p>When performing a database transaction, any read operation, as well as the commit itself, may fail with one of a number of errors. If the error is a retryable error, the transaction needs to be restarted from the beginning. Committing a transaction is also an asynchronous operation, and the returned <a class="reference internal" href="#FDB::FutureNil" title="FDB::FutureNil"><code class="xref rb rb-class docutils literal notranslate"><span class="pre">FutureNil</span></code></a> object needs to be waited on to ensure that no errors occurred.</p>
 <p>The methods <code class="xref rb rb-meth docutils literal notranslate"><span class="pre">Database.transact</span></code> and <code class="xref rb rb-meth docutils literal notranslate"><span class="pre">Transaction.transact</span></code> are convenient wrappers that allow much of this complexity to be handled automatically. A call like</p>
-<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="n">db</span><span class="o">.</span><span class="n">transact</span> <span class="k">do</span> <span class="o">|</span><span class="n">tr</span><span class="o">|</span>
-    <span class="n">tr</span><span class="o">[</span><span class="s1">&#39;a&#39;</span><span class="o">]</span> <span class="o">=</span> <span class="s1">&#39;A&#39;</span>
-    <span class="n">tr</span><span class="o">[</span><span class="s1">&#39;b&#39;</span><span class="o">]</span> <span class="o">=</span> <span class="s1">&#39;B&#39;</span>
+<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="n">db</span><span class="o">.</span><span class="n">transact</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">tr</span><span class="o">|</span>
+<span class="w">    </span><span class="n">tr</span><span class="o">[</span><span class="s1">&#39;a&#39;</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;A&#39;</span>
+<span class="w">    </span><span class="n">tr</span><span class="o">[</span><span class="s1">&#39;b&#39;</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;B&#39;</span>
 <span class="k">end</span>
 </pre></div>
 </div>
 <p>is equivalent to</p>
-<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="n">tr</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">create_transaction</span>
-<span class="n">committed</span> <span class="o">=</span> <span class="kp">false</span>
-<span class="k">while</span> <span class="o">!</span><span class="n">committed</span>
-    <span class="k">begin</span>
-        <span class="n">tr</span><span class="o">[</span><span class="s1">&#39;a&#39;</span><span class="o">]</span> <span class="o">=</span> <span class="s1">&#39;A&#39;</span>
-        <span class="n">tr</span><span class="o">[</span><span class="s1">&#39;b&#39;</span><span class="o">]</span> <span class="o">=</span> <span class="s1">&#39;B&#39;</span>
-        <span class="n">tr</span><span class="o">.</span><span class="n">commit</span><span class="o">.</span><span class="n">wait</span>
-        <span class="n">committed</span> <span class="o">=</span> <span class="kp">true</span>
-    <span class="k">rescue</span> <span class="no">FDB</span><span class="o">::</span><span class="no">Error</span> <span class="o">=&gt;</span> <span class="n">e</span>
-        <span class="n">tr</span><span class="o">.</span><span class="n">on_error</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="n">wait</span>
-    <span class="k">end</span>
+<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="n">tr</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">db</span><span class="o">.</span><span class="n">create_transaction</span>
+<span class="n">committed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kp">false</span>
+<span class="k">while</span><span class="w"> </span><span class="o">!</span><span class="n">committed</span>
+<span class="w">    </span><span class="k">begin</span>
+<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="s1">&#39;a&#39;</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;A&#39;</span>
+<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="s1">&#39;b&#39;</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;B&#39;</span>
+<span class="w">        </span><span class="n">tr</span><span class="o">.</span><span class="n">commit</span><span class="o">.</span><span class="n">wait</span>
+<span class="w">        </span><span class="n">committed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kp">true</span>
+<span class="w">    </span><span class="k">rescue</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Error</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">e</span>
+<span class="w">        </span><span class="n">tr</span><span class="o">.</span><span class="n">on_error</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="n">wait</span>
+<span class="w">    </span><span class="k">end</span>
 <span class="k">end</span>
 </pre></div>
 </div>
@@ -1410,23 +1410,23 @@ both the caching and the increased network bandwidth.</p>
 <p>Be careful when using control flow constructs within the block passed to <code class="xref rb rb-meth docutils literal notranslate"><span class="pre">transact</span></code>. <code class="docutils literal notranslate"><span class="pre">return</span></code> or <code class="docutils literal notranslate"><span class="pre">break</span></code> will exit the retry loop <em>without committing</em> the transaction. Use <code class="docutils literal notranslate"><span class="pre">next</span></code> to exit the block and commit the transaction.</p>
 </div>
 <p>The <code class="xref rb rb-meth docutils literal notranslate"><span class="pre">Transaction.transact</span></code> method, which logically does nothing, makes it easy to write functions that operate on either a <a class="reference internal" href="#FDB::Database" title="FDB::Database"><code class="xref rb rb-class docutils literal notranslate"><span class="pre">Database</span></code></a> or <a class="reference internal" href="#FDB::Transaction" title="FDB::Transaction"><code class="xref rb rb-class docutils literal notranslate"><span class="pre">Transaction</span></code></a>. Consider the following method:</p>
-<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">increment</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span>
-    <span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span> <span class="k">do</span> <span class="o">|</span><span class="n">tr</span><span class="o">|</span>
-        <span class="n">tr</span><span class="o">[</span><span class="n">key</span><span class="o">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">tr</span><span class="o">[</span><span class="n">key</span><span class="o">].</span><span class="n">to_i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to_s</span>
-    <span class="k">end</span>
+<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">increment</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">,</span><span class="w"> </span><span class="n">key</span><span class="p">)</span>
+<span class="w">    </span><span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">tr</span><span class="o">|</span>
+<span class="w">        </span><span class="n">tr</span><span class="o">[</span><span class="n">key</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">tr</span><span class="o">[</span><span class="n">key</span><span class="o">].</span><span class="n">to_i</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to_s</span>
+<span class="w">    </span><span class="k">end</span>
 <span class="k">end</span>
 </pre></div>
 </div>
 <p>This method can be called with a <a class="reference internal" href="#FDB::Database" title="FDB::Database"><code class="xref rb rb-class docutils literal notranslate"><span class="pre">Database</span></code></a>, and it will do its job atomically:</p>
-<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="n">increment</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="s1">&#39;number&#39;</span><span class="p">)</span>
+<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="n">increment</span><span class="p">(</span><span class="n">db</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;number&#39;</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>It can also be called by another transactional method with a transaction:</p>
-<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">increment_both</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">,</span> <span class="n">key1</span><span class="p">,</span> <span class="n">key2</span><span class="p">)</span>
-    <span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span> <span class="k">do</span> <span class="o">|</span><span class="n">tr</span><span class="o">|</span>
-        <span class="n">increment</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">key1</span><span class="p">)</span>
-        <span class="n">increment</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">key2</span><span class="p">)</span>
-    <span class="k">end</span>
+<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">increment_both</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">,</span><span class="w"> </span><span class="n">key1</span><span class="p">,</span><span class="w"> </span><span class="n">key2</span><span class="p">)</span>
+<span class="w">    </span><span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="o">|</span><span class="n">tr</span><span class="o">|</span>
+<span class="w">        </span><span class="n">increment</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span><span class="w"> </span><span class="n">key1</span><span class="p">)</span>
+<span class="w">        </span><span class="n">increment</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span><span class="w"> </span><span class="n">key2</span><span class="p">)</span>
+<span class="w">    </span><span class="k">end</span>
 <span class="k">end</span>
 </pre></div>
 </div>
@@ -1441,7 +1441,7 @@ both the caching and the increased network bandwidth.</p>
 <p>Many FoundationDB API functions return “future” objects. A brief overview of futures is included in the <a class="reference internal" href="class-scheduling.html"><span class="doc">class scheduling tutorial</span></a>. Most future objects behave just like a normal object, but block when you use them for the first time if the asynchronous function which returned the future has not yet completed its action. A future object is considered ready when either a value is available, or when an error has occurred.</p>
 <p id="api-ruby-block">When a future object “blocks”, the ruby thread is blocked, but the global interpreter lock is released.</p>
 <p>When used in a conditional expression, a future object will evaluate to true, even if its value is nil. To test for nil, you must explicitly use the nil?() method:</p>
-<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="k">if</span> <span class="n">tr</span><span class="o">[</span><span class="s1">&#39;a&#39;</span><span class="o">].</span><span class="n">nil?</span>
+<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="k">if</span><span class="w"> </span><span class="n">tr</span><span class="o">[</span><span class="s1">&#39;a&#39;</span><span class="o">].</span><span class="n">nil?</span>
 </pre></div>
 </div>
 <p>All future objects are a subclass of the <a class="reference internal" href="#FDB::Future" title="FDB::Future"><code class="xref rb rb-class docutils literal notranslate"><span class="pre">Future</span></code></a> type.</p>
@@ -1673,7 +1673,7 @@ should use their library of choice for handling these values and then convert to
 when serializing for storage into the key-value store.</p>
 <p>A single tuple element is ordered first by its type, and then by its value.</p>
 <p>If <code class="docutils literal notranslate"><span class="pre">T</span></code> is an <code class="xref rb rb-class docutils literal notranslate"><span class="pre">Enumerable</span></code> meeting these criteria, then conceptually:</p>
-<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="n">T</span> <span class="o">==</span> <span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="n">T</span><span class="p">))</span>
+<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="n">T</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="n">T</span><span class="p">))</span>
 </pre></div>
 </div>
 <div class="admonition note">
@@ -1697,8 +1697,8 @@ when serializing for storage into the key-value store.</p>
 <span class="sig-prename descclassname"><span class="pre">FDB::Tuple.</span></span><span class="sig-name descname"><span class="pre">range</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="pre">tuple</span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Array</span></span></span></dt>
 <dd><p>Returns the range containing all keys that encode tuples strictly starting with <code class="docutils literal notranslate"><span class="pre">tuple</span></code> (that is, all tuples of greater length than tuple of which tuple is a prefix).</p>
 <p>The range will be returned as an <code class="xref rb rb-class docutils literal notranslate"><span class="pre">Array</span></code> of two elements, and may be used with any FoundationDB methods that require a range:</p>
-<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="n">r</span> <span class="o">=</span> <span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="n">T</span><span class="p">)</span>
-<span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="n">r</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span><span class="p">,</span> <span class="n">r</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="p">)</span> <span class="p">{</span> <span class="o">|</span><span class="n">kv</span><span class="o">|</span> <span class="o">...</span> <span class="p">}</span>
+<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="n">T</span><span class="p">)</span>
+<span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="n">r</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="n">r</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="o">|</span><span class="n">kv</span><span class="o">|</span><span class="w"> </span><span class="o">...</span><span class="w"> </span><span class="p">}</span>
 </pre></div>
 </div>
 </dd></dl>
@@ -1799,8 +1799,8 @@ of the UUID bytes.</p>
 <span class="sig-prename descclassname"><span class="pre">Subspace.</span></span><span class="sig-name descname"><span class="pre">range</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="pre">tuple=</span></em><span class="optional">[</span><span class="optional">]</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Array</span></span></span></dt>
 <dd><p>Returns a range representing all keys in the subspace that encode tuples strictly starting with the specifed tuple.</p>
 <p>The range will be returned as an <code class="xref rb rb-class docutils literal notranslate"><span class="pre">Array</span></code> of two elements, and may be used with any FoundationDB methods that require a range:</p>
-<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="n">r</span> <span class="o">=</span> <span class="n">subspace</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;A&#39;</span><span class="p">,</span> <span class="mi">2</span><span class="o">]</span><span class="p">)</span>
-<span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="n">r</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span><span class="p">,</span> <span class="n">r</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="p">)</span> <span class="p">{</span> <span class="o">|</span><span class="n">kv</span><span class="o">|</span> <span class="o">...</span> <span class="p">}</span>
+<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">subspace</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;A&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="o">]</span><span class="p">)</span>
+<span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="n">r</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="n">r</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="o">|</span><span class="n">kv</span><span class="o">|</span><span class="w"> </span><span class="o">...</span><span class="w"> </span><span class="p">}</span>
 </pre></div>
 </div>
 </dd></dl>
@@ -1827,13 +1827,13 @@ of the UUID bytes.</p>
 <dt class="sig sig-object rb">
 <span class="sig-name descname"><span class="pre">Subspace.[](item)</span> <span class="pre">-&gt;</span> <span class="pre">Subspace</span></span></dt>
 <dd><p>Shorthand for Subspace.subspace([item]). This function can be combined with the <a class="reference internal" href="#FDB::Subspace.as_foundationdb_key" title="FDB::Subspace.as_foundationdb_key"><code class="xref rb rb-meth docutils literal notranslate"><span class="pre">Subspace.as_foundationdb_key()</span></code></a> convenience to turn this:</p>
-<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="n">s</span> <span class="o">=</span> <span class="no">FDB</span><span class="o">::</span><span class="no">Subspace</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;x&#39;</span><span class="o">]</span><span class="p">)</span>
-<span class="n">tr</span><span class="o">[</span><span class="n">s</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;foo&#39;</span><span class="p">,</span> <span class="s1">&#39;bar&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="o">]</span><span class="p">)</span><span class="o">]</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="n">s</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Subspace</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;x&#39;</span><span class="o">]</span><span class="p">)</span>
+<span class="n">tr</span><span class="o">[</span><span class="n">s</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;foo&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;bar&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="o">]</span><span class="p">)</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;&#39;</span>
 </pre></div>
 </div>
 <p>into this:</p>
-<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="n">s</span> <span class="o">=</span> <span class="no">FDB</span><span class="o">::</span><span class="no">Subspace</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;x&#39;</span><span class="o">]</span><span class="p">)</span>
-<span class="n">tr</span><span class="o">[</span><span class="n">s</span><span class="o">[</span><span class="s1">&#39;foo&#39;</span><span class="o">][</span><span class="s1">&#39;bar&#39;</span><span class="o">][</span><span class="mi">1</span><span class="o">]]</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+<div class="highlight-ruby notranslate"><div class="highlight"><pre><span></span><span class="n">s</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="no">FDB</span><span class="o">::</span><span class="no">Subspace</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;x&#39;</span><span class="o">]</span><span class="p">)</span>
+<span class="n">tr</span><span class="o">[</span><span class="n">s</span><span class="o">[</span><span class="s1">&#39;foo&#39;</span><span class="o">][</span><span class="s1">&#39;bar&#39;</span><span class="o">][</span><span class="mi">1</span><span class="o">]]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;&#39;</span>
 </pre></div>
 </div>
 </dd></dl>
@@ -1994,7 +1994,7 @@ of the UUID bytes.</p>
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Nov 30, 2022.<br/>
+      Last updated on Jan 19, 2023.<br/>
     </p>
   </div>
 </footer>
