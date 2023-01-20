@@ -35,6 +35,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/TransactionLineage.h"
 #include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/sim_validation.h"
@@ -390,7 +391,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 					}
 
 					if (bytes > FLOW_KNOBS->PACKET_WARNING) {
-						TraceEvent(!g_network->isSimulated() ? SevWarnAlways : SevWarn, "LargeTransaction")
+						TraceEvent(SevWarn, "LargeTransaction")
 						    .suppressFor(1.0)
 						    .detail("Size", bytes)
 						    .detail("Client", req.reply.getEndpoint().getPrimaryAddress());
@@ -1094,7 +1095,8 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				                       self->forceRecovery,
 				                       /* version= */ self->commitVersion,
 				                       /* popVersion= */ 0,
-				                       /* initialCommit */ false);
+				                       /* initialCommit */ false,
+				                       /* provisionalCommitProxy */ self->pProxyCommitData->provisional);
 			}
 			if (self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations.size() &&
 			    self->firstStateMutations) {
@@ -1167,35 +1169,13 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 	}
 }
 
-inline int64_t extractTenantIdFromKeyRef(StringRef s) {
-	if (s.size() < TenantAPI::PREFIX_SIZE) {
-		return TenantInfo::INVALID_TENANT;
-	}
-	// Parse mutation key to determine tenant prefix
-	StringRef prefix = s.substr(0, TenantAPI::PREFIX_SIZE);
-	return TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
-}
-
-int64_t extractTenantIdFromSingleKeyMutation(MutationRef m) {
-	ASSERT(!isSystemKey(m.param1));
-
-	// The first 8 bytes of the key of this OP is also an 8-byte number
-	if (m.type == MutationRef::SetVersionstampedKey && m.param1.size() >= 4 && parseVersionstampOffset(m.param1) < 8) {
-		return TenantInfo::INVALID_TENANT;
-	}
-
-	ASSERT(isSingleKeyMutation((MutationRef::Type)m.type));
-
-	return extractTenantIdFromKeyRef(m.param1);
-}
-
 // Return true if a single-key mutation is associated with a valid tenant id or a system key
 bool validTenantAccess(MutationRef m) {
 	if (isSystemKey(m.param1))
 		return true;
 
 	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
-		auto tenantId = extractTenantIdFromSingleKeyMutation(m);
+		auto tenantId = TenantAPI::extractTenantIdFromMutation(m);
 		// throw exception for invalid raw access
 		if (tenantId == TenantInfo::INVALID_TENANT) {
 			return false;
@@ -1203,8 +1183,8 @@ bool validTenantAccess(MutationRef m) {
 	} else {
 		// For clear range, we allow raw access
 		ASSERT_EQ(m.type, MutationRef::Type::ClearRange);
-		auto beginTenantId = extractTenantIdFromKeyRef(m.param1);
-		auto endTenantId = extractTenantIdFromKeyRef(m.param2);
+		auto beginTenantId = TenantAPI::extractTenantIdFromKeyRef(m.param1);
+		auto endTenantId = TenantAPI::extractTenantIdFromKeyRef(m.param2);
 		CODE_PROBE(beginTenantId != endTenantId, "Clear Range raw access or cross multiple tenants");
 	}
 	return true;
@@ -1257,7 +1237,8 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 				                       self->forceRecovery,
 				                       self->commitVersion,
 				                       self->commitVersion + 1,
-				                       /* initialCommit= */ false);
+				                       /* initialCommit= */ false,
+				                       /* provisionalCommitProxy */ self->pProxyCommitData->provisional);
 			}
 
 			if (self->firstStateMutations) {
@@ -2905,7 +2886,8 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		                       confChanges,
 		                       /* version= */ 0,
 		                       /* popVersion= */ 0,
-		                       /* initialCommit= */ true);
+		                       /* initialCommit= */ true,
+		                       /* provisionalCommitProxy */ pContext->pCommitData->provisional);
 	} // loop
 
 	auto lockedKey = pContext->pTxnStateStore->readValue(databaseLockedKey).get();
@@ -2971,7 +2953,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
                                          Version recoveryTransactionVersion,
                                          bool firstProxy,
                                          std::string whitelistBinPaths,
-                                         EncryptionAtRestMode encryptMode) {
+                                         EncryptionAtRestMode encryptMode,
+                                         bool provisional) {
 	state ProxyCommitData commitData(proxy.id(),
 	                                 master,
 	                                 proxy.getConsistentReadVersion,
@@ -2979,7 +2962,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	                                 proxy.commit,
 	                                 db,
 	                                 firstProxy,
-	                                 encryptMode);
+	                                 encryptMode,
+	                                 provisional);
 
 	state Future<Sequence> sequenceFuture = (Sequence)0;
 	state PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int>> batchedCommits;
@@ -3160,7 +3144,8 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
 		                                                req.recoveryTransactionVersion,
 		                                                req.firstProxy,
 		                                                whitelistBinPaths,
-		                                                req.encryptMode);
+		                                                req.encryptMode,
+		                                                proxy.provisional);
 		wait(core || checkRemoved(db, req.recoveryCount, proxy));
 	} catch (Error& e) {
 		TraceEvent("CommitProxyTerminated", proxy.id()).errorUnsuppressed(e);

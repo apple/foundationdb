@@ -272,6 +272,10 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
 	std::sort(dest.begin(), dest.end());
 }
 
+bool isSystemKey(KeyRef key) {
+	return key.size() && key[0] == systemKeys.begin[0];
+}
+
 const KeyRangeRef conflictingKeysRange =
     KeyRangeRef("\xff\xff/transaction/conflicting_keys/"_sr, "\xff\xff/transaction/conflicting_keys/\xff\xff"_sr);
 const ValueRef conflictingKeysTrue = "1"_sr;
@@ -1706,6 +1710,35 @@ Standalone<BlobRestoreStatus> decodeBlobRestoreStatus(ValueRef const& value) {
 	BinaryReader reader(value, IncludeVersion());
 	reader >> status;
 	return status;
+}
+
+const KeyRangeRef blobRestoreArgKeys("\xff\x02/blobRestoreArgs/"_sr, "\xff\x02/blobRestoreArgs0"_sr);
+
+const Value blobRestoreArgKeyFor(const KeyRangeRef range) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobRestoreArgKeys.begin);
+	wr << range;
+	return wr.toValue();
+}
+
+const KeyRange decodeBlobRestoreArgKeyFor(const KeyRef key) {
+	KeyRange range;
+	BinaryReader reader(key.removePrefix(blobRestoreArgKeys.begin), AssumeVersion(ProtocolVersion::withBlobGranule()));
+	reader >> range;
+	return range;
+}
+
+const Value blobRestoreArgValueFor(BlobRestoreArg args) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
+	wr << args;
+	return wr.toValue();
+}
+
+Standalone<BlobRestoreArg> decodeBlobRestoreArg(ValueRef const& value) {
+	Standalone<BlobRestoreArg> args;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> args;
+	return args;
 }
 
 const KeyRangeRef storageQuotaKeys("\xff/storageQuota/"_sr, "\xff/storageQuota0"_sr);

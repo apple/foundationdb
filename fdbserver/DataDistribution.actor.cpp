@@ -811,7 +811,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				// this will result in invalid memory access. This should only
 				// be an issue in simulation.
 				if (!g_network->isSimulated()) {
-					TraceEvent(SevWarnAlways, "DataDistributorCancelled");
+					TraceEvent(SevWarn, "DataDistributorCancelled");
 				}
 				shards.clear();
 				throw e;
