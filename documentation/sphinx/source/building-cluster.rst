@@ -48,10 +48,12 @@ By default, the script will pick a local network interface that can access the i
     user@host1$ sudo /usr/lib/foundationdb/make_public.py -a 10.0.1.1
     /etc/foundationdb/fdb.cluster is now using address 10.0.1.1
 
-Create a new database
+(Re)create a database
 =====================
 
-If you are setting up a new FoundationDB cluster, and do not have existing databases, you can execute the following command to create a database::
+.. warning:: Please read :ref:`administration-recreating` before attempting the following command which will wipe your existing data.
+
+Sometimes, you may want to execute the following command to create a database::
 
     user@host1$ fdbcli -C /etc/foundationdb/fdb.cluster --exec "configure single new ssd"
     Database created
