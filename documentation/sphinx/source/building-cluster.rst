@@ -51,11 +51,11 @@ By default, the script will pick a local network interface that can access the i
 (Re)create a database
 =====================
 
-.. warning:: Please read :ref:`administration-recreating` before attempting the following command which will wipe your existing data.
+.. warning:: Please read :ref:`administration-recreating` before attempting the following command which may delete existing data.
 
-Sometimes, you may want to execute the following command to create a database::
+If a cluster has no record of a configured database, you can execute the following command with the desired storage engine and redundancy mode to create a new one::
 
-    user@host1$ fdbcli -C /etc/foundationdb/fdb.cluster --exec "configure single new ssd"
+    user@host1$ fdbcli -C /etc/foundationdb/fdb.cluster --exec "configure new single memory"
     Database created
 
 .. _test-the-database:
