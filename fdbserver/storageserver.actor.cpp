@@ -7543,7 +7543,9 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 
 	state double fetchStartTime = 0;
 	// localRecords.resize(records.size());
+	attempt = 0;
 	loop {
+		++attempt;
 		try {
 			TraceEvent(SevDebug, "FetchShardFetchCheckpointsBegin", data->thisServerID)
 			    .detail("MoveInShardID", shard->id)
@@ -7573,6 +7575,9 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 			    .errorUnsuppressed(e)
 			    .detail("MoveInShardID", shard->id)
 			    .detail("CheckpointMetaData", describe(records));
+			if (attempt > 10) {
+				throw e;
+			}
 			wait(delay(1));
 		}
 	}
