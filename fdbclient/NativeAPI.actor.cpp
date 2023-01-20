@@ -8794,32 +8794,39 @@ static Future<Void> createCheckpointImpl(T tr,
 	ASSERT(actionId.present());
 	TraceEvent(SevDebug, "CreateCheckpointTransactionBegin").detail("Ranges", describe(ranges));
 
-	// Only the first range is used to look up the location, since we assume all ranges are hosted by a single shard.
-	// The operation will fail on the storage server otherwise.
-	state RangeResult keyServers = wait(krmGetRanges(tr, keyServersPrefix, ranges[0]));
-	ASSERT(!keyServers.more);
-
 	state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
+	state std::unordered_map<UID, std::vector<KeyRange>> rangeMap;
+	state std::unordered_map<UID, std::vector<UID>> srcMap;
+	for (const auto& range : ranges) {
+		RangeResult keyServers = wait(krmGetRanges(tr, keyServersPrefix, range));
+		ASSERT(!keyServers.more);
+		for (int i = 0; i < keyServers.size() - 1; ++i) {
+			const KeyRangeRef currentRange(keyServers[i].key, keyServers[i + 1].key);
+			std::vector<UID> src;
+			std::vector<UID> dest;
+			UID srcId;
+			UID destId;
+			decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest, srcId, destId);
+			rangeMap[srcId].push_back(currentRange);
+			srcMap.emplace(srcId, src);
+		}
+	}
+
 	if (format == DataMoveRocksCF) {
-		std::vector<UID> src;
-		std::vector<UID> dest;
-		UID srcId;
-		UID destId;
-		decodeKeyServersValue(UIDtoTagMap, keyServers[0].value, src, dest, srcId, destId);
+		for (const auto& [srcId, ranges] : rangeMap) {
+			// The checkpoint request is sent to all replicas, in case any of them is unhealthy.
+			// An alternative is to choose a healthy replica.
+			const UID checkpointID = UID(srcId.first(), deterministicRandom()->randomUInt64());
+			CheckpointMetaData checkpoint(ranges, format, srcMap[srcId], checkpointID, actionId.get());
+			checkpoint.setState(CheckpointMetaData::Pending);
+			tr->set(checkpointKeyFor(checkpointID), checkpointValue(checkpoint));
 
-		// The checkpoint request is sent to all replicas, in case any of them is unhealthy.
-		// An alternative is to choose a healthy replica.
-		const UID checkpointID = UID(srcId.first(), deterministicRandom()->randomUInt64());
-		CheckpointMetaData checkpoint(ranges, format, src, checkpointID, actionId.get());
-		checkpoint.setState(CheckpointMetaData::Pending);
-		tr->set(checkpointKeyFor(checkpointID), checkpointValue(checkpoint));
-
-		TraceEvent(SevDebug, "CreateCheckpointTransactionShard")
-		    .detail("CheckpointKey", checkpointKeyFor(checkpointID))
-		    .detail("CheckpointMetaData", checkpoint.toString())
-		    .detail("ReadVersion", tr->getReadVersion().get());
+			TraceEvent(SevDebug, "CreateCheckpointTransactionShard")
+			    .detail("CheckpointKey", checkpointKeyFor(checkpointID))
+			    .detail("CheckpointMetaData", checkpoint.toString());
+		}
 	} else {
 		throw not_implemented();
 	}
@@ -8975,6 +8982,7 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
                                                                     double timeout) {
 	state std::vector<Future<std::vector<CheckpointMetaData>>> futures;
 
+	// TODO(heliu): Avoid send requests to the same shard.
 	for (const auto& range : ranges) {
 		futures.push_back(getCheckpointMetaDataForRange(cx, range, version, format, actionId, timeout));
 	}
@@ -10918,7 +10926,7 @@ Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges
 	return listBlobbifiedRangesActor(Reference<DatabaseContext>::addRef(this), range, rangeLimit, tenantName);
 }
 
-ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange range) {
+ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange range, Optional<Version> version) {
 	state Database db(cx);
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 	loop {
@@ -10937,6 +10945,11 @@ ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange rang
 			BlobRestoreStatus status(BlobRestorePhase::INIT);
 			Value newValue = blobRestoreCommandValueFor(status);
 			tr->set(key, newValue);
+
+			BlobRestoreArg arg(version);
+			Value argValue = blobRestoreArgValueFor(arg);
+			tr->set(blobRestoreArgKeyFor(range), argValue);
+
 			wait(tr->commit());
 			return true;
 		} catch (Error& e) {
@@ -10945,8 +10958,8 @@ ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange rang
 	}
 }
 
-Future<bool> DatabaseContext::blobRestore(KeyRange range) {
-	return blobRestoreActor(Reference<DatabaseContext>::addRef(this), range);
+Future<bool> DatabaseContext::blobRestore(KeyRange range, Optional<Version> version) {
+	return blobRestoreActor(Reference<DatabaseContext>::addRef(this), range, version);
 }
 
 int64_t getMaxKeySize(KeyRef const& key) {

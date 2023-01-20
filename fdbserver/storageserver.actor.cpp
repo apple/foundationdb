@@ -783,6 +783,7 @@ public:
 
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
+	std::unordered_map<UID, ICheckpointReader*> liveCheckpointReaders; // Active checkpoint readers
 	VersionedMap<int64_t, TenantName> tenantMap;
 	std::map<Version, std::vector<PendingNewShard>>
 	    pendingAddRanges; // Pending requests to add ranges to physical shards
@@ -2476,9 +2477,15 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 	}
 
 	state ICheckpointReader* reader = nullptr;
+	auto crIt = self->liveCheckpointReaders.find(req.checkpointID);
+	if (crIt != self->liveCheckpointReaders.end()) {
+		reader = crIt->second;
+	} else {
+		reader = newCheckpointReader(it->second, CheckpointAsKeyValues::True, self->thisServerID);
+	}
+
 	state std::unique_ptr<ICheckpointIterator> iter;
 	try {
-		reader = newCheckpointReader(it->second, CheckpointAsKeyValues::True, self->thisServerID);
 		wait(reader->init(BinaryWriter::toValue(req.range, IncludeVersion())));
 		iter = reader->getIterator(req.range);
 
@@ -2525,6 +2532,7 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 
 	iter.reset();
 	if (!reader->inUse()) {
+		self->liveCheckpointReaders.erase(req.checkpointID);
 		wait(reader->close());
 	}
 	return Void();
@@ -2903,6 +2911,22 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 
 		state PriorityMultiLock::Lock ssReadLock = wait(data->getReadLock(req.options));
+		// The assumption of feed ordering is that all atLatest feeds will get processed before the !atLatest ones.
+		// Without this delay(0), there is a case where that can happen:
+		//  - a read request (eg getValueQ) has the read lock and is waiting on ss->version.whenAtLeast(V)
+		//  - a getChangeFeedMutations is blocked on that read lock (which is necessarily not atLatest because it's
+		//  reading from disk)
+		//  - the ss calls version->set(V'), which triggers the read requests, which does not wait by reading only from
+		//  the p-tree, and releases this lock.
+		//  - the following storage read does not require waiting, and returns immediately to changeFeedStreamQ,
+		//  triggering its reply with an incorrectly large minStreamVersion
+		//  - the ss calls feed->triggerMutations(), triggering the atLatest feeds to reply with their minStreamVersion
+		//  at the correct version
+		// The delay(0) prevents this, blocking the rest of this execution until all feed triggers finish and the
+		// storage update loop actor completes, making the sequence of minStreamVersions returned to the client valid.
+		// The delay(0) is technically only necessary if we did not immediately acquire the lock, but isn't a big deal
+		// to do always
+		wait(delay(0));
 		RangeResult res = wait(
 		    data->storage.readRange(KeyRangeRef(changeFeedDurableKey(req.rangeID, std::max(req.begin, emptyVersion)),
 		                                        changeFeedDurableKey(req.rangeID, req.end)),
@@ -3378,6 +3402,12 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			}
 
 			auto& clientVersions = data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()];
+			// If removeUID is not set, that means that this loop was never blocked and executed synchronously as part
+			// of the new mutations trigger in the storage update loop. In that case, since there are potentially still
+			// other feeds triggering that this would race with, the largest version we can reply with is the storage's
+			// version just before the feed triggers. Otherwise, removeUID is set, and we were blocked at some point
+			// after the trigger. This means all feed triggers are done, and we can safely reply with the storage's
+			// version.
 			Version minVersion = removeUID ? data->version.get() : data->prevVersion;
 			if (removeUID) {
 				if (gotAll || req.begin == req.end) {
@@ -6339,7 +6369,10 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> tryReadBlobGranules(Tra
 	loop {
 		try {
 			Standalone<VectorRef<BlobGranuleChunkRef>> chunks = wait(tr->readBlobGranules(keys, 0, readVersion));
-			TraceEvent(SevDebug, "ReadBlobGranules").detail("Keys", keys).detail("Chunks", chunks.size());
+			TraceEvent(SevDebug, "ReadBlobGranules")
+			    .detail("Keys", keys)
+			    .detail("Chunks", chunks.size())
+			    .detail("FetchVersion", fetchVersion);
 			return chunks;
 		} catch (Error& e) {
 			if (retryCount >= maxRetryCount) {
@@ -6372,7 +6405,10 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 		for (i = 0; i < chunks.size(); ++i) {
 			state KeyRangeRef chunkRange = chunks[i].keyRange;
 			state RangeResult rows = wait(readBlobGranule(chunks[i], keys, 0, fetchVersion, blobConn));
-			TraceEvent(SevDebug, "ReadBlobData").detail("Rows", rows.size()).detail("ChunkRange", chunkRange);
+			TraceEvent(SevDebug, "ReadBlobData")
+			    .detail("Rows", rows.size())
+			    .detail("ChunkRange", chunkRange)
+			    .detail("FetchVersion", fetchVersion);
 			if (rows.size() == 0) {
 				rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
 			}
@@ -7298,12 +7334,13 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold;
 			if (isFullRestore) {
-				std::pair<KeyRange, BlobRestoreStatus> rangeStatus = wait(getRestoreRangeStatus(data->cx, keys));
+				state std::pair<KeyRange, BlobRestoreStatus> rangeStatus = wait(getRestoreRangeStatus(data->cx, keys));
 				// Read from blob only when it's copying data for full restore. Otherwise it may cause data corruptions
 				// e.g we don't want to copy from blob any more when it's applying mutation logs(APPLYING_MLOGS)
 				if (rangeStatus.second.phase == BlobRestorePhase::COPYING_DATA ||
 				    rangeStatus.second.phase == BlobRestorePhase::ERROR) {
-					hold = tryGetRangeFromBlob(results, &tr, rangeStatus.first, fetchVersion, data->blobConn);
+					Version targetVersion = wait(getRestoreTargetVersion(data->cx, keys, fetchVersion));
+					hold = tryGetRangeFromBlob(results, &tr, rangeStatus.first, targetVersion, data->blobConn);
 				} else {
 					hold = tryGetRange(results, &tr, keys);
 				}

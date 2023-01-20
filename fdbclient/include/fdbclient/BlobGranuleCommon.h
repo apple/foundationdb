@@ -339,4 +339,17 @@ struct BlobRestoreStatus {
 	}
 };
 
+struct BlobRestoreArg {
+	constexpr static FileIdentifier file_identifier = 947689;
+	Optional<Version> version;
+
+	BlobRestoreArg() {}
+	BlobRestoreArg(Optional<Version> v) : version(v){};
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version);
+	}
+};
+
 #endif
