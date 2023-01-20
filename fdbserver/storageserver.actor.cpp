@@ -783,6 +783,7 @@ public:
 
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
+	std::unordered_map<UID, ICheckpointReader*> liveCheckpointReaders; // Active checkpoint readers
 	VersionedMap<int64_t, TenantName> tenantMap;
 	std::map<Version, std::vector<PendingNewShard>>
 	    pendingAddRanges; // Pending requests to add ranges to physical shards
@@ -2476,9 +2477,15 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 	}
 
 	state ICheckpointReader* reader = nullptr;
+	auto crIt = self->liveCheckpointReaders.find(req.checkpointID);
+	if (crIt != self->liveCheckpointReaders.end()) {
+		reader = crIt->second;
+	} else {
+		reader = newCheckpointReader(it->second, CheckpointAsKeyValues::True, self->thisServerID);
+	}
+
 	state std::unique_ptr<ICheckpointIterator> iter;
 	try {
-		reader = newCheckpointReader(it->second, CheckpointAsKeyValues::True, self->thisServerID);
 		wait(reader->init(BinaryWriter::toValue(req.range, IncludeVersion())));
 		iter = reader->getIterator(req.range);
 
@@ -2525,6 +2532,7 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 
 	iter.reset();
 	if (!reader->inUse()) {
+		self->liveCheckpointReaders.erase(req.checkpointID);
 		wait(reader->close());
 	}
 	return Void();
