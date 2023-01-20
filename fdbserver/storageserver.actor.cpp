@@ -7443,6 +7443,155 @@ ACTOR Future<Void> updateMoveInShardMetaData(StorageServer* data, MoveInShardMet
 	return Void();
 }
 
+ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
+                                        std::shared_ptr<MoveInShardMetaData> shard,
+                                        std::string dir) {
+	state std::vector<CheckpointMetaData> records;
+	state int idx = 0;
+	state std::vector<CheckpointMetaData> localRecords;
+	ASSERT(shard->getPhase() == MoveInShardMetaData::Fetching);
+
+	TraceEvent(SevInfo, "FetchShardCheckpointMetaDataBegin", data->thisServerID)
+	    .detail("MoveInShardID", shard->id)
+	    .detail("MoveInShard", shard->toString());
+
+	// TODO: use shard->meta->checkpoints to continue the fetch.
+	state int attempt = 0;
+	loop {
+		++attempt;
+		records.clear();
+		for (const auto& range : shard->ranges) {
+			data->cx->invalidateCache(/*tenantPrefix=*/Key(), range);
+		}
+		try {
+			wait(delay(0, TaskPriority::FetchKeys));
+			wait(store(records,
+			           getCheckpointMetaData(
+			               data->cx, shard->ranges, shard->createVersion, RocksDBKeyValues, shard->dataMoveId)));
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "FetchShardCheckpointMetaDataError", data->thisServerID)
+			    .errorUnsuppressed(e)
+			    .detail("MoveInShardID", shard->id)
+			    .detail("MoveInShard", shard->toString());
+			if (attempt > 10) {
+				throw e;
+			}
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
+			    e.code() == error_code_connection_failed || e.code() == error_code_broken_promise ||
+			    e.code() == error_code_timed_out) {
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::FetchKeys));
+			} else {
+				throw;
+			}
+			// wait(delay(1, TaskPriority::FetchKeys));
+			// if (e.code() == error_code_checkpoint_not_found) {
+			// 	throw;
+			// }
+		}
+	}
+
+	// std::cout << "Got checkpoint metadata:" << std::endl;
+	// for (const auto& record : records) {
+	// 	std::cout << record.toString() << std::endl;
+	// }
+	TraceEvent(SevInfo, "FetchShardCheckpointMetaData", data->thisServerID)
+	    .detail("MoveInShardID", shard->id)
+	    .detail("MoveInShard", shard->toString())
+	    .detail("CheckpointMetaData", describe(records));
+
+	wait(delay(0));
+
+	platform::eraseDirectoryRecursive(dir);
+	ASSERT(platform::createDirectory(dir));
+
+	state double fetchStartTime = 0;
+	// localRecords.resize(records.size());
+	loop {
+		try {
+			TraceEvent(SevDebug, "FetchShardFetchCheckpointsBegin", data->thisServerID)
+			    .detail("MoveInShardID", shard->id)
+			    .detail("CheckpointMetaData", describe(records));
+			// TODO: Persist the progress, for restarts, and fetch checkpoints in parallel.
+			std::unordered_map<UID, std::vector<KeyRange>> checkpointRangeMap;
+			for (const auto& range : shard->ranges) {
+				for (const auto& record : records) {
+					for (const auto& cRange : record.ranges) {
+						if (range.intersects(cRange)) {
+							checkpointRangeMap[record.checkpointID].push_back(range & cRange);
+						}
+					}
+				}
+			}
+			fetchStartTime = now();
+			std::vector<Future<CheckpointMetaData>> fCheckpointMetaData;
+			for (const auto& record : records) {
+				ASSERT(!checkpointRangeMap[record.checkpointID].empty());
+				fCheckpointMetaData.push_back(
+				    fetchCheckpointRanges(data->cx, record, dir, checkpointRangeMap[record.checkpointID]));
+			}
+			wait(store(localRecords, getAll(fCheckpointMetaData)));
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "FetchShardFetchCheckpointsError", data->thisServerID)
+			    .errorUnsuppressed(e)
+			    .detail("MoveInShardID", shard->id)
+			    .detail("CheckpointMetaData", describe(records));
+			wait(delay(1));
+		}
+	}
+
+	const double duration = now() - fetchStartTime;
+	const int64_t totalBytes = getTotalFetchedBytes(localRecords);
+	TraceEvent("FetchShardFetchedCheckpoints", data->thisServerID)
+	    .detail("MoveInShardID", shard->id)
+	    .detail("MoveInShard", shard->toString())
+	    .detail("Checkpoint", describe(localRecords))
+	    .detail("Duration", duration)
+	    .detail("TotalBytes", totalBytes)
+	    .detail("Rate", (double)totalBytes / duration);
+	// localRecords.resize(records.size());
+	// for (; idx < records.size(); ++idx) {
+	// 	loop {
+	// 		try {
+	// 			TraceEvent("FetchShardFetchCheckpointBegin", data->thisServerID)
+	// 			    .detail("MoveInShardID", shard->id)
+	// 			    .detail("CheckpointMetaData", records[idx].toString());
+	// 			// TODO: Persist the progress, for restarts, and fetch checkpoints in parallel.
+	// 			CheckpointMetaData record = wait(fetchCheckpoint(data->cx, records[idx], dir));
+	// 			localRecords[idx] = record;
+	// 			break;
+	// 		} catch (Error& e) {
+	// 			TraceEvent("FetchShardFetchCheckpointError", data->thisServerID)
+	// 			    .errorUnsuppressed(e)
+	// 			    .detail("MoveInShardID", shard->id)
+	// 			    .detail("CheckpointMetaData", records[idx].toString());
+	// 			// std::cout << "Getting checkpoint failure: " << e.name() << std::endl;
+	// 			wait(delay(1));
+	// 		}
+	// 	}
+	// 	TraceEvent("FetchShardFetchedCheckpoint", data->thisServerID)
+	// 	    .detail("MoveInShardID", shard->id)
+	// 	    .detail("MoveInShard", shard->toString())
+	// 	    .detail("Checkpoint", localRecords[idx].toString());
+	// 	// std::cout << "Fetched checkpoint:" << localRecords[idx].toString() << std::endl;
+	// }
+
+	// std::vector<std::string> files = platform::listFiles(dir);
+	// std::cout << "Received checkpoint files on disk: " << dir << std::endl;
+	// for (auto& file : files) {
+	// 	std::cout << file << std::endl;
+	// }
+	// std::cout << std::endl;
+
+	shard->checkpoints = std::move(localRecords);
+	shard->setPhase(MoveInShardMetaData::Ingesting);
+
+	wait(updateMoveInShardMetaData(data, shard.get()));
+
+	return Void();
+}
+
 ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state const UID fetchKeysID = deterministicRandom()->randomUniqueID();
 	state TraceInterval interval("FetchKeys");
