@@ -88,7 +88,7 @@ public:
 	}
 };
 
-class alignas(64) WorkerStatistics {
+class alignas(64) WorkflowStatistics {
 	uint64_t conflicts{ 0 };
 	uint64_t total_errors{ 0 };
 	uint64_t total_timeouts{ 0 };
@@ -100,7 +100,7 @@ class alignas(64) WorkerStatistics {
 	std::vector<DDSketchMako> sketches;
 
 public:
-	WorkerStatistics() noexcept {
+	WorkflowStatistics() noexcept {
 		std::fill(ops.begin(), ops.end(), 0);
 		std::fill(errors.begin(), errors.end(), 0);
 		std::fill(timeouts.begin(), timeouts.end(), 0);
@@ -109,8 +109,8 @@ public:
 		sketches.resize(MAX_OP);
 	}
 
-	WorkerStatistics(const WorkerStatistics& other) = default;
-	WorkerStatistics& operator=(const WorkerStatistics& other) = default;
+	WorkflowStatistics(const WorkflowStatistics& other) = default;
+	WorkflowStatistics& operator=(const WorkflowStatistics& other) = default;
 
 	uint64_t getConflictCount() const noexcept { return conflicts; }
 
@@ -137,7 +137,7 @@ public:
 	uint64_t mean(int op) const noexcept { return sketches[op].mean(); }
 
 	// with 'this' as final aggregation, factor in 'other'
-	void combine(const WorkerStatistics& other) {
+	void combine(const WorkflowStatistics& other) {
 		conflicts += other.conflicts;
 		for (auto op = 0; op < MAX_OP; op++) {
 			sketches[op].mergeWith(other.sketches[op]);
@@ -183,11 +183,11 @@ public:
 
 	void updateLatencies(const std::vector<DDSketchMako> other_sketches) { sketches = other_sketches; }
 
-	friend std::ofstream& operator<<(std::ofstream& os, WorkerStatistics& stats);
-	friend std::ifstream& operator>>(std::ifstream& is, WorkerStatistics& stats);
+	friend std::ofstream& operator<<(std::ofstream& os, WorkflowStatistics& stats);
+	friend std::ifstream& operator>>(std::ifstream& is, WorkflowStatistics& stats);
 };
 
-inline std::ofstream& operator<<(std::ofstream& os, WorkerStatistics& stats) {
+inline std::ofstream& operator<<(std::ofstream& os, WorkflowStatistics& stats) {
 	rapidjson::StringBuffer ss;
 	rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
 	writer.StartObject();
@@ -254,7 +254,7 @@ inline void populateArray(std::array<uint64_t, MAX_OP>& arr,
 	}
 }
 
-inline std::ifstream& operator>>(std::ifstream& is, WorkerStatistics& stats) {
+inline std::ifstream& operator>>(std::ifstream& is, WorkflowStatistics& stats) {
 	std::stringstream buffer;
 	buffer << is.rdbuf();
 	rapidjson::Document doc;

@@ -180,7 +180,7 @@ int cleanupNormalKeyspace(Database db, Arguments const& args) {
 }
 
 /* populate database */
-int populate(Database db, const ThreadArgs& thread_args, int thread_tps, WorkerStatistics& stats) {
+int populate(Database db, const ThreadArgs& thread_args, int thread_tps, WorkflowStatistics& stats) {
 	Arguments const& args = *thread_args.args;
 	const auto process_idx = thread_args.process_idx;
 	const auto thread_idx = thread_args.thread_idx;
@@ -292,7 +292,7 @@ int populate(Database db, const ThreadArgs& thread_args, int thread_tps, WorkerS
 	return 0;
 }
 
-void updateErrorStatsRunMode(WorkerStatistics& stats, fdb::Error err, int op) {
+void updateErrorStatsRunMode(WorkflowStatistics& stats, fdb::Error err, int op) {
 	if (err) {
 		if (err.is(1020 /*not_commited*/)) {
 			stats.incrConflictCount();
@@ -307,7 +307,7 @@ void updateErrorStatsRunMode(WorkerStatistics& stats, fdb::Error err, int op) {
 /* run one iteration of configured transaction */
 int runOneTransaction(Transaction& tx,
                       Arguments const& args,
-                      WorkerStatistics& stats,
+                      WorkflowStatistics& stats,
                       ByteString& key1,
                       ByteString& key2,
                       ByteString& val) {
@@ -412,7 +412,7 @@ int runWorkload(Database db,
                 std::atomic<double> const& throttle_factor,
                 int const thread_iters,
                 std::atomic<int> const& signal,
-                WorkerStatistics& stats,
+                WorkflowStatistics& stats,
                 int const dotrace,
                 int const dotagging) {
 	auto traceid = std::string{};
@@ -542,7 +542,7 @@ void dumpThreadSamples(Arguments const& args,
                        pid_t parent_id,
                        int process_idx,
                        int thread_id,
-                       const WorkerStatistics& stats,
+                       const WorkflowStatistics& stats,
                        bool overwrite = true) {
 	const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, parent_id);
 	const auto rc = mkdir(dirname.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
@@ -1716,11 +1716,11 @@ void Arguments::generateAuthorizationTokens() {
 	logr.info("generated {} tokens in {:6.3f} seconds", active_tenants, toDoubleSeconds(stopwatch.stop().diff()));
 }
 
-void printStats(Arguments const& args, WorkerStatistics const* stats, double const duration_sec, FILE* fp) {
-	static WorkerStatistics prev;
+void printStats(Arguments const& args, WorkflowStatistics const* stats, double const duration_sec, FILE* fp) {
+	static WorkflowStatistics prev;
 
 	const auto num_workers = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
-	auto current = WorkerStatistics{};
+	auto current = WorkflowStatistics{};
 	for (auto i = 0; i < args.num_processes * num_workers; i++) {
 		current.combine(stats[i]);
 	}
@@ -1819,7 +1819,7 @@ void printStatsHeader(Arguments const& args, bool show_commit, bool is_first_hea
 	fmt::print("\n");
 }
 
-void printWorkerStats(WorkerStatistics& final_stats, Arguments args, FILE* fp, bool is_report = false) {
+void printWorkerStats(WorkflowStatistics& final_stats, Arguments args, FILE* fp, bool is_report = false) {
 
 	if (is_report) {
 		for (auto op = 0; op < MAX_OP; op++) {
@@ -2062,14 +2062,14 @@ void loadSample(int pid_main, int op, std::vector<DDSketchMako>& data_points, in
 }
 
 void printReport(Arguments const& args,
-                 WorkerStatistics const* worker_stats,
+                 WorkflowStatistics const* worker_stats,
                  ThreadStatistics const* thread_stats,
                  ProcessStatistics const* process_stats,
                  double const duration_sec,
                  pid_t pid_main,
                  FILE* fp) {
 
-	auto final_worker_stats = WorkerStatistics{};
+	auto final_worker_stats = WorkflowStatistics{};
 	auto final_thread_stats = ThreadStatistics{};
 	auto final_process_stats = ProcessStatistics{};
 	const auto num_workers = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
@@ -2254,7 +2254,7 @@ void printReport(Arguments const& args,
 }
 
 int statsProcessMain(Arguments const& args,
-                     WorkerStatistics const* worker_stats,
+                     WorkflowStatistics const* worker_stats,
                      ThreadStatistics const* thread_stats,
                      ProcessStatistics const* process_stats,
                      std::atomic<double>& throttle_factor,
@@ -2393,12 +2393,12 @@ int statsProcessMain(Arguments const& args,
 	return 0;
 }
 
-WorkerStatistics mergeSketchReport(Arguments& args) {
+WorkflowStatistics mergeSketchReport(Arguments& args) {
 
-	WorkerStatistics stats;
+	WorkflowStatistics stats;
 	for (int i = 0; i < args.num_report_files; i++) {
 		std::ifstream f{ args.report_files[i] };
-		WorkerStatistics tmp;
+		WorkflowStatistics tmp;
 		f >> tmp;
 		stats.combine(tmp);
 	}
@@ -2481,7 +2481,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	if (args.mode == MODE_REPORT) {
-		WorkerStatistics stats = mergeSketchReport(args);
+		WorkflowStatistics stats = mergeSketchReport(args);
 		printWorkerStats(stats, args, NULL, true);
 		return 0;
 	}

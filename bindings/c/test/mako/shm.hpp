@@ -43,18 +43,18 @@ struct Header {
 
 struct LayoutHelper {
 	Header hdr;
-	WorkerStatistics stats;
+	WorkflowStatistics stats;
 };
 
 inline size_t storageSize(int num_processes, int num_threads, int num_workers) noexcept {
 	assert(num_processes >= 1 && num_threads >= 1);
-	return sizeof(LayoutHelper) + sizeof(WorkerStatistics) * ((num_processes * num_workers) - 1) +
+	return sizeof(LayoutHelper) + sizeof(WorkflowStatistics) * ((num_processes * num_workers) - 1) +
 	       sizeof(ThreadStatistics) * (num_threads * num_processes) + sizeof(ProcessStatistics) * num_processes;
 }
 
 // class Access memory layout:
-// Header | WorkerStatistics | WorkerStatistics * (num_processes * num_workers - 1) | ThreadStatistics * (num_processes
-// * num_threads) | ProcessStatistics * (num_processes)
+// Header | WorkflowStatistics | WorkflowStatistics * (num_processes * num_workers - 1) | ThreadStatistics *
+// (num_processes * num_threads) | ProcessStatistics * (num_processes)
 // all Statistics classes have alignas(64)
 
 class Access {
@@ -63,10 +63,10 @@ class Access {
 	int num_threads;
 	int num_workers;
 
-	static inline WorkerStatistics& workerStatsSlot(void* shm_base,
-	                                                int num_workers,
-	                                                int process_idx,
-	                                                int worker_idx) noexcept {
+	static inline WorkflowStatistics& workerStatsSlot(void* shm_base,
+	                                                  int num_workers,
+	                                                  int process_idx,
+	                                                  int worker_idx) noexcept {
 		return (&static_cast<LayoutHelper*>(shm_base)->stats)[process_idx * num_workers + worker_idx];
 	}
 
@@ -78,7 +78,7 @@ class Access {
 	                                                int thread_idx) noexcept {
 		ThreadStatistics* thread_stat_base =
 		    reinterpret_cast<ThreadStatistics*>(static_cast<char*>(shm_base) + sizeof(LayoutHelper) +
-		                                        sizeof(WorkerStatistics) * num_processes * num_workers);
+		                                        sizeof(WorkflowStatistics) * num_processes * num_workers);
 
 		return thread_stat_base[process_idx * num_threads + thread_idx];
 	}
@@ -91,7 +91,7 @@ class Access {
 
 		ProcessStatistics* proc_stat_base =
 		    reinterpret_cast<ProcessStatistics*>(static_cast<char*>(shm_base) + sizeof(LayoutHelper) +
-		                                         sizeof(WorkerStatistics) * num_processes * num_workers +
+		                                         sizeof(WorkflowStatistics) * num_processes * num_workers +
 		                                         sizeof(ThreadStatistics) * num_processes * num_threads);
 		return proc_stat_base[process_idx];
 	}
@@ -112,7 +112,7 @@ public:
 		new (&header()) Header{};
 		for (auto i = 0; i < num_processes; i++)
 			for (auto j = 0; j < num_workers; j++) {
-				new (&workerStatsSlot(i, j)) WorkerStatistics();
+				new (&workerStatsSlot(i, j)) WorkflowStatistics();
 			}
 		for (auto i = 0; i < num_processes; i++)
 			for (auto j = 0; j < num_threads; j++) {
@@ -127,19 +127,19 @@ public:
 
 	Header& header() const noexcept { return *static_cast<Header*>(base); }
 
-	WorkerStatistics const* workerStatsConstArray() const noexcept {
+	WorkflowStatistics const* workerStatsConstArray() const noexcept {
 		return &workerStatsSlot(base, num_workers, 0 /*process_idx*/, 0 /*worker_idx*/);
 	}
 
-	WorkerStatistics* workerStatsArray() const noexcept {
+	WorkflowStatistics* workerStatsArray() const noexcept {
 		return &workerStatsSlot(base, num_workers, 0 /*process_idx*/, 0 /*worker_idx*/);
 	}
 
-	WorkerStatistics const& workerStatsConstSlot(int process_idx, int worker_idx) const noexcept {
+	WorkflowStatistics const& workerStatsConstSlot(int process_idx, int worker_idx) const noexcept {
 		return workerStatsSlot(base, num_workers, process_idx, worker_idx);
 	}
 
-	WorkerStatistics& workerStatsSlot(int process_idx, int worker_idx) const noexcept {
+	WorkflowStatistics& workerStatsSlot(int process_idx, int worker_idx) const noexcept {
 		return workerStatsSlot(base, num_workers, process_idx, worker_idx);
 	}
 
