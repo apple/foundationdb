@@ -149,7 +149,8 @@ public:
 				state std::unordered_set<TenantName>::iterator iter = tenants.begin();
 				for (; iter != tenants.end(); iter++) {
 					state TenantName tenant = *iter;
-					state ReadYourWritesTransaction tr(tenantCache->dbcx(), tenant);
+					state ReadYourWritesTransaction tr(tenantCache->dbcx(),
+					                                   makeReference<Tenant>(tenantCache->dbcx(), tenant));
 					loop {
 						try {
 							state int64_t size = wait(tr.getEstimatedRangeSizeBytes(normalKeys));
