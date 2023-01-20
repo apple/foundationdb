@@ -318,13 +318,13 @@ public:
 		}
 	};
 
-	bool workerAvailable(WorkerInfo const& worker, bool checkStable) {
+	bool workerAvailable(WorkerInfo const& worker, bool checkStable) const {
 		return (now() - startTime < 2 * FLOW_KNOBS->SERVER_REQUEST_INTERVAL) ||
 		       (IFailureMonitor::failureMonitor().getState(worker.details.interf.storage.getEndpoint()).isAvailable() &&
 		        (!checkStable || worker.reboots < 2));
 	}
 
-	bool isLongLivedStateless(Optional<Key> const& processId) {
+	bool isLongLivedStateless(Optional<Key> const& processId) const {
 		return (db.serverInfo->get().distributor.present() &&
 		        db.serverInfo->get().distributor.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().ratekeeper.present() &&
@@ -2181,27 +2181,29 @@ public:
 
 	void compareWorkers(const DatabaseConfiguration& conf,
 	                    const std::vector<WorkerInterface>& first,
-	                    std::map<Optional<Standalone<StringRef>>, int>& firstUsed,
+	                    const std::map<Optional<Standalone<StringRef>>, int>& firstUsed,
 	                    const std::vector<WorkerInterface>& second,
-	                    std::map<Optional<Standalone<StringRef>>, int>& secondUsed,
+	                    const std::map<Optional<Standalone<StringRef>>, int>& secondUsed,
 	                    ProcessClass::ClusterRole role,
 	                    std::string description) {
 		std::vector<WorkerDetails> firstDetails;
-		for (auto& it : first) {
-			auto w = id_worker.find(it.locality.processId());
+		for (auto& worker : first) {
+			auto w = id_worker.find(worker.locality.processId());
 			ASSERT(w != id_worker.end());
-			ASSERT(!conf.isExcludedServer(w->second.details.interf.addresses()));
-			firstDetails.push_back(w->second.details);
+			auto const& [_, workerInfo] = *w;
+			ASSERT(!conf.isExcludedServer(workerInfo.details.interf.addresses()));
+			firstDetails.push_back(workerInfo.details);
 			//TraceEvent("CompareAddressesFirst").detail(description.c_str(), w->second.details.interf.address());
 		}
 		RoleFitness firstFitness(firstDetails, role, firstUsed);
 
 		std::vector<WorkerDetails> secondDetails;
-		for (auto& it : second) {
-			auto w = id_worker.find(it.locality.processId());
+		for (auto& worker : second) {
+			auto w = id_worker.find(worker.locality.processId());
 			ASSERT(w != id_worker.end());
-			ASSERT(!conf.isExcludedServer(w->second.details.interf.addresses()));
-			secondDetails.push_back(w->second.details);
+			auto const& [_, workerInfo] = *w;
+			ASSERT(!conf.isExcludedServer(workerInfo.details.interf.addresses()));
+			secondDetails.push_back(workerInfo.details);
 			//TraceEvent("CompareAddressesSecond").detail(description.c_str(), w->second.details.interf.address());
 		}
 		RoleFitness secondFitness(secondDetails, role, secondUsed);
@@ -3166,14 +3168,20 @@ public:
 	// Whether the transaction system (in primary DC if in HA setting) contains degraded servers.
 	bool transactionSystemContainsDegradedServers() {
 		const ServerDBInfo& dbi = db.serverInfo->get();
-		auto transactionWorkerInList = [&dbi](const std::unordered_set<NetworkAddress>& serverList) -> bool {
+		auto transactionWorkerInList = [&dbi](const std::unordered_set<NetworkAddress>& serverList,
+		                                      bool skipSatellite) -> bool {
 			for (const auto& server : serverList) {
 				if (dbi.master.addresses().contains(server)) {
 					return true;
 				}
 
 				for (const auto& logSet : dbi.logSystemConfig.tLogs) {
-					if (!logSet.isLocal || logSet.locality == tagLocalitySatellite) {
+					if (!logSet.isLocal) {
+						// We don't check server degradation for remote TLogs since it is not on the transaction system
+						// critical path.
+						continue;
+					}
+					if (skipSatellite && logSet.locality == tagLocalitySatellite) {
 						continue;
 					}
 					for (const auto& tlog : logSet.tLogs) {
@@ -3205,8 +3213,10 @@ public:
 			return false;
 		};
 
-		return transactionWorkerInList(degradationInfo.degradedServers) ||
-		       transactionWorkerInList(degradationInfo.disconnectedServers);
+		// Check if transaction system contains degraded/disconnected servers. For satellite, we only check for
+		// disconnection since the latency between prmary and satellite is across WAN and may not be very stable.
+		return transactionWorkerInList(degradationInfo.degradedServers, /*skipSatellite=*/true) ||
+		       transactionWorkerInList(degradationInfo.disconnectedServers, /*skipSatellite=*/false);
 	}
 
 	// Whether transaction system in the remote DC, e.g. log router and tlogs in the remote DC, contains degraded
@@ -3323,7 +3333,7 @@ public:
 		return recentHealthTriggeredRecoveryTime.size();
 	}
 
-	bool isExcludedDegradedServer(const NetworkAddressList& a) {
+	bool isExcludedDegradedServer(const NetworkAddressList& a) const {
 		for (const auto& server : excludedDegradedServers) {
 			if (a.contains(server))
 				return true;
@@ -3448,7 +3458,6 @@ public:
 		serverInfo.masterLifetime.ccID = id;
 		serverInfo.clusterInterface = ccInterface;
 		serverInfo.myLocality = locality;
-		serverInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 		db.serverInfo->set(serverInfo);
 		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 

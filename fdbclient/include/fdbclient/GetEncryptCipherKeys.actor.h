@@ -38,7 +38,7 @@
 
 template <class T>
 Optional<UID> getEncryptKeyProxyId(const Reference<AsyncVar<T> const>& db) {
-	return db->get().encryptKeyProxy.template map<UID>([](EncryptKeyProxyInterface proxy) { return proxy.id(); });
+	return db->get().encryptKeyProxy.map(&EncryptKeyProxyInterface::id);
 }
 
 ACTOR template <class T>

@@ -344,10 +344,10 @@ Future<Void> storeOrThrow(T& out, Future<Optional<T>> what, Error e = key_not_fo
 }
 
 // Waits for a future to be ready, and then applies an asynchronous function to it.
-ACTOR template <class T, class F, class U = decltype(std::declval<F>()(std::declval<T>()).getValue())>
-Future<U> mapAsync(Future<T> what, F actorFunc) {
+ACTOR template <class T, class F>
+Future<decltype(std::declval<F>()(std::declval<T>()).getValue())> mapAsync(Future<T> what, F actorFunc) {
 	T val = wait(what);
-	U ret = wait(actorFunc(val));
+	decltype(std::declval<F>()(std::declval<T>()).getValue()) ret = wait(actorFunc(val));
 	return ret;
 }
 
@@ -571,26 +571,26 @@ public:
 			setUnconditional(k, v, i);
 	}
 	void setUnconditional(K const& k, V const& v) { setUnconditional(k, v, items[k]); }
+
+	void sendError(K const& begin, K const& end, Error const& e) {
+		if (begin >= end)
+			return;
+		std::vector<Promise<Void>> ps = swapRangePromises(items.lower_bound(begin), items.lower_bound(end));
+		sendError(ps, e);
+	}
+
 	void triggerAll() {
-		std::vector<Promise<Void>> ps;
-		for (auto it = items.begin(); it != items.end(); ++it) {
-			ps.resize(ps.size() + 1);
-			ps.back().swap(it->second.change);
-		}
-		std::vector<Promise<Void>> noDestroy = ps; // See explanation of noDestroy in setUnconditional()
-		for (auto p = ps.begin(); p != ps.end(); ++p)
-			p->send(Void());
+		std::vector<Promise<Void>> ps = swapRangePromises(items.begin(), items.end());
+		send(ps);
 	}
+
 	void triggerRange(K const& begin, K const& end) {
-		std::vector<Promise<Void>> ps;
-		for (auto it = items.lower_bound(begin); it != items.end() && it->first < end; ++it) {
-			ps.resize(ps.size() + 1);
-			ps.back().swap(it->second.change);
-		}
-		std::vector<Promise<Void>> noDestroy = ps; // See explanation of noDestroy in setUnconditional()
-		for (auto p = ps.begin(); p != ps.end(); ++p)
-			p->send(Void());
+		if (begin >= end)
+			return;
+		std::vector<Promise<Void>> ps = swapRangePromises(items.lower_bound(begin), items.lower_bound(end));
+		send(ps);
 	}
+
 	void trigger(K const& key) {
 		if (items.count(key) != 0) {
 			auto& i = items[key];
@@ -648,6 +648,30 @@ protected:
 	std::map<K, P> items;
 	const V defaultValue;
 	bool destructing;
+
+	template <typename Iterator>
+	std::vector<Promise<Void>> swapRangePromises(Iterator begin, Iterator end) {
+		std::vector<Promise<Void>> ps;
+		for (auto it = begin; it != end; ++it) {
+			ps.resize(ps.size() + 1);
+			ps.back().swap(it->second.change);
+		}
+		return ps;
+	}
+
+	// ps can't be a reference. See explanation of noDestroy in setUnconditional()
+	void send(std::vector<Promise<Void>> ps) {
+		for (auto& p : ps) {
+			p.send(Void());
+		}
+	}
+
+	// ps can't be a reference. See explanation of noDestroy in setUnconditional()
+	void sendError(std::vector<Promise<Void>> ps, Error const& e) {
+		for (auto& p : ps) {
+			p.sendError(e);
+		}
+	}
 
 	void setUnconditional(K const& k, V const& v, P& i) {
 		Promise<Void> trigger;

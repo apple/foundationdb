@@ -18,89 +18,32 @@
  * limitations under the License.
  */
 
-#pragma once
 #ifndef FDBRPC_TOKEN_SIGN_H
 #define FDBRPC_TOKEN_SIGN_H
+#pragma once
 
 #include "flow/network.h"
 #include "flow/Arena.h"
-#include "flow/FastRef.h"
 #include "flow/FileIdentifier.h"
-#include "fdbrpc/TenantInfo.h"
 #include "flow/PKey.h"
-
-namespace authz {
-
-enum class Algorithm : int {
-	RS256,
-	ES256,
-	UNKNOWN,
-};
-
-Algorithm algorithmFromString(StringRef s) noexcept;
-
-} // namespace authz
-
-namespace authz::flatbuffers {
-
-struct TokenRef {
-	static constexpr FileIdentifier file_identifier = 1523118;
-	double expiresAt;
-	VectorRef<StringRef> tenants;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, expiresAt, tenants);
-	}
-};
-
-struct SignedTokenRef {
-	static constexpr FileIdentifier file_identifier = 5916732;
-	StringRef token;
-	StringRef keyName;
-	StringRef signature;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, token, keyName, signature);
-	}
-
-	int expectedSize() const { return token.size() + keyName.size() + signature.size(); }
-};
-
-SignedTokenRef signToken(Arena& arena, TokenRef token, StringRef keyName, PrivateKey privateKey);
-
-bool verifyToken(SignedTokenRef signedToken, PublicKey publicKey);
-
-} // namespace authz::flatbuffers
+#include "fdbrpc/TokenSpec.h"
+#include <string>
+#include <vector>
 
 namespace authz::jwt {
 
-// Given S = concat(B64UrlEnc(headerJson), ".", B64UrlEnc(payloadJson)),
-// JWT is concat(S, ".", B64UrlEnc(sign(S, PrivateKey))).
-// Below we refer to S as "sign input"
+namespace detail {
 
-// This struct is not meant to be flatbuffer-serialized
-// This is a parsed, flattened view of T and signature
-struct TokenRef {
-	// header part ("typ": "JWT" implicitly enforced)
-	Algorithm algorithm; // alg
-	StringRef keyId; // kid
-	// payload part
-	Optional<StringRef> issuer; // iss
-	Optional<StringRef> subject; // sub
-	Optional<VectorRef<StringRef>> audience; // aud
-	Optional<uint64_t> issuedAtUnixTime; // iat
-	Optional<uint64_t> expiresAtUnixTime; // exp
-	Optional<uint64_t> notBeforeUnixTime; // nbf
-	Optional<StringRef> tokenId; // jti
-	Optional<VectorRef<StringRef>> tenants; // tenants
-	// signature part
-	StringRef signature;
+// work around the fact that VectorRef takes more than one template parameter
+template <typename T>
+using VectorRefAlias = VectorRef<T>;
 
-	// print each non-signature field in non-JSON, human-readable format e.g. for trace
-	StringRef toStringRef(Arena& arena);
-};
+} // namespace detail
+
+using TokenRef = BasicTokenSpec<StringRef, detail::VectorRefAlias, Optional>;
+
+// print each non-signature field in non-JSON, human-readable format e.g. for trace
+StringRef toStringRef(Arena& arena, const TokenRef& tokenSpec);
 
 StringRef makeSignInput(Arena& arena, const TokenRef& tokenSpec);
 

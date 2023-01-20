@@ -110,18 +110,18 @@ inline int intSize(BytesRef b) {
 }
 
 template <template <class...> class StringLike, class Char>
-ByteString strinc(const StringLike<Char>& s) {
-	int index;
+StringLike<Char> strinc(const StringLike<Char>& s) {
+	int index = -1;
 	for (index = s.size() - 1; index >= 0; index--)
-		if (s[index] != 255)
+		if (static_cast<uint8_t>(s[index]) != 255)
 			break;
 
-	// Must not be called with a string that consists only of zero or more '\xff' bytes.
+	// Must not be called with a string that is empty or only consists of '\xff' bytes.
 	assert(index >= 0);
 
-	ByteString byteResult(s.substr(0, index + 1));
-	byteResult[byteResult.size() - 1]++;
-	return byteResult;
+	auto ret = s.substr(0, index + 1);
+	ret.back()++;
+	return ret;
 }
 
 class Error {
@@ -902,6 +902,8 @@ public:
 			throw std::runtime_error("purgeBlobGranules from null database");
 		return native::fdb_database_wait_purge_granules_complete(db.get(), purgeKey.data(), intSize(purgeKey));
 	}
+
+	TypedFuture<future_var::KeyRef> getClientStatus() { return native::fdb_database_get_client_status(db.get()); }
 };
 
 inline Error selectApiVersionNothrow(int version) {

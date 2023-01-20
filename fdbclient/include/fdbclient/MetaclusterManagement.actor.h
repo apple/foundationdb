@@ -1440,7 +1440,8 @@ struct DeleteTenantImpl {
 	                                                    Reference<typename DB::TransactionT> tr) {
 		state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
 
-		if (!tenantEntry.present() || tenantEntry.get().id != self->tenantId) {
+		if (!tenantEntry.present() || tenantEntry.get().id != self->tenantId ||
+		    tenantEntry.get().tenantState == TenantState::RENAMING_TO) {
 			throw tenant_not_found();
 		}
 
@@ -1452,11 +1453,6 @@ struct DeleteTenantImpl {
 		}
 
 		if (tenantEntry.get().tenantState != TenantState::REMOVING) {
-			// Disallow removing the "new" name of a renamed tenant before it completes
-			if (tenantEntry.get().tenantState == TenantState::RENAMING_TO) {
-				throw tenant_not_found();
-			}
-
 			state TenantMapEntry updatedEntry = tenantEntry.get();
 			// Check if we are deleting a tenant in the middle of a rename
 			updatedEntry.tenantState = TenantState::REMOVING;
