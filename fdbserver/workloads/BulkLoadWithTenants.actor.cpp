@@ -96,20 +96,14 @@ struct BulkSetupWorkload : TestWorkload {
 
 		// We want to ensure that tenant deletion happens before the restore phase starts
 		if (workload->deleteTenants) {
-			state Reference<TenantEntryCache<Void>> tenantCache =
-			    makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
-			wait(tenantCache->init());
 			state int numTenantsToDelete = deterministicRandom()->randomInt(0, workload->tenants.size() + 1);
 			if (numTenantsToDelete > 0) {
 				state int i;
 				for (i = 0; i < numTenantsToDelete; i++) {
-					state Reference<Tenant> tenant = deterministicRandom()->randomChoice(workload->tenants);
-					Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getById(tenant->id()));
-					ASSERT(payload.present());
-					state int64_t tenantId = payload.get().entry.id;
+					state int tenantIndex = deterministicRandom()->randomInt(0, workload->tenants.size());
+					state Reference<Tenant> tenant = workload->tenants[tenantIndex];
 					TraceEvent("BulkSetupTenantDeletionClearing")
-					    .detail("TenantName", tenant)
-					    .detail("TenantId", tenantId)
+					    .detail("Tenant", tenant)
 					    .detail("TotalNumTenants", workload->tenants.size());
 					// clear the tenant
 					state ReadYourWritesTransaction tr = ReadYourWritesTransaction(cx, tenant);
@@ -124,15 +118,10 @@ struct BulkSetupWorkload : TestWorkload {
 					}
 					// delete the tenant
 					wait(success(TenantAPI::deleteTenant(cx.getReference(), tenant->name.get(), tenant->id())));
-					for (auto it = workload->tenants.begin(); it != workload->tenants.end(); it++) {
-						if (*it == tenant) {
-							workload->tenants.erase(it);
-							break;
-						}
-					}
+					workload->tenants.erase(workload->tenants.begin() + tenantIndex);
+
 					TraceEvent("BulkSetupTenantDeletionDone")
-					    .detail("TenantName", tenant)
-					    .detail("TenantId", tenantId)
+					    .detail("Tenant", tenant)
 					    .detail("TotalNumTenants", workload->tenants.size());
 				}
 			}
