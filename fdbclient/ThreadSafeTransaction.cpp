@@ -27,6 +27,7 @@
 #include "fdbclient/versions.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "flow/Arena.h"
 #include "flow/ProtocolVersion.h"
 
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't
@@ -216,6 +217,11 @@ ThreadSafeDatabase::ThreadSafeDatabase(ConnectionRecordType connectionRecordType
 			new (db) DatabaseContext(unknown_error());
 		}
 	});
+}
+
+ThreadFuture<Standalone<StringRef>> ThreadSafeDatabase::getClientStatus() {
+	DatabaseContext* db = this->db;
+	return onMainThread([db] { return Future<Standalone<StringRef>>(db->getClientStatus()); });
 }
 
 ThreadSafeDatabase::~ThreadSafeDatabase() {

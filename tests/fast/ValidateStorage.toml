@@ -1,9 +1,8 @@
 [configuration]
 config = 'triple'
-storageEngineType = 5
 generateFearless = true
 allowDefaultTenant = false
-machineCount = 45
+machineCount = 18
 
 [[knobs]]
 shard_encode_location_metadata = true

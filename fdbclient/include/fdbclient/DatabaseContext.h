@@ -412,7 +412,7 @@ public:
 	Future<Version> verifyBlobRange(const KeyRange& range,
 	                                Optional<Version> version,
 	                                Optional<Reference<Tenant>> tenant = {});
-	Future<bool> blobRestore(const KeyRange range);
+	Future<bool> blobRestore(const KeyRange range, Optional<Version> version);
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
@@ -715,6 +715,38 @@ public:
 	EventCacheHolder connectToDatabaseEventCacheHolder;
 
 	Future<int64_t> lookupTenant(TenantName tenant);
+
+	// Get client-side status information as a JSON string with the following schema:
+	// { "Healthy" : <overall health status: true or false>,
+	//   "ClusterID" : <UUID>,
+	//   "Coordinators" : [ <address>, ...  ],
+	//   "CurrentCoordinator" : <address>
+	//   "GrvProxies" : [ <address>, ...  ],
+	//   "CommitProxies" : [ <address>", ... ],
+	//   "StorageServers" : [ { "Address" : <address>, "SSID" : <Storage Server ID> }, ... ],
+	//   "Connections" : [
+	//     { "Address" : "<address>",
+	//       "Status" : <failed|connected|connecting|disconnected>,
+	//       "Compatible" : <is protocol version compatible with the client>,
+	//       "ConnectFailedCount" : <number of failed connection attempts>,
+	//       "LastConnectTime" : <elapsed time in seconds since the last connection attempt>,
+	//       "PingCount" : <total ping count>,
+	//       "PingTimeoutCount" : <number of ping timeouts>,
+	//       "BytesSampleTime" : <elapsed time of the reported the bytes received and sent values>,
+	//       "BytesReceived" : <bytes received>,
+	//       "BytesSent" : <bytes sent>,
+	//       "ProtocolVersion" : <protocol version of the server, missing if unknown>
+	//     },
+	//     ...
+	//   ]
+	// }
+	//
+	// The addresses in the Connections array match the addresses of Coordinators, GrvProxies,
+	// CommitProxies and StorageServers, there is one entry per different address
+	//
+	// If the database context is initialized with an error, the JSON contains just the error code
+	// { "InitializationError" : <error code> }
+	Standalone<StringRef> getClientStatus();
 
 private:
 	using WatchMapKey = std::pair<int64_t, Key>;

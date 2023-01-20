@@ -124,7 +124,7 @@ Transaction createNewTransaction(Database db, Arguments const& args, int id = -1
 
 int cleanupTenants(ipc::AdminServer& server, Arguments const& args, int db_id) {
 	for (auto tenant_id = 0; tenant_id < args.total_tenants;) {
-		const auto tenant_id_end = std::min(args.tenant_batch_size, args.total_tenants - tenant_id);
+		const auto tenant_id_end = tenant_id + std::min(args.tenant_batch_size, args.total_tenants - tenant_id);
 		auto res = server.send(ipc::BatchDeleteTenantRequest{ args.cluster_files[db_id], tenant_id, tenant_id_end });
 		if (res.error_message) {
 			logr.error("{}", *res.error_message);

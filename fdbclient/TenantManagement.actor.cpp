@@ -20,6 +20,7 @@
 
 #include <string>
 #include <map>
+#include "fdbclient/Atomic.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Tuple.h"
@@ -35,6 +36,32 @@ TenantMode tenantModeForClusterType(ClusterType clusterType, TenantMode tenantMo
 	} else {
 		return tenantMode;
 	}
+}
+
+int64_t extractTenantIdFromMutation(MutationRef m) {
+	ASSERT(!isSystemKey(m.param1));
+
+	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+		// The first 8 bytes of the key of this OP is also an 8-byte number
+		if (m.type == MutationRef::SetVersionstampedKey && m.param1.size() >= 4 &&
+		    parseVersionstampOffset(m.param1) < 8) {
+			return TenantInfo::INVALID_TENANT;
+		}
+	} else {
+		// Assumes clear range mutations are split on tenant boundaries
+		ASSERT_EQ(m.type, MutationRef::Type::ClearRange);
+	}
+
+	return extractTenantIdFromKeyRef(m.param1);
+}
+
+int64_t extractTenantIdFromKeyRef(StringRef s) {
+	if (s.size() < TenantAPI::PREFIX_SIZE) {
+		return TenantInfo::INVALID_TENANT;
+	}
+	// Parse mutation key to determine tenant prefix
+	StringRef prefix = s.substr(0, TenantAPI::PREFIX_SIZE);
+	return TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
 }
 
 } // namespace TenantAPI

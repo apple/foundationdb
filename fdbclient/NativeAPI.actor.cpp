@@ -6551,7 +6551,7 @@ Future<Void> Transaction::commitMutations() {
 
 		size_t transactionSize = getSize();
 		if (transactionSize > (uint64_t)FLOW_KNOBS->PACKET_WARNING) {
-			TraceEvent(!g_network->isSimulated() ? SevWarnAlways : SevWarn, "LargeTransaction")
+			TraceEvent(SevWarn, "LargeTransaction")
 			    .suppressFor(1.0)
 			    .detail("Size", transactionSize)
 			    .detail("NumMutations", tr.transaction.mutations.size())
@@ -10869,7 +10869,7 @@ Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges
 	return listBlobbifiedRangesActor(Reference<DatabaseContext>::addRef(this), range, rangeLimit, tenant);
 }
 
-ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange range) {
+ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange range, Optional<Version> version) {
 	state Database db(cx);
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 	loop {
@@ -10888,6 +10888,11 @@ ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange rang
 			BlobRestoreStatus status(BlobRestorePhase::INIT);
 			Value newValue = blobRestoreCommandValueFor(status);
 			tr->set(key, newValue);
+
+			BlobRestoreArg arg(version);
+			Value argValue = blobRestoreArgValueFor(arg);
+			tr->set(blobRestoreArgKeyFor(range), argValue);
+
 			wait(tr->commit());
 			return true;
 		} catch (Error& e) {
@@ -10896,8 +10901,8 @@ ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange rang
 	}
 }
 
-Future<bool> DatabaseContext::blobRestore(KeyRange range) {
-	return blobRestoreActor(Reference<DatabaseContext>::addRef(this), range);
+Future<bool> DatabaseContext::blobRestore(KeyRange range, Optional<Version> version) {
+	return blobRestoreActor(Reference<DatabaseContext>::addRef(this), range, version);
 }
 
 int64_t getMaxKeySize(KeyRef const& key) {
