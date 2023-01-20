@@ -288,78 +288,79 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 	state bool useJson = tokens.size() == 3;
 
 	state Reference<ITransaction> tr = db->createTransaction();
-	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	state Future<Optional<MetaclusterRegistrationEntry>> metaclusterRegistrationFuture =
-	    MetaclusterAPI::getMetaclusterRegistrationEntryTransaction(tr);
-	Optional<MetaclusterRegistrationEntry> metaclusterRegistrationEntry = wait(metaclusterRegistrationFuture);
 
-	const ClusterType clusterType = !metaclusterRegistrationEntry.present()
-	                                    ? ClusterType::STANDALONE
-	                                    : metaclusterRegistrationEntry.get().clusterType;
-	if (ClusterType::STANDALONE == clusterType) {
-		if (useJson) {
-			json_spirit::mObject obj;
-			obj[msgTypeKey] = "success";
-			obj[msgClusterTypeKey] = clusterTypeToString(clusterType);
-			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
-		} else {
-			fmt::print("This cluster is not part of a metacluster\n");
-		}
-		return true;
-	} else if (ClusterType::METACLUSTER_DATA == clusterType) {
-		if (useJson) {
-			json_spirit::mObject obj;
-			obj[msgTypeKey] = "success";
-			obj[msgClusterTypeKey] = clusterTypeToString(clusterType);
-			json_spirit::mObject metaclusterObj;
-			metaclusterObj[msgMgmtClusterKey] = metaclusterRegistrationEntry.get().metaclusterName.toString();
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			Optional<MetaclusterRegistrationEntry> registrationEntry =
+			    wait(MetaclusterAPI::getMetaclusterRegistration(tr));
+			const ClusterType clusterType =
+			    !registrationEntry.present() ? ClusterType::STANDALONE : registrationEntry.get().clusterType;
+			if (ClusterType::STANDALONE == clusterType) {
+				if (useJson) {
+					json_spirit::mObject obj;
+					obj[msgTypeKey] = "success";
+					obj[msgClusterTypeKey] = clusterTypeToString(clusterType);
+					fmt::print("{}\n",
+					           json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+				} else {
+					fmt::print("This cluster is not part of a metacluster\n");
+				}
+				return true;
+			} else if (ClusterType::METACLUSTER_DATA == clusterType) {
+				ASSERT(registrationEntry.present());
+				if (useJson) {
+					json_spirit::mObject obj;
+					obj[msgTypeKey] = "success";
+					obj[msgClusterTypeKey] = clusterTypeToString(clusterType);
+					json_spirit::mObject metaclusterObj;
+					metaclusterObj[msgMgmtClusterKey] = registrationEntry.get().metaclusterName.toString();
+					obj[msgMetaclusterKey] = metaclusterObj;
+					fmt::print("{}\n",
+					           json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+				} else {
+					fmt::print("This cluster \"{}\" is a data cluster within the metacluster whose management cluster "
+					           "is \"{}\"\n",
+					           registrationEntry.get().name.toString().c_str(),
+					           registrationEntry.get().metaclusterName.toString().c_str());
+				}
+				return true;
+			}
 
-			obj[msgMetaclusterKey] = metaclusterObj;
-			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
-		} else {
-			fmt::print(
-			    "This cluster \"{}\" is a data cluster within the metacluster whose management cluster is \"{}\"\n",
-			    metaclusterRegistrationEntry.get().name.toString().c_str(),
-			    metaclusterRegistrationEntry.get().metaclusterName.toString().c_str());
-		}
-		return true;
-	} else {
-		ASSERT(ClusterType::METACLUSTER_MANAGEMENT == clusterType);
-	}
-	try {
-		std::map<ClusterName, DataClusterMetadata> clusters =
-		    wait(MetaclusterAPI::listClustersWithTxn(tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
+			ASSERT(ClusterType::METACLUSTER_MANAGEMENT == clusterType);
+			std::map<ClusterName, DataClusterMetadata> clusters =
+			    wait(MetaclusterAPI::listClustersTransaction(tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
+			auto capacityNumbers = MetaclusterAPI::metaclusterCapacity(clusters);
+			if (useJson) {
+				json_spirit::mObject obj;
+				obj[msgTypeKey] = "success";
+				obj[msgClusterTypeKey] = clusterTypeToString(ClusterType::METACLUSTER_MANAGEMENT);
 
-		auto capacityNumbers = MetaclusterAPI::metaclusterCapacity(clusters);
+				json_spirit::mObject metaclusterObj;
+				metaclusterObj[msgDataClustersKey] = static_cast<int>(clusters.size());
+				metaclusterObj[msgCapacityKey] = capacityNumbers.first.toJson();
+				metaclusterObj[msgAllocatedKey] = capacityNumbers.second.toJson();
 
-		if (useJson) {
-			json_spirit::mObject obj;
-			obj[msgTypeKey] = "success";
-			obj[msgClusterTypeKey] = clusterTypeToString(ClusterType::METACLUSTER_MANAGEMENT);
-
-			json_spirit::mObject metaclusterObj;
-			metaclusterObj[msgDataClustersKey] = static_cast<int>(clusters.size());
-			metaclusterObj[msgCapacityKey] = capacityNumbers.first.toJson();
-			metaclusterObj[msgAllocatedKey] = capacityNumbers.second.toJson();
-
-			obj[msgMetaclusterKey] = metaclusterObj;
-			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
-		} else {
-			fmt::print("  number of data clusters: {}\n", clusters.size());
-			fmt::print("  tenant group capacity: {}\n", capacityNumbers.first.numTenantGroups);
-			fmt::print("  allocated tenant groups: {}\n", capacityNumbers.second.numTenantGroups);
-		}
-
-		return true;
-	} catch (Error& e) {
-		if (useJson) {
-			json_spirit::mObject obj;
-			obj[msgTypeKey] = "error";
-			obj[msgErrorKey] = e.what();
-			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
-			return false;
-		} else {
-			throw;
+				obj[msgMetaclusterKey] = metaclusterObj;
+				fmt::print("{}\n",
+				           json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+			} else {
+				fmt::print("  number of data clusters: {}\n", clusters.size());
+				fmt::print("  tenant group capacity: {}\n", capacityNumbers.first.numTenantGroups);
+				fmt::print("  allocated tenant groups: {}\n", capacityNumbers.second.numTenantGroups);
+			}
+			return true;
+		} catch (Error& e) {
+			if (useJson) {
+				json_spirit::mObject obj;
+				obj[msgTypeKey] = "error";
+				obj[msgErrorKey] = e.what();
+				fmt::print("{}\n",
+				           json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+				return false;
+			} else {
+				throw;
+			}
 		}
 	}
 }
