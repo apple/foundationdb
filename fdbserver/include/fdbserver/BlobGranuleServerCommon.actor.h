@@ -169,6 +169,8 @@ ACTOR Future<Void> updateRestoreStatus(Database db,
                                        Optional<BlobRestorePhase> expectedPhase);
 ACTOR Future<std::pair<KeyRange, BlobRestoreStatus>> getRestoreRangeStatus(Database db, KeyRangeRef keys);
 ACTOR Future<Optional<BlobRestoreStatus>> getRestoreStatus(Database db, KeyRangeRef range);
+ACTOR Future<Optional<BlobRestoreArg>> getRestoreArg(Database db, KeyRangeRef range);
+ACTOR Future<Version> getRestoreTargetVersion(Database db, KeyRangeRef range, Version defaultVersion);
 #include "flow/unactorcompiler.h"
 
 #endif

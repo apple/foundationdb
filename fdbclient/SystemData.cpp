@@ -1712,6 +1712,35 @@ Standalone<BlobRestoreStatus> decodeBlobRestoreStatus(ValueRef const& value) {
 	return status;
 }
 
+const KeyRangeRef blobRestoreArgKeys("\xff\x02/blobRestoreArgs/"_sr, "\xff\x02/blobRestoreArgs0"_sr);
+
+const Value blobRestoreArgKeyFor(const KeyRangeRef range) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobRestoreArgKeys.begin);
+	wr << range;
+	return wr.toValue();
+}
+
+const KeyRange decodeBlobRestoreArgKeyFor(const KeyRef key) {
+	KeyRange range;
+	BinaryReader reader(key.removePrefix(blobRestoreArgKeys.begin), AssumeVersion(ProtocolVersion::withBlobGranule()));
+	reader >> range;
+	return range;
+}
+
+const Value blobRestoreArgValueFor(BlobRestoreArg args) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
+	wr << args;
+	return wr.toValue();
+}
+
+Standalone<BlobRestoreArg> decodeBlobRestoreArg(ValueRef const& value) {
+	Standalone<BlobRestoreArg> args;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> args;
+	return args;
+}
+
 const KeyRangeRef storageQuotaKeys("\xff/storageQuota/"_sr, "\xff/storageQuota0"_sr);
 const KeyRef storageQuotaPrefix = storageQuotaKeys.begin;
 

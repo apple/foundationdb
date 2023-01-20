@@ -626,3 +626,59 @@ ACTOR Future<Optional<BlobRestoreStatus>> getRestoreStatus(Database db, KeyRange
 	}
 	return result;
 }
+
+// Get restore argument
+ACTOR Future<Optional<BlobRestoreArg>> getRestoreArg(Database db, KeyRangeRef keys) {
+	state Transaction tr(db);
+	state Optional<BlobRestoreArg> result;
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			try {
+				state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
+				limits.minRows = 0;
+				state KeySelectorRef begin = firstGreaterOrEqual(blobRestoreArgKeys.begin);
+				state KeySelectorRef end = firstGreaterOrEqual(blobRestoreArgKeys.end);
+				loop {
+					RangeResult ranges = wait(tr.getRange(begin, end, limits, Snapshot::True));
+					for (auto& r : ranges) {
+						KeyRange keyRange = decodeBlobRestoreArgKeyFor(r.key);
+						if (keys.intersects(keyRange)) {
+							Standalone<BlobRestoreArg> arg = decodeBlobRestoreArg(r.value);
+							result = arg;
+							return result;
+						}
+					}
+					if (!ranges.more) {
+						break;
+					}
+					if (ranges.readThrough.present()) {
+						begin = firstGreaterOrEqual(ranges.readThrough.get());
+					} else {
+						begin = firstGreaterThan(ranges.back().key);
+					}
+				}
+				return result;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+// Get restore target version. Return defaultVersion if no restore argument available for the range
+ACTOR Future<Version> getRestoreTargetVersion(Database db, KeyRangeRef range, Version defaultVersion) {
+	Optional<BlobRestoreArg> arg = wait(getRestoreArg(db, range));
+	Version expected = defaultVersion;
+	if (arg.present()) {
+		if (arg.get().version.present()) {
+			return arg.get().version.get();
+		}
+	}
+	return expected;
+}

@@ -122,7 +122,7 @@ class ThreadSafeTransaction : public ITransaction, ThreadSafeReferenceCounted<Th
 public:
 	explicit ThreadSafeTransaction(DatabaseContext* cx,
 	                               ISingleThreadTransaction::Type type,
-	                               Optional<TenantName> tenant);
+	                               Optional<TenantName> tenantName);
 	~ThreadSafeTransaction() override;
 
 	// Note: used while refactoring fdbcli, need to be removed later
