@@ -43,63 +43,136 @@ struct Header {
 
 struct LayoutHelper {
 	Header hdr;
-	ThreadStatistics stats;
+	WorkerStatistics stats;
 };
 
-inline size_t storageSize(int num_processes, int num_threads) noexcept {
+inline size_t storageSize(int num_processes, int num_threads, int num_workers) noexcept {
 	assert(num_processes >= 1 && num_threads >= 1);
-	return sizeof(LayoutHelper) + sizeof(ThreadStatistics) * ((num_processes * num_threads) - 1);
+	return sizeof(LayoutHelper) + sizeof(WorkerStatistics) * ((num_processes * num_workers) - 1) +
+	       sizeof(ThreadStatistics) * (num_threads * num_processes) + sizeof(ProcessStatistics) * num_processes;
 }
+
+// class Access memory layout:
+// Header | WorkerStatistics | WorkerStatistics * (num_processes * num_workers - 1) | ThreadStatistics * (num_processes
+// * num_threads) | ProcessStatistics * (num_processes)
+// all Statistics classes have alignas(64)
 
 class Access {
 	void* base;
 	int num_processes;
 	int num_threads;
+	int num_workers;
 
-	static inline ThreadStatistics& statsSlot(void* shm_base,
-	                                          int num_threads,
-	                                          int process_idx,
-	                                          int thread_idx) noexcept {
-		return (&static_cast<LayoutHelper*>(shm_base)->stats)[process_idx * num_threads + thread_idx];
+	static inline WorkerStatistics& workerStatsSlot(void* shm_base,
+	                                                int num_workers,
+	                                                int process_idx,
+	                                                int worker_idx) noexcept {
+		return (&static_cast<LayoutHelper*>(shm_base)->stats)[process_idx * num_workers + worker_idx];
+	}
+
+	static inline ThreadStatistics& threadStatsSlot(void* shm_base,
+	                                                int num_processes,
+	                                                int num_threads,
+	                                                int num_workers,
+	                                                int process_idx,
+	                                                int thread_idx) noexcept {
+		ThreadStatistics* thread_stat_base =
+		    reinterpret_cast<ThreadStatistics*>(static_cast<char*>(shm_base) + sizeof(LayoutHelper) +
+		                                        sizeof(WorkerStatistics) * num_processes * num_workers);
+
+		return thread_stat_base[process_idx * num_threads + thread_idx];
+	}
+
+	static inline ProcessStatistics& processStatsSlot(void* shm_base,
+	                                                  int num_processes,
+	                                                  int num_threads,
+	                                                  int num_workers,
+	                                                  int process_idx) noexcept {
+
+		ProcessStatistics* proc_stat_base =
+		    reinterpret_cast<ProcessStatistics*>(static_cast<char*>(shm_base) + sizeof(LayoutHelper) +
+		                                         sizeof(WorkerStatistics) * num_processes * num_workers +
+		                                         sizeof(ThreadStatistics) * num_processes * num_threads);
+		return proc_stat_base[process_idx];
 	}
 
 public:
-	Access(void* shm, int num_processes, int num_threads) noexcept
-	  : base(shm), num_processes(num_processes), num_threads(num_threads) {}
+	Access(void* shm, int num_processes, int num_threads, int num_workers) noexcept
+	  : base(shm), num_processes(num_processes), num_threads(num_threads), num_workers(num_workers) {}
 
-	Access() noexcept : Access(nullptr, 0, 0) {}
+	Access() noexcept : Access(nullptr, 0, 0, 0) {}
 
 	Access(const Access&) noexcept = default;
 
 	Access& operator=(const Access&) noexcept = default;
 
-	size_t size() const noexcept { return storageSize(num_processes, num_threads); }
+	size_t size() const noexcept { return storageSize(num_processes, num_threads, num_workers); }
 
 	void initMemory() noexcept {
 		new (&header()) Header{};
 		for (auto i = 0; i < num_processes; i++)
-			for (auto j = 0; j < num_threads; j++)
-				new (&statsSlot(i, j)) ThreadStatistics();
+			for (auto j = 0; j < num_workers; j++) {
+				new (&workerStatsSlot(i, j)) WorkerStatistics();
+			}
+		for (auto i = 0; i < num_processes; i++)
+			for (auto j = 0; j < num_threads; j++) {
+				new (&threadStatsSlot(i, j)) ThreadStatistics();
+			}
+		for (auto i = 0; i < num_processes; i++) {
+			new (&processStatsSlot(i)) ProcessStatistics();
+		}
 	}
 
 	Header const& headerConst() const noexcept { return *static_cast<Header const*>(base); }
 
 	Header& header() const noexcept { return *static_cast<Header*>(base); }
 
-	ThreadStatistics const* statsConstArray() const noexcept {
-		return &statsSlot(base, num_threads, 0 /*process_id*/, 0 /*thread_id*/);
+	WorkerStatistics const* workerStatsConstArray() const noexcept {
+		return &workerStatsSlot(base, num_workers, 0 /*process_idx*/, 0 /*worker_idx*/);
 	}
 
-	ThreadStatistics* statsArray() const noexcept {
-		return &statsSlot(base, num_threads, 0 /*process_id*/, 0 /*thread_id*/);
+	WorkerStatistics* workerStatsArray() const noexcept {
+		return &workerStatsSlot(base, num_workers, 0 /*process_idx*/, 0 /*worker_idx*/);
 	}
 
-	ThreadStatistics const& statsConstSlot(int process_idx, int thread_idx) const noexcept {
-		return statsSlot(base, num_threads, process_idx, thread_idx);
+	WorkerStatistics const& workerStatsConstSlot(int process_idx, int worker_idx) const noexcept {
+		return workerStatsSlot(base, num_workers, process_idx, worker_idx);
 	}
 
-	ThreadStatistics& statsSlot(int process_idx, int thread_idx) const noexcept {
-		return statsSlot(base, num_threads, process_idx, thread_idx);
+	WorkerStatistics& workerStatsSlot(int process_idx, int worker_idx) const noexcept {
+		return workerStatsSlot(base, num_workers, process_idx, worker_idx);
+	}
+
+	ThreadStatistics const* threadStatsConstArray() const noexcept {
+		return &threadStatsSlot(base, num_processes, num_threads, num_workers, 0 /*process_idx*/, 0 /*thread_idx*/);
+	}
+
+	ThreadStatistics* threadStatsArray() const noexcept {
+		return &threadStatsSlot(base, num_processes, num_threads, num_workers, 0 /*process_idx*/, 0 /*thread_idx*/);
+	}
+
+	ThreadStatistics const& threadStatsConstSlot(int process_idx, int thread_idx) const noexcept {
+		return threadStatsSlot(base, num_processes, num_threads, num_workers, process_idx, thread_idx);
+	}
+
+	ThreadStatistics& threadStatsSlot(int process_idx, int thread_idx) const noexcept {
+		return threadStatsSlot(base, num_processes, num_threads, num_workers, process_idx, thread_idx);
+	}
+
+	ProcessStatistics const* processStatsConstArray() const noexcept {
+		return &processStatsSlot(base, num_processes, num_threads, num_workers, 0 /*process_idx*/);
+	}
+
+	ProcessStatistics* processStatsArray() const noexcept {
+		return &processStatsSlot(base, num_processes, num_threads, num_workers, 0 /*process_idx*/);
+	}
+
+	ProcessStatistics const& processStatsConstSlot(int process_idx) const noexcept {
+		return processStatsSlot(base, num_processes, num_threads, num_workers, process_idx);
+	}
+
+	ProcessStatistics& processStatsSlot(int process_idx) const noexcept {
+		return processStatsSlot(base, num_processes, num_threads, num_workers, process_idx);
 	}
 };
 

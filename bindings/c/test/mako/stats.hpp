@@ -88,7 +88,7 @@ public:
 	}
 };
 
-class alignas(64) ThreadStatistics {
+class alignas(64) WorkerStatistics {
 	uint64_t conflicts{ 0 };
 	uint64_t total_errors{ 0 };
 	uint64_t total_timeouts{ 0 };
@@ -100,7 +100,7 @@ class alignas(64) ThreadStatistics {
 	std::vector<DDSketchMako> sketches;
 
 public:
-	ThreadStatistics() noexcept {
+	WorkerStatistics() noexcept {
 		std::fill(ops.begin(), ops.end(), 0);
 		std::fill(errors.begin(), errors.end(), 0);
 		std::fill(timeouts.begin(), timeouts.end(), 0);
@@ -109,8 +109,8 @@ public:
 		sketches.resize(MAX_OP);
 	}
 
-	ThreadStatistics(const ThreadStatistics& other) = default;
-	ThreadStatistics& operator=(const ThreadStatistics& other) = default;
+	WorkerStatistics(const WorkerStatistics& other) = default;
+	WorkerStatistics& operator=(const WorkerStatistics& other) = default;
 
 	uint64_t getConflictCount() const noexcept { return conflicts; }
 
@@ -137,7 +137,7 @@ public:
 	uint64_t mean(int op) const noexcept { return sketches[op].mean(); }
 
 	// with 'this' as final aggregation, factor in 'other'
-	void combine(const ThreadStatistics& other) {
+	void combine(const WorkerStatistics& other) {
 		conflicts += other.conflicts;
 		for (auto op = 0; op < MAX_OP; op++) {
 			sketches[op].mergeWith(other.sketches[op]);
@@ -183,11 +183,11 @@ public:
 
 	void updateLatencies(const std::vector<DDSketchMako> other_sketches) { sketches = other_sketches; }
 
-	friend std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats);
-	friend std::ifstream& operator>>(std::ifstream& is, ThreadStatistics& stats);
+	friend std::ofstream& operator<<(std::ofstream& os, WorkerStatistics& stats);
+	friend std::ifstream& operator>>(std::ifstream& is, WorkerStatistics& stats);
 };
 
-inline std::ofstream& operator<<(std::ofstream& os, ThreadStatistics& stats) {
+inline std::ofstream& operator<<(std::ofstream& os, WorkerStatistics& stats) {
 	rapidjson::StringBuffer ss;
 	rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
 	writer.StartObject();
@@ -254,7 +254,7 @@ inline void populateArray(std::array<uint64_t, MAX_OP>& arr,
 	}
 }
 
-inline std::ifstream& operator>>(std::ifstream& is, ThreadStatistics& stats) {
+inline std::ifstream& operator>>(std::ifstream& is, WorkerStatistics& stats) {
 	std::stringstream buffer;
 	buffer << is.rdbuf();
 	rapidjson::Document doc;
@@ -281,6 +281,45 @@ inline std::ifstream& operator>>(std::ifstream& is, ThreadStatistics& stats) {
 
 	return is;
 }
+
+class alignas(64) ThreadStatistics {
+	double cpu_utilization{ 0.0 };
+
+public:
+	ThreadStatistics() noexcept {}
+
+	ThreadStatistics(const ThreadStatistics& other) = default;
+	ThreadStatistics& operator=(const ThreadStatistics& other) = default;
+
+	double getCPUUtilization() { return cpu_utilization; }
+	void setCPUUtilization(double cpu_utilization) { this->cpu_utilization = cpu_utilization; }
+
+	void combine(const ThreadStatistics& other) { cpu_utilization += other.cpu_utilization; }
+};
+
+class alignas(64) ProcessStatistics {
+	double total_cpu_utilization{ 0.0 };
+	double fdb_network_cpu_utilization{ 0.0 };
+
+public:
+	ProcessStatistics() noexcept {}
+
+	ProcessStatistics(const ProcessStatistics& other) = default;
+	ProcessStatistics& operator=(const ProcessStatistics& other) = default;
+
+	double getTotalCPUUtilization() { return total_cpu_utilization; }
+	double getFDBNetworkCPUUtilization() { return fdb_network_cpu_utilization; }
+
+	void setCPUUtilization(double total_cpu_utilization) { this->total_cpu_utilization = total_cpu_utilization; }
+	void setFDBNetworkCPUUtilization(double fdb_network_cpu_utilization) {
+		this->fdb_network_cpu_utilization = fdb_network_cpu_utilization;
+	}
+
+	void combine(const ProcessStatistics& other) {
+		total_cpu_utilization += other.total_cpu_utilization;
+		fdb_network_cpu_utilization += other.fdb_network_cpu_utilization;
+	}
+};
 
 } // namespace mako
 
