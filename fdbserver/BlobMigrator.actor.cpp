@@ -94,6 +94,16 @@ private:
 						    .detail("Version", granule.version)
 						    .detail("SizeInBytes", granule.sizeInBytes);
 					}
+
+					// Restore version is expected to be greater than max version from blob granule files.
+					state Version max = maxVersion(self);
+					Version targetVersion = wait(BlobRestoreController::getTargetVersion(restoreController, max));
+					if (targetVersion < max) {
+						TraceEvent("UnsupportedRestoreVersion", self->interf_.id())
+						    .detail("MaxBlobGranulesVersion", max)
+						    .detail("TargetVersion", targetVersion);
+						throw restore_missing_data();
+					}
 					wait(BlobRestoreController::updateState(restoreController, COPYING_DATA, LOADED_MANIFEST));
 					return Void();
 				}
@@ -327,13 +337,16 @@ private:
 		// check last version in mutation logs
 		state std::string mlogsUrl = wait(getMutationLogUrl());
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
+		state double beginTs = now();
 		BackupDescription desc = wait(bc->describeBackup(true));
+		TraceEvent("DescribeBackupLatency", self->interf_.id()).detail("Seconds", now() - beginTs);
+
 		if (!desc.contiguousLogEnd.present()) {
-			TraceEvent("InvalidMutationLogs").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL);
+			TraceEvent("InvalidMutationLogs", self->interf_.id()).detail("Url", SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL);
 			throw blob_restore_missing_logs();
 		}
 		if (!desc.minLogBegin.present()) {
-			TraceEvent("InvalidMutationLogs").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL);
+			TraceEvent("InvalidMutationLogs", self->interf_.id()).detail("Url", SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL);
 			throw blob_restore_missing_logs();
 		}
 		state Version minLogVersion = desc.minLogBegin.get();
@@ -343,20 +356,20 @@ private:
 		state Version targetVersion = wait(BlobRestoreController::getTargetVersion(restoreController, maxLogVersion));
 		if (targetVersion < maxLogVersion) {
 			if (!needApplyLogs(self, targetVersion)) {
-				TraceEvent("SkipMutationLogs").detail("TargetVersion", targetVersion);
+				TraceEvent("SkipMutationLogs", self->interf_.id()).detail("TargetVersion", targetVersion);
 				dprint("Skip mutation logs as all granules are at version {}\n", targetVersion);
 				return Void();
 			}
 		}
 
 		if (targetVersion < minLogVersion) {
-			TraceEvent("MissingMutationLogs")
+			TraceEvent("MissingMutationLogs", self->interf_.id())
 			    .detail("MinLogVersion", minLogVersion)
 			    .detail("TargetVersion", maxLogVersion);
 			throw blob_restore_missing_logs();
 		}
 		if (targetVersion > maxLogVersion) {
-			TraceEvent("SkipTargetVersion")
+			TraceEvent("SkipTargetVersion", self->interf_.id())
 			    .detail("MaxLogVersion", maxLogVersion)
 			    .detail("TargetVersion", targetVersion);
 		}
@@ -366,7 +379,7 @@ private:
 		state Standalone<VectorRef<Version>> beginVersions;
 		for (auto& granule : self->blobGranules_) {
 			if (granule.version < minLogVersion || granule.version > maxLogVersion) {
-				TraceEvent("InvalidMutationLogs")
+				TraceEvent("InvalidMutationLogs", self->interf_.id())
 				    .detail("Granule", granule.granuleID)
 				    .detail("GranuleVersion", granule.version)
 				    .detail("MinLogVersion", minLogVersion)
@@ -380,13 +393,15 @@ private:
 				// Blob granule ends at granule.version(inclusive), so we need to apply mutation logs
 				// after granule.version(exclusive).
 				beginVersions.push_back(beginVersions.arena(), granule.version);
-				TraceEvent("ApplyMutationLogVersion").detail("GID", granule.granuleID).detail("Ver", granule.version);
+				TraceEvent("ApplyMutationLogVersion", self->interf_.id())
+				    .detail("GID", granule.granuleID)
+				    .detail("Ver", granule.version);
 			}
 		}
 		Optional<RestorableFileSet> restoreSet =
 		    wait(bc->getRestoreSet(maxLogVersion, ranges, OnlyApplyMutationLogs::True, minLogVersion));
 		if (!restoreSet.present()) {
-			TraceEvent("InvalidMutationLogs")
+			TraceEvent("InvalidMutationLogs", self->interf_.id())
 			    .detail("MinLogVersion", minLogVersion)
 			    .detail("MaxLogVersion", maxLogVersion);
 			throw blob_restore_corrupted_logs();

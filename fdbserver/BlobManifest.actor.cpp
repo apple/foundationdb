@@ -163,11 +163,10 @@ public:
 			const BlobManifestFile& firstFile = *iter;
 			result.push_back(firstFile);
 			// search all following files belonging to same manifest
-			for (auto it = iter + 1; it != allFiles.end(); ++it) {
-				if (it->belongToSameManifest(firstFile)) {
-					result.push_back(*it);
+			for (++iter; iter != allFiles.end(); ++iter) {
+				if (iter->belongToSameManifest(firstFile)) {
+					result.push_back(*iter);
 				} else {
-					iter = it; // start point for next search
 					break;
 				}
 			}
