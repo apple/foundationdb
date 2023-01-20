@@ -57,7 +57,7 @@ Reference<ITenant> ThreadSafeDatabase::openTenant(TenantNameRef tenantName) {
 
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
 	auto type = isConfigDB ? ISingleThreadTransaction::Type::PAXOS_CONFIG : ISingleThreadTransaction::Type::RYW;
-	return Reference<ITransaction>(new ThreadSafeTransaction(db, type, Optional<TenantName>()));
+	return Reference<ITransaction>(new ThreadSafeTransaction(db, type, nullptr));
 }
 
 void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
@@ -240,7 +240,7 @@ ThreadSafeTenant::ThreadSafeTenant(Reference<ThreadSafeDatabase> db, StringRef n
 
 Reference<ITransaction> ThreadSafeTenant::createTransaction() {
 	auto type = db->isConfigDB ? ISingleThreadTransaction::Type::PAXOS_CONFIG : ISingleThreadTransaction::Type::RYW;
-	return Reference<ITransaction>(new ThreadSafeTransaction(db->db, type, name));
+	return Reference<ITransaction>(new ThreadSafeTransaction(db->db, type, tenant));
 }
 
 ThreadFuture<int64_t> ThreadSafeTenant::getId() {
@@ -250,11 +250,11 @@ ThreadFuture<int64_t> ThreadSafeTenant::getId() {
 
 ThreadFuture<Key> ThreadSafeTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
 	DatabaseContext* db = this->db->db;
-	TenantName tenantName = this->name;
+	Tenant* tenantPtr = this->tenant;
 	KeyRange range = keyRange;
-	return onMainThread([db, range, purgeVersion, tenantName, force]() -> Future<Key> {
+	return onMainThread([db, range, purgeVersion, tenantPtr, force]() -> Future<Key> {
 		db->addref();
-		return db->purgeBlobGranules(range, purgeVersion, makeReference<Tenant>(Database(db), tenantName), force);
+		return db->purgeBlobGranules(range, purgeVersion, Reference<Tenant>::addRef(tenantPtr), force);
 	});
 }
 
@@ -269,46 +269,42 @@ ThreadFuture<Void> ThreadSafeTenant::waitPurgeGranulesComplete(const KeyRef& pur
 
 ThreadFuture<bool> ThreadSafeTenant::blobbifyRange(const KeyRangeRef& keyRange) {
 	DatabaseContext* db = this->db->db;
-	TenantName tenantName = this->name;
 	KeyRange range = keyRange;
 	return onMainThread([=]() -> Future<bool> {
 		db->checkDeferredError();
 		db->addref();
-		return db->blobbifyRange(range, makeReference<Tenant>(Database(db), tenantName));
+		return db->blobbifyRange(range, Reference<Tenant>::addRef(tenant));
 	});
 }
 
 ThreadFuture<bool> ThreadSafeTenant::unblobbifyRange(const KeyRangeRef& keyRange) {
 	DatabaseContext* db = this->db->db;
-	TenantName tenantName = this->name;
 	KeyRange range = keyRange;
 	return onMainThread([=]() -> Future<bool> {
 		db->checkDeferredError();
 		db->addref();
-		return db->unblobbifyRange(range, makeReference<Tenant>(Database(db), tenantName));
+		return db->unblobbifyRange(range, Reference<Tenant>::addRef(tenant));
 	});
 }
 
 ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeTenant::listBlobbifiedRanges(const KeyRangeRef& keyRange,
                                                                                         int rangeLimit) {
 	DatabaseContext* db = this->db->db;
-	TenantName tenantName = this->name;
 	KeyRange range = keyRange;
 	return onMainThread([=]() -> Future<Standalone<VectorRef<KeyRangeRef>>> {
 		db->checkDeferredError();
 		db->addref();
-		return db->listBlobbifiedRanges(range, rangeLimit, makeReference<Tenant>(Database(db), tenantName));
+		return db->listBlobbifiedRanges(range, rangeLimit, Reference<Tenant>::addRef(tenant));
 	});
 }
 
 ThreadFuture<Version> ThreadSafeTenant::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
 	DatabaseContext* db = this->db->db;
-	TenantName tenantName = this->name;
 	KeyRange range = keyRange;
 	return onMainThread([=]() -> Future<Version> {
 		db->checkDeferredError();
 		db->addref();
-		return db->verifyBlobRange(range, version, makeReference<Tenant>(Database(db), tenantName));
+		return db->verifyBlobRange(range, version, Reference<Tenant>::addRef(tenant));
 	});
 }
 
@@ -320,8 +316,9 @@ ThreadSafeTenant::~ThreadSafeTenant() {
 
 ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
                                              ISingleThreadTransaction::Type type,
-                                             Optional<TenantName> tenantName)
-  : tenantName(tenantName), initialized(std::make_shared<std::atomic_bool>(false)) {
+                                             Tenant* tenantPtr)
+  : tenantName(tenantPtr ? tenantPtr->name : Optional<TenantName>()),
+    initialized(std::make_shared<std::atomic_bool>(false)) {
 	// Allocate memory for the transaction from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 
@@ -332,11 +329,11 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
 	auto tr = this->tr = ISingleThreadTransaction::allocateOnForeignThread(type);
 	auto init = this->initialized;
 	// No deferred error -- if the construction of the RYW transaction fails, we have no where to put it
-	onMainThreadVoid([tr, cx, type, tenantName, init]() {
+	onMainThreadVoid([tr, cx, type, tenantPtr, init]() {
 		cx->addref();
 		Database db(cx);
-		if (tenantName.present()) {
-			Reference<Tenant> tenant = makeReference<Tenant>(db, tenantName.get());
+		if (tenantPtr) {
+			Reference<Tenant> tenant = Reference<Tenant>::addRef(tenantPtr);
 			if (type == ISingleThreadTransaction::Type::RYW) {
 				new (tr) ReadYourWritesTransaction(db, tenant);
 			} else {
