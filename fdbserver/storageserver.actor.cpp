@@ -156,6 +156,10 @@ static const std::string rocksdbCheckpointDirPrefix = "/rockscheckpoints_";
 namespace {
 enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE, CSK_ASSIGN_EMPTY };
 
+std::string shardIdToString(const UID& shardId) {
+	return format("%016llx", shardId);
+}
+
 std::string changeServerKeysContextName(const ChangeServerKeysContext& context) {
 	switch (context) {
 	case CSK_UPDATE:
@@ -245,6 +249,8 @@ struct MoveInShardMetaData {
 	Phase getPhase() const { return static_cast<Phase>(this->phase); }
 
 	void setPhase(Phase phase) { this->phase = phase; }
+
+	std::string destShardId() const { return format("%016llx", this->dataMoveId.first()); }
 
 	// Key moveInShardKey() const {
 	// 	BinaryWriter wr(Unversioned());
@@ -703,7 +709,11 @@ struct StorageServerDisk {
 	Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) { return storage->checkpoint(request); }
 
 	Future<Void> restore(const std::vector<CheckpointMetaData>& checkpoints) { return storage->restore(checkpoints); }
-
+	Future<Void> restore(const std::string& shardId,
+	                     const std::vector<KeyRange>& ranges,
+	                     const std::vector<CheckpointMetaData>& checkpoints) {
+		return storage->restore(shardId, ranges, checkpoints);
+	}
 	Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) {
 		return storage->deleteCheckpoint(checkpoint);
 	}
@@ -7591,32 +7601,6 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 	    .detail("Duration", duration)
 	    .detail("TotalBytes", totalBytes)
 	    .detail("Rate", (double)totalBytes / duration);
-	// localRecords.resize(records.size());
-	// for (; idx < records.size(); ++idx) {
-	// 	loop {
-	// 		try {
-	// 			TraceEvent("FetchShardFetchCheckpointBegin", data->thisServerID)
-	// 			    .detail("MoveInShardID", shard->id)
-	// 			    .detail("CheckpointMetaData", records[idx].toString());
-	// 			// TODO: Persist the progress, for restarts, and fetch checkpoints in parallel.
-	// 			CheckpointMetaData record = wait(fetchCheckpoint(data->cx, records[idx], dir));
-	// 			localRecords[idx] = record;
-	// 			break;
-	// 		} catch (Error& e) {
-	// 			TraceEvent("FetchShardFetchCheckpointError", data->thisServerID)
-	// 			    .errorUnsuppressed(e)
-	// 			    .detail("MoveInShardID", shard->id)
-	// 			    .detail("CheckpointMetaData", records[idx].toString());
-	// 			// std::cout << "Getting checkpoint failure: " << e.name() << std::endl;
-	// 			wait(delay(1));
-	// 		}
-	// 	}
-	// 	TraceEvent("FetchShardFetchedCheckpoint", data->thisServerID)
-	// 	    .detail("MoveInShardID", shard->id)
-	// 	    .detail("MoveInShard", shard->toString())
-	// 	    .detail("Checkpoint", localRecords[idx].toString());
-	// 	// std::cout << "Fetched checkpoint:" << localRecords[idx].toString() << std::endl;
-	// }
 
 	// std::vector<std::string> files = platform::listFiles(dir);
 	// std::cout << "Received checkpoint files on disk: " << dir << std::endl;
@@ -7632,6 +7616,48 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 
 	return Void();
 }
+
+ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, std::shared_ptr<MoveInShardMetaData> shard) {
+	ASSERT(shard->getPhase() == MoveInShardMetaData::Ingesting);
+
+	TraceEvent("FetchShardIngestCheckpointBegin", data->thisServerID)
+	    .detail("MoveInShardID", shard->id)
+	    .detail("Checkpoints", describe(shard->checkpoints));
+
+	try {
+		wait(data->storage.restore(shard->destShardId(), shard->ranges, shard->checkpoints));
+	} catch (Error& e) {
+		TraceEvent("FetchShardIngestedCheckpointError", data->thisServerID)
+		    .errorUnsuppressed(e)
+		    .detail("MoveInShardID", shard->id)
+		    .detail("MoveInShard", shard->toString())
+		    .detail("Checkpoints", describe(shard->checkpoints));
+		throw;
+	}
+
+	TraceEvent("FetchShardIngestedCheckpoint", data->thisServerID)
+	    .detail("MoveInShardID", shard->id)
+	    .detail("MoveInShard", shard->toString())
+	    .detail("Checkpoints", describe(shard->checkpoints));
+
+	wait(delay(0));
+
+	shard->setPhase(MoveInShardMetaData::ApplyingUpdates);
+
+	wait(updateMoveInShardMetaData(data, shard.get()));
+
+	return Void();
+}
+
+// ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
+//                                           std::shared_ptr<MoveInShardMetaData> shard,
+//                                           std::shared_ptr<MoveInUpdates> moveInUpdates) {
+// 	try {
+// 		TraceEvent("FetchShardApplyingUpdatesBegin", data->thisServerID).detail("MoveInShar", shard->toString());
+// 		// wait(delay(0, TaskPriority::FetchKeys));
+// 		wait(moveInUpdates->restore(shard->highWatermark));
+// 		TraceEvent("FetchShardApplyingUpdatesRestored", data->thisServerID).detail("MoveInShar", shard->toString());
+// state Version version = data->version.get() + 1;
 
 ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state const UID fetchKeysID = deterministicRandom()->randomUniqueID();
@@ -7650,13 +7676,14 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	                                             data->counters.bytesFetched,
 	                                             data->counters.kvFetched);
 
-	// Set read options to use non-caching reads and set Fetch type unless low priority data fetching is disabled by a
-	// knob
+	// Set read options to use non-caching reads and set Fetch type unless low priority data fetching is
+	// disabled by a knob
 	state ReadOptions readOptions = ReadOptions(
 	    fetchKeysID, SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY ? ReadType::FETCH : ReadType::NORMAL, CacheResult::False);
 
-	// need to set this at the very start of the fetch, to handle any private change feed destroy mutations we get for
-	// this key range, that apply to change feeds we don't know about yet because their metadata hasn't been fetched yet
+	// need to set this at the very start of the fetch, to handle any private change feed destroy mutations we
+	// get for this key range, that apply to change feeds we don't know about yet because their metadata hasn't
+	// been fetched yet
 	data->changeFeedDestroys[fetchKeysID] = destroyedFeeds;
 
 	// delay(0) to force a return to the run loop before the work of fetchKeys is started.
@@ -7664,9 +7691,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	try {
 		wait(data->coreStarted.getFuture() && delay(0));
 
-		// On SS Reboot, durableVersion == latestVersion, so any mutations we add to the mutation log would be skipped
-		// if added before latest version advances. To ensure this doesn't happen, we wait for version to increase by
-		// one if this fetchKeys was initiated by a changeServerKeys from restoreDurableState
+		// On SS Reboot, durableVersion == latestVersion, so any mutations we add to the mutation log would be
+		// skipped if added before latest version advances. To ensure this doesn't happen, we wait for version
+		// to increase by one if this fetchKeys was initiated by a changeServerKeys from restoreDurableState
 		if (data->version.get() == data->durableVersion.get()) {
 			wait(data->version.whenAtLeast(data->version.get() + 1));
 			wait(delay(0));
@@ -7692,8 +7719,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		validate(data);
 
-		// Wait (if necessary) for the latest version at which any key in keys was previously available (+1) to be
-		// durable
+		// Wait (if necessary) for the latest version at which any key in keys was previously available (+1) to
+		// be durable
 		auto navr = data->newestAvailableVersion.intersectingRanges(keys);
 		Version lastAvailable = invalidVersion;
 		for (auto r = navr.begin(); r != navr.end(); ++r) {
@@ -7721,12 +7748,13 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		++data->counters.fetchWaitingCount;
 		data->counters.fetchWaitingMS += 1000 * (executeStart - startTime);
 
-		// Fetch keys gets called while the update actor is processing mutations. data->version will not be updated
-		// until all mutations for a version have been processed. We need to take the durableVersionLock to ensure
-		// data->version is greater than the version of the mutation which caused the fetch to be initiated.
+		// Fetch keys gets called while the update actor is processing mutations. data->version will not be
+		// updated until all mutations for a version have been processed. We need to take the durableVersionLock
+		// to ensure data->version is greater than the version of the mutation which caused the fetch to be
+		// initiated.
 
-		// We must also ensure we have fetched all change feed metadata BEFORE changing the phase to fetching to ensure
-		// change feed mutations get applied correctly
+		// We must also ensure we have fetched all change feed metadata BEFORE changing the phase to fetching to
+		// ensure change feed mutations get applied correctly
 		state std::vector<Key> changeFeedsToFetch;
 		state bool isFullRestore = wait(isFullRestoreMode(data->cx, keys));
 		if (!isFullRestore) {
@@ -7746,8 +7774,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		state int debug_nextRetryToLog = 1;
 		state Error lastError;
 
-		// FIXME: The client cache does not notice when servers are added to a team. To read from a local storage server
-		// we must refresh the cache manually.
+		// FIXME: The client cache does not notice when servers are added to a team. To read from a local
+		// storage server we must refresh the cache manually.
 		data->cx->invalidateCache(Key(), keys);
 
 		loop {
@@ -7788,9 +7816,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						throw e;
 					}
 
-					// Note that error in getting GRV doesn't affect any storage server state. Therefore, we catch all
-					// errors here without failing the storage server. When error happens, fetchVersion fall back to
-					// the above computed fetchVersion.
+					// Note that error in getting GRV doesn't affect any storage server state. Therefore, we
+					// catch all errors here without failing the storage server. When error happens,
+					// fetchVersion fall back to the above computed fetchVersion.
 					TraceEvent(SevWarn, "FetchKeyGRVError", data->thisServerID).error(e);
 					lastError = e;
 				}
@@ -7809,8 +7837,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state Future<Void> hold;
 			if (isFullRestore) {
 				state std::pair<KeyRange, BlobRestoreStatus> rangeStatus = wait(getRestoreRangeStatus(data->cx, keys));
-				// Read from blob only when it's copying data for full restore. Otherwise it may cause data corruptions
-				// e.g we don't want to copy from blob any more when it's applying mutation logs(APPLYING_MLOGS)
+				// Read from blob only when it's copying data for full restore. Otherwise it may cause data
+				// corruptions e.g we don't want to copy from blob any more when it's applying mutation
+				// logs(APPLYING_MLOGS)
 				if (rangeStatus.second.phase == BlobRestorePhase::COPYING_DATA ||
 				    rangeStatus.second.phase == BlobRestorePhase::ERROR) {
 					Version targetVersion = wait(getRestoreTargetVersion(data->cx, keys, fetchVersion));
@@ -7916,8 +7945,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					std::deque<Standalone<VerUpdateRef>> updatesToSplit = std::move(shard->updates);
 
 					// This actor finishes committing the keys [keys.begin,nfk) that we already fetched.
-					// The remaining unfetched keys [nfk,keys.end) will become a separate AddingShard with its own
-					// fetchKeys.
+					// The remaining unfetched keys [nfk,keys.end) will become a separate AddingShard with its
+					// own fetchKeys.
 					if (data->shardAware) {
 						StorageServerShard rightShard = data->shards[keys.begin]->toStorageServerShard();
 						rightShard.range = KeyRangeRef(nfk, keys.end);
@@ -7934,11 +7963,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					AddingShard* otherShard = data->shards.rangeContaining(nfk).value()->adding.get();
 					keys = shard->keys;
 
-					// Split our prior updates.  The ones that apply to our new, restricted key range will go back into
-					// shard->updates, and the ones delivered to the new shard will be discarded because it is in
-					// WaitPrevious phase (hasn't chosen a fetchVersion yet). What we are doing here is expensive and
-					// could get more expensive if we started having many more blocks per shard. May need optimization
-					// in the future.
+					// Split our prior updates.  The ones that apply to our new, restricted key range will go
+					// back into shard->updates, and the ones delivered to the new shard will be discarded
+					// because it is in WaitPrevious phase (hasn't chosen a fetchVersion yet). What we are doing
+					// here is expensive and could get more expensive if we started having many more blocks per
+					// shard. May need optimization in the future.
 					std::deque<Standalone<VerUpdateRef>>::iterator u = updatesToSplit.begin();
 					for (; u != updatesToSplit.end(); ++u) {
 						splitMutations(data, data->shards, *u);
@@ -7966,9 +7995,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		    .detail("FKID", interval.pairID)
 		    .detail("SV", data->storageVersion())
 		    .detail("DV", data->durableVersion.get());
-		// Directly commit()ing the IKVS would interfere with updateStorage, possibly resulting in an incomplete version
-		// being recovered. Instead we wait for the updateStorage loop to commit something (and consequently also what
-		// we have written)
+		// Directly commit()ing the IKVS would interfere with updateStorage, possibly resulting in an incomplete
+		// version being recovered. Instead we wait for the updateStorage loop to commit something (and
+		// consequently also what we have written)
 
 		state Future<std::unordered_map<Key, Version>> feedFetchMain = dispatchChangeFeeds(data,
 		                                                                                   fetchKeysID,
@@ -7993,13 +8022,13 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		    .detail("SV", data->storageVersion())
 		    .detail("DV", data->durableVersion.get());
 
-		// Wait to run during update(), after a new batch of versions is received from the tlog but before eager reads
-		// take place.
+		// Wait to run during update(), after a new batch of versions is received from the tlog but before eager
+		// reads take place.
 		Promise<FetchInjectionInfo*> p;
 		data->readyFetchKeys.push_back(p);
 
-		// After we add to the promise readyFetchKeys, update() would provide a pointer to FetchInjectionInfo that we
-		// can put mutation in.
+		// After we add to the promise readyFetchKeys, update() would provide a pointer to FetchInjectionInfo
+		// that we can put mutation in.
 		FetchInjectionInfo* batch = wait(p.getFuture());
 		TraceEvent(SevDebug, "FKUpdateBatch", data->thisServerID).detail("FKID", interval.pairID);
 
@@ -8007,13 +8036,15 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		ASSERT(data->version.get() >= fetchVersion);
 		// Choose a transferredVersion.  This choice and timing ensure that
 		//   * The transferredVersion can be mutated in versionedData
-		//   * The transferredVersion isn't yet committed to storage (so we can write the availability status change)
-		//   * The transferredVersion is <= the version of any of the updates in batch, and if there is an equal version
+		//   * The transferredVersion isn't yet committed to storage (so we can write the availability status
+		//   change)
+		//   * The transferredVersion is <= the version of any of the updates in batch, and if there is an equal
+		//   version
 		//     its mutations haven't been processed yet
 		shard->transferredVersion = data->version.get() + 1;
-		// shard->transferredVersion = batch->changes[0].version;  //< FIXME: This obeys the documented properties, and
-		// seems "safer" because it never introduces extra versions into the data structure, but violates some ASSERTs
-		// currently
+		// shard->transferredVersion = batch->changes[0].version;  //< FIXME: This obeys the documented
+		// properties, and seems "safer" because it never introduces extra versions into the data structure, but
+		// violates some ASSERTs currently
 		data->mutableData().createNewVersion(shard->transferredVersion);
 		ASSERT(shard->transferredVersion > data->storageVersion());
 		ASSERT(shard->transferredVersion == data->data().getLatestVersion());
@@ -8033,8 +8064,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			newChangeFeeds.erase(cfId);
 		}
 		// This is split into two fetches to reduce tail. Fetch [0 - fetchVersion+1)
-		// once fetchVersion is finalized, and [fetchVersion+1, transferredVersion) here once transferredVersion is
-		// finalized. Also fetch new change feeds alongside it
+		// once fetchVersion is finalized, and [fetchVersion+1, transferredVersion) here once transferredVersion
+		// is finalized. Also fetch new change feeds alongside it
 		state Future<std::unordered_map<Key, Version>> feedFetchTransferred =
 		    dispatchChangeFeeds(data,
 		                        fetchKeysID,
@@ -8055,10 +8086,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// the minimal version in updates must be larger than fetchVersion
 		ASSERT(shard->updates.empty() || shard->updates[0].version > fetchVersion);
 
-		// Put the updates that were collected during the FinalCommit phase into the batch at the transferredVersion.
-		// Eager reads will be done for them by update(), and the mutations will come back through
-		// AddingShard::addMutations and be applied to versionedMap and mutationLog as normal. The lie about their
-		// version is acceptable because this shard will never be read at versions < transferredVersion
+		// Put the updates that were collected during the FinalCommit phase into the batch at the
+		// transferredVersion. Eager reads will be done for them by update(), and the mutations will come back
+		// through AddingShard::addMutations and be applied to versionedMap and mutationLog as normal. The lie
+		// about their version is acceptable because this shard will never be read at versions <
+		// transferredVersion
 
 		for (auto i = shard->updates.begin(); i != shard->updates.end(); ++i) {
 			i->version = shard->transferredVersion;
@@ -8119,8 +8151,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		                   keys,
 		                   true); // keys will be available when getLatestVersion()==transferredVersion is durable
 
-		// Note that since it receives a pointer to FetchInjectionInfo, the thread does not leave this actor until this
-		// point.
+		// Note that since it receives a pointer to FetchInjectionInfo, the thread does not leave this actor
+		// until this point.
 
 		// At this point change feed fetching and mutation injection is complete, so full fetch is finished.
 		holdingFullFKPL.release();
@@ -8396,10 +8428,11 @@ void cleanUpChangeFeeds(StorageServer* data, const KeyRangeRef& keys, Version ve
 			                                           changeFeedDurableKey(f.first, 0),
 			                                           changeFeedDurableKey(f.first, version)));
 
-			// We can't actually remove this change feed fully until the mutations clearing its data become durable.
-			// If the SS restarted at version R before the clearing mutations became durable at version D (R < D),
-			// then the restarted SS would restore the change feed clients would be able to read data and would miss
-			// mutations from versions [R, D), up until we got the private mutation triggering the cleanup again.
+			// We can't actually remove this change feed fully until the mutations clearing its data become
+			// durable. If the SS restarted at version R before the clearing mutations became durable at version
+			// D (R < D), then the restarted SS would restore the change feed clients would be able to read data
+			// and would miss mutations from versions [R, D), up until we got the private mutation triggering
+			// the cleanup again.
 
 			auto feed = data->uidChangeFeed.find(f.first);
 			if (feed != data->uidChangeFeed.end()) {
@@ -8456,8 +8489,8 @@ void changeServerKeys(StorageServer* data,
 		return;
 	}
 
-	// Save a backup of the ShardInfo references before we start messing with shards, in order to defer fetchKeys
-	// cancellation (and its potential call to removeDataRange()) until shards is again valid
+	// Save a backup of the ShardInfo references before we start messing with shards, in order to defer
+	// fetchKeys cancellation (and its potential call to removeDataRange()) until shards is again valid
 	std::vector<Reference<ShardInfo>> oldShards;
 	auto os = data->shards.intersectingRanges(keys);
 	for (auto r = os.begin(); r != os.end(); ++r)
@@ -8480,10 +8513,10 @@ void changeServerKeys(StorageServer* data,
 		}
 	}
 
-	// Shard state depends on nowAssigned and whether the data is available (actually assigned in memory or on the disk)
-	// up to the given version.  The latter depends on data->newestAvailableVersion, so loop over the ranges of that.
-	// SOMEDAY: Could this just use shards?  Then we could explicitly do the removeDataRange here when an
-	// adding/transferred shard is cancelled
+	// Shard state depends on nowAssigned and whether the data is available (actually assigned in memory or on
+	// the disk) up to the given version.  The latter depends on data->newestAvailableVersion, so loop over the
+	// ranges of that. SOMEDAY: Could this just use shards?  Then we could explicitly do the removeDataRange
+	// here when an adding/transferred shard is cancelled
 	auto vr = data->newestAvailableVersion.intersectingRanges(keys);
 	std::vector<std::pair<KeyRange, Version>> changeNewestAvailable;
 	std::vector<KeyRange> removeRanges;
@@ -8535,8 +8568,8 @@ void changeServerKeys(StorageServer* data,
 			data->addShard(ShardInfo::newReadWrite(range, data));
 		}
 	}
-	// Update newestAvailableVersion when a shard becomes (un)available (in a separate loop to avoid invalidating vr
-	// above)
+	// Update newestAvailableVersion when a shard becomes (un)available (in a separate loop to avoid
+	// invalidating vr above)
 	for (auto r = changeNewestAvailable.begin(); r != changeNewestAvailable.end(); ++r)
 		data->newestAvailableVersion.insert(r->first, r->second);
 
@@ -8545,8 +8578,8 @@ void changeServerKeys(StorageServer* data,
 
 	coalesceShards(data, KeyRangeRef(ranges[0].begin, ranges[ranges.size() - 1].end));
 
-	// Now it is OK to do removeDataRanges, directly and through fetchKeys cancellation (and we have to do so before
-	// validate())
+	// Now it is OK to do removeDataRanges, directly and through fetchKeys cancellation (and we have to do so
+	// before validate())
 	oldShards.clear();
 	ranges.clear();
 	for (auto r = removeRanges.begin(); r != removeRanges.end(); ++r) {
@@ -8592,8 +8625,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	const Version cVer = version + 1;
 	ASSERT(data->data().getLatestVersion() == cVer);
 
-	// Save a backup of the ShardInfo references before we start messing with shards, in order to defer fetchKeys
-	// cancellation (and its potential call to removeDataRange()) until shards is again valid
+	// Save a backup of the ShardInfo references before we start messing with shards, in order to defer
+	// fetchKeys cancellation (and its potential call to removeDataRange()) until shards is again valid
 	std::vector<Reference<ShardInfo>> oldShards;
 	auto os = data->shards.intersectingRanges(keys);
 	for (auto r = os.begin(); r != os.end(); ++r) {
@@ -8681,8 +8714,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			updatedShards.push_back(StorageServerShard::notAssigned(range, cVer));
 			data->watches.triggerRange(range.begin, range.end);
 			data->pendingRemoveRanges[cVer].push_back(range);
-			// TODO(psm): When fetchKeys() is not used, make sure KV will remove the data, otherwise, removeDataShard()
-			// here.
+			// TODO(psm): When fetchKeys() is not used, make sure KV will remove the data, otherwise,
+			// removeDataShard() here.
 			TraceEvent(SevVerbose, "SSUnassignShard", data->thisServerID)
 			    .detail("Range", range)
 			    .detail("NowAssigned", nowAssigned)
@@ -8697,8 +8730,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				updatedShards.push_back(
 				    StorageServerShard(range, version, desiredId, desiredId, StorageServerShard::ReadWrite));
 				setAvailableStatus(data, range, true);
-				// Note: The initial range is available, however, the shard won't be created in the storage engine
-				// untill version is committed.
+				// Note: The initial range is available, however, the shard won't be created in the storage
+				// engine untill version is committed.
 				data->pendingAddRanges[cVer].emplace_back(desiredId, range);
 				TraceEvent(SevVerbose, "SSInitialShard", data->thisServerID)
 				    .detail("Range", range)
@@ -8757,8 +8790,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 		updateStorageShard(data, shard);
 	}
 
-	// Update newestAvailableVersion when a shard becomes (un)available (in a separate loop to avoid invalidating vr
-	// above)
+	// Update newestAvailableVersion when a shard becomes (un)available (in a separate loop to avoid
+	// invalidating vr above)
 	for (auto r = changeNewestAvailable.begin(); r != changeNewestAvailable.end(); ++r) {
 		data->newestAvailableVersion.insert(r->first, r->second);
 	}
@@ -8769,8 +8802,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 
 	coalescePhysicalShards(data, KeyRangeRef(ranges[0].begin, ranges[ranges.size() - 1].end));
 
-	// Now it is OK to do removeDataRanges, directly and through fetchKeys cancellation (and we have to do so before
-	// validate())
+	// Now it is OK to do removeDataRanges, directly and through fetchKeys cancellation (and we have to do so
+	// before validate())
 	oldShards.clear();
 	ranges.clear();
 	for (auto r = removeRanges.begin(); r != removeRanges.end(); ++r) {
@@ -8802,10 +8835,10 @@ void rollback(StorageServer* data, Version rollbackVersion, Version nextVersion)
 	// to simply restart the storage server actor and restore from the persistent disk state, and then roll
 	// forward from the TLog's history.  It's not quite as efficient, but we rarely have to do this in practice.
 
-	// FIXME: This code is relying for liveness on an undocumented property of the log system implementation: that after
-	// a rollback the rolled back versions will eventually be missing from the peeked log.  A more sophisticated
-	// approach would be to make the rollback range durable and, after reboot, skip over those versions if they appear
-	// in peek results.
+	// FIXME: This code is relying for liveness on an undocumented property of the log system implementation:
+	// that after a rollback the rolled back versions will eventually be missing from the peeked log.  A more
+	// sophisticated approach would be to make the rollback range durable and, after reboot, skip over those
+	// versions if they appear in peek results.
 
 	throw please_reboot();
 }
@@ -8816,8 +8849,8 @@ void StorageServer::addMutation(Version version,
                                 KeyRangeRef const& shard,
                                 UpdateEagerReadInfo* eagerReads) {
 	MutationRef expanded = mutation;
-	MutationRef
-	    nonExpanded; // need to keep non-expanded but atomic converted version of clear mutations for change feeds
+	MutationRef nonExpanded; // need to keep non-expanded but atomic converted version of clear mutations for
+	                         // change feeds
 	auto& mLog = addVersionToMutationLog(version);
 
 	if (!convertAtomicOp(expanded, data(), eagerReads, mLog.arena())) {
@@ -8833,8 +8866,8 @@ void StorageServer::addMutation(Version version,
 	    .detail("ShardEnd", shard.end);
 
 	if (!fromFetch) {
-		// have to do change feed before applyMutation because nonExpanded wasn't copied into the mutation log arena,
-		// and thus would go out of scope if it wasn't copied into the change feed arena
+		// have to do change feed before applyMutation because nonExpanded wasn't copied into the mutation log
+		// arena, and thus would go out of scope if it wasn't copied into the change feed arena
 		applyChangeFeedMutation(this, expanded.type == MutationRef::ClearRange ? nonExpanded : expanded, version);
 	}
 	applyMutation(this, expanded, mLog.arena(), mutableData(), version);
@@ -8911,8 +8944,8 @@ private:
 
 		if (processedStartKey) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
-			// We can also ignore clearRanges, because they are always accompanied by such a pair of sets with the same
-			// keys
+			// We can also ignore clearRanges, because they are always accompanied by such a pair of sets with
+			// the same keys
 			ASSERT(m.type == MutationRef::SetValue && m.param1.startsWith(data->sk));
 			KeyRangeRef keys(startKey.removePrefix(data->sk), m.param1.removePrefix(data->sk));
 
@@ -8931,9 +8964,10 @@ private:
 					// add changes in shard assignment to the mutation log
 					setAssignedStatus(data, keys, nowAssigned);
 
-					// The changes for version have already been received (and are being processed now).  We need to
-					// fetch the data for change.version-1 (changes from versions < change.version) If emptyRange, treat
-					// the shard as empty, see removeKeysFromFailedServer() for more details about this scenario.
+					// The changes for version have already been received (and are being processed now).  We
+					// need to fetch the data for change.version-1 (changes from versions < change.version) If
+					// emptyRange, treat the shard as empty, see removeKeysFromFailedServer() for more details
+					// about this scenario.
 					changeServerKeys(data, keys, nowAssigned, currentVersion - 1, context);
 				}
 			}
@@ -8941,8 +8975,8 @@ private:
 			processedStartKey = false;
 		} else if (m.type == MutationRef::SetValue && m.param1.startsWith(data->sk)) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
-			// We can also ignore clearRanges, because they are always accompanied by such a pair of sets with the same
-			// keys
+			// We can also ignore clearRanges, because they are always accompanied by such a pair of sets with
+			// the same keys
 			startKey = m.param1;
 			decodeServerKeysValue(m.param2, nowAssigned, emptyRange, dataMoveId);
 			processedStartKey = true;
@@ -8990,9 +9024,9 @@ private:
 			UID serverTagKey = decodeServerTagKey(m.param1.substr(1));
 			bool matchesThisServer = serverTagKey == data->thisServerID;
 			bool matchesTssPair = data->isTss() ? serverTagKey == data->tssPairID.get() : false;
-			// Remove SS if another SS is now assigned our tag, or this server was removed by deleting our tag entry
-			// Since TSS don't have tags, they check for their pair's tag. If a TSS is in quarantine, it will stick
-			// around until its pair is removed or it is finished quarantine.
+			// Remove SS if another SS is now assigned our tag, or this server was removed by deleting our tag
+			// entry Since TSS don't have tags, they check for their pair's tag. If a TSS is in quarantine, it
+			// will stick around until its pair is removed or it is finished quarantine.
 			if ((m.type == MutationRef::SetValue &&
 			     ((!data->isTss() && !matchesThisServer) || (data->isTss() && !matchesTssPair))) ||
 			    (m.type == MutationRef::ClearRange &&
@@ -9036,8 +9070,8 @@ private:
 			    .detail("PopVersion", popVersion)
 			    .detail("Status", status);
 
-			// Because of data moves, we can get mutations operating on a change feed we don't yet know about, because
-			// the metadata fetch hasn't started yet
+			// Because of data moves, we can get mutations operating on a change feed we don't yet know about,
+			// because the metadata fetch hasn't started yet
 			bool createdFeed = false;
 			bool popMutationLog = false;
 			bool addMutationToLog = false;
@@ -9072,15 +9106,15 @@ private:
 				data->keyChangeFeed.coalesce(changeFeedRange.contents());
 			} else if (feed != data->uidChangeFeed.end() && feed->second->removing && !feed->second->destroyed &&
 			           status != ChangeFeedStatus::CHANGE_FEED_DESTROY) {
-				// Because we got a private mutation for this change feed, the feed must have moved back after being
-				// moved away. Normally we would later find out about this via a fetch, but in the particular case where
-				// the private mutation is the creation of the change feed, and the following race occurred, we must
-				// refresh it here:
-				// 1. This SS found out about the feed from a fetch, from a SS with a higher version that already got
-				// the feed create mutation
+				// Because we got a private mutation for this change feed, the feed must have moved back after
+				// being moved away. Normally we would later find out about this via a fetch, but in the
+				// particular case where the private mutation is the creation of the change feed, and the
+				// following race occurred, we must refresh it here:
+				// 1. This SS found out about the feed from a fetch, from a SS with a higher version that
+				// already got the feed create mutation
 				// 2. The shard was moved away
-				// 3. The shard was moved back, and this SS fetched change feed metadata from a different SS that did
-				// not yet recieve the private mutation, so the feed was not refreshed
+				// 3. The shard was moved back, and this SS fetched change feed metadata from a different SS
+				// that did not yet recieve the private mutation, so the feed was not refreshed
 				// 4. This SS gets the private mutation, the feed is still marked as removing
 				TraceEvent(SevDebug, "ResetChangeFeedInfoFromPrivateMutation", data->thisServerID)
 				    .detail("FeedID", changeFeedId)
@@ -9108,8 +9142,8 @@ private:
 					}
 					if (feed->second->storageVersion != invalidVersion) {
 						++data->counters.kvSystemClearRanges;
-						// do this clear in the mutation log, as we want it to be committed consistently with the
-						// popVersion update
+						// do this clear in the mutation log, as we want it to be committed consistently with
+						// the popVersion update
 						popMutationLog = true;
 						if (popVersion > feed->second->storageVersion) {
 							feed->second->storageVersion = invalidVersion;
@@ -9117,7 +9151,8 @@ private:
 						}
 					}
 					if (!feed->second->destroyed) {
-						// if feed is destroyed, adding an extra mutation here would re-create it if SS restarted
+						// if feed is destroyed, adding an extra mutation here would re-create it if SS
+						// restarted
 						addMutationToLog = true;
 					}
 				}
@@ -9253,7 +9288,8 @@ private:
 			                 m.param1.removePrefix(systemKeys.begin).removePrefix(storageCachePrefix));
 			data->cachedRangeMap.insert(keys, true);
 
-			// Figure out the affected shard ranges and maintain the cached key-range information in the in-memory map
+			// Figure out the affected shard ranges and maintain the cached key-range information in the
+			// in-memory map
 			// TODO revisit- we are not splitting the cached ranges based on shards as of now.
 			if (0) {
 				auto cachedRanges = data->shards.intersectingRanges(keys);
@@ -9362,10 +9398,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of
 		// memory. This is often referred to as the storage server e-brake (emergency brake)
 
-		// We allow the storage server to make some progress between e-brake periods, referred to as "overage", in
-		// order to ensure that it advances desiredOldestVersion enough for updateStorage to make enough progress on
-		// freeing up queue size. We also increase these limits if speed up simulation was set IF they were buggified to
-		// a very small value.
+		// We allow the storage server to make some progress between e-brake periods, referred to as "overage",
+		// in order to ensure that it advances desiredOldestVersion enough for updateStorage to make enough
+		// progress on freeing up queue size. We also increase these limits if speed up simulation was set IF
+		// they were buggified to a very small value.
 		state int64_t hardLimit = SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES;
 		state int64_t hardLimitOverage = SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES_OVERAGE;
 		if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
@@ -9465,7 +9501,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		state bool collectingCipherKeys = false;
 
 		// Collect eager read keys.
-		// If encrypted mutation is encountered, we collect cipher details and fetch cipher keys, then start over.
+		// If encrypted mutation is encountered, we collect cipher details and fetch cipher keys, then start
+		// over.
 		loop {
 			state uint64_t changeCounter = data->shardChangeCounter;
 			bool epochEnd = false;
@@ -9540,15 +9577,15 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				collectingCipherKeys = false;
 				eager = UpdateEagerReadInfo(enableClearRangeEagerReads);
 			} else {
-				// Any fetchKeys which are ready to transition their shards to the adding,transferred state do so now.
-				// If there is an epoch end we skip this step, to increase testability and to prevent inserting a
-				// version in the middle of a rolled back version range.
+				// Any fetchKeys which are ready to transition their shards to the adding,transferred state do
+				// so now. If there is an epoch end we skip this step, to increase testability and to prevent
+				// inserting a version in the middle of a rolled back version range.
 				while (!hasPrivateData && !epochEnd && !data->readyFetchKeys.empty()) {
 					auto fk = data->readyFetchKeys.back();
 					data->readyFetchKeys.pop_back();
 					fk.send(&fii);
-					// fetchKeys() would put the data it fetched into the fii. The thread will not return back to this
-					// actor until it was completed.
+					// fetchKeys() would put the data it fetched into the fii. The thread will not return back
+					// to this actor until it was completed.
 				}
 
 				for (auto& c : fii.changes)
@@ -9557,11 +9594,11 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				wait(doEagerReads(data, &eager));
 				if (data->shardChangeCounter == changeCounter)
 					break;
-				CODE_PROBE(
-				    true,
-				    "A fetchKeys completed while we were doing this, so eager might be outdated.  Read it again.");
-				// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the reads
-				// only selectively
+				CODE_PROBE(true,
+				           "A fetchKeys completed while we were doing this, so eager might be outdated.  Read "
+				           "it again.");
+				// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the
+				// reads only selectively
 				eager = UpdateEagerReadInfo(enableClearRangeEagerReads);
 				cloneCursor2 = cursor->cloneNoMore();
 			}
@@ -9671,8 +9708,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 				Span span("SS:update"_loc, spanContext);
 
-				// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS in
-				// quarantine.
+				// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a
+				// TSS in quarantine.
 				if (g_network->isSimulated() && data->isTss() && !g_simulator->speedUpSimulation &&
 				    g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations &&
 				    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now() &&
@@ -9931,8 +9968,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		state Version desiredVersion = data->desiredOldestVersion.get();
 		state int64_t bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES;
 
-		// Clean up stale checkpoint requests, this is not supposed to happen, since checkpoints are cleaned up on
-		// failures. This is kept as a safeguard.
+		// Clean up stale checkpoint requests, this is not supposed to happen, since checkpoints are cleaned up
+		// on failures. This is kept as a safeguard.
 		while (!data->pendingCheckpoints.empty() && data->pendingCheckpoints.begin()->first <= startOldestVersion) {
 			for (int idx = 0; idx < data->pendingCheckpoints.begin()->second.size(); ++idx) {
 				auto& metaData = data->pendingCheckpoints.begin()->second[idx];
@@ -10012,9 +10049,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			if (data->tenantMap.getLatestVersion() < newOldestVersion) {
 				data->tenantMap.createNewVersion(newOldestVersion);
 			}
-			// We want to forget things from these data structures atomically with changing oldestVersion (and "before",
-			// since oldestVersion.set() may trigger waiting actors) forgetVersionsBeforeAsync visibly forgets
-			// immediately (without waiting) but asynchronously frees memory.
+			// We want to forget things from these data structures atomically with changing oldestVersion (and
+			// "before", since oldestVersion.set() may trigger waiting actors) forgetVersionsBeforeAsync visibly
+			// forgets immediately (without waiting) but asynchronously frees memory.
 			Future<Void> finishedForgetting =
 			    data->mutableData().forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage) &&
 			    data->tenantMap.forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage);
@@ -10073,8 +10110,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 					auto cleanupPending = data->changeFeedCleanupDurable.find(info->second->id);
 					if (cleanupPending != data->changeFeedCleanupDurable.end() &&
 					    cleanupPending->second <= newOldestVersion) {
-						// due to a race, we just applied a cleanup mutation, but feed updates happen just after. Don't
-						// write any mutations for this feed.
+						// due to a race, we just applied a cleanup mutation, but feed updates happen just
+						// after. Don't write any mutations for this feed.
 						curFeed++;
 						continue;
 					}
@@ -10088,8 +10125,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 					data->storage.writeKeyValue(
 					    KeyValueRef(changeFeedDurableKey(info->second->id, it.version),
 					                changeFeedDurableValue(it.mutations, it.knownCommittedVersion)));
-					// FIXME: there appears to be a bug somewhere where the exact same mutation appears twice in a row
-					// in the stream. We should fix this assert to be strictly > and re-enable it
+					// FIXME: there appears to be a bug somewhere where the exact same mutation appears twice in
+					// a row in the stream. We should fix this assert to be strictly > and re-enable it
 					ASSERT(it.version >= info->second->storageVersion);
 					info->second->storageVersion = it.version;
 					durableChangeFeedMutations++;
@@ -10102,9 +10139,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				if (alreadyFetched > info->second->storageVersion) {
 					info->second->storageVersion = std::min(alreadyFetched, newOldestVersion);
 					if (alreadyFetched > info->second->storageVersion) {
-						// This change feed still has pending mutations fetched and written to storage that are higher
-						// than the new durableVersion. To ensure its storage and durable version get updated, we need
-						// to add it back to fetchingChangeFeeds
+						// This change feed still has pending mutations fetched and written to storage that are
+						// higher than the new durableVersion. To ensure its storage and durable version get
+						// updated, we need to add it back to fetchingChangeFeeds
 						data->fetchingChangeFeeds.insert(info->first);
 					}
 				}
@@ -10183,10 +10220,10 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			CODE_PROBE(true, "SS rebooting after durable");
 			// To avoid brokenPromise error, which is caused by the sender of the durableInProgress (i.e., this
 			// process) never sets durableInProgress, we should set durableInProgress before send the
-			// please_reboot() error. Otherwise, in the race situation when storage server receives both reboot and
-			// brokenPromise of durableInProgress, the worker of the storage server will die.
-			// We will eventually end up with no worker for storage server role.
-			// The data distributor's buildTeam() will get stuck in building a team
+			// please_reboot() error. Otherwise, in the race situation when storage server receives both reboot
+			// and brokenPromise of durableInProgress, the worker of the storage server will die. We will
+			// eventually end up with no worker for storage server role. The data distributor's buildTeam() will
+			// get stuck in building a team
 			durableInProgress.sendError(please_reboot());
 			throw please_reboot();
 		}
@@ -10209,8 +10246,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		curFeed = 0;
 		while (curFeed < feedFetchVersions.size()) {
 			auto info = data->uidChangeFeed.find(feedFetchVersions[curFeed].first);
-			// Don't update if the feed is pending cleanup. Either it will get cleaned up and destroyed, or it will get
-			// fetched again, where the fetch version will get reset.
+			// Don't update if the feed is pending cleanup. Either it will get cleaned up and destroyed, or it
+			// will get fetched again, where the fetch version will get reset.
 			if (info != data->uidChangeFeed.end() && !data->changeFeedCleanupDurable.count(info->second->id)) {
 				if (feedFetchVersions[curFeed].second > info->second->durableFetchVersion.get()) {
 					info->second->durableFetchVersion.set(feedFetchVersions[curFeed].second);
@@ -10255,13 +10292,13 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		data->counters.changeFeedMutationsDurable += durableChangeFeedMutations;
 
 		durableInProgress.send(Void());
-		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server to
-		                                             // shut down, so delay to check for cancellation
+		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server
+		                                             // to shut down, so delay to check for cancellation
 
-		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was
-		// effective and are applied after we change the durable version. Also ensure that we have to lock while
-		// calling changeDurableVersion, because otherwise the latest version of mutableData might be partially
-		// loaded.
+		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit
+		// was effective and are applied after we change the durable version. Also ensure that we have to lock
+		// while calling changeDurableVersion, because otherwise the latest version of mutableData might be
+		// partially loaded.
 		state double beforeSSDurableVersionUpdate = now();
 		wait(data->durableVersionLock.take());
 		data->popVersion(data->storageMinRecoverVersion + 1);
@@ -10587,8 +10624,8 @@ ACTOR Future<Void> restoreByteSample(StorageServer* data,
 	wait(delay(SERVER_KNOBS->BYTE_SAMPLE_START_DELAY));
 
 	size_t bytes_per_fetch = 0;
-	// Since the expected size also includes (as of now) the space overhead of the container, we calculate our own
-	// number here
+	// Since the expected size also includes (as of now) the space overhead of the container, we calculate our
+	// own number here
 	for (auto& it : byteSampleSample) {
 		for (auto& kv : it) {
 			bytes_per_fetch += BinaryReader::fromStringRef<int32_t>(kv.value, Unversioned());
@@ -10688,9 +10725,9 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		data->bytesRestored += fssPairID.get().expectedSize();
 	}
 
-	// It's a bit sketchy to rely on an untrusted storage engine to persist its quarantine state when the quarantine
-	// state means the storage engine already had a durability or correctness error, but it should get
-	// re-quarantined very quickly because of a mismatch if it starts trying to do things again
+	// It's a bit sketchy to rely on an untrusted storage engine to persist its quarantine state when the
+	// quarantine state means the storage engine already had a durability or correctness error, but it should
+	// get re-quarantined very quickly because of a mismatch if it starts trying to do things again
 	if (fTssQuarantine.get().present()) {
 		CODE_PROBE(true, "TSS restarted while quarantined", probe::decoration::rare);
 		data->tssInQuarantine = true;
@@ -10987,20 +11024,20 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 					when(StorageMetrics c = waitNext(change.getFuture())) {
 						metrics += c;
 
-						// SOMEDAY: validation! The changes here are possibly partial changes (we receive multiple
-						// messages per
-						//  update to our requested range). This means that the validation would have to occur after
-						//  all the messages for one clear or set have been dispatched.
+						// SOMEDAY: validation! The changes here are possibly partial changes (we receive
+						// multiple messages per
+						//  update to our requested range). This means that the validation would have to occur
+						//  after all the messages for one clear or set have been dispatched.
 
 						/*StorageMetrics m = getMetrics( data, req.keys );
 						  bool b = ( m.bytes != metrics.bytes || m.bytesWrittenPerKSecond !=
 						  metrics.bytesWrittenPerKSecond
-						  || m.iosPerKSecond != metrics.iosPerKSecond ); if (b) { printf("keys: '%s' - '%s' @%p\n",
-						  printable(req.keys.begin).c_str(), printable(req.keys.end).c_str(), this);
-						  printf("waitMetrics: desync %d (%lld %lld %lld) != (%lld %lld %lld); +(%lld %lld %lld)\n",
-						  b, m.bytes, m.bytesWrittenPerKSecond, m.iosPerKSecond, metrics.bytes,
-						  metrics.bytesWrittenPerKSecond, metrics.iosPerKSecond, c.bytes, c.bytesWrittenPerKSecond,
-						  c.iosPerKSecond);
+						  || m.iosPerKSecond != metrics.iosPerKSecond ); if (b) { printf("keys: '%s' - '%s'
+						  @%p\n", printable(req.keys.begin).c_str(), printable(req.keys.end).c_str(), this);
+						  printf("waitMetrics: desync %d (%lld %lld %lld) != (%lld %lld %lld); +(%lld %lld
+						  %lld)\n", b, m.bytes, m.bytesWrittenPerKSecond, m.iosPerKSecond, metrics.bytes,
+						  metrics.bytesWrittenPerKSecond, metrics.iosPerKSecond, c.bytes,
+						  c.bytesWrittenPerKSecond, c.iosPerKSecond);
 
 						  }*/
 					}
@@ -11008,8 +11045,8 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled)
-					throw; // This is only cancelled when the main loop had exited...no need in this case to clean
-					       // up self
+					throw; // This is only cancelled when the main loop had exited...no need in this case to
+					       // clean up self
 				error = e;
 				break;
 			}
@@ -11222,8 +11259,8 @@ ACTOR Future<Void> serveGetMappedKeyValuesRequests(StorageServer* self,
 	loop {
 		GetMappedKeyValuesRequest req = waitNext(getMappedKeyValues);
 
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
-		// before doing real work
+		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
+		// downgrade before doing real work
 		self->actors.add(self->readGuard(req, getMappedKeyValuesQ));
 	}
 }
@@ -11505,8 +11542,8 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 						self->popVersion(self->storageMinRecoverVersion + 1, true);
 					}
 					// If update() is waiting for results from the tlog, it might never get them, so needs to be
-					// cancelled.  But if it is waiting later, cancelling it could cause problems (e.g. fetchKeys
-					// that already committed to transitioning to waiting state)
+					// cancelled.  But if it is waiting later, cancelling it could cause problems (e.g.
+					// fetchKeys that already committed to transitioning to waiting state)
 					if (!updateReceived) {
 						doUpdate = Void();
 					}
@@ -11602,12 +11639,12 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData, Error const& e) {
 	self.shuttingDown = true;
 
-	// Clearing shards shuts down any fetchKeys actors; these may do things on cancellation that are best done with
-	// self still valid
+	// Clearing shards shuts down any fetchKeys actors; these may do things on cancellation that are best done
+	// with self still valid
 	self.addShard(ShardInfo::newNotAssigned(allKeys));
 
-	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise
-	// just close it.
+	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.
+	// Otherwise just close it.
 	if (e.code() == error_code_please_reboot) {
 		// do nothing.
 	} else if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
