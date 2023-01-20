@@ -6339,7 +6339,10 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> tryReadBlobGranules(Tra
 	loop {
 		try {
 			Standalone<VectorRef<BlobGranuleChunkRef>> chunks = wait(tr->readBlobGranules(keys, 0, readVersion));
-			TraceEvent(SevDebug, "ReadBlobGranules").detail("Keys", keys).detail("Chunks", chunks.size());
+			TraceEvent(SevDebug, "ReadBlobGranules")
+			    .detail("Keys", keys)
+			    .detail("Chunks", chunks.size())
+			    .detail("FetchVersion", fetchVersion);
 			return chunks;
 		} catch (Error& e) {
 			if (retryCount >= maxRetryCount) {
@@ -6372,7 +6375,10 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 		for (i = 0; i < chunks.size(); ++i) {
 			state KeyRangeRef chunkRange = chunks[i].keyRange;
 			state RangeResult rows = wait(readBlobGranule(chunks[i], keys, 0, fetchVersion, blobConn));
-			TraceEvent(SevDebug, "ReadBlobData").detail("Rows", rows.size()).detail("ChunkRange", chunkRange);
+			TraceEvent(SevDebug, "ReadBlobData")
+			    .detail("Rows", rows.size())
+			    .detail("ChunkRange", chunkRange)
+			    .detail("FetchVersion", fetchVersion);
 			if (rows.size() == 0) {
 				rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
 			}
@@ -7298,12 +7304,13 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold;
 			if (isFullRestore) {
-				std::pair<KeyRange, BlobRestoreStatus> rangeStatus = wait(getRestoreRangeStatus(data->cx, keys));
+				state std::pair<KeyRange, BlobRestoreStatus> rangeStatus = wait(getRestoreRangeStatus(data->cx, keys));
 				// Read from blob only when it's copying data for full restore. Otherwise it may cause data corruptions
 				// e.g we don't want to copy from blob any more when it's applying mutation logs(APPLYING_MLOGS)
 				if (rangeStatus.second.phase == BlobRestorePhase::COPYING_DATA ||
 				    rangeStatus.second.phase == BlobRestorePhase::ERROR) {
-					hold = tryGetRangeFromBlob(results, &tr, rangeStatus.first, fetchVersion, data->blobConn);
+					Version targetVersion = wait(getRestoreTargetVersion(data->cx, keys, fetchVersion));
+					hold = tryGetRangeFromBlob(results, &tr, rangeStatus.first, targetVersion, data->blobConn);
 				} else {
 					hold = tryGetRange(results, &tr, keys);
 				}

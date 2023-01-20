@@ -412,7 +412,7 @@ public:
 	Future<Version> verifyBlobRange(const KeyRange& range,
 	                                Optional<Version> version,
 	                                Optional<TenantName> tenantName = {});
-	Future<bool> blobRestore(const KeyRange range);
+	Future<bool> blobRestore(const KeyRange range, Optional<Version> version);
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
