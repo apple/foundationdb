@@ -91,7 +91,7 @@ public: // Internal use only
 
 class ThreadSafeTenant : public ITenant, ThreadSafeReferenceCounted<ThreadSafeTenant>, NonCopyable {
 public:
-	ThreadSafeTenant(Reference<ThreadSafeDatabase> db, StringRef name);
+	ThreadSafeTenant(Reference<ThreadSafeDatabase> db, TenantName name);
 	~ThreadSafeTenant() override;
 
 	Reference<ITransaction> createTransaction() override;
