@@ -65,9 +65,6 @@ public:
 
 	virtual ~IPageEncryptionKeyProvider() = default;
 
-	// Expected encoding type being used with the encryption key provider.
-	virtual EncodingType expectedEncodingType() const = 0;
-
 	// Checks whether encryption should be enabled. If not, the encryption key provider will not be used by
 	// the pager, and instead the default non-encrypted encoding type (XXHash64) is used.
 	virtual bool enableEncryption() const = 0;
@@ -92,9 +89,6 @@ public:
 	// Get encryption domain from a key. Return the domain id, and the size of the encryption domain prefix.
 	virtual std::tuple<int64_t, size_t> getEncryptionDomain(const KeyRef& key) { throw not_implemented(); }
 
-	// Get encryption domain of a page given encoding header.
-	virtual int64_t getEncryptionDomainIdFromHeader(const void* encodingHeader) { throw not_implemented(); }
-
 	// Helper methods.
 
 	// Check if a key fits in an encryption domain.
@@ -113,7 +107,6 @@ public:
 class NullKeyProvider : public IPageEncryptionKeyProvider {
 public:
 	virtual ~NullKeyProvider() {}
-	EncodingType expectedEncodingType() const override { return EncodingType::XXHash64; }
 	bool enableEncryption() const override { return false; }
 };
 
@@ -137,15 +130,12 @@ public:
 
 	virtual ~XOREncryptionKeyProvider_TestOnly() {}
 
-	EncodingType expectedEncodingType() const override { return EncodingType::XOREncryption_TestOnly; }
-
 	bool enableEncryption() const override { return true; }
 
-	Future<EncryptionKey> getEncryptionKey(const void* encodingHeader) override {
-
-		const EncodingHeader* h = reinterpret_cast<const EncodingHeader*>(encodingHeader);
+	Future<EncryptionKey> getEncryptionKey(const void* encryptionHeader) override {
+		const uint8_t* xorKey = reinterpret_cast<const uint8_t*>(encryptionHeader);
 		EncryptionKey s;
-		s.xorKey = h->xorKey;
+		s.xorKey = *xorKey;
 		s.xorWith = xorWith;
 		return s;
 	}
@@ -162,9 +152,6 @@ public:
 
 // Key provider to provider cipher keys randomly from a pre-generated pool. It does not maintain encryption domains.
 // Use for testing.
-template <EncodingType encodingType,
-          typename std::enable_if<encodingType == AESEncryption || encodingType == AESEncryptionWithAuth, bool>::type =
-              true>
 class RandomEncryptionKeyProvider : public IPageEncryptionKeyProvider {
 public:
 	enum EncryptionDomainMode : unsigned int {
@@ -186,20 +173,16 @@ public:
 	}
 	virtual ~RandomEncryptionKeyProvider() = default;
 
-	EncodingType expectedEncodingType() const override { return encodingType; }
-
 	bool enableEncryption() const override { return true; }
 
 	bool enableEncryptionDomain() const override { return mode > 1; }
 
 	Future<EncryptionKey> getEncryptionKey(const void* encodingHeader) override {
-		using Header = typename ArenaPage::AESEncryptionEncoder<encodingType>::Header;
-		const Header* h = reinterpret_cast<const Header*>(encodingHeader);
+		const BlobCipherEncryptHeader* h = reinterpret_cast<const BlobCipherEncryptHeader*>(encodingHeader);
 		EncryptionKey s;
-		s.aesKey.cipherTextKey =
-		    getCipherKey(h->encryption.cipherTextDetails.encryptDomainId, h->encryption.cipherTextDetails.baseCipherId);
-		s.aesKey.cipherHeaderKey = getCipherKey(h->encryption.cipherHeaderDetails.encryptDomainId,
-		                                        h->encryption.cipherHeaderDetails.baseCipherId);
+		s.aesKey.cipherTextKey = getCipherKey(h->cipherTextDetails.encryptDomainId, h->cipherTextDetails.baseCipherId);
+		s.aesKey.cipherHeaderKey =
+		    getCipherKey(h->cipherHeaderDetails.encryptDomainId, h->cipherHeaderDetails.baseCipherId);
 		return s;
 	}
 
@@ -223,13 +206,6 @@ public:
 			domainId = checkDomainId(static_cast<int64_t>(*reinterpret_cast<const int32_t*>(key.begin())));
 		}
 		return { domainId, (domainId == getDefaultEncryptionDomainId() ? 0 : PREFIX_LENGTH) };
-	}
-
-	int64_t getEncryptionDomainIdFromHeader(const void* encodingHeader) override {
-		ASSERT(encodingHeader != nullptr);
-		using Header = typename ArenaPage::AESEncryptionEncoder<encodingType>::Header;
-		const Header* h = reinterpret_cast<const Header*>(encodingHeader);
-		return h->encryption.cipherTextDetails.encryptDomainId;
 	}
 
 private:
@@ -281,20 +257,13 @@ private:
 
 // Key provider which extract tenant id from range key prefixes, and fetch tenant specific encryption keys from
 // EncryptKeyProxy.
-template <EncodingType encodingType,
-          typename std::enable_if<encodingType == AESEncryption || encodingType == AESEncryptionWithAuth, bool>::type =
-              true>
 class TenantAwareEncryptionKeyProvider : public IPageEncryptionKeyProvider {
 public:
-	using EncodingHeader = typename ArenaPage::AESEncryptionEncoder<encodingType>::Header;
-
 	const StringRef systemKeysPrefix = systemKeys.begin;
 
 	TenantAwareEncryptionKeyProvider(Reference<AsyncVar<ServerDBInfo> const> db) : db(db) {}
 
 	virtual ~TenantAwareEncryptionKeyProvider() = default;
-
-	EncodingType expectedEncodingType() const override { return encodingType; }
 
 	bool enableEncryption() const override {
 		return isEncryptionOpSupported(EncryptOperationType::STORAGE_SERVER_ENCRYPTION);
@@ -304,9 +273,9 @@ public:
 
 	ACTOR static Future<EncryptionKey> getEncryptionKey(TenantAwareEncryptionKeyProvider* self,
 	                                                    const void* encodingHeader) {
-		const BlobCipherEncryptHeader& header = reinterpret_cast<const EncodingHeader*>(encodingHeader)->encryption;
+		const BlobCipherEncryptHeader* header = reinterpret_cast<const BlobCipherEncryptHeader*>(encodingHeader);
 		TextAndHeaderCipherKeys cipherKeys =
-		    wait(getEncryptCipherKeys(self->db, header, BlobCipherMetrics::KV_REDWOOD));
+		    wait(getEncryptCipherKeys(self->db, *header, BlobCipherMetrics::KV_REDWOOD));
 		EncryptionKey encryptionKey;
 		encryptionKey.aesKey = cipherKeys;
 		return encryptionKey;
@@ -352,12 +321,6 @@ public:
 			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
 		}
 		return { tenantId, TenantAPI::PREFIX_SIZE };
-	}
-
-	int64_t getEncryptionDomainIdFromHeader(const void* encodingHeader) override {
-		ASSERT(encodingHeader != nullptr);
-		const BlobCipherEncryptHeader& header = reinterpret_cast<const EncodingHeader*>(encodingHeader)->encryption;
-		return header.cipherTextDetails.encryptDomainId;
 	}
 
 private:

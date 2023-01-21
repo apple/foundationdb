@@ -1880,14 +1880,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
 
-				Reference<IPageEncryptionKeyProvider> encryptionKeyProvider;
-				if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
-					encryptionKeyProvider =
-					    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryptionWithAuth>>(dbInfo);
-				} else {
-					encryptionKeyProvider =
-					    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryption>>(dbInfo);
-				}
+				Reference<IPageEncryptionKeyProvider> encryptionKeyProvider =
+				    makeReference<TenantAwareEncryptionKeyProvider>(dbInfo);
 				IKeyValueStore* kv = openKVStore(
 				    s.storeType,
 				    s.filename,
@@ -2573,15 +2567,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                   folder,
 					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
-					Reference<IPageEncryptionKeyProvider> encryptionKeyProvider;
-					if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
-						encryptionKeyProvider =
-						    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryptionWithAuth>>(
-						        dbInfo);
-					} else {
-						encryptionKeyProvider =
-						    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryption>>(dbInfo);
-					}
+					Reference<IPageEncryptionKeyProvider> encryptionKeyProvider =
+					    makeReference<TenantAwareEncryptionKeyProvider>(dbInfo);
 					IKeyValueStore* data = openKVStore(
 					    req.storeType,
 					    filename,

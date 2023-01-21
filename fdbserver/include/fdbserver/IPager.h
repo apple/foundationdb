@@ -102,6 +102,20 @@ enum EncodingType : uint8_t {
 	MAX_ENCODING_TYPE = 4
 };
 
+inline bool isEncodingTypeAESEncrypted(EncodingType encodingType) {
+	return encodingType == EncodingType::AESEncryption || encodingType == EncodingType::AESEncryptionWithAuth;
+}
+
+inline bool isSameEncryptionType(EncodingType t1, EncodingType t2) {
+	auto encryptionType = [](EncodingType encodingType) -> EncodingType {
+		if (encodingType == EncodingType::AESEncryptionWithAuth) {
+			return EncodingType::AESEncryption;
+		}
+		return encodingType;
+	};
+	return encryptionType(t1) == encryptionType(t2);
+}
+
 enum PageType : uint8_t {
 	HeaderPage = 0,
 	BackupHeaderPage = 1,
@@ -343,6 +357,10 @@ public:
 			uint8_t xorKey;
 		};
 
+		static const void* getEncryptionHeader(const void* header) {
+			return &reinterpret_cast<const Header*>(header)->xorKey;
+		}
+
 		static void encode(void* header,
 		                   const EncryptionKey& encryptionKey,
 		                   uint8_t* payload,
@@ -392,6 +410,10 @@ public:
 		using Header = typename std::conditional<encodingType == AESEncryption,
 		                                         AESEncryptionEncodingHeader,
 		                                         AESEncryptionWithAuthEncodingHeader>::type;
+
+		static const void* getEncryptionHeader(const void* header) {
+			return &reinterpret_cast<const Header*>(header)->encryption;
+		}
 
 		static void encode(void* header,
 		                   const TextAndHeaderCipherKeys& cipherKeys,
@@ -634,8 +656,20 @@ public:
 		return cipherKey->getDomainId();
 	}
 
-	// Return pointer to encoding header.
-	const void* getEncodingHeader() const { return encodingHeaderAvailable ? page->getEncodingHeader() : nullptr; }
+	// Return pointer to encryption header.
+	const void* getEncryptionHeader() const {
+		switch (page->encodingType) {
+		case EncodingType::AESEncryption:
+			return AESEncryptionEncoder<AESEncryption>::getEncryptionHeader(page->getEncodingHeader());
+		case EncodingType::AESEncryptionWithAuth:
+			return AESEncryptionEncoder<AESEncryptionWithAuth>::getEncryptionHeader(page->getEncodingHeader());
+		case EncodingType::XOREncryption_TestOnly:
+			return XOREncryptionEncoder::getEncryptionHeader(page->getEncodingHeader());
+		default:
+			ASSERT(false);
+			return nullptr;
+		}
+	}
 
 private:
 	Arena arena;

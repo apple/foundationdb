@@ -2812,7 +2812,7 @@ public:
 		try {
 			page->postReadHeader(pageID);
 			if (page->isEncrypted()) {
-				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
+				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncryptionHeader()));
 				page->encryptionKey = k;
 			}
 			page->postReadPayload(pageID);
@@ -2880,7 +2880,7 @@ public:
 		try {
 			page->postReadHeader(pageIDs.front());
 			if (page->isEncrypted()) {
-				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
+				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncryptionHeader()));
 				page->encryptionKey = k;
 			}
 			page->postReadPayload(pageIDs.front());
@@ -6148,7 +6148,7 @@ private:
 		metrics.pageReadExt += (id.size() - 1);
 
 		// If BTree encryption is enabled, pages read must be encrypted using the desired encryption type
-		if (self->m_enforceEncodingType && (page->getEncodingType() != self->m_encodingType)) {
+		if (self->m_enforceEncodingType && !isSameEncryptionType(page->getEncodingType(), self->m_encodingType)) {
 			Error e = unexpected_encoding_type();
 			TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
 			    .error(e)
@@ -7879,7 +7879,6 @@ public:
 		if (encryptionKeyProvider && encryptionKeyProvider->enableEncryption()) {
 			encodingType = FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED ? EncodingType::AESEncryptionWithAuth
 			                                                             : EncodingType::AESEncryption;
-			ASSERT_EQ(encodingType, encryptionKeyProvider->expectedEncodingType());
 			m_keyProvider = encryptionKeyProvider;
 		} else if (g_allowXOREncryptionInSimulation && g_network->isSimulated() && logID.hash() % 2 == 0) {
 			// Simulation only. Deterministically enable encryption based on uid
@@ -9945,8 +9944,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	    params.getInt("encodingType").orDefault(deterministicRandom()->randomInt(0, EncodingType::MAX_ENCODING_TYPE));
 	state unsigned int encryptionDomainMode =
 	    params.getInt("domainMode")
-	        .orDefault(deterministicRandom()->randomInt(
-	            0, RandomEncryptionKeyProvider<AESEncryption>::EncryptionDomainMode::MAX));
+	        .orDefault(deterministicRandom()->randomInt(0, RandomEncryptionKeyProvider::EncryptionDomainMode::MAX));
 	state int pageSize =
 	    shortTest ? 250 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(250, 400));
 	state int extentSize =
@@ -9999,12 +9997,9 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 	state EncodingType encodingType = static_cast<EncodingType>(encoding);
 	state Reference<IPageEncryptionKeyProvider> keyProvider;
-	if (encodingType == EncodingType::AESEncryption) {
-		keyProvider = makeReference<RandomEncryptionKeyProvider<AESEncryption>>(
-		    RandomEncryptionKeyProvider<AESEncryption>::EncryptionDomainMode(encryptionDomainMode));
-	} else if (encodingType == EncodingType::AESEncryptionWithAuth) {
-		keyProvider = makeReference<RandomEncryptionKeyProvider<AESEncryptionWithAuth>>(
-		    RandomEncryptionKeyProvider<AESEncryptionWithAuth>::EncryptionDomainMode(encryptionDomainMode));
+	if (isEncodingTypeAESEncrypted(encodingType)) {
+		keyProvider = makeReference<RandomEncryptionKeyProvider>(
+		    RandomEncryptionKeyProvider::EncryptionDomainMode(encryptionDomainMode));
 	} else if (encodingType == EncodingType::XOREncryption_TestOnly) {
 		keyProvider = makeReference<XOREncryptionKeyProvider_TestOnly>(file);
 	}
@@ -11348,13 +11343,12 @@ void setAuthMode(EncodingType encodingType) {
 } // anonymous namespace
 
 TEST_CASE("/redwood/correctness/EnforceEncodingType") {
-	state const std::vector<std::pair<EncodingType, EncodingType>> testCases = {
-		{ XXHash64, AESEncryption }, { AESEncryption, AESEncryptionWithAuth }
-	};
+	state const std::vector<std::pair<EncodingType, EncodingType>> testCases = { { XXHash64, AESEncryption },
+		                                                                         { XXHash64, AESEncryptionWithAuth } };
 	state const std::map<EncodingType, Reference<IPageEncryptionKeyProvider>> encryptionKeyProviders = {
 		{ XXHash64, makeReference<NullKeyProvider>() },
-		{ AESEncryption, makeReference<RandomEncryptionKeyProvider<AESEncryption>>() },
-		{ AESEncryptionWithAuth, makeReference<RandomEncryptionKeyProvider<AESEncryptionWithAuth>>() }
+		{ AESEncryption, makeReference<RandomEncryptionKeyProvider>() },
+		{ AESEncryptionWithAuth, makeReference<RandomEncryptionKeyProvider>() }
 	};
 	state IKeyValueStore* kvs = nullptr;
 	g_allowXOREncryptionInSimulation = false;
