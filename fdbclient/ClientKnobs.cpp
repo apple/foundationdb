@@ -296,6 +296,10 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CLIENT_ENABLE_USING_CLUSTER_ID_KEY,     false );
 
 	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,     false );
+	init( ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION,          1 );
+	init( ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION,    1 );
+	init( ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION,    1 );
+
 	// clang-format on
 }
 

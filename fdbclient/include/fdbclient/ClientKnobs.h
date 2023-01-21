@@ -292,6 +292,9 @@ public:
 
 	// Encryption-at-rest
 	bool ENABLE_ENCRYPTION_CPU_TIME_LOGGING;
+	int ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION;
+	int ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION;
+	int ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

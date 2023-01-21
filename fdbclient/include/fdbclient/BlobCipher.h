@@ -19,6 +19,8 @@
  */
 #ifndef FDBCLIENT_BLOB_CIPHER_H
 #define FDBCLIENT_BLOB_CIPHER_H
+#include "flow/ObjectSerializerTraits.h"
+#include <cstring>
 #pragma once
 
 #include "fdbrpc/Stats.h"
@@ -180,6 +182,122 @@ struct hash<BlobCipherDetails> {
 };
 } // namespace std
 
+// forward declaration
+class BlobCipherKey;
+
+struct BlobCipherEncryptHeaderFlagsV1 {
+	uint8_t encryptMode;
+	uint8_t authTokenMode;
+	uint8_t authTokenAlgo;
+
+	static void fromStringRef(const StringRef& flagsRef, BlobCipherEncryptHeaderFlagsV1* ret) {
+		BinaryReader rd(flagsRef, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		rd >> *ret;
+	}
+
+	static StringRef toStringRef(const BlobCipherEncryptHeaderFlagsV1& flags, Arena& arena) {
+		BinaryWriter wr(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		wr.serializeBytes(&flags, sizeof(BlobCipherEncryptHeaderFlagsV1));
+		return wr.toValue(arena);
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar.serializeBytes(this, sizeof(BlobCipherEncryptHeaderFlagsV1));
+	}
+};
+
+// Encryption header is stored as plaintext on a persistent storage to assist reconstruction of cipher-key(s)
+// for reads. FIPS compliance recommendation is to leverage cryptographic digest mechanism to generate
+// 'authentication token' (crypto-secure) to protect against malicious tampering and/or bit rot/flip scenarios.
+//
+// Encryption header support two modes of generation 'authentication tokens':
+// 1) SingleAuthTokenMode: the scheme generates single crypto-secrure auth token to protect {cipherText +
+// header} payload. Scheme is geared towards optimizing cost due to crypto-secure auth-token generation,
+// however, on decryption client needs to be read 'header' + 'encrypted-buffer' to validate the 'auth-token'.
+// The scheme is ideal for usecases where payload represented by the encryptionHeader is not large and it is
+// desirable to minimize CPU/latency penalty due to crypto-secure ops, such as: CommitProxies encrypted inline
+// transactions, StorageServer encrypting pages etc.
+// SOMEDAY: Another potential scheme could be 'MultiAuthTokenMode': Scheme generates separate authTokens
+// for 'encrypted buffer' & 'encryption-header'. The scheme is ideal where payload represented by
+// encryptionHeader is large enough such that it is desirable to optimize cost of upfront reading full
+// 'encrypted buffer', compared to reading only encryptionHeader and ensuring its sanity; for instance:
+// backup-files.
+
+template <uint32_t S>
+struct AesCtrWithAuthV1 {
+	// Cipher text encryption information
+	BlobCipherDetails cipherTextDetails;
+	// Cipher header encryption information
+	BlobCipherDetails cipherHeaderDetails;
+	// Initialization vector used to encrypt the payload.
+	uint8_t iv[AES_256_IV_LENGTH];
+	// Authentication token
+	uint8_t authToken[S];
+
+	void setCipheTextDetails(const Reference<BlobCipherKey>& textCipherKey);
+	void setCipheHeaderDetails(const Reference<BlobCipherKey>&);
+
+	static StringRef toStringRef(const AesCtrWithAuthV1<S>& header, Arena& arena) {
+		BinaryWriter wr(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		wr.serializeBytes(&header, sizeof(AesCtrWithAuthV1<S>));
+		return wr.toValue(arena);
+	}
+
+	static void fromStringRef(const StringRef& headerRef, AesCtrWithAuthV1<S>* ret) {
+		BinaryReader rd(headerRef, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		rd >> *ret;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar.serializeBytes(this, sizeof(AesCtrWithAuthV1<S>));
+	}
+};
+
+struct AesCtrNoAuthV1 {
+	// Cipher text encryption information
+	BlobCipherDetails cipherTextDetails;
+	// Initialization vector used to encrypt the payload.
+	uint8_t iv[AES_256_IV_LENGTH];
+
+	void setCipheTextDetails(const Reference<BlobCipherKey>&);
+
+	static StringRef toStringRef(const AesCtrNoAuthV1& header, Arena& arena) {
+		BinaryWriter wr(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		wr.serializeBytes(&header, sizeof(AesCtrNoAuthV1));
+		return wr.toValue(arena);
+	}
+
+	static void fromStringRef(const StringRef& headerRef, AesCtrNoAuthV1* ret) {
+		BinaryReader rd(headerRef, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		rd >> *ret;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar.serializeBytes(this, sizeof(AesCtrNoAuthV1));
+	}
+};
+
+template <uint32_t S>
+struct BlobCipherEncryptHeaderAesWithAuthV1 {
+	BlobCipherEncryptHeaderFlagsV1 flags;
+	AesCtrWithAuthV1<S> algoHeader;
+};
+
+struct BlobCipherEncryptHeaderRef {
+	// Serializable fields
+	uint16_t headerVersion;
+	StringRef flagsRef;
+	StringRef algoHeaderRef;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, headerVersion, flagsRef, algoHeaderRef);
+	};
+};
+
 // BlobCipher Encryption header format
 // This header is persisted along with encrypted buffer, it contains information necessary
 // to assist decrypting the buffers to serve read requests.
@@ -209,9 +327,9 @@ typedef struct BlobCipherEncryptHeader {
 	// Initialization vector used to encrypt the payload.
 	uint8_t iv[AES_256_IV_LENGTH];
 
-	// Encryption header is stored as plaintext on a persistent storage to assist reconstruction of cipher-key(s) for
-	// reads. FIPS compliance recommendation is to leverage cryptographic digest mechanism to generate 'authentication
-	// token' (crypto-secure) to protect against malicious tampering and/or bit rot/flip scenarios.
+	// Encryption header is stored as plaintext on a persistent storage to assist reconstruction of cipher-key(s)
+	// for reads. FIPS compliance recommendation is to leverage cryptographic digest mechanism to generate
+	// 'authentication token' (crypto-secure) to protect against malicious tampering and/or bit rot/flip scenarios.
 
 	// Encryption header support two modes of generation 'authentication tokens':
 	// 1) SingleAuthTokenMode: the scheme generates single crypto-secrure auth token to protect {cipherText +
@@ -573,8 +691,27 @@ public:
 	                              const int plaintextLen,
 	                              BlobCipherEncryptHeader* header,
 	                              Arena&);
+	StringRef encrypt(const uint8_t*, const int, BlobCipherEncryptHeaderRef*, Arena&);
 
 private:
+	void updateEncryptHeader(const uint8_t*, const int, BlobCipherEncryptHeaderRef* headerRef, Arena& arena);
+	void updateEncryptHeaderFlagsV1(BlobCipherEncryptHeaderRef* headerRef,
+	                                BlobCipherEncryptHeaderFlagsV1* flags,
+	                                Arena& arena);
+	void setCipherAlgoHeaderV1(const uint8_t*,
+	                           const int,
+	                           const int,
+	                           const BlobCipherEncryptHeaderFlagsV1&,
+	                           BlobCipherEncryptHeaderRef*,
+	                           Arena&);
+	void setCipherAlgoHeaderNoAuthV1(const BlobCipherEncryptHeaderFlagsV1&, BlobCipherEncryptHeaderRef*, Arena&);
+	template <uint32_t S>
+	void setCipherAlgoHeaderWithAuthV1(const uint8_t*,
+	                                   const int,
+	                                   const BlobCipherEncryptHeaderFlagsV1&,
+	                                   BlobCipherEncryptHeaderRef*,
+	                                   Arena&);
+
 	EVP_CIPHER_CTX* ctx;
 	Reference<BlobCipherKey> textCipherKey;
 	Reference<BlobCipherKey> headerCipherKey;
@@ -601,11 +738,10 @@ public:
 	                              const int ciphertextLen,
 	                              const BlobCipherEncryptHeader& header,
 	                              Arena&);
-
-	// Enable caller to validate encryption header auth-token (if available) without needing to read the full encrypted
-	// payload. The call is NOP unless header.flags.authTokenMode == ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI.
-
-	void verifyHeaderAuthToken(const BlobCipherEncryptHeader& header, Arena& arena);
+	StringRef decrypt(const uint8_t* ciphertext,
+	                  const int ciphertextLen,
+	                  const BlobCipherEncryptHeaderRef& headerRef,
+	                  Arena&);
 
 private:
 	EVP_CIPHER_CTX* ctx;
@@ -614,6 +750,32 @@ private:
 	bool headerAuthTokenValidationDone;
 	bool authTokensValidationDone;
 	BlobCipherMetrics::UsageType usageType;
+
+	void validateEncryptHeader(const uint8_t*, const int, const BlobCipherEncryptHeaderRef&, Arena&);
+	void validateEncryptHeaderV1(const uint8_t*, const int, const BlobCipherEncryptHeaderRef&, Arena&);
+	void validateEncryptHeaderMetadataV1(const uint32_t, const BlobCipherEncryptHeaderFlagsV1&);
+	void validateAuthTokensV1(const uint8_t*,
+	                          const int,
+	                          const BlobCipherEncryptHeaderFlagsV1&,
+	                          const BlobCipherEncryptHeaderRef&,
+	                          Arena&);
+	void validateHeaderSingleAuthTokenV1(const uint8_t*,
+	                                     const int,
+	                                     const BlobCipherEncryptHeaderFlagsV1&,
+	                                     const BlobCipherEncryptHeaderRef&,
+	                                     Arena&);
+
+	template <uint32_t S>
+	void validateAuthTokenV1(const uint8_t* ciphertext,
+	                         const int ciphertextLen,
+	                         const BlobCipherEncryptHeaderFlagsV1&,
+	                         const BlobCipherEncryptHeaderRef& header,
+	                         Arena& arena);
+
+	void validateHeaderSingleAuthToken(const uint8_t* ciphertext,
+	                                   const int ciphertextLen,
+	                                   const BlobCipherEncryptHeaderRef& header,
+	                                   Arena& arena);
 
 	void verifyEncryptHeaderMetadata(const BlobCipherEncryptHeader& header);
 	void verifyAuthTokens(const uint8_t* ciphertext,
