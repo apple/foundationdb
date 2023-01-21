@@ -36,7 +36,7 @@ struct BulkSetupWorkload : TestWorkload {
 	Key keyPrefix;
 	double maxNumTenants;
 	double minNumTenants;
-	std::vector<TenantName> tenantNames;
+	std::vector<Reference<Tenant>> tenants;
 	bool deleteTenants;
 	double testDuration;
 
@@ -65,19 +65,19 @@ struct BulkSetupWorkload : TestWorkload {
 		state int numTenantsToCreate =
 		    deterministicRandom()->randomInt(workload->minNumTenants, workload->maxNumTenants + 1);
 		TraceEvent("BulkSetupTenantCreation").detail("NumTenants", numTenantsToCreate);
+
 		if (numTenantsToCreate > 0) {
-			std::vector<Future<Void>> tenantFutures;
-			state std::vector<TenantName> tenantNames;
+			state std::vector<Future<Optional<TenantMapEntry>>> tenantFutures;
 			for (int i = 0; i < numTenantsToCreate; i++) {
-				TenantMapEntry entry;
-				tenantNames.push_back(TenantName(format("BulkSetupTenant_%04d", i)));
-				TraceEvent("CreatingTenant")
-				    .detail("Tenant", tenantNames.back())
-				    .detail("TenantGroup", entry.tenantGroup);
-				tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenantNames.back())));
+				TenantName tenantName = TenantNameRef(format("BulkSetupTenant_%04d", i));
+				TraceEvent("CreatingTenant").detail("Tenant", tenantName);
+				tenantFutures.push_back(TenantAPI::createTenant(cx.getReference(), tenantName));
 			}
 			wait(waitForAll(tenantFutures));
-			workload->tenantNames = tenantNames;
+			for (auto& f : tenantFutures) {
+				ASSERT(f.get().present());
+				workload->tenants.push_back(makeReference<Tenant>(f.get().get().id, f.get().get().tenantName));
+			}
 		}
 		wait(bulkSetup(cx,
 		               workload,
@@ -92,25 +92,19 @@ struct BulkSetupWorkload : TestWorkload {
 		               0.1,
 		               0,
 		               0,
-		               workload->tenantNames));
+		               workload->tenants));
+
 		// We want to ensure that tenant deletion happens before the restore phase starts
 		if (workload->deleteTenants) {
-			state Reference<TenantEntryCache<Void>> tenantCache =
-			    makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
-			wait(tenantCache->init());
-			state int numTenantsToDelete = deterministicRandom()->randomInt(0, workload->tenantNames.size() + 1);
-			TraceEvent("BulkSetupTenantDeletion").detail("NumTenants", numTenantsToDelete);
+			state int numTenantsToDelete = deterministicRandom()->randomInt(0, workload->tenants.size() + 1);
 			if (numTenantsToDelete > 0) {
 				state int i;
 				for (i = 0; i < numTenantsToDelete; i++) {
-					state TenantName tenant = deterministicRandom()->randomChoice(workload->tenantNames);
-					Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getByName(tenant));
-					ASSERT(payload.present());
-					state int64_t tenantId = payload.get().entry.id;
+					state int tenantIndex = deterministicRandom()->randomInt(0, workload->tenants.size());
+					state Reference<Tenant> tenant = workload->tenants[tenantIndex];
 					TraceEvent("BulkSetupTenantDeletionClearing")
-					    .detail("TenantName", tenant)
-					    .detail("TenantId", tenantId)
-					    .detail("TotalNumTenants", workload->tenantNames.size());
+					    .detail("Tenant", tenant)
+					    .detail("TotalNumTenants", workload->tenants.size());
 					// clear the tenant
 					state ReadYourWritesTransaction tr = ReadYourWritesTransaction(cx, tenant);
 					loop {
@@ -123,17 +117,12 @@ struct BulkSetupWorkload : TestWorkload {
 						}
 					}
 					// delete the tenant
-					wait(success(TenantAPI::deleteTenant(cx.getReference(), tenant)));
-					for (auto it = workload->tenantNames.begin(); it != workload->tenantNames.end(); it++) {
-						if (*it == tenant) {
-							workload->tenantNames.erase(it);
-							break;
-						}
-					}
+					wait(success(TenantAPI::deleteTenant(cx.getReference(), tenant->name.get(), tenant->id())));
+					workload->tenants.erase(workload->tenants.begin() + tenantIndex);
+
 					TraceEvent("BulkSetupTenantDeletionDone")
-					    .detail("TenantName", tenant)
-					    .detail("TenantId", tenantId)
-					    .detail("TotalNumTenants", workload->tenantNames.size());
+					    .detail("Tenant", tenant)
+					    .detail("TotalNumTenants", workload->tenants.size());
 				}
 			}
 		}

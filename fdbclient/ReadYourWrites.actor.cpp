@@ -1475,8 +1475,8 @@ public:
 	}
 };
 
-ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx, Optional<TenantName> tenantName)
-  : ISingleThreadTransaction(cx->deferredError), tr(cx, tenantName), cache(&arena), writes(&arena), retries(0),
+ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx, Optional<Reference<Tenant>> const& tenant)
+  : ISingleThreadTransaction(cx->deferredError), tr(cx, tenant), cache(&arena), writes(&arena), retries(0),
     approximateSize(0), creationTime(now()), commitStarted(false), versionStampFuture(tr.getVersionstamp()),
     specialKeySpaceWriteMap(std::make_pair(false, Optional<Value>()), specialKeys.end), options(tr) {
 	std::copy(
@@ -1485,11 +1485,11 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx, Optiona
 }
 
 void ReadYourWritesTransaction::construct(Database const& cx) {
-	*this = ReadYourWritesTransaction(cx, Optional<TenantName>());
+	*this = ReadYourWritesTransaction(cx);
 }
 
-void ReadYourWritesTransaction::construct(Database const& cx, TenantName const& tenantName) {
-	*this = ReadYourWritesTransaction(cx, tenantName);
+void ReadYourWritesTransaction::construct(Database const& cx, Reference<Tenant> const& tenant) {
+	*this = ReadYourWritesTransaction(cx, tenant);
 }
 
 ACTOR Future<Void> timebomb(double endTime, Promise<Void> resetPromise) {
@@ -1828,7 +1828,6 @@ Future<Standalone<VectorRef<BlobGranuleChunkRef>>> ReadYourWritesTransaction::re
     Version begin,
     Optional<Version> readVersion,
     Version* readVersionOut) {
-
 	if (!options.readYourWritesDisabled) {
 		return blob_granule_no_ryw();
 	}
@@ -1851,7 +1850,6 @@ Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> ReadYourWritesTransaction::
     const KeyRange& range,
     Optional<Version> summaryVersion,
     int rangeLimit) {
-
 	if (checkUsedDuringCommit()) {
 		return used_during_commit();
 	}

@@ -391,7 +391,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 					}
 
 					if (bytes > FLOW_KNOBS->PACKET_WARNING) {
-						TraceEvent(!g_network->isSimulated() ? SevWarnAlways : SevWarn, "LargeTransaction")
+						TraceEvent(SevWarn, "LargeTransaction")
 						    .suppressFor(1.0)
 						    .detail("Size", bytes)
 						    .detail("Client", req.reply.getEndpoint().getPrimaryAddress());
@@ -999,9 +999,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 			for (int t = 0; t < trs.size(); t++) {
 				TenantInfo const& tenantInfo = trs[t].tenantInfo;
 				int64_t tenantId = tenantInfo.tenantId;
-				Optional<TenantNameRef> const& tenantName = tenantInfo.name;
 				if (tenantId != TenantInfo::INVALID_TENANT) {
-					ASSERT(tenantName.present());
 					encryptDomainIds.emplace(tenantId);
 				} else {
 					// Optimization: avoid enumerating mutations if cluster only serves default encryption domains
@@ -2233,7 +2231,9 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 
 	wait(commitData->validState.getFuture());
 
-	state Version minVersion = commitData->stats.lastCommitVersionAssigned + 1;
+	state Version minVersion =
+	    req.minTenantVersion == latestVersion ? commitData->stats.lastCommitVersionAssigned + 1 : req.minTenantVersion;
+
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
 	bool validTenant = wait(checkTenant(commitData, req.tenant.tenantId, minVersion, "GetKeyServerLocation"));
