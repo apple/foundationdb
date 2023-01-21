@@ -112,7 +112,7 @@ public:
 
 private:
 	Reference<ThreadSafeDatabase> db;
-	Standalone<StringRef> name;
+	TenantName name;
 	Tenant* tenant;
 };
 
