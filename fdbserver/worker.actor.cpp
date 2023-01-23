@@ -1335,7 +1335,9 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 			        (g_network->isSimulated()
 			             ? (/* Disable for RocksDB */ storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
 			                deterministicRandom()->coinflip())
-			             : true));
+			             : true),
+			    encryptionKeyProvider,
+			    Optional<std::map<std::string, std::string>>(StorageEngineParamsFactory::getParams(storeType)));
 			Promise<Void> nextRebootKVStorePromise;
 			filesClosed->add(store->onClosed() ||
 			                 nextRebootKVStorePromise
@@ -1850,7 +1852,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                s.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 				                deterministicRandom()->coinflip())
 				             : true),
-				    encryptionKeyProvider);
+				    encryptionKeyProvider,
+				    Optional<std::map<std::string, std::string>>(StorageEngineParamsFactory::getParams(s.storeType)));
 				Future<Void> kvClosed =
 				    kv->onClosed() ||
 				    rebootKVSPromise.getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
@@ -2545,7 +2548,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                req.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 					                deterministicRandom()->coinflip())
 					             : true),
-					    encryptionKeyProvider);
+					    encryptionKeyProvider,
+					    req.storageEngineParams);
 
 					Future<Void> kvClosed =
 					    data->onClosed() ||
@@ -2562,7 +2566,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                               storageReady,
 					                               dbInfo,
 					                               folder,
-					                               encryptionKeyProvider);
+					                               encryptionKeyProvider,
+					                               req.storageEngineParams);
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(&runningStorages,

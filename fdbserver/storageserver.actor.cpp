@@ -431,6 +431,7 @@ struct StorageServerDisk {
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
+	std::map<std::string, std::string> getStorageEngineParams() const { return storage->getParameters(); }
 
 	// The following are pointers to the Counters in StorageServer::counters of the same names.
 	Counter* kvCommitLogicalBytes;
@@ -1357,15 +1358,20 @@ public:
 
 	// Connection to blob store for fetchKeys()
 	Reference<BlobConnectionProvider> blobConn;
+	// Storage engine parameters
+	Optional<std::map<std::string, std::string>> storageEngineParams;
 
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
 	              StorageServerInterface const& ssi,
-	              Reference<IPageEncryptionKeyProvider> encryptionKeyProvider)
+	              Reference<IPageEncryptionKeyProvider> encryptionKeyProvider,
+	              Optional<std::map<std::string, std::string>> storageEngineParams =
+	                  Optional<std::map<std::string, std::string>>())
 	  : tenantPrefixIndex(makeReference<TenantPrefixIndex>()), encryptionKeyProvider(encryptionKeyProvider),
-	    shardAware(false), tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
-	                                                                               TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
-	                                                                               Histogram::Unit::microseconds)),
+	    storageEngineParams(storageEngineParams), shardAware(false),
+	    tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                            TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
+	                                                            Histogram::Unit::microseconds)),
 	    ssVersionLockLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                          SS_VERSION_LOCK_LATENCY_HISTOGRAM,
 	                                                          Histogram::Unit::microseconds)),
@@ -10879,6 +10885,16 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 			when(AuditStorageRequest req = waitNext(ssi.auditStorage.getFuture())) {
 				self->actors.add(auditStorageQ(self, req));
 			}
+			when(GetStorageEngineParamsRequest req = waitNext(ssi.getStorageEngineParams.getFuture())) {
+				// json_spirit::mObject resultObj;
+				// resultObj["storage_engine"] = self->storage.getKeyValueStoreType().toString();
+				// resultObj["remote"] = self->storage.
+				auto params = self->storage.getStorageEngineParams();
+				// const std::string params_json_str =
+				//     json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print);
+				GetStorageEngineParamsReply _reply(params);
+				req.reply.send(_reply);
+			}
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);
 				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
@@ -11155,8 +11171,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
-                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider) {
-	state StorageServer self(persistentData, db, ssi, encryptionKeyProvider);
+                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider,
+                                 Optional<std::map<std::string, std::string>> storageEngineParams) {
+	state StorageServer self(persistentData, db, ssi, encryptionKeyProvider, storageEngineParams);
 	self.shardAware = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && persistentData->shardAware();
 	state Future<Void> ssCore;
 	self.initialClusterVersion = startVersion;
@@ -11248,8 +11265,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  std::string folder,
                                  Promise<Void> recovered,
                                  Reference<IClusterConnectionRecord> connRecord,
-                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider) {
-	state StorageServer self(persistentData, db, ssi, encryptionKeyProvider);
+                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider,
+                                 Optional<std::map<std::string, std::string>> storageEngineParams) {
+	state StorageServer self(persistentData, db, ssi, encryptionKeyProvider, storageEngineParams);
 	state Future<Void> ssCore;
 	self.folder = folder;
 

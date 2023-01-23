@@ -7926,16 +7926,22 @@ RedwoodRecordRef VersionedBTree::dbEnd("\xff\xff\xff\xff\xff"_sr);
 
 class KeyValueStoreRedwood : public IKeyValueStore {
 public:
-	KeyValueStoreRedwood(std::string filename, UID logID, Reference<IPageEncryptionKeyProvider> encryptionKeyProvider)
-	  : m_filename(filename), prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
+	KeyValueStoreRedwood(std::string filename,
+	                     UID logID,
+	                     Reference<IPageEncryptionKeyProvider> encryptionKeyProvider,
+	                     Optional<std::map<std::string, std::string>> params)
+	  : m_filename(filename),
+	    prefetch(getStorageEngineParamBoolean(params.get(), "kvstore_range_prefetch") /*runtime change*/) {
 
-		int pageSize =
-		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
+		int pageSize = BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4)
+		                       : getStorageEngineParamInt(params.get(), "default_page_size"); // needReplacement
 		int extentSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE;
 		int64_t pageCacheBytes =
 		    g_network->isSimulated()
-		        ? (BUGGIFY ? deterministicRandom()->randomInt(pageSize, FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K)
-		                   : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
+		        ? (BUGGIFY
+		               ? deterministicRandom()->randomInt(pageSize, FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K)
+		               : FLOW_KNOBS
+		                     ->SIM_PAGE_CACHE_4K) // force cache size to be tiny in simulation, cannot remove the knob
 		        : FLOW_KNOBS->PAGE_CACHE_4K;
 		// Rough size of pages to keep in remap cleanup queue before being cleanup.
 		int64_t remapCleanupWindowBytes =
@@ -8246,6 +8252,35 @@ public:
 
 	~KeyValueStoreRedwood() override{};
 
+	std::map<std::string, std::string> getParameters() override {
+		std::map<std::string, std::string> result;
+		// how to get the default page size from m_tree,
+		// what's the general way to get it
+		result["kvstore_range_prefetch"] = prefetch ? "true" : "false";
+		return result;
+	}
+
+	StorageEngineParamResult setParameters(std::map<std::string, std::string> const& params) override {
+		// TODO
+		StorageEngineParamResult result;
+		return result;
+	}
+
+	StorageEngineParamResult checkCompatibility(std::map<std::string, std::string> const& params) override {
+		// TODO
+		StorageEngineParamResult result;
+		for (auto const& [k, v] : params) {
+			if (k == "kvstore_range_prefetch") {
+				getStorageEngineParamBoolean(params, "kvstore_range_prefetch") == prefetch
+				    ? result.unchanged.push_back(k)
+				    : result.applied.push_back(k);
+			} else {
+				// do something
+			}
+		}
+		return result;
+	}
+
 private:
 	std::string m_filename;
 	VersionedBTree* m_tree;
@@ -8265,8 +8300,9 @@ private:
 
 IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                        UID logID,
-                                       Reference<IPageEncryptionKeyProvider> encryptionKeyProvider) {
-	return new KeyValueStoreRedwood(filename, logID, encryptionKeyProvider);
+                                       Reference<IPageEncryptionKeyProvider> encryptionKeyProvider,
+                                       Optional<std::map<std::string, std::string>> params) {
+	return new KeyValueStoreRedwood(filename, logID, encryptionKeyProvider, params);
 }
 
 int randomSize(int max) {
@@ -10070,7 +10106,8 @@ TEST_CASE("Lredwood/correctness/btree") {
 	    params.getInt("remapCleanupWindowBytes")
 	        .orDefault(BUGGIFY ? 0 : deterministicRandom()->randomInt64(1, 100) * 1024 * 1024);
 	state int concurrentExtentReads =
-	    params.getInt("concurrentExtentReads").orDefault(SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
+	    params.getInt("concurrentExtentReads")
+	        .orDefault(SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS); // a default redwood options
 
 	// These settings are an attempt to keep the test execution real reasonably short
 	state int64_t maxPageOps = params.getInt("maxPageOps").orDefault((shortTest || serialTest) ? 50e3 : 1e6);

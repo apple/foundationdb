@@ -846,11 +846,20 @@ struct InitializeStorageRequest {
 	Optional<std::pair<UID, Version>>
 	    tssPairIDAndVersion; // Only set if recruiting a tss. Will be the UID and Version of its SS pair.
 	Version initialClusterVersion;
+	Optional<std::map<std::string, std::string>> storageEngineParams; // Parameters to initialize the storage engine
 	ReplyPromise<InitializeStorageReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, initialClusterVersion);
+		serializer(ar,
+		           seedTag,
+		           reqId,
+		           interfaceId,
+		           storeType,
+		           reply,
+		           tssPairIDAndVersion,
+		           initialClusterVersion,
+		           storageEngineParams);
 	}
 };
 
@@ -1169,15 +1178,17 @@ class IKeyValueStore;
 class ServerCoordinators;
 class IDiskQueue;
 class IPageEncryptionKeyProvider;
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
-                                 StorageServerInterface ssi,
-                                 Tag seedTag,
-                                 Version startVersion,
-                                 Version tssSeedVersion,
-                                 ReplyPromise<InitializeStorageReply> recruitReply,
-                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder,
-                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider);
+ACTOR Future<Void> storageServer(
+    IKeyValueStore* persistentData,
+    StorageServerInterface ssi,
+    Tag seedTag,
+    Version startVersion,
+    Version tssSeedVersion,
+    ReplyPromise<InitializeStorageReply> recruitReply,
+    Reference<AsyncVar<ServerDBInfo> const> db,
+    std::string folder,
+    Reference<IPageEncryptionKeyProvider> encryptionKeyProvider,
+    Optional<std::map<std::string, std::string>> storageEngineParams = Optional<std::map<std::string, std::string>>());
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,
@@ -1186,7 +1197,8 @@ ACTOR Future<Void> storageServer(
     Promise<Void> recovered,
     Reference<IClusterConnectionRecord>
         connRecord, // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
-    Reference<IPageEncryptionKeyProvider> encryptionKeyProvider);
+    Reference<IPageEncryptionKeyProvider> encryptionKeyProvider,
+    Optional<std::map<std::string, std::string>> storageEngineParams = Optional<std::map<std::string, std::string>>());
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,

@@ -123,6 +123,9 @@ struct StorageServerInterface {
 	RequestStream<struct FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues;
 	RequestStream<struct UpdateCommitCostRequest> updateCommitCostRequest;
 	RequestStream<struct AuditStorageRequest> auditStorage;
+	RequestStream<struct GetStorageEngineParamsRequest> getStorageEngineParams;
+	RequestStream<struct SetStorageEngineParamsRequest> setStorageEngineParams;
+	RequestStream<struct CheckStorageEngineParamsCompatibilityRequest> checkStorageEngineParamsCompatibility;
 
 private:
 	bool acceptingRequests;
@@ -198,6 +201,13 @@ public:
 				    RequestStream<struct UpdateCommitCostRequest>(getValue.getEndpoint().getAdjustedEndpoint(22));
 				auditStorage =
 				    RequestStream<struct AuditStorageRequest>(getValue.getEndpoint().getAdjustedEndpoint(23));
+				getStorageEngineParams = RequestStream<struct GetStorageEngineParamsRequest>(
+				    getStorageEngineParams.getEndpoint().getAdjustedEndpoint(24));
+				setStorageEngineParams = RequestStream<struct SetStorageEngineParamsRequest>(
+				    setStorageEngineParams.getEndpoint().getAdjustedEndpoint(25));
+				checkStorageEngineParamsCompatibility =
+				    RequestStream<struct CheckStorageEngineParamsCompatibilityRequest>(
+				        checkStorageEngineParamsCompatibility.getEndpoint().getAdjustedEndpoint(26));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -250,6 +260,9 @@ public:
 		streams.push_back(fetchCheckpointKeyValues.getReceiver());
 		streams.push_back(updateCommitCostRequest.getReceiver());
 		streams.push_back(auditStorage.getReceiver());
+		streams.push_back(getStorageEngineParams.getReceiver());
+		streams.push_back(setStorageEngineParams.getReceiver());
+		streams.push_back(checkStorageEngineParamsCompatibility.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -1116,6 +1129,84 @@ struct GetStorageMetricsReply {
 struct GetStorageMetricsRequest {
 	constexpr static FileIdentifier file_identifier = 13290999;
 	ReplyPromise<GetStorageMetricsReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+struct GetStorageEngineParamsReply {
+	constexpr static FileIdentifier file_identifier = 15492478;
+	std::map<std::string, std::string> params;
+
+	GetStorageEngineParamsReply() = default;
+	GetStorageEngineParamsReply(std::map<std::string, std::string> const& params) : params(params) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, params);
+	}
+};
+
+struct GetStorageEngineParamsRequest {
+	constexpr static FileIdentifier file_identifier = 13291999;
+	ReplyPromise<GetStorageEngineParamsReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+struct StorageEngineParamResult {
+	std::vector<std::string> unchanged;
+	std::vector<std::string> applied;
+	std::vector<std::string> needReboot;
+	std::vector<std::string> needReplacement;
+	std::vector<std::string> unknown;
+
+	StorageEngineParamResult() {}
+	StorageEngineParamResult(std::vector<std::string> const& unchanged,
+	                         std::vector<std::string> const& applied,
+	                         std::vector<std::string> const& needReboot,
+	                         std::vector<std::string> const& needReplacement,
+	                         std::vector<std::string> const& unknown)
+	  : unchanged(unchanged), applied(applied), needReboot(needReboot), needReplacement(needReplacement),
+	    unknown(unknown) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, unchanged, applied, needReboot, needReplacement, unknown);
+	}
+};
+
+struct SetStorageEngineParamsReply {
+	constexpr static FileIdentifier file_identifier = 15492479;
+	StorageEngineParamResult result;
+
+	SetStorageEngineParamsReply() {}
+	SetStorageEngineParamsReply(StorageEngineParamResult result) : result(result) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, result);
+	}
+};
+
+struct SetStorageEngineParamsRequest {
+	constexpr static FileIdentifier file_identifier = 13292000;
+	ReplyPromise<SetStorageEngineParamsReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+struct CheckStorageEngineParamsCompatibilityRequest {
+	constexpr static FileIdentifier file_identifier = 13292001;
+	ReplyPromise<SetStorageEngineParamsReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
