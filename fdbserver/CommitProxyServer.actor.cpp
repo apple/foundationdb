@@ -1072,11 +1072,7 @@ bool validTenantAccess(MutationRef m, std::unordered_map<int64_t, TenantName> co
 
 	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 		auto tenantId = TenantAPI::extractTenantIdFromMutation(m);
-		if (tenantMap.count(tenantId)) {
-			return true;
-		} else {
-			return false;
-		}
+		return tenantMap.count(tenantId) > 0;
 	}
 	return true;
 }
@@ -1094,7 +1090,9 @@ inline bool tenantMapChanging(MutationRef mutation) {
 
 // Return success and properly split clear range mutations if all tenant check pass. Otherwise, return corresponding
 // error
-Error validateAndProcessTenantAccess(VectorRef<MutationRef> mutations, ProxyCommitData* const pProxyCommitData) {
+Error validateAndProcessTenantAccess(VectorRef<MutationRef> mutations,
+                                     ProxyCommitData* const pProxyCommitData,
+                                     Optional<UID> debugId = Optional<UID>()) {
 	bool changeTenant = false;
 	bool writeNormalKey = false;
 	for (auto& mutation : mutations) {
@@ -1112,6 +1110,12 @@ Error validateAndProcessTenantAccess(VectorRef<MutationRef> mutations, ProxyComm
 			writeNormalKey = true;
 		}
 
+		if (debugId.present()) {
+			TraceEvent(SevDebug, "ValidateAndProcessTenantAccess", debugId.get())
+			    .detail("ChangeTenant", changeTenant)
+			    .detail("WriteNormalKey", writeNormalKey)
+			    .detail("Mutation", mutation.param1);
+		}
 		if (writeNormalKey && changeTenant) {
 			return illegal_tenant_access();
 		}
@@ -1130,7 +1134,7 @@ Error validateAndProcessTenantAccess(const CommitTransactionRequest& tr, ProxyCo
 		return success();
 	}
 
-	return validateAndProcessTenantAccess(tr.transaction.mutations, pProxyCommitData);
+	return validateAndProcessTenantAccess(tr.transaction.mutations, pProxyCommitData, tr.debugID);
 }
 
 // Compute and apply "metadata" effects of each other proxy's most recent batch
