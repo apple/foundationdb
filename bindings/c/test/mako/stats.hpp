@@ -22,7 +22,6 @@
 #define MAKO_STATS_HPP
 
 #include <array>
-#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <fstream>

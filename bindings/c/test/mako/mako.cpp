@@ -20,7 +20,6 @@
 
 #include <array>
 #include <cassert>
-#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -69,7 +68,6 @@
 #include "time.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/error/en.h"
-#include "flow/Platform.h"
 
 namespace mako {
 
