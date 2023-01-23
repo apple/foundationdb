@@ -2288,6 +2288,8 @@ public:
 			isr.seedTag = invalidTag;
 			isr.reqId = deterministicRandom()->randomUniqueID();
 			isr.interfaceId = interfaceId;
+			if(self->configuration.storageEngineParams.present())
+				isr.storageEngineParams = self->configuration.storageEngineParams.get();
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
 			state bool doRecruit = true;

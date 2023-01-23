@@ -348,6 +348,12 @@ ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
 		isr.initialClusterVersion = self->recoveryTransactionVersion;
+		if (self->configuration.storageEngineParams.present()) {
+			isr.storageEngineParams = self->configuration.storageEngineParams.get();
+			// TODO : remove this message later if needed
+			for (auto const& [k, v] : isr.storageEngineParams.get())
+				TraceEvent(SevInfo, "StorageEngineParams").detail("Key", k).detail("Value", v);
+		}
 
 		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
 
