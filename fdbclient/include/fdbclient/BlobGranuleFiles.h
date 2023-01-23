@@ -24,7 +24,6 @@
 // This file contains functions for readers who want to materialize blob granules from the underlying files
 
 #include "fdbclient/BlobGranuleCommon.h"
-#include "fdbclient/CommitTransaction.h"
 #include "flow/CompressionUtils.h"
 
 Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
