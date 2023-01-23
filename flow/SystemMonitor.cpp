@@ -465,7 +465,7 @@ Future<Void> startMemoryUsageMonitor(uint64_t memLimit) {
 	auto checkMemoryUsage = [=]() {
 		if (getResidentMemoryUsage() > memLimit) {
 #if defined(ADDRESS_SANITIZER) && defined(__linux__)
-			__sanitizer_print_memory_profile(/*top percent*/ 50, /*max contexts*/ 100);
+			__sanitizer_print_memory_profile(/*top percent*/ 100, /*max contexts*/ 10);
 #endif
 			platform::outOfMemory();
 		}
