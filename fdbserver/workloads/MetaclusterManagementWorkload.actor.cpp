@@ -424,6 +424,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	ACTOR static Future<Void> createTenant(MetaclusterManagementWorkload* self) {
 		state TenantName tenant = self->chooseTenantName();
 		state Optional<TenantGroupName> tenantGroup = self->chooseTenantGroup();
+		state AssignClusterAutomatically assignClusterAutomatically(deterministicRandom()->coinflip());
 
 		auto itr = self->createdTenants.find(tenant);
 		state bool exists = itr != self->createdTenants.end();
@@ -431,24 +432,24 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		state bool hasCapacity = tenantGroupExists || self->ungroupedTenants.size() + self->tenantGroups.size() <
 		                                                  self->totalTenantGroupCapacity;
 		state bool retried = false;
-		state bool preferAssignedCluster = deterministicRandom()->coinflip();
 		// Choose between two preferred clusters because if we get a partial completion and
 		// retry, we want the operation to eventually succeed instead of having a chance of
 		// never re-visiting the original preferred cluster.
 		state std::pair<ClusterName, ClusterName> preferredClusters;
 		state Optional<ClusterName> originalPreferredCluster;
-		if (preferAssignedCluster) {
+		if (!assignClusterAutomatically) {
 			preferredClusters.first = self->chooseClusterName();
 			preferredClusters.second = self->chooseClusterName();
 		}
 
 		state TenantMapEntry tenantMapEntry;
+		tenantMapEntry.tenantName = tenant;
 		tenantMapEntry.tenantGroup = tenantGroup;
 
 		try {
 			loop {
 				try {
-					if (preferAssignedCluster && (!retried || deterministicRandom()->coinflip())) {
+					if (!assignClusterAutomatically && (!retried || deterministicRandom()->coinflip())) {
 						tenantMapEntry.assignedCluster =
 						    deterministicRandom()->coinflip() ? preferredClusters.first : preferredClusters.second;
 						if (!originalPreferredCluster.present()) {
@@ -456,7 +457,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 						}
 					}
 					Future<Void> createFuture =
-					    MetaclusterAPI::createTenant(self->managementDb, tenant, tenantMapEntry);
+					    MetaclusterAPI::createTenant(self->managementDb, tenantMapEntry, assignClusterAutomatically);
 					Optional<Void> result = wait(timeout(createFuture, deterministicRandom()->randomInt(1, 30)));
 					if (result.present()) {
 						break;
@@ -470,7 +471,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 						ASSERT(entry.present());
 						tenantMapEntry = entry.get();
 						break;
-					} else if (preferAssignedCluster && retried &&
+					} else if (!assignClusterAutomatically && retried &&
 					           originalPreferredCluster.get() != tenantMapEntry.assignedCluster.get() &&
 					           (e.code() == error_code_cluster_no_capacity ||
 					            e.code() == error_code_cluster_not_found ||
@@ -503,7 +504,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			}
 
 			auto assignedCluster = self->dataDbs.find(entry.assignedCluster.get());
-			ASSERT(!preferAssignedCluster || tenantMapEntry.assignedCluster.get() == assignedCluster->first);
+			ASSERT(assignClusterAutomatically || tenantMapEntry.assignedCluster.get() == assignedCluster->first);
 			ASSERT(assignedCluster != self->dataDbs.end());
 			ASSERT(assignedCluster->second.tenants.insert(tenant).second);
 
@@ -526,10 +527,10 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				ASSERT(!hasCapacity && !exists);
 				return Void();
 			} else if (e.code() == error_code_cluster_no_capacity) {
-				ASSERT(preferAssignedCluster);
+				ASSERT(!assignClusterAutomatically);
 				return Void();
 			} else if (e.code() == error_code_cluster_not_found) {
-				ASSERT(preferAssignedCluster);
+				ASSERT(!assignClusterAutomatically);
 				return Void();
 			} else if (e.code() == error_code_invalid_tenant_configuration) {
 				ASSERT(tenantGroup.present());

@@ -11233,7 +11233,7 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 			state Version version = wait(tr->getReadVersion());
 			// This limits the number of tenants, but eventually we shouldn't need to do this at all
 			// when SSs store only the local tenants
-			KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> entries =
+			KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> entries =
 			    wait(TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 			ASSERT(entries.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !entries.more);
 
@@ -11241,8 +11241,8 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 			    .detail("Version", version)
 			    .detail("NumTenants", entries.results.size());
 
-			for (auto entry : entries.results) {
-				self->insertTenant(entry.second.prefix, entry.first, version, false);
+			for (auto const& [_, entry] : entries.results) {
+				self->insertTenant(entry.prefix, entry.tenantName, version, false);
 			}
 			break;
 		} catch (Error& e) {

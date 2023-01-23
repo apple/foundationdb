@@ -271,7 +271,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
                                                Version version,
                                                Reference<KeyRangeMap<Version>> key_version,
                                                Database cx,
-                                               std::unordered_map<int64_t, TenantName>* tenantMap,
+                                               std::map<int64_t, TenantName>* tenantMap,
                                                bool provisionalProxy) {
 	try {
 		state uint64_t offset(0);
@@ -657,7 +657,7 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
                                               PromiseStream<Future<Void>> addActor,
                                               FlowLock* commitLock,
                                               Reference<KeyRangeMap<Version>> keyVersion,
-                                              std::unordered_map<int64_t, TenantName>* tenantMap,
+                                              std::map<int64_t, TenantName>* tenantMap,
                                               bool provisionalProxy) {
 	state Version lastVersion = invalidVersion;
 	state bool endOfStream = false;
@@ -789,7 +789,7 @@ ACTOR Future<Void> applyMutations(Database cx,
                                   PublicRequestStream<CommitTransactionRequest> commit,
                                   NotifiedVersion* committedVersion,
                                   Reference<KeyRangeMap<Version>> keyVersion,
-                                  std::unordered_map<int64_t, TenantName>* tenantMap,
+                                  std::map<int64_t, TenantName>* tenantMap,
                                   bool provisionalProxy) {
 	state FlowLock commitLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 	state PromiseStream<Future<Void>> addActor;
