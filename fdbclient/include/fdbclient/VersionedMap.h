@@ -285,12 +285,17 @@ void insert(Reference<PTree<T>>& p, Version at, const T& x) {
 	if (!p) {
 		p = makeReference<PTree<T>>(x, at);
 	} else {
-		bool direction = !(x < p->data);
-		Reference<PTree<T>> child = p->child(direction, at);
-		insert(child, at, x);
-		p = update(p, direction, child, at);
-		if (p->child(direction, at)->priority > p->priority)
-			rotate(p, at, !direction);
+		int c = ::compare(x, p->data);
+		if (c == 0) {
+			p = makeReference<PTree<T>>(p->priority, x, p->left(at), p->right(at), at);
+		} else {
+			const bool direction = !(c < 0);
+			Reference<PTree<T>> child = p->child(direction, at);
+			insert(child, at, x);
+			p = update(p, direction, child, at);
+			if (p->child(direction, at)->priority > p->priority)
+				rotate(p, at, !direction);
+		}
 	}
 }
 
@@ -685,7 +690,7 @@ public:
 	}
 
 	Future<Void> forgetVersionsBeforeAsync(Version newOldestVersion, TaskPriority taskID = TaskPriority::DefaultYield) {
-		ASSERT(newOldestVersion <= latestVersion);
+		ASSERT_LE(newOldestVersion, latestVersion);
 		auto r = upper_bound(roots.begin(), roots.end(), newOldestVersion, rootsComparator());
 		auto upper = r;
 		--r;
@@ -732,10 +737,6 @@ public:
 	// insert() and erase() invalidate atLatest() and all iterators into it
 	void insert(const K& k, const T& t) { insert(k, t, latestVersion); }
 	void insert(const K& k, const T& t, Version insertAt) {
-		if (PTreeImpl::contains(roots.back().second, latestVersion, k))
-			PTreeImpl::remove(roots.back().second,
-			                  latestVersion,
-			                  k); // FIXME: Make PTreeImpl::insert do this automatically  (see also WriteMap.h FIXME)
 		PTreeImpl::insert(
 		    roots.back().second, latestVersion, MapPair<K, std::pair<T, Version>>(k, std::make_pair(t, insertAt)));
 	}

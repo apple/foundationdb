@@ -42,6 +42,7 @@ the contents of the system key space.
 #include "fdbclient/Metacluster.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/StorageWiggleMetrics.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 // ConfigurationResult enumerates normal outcomes of changeConfig() and various error
@@ -133,6 +134,11 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 ConfigureAutoResult parseConfig(StatusObject const& status);
 
 bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bool creating);
+
+bool isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration> oldConfiguration,
+                                       std::map<std::string, std::string> newConfig,
+                                       bool creating);
+bool isTenantModeModeConfigValid(DatabaseConfiguration oldConfiguration, DatabaseConfiguration newConfiguration);
 
 // Management API written in template code to support both IClientAPI and NativeAPI
 namespace ManagementAPI {
@@ -281,6 +287,9 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 		if (!isCompleteConfiguration(m)) {
 			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
 		}
+		if (!isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration>(), m, creating)) {
+			return ConfigurationResult::INVALID_CONFIGURATION;
+		}
 	} else if (m.count(encryptionAtRestModeConfKey.toString()) != 0) {
 		// Encryption data at-rest mode can be set only at the time of database creation
 		return ConfigurationResult::ENCRYPTION_AT_REST_MODE_ALREADY_SET;
@@ -289,9 +298,13 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 	state Future<Void> tooLong = delay(60);
 	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
 	state bool oldReplicationUsesDcId = false;
+	// the caller need to reset the perpetual wiggle stats if pw=0 in case the reset txn on DD side is cancelled
+	// due to DD can die at the same time
+	state bool resetPPWStats = false;
 	state bool warnPPWGradual = false;
 	state bool warnRocksDBIsExperimental = false;
 	state bool warnShardedRocksDBIsExperimental = false;
+
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -320,7 +333,8 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					for (auto kv : m) {
 						newConfig.set(kv.first, kv.second);
 					}
-					if (!newConfig.isValid()) {
+					if (!newConfig.isValid() || !isEncryptionAtRestModeConfigValid(oldConfig, m, creating) ||
+					    !isTenantModeModeConfigValid(oldConfig, newConfig)) {
 						return ConfigurationResult::INVALID_CONFIGURATION;
 					}
 
@@ -518,6 +532,19 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 			for (auto i = m.begin(); i != m.end(); ++i) {
 				fmt::print("Set config key:{}; val:{}\n", i->first, i->second);
 				tr->set(StringRef(i->first), StringRef(i->second));
+				if (i->first == perpetualStorageWiggleKey) {
+					if (i->second == "0") {
+						resetPPWStats = true;
+					} else if (i->first == "1") {
+						resetPPWStats = false; // the latter setting will override the former setting
+					}
+				}
+			}
+
+			if (!creating && resetPPWStats) {
+				state StorageWiggleData wiggleData;
+				wait(wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(true)));
+				wait(wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(false)));
 			}
 
 			tr->addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));

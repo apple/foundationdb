@@ -189,6 +189,11 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
                                              std::string filePath,
                                              bool isNewDatabase,
                                              bool force);
+// Trigger audit storage
+ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> clusterFile,
+                                           std::vector<StringRef> tokens);
+// Retrieve audit storage status
+ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens);
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // include command
@@ -219,6 +224,9 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 ACTOR Future<bool> blobKeyCommandActor(Database localDb,
                                        Optional<TenantMapEntry> tenantEntry,
                                        std::vector<StringRef> tokens);
+// blobrestore command
+ACTOR Future<bool> blobRestoreCommandActor(Database localDb, std::vector<StringRef> tokens);
+
 // maintenance command
 ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);
 ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,

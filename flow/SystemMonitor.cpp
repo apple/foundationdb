@@ -151,6 +151,7 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			    .detail("DCID", machineState.dcId)
 			    .detail("ZoneID", machineState.zoneId)
 			    .detail("MachineID", machineState.machineId)
+			    .detail("Version", machineState.fdbVersion)
 			    .detail("AIOSubmitCount", netData.countAIOSubmit - statState->networkState.countAIOSubmit)
 			    .detail("AIOCollectCount", netData.countAIOCollect - statState->networkState.countAIOCollect)
 			    .detail("AIOSubmitLag",
@@ -328,6 +329,7 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			    .detail("DCID", machineState.dcId)
 			    .detail("ZoneID", machineState.zoneId)
 			    .detail("MachineID", machineState.machineId)
+			    .detail("DatahallID", machineState.datahallId)
 			    .trackLatest("MachineMetrics");
 #ifdef __linux__
 			for (const auto& [k, v] : linux_os::reportCGroupCpuStat()) {

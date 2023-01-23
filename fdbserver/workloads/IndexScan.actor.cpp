@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -92,7 +91,9 @@ struct IndexScanWorkload : KVWorkload {
 	ACTOR static Future<Void> serialScans(Database cx, IndexScanWorkload* self) {
 		state double start = now();
 		try {
-			loop { wait(scanDatabase(cx, self)); }
+			loop {
+				wait(scanDatabase(cx, self));
+			}
 		} catch (...) {
 			self->totalTimeFetching = now() - start;
 			throw;

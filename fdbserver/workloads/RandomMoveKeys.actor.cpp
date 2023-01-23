@@ -25,6 +25,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
 #include "flow/DeterministicRandom.h"
@@ -155,19 +156,35 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 		try {
 			state Promise<Void> signal;
 			state DDEnabledState ddEnabledState;
-			wait(moveKeys(cx,
-			              MoveKeysParams{ deterministicRandom()->randomUniqueID(),
-			                              keys,
-			                              destinationTeamIDs,
-			                              destinationTeamIDs,
-			                              lock,
-			                              signal,
-			                              &fl1,
-			                              &fl2,
-			                              false,
-			                              relocateShardInterval.pairID,
-			                              &ddEnabledState,
-			                              CancelConflictingDataMoves::True }));
+			std::unique_ptr<MoveKeysParams> params;
+			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+				params = std::make_unique<MoveKeysParams>(deterministicRandom()->randomUniqueID(),
+				                                          std::vector<KeyRange>{ keys },
+				                                          destinationTeamIDs,
+				                                          destinationTeamIDs,
+				                                          lock,
+				                                          signal,
+				                                          &fl1,
+				                                          &fl2,
+				                                          false,
+				                                          relocateShardInterval.pairID,
+				                                          &ddEnabledState,
+				                                          CancelConflictingDataMoves::True);
+			} else {
+				params = std::make_unique<MoveKeysParams>(deterministicRandom()->randomUniqueID(),
+				                                          keys,
+				                                          destinationTeamIDs,
+				                                          destinationTeamIDs,
+				                                          lock,
+				                                          signal,
+				                                          &fl1,
+				                                          &fl2,
+				                                          false,
+				                                          relocateShardInterval.pairID,
+				                                          &ddEnabledState,
+				                                          CancelConflictingDataMoves::True);
+			}
+			wait(moveKeys(cx, *params));
 			TraceEvent(relocateShardInterval.end()).detail("Result", "Success");
 			return Void();
 		} catch (Error& e) {

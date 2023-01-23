@@ -58,12 +58,9 @@ std::string buildPartitionPath(const std::string& url, const std::string& partit
 
 // FIXME: make this (more) deterministic outside of simulation for FDBPerfKmsConnector
 Standalone<BlobMetadataDetailsRef> createRandomTestBlobMetadata(const std::string& baseUrl,
-                                                                BlobMetadataDomainId domainId,
-                                                                BlobMetadataDomainName domainName) {
+                                                                BlobMetadataDomainId domainId) {
 	Standalone<BlobMetadataDetailsRef> metadata;
 	metadata.domainId = domainId;
-	metadata.arena().dependsOn(domainName.arena());
-	metadata.domainName = domainName;
 	// 0 == no partition, 1 == suffix partitioned, 2 == storage location partitioned
 	int type = deterministicRandom()->randomInt(0, 3);
 	int partitionCount = (type == 0) ? 0 : deterministicRandom()->randomInt(2, 12);

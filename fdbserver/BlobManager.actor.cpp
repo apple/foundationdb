@@ -388,6 +388,8 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 
 	Promise<Void> iAmReplaced;
 
+	bool isFullRestoreMode = false;
+
 	BlobManagerData(UID id,
 	                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
 	                Database db,
@@ -439,7 +441,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 		// if this granule is not an active granule, it can't be merged
 		auto gIt = workerAssignments.rangeContaining(range.begin);
 		if (gIt->begin() != range.begin || gIt->end() != range.end) {
-			CODE_PROBE(true, "non-active granule reported merge eligible, ignoring");
+			CODE_PROBE(true, "non-active granule reported merge eligible, ignoring", probe::decoration::rare);
 			if (BM_DEBUG) {
 				fmt::print(
 				    "BM {0} Ignoring Merge Candidate [{1} - {2}): range mismatch with active granule [{3} - {4})\n",
@@ -636,11 +638,12 @@ ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmDat
 			// only split on bytes and write rate
 			state StorageMetrics splitMetrics;
 			splitMetrics.bytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
-			splitMetrics.bytesPerKSecond = SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
+			splitMetrics.bytesWrittenPerKSecond = SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
 			if (writeHot) {
-				splitMetrics.bytesPerKSecond = std::min(splitMetrics.bytesPerKSecond, estimated.bytesPerKSecond / 2);
-				splitMetrics.bytesPerKSecond =
-				    std::max(splitMetrics.bytesPerKSecond, SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC);
+				splitMetrics.bytesWrittenPerKSecond =
+				    std::min(splitMetrics.bytesWrittenPerKSecond, estimated.bytesWrittenPerKSecond / 2);
+				splitMetrics.bytesWrittenPerKSecond =
+				    std::max(splitMetrics.bytesWrittenPerKSecond, SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC);
 			}
 			splitMetrics.iosPerKSecond = splitMetrics.infinity;
 			splitMetrics.bytesReadPerKSecond = splitMetrics.infinity;
@@ -1033,7 +1036,7 @@ static bool handleRangeIsAssign(Reference<BlobManagerData> bmData, RangeAssignme
 		if (assignment.assign.get().type == AssignRequestType::Continue) {
 			ASSERT(assignment.worker.present());
 			if (i.range() != assignment.keyRange || i.cvalue() != assignment.worker.get()) {
-				CODE_PROBE(true, "BM assignment out of date");
+				CODE_PROBE(true, "BM assignment out of date", probe::decoration::rare);
 				if (BM_DEBUG) {
 					fmt::print("Out of date re-assign for ({0}, {1}). Assignment must have changed while "
 					           "checking split.\n  Reassign: [{2} - {3}): {4}\n  Existing: [{5} - {6}): {7}\n",
@@ -1171,8 +1174,6 @@ ACTOR Future<Void> checkManagerLock(Transaction* tr, Reference<BlobManagerData> 
 	ASSERT(currentLockValue.present());
 	int64_t currentEpoch = decodeBlobManagerEpochValue(currentLockValue.get());
 	if (currentEpoch != bmData->epoch) {
-		ASSERT(currentEpoch > bmData->epoch);
-
 		if (BM_DEBUG) {
 			fmt::print(
 			    "BM {0} found new epoch {1} > {2} in lock check\n", bmData->id.toString(), currentEpoch, bmData->epoch);
@@ -1183,8 +1184,6 @@ ACTOR Future<Void> checkManagerLock(Transaction* tr, Reference<BlobManagerData> 
 
 		throw blob_manager_replaced();
 	}
-	tr->addReadConflictRange(singleKeyRange(blobManagerEpochKey));
-	tr->addWriteConflictRange(singleKeyRange(blobManagerEpochKey));
 
 	return Void();
 }
@@ -1600,10 +1599,10 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 				if (retried && prevOwnerEpoch == bmData->epoch && prevGranuleID == granuleID &&
 				    prevOwnerSeqno == std::numeric_limits<int64_t>::max()) {
 					// owner didn't change, last iteration of this transaction just succeeded but threw an error.
-					CODE_PROBE(true, "split too big adjustment succeeded after retry");
+					CODE_PROBE(true, "split too big adjustment succeeded after retry", probe::decoration::rare);
 					break;
 				}
-				CODE_PROBE(true, "split too big was since moved to another worker");
+				CODE_PROBE(true, "split too big was since moved to another worker", probe::decoration::rare);
 				if (BM_DEBUG) {
 					fmt::print("BM {0} re-evaluating initial split [{1} - {2}) too big: moved to another worker\n",
 					           bmData->epoch,
@@ -1837,7 +1836,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 			wait(checkManagerLock(tr, bmData));
 			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction(), granuleRange));
 			if (purgeState != ForcedPurgeState::NonePurged) {
-				CODE_PROBE(true, "Split stopped because of force purge");
+				CODE_PROBE(true, "Split stopped because of force purge", probe::decoration::rare);
 				TraceEvent("GranuleSplitCancelledForcePurge", bmData->id)
 				    .detail("Epoch", bmData->epoch)
 				    .detail("GranuleRange", granuleRange);
@@ -2101,7 +2100,7 @@ ACTOR Future<bool> forceGranuleFlush(Reference<BlobManagerData> bmData,
 			for (; i < blobGranuleMapping.size() - 1; i++) {
 				if (!blobGranuleMapping[i].value.size()) {
 					if (BM_DEBUG) {
-						fmt::print("ERROR: No valid granule data for range [{1} - {2}) \n",
+						fmt::print("ERROR: No valid granule data for range [{0} - {1}) \n",
 						           blobGranuleMapping[i].key.printable(),
 						           blobGranuleMapping[i + 1].key.printable());
 					}
@@ -2112,7 +2111,7 @@ ACTOR Future<bool> forceGranuleFlush(Reference<BlobManagerData> bmData,
 				state UID workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
 				if (workerId == UID()) {
 					if (BM_DEBUG) {
-						fmt::print("ERROR: Invalid Blob Worker ID for range [{1} - {2}) \n",
+						fmt::print("ERROR: Invalid Blob Worker ID for range [{0} - {1}) \n",
 						           blobGranuleMapping[i].key.printable(),
 						           blobGranuleMapping[i + 1].key.printable());
 					}
@@ -2328,7 +2327,7 @@ ACTOR Future<bool> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 
 			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction(), mergeRange));
 			if (purgeState != ForcedPurgeState::NonePurged) {
-				CODE_PROBE(true, "Merge finish stopped because of force purge");
+				CODE_PROBE(true, "Merge finish stopped because of force purge", probe::decoration::rare);
 				TraceEvent("GranuleMergeCancelledForcePurge", bmData->id)
 				    .detail("Epoch", bmData->epoch)
 				    .detail("GranuleRange", mergeRange);
@@ -2616,7 +2615,7 @@ ACTOR Future<Void> attemptMerges(Reference<BlobManagerData> bmData,
 		    wait(bmData->db->getStorageMetrics(std::get<1>(candidates[i]), CLIENT_KNOBS->TOO_MANY));
 
 		if (metrics.bytes >= SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES ||
-		    metrics.bytesPerKSecond >= SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC) {
+		    metrics.bytesWrittenPerKSecond >= SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC) {
 			// This granule cannot be merged with any neighbors.
 			// If current candidates up to here can be merged, merge them and skip over this one
 			attemptStartMerge(bmData, currentCandidates);
@@ -2633,7 +2632,9 @@ ACTOR Future<Void> attemptMerges(Reference<BlobManagerData> bmData,
 		    currentBytes + metrics.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES ||
 		    currentKeySumBytes >= CLIENT_KNOBS->VALUE_SIZE_LIMIT / 2) {
 			ASSERT(currentBytes <= SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES);
-			CODE_PROBE(currentKeySumBytes >= CLIENT_KNOBS->VALUE_SIZE_LIMIT / 2, "merge early because of key size");
+			CODE_PROBE(currentKeySumBytes >= CLIENT_KNOBS->VALUE_SIZE_LIMIT / 2,
+			           "merge early because of key size",
+			           probe::decoration::rare);
 			attemptStartMerge(bmData, currentCandidates);
 			currentCandidates.clear();
 			currentBytes = 0;
@@ -3252,7 +3253,7 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 		if (oldEpoch > newEpoch || (oldEpoch == newEpoch && oldSeqno > newSeqno)) {
 			newer.push_back(std::pair(old.range(), std::tuple(oldWorker, oldEpoch, oldSeqno)));
 			if (old.range() != newRange) {
-				CODE_PROBE(true, "BM Recovery: BWs disagree on range boundaries");
+				CODE_PROBE(true, "BM Recovery: BWs disagree on range boundaries", probe::decoration::rare);
 				anyConflicts = true;
 			}
 		} else {
@@ -3286,7 +3287,8 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 					std::get<0>(old.value()) = UID();
 				}
 				if (outOfDate.empty() || outOfDate.back() != std::pair(oldWorker, KeyRange(old.range()))) {
-					CODE_PROBE(true, "BM Recovery: Two workers claim ownership of same granule");
+					CODE_PROBE(
+					    true, "BM Recovery: Two workers claim ownership of same granule", probe::decoration::rare);
 					outOfDate.push_back(std::pair(oldWorker, old.range()));
 				}
 			}
@@ -3537,11 +3539,31 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	bmData->startRecruiting.trigger();
 
 	bmData->initBStore();
-	if (isFullRestoreMode()) {
-		wait(loadManifest(bmData->db, bmData->bstore));
 
-		int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->bstore));
-		wait(updateEpoch(bmData, epoc + 1));
+	bool isFullRestore = wait(isFullRestoreMode(bmData->db, normalKeys));
+	bmData->isFullRestoreMode = isFullRestore;
+	if (bmData->isFullRestoreMode) {
+		Optional<BlobRestoreStatus> status = wait(getRestoreStatus(bmData->db, normalKeys));
+		ASSERT(status.present());
+		state BlobRestorePhase phase = status.get().phase;
+		if (phase == BlobRestorePhase::STARTING_MIGRATOR || phase == BlobRestorePhase::LOADING_MANIFEST) {
+			wait(updateRestoreStatus(bmData->db, normalKeys, BlobRestoreStatus(LOADING_MANIFEST), {}));
+			try {
+				wait(loadManifest(bmData->db, bmData->bstore));
+				int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->bstore));
+				wait(updateEpoch(bmData, epoc + 1));
+				BlobRestoreStatus completedStatus(BlobRestorePhase::LOADED_MANIFEST);
+				wait(updateRestoreStatus(bmData->db, normalKeys, completedStatus, BlobRestorePhase::LOADING_MANIFEST));
+			} catch (Error& e) {
+				if (e.code() != error_code_restore_missing_data) {
+					throw e; // retryable errors
+				}
+				// terminate blob restore for non-retryable errors
+				TraceEvent("ManifestLoadError", bmData->id).error(e).detail("Phase", phase);
+				BlobRestoreStatus error(BlobRestorePhase::ERROR, e.code());
+				wait(updateRestoreStatus(bmData->db, normalKeys, error, {}));
+			}
+		}
 	}
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
@@ -4020,7 +4042,9 @@ ACTOR Future<Void> blobWorkerRecruiter(
 
 	// wait until existing blob workers have been acknowledged so we don't break recruitment invariants
 	loop choose {
-		when(wait(self->startRecruiting.onTrigger())) { break; }
+		when(wait(self->startRecruiting.onTrigger())) {
+			break;
+		}
 	}
 
 	loop {
@@ -4057,7 +4081,9 @@ ACTOR Future<Void> blobWorkerRecruiter(
 				}
 
 				// when the CC changes, so does the request stream so we need to restart recruiting here
-				when(wait(recruitBlobWorker->onChange())) { fCandidateWorker = Future<RecruitBlobWorkerReply>(); }
+				when(wait(recruitBlobWorker->onChange())) {
+					fCandidateWorker = Future<RecruitBlobWorkerReply>();
+				}
 
 				// signal used to restart the loop and try to recruit the next blob worker
 				when(wait(self->restartRecruiting.onTrigger())) {}
@@ -5291,23 +5317,16 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 }
 
 ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
-	if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
-		return Void();
-	}
-
 	bmData->initBStore();
 	loop {
-		bool pendingSplit = wait(hasPendingSplit(bmData));
-		if (!pendingSplit) {
-			wait(dumpManifest(bmData->db, bmData->bstore, bmData->epoch, bmData->manifestDumperSeqNo));
-			bmData->manifestDumperSeqNo++;
-		}
+		wait(dumpManifest(bmData->db, bmData->bstore, bmData->epoch, bmData->manifestDumperSeqNo));
+		bmData->manifestDumperSeqNo++;
 		wait(delay(SERVER_KNOBS->BLOB_MANIFEST_BACKUP_INTERVAL));
 	}
 }
 
-// Simulation validation that multiple blob managers aren't started with the same epoch
-static std::map<int64_t, UID> managerEpochsSeen;
+// Simulation validation that multiple blob managers aren't started with the same epoch within same cluster
+static std::map<std::pair<UID, int64_t>, UID> managerEpochsSeen;
 
 ACTOR Future<Void> checkBlobManagerEpoch(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int64_t epoch, UID dbgid) {
 	loop {
@@ -5318,20 +5337,28 @@ ACTOR Future<Void> checkBlobManagerEpoch(Reference<AsyncVar<ServerDBInfo> const>
 	}
 }
 
+ACTOR Future<UID> fetchClusterId(Database db) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> clusterIdVal = wait(tr->get(clusterIdKey));
+			if (clusterIdVal.present()) {
+				UID clusterId = BinaryReader::fromStringRef<UID>(clusterIdVal.get(), IncludeVersion());
+				return clusterId;
+			}
+			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskPriority::BlobManager));
+			tr->reset();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
                                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                int64_t epoch) {
-	if (g_network->isSimulated()) {
-		bool managerEpochAlreadySeen = managerEpochsSeen.count(epoch);
-		if (managerEpochAlreadySeen) {
-			TraceEvent(SevError, "DuplicateBlobManagersAtEpoch")
-			    .detail("Epoch", epoch)
-			    .detail("BMID1", bmInterf.id())
-			    .detail("BMID2", managerEpochsSeen.at(epoch));
-		}
-		ASSERT(!managerEpochAlreadySeen);
-		managerEpochsSeen[epoch] = bmInterf.id();
-	}
 	state Reference<BlobManagerData> self =
 	    makeReference<BlobManagerData>(bmInterf.id(),
 	                                   dbInfo,
@@ -5339,6 +5366,20 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	                                   bmInterf.locality.dcId(),
 	                                   epoch);
 
+	if (g_network->isSimulated()) {
+		UID clusterId = wait(fetchClusterId(self->db));
+		auto clusterEpoc = std::make_pair(clusterId, epoch);
+		bool managerEpochAlreadySeen = managerEpochsSeen.count(clusterEpoc);
+		if (managerEpochAlreadySeen) {
+			TraceEvent(SevError, "DuplicateBlobManagersAtEpoch")
+			    .detail("ClusterId", clusterId)
+			    .detail("Epoch", epoch)
+			    .detail("BMID1", bmInterf.id())
+			    .detail("BMID2", managerEpochsSeen.at(clusterEpoc));
+		}
+		ASSERT(!managerEpochAlreadySeen);
+		managerEpochsSeen[clusterEpoc] = bmInterf.id();
+	}
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 
 	if (BM_DEBUG) {
@@ -5370,11 +5411,11 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		if (SERVER_KNOBS->BG_ENABLE_MERGING) {
 			self->addActor.send(granuleMergeChecker(self));
 		}
-		if (SERVER_KNOBS->BLOB_MANIFEST_BACKUP && !isFullRestoreMode()) {
+		if (SERVER_KNOBS->BLOB_MANIFEST_BACKUP && !self->isFullRestoreMode) {
 			self->addActor.send(backupManifest(self));
 		}
 
-		if (BUGGIFY) {
+		if (BUGGIFY && !self->isFullRestoreMode) {
 			self->addActor.send(chaosRangeMover(self));
 		}
 

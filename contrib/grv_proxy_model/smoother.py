@@ -20,6 +20,7 @@
 
 import math
 
+
 class Smoother:
     def __init__(self, folding_time):
         self.folding_time = folding_time
@@ -28,10 +29,10 @@ class Smoother:
     def reset(self, value):
         self.time = 0
         self.total = value
-        self.estimate = value 
-        
+        self.estimate = value
+
     def set_total(self, time, total):
-        self.add_delta(time, total-self.total)
+        self.add_delta(time, total - self.total)
 
     def add_delta(self, time, delta):
         self.update(time)
@@ -43,11 +44,10 @@ class Smoother:
 
     def smooth_rate(self, time):
         self.update(time)
-        return (self.total-self.estimate) / self.folding_time
+        return (self.total - self.estimate) / self.folding_time
 
     def update(self, time):
         elapsed = time - self.time
         if elapsed > 0:
             self.time = time
-            self.estimate += (self.total-self.estimate) * (1-math.exp(-elapsed/self.folding_time))
-
+            self.estimate += (self.total - self.estimate) * (1 - math.exp(-elapsed / self.folding_time))

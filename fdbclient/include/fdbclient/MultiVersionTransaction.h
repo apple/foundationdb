@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_MULTIVERSIONTRANSACTION_H
 #define FDBCLIENT_MULTIVERSIONTRANSACTION_H
+#include "flow/Arena.h"
 #pragma once
 
 #include "fdbclient/fdb_c_options.g.h"
@@ -80,7 +81,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 		 * and take the shortcut. */
 		FDBGetRangeReqAndResult getRange;
 		unsigned char buffer[32];
-		bool boundaryAndExist;
 	} FDBMappedKeyValue;
 
 #pragma pack(push, 4)
@@ -205,6 +205,8 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                      uint8_t const* end_key_name,
 	                                      int end_key_name_length,
 	                                      int64_t version);
+
+	FDBFuture* (*databaseGetClientStatus)(FDBDatabase* db);
 
 	// Tenant
 	fdb_error_t (*tenantCreateTransaction)(FDBTenant* tenant, FDBTransaction** outTransaction);
@@ -601,6 +603,9 @@ public:
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
 
+	// Return a JSON string containing database client-side status information
+	ThreadFuture<Standalone<StringRef>> getClientStatus() override;
+
 private:
 	const Reference<FdbCApi> api;
 	FdbCApi::FDBDatabase*
@@ -758,6 +763,7 @@ private:
 	struct TransactionInfo {
 		Reference<ITransaction> transaction;
 		ThreadFuture<Void> onChange;
+		ErrorOr<Void> dbError = ErrorOr<Void>(Void());
 	};
 
 	// Timeout related variables for MultiVersionTransaction objects that do not have an underlying ITransaction
@@ -779,6 +785,8 @@ private:
 	// if we don't have an underlying database object to connect with.
 	void setTimeout(Optional<StringRef> value);
 
+	void resetTimeout();
+
 	// Creates a ThreadFuture<T> that will signal an error if the transaction times out.
 	template <class T>
 	ThreadFuture<T> makeTimeout();
@@ -792,8 +800,11 @@ private:
 	TransactionInfo transaction;
 
 	TransactionInfo getTransaction();
-	void updateTransaction();
+	void updateTransaction(bool setPersistentOptions);
 	void setDefaultOptions(UniqueOrderedOptionList<FDBTransactionOptions> options);
+
+	template <class T, class... Args>
+	ThreadFuture<T> executeOperation(ThreadFuture<T> (ITransaction::*func)(Args...), Args&&... args);
 
 	std::vector<std::pair<FDBTransactionOptions::Option, Optional<Standalone<StringRef>>>> persistentOptions;
 };
@@ -842,6 +853,9 @@ public:
 	~MultiVersionTenant() override;
 
 	Reference<ITransaction> createTransaction() override;
+
+	template <class T, class... Args>
+	ThreadFuture<T> executeOperation(ThreadFuture<T> (ITenant::*func)(Args...), Args&&... args);
 
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
@@ -964,6 +978,9 @@ public:
 	// For internal use in testing
 	static Reference<IDatabase> debugCreateFromExistingDatabase(Reference<IDatabase> db);
 
+	template <class T, class... Args>
+	ThreadFuture<T> executeOperation(ThreadFuture<T> (IDatabase::*func)(Args...), Args&&... args);
+
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
@@ -980,9 +997,15 @@ public:
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
 
+	// Return a JSON string containing database client-side status information
+	ThreadFuture<Standalone<StringRef>> getClientStatus() override;
+
 	// private:
 
 	struct LegacyVersionMonitor;
+
+	// Database initialization state
+	enum class InitializationState { INITIALIZING, INITIALIZATION_FAILED, CREATED, INCOMPATIBLE, CLOSED };
 
 	// A struct that manages the current connection state of the MultiVersionDatabase. This wraps the underlying
 	// IDatabase object that is currently interacting with the cluster.
@@ -1007,6 +1030,15 @@ public:
 		// Must be called from the main thread
 		void startLegacyVersionMonitors();
 
+		// Set a new database connnection
+		void setDatabase(Reference<IDatabase> db);
+
+		// Get database intialization error if initialization failed
+		ErrorOr<Void> getInitializationError();
+
+		// Return a JSON string containing database client-side status information
+		Standalone<StringRef> getClientStatus(ErrorOr<Standalone<StringRef>> dbContextStatus);
+
 		// Cleans up state for the legacy version monitors to break reference cycles
 		void close();
 
@@ -1020,7 +1052,12 @@ public:
 		// this will be a specially created local db.
 		Reference<IDatabase> versionMonitorDb;
 
-		bool closed;
+		// The current database initialization state
+		std::atomic<InitializationState> initializationState;
+
+		// Last error received during database initialization
+		// Set on transition to INITIALIZATION_FAILED state, never changed afterwards
+		Error initializationError;
 
 		ThreadFuture<Void> changed;
 		ThreadFuture<Void> dbReady;
@@ -1103,8 +1140,12 @@ public:
 	Reference<ClientInfo> getLocalClient();
 	void runOnExternalClients(int threadId,
 	                          std::function<void(Reference<ClientInfo>)>,
-	                          bool runOnFailedClients = false);
-	void runOnExternalClientsAllThreads(std::function<void(Reference<ClientInfo>)>, bool runOnFailedClients = false);
+	                          bool runOnFailedClients = false,
+	                          bool failOnError = false);
+	void runOnExternalClientsAllThreads(std::function<void(Reference<ClientInfo>)>,
+	                                    bool runOnFailedClients = false,
+	                                    bool failOnError = false);
+	bool hasNonFailedExternalClients();
 
 	void updateSupportedVersions();
 
@@ -1151,6 +1192,8 @@ private:
 	bool disableBypass;
 	volatile bool bypassMultiClientApi;
 	volatile bool externalClient;
+	bool ignoreExternalClientFailures;
+	bool failIncompatibleClient;
 	bool retainClientLibCopies;
 	ApiVersion apiVersion;
 
@@ -1164,6 +1207,8 @@ private:
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;
 	std::map<FDBNetworkOptions::Option, std::set<Standalone<StringRef>>> setEnvOptions;
 	volatile bool envOptionsLoaded;
+
+	friend struct MultiVersionDatabase::DatabaseState;
 };
 
 #endif

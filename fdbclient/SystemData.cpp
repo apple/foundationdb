@@ -21,7 +21,6 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/Arena.h"
 #include "flow/TDMetric.actor.h"
@@ -273,6 +272,10 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
 	std::sort(dest.begin(), dest.end());
 }
 
+bool isSystemKey(KeyRef key) {
+	return key.size() && key[0] == systemKeys.begin[0];
+}
+
 const KeyRangeRef conflictingKeysRange =
     KeyRangeRef("\xff\xff/transaction/conflicting_keys/"_sr, "\xff\xff/transaction/conflicting_keys/\xff\xff"_sr);
 const ValueRef conflictingKeysTrue = "1"_sr;
@@ -284,25 +287,40 @@ const KeyRangeRef readConflictRangeKeysRange =
 const KeyRangeRef writeConflictRangeKeysRange = KeyRangeRef("\xff\xff/transaction/write_conflict_range/"_sr,
                                                             "\xff\xff/transaction/write_conflict_range/\xff\xff"_sr);
 
-const KeyRangeRef auditRange = KeyRangeRef("\xff/audit/"_sr, "\xff/audit0"_sr);
-const KeyRef auditPrefix = auditRange.begin;
+const KeyRangeRef auditKeys = KeyRangeRef("\xff/audits/"_sr, "\xff/audits0"_sr);
+const KeyRef auditPrefix = auditKeys.begin;
+const KeyRangeRef auditRanges = KeyRangeRef("\xff/auditRanges/"_sr, "\xff/auditRanges0"_sr);
+const KeyRef auditRangePrefix = auditRanges.begin;
 
-const Key auditRangeKey(const AuditType type, const UID& auditId, const KeyRef& key) {
+const Key auditKey(const AuditType type, const UID& auditId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(auditPrefix);
 	wr << static_cast<uint8_t>(type);
 	wr.serializeBytes("/"_sr);
+	wr << bigEndian64(auditId.first());
+	return wr.toValue();
+}
+
+const KeyRange auditKeyRange(const AuditType type) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(auditPrefix);
+	wr << static_cast<uint8_t>(type);
+	wr.serializeBytes("/"_sr);
+	return prefixRange(wr.toValue());
+}
+
+const Key auditRangeKey(const UID& auditId, const KeyRef& key) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(auditRangePrefix);
 	wr << auditId;
 	wr.serializeBytes("/"_sr);
 	wr.serializeBytes(key);
 	return wr.toValue();
 }
 
-const Key auditRangePrefix(const AuditType type, const UID& auditId) {
+const Key auditRangePrefixFor(const UID& auditId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(auditPrefix);
-	wr << static_cast<uint8_t>(type);
-	wr.serializeBytes("/"_sr);
 	wr << auditId;
 	wr.serializeBytes("/"_sr);
 	return wr.toValue();
@@ -868,14 +886,18 @@ const KeyRef configKeysPrefix = configKeys.begin;
 
 const KeyRef perpetualStorageWiggleKey("\xff/conf/perpetual_storage_wiggle"_sr);
 const KeyRef perpetualStorageWiggleLocalityKey("\xff/conf/perpetual_storage_wiggle_locality"_sr);
-const KeyRef perpetualStorageWiggleIDPrefix("\xff/storageWiggleID/"_sr); // withSuffix /primary or /remote
+// The below two are there for compatible upgrade and downgrade. After 7.3, the perpetual wiggle related keys should use
+// format "\xff/storageWiggle/[primary | remote]/[fieldName]". See class StorageWiggleData for the data schema.
+const KeyRef perpetualStorageWiggleIDPrefix("\xff/storageWiggleID/"_sr); // withSuffix /primary/ or /remote/
 const KeyRef perpetualStorageWiggleStatsPrefix("\xff/storageWiggleStats/"_sr); // withSuffix /primary or /remote
+const KeyRef perpetualStorageWigglePrefix("\xff/storageWiggle/"_sr);
 
 const KeyRef triggerDDTeamInfoPrintKey("\xff/triggerDDTeamInfoPrint"_sr);
 
 const KeyRef consistencyScanInfoKey = "\xff/consistencyScanInfo"_sr;
 
 const KeyRef encryptionAtRestModeConfKey("\xff/conf/encryption_at_rest_mode"_sr);
+const KeyRef tenantModeConfKey("\xff/conf/tenant_mode"_sr);
 
 const KeyRangeRef excludedServersKeys("\xff/conf/excluded/"_sr, "\xff/conf/excluded0"_sr);
 const KeyRef excludedServersPrefix = excludedServersKeys.begin;
@@ -1662,11 +1684,70 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 	return interf;
 }
 
+const KeyRangeRef blobRestoreCommandKeys("\xff\x02/blobRestoreCommand/"_sr, "\xff\x02/blobRestoreCommand0"_sr);
+
+const Value blobRestoreCommandKeyFor(const KeyRangeRef range) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobRestoreCommandKeys.begin);
+	wr << range;
+	return wr.toValue();
+}
+
+const KeyRange decodeBlobRestoreCommandKeyFor(const KeyRef key) {
+	KeyRange range;
+	BinaryReader reader(key.removePrefix(blobRestoreCommandKeys.begin),
+	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
+	reader >> range;
+	return range;
+}
+
+const Value blobRestoreCommandValueFor(BlobRestoreStatus status) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
+	wr << status;
+	return wr.toValue();
+}
+
+Standalone<BlobRestoreStatus> decodeBlobRestoreStatus(ValueRef const& value) {
+	Standalone<BlobRestoreStatus> status;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> status;
+	return status;
+}
+
+const KeyRangeRef blobRestoreArgKeys("\xff\x02/blobRestoreArgs/"_sr, "\xff\x02/blobRestoreArgs0"_sr);
+
+const Value blobRestoreArgKeyFor(const KeyRangeRef range) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobRestoreArgKeys.begin);
+	wr << range;
+	return wr.toValue();
+}
+
+const KeyRange decodeBlobRestoreArgKeyFor(const KeyRef key) {
+	KeyRange range;
+	BinaryReader reader(key.removePrefix(blobRestoreArgKeys.begin), AssumeVersion(ProtocolVersion::withBlobGranule()));
+	reader >> range;
+	return range;
+}
+
+const Value blobRestoreArgValueFor(BlobRestoreArg args) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
+	wr << args;
+	return wr.toValue();
+}
+
+Standalone<BlobRestoreArg> decodeBlobRestoreArg(ValueRef const& value) {
+	Standalone<BlobRestoreArg> args;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> args;
+	return args;
+}
+
 const KeyRangeRef storageQuotaKeys("\xff/storageQuota/"_sr, "\xff/storageQuota0"_sr);
 const KeyRef storageQuotaPrefix = storageQuotaKeys.begin;
 
-Key storageQuotaKey(StringRef tenantName) {
-	return tenantName.withPrefix(storageQuotaPrefix);
+Key storageQuotaKey(StringRef tenantGroupName) {
+	return tenantGroupName.withPrefix(storageQuotaPrefix);
 }
 
 const KeyRangeRef idempotencyIdKeys("\xff\x02/idmp/"_sr, "\xff\x02/idmp0"_sr);

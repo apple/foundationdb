@@ -142,7 +142,7 @@ def run_tester(args, cluster, test_file):
         else:
             reason = "exit code: %d" % ret_code
         get_logger().error("\n'%s' did not complete succesfully (%s)" % (cmd[0], reason))
-        if log_dir is not None:
+        if log_dir is not None and not args.disable_log_dump:
             dump_client_logs(log_dir)
 
     get_logger().info("")
@@ -257,6 +257,11 @@ def parse_args(argv):
         action="append",
         dest="knobs",
         help="[lowercase-knob-name]=[knob-value] (there may be multiple --knob options)",
+    )
+    parser.add_argument(
+        "--disable-log-dump",
+        help="Do not dump logs on error",
+        action="store_true",
     )
 
     return parser.parse_args(argv)

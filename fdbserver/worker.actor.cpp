@@ -30,10 +30,12 @@
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ProcessInterface.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/versions.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
 #include "flow/FileIdentifier.h"
+#include "flow/Knobs.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
@@ -675,18 +677,42 @@ ACTOR Future<Void> registrationClient(
 					TraceEvent(SevWarn, "WorkerRegisterTimeout").detail("WaitTime", now() - startTime);
 				}
 			}
-			when(wait(ccInterface->onChange())) { break; }
-			when(wait(ddInterf->onChange())) { break; }
-			when(wait(rkInterf->onChange())) { break; }
-			when(wait(csInterf->onChange())) { break; }
-			when(wait(bmInterf->onChange())) { break; }
-			when(wait(blobMigratorInterf->onChange())) { break; }
-			when(wait(ekpInterf->onChange())) { break; }
-			when(wait(degraded->onChange())) { break; }
-			when(wait(FlowTransport::transport().onIncompatibleChanged())) { break; }
-			when(wait(issues->onChange())) { break; }
-			when(wait(recovered)) { break; }
-			when(wait(clusterId->onChange())) { break; }
+			when(wait(ccInterface->onChange())) {
+				break;
+			}
+			when(wait(ddInterf->onChange())) {
+				break;
+			}
+			when(wait(rkInterf->onChange())) {
+				break;
+			}
+			when(wait(csInterf->onChange())) {
+				break;
+			}
+			when(wait(bmInterf->onChange())) {
+				break;
+			}
+			when(wait(blobMigratorInterf->onChange())) {
+				break;
+			}
+			when(wait(ekpInterf->onChange())) {
+				break;
+			}
+			when(wait(degraded->onChange())) {
+				break;
+			}
+			when(wait(FlowTransport::transport().onIncompatibleChanged())) {
+				break;
+			}
+			when(wait(issues->onChange())) {
+				break;
+			}
+			when(wait(recovered)) {
+				break;
+			}
+			when(wait(clusterId->onChange())) {
+				break;
+			}
 		}
 	}
 }
@@ -1020,6 +1046,9 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 					}
 					bool degradedPeer = false;
 					bool disconnectedPeer = false;
+
+					// If peer->lastLoggedTime == 0, we just started monitor this peer and haven't logged it once yet.
+					double lastLoggedTime = peer->lastLoggedTime <= 0.0 ? peer->lastConnectTime : peer->lastLoggedTime;
 					if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
 					    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo))) {
 						// Monitors intra DC latencies between servers that in the primary or remote DC's transaction
@@ -1037,7 +1066,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 						if (disconnectedPeer || degradedPeer) {
 							TraceEvent("HealthMonitorDetectDegradedPeer")
 							    .detail("Peer", address)
-							    .detail("Elapsed", now() - peer->lastLoggedTime)
+							    .detail("Elapsed", now() - lastLoggedTime)
 							    .detail("Disconnected", disconnectedPeer)
 							    .detail("MinLatency", peer->pingLatencies.min())
 							    .detail("MaxLatency", peer->pingLatencies.max())
@@ -1068,7 +1097,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 							TraceEvent("HealthMonitorDetectDegradedPeer")
 							    .detail("Peer", address)
 							    .detail("Satellite", true)
-							    .detail("Elapsed", now() - peer->lastLoggedTime)
+							    .detail("Elapsed", now() - lastLoggedTime)
 							    .detail("Disconnected", disconnectedPeer)
 							    .detail("MinLatency", peer->pingLatencies.min())
 							    .detail("MaxLatency", peer->pingLatencies.max())
@@ -1705,7 +1734,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 int64_t memoryLimit,
                                 std::string metricsConnFile,
                                 std::string metricsPrefix,
-                                Promise<Void> recoveredDiskFiles,
                                 int64_t memoryProfileThreshold,
                                 std::string _coordFolder,
                                 std::string whitelistBinPaths,
@@ -1788,6 +1816,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			metricsLogger = runMetrics(database, KeyRef(metricsPrefix));
 			database->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 		}
+	} else {
+		metricsLogger = runMetrics();
 	}
 
 	errorForwarders.add(resetAfter(degraded,
@@ -1804,8 +1834,13 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 	filesClosed.add(stopping.getFuture());
 
-	initializeSystemMonitorMachineState(SystemMonitorMachineState(
-	    folder, locality.dcId(), locality.zoneId(), locality.machineId(), g_network->getLocalAddress().ip));
+	initializeSystemMonitorMachineState(SystemMonitorMachineState(folder,
+	                                                              locality.dcId(),
+	                                                              locality.zoneId(),
+	                                                              locality.machineId(),
+	                                                              locality.dataHallId(),
+	                                                              g_network->getLocalAddress().ip,
+	                                                              FDB_VT_VERSION));
 
 	{
 		auto recruited = interf;
@@ -1837,8 +1872,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			if (s.storedComponent == DiskStore::Storage) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
-				Reference<IPageEncryptionKeyProvider> encryptionKeyProvider =
-				    makeReference<TenantAwareEncryptionKeyProvider>(dbInfo);
+
+				Reference<IPageEncryptionKeyProvider> encryptionKeyProvider;
+				if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+					encryptionKeyProvider =
+					    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryptionWithAuth>>(dbInfo);
+				} else {
+					encryptionKeyProvider =
+					    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryption>>(dbInfo);
+				}
 				IKeyValueStore* kv = openKVStore(
 				    s.storeType,
 				    s.filename,
@@ -2025,24 +2067,18 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		// However, the worker server can still serve stateless roles, and if encryption is on, it is crucial to have
 		// some worker available to serve the EncryptKeyProxy role, before opening encrypted storage files.
 		//
-		// When encryption-at-rest is enabled, the follow code allows a worker to first register with the
-		// cluster controller to be recruited only as a stateless process i.e. it can't be recruited as a SS or TLog
-		// process; once the local disk recovery is complete (if applicable), the process re-registers with cluster
-		// controller as a stateful process role.
-		//
-		// TODO(yiwu): Unify behavior for encryption and non-encryption once the change is stable.
+		// To achieve it, registrationClient allows a worker to first register with the cluster controller to be
+		// recruited only as a stateless process i.e. it can't be recruited as a SS or TLog process; once the local disk
+		// recovery is complete (if applicable), the process re-registers with cluster controller as a stateful process
+		// role.
+		Promise<Void> recoveredDiskFiles;
 		Future<Void> recoverDiskFiles = trigger(
 		    [=]() {
-			    TraceEvent("RecoveriesComplete", interf.id());
+			    TraceEvent("DiskFileRecoveriesComplete", interf.id());
 			    recoveredDiskFiles.send(Void());
-			    return Void();
 		    },
 		    waitForAll(recoveries));
-		if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
-			wait(recoverDiskFiles);
-		} else {
-			errorForwarders.add(recoverDiskFiles);
-		}
+		errorForwarders.add(recoverDiskFiles);
 
 		errorForwarders.add(registrationClient(ccInterface,
 		                                       interf,
@@ -2102,9 +2138,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						    .detail("BlobMigratorID",
 						            localInfo.blobMigrator.present() ? localInfo.blobMigrator.get().id() : UID())
 						    .detail("EncryptKeyProxyID",
-						            localInfo.encryptKeyProxy.present() ? localInfo.encryptKeyProxy.get().id() : UID())
-						    .detail("IsEncryptionEnabled", localInfo.client.isEncryptionEnabled);
-
+						            localInfo.encryptKeyProxy.present() ? localInfo.encryptKeyProxy.get().id() : UID());
 						dbInfo->set(localInfo);
 					}
 					errorForwarders.add(
@@ -2334,10 +2368,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				recruited.initEndpoints();
 				if (blobMigratorInterf->get().present()) {
 					recruited = blobMigratorInterf->get().get();
-					CODE_PROBE(true, "Recruited while already a blob migrator.");
+					CODE_PROBE(true, "Recruited while already a blob migrator.", probe::decoration::rare);
 				} else {
 					startRole(Role::BLOB_MIGRATOR, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.haltBlobMigrator);
+					DUMPTOKEN(recruited.waitFailure);
 					DUMPTOKEN(recruited.ssi.getValue);
 					DUMPTOKEN(recruited.ssi.getKey);
 					DUMPTOKEN(recruited.ssi.getKeyValues);
@@ -2348,7 +2383,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.ssi.getReadHotRanges);
 					DUMPTOKEN(recruited.ssi.getRangeSplitPoints);
 					DUMPTOKEN(recruited.ssi.getStorageMetrics);
-					DUMPTOKEN(recruited.ssi.waitFailure);
 					DUMPTOKEN(recruited.ssi.getQueuingMetrics);
 					DUMPTOKEN(recruited.ssi.getKeyValueStoreType);
 					DUMPTOKEN(recruited.ssi.watchValue);
@@ -2382,7 +2416,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					ReplyPromise<InitializeBackupReply> backupReady = req.reply;
 					backupWorkerCache.set(req.reqId, backupReady.getFuture());
 					Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
-					backupProcess = storageCache.removeOnReady(req.reqId, backupProcess);
+					backupProcess = backupWorkerCache.removeOnReady(req.reqId, backupProcess);
 					errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
 					TraceEvent("BackupInitRequest", req.reqId).detail("BackupId", recruited.id());
 					InitializeBackupReply reply(recruited, req.backupEpoch);
@@ -2533,8 +2567,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                   folder,
 					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
-					Reference<IPageEncryptionKeyProvider> encryptionKeyProvider =
-					    makeReference<TenantAwareEncryptionKeyProvider>(dbInfo);
+					Reference<IPageEncryptionKeyProvider> encryptionKeyProvider;
+					if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+						encryptionKeyProvider =
+						    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryptionWithAuth>>(
+						        dbInfo);
+					} else {
+						encryptionKeyProvider =
+						    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryption>>(dbInfo);
+					}
 					IKeyValueStore* data = openKVStore(
 					    req.storeType,
 					    filename,
@@ -2637,6 +2678,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.getStorageServerRejoinInfo);
 				DUMPTOKEN(recruited.waitFailure);
 				DUMPTOKEN(recruited.txnState);
+				DUMPTOKEN(recruited.getTenantId);
 
 				// printf("Recruited as commitProxyServer\n");
 				errorForwarders.add(zombie(recruited,
@@ -2801,7 +2843,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			when(state WorkerSnapRequest snapReq = waitNext(interf.workerSnapReq.getFuture())) {
 				std::string snapReqKey = snapReq.snapUID.toString() + snapReq.role.toString();
 				if (snapReqResultMap.count(snapReqKey)) {
-					CODE_PROBE(true, "Worker received a duplicate finished snapshot request");
+					CODE_PROBE(true, "Worker received a duplicate finished snapshot request", probe::decoration::rare);
 					auto result = snapReqResultMap[snapReqKey];
 					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
 					TraceEvent("RetryFinishedWorkerSnapRequest")
@@ -2809,7 +2851,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    .detail("Role", snapReq.role)
 					    .detail("Result", result.isError() ? result.getError().code() : success().code());
 				} else if (snapReqMap.count(snapReqKey)) {
-					CODE_PROBE(true, "Worker received a duplicate ongoing snapshot request");
+					CODE_PROBE(true, "Worker received a duplicate ongoing snapshot request", probe::decoration::rare);
 					TraceEvent("RetryOngoingWorkerSnapRequest")
 					    .detail("SnapUID", snapReq.snapUID.toString())
 					    .detail("Role", snapReq.role);
@@ -3447,15 +3489,12 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
     Reference<IClusterConnectionRecord> connRecord,
     Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
     Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-    Future<Void> recoveredDiskFiles,
     LocalityData locality,
     Reference<AsyncVar<ServerDBInfo>> dbInfo,
     ConfigDBType configDBType,
     Reference<AsyncVar<Optional<UID>>> clusterId) {
 	state Future<Void> monitor = monitorLeaderWithDelayedCandidacyImpl(connRecord, currentCC);
 	state Future<Void> timeout;
-
-	wait(recoveredDiskFiles);
 
 	loop {
 		if (currentCC->get().present() && dbInfo->get().clusterInterface == currentCC->get().get() &&
@@ -3477,8 +3516,7 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
 			                                     : Never())) {}
 			when(wait(timeout.isValid() ? timeout : Never())) {
 				monitor.cancel();
-				wait(clusterController(
-				    connRecord, currentCC, asyncPriorityInfo, recoveredDiskFiles, locality, configDBType, clusterId));
+				wait(clusterController(connRecord, currentCC, asyncPriorityInfo, locality, configDBType, clusterId));
 				return Void();
 			}
 		}
@@ -3553,7 +3591,6 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
                         std::map<std::string, std::string> manualKnobOverrides,
                         ConfigDBType configDBType) {
 	state std::vector<Future<Void>> actors;
-	state Promise<Void> recoveredDiskFiles;
 	state Reference<ConfigNode> configNode;
 	state Reference<LocalConfiguration> localConfig;
 	if (configDBType != ConfigDBType::DISABLED) {
@@ -3610,7 +3647,6 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		auto asyncPriorityInfo =
 		    makeReference<AsyncVar<ClusterControllerPriorityInfo>>(getCCPriorityInfo(fitnessFilePath, processClass));
 		auto serverDBInfo = ServerDBInfo();
-		serverDBInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 		serverDBInfo.myLocality = localities;
 		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>(serverDBInfo);
 		Reference<AsyncVar<Optional<UID>>> clusterId(
@@ -3623,24 +3659,14 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 			actors.push_back(reportErrors(monitorLeader(connRecord, cc), "ClusterController"));
 		} else if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::WorstFit &&
 		           SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS > 0) {
-			actors.push_back(reportErrors(monitorLeaderWithDelayedCandidacy(connRecord,
-			                                                                cc,
-			                                                                asyncPriorityInfo,
-			                                                                recoveredDiskFiles.getFuture(),
-			                                                                localities,
-			                                                                dbInfo,
-			                                                                configDBType,
-			                                                                clusterId),
-			                              "ClusterController"));
+			actors.push_back(
+			    reportErrors(monitorLeaderWithDelayedCandidacy(
+			                     connRecord, cc, asyncPriorityInfo, localities, dbInfo, configDBType, clusterId),
+			                 "ClusterController"));
 		} else {
-			actors.push_back(reportErrors(clusterController(connRecord,
-			                                                cc,
-			                                                asyncPriorityInfo,
-			                                                recoveredDiskFiles.getFuture(),
-			                                                localities,
-			                                                configDBType,
-			                                                clusterId),
-			                              "ClusterController"));
+			actors.push_back(
+			    reportErrors(clusterController(connRecord, cc, asyncPriorityInfo, localities, configDBType, clusterId),
+			                 "ClusterController"));
 		}
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
 		actors.push_back(reportErrorsExcept(workerServer(connRecord,
@@ -3652,7 +3678,6 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		                                                 memoryLimit,
 		                                                 metricsConnFile,
 		                                                 metricsPrefix,
-		                                                 recoveredDiskFiles,
 		                                                 memoryProfileThreshold,
 		                                                 coordFolder,
 		                                                 whitelistBinPaths,

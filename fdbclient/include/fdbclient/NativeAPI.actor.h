@@ -161,6 +161,7 @@ struct TransactionOptions {
 	bool useGrvCache : 1;
 	bool skipGrvCache : 1;
 	bool rawAccess : 1;
+	bool bypassStorageQuota : 1;
 
 	TransactionPriority priority;
 
@@ -236,10 +237,36 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	void setWatch(Future<Void> watchFuture);
 };
 
+class Tenant : public ReferenceCounted<Tenant> {
+public:
+	Tenant(Database cx, TenantName name);
+	explicit Tenant(int64_t id);
+	Tenant(Future<int64_t> id, Optional<TenantName> name);
+
+	Future<Void> ready() const { return success(idFuture); }
+	int64_t id() const;
+	KeyRef prefix() const;
+	std::string description() const;
+
+	Optional<TenantName> name;
+
+private:
+	mutable int64_t bigEndianId = -1;
+	Future<int64_t> idFuture;
+};
+
+template <>
+struct Traceable<Tenant> : std::true_type {
+	static std::string toString(const Tenant& tenant) { return printable(tenant.description()); }
+};
+
 FDB_DECLARE_BOOLEAN_PARAM(AllowInvalidTenantID);
+FDB_DECLARE_BOOLEAN_PARAM(ResolveDefaultTenant);
 
 struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
+	Future<Version> readVersionFuture;
+	Promise<Optional<Value>> metadataVersion;
 	Optional<Standalone<StringRef>> authToken;
 	Reference<TransactionLogInfo> trLogInfo;
 	TransactionOptions options;
@@ -273,45 +300,52 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 
 	bool automaticIdempotency = false;
 
+	Future<Void> startFuture;
+
 	// Only available so that Transaction can have a default constructor, for use in state variables
 	TransactionState(TaskPriority taskID, SpanContext spanContext)
 	  : taskID(taskID), spanContext(spanContext), tenantSet(false) {}
 
 	// VERSION_VECTOR changed default values of readVersionObtainedFromGrvProxy
 	TransactionState(Database cx,
-	                 Optional<TenantName> tenant,
+	                 Optional<Reference<Tenant>> tenant,
 	                 TaskPriority taskID,
 	                 SpanContext spanContext,
 	                 Reference<TransactionLogInfo> trLogInfo);
 
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
-	TenantInfo getTenantInfo(AllowInvalidTenantID allowInvalidId = AllowInvalidTenantID::False);
 
-	Optional<TenantName> const& tenant();
-	bool hasTenant() const;
-
-	int64_t tenantId() const { return tenantId_; }
-	void trySetTenantId(int64_t tenantId) {
-		if (tenantId_ == TenantInfo::INVALID_TENANT) {
-			tenantId_ = tenantId;
-		}
+	Version readVersion() {
+		ASSERT(readVersionFuture.isValid() && readVersionFuture.isReady());
+		return readVersionFuture.get();
 	}
 
-	Future<Void> handleUnknownTenant();
+	TenantInfo getTenantInfo(AllowInvalidTenantID allowInvalidTenantId = AllowInvalidTenantID::False);
+
+	Optional<Reference<Tenant>> const& tenant();
+	bool hasTenant(ResolveDefaultTenant ResolveDefaultTenant = ResolveDefaultTenant::True);
+	int64_t tenantId() const { return tenant_.present() ? tenant_.get()->id() : TenantInfo::INVALID_TENANT; }
+
+	Future<Void> startTransaction(uint32_t readVersionFlags = 0);
+	Future<Version> getReadVersion(uint32_t flags);
 
 private:
-	Optional<TenantName> tenant_;
-	int64_t tenantId_ = TenantInfo::INVALID_TENANT;
+	Optional<Reference<Tenant>> tenant_;
 	bool tenantSet;
 };
 
 class Transaction : NonCopyable {
 public:
-	explicit Transaction(Database const& cx, Optional<TenantName> const& tenant = Optional<TenantName>());
+	explicit Transaction(Database const& cx, Optional<Reference<Tenant>> const& tenant = Optional<Reference<Tenant>>());
 	~Transaction();
 
 	void setVersion(Version v);
-	Future<Version> getReadVersion() { return getReadVersion(0); }
+	Future<Version> getReadVersion() {
+		if (!trState->readVersionFuture.isValid()) {
+			trState->readVersionFuture = trState->getReadVersion(0);
+		}
+		return trState->readVersionFuture;
+	}
 	Future<Version> getRawReadVersion();
 	Optional<Version> getCachedReadVersion() const;
 
@@ -501,7 +535,7 @@ public:
 		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.write_conflict_ranges, tr.arena);
 	}
 
-	Optional<TenantName> getTenant() { return trState->tenant(); }
+	Optional<Reference<Tenant>> getTenant() { return trState->tenant(); }
 
 	Reference<TransactionState> trState;
 	std::vector<Reference<Watch>> watches;
@@ -513,8 +547,6 @@ public:
 	using FutureT = Future<Type>;
 
 private:
-	Future<Version> getReadVersion(uint32_t flags);
-
 	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
 	Future<RangeResult> getRangeInternal(const KeySelector& begin,
 	                                     const KeySelector& end,
@@ -527,8 +559,6 @@ private:
 
 	double backoff;
 	CommitTransactionRequest tr;
-	Future<Version> readVersion;
-	Promise<Optional<Value>> metadataVersion;
 	std::vector<Future<std::pair<Key, Key>>> extraConflictRanges;
 	Promise<Void> commitResult;
 	Future<Void> committing;
@@ -550,22 +580,27 @@ int64_t extractIntOption(Optional<StringRef> value,
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
 // Adds necessary mutation(s) to the transaction, so that *one* checkpoint will be created for
-// each and every shards overlapping with `range`. Each checkpoint will be created at a random
-// storage server for each shard.
+// each and every shards overlapping with `ranges`.
 // All checkpoint(s) will be created at the transaction's commit version.
-Future<Void> createCheckpoint(Transaction* tr, KeyRangeRef range, CheckpointFormat format);
+Future<Void> createCheckpoint(Transaction* tr,
+                              const std::vector<KeyRange>& ranges,
+                              CheckpointFormat format,
+                              Optional<UID> dataMoveId = Optional<UID>());
 
 // Same as above.
-Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr, KeyRangeRef range, CheckpointFormat format);
+Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr,
+                              const std::vector<KeyRange>& ranges,
+                              CheckpointFormat format,
+                              Optional<UID> dataMoveId = Optional<UID>());
 
-// Gets checkpoint metadata for `keys` at the specific version, with the particular format.
-// One CheckpointMetaData will be returned for each distinctive shard.
-// The collective keyrange of the returned checkpoint(s) is a super-set of `keys`.
-// checkpoint_not_found() error will be returned if the specific checkpoint(s) cannot be found.
+// Gets checkpoint metadata for `ranges` at the specific version, with the particular format.
+// The keyranges of the returned checkpoint is a super-set of `ranges`.
+// checkpoint_not_found() error will be returned if the specific checkpoint cannot be found.
 ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
-                                                                    KeyRange keys,
+                                                                    std::vector<KeyRange> ranges,
                                                                     Version version,
                                                                     CheckpointFormat format,
+                                                                    Optional<UID> dataMoveId = Optional<UID>(),
                                                                     double timeout = 5.0);
 
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
@@ -584,8 +619,8 @@ inline uint64_t getReadOperationCost(uint64_t bytes) {
 }
 
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value
-// will be 1. Otherwise, the value will be 0.
-// Returns the FDB version at which the transaction was committed.
+// will be 1. Otherwise, the value will be 0. The caller should take care of the reset of StorageWiggleMetrics if
+// necessary. Returns the FDB version at which the transaction was committed.
 ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware = LockAware::False);
 
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,

@@ -47,7 +47,9 @@ class LivenessChecker {
 	ACTOR static Future<Void> checkStuck(LivenessChecker const* self) {
 		loop {
 			choose {
-				when(wait(delayUntil(self->lastTime.get() + self->threshold))) { return Void(); }
+				when(wait(delayUntil(self->lastTime.get() + self->threshold))) {
+					return Void();
+				}
 				when(wait(self->lastTime.onChange())) {}
 			}
 		}
@@ -280,7 +282,9 @@ ACTOR Future<Void> remoteMonitorLeader(int* clientCount,
 			when(wait(yieldedFuture(currentElectedLeaderOnChange))) {
 				currentElectedLeaderOnChange = currentElectedLeader->onChange();
 			}
-			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) { break; }
+			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) {
+				break;
+			}
 		}
 	}
 
@@ -398,7 +402,6 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				notify[i].send(newInfo);
 			notify.clear();
 			ClientDBInfo outInfo;
-			outInfo.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 			outInfo.id = deterministicRandom()->randomUniqueID();
 			outInfo.forward = req.conn.toString();
 			clientData.clientInfo->set(CachedSerialization<ClientDBInfo>(outInfo));
@@ -531,7 +534,7 @@ struct LeaderRegisterCollection {
 		return Void();
 	}
 
-	Future<Void> onError() { return actors.getResult(); }
+	Future<Void> onError() const { return actors.getResult(); }
 
 	// Check if the this coordinator is no longer the leader, and the new one was stored in the "forward" keyspace.
 	// If the "forward" keyspace was set some time ago (as configured by knob), log an error to indicate the client is
@@ -638,7 +641,6 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 			Optional<LeaderInfo> forward = regs.getForward(req.clusterKey);
 			if (forward.present()) {
 				ClientDBInfo info;
-				info.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 				info.id = deterministicRandom()->randomUniqueID();
 				info.forward = forward.get().serializedInfo;
 				req.reply.send(CachedSerialization<ClientDBInfo>(info));

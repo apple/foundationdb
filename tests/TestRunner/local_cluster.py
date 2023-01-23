@@ -6,39 +6,62 @@ import subprocess
 import os
 import socket
 import time
+import fcntl
+import sys
+import tempfile
+from authz_util import private_key_gen, public_keyset_from_keys
+from test_util import random_alphanum_string
 
 CLUSTER_UPDATE_TIMEOUT_SEC = 10
 EXCLUDE_SERVERS_TIMEOUT_SEC = 120
 RETRY_INTERVAL_SEC = 0.5
+PORT_LOCK_DIR = Path(tempfile.gettempdir()).joinpath("fdb_local_cluster_port_locks")
+MAX_PORT_ACQUIRE_ATTEMPTS = 1000
 
 
-def _get_free_port_internal():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("0.0.0.0", 0))
-        return s.getsockname()[1]
+class PortProvider:
+    def __init__(self):
+        self._used_ports = set()
+        self._lock_files = []
+        PORT_LOCK_DIR.mkdir(exist_ok=True)
 
+    def get_free_port(self):
+        counter = 0
+        while True:
+            counter += 1
+            if counter > MAX_PORT_ACQUIRE_ATTEMPTS:
+                assert False, "Failed to acquire a free port after {} attempts".format(MAX_PORT_ACQUIRE_ATTEMPTS)
+            port = PortProvider._get_free_port_internal()
+            if port in self._used_ports:
+                continue
+            lock_path = PORT_LOCK_DIR.joinpath("{}.lock".format(port))
+            try:
+                locked_fd = open(lock_path, "w+")
+                self._lock_files.append(locked_fd)
+                fcntl.lockf(locked_fd, fcntl.LOCK_EX)
+                self._used_ports.add(port)
+                return port
+            except OSError:
+                print("Failed to lock file {}. Trying to aquire another port".format(lock_path), file=sys.stderr)
+                pass
 
-_used_ports = set()
+    def is_port_in_use(port):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            return s.connect_ex(("localhost", port)) == 0
 
+    def _get_free_port_internal():
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("0.0.0.0", 0))
+            return s.getsockname()[1]
 
-def get_free_port():
-    global _used_ports
-    port = _get_free_port_internal()
-    while port in _used_ports:
-        port = _get_free_port_internal()
-    _used_ports.add(port)
-    return port
-
-
-def is_port_in_use(port):
-    import socket
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(("localhost", port)) == 0
-
-
-valid_letters_for_secret = string.ascii_letters + string.digits
-
+    def release_locks(self):
+        for fd in self._lock_files:
+            fd.close()
+            try:
+                os.remove(fd.name)
+            except:
+                pass
+        self._lock_files.clear()
 
 class TLSConfig:
     # Passing a negative chain length generates expired leaf certificate
@@ -51,11 +74,6 @@ class TLSConfig:
         self.server_chain_len = server_chain_len
         self.client_chain_len = client_chain_len
         self.verify_peers = verify_peers
-
-
-def random_secret_string(length):
-    return "".join(random.choice(valid_letters_for_secret) for _ in range(length))
-
 
 class LocalCluster:
     configuration_template = """
@@ -120,8 +138,10 @@ logdir = {logdir}
         tls_config: TLSConfig = None,
         mkcert_binary: str = "",
         custom_config: dict = {},
-        public_key_json_str: str = "",
+        authorization_kty: str = "",
+        authorization_keypair_id: str = "",
     ):
+        self.port_provider = PortProvider()
         self.basedir = Path(basedir)
         self.etc = self.basedir.joinpath("etc")
         self.log = self.basedir.joinpath("log")
@@ -153,8 +173,8 @@ logdir = {logdir}
         self.server_ports = {server_id: self.__next_port() for server_id in range(self.process_number)}
         self.server_by_port = {port: server_id for server_id, port in self.server_ports.items()}
         self.next_server_id = self.process_number
-        self.cluster_desc = random_secret_string(8)
-        self.cluster_secret = random_secret_string(8)
+        self.cluster_desc = random_alphanum_string(8)
+        self.cluster_secret = random_alphanum_string(8)
         self.env_vars = {}
         self.running = False
         self.process = None
@@ -163,7 +183,12 @@ logdir = {logdir}
         self.coordinators = set()
         self.active_servers = set(self.server_ports.keys())
         self.tls_config = tls_config
+        self.public_key_jwks_str = None
         self.public_key_json_file = None
+        self.private_key = None
+        self.authorization_private_key_pem_file = None
+        self.authorization_keypair_id = authorization_keypair_id
+        self.authorization_kty = authorization_kty
         self.mkcert_binary = Path(mkcert_binary)
         self.server_cert_file = self.cert.joinpath("server_cert.pem")
         self.client_cert_file = self.cert.joinpath("client_cert.pem")
@@ -172,10 +197,17 @@ logdir = {logdir}
         self.server_ca_file = self.cert.joinpath("server_ca.pem")
         self.client_ca_file = self.cert.joinpath("client_ca.pem")
 
-        if public_key_json_str:
+        if self.authorization_kty:
+            assert self.authorization_keypair_id, "keypair ID must be set to enable authorization"
             self.public_key_json_file = self.etc.joinpath("public_keys.json")
+            self.private_key = private_key_gen(
+                    kty=self.authorization_kty, kid=self.authorization_keypair_id)
+            self.public_key_jwks_str = public_keyset_from_keys([self.private_key])
             with open(self.public_key_json_file, "w") as pubkeyfile:
-                pubkeyfile.write(public_key_json_str)
+                pubkeyfile.write(self.public_key_jwks_str)
+            self.authorization_private_key_pem_file = self.etc.joinpath("authorization_private_key.pem")
+            with open(self.authorization_private_key_pem_file, "w") as privkeyfile:
+                privkeyfile.write(self.private_key.as_pem(is_private=True).decode("utf8"))
 
         if create_config:
             self.create_cluster_file()
@@ -188,7 +220,7 @@ logdir = {logdir}
 
     def __next_port(self):
         if self.first_port is None:
-            return get_free_port()
+            return self.port_provider.get_free_port()
         else:
             self.last_used_port += 1
             return self.last_used_port
@@ -262,7 +294,7 @@ logdir = {logdir}
             "--lockfile",
             str(self.etc.joinpath("fdbmonitor.lock")),
         ]
-        self.fdbmonitor_logfile = open(self.log.joinpath("fdbmonitor.log"), "w")
+        self.fdbmonitor_logfile = open(self.log.joinpath("fdbmonitor.log"), "a+")
         self.process = subprocess.Popen(
             args,
             stdout=self.fdbmonitor_logfile,
@@ -277,6 +309,7 @@ logdir = {logdir}
             self.process.terminate()
             self.process.communicate(timeout=10)
         self.running = False
+        self.fdbmonitor_logfile.close()
 
     def ensure_ports_released(self, timeout_sec=5):
         sec = 0
@@ -284,7 +317,7 @@ logdir = {logdir}
             in_use = False
             for server_id in self.active_servers:
                 port = self.server_ports[server_id]
-                if is_port_in_use(port):
+                if PortProvider.is_port_in_use(port):
                     print("Port {} in use. Waiting for it to be released".format(port))
                     in_use = True
                     break
@@ -300,6 +333,10 @@ logdir = {logdir}
 
     def __exit__(self, xc_type, exc_value, traceback):
         self.stop_cluster()
+        self.release_ports()
+
+    def release_ports(self):
+        self.port_provider.release_locks()
 
     def __fdbcli_exec(self, cmd, stdout, stderr, timeout):
         args = [self.fdbcli_binary, "-C", self.cluster_file, "--exec", cmd]
@@ -333,9 +370,6 @@ logdir = {logdir}
         if self.blob_granules_enabled:
             db_config += " blob_granules_enabled:=1"
         self.fdbcli_exec(db_config)
-
-        if self.blob_granules_enabled:
-            self.fdbcli_exec("blobrange start \\x00 \\xff")
 
     # Generate and install test certificate chains and keys
     def create_tls_cert(self):

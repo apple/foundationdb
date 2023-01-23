@@ -24,7 +24,7 @@
 
 #include <algorithm>
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbrpc/HealthMonitor.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
@@ -90,6 +90,7 @@ public:
 	bool operator<(Endpoint const& r) const {
 		return addresses.address < r.addresses.address || (addresses.address == r.addresses.address && token < r.token);
 	}
+	bool operator>=(Endpoint const& r) const { return !(*this < r); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -150,6 +151,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	AsyncTrigger resetPing;
 	AsyncTrigger resetConnection;
 	bool compatible;
+	bool connected;
 	bool outgoingConnectionIdle; // We don't actually have a connection open and aren't trying to open one because we
 	                             // don't have anything to send
 	double lastConnectTime;
@@ -159,7 +161,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	int64_t bytesSent;
 	double lastDataPacketSentTime;
 	int outstandingReplies;
-	ContinuousSample<double> pingLatencies;
+	DDSketch<double> pingLatencies;
 	double lastLoggedTime;
 	int64_t lastLoggedBytesReceived;
 	int64_t lastLoggedBytesSent;
@@ -171,7 +173,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	int connectOutgoingCount;
 	int connectIncomingCount;
 	int connectFailedCount;
-	ContinuousSample<double> connectLatencies;
+	DDSketch<double> connectLatencies;
 	Promise<Void> disconnect;
 
 	explicit Peer(TransportData* transport, NetworkAddress const& destination);

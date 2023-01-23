@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -31,7 +31,7 @@
 #include "fdbserver/workloads/ReadWriteWorkload.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TDMetric.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct SkewedReadWriteWorkload : ReadWriteCommon {
