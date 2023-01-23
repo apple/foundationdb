@@ -58,7 +58,7 @@ struct RestoreFromBlobWorkload : TestWorkload {
 		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 
 		wait(delay(self->restoreAfter));
-		if (config.encryptionAtRestMode.isEncryptionEnabled()) {
+		if (config.tenantMode == TenantMode::REQUIRED) {
 			// restore system keys followed by user keys
 			wait(success(backupAgent.restore(
 			    cx, {}, self->backupTag, self->backupURL, {}, getSystemBackupRanges(), self->waitForComplete)));

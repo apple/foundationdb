@@ -659,7 +659,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	}
 
 	ACTOR static Future<Void> updateEncryptionKeysCtx(EncryptedRangeFileWriter* self, KeyRef key) {
-		state EncryptCipherDomainId curDomainId = wait(getEncryptionDomainDetails(key, self->encryptMode));
+		state EncryptCipherDomainId curDomainId = getEncryptionDomainDetails(key, self->encryptMode);
 		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 
 		// Get text and header cipher key
@@ -698,10 +698,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		copyToBuffer(self, s->begin(), s->size());
 	}
 
-	static bool isSystemKey(KeyRef key) { return key.size() && key[0] == systemKeys.begin[0]; }
-
-	ACTOR static Future<EncryptCipherDomainId> getEncryptionDomainDetailsImpl(KeyRef key,
-	                                                                          EncryptionAtRestMode encryptMode) {
+	static EncryptCipherDomainId getEncryptionDomainDetails(KeyRef key, EncryptionAtRestMode encryptMode) {
 		if (isSystemKey(key)) {
 			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 		}
@@ -711,10 +708,6 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		// dealing with domain aware encryption so all keys should belong to a tenant
 		KeyRef tenantPrefix = KeyRef(key.begin(), TenantAPI::PREFIX_SIZE);
 		return TenantAPI::prefixToId(tenantPrefix);
-	}
-
-	static Future<EncryptCipherDomainId> getEncryptionDomainDetails(KeyRef key, EncryptionAtRestMode encryptMode) {
-		return getEncryptionDomainDetailsImpl(key, encryptMode);
 	}
 
 	// Handles the first block and internal blocks.  Ends current block if needed.
@@ -824,9 +817,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (self->lastKey.size() == 0 || k.size() == 0) {
 			return false;
 		}
-		state EncryptCipherDomainId curKeyDomainId = wait(getEncryptionDomainDetails(k, self->encryptMode));
-		state EncryptCipherDomainId prevKeyDomainId =
-		    wait(getEncryptionDomainDetails(self->lastKey, self->encryptMode));
+		state EncryptCipherDomainId curKeyDomainId = getEncryptionDomainDetails(k, self->encryptMode);
+		state EncryptCipherDomainId prevKeyDomainId = getEncryptionDomainDetails(self->lastKey, self->encryptMode);
 		if (curKeyDomainId != prevKeyDomainId) {
 			CODE_PROBE(true, "crossed tenant boundaries");
 			wait(handleTenantBondary(self, k, v, writeValue, curKeyDomainId));
@@ -1057,11 +1049,11 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 			state KeyRef curKey = KeyRef(k, kLen);
 			if (!prevDomainId.present()) {
 				EncryptCipherDomainId domainId =
-				    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, encryptMode.get()));
+				    EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, encryptMode.get());
 				prevDomainId = domainId;
 			}
 			EncryptCipherDomainId curDomainId =
-			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, encryptMode.get()));
+			    EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, encryptMode.get());
 			if (!curKey.empty() && !prevKey.empty() && prevDomainId.get() != curDomainId) {
 				ASSERT(!done);
 				if (curDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && curDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
@@ -4651,7 +4643,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("RestoreVersion", restoreVersion)
 				    .detail("Dest", destVersion);
 				if (destVersion <= restoreVersion) {
-					CODE_PROBE(true, "Forcing restored cluster to higher version", probe::decoration::rare);
+					CODE_PROBE(true, "Forcing restored cluster to higher version");
 					tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(restoreVersion + 1, Unversioned()));
 					wait(tr->commit());
 				} else {
@@ -5251,14 +5243,16 @@ public:
 			oldRestore.clear(tr);
 		}
 
-		state int index;
-		for (index = 0; index < restoreRanges.size(); index++) {
-			KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
-			                                .removePrefix(removePrefix)
-			                                .withPrefix(addPrefix);
-			RangeResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
-			if (existingRows.size() > 0 && !onlyApplyMutationLogs) {
-				throw restore_destination_not_empty();
+		if (!onlyApplyMutationLogs) {
+			state int index;
+			for (index = 0; index < restoreRanges.size(); index++) {
+				KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
+				                                .removePrefix(removePrefix)
+				                                .withPrefix(addPrefix);
+				RangeResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
+				if (existingRows.size() > 0) {
+					throw restore_destination_not_empty();
+				}
 			}
 		}
 		// Make new restore config
@@ -6169,7 +6163,7 @@ public:
 			state Standalone<VectorRef<KeyRangeRef>> restoreRange;
 			state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
 			for (auto r : ranges) {
-				if (!config.encryptionAtRestMode.isEncryptionEnabled() || !r.intersects(getSystemBackupRanges())) {
+				if (config.tenantMode != TenantMode::REQUIRED || !r.intersects(getSystemBackupRanges())) {
 					restoreRange.push_back_deep(restoreRange.arena(), r);
 				} else {
 					KeyRangeRef normalKeyRange = r & normalKeys;

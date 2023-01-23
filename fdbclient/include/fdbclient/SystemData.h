@@ -91,6 +91,7 @@ void decodeKeyServersValue(RangeResult result,
                            UID& srcID,
                            UID& destID,
                            bool missingIsError = true);
+bool isSystemKey(KeyRef key);
 
 extern const KeyRangeRef auditKeys;
 extern const KeyRef auditPrefix;
@@ -726,6 +727,11 @@ const Value blobRestoreCommandKeyFor(const KeyRangeRef range);
 const KeyRange decodeBlobRestoreCommandKeyFor(const KeyRef key);
 const Value blobRestoreCommandValueFor(BlobRestoreStatus status);
 Standalone<BlobRestoreStatus> decodeBlobRestoreStatus(ValueRef const& value);
+extern const KeyRangeRef blobRestoreArgKeys;
+const Value blobRestoreArgKeyFor(const KeyRangeRef range);
+const KeyRange decodeBlobRestoreArgKeyFor(const KeyRef key);
+const Value blobRestoreArgValueFor(BlobRestoreArg args);
+Standalone<BlobRestoreArg> decodeBlobRestoreArg(ValueRef const& value);
 
 // Storage quota per tenant
 // "\xff/storageQuota/[[tenantGroupName]]" := "[[quota]]"

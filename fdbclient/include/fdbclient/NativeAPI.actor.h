@@ -239,35 +239,20 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 
 class Tenant : public ReferenceCounted<Tenant> {
 public:
-	Tenant(Future<int64_t> id, Optional<TenantName> name) : idFuture(id), name(name) {}
+	Tenant(Database cx, TenantName name);
+	explicit Tenant(int64_t id);
+	Tenant(Future<int64_t> id, Optional<TenantName> name);
 
-	int64_t id() const {
-		ASSERT(idFuture.isReady());
-		return idFuture.get();
-	}
+	Future<Void> ready() const { return success(idFuture); }
+	int64_t id() const;
+	KeyRef prefix() const;
+	std::string description() const;
 
-	StringRef prefix() const {
-		ASSERT(idFuture.isReady());
-		if (bigEndianId == -1) {
-			bigEndianId = bigEndian64(idFuture.get());
-		}
-		return StringRef(reinterpret_cast<const uint8_t*>(&bigEndianId), TenantAPI::PREFIX_SIZE);
-	}
-
-	std::string description() const {
-		StringRef nameStr = name.castTo<TenantNameRef>().orDefault("<unspecified>"_sr);
-		if (idFuture.canGet()) {
-			return format("%*s (%lld)", nameStr.size(), nameStr.begin(), idFuture.get());
-		} else {
-			return format("%*s", nameStr.size(), nameStr.begin());
-		}
-	}
-
-	Future<int64_t> idFuture;
 	Optional<TenantName> name;
 
 private:
 	mutable int64_t bigEndianId = -1;
+	Future<int64_t> idFuture;
 };
 
 template <>
@@ -276,9 +261,12 @@ struct Traceable<Tenant> : std::true_type {
 };
 
 FDB_DECLARE_BOOLEAN_PARAM(AllowInvalidTenantID);
+FDB_DECLARE_BOOLEAN_PARAM(ResolveDefaultTenant);
 
 struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
+	Future<Version> readVersionFuture;
+	Promise<Optional<Value>> metadataVersion;
 	Optional<Standalone<StringRef>> authToken;
 	Reference<TransactionLogInfo> trLogInfo;
 	TransactionOptions options;
@@ -312,24 +300,34 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 
 	bool automaticIdempotency = false;
 
+	Future<Void> startFuture;
+
 	// Only available so that Transaction can have a default constructor, for use in state variables
 	TransactionState(TaskPriority taskID, SpanContext spanContext)
 	  : taskID(taskID), spanContext(spanContext), tenantSet(false) {}
 
 	// VERSION_VECTOR changed default values of readVersionObtainedFromGrvProxy
 	TransactionState(Database cx,
-	                 Optional<TenantName> tenantName,
+	                 Optional<Reference<Tenant>> tenant,
 	                 TaskPriority taskID,
 	                 SpanContext spanContext,
 	                 Reference<TransactionLogInfo> trLogInfo);
 
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
+
+	Version readVersion() {
+		ASSERT(readVersionFuture.isValid() && readVersionFuture.isReady());
+		return readVersionFuture.get();
+	}
+
 	TenantInfo getTenantInfo(AllowInvalidTenantID allowInvalidTenantId = AllowInvalidTenantID::False);
 
 	Optional<Reference<Tenant>> const& tenant();
-	bool hasTenant() const;
-
+	bool hasTenant(ResolveDefaultTenant ResolveDefaultTenant = ResolveDefaultTenant::True);
 	int64_t tenantId() const { return tenant_.present() ? tenant_.get()->id() : TenantInfo::INVALID_TENANT; }
+
+	Future<Void> startTransaction(uint32_t readVersionFlags = 0);
+	Future<Version> getReadVersion(uint32_t flags);
 
 private:
 	Optional<Reference<Tenant>> tenant_;
@@ -338,11 +336,16 @@ private:
 
 class Transaction : NonCopyable {
 public:
-	explicit Transaction(Database const& cx, Optional<TenantName> const& tenant = Optional<TenantName>());
+	explicit Transaction(Database const& cx, Optional<Reference<Tenant>> const& tenant = Optional<Reference<Tenant>>());
 	~Transaction();
 
 	void setVersion(Version v);
-	Future<Version> getReadVersion() { return getReadVersion(0); }
+	Future<Version> getReadVersion() {
+		if (!trState->readVersionFuture.isValid()) {
+			trState->readVersionFuture = trState->getReadVersion(0);
+		}
+		return trState->readVersionFuture;
+	}
 	Future<Version> getRawReadVersion();
 	Optional<Version> getCachedReadVersion() const;
 
@@ -544,8 +547,6 @@ public:
 	using FutureT = Future<Type>;
 
 private:
-	Future<Version> getReadVersion(uint32_t flags);
-
 	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
 	Future<RangeResult> getRangeInternal(const KeySelector& begin,
 	                                     const KeySelector& end,
@@ -558,8 +559,6 @@ private:
 
 	double backoff;
 	CommitTransactionRequest tr;
-	Future<Version> readVersion;
-	Promise<Optional<Value>> metadataVersion;
 	std::vector<Future<std::pair<Key, Key>>> extraConflictRanges;
 	Promise<Void> commitResult;
 	Future<Void> committing;
