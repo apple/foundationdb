@@ -44,16 +44,11 @@ struct RawTenantAccessWorkload : TestWorkload {
 	std::map<int64_t, int> tid2Idx; // tenant id to tenant index in this workload
 
 	RawTenantAccessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		tenantCount = getOption(options, "tenantCount"_sr, 1000);
+		tenantCount = std::min(getOption(options, "tenantCount"_sr, 1000), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 	}
 
 	Future<Void> setup(Database const& cx) override {
-		if (clientId == 0 && g_network->isSimulated() && BUGGIFY) {
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob(
-			    "max_tenants_per_cluster", KnobValueRef::create(int{ deterministicRandom()->randomInt(20, 100) }));
-		}
-
 		if (clientId == 0) {
 			return _setup(cx, this);
 		}
@@ -100,24 +95,48 @@ struct RawTenantAccessWorkload : TestWorkload {
 		lastDeletedTenants.clear();
 	}
 
-	ACTOR static Future<Void> applyTenantChanges(Database cx, RawTenantAccessWorkload* self) {
-		// erase deleted tenants
-		self->eraseDeletedTenants();
+	void addCreatedTenants(std::unordered_map<int, int64_t> const& newTenantIds) {
+		for (auto idx : lastCreatedTenants) {
+			auto tid = newTenantIds.at(idx);
+			tid2Idx[tid] = idx;
+			idx2Tid[idx] = tid;
+		}
+		lastCreatedTenants.clear();
+	}
 
-		// load the tenant id of new tenants
+	ACTOR static Future<Void> checkAndApplyTenantChanges(Database cx,
+	                                                     RawTenantAccessWorkload* self,
+	                                                     bool lastCommitted) {
+		state std::unordered_map<int, int64_t> newTenantIds;
+		// check tenant existence, and load tenantId
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
 			tr->reset();
+			newTenantIds.clear();
 			try {
-				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				state std::set<int>::const_iterator it = self->lastCreatedTenants.cbegin();
+				state std::set<int>::const_iterator it = self->lastDeletedTenants.cbegin();
+				// check tenant deletion
+				while (it != self->lastDeletedTenants.end()) {
+					Key key = self->specialKeysTenantMapPrefix.withSuffix(self->indexToTenantName(*it));
+					Optional<Value> value = wait(tr->get(key));
+					// the commit proxies should have the same view of tenant map
+					ASSERT_EQ(value.present(), !lastCommitted);
+					++it;
+				}
+
+				// check tenant creation
+				it = self->lastCreatedTenants.cbegin();
 				while (it != self->lastCreatedTenants.end()) {
 					Key key = self->specialKeysTenantMapPrefix.withSuffix(self->indexToTenantName(*it));
 					Optional<Value> value = wait(tr->get(key));
-					ASSERT(value.present());
-					auto id = self->extractTenantId(value.get());
-					self->idx2Tid[*it] = id;
-					self->tid2Idx[id] = *it;
+					// the commit proxies should have the same view of tenant map
+					ASSERT_EQ(value.present(), lastCommitted);
+
+					if (lastCommitted) {
+						auto id = self->extractTenantId(value.get());
+						newTenantIds[*it] = id;
+					}
+
 					++it;
 				}
 				break;
@@ -126,8 +145,9 @@ struct RawTenantAccessWorkload : TestWorkload {
 			}
 		}
 
-		self->lastCreatedTenants.clear();
-		TraceEvent("RawTenantAccess_ApplyTenantChanges").detail("CurrentTenantCount", self->idx2Tid.size());
+		self->eraseDeletedTenants();
+		self->addCreatedTenants(newTenantIds);
+		TraceEvent("RawTenantAccess_CheckAndApplyTenantChanges").detail("CurrentTenantCount", self->idx2Tid.size());
 
 		return Void();
 	}
@@ -230,7 +250,8 @@ struct RawTenantAccessWorkload : TestWorkload {
 		TraceEvent("RawTenantAccess_WriteToInvalidTenant", traceId).detail("TenantId", tenantId);
 	}
 
-	ACTOR static Future<Void> randomTenantTransaction(Database cx, RawTenantAccessWorkload* self) {
+	// return whether the transaction is committed
+	ACTOR static Future<bool> randomTenantTransaction(Database cx, RawTenantAccessWorkload* self) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		state UID traceId = deterministicRandom()->randomUniqueID();
 		// 1. create/delete tenant and write to a tenant is an illegal operation for now. (tenantMapChange &&
@@ -242,6 +263,7 @@ struct RawTenantAccessWorkload : TestWorkload {
 		state bool validTenantWriteOp = false;
 		state bool invalidTenantWriteOp = false;
 		state bool tenantMapChangeOp = false;
+		state bool committed = false;
 
 		loop {
 			tr->reset();
@@ -275,10 +297,12 @@ struct RawTenantAccessWorkload : TestWorkload {
 				}
 
 				wait(tr->commit());
+				committed = true;
 				break;
 			} catch (Error& e) {
 				if (e.code() == error_code_illegal_tenant_access) {
 					illegalAccessCaught = true;
+					break;
 				}
 				TraceEvent("RawTenantAccess_TransactionError", traceId).error(e);
 				wait(tr->onError(e));
@@ -296,7 +320,7 @@ struct RawTenantAccessWorkload : TestWorkload {
 			ASSERT(!illegalAccessCaught);
 		}
 
-		return Void();
+		return committed;
 	}
 
 	// clear tenant data to make sure the random tenant deletions are success
@@ -314,10 +338,11 @@ struct RawTenantAccessWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> _start(Database cx, RawTenantAccessWorkload* self) {
+		state bool lastCommitted = true;
 		loop {
-			wait(applyTenantChanges(cx, self));
+			wait(checkAndApplyTenantChanges(cx, self, lastCommitted));
 			wait(clearAllTenantData(cx, self));
-			wait(randomTenantTransaction(cx, self));
+			wait(store(lastCommitted, randomTenantTransaction(cx, self)));
 			wait(delay(0.5));
 		}
 	}
