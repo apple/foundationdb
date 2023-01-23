@@ -22,6 +22,7 @@
 #define MAKO_STATS_HPP
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -31,6 +32,7 @@
 #include <new>
 #include <ostream>
 #include <utility>
+#include "flow/Platform.h"
 #include "mako/mako.hpp"
 #include "operations.hpp"
 #include "time.hpp"
@@ -282,43 +284,67 @@ inline std::ifstream& operator>>(std::ifstream& is, WorkflowStatistics& stats) {
 	return is;
 }
 
-class alignas(64) ThreadStatistics {
-	double cpu_utilization{ 0.0 };
+enum TimerKind { THREAD, PROCESS };
+
+class CPUUtilizationTimer {
+	steady_clock::time_point timepoint_start;
+	steady_clock::time_point timepoint_end;
+	double cpu_time_start{ 0.0 };
+	double cpu_time_end{ 0.0 };
+	TimerKind kind;
 
 public:
-	ThreadStatistics() noexcept {}
+	CPUUtilizationTimer(TimerKind kind) : kind(kind) {}
+	void start() {
+		timepoint_start = steady_clock::now();
+		cpu_time_start = (kind == THREAD) ? getProcessorTimeThread() : getProcessorTimeProcess();
+	}
+	void end() {
+		timepoint_end = steady_clock::now();
+		cpu_time_end = (kind == THREAD) ? getProcessorTimeThread() : getProcessorTimeProcess();
+	}
+	double getCPUUtilization() const {
+		return (cpu_time_end - cpu_time_start) / toDoubleSeconds(timepoint_end - timepoint_start) * 100.;
+	}
 
-	ThreadStatistics(const ThreadStatistics& other) = default;
-	ThreadStatistics& operator=(const ThreadStatistics& other) = default;
+	double getCPUTime() const { return cpu_time_end - cpu_time_start; }
 
-	double getCPUUtilization() { return cpu_utilization; }
-	void setCPUUtilization(double cpu_utilization) { this->cpu_utilization = cpu_utilization; }
+	double getTotalDuration() const { return toDoubleSeconds(timepoint_end - timepoint_start); }
+};
 
-	void combine(const ThreadStatistics& other) { cpu_utilization += other.cpu_utilization; }
+class alignas(64) ThreadStatistics {
+	CPUUtilizationTimer thread_timer;
+
+public:
+	ThreadStatistics() : thread_timer(THREAD) {}
+
+	void startThreadTimer() { thread_timer.start(); }
+	void endThreadTimer() { thread_timer.end(); }
+	double getThreadCPUUtilization() const { return thread_timer.getCPUUtilization(); }
+	double getCPUTime() const { return thread_timer.getCPUTime(); }
+	double getTotalDuration() const { return thread_timer.getTotalDuration(); }
 };
 
 class alignas(64) ProcessStatistics {
-	double total_cpu_utilization{ 0.0 };
-	double fdb_network_cpu_utilization{ 0.0 };
+	CPUUtilizationTimer process_timer;
+	CPUUtilizationTimer fdb_network_timer;
 
 public:
-	ProcessStatistics() noexcept {}
+	ProcessStatistics() : process_timer(PROCESS), fdb_network_timer(THREAD) {}
+	void startProcessTimer() { process_timer.start(); }
+	void endProcessTimer() { process_timer.end(); }
 
-	ProcessStatistics(const ProcessStatistics& other) = default;
-	ProcessStatistics& operator=(const ProcessStatistics& other) = default;
+	void startFDBNetworkTimer() { fdb_network_timer.start(); }
+	void endFDBNetworkTimer() { fdb_network_timer.end(); }
 
-	double getTotalCPUUtilization() { return total_cpu_utilization; }
-	double getFDBNetworkCPUUtilization() { return fdb_network_cpu_utilization; }
+	double getProcessCPUUtilization() const { return process_timer.getCPUUtilization(); }
+	double getFDBNetworkCPUUtilization() const { return fdb_network_timer.getCPUUtilization(); }
 
-	void setCPUUtilization(double total_cpu_utilization) { this->total_cpu_utilization = total_cpu_utilization; }
-	void setFDBNetworkCPUUtilization(double fdb_network_cpu_utilization) {
-		this->fdb_network_cpu_utilization = fdb_network_cpu_utilization;
-	}
+	double getProcessCPUTime() const { return process_timer.getCPUTime(); }
+	double getFDBNetworkCPUTime() const { return fdb_network_timer.getCPUTime(); }
 
-	void combine(const ProcessStatistics& other) {
-		total_cpu_utilization += other.total_cpu_utilization;
-		fdb_network_cpu_utilization += other.fdb_network_cpu_utilization;
-	}
+	double getProcessTotalDuration() const { return process_timer.getTotalDuration(); }
+	double getFDBNetworkTotalDuration() const { return fdb_network_timer.getTotalDuration(); }
 };
 
 } // namespace mako
