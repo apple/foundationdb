@@ -3015,7 +3015,9 @@ Future<KeyRangeLocationInfo> getKeyLocation(Reference<TransactionState> trState,
 	                      trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>(),
 	                      trState->useProvisionalProxies,
 	                      isBackward,
-	                      trState->readVersionFuture.isReady() ? trState->readVersion() : latestVersion);
+	                      trState->readVersionFuture.isValid() && trState->readVersionFuture.isReady()
+	                          ? trState->readVersion()
+	                          : latestVersion);
 }
 
 ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
@@ -3132,7 +3134,9 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<Transac
 	                            trState->spanContext,
 	                            trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>(),
 	                            trState->useProvisionalProxies,
-	                            trState->readVersionFuture.isReady() ? trState->readVersion() : latestVersion);
+	                            trState->readVersionFuture.isValid() && trState->readVersionFuture.isReady()
+	                                ? trState->readVersion()
+	                                : latestVersion);
 }
 
 ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange keys) {
