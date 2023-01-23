@@ -2913,7 +2913,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		// The delay(0) is technically only necessary if we did not immediately acquire the lock, but isn't a big deal
 		// to do always
 		wait(delay(0));
-		RangeResult res = wait(
+		state RangeResult res = wait(
 		    data->storage.readRange(KeyRangeRef(changeFeedDurableKey(req.rangeID, std::max(req.begin, emptyVersion)),
 		                                        changeFeedDurableKey(req.rangeID, req.end)),
 		                            1 << 30,
