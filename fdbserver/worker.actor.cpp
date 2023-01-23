@@ -97,6 +97,8 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #define KV_STORE(filename, uid) keyValueStoreMemory(filename, uid)
 #endif
 
+template class RequestStream<RecruitMasterRequest, false>;
+
 namespace {
 RoleLineageCollector roleLineageCollector;
 }
