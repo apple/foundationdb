@@ -26,6 +26,9 @@
 #include "flow/genericactors.actor.h"
 #include "flow/UnitTest.h"
 
+StorageEngineParamsFactory redwoodFactory(KeyValueStoreType::SSD_REDWOOD_V1,
+                                          { { "default_page_size", "8192" }, { "kvstore_range_prefetch", "true" } });
+
 DatabaseConfiguration::DatabaseConfiguration() {
 	resetInternal();
 }
@@ -55,6 +58,7 @@ void DatabaseConfiguration::resetInternal() {
 	blobGranulesEnabled = false;
 	tenantMode = TenantMode::DISABLED;
 	encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
+	storageEngineParams = std::map<std::string, std::string>();
 }
 
 int toInt(ValueRef const& v) {
@@ -427,6 +431,15 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	result["blob_granules_enabled"] = (int32_t)blobGranulesEnabled;
 	result["tenant_mode"] = tenantMode.toString();
 	result["encryption_at_rest_mode"] = encryptionAtRestMode.toString();
+
+	// Add storage engine params into the json string
+	if (storageEngineParams.present()) {
+		StatusObject params;
+		for (auto const& [k, v] : storageEngineParams.get()) {
+			params[k] = v;
+		}
+		result["storage_engine_params"] = params;
+	}
 	return result;
 }
 
@@ -659,6 +672,11 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		blobGranulesEnabled = (type != 0);
 	} else if (ck == "encryption_at_rest_mode"_sr) {
 		encryptionAtRestMode = EncryptionAtRestMode::fromValueRef(Optional<ValueRef>(value));
+	} else if (ck.startsWith(storageEngineParamsPrefix.removePrefix(configKeysPrefix))) {
+		ASSERT(storageEngineParams.present());
+		// TODO : should we hardcode the above condition like others?
+		auto paramName = ck.removePrefix(storageEngineParamsPrefix.removePrefix(configKeysPrefix)).toString();
+		storageEngineParams.get()[paramName] = value.toString();
 	} else {
 		return false;
 	}

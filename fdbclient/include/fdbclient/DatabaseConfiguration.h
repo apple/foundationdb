@@ -100,6 +100,22 @@ struct RegionInfo {
 	}
 };
 
+// used to initialize default parameters' values for different storage engines
+struct StorageEngineParamsFactory {
+	static std::map<KeyValueStoreType::StoreType, std::map<std::string, std::string>>& factories() {
+		static std::map<KeyValueStoreType::StoreType, std::map<std::string, std::string>> theFactories;
+		return theFactories;
+	}
+
+	StorageEngineParamsFactory(KeyValueStoreType::StoreType storeType, std::map<std::string, std::string> const& vals) {
+		factories()[storeType] = vals;
+	}
+
+	static std::map<std::string, std::string>& getParams(KeyValueStoreType::StoreType storeType) {
+		return factories().at(storeType);
+	}
+};
+
 struct DatabaseConfiguration {
 	DatabaseConfiguration();
 
@@ -226,6 +242,10 @@ struct DatabaseConfiguration {
 	Reference<IReplicationPolicy> storagePolicy;
 	int32_t storageTeamSize;
 	KeyValueStoreType storageServerStoreType;
+
+	// Storage engine params
+	using storageEngineParamsMap = std::map<std::string, std::string>;
+	Optional<storageEngineParamsMap> storageEngineParams;
 
 	// Testing StorageServers
 	int32_t desiredTSSCount;
