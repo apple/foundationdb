@@ -2897,9 +2897,6 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 
 		state PriorityMultiLock::Lock ssReadLock = wait(data->getReadLock(req.options));
-<<<<<<< HEAD
-		state RangeResult res = wait(
-=======
 		// The assumption of feed ordering is that all atLatest feeds will get processed before the !atLatest ones.
 		// Without this delay(0), there is a case where that can happen:
 		//  - a read request (eg getValueQ) has the read lock and is waiting on ss->version.whenAtLeast(V)
@@ -2917,7 +2914,6 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		// to do always
 		wait(delay(0));
 		RangeResult res = wait(
->>>>>>> main
 		    data->storage.readRange(KeyRangeRef(changeFeedDurableKey(req.rangeID, std::max(req.begin, emptyVersion)),
 		                                        changeFeedDurableKey(req.rangeID, req.end)),
 		                            1 << 30,
