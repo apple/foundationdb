@@ -182,7 +182,6 @@ struct AuthzSecurityWorkload : TestWorkload {
 			req.key = key;
 			req.version = committedVersion;
 			req.tenantInfo.tenantId = tenant->id();
-			req.tenantInfo.name = tenant->name.get();
 			req.tenantInfo.token = token;
 			try {
 				GetValueReply reply = wait(loadBalance(loc.locations->locations(),
@@ -271,7 +270,6 @@ struct AuthzSecurityWorkload : TestWorkload {
 			CommitTransactionRequest req;
 			req.transaction.mutations.push_back(req.arena, MutationRef(MutationRef::SetValue, prefixedKey, newValue));
 			req.transaction.read_snapshot = readVersion;
-			req.tenantInfo.name = tenant->name.get();
 			req.tenantInfo.token = token;
 			req.tenantInfo.tenantId = tenant->id();
 			try {

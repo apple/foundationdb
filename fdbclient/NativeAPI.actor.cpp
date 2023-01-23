@@ -3015,7 +3015,9 @@ Future<KeyRangeLocationInfo> getKeyLocation(Reference<TransactionState> trState,
 	                      trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>(),
 	                      trState->useProvisionalProxies,
 	                      isBackward,
-	                      trState->readVersionFuture.isReady() ? trState->readVersion() : latestVersion);
+	                      trState->readVersionFuture.isValid() && trState->readVersionFuture.isReady()
+	                          ? trState->readVersion()
+	                          : latestVersion);
 }
 
 ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
@@ -3132,7 +3134,9 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<Transac
 	                            trState->spanContext,
 	                            trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>(),
 	                            trState->useProvisionalProxies,
-	                            trState->readVersionFuture.isReady() ? trState->readVersion() : latestVersion);
+	                            trState->readVersionFuture.isValid() && trState->readVersionFuture.isReady()
+	                                ? trState->readVersion()
+	                                : latestVersion);
 }
 
 ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange keys) {
@@ -3271,10 +3275,8 @@ TenantInfo TransactionState::getTenantInfo(AllowInvalidTenantID allowInvalidTena
 	}
 
 	ASSERT(t.present() && (allowInvalidTenantId || t.get()->id() != TenantInfo::INVALID_TENANT));
-	return TenantInfo(t.get()->name,
-	                  authToken,
-	                  (allowInvalidTenantId && !t.get()->ready().isReady()) ? TenantInfo::INVALID_TENANT
-	                                                                        : t.get()->id());
+	return TenantInfo(
+	    (allowInvalidTenantId && !t.get()->ready().isReady()) ? TenantInfo::INVALID_TENANT : t.get()->id(), authToken);
 }
 
 // Returns the tenant used in this transaction. If the tenant is unset and raw access isn't specified, then the default
@@ -3788,7 +3790,7 @@ ACTOR Future<Void> sameVersionDiffValue(Database cx, Reference<WatchParameters> 
 
 	loop {
 		try {
-			if (!parameters->tenant.name.present()) {
+			if (!parameters->tenant.hasTenant()) {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			}
 
