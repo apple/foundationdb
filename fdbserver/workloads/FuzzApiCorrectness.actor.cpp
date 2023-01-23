@@ -242,7 +242,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		std::vector<Future<Void>> tenantFutures;
 		for (int i = 0; i < self->numTenants + 1; ++i) {
 			TenantName tenantName = getTenant(i);
-			self->tenants.push_back(self->db->openTenant(tenantName));
 
 			// The last tenant will not be created
 			if (i < self->numTenants) {
@@ -253,6 +252,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			}
 		}
 		wait(waitForAll(tenantFutures));
+
+		for (int i = 0; i < self->numTenants + 1; ++i) {
+			TenantName tenantName = getTenant(i);
+			self->tenants.push_back(self->db->openTenant(tenantName));
+		}
 
 		// When domain-aware encryption is enabled, writing random keys without specifying tenant may cause Redwood to
 		// create too many pages.
