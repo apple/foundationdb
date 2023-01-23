@@ -728,7 +728,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 							    .detail("ShardEnd", printable(range.end))
 							    .detail("Address", storageServerInterfaces[j].address())
 							    .detail("UID", storageServerInterfaces[j].id())
-							    .detail("Quiesed", performQuiescentChecks)
+							    .detail("Quiesced", performQuiescentChecks)
 							    .detail("GetKeyValuesToken",
 							            storageServerInterfaces[j].getKeyValues.getEndpoint().token)
 							    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False");
