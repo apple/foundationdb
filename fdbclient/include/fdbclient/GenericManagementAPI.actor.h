@@ -132,6 +132,8 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 
 ConfigureAutoResult parseConfig(StatusObject const& status);
 
+bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bool creating);
+
 // Management API written in template code to support both IClientAPI and NativeAPI
 namespace ManagementAPI {
 
@@ -269,6 +271,10 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 			locked = UID::fromString(iter->second);
 			m.erase(iter);
 		}
+	}
+	if(!checkForStorageEngineParamsChange(m, creating)) {
+		fmt::print("Invalid configuration for storage engine params\n");
+		return ConfigurationResult::INVALID_CONFIGURATION;
 	}
 	if (creating) {
 		m[initIdKey.toString()] = deterministicRandom()->randomUniqueID().toString();
@@ -510,6 +516,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 			}
 
 			for (auto i = m.begin(); i != m.end(); ++i) {
+				fmt::print("Set config key:{}; val:{}\n", i->first, i->second);
 				tr->set(StringRef(i->first), StringRef(i->second));
 			}
 

@@ -22,6 +22,8 @@
 #include <string>
 #include <vector>
 
+#include <boost/algorithm/string.hpp>
+
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fmt/format.h"
 #include "fdbclient/Knobs.h"
@@ -54,6 +56,63 @@ bool isInteger(const std::string& s) {
 	return (*p == 0);
 }
 
+// Check if the specified params supported for the given storage type.
+// It will return false if invalid parameters are given.
+bool parseStorageEngineParams(KeyValueStoreType::StoreType storeType,
+                              std::string const& kvPairsStr,
+                              std::map<std::string, std::string>& out,
+                              bool creating) {
+	auto& paramsInitMap = StorageEngineParamsFactory::getParams(storeType);
+	// Insert all default values when creating the database
+	if (creating) {
+		for (auto const& [k, v] : paramsInitMap)
+			out[storageEngineParamsPrefix.toString() + k] = v;
+	}
+
+	std::vector<std::string> kvPairs;
+	boost::split(kvPairs, kvPairsStr, [](char c) { return c == ','; });
+	for (auto const& _kv : kvPairs) {
+		auto pos = _kv.find("=");
+		if (pos != std::string::npos) {
+			auto k = _kv.substr(0, pos);
+			auto v = _kv.substr(pos + 1);
+			fmt::print("Reading k:{}; v:{}\n", k, v);
+			if (!paramsInitMap.count(k)) {
+				fmt::print("Error: {} is not a supported parameter for storage engine {}.\n",
+				           k,
+				           KeyValueStoreType::getStoreTypeStr(storeType));
+				return false;
+			} else {
+				TraceEvent(SevDebug, "ReplaceDefaultStorageEngineParameter")
+				    .detail("StoreType", KeyValueStoreType::getStoreTypeStr(storeType))
+				    .detail("Parameter", k)
+				    .detail("DefaultValue", paramsInitMap[k])
+				    .detail("Value", v);
+				out[storageEngineParamsPrefix.toString() + k] = v;
+			}
+		} else {
+			// TODO: print error message that invalid parameters are given
+			return false;
+		}
+	}
+	return true;
+}
+
+bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bool creating) {
+	auto storageEngineParamsKey = configKeysPrefix.toString() + "storage_engine_params";
+	bool storageEngineParamsChange = m.count(storageEngineParamsKey) != 0;
+	if (!storageEngineParamsChange)
+		return true;
+	auto paramsVal = m[storageEngineParamsKey];
+	auto storeType =
+	    static_cast<KeyValueStoreType::StoreType>(std::stoi(m[configKeysPrefix.toString() + "storage_engine"]));
+	if (!parseStorageEngineParams(storeType, m[storageEngineParamsKey], m, creating))
+		return false;
+	// erase the raw value string delimitered by ","
+	m.erase(storageEngineParamsKey);
+	return true;
+}
+
 // Defines the mapping between configuration names (as exposed by fdbcli, buildConfiguration()) and actual configuration
 // parameters
 std::map<std::string, std::string> configForToken(std::string const& mode) {
@@ -80,11 +139,29 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 	}
 
 	size_t pos;
+	Optional<KeyValueStoreType> logType;
+	Optional<KeyValueStoreType> storeType;
 
 	// key:=value is unvalidated and unchecked
 	pos = mode.find(":=");
 	if (pos != std::string::npos) {
-		out[p + mode.substr(0, pos)] = mode.substr(pos + 2);
+		auto k = mode.substr(0, pos);
+		auto v = mode.substr(pos + 2);
+		if (k == "redwood") {
+			logType = KeyValueStoreType::SSD_BTREE_V2;
+			storeType = KeyValueStoreType::SSD_REDWOOD_V1;
+		} else {
+			// TODO: check if storage type is supported
+			fmt::print("Error: Unsupported params change for storage engine {}", k);
+			return out;
+		}
+		if (storeType.present()) {
+			out[p + "storage_engine_params"] = v;
+			out[p + "log_engine"] = format("%d", logType.get().storeType());
+			out[p + "storage_engine"] = format("%d", storeType.get().storeType());
+		} else {
+			out[p + k] = v;
+		}
 		return out;
 	}
 
@@ -218,8 +295,6 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 		return out;
 	}
 
-	Optional<KeyValueStoreType> logType;
-	Optional<KeyValueStoreType> storeType;
 	if (mode == "ssd-1") {
 		logType = KeyValueStoreType::SSD_BTREE_V1;
 		storeType = KeyValueStoreType::SSD_BTREE_V1;
