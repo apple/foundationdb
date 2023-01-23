@@ -1573,8 +1573,19 @@ int Arguments::validate() {
 		logr.error("--num_databases ({}) must be >= number of clusters({})", num_databases, num_fdb_clusters);
 		return -1;
 	}
-	if (num_threads < num_databases) {
-		logr.error("--threads ({}) must be >= number of databases ({})", num_threads, num_databases);
+	// In sync mode, threads, and in async mode, async states / workflows are assigned to databases. Having more
+	// databases than threads or async states / workflows leads to unused databases.
+	if (async_xacts == 0 && num_threads < num_databases) {
+		logr.error("--threads ({}) must be >= number of databases ({}) in sync mode", num_threads, num_databases);
+		return -1;
+	}
+	if (async_xacts > 0 && async_xacts < num_databases) {
+		logr.error("--async_xacts ({}) must be >= number of databases ({}) in async mode", async_xacts, num_databases);
+		return -1;
+	}
+	// Having more threads than async workflows in the async mode does lead to unused threads.
+	if (async_xacts > 0 && num_threads > async_xacts) {
+		logr.error("--threads ({}) must be <= --async_xacts", num_threads);
 		return -1;
 	}
 	if (key_length < 4 /* "mako" */ + row_digits) {
