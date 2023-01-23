@@ -240,19 +240,17 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		self->db = db;
 
 		std::vector<Future<Void>> tenantFutures;
-		for (int i = 0; i < self->numTenants + 1; ++i) {
+		// The last tenant will not be created
+		for (int i = 0; i < self->numTenants; ++i) {
 			TenantName tenantName = getTenant(i);
-
-			// The last tenant will not be created
-			if (i < self->numTenants) {
-				TenantMapEntry entry;
-				entry.tenantGroup = self->getTenantGroup(i);
-				tenantFutures.push_back(::success(TenantAPI::createTenant(cx.getReference(), tenantName, entry)));
-				self->createdTenants.insert(tenantName);
-			}
+			TenantMapEntry entry;
+			entry.tenantGroup = self->getTenantGroup(i);
+			tenantFutures.push_back(::success(TenantAPI::createTenant(cx.getReference(), tenantName, entry)));
+			self->createdTenants.insert(tenantName);
 		}
 		wait(waitForAll(tenantFutures));
 
+		// Open one extra tenant to test the failure of using a tenant that doesn't exist
 		for (int i = 0; i < self->numTenants + 1; ++i) {
 			TenantName tenantName = getTenant(i);
 			self->tenants.push_back(self->db->openTenant(tenantName));
