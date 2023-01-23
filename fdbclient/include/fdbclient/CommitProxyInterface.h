@@ -151,6 +151,10 @@ struct ClientDBInfo {
 	}
 };
 
+// Compile ReplyPromise<CachedSerialization<ClientDBInfo>> takes long time, extern template is used to fix this. The
+// corresponding instantiations are done in CommitProxyInterface.cpp
+extern template class ReplyPromise<class CachedSerialization<struct ClientDBInfo>>;
+
 struct CommitID {
 	constexpr static FileIdentifier file_identifier = 14254927;
 	Version version; // returns invalidVersion if transaction conflicts
