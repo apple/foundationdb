@@ -48,6 +48,7 @@
 #include "fdbclient/Tracing.h"
 #include "flow/Util.h"
 #include "fdbclient/Atomic.h"
+#include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/BlobConnectionProvider.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
 #include "fdbclient/CommitProxyInterface.h"
@@ -138,7 +139,8 @@ bool canReplyWith(Error e) {
 	case error_code_server_overloaded:
 	case error_code_change_feed_popped:
 	case error_code_tenant_name_required:
-	case error_code_unknown_tenant:
+	case error_code_tenant_removed:
+	case error_code_tenant_not_found:
 	// getMappedRange related exceptions that are not retriable:
 	case error_code_mapper_bad_index:
 	case error_code_mapper_no_such_key:
@@ -781,6 +783,7 @@ public:
 
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
+	std::unordered_map<UID, ICheckpointReader*> liveCheckpointReaders; // Active checkpoint readers
 	VersionedMap<int64_t, TenantName> tenantMap;
 	std::map<Version, std::vector<PendingNewShard>>
 	    pendingAddRanges; // Pending requests to add ranges to physical shards
@@ -1018,12 +1021,12 @@ public:
 	KeyRangeMap<bool> cachedRangeMap; // indicates if a key-range is being cached
 
 	KeyRangeMap<std::vector<Reference<ChangeFeedInfo>>> keyChangeFeed;
-	std::map<Key, Reference<ChangeFeedInfo>> uidChangeFeed;
+	std::unordered_map<Key, Reference<ChangeFeedInfo>> uidChangeFeed;
 	Deque<std::pair<std::vector<Key>, Version>> changeFeedVersions;
 	std::map<UID, PromiseStream<Key>> changeFeedDestroys;
 	std::set<Key> currentChangeFeeds;
 	std::set<Key> fetchingChangeFeeds;
-	std::unordered_map<NetworkAddress, std::map<UID, Version>> changeFeedClientVersions;
+	std::unordered_map<NetworkAddress, std::unordered_map<UID, Version>> changeFeedClientVersions;
 	std::unordered_map<Key, Version> changeFeedCleanupDurable;
 	int64_t activeFeedQueries = 0;
 	int64_t changeFeedMemoryBytes = 0;
@@ -2015,12 +2018,7 @@ void StorageServer::checkTenantEntry(Version version, TenantInfo tenantInfo) {
 			TraceEvent(SevWarn, "StorageTenantNotFound", thisServerID)
 			    .detail("Tenant", tenantInfo.tenantId)
 			    .backtrace();
-			throw unknown_tenant();
-		}
-
-		// TENANT_TODO: this is temporary pending other changes to remove reliance on names
-		if (*itr != tenantInfo.name.get()) {
-			throw unknown_tenant();
+			throw tenant_not_found();
 		}
 	}
 }
@@ -2479,9 +2477,15 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 	}
 
 	state ICheckpointReader* reader = nullptr;
+	auto crIt = self->liveCheckpointReaders.find(req.checkpointID);
+	if (crIt != self->liveCheckpointReaders.end()) {
+		reader = crIt->second;
+	} else {
+		reader = newCheckpointReader(it->second, CheckpointAsKeyValues::True, self->thisServerID);
+	}
+
 	state std::unique_ptr<ICheckpointIterator> iter;
 	try {
-		reader = newCheckpointReader(it->second, CheckpointAsKeyValues::True, self->thisServerID);
 		wait(reader->init(BinaryWriter::toValue(req.range, IncludeVersion())));
 		iter = reader->getIterator(req.range);
 
@@ -2528,6 +2532,7 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 
 	iter.reset();
 	if (!reader->inUse()) {
+		self->liveCheckpointReaders.erase(req.checkpointID);
 		wait(reader->close());
 	}
 	return Void();
@@ -2650,7 +2655,8 @@ MutationsAndVersionRef filterMutationsInverted(Arena& arena, MutationsAndVersion
 MutationsAndVersionRef filterMutations(Arena& arena,
                                        MutationsAndVersionRef const& m,
                                        KeyRange const& range,
-                                       bool inverted) {
+                                       bool inverted,
+                                       int commonPrefixLength) {
 	if (m.mutations.size() == 1 && m.mutations.back().param1 == lastEpochEndPrivateKey) {
 		return m;
 	}
@@ -2662,22 +2668,28 @@ MutationsAndVersionRef filterMutations(Arena& arena,
 	Optional<VectorRef<MutationRef>> modifiedMutations;
 	for (int i = 0; i < m.mutations.size(); i++) {
 		if (m.mutations[i].type == MutationRef::SetValue) {
-			if (modifiedMutations.present() && range.contains(m.mutations[i].param1)) {
+			bool inRange = range.begin.compareSuffix(m.mutations[i].param1, commonPrefixLength) <= 0 &&
+			               m.mutations[i].param1.compareSuffix(range.end, commonPrefixLength) < 0;
+			if (modifiedMutations.present() && inRange) {
 				modifiedMutations.get().push_back(arena, m.mutations[i]);
 			}
-			if (!modifiedMutations.present() && !range.contains(m.mutations[i].param1)) {
+			if (!modifiedMutations.present() && !inRange) {
 				modifiedMutations = m.mutations.slice(0, i);
 				arena.dependsOn(range.arena());
 			}
 		} else {
 			ASSERT(m.mutations[i].type == MutationRef::ClearRange);
+			// param1 < range.begin || param2 > range.end
 			if (!modifiedMutations.present() &&
-			    (m.mutations[i].param1 < range.begin || m.mutations[i].param2 > range.end)) {
+			    (m.mutations[i].param1.compareSuffix(range.begin, commonPrefixLength) < 0 ||
+			     m.mutations[i].param2.compareSuffix(range.end, commonPrefixLength) > 0)) {
 				modifiedMutations = m.mutations.slice(0, i);
 				arena.dependsOn(range.arena());
 			}
 			if (modifiedMutations.present()) {
-				if (m.mutations[i].param1 < range.end && range.begin < m.mutations[i].param2) {
+				// param1 < range.end && range.begin < param2
+				if (m.mutations[i].param1.compareSuffix(range.end, commonPrefixLength) < 0 &&
+				    range.begin.compareSuffix(m.mutations[i].param2, commonPrefixLength) < 0) {
 					modifiedMutations.get().push_back(arena,
 					                                  MutationRef(MutationRef::ClearRange,
 					                                              std::max(range.begin, m.mutations[i].param1),
@@ -2781,9 +2793,12 @@ static std::deque<Standalone<MutationsAndVersionRef>>::const_iterator searchChan
 enum FeedDiskReadState { STARTING, NORMAL, DISK_CATCHUP };
 
 ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(StorageServer* data,
+                                                                            Reference<ChangeFeedInfo> feedInfo,
                                                                             ChangeFeedStreamRequest req,
                                                                             bool inverted,
                                                                             bool atLatest,
+                                                                            bool doFilterMutations,
+                                                                            int commonFeedPrefixLength,
                                                                             FeedDiskReadState* feedDiskReadState) {
 	state ChangeFeedStreamReply reply;
 	state ChangeFeedStreamReply memoryReply;
@@ -2814,12 +2829,9 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		throw wrong_shard_server();
 	}
 
-	auto feed = data->uidChangeFeed.find(req.rangeID);
-	if (feed == data->uidChangeFeed.end()) {
+	if (feedInfo->removing) {
 		throw unknown_change_feed();
 	}
-
-	state Reference<ChangeFeedInfo> feedInfo = feed->second;
 
 	// We must copy the mutationDeque when fetching the durable bytes in case mutations are popped from memory while
 	// waiting for the results
@@ -2827,8 +2839,9 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	state Version dequeKnownCommit = data->knownCommittedVersion.get();
 	state Version emptyVersion = feedInfo->emptyVersion;
 	state Version durableValidationVersion = std::min(data->durableVersion.get(), feedInfo->durableFetchVersion.get());
+	state Version lastMemoryVersion = invalidVersion;
+	state Version lastMemoryKnownCommitted = invalidVersion;
 	Version fetchStorageVersion = std::max(feedInfo->fetchVersion, feedInfo->durableFetchVersion.get());
-	state bool doFilterMutations = !req.range.contains(feedInfo->range);
 	state bool doValidation = EXPENSIVE_VALIDATION;
 
 	if (DEBUG_CF_TRACE) {
@@ -2863,14 +2876,18 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				break;
 			}
 			MutationsAndVersionRef m = *it;
+
+			remainingLimitBytes -= sizeof(MutationsAndVersionRef) + m.expectedSize();
 			if (doFilterMutations) {
-				m = filterMutations(memoryReply.arena, *it, req.range, inverted);
+				m = filterMutations(memoryReply.arena, *it, req.range, inverted, commonFeedPrefixLength);
 			}
 			if (m.mutations.size()) {
 				memoryReply.arena.dependsOn(it->arena());
 				memoryReply.mutations.push_back(memoryReply.arena, m);
-				remainingLimitBytes -= sizeof(MutationsAndVersionRef) + m.expectedSize();
 			}
+
+			lastMemoryVersion = m.version;
+			lastMemoryKnownCommitted = m.knownCommittedVersion;
 			it++;
 		}
 	}
@@ -2894,6 +2911,22 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 
 		state PriorityMultiLock::Lock ssReadLock = wait(data->getReadLock(req.options));
+		// The assumption of feed ordering is that all atLatest feeds will get processed before the !atLatest ones.
+		// Without this delay(0), there is a case where that can happen:
+		//  - a read request (eg getValueQ) has the read lock and is waiting on ss->version.whenAtLeast(V)
+		//  - a getChangeFeedMutations is blocked on that read lock (which is necessarily not atLatest because it's
+		//  reading from disk)
+		//  - the ss calls version->set(V'), which triggers the read requests, which does not wait by reading only from
+		//  the p-tree, and releases this lock.
+		//  - the following storage read does not require waiting, and returns immediately to changeFeedStreamQ,
+		//  triggering its reply with an incorrectly large minStreamVersion
+		//  - the ss calls feed->triggerMutations(), triggering the atLatest feeds to reply with their minStreamVersion
+		//  at the correct version
+		// The delay(0) prevents this, blocking the rest of this execution until all feed triggers finish and the
+		// storage update loop actor completes, making the sequence of minStreamVersions returned to the client valid.
+		// The delay(0) is technically only necessary if we did not immediately acquire the lock, but isn't a big deal
+		// to do always
+		wait(delay(0));
 		RangeResult res = wait(
 		    data->storage.readRange(KeyRangeRef(changeFeedDurableKey(req.rangeID, std::max(req.begin, emptyVersion)),
 		                                        changeFeedDurableKey(req.rangeID, req.end)),
@@ -2962,7 +2995,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 
 			MutationsAndVersionRef m = MutationsAndVersionRef(mutations, version, knownCommittedVersion);
 			if (doFilterMutations) {
-				m = filterMutations(reply.arena, m, req.range, inverted);
+				m = filterMutations(reply.arena, m, req.range, inverted, commonFeedPrefixLength);
 			}
 			if (m.mutations.size()) {
 				reply.arena.dependsOn(mutations.arena());
@@ -3049,9 +3082,15 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			reply.mutations.append(reply.arena, it, totalCount);
 			// If still empty, that means disk results were filtered out, but skipped all memory results. Add an empty,
 			// either the last version from disk
-			if (reply.mutations.empty() && res.size()) {
-				CODE_PROBE(true, "Change feed adding empty version after disk + memory filtered");
-				reply.mutations.push_back(reply.arena, MutationsAndVersionRef(lastVersion, lastKnownCommitted));
+			if (reply.mutations.empty()) {
+				if (res.size() || (lastMemoryVersion != invalidVersion && remainingLimitBytes <= 0)) {
+					CODE_PROBE(true, "Change feed adding empty version after disk + memory filtered");
+					if (res.empty()) {
+						lastVersion = lastMemoryVersion;
+						lastKnownCommitted = lastMemoryKnownCommitted;
+					}
+					reply.mutations.push_back(reply.arena, MutationsAndVersionRef(lastVersion, lastKnownCommitted));
+				}
 			}
 		} else if (reply.mutations.empty() || reply.mutations.back().version < lastVersion) {
 			CODE_PROBE(true, "Change feed adding empty version after disk filtered");
@@ -3060,6 +3099,14 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	} else {
 		reply = memoryReply;
 		*feedDiskReadState = FeedDiskReadState::NORMAL;
+
+		// if we processed memory results that got entirely or mostly filtered, but we're not caught up, add an empty at
+		// the end
+		if ((reply.mutations.empty() || reply.mutations.back().version < lastMemoryVersion) &&
+		    remainingLimitBytes <= 0) {
+			CODE_PROBE(true, "Memory feed adding empty version after memory filtered");
+			reply.mutations.push_back(reply.arena, MutationsAndVersionRef(lastMemoryVersion, lastMemoryKnownCommitted));
+		}
 	}
 
 	bool gotAll = remainingLimitBytes > 0 && remainingDurableBytes > 0 && data->version.get() == startVersion;
@@ -3220,6 +3267,10 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 	state bool removeUID = false;
 	state FeedDiskReadState feedDiskReadState = STARTING;
 	state Optional<Version> blockedVersion;
+	state Reference<ChangeFeedInfo> feedInfo;
+	state Future<Void> streamEndReached;
+	state bool doFilterMutations;
+	state int commonFeedPrefixLength;
 
 	try {
 		++data->counters.feedStreamQueries;
@@ -3259,7 +3310,26 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 		}
 
-		wait(success(waitForVersionNoTooOld(data, req.begin)));
+		Version checkTooOldVersion = (!req.canReadPopped || req.end == MAX_VERSION) ? req.begin : req.end;
+		wait(success(waitForVersionNoTooOld(data, checkTooOldVersion)));
+
+		// set persistent references to map data structures to not have to re-look them up every loop
+		auto feed = data->uidChangeFeed.find(req.rangeID);
+		if (feed == data->uidChangeFeed.end() || feed->second->removing) {
+			req.reply.sendError(unknown_change_feed());
+			// throw to delete from changeFeedClientVersions if present
+			throw unknown_change_feed();
+		}
+		feedInfo = feed->second;
+
+		streamEndReached =
+		    (req.end == std::numeric_limits<Version>::max()) ? Never() : data->version.whenAtLeast(req.end);
+
+		doFilterMutations = !req.range.contains(feedInfo->range);
+		commonFeedPrefixLength = 0;
+		if (doFilterMutations) {
+			commonFeedPrefixLength = commonPrefixLength(feedInfo->range.begin, feedInfo->range.end);
+		}
 
 		// send an empty version at begin - 1 to establish the stream quickly
 		ChangeFeedStreamReply emptyInitialReply;
@@ -3303,8 +3373,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			wait(onReady);
 
 			// keep this as not state variable so it is freed after sending to reduce memory
-			Future<std::pair<ChangeFeedStreamReply, bool>> feedReplyFuture =
-			    getChangeFeedMutations(data, req, false, atLatest, &feedDiskReadState);
+			Future<std::pair<ChangeFeedStreamReply, bool>> feedReplyFuture = getChangeFeedMutations(
+			    data, feedInfo, req, false, atLatest, doFilterMutations, commonFeedPrefixLength, &feedDiskReadState);
 			if (atLatest && !removeUID && !feedReplyFuture.isReady()) {
 				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][req.id] =
 				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
@@ -3332,14 +3402,19 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			}
 
 			auto& clientVersions = data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()];
+			// If removeUID is not set, that means that this loop was never blocked and executed synchronously as part
+			// of the new mutations trigger in the storage update loop. In that case, since there are potentially still
+			// other feeds triggering that this would race with, the largest version we can reply with is the storage's
+			// version just before the feed triggers. Otherwise, removeUID is set, and we were blocked at some point
+			// after the trigger. This means all feed triggers are done, and we can safely reply with the storage's
+			// version.
 			Version minVersion = removeUID ? data->version.get() : data->prevVersion;
 			if (removeUID) {
 				if (gotAll || req.begin == req.end) {
-					data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()].erase(req.id);
+					clientVersions.erase(req.id);
 					removeUID = false;
 				} else {
-					data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][req.id] =
-					    feedReply.mutations.back().version;
+					clientVersions[req.id] = feedReply.mutations.back().version;
 				}
 			}
 
@@ -3360,19 +3435,16 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			}
 			if (gotAll) {
 				blockedVersion = Optional<Version>();
-				auto feed = data->uidChangeFeed.find(req.rangeID);
-				if (feed == data->uidChangeFeed.end() || feed->second->removing) {
+				if (feedInfo->removing) {
 					req.reply.sendError(unknown_change_feed());
 					// throw to delete from changeFeedClientVersions if present
 					throw unknown_change_feed();
 				}
 				choose {
-					when(wait(feed->second->newMutations.onTrigger())) {}
-					when(wait(req.end == std::numeric_limits<Version>::max() ? Future<Void>(Never())
-					                                                         : data->version.whenAtLeast(req.end))) {}
+					when(wait(feedInfo->newMutations.onTrigger())) {}
+					when(wait(streamEndReached)) {}
 				}
-				auto feedItr = data->uidChangeFeed.find(req.rangeID);
-				if (feedItr == data->uidChangeFeed.end() || feedItr->second->removing) {
+				if (feedInfo->removing) {
 					req.reply.sendError(unknown_change_feed());
 					// throw to delete from changeFeedClientVersions if present
 					throw unknown_change_feed();
@@ -3580,7 +3652,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 
 	++data->counters.quickGetValueMiss;
 	if (SERVER_KNOBS->QUICK_GET_VALUE_FALLBACK) {
-		state Transaction tr(data->cx, pOriginalReq->tenantInfo.name.castTo<TenantName>());
+		state Transaction tr(data->cx, makeReference<Tenant>(pOriginalReq->tenantInfo.tenantId));
 		tr.setVersion(version);
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
 		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
@@ -4245,7 +4317,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 
 	++data->counters.quickGetKeyValuesMiss;
 	if (SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK) {
-		state Transaction tr(data->cx, pOriginalReq->tenantInfo.name.castTo<TenantName>());
+		state Transaction tr(data->cx, makeReference<Tenant>(pOriginalReq->tenantInfo.tenantId));
 		tr.setVersion(version);
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
 			tr.debugTransaction(pOriginalReq->options.get().debugID.get());
@@ -4405,14 +4477,17 @@ Key constructMappedKey(KeyValueRef* keyValue, std::vector<Optional<Tuple>>& vec,
 }
 
 ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
-                                              KeyRange range,
+                                              AuditStorageState auditState,
                                               Version version,
                                               StorageServerInterface remoteServer) {
 	TraceEvent(SevInfo, "ValidateRangeAgainstServerBegin", data->thisServerID)
-	    .detail("Range", range)
+	    .detail("AuditID", auditState.id)
+	    .detail("Range", auditState.range)
 	    .detail("Version", version)
 	    .detail("RemoteServer", remoteServer.toString());
 
+	state KeyRange range = auditState.range;
+	state Key originBegin = range.begin;
 	state int validatedKeys = 0;
 	state std::string error;
 	loop {
@@ -4457,8 +4532,9 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 				}
 			}
 
-			GetKeyValuesReply remote = reps[0].get(), local = reps[1].get();
+			const GetKeyValuesReply &remote = reps[0].get(), local = reps[1].get();
 			Key lastKey = range.begin;
+			auditState.range = range;
 
 			const int end = std::min(local.data.size(), remote.data.size());
 			int i = 0;
@@ -4466,7 +4542,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 				KeyValueRef remoteKV = remote.data[i];
 				KeyValueRef localKV = local.data[i];
 				if (!range.contains(remoteKV.key) || !range.contains(localKV.key)) {
-					TraceEvent(SevDebug, "SSValidateRangeKeyOutOfRange", data->thisServerID)
+					TraceEvent(SevWarn, "SSValidateRangeKeyOutOfRange", data->thisServerID)
 					    .detail("Range", range)
 					    .detail("RemoteServer", remoteServer.toString().c_str())
 					    .detail("LocalKey", Traceable<StringRef>::toString(localKV.key).c_str())
@@ -4515,9 +4591,14 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 				break;
 			}
 
-			range = KeyRangeRef(keyAfter(lastKey), range.end);
+			if (i > 0) {
+				range = KeyRangeRef(keyAfter(lastKey), range.end);
+				auditState.range = KeyRangeRef(originBegin, range.begin);
+				auditState.setPhase(AuditPhase::Complete);
+				wait(persistAuditStateMap(data->cx, auditState));
+			}
 		} catch (Error& e) {
-			TraceEvent(SevWarnAlways, "ValidateRangeAgainstServerError", data->thisServerID)
+			TraceEvent(SevWarn, "ValidateRangeAgainstServerError", data->thisServerID)
 			    .errorUnsuppressed(e)
 			    .detail("RemoteServer", remoteServer.toString())
 			    .detail("Range", range)
@@ -4532,9 +4613,12 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 		    .detail("Version", version)
 		    .detail("ErrorMessage", error)
 		    .detail("RemoteServer", remoteServer.toString());
+		auditState.setPhase(AuditPhase::Error);
+		wait(persistAuditStateMap(data->cx, auditState));
+		throw audit_storage_error();
 	}
 
-	TraceEvent(SevDebug, "ValidateRangeAgainstServerEnd", data->thisServerID)
+	TraceEvent(SevInfo, "ValidateRangeAgainstServerEnd", data->thisServerID)
 	    .detail("Range", range)
 	    .detail("Version", version)
 	    .detail("ValidatedKeys", validatedKeys)
@@ -4543,9 +4627,9 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 	return Void();
 }
 
-ACTOR Future<Void> validateRangeShard(StorageServer* data, KeyRange range, std::vector<UID> candidates) {
+ACTOR Future<Void> validateRangeShard(StorageServer* data, AuditStorageState auditState, std::vector<UID> candidates) {
 	TraceEvent(SevDebug, "ServeValidateRangeShardBegin", data->thisServerID)
-	    .detail("Range", range)
+	    .detail("Range", auditState.range)
 	    .detail("Servers", describe(candidates));
 
 	state Version version;
@@ -4586,7 +4670,7 @@ ACTOR Future<Void> validateRangeShard(StorageServer* data, KeyRange range, std::
 
 	if (ssis.size() < 2) {
 		TraceEvent(SevWarn, "ServeValidateRangeShardNotHAConfig", data->thisServerID)
-		    .detail("Range", range)
+		    .detail("Range", auditState.range)
 		    .detail("Servers", describe(candidates));
 		return Void();
 	}
@@ -4604,10 +4688,10 @@ ACTOR Future<Void> validateRangeShard(StorageServer* data, KeyRange range, std::
 	}
 
 	if (remoteServer != nullptr) {
-		wait(validateRangeAgainstServer(data, range, version, *remoteServer));
+		wait(validateRangeAgainstServer(data, auditState, version, *remoteServer));
 	} else {
 		TraceEvent(SevWarn, "ServeValidateRangeShardRemoteNotFound", data->thisServerID)
-		    .detail("Range", range)
+		    .detail("Range", auditState.range)
 		    .detail("Servers", describe(candidates));
 		throw audit_storage_failed();
 	}
@@ -4615,9 +4699,12 @@ ACTOR Future<Void> validateRangeShard(StorageServer* data, KeyRange range, std::
 	return Void();
 }
 
-ACTOR Future<Void> validateRangeAgainstServers(StorageServer* data, KeyRange range, std::vector<UID> targetServers) {
+ACTOR Future<Void> validateRangeAgainstServers(StorageServer* data,
+                                               AuditStorageState auditState,
+                                               std::vector<UID> targetServers) {
 	TraceEvent(SevDebug, "ValidateRangeAgainstServersBegin", data->thisServerID)
-	    .detail("Range", range)
+	    .detail("AuditID", auditState.id)
+	    .detail("Range", auditState.range)
 	    .detail("TargetServers", describe(targetServers));
 
 	state Version version;
@@ -4635,10 +4722,8 @@ ACTOR Future<Void> validateRangeAgainstServers(StorageServer* data, KeyRange ran
 				}
 			}
 
-			std::vector<Optional<Value>> serverListValues_ = wait(getAll(serverListEntries));
-			serverListValues = serverListValues_;
-			Version version_ = wait(tr.getReadVersion());
-			version = version_;
+			wait(store(serverListValues, getAll(serverListEntries)));
+			wait(store(version, tr.getReadVersion()));
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -4648,10 +4733,12 @@ ACTOR Future<Void> validateRangeAgainstServers(StorageServer* data, KeyRange ran
 	std::vector<Future<Void>> fs;
 	for (const auto& v : serverListValues) {
 		if (!v.present()) {
-			TraceEvent(SevWarn, "ValidateRangeRemoteServerNotFound", data->thisServerID).detail("Range", range);
+			TraceEvent(SevWarn, "ValidateRangeRemoteServerNotFound", data->thisServerID)
+			    .detail("AuditID", auditState.id)
+			    .detail("Range", auditState.range);
 			throw audit_storage_failed();
 		}
-		fs.push_back(validateRangeAgainstServer(data, range, version, decodeServerListValue(v.get())));
+		fs.push_back(validateRangeAgainstServer(data, auditState, version, decodeServerListValue(v.get())));
 	}
 
 	wait(waitForAll(fs));
@@ -4663,7 +4750,7 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
 
-	TraceEvent(SevInfo, "ServeAuditStorageBegin", data->thisServerID)
+	TraceEvent(SevInfo, "SSAuditStorageBegin", data->thisServerID)
 	    .detail("RequestID", req.id)
 	    .detail("Range", req.range)
 	    .detail("AuditType", req.type)
@@ -4671,6 +4758,7 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 
 	state Key begin = req.range.begin;
 	state std::vector<Future<Void>> fs;
+	state AuditStorageState res(req.id, req.range, req.getType());
 
 	try {
 		if (req.targetServers.empty()) {
@@ -4694,7 +4782,10 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 						std::vector<UID> dest;
 						UID srcId, destId;
 						decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
-						fs.push_back(validateRangeShard(data, KeyRangeRef(shards[i].key, shards[i + 1].key), src));
+						fs.push_back(validateRangeShard(
+						    data,
+						    AuditStorageState(res.id, KeyRangeRef(shards[i].key, shards[i + 1].key), res.getType()),
+						    src));
 						begin = shards[i + 1].key;
 					}
 				} catch (Error& e) {
@@ -4702,19 +4793,27 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 				}
 			}
 		} else {
-			fs.push_back(validateRangeAgainstServers(data, req.range, req.targetServers));
+			fs.push_back(validateRangeAgainstServers(data, res, req.targetServers));
 		}
+
 		wait(waitForAll(fs));
-		AuditStorageState res(req.id, req.getType());
 		res.setPhase(AuditPhase::Complete);
 		req.reply.send(res);
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "ServeAuditStorageError", data->thisServerID)
+		TraceEvent(SevInfo, "SSAuditStorageError", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("RequestID", req.id)
 		    .detail("Range", req.range)
-		    .detail("AuditType", req.type);
-		req.reply.sendError(audit_storage_failed());
+		    .detail("AuditType", req.type)
+		    .detail("TargetServers", describe(req.targetServers));
+		if (e.code() != error_code_audit_storage_error) {
+			req.reply.sendError(audit_storage_failed());
+		} else {
+			req.reply.sendError(audit_storage_error());
+		}
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 	}
 
 	return Void();
@@ -6270,7 +6369,10 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> tryReadBlobGranules(Tra
 	loop {
 		try {
 			Standalone<VectorRef<BlobGranuleChunkRef>> chunks = wait(tr->readBlobGranules(keys, 0, readVersion));
-			TraceEvent(SevDebug, "ReadBlobGranules").detail("Keys", keys).detail("Chunks", chunks.size());
+			TraceEvent(SevDebug, "ReadBlobGranules")
+			    .detail("Keys", keys)
+			    .detail("Chunks", chunks.size())
+			    .detail("FetchVersion", fetchVersion);
 			return chunks;
 		} catch (Error& e) {
 			if (retryCount >= maxRetryCount) {
@@ -6303,7 +6405,10 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 		for (i = 0; i < chunks.size(); ++i) {
 			state KeyRangeRef chunkRange = chunks[i].keyRange;
 			state RangeResult rows = wait(readBlobGranule(chunks[i], keys, 0, fetchVersion, blobConn));
-			TraceEvent(SevDebug, "ReadBlobData").detail("Rows", rows.size()).detail("ChunkRange", chunkRange);
+			TraceEvent(SevDebug, "ReadBlobData")
+			    .detail("Rows", rows.size())
+			    .detail("ChunkRange", chunkRange)
+			    .detail("FetchVersion", fetchVersion);
 			if (rows.size() == 0) {
 				rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
 			}
@@ -7229,12 +7334,13 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold;
 			if (isFullRestore) {
-				std::pair<KeyRange, BlobRestoreStatus> rangeStatus = wait(getRestoreRangeStatus(data->cx, keys));
+				state std::pair<KeyRange, BlobRestoreStatus> rangeStatus = wait(getRestoreRangeStatus(data->cx, keys));
 				// Read from blob only when it's copying data for full restore. Otherwise it may cause data corruptions
 				// e.g we don't want to copy from blob any more when it's applying mutation logs(APPLYING_MLOGS)
 				if (rangeStatus.second.phase == BlobRestorePhase::COPYING_DATA ||
 				    rangeStatus.second.phase == BlobRestorePhase::ERROR) {
-					hold = tryGetRangeFromBlob(results, &tr, rangeStatus.first, fetchVersion, data->blobConn);
+					Version targetVersion = wait(getRestoreTargetVersion(data->cx, keys, fetchVersion));
+					hold = tryGetRangeFromBlob(results, &tr, rangeStatus.first, targetVersion, data->blobConn);
 				} else {
 					hold = tryGetRange(results, &tr, keys);
 				}
@@ -8742,8 +8848,9 @@ void StorageServer::clearTenants(StringRef startTenant, StringRef endTenant, Ver
 			if (*itr >= startTenant && *itr < endTenant) {
 				// Trigger any watches on the prefix associated with the tenant.
 				Key tenantPrefix = TenantAPI::idToPrefix(itr.key());
-				watches.triggerRange(tenantPrefix, strinc(tenantPrefix));
 				TraceEvent("EraseTenant", thisServerID).detail("Tenant", itr.key()).detail("Version", version);
+				watches.sendError(tenantPrefix, strinc(tenantPrefix), tenant_removed());
+
 				tenantsToClear.insert(itr.key());
 				addMutationToMutationLog(mLV,
 				                         MutationRef(MutationRef::ClearRange,

@@ -34,7 +34,6 @@ waitForQuiescence = false
     tag = 'default'
     submitOnly = true
     waitForBackup = true
-    waitRetries = 100
 
 [[test]]
 testTitle = 'CycleTest'
@@ -55,7 +54,6 @@ clearAfterTest = false
     tag = 'default'
     waitForBackup = true
     stopBackup = true
-    waitRetries = 500
 
 [[test]]
 testTitle = 'BlobRestore'
@@ -67,3 +65,15 @@ waitForQuiescence = false
     [[test.workload]]
     testName = 'BlobRestoreWorkload'
     performRestore = true
+
+
+[[test]]
+testTitle = 'VerifyCycle'
+checkOnly = true
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    transactionsPerSecond = 3000.0
+    testDuration = 10.0
+    expectedRate = 0

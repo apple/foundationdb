@@ -407,6 +407,8 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_verify_blob_range(FDBDataba
                                                                        int end_key_name_length,
                                                                        int64_t version);
 
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_client_status(FDBDatabase* db);
+
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant,
                                                                        FDBTransaction** out_transaction);
 

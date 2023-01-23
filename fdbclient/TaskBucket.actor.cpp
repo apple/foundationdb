@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/TaskBucket.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -170,19 +171,22 @@ public:
 
 		// Get keyspace for the specified priority level
 		state Subspace space = taskBucket->getAvailableSpace(priority);
-
 		{
 			// Get a task key that is <= a random UID task key, if successful then return it
-			Key k = wait(tr->getKey(lastLessOrEqual(space.pack(uid)), Snapshot::True));
-			if (space.contains(k))
-				return Optional<Key>(k);
+			RangeResult value =
+			    wait(tr->getRange(KeyRangeRef(space.key(), space.pack(uid)), 1, Snapshot::True, Reverse::True));
+			if (!value.empty()) {
+				return Optional<Key>(value[0].key);
+			}
 		}
 
 		{
 			// Get a task key that is <= the maximum possible UID, if successful return it.
-			Key k = wait(tr->getKey(lastLessOrEqual(space.pack(maxUIDKey)), Snapshot::True));
-			if (space.contains(k))
-				return Optional<Key>(k);
+			RangeResult value =
+			    wait(tr->getRange(KeyRangeRef(space.key(), space.pack(maxUIDKey)), 1, Snapshot::True, Reverse::True));
+			if (!value.empty()) {
+				return Optional<Key>(value[0].key);
+			}
 		}
 
 		return Optional<Key>();
