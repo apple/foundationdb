@@ -123,13 +123,15 @@ ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
 	for (const auto& item : req.encryptKeyInfos) {
 		const auto& itr = ctx->simEncryptKeyStore.find(item.baseCipherId);
 		if (itr != ctx->simEncryptKeyStore.end()) {
+			// TODO: Relax assert if EKP APIs are updated to make 'domain_id' optional for encryption keys point lookups
+			ASSERT(item.domainId.present());
 			rep.cipherKeyDetails.emplace_back_deep(
-			    rep.arena, item.domainId, itr->first, StringRef(itr->second.get()->key), refAtTS, expAtTS);
+			    rep.arena, item.domainId.get(), itr->first, StringRef(itr->second.get()->key), refAtTS, expAtTS);
 
 			if (dbgKIdTrace.present()) {
 				// {encryptDomainId, baseCipherId} forms a unique tuple across encryption domains
 				dbgKIdTrace.get().detail(
-				    getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_RESULT_PREFIX, item.domainId, itr->first), "");
+				    getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_RESULT_PREFIX, item.domainId.get(), itr->first), "");
 			}
 		} else {
 			success = false;

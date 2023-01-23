@@ -402,7 +402,6 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				notify[i].send(newInfo);
 			notify.clear();
 			ClientDBInfo outInfo;
-			outInfo.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 			outInfo.id = deterministicRandom()->randomUniqueID();
 			outInfo.forward = req.conn.toString();
 			clientData.clientInfo->set(CachedSerialization<ClientDBInfo>(outInfo));
@@ -642,7 +641,6 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 			Optional<LeaderInfo> forward = regs.getForward(req.clusterKey);
 			if (forward.present()) {
 				ClientDBInfo info;
-				info.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 				info.id = deterministicRandom()->randomUniqueID();
 				info.forward = forward.get().serializedInfo;
 				req.reply.send(CachedSerialization<ClientDBInfo>(info));

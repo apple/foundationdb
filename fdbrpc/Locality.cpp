@@ -289,6 +289,8 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 			return ProcessClass::GoodFit;
 		case ProcessClass::MasterClass:
 			return ProcessClass::OkayFit;
+		case ProcessClass::BlobWorkerClass:
+			return ProcessClass::OkayFit;
 		default:
 			return ProcessClass::NeverAssign;
 		}

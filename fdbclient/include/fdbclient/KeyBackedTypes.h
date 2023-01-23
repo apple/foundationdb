@@ -700,3 +700,13 @@ public:
 
 	KeyRange subspace;
 };
+
+// all fields are under prefix, the schema is like prefix/"packed key"/"packed key2"
+class KeyBackedStruct {
+public:
+	KeyBackedStruct(StringRef prefix) : prefix(prefix), rootSpace(prefix) {}
+
+protected:
+	Key prefix;
+	Subspace rootSpace;
+};

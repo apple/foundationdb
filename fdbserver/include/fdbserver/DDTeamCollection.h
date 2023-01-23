@@ -30,7 +30,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbrpc/Replication.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"

@@ -116,6 +116,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PEEK_BATCHING_EMPTY_MSG,                             false ); if ( randomize && BUGGIFY ) PEEK_BATCHING_EMPTY_MSG = true;
 	init( PEEK_BATCHING_EMPTY_MSG_INTERVAL,                    0.001 ); if ( randomize && BUGGIFY ) PEEK_BATCHING_EMPTY_MSG_INTERVAL = 0.01;
 	init( POP_FROM_LOG_DELAY,                                      1 ); if ( randomize && BUGGIFY ) POP_FROM_LOG_DELAY = 0;
+	init( TLOG_PULL_ASYNC_DATA_WARNING_TIMEOUT_SECS,             120 );
 
 	// disk snapshot max timeout, to be put in TLog, storage and coordinator nodes
 	init( MAX_FORKED_PROCESS_OUTPUT,                            1024 );
@@ -450,6 +451,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// ROCKSDB_STATS_LEVEL=1 indicates rocksdb::StatsLevel::kExceptHistogramOrTimers
 	// Refer StatsLevel: https://github.com/facebook/rocksdb/blob/main/include/rocksdb/statistics.h#L594
 	init( ROCKSDB_STATS_LEVEL,                                     1 ); if( randomize && BUGGIFY ) ROCKSDB_STATS_LEVEL = deterministicRandom()->randomInt(0, 6);
+	init( ROCKSDB_ENABLE_COMPACT_ON_DELETION,                   true );
+	// CDCF: CompactOnDeletionCollectorFactory. The below 3 are parameters of the CompactOnDeletionCollectorFactory
+	// which controls the compaction on deleted data.
+	init( ROCKSDB_CDCF_SILIDING_WINDOW_SIZE,                     128 );
+	init( ROCKSDB_CDCF_DELETION_TRIGGER,                           1 );
+	init( ROCKSDB_CDCF_DELETION_RATIO,                             0 );
 	// Can commit will delay ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD seconds for
 	// ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD times, if rocksdb overloaded.
 	// Set ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD to 0, to disable
@@ -488,6 +495,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET,             10.0 );
 	init( START_TRANSACTION_MAX_QUEUE_SIZE,                      1e6 );
 	init( KEY_LOCATION_MAX_QUEUE_SIZE,                           1e6 );
+	init( TENANT_ID_REQUEST_MAX_QUEUE_SIZE,                      1e6 );
 	init( COMMIT_PROXY_LIVENESS_TIMEOUT,                        20.0 );
 
 	init( COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE,         0.0005 ); if( randomize && BUGGIFY ) COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE = 0.005;
@@ -499,6 +507,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT,              8LL << 30 ); if (randomize && BUGGIFY) COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT = deterministicRandom()->randomInt64(100LL << 20,  8LL << 30);
 	init( COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL,                   0.5 );
 	init( COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR,           5.0 );
+	init( COMMIT_TRIGGER_DELAY,                                  0.01 ); if (randomize && BUGGIFY) COMMIT_TRIGGER_DELAY = deterministicRandom()->random01() * 4;
 
 	// these settings disable batch bytes scaling.  Try COMMIT_TRANSACTION_BATCH_BYTES_MAX=1e6, COMMIT_TRANSACTION_BATCH_BYTES_SCALE_BASE=50000, COMMIT_TRANSACTION_BATCH_BYTES_SCALE_POWER=0.5?
 	init( COMMIT_TRANSACTION_BATCH_BYTES_MIN,                  100000 );
@@ -568,7 +577,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BACKUP_TIMEOUT,                                        0.4 );
 	init( BACKUP_NOOP_POP_DELAY,                                 5.0 );
 	init( BACKUP_FILE_BLOCK_BYTES,                       1024 * 1024 );
-	init( BACKUP_LOCK_BYTES,                                     3e9 ); if(randomize && BUGGIFY) BACKUP_LOCK_BYTES = deterministicRandom()->randomInt(1024, 4096) * 30 * 1024;
+	init( BACKUP_LOCK_BYTES,                                     3e9 ); if(randomize && BUGGIFY) BACKUP_LOCK_BYTES = deterministicRandom()->randomInt(1024, 4096) * 256 * 1024;
 	init( BACKUP_UPLOAD_DELAY,                                  10.0 ); if(randomize && BUGGIFY) BACKUP_UPLOAD_DELAY = deterministicRandom()->random01() * 60;
 
 	//Cluster Controller
@@ -1039,7 +1048,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_FULL_RESTORE_MODE,                              false );
 	init( BLOB_MIGRATOR_CHECK_INTERVAL,      isSimulated ?  1.0 : 5.0);
 	init( BLOB_MANIFEST_RW_ROWS,             isSimulated ?  10 : 1000);
-	init( BLOB_RESTORE_MLOGS_URL, isSimulated ? "file://simfdb/fdbblob/mlogs" : "");
+	init( BLOB_RESTORE_MLOGS_URL, isSimulated ? "file://simfdb/backups/" : "");
+	init( BLOB_MIGRATOR_ERROR_RETRIES,        20);
 
 	init( BGCC_TIMEOUT,                   isSimulated ? 10.0 : 120.0 );
 	init( BGCC_MIN_INTERVAL,                isSimulated ? 1.0 : 10.0 );
@@ -1061,11 +1071,14 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// NOTE: Care must be taken when attempting to update below configurations for a up/running FDB cluster.
 	init( REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE,                "");
 	init( REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT,         "");
+	init( REST_KMS_CONNECTOR_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT,  "");
 	init( REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT,           "");
 	// Details to fetch validation token from a localhost file
 	// acceptable format: "<token_name1>#<absolute_file_path1>,<token_name2>#<absolute_file_path2>,.."
 	// NOTE: 'token-name" can NOT contain '#' character
 	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS,             "");
+	init( REST_KMS_CURRENT_BLOB_METADATA_REQUEST_VERSION,           1);
+	init( REST_KMS_CURRENT_CIPHER_REQUEST_VERSION,                  1);
 
 	// Drop in-memory state associated with an idempotency id after this many seconds. Once dropped, this id cannot be
 	// expired proactively, but will eventually get cleaned up by the idempotency id cleaner.
