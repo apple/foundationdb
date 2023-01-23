@@ -329,6 +329,10 @@ extern const KeyRef failedLocalityVersionKey; // The value of this key shall be 
 std::string decodeFailedLocalityKey(KeyRef const& key); // where key.startsWith(failedLocalityPrefix)
 std::string encodeFailedLocalityKey(std::string const&);
 
+// storage engine parameters keys prefix
+// \xff/conf/storage_engine_params/<param> := <val>
+extern const KeyRef storageEngineParamsPrefix;
+
 //   "\xff/globalConfig/[[option]]" := "value"
 //	 An umbrella prefix for global configuration data synchronized to all nodes.
 // extern const KeyRangeRef globalConfigData;
