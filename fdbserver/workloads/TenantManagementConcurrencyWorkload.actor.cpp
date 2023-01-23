@@ -41,7 +41,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 	static constexpr auto NAME = "TenantManagementConcurrency";
 
 	const TenantName tenantNamePrefix = "tenant_management_concurrency_workload_"_sr;
-	const Key testParametersKey = "test_parameters"_sr;
+	const Key testParametersKey = nonMetadataSystemKeys.begin.withSuffix("/tenant_test/test_parameters"_sr);
 
 	int maxTenants;
 	int maxTenantGroups;

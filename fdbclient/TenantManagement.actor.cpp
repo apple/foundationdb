@@ -43,9 +43,14 @@ int64_t extractTenantIdFromMutation(MutationRef m) {
 
 	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 		// The first 8 bytes of the key of this OP is also an 8-byte number
-		if (m.type == MutationRef::SetVersionstampedKey && m.param1.size() >= 4 &&
-		    parseVersionstampOffset(m.param1) < 8) {
-			return TenantInfo::INVALID_TENANT;
+		if (m.type == MutationRef::SetVersionstampedKey && m.param1.size() >= 4) {
+			// when the timestamp overlap with first 8 bytes
+			if (parseVersionstampOffset(m.param1) < 8) {
+				return TenantInfo::INVALID_TENANT;
+			} else {
+				// parse the tenant id as usual
+				return extractTenantIdFromKeyRef(m.param1);
+			}
 		}
 	} else {
 		// Assumes clear range mutations are split on tenant boundaries

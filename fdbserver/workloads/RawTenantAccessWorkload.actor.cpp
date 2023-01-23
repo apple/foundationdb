@@ -233,9 +233,15 @@ struct RawTenantAccessWorkload : TestWorkload {
 	ACTOR static Future<Void> randomTenantTransaction(Database cx, RawTenantAccessWorkload* self) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		state UID traceId = deterministicRandom()->randomUniqueID();
-		state bool allowIllegalAccess = deterministicRandom()->coinflip();
-		state bool illegalAccess = false;
+		// 1. create/delete tenant and write to a tenant is an illegal operation for now. (tenantMapChange &&
+		// normalKeyWriteOp == true)
+		// 2. write a non-existed tenant is illegal. (invalidTenantWriteOp == true)
+		state bool legalTxnOnly = deterministicRandom()->coinflip(); // whether allow generating illegal transaction
 		state bool illegalAccessCaught = false;
+		state bool normalKeyWriteOp = false;
+		state bool validTenantWriteOp = false;
+		state bool invalidTenantWriteOp = false;
+		state bool tenantMapChangeOp = false;
 
 		loop {
 			tr->reset();
@@ -246,19 +252,25 @@ struct RawTenantAccessWorkload : TestWorkload {
 				state int i = 0;
 				for (; i < 10; ++i) {
 					int op = deterministicRandom()->randomInt(0, 4);
-					if (op == 0 && self->predictTenantCount() < self->tenantCount) {
+					if (op == 0 && self->predictTenantCount() < self->tenantCount &&
+					    !(legalTxnOnly && normalKeyWriteOp)) {
 						// whether to create a new Tenant
 						self->createNewTenant(tr, traceId);
-					} else if (op == 1 && self->predictTenantCount() > 0) {
+						tenantMapChangeOp = true;
+					} else if (op == 1 && self->predictTenantCount() > 0 && !(legalTxnOnly && normalKeyWriteOp)) {
 						// whether to delete a existed tenant
 						self->deleteExistedTenant(tr, traceId);
-					} else if (op == 2 && allowIllegalAccess && self->predictTenantCount() < self->tenantCount) {
+						tenantMapChangeOp = true;
+					} else if (op == 2 && self->predictTenantCount() < self->tenantCount && !legalTxnOnly) {
 						// whether to write to a non-existed tenant
 						self->writeToInvalidTenant(tr, traceId);
-						illegalAccess = true;
-					} else if (op == 3 && self->idx2Tid.size() > 0) {
+						invalidTenantWriteOp = true;
+						normalKeyWriteOp = true;
+					} else if (op == 3 && self->idx2Tid.size() > 0 && !(legalTxnOnly && tenantMapChangeOp)) {
 						// whether to write to a existed tenant
 						self->writeToExistedTenant(tr, traceId);
+						validTenantWriteOp = true;
+						normalKeyWriteOp = true;
 					}
 				}
 
@@ -272,7 +284,17 @@ struct RawTenantAccessWorkload : TestWorkload {
 				wait(tr->onError(e));
 			}
 		}
-		ASSERT_EQ(illegalAccessCaught, illegalAccess);
+
+		// check whether we caught illegal transaction when running illegal transactions
+		if (invalidTenantWriteOp) {
+			ASSERT(illegalAccessCaught);
+			CODE_PROBE(true, "Caught invalid tenant write op.");
+		} else if (tenantMapChangeOp && normalKeyWriteOp) {
+			ASSERT(illegalAccessCaught);
+			CODE_PROBE(true, "Caught tenant map changing and normal key writing in the same transaction.");
+		} else {
+			ASSERT(!illegalAccessCaught);
+		}
 
 		return Void();
 	}
