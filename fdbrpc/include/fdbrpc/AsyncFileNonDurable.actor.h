@@ -51,8 +51,12 @@ ACTOR template <class T>
 Future<T> sendErrorOnShutdown(Future<T> in, bool assertOnCancel = false) {
 	try {
 		choose {
-			when(wait(waitShutdownSignal())) { throw io_error().asInjectedFault(); }
-			when(T rep = wait(in)) { return rep; }
+			when(wait(waitShutdownSignal())) {
+				throw io_error().asInjectedFault();
+			}
+			when(T rep = wait(in)) {
+				return rep;
+			}
 		}
 	} catch (Error& e) {
 		ASSERT(e.code() != error_code_actor_cancelled || !assertOnCancel);
@@ -391,7 +395,9 @@ private:
 		state bool saveDurable = true;
 		choose {
 			when(wait(delay(delayDuration))) {}
-			when(bool durable = wait(startSyncFuture)) { saveDurable = durable; }
+			when(bool durable = wait(startSyncFuture)) {
+				saveDurable = durable;
+			}
 		}
 
 		debugFileCheck("AsyncFileNonDurableWriteAfterWait", self->filename, dataCopy.begin(), offset, length);
@@ -568,7 +574,9 @@ private:
 		state bool saveDurable = true;
 		choose {
 			when(wait(delay(delayDuration))) {}
-			when(bool durable = wait(startSyncFuture)) { saveDurable = durable; }
+			when(bool durable = wait(startSyncFuture)) {
+				saveDurable = durable;
+			}
 		}
 
 		if (g_network->check_yield(TaskPriority::DefaultYield)) {

@@ -32,12 +32,12 @@ public:
 	/* This conversion constructor was nice, but combined with the prior constructor it means that Optional<int> can be
 	converted to Optional<Optional<int>> in the wrong way (a non-present Optional<int> converts to a non-present
 	Optional<Optional<int>>). Use .castTo<>() instead.
-    
-    template <class S> Optional(const Optional<S>& o) : valid(o.present()) {
-        if (valid)
-            new (&value) T(o.get());
-    }
-    */
+
+	template <class S> Optional(const Optional<S>& o) : valid(o.present()) {
+	    if (valid)
+	        new (&value) T(o.get());
+	}
+	*/
 
 	Optional(Arena& a, const Optional<T>& o) {
 		if (o.present())
@@ -101,6 +101,5 @@ private:
 	static inline std::hash<std::optional<T>> hashFunc{};
 	std::optional<T> impl;
 };
-
 
 #endif // FLOW_OPTIONAL_H

@@ -217,7 +217,6 @@ inline void save(Archive& ar, const Arena& p) {
 	// No action required
 }
 
-
 template <class Archive, class T>
 inline void load(Archive& ar, Optional<T>& value) {
 	bool valid;

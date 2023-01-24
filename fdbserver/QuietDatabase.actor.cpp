@@ -673,8 +673,9 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
 			    .detail("RemoteDead", remoteDead)
 			    .detail("PrimaryDead", primaryDead);
 			g_simulator->usableRegions = 1;
-			g_simulator->killDataCenter(
-			    primaryDead ? g_simulator->primaryDcId : g_simulator->remoteDcId, ISimulator::KillType::KillInstantly, true);
+			g_simulator->killDataCenter(primaryDead ? g_simulator->primaryDcId : g_simulator->remoteDcId,
+			                            ISimulator::KillType::KillInstantly,
+			                            true);
 			wait(success(ManagementAPI::changeConfig(
 			    cx.getReference(),
 			    (primaryDead ? g_simulator->disablePrimary : g_simulator->disableRemote) + " repopulate_anti_quorum=1",

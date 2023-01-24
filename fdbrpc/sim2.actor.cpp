@@ -2103,7 +2103,8 @@ public:
 				if (process->startingClass != ProcessClass::TesterClass)
 					killProcess_internal(process, kt);
 			}
-		} else if (kt == KillType::Reboot || kt == KillType::RebootAndDelete) {
+		} else if (kt == KillType::Reboot || kt == KillType::RebootAndDelete ||
+		           kt == KillType::RebootProcessAndSwitch) {
 			for (auto& process : machines[machineId].processes) {
 				TraceEvent("KillMachineProcess")
 				    .detail("KillType", kt)
@@ -2671,8 +2672,10 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 		           "Simulated process rebooted",
 		           probe::assert::simOnly,
 		           probe::context::sim2);
-		CODE_PROBE(
-		    kt == ISimulator::KillType::Reboot, "Simulated machine rebooted", probe::assert::simOnly, probe::context::sim2);
+		CODE_PROBE(kt == ISimulator::KillType::Reboot,
+		           "Simulated machine rebooted",
+		           probe::assert::simOnly,
+		           probe::context::sim2);
 		CODE_PROBE(kt == ISimulator::KillType::RebootAndDelete,
 		           "Simulated machine rebooted with data and coordination state deletion",
 		           probe::assert::simOnly,
