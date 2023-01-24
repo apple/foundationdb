@@ -37,7 +37,8 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 	double testDuration;
 	Key keyPrefix;
 	bool hasTenant;
-	Optional<TenantName> tenant;
+	Optional<TenantName> tenantName;
+	Optional<Reference<Tenant>> tenant;
 	bool checkOnly;
 
 	GetEstimatedRangeSizeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -45,7 +46,7 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 		nodeCount = getOption(options, "nodeCount"_sr, 10000);
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
 		hasTenant = hasOption(options, "tenant"_sr);
-		tenant = hasTenant ? getOption(options, "tenant"_sr, "DefaultNeverUsed"_sr) : Optional<TenantName>();
+		tenantName = hasTenant ? getOption(options, "tenant"_sr, "DefaultNeverUsed"_sr) : Optional<TenantName>();
 		checkOnly = getOption(options, "checkOnly"_sr, false);
 	}
 
@@ -55,6 +56,7 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 		}
 		// The following call to bulkSetup() assumes that we have a valid tenant.
 		ASSERT(hasTenant);
+		tenant = makeReference<Tenant>(cx, tenantName.get());
 		// Use default values for arguments between (and including) postSetupWarming and endNodeIdx params.
 		return bulkSetup(cx,
 		                 this,
@@ -105,12 +107,12 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 	ACTOR static Future<int64_t> getSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
 		state ReadYourWritesTransaction tr(cx, self->tenant);
 		state double totalDelay = 0.0;
-		TraceEvent(SevDebug, "GetSizeStart").detail("Tenant", tr.getTenant());
+		TraceEvent(SevDebug, "GetSizeStart").detail("Tenant", self->tenant);
 
 		loop {
 			try {
 				state int64_t size = wait(tr.getEstimatedRangeSizeBytes(normalKeys));
-				TraceEvent(SevDebug, "GetSizeResult").detail("Tenant", tr.getTenant()).detail("Size", size);
+				TraceEvent(SevDebug, "GetSizeResult").detail("Tenant", self->tenant).detail("Size", size);
 				if (!sizeIsAsExpected(self, size) && totalDelay < 300.0) {
 					totalDelay += 5.0;
 					wait(delay(5.0));
@@ -118,7 +120,7 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 					return size;
 				}
 			} catch (Error& e) {
-				TraceEvent(SevDebug, "GetSizeError").errorUnsuppressed(e).detail("Tenant", tr.getTenant());
+				TraceEvent(SevDebug, "GetSizeError").errorUnsuppressed(e).detail("Tenant", self->tenant);
 				wait(tr.onError(e));
 			}
 		}

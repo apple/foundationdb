@@ -34,6 +34,10 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// Instantiate MasterInterface related tempates
+template class ReplyPromise<MasterInterface>;
+template struct NetSAV<MasterInterface>;
+
 struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	UID dbgid;
 
