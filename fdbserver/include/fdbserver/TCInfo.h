@@ -252,17 +252,16 @@ private:
 class TCTenantInfo : public ReferenceCounted<TCTenantInfo> {
 private:
 	TenantInfo m_tenantInfo;
-	Key m_prefix;
 	std::vector<Reference<TCTeamInfo>> m_tenantTeams;
 	int64_t m_cacheGeneration;
 
 public:
-	TCTenantInfo() { m_prefix = allKeys.end; }
-	TCTenantInfo(TenantInfo tinfo, Key prefix) : m_tenantInfo(tinfo), m_prefix(prefix) {}
+	TCTenantInfo() {}
+	TCTenantInfo(TenantInfo tinfo) : m_tenantInfo(tinfo) {}
 	std::vector<Reference<TCTeamInfo>>& teams() { return m_tenantTeams; }
 
-	TenantName name() const { return m_tenantInfo.name.get(); }
-	std::string prefixDesc() const { return m_prefix.printable(); }
+	std::string prefixDesc() const { return m_tenantInfo.prefix.get().printable(); }
+	int64_t id() const { return m_tenantInfo.tenantId; }
 
 	void addTeam(TCTeamInfo team);
 	void removeTeam(TCTeamInfo team);

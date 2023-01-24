@@ -156,6 +156,10 @@ struct ClientDBInfo {
 	}
 };
 
+// Compile ReplyPromise<CachedSerialization<ClientDBInfo>> takes long time, extern template is used to fix this. The
+// corresponding instantiations are done in CommitProxyInterface.cpp
+extern template class ReplyPromise<class CachedSerialization<struct ClientDBInfo>>;
+
 struct ExpireIdempotencyIdRequest {
 	constexpr static FileIdentifier file_identifier = 1900933;
 	Version commitVersion = invalidVersion;
@@ -379,7 +383,6 @@ struct GetTenantIdReply {
 
 struct GetTenantIdRequest {
 	constexpr static FileIdentifier file_identifier = 11299717;
-	SpanContext spanContext;
 	TenantName tenantName;
 	ReplyPromise<GetTenantIdReply> reply;
 
@@ -390,14 +393,14 @@ struct GetTenantIdRequest {
 	Version minTenantVersion;
 
 	GetTenantIdRequest() : minTenantVersion(latestVersion) {}
-	GetTenantIdRequest(SpanContext spanContext, TenantNameRef const& tenantName, Version minTenantVersion)
-	  : spanContext(spanContext), tenantName(tenantName), minTenantVersion(minTenantVersion) {}
+	GetTenantIdRequest(TenantNameRef const& tenantName, Version minTenantVersion)
+	  : tenantName(tenantName), minTenantVersion(minTenantVersion) {}
 
 	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply, spanContext, tenantName, minTenantVersion);
+		serializer(ar, reply, tenantName, minTenantVersion);
 	}
 };
 
@@ -421,6 +424,10 @@ struct GetKeyServerLocationsReply {
 		serializer(ar, results, resultsTssMapping, resultsTagMapping, arena);
 	}
 };
+
+// Instantiated in CommitProxyInterface.cpp
+extern template class ReplyPromise<GetKeyServerLocationsReply>;
+extern template struct NetSAV<GetKeyServerLocationsReply>;
 
 struct GetKeyServerLocationsRequest {
 	constexpr static FileIdentifier file_identifier = 9144680;
