@@ -81,7 +81,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CHANGE_FEED_POP_TIMEOUT,                10.0 );
 	init( CHANGE_FEED_STREAM_MIN_BYTES,            1e4 ); if( randomize && BUGGIFY ) CHANGE_FEED_STREAM_MIN_BYTES = 1;
 	init( CHANGE_FEED_START_INTERVAL,             20.0 ); if( randomize && BUGGIFY ) CHANGE_FEED_START_INTERVAL = 10.0;
-	init( CHANGE_FEED_COALESCE_LOCATIONS,         true ); if( randomize && BUGGIFY ) CHANGE_FEED_COALESCE_LOCATIONS = false;
+	init( CHANGE_FEED_COALESCE_LOCATIONS,        false ); if( randomize && BUGGIFY ) CHANGE_FEED_COALESCE_LOCATIONS = false;
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1;
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && BUGGIFY ) GRV_BATCH_TIMEOUT = 0.1;
