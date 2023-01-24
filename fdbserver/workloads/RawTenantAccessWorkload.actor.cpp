@@ -65,25 +65,23 @@ struct RawTenantAccessWorkload : TestWorkload {
 		// create N tenant through special key space
 		wait(runRYWTransaction(cx, [workload](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			for (int i = 0; i < workload->tenantCount; ++i) {
+			for (int i = 0; i < workload->tenantCount ; i += 2) {
 				tr->set(workload->specialKeysTenantMapPrefix.withSuffix(workload->indexToTenantName(i)), ""_sr);
 			}
 			return Future<Void>(Void());
 		}));
 
-		for (int i = 0; i < self->tenantCount; ++i) {
+		for (int i = 0; i < self->tenantCount; i += 2) {
 			self->lastCreatedTenants.insert(i);
 		}
 		return Void();
 	}
 
 	bool hasNonexistentTenant() const {
-		// do the conservative estimation for simplicity
-		return lastDeletedTenants.size() > 0 || (lastCreatedTenants.size() + idx2Tid.size() < tenantCount);
+		return lastCreatedTenants.size() + idx2Tid.size() < tenantCount;
 	}
 
 	bool hasExistingTenant() const {
-		// do the conservative estimation for simplicity
 		return idx2Tid.size() - lastDeletedTenants.size() > 0;
 	}
 
@@ -183,11 +181,7 @@ struct RawTenantAccessWorkload : TestWorkload {
 		ASSERT(hasNonexistentTenant());
 		int tenantIdx = deterministicRandom()->randomInt(0, tenantCount);
 		// find the nearest nonexistent tenant
-		while (true) {
-			if ((!idx2Tid.count(tenantIdx) && !lastCreatedTenants.count(tenantIdx)) ||
-			    lastDeletedTenants.count(tenantIdx)) {
-				break;
-			}
+		while (idx2Tid.count(tenantIdx) || lastCreatedTenants.count(tenantIdx)) {
 			tenantIdx++;
 			if (tenantIdx == tenantCount) {
 				tenantIdx = 0;
@@ -224,6 +218,7 @@ struct RawTenantAccessWorkload : TestWorkload {
 		lastDeletedTenants.insert(tenantIdx);
 		TraceEvent("RawTenantAccess_DeleteExistingTenant", traceId)
 		    .detail("TenantIndex", tenantIdx)
+		    .detail("TenantId", idx2Tid.at(tenantIdx))
 		    .detail("LastCreatedTenants", lastCreatedTenants.size())
 		    .detail("LastDeletedTenants", lastDeletedTenants.size());
 	}
@@ -340,7 +335,7 @@ struct RawTenantAccessWorkload : TestWorkload {
 		} else {
 			ASSERT(!illegalAccessCaught);
 		}
-
+		TraceEvent("RawTenantAccess_TransactionResult", traceId).detail("Committed", committed);
 		return committed;
 	}
 

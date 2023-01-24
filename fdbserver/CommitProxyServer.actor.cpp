@@ -960,6 +960,9 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	int conflictRangeCount = 0;
 	self->maxTransactionBytes = 0;
 	for (int t = 0; t < trs.size(); t++) {
+		// detect invalid tenant operation
+
+
 		requests.addTransaction(trs[t], self->commitVersion, t);
 		conflictRangeCount +=
 		    trs[t].transaction.read_conflict_ranges.size() + trs[t].transaction.write_conflict_ranges.size();
@@ -1066,13 +1069,15 @@ void assertResolutionStateMutationsSizeConsistent(const std::vector<ResolveTrans
 }
 
 // Return true if a single-key mutation is associated with a valid tenant id or a system key
-bool validTenantAccess(MutationRef m, std::unordered_map<int64_t, TenantName> const& tenantMap) {
+bool validTenantAccess(MutationRef m,
+                       std::unordered_map<int64_t, TenantName> const& tenantMap,
+                       Optional<int64_t>& tenantId) {
 	if (isSystemKey(m.param1))
 		return true;
 
 	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
-		auto tenantId = TenantAPI::extractTenantIdFromMutation(m);
-		return tenantMap.count(tenantId) > 0;
+		tenantId = TenantAPI::extractTenantIdFromMutation(m);
+		return tenantMap.count(tenantId.get()) > 0;
 	}
 	return true;
 }
@@ -1092,10 +1097,14 @@ inline bool tenantMapChanging(MutationRef mutation) {
 // error
 Error validateAndProcessTenantAccess(VectorRef<MutationRef> mutations,
                                      ProxyCommitData* const pProxyCommitData,
-                                     Optional<UID> debugId = Optional<UID>()) {
+                                     Optional<UID> debugId = Optional<UID>(),
+                                     const char* context = "") {
 	bool changeTenant = false;
 	bool writeNormalKey = false;
+
 	for (auto& mutation : mutations) {
+		Optional<int64_t> tenantId;
+		bool validAccess = true;
 		if (tenantMapChanging(mutation)) {
 			changeTenant = true;
 		} else if (mutation.type == MutationRef::ClearRange) {
@@ -1104,19 +1113,24 @@ Error validateAndProcessTenantAccess(VectorRef<MutationRef> mutations,
 			CODE_PROBE(beginTenantId != endTenantId, "Clear Range raw access or cross multiple tenants");
 			// TODO: splitting clear range
 		} else if (!isSystemKey(mutation.param1)) {
-			if (!validTenantAccess(mutation, pProxyCommitData->tenantMap)) {
-				return illegal_tenant_access();
-			}
+			validAccess = validTenantAccess(mutation, pProxyCommitData->tenantMap, tenantId);
 			writeNormalKey = true;
 		}
 
 		if (debugId.present()) {
-			TraceEvent(SevDebug, "ValidateAndProcessTenantAccess", debugId.get())
+			TraceEvent(SevDebug, "ValidateAndProcessTenantAccess", pProxyCommitData->dbgid)
+			    .detail("Context", context)
+			    .detail("TxnId", debugId.get())
+			    .detail("Version", pProxyCommitData->version.get())
 			    .detail("ChangeTenant", changeTenant)
 			    .detail("WriteNormalKey", writeNormalKey)
+			    .detail("TenantId", tenantId)
+			    .detail("ValidAccess", validAccess)
+			    .detail("MutationType", getTypeString(mutation.type))
 			    .detail("Mutation", mutation.param1);
 		}
-		if (writeNormalKey && changeTenant) {
+
+		if ((writeNormalKey && changeTenant) || !validAccess) {
 			return illegal_tenant_access();
 		}
 	}
@@ -1134,7 +1148,8 @@ Error validateAndProcessTenantAccess(const CommitTransactionRequest& tr, ProxyCo
 		return success();
 	}
 
-	return validateAndProcessTenantAccess(tr.transaction.mutations, pProxyCommitData, tr.debugID);
+	return validateAndProcessTenantAccess(
+	    tr.transaction.mutations, pProxyCommitData, tr.debugID, "validateAndProcessTenantAccess");
 }
 
 // Compute and apply "metadata" effects of each other proxy's most recent batch
@@ -1159,7 +1174,9 @@ void applyMetadataEffect(CommitBatchContext* self) {
 			if (committed) {
 				Error e = validateAndProcessTenantAccess(
 				    self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations,
-				    self->pProxyCommitData);
+				    self->pProxyCommitData,
+				    self->pProxyCommitData->dbgid,
+				    "applyMetadataEffect");
 				committed = committed && (e.code() == error_code_success);
 			}
 
