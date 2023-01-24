@@ -1029,7 +1029,7 @@ private:
 ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
                                         Standalone<VectorRef<KeyValueRef>>* results,
                                         bool encryptedBlock,
-                                        Optional<EncryptionAtRestMode> encryptMode,
+                                        EncryptionAtRestMode encryptMode,
                                         Optional<BlobCipherEncryptHeader> encryptHeader,
                                         Optional<Reference<TenantEntryCache<Void>>> tenantCache) {
 	// Read begin key, if this fails then block was invalid.
@@ -1049,16 +1049,15 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 		// make sure that all keys in a block belong to exactly one tenant,
 		// unless its the last key in which case it can be a truncated (different) tenant prefix
 		if (encryptedBlock && g_network && g_network->isSimulated()) {
-			ASSERT(encryptMode.present());
 			ASSERT(encryptHeader.present());
 			state KeyRef curKey = KeyRef(k, kLen);
 			if (!prevDomainId.present()) {
 				EncryptCipherDomainId domainId =
-				    EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, encryptMode.get());
+				    EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, encryptMode);
 				prevDomainId = domainId;
 			}
 			EncryptCipherDomainId curDomainId =
-			    EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, encryptMode.get());
+			    EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, encryptMode);
 			if (!curKey.empty() && !prevKey.empty() && prevDomainId.get() != curDomainId) {
 				ASSERT(!done);
 				if (curDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && curDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
@@ -1138,12 +1137,8 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		// BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION
 		int32_t file_version = reader.consume<int32_t>();
 		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
-			wait(decodeKVPairs(&reader,
-			                   &results,
-			                   false,
-			                   Optional<EncryptionAtRestMode>(),
-			                   Optional<BlobCipherEncryptHeader>(),
-			                   tenantCache));
+			wait(
+			    decodeKVPairs(&reader, &results, false, encryptMode, Optional<BlobCipherEncryptHeader>(), tenantCache));
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 			CODE_PROBE(true, "decoding encrypted block");
 			// decode options struct
@@ -3557,6 +3552,9 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		}
 		state int64_t tenantId = TenantAPI::extractTenantIdFromKeyRef(key);
 		Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getById(tenantId));
+		if (!payload.present()) {
+			TraceEvent(SevError, "SnapshotRestoreInvalidTenantAccess").detail("Tenant", tenantId);
+		}
 		ASSERT(payload.present());
 		return Void();
 	}

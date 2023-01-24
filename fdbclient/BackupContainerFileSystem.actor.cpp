@@ -976,6 +976,8 @@ public:
 			// TODO: Reenable the sanity check after TooManyFiles error is resolved
 			if (false && g_network->isSimulated()) {
 				// Sanity check key ranges
+				// TODO: If we want to re-enable this codepath, make sure that we are passing a valid DB object (instead
+				// of the DB object created on the line below)
 				ASSERT(false);
 				state Database cx;
 				state std::map<std::string, KeyRange>::iterator rit;
