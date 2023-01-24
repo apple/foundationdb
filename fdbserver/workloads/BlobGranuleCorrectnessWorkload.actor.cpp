@@ -128,7 +128,10 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 		}
 	}
 
-	void openTenant(Database const& cx) { tenant = makeReference<Tenant>(cx, tenantName); }
+	Future<Void> openTenant(Database const& cx) {
+		tenant = makeReference<Tenant>(cx, tenantName);
+		return tenant->ready();
+	}
 
 	// TODO could make keys variable length?
 	Key getKey(uint32_t key, uint32_t id) {
@@ -282,17 +285,17 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		}
 
 		state int directoryIdx = 0;
-		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
+		state std::vector<std::pair<int64_t, TenantMapEntry>> tenants;
 		state BGTenantMap tenantData(self->dbInfo);
 		state Reference<GranuleTenantData> data;
 		for (; directoryIdx < self->directories.size(); directoryIdx++) {
 			// Set up the blob range first
-			TenantMapEntry tenantEntry = wait(self->setUpTenant(cx, self->directories[directoryIdx]->tenantName));
-			self->directories[directoryIdx]->openTenant(cx);
+			state TenantMapEntry tenantEntry = wait(self->setUpTenant(cx, self->directories[directoryIdx]->tenantName));
+			wait(self->directories[directoryIdx]->openTenant(cx));
 			self->directories[directoryIdx]->tenantEntry = tenantEntry;
 			self->directories[directoryIdx]->directoryRange =
 			    KeyRangeRef(tenantEntry.prefix, tenantEntry.prefix.withSuffix(normalKeys.end));
-			tenants.push_back({ self->directories[directoryIdx]->tenant->name.get(), tenantEntry });
+			tenants.push_back({ self->directories[directoryIdx]->tenant->id(), tenantEntry });
 			bool _success = wait(cx->blobbifyRange(self->directories[directoryIdx]->directoryRange));
 			ASSERT(_success);
 		}

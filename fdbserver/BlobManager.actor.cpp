@@ -1249,10 +1249,9 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 }
 
 ACTOR Future<Void> loadTenantMap(Reference<ReadYourWritesTransaction> tr, Reference<BlobManagerData> bmData) {
-	state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
+	state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantResults;
 	wait(store(tenantResults,
-	           TenantMetadata::tenantMap().getRange(
-	               tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+	           TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
 	ASSERT(tenantResults.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantResults.more);
 
 	bmData->tenantData.addTenants(tenantResults.results);
