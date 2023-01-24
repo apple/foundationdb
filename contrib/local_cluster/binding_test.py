@@ -52,7 +52,8 @@ def _setup_logs(log_level: int = logging.INFO):
     logger.addHandler(stdout_handler)
     logger.setLevel(log_level)
 
-    # Here we might lose some of the logging from lib
+    # Here we might lose some of the logging from lib as the logger is set after
+    # importing the modules
     lib_logger = logging.getLogger("lib")
     lib_logger.setLevel(log_level)
 

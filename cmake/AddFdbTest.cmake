@@ -380,8 +380,127 @@ function(create_valgrind_correctness_package)
   endif()
 endfunction()
 
+function(prepare_binding_test_files build_directory target_name target_dependency)
+  add_custom_target(${target_name} DEPENDS ${target_dependency})
+  add_custom_command(
+    TARGET ${target_name}
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_flow_tester> ${build_directory}/tests/flow/bin/fdb_flow_tester
+    COMMENT "Copy Flow tester for bindingtester")
+
+  set(generated_binding_files python/fdb/fdboptions.py)
+  if(WITH_JAVA_BINDING)
+    if(NOT FDB_RELEASE)
+      set(not_fdb_release_string "-SNAPSHOT")
+    else()
+      set(not_fdb_release_string "")
+    endif()
+    add_custom_command(
+      TARGET ${target_name}
+      COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_BINARY_DIR}/packages/fdb-java-${FDB_VERSION}${not_fdb_release_string}.jar
+        ${build_directory}/tests/java/foundationdb-client.jar
+      COMMENT "Copy Java bindings for bindingtester")
+    add_dependencies(${target_name} fat-jar)
+    add_dependencies(${target_name} foundationdb-tests)
+    set(generated_binding_files ${generated_binding_files} java/foundationdb-tests.jar)
+  endif()
+
+  if(WITH_GO_BINDING)
+    add_dependencies(${target_name} fdb_go_tester fdb_go)
+    add_custom_command(
+      TARGET ${target_name}
+      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bindings/go/bin/_stacktester ${build_directory}/tests/go/build/bin/_stacktester
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${bdir}/tests/go/src/fdb/
+      COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_BINARY_DIR}/bindings/go/src/github.com/apple/foundationdb/bindings/go/src/fdb/generated.go # SRC
+        ${build_directory}/tests/go/src/fdb/ # DEST
+      COMMENT "Copy generated.go for bindingtester")
+  endif()
+
+  foreach(generated IN LISTS generated_binding_files)
+    add_custom_command(
+      TARGET ${target_name}
+      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bindings/${generated} ${build_directory}/tests/${generated}
+      COMMENT "Copy ${generated} to bindingtester")
+  endforeach()
+endfunction(prepare_binding_test_files)
+
+function(package_bindingtester2)
+  if (WIN32 OR OPEN_FOR_IDE)
+    message(WARNING "Binding tester is not built (WIN32/OPEN_FOR_IDE)")
+    return()
+  endif()
+
+  set(fdbcName "libfdb_c.so")
+  if (APPLE)
+    set(fdbcName "libfdb_c.dylib")
+  endif ()
+
+  set(touch_file ${CMAKE_BINARY_DIR}/bindingtester2.touch)
+  set(build_directory ${CMAKE_BINARY_DIR}/bindingtester2)
+  set(tests_directory ${build_directory}/tests)
+  add_custom_command(
+    OUTPUT ${touch_file}
+    COMMAND ${CMAKE_COMMAND} -E remove_directory ${build_directory}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${build_directory}
+    COMMAND ${CMAKE_COMMAND} -E remove_directory ${tests_directory}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${tests_directory}
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/bindings ${tests_directory}
+    COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/bindingtester2.touch"
+    COMMENT "Setup scratch directory for bindingtester2")
+
+  set(joshua_directory ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts)
+  set(output_files
+   ${build_directory}/joshua_test
+   ${build_directory}/joshua_timeout
+   ${build_directory}/fdbcli
+   ${build_directory}/fdbserver
+   ${build_directory}/${fdbcName}
+  )
+
+  add_custom_command(
+    OUTPUT ${output_files}
+    DEPENDS strip_only_fdbcli
+            strip_only_fdbserver
+            strip_only_fdb_c
+            ${joshua_directory}/binding_test_start.sh
+            ${joshua_directory}/binding_test_timeout.sh
+            ${touch_file}
+    COMMAND ${CMAKE_COMMAND} -E copy
+            ${CMAKE_BINARY_DIR}/packages/bin/fdbcli
+            ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
+            ${CMAKE_BINARY_DIR}/packages/lib/${fdbcName}
+            ${build_directory}
+    COMMAND ${CMAKE_COMMAND} -E copy ${joshua_directory}/binding_test_start.sh ${build_directory}/joshua_test
+    COMMAND ${CMAKE_COMMAND} -E copy ${joshua_directory}/binding_test_timeout.sh ${build_directory}/joshua_timeout
+    COMMENT "Copy executables and scripts to bindingtester2 dir")
+
+  set(local_cluster_files ${build_directory}/local_cluster)
+  set(local_cluster_directory ${CMAKE_SOURCE_DIR}/contrib/local_cluster)
+  add_custom_command(
+    OUTPUT ${local_cluster_files}
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${local_cluster_directory}
+            ${build_directory}
+  )
+
+  prepare_binding_test_files(${build_directory} copy_bindingtester2_test_files ${touch_file})
+
+  set(tar_file ${CMAKE_BINARY_DIR}/packages/bindingtester2-${FDB_VERSION}.tar.gz)
+  add_custom_command(
+    OUTPUT ${tar_file}
+    DEPENDS ${touch_file} ${output_files} ${local_cluster_files} copy_bindingtester2_test_files
+    COMMAND ${CMAKE_COMMAND} -E tar czf ${tar_file} *
+    WORKING_DIRECTORY ${build_directory}
+    COMMENT "Pack bindingtester2"
+  )
+
+  add_custom_target(bindingtester2 ALL DEPENDS ${tar_file})
+endfunction(package_bindingtester2)
+
 function(package_bindingtester)
   if(WIN32 OR OPEN_FOR_IDE)
+    message(WARNING "Binding tester is not built (WIN32/OPEN_FOR_IDE)")
     return()
   elseif(APPLE)
     set(fdbcName "libfdb_c.dylib")
@@ -403,7 +522,6 @@ function(package_bindingtester)
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/localClusterStart.sh ${bdir}/localClusterStart.sh
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/bindingTestScript.sh ${bdir}/bindingTestScript.sh
     COMMENT "Copy executables and scripts to bindingtester dir")
-  file(GLOB_RECURSE test_files ${CMAKE_SOURCE_DIR}/bindings/*)
   add_custom_command(
     OUTPUT "${CMAKE_BINARY_DIR}/bindingtester.touch"
     COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/bindingtester/tests
@@ -412,60 +530,19 @@ function(package_bindingtester)
     COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/bindingtester.touch"
     COMMENT "Copy test files for bindingtester")
 
-  add_custom_target(copy_binding_output_files DEPENDS ${CMAKE_BINARY_DIR}/bindingtester.touch python_binding fdb_flow_tester)
-  add_custom_command(
-    TARGET copy_binding_output_files
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_flow_tester> ${bdir}/tests/flow/bin/fdb_flow_tester
-    COMMENT "Copy Flow tester for bindingtester")
-
-  set(generated_binding_files python/fdb/fdboptions.py)
-  if(WITH_JAVA_BINDING)
-    if(NOT FDB_RELEASE)
-      set(not_fdb_release_string "-SNAPSHOT")
-    else()
-      set(not_fdb_release_string "")
-    endif()
-    add_custom_command(
-      TARGET copy_binding_output_files
-      COMMAND ${CMAKE_COMMAND} -E copy
-        ${CMAKE_BINARY_DIR}/packages/fdb-java-${FDB_VERSION}${not_fdb_release_string}.jar
-        ${bdir}/tests/java/foundationdb-client.jar
-      COMMENT "Copy Java bindings for bindingtester")
-    add_dependencies(copy_binding_output_files fat-jar)
-    add_dependencies(copy_binding_output_files foundationdb-tests)
-    set(generated_binding_files ${generated_binding_files} java/foundationdb-tests.jar)
-  endif()
-
-  if(WITH_GO_BINDING AND NOT OPEN_FOR_IDE)
-    add_dependencies(copy_binding_output_files fdb_go_tester fdb_go)
-    add_custom_command(
-      TARGET copy_binding_output_files
-      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bindings/go/bin/_stacktester ${bdir}/tests/go/build/bin/_stacktester
-      COMMAND ${CMAKE_COMMAND} -E make_directory ${bdir}/tests/go/src/fdb/
-      COMMAND ${CMAKE_COMMAND} -E copy
-        ${CMAKE_BINARY_DIR}/bindings/go/src/github.com/apple/foundationdb/bindings/go/src/fdb/generated.go # SRC
-        ${bdir}/tests/go/src/fdb/ # DEST
-      COMMENT "Copy generated.go for bindingtester")
-  endif()
-
-  foreach(generated IN LISTS generated_binding_files)
-    add_custom_command(
-      TARGET copy_binding_output_files
-      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bindings/${generated} ${bdir}/tests/${generated}
-      COMMENT "Copy ${generated} to bindingtester")
-  endforeach()
+  prepare_binding_test_files(${bdir} copy_binding_output_files ${CMAKE_BINARY_DIR}/bindingtester.touch)
 
   add_custom_target(copy_bindingtester_binaries
     DEPENDS ${outfiles} "${CMAKE_BINARY_DIR}/bindingtester.touch" copy_binding_output_files)
   add_dependencies(copy_bindingtester_binaries strip_only_fdbserver strip_only_fdbcli strip_only_fdb_c)
+
   set(tar_file ${CMAKE_BINARY_DIR}/packages/bindingtester-${FDB_VERSION}.tar.gz)
   add_custom_command(
     OUTPUT ${tar_file}
     COMMAND ${CMAKE_COMMAND} -E tar czf ${tar_file} *
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/bindingtester
     COMMENT "Pack bindingtester")
-  add_custom_target(bindingtester ALL DEPENDS ${tar_file})
-  add_dependencies(bindingtester copy_bindingtester_binaries)
+  add_custom_target(bindingtester ALL DEPENDS ${tar_file} copy_bindingtester_binaries)
 endfunction()
 
 # Test for setting up Python venv for client tests.
