@@ -2,6 +2,7 @@
 #include "fdbclient/CoordinationInterface.h"
 
 // Instantiate ClientDBInfo related tempates
+template class ReplyPromise<struct ClientDBInfo>;
 template class ReplyPromise<CachedSerialization<ClientDBInfo>>;
 
 // Instantiate OpenDatabaseCoordRequest related templates

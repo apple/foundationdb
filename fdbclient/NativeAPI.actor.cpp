@@ -110,6 +110,9 @@
 #endif
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+template class RequestStream<OpenDatabaseRequest, false>;
+template struct NetNotifiedQueue<OpenDatabaseRequest, false>;
+
 FDB_DEFINE_BOOLEAN_PARAM(CacheResult);
 
 extern const char* getSourceVersion();
