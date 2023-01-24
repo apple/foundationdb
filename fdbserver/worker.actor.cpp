@@ -104,6 +104,9 @@ template struct NetNotifiedQueue<RecruitMasterRequest, false>;
 template class RequestStream<InitializeCommitProxyRequest, false>;
 template struct NetNotifiedQueue<InitializeCommitProxyRequest, false>;
 
+template class RequestStream<InitializeGrvProxyRequest, false>;
+template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
+
 namespace {
 RoleLineageCollector roleLineageCollector;
 }

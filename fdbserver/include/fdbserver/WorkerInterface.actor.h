@@ -756,6 +756,10 @@ struct InitializeGrvProxyRequest {
 	}
 };
 
+// Instantiated in worker.actor.cpp
+extern template class RequestStream<InitializeGrvProxyRequest, false>;
+extern template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
+
 struct InitializeDataDistributorRequest {
 	constexpr static FileIdentifier file_identifier = 8858952;
 	UID reqId;

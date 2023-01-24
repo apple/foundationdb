@@ -425,6 +425,10 @@ struct GetKeyServerLocationsReply {
 	}
 };
 
+// Instantiated in CommitProxyInterface.cpp
+extern template class ReplyPromise<GetKeyServerLocationsReply>;
+extern template struct NetSAV<GetKeyServerLocationsReply>;
+
 struct GetKeyServerLocationsRequest {
 	constexpr static FileIdentifier file_identifier = 9144680;
 	Arena arena;
