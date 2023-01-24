@@ -719,6 +719,7 @@ struct RecruitMasterRequest {
 
 // Instantiated in worker.actor.cpp
 extern template class RequestStream<RecruitMasterRequest, false>;
+extern template struct NetNotifiedQueue<RecruitMasterRequest, false>;
 
 struct InitializeCommitProxyRequest {
 	constexpr static FileIdentifier file_identifier = 10344153;
