@@ -98,6 +98,7 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #endif
 
 template class RequestStream<RecruitMasterRequest, false>;
+template struct NetNotifiedQueue<RecruitMasterRequest, false>;
 
 namespace {
 RoleLineageCollector roleLineageCollector;
