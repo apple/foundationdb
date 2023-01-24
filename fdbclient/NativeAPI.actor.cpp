@@ -2281,7 +2281,8 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	                                                clientInfo,
 	                                                coordinator,
 	                                                networkOptions.supportedVersions,
-	                                                StringRef(networkOptions.traceLogGroup));
+	                                                StringRef(networkOptions.traceLogGroup),
+	                                                internal);
 
 	DatabaseContext* db;
 	if (preallocatedDb) {
