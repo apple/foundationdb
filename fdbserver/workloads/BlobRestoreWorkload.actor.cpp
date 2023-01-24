@@ -24,6 +24,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -72,7 +73,7 @@ struct BlobRestoreWorkload : TestWorkload {
 
 		if (self->performRestore_) {
 			fmt::print("Perform blob restore\n");
-			wait(store(result, self->extraDb_->blobRestore(normalKeys)));
+			wait(store(result, self->extraDb_->blobRestore(normalKeys, {})));
 
 			state std::vector<Future<Void>> futures;
 			futures.push_back(self->runBackupAgent(self));
