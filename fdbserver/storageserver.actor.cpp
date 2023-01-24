@@ -1639,9 +1639,9 @@ public:
 		Version minVersion = version.get();
 		for (auto& it : clientVersions) {
 			/*fmt::print("SS {0} Blocked client {1} @ {2}\n",
-			           thisServerID.toString().substr(0, 4),
-			           it.first.toString().substr(0, 8),
-			           it.second);*/
+			        thisServerID.toString().substr(0, 4),
+			        it.first.toString().substr(0, 8),
+			        it.second);*/
 			minVersion = std::min(minVersion, it.second);
 		}
 		return minVersion;
@@ -10406,7 +10406,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 
 		bool nowAvailable = available[availableLoc].value != "0"_sr;
 		/*if(nowAvailable)
-		  TraceEvent("AvailableShard", data->thisServerID).detail("RangeBegin", keys.begin).detail("RangeEnd", keys.end);*/
+		TraceEvent("AvailableShard", data->thisServerID).detail("RangeBegin", keys.begin).detail("RangeEnd", keys.end);*/
 		data->newestAvailableVersion.insert(keys, nowAvailable ? latestVersion : invalidVersion);
 		wait(yield());
 	}
@@ -10426,7 +10426,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 			ASSERT(!keys.empty());
 			bool nowAssigned = assigned[assignedLoc].value != "0"_sr;
 			/*if(nowAssigned)
-			  TraceEvent("AssignedShard", data->thisServerID).detail("RangeBegin", keys.begin).detail("RangeEnd", keys.end);*/
+			TraceEvent("AssignedShard", data->thisServerID).detail("RangeBegin", keys.begin).detail("RangeEnd", keys.end);*/
 			changeServerKeys(data, keys, nowAssigned, version, CSK_RESTORE);
 
 			if (!nowAssigned)
@@ -10653,16 +10653,16 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 						//  all the messages for one clear or set have been dispatched.
 
 						/*StorageMetrics m = getMetrics( data, req.keys );
-						  bool b = ( m.bytes != metrics.bytes || m.bytesWrittenPerKSecond !=
-						  metrics.bytesWrittenPerKSecond
-						  || m.iosPerKSecond != metrics.iosPerKSecond ); if (b) { printf("keys: '%s' - '%s' @%p\n",
-						  printable(req.keys.begin).c_str(), printable(req.keys.end).c_str(), this);
-						  printf("waitMetrics: desync %d (%lld %lld %lld) != (%lld %lld %lld); +(%lld %lld %lld)\n",
-						  b, m.bytes, m.bytesWrittenPerKSecond, m.iosPerKSecond, metrics.bytes,
-						  metrics.bytesWrittenPerKSecond, metrics.iosPerKSecond, c.bytes, c.bytesWrittenPerKSecond,
-						  c.iosPerKSecond);
+						bool b = ( m.bytes != metrics.bytes || m.bytesWrittenPerKSecond !=
+						metrics.bytesWrittenPerKSecond
+						|| m.iosPerKSecond != metrics.iosPerKSecond ); if (b) { printf("keys: '%s' - '%s' @%p\n",
+						printable(req.keys.begin).c_str(), printable(req.keys.end).c_str(), this);
+						printf("waitMetrics: desync %d (%lld %lld %lld) != (%lld %lld %lld); +(%lld %lld %lld)\n",
+						b, m.bytes, m.bytesWrittenPerKSecond, m.iosPerKSecond, metrics.bytes,
+						metrics.bytesWrittenPerKSecond, metrics.iosPerKSecond, c.bytes, c.bytesWrittenPerKSecond,
+						c.iosPerKSecond);
 
-						  }*/
+						}*/
 					}
 					when(wait(timeout)) { timedout = true; }
 				}
@@ -11744,13 +11744,13 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 To reach 64, need to save: 11 bytes + all padding
 
 Possibilities:
-  -8 Combine lastUpdateVersion, insertVersion?
-  -2 Fold together updated, replacedPointer, isClear bits
-  -3 Fold away updated, replacedPointer, isClear
-  -8 Move value lengths into arena
-  -4 Replace priority with H(pointer)
-  -12 Compress pointers (using special allocator)
-  -4 Modular lastUpdateVersion (make sure no node survives 4 billion updates)
+-8 Combine lastUpdateVersion, insertVersion?
+-2 Fold together updated, replacedPointer, isClear bits
+-3 Fold away updated, replacedPointer, isClear
+-8 Move value lengths into arena
+-4 Replace priority with H(pointer)
+-12 Compress pointers (using special allocator)
+-4 Modular lastUpdateVersion (make sure no node survives 4 billion updates)
 */
 
 void versionedMapTest() {
