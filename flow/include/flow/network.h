@@ -120,7 +120,6 @@ public:
 	virtual Future<int64_t> read() = 0;
 };
 
-
 typedef void* flowGlobalType;
 typedef NetworkAddress (*NetworkAddressFuncPtr)();
 typedef NetworkAddressList (*NetworkAddressesFuncPtr)();
@@ -278,6 +277,5 @@ protected:
 
 	~INetwork() {} // Please don't try to delete through this interface!
 };
-
 
 #endif

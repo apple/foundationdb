@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
- #ifndef FLOW_TASKPRIORITY_H
- #define FLOW_TASKPRIORITY_H
+#ifndef FLOW_TASKPRIORITY_H
+#define FLOW_TASKPRIORITY_H
 
 enum class TaskPriority {
 	Max = 1000000,
@@ -117,5 +117,4 @@ inline TaskPriority incrementPriorityIfEven(TaskPriority p) {
 	return static_cast<TaskPriority>(static_cast<uint64_t>(p) | 1);
 }
 
-
- #endif //FLOW_TASKPRIORITY_H
+#endif // FLOW_TASKPRIORITY_H

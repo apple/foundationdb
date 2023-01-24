@@ -1312,7 +1312,9 @@ Future<T> ioTimeoutError(Future<T> what, double time, const char* context = null
 	}
 	Future<Void> end = lowPriorityDelay(time);
 	choose {
-		when(T t = wait(what)) { return t; }
+		when(T t = wait(what)) {
+			return t;
+		}
 		when(wait(end)) {
 			Error err = io_timeout();
 			if (!isSimulatorProcessReliable()) {
@@ -1346,7 +1348,9 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 	if (degradedTime < errTime) {
 		Future<Void> degradedEnd = lowPriorityDelay(degradedTime);
 		choose {
-			when(T t = wait(what)) { return t; }
+			when(T t = wait(what)) {
+				return t;
+			}
 			when(wait(degradedEnd)) {
 				CODE_PROBE(true, "TLog degraded", probe::func::deduplicate);
 				TraceEvent(SevWarnAlways, "IoDegraded").log();
@@ -1357,7 +1361,9 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 
 	Future<Void> end = lowPriorityDelay(errTime - degradedTime);
 	choose {
-		when(T t = wait(what)) { return t; }
+		when(T t = wait(what)) {
+			return t;
+		}
 		when(wait(end)) {
 			Error err = io_timeout();
 			if (!isSimulatorProcessReliable()) {

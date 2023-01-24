@@ -56,4 +56,4 @@ private: // construction
 	BitFlipper(BitFlipper const&) = delete;
 };
 
-#endif  // FLOW_CHAOSMETRICS_H
+#endif // FLOW_CHAOSMETRICS_H

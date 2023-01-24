@@ -308,8 +308,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			processesLeft.insert(processesLeft.end(), killProcArray.begin(), killProcArray.end());
 
 			// Check if we can kill the added process
-			bCanKillProcess =
-			    g_simulator->canKillProcesses(processesLeft, processesDead, ISimulator::KillType::KillInstantly, nullptr);
+			bCanKillProcess = g_simulator->canKillProcesses(
+			    processesLeft, processesDead, ISimulator::KillType::KillInstantly, nullptr);
 
 			// Remove the added processes
 			processesLeft.resize(processesLeft.size() - killProcArray.size());
@@ -497,8 +497,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("Zones", zoneIds.size())
 			    .detail("ClusterAvailable", g_simulator->isAvailable());
 			for (auto& zoneId : zoneIds) {
-				killedMachine = g_simulator->killZone(
-				    zoneId, removeViaClear ? ISimulator::KillType::RebootAndDelete : ISimulator::KillType::KillInstantly);
+				killedMachine = g_simulator->killZone(zoneId,
+				                                      removeViaClear ? ISimulator::KillType::RebootAndDelete
+				                                                     : ISimulator::KillType::KillInstantly);
 				TraceEvent(killedMachine ? SevInfo : SevWarn, "RemoveAndKill")
 				    .detail("Step", removeViaClear ? "Clear Machine" : "Kill Machine")
 				    .detail("ZoneId", zoneId)

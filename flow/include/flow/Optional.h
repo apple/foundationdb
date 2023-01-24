@@ -54,10 +54,10 @@ public:
 	/* This conversion constructor was nice, but combined with the prior constructor it means that Optional<int> can be
 	converted to Optional<Optional<int>> in the wrong way (a non-present Optional<int> converts to a non-present
 	Optional<Optional<int>>). Use .castTo<>() instead.
-	
+
 	template <class S> Optional(const Optional<S>& o) : valid(o.present()) {
-		if (valid)
-			new (&value) T(o.get());
+	    if (valid)
+	        new (&value) T(o.get());
 	}
 	*/
 

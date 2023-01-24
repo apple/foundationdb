@@ -31,7 +31,6 @@ Future<Void> waitShutdownSignal() {
 	return success(g_simulator->getCurrentProcess()->shutdownSignal.getFuture());
 }
 
-
 ACTOR Future<Void> sendOnProcess(ISimulator::ProcessInfo* process, Promise<Void> promise, TaskPriority taskID) {
 	wait(g_simulator->onProcess(process, taskID));
 	promise.send(Void());
@@ -58,7 +57,9 @@ ACTOR Future<Reference<IAsyncFile>> AsyncFileDetachable::open(Future<Reference<I
 		when(wait(success(g_simulator->getCurrentProcess()->shutdownSignal.getFuture()))) {
 			throw io_error().asInjectedFault();
 		}
-		when(Reference<IAsyncFile> f = wait(wrappedFile)) { return makeReference<AsyncFileDetachable>(f); }
+		when(Reference<IAsyncFile> f = wait(wrappedFile)) {
+			return makeReference<AsyncFileDetachable>(f);
+		}
 	}
 }
 
@@ -113,7 +114,8 @@ ACTOR Future<Reference<IAsyncFile>> AsyncFileNonDurable::open(std::string filena
 
 		// If we are in the process of deleting a file, we can't let someone else modify it at the same time.  We
 		// therefore block the creation of new files until deletion is complete
-		state std::map<std::string, Future<Void>>::iterator deletedFile = AsyncFileNonDurable::filesBeingDeleted.find(filename);
+		state std::map<std::string, Future<Void>>::iterator deletedFile =
+		    AsyncFileNonDurable::filesBeingDeleted.find(filename);
 		if (deletedFile != AsyncFileNonDurable::filesBeingDeleted.end()) {
 			//TraceEvent("AsyncFileNonDurableOpenWaitOnDelete1").detail("Filename", filename);
 			wait(deletedFile->second || shutdown);
@@ -207,19 +209,19 @@ ACTOR Future<Void> AsyncFileNonDurable::closeFile(AsyncFileNonDurable* self) {
 	}
 }
 
-	void AsyncFileNonDurable::removeOpenFile(std::string filename, AsyncFileNonDurable* file) {
-		auto& openFiles = g_simulator->getCurrentProcess()->machine->openFiles;
+void AsyncFileNonDurable::removeOpenFile(std::string filename, AsyncFileNonDurable* file) {
+	auto& openFiles = g_simulator->getCurrentProcess()->machine->openFiles;
 
-		auto iter = openFiles.find(filename);
+	auto iter = openFiles.find(filename);
 
-		// Various actions (e.g. simulated delete) can remove a file from openFiles prematurely, so it may already
-		// be gone. Renamed files (from atomic write and create) will also be present under only one of the two
-		// names.
-		if (iter != openFiles.end()) {
-			// even if the filename exists, it doesn't mean that it references the same file. It could be that the
-			// file was renamed and later a file with the same name was opened.
-			if (iter->second.getPtrIfReady().orDefault(nullptr) == file) {
-				openFiles.erase(iter);
-			}
+	// Various actions (e.g. simulated delete) can remove a file from openFiles prematurely, so it may already
+	// be gone. Renamed files (from atomic write and create) will also be present under only one of the two
+	// names.
+	if (iter != openFiles.end()) {
+		// even if the filename exists, it doesn't mean that it references the same file. It could be that the
+		// file was renamed and later a file with the same name was opened.
+		if (iter->second.getPtrIfReady().orDefault(nullptr) == file) {
+			openFiles.erase(iter);
 		}
 	}
+}

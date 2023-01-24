@@ -159,6 +159,6 @@ struct ProcessInfo : NonCopyable {
 	Promise<KillType> shutdownSignal;
 };
 
-}   // namespace simulator
+} // namespace simulator
 
 #endif // FDBRPC_SIMULATOR_PROCESSINFO_H
