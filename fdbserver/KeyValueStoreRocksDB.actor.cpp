@@ -174,7 +174,7 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 		// @param deletion_ratio, if <= 0 or > 1, disable triggering compaction
 		//     based on deletion ratio. Disabled by default.
 		options.table_properties_collector_factories = { rocksdb::NewCompactOnDeletionCollectorFactory(
-			SERVER_KNOBS->ROCKSDB_CDCF_SILIDING_WINDOW_SIZE,
+			SERVER_KNOBS->ROCKSDB_CDCF_SLIDING_WINDOW_SIZE,
 			SERVER_KNOBS->ROCKSDB_CDCF_DELETION_TRIGGER,
 			SERVER_KNOBS->ROCKSDB_CDCF_DELETION_RATIO) };
 	}
@@ -1901,10 +1901,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READPREFIX_GET_HISTOGRAM, Histogram::Unit::microseconds);
 		state Reference<Histogram> rocksdbReadRangeBytesReturnedHistogram = Histogram::getHistogram(
 		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READ_RANGE_BYTES_RETURNED_HISTOGRAM, Histogram::Unit::bytes);
-		state Reference<Histogram> rocksdbReadRangeKVPairsReturnedHistogram =
-		    Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                            ROCKSDB_READ_RANGE_KV_PAIRS_RETURNED_HISTOGRAM,
-		                            Histogram::Unit::countLinear);
+		state Reference<Histogram> rocksdbReadRangeKVPairsReturnedHistogram = Histogram::getHistogram(
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READ_RANGE_KV_PAIRS_RETURNED_HISTOGRAM, Histogram::Unit::bytes);
 		loop {
 			choose {
 				when(std::pair<std::string, double> measure = waitNext(metricFutureStream)) {
@@ -1947,7 +1945,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					} else if (metricName == ROCKSDB_READ_RANGE_BYTES_RETURNED_HISTOGRAM.toString()) {
 						rocksdbReadRangeBytesReturnedHistogram->sample(metricValue);
 					} else if (metricName == ROCKSDB_READ_RANGE_KV_PAIRS_RETURNED_HISTOGRAM.toString()) {
-						rocksdbReadRangeKVPairsReturnedHistogram->sampleRecordCounter(metricValue);
+						rocksdbReadRangeKVPairsReturnedHistogram->sample(metricValue);
 					} else {
 						UNREACHABLE();
 					}
