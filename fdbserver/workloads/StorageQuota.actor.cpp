@@ -33,18 +33,23 @@
 struct StorageQuotaWorkload : TestWorkload {
 	static constexpr auto NAME = "StorageQuota";
 	TenantGroupName group;
-	TenantName tenant;
+	TenantName tenantName;
+	Reference<Tenant> tenant;
 	int nodeCount;
-	TenantName emptyTenant;
+	TenantName emptyTenantName;
+	Reference<Tenant> emptyTenant;
 
 	StorageQuotaWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		group = getOption(options, "group"_sr, "DefaultGroup"_sr);
-		tenant = getOption(options, "tenant"_sr, "DefaultTenant"_sr);
+		tenantName = getOption(options, "tenant"_sr, "DefaultTenant"_sr);
 		nodeCount = getOption(options, "nodeCount"_sr, 10000);
-		emptyTenant = getOption(options, "emptyTenant"_sr, "DefaultTenant"_sr);
+		emptyTenantName = getOption(options, "emptyTenant"_sr, "DefaultTenant"_sr);
 	}
 
 	Future<Void> setup(Database const& cx) override {
+		tenant = makeReference<Tenant>(cx, tenantName);
+		emptyTenant = makeReference<Tenant>(cx, emptyTenantName);
+
 		// Use default values for arguments between (and including) postSetupWarming and endNodeIdx params.
 		return bulkSetup(cx,
 		                 this,
@@ -72,8 +77,8 @@ struct StorageQuotaWorkload : TestWorkload {
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(keyForIndex(n), value((n + 1) % nodeCount)); }
 
 	ACTOR Future<Void> _start(StorageQuotaWorkload* self, Database cx) {
-		state TenantMapEntry entry1 = wait(TenantAPI::getTenant(cx.getReference(), self->tenant));
-		state TenantMapEntry entry2 = wait(TenantAPI::getTenant(cx.getReference(), self->emptyTenant));
+		state TenantMapEntry entry1 = wait(TenantAPI::getTenant(cx.getReference(), self->tenantName));
+		state TenantMapEntry entry2 = wait(TenantAPI::getTenant(cx.getReference(), self->emptyTenantName));
 		ASSERT(entry1.tenantGroup.present() && entry1.tenantGroup.get() == self->group &&
 		       entry2.tenantGroup.present() && entry2.tenantGroup.get() == self->group);
 
@@ -116,8 +121,8 @@ struct StorageQuotaWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<int64_t> getSize(Database cx, TenantName tenantName) {
-		state ReadYourWritesTransaction tr(cx, tenantName);
+	ACTOR static Future<int64_t> getSize(Database cx, Reference<Tenant> tenant) {
+		state ReadYourWritesTransaction tr(cx, tenant);
 		state double totalDelay = 0.0;
 		state int64_t previousSize = -1;
 
@@ -129,11 +134,11 @@ struct StorageQuotaWorkload : TestWorkload {
 					totalDelay += 5.0;
 					wait(delay(5.0));
 				} else {
-					TraceEvent(SevDebug, "GetSizeResult").detail("Tenant", tr.getTenant().get()).detail("Size", size);
+					TraceEvent(SevDebug, "GetSizeResult").detail("Tenant", tenant).detail("Size", size);
 					return size;
 				}
 			} catch (Error& e) {
-				TraceEvent(SevDebug, "GetSizeError").errorUnsuppressed(e).detail("Tenant", tr.getTenant().get());
+				TraceEvent(SevDebug, "GetSizeError").errorUnsuppressed(e).detail("Tenant", tenant);
 				wait(tr.onError(e));
 			}
 		}
@@ -179,7 +184,7 @@ struct StorageQuotaWorkload : TestWorkload {
 
 	ACTOR static Future<bool> tryWrite(StorageQuotaWorkload* self,
 	                                   Database cx,
-	                                   TenantName tenant,
+	                                   Reference<Tenant> tenant,
 	                                   bool bypassQuota,
 	                                   bool expectOk) {
 		state int i;

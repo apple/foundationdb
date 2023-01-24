@@ -478,6 +478,21 @@ Reference<ITransaction> DLTenant::createTransaction() {
 	return Reference<ITransaction>(new DLTransaction(api, tr));
 }
 
+ThreadFuture<int64_t> DLTenant::getId() {
+	if (!api->tenantGetId) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->tenantGetId(tenant);
+
+	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		int64_t res = 0;
+		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &res);
+		ASSERT(!error);
+		return res;
+	});
+}
+
 ThreadFuture<Key> DLTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
 	if (!api->tenantPurgeBlobGranules) {
 		return unsupported_operation();
@@ -959,6 +974,7 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_tenant_verify_blob_range",
 	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
+	loadClientFunction(&api->tenantGetId, lib, fdbCPath, "fdb_tenant_get_id", headerVersion >= 730);
 	loadClientFunction(&api->tenantDestroy, lib, fdbCPath, "fdb_tenant_destroy", headerVersion >= 710);
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option", headerVersion >= 0);
@@ -1781,6 +1797,10 @@ ThreadFuture<T> MultiVersionTenant::executeOperation(ThreadFuture<T> (ITenant::*
 
 	// Wait for the database to be initialized
 	return abortableFuture(ThreadFuture<T>(Never()), tenantDb.onChange);
+}
+
+ThreadFuture<int64_t> MultiVersionTenant::getId() {
+	return executeOperation(&ITenant::getId);
 }
 
 ThreadFuture<Key> MultiVersionTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {

@@ -1299,6 +1299,16 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTenant_Tenant_1verifyBlob
 	return (jlong)f;
 }
 
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTenant_Tenant_1getId(JNIEnv* jenv, jobject, jlong tPtr) {
+	if (!tPtr) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBTenant* tenant = (FDBTenant*)tPtr;
+	FDBFuture* f = fdb_tenant_get_id(tenant);
+	return (jlong)f;
+}
+
 JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1setVersion(JNIEnv* jenv,
                                                                                           jobject,
                                                                                           jlong tPtr,

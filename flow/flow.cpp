@@ -19,17 +19,23 @@
  */
 
 #include "flow/flow.h"
+
+#include <stdarg.h>
+
+#include <cinttypes>
+
+#include <openssl/err.h>
+#include <openssl/rand.h>
+
 #include "flow/DeterministicRandom.h"
 #include "flow/Error.h"
-#include "flow/UnitTest.h"
+#include "flow/Hostname.h"
 #include "flow/rte_memcpy.h"
+#include "flow/UnitTest.h"
+
 #ifdef WITH_FOLLY_MEMCPY
 #include "folly_memcpy.h"
 #endif
-#include <stdarg.h>
-#include <cinttypes>
-#include <openssl/err.h>
-#include <openssl/rand.h>
 
 std::atomic<bool> startSampling = false;
 LineageReference rootLineage;

@@ -68,7 +68,8 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 	int32_t directoryID;
 	KeyRange directoryRange;
 	TenantName tenantName;
-	TenantMapEntry tenant;
+	Reference<Tenant> tenant;
+	TenantMapEntry tenantEntry;
 	Reference<BlobConnectionProvider> bstore;
 
 	// key + value gen data
@@ -127,6 +128,11 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 		}
 	}
 
+	Future<Void> openTenant(Database const& cx) {
+		tenant = makeReference<Tenant>(cx, tenantName);
+		return tenant->ready();
+	}
+
 	// TODO could make keys variable length?
 	Key getKey(uint32_t key, uint32_t id) {
 		std::stringstream ss;
@@ -155,7 +161,7 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 			if (t2.size() > 0 && t.getInt(0) != t2.getInt(0)) {
 				if (t.size() > BGW_TUPLE_KEY_SIZE - SERVER_KNOBS->BG_KEY_TUPLE_TRUNCATE_OFFSET) {
 					fmt::print("Tenant: {0}, K={1}, E={2}, LK={3}. {4} != {5}\n",
-					           tenant.prefix.printable(),
+					           tenantEntry.prefix.printable(),
 					           k.printable(),
 					           e.printable(),
 					           lastKey.printable(),
@@ -249,17 +255,18 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<TenantMapEntry> setUpTenant(Database cx, TenantName name) {
+	ACTOR Future<TenantMapEntry> setUpTenant(Database cx, TenantName tenantName) {
 		if (BGW_DEBUG) {
-			fmt::print("Setting up blob granule range for tenant {0}\n", name.printable());
+			fmt::print("Setting up blob granule range for tenant {0}\n", tenantName.printable());
 		}
 
-		Optional<TenantMapEntry> entry = wait(TenantAPI::createTenant(cx.getReference(), name));
+		Optional<TenantMapEntry> entry = wait(TenantAPI::createTenant(cx.getReference(), tenantName));
 		ASSERT(entry.present());
 
 		if (BGW_DEBUG) {
-			fmt::print(
-			    "Set up blob granule range for tenant {0}: {1}\n", name.printable(), entry.get().prefix.printable());
+			fmt::print("Set up blob granule range for tenant {0}: {1}\n",
+			           tenantName.printable(),
+			           entry.get().prefix.printable());
 		}
 
 		return entry.get();
@@ -278,17 +285,17 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		}
 
 		state int directoryIdx = 0;
-		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
+		state std::vector<std::pair<int64_t, TenantMapEntry>> tenants;
 		state BGTenantMap tenantData(self->dbInfo);
 		state Reference<GranuleTenantData> data;
 		for (; directoryIdx < self->directories.size(); directoryIdx++) {
 			// Set up the blob range first
-			TenantMapEntry tenantEntry = wait(self->setUpTenant(cx, self->directories[directoryIdx]->tenantName));
-
-			self->directories[directoryIdx]->tenant = tenantEntry;
+			state TenantMapEntry tenantEntry = wait(self->setUpTenant(cx, self->directories[directoryIdx]->tenantName));
+			wait(self->directories[directoryIdx]->openTenant(cx));
+			self->directories[directoryIdx]->tenantEntry = tenantEntry;
 			self->directories[directoryIdx]->directoryRange =
 			    KeyRangeRef(tenantEntry.prefix, tenantEntry.prefix.withSuffix(normalKeys.end));
-			tenants.push_back({ self->directories[directoryIdx]->tenantName, tenantEntry });
+			tenants.push_back({ self->directories[directoryIdx]->tenant->id(), tenantEntry });
 			bool _success = wait(cx->blobbifyRange(self->directories[directoryIdx]->directoryRange));
 			ASSERT(_success);
 		}
@@ -326,17 +333,12 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 	                                     bool doSetup) {
 		// read entire keyspace at the start until granules for the entire thing are available
 		loop {
-			state Transaction tr(cx, threadData->tenantName);
+			state Transaction tr(cx, threadData->tenant);
 			try {
 				Version rv = wait(self->doGrv(&tr));
 				state Version readVersion = rv;
-				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
-				    wait(readFromBlob(cx,
-				                      threadData->bstore,
-				                      normalKeys /* tenant handles range */,
-				                      0,
-				                      readVersion,
-				                      threadData->tenantName));
+				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob = wait(readFromBlob(
+				    cx, threadData->bstore, normalKeys /* tenant handles range */, 0, readVersion, threadData->tenant));
 				fmt::print("Directory {0} got {1} RV {2}\n",
 				           threadData->directoryID,
 				           doSetup ? "initial" : "final",
@@ -720,8 +722,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 					beginVersion = threadData->writeVersions[beginVersionIdx];
 				}
 
-				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob = wait(
-				    readFromBlob(cx, threadData->bstore, range, beginVersion, readVersion, threadData->tenantName));
+				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
+				    wait(readFromBlob(cx, threadData->bstore, range, beginVersion, readVersion, threadData->tenant));
 				self->validateResult(threadData, blob, startKey, endKey, beginVersion, readVersion);
 
 				int resultBytes = blob.first.expectedSize();
@@ -739,7 +741,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 						           range.begin.printable(),
 						           range.end.printable(),
 						           readVersion,
-						           threadData->tenantName.printable());
+						           printable(threadData->tenant->description()));
 					}
 					threadData->timeTravelTooOld++;
 				} else {
@@ -770,7 +772,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		TraceEvent("BlobGranuleCorrectnessWriterReady").log();
 
 		loop {
-			state Transaction tr(cx, threadData->tenantName);
+			state Transaction tr(cx, threadData->tenant);
 
 			// pick rows to write and clear, generate values for writes
 			state std::vector<std::tuple<uint32_t, uint32_t, uint32_t, uint16_t>> keyAndIdToWrite;
@@ -894,7 +896,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		for (auto& it : directories) {
 			// Wait for blob worker to initialize snapshot before starting test for that range
 			Future<Void> start = waitFirstSnapshot(this, cx, it, true);
-			it->summaryClient = validateGranuleSummaries(cx, normalKeys, it->tenantName, it->triggerSummaryComplete);
+			it->summaryClient = validateGranuleSummaries(cx, normalKeys, it->tenant, it->triggerSummaryComplete);
 			clients.push_back(timeout(writeWorker(this, start, cx, it), testDuration, Void()));
 			clients.push_back(timeout(readWorker(this, start, cx, it), testDuration, Void()));
 		}
@@ -908,7 +910,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		// check that reading ranges with tenant name gives valid result of ranges just for tenant, with no tenant
 		// prefix
 		loop {
-			state Transaction tr(cx, threadData->tenantName);
+			state Transaction tr(cx, threadData->tenant);
 			try {
 				Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(normalKeys, 1000000));
 				ASSERT(ranges.size() >= 1 && ranges.size() < 1000000);
@@ -949,7 +951,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				fmt::print("Directory {0} doing final data check @ {1}\n", threadData->directoryID, readVersion);
 			}
 			std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob = wait(readFromBlob(
-			    cx, threadData->bstore, normalKeys /*tenant handles range*/, 0, readVersion, threadData->tenantName));
+			    cx, threadData->bstore, normalKeys /*tenant handles range*/, 0, readVersion, threadData->tenant));
 			result = self->validateResult(threadData, blob, 0, std::numeric_limits<uint32_t>::max(), 0, readVersion);
 			finalRowsValidated = blob.first.size();
 
