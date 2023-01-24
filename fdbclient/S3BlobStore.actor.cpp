@@ -69,6 +69,10 @@ S3BlobStoreEndpoint::Stats S3BlobStoreEndpoint::Stats::operator-(const Stats& rh
 
 S3BlobStoreEndpoint::Stats S3BlobStoreEndpoint::s_stats;
 
+std::unordered_map<BlobStoreConnectionPoolKey,
+                   Reference<S3BlobStoreEndpoint::ConnectionPoolData> /*, std::hash<BlobStoreConnectionPoolKey>*/>
+    S3BlobStoreEndpoint::globalConnectionPool;
+
 S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	secure_connection = 1;
 	connect_tries = CLIENT_KNOBS->BLOBSTORE_CONNECT_TRIES;
@@ -720,9 +724,9 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
                                                                    bool* reusingConn) {
 	// First try to get a connection from the pool
 	*reusingConn = false;
-	while (!b->connectionPool.empty()) {
-		S3BlobStoreEndpoint::ReusableConnection rconn = b->connectionPool.front();
-		b->connectionPool.pop();
+	while (!b->connectionPool->pool.empty()) {
+		S3BlobStoreEndpoint::ReusableConnection rconn = b->connectionPool->pool.front();
+		b->connectionPool->pool.pop();
 
 		// If the connection expires in the future then return it
 		if (rconn.expirationTime > now()) {
@@ -742,7 +746,7 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 		}
 		service = b->knobs.secure_connection ? "https" : "http";
 	}
-	bool isTLS = b->knobs.secure_connection == 1;
+	bool isTLS = b->knobs.isTLS();
 	state Reference<IConnection> conn;
 	if (b->useProxy) {
 		if (isTLS) {
@@ -778,7 +782,7 @@ Future<S3BlobStoreEndpoint::ReusableConnection> S3BlobStoreEndpoint::connect(boo
 void S3BlobStoreEndpoint::returnConnection(ReusableConnection& rconn) {
 	// If it expires in the future then add it to the pool in the front
 	if (rconn.expirationTime > now()) {
-		connectionPool.push(rconn);
+		connectionPool->pool.push(rconn);
 	}
 	rconn.conn = Reference<IConnection>();
 }

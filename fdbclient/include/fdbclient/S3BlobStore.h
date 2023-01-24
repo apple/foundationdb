@@ -21,6 +21,7 @@
 #pragma once
 
 #include <map>
+#include <unordered_map>
 #include <functional>
 #include "flow/flow.h"
 #include "flow/Net2Packet.h"
@@ -28,6 +29,41 @@
 #include "flow/IRateControl.h"
 #include "fdbrpc/HTTP.h"
 #include "fdbclient/JSONDoc.h"
+
+#include <boost/functional/hash.hpp>
+
+// unique key that indentifies interchangeable connections for the same settings and destination
+// FIXME: can we define std::hash as a struct member of a S3BlobStoreEndpoint?
+struct BlobStoreConnectionPoolKey {
+	std::string host;
+	std::string service;
+	std::string region;
+	bool isTLS;
+
+	BlobStoreConnectionPoolKey(const std::string& host,
+	                           const std::string& service,
+	                           const std::string& region,
+	                           bool isTLS)
+	  : host(host), service(service), region(region), isTLS(isTLS) {}
+
+	bool operator==(const BlobStoreConnectionPoolKey& other) const {
+		return isTLS == other.isTLS && host == other.host && service == other.service && region == other.region;
+	}
+};
+
+namespace std {
+template <>
+struct hash<BlobStoreConnectionPoolKey> {
+	std::size_t operator()(const BlobStoreConnectionPoolKey& key) const {
+		std::size_t seed = 0;
+		boost::hash_combine(seed, std::hash<std::string>{}(key.host));
+		boost::hash_combine(seed, std::hash<std::string>{}(key.service));
+		boost::hash_combine(seed, std::hash<std::string>{}(key.region));
+		boost::hash_combine(seed, std::hash<bool>{}(key.isTLS));
+		return seed;
+	}
+};
+} // namespace std
 
 // Representation of all the things you need to connect to a blob store instance with some credentials.
 // Reference counted because a very large number of them could be needed.
@@ -97,7 +133,23 @@ public:
 				"BUILD_AWS_BACKUP is enabled."
 			};
 		}
+
+		bool isTLS() const { return secure_connection == 1; }
 	};
+
+	struct ReusableConnection {
+		Reference<IConnection> conn;
+		double expirationTime;
+	};
+
+	// basically, reference counted queue with option to add other fields
+	struct ConnectionPoolData : NonCopyable, ReferenceCounted<ConnectionPoolData> {
+		std::queue<ReusableConnection> pool;
+	};
+
+	static std::unordered_map<BlobStoreConnectionPoolKey,
+	                          Reference<ConnectionPoolData> /*, std::hash<BlobStoreConnectionPoolKey>*/>
+	    globalConnectionPool;
 
 	S3BlobStoreEndpoint(std::string const& host,
 	                    std::string const& service,
@@ -122,15 +174,31 @@ public:
 
 		if (host.empty() || (proxyHost.present() != proxyPort.present()))
 			throw connection_string_invalid();
+
+		// set connection pool instance
+		if (useProxy) {
+			// don't use global connection pool if there's a proxy, as it complicates it
+			connectionPool = makeReference<ConnectionPoolData>();
+		} else {
+			BlobStoreConnectionPoolKey key(host, service, region, knobs.isTLS());
+			auto it = globalConnectionPool.find(key);
+			if (it != globalConnectionPool.end()) {
+				connectionPool = it->second;
+			} else {
+				connectionPool = makeReference<ConnectionPoolData>();
+				globalConnectionPool.insert({ key, connectionPool });
+			}
+		}
+		ASSERT(connectionPool.isValid());
 	}
 
 	static std::string getURLFormat(bool withResource = false) {
 		const char* resource = "";
 		if (withResource)
 			resource = "<name>";
-		return format(
-		    "blobstore://<api_key>:<secret>:<security_token>@<host>[:<port>]/%s[?<param>=<value>[&<param>=<value>]...]",
-		    resource);
+		return format("blobstore://<api_key>:<secret>:<security_token>@<host>[:<port>]/"
+		              "%s[?<param>=<value>[&<param>=<value>]...]",
+		              resource);
 	}
 
 	typedef std::map<std::string, std::string> ParametersT;
@@ -148,11 +216,10 @@ public:
 	// parameters in addition to the passed params string
 	std::string getResourceURL(std::string resource, std::string params) const;
 
-	struct ReusableConnection {
-		Reference<IConnection> conn;
-		double expirationTime;
-	};
-	std::queue<ReusableConnection> connectionPool;
+	// global map from host to connection pool for that host
+	// FIXME: add periodic connection reaper to pool
+	// local connection pool for this blobstore
+	Reference<ConnectionPoolData> connectionPool;
 	Future<ReusableConnection> connect(bool* reusingConn);
 	void returnConnection(ReusableConnection& conn);
 
