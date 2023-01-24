@@ -1440,6 +1440,37 @@ ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx,
 	return statusObj;
 }
 
+ACTOR static Future<JsonBuilderObject> versionEpochStatusFetcher(Database cx,
+                                                                 std::set<std::string>* incomplete_reasons) {
+	state JsonBuilderObject message;
+	try {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				Optional<Value> versionEpochVal = wait(timeoutError(BUGGIFY ? Never() : tr.get(versionEpochKey), 5.0));
+				message["enabled"] = versionEpochVal.present();
+				if (!versionEpochVal.present()) {
+					break;
+				}
+				int64_t versionEpoch = BinaryReader::fromStringRef<int64_t>(versionEpochVal.get(), Unversioned());
+				message["epoch"] = std::to_string(versionEpoch);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		incomplete_reasons->insert(format("Unable to retrieve version epoch information (%s).", e.what()));
+	}
+	return message;
+}
+
 ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx,
                                                         JsonBuilderArray* messages,
                                                         std::set<std::string>* incomplete_reasons) {
@@ -3130,10 +3161,20 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		// construct status information for cluster subsections
 		state int statusCode = (int)RecoveryStatus::END;
-		state JsonBuilderObject recoveryStateStatus = wait(
-		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
+		state Future<JsonBuilderObject> recoveryStateStatusFuture =
+		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode);
 
-		state JsonBuilderObject idmpKeyStatus = wait(getIdmpKeyStatus(cx));
+		state Future<JsonBuilderObject> idmpKeyStatusFuture = getIdmpKeyStatus(cx);
+
+		state Future<JsonBuilderObject> versionEpochStatusFuture =
+		    versionEpochStatusFetcher(cx, &status_incomplete_reasons);
+
+		wait(waitForAll<JsonBuilderObject>(
+		    { recoveryStateStatusFuture, idmpKeyStatusFuture, versionEpochStatusFuture }));
+
+		state JsonBuilderObject recoveryStateStatus = recoveryStateStatusFuture.get();
+		state JsonBuilderObject idmpKeyStatus = idmpKeyStatusFuture.get();
+		state JsonBuilderObject versionEpochStatus = versionEpochStatusFuture.get();
 
 		// machine metrics
 		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
@@ -3366,6 +3407,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 			if (!tenants.empty())
 				statusObj["tenants"] = tenants;
+
+			statusObj["version_epoch"] = versionEpochStatus;
 
 			// Merge dataOverlay into data
 			JsonBuilderObject& clusterDataSection = workerStatuses[0];
