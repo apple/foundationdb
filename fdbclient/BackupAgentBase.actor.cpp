@@ -32,6 +32,7 @@
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
+#include "flow/EncryptUtils.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -323,10 +324,22 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			// Decrypt mutation ref if encrypted
 			if (logValue.isEncrypted()) {
 				encryptedLogValue = logValue;
+				state EncryptCipherDomainId domainId = logValue.encryptionHeader()->cipherTextDetails.encryptDomainId;
 				Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
-				TextAndHeaderCipherKeys cipherKeys =
-				    wait(getEncryptCipherKeys(dbInfo, *logValue.encryptionHeader(), BlobCipherMetrics::BACKUP));
-				logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::BACKUP);
+				try {
+					TextAndHeaderCipherKeys cipherKeys = wait(
+					    getEncryptCipherKeys(dbInfo, *logValue.encryptionHeader(), BlobCipherMetrics::BACKUP, true));
+					logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::BACKUP);
+				} catch (Error& e) {
+					// It's possible a tenant was deleted and the encrypt key fetch failed
+					if (e.code() == error_code_encrypt_keys_fetch_failed) {
+						TraceEvent(SevError, "MutationLogRestoreEncryptKeyFetchFailed")
+						    .detail("Version", version)
+						    .detail("TenantId", domainId);
+					} else {
+						throw;
+					}
+				}
 			}
 			ASSERT(!logValue.isEncrypted());
 

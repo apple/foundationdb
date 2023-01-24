@@ -27,7 +27,9 @@
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/EncryptKeyProxyInterface.h"
+#include "fdbclient/Knobs.h"
 #include "fdbrpc/Stats.h"
+#include "fdbrpc/TenantInfo.h"
 #include "flow/Knobs.h"
 #include "flow/IRandom.h"
 
@@ -168,7 +170,8 @@ Future<Reference<BlobCipherKey>> getLatestEncryptCipherKey(Reference<AsyncVar<T>
 ACTOR template <class T>
 Future<EKPGetBaseCipherKeysByIdsReply> getUncachedEncryptCipherKeys(Reference<AsyncVar<T> const> db,
                                                                     EKPGetBaseCipherKeysByIdsRequest request,
-                                                                    BlobCipherMetrics::UsageType usageType) {
+                                                                    BlobCipherMetrics::UsageType usageType,
+                                                                    bool shouldThrowKeyFetchFailed) {
 	Optional<EncryptKeyProxyInterface> proxy = db->get().encryptKeyProxy;
 	if (!proxy.present()) {
 		// Wait for onEncryptKeyProxyChange.
@@ -181,6 +184,15 @@ Future<EKPGetBaseCipherKeysByIdsReply> getUncachedEncryptCipherKeys(Reference<As
 		if (reply.error.present()) {
 			TraceEvent(SevWarn, "GetEncryptCipherKeys_RequestFailed").error(reply.error.get());
 			throw encrypt_keys_fetch_failed();
+		}
+		if (g_network && g_network->isSimulated() && shouldThrowKeyFetchFailed &&
+		    CLIENT_KNOBS->EKP_TENANT_ID_TO_DROP != TenantInfo::INVALID_TENANT) {
+			for (auto& baseCipherInfo : request.baseCipherInfos) {
+				if (baseCipherInfo.domainId == CLIENT_KNOBS->EKP_TENANT_ID_TO_DROP) {
+					TraceEvent(SevWarn, "GetEncryptCipherKeys_SimulatedError").error(reply.error.get());
+					throw encrypt_keys_fetch_failed();
+				}
+			}
 		}
 		return reply;
 	} catch (Error& e) {
@@ -202,7 +214,8 @@ ACTOR template <class T>
 Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncryptCipherKeys(
     Reference<AsyncVar<T> const> db,
     std::unordered_set<BlobCipherDetails> cipherDetails,
-    BlobCipherMetrics::UsageType usageType) {
+    BlobCipherMetrics::UsageType usageType,
+    bool shouldThrowKeyFetchFailed = false) {
 	state Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 	state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys;
 	state std::unordered_set<BaseCipherIndex, boost::hash<BaseCipherIndex>> uncachedBaseCipherIds;
@@ -232,7 +245,8 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncry
 	// Fetch any uncached cipher keys.
 	state double startTime = now();
 	loop choose {
-		when(EKPGetBaseCipherKeysByIdsReply reply = wait(getUncachedEncryptCipherKeys(db, request, usageType))) {
+		when(EKPGetBaseCipherKeysByIdsReply reply =
+		         wait(getUncachedEncryptCipherKeys(db, request, usageType, shouldThrowKeyFetchFailed))) {
 			std::unordered_map<BaseCipherIndex, EKPBaseCipherDetails, boost::hash<BaseCipherIndex>> baseCipherKeys;
 			for (const EKPBaseCipherDetails& baseDetails : reply.baseCipherDetails) {
 				BaseCipherIndex baseIdx = std::make_pair(baseDetails.encryptDomainId, baseDetails.baseCipherId);
@@ -301,10 +315,11 @@ Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(const Reference
 ACTOR template <class T>
 Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
                                                      BlobCipherEncryptHeader header,
-                                                     BlobCipherMetrics::UsageType usageType) {
+                                                     BlobCipherMetrics::UsageType usageType,
+                                                     bool shouldThrowKeyFetchFailed = false) {
 	std::unordered_set<BlobCipherDetails> cipherDetails{ header.cipherTextDetails, header.cipherHeaderDetails };
 	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys =
-	    wait(getEncryptCipherKeys(db, cipherDetails, usageType));
+	    wait(getEncryptCipherKeys(db, cipherDetails, usageType, shouldThrowKeyFetchFailed));
 	ASSERT(cipherKeys.count(header.cipherTextDetails) > 0);
 	ASSERT(cipherKeys.count(header.cipherHeaderDetails) > 0);
 	TextAndHeaderCipherKeys result{ cipherKeys.at(header.cipherTextDetails),

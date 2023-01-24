@@ -292,6 +292,7 @@ public:
 
 	// Encryption-at-rest
 	bool ENABLE_ENCRYPTION_CPU_TIME_LOGGING;
+	int64_t EKP_TENANT_ID_TO_DROP; // Which tenant the the EKP should throw key not found in simulation
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
