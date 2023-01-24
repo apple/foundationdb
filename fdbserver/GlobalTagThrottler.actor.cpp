@@ -226,9 +226,9 @@ class GlobalTagThrottlerImpl {
 			return {};
 		}
 		auto const transactionRate = stats.get().getTransactionRate();
-		// If there is less than one transaction per second, we do not have enough data
+		// If there is less than GLOBAL_TAG_THROTTLING_MIN_TPS transactions per second, we do not have enough data
 		// to accurately compute an average transaction cost.
-		if (transactionRate < 1.0) {
+		if (transactionRate < SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MIN_TPS) {
 			return {};
 		} else {
 			return std::max(static_cast<double>(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE), cost.get() / transactionRate);
@@ -247,7 +247,7 @@ class GlobalTagThrottlerImpl {
 		auto const transactionRate = stats.get().getTransactionRate();
 		te.detail("TransactionRate", transactionRate);
 		te.detail("Cost", cost);
-		if (transactionRate < 1.0) {
+		if (transactionRate < SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MIN_TPS) {
 			return {};
 		} else {
 			return std::max(static_cast<double>(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE), cost / transactionRate);
