@@ -379,7 +379,6 @@ struct GetTenantIdReply {
 
 struct GetTenantIdRequest {
 	constexpr static FileIdentifier file_identifier = 11299717;
-	SpanContext spanContext;
 	TenantName tenantName;
 	ReplyPromise<GetTenantIdReply> reply;
 
@@ -390,14 +389,14 @@ struct GetTenantIdRequest {
 	Version minTenantVersion;
 
 	GetTenantIdRequest() : minTenantVersion(latestVersion) {}
-	GetTenantIdRequest(SpanContext spanContext, TenantNameRef const& tenantName, Version minTenantVersion)
-	  : spanContext(spanContext), tenantName(tenantName), minTenantVersion(minTenantVersion) {}
+	GetTenantIdRequest(TenantNameRef const& tenantName, Version minTenantVersion)
+	  : tenantName(tenantName), minTenantVersion(minTenantVersion) {}
 
 	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply, spanContext, tenantName, minTenantVersion);
+		serializer(ar, reply, tenantName, minTenantVersion);
 	}
 };
 

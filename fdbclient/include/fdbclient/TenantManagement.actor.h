@@ -145,6 +145,7 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
 		throw invalid_tenant_group_name();
 	}
 
+	tenantEntry.tenantName = name;
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 	state Future<Optional<TenantMapEntry>> existingEntryFuture = tryGetTenantTransaction(tr, name);

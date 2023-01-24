@@ -3635,7 +3635,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 
 	state Optional<Key> tenantPrefix;
 	state Arena arena;
-	if (req.tenantInfo.name.present()) {
+	if (req.tenantInfo.hasTenant()) {
 		ASSERT(req.tenantInfo.tenantId != TenantInfo::INVALID_TENANT);
 		Optional<TenantMapEntry> tenantEntry = bwData->tenantData.getTenantById(req.tenantInfo.tenantId);
 		if (tenantEntry.present()) {
@@ -3647,8 +3647,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			// Just throw wrong_shard_server and make the client retry and assume we load it later
 			TraceEvent(SevDebug, "BlobWorkerRequestTenantNotFound", bwData->id)
 			    .suppressFor(5.0)
-			    .detail("TenantName", req.tenantInfo.name.get())
-			    .detail("TenantId", req.tenantInfo.tenantId);
+			    .detail("Tenant", req.tenantInfo.tenantId);
 			throw tenant_not_found();
 		}
 		req.keyRange = KeyRangeRef(req.keyRange.begin.withPrefix(tenantPrefix.get(), req.arena),

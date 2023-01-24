@@ -1184,8 +1184,6 @@ ACTOR Future<Void> checkManagerLock(Transaction* tr, Reference<BlobManagerData> 
 
 		throw blob_manager_replaced();
 	}
-	tr->addReadConflictRange(singleKeyRange(blobManagerEpochKey));
-	tr->addWriteConflictRange(singleKeyRange(blobManagerEpochKey));
 
 	return Void();
 }
