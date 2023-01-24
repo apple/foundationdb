@@ -120,7 +120,10 @@ private:
 // lower-level client APIs exposed by ISingleThreadTransaction
 class ThreadSafeTransaction : public ITransaction, ThreadSafeReferenceCounted<ThreadSafeTransaction>, NonCopyable {
 public:
-	explicit ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadTransaction::Type type, Tenant* tenantPtr);
+	explicit ThreadSafeTransaction(DatabaseContext* cx,
+	                               ISingleThreadTransaction::Type type,
+	                               Optional<TenantName> tenantName,
+	                               Tenant* tenantPtr);
 	~ThreadSafeTransaction() override;
 
 	// Note: used while refactoring fdbcli, need to be removed later

@@ -57,7 +57,7 @@ Reference<ITenant> ThreadSafeDatabase::openTenant(TenantNameRef tenantName) {
 
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
 	auto type = isConfigDB ? ISingleThreadTransaction::Type::PAXOS_CONFIG : ISingleThreadTransaction::Type::RYW;
-	return Reference<ITransaction>(new ThreadSafeTransaction(db, type, nullptr));
+	return Reference<ITransaction>(new ThreadSafeTransaction(db, type, Optional<TenantName>(), nullptr));
 }
 
 void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
@@ -240,7 +240,7 @@ ThreadSafeTenant::ThreadSafeTenant(Reference<ThreadSafeDatabase> db, TenantName 
 
 Reference<ITransaction> ThreadSafeTenant::createTransaction() {
 	auto type = db->isConfigDB ? ISingleThreadTransaction::Type::PAXOS_CONFIG : ISingleThreadTransaction::Type::RYW;
-	return Reference<ITransaction>(new ThreadSafeTransaction(db->db, type, tenant));
+	return Reference<ITransaction>(new ThreadSafeTransaction(db->db, type, name, tenant));
 }
 
 ThreadFuture<int64_t> ThreadSafeTenant::getId() {
@@ -316,9 +316,9 @@ ThreadSafeTenant::~ThreadSafeTenant() {
 
 ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
                                              ISingleThreadTransaction::Type type,
+                                             Optional<TenantName> tenantName,
                                              Tenant* tenantPtr)
-  : tenantName(tenantPtr ? tenantPtr->name : Optional<TenantName>()),
-    initialized(std::make_shared<std::atomic_bool>(false)) {
+  : tenantName(tenantName), initialized(std::make_shared<std::atomic_bool>(false)) {
 	// Allocate memory for the transaction from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 
