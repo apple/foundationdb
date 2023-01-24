@@ -1339,6 +1339,9 @@ class Tenant(_TransactionCreator):
         self.capi.fdb_tenant_create_transaction(self.tpointer, ctypes.byref(pointer))
         return Transaction(pointer.value, self)
 
+    def get_id(self):
+        return FutureInt64(self.capi.fdb_tenant_get_id(self.tpointer))
+
 
 fill_operations()
 

@@ -237,11 +237,13 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	void setWatch(Future<Void> watchFuture);
 };
 
-class Tenant : public ReferenceCounted<Tenant> {
+class Tenant : public ReferenceCounted<Tenant>, public FastAllocated<Tenant>, NonCopyable {
 public:
 	Tenant(Database cx, TenantName name);
 	explicit Tenant(int64_t id);
 	Tenant(Future<int64_t> id, Optional<TenantName> name);
+
+	static Tenant* allocateOnForeignThread() { return (Tenant*)Tenant::operator new(sizeof(Tenant)); }
 
 	Future<Void> ready() const { return success(idFuture); }
 	int64_t id() const;
