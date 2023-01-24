@@ -1016,7 +1016,9 @@ ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
 					proxiesChangeTrigger->trigger();
 				}
 			}
-			when(wait(actors.getResult())) { UNSTOPPABLE_ASSERT(false); }
+			when(wait(actors.getResult())) {
+				UNSTOPPABLE_ASSERT(false);
+			}
 		}
 	}
 }
@@ -3383,7 +3385,9 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 					    std::vector<Error>{ transaction_too_old(), future_version() });
 				}
 				choose {
-					when(wait(trState->cx->connectionFileChanged())) { throw transaction_too_old(); }
+					when(wait(trState->cx->connectionFileChanged())) {
+						throw transaction_too_old();
+					}
 					when(GetValueReply _reply = wait(loadBalance(
 					         trState->cx.getPtr(),
 					         locationInfo.locations,
@@ -3525,7 +3529,9 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Use
 			state GetKeyReply reply;
 			try {
 				choose {
-					when(wait(trState->cx->connectionFileChanged())) { throw transaction_too_old(); }
+					when(wait(trState->cx->connectionFileChanged())) {
+						throw transaction_too_old();
+					}
 					when(GetKeyReply _reply = wait(loadBalance(
 					         trState->cx.getPtr(),
 					         locationInfo.locations,
@@ -3684,7 +3690,9 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 				                     TaskPriority::DefaultPromiseEndpoint))) {
 					resp = r;
 				}
-				when(wait(cx->connectionRecord ? cx->connectionRecord->onChange() : Never())) { wait(Never()); }
+				when(wait(cx->connectionRecord ? cx->connectionRecord->onChange() : Never())) {
+					wait(Never());
+				}
 			}
 			if (watchValueID.present()) {
 				g_traceBatch.addEvent("WatchValueDebug", watchValueID.get().first(), "NativeAPI.watchValue.After");
@@ -4045,7 +4053,9 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 				state GetKeyValuesFamilyReply rep;
 				try {
 					choose {
-						when(wait(trState->cx->connectionFileChanged())) { throw transaction_too_old(); }
+						when(wait(trState->cx->connectionFileChanged())) {
+							throw transaction_too_old();
+						}
 						when(GetKeyValuesFamilyReply _rep = wait(loadBalance(
 						         trState->cx.getPtr(),
 						         locations[shard].locations,
@@ -4906,7 +4916,9 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 								return Void();
 							}
 
-							when(GetKeyValuesStreamReply _rep = waitNext(replyStream.getFuture())) { rep = _rep; }
+							when(GetKeyValuesStreamReply _rep = waitNext(replyStream.getFuture())) {
+								rep = _rep;
+							}
 						}
 						++trState->cx->transactionPhysicalReadsCompleted;
 					} catch (Error& e) {
@@ -5379,7 +5391,9 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 				loop {
 					choose {
 						// NativeAPI watchValue future finishes or errors
-						when(wait(watch->watchFuture)) { break; }
+						when(wait(watch->watchFuture)) {
+							break;
+						}
 
 						when(wait(cx->connectionFileChanged())) {
 							CODE_PROBE(true, "Recreated a watch after switch");
@@ -6946,7 +6960,9 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 			state Future<Void> onProxiesChanged = cx->onProxiesChanged();
 
 			choose {
-				when(wait(onProxiesChanged)) { onProxiesChanged = cx->onProxiesChanged(); }
+				when(wait(onProxiesChanged)) {
+					onProxiesChanged = cx->onProxiesChanged();
+				}
 				when(GetReadVersionReply v =
 				         wait(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies(
 				                                   flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES)),
@@ -7367,7 +7383,9 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 				needToConnect = false;
 			}
 			choose {
-				when(wait(coordinator->onChange())) { needToConnect = true; }
+				when(wait(coordinator->onChange())) {
+					needToConnect = true;
+				}
 
 				when(ProtocolVersion pv = wait(protocolVersion)) {
 					if (!expectedVersion.present() || expectedVersion.get() != pv) {
@@ -8879,8 +8897,12 @@ ACTOR static Future<std::vector<CheckpointMetaData>> getCheckpointMetaDataForRan
 			}
 
 			choose {
-				when(wait(cx->connectionFileChanged())) { cx->invalidateCache({}, range); }
-				when(wait(waitForAll(futures))) { break; }
+				when(wait(cx->connectionFileChanged())) {
+					cx->invalidateCache({}, range);
+				}
+				when(wait(waitForAll(futures))) {
+					break;
+				}
 				when(wait(delay(timeout))) {
 					TraceEvent(SevWarn, "GetCheckpointTimeout").detail("Range", range).detail("Version", version);
 				}
@@ -9551,8 +9573,12 @@ ACTOR Future<Void> changeFeedWhenAtLatest(Reference<ChangeFeedData> self, Versio
 		// only allowed to use empty versions if you're caught up
 		Future<Void> waitEmptyVersion = (self->notAtLatest.get() == 0) ? changeFeedWaitLatest(self, version) : Never();
 		choose {
-			when(wait(waitEmptyVersion)) { break; }
-			when(wait(lastReturned)) { break; }
+			when(wait(waitEmptyVersion)) {
+				break;
+			}
+			when(wait(lastReturned)) {
+				break;
+			}
 			when(wait(self->refresh.getFuture())) {}
 			when(wait(self->notAtLatest.onChange())) {}
 		}
