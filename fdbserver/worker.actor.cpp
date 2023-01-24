@@ -100,6 +100,9 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 template class RequestStream<RecruitMasterRequest, false>;
 template struct NetNotifiedQueue<RecruitMasterRequest, false>;
 
+template class RequestStream<InitializeCommitProxyRequest, false>;
+template struct NetNotifiedQueue<InitializeCommitProxyRequest, false>;
+
 namespace {
 RoleLineageCollector roleLineageCollector;
 }

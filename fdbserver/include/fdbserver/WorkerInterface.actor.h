@@ -707,6 +707,11 @@ struct InitializeCommitProxyRequest {
 	}
 };
 
+
+// Instantiated in worker.actor.cpp
+extern template class RequestStream<InitializeCommitProxyRequest, false>;
+extern template struct NetNotifiedQueue<InitializeCommitProxyRequest, false>;
+
 struct InitializeGrvProxyRequest {
 	constexpr static FileIdentifier file_identifier = 8265613;
 	MasterInterface master;
