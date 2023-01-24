@@ -52,12 +52,7 @@ struct Hostname {
 	//    host.name:1234
 	//    host-name:1234
 	//    host-name_part1.host-name_part2:1234:tls
-	static bool isHostname(const std::string& s) {
-		std::regex validation("^([\\w\\-]+\\.?)+:([\\d]+){1,}(:tls)?$");
-		std::regex ipv4Validation("^([\\d]{1,3}\\.?){4,}:([\\d]+){1,}(:tls)?$");
-		return !std::regex_match(s, ipv4Validation) && std::regex_match(s, validation);
-	}
-
+	static bool isHostname(const std::string& s);
 	static Hostname parse(const std::string& s);
 
 	std::string toString() const { return host + ":" + service + (isTLS ? ":tls" : ""); }

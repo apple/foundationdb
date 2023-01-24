@@ -98,6 +98,15 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #define KV_STORE(filename, uid) keyValueStoreMemory(filename, uid)
 #endif
 
+template class RequestStream<RecruitMasterRequest, false>;
+template struct NetNotifiedQueue<RecruitMasterRequest, false>;
+
+template class RequestStream<InitializeCommitProxyRequest, false>;
+template struct NetNotifiedQueue<InitializeCommitProxyRequest, false>;
+
+template class RequestStream<InitializeGrvProxyRequest, false>;
+template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
+
 namespace {
 RoleLineageCollector roleLineageCollector;
 }

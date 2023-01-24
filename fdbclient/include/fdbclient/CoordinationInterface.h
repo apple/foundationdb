@@ -282,6 +282,8 @@ struct OpenDatabaseCoordRequest {
 	}
 };
 
+extern template struct NetNotifiedQueue<OpenDatabaseCoordRequest, true>;
+
 class ClientCoordinators {
 public:
 	std::vector<ClientLeaderRegInterface> clientLeaderServers;
