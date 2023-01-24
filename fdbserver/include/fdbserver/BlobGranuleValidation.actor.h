@@ -41,7 +41,7 @@ ACTOR Future<std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>>>
     KeyRange range,
     Version beginVersion,
     Version readVersion,
-    Optional<TenantName> tenantName = Optional<TenantName>());
+    Optional<Reference<Tenant>> tenant = Optional<Reference<Tenant>>());
 
 ACTOR Future<std::pair<RangeResult, Version>> readFromFDB(Database cx, KeyRange range);
 
@@ -57,7 +57,7 @@ ACTOR Future<Void> clearAndAwaitMerge(Database cx, KeyRange range);
 
 ACTOR Future<Void> validateGranuleSummaries(Database cx,
                                             KeyRange range,
-                                            Optional<TenantName> tenantName,
+                                            Optional<Reference<Tenant>> tenantName,
                                             Promise<Void> testComplete);
 
 ACTOR Future<Void> checkFeedCleanup(Database cx, bool debug);

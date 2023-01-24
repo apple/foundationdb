@@ -136,6 +136,7 @@ ERROR( audit_storage_exceeded_request_limit, 1222, "Exceeded the max number of a
 ERROR( proxy_tag_throttled, 1223, "Exceeded maximum proxy tag throttling duration" )
 ERROR( key_value_store_deadline_exceeded, 1224, "Exceeded maximum time allowed to read or write.")
 ERROR( storage_quota_exceeded, 1225, "Exceeded the maximum storage quota allocated to the tenant.")
+ERROR( audit_storage_error, 1226, "Found data corruption" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -249,7 +250,6 @@ ERROR( tenant_not_empty, 2133, "Cannot delete a non-empty tenant" )
 ERROR( invalid_tenant_name, 2134, "Tenant name cannot begin with \\xff" )
 ERROR( tenant_prefix_allocator_conflict, 2135, "The database already has keys stored at the prefix allocated for the tenant" )
 ERROR( tenants_disabled, 2136, "Tenants have been disabled in the cluster" )
-ERROR( unknown_tenant, 2137, "Tenant is not available from this server" )
 ERROR( illegal_tenant_access, 2138, "Illegal tenant access" )
 ERROR( invalid_tenant_group_name, 2139, "Tenant group name cannot begin with \\xff" )
 ERROR( invalid_tenant_configuration, 2140, "Tenant configuration is invalid" )

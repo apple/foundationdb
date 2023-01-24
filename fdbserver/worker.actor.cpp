@@ -248,7 +248,7 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 				CODE_PROBE(true, "Worker terminated with file_not_found error");
 				return Void();
 			} else if (e.getError().code() == error_code_lock_file_failure) {
-				CODE_PROBE(true, "Unable to lock file", probe::decoration::rare);
+				CODE_PROBE(true, "Unable to lock file", probe::context::net2, probe::assert::noSim);
 				throw please_reboot_kv_store();
 			}
 			throw e.getError();
@@ -1836,6 +1836,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	                                                              locality.dcId(),
 	                                                              locality.zoneId(),
 	                                                              locality.machineId(),
+	                                                              locality.dataHallId(),
 	                                                              g_network->getLocalAddress().ip,
 	                                                              FDB_VT_VERSION));
 
@@ -2672,6 +2673,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.getStorageServerRejoinInfo);
 				DUMPTOKEN(recruited.waitFailure);
 				DUMPTOKEN(recruited.txnState);
+				DUMPTOKEN(recruited.getTenantId);
 
 				// printf("Recruited as commitProxyServer\n");
 				errorForwarders.add(zombie(recruited,

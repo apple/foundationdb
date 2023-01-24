@@ -673,7 +673,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				state Standalone<VectorRef<KeyRangeRef>> restoreRange;
 				state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
 				for (auto r : self->backupRanges) {
-					if (!config.encryptionAtRestMode.isEncryptionEnabled() || !r.intersects(getSystemBackupRanges())) {
+					if (config.tenantMode != TenantMode::REQUIRED || !r.intersects(getSystemBackupRanges())) {
 						restoreRange.push_back_deep(
 						    restoreRange.arena(),
 						    KeyRangeRef(r.begin.withPrefix(self->backupPrefix), r.end.withPrefix(self->backupPrefix)));

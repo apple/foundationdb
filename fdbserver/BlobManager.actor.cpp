@@ -1184,8 +1184,6 @@ ACTOR Future<Void> checkManagerLock(Transaction* tr, Reference<BlobManagerData> 
 
 		throw blob_manager_replaced();
 	}
-	tr->addReadConflictRange(singleKeyRange(blobManagerEpochKey));
-	tr->addWriteConflictRange(singleKeyRange(blobManagerEpochKey));
 
 	return Void();
 }
@@ -5328,7 +5326,7 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 }
 
 // Simulation validation that multiple blob managers aren't started with the same epoch within same cluster
-static std::map<std::pair<std::string, int64_t>, UID> managerEpochsSeen;
+static std::map<std::pair<UID, int64_t>, UID> managerEpochsSeen;
 
 ACTOR Future<Void> checkBlobManagerEpoch(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int64_t epoch, UID dbgid) {
 	loop {
@@ -5339,11 +5337,37 @@ ACTOR Future<Void> checkBlobManagerEpoch(Reference<AsyncVar<ServerDBInfo> const>
 	}
 }
 
+ACTOR Future<UID> fetchClusterId(Database db) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> clusterIdVal = wait(tr->get(clusterIdKey));
+			if (clusterIdVal.present()) {
+				UID clusterId = BinaryReader::fromStringRef<UID>(clusterIdVal.get(), IncludeVersion());
+				return clusterId;
+			}
+			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskPriority::BlobManager));
+			tr->reset();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
                                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                int64_t epoch) {
+	state Reference<BlobManagerData> self =
+	    makeReference<BlobManagerData>(bmInterf.id(),
+	                                   dbInfo,
+	                                   openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True),
+	                                   bmInterf.locality.dcId(),
+	                                   epoch);
+
 	if (g_network->isSimulated()) {
-		std::string clusterId = dbInfo->get().clusterInterface.id().shortString();
+		UID clusterId = wait(fetchClusterId(self->db));
 		auto clusterEpoc = std::make_pair(clusterId, epoch);
 		bool managerEpochAlreadySeen = managerEpochsSeen.count(clusterEpoc);
 		if (managerEpochAlreadySeen) {
@@ -5356,13 +5380,6 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		ASSERT(!managerEpochAlreadySeen);
 		managerEpochsSeen[clusterEpoc] = bmInterf.id();
 	}
-	state Reference<BlobManagerData> self =
-	    makeReference<BlobManagerData>(bmInterf.id(),
-	                                   dbInfo,
-	                                   openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True),
-	                                   bmInterf.locality.dcId(),
-	                                   epoch);
-
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 
 	if (BM_DEBUG) {

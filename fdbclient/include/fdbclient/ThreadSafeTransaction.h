@@ -73,6 +73,9 @@ public:
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
 
+	// Return a JSON string containing database client-side status information
+	ThreadFuture<Standalone<StringRef>> getClientStatus() override;
+
 private:
 	friend class ThreadSafeTenant;
 	friend class ThreadSafeTransaction;
@@ -88,7 +91,7 @@ public: // Internal use only
 
 class ThreadSafeTenant : public ITenant, ThreadSafeReferenceCounted<ThreadSafeTenant>, NonCopyable {
 public:
-	ThreadSafeTenant(Reference<ThreadSafeDatabase> db, StringRef name);
+	ThreadSafeTenant(Reference<ThreadSafeDatabase> db, TenantName name);
 	~ThreadSafeTenant() override;
 
 	Reference<ITransaction> createTransaction() override;
@@ -109,7 +112,7 @@ public:
 
 private:
 	Reference<ThreadSafeDatabase> db;
-	Standalone<StringRef> name;
+	TenantName name;
 	Tenant* tenant;
 };
 
@@ -119,7 +122,8 @@ class ThreadSafeTransaction : public ITransaction, ThreadSafeReferenceCounted<Th
 public:
 	explicit ThreadSafeTransaction(DatabaseContext* cx,
 	                               ISingleThreadTransaction::Type type,
-	                               Optional<TenantName> tenant);
+	                               Optional<TenantName> tenantName,
+	                               Tenant* tenantPtr);
 	~ThreadSafeTransaction() override;
 
 	// Note: used while refactoring fdbcli, need to be removed later
