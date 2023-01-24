@@ -95,7 +95,7 @@ public:
 		    delete_requests_per_second, multipart_max_part_size, multipart_min_part_size, concurrent_requests,
 		    concurrent_uploads, concurrent_lists, concurrent_reads_per_file, concurrent_writes_per_file,
 		    enable_read_cache, read_block_size, read_ahead_blocks, read_cache_blocks_per_file,
-		    max_send_bytes_per_second, max_recv_bytes_per_second, sdk_auth;
+		    max_send_bytes_per_second, max_recv_bytes_per_second, sdk_auth, global_connection_pool;
 		bool set(StringRef name, int value);
 		std::string getURLParameters() const;
 		static std::vector<std::string> getKnobDescriptions() {
@@ -130,7 +130,8 @@ public:
 				"max_recv_bytes_per_second (or rbps)   Max receive bytes per second for all requests combined (NOT YET "
 				"USED).",
 				"sdk_auth (or sa)                      Use AWS SDK to resolve credentials. Only valid if "
-				"BUILD_AWS_BACKUP is enabled."
+				"BUILD_AWS_BACKUP is enabled.",
+				"global_connection_pool (or gcp)       Enable shared connection pool between all blobstore instances."
 			};
 		}
 
@@ -176,8 +177,9 @@ public:
 			throw connection_string_invalid();
 
 		// set connection pool instance
-		if (useProxy) {
-			// don't use global connection pool if there's a proxy, as it complicates it
+		if (useProxy || !knobs.global_connection_pool) {
+			// don't use global connection pool if there's a proxy, as it complicates the logic
+			// FIXME: handle proxies?
 			connectionPool = makeReference<ConnectionPoolData>();
 		} else {
 			BlobStoreConnectionPoolKey key(host, service, region, knobs.isTLS());

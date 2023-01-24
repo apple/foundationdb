@@ -99,6 +99,7 @@ S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	max_send_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_SEND_BYTES_PER_SECOND;
 	max_recv_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_RECV_BYTES_PER_SECOND;
 	sdk_auth = false;
+	global_connection_pool = CLIENT_KNOBS->BLOBSTORE_GLOBAL_CONNECTION_POOL;
 }
 
 bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
@@ -137,6 +138,7 @@ bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(max_send_bytes_per_second, sbps);
 	TRY_PARAM(max_recv_bytes_per_second, rbps);
 	TRY_PARAM(sdk_auth, sa);
+	TRY_PARAM(global_connection_pool, gcp);
 #undef TRY_PARAM
 	return false;
 }
@@ -174,6 +176,8 @@ std::string S3BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	_CHECK_PARAM(read_cache_blocks_per_file, rcb);
 	_CHECK_PARAM(max_send_bytes_per_second, sbps);
 	_CHECK_PARAM(max_recv_bytes_per_second, rbps);
+	_CHECK_PARAM(sdk_auth, sa);
+	_CHECK_PARAM(global_connection_pool, gcp);
 #undef _CHECK_PARAM
 	return r;
 }
