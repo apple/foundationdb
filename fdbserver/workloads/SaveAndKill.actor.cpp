@@ -26,6 +26,7 @@
 #include "boost/algorithm/string/predicate.hpp"
 #include "flow/IConnection.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
+#include "flow/Knobs.h"
 
 #undef state
 #include "fdbclient/SimpleIni.h"
@@ -79,6 +80,9 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SetBoolValue("META", "enableTLogEncryption", SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION);
 		ini.SetBoolValue("META", "enableStorageServerEncryption", SERVER_KNOBS->ENABLE_STORAGE_SERVER_ENCRYPTION);
 		ini.SetBoolValue("META", "enableBlobGranuleEncryption", SERVER_KNOBS->ENABLE_BLOB_GRANULE_ENCRYPTION);
+
+		ini.SetBoolValue("META", "encryptHeaderAuthTokenEnabled", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED);
+		ini.SetLongValue("META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO);
 
 		std::vector<ISimulator::ProcessInfo*> processes = g_simulator->getAllProcesses();
 		std::map<NetworkAddress, ISimulator::ProcessInfo*> rebootingProcesses =
