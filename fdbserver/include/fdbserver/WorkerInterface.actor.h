@@ -711,7 +711,6 @@ struct InitializeCommitProxyRequest {
 	}
 };
 
-
 // Instantiated in worker.actor.cpp
 extern template class RequestStream<InitializeCommitProxyRequest, false>;
 extern template struct NetNotifiedQueue<InitializeCommitProxyRequest, false>;
