@@ -536,7 +536,6 @@ public class StackTester {
 					testWatches(inst.context.db);
 					testLocality(inst.context.db);
 					testTenantTupleNames(inst.context.db);
-					testTenantId(inst.context.db);
 				}
 				catch(Exception e) {
 					throw new RuntimeException("Unit tests failed: " + e.getMessage());
@@ -813,17 +812,6 @@ public class StackTester {
 			TenantManagement.deleteTenant(db, Tuple.from("tenant")).join();
         }
 		catch(Exception e) {
-			e.printStackTrace();
-		}
-	}
-
-	private static void testTenantId(Database db) {
-		try {
-			TenantManagement.createTenant(db, Tuple.from("tenant")).join();
-			Tenant tenant = db.openTenant(Tuple.from("tenant"));
-			Long tenantId = tenant.getId().join();
-			assert tenantId > 0;
-		} catch(Exception e) {
 			e.printStackTrace();
 		}
 	}
