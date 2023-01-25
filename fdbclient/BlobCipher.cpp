@@ -706,18 +706,18 @@ void EncryptBlobCipherAes265Ctr::updateEncryptHeader(const uint8_t* ciphertext,
 	setCipherAlgoHeaderV1(ciphertext, ciphertextLen, flags, headerRef, arena);
 }
 
-Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plaintext,
-                                                          const int plaintextLen,
-                                                          BlobCipherEncryptHeaderRef* headerRef,
-                                                          Arena& arena) {
+StringRef EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plaintext,
+                                              const int plaintextLen,
+                                              BlobCipherEncryptHeaderRef* headerRef,
+                                              Arena& arena) {
 	double startTime = 0.0;
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
 		startTime = timer_monotonic();
 	}
 
 	const int allocSize = plaintextLen + AES_BLOCK_SIZE;
-	Reference<EncryptBuf> encryptBuf = makeReference<EncryptBuf>(allocSize, arena);
-	uint8_t* ciphertext = encryptBuf->begin();
+	StringRef encryptBuf = makeString(allocSize, arena);
+	uint8_t* ciphertext = mutateString(encryptBuf);
 
 	int bytes{ 0 };
 	if (EVP_EncryptUpdate(ctx, ciphertext, &bytes, plaintext, plaintextLen) != 1) {
@@ -741,7 +741,6 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 		    .detail("EncryptedBufLen", bytes + finalBytes);
 		throw encrypt_ops_error();
 	}
-	encryptBuf->setLogicalSize(plaintextLen);
 
 	// Ensure encryption header authToken details sanity
 	ASSERT(isEncryptHeaderAuthTokenDetailsValid(authTokenMode, authTokenAlgo));
@@ -760,7 +759,8 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 	CODE_PROBE(authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
 	           "ConfigurableEncryption: AES_CMAC Auth token generation");
 
-	return encryptBuf;
+	// discard the extra buffer allocated to account for AES_BLOCK_SIZE encryption assist
+	return encryptBuf.substr(0, plaintextLen);
 }
 
 Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plaintext,
@@ -1005,10 +1005,10 @@ void DecryptBlobCipherAes256Ctr::validateEncryptHeader(const uint8_t* ciphertext
 	validateEncryptHeaderV1(ciphertext, ciphertextLen, headerRef, arena);
 }
 
-Reference<EncryptBuf> DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphertext,
-                                                          const int ciphertextLen,
-                                                          const BlobCipherEncryptHeaderRef& headerRef,
-                                                          Arena& arena) {
+StringRef DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphertext,
+                                              const int ciphertextLen,
+                                              const BlobCipherEncryptHeaderRef& headerRef,
+                                              Arena& arena) {
 	double startTime = 0.0;
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
 		startTime = timer_monotonic();
@@ -1017,9 +1017,9 @@ Reference<EncryptBuf> DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphert
 	validateEncryptHeader(ciphertext, ciphertextLen, headerRef, arena);
 
 	const int allocSize = ciphertextLen + AES_BLOCK_SIZE;
-	Reference<EncryptBuf> decrypted = makeReference<EncryptBuf>(allocSize, arena);
+	StringRef decrypted = makeString(allocSize, arena);
 
-	uint8_t* plaintext = decrypted->begin();
+	uint8_t* plaintext = mutateString(decrypted);
 	int bytesDecrypted{ 0 };
 	if (!EVP_DecryptUpdate(ctx, plaintext, &bytesDecrypted, ciphertext, ciphertextLen)) {
 		TraceEvent(SevWarn, "BlobCipherDecryptUpdateFailed")
@@ -1043,15 +1043,14 @@ Reference<EncryptBuf> DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphert
 		throw encrypt_ops_error();
 	}
 
-	decrypted->setLogicalSize(ciphertextLen);
-
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
 		BlobCipherMetrics::counters(usageType).decryptCPUTimeNS += int64_t((timer_monotonic() - startTime) * 1e9);
 	}
 
 	CODE_PROBE(true, "ConfigurableEncryption: BlobCipher data decryption");
 
-	return decrypted;
+	// discard the extra buffer allocated to account AES_BLOCK_SIZE decryption assist
+	return decrypted.substr(0, ciphertextLen);
 }
 
 DecryptBlobCipherAes256Ctr::DecryptBlobCipherAes256Ctr(Reference<BlobCipherKey> tCipherKey,
@@ -1584,7 +1583,7 @@ TEST_CASE("flow/BlobCipher") {
 		                                     BlobCipherMetrics::TEST);
 
 		BlobCipherEncryptHeaderRef headerRef;
-		Reference<EncryptBuf> encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+		StringRef encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 
 		// validate header version details
 		BlobCipherEncryptHeaderFlagsV1 flags;
@@ -1603,7 +1602,7 @@ TEST_CASE("flow/BlobCipher") {
 		// validate IV
 		ASSERT_EQ(noAuth.ivRef.size(), AES_256_IV_LENGTH);
 		ASSERT_EQ(memcmp(&iv[0], noAuth.ivRef.begin(), AES_256_IV_LENGTH), 0);
-		ASSERT_NE(memcmp(&orgData[0], encryptedBuf->begin(), bufLen), 0);
+		ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
 		// validate cipherKey details
 		ASSERT_EQ(noAuth.cipherTextDetails.encryptDomainId, cipherKey->getDomainId());
 		ASSERT_EQ(noAuth.cipherTextDetails.baseCipherId, cipherKey->getBaseCipherId());
@@ -1616,10 +1615,9 @@ TEST_CASE("flow/BlobCipher") {
 		DecryptBlobCipherAes256Ctr decryptor(
 		    tCipherKeyKey, Reference<BlobCipherKey>(), noAuth.ivRef.begin(), BlobCipherMetrics::TEST);
 
-		Reference<EncryptBuf> decryptedBuf =
-		    decryptor.decrypt(encryptedBuf->begin(), encryptedBuf->getLogicalSize(), headerRef, arena);
-		ASSERT_EQ(decryptedBuf->getLogicalSize(), bufLen);
-		ASSERT_EQ(memcmp(decryptedBuf->begin(), &orgData[0], bufLen), 0);
+		StringRef decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), encryptedBuf.size(), headerRef, arena);
+		ASSERT_EQ(decryptedBuf.size(), bufLen);
+		ASSERT_EQ(memcmp(decryptedBuf.begin(), &orgData[0], bufLen), 0);
 
 		TraceEvent("BlobCipherTestEncryptDecryptDone")
 		    .detail("HeaderFlagsVersion", headerRef.flagsVersion)
@@ -1639,7 +1637,7 @@ TEST_CASE("flow/BlobCipher") {
 			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 			DecryptBlobCipherAes256Ctr decryptor(
 			    tCipherKeyKey, Reference<BlobCipherKey>(), &iv[0], BlobCipherMetrics::TEST);
-			decryptedBuf = decryptor.decrypt(encryptedBuf->begin(), bufLen, corruptedHeaderRef, arena);
+			decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, corruptedHeaderRef, arena);
 			ASSERT(false); // error expected
 		} catch (Error& e) {
 			if (e.code() != error_code_encrypt_header_metadata_mismatch) {
@@ -1658,7 +1656,7 @@ TEST_CASE("flow/BlobCipher") {
 			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 			DecryptBlobCipherAes256Ctr decryptor(
 			    tCipherKeyKey, Reference<BlobCipherKey>(), &iv[0], BlobCipherMetrics::TEST);
-			decryptedBuf = decryptor.decrypt(encryptedBuf->begin(), bufLen, corruptedHeaderRef, arena);
+			decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, corruptedHeaderRef, arena);
 			ASSERT(false); // error expected
 		} catch (Error& e) {
 			if (e.code() != error_code_encrypt_header_metadata_mismatch) {
@@ -1671,13 +1669,13 @@ TEST_CASE("flow/BlobCipher") {
 		try {
 			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 			uint8_t temp[bufLen];
-			memcpy(encryptedBuf->begin(), &temp[0], bufLen);
+			memcpy((void*)encryptedBuf.begin(), &temp[0], bufLen);
 			int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
 			temp[tIdx] += 1;
 			DecryptBlobCipherAes256Ctr decryptor(
 			    tCipherKeyKey, Reference<BlobCipherKey>(), &iv[0], BlobCipherMetrics::TEST);
 			decryptedBuf = decryptor.decrypt(&temp[0], bufLen, headerRef, arena);
-			ASSERT_NE(memcmp(decryptedBuf->begin(), &orgData[0], bufLen), 0);
+			ASSERT_NE(memcmp(decryptedBuf.begin(), &orgData[0], bufLen), 0);
 		} catch (Error& e) {
 			// No authToken, hence, no corruption detection supported
 			ASSERT(false);
@@ -1813,10 +1811,10 @@ TEST_CASE("flow/BlobCipher") {
 		                                     EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
 		                                     BlobCipherMetrics::TEST);
 		BlobCipherEncryptHeaderRef headerRef;
-		Reference<EncryptBuf> encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+		StringRef encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 
-		ASSERT_EQ(encryptedBuf->getLogicalSize(), bufLen);
-		ASSERT_NE(memcmp(&orgData[0], encryptedBuf->begin(), bufLen), 0);
+		ASSERT_EQ(encryptedBuf.size(), bufLen);
+		ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
 		ASSERT_EQ(headerRef.flagsVersion, CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
 		ASSERT_EQ(headerRef.algoHeaderVersion, CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION);
 
@@ -1833,7 +1831,7 @@ TEST_CASE("flow/BlobCipher") {
 		// validate IV
 		ASSERT_EQ(hmacSha.ivRef.size(), AES_256_IV_LENGTH);
 		ASSERT_EQ(memcmp(&iv[0], hmacSha.ivRef.begin(), AES_256_IV_LENGTH), 0);
-		ASSERT_NE(memcmp(&orgData[0], encryptedBuf->begin(), bufLen), 0);
+		ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
 		// validate cipherKey details
 		ASSERT_EQ(hmacSha.cipherTextDetails.encryptDomainId, cipherKey->getDomainId());
 		ASSERT_EQ(hmacSha.cipherTextDetails.baseCipherId, cipherKey->getBaseCipherId());
@@ -1851,10 +1849,10 @@ TEST_CASE("flow/BlobCipher") {
 		ASSERT(tCipherKeyKey->isEqual(cipherKey));
 		ASSERT(hCipherKey->isEqual(headerCipherKey));
 		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, hmacSha.ivRef.begin(), BlobCipherMetrics::TEST);
-		Reference<EncryptBuf> decryptedBuf = decryptor.decrypt(encryptedBuf->begin(), bufLen, headerRef, arena);
+		StringRef decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, headerRef, arena);
 
-		ASSERT_EQ(decryptedBuf->getLogicalSize(), bufLen);
-		ASSERT_EQ(memcmp(decryptedBuf->begin(), &orgData[0], bufLen), 0);
+		ASSERT_EQ(decryptedBuf.size(), bufLen);
+		ASSERT_EQ(memcmp(decryptedBuf.begin(), &orgData[0], bufLen), 0);
 
 		TraceEvent("BlobCipherTestEncryptDecryptDone")
 		    .detail("HeaderFlagsVersion", headerRef.flagsVersion)
@@ -1876,7 +1874,7 @@ TEST_CASE("flow/BlobCipher") {
 		try {
 			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
-			decryptedBuf = decryptor.decrypt(encryptedBuf->begin(), bufLen, corruptedHeaderRef, arena);
+			decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, corruptedHeaderRef, arena);
 			ASSERT(false); // error expected
 		} catch (Error& e) {
 			if (e.code() != error_code_encrypt_header_metadata_mismatch) {
@@ -1894,7 +1892,7 @@ TEST_CASE("flow/BlobCipher") {
 		try {
 			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
-			decryptedBuf = decryptor.decrypt(encryptedBuf->begin(), bufLen, corruptedHeaderRef, arena);
+			decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, corruptedHeaderRef, arena);
 			ASSERT(false); // error expected
 		} catch (Error& e) {
 			if (e.code() != error_code_encrypt_header_metadata_mismatch) {
@@ -1907,12 +1905,12 @@ TEST_CASE("flow/BlobCipher") {
 		try {
 			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 			uint8_t temp[bufLen];
-			memcpy(encryptedBuf->begin(), &temp[0], bufLen);
+			memcpy((void*)encryptedBuf.begin(), &temp[0], bufLen);
 			int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
 			temp[tIdx] += 1;
 			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
 			decryptedBuf = decryptor.decrypt(&temp[0], bufLen, headerRef, arena);
-			ASSERT_NE(memcmp(decryptedBuf->begin(), &orgData[0], bufLen), 0);
+			ASSERT_NE(memcmp(decryptedBuf.begin(), &orgData[0], bufLen), 0);
 		} catch (Error& e) {
 			if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
 				throw;
@@ -2049,10 +2047,10 @@ TEST_CASE("flow/BlobCipher") {
 		                                     EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
 		                                     BlobCipherMetrics::TEST);
 		BlobCipherEncryptHeaderRef headerRef;
-		Reference<EncryptBuf> encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+		StringRef encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 
-		ASSERT_EQ(encryptedBuf->getLogicalSize(), bufLen);
-		ASSERT_NE(memcmp(&orgData[0], encryptedBuf->begin(), bufLen), 0);
+		ASSERT_EQ(encryptedBuf.size(), bufLen);
+		ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
 		ASSERT_EQ(headerRef.flagsVersion, CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
 		ASSERT_EQ(headerRef.algoHeaderVersion, CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION);
 
@@ -2069,7 +2067,7 @@ TEST_CASE("flow/BlobCipher") {
 		// validate IV
 		ASSERT_EQ(aesCmac.ivRef.size(), AES_256_IV_LENGTH);
 		ASSERT_EQ(memcmp(&iv[0], aesCmac.ivRef.begin(), AES_256_IV_LENGTH), 0);
-		ASSERT_NE(memcmp(&orgData[0], encryptedBuf->begin(), bufLen), 0);
+		ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
 		// validate cipherKey details
 		ASSERT_EQ(aesCmac.cipherTextDetails.encryptDomainId, cipherKey->getDomainId());
 		ASSERT_EQ(aesCmac.cipherTextDetails.baseCipherId, cipherKey->getBaseCipherId());
@@ -2087,10 +2085,10 @@ TEST_CASE("flow/BlobCipher") {
 		ASSERT(tCipherKeyKey->isEqual(cipherKey));
 		ASSERT(hCipherKey->isEqual(headerCipherKey));
 		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, aesCmac.ivRef.begin(), BlobCipherMetrics::TEST);
-		Reference<EncryptBuf> decryptedBuf = decryptor.decrypt(encryptedBuf->begin(), bufLen, headerRef, arena);
+		StringRef decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, headerRef, arena);
 
-		ASSERT_EQ(decryptedBuf->getLogicalSize(), bufLen);
-		ASSERT_EQ(memcmp(decryptedBuf->begin(), &orgData[0], bufLen), 0);
+		ASSERT_EQ(decryptedBuf.size(), bufLen);
+		ASSERT_EQ(memcmp(decryptedBuf.begin(), &orgData[0], bufLen), 0);
 
 		TraceEvent("BlobCipherTestEncryptDecryptDone")
 		    .detail("HeaderFlagsVersion", headerRef.flagsVersion)
@@ -2112,7 +2110,7 @@ TEST_CASE("flow/BlobCipher") {
 		try {
 			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
-			decryptedBuf = decryptor.decrypt(encryptedBuf->begin(), bufLen, corruptedHeaderRef, arena);
+			decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, corruptedHeaderRef, arena);
 			ASSERT(false); // error expected
 		} catch (Error& e) {
 			if (e.code() != error_code_encrypt_header_metadata_mismatch) {
@@ -2130,7 +2128,7 @@ TEST_CASE("flow/BlobCipher") {
 		try {
 			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
-			decryptedBuf = decryptor.decrypt(encryptedBuf->begin(), bufLen, corruptedHeaderRef, arena);
+			decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, corruptedHeaderRef, arena);
 			ASSERT(false); // error expected
 		} catch (Error& e) {
 			if (e.code() != error_code_encrypt_header_metadata_mismatch) {
@@ -2143,12 +2141,12 @@ TEST_CASE("flow/BlobCipher") {
 		try {
 			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 			uint8_t temp[bufLen];
-			memcpy(encryptedBuf->begin(), &temp[0], bufLen);
+			memcpy((void*)encryptedBuf.begin(), &temp[0], bufLen);
 			int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
 			temp[tIdx] += 1;
 			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
 			decryptedBuf = decryptor.decrypt(&temp[0], bufLen, headerRef, arena);
-			ASSERT_NE(memcmp(decryptedBuf->begin(), &orgData[0], bufLen), 0);
+			ASSERT_NE(memcmp(decryptedBuf.begin(), &orgData[0], bufLen), 0);
 		} catch (Error& e) {
 			if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
 				throw;
