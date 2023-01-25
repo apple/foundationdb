@@ -2647,8 +2647,8 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 	wait(g_sim2.delay(0, TaskPriority::DefaultDelay, p)); // Switch to the machine in question
 
 	try {
-		ASSERT(kt == ISimulator::KillType::RebootProcess || kt == ISimulator::KillType::Reboot || kt == ISimulator::KillType::RebootAndDelete ||
-		       kt == ISimulator::KillType::RebootProcessAndDelete);
+		ASSERT(kt == ISimulator::KillType::RebootProcess || kt == ISimulator::KillType::Reboot ||
+		       kt == ISimulator::KillType::RebootAndDelete || kt == ISimulator::KillType::RebootProcessAndDelete);
 
 		CODE_PROBE(kt == ISimulator::KillType::RebootProcess,
 		           "Simulated process rebooted",
