@@ -314,7 +314,7 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 					obj[msgTypeKey] = "success";
 					obj[msgClusterTypeKey] = clusterTypeToString(clusterType);
 					json_spirit::mObject metaclusterObj;
-					metaclusterObj[msgMgmtClusterKey] = registrationEntry.get().metaclusterName.toString();
+					metaclusterObj[msgMetaclusterName] = registrationEntry.get().metaclusterName.toString();
 					obj[msgMetaclusterKey] = metaclusterObj;
 					fmt::print("{}\n",
 					           json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
