@@ -23,11 +23,13 @@
 #include <map>
 #include <unordered_map>
 #include <functional>
+#include "flow/IRandom.h"
 #include "flow/flow.h"
 #include "flow/Net2Packet.h"
 #include "fdbclient/Knobs.h"
 #include "flow/IRateControl.h"
 #include "fdbrpc/HTTP.h"
+#include "fdbrpc/Stats.h"
 #include "fdbclient/JSONDoc.h"
 
 #include <boost/functional/hash.hpp>
@@ -81,6 +83,54 @@ public:
 	};
 
 	static Stats s_stats;
+
+	struct BlobStats {
+		UID id;
+		CounterCollection cc;
+		Counter requestsSuccessful;
+		Counter requestsFailed;
+		Counter newConnections;
+		Counter expiredConnections;
+		Counter reusedConnections;
+		Counter fastRetries;
+
+		LatencySample requestLatency;
+
+		// init not in static codepath, to avoid initialization race issues and so no blob connections means no
+		// unecessary blob stats traces
+		BlobStats()
+		  : id(deterministicRandom()->randomUniqueID()), cc("BlobStoreStats", id.toString()),
+		    requestsSuccessful("RequestsSuccessful", cc), requestsFailed("RequestsFailed", cc),
+		    newConnections("NewConnections", cc), expiredConnections("ExpiredConnections", cc),
+		    reusedConnections("ReusedConnections", cc), fastRetries("FastRetries", cc),
+		    requestLatency("BlobStoreRequestLatency",
+		                   id,
+		                   CLIENT_KNOBS->BLOBSTORE_LATENCY_LOGGING_INTERVAL,
+		                   CLIENT_KNOBS->BLOBSTORE_LATENCY_LOGGING_ACCURACY) {}
+	};
+	// null when initialized, so no blob stats until a blob connection is used
+	static std::unique_ptr<BlobStats> blobStats;
+	static Future<Void> statsLogger;
+
+	void maybeStartStatsLogger() {
+		if (!blobStats && CLIENT_KNOBS->BLOBSTORE_ENABLE_LOGGING) {
+			blobStats = std::make_unique<BlobStats>();
+			specialCounter(
+			    blobStats->cc, "GlobalConnectionPoolCount", [this]() { return this->globalConnectionPool.size(); });
+			specialCounter(blobStats->cc, "GlobalConnectionPoolSize", [this]() {
+				// FIXME: could track this explicitly via an int variable with extra logic, but this should be small and
+				// infrequent
+				int totalConnections = 0;
+				for (auto& it : this->globalConnectionPool) {
+					totalConnections += it.second->pool.size();
+				}
+				return totalConnections;
+			});
+
+			statsLogger = blobStats->cc.traceCounters(
+			    "BlobStoreMetrics", blobStats->id, CLIENT_KNOBS->BLOBSTORE_STATS_LOGGING_INTERVAL, "BlobStoreMetrics");
+		}
+	}
 
 	struct Credentials {
 		std::string key;
@@ -148,9 +198,8 @@ public:
 		std::queue<ReusableConnection> pool;
 	};
 
-	static std::unordered_map<BlobStoreConnectionPoolKey,
-	                          Reference<ConnectionPoolData> /*, std::hash<BlobStoreConnectionPoolKey>*/>
-	    globalConnectionPool;
+	// global connection pool for multiple blobstore endpoints with same connection settings and request destination
+	static std::unordered_map<BlobStoreConnectionPoolKey, Reference<ConnectionPoolData>> globalConnectionPool;
 
 	S3BlobStoreEndpoint(std::string const& host,
 	                    std::string const& service,
@@ -192,6 +241,8 @@ public:
 			}
 		}
 		ASSERT(connectionPool.isValid());
+
+		maybeStartStatsLogger();
 	}
 
 	static std::string getURLFormat(bool withResource = false) {
@@ -218,7 +269,6 @@ public:
 	// parameters in addition to the passed params string
 	std::string getResourceURL(std::string resource, std::string params) const;
 
-	// global map from host to connection pool for that host
 	// FIXME: add periodic connection reaper to pool
 	// local connection pool for this blobstore
 	Reference<ConnectionPoolData> connectionPool;
