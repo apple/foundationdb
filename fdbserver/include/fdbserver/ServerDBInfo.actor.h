@@ -123,6 +123,10 @@ struct GetServerDBInfoRequest {
 	}
 };
 
+// Instantiated in worker.actor.cpp
+extern template class RequestStream<GetServerDBInfoRequest, false>;
+extern template struct NetNotifiedQueue<GetServerDBInfoRequest, false>;
+
 ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply);
 
 ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoRequest req,

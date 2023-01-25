@@ -868,6 +868,9 @@ struct PacketWriter {
 		return result;
 	}
 
+	// This is used by MakeSerializeSource::serializePacketWriter
+	static uint8_t* packetWriterAlloc(const size_t size, void* self);
+
 private:
 	void serializeBytesAcrossBoundary(const void* data, int bytes);
 	void nextBuffer(size_t size = 0 /* downstream it will default to at least 4k minus some padding */);
@@ -886,9 +889,12 @@ template <class T, class V>
 class MakeSerializeSource : public ISerializeSource {
 public:
 	using value_type = V;
-	void serializePacketWriter(PacketWriter& w) const override {
-		ObjectWriter writer([&](size_t size) { return w.writeBytes(size); }, AssumeVersion(w.protocolVersion()));
-		writer.serialize(get()); // Writes directly into buffer supplied by |w|
+	void serializePacketWriter(PacketWriter& packetWriter) const override {
+		ObjectWriter objectWriter(
+		    PacketWriter::packetWriterAlloc, &packetWriter, AssumeVersion(packetWriter.protocolVersion()));
+
+		// Writes directly into buffer supplied by packetWriter
+		objectWriter.serialize(get());
 	}
 	virtual value_type const& get() const = 0;
 };
