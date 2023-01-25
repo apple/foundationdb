@@ -85,9 +85,7 @@ struct StateTransactionRef {
 	// The tenants associated with this transaction. This field only existing when tenant mode is required. Because the
 	// applyMetadataEffect need to know whether the tenant access is valid to decide whether to apply metadata
 	Optional<VectorRef<int64_t>> tenantIds;
-	size_t expectedSize() const {
-		return mutations.expectedSize() + (tenantIds.present() ? tenantIds.expectedSize() : 0);
-	}
+	size_t expectedSize() const { return mutations.expectedSize() + tenantIds.expectedSize(); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {

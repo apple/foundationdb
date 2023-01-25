@@ -245,7 +245,9 @@ struct ResolutionRequestBuilder {
 			// the reply from Resolver 0 has the right one back.
 			auto& tr = getOutTransaction(0, trIn.read_snapshot);
 			tr.spanContext = trRequest.spanContext;
-			tr.tenantIds = tenantIds;
+			if (needParseTenantId) {
+				tr.tenantIds = tenantIds;
+			}
 		}
 
 		std::vector<int> resolversUsed;
@@ -1190,9 +1192,9 @@ void applyMetadataEffect(CommitBatchContext* self) {
 
 				// TODO debug trace
 				if (self->debugID.present()) {
-					TraceEvent e(SevDebug, "TenantCheck_ApplyMetadataEffect", self->debugID.get());
-					e.detail("TenantIds", tenantIds);
-					e.detail("Mutations", mutations);
+					TraceEvent(SevDebug, "TenantCheck_ApplyMetadataEffect", self->debugID.get())
+					    .detail("TenantIds", tenantIds)
+					    .detail("Mutations", mutations);
 				}
 			}
 
@@ -1737,13 +1739,15 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	applyMetadataEffect(self);
 
 	if (debugID.present()) {
-		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadaEffect");
+		g_traceBatch.addEvent(
+		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadataEffect");
 	}
 
 	determineCommittedTransactions(self);
 
 	if (debugID.present()) {
-		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadaEffect");
+		g_traceBatch.addEvent(
+		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadataEffect");
 	}
 
 	if (self->forceRecovery) {

@@ -328,7 +328,7 @@ struct CommitTransactionRef {
 
 	size_t expectedSize() const {
 		return read_conflict_ranges.expectedSize() + write_conflict_ranges.expectedSize() + mutations.expectedSize() +
-		       (tenantIds.present() ? tenantIds.expectedSize() : 0);
+		       tenantIds.expectedSize();
 	}
 };
 
