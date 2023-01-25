@@ -29,6 +29,7 @@
 #include <string>
 #include <stdint.h>
 #include <atomic>
+#include <unordered_map>
 #include "flow/IRandom.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/WriteOnlySet.h"
