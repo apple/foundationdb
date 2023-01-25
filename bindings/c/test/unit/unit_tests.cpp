@@ -1049,6 +1049,10 @@ static std::string recordValue(const int i, const int split) {
 	return Tuple::makeTuple(dataOfRecord(i), split).pack().toString();
 }
 
+static std::unordered_map<int, int> versionToPosMatchIndex = { std::make_pair(2, 1) };
+static std::unordered_map<int, int> versionToPosFetchLocalOnly = { std::make_pair(2, 6) };
+static std::unordered_map<int, int> versionToLength = { std::make_pair(2, 8) };
+
 const static int SPLIT_SIZE = 3;
 std::map<std::string, std::string> fillInRecords(int n) {
 	// Note: The user requested `prefix` should be added as the first element of the tuple that forms the key, rather
@@ -1085,15 +1089,19 @@ GetMappedRangeResultV2 getMappedIndexEntriesInternalV2(int beginId,
                                                        int endId,
                                                        fdb::Transaction& tr,
                                                        std::string mapper,
-													   int matchIndex) {
+                                                       int matchIndex,
+                                                       bool fetchLocalOnly) {
 	std::string indexEntryKeyBegin = indexEntryKey(beginId);
 	std::string indexEntryKeyEnd = indexEntryKey(endId);
-	int mrpLength = 6;
+	int version = 2;
+	int mrpLength = versionToLength[version];
 	uint8_t mrp[mrpLength];
 	memset(mrp, 0, mrpLength);
-	mrp[0] = 2; // API protocol version
-	mrp[1] = code_int;
-	mrp[2] = matchIndex; // little endian
+	mrp[0] = version; // API protocol version
+	mrp[versionToPosMatchIndex[version]] = code_int;
+	mrp[versionToPosMatchIndex[version] + 1] = matchIndex; // little endian
+	mrp[versionToPosFetchLocalOnly[version]] = code_bool;
+	mrp[versionToPosFetchLocalOnly[version] + 1] = fetchLocalOnly;
 	std::cout << "matchIndex is " << matchIndex << std::endl;
 	return get_mapped_range_v2(
 	    tr,
@@ -1120,11 +1128,12 @@ GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transact
 GetMappedRangeResultV2 getMappedIndexEntries(int beginId,
                                              int endId,
                                              fdb::Transaction& tr,
+                                             bool allMissing,
                                              int matchIndex,
-                                             bool allMissing) {
+                                             bool fetchLocalOnly) {
 	std::string mapper =
 	    Tuple::makeTuple(prefix, RECORD, (allMissing ? "{K[2]}"_sr : "{K[3]}"_sr), "{...}"_sr).pack().toString();
-	return getMappedIndexEntriesInternalV2(beginId, endId, tr, mapper, matchIndex);
+	return getMappedIndexEntriesInternalV2(beginId, endId, tr, mapper, matchIndex, fetchLocalOnly);
 }
 
 TEST_CASE("versionstamp_unit_test") {
@@ -1236,8 +1245,9 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 		int beginId = 1;
 		int endId = 19;
 		int matchIndex = getMatchIndexRandom();
+		bool fetchLocalOnly = deterministicRandom()->random01() > 0.5 ? true : false;
 		int allMissing = false;
-		auto result = getMappedIndexEntries(beginId, endId, tr, matchIndex, allMissing);
+		auto result = getMappedIndexEntries(beginId, endId, tr, allMissing, matchIndex, fetchLocalOnly);
 
 		if (result.err) {
 			fdb::EmptyFuture f1 = tr.on_error(result.err);
@@ -1315,8 +1325,9 @@ TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
 		int beginId = 1;
 		int endId = 19;
 		int matchIndex = getMatchIndexRandom();
+		bool fetchLocalOnly = deterministicRandom()->random01() > 0.5 ? true : false;
 		int allMissing = true;
-		auto result = getMappedIndexEntries(beginId, endId, tr, matchIndex, allMissing);
+		auto result = getMappedIndexEntries(beginId, endId, tr, allMissing, matchIndex, fetchLocalOnly);
 
 		if (result.err) {
 			fdb::EmptyFuture f1 = tr.on_error(result.err);

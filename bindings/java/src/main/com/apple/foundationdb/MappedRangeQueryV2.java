@@ -55,6 +55,7 @@ class MappedRangeQueryV2 implements AsyncIterable<MappedKeyValueV2> {
 	private final boolean snapshot;
 	private final int rowLimit;
 	private final int matchIndex;
+	private final boolean fetchLocalOnly;
 	private final boolean reverse;
 	private final StreamingMode streamingMode;
 	private final EventKeeper eventKeeper;
@@ -63,15 +64,17 @@ class MappedRangeQueryV2 implements AsyncIterable<MappedKeyValueV2> {
 	private final int code_bool = 2;
 
 	private static final int matchIndexPos = 1;
+	private static final int fetchLocalOnlyPos = 6;
 
 	MappedRangeQueryV2(FDBTransaction transaction, boolean isSnapshot, KeySelector begin, KeySelector end,
-	                   byte[] mapper, int rowLimit, int matchIndex, boolean reverse, StreamingMode streamingMode,
-	                   EventKeeper eventKeeper) {
+	                   byte[] mapper, int rowLimit, int matchIndex, boolean fetchLocalOnly, boolean reverse,
+	                   StreamingMode streamingMode, EventKeeper eventKeeper) {
 		this.tr = transaction;
 		this.begin = begin;
 		this.end = end;
 		this.mapper = mapper;
 		this.matchIndex = matchIndex;
+		this.fetchLocalOnly = fetchLocalOnly;
 		this.snapshot = isSnapshot;
 		this.rowLimit = rowLimit;
 		this.reverse = reverse;
@@ -79,10 +82,12 @@ class MappedRangeQueryV2 implements AsyncIterable<MappedKeyValueV2> {
 		this.eventKeeper = eventKeeper;
 	}
 
-	byte[] getMrp(int matchIndex) {
-		byte[] mrp = new byte[] { 0x02, 0, 0, 0, 0, 0 };
+	byte[] getMrp(int matchIndex, boolean fetchLocalOnly) {
+		byte[] mrp = new byte[] { 0x02, 0, 0, 0, 0, 0, 0, 0 };
 		mrp[matchIndexPos] = code_int;
 		mrp[matchIndexPos + 1] = (byte)matchIndex;
+		mrp[fetchLocalOnlyPos] = code_bool;
+		mrp[fetchLocalOnlyPos + 1] = (byte)(fetchLocalOnly ? 1 : 0);
 		return mrp;
 	}
 
@@ -101,7 +106,7 @@ class MappedRangeQueryV2 implements AsyncIterable<MappedKeyValueV2> {
 		System.out.println("Hfu5 mode exact : " + (mode == StreamingMode.EXACT));
 		// if the streaming mode is EXACT, try and grab things as one chunk
 		if (mode == StreamingMode.EXACT) {
-			byte[] mrp = getMrp(this.matchIndex);
+			byte[] mrp = getMrp(this.matchIndex, this.fetchLocalOnly);
 			FutureMappedResultsV2 range =
 			    tr.getMappedRange_internal_v2(this.begin, this.end, this.mapper, mrp, this.rowLimit, 0,
 			                                  StreamingMode.EXACT.code(), 1, this.snapshot, this.reverse);
@@ -111,9 +116,9 @@ class MappedRangeQueryV2 implements AsyncIterable<MappedKeyValueV2> {
 
 		// If the streaming mode is not EXACT, simply collect the results of an
 		// iteration into a list
-		return AsyncUtil.collect(
-		    new MappedRangeQueryV2(tr, snapshot, begin, end, mapper, rowLimit, matchIndex, reverse, mode, eventKeeper),
-		    tr.getExecutor());
+		return AsyncUtil.collect(new MappedRangeQueryV2(tr, snapshot, begin, end, mapper, rowLimit, matchIndex,
+		                                                fetchLocalOnly, reverse, mode, eventKeeper),
+		                         tr.getExecutor());
 	}
 
 	/**
@@ -123,7 +128,8 @@ class MappedRangeQueryV2 implements AsyncIterable<MappedKeyValueV2> {
 	 */
 	@Override
 	public AsyncRangeIteratorV2 iterator() {
-		return new AsyncRangeIteratorV2(this.rowLimit, getMrp(this.matchIndex), this.reverse, this.streamingMode);
+		return new AsyncRangeIteratorV2(this.rowLimit, getMrp(this.matchIndex, this.fetchLocalOnly), this.reverse,
+		                                this.streamingMode);
 	}
 
 	private class AsyncRangeIteratorV2 implements AsyncIterator<MappedKeyValueV2> {

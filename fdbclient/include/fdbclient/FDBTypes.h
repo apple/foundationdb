@@ -153,7 +153,7 @@ const int MATCH_INDEX_ALL = 0;
 const int MATCH_INDEX_NONE = 1;
 const int MATCH_INDEX_MATCHED_ONLY = 2;
 const int MATCH_INDEX_UNMATCHED_ONLY = 3;
-const int MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH = 8;
+const int MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH_V2 = 3;
 
 enum { txsTagOld = -1, invalidTagOld = -100 };
 

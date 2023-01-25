@@ -107,7 +107,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		@Override
 		public AsyncIterable<MappedKeyValueV2> getMappedRangeV2(KeySelector begin, KeySelector end, byte[] mapper,
 		                                                        int limit, boolean reverse, StreamingMode mode,
-		                                                        int matchIndex) {
+		                                                        int matchIndex, boolean fetchLocalOnly) {
 
 			throw new UnsupportedOperationException("getMappedRange is only supported in serializable");
 		}
@@ -381,12 +381,12 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	@Override
 	public AsyncIterable<MappedKeyValueV2> getMappedRangeV2(KeySelector begin, KeySelector end, byte[] mapper,
 	                                                        int limit, boolean reverse, StreamingMode mode,
-	                                                        int matchIndex) {
+	                                                        int matchIndex, boolean fetchLocalOnly) {
 		if (mapper == null) {
 			throw new IllegalArgumentException("Mapper must be non-null");
 		}
-		return new MappedRangeQueryV2(FDBTransaction.this, false, begin, end, mapper, limit, matchIndex, reverse, mode,
-		                              eventKeeper);
+		return new MappedRangeQueryV2(FDBTransaction.this, false, begin, end, mapper, limit, matchIndex, fetchLocalOnly,
+		                              reverse, mode, eventKeeper);
 	}
 
 	///////////////////

@@ -502,7 +502,8 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	AsyncIterable<MappedKeyValueV2> getMappedRangeV2(KeySelector begin, KeySelector end, byte[] mapper, int limit,
-	                                                 boolean reverse, StreamingMode mode, int matchIndex);
+	                                                 boolean reverse, StreamingMode mode, int matchIndex,
+	                                                 boolean fetchLocalOnly);
 	/**
 	 * Gets an estimate for the number of bytes stored in the given range.
 	 * Note: the estimated size is calculated based on the sampling done by FDB server. The sampling

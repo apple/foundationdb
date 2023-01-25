@@ -4821,7 +4821,8 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 }
 
 std::unordered_map<int, int> versionToPosMatchIndex = { std::make_pair(2, 1) };
-std::unordered_map<int, int> localPosForVersions = { std::make_pair(2, 1) };
+std::unordered_map<int, int> versionToPosFetchLocalOnly = { std::make_pair(2, 6) };
+std::unordered_map<int, int> versionToPosLocal = { std::make_pair(2, 1) };
 std::set<int> supportedVersions{ 2 };
 
 const int code_int = 1;
@@ -4832,14 +4833,16 @@ void fillReply(Arena* a, int getMappedRangeProtocolVersion, MappedKeyValueRef* k
 }
 
 void setLocal(Arena* a, int getMappedRangeProtocolVersion, MappedKeyValueRefV2* kvm, int local, int i) {
-	uint8_t replyBytes[MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH];
-	memset(replyBytes, 0, MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH);
+	uint8_t replyBytes[MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH_V2];
+	memset(replyBytes, 0, MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH_V2);
+	int localPos = versionToPosLocal[getMappedRangeProtocolVersion];
 	replyBytes[0] = getMappedRangeProtocolVersion;
-	replyBytes[1] = code_bool;
-	replyBytes[2] = local;
-	kvm->paramsBuffer = StringRef(*a, replyBytes, MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH);
+	replyBytes[localPos] = code_bool;
+	replyBytes[localPos + 1] = local;
+	kvm->paramsBuffer = StringRef(*a, replyBytes, MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH_V2);
 	if (i == 0) {
-		for (int j = 0; j < 8; j++) {
+		for (int j = 0; j < MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH_V2; j++) {
+			std::cout << "Hfu5Local1111  pos = " << localPos << " buffer = " << (int)kvm->paramsBuffer[j] << std::endl;
 			TraceEvent("Hfu5Local1111").detail("Byte", j).detail("Content", (int)kvm->paramsBuffer[j]);
 		}
 		TraceEvent("Hfu5SetLocal")
@@ -4877,16 +4880,15 @@ void fillReply(Arena* a, int getMappedRangeProtocolVersion, MappedKeyValueRefV2*
 }
 
 // returns protocol version for getMappedRange
-int parseParams(GetMappedKeyValuesRequest* req, int* matchIndex) {
+int parseParams(GetMappedKeyValuesRequest* req, int* matchIndex, bool* fetchLocalOnly) {
 	*matchIndex = MATCH_INDEX_ALL;
+	*fetchLocalOnly = false;
 	return 0;
 }
 
 void parseMatchIndex(KeyRef mrp, int* matchIndex, int version) {
 	int pos = versionToPosMatchIndex[version];
-
 	if (mrp[pos] != code_int) {
-		// err
 		TraceEvent("Hfu5ErrorParsingMatchIndex");
 		return;
 	}
@@ -4895,17 +4897,28 @@ void parseMatchIndex(KeyRef mrp, int* matchIndex, int version) {
 	            sizeof(int)); // assuming to have little endian, if not, then build the int with customized method
 }
 
-int parseParams(GetMappedKeyValuesRequestV2* req, int* matchIndex) {
+void parseFetchLocalOnly(KeyRef mrp, bool* fetchLocalOnly, int version) {
+	int pos = versionToPosFetchLocalOnly[version];
+	if (mrp[pos] != code_bool) {
+		TraceEvent("Hfu5ErrorParsingFetchLocalOnly");
+		return;
+	}
+	*fetchLocalOnly = mrp[pos + 1];
+}
+
+int parseParams(GetMappedKeyValuesRequestV2* req, int* matchIndex, bool* fetchLocalOnly) {
 	KeyRef mrp = req->mrp;
 	int v = mrp[0];
 	for (int j = 0; j < mrp.size(); j++) {
 		TraceEvent("Hfu5parseParams").detail("Byte", j).detail("Content", (int)mrp[j]);
 	}
-	if (v > *supportedVersions.rbegin()) {
+	if (v < *supportedVersions.begin() || v > *supportedVersions.rbegin()) {
 		TraceEvent("Hfu5ErrorVersionNotSupport").detail("Version", v);
+		std::cout << "Hfu5ErrorVersionNotSupport" << std::endl;
 		return 0;
 	}
 	parseMatchIndex(mrp, matchIndex, v);
+	parseFetchLocalOnly(mrp, fetchLocalOnly, v);
 	return v;
 }
 
@@ -5007,8 +5020,8 @@ Future<Reply> mapKeyValues(StorageServer* data,
 	state std::vector<Optional<Tuple>> vt;
 	state bool isRangeQuery = false;
 	state int matchIndex;
-	state bool fetchLocalOnly = false;
-	state int getMappedRangeProtocolVersion = parseParams(pOriginalReq, &matchIndex);
+	state bool fetchLocalOnly;
+	state int getMappedRangeProtocolVersion = parseParams(pOriginalReq, &matchIndex, &fetchLocalOnly);
 	preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 
 	state int sz = input.data.size();
