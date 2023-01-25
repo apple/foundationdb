@@ -319,8 +319,7 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 					fmt::print("{}\n",
 					           json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
 				} else {
-					fmt::print("This cluster \"{}\" is a data cluster within the metacluster whose management cluster "
-					           "is \"{}\"\n",
+					fmt::print("This cluster \"{}\" is a data cluster within the metacluster named \"{}\"\n",
 					           registrationEntry.get().name.toString().c_str(),
 					           registrationEntry.get().metaclusterName.toString().c_str());
 				}
