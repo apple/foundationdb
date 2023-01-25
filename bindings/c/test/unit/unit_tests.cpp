@@ -1245,7 +1245,7 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 		int beginId = 1;
 		int endId = 19;
 		int matchIndex = getMatchIndexRandom();
-		bool fetchLocalOnly = deterministicRandom()->random01() > 0.5 ? true : false;
+		bool fetchLocalOnly = deterministicRandom()->random01() < 0.5;
 		int allMissing = false;
 		auto result = getMappedIndexEntries(beginId, endId, tr, allMissing, matchIndex, fetchLocalOnly);
 
@@ -1325,7 +1325,7 @@ TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
 		int beginId = 1;
 		int endId = 19;
 		int matchIndex = getMatchIndexRandom();
-		bool fetchLocalOnly = deterministicRandom()->random01() > 0.5 ? true : false;
+		bool fetchLocalOnly = deterministicRandom()->random01() < 0.5;
 		int allMissing = true;
 		auto result = getMappedIndexEntries(beginId, endId, tr, allMissing, matchIndex, fetchLocalOnly);
 

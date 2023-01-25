@@ -1850,81 +1850,81 @@ Java_com_apple_foundationdb_FutureMappedResults_FutureMappedResults_1getDirect(J
 	}
 }
 
-// JNIEXPORT void JNICALL
-// Java_com_apple_foundationdb_FutureMappedResultsV2_FutureMappedResultsV2_1getDirect(JNIEnv* jenv,
-//                                                                                  jobject,
-//                                                                                  jlong future,
-//                                                                                  jobject jbuffer,
-//                                                                                  jint bufferCapacity) {
+// TODO: test this
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FutureMappedResultsV2_Result_1getDirect(JNIEnv* jenv,
+                                                                                           jobject,
+                                                                                           jlong future,
+                                                                                           jobject jbuffer,
+                                                                                           jint bufferCapacity) {
 
-// 	if (!future) {
-// 		throwParamNotNull(jenv);
-// 		return;
-// 	}
+	if (!future) {
+		throwParamNotNull(jenv);
+		return;
+	}
 
-// 	uint8_t* buffer = (uint8_t*)jenv->GetDirectBufferAddress(jbuffer);
-// 	if (!buffer) {
-// 		if (!jenv->ExceptionOccurred())
-// 			throwRuntimeEx(jenv, "Error getting handle to native resources");
-// 		return;
-// 	}
+	uint8_t* buffer = (uint8_t*)jenv->GetDirectBufferAddress(jbuffer);
+	if (!buffer) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return;
+	}
 
-// 	FDBFuture* f = (FDBFuture*)future;
-// 	const FDBMappedKeyValueV2* kvms;
-// 	int count;
-// 	fdb_bool_t more;
-// 	fdb_error_t err = fdb_future_get_mappedkeyvalue_array_v2(f, &kvms, &count, &more);
-// 	if (err) {
-// 		safeThrow(jenv, getThrowable(jenv, err));
-// 		return;
-// 	}
+	FDBFuture* f = (FDBFuture*)future;
+	const FDBMappedKeyValueV2* kvms;
+	int count;
+	fdb_bool_t more;
+	fdb_error_t err = fdb_future_get_mappedkeyvalue_array_v2(f, &kvms, &count, &more);
+	if (err) {
+		safeThrow(jenv, getThrowable(jenv, err));
+		return;
+	}
 
-// 	int totalCapacityNeeded = 2 * sizeof(jint);
-// 	for (int i = 0; i < count; i++) {
-// 		const FDBMappedKeyValueV2& kvm = kvms[i];
-// 		totalCapacityNeeded += kvm.key.key_length + kvm.value.key_length + kvm.getRange.begin.key.key_length +
-// 		                       kvm.getRange.end.key.key_length + kvm.paramsBuffer.key_length +
-// 		                       6 * sizeof(jint); // Besides the 4 lengths above, also one for kvm_count.
-// 		int kvm_count = kvm.getRange.m_size;
-// 		for (int i = 0; i < kvm_count; i++) {
-// 			auto kv = kvm.getRange.data[i];
-// 			totalCapacityNeeded += kv.key_length + kv.value_length + 2 * sizeof(jint);
-// 		}
-// 		if (bufferCapacity < totalCapacityNeeded) {
-// 			count = i; /* Only fit first `i` K/V pairs */
-// 			more = true;
-// 			break;
-// 		}
-// 	}
+	int totalCapacityNeeded = 2 * sizeof(jint);
+	for (int i = 0; i < count; i++) {
+		const FDBMappedKeyValueV2& kvm = kvms[i];
+		totalCapacityNeeded += kvm.key.key_length + kvm.value.key_length + kvm.getRange.begin.key.key_length +
+		                       kvm.getRange.end.key.key_length + kvm.paramsBuffer.key_length +
+		                       6 * sizeof(jint); // Besides the 5 lengths above, also one for kvm_count.
+		int kvm_count = kvm.getRange.m_size;
+		for (int i = 0; i < kvm_count; i++) {
+			auto kv = kvm.getRange.data[i];
+			totalCapacityNeeded += kv.key_length + kv.value_length + 2 * sizeof(jint);
+		}
+		if (bufferCapacity < totalCapacityNeeded) {
+			count = i; /* Only fit first `i` K/V pairs */
+			more = true;
+			break;
+		}
+	}
 
-// 	int offset = 0;
+	int offset = 0;
 
-// 	// First copy RangeResultSummary, i.e. [keyCount, more]
-// 	memcpy(buffer + offset, &count, sizeof(jint));
-// 	offset += sizeof(jint);
+	// First copy RangeResultSummary, i.e. [keyCount, more]
+	memcpy(buffer + offset, &count, sizeof(jint));
+	offset += sizeof(jint);
 
-// 	memcpy(buffer + offset, &more, sizeof(jint));
-// 	offset += sizeof(jint);
+	memcpy(buffer + offset, &more, sizeof(jint));
+	offset += sizeof(jint);
 
-// 	for (int i = 0; i < count; i++) {
-// 		const FDBMappedKeyValueV2& kvm = kvms[i];
-// 		memcpyString(buffer, offset, kvm.key);
-// 		memcpyString(buffer, offset, kvm.value);
-// 		memcpyString(buffer, offset, kvm.paramsBuffer);
-// 		memcpyString(buffer, offset, kvm.getRange.begin.key);
-// 		memcpyString(buffer, offset, kvm.getRange.end.key);
+	for (int i = 0; i < count; i++) {
+		const FDBMappedKeyValueV2& kvm = kvms[i];
+		memcpyString(buffer, offset, kvm.key);
+		memcpyString(buffer, offset, kvm.value);
+		memcpyString(buffer, offset, kvm.paramsBuffer);
+		memcpyString(buffer, offset, kvm.getRange.begin.key);
+		memcpyString(buffer, offset, kvm.getRange.end.key);
 
-// 		int kvm_count = kvm.getRange.m_size;
-// 		memcpy(buffer + offset, &kvm_count, sizeof(jint));
-// 		offset += sizeof(jint);
+		int kvm_count = kvm.getRange.m_size;
+		memcpy(buffer + offset, &kvm_count, sizeof(jint));
+		offset += sizeof(jint);
 
-// 		for (int i = 0; i < kvm_count; i++) {
-// 			auto kv = kvm.getRange.data[i];
-// 			memcpyStringInner(buffer, offset, kv.key, kv.key_length);
-// 			memcpyStringInner(buffer, offset, kv.value, kv.value_length);
-// 		}
-// 	}
-// }
+		for (int i = 0; i < kvm_count; i++) {
+			auto kv = kvm.getRange.data[i];
+			memcpyStringInner(buffer, offset, kv.key, kv.key_length);
+			memcpyStringInner(buffer, offset, kv.value, kv.value_length);
+		}
+	}
+}
 
 JNIEXPORT jlong JNICALL
 Java_com_apple_foundationdb_FDBTransaction_Transaction_1getEstimatedRangeSizeBytes(JNIEnv* jenv,

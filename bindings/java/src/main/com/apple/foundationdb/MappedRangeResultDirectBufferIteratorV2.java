@@ -49,9 +49,9 @@ class MappedRangeResultDirectBufferIteratorV2 extends DirectBufferIterator imple
 
 		final byte[] key = getString();
 		final byte[] value = getString();
+		final byte[] paramsBuffer = getString();
 		final byte[] rangeBegin = getString();
 		final byte[] rangeEnd = getString();
-		final byte[] paramsBuffer = getString();
 		final int rangeResultSize = byteBuffer.getInt();
 		List<KeyValue> rangeResult = new ArrayList();
 		for (int i = 0; i < rangeResultSize; i++) {

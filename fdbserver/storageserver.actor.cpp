@@ -4852,7 +4852,7 @@ void setLocal(Arena* a, int getMappedRangeProtocolVersion, MappedKeyValueRefV2* 
 		    .detail("SizeStringRef", sizeof(kvm->paramsBuffer))
 		    .detail("SizeReq", sizeof(kvm->reqAndResult))
 		    .detail("SizeInt", sizeof(int))
-		    .detail("GetMappedRangeProtocolVersion", (int)replyBytes[0])
+		    .detail("GetMappedRangeProtocolVersion", getMappedRangeProtocolVersion)
 		    .detail("CODE", (int)replyBytes[1])
 		    .detail("PosKVM", (long)kvm)
 		    .detail("PosParamsBuffer", (long)&(kvm->paramsBuffer))
@@ -4906,6 +4906,7 @@ void parseFetchLocalOnly(KeyRef mrp, bool* fetchLocalOnly, int version) {
 	*fetchLocalOnly = mrp[pos + 1];
 }
 
+// returns protocol version for getMappedRange
 int parseParams(GetMappedKeyValuesRequestV2* req, int* matchIndex, bool* fetchLocalOnly) {
 	KeyRef mrp = req->mrp;
 	int v = mrp[0];
@@ -5050,7 +5051,6 @@ Future<Reply> mapKeyValues(StorageServer* data,
 
 			// std::cout << "key:" << printable(kvm->key) << ", value:" << printable(kvm->value)
 			//          << ", mappedKey:" << printable(mappedKey) << std::endl;
-			int fetchLocalOnly = false;
 			subqueries.push_back(mapSubquery(data,
 			                                 input.version,
 			                                 pOriginalReq,

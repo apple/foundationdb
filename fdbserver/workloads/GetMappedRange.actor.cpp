@@ -39,6 +39,9 @@ const KeyRef INDEX = "INDEX"_sr;
 const int MATCH_INDEX_TEST_710_API = -1;
 const int code_int = 1;
 const int code_bool = 2;
+static std::unordered_map<int, int> versionToPosMatchIndex = { std::make_pair(2, 1) };
+static std::unordered_map<int, int> versionToPosFetchLocalOnly = { std::make_pair(2, 6) };
+static std::unordered_map<int, int> versionToLength = { std::make_pair(2, 8) };
 
 int recordSize;
 int indexSize;
@@ -167,9 +170,9 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	                           int matchIndex,
 	                           bool isBoundary,
 	                           bool allMissing) {
-		// std::cout << "validateRecord expectedId " << expectedId << " it->key " << printable(it->key)
-		//           << " indexEntryKey(expectedId) " << printable(indexEntryKey(expectedId))
-		//           << " matchIndex: " << matchIndex << std::endl;
+		std::cout << "validateRecord expectedId " << expectedId << " it->key " << printable(it->key)
+		          << " indexEntryKey(expectedId) " << printable(indexEntryKey(expectedId))
+		          << " matchIndex: " << matchIndex << std::endl;
 		if (matchIndex == MATCH_INDEX_ALL || matchIndex == MATCH_INDEX_TEST_710_API || isBoundary) {
 			ASSERT(it->key == indexEntryKey(expectedId));
 		} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
@@ -291,12 +294,17 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					}
 					return std::make_pair(result.size(), result.more);
 				} else {
-					uint8_t tmp[6];
-					memset(tmp, 0, 6);
-					tmp[0] = 2; // API protocol version
-					tmp[1] = code_int;
-					tmp[2] = matchIndex; // little endian
-					StringRef str(tmp, 6);
+					int version = 2;
+					int mrpLength = versionToLength[version];
+					bool fetchLocalOnly = deterministicRandom()->random01() < 0.5; // TODO : make it random
+					uint8_t tmp[mrpLength];
+					memset(tmp, 0, mrpLength);
+					tmp[0] = version;
+					tmp[versionToPosMatchIndex[version]] = code_int;
+					tmp[versionToPosMatchIndex[version] + 1] = matchIndex; // little endian
+					tmp[versionToPosFetchLocalOnly[version]] = code_bool;
+					tmp[versionToPosFetchLocalOnly[version] + 1] = fetchLocalOnly;
+					StringRef str(tmp, mrpLength);
 					Key mrp(str);
 					MappedRangeResultV2 result = wait(tr->getMappedRangeV2(beginSelector,
 					                                                       endSelector,

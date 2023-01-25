@@ -212,7 +212,7 @@ class MappedRangeQueryIntegrationTest {
 	RangeQueryWithIndex mappedRangeQueryV2 = (int begin, int end, Database db) -> db.run(tr -> {
 		try {
 			int matchIndex = getRandomMatchIndex();
-			boolean fetchLocalOnly = false;
+			boolean fetchLocalOnly = Math.random() < 0.5;
 			boolean missing = Math.random() < 0.5;
 			byte[] m = missing ? MAPPER_ALL_MISSING : MAPPER;
 			System.out.println("MatchIndex = " + matchIndex + "  missing = " + missing);
