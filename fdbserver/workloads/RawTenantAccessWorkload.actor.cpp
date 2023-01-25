@@ -38,8 +38,16 @@ struct RawTenantAccessWorkload : TestWorkload {
 	int tenantCount;
 	double testDuration;
 
+	enum Op {
+		CREATE_TENANT,
+		DELETE_TENANT,
+		VALID_WRITE, // write to existing tenant
+		INVALID_WRITE, // write to nonexistent tenant
+	};
+	std::vector<std::pair<Op, int>> txnOps; // Operations and corresponding tenant index
 	std::set<int> lastCreatedTenants; // the index of tenant to be created if the last transaction succeed
 	std::set<int> lastDeletedTenants; // the index of tenant to be deleted if the last transaction succeed
+
 	std::map<int, int64_t> idx2Tid; // workload tenant idx to tenantId
 	std::map<int64_t, int> tid2Idx; // tenant id to tenant index in this workload
 
@@ -55,7 +63,7 @@ struct RawTenantAccessWorkload : TestWorkload {
 		return Void();
 	}
 
-	TenantName indexToTenantName(int index) {
+	TenantName indexToTenantName(int index) const {
 		auto name = fmt::format("tenant_idx_{:06d}", index);
 		return TenantName(StringRef(name));
 	}
@@ -81,7 +89,7 @@ struct RawTenantAccessWorkload : TestWorkload {
 
 	bool hasExistingTenant() const { return idx2Tid.size() - lastDeletedTenants.size() > 0; }
 
-	int64_t extractTenantId(ValueRef value) {
+	int64_t extractTenantId(ValueRef value) const {
 		int64_t id;
 		json_spirit::mValue jsonObject;
 		json_spirit::read_string(value.toString(), jsonObject);
@@ -160,9 +168,6 @@ struct RawTenantAccessWorkload : TestWorkload {
 			TraceEvent("RawTenantAccess_ApplyTenantChanges").detail("CurrentTenantCount", self->idx2Tid.size());
 		}
 
-		self->lastDeletedTenants.clear();
-		self->lastCreatedTenants.clear();
-
 		return Void();
 	}
 
@@ -173,7 +178,7 @@ struct RawTenantAccessWorkload : TestWorkload {
 		return Void();
 	}
 
-	void createNewTenant(Reference<ReadYourWritesTransaction> tr, UID traceId) {
+	int64_t chooseNonexistentTenant() const {
 		ASSERT(hasNonexistentTenant());
 		int tenantIdx = deterministicRandom()->randomInt(0, tenantCount);
 		// find the nearest nonexistent tenant
@@ -183,18 +188,15 @@ struct RawTenantAccessWorkload : TestWorkload {
 				tenantIdx = 0;
 			}
 		}
-
-		tr->set(specialKeysTenantMapPrefix.withSuffix(indexToTenantName(tenantIdx)), ""_sr);
-		lastCreatedTenants.insert(tenantIdx);
-		lastDeletedTenants.erase(tenantIdx);
-
-		TraceEvent("RawTenantAccess_CreateNewTenant", traceId)
-		    .detail("TenantIndex", tenantIdx)
-		    .detail("LastCreatedTenants", lastCreatedTenants.size())
-		    .detail("LastDeletedTenants", lastDeletedTenants.size());
+		return tenantIdx;
 	}
 
-	void deleteExistingTenant(Reference<ReadYourWritesTransaction> tr, UID traceId) {
+	void createNewTenant(int64_t tenantIdx, Reference<ReadYourWritesTransaction> tr, UID traceId) const {
+		tr->set(specialKeysTenantMapPrefix.withSuffix(indexToTenantName(tenantIdx)), ""_sr);
+		TraceEvent("RawTenantAccess_CreateNewTenant", traceId).detail("TenantIndex", tenantIdx);
+	}
+
+	int64_t chooseExistingTenant() const {
 		ASSERT(hasExistingTenant());
 		int tenantIdx = deterministicRandom()->randomInt(0, tenantCount);
 		// find the nearest existing tenant
@@ -207,29 +209,18 @@ struct RawTenantAccessWorkload : TestWorkload {
 				tenantIdx = 0;
 			}
 		}
-
-		Key key = specialKeysTenantMapPrefix.withSuffix(indexToTenantName(tenantIdx));
-		tr->clear(key);
-		lastCreatedTenants.erase(tenantIdx);
-		lastDeletedTenants.insert(tenantIdx);
-		TraceEvent("RawTenantAccess_DeleteExistingTenant", traceId)
-		    .detail("TenantIndex", tenantIdx)
-		    .detail("TenantId", idx2Tid.at(tenantIdx))
-		    .detail("LastCreatedTenants", lastCreatedTenants.size())
-		    .detail("LastDeletedTenants", lastDeletedTenants.size());
+		return tenantIdx;
 	}
 
-	void writeToExistingTenant(Reference<ReadYourWritesTransaction> tr, UID traceId) {
-		ASSERT_GT(idx2Tid.size(), 0);
-		// determine the tenant to write
-		int tenantIdx = deterministicRandom()->randomInt(0, tenantCount);
-		auto it = idx2Tid.lower_bound(tenantIdx);
-		if (it == idx2Tid.end()) {
-			tenantIdx = idx2Tid.begin()->first;
-		} else {
-			tenantIdx = it->first;
-		}
+	void deleteExistingTenant(int64_t tenantIdx, Reference<ReadYourWritesTransaction> tr, UID traceId) const {
+		Key key = specialKeysTenantMapPrefix.withSuffix(indexToTenantName(tenantIdx));
+		tr->clear(key);
+		TraceEvent("RawTenantAccess_DeleteExistingTenant", traceId)
+		    .detail("TenantIndex", tenantIdx)
+		    .detail("TenantId", idx2Tid.at(tenantIdx));
+	}
 
+	void writeToExistingTenant(int64_t tenantIdx, Reference<ReadYourWritesTransaction> tr, UID traceId) const {
 		// write the raw data
 		int64_t tenantId = idx2Tid.at(tenantIdx);
 		Key prefix = TenantAPI::idToPrefix(tenantId);
@@ -239,7 +230,7 @@ struct RawTenantAccessWorkload : TestWorkload {
 		    .detail("TenantId", tenantId);
 	}
 
-	void writeToInvalidTenant(Reference<ReadYourWritesTransaction> tr, UID traceId) {
+	void writeToInvalidTenant(Reference<ReadYourWritesTransaction> tr, UID traceId) const {
 		ASSERT(hasNonexistentTenant());
 		// determine the invalid tenant id
 		int64_t tenantId = TenantInfo::INVALID_TENANT;
@@ -264,22 +255,17 @@ struct RawTenantAccessWorkload : TestWorkload {
 	ACTOR static Future<bool> randomTenantTransaction(Database cx, RawTenantAccessWorkload* self) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		state UID traceId = deterministicRandom()->randomUniqueID();
-		// 1. create/delete tenant and write to a tenant is an illegal operation for now. (tenantMapChange &&
-		// normalKeyWriteOp == true)
-		// 2. write a nonexistent tenant is illegal. (invalidTenantWriteOp == true)
-		state bool legalTxnOnly = deterministicRandom()->coinflip(); // whether allow generating illegal transaction
-		state bool validTenantWriteOnly = deterministicRandom()->coinflip(); // whether only write to existing tenants
+
+		state bool tenantMapChangeOp = false;
+		state bool invalidTenantWriteOp = false;
+		state bool normalKeyWriteOp = false;
 
 		state bool illegalAccessCaught = false;
-		state bool normalKeyWriteOp = false;
-		state bool validTenantWriteOp = false;
-		state bool invalidTenantWriteOp = false;
-		state bool tenantMapChangeOp = false;
 		state bool committed = false;
 
+		self->prepareTransactionOps();
+
 		loop {
-			self->lastDeletedTenants.clear();
-			self->lastCreatedTenants.clear();
 			tr->reset();
 			tr->debugTransaction(traceId);
 			try {
@@ -287,26 +273,25 @@ struct RawTenantAccessWorkload : TestWorkload {
 				tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 				// the transaction will randomly run 10 ops
 				state int i = 0;
-				for (; i < 10; ++i) {
-					int op = deterministicRandom()->randomInt(0, 4);
-					if (op == 0 && self->hasNonexistentTenant() && !(legalTxnOnly && normalKeyWriteOp)) {
-						// whether to create a new Tenant
-						self->createNewTenant(tr, traceId);
+				for (; i < self->txnOps.size(); ++i) {
+					switch (self->txnOps[i].first) {
+					case CREATE_TENANT:
+						self->createNewTenant(self->txnOps[i].second, tr, traceId);
 						tenantMapChangeOp = true;
-					} else if (op == 1 && self->hasExistingTenant() && !(legalTxnOnly && normalKeyWriteOp)) {
-						// whether to delete an existing tenant
-						self->deleteExistingTenant(tr, traceId);
+						break;
+					case DELETE_TENANT:
+						self->deleteExistingTenant(self->txnOps[i].second, tr, traceId);
 						tenantMapChangeOp = true;
-					} else if (op == 2 && self->hasNonexistentTenant() && !legalTxnOnly && !validTenantWriteOnly) {
-						// whether to write to a nonexistent tenant
+						break;
+					case VALID_WRITE:
+						self->writeToExistingTenant(self->txnOps[i].second, tr, traceId);
+						normalKeyWriteOp = true;
+						break;
+					case INVALID_WRITE:
 						self->writeToInvalidTenant(tr, traceId);
 						invalidTenantWriteOp = true;
 						normalKeyWriteOp = true;
-					} else if (op == 3 && self->idx2Tid.size() > 0 && !(legalTxnOnly && tenantMapChangeOp)) {
-						// whether to write to an existing tenant
-						self->writeToExistingTenant(tr, traceId);
-						validTenantWriteOp = true;
-						normalKeyWriteOp = true;
+						break;
 					}
 				}
 
@@ -349,6 +334,42 @@ struct RawTenantAccessWorkload : TestWorkload {
 			return Future<Void>(Void());
 		}));
 		return Void();
+	}
+
+	void prepareTransactionOps() {
+		// 1. create/delete tenant and write to a tenant is an illegal operation for now. (tenantMapChange &&
+		// normalKeyWriteOp == true)
+		// 2. write a nonexistent tenant is illegal. (invalidTenantWriteOp == true)
+		bool legalTxnOnly = deterministicRandom()->coinflip(); // whether allow generating illegal transaction
+		bool validTenantWriteOnly = deterministicRandom()->coinflip(); // whether only write to existing tenants
+		bool normalKeyWriteOp = false;
+		bool tenantMapChangeOp = false;
+
+		txnOps.clear();
+		lastDeletedTenants.clear();
+		lastCreatedTenants.clear();
+		for (int i = 0; i < 10; ++i) {
+			int op = deterministicRandom()->randomInt(0, 4);
+			if (op == 0 && hasNonexistentTenant() && !(legalTxnOnly && normalKeyWriteOp)) {
+				// whether to create a new Tenant
+				txnOps.emplace_back(CREATE_TENANT, chooseNonexistentTenant());
+				lastCreatedTenants.emplace(txnOps.back().second);
+				tenantMapChangeOp = true;
+			} else if (op == 1 && hasExistingTenant() && !(legalTxnOnly && normalKeyWriteOp)) {
+				// whether to delete an existing tenant
+				txnOps.emplace_back(DELETE_TENANT, chooseExistingTenant());
+				lastDeletedTenants.emplace(txnOps.back().second);
+				tenantMapChangeOp = true;
+			} else if (op == 2 && hasNonexistentTenant() && !legalTxnOnly && !validTenantWriteOnly) {
+				// whether to write to a nonexistent tenant
+				txnOps.emplace_back(INVALID_WRITE, -1);
+				normalKeyWriteOp = true;
+			} else if (op == 3 && hasExistingTenant() && !(legalTxnOnly && tenantMapChangeOp)) {
+				// whether to write to an existing tenant
+				txnOps.emplace_back(VALID_WRITE, chooseExistingTenant());
+				normalKeyWriteOp = true;
+			}
+		}
 	}
 
 	ACTOR static Future<Void> _start(Database cx, RawTenantAccessWorkload* self) {
