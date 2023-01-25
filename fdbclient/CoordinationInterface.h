@@ -241,6 +241,7 @@ struct OpenDatabaseCoordRequest {
 	std::vector<Hostname> hostnames;
 	std::vector<NetworkAddress> coordinators;
 	ReplyPromise<CachedSerialization<struct ClientDBInfo>> reply;
+	bool internal{ true };
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -252,7 +253,8 @@ struct OpenDatabaseCoordRequest {
 		           clusterKey,
 		           coordinators,
 		           reply,
-		           hostnames);
+		           hostnames,
+		           internal);
 	}
 };
 
