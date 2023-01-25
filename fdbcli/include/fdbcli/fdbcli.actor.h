@@ -42,7 +42,7 @@ namespace fdb_cli {
 constexpr char msgTypeKey[] = "type";
 constexpr char msgClusterKey[] = "cluster";
 constexpr char msgClusterTypeKey[] = "cluster_type";
-constexpr char msgMgmtClusterKey[] = "management_cluster";
+constexpr char msgMetaclusterName[] = "metacluster_name";
 constexpr char msgMetaclusterKey[] = "metacluster";
 constexpr char msgDataClustersKey[] = "data_clusters";
 constexpr char msgCapacityKey[] = "capacity";
