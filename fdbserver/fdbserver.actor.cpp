@@ -2272,9 +2272,8 @@ int main(int argc, char* argv[]) {
 				g_knobs.setKnob("encrypt_header_auth_token_enabled",
 				                KnobValue::create(ini.GetBoolValue("META", "encryptHeaderAuthTokenEnabled", false)));
 				g_knobs.setKnob("encrypt_header_auth_token_algo",
-				                KnobValue::create((int)ini.GetLongValue("META",
-				                                                        "encryptHeaderAuthTokenAlgo",
-				                                                        FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO)));
+				                KnobValue::create((int)ini.GetLongValue(
+				                    "META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO)));
 			}
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator->run();
