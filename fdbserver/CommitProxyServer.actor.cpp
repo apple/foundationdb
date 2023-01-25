@@ -391,7 +391,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 					}
 
 					if (bytes > FLOW_KNOBS->PACKET_WARNING) {
-						TraceEvent(!g_network->isSimulated() ? SevWarnAlways : SevWarn, "LargeTransaction")
+						TraceEvent(SevWarn, "LargeTransaction")
 						    .suppressFor(1.0)
 						    .detail("Size", bytes)
 						    .detail("Client", req.reply.getEndpoint().getPrimaryAddress());
@@ -403,9 +403,9 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 						continue;
 					}
 
-					Optional<TenantNameRef> const& tenantName = req.tenantInfo.name;
-					if (SERVER_KNOBS->STORAGE_QUOTA_ENABLED && !req.bypassStorageQuota() && tenantName.present() &&
-					    commitData->tenantsOverStorageQuota.count(tenantName.get()) > 0) {
+					if (SERVER_KNOBS->STORAGE_QUOTA_ENABLED && !req.bypassStorageQuota() &&
+					    req.tenantInfo.hasTenant() &&
+					    commitData->tenantsOverStorageQuota.count(req.tenantInfo.tenantId) > 0) {
 						req.reply.sendError(storage_quota_exceeded());
 						continue;
 					}
@@ -999,9 +999,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 			for (int t = 0; t < trs.size(); t++) {
 				TenantInfo const& tenantInfo = trs[t].tenantInfo;
 				int64_t tenantId = tenantInfo.tenantId;
-				Optional<TenantNameRef> const& tenantName = tenantInfo.name;
 				if (tenantId != TenantInfo::INVALID_TENANT) {
-					ASSERT(tenantName.present());
 					encryptDomainIds.emplace(tenantId);
 				} else {
 					// Optimization: avoid enumerating mutations if cluster only serves default encryption domains
@@ -1663,13 +1661,15 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	applyMetadataEffect(self);
 
 	if (debugID.present()) {
-		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadaEffect");
+		g_traceBatch.addEvent(
+		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadataEffect");
 	}
 
 	determineCommittedTransactions(self);
 
 	if (debugID.present()) {
-		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadaEffect");
+		g_traceBatch.addEvent(
+		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.DetermineCommittedTransactions");
 	}
 
 	if (self->forceRecovery) {
@@ -1681,7 +1681,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent(
-		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadaToCommittedTxn");
+		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadataToCommittedTxn");
 	}
 
 	// Second pass
@@ -2233,7 +2233,9 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 
 	wait(commitData->validState.getFuture());
 
-	state Version minVersion = commitData->stats.lastCommitVersionAssigned + 1;
+	state Version minVersion =
+	    req.minTenantVersion == latestVersion ? commitData->stats.lastCommitVersionAssigned + 1 : req.minTenantVersion;
+
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
 	bool validTenant = wait(checkTenant(commitData, req.tenant.tenantId, minVersion, "GetKeyServerLocation"));

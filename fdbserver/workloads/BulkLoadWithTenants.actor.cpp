@@ -18,9 +18,11 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ClientKnobs.h"
 #include "fdbclient/TenantEntryCache.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/TenantInfo.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -36,11 +38,12 @@ struct BulkSetupWorkload : TestWorkload {
 	Key keyPrefix;
 	double maxNumTenants;
 	double minNumTenants;
-	std::vector<TenantName> tenantNames;
+	std::vector<Reference<Tenant>> tenants;
 	bool deleteTenants;
 	double testDuration;
-	std::unordered_map<TenantName, int> numKVPairsPerTenant;
+	std::unordered_map<int64_t, std::vector<KeyValueRef>> numKVPairsPerTenant;
 	bool enableEKPKeyFetchFailure;
+	Arena arena;
 
 	BulkSetupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
@@ -63,24 +66,28 @@ struct BulkSetupWorkload : TestWorkload {
 
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(key(n), value((n + 1) % nodeCount)); }
 
-	ACTOR static Future<int> getNumKeysForTenant(TenantName tenant, Database cx) {
+	ACTOR static Future<std::vector<KeyValueRef>> getKVPairsForTenant(BulkSetupWorkload* workload,
+	                                                                  Reference<Tenant> tenant,
+	                                                                  Database cx) {
 		state KeySelector begin = firstGreaterOrEqual(normalKeys.begin);
 		state KeySelector end = firstGreaterOrEqual(normalKeys.end);
+		state std::vector<KeyValueRef> kvPairs;
 		state ReadYourWritesTransaction tr = ReadYourWritesTransaction(cx, tenant);
-		state int result = 0;
 		loop {
 			try {
 				RangeResult kvRange = wait(tr.getRange(begin, end, 1000));
 				if (!kvRange.more && kvRange.size() == 0) {
 					break;
 				}
-				result += kvRange.size();
+				for (int i = 0; i < kvRange.size(); i++) {
+					kvPairs.push_back(KeyValueRef(workload->arena, KeyValueRef(kvRange[i].key, kvRange[i].value)));
+				}
 				begin = firstGreaterThan(kvRange.end()[-1].key);
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
 		}
-		return result;
+		return kvPairs;
 	}
 
 	ACTOR static Future<Void> _setup(BulkSetupWorkload* workload, Database cx) {
@@ -88,19 +95,19 @@ struct BulkSetupWorkload : TestWorkload {
 		state int numTenantsToCreate =
 		    deterministicRandom()->randomInt(workload->minNumTenants, workload->maxNumTenants + 1);
 		TraceEvent("BulkSetupTenantCreation").detail("NumTenants", numTenantsToCreate);
+
 		if (numTenantsToCreate > 0) {
-			std::vector<Future<Void>> tenantFutures;
-			state std::vector<TenantName> tenantNames;
+			state std::vector<Future<Optional<TenantMapEntry>>> tenantFutures;
 			for (int i = 0; i < numTenantsToCreate; i++) {
-				TenantMapEntry entry;
-				tenantNames.push_back(TenantName(format("BulkSetupTenant_%04d", i)));
-				TraceEvent("CreatingTenant")
-				    .detail("Tenant", tenantNames.back())
-				    .detail("TenantGroup", entry.tenantGroup);
-				tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenantNames.back())));
+				TenantName tenantName = TenantNameRef(format("BulkSetupTenant_%04d", i));
+				TraceEvent("CreatingTenant").detail("Tenant", tenantName);
+				tenantFutures.push_back(TenantAPI::createTenant(cx.getReference(), tenantName));
 			}
 			wait(waitForAll(tenantFutures));
-			workload->tenantNames = tenantNames;
+			for (auto& f : tenantFutures) {
+				ASSERT(f.get().present());
+				workload->tenants.push_back(makeReference<Tenant>(f.get().get().id, f.get().get().tenantName));
+			}
 		}
 		wait(bulkSetup(cx,
 		               workload,
@@ -115,30 +122,59 @@ struct BulkSetupWorkload : TestWorkload {
 		               0.1,
 		               0,
 		               0,
-		               workload->tenantNames));
+		               workload->tenants));
 
 		state int i;
-		for (i = 0; i < workload->tenantNames.size(); i++) {
-			int keysForCurTenant = wait(getNumKeysForTenant(workload->tenantNames[i], cx));
-			workload->numKVPairsPerTenant[workload->tenantNames[i]] = keysForCurTenant;
+		for (i = 0; i < workload->tenants.size(); i++) {
+			std::vector<KeyValueRef> keysForCurTenant = wait(getKVPairsForTenant(workload, workload->tenants[i], cx));
+			if (workload->enableEKPKeyFetchFailure &&
+			    CLIENT_KNOBS->EKP_TENANT_ID_TO_DROP == TenantInfo::INVALID_TENANT && keysForCurTenant.size() > 0) {
+				IKnobCollection::getMutableGlobalKnobCollection().setKnob(
+				    "ekp_tenant_id_to_drop", KnobValueRef::create(int64_t{ workload->tenants[i]->id() }));
+				TraceEvent("BulkSetupTenantForEKPToDrop").detail("Tenant", CLIENT_KNOBS->EKP_TENANT_ID_TO_DROP);
+			}
+			workload->numKVPairsPerTenant[workload->tenants[i]->id()] = keysForCurTenant;
 		}
 		return Void();
 	}
 
 	ACTOR static Future<bool> _check(BulkSetupWorkload* workload, Database cx) {
 		state int i;
-		for (i = 0; i < workload->tenantNames.size(); i++) {
-			int keysForCurTenant = wait(getNumKeysForTenant(workload->tenantNames[i], cx));
-			if (keysForCurTenant != workload->numKVPairsPerTenant[workload->tenantNames[i]]) {
-				TraceEvent(SevError, "BulkSetupNumKeysMistmatch")
-				    .detail("TenantName", workload->tenantNames[i])
-				    .detail("ActualCount", keysForCurTenant)
-				    .detail("ExpectedCount", workload->numKVPairsPerTenant[workload->tenantNames[i]]);
+		for (i = 0; i < workload->tenants.size(); i++) {
+			state Reference<Tenant> tenant = workload->tenants[i];
+			std::vector<KeyValueRef> keysForCurTenant = wait(getKVPairsForTenant(workload, tenant, cx));
+			if (tenant->id() == CLIENT_KNOBS->EKP_TENANT_ID_TO_DROP) {
+				// Don't check the tenant that the EKP would throw errors for
+				continue;
+			}
+			std::vector<KeyValueRef> expectedKeysForCurTenant = workload->numKVPairsPerTenant[tenant->id()];
+			if (keysForCurTenant.size() != expectedKeysForCurTenant.size()) {
+				TraceEvent(SevError, "BulkSetupNumKeysMismatch")
+				    .detail("TenantName", tenant)
+				    .detail("ActualCount", keysForCurTenant.size())
+				    .detail("ExpectedCount", expectedKeysForCurTenant.size());
 				return false;
 			} else {
 				TraceEvent("BulkSetupNumKeys")
-				    .detail("TenantName", workload->tenantNames[i])
-				    .detail("KeysForTenant", keysForCurTenant);
+				    .detail("TenantName", tenant)
+				    .detail("ActualCount", keysForCurTenant.size());
+			}
+
+			for (int j = 0; j < expectedKeysForCurTenant.size(); j++) {
+				if (expectedKeysForCurTenant[j].key != keysForCurTenant[j].key) {
+					TraceEvent(SevError, "BulkSetupNumKeyMismatch")
+					    .detail("TenantName", tenant)
+					    .detail("ActualKey", keysForCurTenant[j].key)
+					    .detail("ExpectedKey", expectedKeysForCurTenant[j].key);
+					return false;
+				}
+				if (expectedKeysForCurTenant[j].value != keysForCurTenant[j].value) {
+					TraceEvent(SevError, "BulkSetupNumValueMismatch")
+					    .detail("TenantName", tenant)
+					    .detail("ActualValue", keysForCurTenant[j].value)
+					    .detail("ExpectedValue", expectedKeysForCurTenant[j].value);
+					return false;
+				}
 			}
 		}
 		return true;
@@ -150,25 +186,17 @@ struct BulkSetupWorkload : TestWorkload {
 			state Reference<TenantEntryCache<Void>> tenantCache =
 			    makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
 			wait(tenantCache->init());
-			state int numTenantsToDelete = deterministicRandom()->randomInt(0, workload->tenantNames.size() + 1);
+			state int numTenantsToDelete = deterministicRandom()->randomInt(0, workload->tenants.size() + 1);
 			TraceEvent("BulkSetupTenantDeletion").detail("NumTenants", numTenantsToDelete);
 			if (numTenantsToDelete > 0) {
 				state int i;
 				for (i = 0; i < numTenantsToDelete; i++) {
-					state TenantName tenant = deterministicRandom()->randomChoice(workload->tenantNames);
-					Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getByName(tenant));
-					ASSERT(payload.present());
-					state int64_t tenantId = payload.get().entry.id;
+					state int tenantIndex = deterministicRandom()->randomInt(0, workload->tenants.size());
+					state Reference<Tenant> tenant = workload->tenants[tenantIndex];
+					workload->tenants.erase(workload->tenants.begin() + tenantIndex);
 					TraceEvent("BulkSetupTenantDeletionClearing")
-					    .detail("TenantName", tenant)
-					    .detail("TenantId", tenantId)
-					    .detail("TotalNumTenants", workload->tenantNames.size());
-					for (auto it = workload->tenantNames.begin(); it != workload->tenantNames.end(); it++) {
-						if (*it == tenant) {
-							workload->tenantNames.erase(it);
-							break;
-						}
-					}
+					    .detail("Tenant", tenant)
+					    .detail("TotalNumTenants", workload->tenants.size());
 					// clear the tenant
 					state ReadYourWritesTransaction tr = ReadYourWritesTransaction(cx, tenant);
 					loop {
@@ -181,11 +209,11 @@ struct BulkSetupWorkload : TestWorkload {
 						}
 					}
 					// delete the tenant
-					wait(success(TenantAPI::deleteTenant(cx.getReference(), tenant)));
+					wait(success(TenantAPI::deleteTenant(cx.getReference(), tenant->name.get(), tenant->id())));
+
 					TraceEvent("BulkSetupTenantDeletionDone")
-					    .detail("TenantName", tenant)
-					    .detail("TenantId", tenantId)
-					    .detail("TotalNumTenants", workload->tenantNames.size());
+					    .detail("Tenant", tenant)
+					    .detail("TotalNumTenants", workload->tenants.size());
 				}
 			}
 		}

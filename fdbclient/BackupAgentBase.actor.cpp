@@ -273,7 +273,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
                                                Version version,
                                                Reference<KeyRangeMap<Version>> key_version,
                                                Database cx,
-                                               std::unordered_map<int64_t, TenantName>* tenantMap,
+                                               std::map<int64_t, TenantName>* tenantMap,
                                                bool provisionalProxy) {
 	try {
 		state uint64_t offset(0);
@@ -321,33 +321,21 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			offset += len2;
 			state Optional<MutationRef> encryptedLogValue = Optional<MutationRef>();
 
-			// Decrypt mutation ref if encrypted
-			if (logValue.isEncrypted()) {
-				encryptedLogValue = logValue;
-				state EncryptCipherDomainId domainId = logValue.encryptionHeader()->cipherTextDetails.encryptDomainId;
-				Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
-				try {
-					TextAndHeaderCipherKeys cipherKeys = wait(
-					    getEncryptCipherKeys(dbInfo, *logValue.encryptionHeader(), BlobCipherMetrics::BACKUP, true));
-					logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::BACKUP);
-				} catch (Error& e) {
-					// It's possible a tenant was deleted and the encrypt key fetch failed
-					if (e.code() == error_code_encrypt_keys_fetch_failed) {
-						TraceEvent(SevError, "MutationLogRestoreEncryptKeyFetchFailed")
-						    .detail("Version", version)
-						    .detail("TenantId", domainId);
-					} else {
-						throw;
-					}
+			// check for valid tenant in required tenant mode if the mutation is either encrypted or is un-encrypted and
+			// NOT a system key
+			if (config.tenantMode == TenantMode::REQUIRED &&
+			    (logValue.isEncrypted() || !isSystemKey(logValue.param1))) {
+				int64_t tenantId = TenantInfo::INVALID_TENANT;
+				if (logValue.isEncrypted()) {
+					tenantId = logValue.encryptionHeader()->cipherTextDetails.encryptDomainId;
+				} else {
+					tenantId = TenantAPI::extractTenantIdFromMutation(logValue);
 				}
-			}
-			ASSERT(!logValue.isEncrypted());
-
-			if (config.tenantMode == TenantMode::REQUIRED && !isSystemKey(logValue.param1)) {
-				// If a tenant is not found for a given mutation then exclude it from the batch
-				int64_t tenantId = TenantAPI::extractTenantIdFromMutation(logValue);
 				ASSERT(tenantMap != nullptr);
-				if (tenantMap->find(tenantId) == tenantMap->end()) {
+				if (logValue.isEncrypted() && isReservedEncryptDomain(tenantId)) {
+					// These are valid encrypt domains so don't check the tenant map
+				} else if (tenantMap->find(tenantId) == tenantMap->end()) {
+					// If a tenant is not found for a given mutation then exclude it from the batch
 					ASSERT(!provisionalProxy);
 					TraceEvent(SevWarnAlways, "MutationLogRestoreTenantNotFound")
 					    .detail("Version", version)
@@ -357,6 +345,31 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 					continue;
 				}
 			}
+
+			// Decrypt mutation ref if encrypted
+			if (logValue.isEncrypted()) {
+				encryptedLogValue = logValue;
+				state EncryptCipherDomainId domainId = logValue.encryptionHeader()->cipherTextDetails.encryptDomainId;
+				Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
+				try {
+					TextAndHeaderCipherKeys cipherKeys =
+					    wait(getEncryptCipherKeys(dbInfo, *logValue.encryptionHeader(), BlobCipherMetrics::RESTORE));
+					logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::BACKUP);
+				} catch (Error& e) {
+					// It's possible a tenant was deleted and the encrypt key fetch failed
+					if (e.code() == error_code_encrypt_keys_fetch_failed) {
+						TraceEvent(SevWarnAlways, "MutationLogRestoreEncryptKeyFetchFailed")
+						    .detail("Version", version)
+						    .detail("TenantId", domainId);
+						CODE_PROBE(true, "mutation log restore encrypt keys not found");
+						consumed += BackupAgentBase::logHeaderSize + len1 + len2;
+						continue;
+					} else {
+						throw;
+					}
+				}
+			}
+			ASSERT(!logValue.isEncrypted());
 
 			MutationRef originalLogValue = logValue;
 
@@ -673,7 +686,7 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
                                               PromiseStream<Future<Void>> addActor,
                                               FlowLock* commitLock,
                                               Reference<KeyRangeMap<Version>> keyVersion,
-                                              std::unordered_map<int64_t, TenantName>* tenantMap,
+                                              std::map<int64_t, TenantName>* tenantMap,
                                               bool provisionalProxy) {
 	state Version lastVersion = invalidVersion;
 	state bool endOfStream = false;
@@ -805,7 +818,7 @@ ACTOR Future<Void> applyMutations(Database cx,
                                   PublicRequestStream<CommitTransactionRequest> commit,
                                   NotifiedVersion* committedVersion,
                                   Reference<KeyRangeMap<Version>> keyVersion,
-                                  std::unordered_map<int64_t, TenantName>* tenantMap,
+                                  std::map<int64_t, TenantName>* tenantMap,
                                   bool provisionalProxy) {
 	state FlowLock commitLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 	state PromiseStream<Future<Void>> addActor;

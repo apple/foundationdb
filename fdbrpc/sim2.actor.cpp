@@ -2397,9 +2397,9 @@ class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
 	std::deque<std::pair<NetworkAddress, Packet>> recvBuffer;
 	AsyncVar<int64_t> writtenPackets;
 	NetworkAddress _localAddress;
-	bool randomDropPacket() {
-		auto res = deterministicRandom()->random01() < .000001;
-		CODE_PROBE(res, "UDP packet drop", probe::context::sim2, probe::assert::simOnly, probe::decoration::rare);
+	static bool randomDropPacket() {
+		auto res = deterministicRandom()->random01() < .000005;
+		CODE_PROBE(res, "UDP packet drop", probe::context::sim2, probe::assert::simOnly);
 		return res;
 	}
 
