@@ -65,7 +65,7 @@ struct RawTenantAccessWorkload : TestWorkload {
 		// create N tenant through special key space
 		wait(runRYWTransaction(cx, [workload](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			for (int i = 0; i < workload->tenantCount ; i += 2) {
+			for (int i = 0; i < workload->tenantCount; i += 2) {
 				tr->set(workload->specialKeysTenantMapPrefix.withSuffix(workload->indexToTenantName(i)), ""_sr);
 			}
 			return Future<Void>(Void());
@@ -77,13 +77,9 @@ struct RawTenantAccessWorkload : TestWorkload {
 		return Void();
 	}
 
-	bool hasNonexistentTenant() const {
-		return lastCreatedTenants.size() + idx2Tid.size() < tenantCount;
-	}
+	bool hasNonexistentTenant() const { return lastCreatedTenants.size() + idx2Tid.size() < tenantCount; }
 
-	bool hasExistingTenant() const {
-		return idx2Tid.size() - lastDeletedTenants.size() > 0;
-	}
+	bool hasExistingTenant() const { return idx2Tid.size() - lastDeletedTenants.size() > 0; }
 
 	int64_t extractTenantId(ValueRef value) {
 		int64_t id;
@@ -282,6 +278,8 @@ struct RawTenantAccessWorkload : TestWorkload {
 		state bool committed = false;
 
 		loop {
+			self->lastDeletedTenants.clear();
+			self->lastCreatedTenants.clear();
 			tr->reset();
 			tr->debugTransaction(traceId);
 			try {

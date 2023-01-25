@@ -69,17 +69,29 @@ struct ResolverInterface {
 struct StateTransactionRef {
 	constexpr static FileIdentifier file_identifier = 6150271;
 	StateTransactionRef() {}
-	StateTransactionRef(const bool committed, VectorRef<MutationRef> const& mutations)
-	  : committed(committed), mutations(mutations) {}
+	StateTransactionRef(const bool committed,
+	                    VectorRef<MutationRef> const& mutations,
+	                    Optional<VectorRef<int64_t>> tenantIds)
+	  : committed(committed), mutations(mutations), tenantIds(tenantIds) {}
 	StateTransactionRef(Arena& p, const StateTransactionRef& toCopy)
-	  : committed(toCopy.committed), mutations(p, toCopy.mutations) {}
+	  : committed(toCopy.committed), mutations(p, toCopy.mutations) {
+		if (toCopy.tenantIds.present()) {
+			tenantIds = VectorRef<int64_t>(p, toCopy.tenantIds.get());
+		}
+	}
 	bool committed;
 	VectorRef<MutationRef> mutations;
-	size_t expectedSize() const { return mutations.expectedSize(); }
+
+	// The tenants associated with this transaction. This field only existing when tenant mode is required. Because the
+	// applyMetadataEffect need to know whether the tenant access is valid to decide whether to apply metadata
+	Optional<VectorRef<int64_t>> tenantIds;
+	size_t expectedSize() const {
+		return mutations.expectedSize() + (tenantIds.present() ? tenantIds.expectedSize() : 0);
+	}
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, committed, mutations);
+		serializer(ar, committed, mutations, tenantIds);
 	}
 };
 

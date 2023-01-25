@@ -203,6 +203,8 @@ struct ResolutionRequestBuilder {
 		ASSERT(transactionNumberInBatch >= 0 && transactionNumberInBatch < 32768);
 
 		bool isTXNStateTransaction = false;
+		bool needParseTenantId = !trRequest.tenantInfo.hasTenant() && self->getTenantMode() == TenantMode::REQUIRED;
+		VectorRef<int64_t> tenantIds;
 		for (auto& m : trIn.mutations) {
 			DEBUG_MUTATION("AddTr", ver, m, self->dbgid).detail("Idx", transactionNumberInBatch);
 			if (m.type == MutationRef::SetVersionstampedKey) {
@@ -216,6 +218,8 @@ struct ResolutionRequestBuilder {
 				auto& tr = getOutTransaction(0, trIn.read_snapshot);
 				tr.mutations.push_back(requests[0].arena, m);
 				tr.lock_aware = trRequest.isLockAware();
+			} else if (needParseTenantId && !isSystemKey(m.param1) && isSingleKeyMutation((MutationRef::Type)m.type)) {
+				tenantIds.push_back(requests[0].arena, TenantAPI::extractTenantIdFromMutation(m));
 			}
 		}
 		if (isTXNStateTransaction && !trRequest.isLockAware()) {
@@ -239,7 +243,9 @@ struct ResolutionRequestBuilder {
 			}
 			// Note only Resolver 0 got the correct spanContext, which means
 			// the reply from Resolver 0 has the right one back.
-			getOutTransaction(0, trIn.read_snapshot).spanContext = trRequest.spanContext;
+			auto& tr = getOutTransaction(0, trIn.read_snapshot);
+			tr.spanContext = trRequest.spanContext;
+			tr.tenantIds = tenantIds;
 		}
 
 		std::vector<int> resolversUsed;
@@ -960,9 +966,6 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	int conflictRangeCount = 0;
 	self->maxTransactionBytes = 0;
 	for (int t = 0; t < trs.size(); t++) {
-		// detect invalid tenant operation
-
-
 		requests.addTransaction(trs[t], self->commitVersion, t);
 		conflictRangeCount +=
 		    trs[t].transaction.read_conflict_ranges.size() + trs[t].transaction.write_conflict_ranges.size();
@@ -1082,7 +1085,7 @@ bool validTenantAccess(MutationRef m,
 	return true;
 }
 
-inline bool tenantMapChanging(MutationRef mutation) {
+inline bool tenantMapChanging(MutationRef const& mutation) {
 	const KeyRangeRef tenantMapRange = TenantMetadata::tenantMap().subspace;
 	if (mutation.type == MutationRef::SetValue && mutation.param1.startsWith(tenantMapRange.begin)) {
 		return true;
@@ -1171,13 +1174,26 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				    committed && self->resolution[resolver].stateMutations[versionIndex][transactionIndex].committed;
 			}
 
-			if (committed) {
-				Error e = validateAndProcessTenantAccess(
-				    self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations,
-				    self->pProxyCommitData,
-				    self->pProxyCommitData->dbgid,
-				    "applyMetadataEffect");
-				committed = committed && (e.code() == error_code_success);
+			if (committed && self->pProxyCommitData->getTenantMode() == TenantMode::REQUIRED) {
+				auto& tenantIds = self->resolution[0].stateMutations[versionIndex][transactionIndex].tenantIds;
+				ASSERT(tenantIds.present());
+				// check whether contains tenant changes and normal key writing
+				auto& mutations = self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations;
+				committed =
+				    tenantIds.get().empty() || std::none_of(mutations.begin(), mutations.end(), tenantMapChanging);
+
+				// check if all tenant ids are valid if committed == true
+				committed = committed &&
+				            std::all_of(tenantIds.get().begin(), tenantIds.get().end(), [self](const int64_t& tid) {
+					            return self->pProxyCommitData->tenantMap.count(tid);
+				            });
+
+				// TODO debug trace
+				if (self->debugID.present()) {
+					TraceEvent e(SevDebug, "TenantCheck_ApplyMetadataEffect", self->debugID.get());
+					e.detail("TenantIds", tenantIds);
+					e.detail("Mutations", mutations);
+				}
 			}
 
 			if (committed) {

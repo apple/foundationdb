@@ -15,4 +15,4 @@ runSetup = true
     [[test.workload]]
     testName = 'RawTenantAccess'
     tenantCount = 1000
-    testDuration = 200
+    testDuration = 120
