@@ -2062,24 +2062,6 @@ public:
 			return false;
 		}
 
-		// Check if any processes on machine are rebooting
-		if (processesOnMachine != processesPerMachine) {
-			CODE_PROBE(true,
-			           "Attempted reboot and kill, but the target did not have all of its processes running",
-			           probe::context::sim2,
-			           probe::assert::simOnly);
-			TraceEvent(SevWarn, "AbortedKill")
-			    .detail("KillType", kt)
-			    .detail("MachineId", machineId)
-			    .detail("Reason", "Machine processes does not match number of processes per machine")
-			    .detail("Processes", processesOnMachine)
-			    .detail("ProcessesPerMachine", processesPerMachine)
-			    .backtrace();
-			if (ktFinal)
-				*ktFinal = KillType::None;
-			return false;
-		}
-
 		TraceEvent("KillMachine")
 		    .detail("MachineId", machineId)
 		    .detail("Kt", kt)
