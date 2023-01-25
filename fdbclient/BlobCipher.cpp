@@ -620,6 +620,8 @@ void EncryptBlobCipherAes265Ctr::setCipherAlgoHeaderWithAuthV1(const uint8_t* ci
                                                                const BlobCipherEncryptHeaderFlagsV1& flags,
                                                                BlobCipherEncryptHeaderRef* headerRef,
                                                                Arena& arena) {
+	// Construct algorithm specific details except 'authToken', serialize the details into 'headerRef' to allow
+	// authToken generation
 	AesCtrWithAuthV1<S> algoHeader(
 	    BlobCipherDetails(textCipherKey->getDomainId(), textCipherKey->getBaseCipherId(), textCipherKey->getSalt()),
 	    BlobCipherDetails(
@@ -628,7 +630,6 @@ void EncryptBlobCipherAes265Ctr::setCipherAlgoHeaderWithAuthV1(const uint8_t* ci
 	    AES_256_IV_LENGTH,
 	    arena);
 	headerRef->algoHeaderRef = AesCtrWithAuthV1<S>::serialize(algoHeader, arena);
-
 	// compute the authentication token
 	StringRef serialized =
 	    ObjectWriter::toValue(*headerRef, IncludeVersion(ProtocolVersion::withEncryptionAtRest())).contents();
@@ -637,7 +638,10 @@ void EncryptBlobCipherAes265Ctr::setCipherAlgoHeaderWithAuthV1(const uint8_t* ci
 	                 AES_256_KEY_LENGTH,
 	                 mutateString(algoHeader.authTokenRef),
 	                 (EncryptAuthTokenAlgo)flags.authTokenAlgo,
-	                 S);
+	                 AUTH_TOKEN_MAX_SIZE);
+
+	// Populate headerRef algorithm specific header details
+	headerRef->algoHeaderRef = AesCtrWithAuthV1<S>::serialize(algoHeader, arena);
 }
 
 void EncryptBlobCipherAes265Ctr::setCipherAlgoHeaderNoAuthV1(const BlobCipherEncryptHeaderFlagsV1& flags,
@@ -748,13 +752,13 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 		BlobCipherMetrics::counters(usageType).encryptCPUTimeNS += int64_t((timer_monotonic() - startTime) * 1e9);
 	}
 
-	CODE_PROBE(true, "BlobCipher data encryption");
+	CODE_PROBE(true, "ConfigurableEncryption: BlobCipher data encryption");
 	CODE_PROBE(authTokenAlgo == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
-	           "Encryption authentication disabled");
+	           "ConfigurbleEncryption: Encryption authentication disabled");
 	CODE_PROBE(authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
-	           "HMAC_SHA Auth token generation");
+	           "ConfigurableEncrytion: HMAC_SHA Auth token generation");
 	CODE_PROBE(authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
-	           "AES_CMAC Auth token generation");
+	           "ConfigurableEncryption: AES_CMAC Auth token generation");
 
 	return encryptBuf;
 }
@@ -907,7 +911,7 @@ void DecryptBlobCipherAes256Ctr::validateAuthTokenV1(const uint8_t* ciphertext,
 	                 AES_256_KEY_LENGTH,
 	                 &computed[0],
 	                 (EncryptAuthTokenAlgo)flags.authTokenAlgo,
-	                 S);
+	                 AUTH_TOKEN_MAX_SIZE);
 
 	if (memcmp(&persited[0], &computed[0], S) != 0) {
 		TraceEvent(SevWarn, "BlobCipherVerifyEncryptBlobHeaderAuthTokenMismatch")
@@ -986,11 +990,11 @@ void DecryptBlobCipherAes256Ctr::validateEncryptHeaderV1(const uint8_t* cipherte
 	validateAuthTokensV1(ciphertext, ciphertextLen, flags, headerRef, arena);
 
 	CODE_PROBE(flags.authTokenAlgo == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
-	           "Decryption authentication disabled");
+	           "ConfigurableEncryption: Decryption authentication disabled");
 	CODE_PROBE(flags.authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
-	           "Decryption HMAC_SHA Auth token verification");
+	           "ConfigurableEncryption: Decryption HMAC_SHA Auth token verification");
 	CODE_PROBE(flags.authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
-	           "Decryption AES_CMAC Auth token verification");
+	           "ConfigurableEncryption: Decryption AES_CMAC Auth token verification");
 }
 
 void DecryptBlobCipherAes256Ctr::validateEncryptHeader(const uint8_t* ciphertext,
@@ -1045,7 +1049,7 @@ Reference<EncryptBuf> DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphert
 		BlobCipherMetrics::counters(usageType).decryptCPUTimeNS += int64_t((timer_monotonic() - startTime) * 1e9);
 	}
 
-	CODE_PROBE(true, "BlobCipher data decryption");
+	CODE_PROBE(true, "ConfigurableEncryption: BlobCipher data decryption");
 
 	return decrypted;
 }
@@ -1570,7 +1574,7 @@ TEST_CASE("flow/BlobCipher") {
 
 	// validate basic encrypt followed by decrypt operation for AUTH_MODE_NONE using 'configurable encryption' semantics
 	if (CLIENT_KNOBS->ENCRYPT_ENABLE_CONFIGURABLE_ENCRYPTION) {
-		TraceEvent("NoneAuthModeStartConfigurableEncryption");
+		TraceEvent("ConfigurableEncryptionNoAuthStart");
 
 		EncryptBlobCipherAes265Ctr encryptor(cipherKey,
 		                                     headerCipherKey,
@@ -1617,7 +1621,7 @@ TEST_CASE("flow/BlobCipher") {
 		ASSERT_EQ(decryptedBuf->getLogicalSize(), bufLen);
 		ASSERT_EQ(memcmp(decryptedBuf->begin(), &orgData[0], bufLen), 0);
 
-		TraceEvent("BlobCipherTestEncryptDone")
+		TraceEvent("BlobCipherTestEncryptDecryptDone")
 		    .detail("HeaderFlagsVersion", headerRef.flagsVersion)
 		    .detail("AlgoHeaderVersion", headerRef.algoHeaderVersion)
 		    .detail("HeaderEncryptMode", flags.encryptMode)
@@ -1641,6 +1645,7 @@ TEST_CASE("flow/BlobCipher") {
 			if (e.code() != error_code_encrypt_header_metadata_mismatch) {
 				throw;
 			}
+			TraceEvent("ConfigurableEncryptionNoAuthCorruptFlagsDone");
 		}
 
 		// induce encryption header corruption - encryptionMode corrupted
@@ -1659,6 +1664,7 @@ TEST_CASE("flow/BlobCipher") {
 			if (e.code() != error_code_encrypt_header_metadata_mismatch) {
 				throw;
 			}
+			TraceEvent("ConfigurableEncryptionNoAuthCorruptEncryptModeDone");
 		}
 
 		// induce encrypted buffer payload corruption
@@ -1677,7 +1683,7 @@ TEST_CASE("flow/BlobCipher") {
 			ASSERT(false);
 		}
 
-		TraceEvent("NoneAuthModeConfigurableEncryptionDone");
+		TraceEvent("ConfigurableEncryptionNoAuthStart");
 	}
 
 	// validate basic encrypt followed by decrypt operation for AUTH_TOKEN_MODE_SINGLE
@@ -1793,6 +1799,130 @@ TEST_CASE("flow/BlobCipher") {
 
 		TraceEvent("SingleAuthModeHmacShaDone");
 	}
+
+	// validate basic encrypt followed by decrypt operation for AUTH_TOKEN_MODE_SINGLE
+	// HMAC_SHA authToken algorithm with configurable encryption semantics
+	if (CLIENT_KNOBS->ENCRYPT_ENABLE_CONFIGURABLE_ENCRYPTION) {
+		TraceEvent("ConfigurableEncryptionSingleAuthModeStart").detail("Mode", "HMAC-SHA");
+
+		EncryptBlobCipherAes265Ctr encryptor(cipherKey,
+		                                     headerCipherKey,
+		                                     iv,
+		                                     AES_256_IV_LENGTH,
+		                                     EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+		                                     EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
+		                                     BlobCipherMetrics::TEST);
+		BlobCipherEncryptHeaderRef headerRef;
+		Reference<EncryptBuf> encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+
+		ASSERT_EQ(encryptedBuf->getLogicalSize(), bufLen);
+		ASSERT_NE(memcmp(&orgData[0], encryptedBuf->begin(), bufLen), 0);
+		ASSERT_EQ(headerRef.flagsVersion, CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
+		ASSERT_EQ(headerRef.algoHeaderVersion, CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION);
+
+		// validate flags
+		BlobCipherEncryptHeaderFlagsV1 flags;
+		BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, &flags, arena);
+		ASSERT_EQ(flags.encryptMode, EncryptCipherMode::ENCRYPT_CIPHER_MODE_AES_256_CTR);
+		ASSERT_EQ(flags.authTokenMode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+		ASSERT_EQ(flags.authTokenAlgo, EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA);
+
+		// validate algo header
+		AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE> hmacSha;
+		AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>::deserialize(headerRef.algoHeaderRef, &hmacSha, arena);
+		// validate IV
+		ASSERT_EQ(hmacSha.ivRef.size(), AES_256_IV_LENGTH);
+		ASSERT_EQ(memcmp(&iv[0], hmacSha.ivRef.begin(), AES_256_IV_LENGTH), 0);
+		ASSERT_NE(memcmp(&orgData[0], encryptedBuf->begin(), bufLen), 0);
+		// validate cipherKey details
+		ASSERT_EQ(hmacSha.cipherTextDetails.encryptDomainId, cipherKey->getDomainId());
+		ASSERT_EQ(hmacSha.cipherTextDetails.baseCipherId, cipherKey->getBaseCipherId());
+		ASSERT_EQ(hmacSha.cipherTextDetails.salt, cipherKey->getSalt());
+		ASSERT_EQ(hmacSha.cipherHeaderDetails.encryptDomainId, headerCipherKey->getDomainId());
+		ASSERT_EQ(hmacSha.cipherHeaderDetails.baseCipherId, headerCipherKey->getBaseCipherId());
+		ASSERT_EQ(hmacSha.cipherHeaderDetails.salt, headerCipherKey->getSalt());
+
+		Reference<BlobCipherKey> tCipherKeyKey = cipherKeyCache->getCipherKey(hmacSha.cipherTextDetails.encryptDomainId,
+		                                                                      hmacSha.cipherTextDetails.baseCipherId,
+		                                                                      hmacSha.cipherTextDetails.salt);
+		Reference<BlobCipherKey> hCipherKey = cipherKeyCache->getCipherKey(hmacSha.cipherHeaderDetails.encryptDomainId,
+		                                                                   hmacSha.cipherHeaderDetails.baseCipherId,
+		                                                                   hmacSha.cipherHeaderDetails.salt);
+		ASSERT(tCipherKeyKey->isEqual(cipherKey));
+		ASSERT(hCipherKey->isEqual(headerCipherKey));
+		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, hmacSha.ivRef.begin(), BlobCipherMetrics::TEST);
+		Reference<EncryptBuf> decryptedBuf = decryptor.decrypt(encryptedBuf->begin(), bufLen, headerRef, arena);
+
+		ASSERT_EQ(decryptedBuf->getLogicalSize(), bufLen);
+		ASSERT_EQ(memcmp(decryptedBuf->begin(), &orgData[0], bufLen), 0);
+
+		TraceEvent("BlobCipherTestEncryptDecryptDone")
+		    .detail("HeaderFlagsVersion", headerRef.flagsVersion)
+		    .detail("AlgoHeaderVersion", headerRef.algoHeaderVersion)
+		    .detail("HeaderEncryptMode", flags.encryptMode)
+		    .detail("HeaderEncryptAuthTokenMode", flags.authTokenMode)
+		    .detail("HeaderEncryptAuthTokenAlgo", flags.authTokenAlgo)
+		    .detail("TextDomainId", hmacSha.cipherTextDetails.encryptDomainId)
+		    .detail("TextBaseCipherId", hmacSha.cipherTextDetails.baseCipherId)
+		    .detail("TextSalt", hmacSha.cipherTextDetails.salt)
+		    .detail("HeaderDomainId", hmacSha.cipherTextDetails.encryptDomainId)
+		    .detail("HeaderBaseCipherId", hmacSha.cipherTextDetails.baseCipherId)
+		    .detail("HeaderSalt", hmacSha.cipherTextDetails.salt);
+
+		// induce encryption header corruption - headerVersion corrupted
+		BlobCipherEncryptHeaderRef corruptedHeaderRef;
+		BlobCipherEncryptHeaderRef::clone(headerRef, &corruptedHeaderRef, arena);
+		corruptedHeaderRef.flagsVersion += 1;
+		try {
+			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
+			decryptedBuf = decryptor.decrypt(encryptedBuf->begin(), bufLen, corruptedHeaderRef, arena);
+			ASSERT(false); // error expected
+		} catch (Error& e) {
+			if (e.code() != error_code_encrypt_header_metadata_mismatch) {
+				throw;
+			}
+			TraceEvent("ConfigurableEncryptionCorruptFlagsDone").detail("Mode", "HMAC-SHA");
+		}
+
+		// induce encryption header corruption - encryptionMode corrupted
+		BlobCipherEncryptHeaderRef::clone(headerRef, &corruptedHeaderRef, arena);
+		BlobCipherEncryptHeaderFlagsV1 corruptedFlags;
+		BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, &corruptedFlags, arena);
+		corruptedFlags.encryptMode += 1;
+		corruptedHeaderRef.flagsRef = BlobCipherEncryptHeaderFlagsV1::serialize(corruptedFlags, arena);
+		try {
+			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
+			decryptedBuf = decryptor.decrypt(encryptedBuf->begin(), bufLen, corruptedHeaderRef, arena);
+			ASSERT(false); // error expected
+		} catch (Error& e) {
+			if (e.code() != error_code_encrypt_header_metadata_mismatch) {
+				throw;
+			}
+			TraceEvent("ConfigurableEncryptionCorruptEncryptModeDone").detail("Mode", "HMAC-SHA");
+		}
+
+		// induce encrypted buffer payload corruption
+		try {
+			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+			uint8_t temp[bufLen];
+			memcpy(encryptedBuf->begin(), &temp[0], bufLen);
+			int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
+			temp[tIdx] += 1;
+			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
+			decryptedBuf = decryptor.decrypt(&temp[0], bufLen, headerRef, arena);
+			ASSERT_NE(memcmp(decryptedBuf->begin(), &orgData[0], bufLen), 0);
+		} catch (Error& e) {
+			if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
+				throw;
+			}
+			TraceEvent("ConfigurableEncryptionCorruptPayloadDone").detail("Mode", "HMAC-SHA");
+		}
+
+		TraceEvent("ConfigurableEncryptionSingleAuthModeDone").detail("Mode", "HMAC-SHA");
+	}
+
 	// AES_CMAC authToken algorithm
 	{
 		TraceEvent("SingleAuthModeAesCMacStart").log();
@@ -1904,6 +2034,129 @@ TEST_CASE("flow/BlobCipher") {
 		}
 
 		TraceEvent("SingleAuthModeAesCmacDone");
+	}
+
+	// validate basic encrypt followed by decrypt operation for AUTH_TOKEN_MODE_SINGLE
+	// HMAC_SHA authToken algorithm with configurable encryption semantics
+	if (CLIENT_KNOBS->ENCRYPT_ENABLE_CONFIGURABLE_ENCRYPTION) {
+		TraceEvent("ConfigurableEncryptionSingleAuthModeStart").detail("Mode", "AES-CMAC");
+
+		EncryptBlobCipherAes265Ctr encryptor(cipherKey,
+		                                     headerCipherKey,
+		                                     iv,
+		                                     AES_256_IV_LENGTH,
+		                                     EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+		                                     EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
+		                                     BlobCipherMetrics::TEST);
+		BlobCipherEncryptHeaderRef headerRef;
+		Reference<EncryptBuf> encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+
+		ASSERT_EQ(encryptedBuf->getLogicalSize(), bufLen);
+		ASSERT_NE(memcmp(&orgData[0], encryptedBuf->begin(), bufLen), 0);
+		ASSERT_EQ(headerRef.flagsVersion, CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
+		ASSERT_EQ(headerRef.algoHeaderVersion, CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION);
+
+		// validate flags
+		BlobCipherEncryptHeaderFlagsV1 flags;
+		BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, &flags, arena);
+		ASSERT_EQ(flags.encryptMode, EncryptCipherMode::ENCRYPT_CIPHER_MODE_AES_256_CTR);
+		ASSERT_EQ(flags.authTokenMode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+		ASSERT_EQ(flags.authTokenAlgo, EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC);
+
+		// validate algo header
+		AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE> aesCmac;
+		AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>::deserialize(headerRef.algoHeaderRef, &aesCmac, arena);
+		// validate IV
+		ASSERT_EQ(aesCmac.ivRef.size(), AES_256_IV_LENGTH);
+		ASSERT_EQ(memcmp(&iv[0], aesCmac.ivRef.begin(), AES_256_IV_LENGTH), 0);
+		ASSERT_NE(memcmp(&orgData[0], encryptedBuf->begin(), bufLen), 0);
+		// validate cipherKey details
+		ASSERT_EQ(aesCmac.cipherTextDetails.encryptDomainId, cipherKey->getDomainId());
+		ASSERT_EQ(aesCmac.cipherTextDetails.baseCipherId, cipherKey->getBaseCipherId());
+		ASSERT_EQ(aesCmac.cipherTextDetails.salt, cipherKey->getSalt());
+		ASSERT_EQ(aesCmac.cipherHeaderDetails.encryptDomainId, headerCipherKey->getDomainId());
+		ASSERT_EQ(aesCmac.cipherHeaderDetails.baseCipherId, headerCipherKey->getBaseCipherId());
+		ASSERT_EQ(aesCmac.cipherHeaderDetails.salt, headerCipherKey->getSalt());
+
+		Reference<BlobCipherKey> tCipherKeyKey = cipherKeyCache->getCipherKey(aesCmac.cipherTextDetails.encryptDomainId,
+		                                                                      aesCmac.cipherTextDetails.baseCipherId,
+		                                                                      aesCmac.cipherTextDetails.salt);
+		Reference<BlobCipherKey> hCipherKey = cipherKeyCache->getCipherKey(aesCmac.cipherHeaderDetails.encryptDomainId,
+		                                                                   aesCmac.cipherHeaderDetails.baseCipherId,
+		                                                                   aesCmac.cipherHeaderDetails.salt);
+		ASSERT(tCipherKeyKey->isEqual(cipherKey));
+		ASSERT(hCipherKey->isEqual(headerCipherKey));
+		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, aesCmac.ivRef.begin(), BlobCipherMetrics::TEST);
+		Reference<EncryptBuf> decryptedBuf = decryptor.decrypt(encryptedBuf->begin(), bufLen, headerRef, arena);
+
+		ASSERT_EQ(decryptedBuf->getLogicalSize(), bufLen);
+		ASSERT_EQ(memcmp(decryptedBuf->begin(), &orgData[0], bufLen), 0);
+
+		TraceEvent("BlobCipherTestEncryptDecryptDone")
+		    .detail("HeaderFlagsVersion", headerRef.flagsVersion)
+		    .detail("AlgoHeaderVersion", headerRef.algoHeaderVersion)
+		    .detail("HeaderEncryptMode", flags.encryptMode)
+		    .detail("HeaderEncryptAuthTokenMode", flags.authTokenMode)
+		    .detail("HeaderEncryptAuthTokenAlgo", flags.authTokenAlgo)
+		    .detail("TextDomainId", aesCmac.cipherTextDetails.encryptDomainId)
+		    .detail("TextBaseCipherId", aesCmac.cipherTextDetails.baseCipherId)
+		    .detail("TextSalt", aesCmac.cipherTextDetails.salt)
+		    .detail("HeaderDomainId", aesCmac.cipherTextDetails.encryptDomainId)
+		    .detail("HeaderBaseCipherId", aesCmac.cipherTextDetails.baseCipherId)
+		    .detail("HeaderSalt", aesCmac.cipherTextDetails.salt);
+
+		// induce encryption header corruption - headerVersion corrupted
+		BlobCipherEncryptHeaderRef corruptedHeaderRef;
+		BlobCipherEncryptHeaderRef::clone(headerRef, &corruptedHeaderRef, arena);
+		corruptedHeaderRef.flagsVersion += 1;
+		try {
+			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
+			decryptedBuf = decryptor.decrypt(encryptedBuf->begin(), bufLen, corruptedHeaderRef, arena);
+			ASSERT(false); // error expected
+		} catch (Error& e) {
+			if (e.code() != error_code_encrypt_header_metadata_mismatch) {
+				throw;
+			}
+			TraceEvent("ConfigurableEncryptionCorruptFlagsDone").detail("Mode", "AES-CMAC");
+		}
+
+		// induce encryption header corruption - encryptionMode corrupted
+		BlobCipherEncryptHeaderRef::clone(headerRef, &corruptedHeaderRef, arena);
+		BlobCipherEncryptHeaderFlagsV1 corruptedFlags;
+		BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, &corruptedFlags, arena);
+		corruptedFlags.encryptMode += 1;
+		corruptedHeaderRef.flagsRef = BlobCipherEncryptHeaderFlagsV1::serialize(corruptedFlags, arena);
+		try {
+			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
+			decryptedBuf = decryptor.decrypt(encryptedBuf->begin(), bufLen, corruptedHeaderRef, arena);
+			ASSERT(false); // error expected
+		} catch (Error& e) {
+			if (e.code() != error_code_encrypt_header_metadata_mismatch) {
+				throw;
+			}
+			TraceEvent("ConfigurableEncryptionCorruptEncryptModeDone").detail("Mode", "AES-CMAC");
+		}
+
+		// induce encrypted buffer payload corruption
+		try {
+			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+			uint8_t temp[bufLen];
+			memcpy(encryptedBuf->begin(), &temp[0], bufLen);
+			int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
+			temp[tIdx] += 1;
+			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
+			decryptedBuf = decryptor.decrypt(&temp[0], bufLen, headerRef, arena);
+			ASSERT_NE(memcmp(decryptedBuf->begin(), &orgData[0], bufLen), 0);
+		} catch (Error& e) {
+			if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
+				throw;
+			}
+			TraceEvent("ConfigurableEncryptionCorruptPayloadDone").detail("Mode", "AES-CMAC");
+		}
+
+		TraceEvent("ConfigurableEncryptionSingleAuthModeStart").detail("Mode", "AES-CMAC");
 	}
 
 	// Validate dropping encryptDomainId cached keys
