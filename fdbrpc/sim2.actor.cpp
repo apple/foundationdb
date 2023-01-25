@@ -1503,17 +1503,20 @@ public:
 					if (processInfo->locality.dcId() == primaryDcId) {
 						primaryProcessesLeft.add(processInfo->locality);
 						primaryLocalitiesLeft.push_back(processInfo->locality);
-					} else if (processInfo->locality.dcId() == remoteDcId) {
+					}
+					if (processInfo->locality.dcId() == remoteDcId) {
 						remoteProcessesLeft.add(processInfo->locality);
 						remoteLocalitiesLeft.push_back(processInfo->locality);
-					} else if (std::find(primarySatelliteDcIds.begin(),
-					                     primarySatelliteDcIds.end(),
-					                     processInfo->locality.dcId()) != primarySatelliteDcIds.end()) {
+					}
+					if (std::find(primarySatelliteDcIds.begin(),
+					              primarySatelliteDcIds.end(),
+					              processInfo->locality.dcId()) != primarySatelliteDcIds.end()) {
 						primarySatelliteProcessesLeft.add(processInfo->locality);
 						primarySatelliteLocalitiesLeft.push_back(processInfo->locality);
-					} else if (std::find(remoteSatelliteDcIds.begin(),
-					                     remoteSatelliteDcIds.end(),
-					                     processInfo->locality.dcId()) != remoteSatelliteDcIds.end()) {
+					}
+					if (std::find(remoteSatelliteDcIds.begin(),
+					              remoteSatelliteDcIds.end(),
+					              processInfo->locality.dcId()) != remoteSatelliteDcIds.end()) {
 						remoteSatelliteProcessesLeft.add(processInfo->locality);
 						remoteSatelliteLocalitiesLeft.push_back(processInfo->locality);
 					}
@@ -1522,17 +1525,20 @@ public:
 					if (processInfo->locality.dcId() == primaryDcId) {
 						primaryProcessesDead.add(processInfo->locality);
 						primaryLocalitiesDead.push_back(processInfo->locality);
-					} else if (processInfo->locality.dcId() == remoteDcId) {
+					}
+					if (processInfo->locality.dcId() == remoteDcId) {
 						remoteProcessesDead.add(processInfo->locality);
 						remoteLocalitiesDead.push_back(processInfo->locality);
-					} else if (std::find(primarySatelliteDcIds.begin(),
-					                     primarySatelliteDcIds.end(),
-					                     processInfo->locality.dcId()) != primarySatelliteDcIds.end()) {
+					}
+					if (std::find(primarySatelliteDcIds.begin(),
+					              primarySatelliteDcIds.end(),
+					              processInfo->locality.dcId()) != primarySatelliteDcIds.end()) {
 						primarySatelliteProcessesDead.add(processInfo->locality);
 						primarySatelliteLocalitiesDead.push_back(processInfo->locality);
-					} else if (std::find(remoteSatelliteDcIds.begin(),
-					                     remoteSatelliteDcIds.end(),
-					                     processInfo->locality.dcId()) != remoteSatelliteDcIds.end()) {
+					}
+					if (std::find(remoteSatelliteDcIds.begin(),
+					              remoteSatelliteDcIds.end(),
+					              processInfo->locality.dcId()) != remoteSatelliteDcIds.end()) {
 						remoteSatelliteProcessesDead.add(processInfo->locality);
 						remoteSatelliteLocalitiesDead.push_back(processInfo->locality);
 					}
