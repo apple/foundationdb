@@ -6,6 +6,7 @@ testTitle = 'SubmitBackup'
 simBackupAgents= 'BackupToFile'
 clearAfterTest = false
 runConsistencyCheck=false
+disabledFailureInjectionWorkloads = 'Attrition'
 
     [[test.workload]]
     testName = 'SubmitBackup'
@@ -23,6 +24,7 @@ runConsistencyCheck=false
 testTitle = 'FirstCycleTest'
 clearAfterTest=false
 runConsistencyCheck = false
+disabledFailureInjectionWorkloads = 'Attrition'
 
     [[test.workload]]
     testName = 'Cycle'
