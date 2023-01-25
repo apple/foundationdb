@@ -747,6 +747,10 @@ extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_verify_blob_range(
 	                        .extractPtr());
 }
 
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_get_id(FDBTenant* tenant) {
+	return (FDBFuture*)(TENANT(tenant)->getId().extractPtr());
+}
+
 extern "C" DLLEXPORT void fdb_tenant_destroy(FDBTenant* tenant) {
 	try {
 		TENANT(tenant)->delref();

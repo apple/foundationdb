@@ -249,6 +249,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                    int end_key_name_length,
 	                                    int64_t version);
 
+	FDBFuture* (*tenantGetId)(FDBTenant* tenant);
 	void (*tenantDestroy)(FDBTenant* tenant);
 
 	// Transaction
@@ -540,6 +541,7 @@ public:
 
 	Reference<ITransaction> createTransaction() override;
 
+	ThreadFuture<int64_t> getId() override;
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
@@ -857,6 +859,7 @@ public:
 	template <class T, class... Args>
 	ThreadFuture<T> executeOperation(ThreadFuture<T> (ITenant::*func)(Args...), Args&&... args);
 
+	ThreadFuture<int64_t> getId() override;
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 

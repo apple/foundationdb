@@ -908,6 +908,12 @@ public:
 		    tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end), version);
 	}
 
+	TypedFuture<future_var::Int64> getId() {
+		if (!tenant)
+			throw std::runtime_error("getId() from null tenant");
+		return native::fdb_tenant_get_id(tenant.get());
+	}
+
 	TypedFuture<future_var::KeyRef> purgeBlobGranules(KeyRef begin, KeyRef end, int64_t version, bool force) override {
 		if (!tenant)
 			throw std::runtime_error("purgeBlobGranules() from null tenant");

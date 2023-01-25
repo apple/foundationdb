@@ -1741,6 +1741,8 @@ Standalone<BlobRestoreArg> decodeBlobRestoreArg(ValueRef const& value) {
 	return args;
 }
 
+const Key blobManifestVersionKey = "\xff\x02/blobManifestVersion"_sr;
+
 const KeyRangeRef storageQuotaKeys("\xff/storageQuota/"_sr, "\xff/storageQuota0"_sr);
 const KeyRef storageQuotaPrefix = storageQuotaKeys.begin;
 

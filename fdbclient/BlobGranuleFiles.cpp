@@ -2607,7 +2607,7 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 		}
 		deltaIdx++;
 	}
-	StringRef deltaPtrs[deltaPtrsVector.size()];
+	StringRef deltaPtrs[deltaPtrsVector.size() + 1];
 	for (int i = 0; i < deltaPtrsVector.size(); i++) {
 		deltaPtrs[i] = deltaPtrsVector[i];
 	}

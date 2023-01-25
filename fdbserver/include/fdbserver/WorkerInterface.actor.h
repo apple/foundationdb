@@ -717,6 +717,10 @@ struct RecruitMasterRequest {
 	}
 };
 
+// Instantiated in worker.actor.cpp
+extern template class RequestStream<RecruitMasterRequest, false>;
+extern template struct NetNotifiedQueue<RecruitMasterRequest, false>;
+
 struct InitializeCommitProxyRequest {
 	constexpr static FileIdentifier file_identifier = 10344153;
 	MasterInterface master;
@@ -734,6 +738,10 @@ struct InitializeCommitProxyRequest {
 	}
 };
 
+// Instantiated in worker.actor.cpp
+extern template class RequestStream<InitializeCommitProxyRequest, false>;
+extern template struct NetNotifiedQueue<InitializeCommitProxyRequest, false>;
+
 struct InitializeGrvProxyRequest {
 	constexpr static FileIdentifier file_identifier = 8265613;
 	MasterInterface master;
@@ -746,6 +754,10 @@ struct InitializeGrvProxyRequest {
 		serializer(ar, master, masterLifetime, recoveryCount, reply);
 	}
 };
+
+// Instantiated in worker.actor.cpp
+extern template class RequestStream<InitializeGrvProxyRequest, false>;
+extern template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
 
 struct InitializeDataDistributorRequest {
 	constexpr static FileIdentifier file_identifier = 8858952;
