@@ -25,7 +25,7 @@ struct ProcessInfo : NonCopyable {
 	LocalityData locality;
 	ProcessClass startingClass;
 	TDMetricCollection tdmetrics;
-	MetricCollection metrics;
+	TDMetricCollection metrics;
 	ChaosMetrics chaosMetrics;
 	HistogramRegistry histograms;
 	std::map<NetworkAddress, Reference<IListener>> listenerMap;
@@ -34,7 +34,6 @@ struct ProcessInfo : NonCopyable {
 	bool excluded;
 	bool cleared;
 	bool rebooting;
-	bool drProcess;
 	std::vector<flowGlobalType> globals;
 
 	INetworkConnections* network;
@@ -59,8 +58,8 @@ struct ProcessInfo : NonCopyable {
 	            const char* coordinationFolder)
 	  : name(name), coordinationFolder(coordinationFolder), dataFolder(dataFolder), machine(nullptr),
 	    addresses(addresses), address(addresses.address), locality(locality), startingClass(startingClass),
-	    failed(false), excluded(false), cleared(false), rebooting(false), drProcess(false), network(net),
-	    fault_injection_r(0), fault_injection_p1(0), fault_injection_p2(0), failedDisk(false) {
+	    failed(false), excluded(false), cleared(false), rebooting(false), network(net), fault_injection_r(0),
+	    fault_injection_p1(0), fault_injection_p2(0), failedDisk(false) {
 		uid = deterministicRandom()->randomUniqueID();
 	}
 
@@ -159,6 +158,6 @@ struct ProcessInfo : NonCopyable {
 	Promise<KillType> shutdownSignal;
 };
 
-}   // namespace simulator
+} // namespace simulator
 
 #endif // FDBRPC_SIMULATOR_PROCESSINFO_H
