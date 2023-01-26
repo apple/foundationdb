@@ -2381,7 +2381,7 @@ void checkDeltaRead(const KeyValueGen& kvGen,
 	    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUniqueID(), readVersion, ".delta");
 	Standalone<BlobGranuleChunkRef> chunk;
 	chunk.deltaFiles.emplace_back_deep(
-	    chunk.arena(), filename, 0, serialized[0]->size(), serialized[0]->size(), kvGen.cipherKeys);
+	    chunk.arena(), filename, 0, serialized[0].size(), serialized[0].size(), kvGen.cipherKeys);
 	chunk.keyRange = kvGen.allRange;
 	chunk.includedVersion = readVersion;
 	chunk.snapshotVersion = invalidVersion;
