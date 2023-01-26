@@ -279,7 +279,7 @@ struct MoveInShardMetaData {
 	// 	return wr.toValue();
 	// }
 
-	Value moveInShardValue() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
+	// Value moveInShardValue() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
 
 	// KeyRange persistUpdatesKeyRange() const {
 	// 	BinaryWriter wr(Unversioned());
@@ -456,6 +456,7 @@ struct MoveInShard {
 	            MoveInPhase phase);
 	MoveInShard(StorageServer* server, const UID& id, const UID& dataMoveId, KeyRange range, const Version version);
 	MoveInShard(StorageServer* server, const UID& dataMoveId, KeyRange range, const Version version);
+	MoveInShard(StorageServer* server, const UID& id, const UID& dataMoveId, const Version version);
 	MoveInShard(StorageServer* server, MoveInShardMetaData meta);
 	~MoveInShard() {
 		if (!fetchComplete.isSet()) {
@@ -644,7 +645,7 @@ public:
 		} else {
 			ASSERT(this->moveIn);
 			const MoveInPhase phase = this->moveIn->getPhase();
-			if (phase <= MoveInPhase::ReadWritePending) {
+			if (phase < MoveInPhase::ReadWritePending) {
 				st = StorageServerShard::MoveIn;
 			} else if (phase == MoveInPhase::ReadWritePending) {
 				st = StorageServerShard::ReadWritePending;
@@ -776,7 +777,7 @@ struct StorageServerDisk {
 	Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) {
 		return storage->deleteCheckpoint(checkpoint);
 	}
-
+	IKeyValueStore* getKeyValueStore() const { return this->storage; }
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
@@ -1140,6 +1141,7 @@ public:
 	    pendingAddRanges; // Pending requests to add ranges to physical shards
 	std::map<Version, std::vector<KeyRange>>
 	    pendingRemoveRanges; // Pending requests to remove ranges from physical shards
+	std::unordered_map<UID, std::shared_ptr<MoveInShard>> moveInShards;
 
 	Reference<IPageEncryptionKeyProvider> encryptionKeyProvider;
 
@@ -1190,6 +1192,7 @@ public:
 	KeyRangeRef clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenantInfo, Arena& arena);
 
 	std::vector<StorageServerShard> getStorageServerShards(KeyRangeRef range);
+	std::shared_ptr<MoveInShard> getMoveInShard(const UID& dataMoveId, const Version version, const KeyRangeRef range);
 
 	class CurrentRunningFetchKeys {
 		std::unordered_map<UID, double> startTimeMap;
@@ -2384,6 +2387,28 @@ std::vector<StorageServerShard> StorageServer::getStorageServerShards(KeyRangeRe
 		res.push_back(t.value()->toStorageServerShard());
 	}
 	return res;
+}
+
+std::shared_ptr<MoveInShard> StorageServer::getMoveInShard(const UID& dataMoveId,
+                                                           const Version version,
+                                                           const KeyRangeRef range) {
+	for (auto& [id, moveInShard] : moveInShards) {
+		if (moveInShard->meta->dataMoveId == dataMoveId && moveInShard->meta->createVersion == version) {
+			for (const auto& kr : moveInShard->meta->ranges) {
+				if (range.intersects(kr)) {
+					ASSERT(range == kr);
+					return moveInShard;
+				}
+			}
+			moveInShard->meta->ranges.push_back(range);
+			return moveInShard;
+		}
+	}
+	const UID id = deterministicRandom()->randomUniqueID();
+	std::shared_ptr<MoveInShard> shard = std::make_shared<MoveInShard>(this, id, dataMoveId, version);
+	shard->meta->ranges.push_back(range);
+	moveInShards.emplace(id, shard);
+	return shard;
 }
 
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
@@ -7843,14 +7868,15 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 			updateStorageShard(data, newShard);
 			setAvailableStatus(data, range, true);
 		}
-		shard->setPhase(MoveInPhase::Complete);
+		shard->setPhase(MoveInPhase::ReadWritePending);
 		auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 		// KeyRange keys = singleKeyRange(shard->moveInShardKey());
 		data->addMutationToMutationLog(
-		    mLV, MutationRef(MutationRef::SetValue, persistMoveInShardKey(shard->id), shard->moveInShardValue()));
+		    mLV, MutationRef(MutationRef::SetValue, persistMoveInShardKey(shard->id), moveInShardValue(*shard)));
 
 		// Wait for the transferredVersion (and therefore the shard data) to be committed and durable.
 		wait(data->durableVersion.whenAtLeast(data->data().getLatestVersion() + 1));
+		shard->setPhase(MoveInPhase::Complete);
 
 		TraceEvent("FetchShardApplyUpdatesSuccess", data->thisServerID).detail("MoveInShard", shard->toString());
 	} catch (Error& e) {
@@ -8045,6 +8071,9 @@ MoveInShard::MoveInShard(StorageServer* server,
 
 MoveInShard::MoveInShard(StorageServer* server, const UID& dataMoveId, KeyRange range, const Version version)
   : MoveInShard(server, deterministicRandom()->randomUniqueID(), dataMoveId, range, version) {}
+
+MoveInShard::MoveInShard(StorageServer* server, const UID& id, const UID& dataMoveId, const Version version)
+  : MoveInShard(server, id, dataMoveId, {}, version, MoveInPhase::Fetching) {}
 
 MoveInShard::MoveInShard(StorageServer* server, MoveInShardMetaData meta)
   : meta(std::make_shared<MoveInShardMetaData>(meta)), server(server),
