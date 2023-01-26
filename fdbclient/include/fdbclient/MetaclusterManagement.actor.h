@@ -995,10 +995,12 @@ Future<std::map<ClusterName, DataClusterMetadata>> listClusters(Reference<DB> db
                                                                 ClusterName end,
                                                                 int limit) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			std::map<ClusterName, DataClusterMetadata> clusters = wait(listClustersTransaction(tr, begin, end, limit));
+
 			return clusters;
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
