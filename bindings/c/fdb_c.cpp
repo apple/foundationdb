@@ -389,7 +389,6 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_readbg_get_descriptions(FDBFuture* f
 		                 FDBBGFileDescription& desc = (*out)[chunkIdx];
 
 		                 // set key range
-		                 // this is normally not something we explicitly set, so hack by casting around const
 		                 desc.key_range.begin_key = chunk.keyRange.begin.begin();
 		                 desc.key_range.begin_key_length = chunk.keyRange.begin.size();
 		                 desc.key_range.end_key = chunk.keyRange.end.begin();
@@ -413,7 +412,7 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_readbg_get_descriptions(FDBFuture* f
 		                 setBGMutations(&desc.memory_mutations, &desc.memory_mutation_count, ar, chunk.newDeltas);
 	                 }
 
-	                 // memory lifetime hack to make this memory owned by the arena of the object stored in the future
+	                 // make this memory owned by the arena of the object stored in the future
 	                 results.arena()
 	                     .dependsOn(ar););
 }
