@@ -189,6 +189,7 @@ struct hash<BlobCipherDetails> {
 // forward declaration
 class BlobCipherKey;
 
+#pragma pack(push, 1) // exact fit - no padding
 struct BlobCipherEncryptHeaderFlagsV1 {
 	constexpr static FileIdentifier file_identifier = 8269919;
 
@@ -203,14 +204,17 @@ struct BlobCipherEncryptHeaderFlagsV1 {
 		serializer(ar, encryptMode, authTokenMode, authTokenAlgo);
 	}
 
-	static StringRef serialize(const BlobCipherEncryptHeaderFlagsV1& flags, Arena& arena) {
-		return StringRef(
-		    arena, ObjectWriter::toValue(flags, IncludeVersion(ProtocolVersion::withEncryptionAtRest())).contents());
+	bool operator==(const BlobCipherEncryptHeaderFlagsV1& o) const {
+		return encryptMode == o.encryptMode && authTokenMode == o.authTokenMode && authTokenAlgo == o.authTokenAlgo;
 	}
 
-	static void deserialize(const StringRef& flagsRef, BlobCipherEncryptHeaderFlagsV1* ret, Arena& arena) {
-		ObjectReader hDataReader(flagsRef.begin(), IncludeVersion(ProtocolVersion::withEncryptionAtRest()));
-		hDataReader.deserialize(FileIdentifierFor<BlobCipherEncryptHeaderFlagsV1>::value, *ret, arena);
+	static Standalone<StringRef> serialize(const BlobCipherEncryptHeaderFlagsV1& flags) {
+		return ObjectWriter::toValue(flags, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+	}
+
+	static BlobCipherEncryptHeaderFlagsV1 deserialize(const StringRef& flagsRef) {
+		return ObjectReader::fromStringRef<BlobCipherEncryptHeaderFlagsV1>(
+		    flagsRef, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 	}
 };
 
@@ -254,8 +258,8 @@ struct AesCtrWithAuthV1 {
 	                    Arena& arena)
 	  : cipherTextDetails(textDetails), cipherHeaderDetails(headerDetails), ivRef(makeString(AES_256_IV_LENGTH, arena)),
 	    authTokenRef(makeString(S, arena)) {
-		memset(mutateString(authTokenRef), 0, S);
 		memcpy(mutateString(ivRef), iv, ivLen);
+		memset(mutateString(authTokenRef), 0, S);
 	}
 
 	template <class Ar>
@@ -263,13 +267,19 @@ struct AesCtrWithAuthV1 {
 		serializer(ar, cipherTextDetails, cipherHeaderDetails, ivRef, authTokenRef);
 	}
 
+	bool operator==(const AesCtrWithAuthV1<S>& o) const {
+		return cipherHeaderDetails == o.cipherHeaderDetails && cipherTextDetails == o.cipherTextDetails &&
+		       ivRef.compare(o.ivRef) == 0 && authTokenRef.compare(o.authTokenRef) == 0;
+	}
+
 	static StringRef serialize(const AesCtrWithAuthV1<S>& header, Arena& arena) {
-		return StringRef(
-		    arena, ObjectWriter::toValue(header, IncludeVersion(ProtocolVersion::withEncryptionAtRest())).contents());
+		StringRef value =
+		    ObjectWriter::toValue(header, AssumeVersion(ProtocolVersion::withEncryptionAtRest())).contents();
+		return StringRef(arena, value);
 	}
 
 	static void deserialize(const StringRef& header, AesCtrWithAuthV1<S>* ret, Arena& arena) {
-		ObjectReader dataReader(header.begin(), IncludeVersion(ProtocolVersion::withEncryptionAtRest()));
+		ObjectReader dataReader(header.begin(), AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 		dataReader.deserialize(FileIdentifierFor<AesCtrWithAuthV1<S>>::value, *ret, arena);
 	}
 };
@@ -295,13 +305,18 @@ struct AesCtrNoAuthV1 {
 		serializer(ar, cipherTextDetails, ivRef);
 	}
 
+	bool operator==(const AesCtrNoAuthV1& o) const {
+		return cipherTextDetails == o.cipherTextDetails && ivRef.compare(o.ivRef) == 0;
+	}
+
 	static StringRef serialize(const AesCtrNoAuthV1& header, Arena& arena) {
-		return StringRef(
-		    arena, ObjectWriter::toValue(header, IncludeVersion(ProtocolVersion::withEncryptionAtRest())).contents());
+		StringRef value =
+		    ObjectWriter::toValue(header, AssumeVersion(ProtocolVersion::withEncryptionAtRest())).contents();
+		return StringRef(arena, value);
 	}
 
 	static void deserialize(const StringRef& header, AesCtrNoAuthV1* ret, Arena& arena) {
-		ObjectReader dataReader(header.begin(), IncludeVersion(ProtocolVersion::withEncryptionAtRest()));
+		ObjectReader dataReader(header.begin(), AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 		dataReader.deserialize(FileIdentifierFor<AesCtrNoAuthV1>::value, *ret, arena);
 	}
 };
@@ -320,18 +335,33 @@ struct BlobCipherEncryptHeaderRef {
 	// Serialized encryption algorithm tracker
 	StringRef algoHeaderRef;
 
+	BlobCipherEncryptHeaderRef() {}
+	BlobCipherEncryptHeaderRef(Arena& arena, const BlobCipherEncryptHeaderRef& src)
+	  : flagsVersion(src.flagsVersion), algoHeaderVersion(src.algoHeaderVersion), flagsRef(arena, src.flagsRef),
+	    algoHeaderRef(arena, src.algoHeaderRef) {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, flagsVersion, flagsRef, algoHeaderRef);
+		serializer(ar, flagsVersion, algoHeaderVersion, flagsRef, algoHeaderRef);
 	};
 
-	static void clone(const BlobCipherEncryptHeaderRef& src, BlobCipherEncryptHeaderRef* clone, Arena& arena) {
-		clone->flagsVersion = src.flagsVersion;
-		clone->algoHeaderVersion = src.algoHeaderVersion;
-		clone->flagsRef = StringRef(arena, src.flagsRef);
-		clone->algoHeaderRef = StringRef(arena, src.algoHeaderRef);
+	bool operator==(const BlobCipherEncryptHeaderRef& o) const {
+		return flagsVersion == o.flagsVersion && algoHeaderVersion == o.algoHeaderVersion &&
+		       flagsRef.compare(o.flagsRef) == 0 && algoHeaderRef.compare(o.algoHeaderRef) == 0;
+	}
+
+	static StringRef serialize(const BlobCipherEncryptHeaderRef& header, Arena& arena) {
+		StringRef value =
+		    ObjectWriter::toValue(header, AssumeVersion(ProtocolVersion::withEncryptionAtRest())).contents();
+		return StringRef(arena, value);
+	}
+
+	static void deserialize(const StringRef& header, BlobCipherEncryptHeaderRef* ret, Arena& arena) {
+		ObjectReader reader(header.begin(), AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		reader.deserialize(FileIdentifierFor<BlobCipherEncryptHeaderRef>::value, *ret, arena);
 	}
 };
+#pragma pack(pop)
 
 // BlobCipher Encryption header format
 // This header is persisted along with encrypted buffer, it contains information necessary

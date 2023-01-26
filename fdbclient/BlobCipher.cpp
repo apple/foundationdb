@@ -629,16 +629,17 @@ void EncryptBlobCipherAes265Ctr::setCipherAlgoHeaderWithAuthV1(const uint8_t* ci
 	    iv,
 	    AES_256_IV_LENGTH,
 	    arena);
+	uint8_t computed[S];
 	headerRef->algoHeaderRef = AesCtrWithAuthV1<S>::serialize(algoHeader, arena);
 	// compute the authentication token
-	StringRef serialized =
-	    ObjectWriter::toValue(*headerRef, IncludeVersion(ProtocolVersion::withEncryptionAtRest())).contents();
+	StringRef serialized = BlobCipherEncryptHeaderRef::serialize(*headerRef, arena);
 	computeAuthToken({ { ciphertext, ciphertextLen }, { serialized.begin(), serialized.size() } },
 	                 headerCipherKey->rawCipher(),
 	                 AES_256_KEY_LENGTH,
-	                 mutateString(algoHeader.authTokenRef),
+	                 &computed[0],
 	                 (EncryptAuthTokenAlgo)flags.authTokenAlgo,
 	                 AUTH_TOKEN_MAX_SIZE);
+	memcpy(mutateString(algoHeader.authTokenRef), computed, S);
 
 	// Populate headerRef algorithm specific header details
 	headerRef->algoHeaderRef = AesCtrWithAuthV1<S>::serialize(algoHeader, arena);
@@ -684,7 +685,13 @@ void EncryptBlobCipherAes265Ctr::updateEncryptHeaderFlagsV1(BlobCipherEncryptHea
 	flags->encryptMode = ENCRYPT_CIPHER_MODE_AES_256_CTR;
 	flags->authTokenMode = authTokenMode;
 	flags->authTokenAlgo = authTokenAlgo;
-	headerRef->flagsRef = BlobCipherEncryptHeaderFlagsV1::serialize(*flags, arena);
+	Standalone<StringRef> serializedFlags =
+	    ObjectWriter::toValue(*flags, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+	arena.dependsOn(serializedFlags.arena());
+	headerRef->flagsRef = serializedFlags.contents();
+
+	BlobCipherEncryptHeaderFlagsV1 toVerify = BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef->flagsRef);
+	ASSERT_EQ(flags->encryptMode, toVerify.encryptMode);
 }
 
 void EncryptBlobCipherAes265Ctr::updateEncryptHeader(const uint8_t* ciphertext,
@@ -918,8 +925,7 @@ void DecryptBlobCipherAes256Ctr::extractCipherDetailsIvRefFromHeader(const BlobC
 	EncryptAuthTokenMode mode;
 	EncryptAuthTokenAlgo algo;
 	if (headerRef.flagsVersion == 1) {
-		BlobCipherEncryptHeaderFlagsV1 flags;
-		BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, &flags, arena);
+		BlobCipherEncryptHeaderFlagsV1 flags = BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef);
 		mode = (EncryptAuthTokenMode)flags.authTokenMode;
 		algo = (EncryptAuthTokenAlgo)flags.authTokenAlgo;
 	}
@@ -962,8 +968,8 @@ void DecryptBlobCipherAes256Ctr::validateAuthTokenV1(const uint8_t* ciphertext,
 
 	// prepare the payload {cipherText + encryptionHeader}
 	// ensure the 'authToken' is reset before computing the 'authentication token'
-	BlobCipherEncryptHeaderRef headerRefCopy;
-	BlobCipherEncryptHeaderRef::clone(headerRef, &headerRefCopy, arena);
+	BlobCipherEncryptHeaderRef headerRefCopy = BlobCipherEncryptHeaderRef(arena, headerRef);
+	// BlobCipherEncryptHeaderRef::clone(headerRef, &headerRefCopy, arena);
 
 	AesCtrWithAuthV1<S> algoHeaderCopy;
 	AesCtrWithAuthV1<S>::deserialize(headerRef.algoHeaderRef, &algoHeaderCopy, arena);
@@ -986,10 +992,8 @@ void DecryptBlobCipherAes256Ctr::validateAuthTokenV1(const uint8_t* ciphertext,
 	memcpy(&persited[0], algoHeaderCopy.authTokenRef.begin(), S);
 	memset(mutateString(algoHeaderCopy.authTokenRef), 0, S);
 
-	headerRefCopy.algoHeaderRef =
-	    ObjectWriter::toValue(algoHeaderCopy, IncludeVersion(ProtocolVersion::withEncryptionAtRest()));
-	StringRef serialized =
-	    ObjectWriter::toValue(headerRefCopy, IncludeVersion(ProtocolVersion::withEncryptionAtRest())).contents();
+	headerRefCopy.algoHeaderRef = AesCtrWithAuthV1<S>::serialize(algoHeaderCopy, arena);
+	StringRef serialized = BlobCipherEncryptHeaderRef::serialize(headerRefCopy, arena);
 
 	computeAuthToken({ { ciphertext, ciphertextLen }, { serialized.begin(), serialized.size() } },
 	                 headerCipherKey->rawCipher(),
@@ -1079,8 +1083,7 @@ void DecryptBlobCipherAes256Ctr::validateEncryptHeader(const uint8_t* ciphertext
 		throw encrypt_header_metadata_mismatch();
 	}
 	if (headerRef.flagsVersion == 1) {
-		BlobCipherEncryptHeaderFlagsV1 flags;
-		BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, &flags, arena);
+		BlobCipherEncryptHeaderFlagsV1 flags = BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef);
 		validateEncryptHeaderFlagsV1(headerRef.flagsVersion, flags);
 		validateAuthTokensV1(ciphertext, ciphertextLen, flags, headerRef, arena);
 
@@ -1365,6 +1368,7 @@ void computeAuthToken(const std::vector<std::pair<const uint8_t*, size_t>>& payl
                       const EncryptAuthTokenAlgo algo,
                       unsigned int digestBufMaxSz) {
 	ASSERT_EQ(digestBufMaxSz, AUTH_TOKEN_MAX_SIZE);
+	ASSERT_EQ(keyLen, AES_256_KEY_LENGTH);
 	ASSERT(isEncryptHeaderAuthTokenAlgoValid(algo));
 
 	int authTokenSz = getEncryptHeaderAuthTokenSize(algo);
@@ -1379,7 +1383,6 @@ void computeAuthToken(const std::vector<std::pair<const uint8_t*, size_t>>& payl
 		ASSERT_EQ(digestLen, authTokenSz);
 	} else if (algo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC) {
 		ASSERT_EQ(authTokenSz, AUTH_TOKEN_AES_CMAC_SIZE);
-		ASSERT_EQ(keyLen, AES_256_KEY_LENGTH);
 
 		Aes256CmacDigestGen cmacGenerator(key, keyLen);
 		size_t digestLen = cmacGenerator.digest(payload, digestBuf, authTokenSz);
@@ -1668,8 +1671,7 @@ TEST_CASE("flow/BlobCipher") {
 		StringRef encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 
 		// validate header version details
-		BlobCipherEncryptHeaderFlagsV1 flags;
-		BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, &flags, arena);
+		BlobCipherEncryptHeaderFlagsV1 flags = BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef);
 		ASSERT_EQ(headerRef.flagsVersion, CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
 		ASSERT_EQ(headerRef.algoHeaderVersion, CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION);
 
@@ -1677,6 +1679,11 @@ TEST_CASE("flow/BlobCipher") {
 		ASSERT_EQ(flags.encryptMode, EncryptCipherMode::ENCRYPT_CIPHER_MODE_AES_256_CTR);
 		ASSERT_EQ(flags.authTokenMode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE);
 		ASSERT_EQ(flags.authTokenAlgo, EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE);
+
+		StringRef headerStr = BlobCipherEncryptHeaderRef::serialize(headerRef, arena);
+		BlobCipherEncryptHeaderRef toVerify;
+		BlobCipherEncryptHeaderRef::deserialize(headerStr, &toVerify, arena);
+		ASSERT(headerRef == toVerify);
 
 		BlobCipherDetails tCipherDetails;
 		BlobCipherDetails hCipherDetails;
@@ -1717,8 +1724,7 @@ TEST_CASE("flow/BlobCipher") {
 		    .detail("Salt", tCipherDetails.salt);
 
 		// induce encryption header corruption - headerVersion corrupted
-		BlobCipherEncryptHeaderRef corruptedHeaderRef;
-		BlobCipherEncryptHeaderRef::clone(headerRef, &corruptedHeaderRef, arena);
+		BlobCipherEncryptHeaderRef corruptedHeaderRef = BlobCipherEncryptHeaderRef(arena, headerRef);
 		corruptedHeaderRef.flagsVersion += 1;
 		try {
 			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
@@ -1734,11 +1740,13 @@ TEST_CASE("flow/BlobCipher") {
 		}
 
 		// induce encryption header corruption - encryptionMode corrupted
-		BlobCipherEncryptHeaderRef::clone(headerRef, &corruptedHeaderRef, arena);
-		BlobCipherEncryptHeaderFlagsV1 corruptedFlags;
-		BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, &corruptedFlags, arena);
+		corruptedHeaderRef = BlobCipherEncryptHeaderRef(arena, headerRef);
+		BlobCipherEncryptHeaderFlagsV1 corruptedFlags = BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef);
 		corruptedFlags.encryptMode += 1;
-		corruptedHeaderRef.flagsRef = BlobCipherEncryptHeaderFlagsV1::serialize(corruptedFlags, arena);
+		Standalone<StringRef> serializedFlags =
+		    ObjectWriter::toValue(corruptedFlags, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		arena.dependsOn(serializedFlags.arena());
+		corruptedHeaderRef.flagsRef = serializedFlags.contents();
 		try {
 			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 			DecryptBlobCipherAes256Ctr decryptor(
@@ -1906,8 +1914,7 @@ TEST_CASE("flow/BlobCipher") {
 		ASSERT_EQ(headerRef.algoHeaderVersion, CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION);
 
 		// validate flags
-		BlobCipherEncryptHeaderFlagsV1 flags;
-		BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, &flags, arena);
+		BlobCipherEncryptHeaderFlagsV1 flags = BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef);
 		ASSERT_EQ(flags.encryptMode, EncryptCipherMode::ENCRYPT_CIPHER_MODE_AES_256_CTR);
 		ASSERT_EQ(flags.authTokenMode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
 		ASSERT_EQ(flags.authTokenAlgo, EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA);
@@ -1956,8 +1963,7 @@ TEST_CASE("flow/BlobCipher") {
 		    .detail("HeaderSalt", hCipherDetails.salt);
 
 		// induce encryption header corruption - headerVersion corrupted
-		BlobCipherEncryptHeaderRef corruptedHeaderRef;
-		BlobCipherEncryptHeaderRef::clone(headerRef, &corruptedHeaderRef, arena);
+		BlobCipherEncryptHeaderRef corruptedHeaderRef = BlobCipherEncryptHeaderRef(arena, headerRef);
 		corruptedHeaderRef.flagsVersion += 1;
 		try {
 			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
@@ -1972,11 +1978,13 @@ TEST_CASE("flow/BlobCipher") {
 		}
 
 		// induce encryption header corruption - encryptionMode corrupted
-		BlobCipherEncryptHeaderRef::clone(headerRef, &corruptedHeaderRef, arena);
-		BlobCipherEncryptHeaderFlagsV1 corruptedFlags;
-		BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, &corruptedFlags, arena);
+		corruptedHeaderRef = BlobCipherEncryptHeaderRef(arena, headerRef);
+		BlobCipherEncryptHeaderFlagsV1 corruptedFlags = BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef);
 		corruptedFlags.encryptMode += 1;
-		corruptedHeaderRef.flagsRef = BlobCipherEncryptHeaderFlagsV1::serialize(corruptedFlags, arena);
+		Standalone<StringRef> serializedFlags =
+		    ObjectWriter::toValue(corruptedFlags, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		arena.dependsOn(serializedFlags.arena());
+		corruptedHeaderRef.flagsRef = serializedFlags.contents();
 		try {
 			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
@@ -2143,8 +2151,7 @@ TEST_CASE("flow/BlobCipher") {
 		ASSERT_EQ(headerRef.algoHeaderVersion, CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION);
 
 		// validate flags
-		BlobCipherEncryptHeaderFlagsV1 flags;
-		BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, &flags, arena);
+		BlobCipherEncryptHeaderFlagsV1 flags = BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef);
 		ASSERT_EQ(flags.encryptMode, EncryptCipherMode::ENCRYPT_CIPHER_MODE_AES_256_CTR);
 		ASSERT_EQ(flags.authTokenMode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
 		ASSERT_EQ(flags.authTokenAlgo, EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC);
@@ -2194,8 +2201,7 @@ TEST_CASE("flow/BlobCipher") {
 		    .detail("HeaderSalt", hCipherDetails.salt);
 
 		// induce encryption header corruption - headerVersion corrupted
-		BlobCipherEncryptHeaderRef corruptedHeaderRef;
-		BlobCipherEncryptHeaderRef::clone(headerRef, &corruptedHeaderRef, arena);
+		BlobCipherEncryptHeaderRef corruptedHeaderRef = BlobCipherEncryptHeaderRef(arena, headerRef);
 		corruptedHeaderRef.flagsVersion += 1;
 		try {
 			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
@@ -2210,11 +2216,13 @@ TEST_CASE("flow/BlobCipher") {
 		}
 
 		// induce encryption header corruption - encryptionMode corrupted
-		BlobCipherEncryptHeaderRef::clone(headerRef, &corruptedHeaderRef, arena);
-		BlobCipherEncryptHeaderFlagsV1 corruptedFlags;
-		BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, &corruptedFlags, arena);
+		corruptedHeaderRef = BlobCipherEncryptHeaderRef(arena, headerRef);
+		BlobCipherEncryptHeaderFlagsV1 corruptedFlags = BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef);
 		corruptedFlags.encryptMode += 1;
-		corruptedHeaderRef.flagsRef = BlobCipherEncryptHeaderFlagsV1::serialize(corruptedFlags, arena);
+		Standalone<StringRef> serializedFlags =
+		    ObjectWriter::toValue(corruptedFlags, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		arena.dependsOn(serializedFlags.arena());
+		corruptedHeaderRef.flagsRef = serializedFlags.contents();
 		try {
 			encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
