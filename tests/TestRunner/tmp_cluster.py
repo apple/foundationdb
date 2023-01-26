@@ -147,6 +147,7 @@ if __name__ == "__main__":
             cmd_args.append(cmd)
         env = dict(**os.environ)
         env["FDB_CLUSTER_FILE"] = env.get("FDB_CLUSTER_FILE", cluster.cluster_file)
+        env["FDB_CLUSTERS"] = env.get("FDB_CLUSTERS", cluster.cluster_file)
         print("command: {}".format(cmd_args))
         errcode = subprocess.run(
             cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env

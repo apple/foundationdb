@@ -153,6 +153,7 @@ const int MATCH_INDEX_ALL = 0;
 const int MATCH_INDEX_NONE = 1;
 const int MATCH_INDEX_MATCHED_ONLY = 2;
 const int MATCH_INDEX_UNMATCHED_ONLY = 3;
+const int MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH_V2 = 3;
 
 enum { txsTagOld = -1, invalidTagOld = -100 };
 
@@ -533,6 +534,7 @@ using KeyValue = Standalone<KeyValueRef>;
 using KeySelector = Standalone<struct KeySelectorRef>;
 using RangeResult = Standalone<struct RangeResultRef>;
 using MappedRangeResult = Standalone<struct MappedRangeResultRef>;
+using MappedRangeResultV2 = Standalone<struct MappedRangeResultRefV2>;
 
 namespace std {
 template <>
@@ -707,6 +709,7 @@ KeyRangeWith<Val> keyRangeWith(const KeyRangeRef& range, const Val& value) {
 }
 
 struct MappedKeyValueRef;
+struct MappedKeyValueRefV2;
 
 struct GetRangeLimits {
 	enum { ROW_LIMIT_UNLIMITED = -1, BYTE_LIMIT_UNLIMITED = -1 };
@@ -723,6 +726,8 @@ struct GetRangeLimits {
 	void decrement(KeyValueRef const& data);
 	void decrement(VectorRef<MappedKeyValueRef> const& data);
 	void decrement(MappedKeyValueRef const& data);
+	void decrement(VectorRef<MappedKeyValueRefV2> const& data);
+	void decrement(MappedKeyValueRefV2 const& data);
 
 	// True if either the row or byte limit has been reached
 	bool isReached() const;
@@ -860,6 +865,43 @@ struct MappedKeyValueRef : KeyValueRef {
 	}
 };
 
+struct MappedKeyValueRefV2 : KeyValueRef {
+	// Save the original key value at the base (KeyValueRef).
+
+	KeyRef responseBytes;
+	MappedReqAndResultRef reqAndResult;
+
+	MappedKeyValueRefV2() = default;
+	MappedKeyValueRefV2(Arena& a, const MappedKeyValueRefV2& copyFrom) : KeyValueRef(a, copyFrom) {
+		responseBytes = StringRef(a, copyFrom.responseBytes);
+		const auto& reqAndResultCopyFrom = copyFrom.reqAndResult;
+		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResultCopyFrom)) {
+			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResultCopyFrom);
+			reqAndResult = GetValueReqAndResultRef(a, getValue);
+		} else if (std::holds_alternative<GetRangeReqAndResultRef>(reqAndResultCopyFrom)) {
+			auto getRange = std::get<GetRangeReqAndResultRef>(reqAndResultCopyFrom);
+			reqAndResult = GetRangeReqAndResultRef(a, getRange);
+		} else {
+			throw internal_error();
+		}
+	}
+
+	bool operator==(const MappedKeyValueRefV2& rhs) const {
+		return static_cast<const KeyValueRef&>(*this) == static_cast<const KeyValueRef&>(rhs) &&
+		       reqAndResult == rhs.reqAndResult && responseBytes == rhs.responseBytes;
+	}
+	bool operator!=(const MappedKeyValueRefV2& rhs) const { return !(rhs == *this); }
+
+	// It relies on the base to provide the expectedSize. TODO: Consider add the underlying request and key values into
+	// expected size?
+	//	int expectedSize() const { return ((KeyValueRef*)this)->expectedSisze() + reqA }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ((KeyValueRef&)*this), reqAndResult, responseBytes);
+	}
+};
+
 struct MappedRangeResultRef : VectorRef<MappedKeyValueRef> {
 	// Additional information on range result. See comments on RangeResultRef.
 	bool more;
@@ -883,6 +925,38 @@ struct MappedRangeResultRef : VectorRef<MappedKeyValueRef> {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, ((VectorRef<MappedKeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
+	}
+
+	std::string toString() const {
+		return "more:" + std::to_string(more) +
+		       " readThrough:" + (readThrough.present() ? readThrough.get().toString() : "[unset]") +
+		       " readToBegin:" + std::to_string(readToBegin) + " readThroughEnd:" + std::to_string(readThroughEnd);
+	}
+};
+
+struct MappedRangeResultRefV2 : VectorRef<MappedKeyValueRefV2> {
+	// Additional information on range result. See comments on RangeResultRef.
+	bool more;
+	Optional<KeyRef> readThrough;
+	bool readToBegin;
+	bool readThroughEnd;
+
+	MappedRangeResultRefV2() : more(false), readToBegin(false), readThroughEnd(false) {}
+	MappedRangeResultRefV2(Arena& p, const MappedRangeResultRefV2& toCopy)
+	  : VectorRef<MappedKeyValueRefV2>(p, toCopy), more(toCopy.more),
+	    readThrough(toCopy.readThrough.present() ? KeyRef(p, toCopy.readThrough.get()) : Optional<KeyRef>()),
+	    readToBegin(toCopy.readToBegin), readThroughEnd(toCopy.readThroughEnd) {}
+	MappedRangeResultRefV2(const VectorRef<MappedKeyValueRefV2>& value,
+	                       bool more,
+	                       Optional<KeyRef> readThrough = Optional<KeyRef>())
+	  : VectorRef<MappedKeyValueRefV2>(value), more(more), readThrough(readThrough), readToBegin(false),
+	    readThroughEnd(false) {}
+	MappedRangeResultRefV2(bool readToBegin, bool readThroughEnd)
+	  : more(false), readToBegin(readToBegin), readThroughEnd(readThroughEnd) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ((VectorRef<MappedKeyValueRefV2>&)*this), more, readThrough, readToBegin, readThroughEnd);
 	}
 
 	std::string toString() const {

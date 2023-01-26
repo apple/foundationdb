@@ -115,8 +115,6 @@ typedef struct keyvalue {
 } FDBKeyValue;
 #endif
 
-#pragma pack(pop)
-
 /* Memory layout of KeySelectorRef. */
 typedef struct keyselector {
 	FDBKey key;
@@ -171,7 +169,29 @@ typedef struct mappedkeyvalue {
 	unsigned char buffer[32];
 } FDBMappedKeyValue;
 
-#pragma pack(push, 4)
+/* Memory layout of MappedKeyValueRefV2.
+
+Total 128 bytes
+- key (12 bytes)
+- value (12 bytes)
+- responseBytes (12 bytes)
+- padding buffer (4 bytes)
+- begin selector (20 bytes)
+- end selector (20 bytes)
+- vector (16 bytes)
+- buffer (32 bytes)
+*/
+typedef struct mappedkeyvaluev2 {
+	FDBKey key;
+	FDBKey value;
+	/* It's complicated to map a std::variant to C. For now we assume the underlying requests are always getRange and
+	 * take the shortcut. */
+	FDBKey responseBytes;
+	unsigned char padding[4];
+	FDBGetRangeReqAndResult getRange;
+	unsigned char buffer[32];
+} FDBMappedKeyValueV2;
+
 typedef struct keyrange {
 	const uint8_t* begin_key;
 	int begin_key_length;
@@ -291,6 +311,11 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_mappedkeyvalue_array(FDB
                                                                              FDBMappedKeyValue const** out_kv,
                                                                              int* out_count,
                                                                              fdb_bool_t* out_more);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_mappedkeyvalue_array_v2(FDBFuture* f,
+                                                                                FDBMappedKeyValueV2 const** out_kv,
+                                                                                int* out_count,
+                                                                                fdb_bool_t* out_more);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_key_array(FDBFuture* f,
                                                                   FDBKey const** out_key_array,
@@ -531,10 +556,28 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_mapped_range(FDBTran
                                                                          int target_bytes,
                                                                          FDBStreamingMode mode,
                                                                          int iteration,
-                                                                         int matchIndex,
                                                                          fdb_bool_t snapshot,
                                                                          fdb_bool_t reverse);
 
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_mapped_range_v2(FDBTransaction* tr,
+                                                                            uint8_t const* begin_key_name,
+                                                                            int begin_key_name_length,
+                                                                            fdb_bool_t begin_or_equal,
+                                                                            int begin_offset,
+                                                                            uint8_t const* end_key_name,
+                                                                            int end_key_name_length,
+                                                                            fdb_bool_t end_or_equal,
+                                                                            int end_offset,
+                                                                            uint8_t const* mapper_name,
+                                                                            int mapper_name_length,
+                                                                            int limit,
+                                                                            int target_bytes,
+                                                                            FDBStreamingMode mode,
+                                                                            int iteration,
+                                                                            fdb_bool_t snapshot,
+                                                                            fdb_bool_t reverse,
+                                                                            uint8_t const* mapped_range_params,
+                                                                            int mapped_range_params_length);
 DLLEXPORT void fdb_transaction_set(FDBTransaction* tr,
                                    uint8_t const* key_name,
                                    int key_name_length,

@@ -26,6 +26,7 @@ import com.apple.foundationdb.async.AsyncIterator;
 import com.apple.foundationdb.async.AsyncUtil;
 
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -46,28 +47,48 @@ import java.util.function.BiConsumer;
  *   operation, the remove is not durable until {@code commit()} on the {@code Transaction}
  *   that yielded this query returns <code>true</code>.
  */
-class MappedRangeQuery implements AsyncIterable<MappedKeyValue> {
+class MappedRangeQueryV2 implements AsyncIterable<MappedKeyValueV2> {
 	private final FDBTransaction tr;
 	private final KeySelector begin;
 	private final KeySelector end;
 	private final byte[] mapper; // Nonnull
 	private final boolean snapshot;
 	private final int rowLimit;
+	private final int matchIndex;
+	private final boolean fetchLocalOnly;
 	private final boolean reverse;
 	private final StreamingMode streamingMode;
 	private final EventKeeper eventKeeper;
 
-	MappedRangeQuery(FDBTransaction transaction, boolean isSnapshot, KeySelector begin, KeySelector end, byte[] mapper,
-	                 int rowLimit, boolean reverse, StreamingMode streamingMode, EventKeeper eventKeeper) {
+	private final int code_int = 1;
+	private final int code_bool = 2;
+
+	private static final int matchIndexPos = 1;
+	private static final int fetchLocalOnlyPos = 6;
+
+	MappedRangeQueryV2(FDBTransaction transaction, boolean isSnapshot, KeySelector begin, KeySelector end,
+	                   byte[] mapper, int rowLimit, int matchIndex, boolean fetchLocalOnly, boolean reverse,
+	                   StreamingMode streamingMode, EventKeeper eventKeeper) {
 		this.tr = transaction;
 		this.begin = begin;
 		this.end = end;
 		this.mapper = mapper;
+		this.matchIndex = matchIndex;
+		this.fetchLocalOnly = fetchLocalOnly;
 		this.snapshot = isSnapshot;
 		this.rowLimit = rowLimit;
 		this.reverse = reverse;
 		this.streamingMode = streamingMode;
 		this.eventKeeper = eventKeeper;
+	}
+
+	byte[] getParamsBytes(int matchIndex, boolean fetchLocalOnly) {
+		byte[] paramsBytes = new byte[] { 0x02, 0, 0, 0, 0, 0, 0, 0 };
+		paramsBytes[matchIndexPos] = code_int;
+		paramsBytes[matchIndexPos + 1] = (byte)matchIndex;
+		paramsBytes[fetchLocalOnlyPos] = code_bool;
+		paramsBytes[fetchLocalOnlyPos + 1] = (byte)(fetchLocalOnly ? 1 : 0);
+		return paramsBytes;
 	}
 
 	/**
@@ -79,45 +100,45 @@ class MappedRangeQuery implements AsyncIterable<MappedKeyValue> {
 	 *  constrained by the query parameters.
 	 */
 	@Override
-	public CompletableFuture<List<MappedKeyValue>> asList() {
+	public CompletableFuture<List<MappedKeyValueV2>> asList() {
 		StreamingMode mode = this.streamingMode;
 		if (mode == StreamingMode.ITERATOR) mode = (this.rowLimit == 0) ? StreamingMode.WANT_ALL : StreamingMode.EXACT;
-
 		// if the streaming mode is EXACT, try and grab things as one chunk
 		if (mode == StreamingMode.EXACT) {
-
-			FutureMappedResults range =
-			    tr.getMappedRange_internal(this.begin, this.end, this.mapper, this.rowLimit, 0,
-			                               StreamingMode.EXACT.code(), 1, this.snapshot, this.reverse);
+			byte[] paramsBytes = getParamsBytes(this.matchIndex, this.fetchLocalOnly);
+			FutureMappedResultsV2 range =
+			    tr.getMappedRange_internal_v2(this.begin, this.end, this.mapper, paramsBytes, this.rowLimit, 0,
+			                                  StreamingMode.EXACT.code(), 1, this.snapshot, this.reverse);
 			return range.thenApply(result -> result.get().values).whenComplete((result, e) -> range.close());
 		}
-
 		// If the streaming mode is not EXACT, simply collect the results of an
 		// iteration into a list
-		return AsyncUtil.collect(
-		    new MappedRangeQuery(tr, snapshot, begin, end, mapper, rowLimit, reverse, mode, eventKeeper),
-		    tr.getExecutor());
+		return AsyncUtil.collect(new MappedRangeQueryV2(tr, snapshot, begin, end, mapper, rowLimit, matchIndex,
+		                                                fetchLocalOnly, reverse, mode, eventKeeper),
+		                         tr.getExecutor());
 	}
 
 	/**
 	 *  Returns an {@code Iterator} over the results of this query against FoundationDB.
 	 *
-	 *  @return an {@code Iterator} over type {@code MappedKeyValue}.
+	 *  @return an {@code Iterator} over type {@code MappedKeyValueV2}.
 	 */
 	@Override
-	public AsyncRangeIterator iterator() {
-		return new AsyncRangeIterator(this.rowLimit, this.reverse, this.streamingMode);
+	public AsyncRangeIteratorV2 iterator() {
+		return new AsyncRangeIteratorV2(this.rowLimit, getParamsBytes(this.matchIndex, this.fetchLocalOnly),
+		                                this.reverse, this.streamingMode);
 	}
 
-	private class AsyncRangeIterator implements AsyncIterator<MappedKeyValue> {
+	private class AsyncRangeIteratorV2 implements AsyncIterator<MappedKeyValueV2> {
 		// immutable aspects of this iterator
 		private final boolean rowsLimited;
 		private final boolean reverse;
 		private final StreamingMode streamingMode;
+		private final byte[] paramsBytes;
 
 		// There is the chance for parallelism in the two "chunks" for fetched data
-		private MappedRangeResult chunk = null;
-		private MappedRangeResult nextChunk = null;
+		private MappedRangeResultV2 chunk = null;
+		private MappedRangeResultV2 nextChunk = null;
 		private boolean fetchOutstanding = false;
 		private byte[] prevKey = null;
 		private int index = 0;
@@ -127,34 +148,34 @@ class MappedRangeQuery implements AsyncIterable<MappedKeyValue> {
 
 		private int rowsRemaining;
 
-		private FutureMappedResults fetchingChunk;
+		private FutureMappedResultsV2 fetchingChunk;
 		private CompletableFuture<Boolean> nextFuture;
 		private boolean isCancelled = false;
 
-		private AsyncRangeIterator(int rowLimit, boolean reverse, StreamingMode streamingMode) {
-			this.begin = MappedRangeQuery.this.begin;
-			this.end = MappedRangeQuery.this.end;
+		private AsyncRangeIteratorV2(int rowLimit, byte[] paramsBytes, boolean reverse, StreamingMode streamingMode) {
+			this.begin = MappedRangeQueryV2.this.begin;
+			this.end = MappedRangeQueryV2.this.end;
 			this.rowsLimited = rowLimit != 0;
 			this.rowsRemaining = rowLimit;
 			this.reverse = reverse;
+			this.paramsBytes = paramsBytes;
 			this.streamingMode = streamingMode;
-
 			startNextFetch();
 		}
 
 		private synchronized boolean mainChunkIsTheLast() { return !chunk.more || (rowsLimited && rowsRemaining < 1); }
 
-		class FetchComplete implements BiConsumer<MappedRangeResultInfo, Throwable> {
-			final FutureMappedResults fetchingChunk;
+		class FetchComplete implements BiConsumer<MappedRangeResultInfoV2, Throwable> {
+			final FutureMappedResultsV2 fetchingChunk;
 			final CompletableFuture<Boolean> promise;
 
-			FetchComplete(FutureMappedResults fetch, CompletableFuture<Boolean> promise) {
+			FetchComplete(FutureMappedResultsV2 fetch, CompletableFuture<Boolean> promise) {
 				this.fetchingChunk = fetch;
 				this.promise = promise;
 			}
 
 			@Override
-			public void accept(MappedRangeResultInfo data, Throwable error) {
+			public void accept(MappedRangeResultInfoV2 data, Throwable error) {
 				try {
 					if (error != null) {
 						if (eventKeeper != null) {
@@ -168,14 +189,14 @@ class MappedRangeQuery implements AsyncIterable<MappedKeyValue> {
 						return;
 					}
 
-					final MappedRangeResult rangeResult = data.get();
+					final MappedRangeResultV2 rangeResult = data.get();
 					final RangeResultSummary summary = rangeResult.getSummary();
 					if (summary.lastKey == null) {
 						promise.complete(Boolean.FALSE);
 						return;
 					}
 
-					synchronized (MappedRangeQuery.AsyncRangeIterator.this) {
+					synchronized (AsyncRangeIteratorV2.this) {
 						fetchOutstanding = false;
 
 						// adjust the total number of rows we should ever fetch
@@ -217,10 +238,10 @@ class MappedRangeQuery implements AsyncIterable<MappedKeyValue> {
 
 			nextFuture = new CompletableFuture<>();
 			final long sTime = System.nanoTime();
-			fetchingChunk = tr.getMappedRange_internal(begin, end, mapper, rowsLimited ? rowsRemaining : 0, 0,
-			                                           streamingMode.code(), ++iteration, snapshot, reverse);
-
-			BiConsumer<MappedRangeResultInfo, Throwable> cons = new FetchComplete(fetchingChunk, nextFuture);
+			fetchingChunk =
+			    tr.getMappedRange_internal_v2(begin, end, mapper, paramsBytes, rowsLimited ? rowsRemaining : 0, 0,
+			                                  streamingMode.code(), ++iteration, snapshot, reverse);
+			BiConsumer<MappedRangeResultInfoV2, Throwable> cons = new FetchComplete(fetchingChunk, nextFuture);
 			if (eventKeeper != null) {
 				eventKeeper.increment(Events.RANGE_QUERY_FETCHES);
 				cons = cons.andThen((r, t) -> {
@@ -257,7 +278,7 @@ class MappedRangeQuery implements AsyncIterable<MappedKeyValue> {
 		}
 
 		@Override
-		public MappedKeyValue next() {
+		public MappedKeyValueV2 next() {
 			CompletableFuture<Boolean> nextFuture;
 			synchronized (this) {
 				if (isCancelled) throw new CancellationException();
@@ -269,7 +290,7 @@ class MappedRangeQuery implements AsyncIterable<MappedKeyValue> {
 					//  start fetching the data for the next block
 					boolean initialNext = index == 0;
 
-					MappedKeyValue result = chunk.values.get(index);
+					MappedKeyValueV2 result = chunk.values.get(index);
 					prevKey = result.getKey();
 					index++;
 
@@ -293,7 +314,6 @@ class MappedRangeQuery implements AsyncIterable<MappedKeyValue> {
 						chunk = nextChunk;
 						nextChunk = null;
 					}
-
 					if (initialNext) {
 						startNextFetch();
 					}
