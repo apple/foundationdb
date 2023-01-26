@@ -11,6 +11,7 @@ Release Notes
 7.1.26
 ======
 * Released with AVX disabled.
+* Modified "status json" to not report fdbserver processes as clients. `(PR ##9252 <https://github.com/apple/foundationdb/pull/9252>)`_
 * Added detection of disconnection to satellite TLog in gray failure detection. `(PR #9107) <https://github.com/apple/foundationdb/pull/9107>`_
 * Fixed (non)empty peeks stats in TLogMetrics. `(PR #9074) <https://github.com/apple/foundationdb/pull/9074>`_
 * Fixed a data distribution bug where exclusions can become stuck because DD cannot build new teams. `(PR #9035) <https://github.com/apple/foundationdb/pull/9035>`_
