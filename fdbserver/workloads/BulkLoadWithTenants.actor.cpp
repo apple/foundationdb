@@ -100,13 +100,13 @@ struct BulkSetupWorkload : TestWorkload {
 			state std::vector<Future<Optional<TenantMapEntry>>> tenantFutures;
 			for (int i = 0; i < numTenantsToCreate; i++) {
 				TenantName tenantName = TenantNameRef(format("BulkSetupTenant_%04d", i));
-				TraceEvent("CreatingTenant").detail("Tenant", tenantName);
 				tenantFutures.push_back(TenantAPI::createTenant(cx.getReference(), tenantName));
 			}
 			wait(waitForAll(tenantFutures));
 			for (auto& f : tenantFutures) {
 				ASSERT(f.get().present());
 				workload->tenants.push_back(makeReference<Tenant>(f.get().get().id, f.get().get().tenantName));
+				TraceEvent("BulkSetupCreatedTenant").detail("Tenant", workload->tenants.back());
 			}
 		}
 		wait(bulkSetup(cx,
@@ -183,6 +183,7 @@ struct BulkSetupWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(BulkSetupWorkload* workload, Database cx) {
 		// We want to ensure that tenant deletion happens before the restore phase starts
 		if (workload->deleteTenants) {
+			state double startTime = now();
 			state Reference<TenantEntryCache<Void>> tenantCache =
 			    makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
 			wait(tenantCache->init());
@@ -210,10 +211,9 @@ struct BulkSetupWorkload : TestWorkload {
 					}
 					// delete the tenant
 					wait(success(TenantAPI::deleteTenant(cx.getReference(), tenant->name.get(), tenant->id())));
-
-					TraceEvent("BulkSetupTenantDeletionDone")
-					    .detail("Tenant", tenant)
-					    .detail("TotalNumTenants", workload->tenants.size());
+					if (workload->testDuration > 0 && now() - startTime >= workload->testDuration) {
+						return Void();
+					}
 				}
 			}
 		}
@@ -229,11 +229,7 @@ struct BulkSetupWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0) {
-			if (testDuration > 0) {
-				return timeout(_start(this, cx), testDuration, Void());
-			} else {
-				return _start(this, cx);
-			}
+			return _start(this, cx);
 		}
 		return Void();
 	}

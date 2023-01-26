@@ -1149,7 +1149,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 			CODE_PROBE(true, "decoding encrypted block");
 			// decode options struct
-			uint32_t optionsLen = reader.consumeNetworkUInt32();
+			state uint32_t optionsLen = reader.consumeNetworkUInt32();
 			const uint8_t* o = reader.consume(optionsLen);
 			StringRef optionsStringRef = StringRef(o, optionsLen);
 			EncryptedRangeFileWriter::Options options =
@@ -1157,10 +1157,17 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			ASSERT(!options.compressionEnabled);
 
 			// read encryption header
-			const uint8_t* headerStart = reader.consume(BlobCipherEncryptHeader::headerSize);
+			state const uint8_t* headerStart = reader.consume(BlobCipherEncryptHeader::headerSize);
 			StringRef headerS = StringRef(headerStart, BlobCipherEncryptHeader::headerSize);
 			state BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(headerS);
 			blockTenantId = header.cipherTextDetails.encryptDomainId;
+			if (config.tenantMode == TenantMode::REQUIRED && !isReservedEncryptDomain(blockTenantId)) {
+				ASSERT(tenantCache.present());
+				Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache.get()->getById(blockTenantId));
+				if (!payload.present()) {
+					throw tenant_not_found();
+				}
+			}
 			const uint8_t* dataPayloadStart = headerStart + BlobCipherEncryptHeader::headerSize;
 			// calculate the total bytes read up to (and including) the header
 			int64_t bytesRead = sizeof(int32_t) + sizeof(uint32_t) + optionsLen + BlobCipherEncryptHeader::headerSize;
@@ -1176,8 +1183,11 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		return results;
 	} catch (Error& e) {
 		if (e.code() == error_code_encrypt_keys_fetch_failed) {
-			TraceEvent(SevWarn, "SnapshotRestoreEncryptKeyFetchFailed").detail("TenantId", blockTenantId);
-			CODE_PROBE(true, "snapshot restore encrypt keys not found");
+			TraceEvent(SevWarnAlways, "SnapshotRestoreEncryptKeyFetchFailed").detail("TenantId", blockTenantId);
+			CODE_PROBE(true, "Snapshot restore encrypt keys not found");
+		} else if (e.code() == error_code_tenant_not_found) {
+			TraceEvent(SevWarnAlways, "EncryptedSnapshotRestoreTenantNotFound").detail("TenantId", blockTenantId);
+			CODE_PROBE(true, "Encrypted Snapshot restore tenant not found");
 		}
 		TraceEvent(SevWarn, "FileRestoreDecodeRangeFileBlockFailed")
 		    .error(e)
@@ -3622,7 +3632,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 			blockData = data;
 		} catch (Error& e) {
 			// It's possible a tenant was deleted and the encrypt key fetch failed
-			if (e.code() == error_code_encrypt_keys_fetch_failed) {
+			if (e.code() == error_code_encrypt_keys_fetch_failed || e.code() == error_code_tenant_not_found) {
 				return Void();
 			}
 			throw;

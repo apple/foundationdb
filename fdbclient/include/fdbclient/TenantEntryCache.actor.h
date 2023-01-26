@@ -561,13 +561,12 @@ public:
 		mapByTenantId[entry.id] = payload;
 		mapByTenantName[entry.tenantName] = payload;
 
-		// This is a noisy trace (that may cause traced too many lines in simulation) so comment out for now
-		// TraceEvent("TenantEntryCachePut")
-		//     .detail("TenantName", entry.tenantName)
-		//     .detail("TenantNameExisting", existingName)
-		//     .detail("TenantID", entry.id)
-		//     .detail("TenantIDExisting", existingId)
-		//     .detail("TenantPrefix", entry.prefix);
+		TraceEvent("TenantEntryCachePut")
+		    .detail("TenantName", entry.tenantName)
+		    .detail("TenantNameExisting", existingName)
+		    .detail("TenantID", entry.id)
+		    .detail("TenantIDExisting", existingId)
+		    .detail("TenantPrefix", entry.prefix);
 
 		CODE_PROBE(idItr == mapByTenantId.end() && nameItr == mapByTenantName.end(), "TenantCache new entry");
 		CODE_PROBE(idItr != mapByTenantId.end() && nameItr == mapByTenantName.end(), "TenantCache entry name updated");
