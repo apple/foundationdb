@@ -640,6 +640,7 @@ public:
 			st = StorageServerShard::NotAssigned;
 		} else if (this->adding) {
 			st = this->adding->phase == AddingShard::Waiting ? StorageServerShard::ReadWritePending
+			                                                 : StorageServerShard::Adding;
 		} else {
 			ASSERT(this->moveIn);
 			const MoveInPhase phase = this->moveIn->getPhase();
@@ -685,23 +686,22 @@ public:
 	}
 	bool isCFInVersionedData() const { return readWrite || (adding && adding->isDataAndCFTransferred()); }
 	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
-	bool isFetched() const { return readWrite || (adding && adding->fetchComplete.isSet())|| (moveIn && moveIn->fetchComplete.isSet()); }
+	bool isFetched() const {
+		return readWrite || (adding && adding->fetchComplete.isSet()) || (moveIn && moveIn->fetchComplete.isSet());
+	}
 
 	const char* debugDescribeState() const {
 		if (notAssigned()) {
 			return "NotAssigned";
-		}
-		else if (adding && !adding->isDataAndCFTransferred()) {
+		} else if (adding && !adding->isDataAndCFTransferred()) {
 			return "AddingFetchingCF";
-		}
-		else if (adding && !adding->isDataTransferred()) {
+		} else if (adding && !adding->isDataTransferred()) {
 			return "AddingFetching";
-		}
-		else if (adding) {
+		} else if (adding) {
 			return "AddingTransferred";
+		} else if (moveIn) {
 		}
-		else if (moveIn) {}
-			return moveIn->meta.toString();
+		return moveIn->meta.toString();
 		else {
 			return "ReadWrite";
 		}
@@ -7838,7 +7838,8 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 			data->shards[range.begin]->phase = AddingShard::Waiting;
 			const StorageServerShard newShard = data->shards[keys.begin]->toStorageServerShard();
 			ASSERT(newShard.range == range);
-			ASSERT(newShard.getShardState() == StorageServerShard::ReadWritePending);
+			// ASSERT(newShard.getShardState() == StorageServerShard::ReadWritePending);
+			newShard.setShardState(StorageServerShard::ReadWrite);
 			updateStorageShard(data, newShard);
 			setAvailableStatus(data, range, true);
 		}
@@ -8667,6 +8668,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			newShard = data->shards[keys.begin]->toStorageServerShard();
 			ASSERT(newShard.range == keys);
 			ASSERT(newShard.getShardState() == StorageServerShard::ReadWritePending);
+			newShard.setShardState(StorageServerShard::ReadWrite);
 			updateStorageShard(data, newShard);
 		}
 		setAvailableStatus(data,
@@ -8688,7 +8690,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		data->newestAvailableVersion.insert(shard->keys, latestVersion);
 		shard->readWrite.send(Void());
 		if (data->shardAware) {
-			newShard.setShardState(StorageServerShard::ReadWrite);
 			data->addShard(ShardInfo::newShard(data, newShard)); // invalidates shard!
 			coalescePhysicalShards(data, keys);
 		} else {
@@ -8782,14 +8783,11 @@ void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& 
 	ASSERT(keys.contains(mutation.param1));
 	if (adding) {
 		adding->addMutation(version, fromFetch, mutation);
-	}
-		else if (moveIn) {
-			moveIn->addMutation();
-		}
-	else if (readWrite) {
+	} else if (moveIn) {
+		moveIn->addMutation();
+	} else if (readWrite) {
 		readWrite->addMutation(version, fromFetch, mutation, this->keys, readWrite->updateEagerReads);
-	}
-	else if (mutation.type != MutationRef::ClearRange) {
+	} else if (mutation.type != MutationRef::ClearRange) {
 		TraceEvent(SevError, "DeliveredToNotAssigned").detail("Version", version).detail("Mutation", mutation);
 		ASSERT(false); // Mutation delivered to notAssigned shard!
 	}
@@ -10925,9 +10923,9 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 }
 
 void updateStorageShard(StorageServer* data, StorageServerShard shard) {
-	if (shard.getShardState() == StorageServerShard::ReadWritePending) {
-		shard.setShardState(StorageServerShard::ReadWrite);
-	}
+	// if (shard.getShardState() == StorageServerShard::ReadWritePending) {
+	// 	shard.setShardState(StorageServerShard::ReadWrite);
+	// }
 
 	auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 
