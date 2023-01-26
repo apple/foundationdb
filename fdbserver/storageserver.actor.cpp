@@ -1409,7 +1409,7 @@ public:
 	                                                         Histogram::Unit::bytes)),
 	    readRangeKVPairsReturnedHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                              SS_READ_RANGE_KV_PAIRS_RETURNED_HISTOGRAM,
-	                                                              Histogram::Unit::countLinear)),
+	                                                              Histogram::Unit::bytes)),
 	    tag(invalidTag), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0),
 	    storage(this, storage), shardChangeCounter(0), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
 	    prevVersion(0), rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
@@ -2010,9 +2010,7 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 	if (version <= data->version.get())
 		return version;
 	choose {
-		when(wait(data->version.whenAtLeast(version))) {
-			return version;
-		}
+		when(wait(data->version.whenAtLeast(version))) { return version; }
 		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
 			if (deterministicRandom()->random01() < 0.001)
 				TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
@@ -3962,7 +3960,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 		}
 	}
 	data->readRangeBytesReturnedHistogram->sample(resultLogicalSize);
-	data->readRangeKVPairsReturnedHistogram->sampleRecordCounter(result.data.size());
+	data->readRangeKVPairsReturnedHistogram->sample(result.data.size());
 
 	// all but the last item are less than *pLimitBytes
 	ASSERT(result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
@@ -6185,7 +6183,6 @@ void applyChangeFeedMutation(StorageServer* self,
 						clearMutation.param2 = it->range.end;
 						modified = true;
 					}
-
 					if (!modified && (clearMutation.param1 == shard.begin || clearMutation.param2 == shard.end)) {
 						modified = true;
 					}
@@ -6210,8 +6207,7 @@ void applyChangeFeedMutation(StorageServer* self,
 						}
 						it->mutations.back().cipherKeys.push_back(encryptedMutation.cipherKeys);
 					} else if (it->mutations.back().encrypted.present()) {
-						it->mutations.back().encrypted.get().push_back_deep(it->mutations.back().arena(),
-						                                                    clearMutation);
+						it->mutations.back().encrypted.get().push_back_deep(it->mutations.back().arena(), m);
 						it->mutations.back().cipherKeys.push_back(TextAndHeaderCipherKeys());
 					}
 
@@ -6667,9 +6663,7 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		when(wait(changeFeedInfo->fetchLock.take())) {
 			feedFetchReleaser = FlowLock::Releaser(changeFeedInfo->fetchLock);
 		}
-		when(wait(changeFeedInfo->durableFetchVersion.whenAtLeast(endVersion))) {
-			return invalidVersion;
-		}
+		when(wait(changeFeedInfo->durableFetchVersion.whenAtLeast(endVersion))) { return invalidVersion; }
 	}
 
 	state Version startVersion = beginVersion;
@@ -10704,9 +10698,7 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 
 						}*/
 					}
-					when(wait(timeout)) {
-						timedout = true;
-					}
+					when(wait(timeout)) { timedout = true; }
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled)
@@ -11377,7 +11369,7 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 			state Version version = wait(tr->getReadVersion());
 			// This limits the number of tenants, but eventually we shouldn't need to do this at all
 			// when SSs store only the local tenants
-			KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> entries =
+			KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> entries =
 			    wait(TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 			ASSERT(entries.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !entries.more);
 
@@ -11385,8 +11377,8 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 			    .detail("Version", version)
 			    .detail("NumTenants", entries.results.size());
 
-			for (auto entry : entries.results) {
-				self->insertTenant(entry.second.prefix, entry.first, version, false);
+			for (auto const& [_, entry] : entries.results) {
+				self->insertTenant(entry.prefix, entry.tenantName, version, false);
 			}
 			break;
 		} catch (Error& e) {
