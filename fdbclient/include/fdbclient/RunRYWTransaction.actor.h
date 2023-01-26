@@ -54,6 +54,21 @@ Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>())
 }
 
 ACTOR template <class Function>
+Future<Void> runRYWTransactionVoid(Database cx, Function func) {
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	loop {
+		try {
+			// func should be idempotent; otherwise, retry will get undefined result
+			wait(func(tr));
+			wait(tr->commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+ACTOR template <class Function>
 Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue())>
 runRYWTransactionFailIfLocked(Database cx, Function func) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
