@@ -6124,7 +6124,8 @@ void applyMutation(StorageServer* self,
 void applyChangeFeedMutation(StorageServer* self,
                              MutationRef const& m,
                              MutationRefAndCipherKeys const& encryptedMutation,
-                             Version version) {
+                             Version version,
+                             KeyRangeRef const& shard) {
 	if (m.type == MutationRef::SetValue) {
 		for (auto& it : self->keyChangeFeed[m.param1]) {
 			if (version < it->stopVersion && !it->removing && version > it->emptyVersion) {
@@ -6184,6 +6185,10 @@ void applyChangeFeedMutation(StorageServer* self,
 						clearMutation.param2 = it->range.end;
 						modified = true;
 					}
+
+					if (!modified && (clearMutation.param1 == shard.begin || clearMutation.param2 == shard.end)) {
+						modified = true;
+					}
 					if (it->mutations.empty() || it->mutations.back().version != version) {
 						it->mutations.push_back(
 						    EncryptedMutationsAndVersionRef(version, self->knownCommittedVersion.get()));
@@ -6205,7 +6210,8 @@ void applyChangeFeedMutation(StorageServer* self,
 						}
 						it->mutations.back().cipherKeys.push_back(encryptedMutation.cipherKeys);
 					} else if (it->mutations.back().encrypted.present()) {
-						it->mutations.back().encrypted.get().push_back_deep(it->mutations.back().arena(), m);
+						it->mutations.back().encrypted.get().push_back_deep(it->mutations.back().arena(),
+						                                                    clearMutation);
 						it->mutations.back().cipherKeys.push_back(TextAndHeaderCipherKeys());
 					}
 
@@ -8520,7 +8526,7 @@ void StorageServer::addMutation(Version version,
 		}
 
 		applyChangeFeedMutation(
-		    this, expanded.type == MutationRef::ClearRange ? nonExpanded : expanded, encrypt, version);
+		    this, expanded.type == MutationRef::ClearRange ? nonExpanded : expanded, encrypt, version, shard);
 	}
 	applyMutation(this, expanded, mLog.arena(), mutableData(), version);
 
