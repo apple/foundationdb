@@ -651,8 +651,11 @@ ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmDat
 			state PromiseStream<Key> resultStream;
 			state Standalone<VectorRef<KeyRef>> keys;
 			// SplitMetrics.bytes / 3 as min split size because of same splitThreshold logic above.
+			// Estimated metrics doesn't work well when split metrics request spans multiple shards, since estimate is
+			// for the whole range. Pass empty metrics instead of *estimated*, since it's already incorporated somewhat
+			// in splitMetrics, and storage will trust its local byte sample over the estimate.
 			state Future<Void> streamFuture = bmData->db->splitStorageMetricsStream(
-			    resultStream, range, splitMetrics, estimated, splitMetrics.bytes / 3);
+			    resultStream, range, splitMetrics, StorageMetrics(), splitMetrics.bytes / 3);
 			loop {
 				try {
 					Key k = waitNext(resultStream.getFuture());
@@ -1249,10 +1252,9 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 }
 
 ACTOR Future<Void> loadTenantMap(Reference<ReadYourWritesTransaction> tr, Reference<BlobManagerData> bmData) {
-	state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
+	state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantResults;
 	wait(store(tenantResults,
-	           TenantMetadata::tenantMap().getRange(
-	               tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+	           TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
 	ASSERT(tenantResults.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantResults.more);
 
 	bmData->tenantData.addTenants(tenantResults.results);
@@ -5318,9 +5320,21 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 
 ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 	bmData->initBStore();
+
 	loop {
-		wait(dumpManifest(bmData->db, bmData->bstore, bmData->epoch, bmData->manifestDumperSeqNo));
-		bmData->manifestDumperSeqNo++;
+		// Skip backup if no active blob ranges
+		bool activeRanges = false;
+		auto knownRanges = bmData->knownBlobRanges.intersectingRanges(normalKeys);
+		for (auto& it : knownRanges) {
+			if (it.cvalue()) {
+				activeRanges = true;
+				break;
+			}
+		}
+		if (activeRanges) {
+			wait(dumpManifest(bmData->db, bmData->bstore, bmData->epoch, bmData->manifestDumperSeqNo));
+			bmData->manifestDumperSeqNo++;
+		}
 		wait(delay(SERVER_KNOBS->BLOB_MANIFEST_BACKUP_INTERVAL));
 	}
 }

@@ -26,6 +26,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
@@ -386,7 +387,7 @@ struct TenantManagementWorkload : TestWorkload {
 			std::vector<Future<Void>> createFutures;
 			for (auto [tenant, entry] : tenantsToCreate) {
 				entry.setId(nextId++);
-				createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, tenant, entry)));
+				createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, entry)));
 			}
 			TenantMetadata::lastTenantId().set(tr, nextId - 1);
 			wait(waitForAll(createFutures));
@@ -397,7 +398,7 @@ struct TenantManagementWorkload : TestWorkload {
 				tenantsToCreate.begin()->second.assignedCluster = self->dataClusterName;
 			}
 			wait(MetaclusterAPI::createTenant(
-			    self->mvDb, tenantsToCreate.begin()->first, tenantsToCreate.begin()->second));
+			    self->mvDb, tenantsToCreate.begin()->second, AssignClusterAutomatically::True));
 		}
 
 		return Void();
@@ -431,6 +432,7 @@ struct TenantManagementWorkload : TestWorkload {
 			}
 
 			TenantMapEntry entry;
+			entry.tenantName = tenant;
 			entry.tenantGroup = self->chooseTenantGroup(true);
 
 			if (self->createdTenants.count(tenant)) {
@@ -704,10 +706,9 @@ struct TenantManagementWorkload : TestWorkload {
 	ACTOR static Future<Void> deleteTenantImpl(Reference<ReadYourWritesTransaction> tr,
 	                                           TenantName beginTenant,
 	                                           Optional<TenantName> endTenant,
-	                                           std::vector<TenantName> tenants,
+	                                           std::map<TenantName, int64_t> tenants,
 	                                           OperationType operationType,
 	                                           TenantManagementWorkload* self) {
-		state int tenantIndex;
 		if (operationType == OperationType::SPECIAL_KEYS) {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			Key key = self->specialKeysTenantMapPrefix.withSuffix(beginTenant);
@@ -723,8 +724,10 @@ struct TenantManagementWorkload : TestWorkload {
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			std::vector<Future<Void>> deleteFutures;
-			for (tenantIndex = 0; tenantIndex != tenants.size(); ++tenantIndex) {
-				deleteFutures.push_back(TenantAPI::deleteTenantTransaction(tr, tenants[tenantIndex]));
+			for (auto const& [name, id] : tenants) {
+				if (id != TenantInfo::INVALID_TENANT) {
+					deleteFutures.push_back(TenantAPI::deleteTenantTransaction(tr, id));
+				}
 			}
 
 			wait(waitForAll(deleteFutures));
@@ -782,38 +785,38 @@ struct TenantManagementWorkload : TestWorkload {
 		state bool anyExists = alreadyExists;
 
 		// Collect a list of all tenants that we expect should be deleted by this operation
-		state std::vector<TenantName> tenants;
+		state std::map<TenantName, int64_t> tenants;
 		if (!endTenant.present()) {
-			tenants.push_back(beginTenant);
+			tenants[beginTenant] = anyExists ? itr->second.tenant->id() : TenantInfo::INVALID_TENANT;
 		} else if (endTenant.present()) {
 			for (auto itr = self->createdTenants.lower_bound(beginTenant);
 			     itr != self->createdTenants.end() && itr->first < endTenant.get();
 			     ++itr) {
-				tenants.push_back(itr->first);
+				tenants[itr->first] = itr->second.tenant->id();
 				anyExists = true;
 			}
 		}
 
 		// Check whether each tenant is empty.
-		state int tenantIndex;
+		state std::map<TenantName, int64_t>::iterator tenantItr;
 		state std::vector<std::pair<TenantName, Future<ErrorOr<Void>>>> watchFutures;
 		try {
 			if (alreadyExists || endTenant.present()) {
-				for (tenantIndex = 0; tenantIndex < tenants.size(); ++tenantIndex) {
+				for (tenantItr = tenants.begin(); tenantItr != tenants.end(); ++tenantItr) {
 					// For most tenants, we will delete the contents and make them empty
 					if (deterministicRandom()->random01() < 0.9) {
-						wait(clearTenantData(self, tenants[tenantIndex]));
+						wait(clearTenantData(self, tenantItr->first));
 
 						// watch the tenant to be deleted
 						if (watchTenantCheck) {
 							watchFutures.emplace_back(
-							    tenants[tenantIndex],
-							    errorOr(watchTenant(self, self->createdTenants[tenants[tenantIndex]].tenant)));
+							    tenantItr->first,
+							    errorOr(watchTenant(self, self->createdTenants[tenantItr->first].tenant)));
 						}
 					}
 					// Otherwise, we will just report the current emptiness of the tenant
 					else {
-						auto itr = self->createdTenants.find(tenants[tenantIndex]);
+						auto itr = self->createdTenants.find(tenantItr->first);
 						ASSERT(itr != self->createdTenants.end());
 						isEmpty = isEmpty && itr->second.empty;
 					}
@@ -881,7 +884,7 @@ struct TenantManagementWorkload : TestWorkload {
 					if (!tenants.empty()) {
 						// Check the state of the first deleted tenant
 						Optional<TenantMapEntry> resultEntry =
-						    wait(self->tryGetTenant(*tenants.begin(), operationType));
+						    wait(self->tryGetTenant(tenants.begin()->first, operationType));
 
 						if (!resultEntry.present()) {
 							alreadyExists = false;
@@ -893,9 +896,8 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 				}
 
-				// The management transaction operation is a no-op if there are no tenants to delete in a range
-				// delete
-				if (tenants.size() == 0 && operationType == OperationType::MANAGEMENT_TRANSACTION) {
+				// The management transaction operation is a no-op if there are no tenants to delete
+				if (!anyExists && operationType == OperationType::MANAGEMENT_TRANSACTION) {
 					return Void();
 				}
 
@@ -928,8 +930,8 @@ struct TenantManagementWorkload : TestWorkload {
 				}
 
 				// Update our local state to remove the deleted tenants
-				for (auto tenant : tenants) {
-					auto itr = self->createdTenants.find(tenant);
+				for (auto const& [name, id] : tenants) {
+					auto itr = self->createdTenants.find(name);
 					ASSERT(itr != self->createdTenants.end());
 
 					// If the tenant group has no tenants remaining, stop tracking it
@@ -941,7 +943,7 @@ struct TenantManagementWorkload : TestWorkload {
 						}
 					}
 
-					self->createdTenants.erase(tenant);
+					self->createdTenants.erase(name);
 				}
 
 				// check for watch result
@@ -1677,7 +1679,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 				ASSERT(tenantGroups.size() <= limit);
 
-				// Compare the resulting tenant list to the list we expected to get
+				// Compare the resulting tenant group list to the list we expected to get
 				auto localItr = self->createdTenantGroups.lower_bound(beginTenantGroup);
 				auto tenantMapItr = tenantGroups.begin();
 				for (; tenantMapItr != tenantGroups.end(); ++tenantMapItr, ++localItr) {

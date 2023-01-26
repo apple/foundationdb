@@ -892,14 +892,26 @@ struct ChangeFeedStreamRequest {
 	bool canReadPopped = true;
 	UID id; // This must be globally unique among ChangeFeedStreamRequest instances
 	Optional<ReadOptions> options;
+	bool encrypted = false;
 
 	ReplyPromiseStream<ChangeFeedStreamReply> reply;
 
 	ChangeFeedStreamRequest() {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, rangeID, begin, end, range, reply, spanContext, replyBufferSize, canReadPopped, id, options, arena);
+		serializer(ar,
+		           rangeID,
+		           begin,
+		           end,
+		           range,
+		           reply,
+		           spanContext,
+		           replyBufferSize,
+		           canReadPopped,
+		           id,
+		           options,
+		           encrypted,
+		           arena);
 	}
 };
 
