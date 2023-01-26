@@ -30,6 +30,9 @@ ACTOR Future<std::pair<RangeResult, Version>> readFromFDB(Database cx, KeyRange 
 	state KeyRange currentRange = range;
 	loop {
 		tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+		// use no-cache as this is either used for test validation, or the blob granule consistency check
+		ReadOptions readOptions = { ReadType::NORMAL, CacheResult::False };
+		tr.trState->readOptions = readOptions;
 		try {
 			state RangeResult r = wait(tr.getRange(currentRange, CLIENT_KNOBS->TOO_MANY));
 			Version grv = wait(tr.getReadVersion());
