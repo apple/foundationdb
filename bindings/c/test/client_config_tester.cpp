@@ -19,7 +19,14 @@
  */
 
 /*
- * A utility for testing setting up the FDB client with different configuration options
+ * A utility for testing FDB client with different configuration options
+ *
+ * It performs following steps:
+ * 1. Initialize FDB client with the specified options
+ * 2. Create a database
+ * 3. Perform a simple transaction
+ * 4. Check if these steps succeed of fail with the expected error
+ * 5. Print client status if requested
  */
 
 #include "fmt/core.h"
@@ -53,6 +60,7 @@ enum TesterOptionId {
 	OPT_EXTERNAL_CLIENT_LIBRARY,
 	OPT_EXTERNAL_CLIENT_DIRECTORY,
 	OPT_DISABLE_LOCAL_CLIENT,
+	OPT_DISABLE_CLIENT_BYPASS,
 	OPT_API_VERSION,
 	OPT_TRANSACTION_TIMEOUT,
 	OPT_TRACE,
@@ -60,7 +68,8 @@ enum TesterOptionId {
 	OPT_TMP_DIR,
 	OPT_IGNORE_EXTERNAL_CLIENT_FAILURES,
 	OPT_FAIL_INCOMPATIBLE_CLIENT,
-	OPT_EXPECTED_ERROR
+	OPT_EXPECTED_ERROR,
+	OPT_PRINT_STATUS
 };
 
 const int MIN_TESTABLE_API_VERSION = 400;
@@ -73,6 +82,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_EXTERNAL_CLIENT_LIBRARY, "--external-client-library", SO_REQ_SEP },
 	  { OPT_EXTERNAL_CLIENT_DIRECTORY, "--external-client-dir", SO_REQ_SEP },
 	  { OPT_DISABLE_LOCAL_CLIENT, "--disable-local-client", SO_NONE },
+	  { OPT_DISABLE_CLIENT_BYPASS, "--disable-client-bypass", SO_NONE },
 	  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
 	  { OPT_TRANSACTION_TIMEOUT, "--transaction-timeout", SO_REQ_SEP },
 	  { OPT_TRACE, "--log", SO_NONE },
@@ -81,6 +91,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_IGNORE_EXTERNAL_CLIENT_FAILURES, "--ignore-external-client-failures", SO_NONE },
 	  { OPT_FAIL_INCOMPATIBLE_CLIENT, "--fail-incompatible-client", SO_NONE },
 	  { OPT_EXPECTED_ERROR, "--expected-error", SO_REQ_SEP },
+	  { OPT_PRINT_STATUS, "--print-status", SO_NONE },
 	  SO_END_OF_OPTIONS };
 
 class TesterOptions {
@@ -91,6 +102,7 @@ public:
 	std::string externalClientLibrary;
 	std::string externalClientDir;
 	bool disableLocalClient = false;
+	bool disableClientBypass = false;
 	int transactionTimeout = 0;
 	bool trace = false;
 	std::string traceDir;
@@ -98,6 +110,7 @@ public:
 	bool ignoreExternalClientFailures = false;
 	bool failIncompatibleClient = false;
 	fdb::Error::CodeType expectedError = 0;
+	bool printStatus = false;
 };
 
 namespace {
@@ -119,6 +132,8 @@ void printProgramUsage(const char* execName) {
 	       "                 Directory containing external client libraries.\n"
 	       "  --disable-local-client\n"
 	       "                 Disable the local client, i.e. use only external client libraries.\n"
+	       "  --disable-client-bypass\n"
+	       "                 Disable bypassing Multi-Version Client when using the local client.\n"
 	       "  --api-version VERSION\n"
 	       "                 Required FDB API version (default %d).\n"
 	       "  --transaction-timeout MILLISECONDS\n"
@@ -135,6 +150,8 @@ void printProgramUsage(const char* execName) {
 	       "                 Fail if there is no client matching the server version.\n"
 	       "  --expected-error ERR\n"
 	       "                 FDB error code the test expected to fail with (default: 0).\n"
+	       "  --print-status\n"
+	       "                 Print database client status.\n"
 	       "  -h, --help     Display this help and exit.\n",
 	       FDB_API_VERSION);
 }
@@ -167,6 +184,9 @@ bool processArg(const CSimpleOpt& args) {
 	case OPT_DISABLE_LOCAL_CLIENT:
 		options.disableLocalClient = true;
 		break;
+	case OPT_DISABLE_CLIENT_BYPASS:
+		options.disableClientBypass = true;
+		break;
 	case OPT_API_VERSION:
 		if (!processIntOption(
 		        args.OptionText(), args.OptionArg(), MIN_TESTABLE_API_VERSION, FDB_API_VERSION, options.apiVersion)) {
@@ -177,6 +197,7 @@ bool processArg(const CSimpleOpt& args) {
 		if (!processIntOption(args.OptionText(), args.OptionArg(), 0, 1000000, options.transactionTimeout)) {
 			return false;
 		}
+		break;
 	case OPT_TRACE:
 		options.trace = true;
 		break;
@@ -196,6 +217,10 @@ bool processArg(const CSimpleOpt& args) {
 		if (!processIntOption(args.OptionText(), args.OptionArg(), 0, 10000, options.expectedError)) {
 			return false;
 		}
+		break;
+	case OPT_PRINT_STATUS:
+		options.printStatus = true;
+		break;
 	}
 	return true;
 }
@@ -270,6 +295,18 @@ void applyNetworkOptions() {
 	if (options.failIncompatibleClient) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_FAIL_INCOMPATIBLE_CLIENT);
 	}
+	if (options.disableClientBypass) {
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_CLIENT_BYPASS);
+	}
+}
+
+void printDatabaseStatus(fdb::Database db) {
+	if (options.printStatus) {
+		auto statusFuture = db.getClientStatus();
+		fdb_check(statusFuture.blockUntilReady(), "Wait on getClientStatus failed");
+		fmt::print("{}\n", fdb::toCharsRef(statusFuture.get()));
+		fflush(stdout);
+	}
 }
 
 void testTransaction() {
@@ -277,22 +314,40 @@ void testTransaction() {
 	fdb::Transaction tx = db.createTransaction();
 	while (true) {
 		// Set a time out to avoid long delays when testing invalid configurations
-		tx.setOption(FDB_TR_OPTION_TIMEOUT, options.transactionTimeout);
-		tx.set(fdb::toBytesRef("key1"sv), fdb::toBytesRef("val1"sv));
-		auto commitFuture = tx.commit();
-		fdb_check(commitFuture.blockUntilReady(), "Wait on commit failed");
-		fdb::Error err = commitFuture.error();
-		if (!err) {
+		try {
+			tx.setOption(FDB_TR_OPTION_TIMEOUT, options.transactionTimeout);
+			auto getFuture = tx.get(fdb::toBytesRef("key2"sv), true);
+			fdb_check(getFuture.blockUntilReady(), "Wait on get failed");
+			if (getFuture.error()) {
+				throw getFuture.error();
+			}
+			tx.set(fdb::toBytesRef("key1"sv), fdb::toBytesRef("val1"sv));
+			auto commitFuture = tx.commit();
+			fdb_check(commitFuture.blockUntilReady(), "Wait on commit failed");
+			if (commitFuture.error()) {
+				throw commitFuture.error();
+			}
 			break;
+		} catch (fdb::Error err) {
+			if (err.code() == error_code_timed_out) {
+				fmt::print(stderr, "Transaction timed out\n");
+				printDatabaseStatus(db);
+				exitImmediately(1);
+			}
+			auto onErrorFuture = tx.onError(err);
+			fdb_check(onErrorFuture.blockUntilReady(), "Wait on onError failed");
+			auto onErrResult = onErrorFuture.error();
+			if (onErrResult) {
+				fmt::print(stderr,
+				           "Transaction failed with a non-retriable error: {}({})\n",
+				           onErrResult.code(),
+				           onErrResult.what());
+				printDatabaseStatus(db);
+				checkErrorCodeAndExit(onErrResult.code());
+			}
 		}
-		if (err.code() == error_code_timed_out) {
-			fmt::print(stderr, "Transaction timed out\n");
-			exitImmediately(1);
-		}
-		auto onErrorFuture = tx.onError(err);
-		fdb_check(onErrorFuture.blockUntilReady(), "Wait on onError failed");
-		fdb_check(onErrorFuture.error(), "onError failed");
 	}
+	printDatabaseStatus(db);
 }
 
 } // namespace

@@ -100,7 +100,7 @@ public:
 		if (req.tenantInfo.hasTenant()) {
 			// TODO(xwang) add support for tenant test, search for tenant entry
 			Optional<TenantMapEntry> entry;
-			Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
+			Optional<Key> tenantPrefix = entry.map(&TenantMapEntry::prefix);
 			if (tenantPrefix.present()) {
 				UNREACHABLE();
 				// req.keys = req.keys.withPrefix(tenantPrefix.get(), req.arena);
@@ -208,7 +208,7 @@ void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus
 			twoWayShardSplitting(ranges.begin().range(), range.begin, ranges.begin().cvalue().shardSize, restrictSize);
 		}
 		if (ranges.end().begin() > range.end) {
-			CODE_PROBE(true, "Implicitly split end range to 2 pieces", probe::decoration::rare);
+			CODE_PROBE(true, "Implicitly split end range to 2 pieces");
 			auto lastRange = ranges.end();
 			--lastRange;
 			twoWayShardSplitting(lastRange.range(), range.end, ranges.end().cvalue().shardSize, restrictSize);
@@ -228,7 +228,7 @@ void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus
 			it.value() = ShardInfo{ status, newSize };
 		} else if ((oldStatus == MockShardStatus::COMPLETED || oldStatus == MockShardStatus::FETCHED) &&
 		           (status == MockShardStatus::INFLIGHT || status == MockShardStatus::FETCHED)) {
-			CODE_PROBE(true, "Shard already on server", probe::decoration::rare);
+			CODE_PROBE(true, "Shard already on server");
 		} else {
 			TraceEvent(SevError, "MockShardStatusTransitionError", id)
 			    .detail("From", oldStatus)
@@ -587,10 +587,8 @@ Future<KeyRangeLocationInfo> MockGlobalState::getKeyLocation(TenantInfo tenant,
 	ASSERT_EQ(srcTeam.size(), 1);
 	rep.results.emplace_back(single, extractStorageServerInterfaces(srcTeam.front().servers));
 
-	return KeyRangeLocationInfo(
-	    rep.tenantEntry,
-	    KeyRange(toPrefixRelativeRange(rep.results[0].first, rep.tenantEntry.prefix), rep.arena),
-	    buildLocationInfo(rep.results[0].second));
+	return KeyRangeLocationInfo(KeyRange(toPrefixRelativeRange(rep.results[0].first, tenant.prefix), rep.arena),
+	                            buildLocationInfo(rep.results[0].second));
 }
 
 Future<std::vector<KeyRangeLocationInfo>> MockGlobalState::getKeyRangeLocations(
@@ -622,8 +620,7 @@ Future<std::vector<KeyRangeLocationInfo>> MockGlobalState::getKeyRangeLocations(
 
 	std::vector<KeyRangeLocationInfo> results;
 	for (int shard = 0; shard < rep.results.size(); shard++) {
-		results.emplace_back(rep.tenantEntry,
-		                     (toPrefixRelativeRange(rep.results[shard].first, rep.tenantEntry.prefix) & keys),
+		results.emplace_back((toPrefixRelativeRange(rep.results[shard].first, tenant.prefix) & keys),
 		                     buildLocationInfo(rep.results[shard].second));
 	}
 	return results;

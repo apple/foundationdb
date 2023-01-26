@@ -284,7 +284,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 	int changeFeedStreamReplyBufferSize = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 4;
 
-	bool isEncryptionEnabled = false;
+	EncryptionAtRestMode encryptMode;
 	bool buggifyFull = false;
 
 	int64_t memoryFullThreshold =
@@ -307,7 +307,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	          SERVER_KNOBS->FILE_LATENCY_SKETCH_ACCURACY,
 	          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-	    isEncryptionEnabled(isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION)) {}
+	    encryptMode(EncryptionAtRestMode::DISABLED) {}
 
 	bool managerEpochOk(int64_t epoch) {
 		if (epoch < currentManagerEpoch) {
@@ -436,6 +436,7 @@ void checkGranuleLock(int64_t epoch, int64_t seqno, int64_t ownerEpoch, int64_t 
 		throw granule_assignment_conflict();
 	}
 }
+
 } // namespace
 
 // Below actors asssit in fetching/lookup desired encryption keys. Following steps are done for an encryption key
@@ -453,16 +454,19 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
                                                                   KeyRange keyRange,
                                                                   Arena* arena) {
 	state BlobGranuleCipherKeysCtx cipherKeysCtx;
-	state Reference<GranuleTenantData> tenantData = wait(bwData->tenantData.getDataForGranule(keyRange));
-
-	ASSERT(tenantData.isValid());
+	state EncryptCipherDomainId domainId = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
+	if (bwData->encryptMode.mode == EncryptionAtRestMode::DOMAIN_AWARE) {
+		state Reference<GranuleTenantData> tenantData = wait(bwData->tenantData.getDataForGranule(keyRange));
+		ASSERT(tenantData.isValid());
+		domainId = tenantData->entry.id;
+	}
 
 	std::unordered_set<EncryptCipherDomainId> domainIds;
-	domainIds.emplace(tenantData->entry.id);
+	domainIds.emplace(domainId);
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> domainKeyMap =
 	    wait(getLatestEncryptCipherKeys(bwData->dbInfo, domainIds, BlobCipherMetrics::BLOB_GRANULE));
 
-	auto domainKeyItr = domainKeyMap.find(tenantData->entry.id);
+	auto domainKeyItr = domainKeyMap.find(domainId);
 	ASSERT(domainKeyItr != domainKeyMap.end());
 	cipherKeysCtx.textCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(domainKeyItr->second, *arena);
 
@@ -821,7 +825,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	state Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 	state Arena arena;
 
-	if (bwData->isEncryptionEnabled) {
+	if (bwData->encryptMode.isEncryptionEnabled()) {
 		BlobGranuleCipherKeysCtx ciphKeysCtx = wait(getLatestGranuleCipherKeys(bwData, keyRange, &arena));
 		cipherKeysCtx = std::move(ciphKeysCtx);
 		cipherKeysMeta = BlobGranuleCipherKeysCtx::toCipherKeysMeta(cipherKeysCtx.get());
@@ -1034,7 +1038,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	state Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 	state Arena arena;
 
-	if (bwData->isEncryptionEnabled) {
+	if (bwData->encryptMode.isEncryptionEnabled()) {
 		BlobGranuleCipherKeysCtx ciphKeysCtx = wait(getLatestGranuleCipherKeys(bwData, keyRange, &arena));
 		cipherKeysCtx = std::move(ciphKeysCtx);
 		cipherKeysMeta = BlobGranuleCipherKeysCtx::toCipherKeysMeta(cipherKeysCtx.get());
@@ -1303,13 +1307,10 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		ASSERT(snapshotVersion < version);
 
 		state Optional<BlobGranuleCipherKeysCtx> snapCipherKeysCtx;
-		if (g_network && g_network->isSimulated() &&
-		    isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION) &&
-		    !snapshotF.cipherKeysMeta.present()) {
-			ASSERT(false);
-		}
+		ASSERT(!(g_network && g_network->isSimulated() && bwData->encryptMode.isEncryptionEnabled() &&
+		         !snapshotF.cipherKeysMeta.present()));
 		if (snapshotF.cipherKeysMeta.present()) {
-			ASSERT(isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION));
+			ASSERT(bwData->encryptMode.isEncryptionEnabled());
 			CODE_PROBE(true, "fetching cipher keys for blob snapshot file");
 			BlobGranuleCipherKeysCtx keysCtx =
 			    wait(getGranuleCipherKeysFromKeysMeta(bwData, snapshotF.cipherKeysMeta.get(), &filenameArena));
@@ -1336,14 +1337,11 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 
 			deltaF = files.deltaFiles[deltaIdx];
 
-			if (g_network && g_network->isSimulated() &&
-			    isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION) &&
-			    !deltaF.cipherKeysMeta.present()) {
-				ASSERT(false);
-			}
+			ASSERT(!(g_network && g_network->isSimulated() && bwData->encryptMode.isEncryptionEnabled() &&
+			         !deltaF.cipherKeysMeta.present()));
 
 			if (deltaF.cipherKeysMeta.present()) {
-				ASSERT(isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION));
+				ASSERT(bwData->encryptMode.isEncryptionEnabled());
 				CODE_PROBE(true, "fetching cipher keys for delta file");
 				BlobGranuleCipherKeysCtx keysCtx =
 				    wait(getGranuleCipherKeysFromKeysMeta(bwData, deltaF.cipherKeysMeta.get(), &filenameArena));
@@ -2253,8 +2251,29 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		}
 
 		// No need to start Change Feed in full restore mode
-		if (bwData->isFullRestoreMode)
+		if (bwData->isFullRestoreMode) {
+			while (inFlightFiles.size() > 0) {
+				if (inFlightFiles.front().future.isReady()) {
+					BlobFileIndex completedFile = wait(inFlightFiles.front().future);
+					if (inFlightFiles.front().snapshot) {
+						if (metadata->files.deltaFiles.empty()) {
+							ASSERT(completedFile.version == metadata->initialSnapshotVersion);
+						} else {
+							ASSERT(completedFile.version == metadata->files.deltaFiles.back().version);
+						}
+						metadata->files.snapshotFiles.push_back(completedFile);
+						metadata->durableSnapshotVersion.set(completedFile.version);
+						pendingSnapshots--;
+					}
+					inFlightFiles.pop_front();
+					wait(yield(TaskPriority::BlobWorkerUpdateStorage));
+				} else {
+					wait(yield(TaskPriority::BlobWorkerUpdateStorage));
+				}
+			}
+			metadata->readable.send(Void());
 			return Void();
+		}
 
 		checkMergeCandidate = granuleCheckMergeCandidate(bwData,
 		                                                 metadata,
@@ -3616,21 +3635,20 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 
 	state Optional<Key> tenantPrefix;
 	state Arena arena;
-	if (req.tenantInfo.name.present()) {
+	if (req.tenantInfo.hasTenant()) {
 		ASSERT(req.tenantInfo.tenantId != TenantInfo::INVALID_TENANT);
 		Optional<TenantMapEntry> tenantEntry = bwData->tenantData.getTenantById(req.tenantInfo.tenantId);
 		if (tenantEntry.present()) {
 			ASSERT(tenantEntry.get().id == req.tenantInfo.tenantId);
 			tenantPrefix = tenantEntry.get().prefix;
 		} else {
-			CODE_PROBE(true, "Blob worker unknown tenant");
+			CODE_PROBE(true, "Blob worker tenant not found");
 			// FIXME - better way. Wait on retry here, or just have better model for tenant metadata?
 			// Just throw wrong_shard_server and make the client retry and assume we load it later
-			TraceEvent(SevDebug, "BlobWorkerRequestUnknownTenant", bwData->id)
+			TraceEvent(SevDebug, "BlobWorkerRequestTenantNotFound", bwData->id)
 			    .suppressFor(5.0)
-			    .detail("TenantName", req.tenantInfo.name.get())
-			    .detail("TenantId", req.tenantInfo.tenantId);
-			throw unknown_tenant();
+			    .detail("Tenant", req.tenantInfo.tenantId);
+			throw tenant_not_found();
 		}
 		req.keyRange = KeyRangeRef(req.keyRange.begin.withPrefix(tenantPrefix.get(), req.arena),
 		                           req.keyRange.end.withPrefix(tenantPrefix.get(), req.arena));
@@ -3694,12 +3712,10 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			state Reference<GranuleMetadata> metadata = m;
 			// state Version granuleBeginVersion = req.beginVersion;
 			// skip waiting for CF ready for recovery mode
-			if (!bwData->isFullRestoreMode) {
-				choose {
-					when(wait(metadata->readable.getFuture())) {}
-					when(wait(metadata->cancelled.getFuture())) {
-						throw wrong_shard_server();
-					}
+			choose {
+				when(wait(metadata->readable.getFuture())) {}
+				when(wait(metadata->cancelled.getFuture())) {
+					throw wrong_shard_server();
 				}
 			}
 
@@ -3875,13 +3891,10 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 							    .detail("FileName", chunk.snapshotFile.get().filename.toString())
 							    .detail("Encrypted", encrypted);
 						}
-
-						if (g_network && g_network->isSimulated() &&
-						    isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION) && !encrypted) {
-							ASSERT(false);
-						}
+						ASSERT(!(g_network && g_network->isSimulated() && bwData->encryptMode.isEncryptionEnabled() &&
+						         !encrypted));
 						if (encrypted) {
-							ASSERT(isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION));
+							ASSERT(bwData->encryptMode.isEncryptionEnabled());
 							ASSERT(!chunk.snapshotFile.get().cipherKeysCtx.present());
 							CODE_PROBE(true, "fetching cipher keys from meta ref for snapshot file");
 							snapCipherKeysCtx = getGranuleCipherKeysFromKeysMetaRef(
@@ -3898,12 +3911,10 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 							    .detail("Encrypted", encrypted);
 						}
 
-						if (g_network && g_network->isSimulated() &&
-						    isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION) && !encrypted) {
-							ASSERT(false);
-						}
+						ASSERT(!(g_network && g_network->isSimulated() && bwData->encryptMode.isEncryptionEnabled() &&
+						         !encrypted));
 						if (encrypted) {
-							ASSERT(isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION));
+							ASSERT(bwData->encryptMode.isEncryptionEnabled());
 							ASSERT(!chunk.deltaFiles[deltaIdx].cipherKeysCtx.present());
 							CODE_PROBE(true, "fetching cipher keys from meta ref for delta files");
 							deltaCipherKeysCtxs.emplace(
@@ -4103,7 +4114,6 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			state Future<Optional<Value>> fLockValue = tr.get(lockKey);
 			state Future<ForcedPurgeState> fForcedPurgeState = getForcePurgedState(&tr, req.keyRange);
 			Future<Optional<GranuleHistory>> fHistory = getLatestGranuleHistory(&tr, req.keyRange);
-
 			Optional<GranuleHistory> history = wait(fHistory);
 			info.history = history;
 
@@ -4205,6 +4215,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 					if (info.existingFiles.get().snapshotFiles.empty()) {
 						ASSERT(info.existingFiles.get().deltaFiles.empty());
 						info.previousDurableVersion = invalidVersion;
+						info.doSnapshot = true;
 					} else if (info.existingFiles.get().deltaFiles.empty()) {
 						info.previousDurableVersion = info.existingFiles.get().snapshotFiles.back().version;
 					} else {
@@ -4230,8 +4241,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			// If anything in previousGranules, need to do the handoff logic and set
 			// ret.previousChangeFeedId, and the previous durable version will come from the previous
 			// granules
-			if (info.history.present() && info.history.get().value.parentVersions.size() > 0 &&
-			    !bwData->isFullRestoreMode) {
+			if (info.history.present() && info.history.get().value.parentVersions.size() > 0) {
 				CODE_PROBE(true, "Granule open found parent");
 				if (info.history.get().value.parentVersions.size() == 1) { // split
 					state KeyRangeRef parentRange(info.history.get().value.parentBoundaries[0],
@@ -4263,17 +4273,21 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 							info.changeFeedStartVersion = granuleSplitState.second;
 						} else if (granuleSplitState.first == BlobGranuleSplitState::Initialized) {
 							CODE_PROBE(true, "Granule open found granule in initialized state");
-							wait(updateGranuleSplitState(&tr,
-							                             info.splitParentGranule.get().first,
-							                             info.splitParentGranule.get().second,
-							                             info.granuleID,
-							                             BlobGranuleSplitState::Assigned));
+							if (!bwData->isFullRestoreMode) {
+								wait(updateGranuleSplitState(&tr,
+								                             info.splitParentGranule.get().first,
+								                             info.splitParentGranule.get().second,
+								                             info.granuleID,
+								                             BlobGranuleSplitState::Assigned));
+							}
 							// change feed was created as part of this transaction, changeFeedStartVersion
 							// will be set later
 						} else {
-							CODE_PROBE(true, "Granule open found granule in done state");
-							// this sub-granule is done splitting, no need for split logic.
-							info.splitParentGranule.reset();
+							if (!bwData->isFullRestoreMode) {
+								CODE_PROBE(true, "Granule open found granule in done state");
+								// this sub-granule is done splitting, no need for split logic.
+								info.splitParentGranule.reset();
+							}
 						}
 					}
 
@@ -5172,10 +5186,15 @@ ACTOR Future<Void> simForceFullMemory(Reference<BlobWorkerData> bwData) {
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
                               ReplyPromise<InitializeBlobWorkerReply> recruitReply,
                               Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	state Reference<BlobWorkerData> self(new BlobWorkerData(
-	    bwInterf.id(), dbInfo, openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
+	state Database cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+	state Reference<BlobWorkerData> self(new BlobWorkerData(bwInterf.id(), dbInfo, cx));
 	self->id = bwInterf.id();
 	self->locality = bwInterf.locality;
+	// Since the blob worker gets initalized through the blob manager it is more reliable to fetch the encryption state
+	// using the DB Config rather than passing it through the initalization request for the blob manager and blob worker
+	DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+	self->encryptMode = config.encryptionAtRestMode;
+	TraceEvent("BWEncryptionAtRestMode").detail("Mode", self->encryptMode.toString());
 
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 

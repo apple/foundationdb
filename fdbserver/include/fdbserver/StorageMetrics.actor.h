@@ -46,6 +46,7 @@ const StringRef STORAGE_COMMIT_LATENCY_HISTOGRAM = "StorageCommitLatency"_sr;
 const StringRef SS_DURABLE_VERSION_UPDATE_LATENCY_HISTOGRAM = "SSDurableVersionUpdateLatency"_sr;
 const StringRef SS_READ_RANGE_BYTES_RETURNED_HISTOGRAM = "SSReadRangeBytesReturned"_sr;
 const StringRef SS_READ_RANGE_BYTES_LIMIT_HISTOGRAM = "SSReadRangeBytesLimit"_sr;
+const StringRef SS_READ_RANGE_KV_PAIRS_RETURNED_HISTOGRAM = "SSReadRangeKVPairsReturned"_sr;
 
 struct StorageMetricSample {
 	IndexedSet<Key, int64_t> sample;
@@ -192,7 +193,7 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 		choose {
 			when(state WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
 				if (!req.tenantInfo.hasTenant() && !self->isReadable(req.keys)) {
-					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()", probe::decoration::rare);
+					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()");
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
 					self->addActor(self->waitMetricsTenantAware(req));

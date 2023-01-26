@@ -18,7 +18,9 @@
  * limitations under the License.
  */
 
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
@@ -111,10 +113,12 @@ struct RestoreBackupWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> _start(RestoreBackupWorkload* self, Database cx) {
+		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		wait(delay(self->delayFor));
 		wait(waitOnBackup(self, cx));
 		wait(clearDatabase(cx));
-		if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
+
+		if (config.tenantMode == TenantMode::REQUIRED) {
 			// restore system keys
 			VectorRef<KeyRangeRef> systemBackupRanges = getSystemBackupRanges();
 			state std::vector<Future<Version>> restores;

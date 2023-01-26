@@ -231,6 +231,8 @@ inline void save(Archive& ar, const Arena& p) {
 template <class T>
 class Optional : public ComposedIdentifier<T, 4> {
 public:
+	using ValueType = T;
+
 	Optional() = default;
 
 	template <class U>
@@ -250,16 +252,140 @@ public:
 
 	template <class R>
 	Optional<R> castTo() const {
-		return map<R>([](const T& v) { return (R)v; });
+		return map([](const T& v) { return (R)v; });
 	}
 
-	template <class R>
-	Optional<R> map(std::function<R(T)> f) const& {
-		return present() ? Optional<R>(f(get())) : Optional<R>();
+private:
+	template <class F>
+	using MapRet = std::decay_t<std::invoke_result_t<F, T>>;
+
+	template <class F>
+	using EnableIfNotMemberPointer =
+	    std::enable_if_t<!std::is_member_object_pointer_v<F> && !std::is_member_function_pointer_v<F>>;
+
+public:
+	// If the optional is set, calls the function f on the value and returns the value. Otherwise, returns an empty
+	// optional.
+	template <class F, typename = EnableIfNotMemberPointer<F>>
+	Optional<MapRet<F>> map(const F& f) const& {
+		return present() ? Optional<MapRet<F>>(f(get())) : Optional<MapRet<F>>();
 	}
-	template <class R>
-	Optional<R> map(std::function<R(T)> f) && {
-		return present() ? Optional<R>(f(std::move(*this).get())) : Optional<R>();
+	template <class F, typename = EnableIfNotMemberPointer<F>>
+	Optional<MapRet<F>> map(const F& f) && {
+		return present() ? Optional<MapRet<F>>(f(std::move(*this).get())) : Optional<MapRet<F>>();
+	}
+
+	// Converts an Optional<T> to an Optional<R> of one of its value's members
+	//
+	// v.map(&T::member) is equivalent to v.map([](T v) { return v.member; })
+	template <class R, class Rp = std::decay_t<R>>
+	std::enable_if_t<std::is_class_v<T>, Optional<Rp>> map(
+	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) const& {
+		return present() ? Optional<Rp>(get().*member) : Optional<Rp>();
+	}
+	template <class R, class Rp = std::decay_t<R>>
+	std::enable_if_t<std::is_class_v<T>, Optional<Rp>> map(
+	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) && {
+		return present() ? Optional<Rp>(std::move(*this).get().*member) : Optional<Rp>();
+	}
+
+	// Converts an Optional<T> to an Optional<R> of a value returned by a member function of T
+	//
+	// v.map(&T::memberFunc, arg1, arg2, ...) is equivalent to
+	// v.map([](T v) { return v.memberFunc(arg1, arg2, ...); })
+	template <class R, class... Args, class Rp = std::decay_t<R>>
+	std::enable_if_t<std::is_class_v<T>, Optional<Rp>> map(
+	    R (std::conditional_t<std::is_class_v<T>, T, Void>::*memberFunc)(Args...) const,
+	    Args&&... args) const& {
+		return present() ? Optional<Rp>((get().*memberFunc)(std::forward<Args>(args)...)) : Optional<Rp>();
+	}
+	template <class R, class... Args, class Rp = std::decay_t<R>>
+	std::enable_if_t<std::is_class_v<T>, Optional<Rp>> map(
+	    R (std::conditional_t<std::is_class_v<T>, T, Void>::*memberFunc)(Args...) const,
+	    Args&&... args) && {
+		return present() ? Optional<Rp>((std::move(*this).get().*memberFunc)(std::forward<Args>(args)...))
+		                 : Optional<Rp>();
+	}
+
+	// Given T that is a pointer or pointer-like type to type P (e.g. T=P* or T=Reference<P>), converts an Optional<T>
+	// to an Optional<R> of one its value's members. If the optional value is present and false-like (null), then
+	// returns an empty Optional<R>.
+	//
+	// v.mapRef(&P::member) is equivalent to Optional<R>(v.get()->member) if v is present and non-null
+	template <class P, class R, class Rp = std::decay_t<R>>
+	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, Optional<Rp>> mapRef(R P::*member) const& {
+		if (!present() || !get()) {
+			return Optional<Rp>();
+		}
+
+		P& p = *get();
+		return p.*member;
+	}
+
+	// Given T that is a pointer or pointer-like type to type P (e.g. T=P* or T=Reference<P>), converts an Optional<T>
+	// to an Optional<R> of a value returned by a member function of P. If the optional value is present and false-like
+	// (null), then returns an empty Optional<R>.
+	//
+	// v.mapRef(&T::memberFunc, arg1, arg2, ...) is equivalent to Optional<R>(v.get()->memberFunc(arg1, arg2, ...)) if v
+	// is present and non-null
+	template <class P, class R, class... Args, class Rp = std::decay_t<R>>
+	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, Optional<Rp>> mapRef(R (P::*memberFunc)(Args...) const,
+	                                                                                  Args&&... args) const& {
+		if (!present() || !get()) {
+			return Optional<Rp>();
+		}
+		P& p = *get();
+		return (p.*memberFunc)(std::forward<Args>(args)...);
+	}
+
+	// Similar to map with a mapped type of Optional<R>, but flattens the result. For example, if the mapped result is
+	// of type Optional<R>, map will return Optional<Optional<R>> while flatMap will return Optional<R>
+	template <class... Args>
+	auto flatMap(Args&&... args) const& {
+		auto val = map(std::forward<Args>(args)...);
+		using R = typename decltype(val)::ValueType::ValueType;
+
+		if (val.present()) {
+			return val.get();
+		} else {
+			return Optional<R>();
+		}
+	}
+	template <class... Args>
+	auto flatMap(Args&&... args) && {
+		auto val = std::move(*this).map(std::forward<Args>(args)...);
+		using R = typename decltype(val)::ValueType::ValueType;
+
+		if (val.present()) {
+			return val.get();
+		} else {
+			return Optional<R>();
+		}
+	}
+
+	// Similar to mapRef with a mapped type of Optional<R>, but flattens the result. For example, if the mapped result
+	// is of type Optional<R>, mapRef will return Optional<Optional<R>> while flatMapRef will return Optional<R>
+	template <class... Args>
+	auto flatMapRef(Args&&... args) const& {
+		auto val = mapRef(std::forward<Args>(args)...);
+		using R = typename decltype(val)::ValueType::ValueType;
+
+		if (val.present()) {
+			return val.get();
+		} else {
+			return Optional<R>();
+		}
+	}
+	template <class... Args>
+	auto flatMapRef(Args&&... args) && {
+		auto val = std::move(*this).mapRef(std::forward<Args>(args)...);
+		using R = typename decltype(val)::ValueType::ValueType;
+
+		if (val.present()) {
+			return val.get();
+		} else {
+			return Optional<R>();
+		}
 	}
 
 	bool present() const { return impl.has_value(); }

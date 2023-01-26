@@ -203,13 +203,11 @@ struct EndpointFailureInfo {
 };
 
 struct KeyRangeLocationInfo {
-	TenantMapEntry tenantEntry;
 	KeyRange range;
 	Reference<LocationInfo> locations;
 
 	KeyRangeLocationInfo() {}
-	KeyRangeLocationInfo(TenantMapEntry tenantEntry, KeyRange range, Reference<LocationInfo> locations)
-	  : tenantEntry(tenantEntry), range(range), locations(locations) {}
+	KeyRangeLocationInfo(KeyRange range, Reference<LocationInfo> locations) : range(range), locations(locations) {}
 };
 
 struct OverlappingChangeFeedsInfo {
@@ -260,22 +258,17 @@ public:
 		return cx;
 	}
 
-	Optional<KeyRangeLocationInfo> getCachedLocation(const Optional<TenantNameRef>& tenant,
+	Optional<KeyRangeLocationInfo> getCachedLocation(const TenantInfo& tenant,
 	                                                 const KeyRef&,
 	                                                 Reverse isBackward = Reverse::False);
-	bool getCachedLocations(const Optional<TenantNameRef>& tenant,
+	bool getCachedLocations(const TenantInfo& tenant,
 	                        const KeyRangeRef&,
 	                        std::vector<KeyRangeLocationInfo>&,
 	                        int limit,
 	                        Reverse reverse);
-	void cacheTenant(const TenantName& tenant, const TenantMapEntry& tenantEntry);
-	Reference<LocationInfo> setCachedLocation(const Optional<TenantNameRef>& tenant,
-	                                          const TenantMapEntry& tenantEntry,
-	                                          const KeyRangeRef&,
-	                                          const std::vector<struct StorageServerInterface>&);
-	void invalidateCachedTenant(const TenantNameRef& tenant);
-	void invalidateCache(const KeyRef& tenantPrefix, const KeyRef& key, Reverse isBackward = Reverse::False);
-	void invalidateCache(const KeyRef& tenantPrefix, const KeyRangeRef& keys);
+	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const std::vector<struct StorageServerInterface>&);
+	void invalidateCache(const Optional<KeyRef>& tenantPrefix, const KeyRef& key, Reverse isBackward = Reverse::False);
+	void invalidateCache(const Optional<KeyRef>& tenantPrefix, const KeyRangeRef& keys);
 
 	// Records that `endpoint` is failed on a healthy server.
 	void setFailedEndpointOnHealthyServer(const Endpoint& endpoint);
@@ -407,19 +400,19 @@ public:
 	// BlobGranule API.
 	Future<Key> purgeBlobGranules(KeyRange keyRange,
 	                              Version purgeVersion,
-	                              Optional<TenantName> tenant,
+	                              Optional<Reference<Tenant>> tenant,
 	                              bool force = false);
 	Future<Void> waitPurgeGranulesComplete(Key purgeKey);
 
-	Future<bool> blobbifyRange(KeyRange range, Optional<TenantName> tenantName = {});
-	Future<bool> unblobbifyRange(KeyRange range, Optional<TenantName> tenantName = {});
+	Future<bool> blobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant = {});
+	Future<bool> unblobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant = {});
 	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range,
 	                                                                int rangeLimit,
-	                                                                Optional<TenantName> tenantName = {});
+	                                                                Optional<Reference<Tenant>> tenant = {});
 	Future<Version> verifyBlobRange(const KeyRange& range,
 	                                Optional<Version> version,
-	                                Optional<TenantName> tenantName = {});
-	Future<bool> blobRestore(const KeyRange range);
+	                                Optional<Reference<Tenant>> tenant = {});
+	Future<bool> blobRestore(const KeyRange range, Optional<Version> version);
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
@@ -496,10 +489,8 @@ public:
 
 	// Cache of location information
 	int locationCacheSize;
-	int tenantCacheSize;
 	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
 	std::unordered_map<Endpoint, EndpointFailureInfo> failedEndpointsOnHealthyServersInfo;
-	std::unordered_map<TenantName, TenantMapEntry> tenantCache;
 
 	std::map<UID, StorageServerInfo*> server_interf;
 	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
@@ -562,6 +553,8 @@ public:
 	Counter transactionKeyServerLocationRequests;
 	Counter transactionKeyServerLocationRequestsCompleted;
 	Counter transactionStatusRequests;
+	Counter transactionTenantLookupRequests;
+	Counter transactionTenantLookupRequestsCompleted;
 	Counter transactionsTooOld;
 	Counter transactionsFutureVersions;
 	Counter transactionsNotCommitted;
@@ -699,9 +692,8 @@ public:
 
 	// Returns the latest commit versions that mutated the specified storage servers
 	/// @note returns the latest commit version for a storage server only if the latest
-	// commit version of that storage server is below the specified "readVersion".
+	// commit version of that storage server is below the transaction's readVersion.
 	void getLatestCommitVersions(const Reference<LocationInfo>& locationInfo,
-	                             Version readVersion,
 	                             Reference<TransactionState> info,
 	                             VersionVector& latestCommitVersions);
 
@@ -713,12 +705,48 @@ public:
 	                            Version readVersion,
 	                            VersionVector& latestCommitVersion);
 
+	TenantMode getTenantMode() const { return clientInfo->get().tenantMode; }
+
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;
 	Reference<TransactionT> createTransaction();
 
 	std::unique_ptr<GlobalConfig> globalConfig;
 	EventCacheHolder connectToDatabaseEventCacheHolder;
+
+	Future<int64_t> lookupTenant(TenantName tenant);
+
+	// Get client-side status information as a JSON string with the following schema:
+	// { "Healthy" : <overall health status: true or false>,
+	//   "ClusterID" : <UUID>,
+	//   "Coordinators" : [ <address>, ...  ],
+	//   "CurrentCoordinator" : <address>
+	//   "GrvProxies" : [ <address>, ...  ],
+	//   "CommitProxies" : [ <address>", ... ],
+	//   "StorageServers" : [ { "Address" : <address>, "SSID" : <Storage Server ID> }, ... ],
+	//   "Connections" : [
+	//     { "Address" : "<address>",
+	//       "Status" : <failed|connected|connecting|disconnected>,
+	//       "Compatible" : <is protocol version compatible with the client>,
+	//       "ConnectFailedCount" : <number of failed connection attempts>,
+	//       "LastConnectTime" : <elapsed time in seconds since the last connection attempt>,
+	//       "PingCount" : <total ping count>,
+	//       "PingTimeoutCount" : <number of ping timeouts>,
+	//       "BytesSampleTime" : <elapsed time of the reported the bytes received and sent values>,
+	//       "BytesReceived" : <bytes received>,
+	//       "BytesSent" : <bytes sent>,
+	//       "ProtocolVersion" : <protocol version of the server, missing if unknown>
+	//     },
+	//     ...
+	//   ]
+	// }
+	//
+	// The addresses in the Connections array match the addresses of Coordinators, GrvProxies,
+	// CommitProxies and StorageServers, there is one entry per different address
+	//
+	// If the database context is initialized with an error, the JSON contains just the error code
+	// { "InitializationError" : <error code> }
+	Standalone<StringRef> getClientStatus();
 
 private:
 	using WatchMapKey = std::pair<int64_t, Key>;

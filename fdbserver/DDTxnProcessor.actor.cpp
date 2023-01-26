@@ -256,6 +256,8 @@ class DDTxnProcessorImpl {
 			numDataMoves = 0;
 			server_dc.clear();
 			result->allServers.clear();
+			result->dataMoveMap = KeyRangeMap<std::shared_ptr<DataMove>>(std::make_shared<DataMove>());
+			result->auditStates.clear();
 			tss_servers.clear();
 			team_cache.clear();
 			succeeded = false;
@@ -341,6 +343,12 @@ class DDTxnProcessorImpl {
 					}
 					result->dataMoveMap.insert(meta.ranges.front(), std::move(dataMove));
 					++numDataMoves;
+				}
+
+				RangeResult ads = wait(tr.getRange(auditKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!ads.more && ads.size() < CLIENT_KNOBS->TOO_MANY);
+				for (int i = 0; i < ads.size(); ++i) {
+					result->auditStates.push_back(decodeAuditStorageState(ads[i].value));
 				}
 
 				succeeded = true;

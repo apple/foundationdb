@@ -902,6 +902,13 @@
          "num_tenants" : 1, // on data cluster, local count; on management cluster, total metacluster count
          "num_tenant_groups" : 10,
          "tenant_group_capacity" : 20,
+      },
+      "idempotency_ids" : {
+         "size_bytes" : 0, // An estimate of the current number of bytes used in the database to store idempotency ids.
+         "expired_version" : 0, // The commit status of a transaction whose commit version could be <= expired_version can no longer be determined.
+         "expired_age" : 0, // The age in seconds of expired_version.
+         "oldest_id_version" : 0, // The version of the oldest idempotency id still stored in the database.
+         "oldest_id_age" : 0 // The age in seconds of the oldest_id_version.
       }
    },
    "client":{

@@ -87,13 +87,6 @@ struct BlobManifestFile {
 		std::sort(result.begin(), result.end());
 		return result;
 	}
-
-	// Find the last manifest file
-	ACTOR static Future<std::string> last(Reference<BackupContainerFileSystem> reader) {
-		std::vector<BlobManifestFile> files = wait(list(reader));
-		ASSERT(!files.empty());
-		return files.front().fileName;
-	}
 };
 
 // This class dumps blob manifest to external blob storage.
@@ -233,11 +226,16 @@ public:
 	ACTOR static Future<Void> execute(Reference<BlobManifestLoader> self) {
 		try {
 			Value data = wait(readFromFile(self));
+			if (data.empty()) {
+				throw restore_missing_data();
+			}
 			state Standalone<BlobManifest> manifest = decode(data);
 			wait(writeSystemKeys(self, manifest.rows));
 			BlobGranuleRestoreVersionVector _ = wait(listGranules(self));
 		} catch (Error& e) {
-			dprint("WARNING: unexpected manifest loader error {}\n", e.what()); // skip error handling so far
+			dprint("WARNING: unexpected manifest loader error {}\n", e.what());
+			TraceEvent("BlobManfiestError").error(e).log();
+			throw;
 		}
 		return Void();
 	}
@@ -287,8 +285,9 @@ public:
 							dprint("missing data for key range {} \n", granuleRange.toString());
 							TraceEvent("BlobRestoreMissingData").detail("KeyRange", granuleRange.toString());
 						} else {
-							throw;
+							TraceEvent("BlobManifestError").error(e).detail("KeyRange", granuleRange.toString());
 						}
+						throw;
 					}
 				}
 				return results;
@@ -319,7 +318,12 @@ private:
 	// Read data from a manifest file
 	ACTOR static Future<Value> readFromFile(Reference<BlobManifestLoader> self) {
 		state Reference<BackupContainerFileSystem> container = self->blobConn_->getForRead(MANIFEST_FOLDER);
-		std::string fileName = wait(BlobManifestFile::last(container));
+		std::vector<BlobManifestFile> files = wait(BlobManifestFile::list(container));
+		if (files.empty()) {
+			dprint("No blob manifest files for restore\n");
+			return Value();
+		}
+		std::string fileName = files.front().fileName;
 		state Reference<IAsyncFile> reader = wait(container->readFile(fileName));
 		state int64_t fileSize = wait(reader->size());
 		state Arena arena;
@@ -376,36 +380,43 @@ private:
 	// Find the newest granule for a key range. The newest granule has the max version and relevant files
 	ACTOR static Future<Standalone<BlobGranuleRestoreVersion>> getGranule(Transaction* tr, KeyRangeRef range) {
 		state Standalone<BlobGranuleRestoreVersion> granuleVersion;
-		KeyRange historyKeyRange = blobGranuleHistoryKeyRangeFor(range);
-		// reverse lookup so that the first row is the newest version
-		state RangeResult results =
-		    wait(tr->getRange(historyKeyRange, GetRangeLimits::BYTE_LIMIT_UNLIMITED, Snapshot::True, Reverse::True));
-		for (KeyValueRef row : results) {
-			state KeyRange keyRange;
-			state Version version;
-			std::tie(keyRange, version) = decodeBlobGranuleHistoryKey(row.key);
-			Standalone<BlobGranuleHistoryValue> historyValue = decodeBlobGranuleHistoryValue(row.value);
-			state UID granuleID = historyValue.granuleID;
+		state KeyRange historyKeyRange = blobGranuleHistoryKeyRangeFor(range);
+		loop {
+			try {
+				// reverse lookup so that the first row is the newest version
+				state RangeResult results = wait(
+				    tr->getRange(historyKeyRange, GetRangeLimits::BYTE_LIMIT_UNLIMITED, Snapshot::True, Reverse::True));
+				for (KeyValueRef row : results) {
+					state KeyRange keyRange;
+					state Version version;
+					std::tie(keyRange, version) = decodeBlobGranuleHistoryKey(row.key);
+					Standalone<BlobGranuleHistoryValue> historyValue = decodeBlobGranuleHistoryValue(row.value);
+					state UID granuleID = historyValue.granuleID;
 
-			std::vector<GranuleFileVersion> files = wait(listGranuleFiles(tr, granuleID));
-			if (files.empty()) {
-				dprint("Granule {} doesn't have files for version {}\n", granuleID.toString(), version);
-				continue; // check previous version
+					std::vector<GranuleFileVersion> files = wait(listGranuleFiles(tr, granuleID));
+
+					granuleVersion.keyRange = KeyRangeRef(granuleVersion.arena(), keyRange);
+					granuleVersion.granuleID = granuleID;
+					if (files.empty()) {
+						dprint("Granule {} doesn't have files for version {}\n", granuleID.toString(), version);
+						granuleVersion.version = version;
+						granuleVersion.sizeInBytes = 1;
+					} else {
+						granuleVersion.version = files.back().version;
+						granuleVersion.sizeInBytes = granuleSizeInBytes(files);
+					}
+					dprint("Granule {}: \n", granuleVersion.granuleID.toString());
+					dprint("  {} {} {}\n", keyRange.toString(), granuleVersion.version, granuleVersion.sizeInBytes);
+					for (auto& file : files) {
+						dprint("  File {}: {} bytes\n", file.filename, file.sizeInBytes);
+					}
+					return granuleVersion;
+				}
+				throw restore_missing_data(); // todo a better error code
+			} catch (Error& e) {
+				wait(tr->onError(e));
 			}
-
-			granuleVersion.keyRange = KeyRangeRef(granuleVersion.arena(), keyRange);
-			granuleVersion.granuleID = granuleID;
-			granuleVersion.version = files.back().version;
-			granuleVersion.sizeInBytes = granuleSizeInBytes(files);
-
-			dprint("Granule {}: \n", granuleVersion.granuleID.toString());
-			dprint("  {} {} {}\n", keyRange.toString(), granuleVersion.version, granuleVersion.sizeInBytes);
-			for (auto& file : files) {
-				dprint("  File {}: {} bytes\n", file.filename, file.sizeInBytes);
-			}
-			return granuleVersion;
 		}
-		throw restore_missing_data(); // todo a better error code
 	}
 
 	// Return sum of last snapshot file size and delta files afterwards
@@ -529,13 +540,13 @@ ACTOR Future<int64_t> lastBlobEpoc(Database db, Reference<BlobConnectionProvider
 
 // Return true if the given key range is restoring
 ACTOR Future<bool> isFullRestoreMode(Database db, KeyRangeRef keys) {
-	KeyRange range = wait(getRestoringRange(db, keys));
-	return !range.empty();
+	std::pair<KeyRange, BlobRestoreStatus> rangeStatus = wait(getRestoreRangeStatus(db, keys));
+	return !rangeStatus.first.empty() && rangeStatus.second.phase != BlobRestorePhase::DONE;
 }
 
 // Check the given key range and return subrange that is doing restore. Returns empty range if no restoring
 // for any portion of the given range.
-ACTOR Future<KeyRange> getRestoringRange(Database db, KeyRangeRef keys) {
+ACTOR Future<std::pair<KeyRange, BlobRestoreStatus>> getRestoreRangeStatus(Database db, KeyRangeRef keys) {
 	state Transaction tr(db);
 	loop {
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -552,9 +563,8 @@ ACTOR Future<KeyRange> getRestoringRange(Database db, KeyRangeRef keys) {
 					KeyRange keyRange = decodeBlobRestoreCommandKeyFor(r.key);
 					if (keys.intersects(keyRange)) {
 						Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(r.value);
-						if (status.phase < BlobRestorePhase::DONE) {
-							return KeyRangeRef(std::max(keys.begin, keyRange.begin), std::min(keys.end, keyRange.end));
-						}
+						KeyRangeRef intersected(std::max(keys.begin, keyRange.begin), std::min(keys.end, keyRange.end));
+						return std::make_pair(intersected, status);
 					}
 				}
 				if (!ranges.more) {
@@ -566,7 +576,7 @@ ACTOR Future<KeyRange> getRestoringRange(Database db, KeyRangeRef keys) {
 					begin = firstGreaterThan(ranges.end()[-1].key);
 				}
 			}
-			return KeyRangeRef();
+			return std::make_pair(KeyRangeRef(), BlobRestoreStatus(BlobRestorePhase::DONE));
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -574,14 +584,29 @@ ACTOR Future<KeyRange> getRestoringRange(Database db, KeyRangeRef keys) {
 }
 
 // Update restore status
-ACTOR Future<Void> updateRestoreStatus(Database db, KeyRangeRef range, BlobRestoreStatus status) {
+ACTOR Future<Void> updateRestoreStatus(Database db,
+                                       KeyRangeRef range,
+                                       BlobRestoreStatus status,
+                                       Optional<BlobRestorePhase> expectedPhase) {
 	state Transaction tr(db);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Key key = blobRestoreCommandKeyFor(range);
+			state Key key = blobRestoreCommandKeyFor(range);
+
+			// check if current phase is expected
+			if (expectedPhase.present()) {
+				Optional<Value> oldValue = wait(tr.get(key));
+				if (oldValue.present()) {
+					Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(oldValue.get());
+					if (status.phase != expectedPhase.get()) {
+						throw restore_error();
+					}
+				}
+			}
+
 			Value value = blobRestoreCommandValueFor(status);
 			tr.set(key, value);
 			wait(tr.commit());
@@ -593,23 +618,67 @@ ACTOR Future<Void> updateRestoreStatus(Database db, KeyRangeRef range, BlobResto
 }
 
 // Get restore status
-ACTOR Future<Optional<BlobRestoreStatus>> getRestoreStatus(Database db, KeyRangeRef range) {
+ACTOR Future<Optional<BlobRestoreStatus>> getRestoreStatus(Database db, KeyRangeRef keys) {
+	state Optional<BlobRestoreStatus> result;
+	std::pair<KeyRange, BlobRestoreStatus> rangeStatus = wait(getRestoreRangeStatus(db, keys));
+	if (!rangeStatus.first.empty()) {
+		result = rangeStatus.second;
+	}
+	return result;
+}
+
+// Get restore argument
+ACTOR Future<Optional<BlobRestoreArg>> getRestoreArg(Database db, KeyRangeRef keys) {
 	state Transaction tr(db);
+	state Optional<BlobRestoreArg> result;
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Key key = blobRestoreCommandKeyFor(range);
-			Optional<Value> value = wait(tr.get(key));
-			Optional<BlobRestoreStatus> result;
-			if (value.present()) {
-				Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(value.get());
-				result = status;
+			try {
+				state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
+				limits.minRows = 0;
+				state KeySelectorRef begin = firstGreaterOrEqual(blobRestoreArgKeys.begin);
+				state KeySelectorRef end = firstGreaterOrEqual(blobRestoreArgKeys.end);
+				loop {
+					RangeResult ranges = wait(tr.getRange(begin, end, limits, Snapshot::True));
+					for (auto& r : ranges) {
+						KeyRange keyRange = decodeBlobRestoreArgKeyFor(r.key);
+						if (keys.intersects(keyRange)) {
+							Standalone<BlobRestoreArg> arg = decodeBlobRestoreArg(r.value);
+							result = arg;
+							return result;
+						}
+					}
+					if (!ranges.more) {
+						break;
+					}
+					if (ranges.readThrough.present()) {
+						begin = firstGreaterOrEqual(ranges.readThrough.get());
+					} else {
+						begin = firstGreaterThan(ranges.back().key);
+					}
+				}
+				return result;
+			} catch (Error& e) {
+				wait(tr.onError(e));
 			}
-			return result;
+
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
 	}
+}
+
+// Get restore target version. Return defaultVersion if no restore argument available for the range
+ACTOR Future<Version> getRestoreTargetVersion(Database db, KeyRangeRef range, Version defaultVersion) {
+	Optional<BlobRestoreArg> arg = wait(getRestoreArg(db, range));
+	Version expected = defaultVersion;
+	if (arg.present()) {
+		if (arg.get().version.present()) {
+			return arg.get().version.get();
+		}
+	}
+	return expected;
 }

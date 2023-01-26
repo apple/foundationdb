@@ -31,6 +31,8 @@ enum CheckpointFormat {
 	DataMoveRocksCF = 1,
 	// For RocksDB, checkpoint generated via rocksdb::Checkpoint::CreateCheckpoint().
 	RocksDB = 2,
+	// Checkpoint fetched as key-value pairs.
+	RocksDBKeyValues = 3,
 };
 
 // Metadata of a FDB checkpoint.
