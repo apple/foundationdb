@@ -210,7 +210,10 @@ struct BlobWorkerInfo {
 	BlobWorkerInfo(int numGranulesAssigned = 0) : numGranulesAssigned(numGranulesAssigned) {}
 };
 
-enum BoundaryEvalType { UNKNOWN, MERGE, SPLIT };
+// recover is when the BM assigns an ambiguously owned range on recovery
+// merge is when the BM initiated a merge candidate for the range
+// split is when the BM initiated a split check for the range
+enum BoundaryEvalType { UNKNOWN, RECOVER, MERGE, SPLIT };
 
 struct BoundaryEvaluation {
 	int64_t epoch;
@@ -3781,6 +3784,11 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		// if worker id is already set to a known worker that replied with it in the mapping, range is already assigned
 		// there. If not, need to explicitly assign it to someone
 		if (workerId == UID() || epoch == 0 || !endingWorkers.count(workerId)) {
+			// prevent racing status updates from old owner from causing issues until this request gets sent out
+			// properly
+			bmData->boundaryEvaluations.insert(
+			    range.range(), BoundaryEvaluation(bmData->epoch, 0, BoundaryEvalType::RECOVER, bmData->epoch, 0));
+
 			RangeAssignment raAssign;
 			raAssign.isAssign = true;
 			raAssign.worker = workerId;
