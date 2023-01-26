@@ -1458,8 +1458,11 @@ ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> MultiVersionTransaction
     Version beginVersion,
     Optional<Version> readVersion,
     Version* readVersionOut) {
-	return executeOperation(&ITransaction::readBlobGranulesStart, keyRange, std::forward<Version>(beginVersion),
-	    std::forward<Optional<Version>>(readVersion), std::forward<Version*>(readVersionOut));
+	return executeOperation(&ITransaction::readBlobGranulesStart,
+	                        keyRange,
+	                        std::forward<Version>(beginVersion),
+	                        std::forward<Optional<Version>>(readVersion),
+	                        std::forward<Version*>(readVersionOut));
 }
 
 ThreadResult<RangeResult> MultiVersionTransaction::readBlobGranulesFinish(

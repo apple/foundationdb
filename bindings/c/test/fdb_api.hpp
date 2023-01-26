@@ -96,7 +96,7 @@ struct GranuleFilePointer {
 };
 
 struct GranuleMutation {
-  native::FDBBGMutationType type;
+	native::FDBBGMutationType type;
 	int64_t version;
 	ByteString param1;
 	ByteString param2;

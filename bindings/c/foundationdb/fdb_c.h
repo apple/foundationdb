@@ -223,14 +223,11 @@ typedef struct bgfilepointer {
 	/* TODO: encryption keys would go here */
 } FDBBGFilePointer;
 
-typedef enum {
-  FDB_BG_MUTATION_TYPE_SET_VALUE = 0,
-  FDB_BG_MUTATION_TYPE_CLEAR_RANGE = 1
-} FDBBGMutationType;
+typedef enum { FDB_BG_MUTATION_TYPE_SET_VALUE = 0, FDB_BG_MUTATION_TYPE_CLEAR_RANGE = 1 } FDBBGMutationType;
 
 #pragma pack(push, 4)
 typedef struct bgmutation {
-	uint8_t type;  // FDBBGMutationType
+	uint8_t type; // FDBBGMutationType
 	int64_t version;
 	const uint8_t* param1_ptr;
 	int param1_length;
