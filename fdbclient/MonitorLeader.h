@@ -26,6 +26,7 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/CommitProxyInterface.h"
+#include "fdbclient/ClientBooleanParams.h"
 
 #define CLUSTER_FILE_ENV_VAR_NAME "FDB_CLUSTER_FILE"
 
