@@ -96,13 +96,13 @@ struct GranuleFilePointer {
 };
 
 struct GranuleMutation {
-	uint8_t type;
+  native::FDBBGMutationType type;
 	int64_t version;
 	ByteString param1;
 	ByteString param2;
 
 	GranuleMutation(const native::FDBBGMutation& nativeMutation) {
-		type = nativeMutation.type;
+		type = static_cast<native::FDBBGMutationType>(nativeMutation.type);
 		version = nativeMutation.version;
 		param1 = ByteString(nativeMutation.param1_ptr, nativeMutation.param1_length);
 		param2 = ByteString(nativeMutation.param2_ptr, nativeMutation.param2_length);
@@ -748,16 +748,16 @@ public:
 
 	TypedFuture<future_var::GranuleDescriptionRefArray> readBlobGranulesDescription(KeyRef begin,
 	                                                                                KeyRef end,
-	                                                                                int64_t begin_version,
-	                                                                                int64_t read_version,
+	                                                                                int64_t beginVersion,
+	                                                                                int64_t readVersion,
 	                                                                                int64_t* readVersionOut) {
 		return native::fdb_transaction_read_blob_granules_description(tr.get(),
 		                                                              begin.data(),
 		                                                              intSize(begin),
 		                                                              end.data(),
 		                                                              intSize(end),
-		                                                              begin_version,
-		                                                              read_version,
+		                                                              beginVersion,
+		                                                              readVersion,
 		                                                              readVersionOut);
 	}
 

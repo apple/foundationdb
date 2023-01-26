@@ -223,9 +223,14 @@ typedef struct bgfilepointer {
 	/* TODO: encryption keys would go here */
 } FDBBGFilePointer;
 
+typedef enum {
+  FDB_BG_MUTATION_TYPE_SET_VALUE = 0,
+  FDB_BG_MUTATION_TYPE_CLEAR_RANGE = 1
+} FDBBGMutationType;
+
 #pragma pack(push, 4)
 typedef struct bgmutation {
-	uint8_t type;
+	uint8_t type;  // FDBBGMutationType
 	int64_t version;
 	const uint8_t* param1_ptr;
 	int param1_length;
@@ -631,9 +636,9 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_read_blob_granules_descr
                                                                                        int begin_key_name_length,
                                                                                        uint8_t const* end_key_name,
                                                                                        int end_key_name_length,
-                                                                                       int64_t beginVersion,
-                                                                                       int64_t readVersion,
-                                                                                       int64_t* readVersionOut);
+                                                                                       int64_t begin_version,
+                                                                                       int64_t read_version,
+                                                                                       int64_t* read_version_out);
 
 #define FDB_KEYSEL_LAST_LESS_THAN(k, l) k, l, 0, 0
 #define FDB_KEYSEL_LAST_LESS_OR_EQUAL(k, l) k, l, 1, 0

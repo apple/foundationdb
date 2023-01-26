@@ -64,6 +64,8 @@ int g_api_version = 0;
    Standalone<RangeResultRef> as an array of FDBKeyValue. */
 static_assert(sizeof(FDBKeyValue) == sizeof(KeyValueRef), "FDBKeyValue / KeyValueRef size mismatch");
 static_assert(sizeof(FDBBGMutation) == sizeof(GranuleMutationRef), "FDBBGMutation / GranuleMutationRef size mismatch");
+static_assert(FDB_BG_MUTATION_TYPE_SET_VALUE == MutationRef::Type::SetValue, "FDB_BG_MUTATION_TYPE_SET_VALUE enum value mismatch");
+static_assert(FDB_BG_MUTATION_TYPE_CLEAR_RANGE == MutationRef::Type::ClearRange, "FDB_BG_MUTATION_TYPE_CLEAR_RANGE enum value mismatch");
 
 #define TSAV_ERROR(type, error) ((FDBFuture*)(ThreadFuture<type>(error())).extractPtr())
 
@@ -335,10 +337,6 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_granule_summary_array(FDBFuture*
 	                 *out_ranges = (FDBGranuleSummary*)na.begin();
 	                 *out_count = na.size(););
 }
-
-// all for using future result from read_blob_granules_description
-// FIXME: put this behind MVC somehow to remove this file's dependencies on fdbclient/BlobGranuleCommon.h and
-// fdbclient/BlobGranuleFiles.h
 
 void setBlobFilePointer(FDBBGFilePointer* dest, const BlobFilePointerRef& source) {
 	dest->filename_ptr = source.filename.begin();
@@ -1200,19 +1198,19 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules_description(F
                                                                                int begin_key_name_length,
                                                                                uint8_t const* end_key_name,
                                                                                int end_key_name_length,
-                                                                               int64_t beginVersion,
-                                                                               int64_t readVersion,
-                                                                               int64_t* readVersionOut) {
+                                                                               int64_t begin_version,
+                                                                               int64_t read_version,
+                                                                               int64_t* read_version_out) {
 	Optional<Version> rv;
-	if (readVersion != latestVersion) {
-		rv = readVersion;
+	if (read_version != latestVersion) {
+		rv = read_version;
 	}
 	return (FDBFuture*)(TXN(tr)
 	                        ->readBlobGranulesStart(KeyRangeRef(KeyRef(begin_key_name, begin_key_name_length),
 	                                                            KeyRef(end_key_name, end_key_name_length)),
-	                                                beginVersion,
+	                                                begin_version,
 	                                                rv,
-	                                                readVersionOut)
+	                                                read_version_out)
 	                        .extractPtr());
 }
 

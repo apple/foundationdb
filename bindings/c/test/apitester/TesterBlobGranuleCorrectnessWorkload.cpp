@@ -37,9 +37,6 @@ public:
 		if (Random::get().randomInt(0, 1) == 0) {
 			excludedOpTypes.push_back(OP_CLEAR_RANGE);
 		}
-
-		// FIXME: re-enable test after increasing granule size and fixing bugs!
-		excludedOpTypes.push_back(OP_READ_DESC);
 	}
 
 private:

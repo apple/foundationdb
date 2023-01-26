@@ -1458,13 +1458,8 @@ ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> MultiVersionTransaction
     Version beginVersion,
     Optional<Version> readVersion,
     Version* readVersionOut) {
-
-	// readBlobGranulesDescription calls this directly for now
-	// FIXME: cleaner way to keep unsupported operation exception here and move behind multi-version client?
-	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->readBlobGranulesStart(keyRange, beginVersion, readVersion, readVersionOut)
-	                        : makeTimeout<Standalone<VectorRef<BlobGranuleChunkRef>>>();
-	return abortableFuture(f, tr.onChange);
+	return executeOperation(&ITransaction::readBlobGranulesStart, keyRange, std::forward<Version>(beginVersion),
+	    std::forward<Optional<Version>>(readVersion), std::forward<Version*>(readVersionOut));
 }
 
 ThreadResult<RangeResult> MultiVersionTransaction::readBlobGranulesFinish(
