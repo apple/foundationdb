@@ -216,7 +216,8 @@ description is not currently required but encouraged.
     <Option name="use_config_database" code="800"
             description="Use configuration database." />
     <Option name="test_causal_read_risky" code="900"
-            description="An integer between 0 and 100 (default is 0) expressing the probability that a client will verify it can't read stale data whenever it detects a recovery." />
+            paramType="Int" paramDescription="integer between 0 and 100 expressing the probability a client will verify it can't read stale data"
+            description="Enables verification of causal read risky by checking whether clients are able to read stale data when they detect a recovery, and logging an error if so." />
   </Scope>
   
   <Scope name="TransactionOption">

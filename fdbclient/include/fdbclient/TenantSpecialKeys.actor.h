@@ -110,8 +110,7 @@ private:
 	    std::vector<std::pair<Standalone<StringRef>, Optional<Value>>> configMutations,
 	    int64_t tenantId,
 	    std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
-		state TenantMapEntry tenantEntry;
-		tenantEntry.setId(tenantId);
+		state TenantMapEntry tenantEntry(tenantId, tenantName, TenantState::READY);
 
 		for (auto const& [name, value] : configMutations) {
 			tenantEntry.configure(name, value);
@@ -122,7 +121,7 @@ private:
 		}
 
 		std::pair<Optional<TenantMapEntry>, bool> entry =
-		    wait(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenantName, tenantEntry));
+		    wait(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenantEntry));
 
 		return entry.second;
 	}
@@ -180,7 +179,7 @@ private:
 			}
 		}
 
-		wait(TenantAPI::configureTenantTransaction(&ryw->getTransaction(), tenantName, originalEntry, updatedEntry));
+		wait(TenantAPI::configureTenantTransaction(&ryw->getTransaction(), originalEntry, updatedEntry));
 		return Void();
 	}
 
@@ -190,7 +189,7 @@ private:
 		state Optional<TenantMapEntry> tenantEntry =
 		    wait(TenantAPI::tryGetTenantTransaction(&ryw->getTransaction(), tenantName));
 		if (tenantEntry.present()) {
-			wait(TenantAPI::deleteTenantTransaction(&ryw->getTransaction(), tenantName));
+			wait(TenantAPI::deleteTenantTransaction(&ryw->getTransaction(), tenantEntry.get().id));
 			if (tenantEntry.get().tenantGroup.present()) {
 				(*tenantGroupNetTenantDelta)[tenantEntry.get().tenantGroup.get()]--;
 			}
@@ -217,10 +216,7 @@ private:
 
 		std::vector<Future<Void>> deleteFutures;
 		for (auto tenant : tenants) {
-			deleteFutures.push_back(TenantAPI::deleteTenantTransaction(&ryw->getTransaction(), tenant.first));
-			if (tenant.second.tenantGroup.present()) {
-				(*tenantGroupNetTenantDelta)[tenant.second.tenantGroup.get()]--;
-			}
+			deleteFutures.push_back(deleteSingleTenant(ryw, tenant.first, tenantGroupNetTenantDelta));
 		}
 
 		wait(waitForAll(deleteFutures));

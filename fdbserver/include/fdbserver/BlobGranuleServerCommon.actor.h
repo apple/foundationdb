@@ -97,13 +97,12 @@ ACTOR Future<ForcedPurgeState> getForcePurgedState(Transaction* tr, KeyRange key
 
 // TODO: versioned like SS has?
 struct GranuleTenantData : NonCopyable, ReferenceCounted<GranuleTenantData> {
-	TenantName name;
 	TenantMapEntry entry;
 	Reference<BlobConnectionProvider> bstore;
 	Promise<Void> bstoreLoaded;
 
 	GranuleTenantData() {}
-	GranuleTenantData(TenantName name, TenantMapEntry entry) : name(name), entry(entry) {}
+	GranuleTenantData(TenantMapEntry entry) : entry(entry) {}
 
 	void updateBStore(const BlobMetadataDetailsRef& metadata) {
 		if (bstoreLoaded.canBeSet()) {
@@ -120,7 +119,7 @@ struct GranuleTenantData : NonCopyable, ReferenceCounted<GranuleTenantData> {
 // TODO: add refreshing
 struct BGTenantMap {
 public:
-	void addTenants(std::vector<std::pair<TenantName, TenantMapEntry>>);
+	void addTenants(std::vector<std::pair<int64_t, TenantMapEntry>>);
 	void removeTenants(std::vector<int64_t> tenantIds);
 
 	Optional<TenantMapEntry> getTenantById(int64_t id);
@@ -171,6 +170,7 @@ ACTOR Future<std::pair<KeyRange, BlobRestoreStatus>> getRestoreRangeStatus(Datab
 ACTOR Future<Optional<BlobRestoreStatus>> getRestoreStatus(Database db, KeyRangeRef range);
 ACTOR Future<Optional<BlobRestoreArg>> getRestoreArg(Database db, KeyRangeRef range);
 ACTOR Future<Version> getRestoreTargetVersion(Database db, KeyRangeRef range, Version defaultVersion);
+ACTOR Future<Version> getManifestVersion(Database db);
 #include "flow/unactorcompiler.h"
 
 #endif

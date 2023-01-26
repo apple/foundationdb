@@ -41,9 +41,16 @@ ACTOR Future<Standalone<StringRef>> readFile(Reference<BlobConnectionProvider> b
 		// printf("Got snapshot file size %lld\n", size);
 		state uint8_t* data = new (arena) uint8_t[f.length];
 		// printf("Reading %lld bytes from snapshot file %s\n", size, filename.c_str());
-		int readSize = wait(reader->read(data, f.length, f.offset));
-		// printf("Read %lld bytes from snapshot file %s\n", readSize, filename.c_str());
-		ASSERT(f.length == readSize);
+
+		state int lengthRemaining = f.length;
+		state int64_t blockOffset = f.offset;
+		while (lengthRemaining > 0) {
+			int blockSize = std::min(lengthRemaining, CLIENT_KNOBS->BGR_READ_BLOCK_SIZE);
+			int readSize = wait(reader->read(data + (blockOffset - f.offset), blockSize, blockOffset));
+			ASSERT(readSize <= lengthRemaining);
+			lengthRemaining -= readSize;
+			blockOffset += readSize;
+		}
 
 		StringRef dataRef(data, f.length);
 		return Standalone<StringRef>(dataRef, arena);
