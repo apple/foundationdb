@@ -3838,8 +3838,10 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		// if worker id is already set to a known worker that replied with it in the mapping, range is already assigned
 		// there. If not, need to explicitly assign it to someone
 		if (workerId == UID() || epoch == 0 || !endingWorkers.count(workerId)) {
-			// prevent racing status updates from old owner from causing issues until this request gets sent out properly
-			bmData->boundaryEvaluations.insert(range.range(),  BoundaryEvaluation(bmData->epoch, 0, BoundaryEvalType::RECOVER, bmData->epoch, 0));
+			// prevent racing status updates from old owner from causing issues until this request gets sent out
+			// properly
+			bmData->boundaryEvaluations.insert(
+			    range.range(), BoundaryEvaluation(bmData->epoch, 0, BoundaryEvalType::RECOVER, bmData->epoch, 0));
 
 			RangeAssignment raAssign;
 			raAssign.isAssign = true;
