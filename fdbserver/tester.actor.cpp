@@ -26,7 +26,12 @@
 #include <toml.hpp>
 
 #include "flow/ActorCollection.h"
+#include "flow/ChaosMetrics.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/Histogram.h"
+#include "flow/IAsyncFile.h"
+#include "flow/TDMetric.actor.h"
+#include "fdbrpc/Locality.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
