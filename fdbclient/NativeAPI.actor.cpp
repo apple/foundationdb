@@ -5432,6 +5432,7 @@ Future<Void> Transaction::watch(Reference<Watch> watch) {
 	++trState->cx->transactionWatchRequests;
 
 	trState->cx->increaseWatchCounter();
+	watch->readOptions = trState->readOptions;
 	watches.push_back(watch);
 	return ::watch(watch,
 	               trState->cx,
@@ -6811,12 +6812,20 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 
 	case FDBTransactionOptions::LOCK_AWARE:
 		validateOptionValueNotPresent(value);
+		if (!trState->readOptions.present()) {
+			trState->readOptions = ReadOptions();
+		}
+		trState->readOptions.get().lockAware = true;
 		trState->options.lockAware = true;
 		trState->options.readOnly = false;
 		break;
 
 	case FDBTransactionOptions::READ_LOCK_AWARE:
 		validateOptionValueNotPresent(value);
+		if (!trState->readOptions.present()) {
+			trState->readOptions = ReadOptions();
+		}
+		trState->readOptions.get().lockAware = true;
 		if (!trState->options.lockAware) {
 			trState->options.lockAware = true;
 			trState->options.readOnly = true;

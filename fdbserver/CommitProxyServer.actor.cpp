@@ -1196,6 +1196,11 @@ bool validTenantAccess(const CommitTransactionRequest& tr, ProxyCommitData* cons
 		return false;
 	}
 
+	if (!tr.isLockAware() && pProxyCommitData->lockedTenants.contains(tr.tenantInfo.tenantId)) {
+		tr.reply.sendError(tenant_locked());
+		return false;
+	}
+
 	// only do the mutation check when the transaction use raw_access option and the tenant mode is required
 	if (pProxyCommitData->getTenantMode() != TenantMode::REQUIRED || tr.tenantInfo.hasTenant()) {
 		return true;

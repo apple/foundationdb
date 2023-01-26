@@ -475,6 +475,29 @@ Future<Void> configureTenantTransaction(Transaction tr,
 }
 
 ACTOR template <class Transaction>
+Future<Void> changeLockState(Transaction* tr, TenantMapEntry tenant, TenantLockState desiredLockState, UID lockID) {
+	Optional<UID> currLockID = wait(TenantMetadata::tenantLockID().get(tr));
+	if (currLockID.present()) {
+		if (currLockID.get() != lockID) {
+			throw tenant_locked();
+		} else if (desiredLockState != TenantLockState::UNLOCKED) {
+			// already executed -- this can happen if we're in a retry loop
+			return Void();
+		}
+		// otherwise we can now continue with unlock
+	}
+	TenantMapEntry newState = tenant;
+	newState.tenantLockState = desiredLockState;
+	configureTenantTransaction(tr, tenant, newState);
+	if (desiredLockState == TenantLockState::UNLOCKED) {
+		TenantMetadata::tenantLockID().clear(tr);
+	} else {
+		TenantMetadata::tenantLockID().set(tr, lockID);
+	}
+	return Void();
+}
+
+ACTOR template <class Transaction>
 Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantsTransaction(Transaction tr,
                                                                                   TenantName begin,
                                                                                   TenantName end,

@@ -142,6 +142,7 @@ bool canReplyWith(Error e) {
 	case error_code_tenant_name_required:
 	case error_code_tenant_removed:
 	case error_code_tenant_not_found:
+	case error_code_tenant_locked:
 	// getMappedRange related exceptions that are not retriable:
 	case error_code_mapper_bad_index:
 	case error_code_mapper_no_such_key:
@@ -739,6 +740,17 @@ bool SSPhysicalShard::hasRange(Reference<ShardInfo> shard) const {
 	return false;
 }
 
+struct TenantSSInfo {
+	constexpr static FileIdentifier file_identifier = 3253114;
+	TenantName name;
+	TenantLockState lockState;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, name, lockState);
+	}
+};
+
 struct StorageServer : public IStorageMetricsService {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
 
@@ -791,7 +803,7 @@ public:
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
 	std::unordered_map<UID, ICheckpointReader*> liveCheckpointReaders; // Active checkpoint readers
-	VersionedMap<int64_t, TenantName> tenantMap;
+	VersionedMap<int64_t, TenantSSInfo> tenantMap;
 	std::map<Version, std::vector<PendingNewShard>>
 	    pendingAddRanges; // Pending requests to add ranges to physical shards
 	std::map<Version, std::vector<KeyRange>>
@@ -839,10 +851,10 @@ public:
 	void clearWatchMetadata();
 
 	// tenant map operations
-	void insertTenant(StringRef tenantPrefix, TenantName tenantName, Version version, bool persist);
+	void insertTenant(TenantMapEntry const& tenant, Version version, bool persist);
 	void clearTenants(StringRef startTenant, StringRef endTenant, Version version);
 
-	void checkTenantEntry(Version version, TenantInfo tenant);
+	void checkTenantEntry(Version version, TenantInfo tenant, bool lockAware);
 	KeyRangeRef clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenantInfo, Arena& arena);
 
 	std::vector<StorageServerShard> getStorageServerShards(KeyRangeRef range);
@@ -1669,7 +1681,7 @@ public:
 
 	void getSplitPoints(SplitRangeRequest const& req) override {
 		try {
-			checkTenantEntry(version.get(), req.tenantInfo);
+			checkTenantEntry(version.get(), req.tenantInfo, true);
 			metrics.getSplitPoints(req, req.tenantInfo.prefix);
 		} catch (Error& e) {
 			req.reply.sendError(e);
@@ -2024,7 +2036,7 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 	}
 }
 
-void StorageServer::checkTenantEntry(Version version, TenantInfo tenantInfo) {
+void StorageServer::checkTenantEntry(Version version, TenantInfo tenantInfo, bool lockAware) {
 	if (tenantInfo.hasTenant()) {
 		auto view = tenantMap.at(version);
 		auto itr = view.find(tenantInfo.tenantId);
@@ -2033,6 +2045,8 @@ void StorageServer::checkTenantEntry(Version version, TenantInfo tenantInfo) {
 			    .detail("Tenant", tenantInfo.tenantId)
 			    .backtrace();
 			throw tenant_not_found();
+		} else if (!lockAware && itr->lockState == TenantLockState::LOCKED) {
+			throw tenant_locked();
 		}
 	}
 }
@@ -2084,7 +2098,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			                      req.options.get().debugID.get().first(),
 			                      "getValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
 
-		data->checkTenantEntry(version, req.tenantInfo);
+		data->checkTenantEntry(version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
 		if (req.tenantInfo.hasTenant()) {
 			req.key = req.key.withPrefix(req.tenantInfo.prefix.get());
 		}
@@ -4158,7 +4172,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		                                                                         : UID());
 		data->counters.readVersionWaitSample.addMeasurement(g_network->timer() - queueWaitEnd);
 
-		data->checkTenantEntry(version, req.tenantInfo);
+		data->checkTenantEntry(version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
 		if (req.tenantInfo.hasTenant()) {
 			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
 			req.end.setKeyUnlimited(req.end.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
@@ -5110,7 +5124,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	return result;
 }
 
-bool rangeIntersectsAnyTenant(VersionedMap<int64_t, TenantName>& tenantMap, KeyRangeRef range, Version ver) {
+bool rangeIntersectsAnyTenant(VersionedMap<int64_t, TenantSSInfo>& tenantMap, KeyRangeRef range, Version ver) {
 	auto view = tenantMap.at(ver);
 
 	// There are no tenants, so we don't need to do any work
@@ -5160,10 +5174,10 @@ bool rangeIntersectsAnyTenant(VersionedMap<int64_t, TenantName>& tenantMap, KeyR
 TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
 	std::set<int64_t> entries = { 0, 2, 3, 4, 6 };
 
-	VersionedMap<int64_t, TenantName> tenantMap;
+	VersionedMap<int64_t, TenantSSInfo> tenantMap;
 	tenantMap.createNewVersion(1);
 	for (auto entry : entries) {
-		tenantMap.insert(entry, ""_sr);
+		tenantMap.insert(entry, TenantSSInfo{ ""_sr, TenantLockState::UNLOCKED });
 	}
 
 	// Before all tenants
@@ -5248,13 +5262,13 @@ TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
 }
 
 TEST_CASE("/fdbserver/storageserver/randomRangeIntersectsAnyTenant") {
-	VersionedMap<int64_t, TenantName> tenantMap;
+	VersionedMap<int64_t, TenantSSInfo> tenantMap;
 	std::set<Key> tenantPrefixes;
 	tenantMap.createNewVersion(1);
 	int numEntries = deterministicRandom()->randomInt(0, 20);
 	for (int i = 0; i < numEntries; ++i) {
 		int64_t tenantId = deterministicRandom()->randomInt64(0, std::numeric_limits<int64_t>::max());
-		tenantMap.insert(tenantId, ""_sr);
+		tenantMap.insert(tenantId, TenantSSInfo{ ""_sr, TenantLockState::UNLOCKED });
 		tenantPrefixes.insert(TenantAPI::idToPrefix(tenantId));
 	}
 
@@ -5322,7 +5336,8 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		state Version version = wait(waitForVersion(data, commitVersion, req.version, span.context));
 		data->counters.readVersionWaitSample.addMeasurement(g_network->timer() - queueWaitEnd);
 
-		data->checkTenantEntry(req.version, req.tenantInfo);
+		data->checkTenantEntry(
+		    req.version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
 		if (req.tenantInfo.hasTenant()) {
 			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
 			req.end.setKeyUnlimited(req.end.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
@@ -5536,7 +5551,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
 		state Version version = wait(waitForVersion(data, commitVersion, req.version, span.context));
 
-		data->checkTenantEntry(version, req.tenantInfo);
+		data->checkTenantEntry(version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
 		if (req.tenantInfo.hasTenant()) {
 			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
 			req.end.setKeyUnlimited(req.end.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
@@ -5745,7 +5760,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		state Version version = wait(waitForVersion(data, commitVersion, req.version, req.spanContext));
 		data->counters.readVersionWaitSample.addMeasurement(g_network->timer() - queueWaitEnd);
 
-		data->checkTenantEntry(version, req.tenantInfo);
+		data->checkTenantEntry(version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
 		if (req.tenantInfo.hasTenant()) {
 			req.sel.setKeyUnlimited(req.sel.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
 		}
@@ -8885,7 +8900,7 @@ private:
 			if (m.type == MutationRef::SetValue) {
 				TenantName tenantName = m.param1.removePrefix(TenantMetadata::tenantMapPrivatePrefix());
 				TenantMapEntry entry = TenantMapEntry::decode(m.param2);
-				data->insertTenant(entry.prefix, tenantName, currentVersion, true);
+				data->insertTenant(entry, currentVersion, true);
 			} else if (m.type == MutationRef::ClearRange) {
 				data->clearTenants(m.param1.removePrefix(TenantMetadata::tenantMapPrivatePrefix()),
 				                   m.param2.removePrefix(TenantMetadata::tenantMapPrivatePrefix()),
@@ -8983,17 +8998,18 @@ private:
 	}
 };
 
-void StorageServer::insertTenant(StringRef tenantPrefix, TenantName tenantName, Version version, bool persist) {
+void StorageServer::insertTenant(TenantMapEntry const& tenant, Version version, bool persist) {
 	if (version >= tenantMap.getLatestVersion()) {
-		int64_t tenantId = TenantAPI::prefixToId(tenantPrefix);
+		int64_t tenantId = TenantAPI::prefixToId(tenant.prefix);
 		tenantMap.createNewVersion(version);
-		tenantMap.insert(tenantId, tenantName);
+		tenantMap.insert(tenant.id, TenantSSInfo{ tenant.tenantName, tenant.tenantLockState });
 
 		if (persist) {
 			auto& mLV = addVersionToMutationLog(version);
-			addMutationToMutationLog(
-			    mLV,
-			    MutationRef(MutationRef::SetValue, tenantPrefix.withPrefix(persistTenantMapKeys.begin), tenantName));
+			addMutationToMutationLog(mLV,
+			                         MutationRef(MutationRef::SetValue,
+			                                     tenant.prefix.withPrefix(persistTenantMapKeys.begin),
+			                                     tenant.tenantName));
 		}
 
 		TraceEvent("InsertTenant", thisServerID).detail("Tenant", tenantId).detail("Version", version);
@@ -9008,7 +9024,7 @@ void StorageServer::clearTenants(StringRef startTenant, StringRef endTenant, Ver
 		auto& mLV = addVersionToMutationLog(version);
 		std::set<int64_t> tenantsToClear;
 		for (auto itr = view.begin(); itr != view.end(); ++itr) {
-			if (*itr >= startTenant && *itr < endTenant) {
+			if (itr->name >= startTenant && itr->name < endTenant) {
 				// Trigger any watches on the prefix associated with the tenant.
 				Key tenantPrefix = TenantAPI::idToPrefix(itr.key());
 				TraceEvent("EraseTenant", thisServerID).detail("Tenant", itr.key()).detail("Version", version);
@@ -10012,7 +10028,8 @@ void StorageServerDisk::makeNewStorageServerDurable(const bool shardAware) {
 
 	auto view = data->tenantMap.atLatest();
 	for (auto itr = view.begin(); itr != view.end(); ++itr) {
-		storage->set(KeyValueRef(TenantAPI::idToPrefix(itr.key()).withPrefix(persistTenantMapKeys.begin), *itr));
+		auto val = ObjectWriter::toValue(*itr, IncludeVersion());
+		storage->set(KeyValueRef(TenantAPI::idToPrefix(itr.key()).withPrefix(persistTenantMapKeys.begin), val));
 	}
 }
 
@@ -10507,7 +10524,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		auto const& result = tenantMap[tenantMapLoc];
 		int64_t tenantId = TenantAPI::prefixToId(result.key.substr(persistTenantMapKeys.begin.size()));
 
-		data->tenantMap.insert(tenantId, result.value);
+		data->tenantMap.insert(tenantId, ObjectReader::fromStringRef<TenantSSInfo>(result.value, IncludeVersion()));
 
 		TraceEvent("RestoringTenant", data->thisServerID)
 		    .detail("Key", tenantMap[tenantMapLoc].key)
@@ -10774,7 +10791,7 @@ ACTOR Future<Void> waitMetricsTenantAware_internal(StorageServer* self, WaitMetr
 			// `latestVersion`, this can only happen if the version at the storage server is currently `0`.
 			// It is okay for the caller to retry after a delay to give the server some time to catch up.
 			state Version version = wait(waitForVersionNoTooOld(self, latestVersion));
-			self->checkTenantEntry(version, req.tenantInfo);
+			self->checkTenantEntry(version, req.tenantInfo, true);
 		} catch (Error& e) {
 			self->sendErrorWithPenalty(req.reply, e, self->getPenalty());
 			return Void();
@@ -10953,7 +10970,7 @@ ACTOR Future<Void> watchValueWaitForVersion(StorageServer* self,
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 	try {
 		wait(success(waitForVersionNoTooOld(self, req.version)));
-		self->checkTenantEntry(latestVersion, req.tenantInfo);
+		self->checkTenantEntry(latestVersion, req.tenantInfo, false);
 		if (req.tenantInfo.hasTenant()) {
 			req.key = req.key.withPrefix(req.tenantInfo.prefix.get());
 		}
@@ -11380,7 +11397,7 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 			    .detail("NumTenants", entries.results.size());
 
 			for (auto const& [_, entry] : entries.results) {
-				self->insertTenant(entry.prefix, entry.tenantName, version, false);
+				self->insertTenant(entry, version, false);
 			}
 			break;
 		} catch (Error& e) {

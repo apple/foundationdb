@@ -228,6 +228,7 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	Promise<Void> onChangeTrigger;
 	Promise<Void> onSetWatchTrigger;
 	Future<Void> watchFuture;
+	Optional<ReadOptions> readOptions;
 
 	Watch() : valuePresent(false), setPresent(false), watchFuture(Never()) {}
 	Watch(Key key) : key(key), valuePresent(false), setPresent(false), watchFuture(Never()) {}
