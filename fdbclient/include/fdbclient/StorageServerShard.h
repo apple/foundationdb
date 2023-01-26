@@ -31,9 +31,10 @@ struct StorageServerShard {
 
 	enum ShardState {
 		NotAssigned = 0,
-		MovingIn = 1,
+		Adding = 1,
 		ReadWritePending = 2,
 		ReadWrite = 3,
+		MovingIn = 4,
 	};
 
 	StorageServerShard() = default;
@@ -57,13 +58,16 @@ struct StorageServerShard {
 		switch (ss) {
 		case NotAssigned:
 			return "NotAssigned";
-		case MovingIn:
-			return "MovingIn";
+		case Adding:
+			return "Adding";
 		case ReadWritePending:
 			return "ReadWritePending";
 		case ReadWrite:
 			return "ReadWrite";
+		case MovingIn:
+			return "MovingIn";
 		}
+
 		return "InvalidState";
 	}
 
@@ -75,7 +79,7 @@ struct StorageServerShard {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, range, version, id, desiredId, shardState);
+		serializer(ar, range, version, id, desiredId, shardState, moveInShardId);
 	}
 
 	KeyRange range;
@@ -83,6 +87,7 @@ struct StorageServerShard {
 	uint64_t id; // The actual shard ID.
 	uint64_t desiredId; // The intended shard ID.
 	int8_t shardState;
+	Optional<UID> moveInShardId; // If present, it is the associated MoveInShardMetaData.
 };
 
 #endif
