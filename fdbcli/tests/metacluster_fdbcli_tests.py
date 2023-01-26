@@ -63,7 +63,7 @@ if __name__ == "__main__":
     # keep current environment variables
     fdbcli_env = os.environ.copy()
     cluster_files = fdbcli_env.get("FDB_CLUSTERS").split(';')
-    N = len(cluster_files)
+    num_clusters = len(cluster_files)
     assert len(cluster_files) > 1
 
     fdbcli_bin = args.build_dir + '/bin/fdbcli'
@@ -73,7 +73,7 @@ if __name__ == "__main__":
         assert output == "This cluster is not part of a metacluster"
 
     names = ['meta_mgmt']
-    names.extend(['data{}'.format(i) for i in range(1, N)])
+    names.extend(['data{}'.format(i) for i in range(1, num_clusters)])
 
     metacluster_create(cluster_files[0], names[0])
     for (cf, name) in zip(cluster_files[1:], names[1:]):
@@ -84,7 +84,7 @@ number of data clusters: {}
   tenant group capacity: 0
   allocated tenant groups: 0
 """
-    expected = expected.format(N - 1).strip()
+    expected = expected.format(num_clusters - 1).strip()
     output = metacluster_status(cluster_files[0])
     assert expected == output
 

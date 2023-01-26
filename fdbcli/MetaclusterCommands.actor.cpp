@@ -287,13 +287,15 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 
 	state bool useJson = tokens.size() == 3;
 
+	state Optional<std::string> metaclusterName;
+
 	state Reference<ITransaction> tr = db->createTransaction();
 
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			Optional<MetaclusterRegistrationEntry> registrationEntry =
-			    wait(MetaclusterAPI::getMetaclusterRegistration(tr));
+			    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
 			const ClusterType clusterType =
 			    !registrationEntry.present() ? ClusterType::STANDALONE : registrationEntry.get().clusterType;
 			if (ClusterType::STANDALONE == clusterType) {
@@ -309,22 +311,25 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 				return true;
 			} else if (ClusterType::METACLUSTER_DATA == clusterType) {
 				ASSERT(registrationEntry.present());
+				metaclusterName = registrationEntry.get().metaclusterName.toString();
 				if (useJson) {
 					json_spirit::mObject obj;
 					obj[msgTypeKey] = "success";
 					obj[msgClusterTypeKey] = clusterTypeToString(clusterType);
 					json_spirit::mObject metaclusterObj;
-					metaclusterObj[msgMetaclusterName] = registrationEntry.get().metaclusterName.toString();
+					metaclusterObj[msgMetaclusterName] = metaclusterName.get();
 					obj[msgMetaclusterKey] = metaclusterObj;
 					fmt::print("{}\n",
 					           json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
 				} else {
 					fmt::print("This cluster \"{}\" is a data cluster within the metacluster named \"{}\"\n",
 					           registrationEntry.get().name.toString().c_str(),
-					           registrationEntry.get().metaclusterName.toString().c_str());
+					           metaclusterName.get().c_str());
 				}
 				return true;
 			}
+
+			metaclusterName = registrationEntry.get().metaclusterName.toString();
 
 			ASSERT(ClusterType::METACLUSTER_MANAGEMENT == clusterType);
 			std::map<ClusterName, DataClusterMetadata> clusters =
@@ -336,6 +341,7 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 				obj[msgClusterTypeKey] = clusterTypeToString(ClusterType::METACLUSTER_MANAGEMENT);
 
 				json_spirit::mObject metaclusterObj;
+				metaclusterObj[msgMetaclusterName] = metaclusterName.get();
 				metaclusterObj[msgDataClustersKey] = static_cast<int>(clusters.size());
 				metaclusterObj[msgCapacityKey] = capacityNumbers.first.toJson();
 				metaclusterObj[msgAllocatedKey] = capacityNumbers.second.toJson();
