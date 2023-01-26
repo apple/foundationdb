@@ -777,16 +777,25 @@ public:
 	                  const BlobCipherEncryptHeaderRef& headerRef,
 	                  Arena&);
 
+	static void extractCipherDetailsIvRefFromHeader(const BlobCipherEncryptHeaderRef&,
+	                                                BlobCipherDetails*,
+	                                                BlobCipherDetails*,
+	                                                StringRef*,
+	                                                Arena&);
+
 private:
 	EVP_CIPHER_CTX* ctx;
+	BlobCipherMetrics::UsageType usageType;
 	Reference<BlobCipherKey> textCipherKey;
 	Reference<BlobCipherKey> headerCipherKey;
-	bool headerAuthTokenValidationDone;
 	bool authTokensValidationDone;
-	BlobCipherMetrics::UsageType usageType;
 
-	void validateEncryptHeader(const uint8_t*, const int, const BlobCipherEncryptHeaderRef&, Arena&);
-	void validateEncryptHeaderV1(const uint8_t*, const int, const BlobCipherEncryptHeaderRef&, Arena&);
+	void validateEncryptHeader(const uint8_t*,
+	                           const int,
+	                           const BlobCipherEncryptHeaderRef&,
+	                           EncryptAuthTokenMode*,
+	                           EncryptAuthTokenAlgo*,
+	                           Arena&);
 	void validateEncryptHeaderFlagsV1(const uint32_t, const BlobCipherEncryptHeaderFlagsV1&);
 	void validateAuthTokensV1(const uint8_t*,
 	                          const int,
@@ -819,6 +828,14 @@ private:
 	                                 const int ciphertextLen,
 	                                 const BlobCipherEncryptHeader& header,
 	                                 Arena& arena);
+
+	static void extractCipherDetailsIvRefFromHeaderV1(const BlobCipherEncryptHeaderRef&,
+	                                                  const EncryptAuthTokenMode mode,
+	                                                  const EncryptAuthTokenAlgo algo,
+	                                                  BlobCipherDetails*,
+	                                                  BlobCipherDetails*,
+	                                                  StringRef*,
+	                                                  Arena& arena);
 };
 
 class HmacSha256DigestGen final : NonCopyable {
