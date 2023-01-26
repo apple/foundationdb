@@ -2462,7 +2462,7 @@ TEST_CASE("/blobgranule/files/deltaFormatUnitTest") {
 	}*/
 	Value serialized = serializeChunkedDeltaFile(
 	    fileNameRef, data, kvGen.allRange, targetChunkSize, kvGen.compressFilter, kvGen.cipherKeys);
-	std::vector<StringRef> deltaPtr{serialized};
+	std::vector<StringRef> deltaPtr{ serialized };
 
 	// check whole file
 	checkDeltaRead(kvGen, kvGen.allRange, 0, data.back().version, data, deltaPtr);
