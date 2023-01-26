@@ -310,11 +310,11 @@ struct RawTenantAccessWorkload : TestWorkload {
 
 		// check whether we caught illegal transaction when running illegal transactions
 		if (invalidTenantWriteOp) {
-			ASSERT(illegalAccessCaught);
-			CODE_PROBE(true, "Caught invalid tenant write op.");
+			ASSERT(!committed);
+			CODE_PROBE(illegalAccessCaught, "Caught invalid tenant write op.");
 		} else if (tenantMapChangeOp && normalKeyWriteOp) {
-			ASSERT(illegalAccessCaught);
-			CODE_PROBE(true, "Caught tenant map changing and normal key writing in the same transaction.");
+			ASSERT(!committed);
+			CODE_PROBE(illegalAccessCaught, "Caught tenant map changing and normal key writing in the same transaction.");
 		} else {
 			ASSERT(!illegalAccessCaught);
 		}
