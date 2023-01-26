@@ -110,6 +110,9 @@
 #endif
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+template class RequestStream<OpenDatabaseRequest, false>;
+template struct NetNotifiedQueue<OpenDatabaseRequest, false>;
+
 FDB_DEFINE_BOOLEAN_PARAM(CacheResult);
 
 extern const char* getSourceVersion();
@@ -2281,7 +2284,8 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	                                                clientInfo,
 	                                                coordinator,
 	                                                networkOptions.supportedVersions,
-	                                                StringRef(networkOptions.traceLogGroup));
+	                                                StringRef(networkOptions.traceLogGroup),
+	                                                internal);
 
 	DatabaseContext* db;
 	if (preallocatedDb) {
@@ -3715,12 +3719,12 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, parameters->taskID));
 			} else if (e.code() == error_code_watch_cancelled || e.code() == error_code_process_behind) {
 				// clang-format off
-				CODE_PROBE(e.code() == error_code_watch_cancelled, "Too many watches on the storage server, poll for changes instead");
-				CODE_PROBE(e.code() == error_code_process_behind, "The storage servers are all behind", probe::decoration::rare);
+						CODE_PROBE(e.code() == error_code_watch_cancelled, "Too many watches on the storage server, poll for changes instead");
+						CODE_PROBE(e.code() == error_code_process_behind, "The storage servers are all behind", probe::decoration::rare);
 				// clang-format on
 				wait(delay(CLIENT_KNOBS->WATCH_POLLING_TIME, parameters->taskID));
 			} else if (e.code() == error_code_timed_out) { // The storage server occasionally times out watches in case
-				                                           // it was cancelled
+				// it was cancelled
 				CODE_PROBE(true, "A watch timed out");
 				wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, parameters->taskID));
 			} else {
@@ -4390,7 +4394,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 			if (reverse && (begin - 1).isDefinitelyLess(shard.begin) &&
 			    (!begin.isFirstGreaterOrEqual() ||
 			     begin.getKey() != shard.begin)) { // In this case we would be setting modifiedSelectors to true, but
-				                                   // not modifying anything
+				// not modifying anything
 
 				req.begin = firstGreaterOrEqual(shard.begin);
 				modifiedSelectors = true;
@@ -9863,7 +9867,8 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
                                          Version end,
                                          int replyBufferSize,
                                          bool canReadPopped,
-                                         ReadOptions readOptions) {
+                                         ReadOptions readOptions,
+                                         bool encrypted) {
 	state std::vector<Future<Void>> fetchers(interfs.size());
 	state std::vector<Future<Void>> onErrors(interfs.size());
 	state std::vector<MutationAndVersionStream> streams(interfs.size());
@@ -9893,6 +9898,7 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		}
 		req.options = readOptions;
 		req.id = deterministicRandom()->randomUniqueID();
+		req.encrypted = encrypted;
 
 		debugUIDs.push_back(req.id);
 		mergeCursorUID = UID(mergeCursorUID.first() ^ req.id.first(), mergeCursorUID.second() ^ req.id.second());
@@ -10099,7 +10105,8 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
                                           Version end,
                                           int replyBufferSize,
                                           bool canReadPopped,
-                                          ReadOptions readOptions) {
+                                          ReadOptions readOptions,
+                                          bool encrypted) {
 	state Database cx(db);
 	state ChangeFeedStreamRequest req;
 	state Optional<ChangeFeedTSSValidationData> tssData;
@@ -10111,6 +10118,7 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	req.replyBufferSize = replyBufferSize;
 	req.options = readOptions;
 	req.id = deterministicRandom()->randomUniqueID();
+	req.encrypted = encrypted;
 
 	if (DEBUG_CF_CLIENT_TRACE) {
 		TraceEvent(SevDebug, "TraceChangeFeedClientSingleCursor", req.id)
@@ -10196,7 +10204,8 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
                                             KeyRange range,
                                             int replyBufferSize,
                                             bool canReadPopped,
-                                            ReadOptions readOptions) {
+                                            ReadOptions readOptions,
+                                            bool encrypted) {
 	state Database cx(db);
 	state Span span("NAPI:GetChangeFeedStream"_loc);
 	db->usedAnyChangeFeeds = true;
@@ -10290,8 +10299,16 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				}
 				CODE_PROBE(true, "Change feed merge cursor");
 				// TODO (jslocum): validate connectionFileChanged behavior
-				wait(mergeChangeFeedStream(
-				         db, interfs, results, rangeID, &begin, end, replyBufferSize, canReadPopped, readOptions) ||
+				wait(mergeChangeFeedStream(db,
+				                           interfs,
+				                           results,
+				                           rangeID,
+				                           &begin,
+				                           end,
+				                           replyBufferSize,
+				                           canReadPopped,
+				                           readOptions,
+				                           encrypted) ||
 				     cx->connectionFileChanged());
 			} else {
 				CODE_PROBE(true, "Change feed single cursor");
@@ -10305,7 +10322,8 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				                            end,
 				                            replyBufferSize,
 				                            canReadPopped,
-				                            readOptions) ||
+				                            readOptions,
+				                            encrypted) ||
 				     cx->connectionFileChanged());
 			}
 		} catch (Error& e) {
@@ -10373,7 +10391,8 @@ Future<Void> DatabaseContext::getChangeFeedStream(Reference<ChangeFeedData> resu
                                                   KeyRange range,
                                                   int replyBufferSize,
                                                   bool canReadPopped,
-                                                  ReadOptions readOptions) {
+                                                  ReadOptions readOptions,
+                                                  bool encrypted) {
 	return getChangeFeedStreamActor(Reference<DatabaseContext>::addRef(this),
 	                                results,
 	                                rangeID,
@@ -10382,7 +10401,8 @@ Future<Void> DatabaseContext::getChangeFeedStream(Reference<ChangeFeedData> resu
 	                                range,
 	                                replyBufferSize,
 	                                canReadPopped,
-	                                readOptions);
+	                                readOptions,
+	                                encrypted);
 }
 
 Version OverlappingChangeFeedsInfo::getFeedMetadataVersion(const KeyRangeRef& range) const {

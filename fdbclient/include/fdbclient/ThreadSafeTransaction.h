@@ -91,11 +91,12 @@ public: // Internal use only
 
 class ThreadSafeTenant : public ITenant, ThreadSafeReferenceCounted<ThreadSafeTenant>, NonCopyable {
 public:
-	ThreadSafeTenant(Reference<ThreadSafeDatabase> db, TenantName name) : db(db), name(name) {}
+	ThreadSafeTenant(Reference<ThreadSafeDatabase> db, TenantName name);
 	~ThreadSafeTenant() override;
 
 	Reference<ITransaction> createTransaction() override;
 
+	ThreadFuture<int64_t> getId() override;
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
@@ -111,7 +112,8 @@ public:
 
 private:
 	Reference<ThreadSafeDatabase> db;
-	Standalone<StringRef> name;
+	TenantName name;
+	Tenant* tenant;
 };
 
 // An implementation of ITransaction that serializes operations onto the network thread and interacts with the
@@ -120,7 +122,8 @@ class ThreadSafeTransaction : public ITransaction, ThreadSafeReferenceCounted<Th
 public:
 	explicit ThreadSafeTransaction(DatabaseContext* cx,
 	                               ISingleThreadTransaction::Type type,
-	                               Optional<TenantName> tenantName);
+	                               Optional<TenantName> tenantName,
+	                               Tenant* tenantPtr);
 	~ThreadSafeTransaction() override;
 
 	// Note: used while refactoring fdbcli, need to be removed later

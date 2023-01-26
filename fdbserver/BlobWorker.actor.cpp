@@ -4905,15 +4905,13 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
-				wait(store(tenantResults,
-				           TenantMetadata::tenantMap().getRange(tr,
-				                                                Optional<TenantName>(),
-				                                                Optional<TenantName>(),
-				                                                CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+				state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantResults;
+				wait(
+				    store(tenantResults,
+				          TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
 				ASSERT(tenantResults.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantResults.more);
 
-				std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
+				std::vector<std::pair<int64_t, TenantMapEntry>> tenants;
 				for (auto& it : tenantResults.results) {
 					// FIXME: handle removing/moving tenants!
 					tenants.push_back(std::pair(it.first, it.second));

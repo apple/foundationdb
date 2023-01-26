@@ -22,6 +22,7 @@
 
 #include "flow/flat_buffers.h"
 #include "flow/UnitTest.h"
+#include "flow/IConnection.h"
 
 #include <boost/algorithm/string.hpp>
 
