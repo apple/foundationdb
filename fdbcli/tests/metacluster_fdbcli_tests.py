@@ -90,6 +90,6 @@ number of data clusters: {}
 
     for (cf, name) in zip(cluster_files[1:], names[1:]):
         output = metacluster_status(cf)
-        expected = "This cluster \"{}\" is a data cluster within the metacluster whose management cluster is \"{" \
+        expected = "This cluster \"{}\" is a data cluster within the metacluster named \"{" \
                    "}\"".format(name, names[0])
         assert expected == output
