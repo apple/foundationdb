@@ -24,6 +24,7 @@
 #include "flow/Platform.actor.h"
 #include "flow/Platform.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {

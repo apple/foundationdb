@@ -5320,9 +5320,21 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 
 ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 	bmData->initBStore();
+
 	loop {
-		wait(dumpManifest(bmData->db, bmData->bstore, bmData->epoch, bmData->manifestDumperSeqNo));
-		bmData->manifestDumperSeqNo++;
+		// Skip backup if no active blob ranges
+		bool activeRanges = false;
+		auto knownRanges = bmData->knownBlobRanges.intersectingRanges(normalKeys);
+		for (auto& it : knownRanges) {
+			if (it.cvalue()) {
+				activeRanges = true;
+				break;
+			}
+		}
+		if (activeRanges) {
+			wait(dumpManifest(bmData->db, bmData->bstore, bmData->epoch, bmData->manifestDumperSeqNo));
+			bmData->manifestDumperSeqNo++;
+		}
 		wait(delay(SERVER_KNOBS->BLOB_MANIFEST_BACKUP_INTERVAL));
 	}
 }

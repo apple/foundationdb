@@ -21,6 +21,7 @@
 #include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
 #include "flow/UnitTest.h"
+#include "flow/IConnection.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 Future<int64_t> AsyncFileS3BlobStoreRead::size() const {

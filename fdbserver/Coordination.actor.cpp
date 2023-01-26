@@ -226,7 +226,7 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 	++(*clientCount);
 	hasConnectedClients->set(true);
 
-	if (req.supportedVersions.size() > 0) {
+	if (req.supportedVersions.size() > 0 && !req.internal) {
 		db->clientStatusInfoMap[req.reply.getEndpoint().getPrimaryAddress()] =
 		    ClientStatusInfo(req.traceLogGroup, req.supportedVersions, req.issues);
 	}
@@ -252,7 +252,7 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 		}
 	}
 
-	if (req.supportedVersions.size() > 0) {
+	if (req.supportedVersions.size() > 0 && !req.internal) {
 		db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
 	}
 

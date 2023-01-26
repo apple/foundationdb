@@ -44,6 +44,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/TaskQueue.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/ChaosMetrics.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/AsioReactor.h"
 #include "flow/Profiler.h"
@@ -55,6 +56,8 @@
 #include "flow/Util.h"
 #include "flow/UnitTest.h"
 #include "flow/ScopeExit.h"
+#include "flow/IUDPSocket.h"
+#include "flow/IConnection.h"
 
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
