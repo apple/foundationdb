@@ -149,6 +149,18 @@ private:
 	MappedKeyValueArrayFuture(FDBFuture* f) : Future(f) {}
 };
 
+class MappedKeyValueArrayFutureV2 : public Future {
+public:
+	// Call this function instead of fdb_future_get_mappedkeyvalue_array when using
+	// the MappedKeyValueArrayFuture type. Its behavior is identical to
+	// fdb_future_get_mappedkeyvalue_array.
+	fdb_error_t get(const FDBMappedKeyValueV2** out_kv, int* out_count, fdb_bool_t* out_more);
+
+private:
+	friend class Transaction;
+	MappedKeyValueArrayFutureV2(FDBFuture* f) : Future(f) {}
+};
+
 class KeyRangeArrayFuture : public Future {
 public:
 	// Call this function instead of fdb_future_get_keyrange_array when using
@@ -329,10 +341,27 @@ public:
 	                                           int target_bytes,
 	                                           FDBStreamingMode mode,
 	                                           int iteration,
-	                                           int matchIndex,
 	                                           fdb_bool_t snapshot,
 	                                           fdb_bool_t reverse);
 
+	MappedKeyValueArrayFutureV2 get_mapped_range_v2(const uint8_t* begin_key_name,
+	                                                int begin_key_name_length,
+	                                                fdb_bool_t begin_or_equal,
+	                                                int begin_offset,
+	                                                const uint8_t* end_key_name,
+	                                                int end_key_name_length,
+	                                                fdb_bool_t end_or_equal,
+	                                                int end_offset,
+	                                                const uint8_t* mapper_name,
+	                                                int mapper_name_length,
+	                                                int limit,
+	                                                int target_bytes,
+	                                                FDBStreamingMode mode,
+	                                                int iteration,
+	                                                fdb_bool_t snapshot,
+	                                                fdb_bool_t reverse,
+	                                                uint8_t const* mapped_range_params,
+	                                                int mapped_range_params_length);
 	// Wrapper around fdb_transaction_watch. Returns a future representing an
 	// empty value.
 	EmptyFuture watch(std::string_view key);

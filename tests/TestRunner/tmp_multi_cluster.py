@@ -71,6 +71,7 @@ if __name__ == "__main__":
         print(cluster_paths)
         env = dict(**os.environ)
         env["FDB_CLUSTERS"] = env.get("FDB_CLUSTERS", cluster_paths)
+        env["FDB_CLUSTER_FILE"] = env.get("FDB_CLUSTER_FILE", cluster_paths)
         cmd_args = []
         for cmd in args.cmd:
             cmd_args.append(cmd)

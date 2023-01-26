@@ -456,17 +456,33 @@ ThreadFuture<MappedRangeResult> ThreadSafeTransaction::getMappedRange(const KeyS
                                                                       const KeySelectorRef& end,
                                                                       const StringRef& mapper,
                                                                       GetRangeLimits limits,
-                                                                      int matchIndex,
                                                                       bool snapshot,
                                                                       bool reverse) {
 	KeySelector b = begin;
 	KeySelector e = end;
 	Key h = mapper;
-
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, b, e, h, limits, matchIndex, snapshot, reverse]() -> Future<MappedRangeResult> {
+	return onMainThread([tr, b, e, h, limits, snapshot, reverse]() -> Future<MappedRangeResult> {
 		tr->checkDeferredError();
-		return tr->getMappedRange(b, e, h, limits, matchIndex, Snapshot{ snapshot }, Reverse{ reverse });
+		return tr->getMappedRange(b, e, h, limits, Snapshot{ snapshot }, Reverse{ reverse });
+	});
+}
+
+ThreadFuture<MappedRangeResultV2> ThreadSafeTransaction::getMappedRangeV2(const KeySelectorRef& begin,
+                                                                          const KeySelectorRef& end,
+                                                                          const StringRef& mapper,
+                                                                          const StringRef& mrp,
+                                                                          GetRangeLimits limits,
+                                                                          bool snapshot,
+                                                                          bool reverse) {
+	KeySelector b = begin;
+	KeySelector e = end;
+	Key h = mapper;
+	Key m = mrp;
+	ISingleThreadTransaction* tr = this->tr;
+	return onMainThread([tr, b, e, h, limits, snapshot, reverse, m]() -> Future<MappedRangeResultV2> {
+		tr->checkDeferredError();
+		return tr->getMappedRangeV2(b, e, h, m, limits, Snapshot{ snapshot }, Reverse{ reverse });
 	});
 }
 

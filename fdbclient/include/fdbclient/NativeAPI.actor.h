@@ -390,17 +390,24 @@ public:
 	                                                       const KeySelector& end,
 	                                                       const Key& mapper,
 	                                                       GetRangeLimits limits,
-	                                                       int matchIndex = MATCH_INDEX_ALL,
 	                                                       Snapshot = Snapshot::False,
 	                                                       Reverse = Reverse::False);
+
+	[[nodiscard]] Future<MappedRangeResultV2> getMappedRangeV2(const KeySelector& begin,
+	                                                           const KeySelector& end,
+	                                                           const Key& mapper,
+	                                                           const Key& mrp,
+	                                                           GetRangeLimits limits,
+	                                                           Snapshot = Snapshot::False,
+	                                                           Reverse = Reverse::False);
 
 private:
 	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
 	Future<RangeResultFamily> getRangeInternal(const KeySelector& begin,
 	                                           const KeySelector& end,
 	                                           const Key& mapper,
+	                                           const Key& mrp,
 	                                           GetRangeLimits limits,
-	                                           int matchIndex,
 	                                           Snapshot snapshot,
 	                                           Reverse reverse);
 

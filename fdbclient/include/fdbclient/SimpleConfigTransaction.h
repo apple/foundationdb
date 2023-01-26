@@ -63,9 +63,17 @@ public:
 	                                         KeySelector end,
 	                                         Key mapper,
 	                                         GetRangeLimits limits,
-	                                         int matchIndex,
 	                                         Snapshot = Snapshot::False,
 	                                         Reverse = Reverse::False) override {
+		throw client_invalid_operation();
+	}
+	Future<MappedRangeResultV2> getMappedRangeV2(KeySelector begin,
+	                                             KeySelector end,
+	                                             Key mapper,
+	                                             Key mrp,
+	                                             GetRangeLimits limits,
+	                                             Snapshot = Snapshot::False,
+	                                             Reverse = Reverse::False) override {
 		throw client_invalid_operation();
 	}
 	Future<Void> commit() override;

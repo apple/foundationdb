@@ -60,31 +60,48 @@ class MappedRangeQueryIntegrationTest {
 		}
 	}
 
-	static private final byte[] EMPTY = Tuple.from().pack();
-	static private final String PREFIX = "prefix";
-	static private final String RECORD = "RECORD";
-	static private final String INDEX = "INDEX";
-	static private String primaryKey(int i) { return String.format("primary-key-of-record-%08d", i); }
-	static private String indexKey(int i) { return String.format("index-key-of-record-%08d", i); }
-	static private String dataOfRecord(int i) { return String.format("data-of-record-%08d", i); }
+	private static final byte[] EMPTY = Tuple.from().pack();
+	private static final String PREFIX = "prefix";
+	private static final String RECORD = "RECORD";
+	private static final String INDEX = "INDEX";
+	private static final String NOTFOUND = "NOT_FOUND";
+	private static String primaryKey(int i) { return String.format("primary-key-of-record-%08d", i); }
+	private static String indexKey(int i) { return String.format("index-key-of-record-%08d", i); }
+	private static String dataOfRecord(int i) { return String.format("data-of-record-%08d", i); }
 
 	static byte[] MAPPER = Tuple.from(PREFIX, RECORD, "{K[3]}", "{...}").pack();
+	static byte[] MAPPER_ALL_MISSING = Tuple.from(PREFIX, NOTFOUND, "{K[3]}", "{...}").pack();
+
 	static int SPLIT_SIZE = 3;
 
-	static private byte[] indexEntryKey(final int i) {
+	private static byte[] notFoundMapperEntryKey(final int i) {
+		return Tuple.from(PREFIX, NOTFOUND, primaryKey(i)).pack();
+	}
+	private static byte[] indexEntryKey(final int i) {
 		return Tuple.from(PREFIX, INDEX, indexKey(i), primaryKey(i)).pack();
 	}
-	static private byte[] recordKeyPrefix(final int i) {
-		return Tuple.from(PREFIX, RECORD, primaryKey(i)).pack();
-	}
-	static private byte[] recordKey(final int i, final int split) {
+	private static byte[] recordKeyPrefix(final int i) { return Tuple.from(PREFIX, RECORD, primaryKey(i)).pack(); }
+	private static byte[] recordKey(final int i, final int split) {
 		return Tuple.from(PREFIX, RECORD, primaryKey(i), split).pack();
 	}
-	static private byte[] recordValue(final int i, final int split) {
+	private static byte[] recordValue(final int i, final int split) {
 		return Tuple.from(dataOfRecord(i), split).pack();
 	}
 
-	static private void insertRecordWithIndex(final Transaction tr, final int i) {
+	private static int getRandomMatchIndex() {
+		double r = Math.random();
+		if (r < 0.25) {
+			return Transaction.MATCH_INDEX_ALL;
+		} else if (r < 0.5) {
+			return Transaction.MATCH_INDEX_NONE;
+		} else if (r < 0.75) {
+			return Transaction.MATCH_INDEX_MATCHED_ONLY;
+		} else {
+			return Transaction.MATCH_INDEX_UNMATCHED_ONLY;
+		}
+	}
+
+	private static void insertRecordWithIndex(final Transaction tr, final int i) {
 		tr.set(indexEntryKey(i), EMPTY);
 		for (int split = 0; split < SPLIT_SIZE; split++) {
 			tr.set(recordKey(i, split), recordValue(i, split));
@@ -116,6 +133,7 @@ class MappedRangeQueryIntegrationTest {
 			insertRecordsWithIndexes(numRecords, db);
 			instrument(rangeQueryAndThenRangeQueries, "rangeQueryAndThenRangeQueries", db);
 			instrument(mappedRangeQuery, "mappedRangeQuery", db);
+			instrument(mappedRangeQueryV2, "mappedRangeQueryV2", db);
 		}
 	}
 
@@ -131,8 +149,8 @@ class MappedRangeQueryIntegrationTest {
 		                  numQueries * 1000L / time);
 	}
 
-	static private final int RECORDS_PER_TXN = 100;
-	static private void insertRecordsWithIndexes(int n, Database db) {
+	private static final int RECORDS_PER_TXN = 100;
+	private static void insertRecordsWithIndexes(int n, Database db) {
 		int i = 0;
 		while (i < n) {
 			int begin = i;
@@ -180,7 +198,7 @@ class MappedRangeQueryIntegrationTest {
 
 					Assertions.assertTrue(records.hasNext());
 					List<KeyValue> rangeResult = records.next().get();
-					validateRangeResult(id, rangeResult);
+					validateRangeResult(id, rangeResult, false);
 				}
 				Assertions.assertFalse(indexes.hasNext());
 				Assertions.assertFalse(records.hasNext());
@@ -191,14 +209,65 @@ class MappedRangeQueryIntegrationTest {
 		return null;
 	});
 
+	RangeQueryWithIndex mappedRangeQueryV2 = (int begin, int end, Database db) -> db.run(tr -> {
+		try {
+			int matchIndex = getRandomMatchIndex();
+			boolean fetchLocalOnly = Math.random() < 0.5;
+			boolean missing = Math.random() < 0.5;
+			byte[] m = missing ? MAPPER_ALL_MISSING : MAPPER;
+			List<MappedKeyValueV2> kvs = tr.getMappedRangeV2(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
+			                                                 KeySelector.firstGreaterOrEqual(indexEntryKey(end)), m,
+			                                                 ReadTransaction.ROW_LIMIT_UNLIMITED, false,
+			                                                 StreamingMode.WANT_ALL, matchIndex, fetchLocalOnly)
+			                                 .asList()
+			                                 .get();
+			Assertions.assertEquals(end - begin, kvs.size());
+			// assuming "local" is always true in the reply
+			byte[] expectParamsBuffer = new byte[] { 0x02, 0x02, 0x01 };
+
+			if (validate) {
+				final Iterator<MappedKeyValueV2> results = kvs.iterator();
+				for (int id = begin; id < end; id++) {
+					Assertions.assertTrue(results.hasNext());
+					MappedKeyValueV2 mappedKeyValue = results.next();
+					if (matchIndex == Transaction.MATCH_INDEX_ALL || id == begin || id == end - 1) {
+						assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
+					} else if (matchIndex == Transaction.MATCH_INDEX_MATCHED_ONLY) {
+						assertByteArrayEquals(missing ? EMPTY : indexEntryKey(id), mappedKeyValue.getKey());
+					} else if (matchIndex == Transaction.MATCH_INDEX_UNMATCHED_ONLY) {
+						assertByteArrayEquals(missing ? indexEntryKey(id) : EMPTY, mappedKeyValue.getKey());
+					} else {
+						assertByteArrayEquals(EMPTY, mappedKeyValue.getKey());
+					}
+					assertByteArrayEquals(EMPTY, mappedKeyValue.getValue());
+					byte[] prefix = missing ? notFoundMapperEntryKey(id) : recordKeyPrefix(id);
+					assertByteArrayEquals(prefix, mappedKeyValue.getRangeBegin());
+					prefix[prefix.length - 1] = (byte)0x01;
+					assertByteArrayEquals(prefix, mappedKeyValue.getRangeEnd());
+
+					List<KeyValue> rangeResult = mappedKeyValue.getRangeResult();
+					validateRangeResult(id, rangeResult, missing);
+
+					byte[] paramsBuffer = mappedKeyValue.getParamsBuffer();
+					assertByteArrayEquals(expectParamsBuffer, paramsBuffer);
+				}
+				Assertions.assertFalse(results.hasNext());
+			}
+		} catch (Exception e) {
+			Assertions.fail("Unexpected exception", e);
+		}
+		return null;
+	});
+
 	RangeQueryWithIndex mappedRangeQuery = (int begin, int end, Database db) -> db.run(tr -> {
 		try {
-			List<MappedKeyValue> kvs = tr.getMappedRange(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
-			                                             KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
-			                                             ReadTransaction.ROW_LIMIT_UNLIMITED,
-			                                             FDBTransaction.MATCH_INDEX_ALL, false, StreamingMode.WANT_ALL)
-			                               .asList()
-			                               .get();
+
+			List<MappedKeyValue> kvs =
+			    tr.getMappedRange(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
+			                      KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
+			                      ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
+			        .asList()
+			        .get();
 			Assertions.assertEquals(end - begin, kvs.size());
 
 			if (validate) {
@@ -215,7 +284,7 @@ class MappedRangeQueryIntegrationTest {
 					assertByteArrayEquals(prefix, mappedKeyValue.getRangeEnd());
 
 					List<KeyValue> rangeResult = mappedKeyValue.getRangeResult();
-					validateRangeResult(id, rangeResult);
+					validateRangeResult(id, rangeResult, false);
 				}
 				Assertions.assertFalse(results.hasNext());
 			}
@@ -225,7 +294,11 @@ class MappedRangeQueryIntegrationTest {
 		return null;
 	});
 
-	void validateRangeResult(int id, List<KeyValue> rangeResult) {
+	void validateRangeResult(int id, List<KeyValue> rangeResult, boolean missing) {
+		if (missing) {
+			Assertions.assertEquals(rangeResult.size(), 0);
+			return;
+		}
 		Assertions.assertEquals(rangeResult.size(), SPLIT_SIZE);
 		for (int split = 0; split < SPLIT_SIZE; split++) {
 			KeyValue keyValue = rangeResult.get(split);
