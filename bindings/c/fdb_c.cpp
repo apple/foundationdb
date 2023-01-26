@@ -64,9 +64,9 @@ int g_api_version = 0;
    Standalone<RangeResultRef> as an array of FDBKeyValue. */
 static_assert(sizeof(FDBKeyValue) == sizeof(KeyValueRef), "FDBKeyValue / KeyValueRef size mismatch");
 static_assert(sizeof(FDBBGMutation) == sizeof(GranuleMutationRef), "FDBBGMutation / GranuleMutationRef size mismatch");
-static_assert(FDB_BG_MUTATION_TYPE_SET_VALUE == MutationRef::Type::SetValue,
+static_assert(static_cast<int>(FDB_BG_MUTATION_TYPE_SET_VALUE) == static_cast<int>(MutationRef::Type::SetValue),
               "FDB_BG_MUTATION_TYPE_SET_VALUE enum value mismatch");
-static_assert(FDB_BG_MUTATION_TYPE_CLEAR_RANGE == MutationRef::Type::ClearRange,
+static_assert(static_cast<int>(FDB_BG_MUTATION_TYPE_CLEAR_RANGE) == static_cast<int>(MutationRef::Type::ClearRange),
               "FDB_BG_MUTATION_TYPE_CLEAR_RANGE enum value mismatch");
 
 #define TSAV_ERROR(type, error) ((FDBFuture*)(ThreadFuture<type>(error())).extractPtr())
