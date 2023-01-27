@@ -304,7 +304,7 @@ public:
 
 	Promise<Void> initialized;
 
-	std::unordered_map<AuditType, std::vector<std::shared_ptr<DDAudit>>> audits;
+	std::unordered_map<AuditType, std::unordered_map<UID, std::shared_ptr<DDAudit>>> audits;
 	Future<Void> auditInitialized;
 
 	Optional<Reference<TenantCache>> ddTenantCache;
@@ -1382,7 +1382,7 @@ ACTOR Future<Void> resumeAuditStorage(Reference<DataDistributor> self, AuditStor
 
 	state std::shared_ptr<DDAudit> audit =
 	    std::make_shared<DDAudit>(auditState.id, auditState.range, auditState.getType());
-	self->audits[auditState.getType()].push_back(audit);
+	self->audits[auditState.getType()][audit->id] = audit;
 	audit->actors.add(loadAndDispatchAuditRange(self, audit, auditState.range));
 	TraceEvent(SevDebug, "DDResumAuditStorageBegin", self->ddId)
 	    .detail("AuditID", audit->id)
@@ -1411,6 +1411,7 @@ ACTOR Future<Void> resumeAuditStorage(Reference<DataDistributor> self, AuditStor
 			self->addActor.send(resumeAuditStorage(self, auditState));
 		}
 	}
+	self->audits[auditState.getType()].erase(audit->id);
 
 	return Void();
 }
@@ -1425,7 +1426,7 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		try {
 			auto it = self->audits.find(req.getType());
 			if (it != self->audits.end() && !it->second.empty()) {
-				for (auto& currentAudit : it->second) {
+				for (auto& [id, currentAudit] : it->second) {
 					if (currentAudit->range.contains(req.range)) {
 						auditState.id = currentAudit->id;
 						auditState.range = currentAudit->range;
@@ -1444,7 +1445,7 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 				UID auditId = wait(persistNewAuditState(self->txnProcessor->context(), auditState));
 				auditState.id = auditId;
 				audit = std::make_shared<DDAudit>(auditId, req.range, req.getType());
-				self->audits[req.getType()].push_back(audit);
+				self->audits[req.getType()][audit->id] = audit;
 				audit->actors.add(loadAndDispatchAuditRange(self, audit, req.range));
 				// Simulate restarting.
 				if (g_network->isSimulated() && deterministicRandom()->coinflip()) {
@@ -1497,6 +1498,7 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			throw e;
 		}
 	}
+	self->audits[auditState.getType()].erase(auditState.id);
 
 	return Void();
 }

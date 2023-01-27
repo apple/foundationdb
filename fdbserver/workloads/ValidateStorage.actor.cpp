@@ -117,6 +117,21 @@ struct ValidateStorage : TestWorkload {
 			}
 		}
 
+		loop {
+			try {
+				Optional<UID> auditId_ = wait(timeout(
+				    auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA, /*async=*/true), 30));
+				if (!auditId_.present()) {
+					throw audit_storage_failed();
+				}
+				ASSERT(auditId_ != auditId);
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
+				wait(delay(1));
+			}
+		}
+
 		return Void();
 	}
 
