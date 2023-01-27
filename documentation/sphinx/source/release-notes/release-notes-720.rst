@@ -19,6 +19,7 @@ Reliability
 Fixes
 -----
 
+* Fixed status json to not report fdbserver processes as clients. `(PR #9262) <https://github.com/apple/foundationdb/pull/9262>`_
 * In ``fdbcli``, integer options are now expressed as integers rather than byte strings (e.g. ``option on TIMEOUT 1000``). `(PR #7571) <https://github.com/apple/foundationdb/pull/7571>`_
 * Fixed the bug in ``ConflictingKeysImpl::getRange`` which happens when an underlying conflicting range contains the read range. Added additional test coverage for validating random ``getRange`` results from special keys. `(PR #7597) <https://github.com/apple/foundationdb/pull/7597>`_
 * Fixed the bug in ``SpecialKeyRangeAsyncImpl::getRange`` that the local cache is updated incorrectly after a cross-module read range if it touched more than one ``SpecialKeyRangeAsyncImpl`` in resolving key selectors. Extended the ``SpecialKeySpaceCorrectness`` workload to catch the bug. `(PR #7671) <https://github.com/apple/foundationdb/pull/7671>`_
