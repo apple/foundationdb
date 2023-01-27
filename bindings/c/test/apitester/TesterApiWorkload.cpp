@@ -152,7 +152,7 @@ fdb::Key ApiWorkload::randomKey(double existingKeyRatio, std::optional<int> tena
 	}
 }
 
-fdb::KeyRange ApiWorkload::randomKeyRange() {
+fdb::KeyRange ApiWorkload::randomNonEmptyKeyRange() {
 	fdb::KeyRange keyRange;
 	keyRange.beginKey = randomKeyName();
 	// avoid empty key range

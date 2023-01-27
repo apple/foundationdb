@@ -74,7 +74,7 @@ private:
 	}
 
 	void randomReadOp(TTaskFct cont, std::optional<int> tenantId) {
-		fdb::KeyRange keyRange = randomKeyRange();
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 
 		auto results = std::make_shared<std::vector<fdb::KeyValue>>();
 		auto tooOld = std::make_shared<bool>(false);
@@ -160,7 +160,7 @@ private:
 	}
 
 	void randomGetGranulesOp(TTaskFct cont, std::optional<int> tenantId) {
-		fdb::KeyRange keyRange = randomKeyRange();
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 		auto results = std::make_shared<std::vector<fdb::KeyRange>>();
 
 		debugOp("GetGranules", keyRange, tenantId, "starting");
@@ -191,7 +191,7 @@ private:
 			schedule(cont);
 			return;
 		}
-		fdb::KeyRange keyRange = randomKeyRange();
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 		auto results = std::make_shared<std::vector<fdb::GranuleSummary>>();
 
 		debugOp("Summarize", keyRange, tenantId, "starting");
@@ -280,7 +280,7 @@ private:
 
 	// TODO: tenant support
 	void randomGetBlobRangesOp(TTaskFct cont, std::optional<int> tenantId) {
-		fdb::KeyRange keyRange = randomKeyRange();
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 
 		auto results = std::make_shared<std::vector<fdb::KeyRange>>();
 
@@ -306,7 +306,7 @@ private:
 
 	// TODO: tenant support
 	void randomVerifyOp(TTaskFct cont, std::optional<int> tenantId) {
-		fdb::KeyRange keyRange = randomKeyRange();
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 
 		debugOp("Verify", keyRange, tenantId, "starting");
 
