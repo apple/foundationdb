@@ -91,7 +91,8 @@ Future<Standalone<VectorRef<REPLY_TYPE(Request)>>> txnDoBlobGranuleRequests(
 					           blobGranuleMapping[i].key.printable(),
 					           blobGranuleMapping[i + 1].key.printable());
 				}
-				break;
+				// throw to force read version to increase and to retry reading mapping
+				throw transaction_too_old();
 			}
 		}
 
