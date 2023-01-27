@@ -2427,12 +2427,26 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					}
 					when(wait(inFlightFiles.empty() ? Never() : success(inFlightFiles.front().future))) {}
 					when(wait(nextForceFlush)) {
-						if (forceFlushVersions.empty() ||
-						    forceFlushVersions.back() < metadata->forceFlushVersion.get()) {
-							forceFlushVersions.push_back(metadata->forceFlushVersion.get());
+						Version nextForceFlushVersion = metadata->forceFlushVersion.get();
+						// if flush version is during a known rollback, increase it to after the rollback, so we don't
+						// write a snapshot or delta across rollbacks.
+						for (auto& it : rollbacksCompleted) {
+							if (nextForceFlushVersion > it.first && nextForceFlushVersion < it.second) {
+								nextForceFlushVersion = it.second;
+							}
 						}
-						if (metadata->forceFlushVersion.get() > lastForceFlushVersion) {
-							lastForceFlushVersion = metadata->forceFlushVersion.get();
+						for (auto& it : rollbacksInProgress) {
+							if (nextForceFlushVersion > it.first && nextForceFlushVersion < it.second) {
+								nextForceFlushVersion = it.second;
+							}
+						}
+						CODE_PROBE(nextForceFlushVersion != metadata->forceFlushVersion.get(),
+						           "force flush version bumped by rollback");
+						if (forceFlushVersions.empty() || forceFlushVersions.back() < nextForceFlushVersion) {
+							forceFlushVersions.push_back(nextForceFlushVersion);
+						}
+						if (nextForceFlushVersion > lastForceFlushVersion) {
+							lastForceFlushVersion = nextForceFlushVersion;
 						}
 						nextForceFlush = metadata->forceFlushVersion.whenAtLeast(lastForceFlushVersion + 1);
 					}
@@ -2502,6 +2516,15 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							BinaryReader br(deltas.mutations[0].param2, Unversioned());
 							br >> rollbackVersion;
 
+							if (BW_DEBUG && rollbackVersion < metadata->durableDeltaVersion.get()) {
+								fmt::print("Granule [{0} - {1}) on BW {2} invalid rollback!! {3} -> {4} (DDV={5})\n",
+								           metadata->keyRange.begin.printable().c_str(),
+								           metadata->keyRange.end.printable().c_str(),
+								           bwData->id.toString().substr(0, 5).c_str(),
+								           deltas.version,
+								           rollbackVersion,
+								           metadata->durableDeltaVersion.get());
+							}
 							ASSERT(rollbackVersion >= metadata->durableDeltaVersion.get());
 
 							if (!rollbacksInProgress.empty()) {

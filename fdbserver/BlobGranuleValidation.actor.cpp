@@ -397,6 +397,16 @@ ACTOR Future<Void> validateForceFlushing(Database cx,
 		}
 	}
 
+	// since this call can come from a client, don't assume that the passed version is a grv/committed version.
+	// Buggify to enforce this
+	if (BUGGIFY_WITH_PROB(0.1)) {
+		flushVersion += deterministicRandom()->randomInt(0, 1000000);
+		TraceEvent("ValidateForceFlushAddingJitter")
+		    .detail("Range", range)
+		    .detail("ToFlush", toFlush)
+		    .detail("NewVersion", flushVersion);
+	}
+
 	state bool compact = deterministicRandom()->random01() < 0.25;
 
 	TraceEvent("ValidateForceFlushRequesting")
