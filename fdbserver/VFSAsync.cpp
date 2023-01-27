@@ -26,6 +26,7 @@
 #include "flow/IAsyncFile.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
 
 #include <assert.h>

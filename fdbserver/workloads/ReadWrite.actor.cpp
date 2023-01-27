@@ -471,7 +471,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		}
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return timeout(_start(cx, this), testDuration, Void()); }
 
 	ACTOR template <class Trans>
 	static Future<Void> readOp(Trans* tr, std::vector<int64_t> keys, ReadWriteWorkload* self, bool shouldRecord) {
@@ -535,21 +535,16 @@ struct ReadWriteWorkload : ReadWriteCommon {
 			Future<Void> worker;
 			if (self->useRYW)
 				worker = self->randomReadWriteClient<ReadYourWritesTransaction>(
-				    cx, self, self->actorCount / self->transactionsPerSecond, c, startTime);
+				    cx, self, self->actorCount / self->transactionsPerSecond, c);
 			else
 				worker = self->randomReadWriteClient<Transaction>(
-				    cx, self, self->actorCount / self->transactionsPerSecond, c, startTime);
+				    cx, self, self->actorCount / self->transactionsPerSecond, c);
 			clients.push_back(worker);
 		}
 
 		if (!self->cancelWorkersAtDuration)
 			self->clients = clients; // Don't cancel them until check()
 
-		// If this workload is used during a restore we want to ensure we don't start reading/writing during the restore
-		// Otherwise this could lead to tenant_not_found errors in certain cases
-		if (self->exitEarly && now() - startTime > self->testDuration) {
-			return Void();
-		}
 		wait(self->cancelWorkersAtDuration ? timeout(waitForAll(clients), self->testDuration, Void())
 		                                   : delay(self->testDuration));
 		return Void();
@@ -574,11 +569,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 	}
 
 	ACTOR template <class Trans>
-	Future<Void> randomReadWriteClient(Database cx,
-	                                   ReadWriteWorkload* self,
-	                                   double delay,
-	                                   int clientIndex,
-	                                   double workloadStartTime) {
+	Future<Void> randomReadWriteClient(Database cx, ReadWriteWorkload* self, double delay, int clientIndex) {
 		state double startTime = now();
 		state double lastTime = now();
 		state double GRVStartTime;
@@ -695,11 +686,6 @@ struct ReadWriteWorkload : ReadWriteCommon {
 							tr.addWriteConflictRange(extra_ranges[op + extra_read_conflict_ranges]);
 
 						state double commitStart = now();
-						// Its possible that if a restore is started this workload is still running which causes issues
-						// if the tenant map is cleared
-						if (self->cancelWorkersAtDuration && now() - workloadStartTime > self->testDuration) {
-							return Void();
-						}
 						wait(tr.commit());
 
 						double commitLatency = now() - commitStart;

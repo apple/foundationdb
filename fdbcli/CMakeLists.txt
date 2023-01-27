@@ -58,4 +58,10 @@ if (NOT WIN32 AND NOT OPEN_FOR_IDE)
           5
           --external-client-library ${CMAKE_BINARY_DIR}/bindings/c/libfdb_c_external.so
           )
+
+  add_multi_fdbclient_test(
+    NAME metacluster_fdbcli_tests
+    COMMAND ${CMAKE_SOURCE_DIR}/fdbcli/tests/metacluster_fdbcli_tests.py
+            ${CMAKE_BINARY_DIR}
+            )
 endif()

@@ -23,6 +23,7 @@
 #pragma once
 
 #include "flow/flow.h"
+#include "flow/TaskPriority.h"
 #include "flow/serialize.h"
 #include "fdbrpc/FlowTransport.h" // NetworkMessageReceiver Endpoint
 #include "fdbrpc/FailureMonitor.h"

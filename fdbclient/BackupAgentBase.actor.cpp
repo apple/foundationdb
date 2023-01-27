@@ -32,8 +32,6 @@
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
-#include "flow/EncryptUtils.h"
-#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 FDB_DEFINE_BOOLEAN_PARAM(LockDB);

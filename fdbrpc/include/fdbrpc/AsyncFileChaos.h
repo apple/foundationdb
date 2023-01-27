@@ -25,6 +25,7 @@
 #include "flow/IAsyncFile.h"
 #include "flow/network.h"
 #include "flow/ActorCollection.h"
+#include "flow/ChaosMetrics.h"
 #include "fdbrpc/simulator.h"
 
 // template <class AsyncFileType>

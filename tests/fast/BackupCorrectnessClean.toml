@@ -28,7 +28,6 @@ simBackupAgents = 'BackupToFile'
 
     [[test.workload]]
     testName = 'ReadWrite'
-    exitEarly = true
     testDuration = 30.0
     transactionsPerSecond = 10
     writesPerTransactionA = 10
