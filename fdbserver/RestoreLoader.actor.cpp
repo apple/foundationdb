@@ -86,7 +86,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     Reference<IBackupContainer> bc,
     Version version,
     RestoreAsset asset,
-    Optional<Database> cx);
+    Database cx);
 ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreLoaderData> self);
 
 // Dispatch requests based on node's business (i.e, cpu usage for now) and requests' priorities
@@ -1250,7 +1250,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     Reference<IBackupContainer> bc,
     Version version,
     RestoreAsset asset,
-    Optional<Database> cx) {
+    Database cx) {
 	state VersionedMutationsMap& kvOps = kvOpsIter->second;
 	state SampledMutationsVec& sampleMutations = samplesIter->second;
 

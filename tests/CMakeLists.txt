@@ -131,6 +131,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BackupAzureBlobCorrectness.toml IGNORE)
   add_fdb_test(TEST_FILES fast/BackupS3BlobCorrectness.toml IGNORE)
   add_fdb_test(TEST_FILES fast/BackupCorrectness.toml)
+  add_fdb_test(TEST_FILES fast/BackupCorrectnessWithTenantDeletion.toml)
   add_fdb_test(TEST_FILES fast/EncryptedBackupCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
@@ -258,12 +259,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/StatusBuilderPerf.toml)
   add_fdb_test(TEST_FILES rare/TLogVersionMessagesOverheadFactor.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/SnapIncrementalRestore-1.txt
-    restarting/from_7.1.0/SnapIncrementalRestore-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/ConfigureTestRestart-1.toml
-    restarting/from_7.1.0/ConfigureTestRestart-2.toml)
-  add_fdb_test(
     TEST_FILES restarting/from_5.0.0_until_6.3.0/CycleTestRestart-1.txt
     restarting/from_5.0.0_until_6.3.0/CycleTestRestart-2.txt)
   add_fdb_test(
@@ -291,38 +286,77 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
     restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/to_7.1.0/CycleTestRestart-1.toml
-    restarting/to_7.1.0/CycleTestRestart-2.toml)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-1.toml
+    restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/SnapTestAttrition-1.txt
-    restarting/from_7.1.0/SnapTestAttrition-2.txt)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapCycleRestart-1.txt
+    restarting/from_7.1.0_until_7.2.0/SnapCycleRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/SnapTestSimpleRestart-1.txt
-    restarting/from_7.1.0/SnapTestSimpleRestart-2.txt)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-1.txt
+    restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/SnapTestRestart-1.txt
-    restarting/from_7.1.0/SnapTestRestart-2.txt)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapTestAttrition-1.txt
+    restarting/from_7.1.0_until_7.2.0/SnapTestAttrition-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/SnapCycleRestart-1.txt
-    restarting/from_7.1.0/SnapCycleRestart-2.txt)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapTestSimpleRestart-1.txt
+    restarting/from_7.1.0_until_7.2.0/SnapTestSimpleRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/to_7.1.0/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/to_7.1.0/ConfigureStorageMigrationTestRestart-2.toml)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapTestRestart-1.txt
+    restarting/from_7.1.0_until_7.2.0/SnapTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/from_7.1.0/ConfigureStorageMigrationTestRestart-2.toml)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
+    restarting/from_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/VersionVectorDisableRestart-1.toml
-    restarting/from_7.1.0/VersionVectorDisableRestart-2.toml)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/VersionVectorDisableRestart-1.toml
+    restarting/from_7.1.0_until_7.2.0/VersionVectorDisableRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/VersionVectorEnableRestart-1.toml
-    restarting/from_7.1.0/VersionVectorEnableRestart-2.toml)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/VersionVectorEnableRestart-1.toml
+    restarting/from_7.1.0_until_7.2.0/VersionVectorEnableRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.2.0_until_7.3.0/ConfigureTestRestart-1.toml
+    restarting/from_7.2.0_until_7.3.0/ConfigureTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
+    restarting/from_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.2.0_until_7.3.0/VersionVectorDisableRestart-1.toml
+    restarting/from_7.2.0_until_7.3.0/VersionVectorDisableRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.2.0_until_7.3.0/VersionVectorEnableRestart-1.toml
+    restarting/from_7.2.0_until_7.3.0/VersionVectorEnableRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.2.0/DrUpgradeRestart-1.toml
           restarting/from_7.2.0/DrUpgradeRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/to_7.2.0/CycleTestRestart-1.toml
-    restarting/to_7.2.0/CycleTestRestart-2.toml)
+    TEST_FILES restarting/from_7.3.0/ConfigureTestRestart-1.toml
+    restarting/from_7.3.0/ConfigureTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
+    restarting/from_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/VersionVectorDisableRestart-1.toml
+    restarting/from_7.3.0/VersionVectorDisableRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/VersionVectorEnableRestart-1.toml
+    restarting/from_7.3.0/VersionVectorEnableRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
+    restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_7.1.0_until_7.2.0/CycleTestRestart-1.toml
+    restarting/to_7.1.0_until_7.2.0/CycleTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
+    restarting/to_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_7.2.0_until_7.3.0/CycleTestRestart-1.toml
+    restarting/to_7.2.0_until_7.3.0/CycleTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
+    restarting/to_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_7.3.0/CycleTestRestart-1.toml
+    restarting/to_7.3.0/CycleTestRestart-2.toml)
 
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
