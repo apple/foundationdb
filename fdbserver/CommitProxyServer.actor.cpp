@@ -203,6 +203,7 @@ struct ResolutionRequestBuilder {
 		ASSERT(transactionNumberInBatch >= 0 && transactionNumberInBatch < 32768);
 
 		bool isTXNStateTransaction = false;
+		TraceEvent(SevDebug, "AddTransaction", self->dbgid).detail("TenantMode", (int)self->getTenantMode());
 		bool needParseTenantId = !trRequest.tenantInfo.hasTenant() && self->getTenantMode() == TenantMode::REQUIRED;
 		VectorRef<int64_t> tenantIds;
 		for (auto& m : trIn.mutations) {
@@ -3197,15 +3198,32 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	}
 }
 
-ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
-                                uint64_t recoveryCount,
-                                CommitProxyInterface myInterface) {
+// only update the local Db info if the CP is not removed
+ACTOR Future<Void> updateLocalDbInfo(Reference<AsyncVar<ServerDBInfo> const> in,
+                                     Reference<AsyncVar<ServerDBInfo>> out,
+                                     uint64_t recoveryCount,
+                                     CommitProxyInterface myInterface) {
+	// whether this CP already receive the db info including itself
+	state bool firstValidDbInfo = false;
+
 	loop {
-		if (db->get().recoveryCount >= recoveryCount &&
-		    !std::count(db->get().client.commitProxies.begin(), db->get().client.commitProxies.end(), myInterface)) {
+		bool isIncluded =
+		    std::count(in->get().client.commitProxies.begin(), in->get().client.commitProxies.end(), myInterface);
+		if (in->get().recoveryCount >= recoveryCount && !isIncluded) {
 			throw worker_removed();
 		}
-		wait(db->onChange());
+
+		if (isIncluded) {
+			firstValidDbInfo = true;
+		}
+
+		// only update the db info if this is the current CP, or before we received first one including current CP.
+		// Several db infos at the beginning just contain the provisional CP
+		if (isIncluded || !firstValidDbInfo) {
+			out->set(in->get());
+		}
+
+		wait(in->onChange());
 	}
 }
 
@@ -3214,17 +3232,18 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
                                      Reference<AsyncVar<ServerDBInfo> const> db,
                                      std::string whitelistBinPaths) {
 	try {
+		state Reference<AsyncVar<ServerDBInfo>> localDb = makeReference<AsyncVar<ServerDBInfo>>();
 		state Future<Void> core = commitProxyServerCore(proxy,
 		                                                req.master,
 		                                                req.masterLifetime,
-		                                                db,
+		                                                localDb,
 		                                                req.recoveryCount,
 		                                                req.recoveryTransactionVersion,
 		                                                req.firstProxy,
 		                                                whitelistBinPaths,
 		                                                req.encryptMode,
 		                                                proxy.provisional);
-		wait(core || checkRemoved(db, req.recoveryCount, proxy));
+		wait(core || updateLocalDbInfo(db, localDb, req.recoveryCount, proxy));
 	} catch (Error& e) {
 		TraceEvent("CommitProxyTerminated", proxy.id()).errorUnsuppressed(e);
 

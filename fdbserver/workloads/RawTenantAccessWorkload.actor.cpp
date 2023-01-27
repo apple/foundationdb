@@ -267,7 +267,7 @@ struct RawTenantAccessWorkload : TestWorkload {
 
 		loop {
 			tr->reset();
-			tr->debugTransaction(traceId);
+			// tr->debugTransaction(traceId);
 			try {
 				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				tr->setOption(FDBTransactionOptions::RAW_ACCESS);
