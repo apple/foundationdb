@@ -852,6 +852,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGESERVER_READTYPE_PRIORITY_MAP,           "0,1,2,3,4" );
 	init( STORAGE_SERVER_PHYSICAL_SHARD_MOVE,                   true );
 	init( FETCH_SHARD_BUFFER_BYTE_LIMIT,                        20e6 );
+	init( PHYSICAL_SHARD_MOVE_VERBOSE_TRACKING,                 true );
 
 	//Wait Failure
 	init( MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS,                 250 ); if( randomize && BUGGIFY ) MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS = 2;
