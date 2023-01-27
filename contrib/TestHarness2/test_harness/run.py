@@ -504,9 +504,7 @@ class TestRunner:
                 and config.random.random() < config.unseed_check_ratio
             )
             buggify_enabled: bool = config.random.random() < config.buggify_on_ratio
-            if unseed_check and count != 0:
-                # for restarting tests we will need to restore the sim2 directory after the first run
-                self.backup_sim_dir(seed + count - 1)
+            # FIXME: support unseed checks for restarting tests
             run = TestRun(
                 binary,
                 file.absolute(),
@@ -525,9 +523,7 @@ class TestRunner:
             run.summary.out.dump(sys.stdout)
             if not result:
                 return False
-            if unseed_check and run.summary.unseed is not None:
-                if count != 0:
-                    self.restore_sim_dir(seed + count - 1)
+            if count == 0 and unseed_check and run.summary.unseed is not None:
                 run2 = TestRun(
                     binary,
                     file.absolute(),
