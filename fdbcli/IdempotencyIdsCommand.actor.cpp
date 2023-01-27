@@ -26,13 +26,6 @@
 
 namespace {
 
-constexpr auto usage = "idempotencyids [status | clear <min_age_seconds>]";
-
-bool exitFailure() {
-	fmt::print(usage);
-	return false;
-}
-
 Optional<double> parseAgeValue(StringRef token) {
 	try {
 		return std::stod(token.toString());
@@ -47,33 +40,44 @@ namespace fdb_cli {
 
 ACTOR Future<bool> idempotencyIdsCommandActor(Database db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 2 || tokens.size() > 3) {
-		return exitFailure();
+		printUsage(tokens[0]);
+		return false;
 	} else {
 		auto const action = tokens[1];
 		if (action == "status"_sr) {
 			if (tokens.size() != 2) {
-				return exitFailure();
+				printUsage(tokens[0]);
+				return false;
 			}
 			JsonBuilderObject status = wait(getIdmpKeyStatus(db));
 			fmt::print("{}\n", status.getJson());
 			return true;
 		} else if (action == "clear"_sr) {
 			if (tokens.size() != 3) {
-				return exitFailure();
+				printUsage(tokens[0]);
+				return false;
 			}
 			auto const age = parseAgeValue(tokens[2]);
 			if (!age.present()) {
-				return exitFailure();
+				printUsage(tokens[0]);
+				return false;
 			}
 			wait(cleanIdempotencyIds(db, age.get()));
 			fmt::print("Successfully cleared idempotency IDs.\n");
 			return true;
 		} else {
-			return exitFailure();
+			printUsage(tokens[0]);
+			return false;
 		}
 	}
 }
 
-CommandFactory idempotencyIdsCommandFactory("idempotencyids");
+CommandFactory idempotencyIdsCommandFactory(
+    "idempotencyids",
+    CommandHelp(
+        "idempotencyids [status | clear <min_age_seconds>]",
+        "View status of idempotency ids, or reclaim space used by idempotency ids older than the given age",
+        "View status of idempotency ids currently in the cluster, or reclaim space by clearing all the idempotency ids "
+        "older than min_age_seconds (which will expire all transaction versions older than this age)\n"));
 
 } // namespace fdb_cli

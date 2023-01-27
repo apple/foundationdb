@@ -1325,13 +1325,13 @@ def idempotency_ids(logger):
     command = "idempotencyids clear"
     output = run_fdbcli_command(command)
     logger.debug(command + " : " + output)
-    assert output == "idempotencyids [status | clear <min_age_seconds>]", output
+    assert output == "Usage: idempotencyids [status | clear <min_age_seconds>]", output
 
     # Incorrect number of tokens
     command = "idempotencyids"
     output = run_fdbcli_command(command)
     logger.debug(command + " : " + output)
-    assert output == "idempotencyids [status | clear <min_age_seconds>]", output
+    assert output == "Usage: idempotencyids [status | clear <min_age_seconds>]", output
 
 
 def integer_options():
