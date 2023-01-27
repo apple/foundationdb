@@ -1595,8 +1595,11 @@ void SimulationConfig::setTenantMode(const TestConfig& testConfig) {
 
 void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
 	EncryptionAtRestMode encryptionMode = EncryptionAtRestMode::DISABLED;
+	// Only Redwood support encryption. Disable encryption if non-Redwood storage engine is explicitly specified.
+	bool disableEncryption = testConfig.disableEncryption ||
+	                         (testConfig.storageEngineType.present() && testConfig.storageEngineType.get() != 3);
 	// TODO: Remove check on the ENABLE_ENCRYPTION knob once the EKP can start using the db config
-	if (!testConfig.disableEncryption && (SERVER_KNOBS->ENABLE_ENCRYPTION || !testConfig.encryptModes.empty())) {
+	if (!disableEncryption && (SERVER_KNOBS->ENABLE_ENCRYPTION || !testConfig.encryptModes.empty())) {
 		TenantMode tenantMode = db.tenantMode;
 		if (!testConfig.encryptModes.empty()) {
 			std::vector<EncryptionAtRestMode> validEncryptModes;
