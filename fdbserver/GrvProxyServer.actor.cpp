@@ -1137,8 +1137,10 @@ ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy,
 		wait(core || checkRemoved(db, req.recoveryCount, proxy));
 	} catch (Error& e) {
 		TraceEvent("GrvProxyTerminated", proxy.id()).errorUnsuppressed(e);
-		CODE_PROBE(e.code() == error_code_master_failed, "master_failed");
-		CODE_PROBE(e.code() == error_code_tlog_failed, "tlog_failed");
+		ASSERT(e.code() !=
+		       error_code_broken_promise); // all broken_promise should be transformed to the correct error code
+		CODE_PROBE(e.code() == error_code_master_failed, "GrvProxyServer master failed");
+		CODE_PROBE(e.code() == error_code_tlog_failed, "GrvProxyServer tlog failed");
 		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
 		    e.code() != error_code_tlog_failed && e.code() != error_code_coordinators_changed &&
 		    e.code() != error_code_coordinated_state_conflict && e.code() != error_code_new_coordinators_timed_out &&
