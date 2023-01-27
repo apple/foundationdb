@@ -603,6 +603,7 @@ class Tester:
                 elif inst.op == six.u("TENANT_SET_ACTIVE"):
                     name = inst.pop()
                     self.tenant = self.db.open_tenant(name)
+                    self.tenant.get_id().wait()
                 elif inst.op == six.u("TENANT_CLEAR_ACTIVE"):
                     self.tenant = None
                 elif inst.op == six.u("TENANT_LIST"):

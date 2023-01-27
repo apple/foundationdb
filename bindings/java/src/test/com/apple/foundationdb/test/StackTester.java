@@ -450,7 +450,7 @@ public class StackTester {
 			}
 			else if (op == StackOperation.TENANT_SET_ACTIVE) {
 				byte[] tenantName = (byte[])inst.popParam().join();
-				inst.context.setTenant(Optional.of(tenantName));
+				inst.context.setTenant(Optional.of(tenantName)).join();
 			}
 			else if (op == StackOperation.TENANT_CLEAR_ACTIVE) {
 				inst.context.setTenant(Optional.empty());
