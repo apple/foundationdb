@@ -779,6 +779,10 @@ void openTraceFile(const Optional<NetworkAddress>& na,
 	if (g_traceLog.isOpen())
 		return;
 
+	// Either a network address or an identifier must be provided
+	// otherwise there is no meaningful way to identify the trace file
+	ASSERT(na.present() || !identifier.empty());
+
 	if (directory.empty())
 		directory = ".";
 
@@ -795,10 +799,9 @@ void openTraceFile(const Optional<NetworkAddress>& na,
 		} else {
 			baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.get().port);
 		}
-	} else if (!identifier.empty()) {
-		baseName = format("%s.%s", baseOfBase.c_str(), identifier.c_str());
 	} else {
-		baseName = baseOfBase;
+		ASSERT(!identifier.empty());
+		baseName = format("%s.%s", baseOfBase.c_str(), identifier.c_str());
 	}
 
 	g_traceLog.open(directory,

@@ -578,11 +578,12 @@ class ClientTracingTests(unittest.TestCase):
         self.exec_test()
         self.assertEqual(2, len(self.trace_files))
         primary_trace = self.find_trace_file()
+        # The machine address will be available only in the second ClientStart event
         self.find_and_check_event(primary_trace, "ClientStart", [], ["Machine"])
-        self.find_and_check_event(primary_trace, "ClientIPDetermined", ["Machine"], [])
+        self.find_and_check_event(primary_trace, "ClientStart", ["Machine"], [], seqno=1)
         cur_ver_trace = self.find_trace_file(version=CURRENT_VERSION, thread_idx=0)
         self.find_and_check_event(cur_ver_trace, "ClientStart", [], ["Machine"])
-        self.find_and_check_event(cur_ver_trace, "ClientIPDetermined", ["Machine"], [])
+        self.find_and_check_event(cur_ver_trace, "ClientStart", ["Machine"], [], seqno=1)
 
     def test_init_on_setup_trace_error_case(self):
         # Test trace files created with trace_initialize_on_setup option
@@ -673,10 +674,13 @@ class ClientTracingTests(unittest.TestCase):
                 return trace_file
         self.fail("No maching trace file found")
 
-    def find_and_check_event(self, trace_file, event_type, attr_present, attr_missing):
+    def find_and_check_event(self, trace_file, event_type, attr_present, attr_missing, seqno=0):
         self.assertTrue(trace_file in self.trace_file_events)
         for event in self.trace_file_events[trace_file]:
             if event["Type"] == event_type:
+                if seqno > 0:
+                    seqno -= 1
+                    continue
                 for attr in attr_present:
                     self.assertTrue(attr in event)
                 for attr in attr_missing:
