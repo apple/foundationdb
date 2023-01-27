@@ -1570,6 +1570,24 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantsTransactio
 	return results;
 }
 
+template <class DB>
+Future<std::vector<std::pair<TenantName, int64_t>>> listTenantIds(Reference<DB> db,
+                                                                  TenantName begin,
+                                                                  TenantName end,
+                                                                  int limit,
+                                                                  int offset = 0) {
+
+	auto future = runTransaction(
+	    db,
+	    [=](Reference<typename DB::TransactionT> tr) -> Future<KeyBackedRangeResult<std::pair<TenantName, int64_t>>> {
+		    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		    tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		    return ManagementClusterMetadata::tenantMetadata().tenantNameIndex.getRange(tr, begin, end, limit + offset);
+	    });
+
+	return fmap([](auto& rangeResult) { return rangeResult.result; }, future);
+}
+
 ACTOR template <class DB>
 Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(
     Reference<DB> db,
