@@ -210,7 +210,10 @@ struct BlobWorkerInfo {
 	BlobWorkerInfo(int numGranulesAssigned = 0) : numGranulesAssigned(numGranulesAssigned) {}
 };
 
-enum BoundaryEvalType { UNKNOWN, MERGE, SPLIT };
+// recover is when the BM assigns an ambiguously owned range on recovery
+// merge is when the BM initiated a merge candidate for the range
+// split is when the BM initiated a split check for the range
+enum BoundaryEvalType { UNKNOWN, RECOVER, MERGE, SPLIT };
 
 struct BoundaryEvaluation {
 	int64_t epoch;
@@ -651,8 +654,11 @@ ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmDat
 			state PromiseStream<Key> resultStream;
 			state Standalone<VectorRef<KeyRef>> keys;
 			// SplitMetrics.bytes / 3 as min split size because of same splitThreshold logic above.
+			// Estimated metrics doesn't work well when split metrics request spans multiple shards, since estimate is
+			// for the whole range. Pass empty metrics instead of *estimated*, since it's already incorporated somewhat
+			// in splitMetrics, and storage will trust its local byte sample over the estimate.
 			state Future<Void> streamFuture = bmData->db->splitStorageMetricsStream(
-			    resultStream, range, splitMetrics, estimated, splitMetrics.bytes / 3);
+			    resultStream, range, splitMetrics, StorageMetrics(), splitMetrics.bytes / 3);
 			loop {
 				try {
 					Key k = waitNext(resultStream.getFuture());
@@ -1184,8 +1190,6 @@ ACTOR Future<Void> checkManagerLock(Transaction* tr, Reference<BlobManagerData> 
 
 		throw blob_manager_replaced();
 	}
-	tr->addReadConflictRange(singleKeyRange(blobManagerEpochKey));
-	tr->addWriteConflictRange(singleKeyRange(blobManagerEpochKey));
 
 	return Void();
 }
@@ -1251,10 +1255,9 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 }
 
 ACTOR Future<Void> loadTenantMap(Reference<ReadYourWritesTransaction> tr, Reference<BlobManagerData> bmData) {
-	state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
+	state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantResults;
 	wait(store(tenantResults,
-	           TenantMetadata::tenantMap().getRange(
-	               tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+	           TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
 	ASSERT(tenantResults.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantResults.more);
 
 	bmData->tenantData.addTenants(tenantResults.results);
@@ -3835,6 +3838,11 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		// if worker id is already set to a known worker that replied with it in the mapping, range is already assigned
 		// there. If not, need to explicitly assign it to someone
 		if (workerId == UID() || epoch == 0 || !endingWorkers.count(workerId)) {
+			// prevent racing status updates from old owner from causing issues until this request gets sent out
+			// properly
+			bmData->boundaryEvaluations.insert(
+			    range.range(), BoundaryEvaluation(bmData->epoch, 0, BoundaryEvalType::RECOVER, bmData->epoch, 0));
+
 			RangeAssignment raAssign;
 			raAssign.isAssign = true;
 			raAssign.worker = workerId;
@@ -5320,9 +5328,21 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 
 ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 	bmData->initBStore();
+
 	loop {
-		wait(dumpManifest(bmData->db, bmData->bstore, bmData->epoch, bmData->manifestDumperSeqNo));
-		bmData->manifestDumperSeqNo++;
+		// Skip backup if no active blob ranges
+		bool activeRanges = false;
+		auto knownRanges = bmData->knownBlobRanges.intersectingRanges(normalKeys);
+		for (auto& it : knownRanges) {
+			if (it.cvalue()) {
+				activeRanges = true;
+				break;
+			}
+		}
+		if (activeRanges) {
+			wait(dumpManifest(bmData->db, bmData->bstore, bmData->epoch, bmData->manifestDumperSeqNo));
+			bmData->manifestDumperSeqNo++;
+		}
 		wait(delay(SERVER_KNOBS->BLOB_MANIFEST_BACKUP_INTERVAL));
 	}
 }

@@ -32,6 +32,7 @@
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 FDB_DEFINE_BOOLEAN_PARAM(LockDB);
@@ -271,7 +272,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
                                                Version version,
                                                Reference<KeyRangeMap<Version>> key_version,
                                                Database cx,
-                                               std::unordered_map<int64_t, TenantName>* tenantMap,
+                                               std::map<int64_t, TenantName>* tenantMap,
                                                bool provisionalProxy) {
 	try {
 		state uint64_t offset(0);
@@ -335,7 +336,9 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 				ASSERT(tenantMap != nullptr);
 				if (tenantMap->find(tenantId) == tenantMap->end()) {
 					ASSERT(!provisionalProxy);
-					TraceEvent("TenantNotFound").detail("Version", version).detail("TenantId", tenantId);
+					TraceEvent(SevWarnAlways, "MutationLogRestoreTenantNotFound")
+					    .detail("Version", version)
+					    .detail("TenantId", tenantId);
 					CODE_PROBE(true, "mutation log restore tenant not found");
 					consumed += BackupAgentBase::logHeaderSize + len1 + len2;
 					continue;
@@ -657,7 +660,7 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
                                               PromiseStream<Future<Void>> addActor,
                                               FlowLock* commitLock,
                                               Reference<KeyRangeMap<Version>> keyVersion,
-                                              std::unordered_map<int64_t, TenantName>* tenantMap,
+                                              std::map<int64_t, TenantName>* tenantMap,
                                               bool provisionalProxy) {
 	state Version lastVersion = invalidVersion;
 	state bool endOfStream = false;
@@ -789,7 +792,7 @@ ACTOR Future<Void> applyMutations(Database cx,
                                   PublicRequestStream<CommitTransactionRequest> commit,
                                   NotifiedVersion* committedVersion,
                                   Reference<KeyRangeMap<Version>> keyVersion,
-                                  std::unordered_map<int64_t, TenantName>* tenantMap,
+                                  std::map<int64_t, TenantName>* tenantMap,
                                   bool provisionalProxy) {
 	state FlowLock commitLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 	state PromiseStream<Future<Void>> addActor;

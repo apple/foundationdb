@@ -24,6 +24,7 @@
 #include "libb64/encode.h"
 #include "flow/Knobs.h"
 #include <cctype>
+#include "flow/IConnection.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 

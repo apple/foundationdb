@@ -30,6 +30,7 @@
 #include "flow/Platform.h"
 #include "flow/SendBufferIterator.h"
 #include "flow/UnitTest.h"
+#include "flow/IConnection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 using namespace boost::asio;

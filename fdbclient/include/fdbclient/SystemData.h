@@ -727,6 +727,12 @@ const Value blobRestoreCommandKeyFor(const KeyRangeRef range);
 const KeyRange decodeBlobRestoreCommandKeyFor(const KeyRef key);
 const Value blobRestoreCommandValueFor(BlobRestoreStatus status);
 Standalone<BlobRestoreStatus> decodeBlobRestoreStatus(ValueRef const& value);
+extern const KeyRangeRef blobRestoreArgKeys;
+const Value blobRestoreArgKeyFor(const KeyRangeRef range);
+const KeyRange decodeBlobRestoreArgKeyFor(const KeyRef key);
+const Value blobRestoreArgValueFor(BlobRestoreArg args);
+Standalone<BlobRestoreArg> decodeBlobRestoreArg(ValueRef const& value);
+extern const Key blobManifestVersionKey;
 
 // Storage quota per tenant
 // "\xff/storageQuota/[[tenantGroupName]]" := "[[quota]]"

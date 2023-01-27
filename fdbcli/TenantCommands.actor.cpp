@@ -186,10 +186,15 @@ ACTOR Future<bool> tenantCreateCommand(Reference<IDatabase> db, std::vector<Stri
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 				TenantMapEntry tenantEntry;
+				AssignClusterAutomatically assignClusterAutomatically = AssignClusterAutomatically::True;
 				for (auto const& [name, value] : configuration.get()) {
+					if (name == "assigned_cluster"_sr) {
+						assignClusterAutomatically = AssignClusterAutomatically::False;
+					}
 					tenantEntry.configure(name, value);
 				}
-				wait(MetaclusterAPI::createTenant(db, tokens[2], tenantEntry));
+				tenantEntry.tenantName = tokens[2];
+				wait(MetaclusterAPI::createTenant(db, tenantEntry, assignClusterAutomatically));
 			} else {
 				if (!doneExistenceCheck) {
 					// Hold the reference to the standalone's memory

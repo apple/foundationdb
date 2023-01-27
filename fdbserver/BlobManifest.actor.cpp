@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/ClientBooleanParams.h"
@@ -124,12 +125,21 @@ private:
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
+				// record the read vesion
+				Version readVersion = wait(tr.getReadVersion());
+				Value versionEncoded = BinaryWriter::toValue(readVersion, Unversioned());
+				rows.push_back_deep(rows.arena(), KeyValueRef(blobManifestVersionKey, versionEncoded));
+
 				state std::vector<KeyRangeRef> ranges = {
 					blobGranuleMappingKeys, // Map granule to workers. Track the active granules
-					blobGranuleFileKeys, // Map a granule version to granule files. Track files for a granule
 					blobGranuleHistoryKeys, // Map granule to its parents and parent bundaries. for time-travel read
+					blobGranuleFileKeys, // Map a granule version to granule files. Track files for a granule
 					blobRangeKeys // Key ranges managed by blob
 				};
+				// tenant metadata
+				for (auto& r : getSystemBackupRanges()) {
+					ranges.push_back(r);
+				}
 				for (auto range : ranges) {
 					state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
 					limits.minRows = 0;
@@ -231,6 +241,8 @@ public:
 			}
 			state Standalone<BlobManifest> manifest = decode(data);
 			wait(writeSystemKeys(self, manifest.rows));
+			Version manifestVersion = wait(getManifestVersion(self->db_));
+			dprint("Blob manifest version {}\n", manifestVersion);
 			BlobGranuleRestoreVersionVector _ = wait(listGranules(self));
 		} catch (Error& e) {
 			dprint("WARNING: unexpected manifest loader error {}\n", e.what());
@@ -625,4 +637,82 @@ ACTOR Future<Optional<BlobRestoreStatus>> getRestoreStatus(Database db, KeyRange
 		result = rangeStatus.second;
 	}
 	return result;
+}
+
+// Get restore argument
+ACTOR Future<Optional<BlobRestoreArg>> getRestoreArg(Database db, KeyRangeRef keys) {
+	state Transaction tr(db);
+	state Optional<BlobRestoreArg> result;
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			try {
+				state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
+				limits.minRows = 0;
+				state KeySelectorRef begin = firstGreaterOrEqual(blobRestoreArgKeys.begin);
+				state KeySelectorRef end = firstGreaterOrEqual(blobRestoreArgKeys.end);
+				loop {
+					RangeResult ranges = wait(tr.getRange(begin, end, limits, Snapshot::True));
+					for (auto& r : ranges) {
+						KeyRange keyRange = decodeBlobRestoreArgKeyFor(r.key);
+						if (keys.intersects(keyRange)) {
+							Standalone<BlobRestoreArg> arg = decodeBlobRestoreArg(r.value);
+							result = arg;
+							return result;
+						}
+					}
+					if (!ranges.more) {
+						break;
+					}
+					if (ranges.readThrough.present()) {
+						begin = firstGreaterOrEqual(ranges.readThrough.get());
+					} else {
+						begin = firstGreaterThan(ranges.back().key);
+					}
+				}
+				return result;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+// Get restore target version. Return defaultVersion if no restore argument available for the range
+ACTOR Future<Version> getRestoreTargetVersion(Database db, KeyRangeRef range, Version defaultVersion) {
+	Optional<BlobRestoreArg> arg = wait(getRestoreArg(db, range));
+	Version expected = defaultVersion;
+	if (arg.present()) {
+		if (arg.get().version.present()) {
+			return arg.get().version.get();
+		}
+	}
+	return expected;
+}
+
+// Get manifest backup version
+ACTOR Future<Version> getManifestVersion(Database db) {
+	state Transaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> value = wait(tr.get(blobManifestVersionKey));
+			if (value.present()) {
+				Version version;
+				BinaryReader reader(value.get(), Unversioned());
+				reader >> version;
+				return version;
+			}
+			throw restore_missing_data();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 }
