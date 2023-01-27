@@ -1697,16 +1697,6 @@ RangeResult bgReadSnapshotFile(const StringRef& data) {
 	return snapshot;
 }
 
-MutationsAndVersionRef singleMutation(Version v,
-                                      MutationRef::Type type,
-                                      Arena& ar,
-                                      const StringRef& param1,
-                                      const StringRef& param2) {
-	MutationsAndVersionRef ref(v, v);
-	ref.mutations.emplace_back(ar, type, param1, param2);
-	return ref;
-}
-
 // FIXME: refactor if possible, just copy-pasted from loadChunkedDeltaFile for prototyping
 Standalone<VectorRef<GranuleMutationRef>> bgReadDeltaFile(const StringRef& deltaData) {
 	Standalone<VectorRef<GranuleMutationRef>> deltas;
@@ -2773,6 +2763,17 @@ TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 	return Void();
 }
 
+namespace {
+MutationsAndVersionRef singleMutation(Version v,
+                                      MutationRef::Type type,
+                                      Arena& ar,
+                                      const StringRef& param1,
+                                      const StringRef& param2) {
+	MutationsAndVersionRef ref(v, v);
+	ref.mutations.emplace_back(ar, type, param1, param2);
+	return ref;
+}
+
 void checkMutations(const Standalone<VectorRef<GranuleMutationRef>>& expected,
                     const Standalone<VectorRef<GranuleMutationRef>>& actual) {
 	ASSERT(expected.size() == actual.size());
@@ -2783,6 +2784,7 @@ void checkMutations(const Standalone<VectorRef<GranuleMutationRef>>& expected,
 		ASSERT(expected[i].param2 == actual[i].param2);
 	}
 }
+} // namespace
 
 /*
 Input mutations:

@@ -340,6 +340,7 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_granule_summary_array(FDBFuture*
 	                 *out_count = na.size(););
 }
 
+namespace {
 void setBlobFilePointer(FDBBGFilePointer* dest, const BlobFilePointerRef& source) {
 	dest->filename_ptr = source.filename.begin();
 	dest->filename_length = source.filename.size();
@@ -377,6 +378,7 @@ void setBGMutations(FDBBGMutation** mutationsOut, int* mutationCountOut, Arena& 
 		ASSERT(mutationCount == *mutationCountOut);
 	}
 }
+} // namespace
 
 extern "C" DLLEXPORT fdb_error_t fdb_future_readbg_get_descriptions(FDBFuture* f,
                                                                     FDBBGFileDescription** out,
