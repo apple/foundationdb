@@ -743,6 +743,68 @@ Future<T> safeThreadFutureToFutureImpl(ThreadFuture<T> threadFuture) {
 	return threadFuture.get();
 }
 
+// Specialization for Standalone<T>
+ACTOR template <class T>
+Future<Standalone<T>> safeThreadFutureToFutureImpl(ThreadFuture<Standalone<T>> threadFuture) {
+	Promise<Void> ready;
+	Future<Void> onReady = ready.getFuture();
+	UtilCallback<Standalone<T>>* callback = new UtilCallback<Standalone<T>>(threadFuture, ready.extractRawPointer());
+	int unused = 0;
+	threadFuture.callOrSetAsCallback(callback, unused, 0);
+	try {
+		wait(onReady);
+	} catch (Error& e) {
+		// broken_promise can be thrown if the network is already shut down
+		ASSERT(e.code() == error_code_operation_cancelled || e.code() == error_code_broken_promise);
+		// prerequisite: we have exclusive ownership of the threadFuture
+		if (e.code() == error_code_operation_cancelled) {
+			threadFuture.cancel();
+		}
+		throw e;
+	}
+	// threadFuture should be ready
+	ASSERT(threadFuture.isReady());
+	if (threadFuture.isError())
+		throw threadFuture.getError();
+	if (g_network->isSimulated()) {
+		return Standalone<T>(threadFuture.get(), Arena());
+	}
+	return threadFuture.get();
+}
+
+ACTOR template <class T>
+Future<Optional<Standalone<T>>> safeThreadFutureToFutureImpl(ThreadFuture<Optional<Standalone<T>>> threadFuture) {
+	Promise<Void> ready;
+	Future<Void> onReady = ready.getFuture();
+	UtilCallback<Optional<Standalone<T>>>* callback =
+	    new UtilCallback<Optional<Standalone<T>>>(threadFuture, ready.extractRawPointer());
+	int unused = 0;
+	threadFuture.callOrSetAsCallback(callback, unused, 0);
+	try {
+		wait(onReady);
+	} catch (Error& e) {
+		// broken_promise can be thrown if the network is already shut down
+		ASSERT(e.code() == error_code_operation_cancelled || e.code() == error_code_broken_promise);
+		// prerequisite: we have exclusive ownership of the threadFuture
+		if (e.code() == error_code_operation_cancelled) {
+			threadFuture.cancel();
+		}
+		throw e;
+	}
+	// threadFuture should be ready
+	ASSERT(threadFuture.isReady());
+	if (threadFuture.isError())
+		throw threadFuture.getError();
+	if (g_network->isSimulated()) {
+		if (threadFuture.get().present()) {
+			return Standalone<T>(threadFuture.get().get(), Arena());
+		} else {
+			return Optional<Standalone<T>>();
+		}
+	}
+	return threadFuture.get();
+}
+
 // The allow anonymous_future type is used to prevent misuse of ThreadFutures.
 // For Standalone types, the memory in some cases is actually stored in the ThreadFuture object,
 // in which case we expect the caller to keep that ThreadFuture around until the result is no
