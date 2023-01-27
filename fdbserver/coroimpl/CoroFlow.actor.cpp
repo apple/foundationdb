@@ -22,6 +22,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include <boost/coroutine2/all.hpp>
 #include <boost/coroutine2/coroutine.hpp>
 #include <functional>

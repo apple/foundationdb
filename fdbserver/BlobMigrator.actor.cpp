@@ -333,12 +333,18 @@ private:
 		// check last version in mutation logs
 
 		state std::string baseUrl = SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL;
-		state std::vector<std::string> containers = wait(IBackupContainer::listContainers(baseUrl, {}));
-		if (containers.size() == 0) {
-			TraceEvent("MissingMutationLogs", self->interf_.id()).detail("Url", baseUrl);
-			throw restore_missing_data();
+		state std::string mlogsUrl;
+		if (baseUrl.starts_with("file://")) {
+			state std::vector<std::string> containers = wait(IBackupContainer::listContainers(baseUrl, {}));
+			if (containers.size() == 0) {
+				TraceEvent("MissingMutationLogs", self->interf_.id()).detail("Url", baseUrl);
+				throw restore_missing_data();
+			}
+			mlogsUrl = containers.front();
+		} else {
+			mlogsUrl = baseUrl;
 		}
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(containers.front(), {}, {});
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
 		BackupDescription desc = wait(bc->describeBackup());
 		if (!desc.contiguousLogEnd.present()) {
 			TraceEvent("InvalidMutationLogs").detail("Url", baseUrl);
@@ -394,7 +400,7 @@ private:
 			}
 		}
 		Optional<RestorableFileSet> restoreSet =
-		    wait(bc->getRestoreSet(maxLogVersion, self->db_, ranges, OnlyApplyMutationLogs::True, minLogVersion));
+		    wait(bc->getRestoreSet(maxLogVersion, ranges, OnlyApplyMutationLogs::True, minLogVersion));
 		if (!restoreSet.present()) {
 			TraceEvent("InvalidMutationLogs")
 			    .detail("MinLogVersion", minLogVersion)
@@ -406,7 +412,7 @@ private:
 		    .detail("MinVer", minLogVersion)
 		    .detail("MaxVer", maxLogVersion);
 
-		wait(submitRestore(self, KeyRef(tagName), KeyRef(containers.front()), ranges, beginVersions, targetVersion));
+		wait(submitRestore(self, KeyRef(tagName), KeyRef(mlogsUrl), ranges, beginVersions, targetVersion));
 		return Void();
 	}
 

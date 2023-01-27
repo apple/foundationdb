@@ -2269,6 +2269,11 @@ int main(int argc, char* argv[]) {
 				// Disable domain-aware encryption in Redwood until encryption mode from db config is being handled.
 				// TODO(yiwu): clean it up once we cleanup the knob.
 				g_knobs.setKnob("redwood_split_encrypted_pages_by_tenant", KnobValue::create(bool{ false }));
+				g_knobs.setKnob("encrypt_header_auth_token_enabled",
+				                KnobValue::create(ini.GetBoolValue("META", "encryptHeaderAuthTokenEnabled", false)));
+				g_knobs.setKnob("encrypt_header_auth_token_algo",
+				                KnobValue::create((int)ini.GetLongValue(
+				                    "META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO)));
 			}
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator->run();
