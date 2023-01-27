@@ -32,6 +32,10 @@
 #include "flow/Hostname.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// To avoid diretly access INetworkConnection::net()->removeCachedDNS(), which will require heavy include budget, put
+// the call to FlowTransport.actor.cpp as a external function.
+extern void removeCachedDNS(const std::string& host, const std::string& service);
+
 ACTOR template <class Req, bool P>
 Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req, P> to, Req request) {
 	// Like to.getReply(request), except that a broken_promise exception results in retrying request immediately.
@@ -98,7 +102,7 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request, Hostname h
 		resetReply(request);
 		if (reply.getError().code() == error_code_request_maybe_delivered) {
 			// Connection failure.
-			INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
+			removeCachedDNS(hostname.host, hostname.service);
 		}
 	}
 	return reply;
@@ -122,7 +126,7 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(Req request,
 		resetReply(request);
 		if (reply.getError().code() == error_code_request_maybe_delivered) {
 			// Connection failure.
-			INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
+			removeCachedDNS(hostname.host, hostname.service);
 		}
 	}
 	return reply;
@@ -147,7 +151,7 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request, Hostname hostname
 				// Connection failure.
 				wait(delay(reconnectInterval));
 				reconnectInterval = std::min(2 * reconnectInterval, FLOW_KNOBS->HOSTNAME_RECONNECT_MAX_INTERVAL);
-				INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
+				removeCachedDNS(hostname.host, hostname.service);
 			} else {
 				throw reply.getError();
 			}
@@ -180,7 +184,7 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(Req request,
 				wait(delay(reconnectInitInterval));
 				reconnectInitInterval =
 				    std::min(2 * reconnectInitInterval, FLOW_KNOBS->HOSTNAME_RECONNECT_MAX_INTERVAL);
-				INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
+				removeCachedDNS(hostname.host, hostname.service);
 			} else {
 				throw reply.getError();
 			}

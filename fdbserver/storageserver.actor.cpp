@@ -1409,7 +1409,7 @@ public:
 	                                                         Histogram::Unit::bytes)),
 	    readRangeKVPairsReturnedHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                              SS_READ_RANGE_KV_PAIRS_RETURNED_HISTOGRAM,
-	                                                              Histogram::Unit::countLinear)),
+	                                                              Histogram::Unit::bytes)),
 	    tag(invalidTag), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0),
 	    storage(this, storage), shardChangeCounter(0), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
 	    prevVersion(0), rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
@@ -3962,7 +3962,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 		}
 	}
 	data->readRangeBytesReturnedHistogram->sample(resultLogicalSize);
-	data->readRangeKVPairsReturnedHistogram->sampleRecordCounter(result.data.size());
+	data->readRangeKVPairsReturnedHistogram->sample(result.data.size());
 
 	// all but the last item are less than *pLimitBytes
 	ASSERT(result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
@@ -6124,7 +6124,8 @@ void applyMutation(StorageServer* self,
 void applyChangeFeedMutation(StorageServer* self,
                              MutationRef const& m,
                              MutationRefAndCipherKeys const& encryptedMutation,
-                             Version version) {
+                             Version version,
+                             KeyRangeRef const& shard) {
 	if (m.type == MutationRef::SetValue) {
 		for (auto& it : self->keyChangeFeed[m.param1]) {
 			if (version < it->stopVersion && !it->removing && version > it->emptyVersion) {
@@ -6182,6 +6183,9 @@ void applyChangeFeedMutation(StorageServer* self,
 					}
 					if (clearMutation.param2 > it->range.end) {
 						clearMutation.param2 = it->range.end;
+						modified = true;
+					}
+					if (!modified && (clearMutation.param1 == shard.begin || clearMutation.param2 == shard.end)) {
 						modified = true;
 					}
 					if (it->mutations.empty() || it->mutations.back().version != version) {
@@ -8520,7 +8524,7 @@ void StorageServer::addMutation(Version version,
 		}
 
 		applyChangeFeedMutation(
-		    this, expanded.type == MutationRef::ClearRange ? nonExpanded : expanded, encrypt, version);
+		    this, expanded.type == MutationRef::ClearRange ? nonExpanded : expanded, encrypt, version, shard);
 	}
 	applyMutation(this, expanded, mLog.arena(), mutableData(), version);
 

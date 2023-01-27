@@ -274,16 +274,18 @@ logdir = {logdir}
 
     def create_cluster_file(self):
         with open(self.cluster_file, "x") as f:
-            f.write(
-                "{desc}:{secret}@{ip_addr}:{server_port}{optional_tls}".format(
-                    desc=self.cluster_desc,
-                    secret=self.cluster_secret,
-                    ip_addr=self.ip_address,
-                    server_port=self.server_ports[0],
-                    optional_tls=":tls" if self.tls_config is not None else "",
-                )
-            )
+            f.write(self.get_connection_string())
         self.coordinators = {0}
+
+    def get_connection_string(self):
+        conn_str = "{desc}:{secret}@{ip_addr}:{server_port}{optional_tls}".format(
+            desc=self.cluster_desc,
+            secret=self.cluster_secret,
+            ip_addr=self.ip_address,
+            server_port=self.server_ports[0],
+            optional_tls=":tls" if self.tls_config else "",
+        )
+        return conn_str
 
     def start_cluster(self):
         assert not self.running, "Can't start a server that is already running"

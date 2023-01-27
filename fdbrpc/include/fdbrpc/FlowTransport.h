@@ -34,6 +34,8 @@
 #include "flow/Arena.h"
 #include "flow/PKey.h"
 
+class IConnection;
+
 enum { WLTOKEN_ENDPOINT_NOT_FOUND = 0, WLTOKEN_PING_PACKET, WLTOKEN_UNAUTHORIZED_ENDPOINT, WLTOKEN_FIRST_AVAILABLE };
 
 #pragma pack(push, 4)

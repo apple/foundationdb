@@ -31,6 +31,7 @@
 #include "fdbrpc/HTTP.h"
 #include "fdbrpc/Stats.h"
 #include "fdbclient/JSONDoc.h"
+#include "flow/IConnection.h"
 
 #include <boost/functional/hash.hpp>
 

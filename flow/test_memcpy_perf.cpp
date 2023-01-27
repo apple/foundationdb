@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/time.h>
 
 #include "flow/rte_memcpy.h"
 #include "flow/IRandom.h"
