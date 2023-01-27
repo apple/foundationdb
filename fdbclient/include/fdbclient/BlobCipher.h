@@ -199,22 +199,18 @@ struct BlobCipherEncryptHeaderFlagsV1 {
 	uint8_t authTokenMode;
 	uint8_t authTokenAlgo;
 
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, encryptMode, authTokenMode, authTokenAlgo);
-	}
-
 	bool operator==(const BlobCipherEncryptHeaderFlagsV1& o) const {
 		return encryptMode == o.encryptMode && authTokenMode == o.authTokenMode && authTokenAlgo == o.authTokenAlgo;
 	}
 
-	static Standalone<StringRef> serialize(const BlobCipherEncryptHeaderFlagsV1& flags) {
-		return ObjectWriter::toValue(flags, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+	static void deserialize(const StringRef& flagsRef, BlobCipherEncryptHeaderFlagsV1& ret) {
+		ObjectReader headerReader(flagsRef.begin(), Unversioned());
+		headerReader.deserialize<BlobCipherEncryptHeaderFlagsV1>(ret);
 	}
 
-	static BlobCipherEncryptHeaderFlagsV1 deserialize(const StringRef& flagsRef) {
-		return ObjectReader::fromStringRef<BlobCipherEncryptHeaderFlagsV1>(
-		    flagsRef, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, encryptMode, authTokenMode, authTokenAlgo);
 	}
 };
 
@@ -241,11 +237,11 @@ struct AesCtrWithAuthV1 {
 
 	// Serializable fields
 
-	// Cipher text encryption information
+	// Text cipher encryption information
 	BlobCipherDetails cipherTextDetails;
-	// Cipher header encryption information
+	// Header cipher encryption information
 	BlobCipherDetails cipherHeaderDetails;
-	// Initialization vector used to encrypt the payload.
+	// Initialization vector
 	StringRef ivRef;
 	// Authentication token
 	StringRef authTokenRef;
@@ -262,25 +258,19 @@ struct AesCtrWithAuthV1 {
 		memset(mutateString(authTokenRef), 0, S);
 	}
 
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, cipherTextDetails, cipherHeaderDetails, ivRef, authTokenRef);
-	}
-
 	bool operator==(const AesCtrWithAuthV1<S>& o) const {
 		return cipherHeaderDetails == o.cipherHeaderDetails && cipherTextDetails == o.cipherTextDetails &&
 		       ivRef.compare(o.ivRef) == 0 && authTokenRef.compare(o.authTokenRef) == 0;
 	}
 
-	static StringRef serialize(const AesCtrWithAuthV1<S>& header, Arena& arena) {
-		StringRef value =
-		    ObjectWriter::toValue(header, AssumeVersion(ProtocolVersion::withEncryptionAtRest())).contents();
-		return StringRef(arena, value);
+	static void deserialize(const StringRef& header, AesCtrWithAuthV1<S>& ret, Arena& arena) {
+		ObjectReader dataReader(header.begin(), Unversioned());
+		dataReader.deserialize(FileIdentifierFor<AesCtrWithAuthV1<S>>::value, ret, arena);
 	}
 
-	static void deserialize(const StringRef& header, AesCtrWithAuthV1<S>* ret, Arena& arena) {
-		ObjectReader dataReader(header.begin(), AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
-		dataReader.deserialize(FileIdentifierFor<AesCtrWithAuthV1<S>>::value, *ret, arena);
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, cipherTextDetails, cipherHeaderDetails, ivRef, authTokenRef);
 	}
 };
 
@@ -289,9 +279,9 @@ struct AesCtrNoAuthV1 {
 
 	// Serializable fields
 
-	// Cipher text encryption information
+	// Text cipher encryption information
 	BlobCipherDetails cipherTextDetails;
-	// Initialization vector used to encrypt the payload.
+	// Initialization vector
 	StringRef ivRef;
 
 	AesCtrNoAuthV1() {}
@@ -300,24 +290,18 @@ struct AesCtrNoAuthV1 {
 		memcpy(mutateString(ivRef), iv, ivLen);
 	}
 
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, cipherTextDetails, ivRef);
-	}
-
 	bool operator==(const AesCtrNoAuthV1& o) const {
 		return cipherTextDetails == o.cipherTextDetails && ivRef.compare(o.ivRef) == 0;
 	}
 
-	static StringRef serialize(const AesCtrNoAuthV1& header, Arena& arena) {
-		StringRef value =
-		    ObjectWriter::toValue(header, AssumeVersion(ProtocolVersion::withEncryptionAtRest())).contents();
-		return StringRef(arena, value);
+	static void deserialize(const StringRef& header, AesCtrNoAuthV1& ret, Arena& arena) {
+		ObjectReader dataReader(header.begin(), Unversioned());
+		dataReader.deserialize(FileIdentifierFor<AesCtrNoAuthV1>::value, ret, arena);
 	}
 
-	static void deserialize(const StringRef& header, AesCtrNoAuthV1* ret, Arena& arena) {
-		ObjectReader dataReader(header.begin(), AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
-		dataReader.deserialize(FileIdentifierFor<AesCtrNoAuthV1>::value, *ret, arena);
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, cipherTextDetails, ivRef);
 	}
 };
 
@@ -336,29 +320,23 @@ struct BlobCipherEncryptHeaderRef {
 	StringRef algoHeaderRef;
 
 	BlobCipherEncryptHeaderRef() {}
-	BlobCipherEncryptHeaderRef(Arena& arena, const BlobCipherEncryptHeaderRef& src)
-	  : flagsVersion(src.flagsVersion), algoHeaderVersion(src.algoHeaderVersion), flagsRef(arena, src.flagsRef),
-	    algoHeaderRef(arena, src.algoHeaderRef) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, flagsVersion, algoHeaderVersion, flagsRef, algoHeaderRef);
-	};
+	BlobCipherEncryptHeaderRef(const BlobCipherEncryptHeaderRef& src, Arena& arena)
+	  : flagsVersion(src.flagsVersion), algoHeaderVersion(src.algoHeaderVersion),
+	    flagsRef(StringRef(arena, src.flagsRef)), algoHeaderRef(StringRef(arena, src.algoHeaderRef)) {}
 
 	bool operator==(const BlobCipherEncryptHeaderRef& o) const {
 		return flagsVersion == o.flagsVersion && algoHeaderVersion == o.algoHeaderVersion &&
 		       flagsRef.compare(o.flagsRef) == 0 && algoHeaderRef.compare(o.algoHeaderRef) == 0;
 	}
 
-	static StringRef serialize(const BlobCipherEncryptHeaderRef& header, Arena& arena) {
-		StringRef value =
-		    ObjectWriter::toValue(header, AssumeVersion(ProtocolVersion::withEncryptionAtRest())).contents();
-		return StringRef(arena, value);
+	static void deserialize(const StringRef& header, BlobCipherEncryptHeaderRef& ret, Arena& arena) {
+		ObjectReader reader(header.begin(), Unversioned());
+		reader.deserialize(FileIdentifierFor<BlobCipherEncryptHeaderRef>::value, ret, arena);
 	}
 
-	static void deserialize(const StringRef& header, BlobCipherEncryptHeaderRef* ret, Arena& arena) {
-		ObjectReader reader(header.begin(), AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
-		reader.deserialize(FileIdentifierFor<BlobCipherEncryptHeaderRef>::value, *ret, arena);
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, flagsVersion, algoHeaderVersion, flagsRef, algoHeaderRef);
 	}
 };
 #pragma pack(pop)
@@ -830,19 +808,16 @@ private:
 	void validateAuthTokensV1(const uint8_t*,
 	                          const int,
 	                          const BlobCipherEncryptHeaderFlagsV1&,
-	                          const BlobCipherEncryptHeaderRef&,
-	                          Arena&);
+	                          const BlobCipherEncryptHeaderRef&);
 	void validateHeaderSingleAuthTokenV1(const uint8_t*,
 	                                     const int,
 	                                     const BlobCipherEncryptHeaderFlagsV1&,
-	                                     const BlobCipherEncryptHeaderRef&,
-	                                     Arena&);
+	                                     const BlobCipherEncryptHeaderRef&);
 	template <uint32_t S>
 	void validateAuthTokenV1(const uint8_t* ciphertext,
 	                         const int ciphertextLen,
 	                         const BlobCipherEncryptHeaderFlagsV1&,
-	                         const BlobCipherEncryptHeaderRef& header,
-	                         Arena& arena);
+	                         const BlobCipherEncryptHeaderRef& header);
 
 	void validateHeaderSingleAuthToken(const uint8_t* ciphertext,
 	                                   const int ciphertextLen,

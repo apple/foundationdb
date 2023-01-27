@@ -37,6 +37,7 @@
 #include <random>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/serialize.h"
 
 #define MEGA_BYTES (1024 * 1024)
 #define NANO_SECOND (1000 * 1000 * 1000)
@@ -363,8 +364,8 @@ struct EncryptionOpsWorkload : TestWorkload {
 		}
 
 		// validate flags
-		BlobCipherEncryptHeaderFlagsV1 flags;
-		BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, &flags, arena);
+		BlobCipherEncryptHeaderFlagsV1 flags = ObjectReader::fromStringRef<BlobCipherEncryptHeaderFlagsV1>(
+		    headerRef.flagsRef, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 		ASSERT_EQ(flags.encryptMode, EncryptCipherMode::ENCRYPT_CIPHER_MODE_AES_256_CTR);
 
 		BlobCipherDetails tCipherDetails;
