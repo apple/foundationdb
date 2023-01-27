@@ -91,11 +91,18 @@ void decodeKeyServersValue(RangeResult result,
                            UID& srcID,
                            UID& destID,
                            bool missingIsError = true);
+bool isSystemKey(KeyRef key);
 
-extern const KeyRangeRef auditRange;
+extern const KeyRangeRef auditKeys;
 extern const KeyRef auditPrefix;
-const Key auditRangeKey(const AuditType type, const UID& auditId, const KeyRef& key);
-const Key auditRangePrefix(const AuditType type, const UID& auditId);
+extern const KeyRangeRef auditRanges;
+extern const KeyRef auditRangePrefix;
+
+const Key auditKey(const AuditType type, const UID& auditId);
+const KeyRange auditKeyRange(const AuditType type);
+const Key auditRangeKey(const UID& auditId, const KeyRef& key);
+const Key auditRangePrefixFor(const UID& auditId);
+
 const Value auditStorageStateValue(const AuditStorageState& auditStorageState);
 AuditStorageState decodeAuditStorageState(const ValueRef& value);
 
@@ -720,6 +727,12 @@ const Value blobRestoreCommandKeyFor(const KeyRangeRef range);
 const KeyRange decodeBlobRestoreCommandKeyFor(const KeyRef key);
 const Value blobRestoreCommandValueFor(BlobRestoreStatus status);
 Standalone<BlobRestoreStatus> decodeBlobRestoreStatus(ValueRef const& value);
+extern const KeyRangeRef blobRestoreArgKeys;
+const Value blobRestoreArgKeyFor(const KeyRangeRef range);
+const KeyRange decodeBlobRestoreArgKeyFor(const KeyRef key);
+const Value blobRestoreArgValueFor(BlobRestoreArg args);
+Standalone<BlobRestoreArg> decodeBlobRestoreArg(ValueRef const& value);
+extern const Key blobManifestVersionKey;
 
 // Storage quota per tenant
 // "\xff/storageQuota/[[tenantGroupName]]" := "[[quota]]"

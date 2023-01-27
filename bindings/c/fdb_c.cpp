@@ -82,8 +82,7 @@ extern "C" DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_erro
 		       code == error_code_grv_proxy_memory_limit_exceeded ||
 		       code == error_code_commit_proxy_memory_limit_exceeded ||
 		       code == error_code_batch_transaction_throttled || code == error_code_process_behind ||
-		       code == error_code_tag_throttled || code == error_code_unknown_tenant ||
-		       code == error_code_proxy_tag_throttled;
+		       code == error_code_tag_throttled || code == error_code_proxy_tag_throttled;
 	}
 	return false;
 }
@@ -560,6 +559,10 @@ extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_verify_blob_rang
 	                        .extractPtr());
 }
 
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_client_status(FDBDatabase* db) {
+	return (FDBFuture*)(DB(db)->getClientStatus().extractPtr());
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant, FDBTransaction** out_transaction) {
 	CATCH_AND_RETURN(*out_transaction = (FDBTransaction*)TENANT(tenant)->createTransaction().extractPtr(););
 }
@@ -636,6 +639,10 @@ extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_verify_blob_range(
 	                                                      StringRef(end_key_name, end_key_name_length)),
 	                                          rv)
 	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_get_id(FDBTenant* tenant) {
+	return (FDBFuture*)(TENANT(tenant)->getId().extractPtr());
 }
 
 extern "C" DLLEXPORT void fdb_tenant_destroy(FDBTenant* tenant) {

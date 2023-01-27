@@ -116,17 +116,20 @@ struct IncrementalBackupWorkload : TestWorkload {
 			state int tries = 0;
 			loop {
 				tries++;
-				BackupDescription desc = wait(backupContainer->describeBackup(true));
+				state BackupDescription desc = wait(backupContainer->describeBackup(true));
 				TraceEvent("IBackupVersionGate")
 				    .detail("MaxLogEndVersion", desc.maxLogEnd.present() ? desc.maxLogEnd.get() : invalidVersion)
 				    .detail("ContiguousLogEndVersion",
 				            desc.contiguousLogEnd.present() ? desc.contiguousLogEnd.get() : invalidVersion)
 				    .detail("TargetVersion", v);
-				if (self->waitRetries != -1 && tries > self->waitRetries)
-					break;
-				if (!desc.contiguousLogEnd.present())
+
+				if (!desc.contiguousLogEnd.present()) {
+					wait(delay(5.0));
 					continue;
+				}
 				if (desc.contiguousLogEnd.get() >= v)
+					break;
+				if (self->waitRetries != -1 && tries > self->waitRetries)
 					break;
 				// Avoid spamming requests with a delay
 				wait(delay(5.0));
@@ -234,7 +237,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			state Standalone<VectorRef<KeyRangeRef>> restoreRange;
 			state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
 			for (auto r : backupRanges) {
-				if (!config.encryptionAtRestMode.isEncryptionEnabled() || !r.intersects(getSystemBackupRanges())) {
+				if (config.tenantMode != TenantMode::REQUIRED || !r.intersects(getSystemBackupRanges())) {
 					restoreRange.push_back_deep(restoreRange.arena(), r);
 				} else {
 					KeyRangeRef normalKeyRange = r & normalKeys;

@@ -30,6 +30,9 @@ ACTOR Future<std::pair<RangeResult, Version>> readFromFDB(Database cx, KeyRange 
 	state KeyRange currentRange = range;
 	loop {
 		tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+		// use no-cache as this is either used for test validation, or the blob granule consistency check
+		ReadOptions readOptions = { ReadType::NORMAL, CacheResult::False };
+		tr.trState->readOptions = readOptions;
 		try {
 			state RangeResult r = wait(tr.getRange(currentRange, CLIENT_KNOBS->TOO_MANY));
 			Version grv = wait(tr.getReadVersion());
@@ -66,10 +69,10 @@ ACTOR Future<std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>>>
     KeyRange range,
     Version beginVersion,
     Version readVersion,
-    Optional<TenantName> tenantName) {
+    Optional<Reference<Tenant>> tenant) {
 	state RangeResult out;
 	state Standalone<VectorRef<BlobGranuleChunkRef>> chunks;
-	state Transaction tr(cx, tenantName);
+	state Transaction tr(cx, tenant);
 
 	loop {
 		try {
@@ -83,7 +86,7 @@ ACTOR Future<std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>>>
 	}
 
 	for (const BlobGranuleChunkRef& chunk : chunks) {
-		ASSERT(chunk.tenantPrefix.present() == tenantName.present());
+		ASSERT(chunk.tenantPrefix.present() == tenant.present());
 		RangeResult chunkRows = wait(readBlobGranule(chunk, range, beginVersion, readVersion, bstore));
 		out.arena().dependsOn(chunkRows.arena());
 		out.append(out.arena(), chunkRows.begin(), chunkRows.size());
@@ -217,8 +220,8 @@ ACTOR Future<Void> clearAndAwaitMerge(Database cx, KeyRange range) {
 ACTOR Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> getSummaries(Database cx,
                                                                         KeyRange range,
                                                                         Version summaryVersion,
-                                                                        Optional<TenantName> tenantName) {
-	state Transaction tr(cx, tenantName);
+                                                                        Optional<Reference<Tenant>> tenant) {
+	state Transaction tr(cx, tenant);
 	loop {
 		try {
 			Standalone<VectorRef<BlobGranuleSummaryRef>> summaries =
@@ -242,12 +245,12 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> getSummaries(Database
 
 ACTOR Future<Void> validateGranuleSummaries(Database cx,
                                             KeyRange range,
-                                            Optional<TenantName> tenantName,
+                                            Optional<Reference<Tenant>> tenant,
                                             Promise<Void> testComplete) {
 	state Arena lastSummaryArena;
 	state KeyRangeMap<Optional<BlobGranuleSummaryRef>> lastSummary;
 	state Version lastSummaryVersion = invalidVersion;
-	state Transaction tr(cx, tenantName);
+	state Transaction tr(cx, tenant);
 	state int successCount = 0;
 	try {
 		loop {
@@ -266,7 +269,7 @@ ACTOR Future<Void> validateGranuleSummaries(Database cx,
 
 			state Standalone<VectorRef<BlobGranuleSummaryRef>> nextSummary;
 			try {
-				wait(store(nextSummary, getSummaries(cx, range, nextSummaryVersion, tenantName)));
+				wait(store(nextSummary, getSummaries(cx, range, nextSummaryVersion, tenant)));
 			} catch (Error& e) {
 				if (e.code() == error_code_blob_granule_transaction_too_old) {
 					ASSERT(lastSummaryVersion == invalidVersion);
@@ -344,7 +347,7 @@ struct feed_cmp_f {
 };
 
 ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getActiveFeeds(Transaction* tr) {
-	RangeResult feedResult = wait(tr->getRange(changeFeedKeys, 10000));
+	RangeResult feedResult = wait(tr->getRange(changeFeedKeys, CLIENT_KNOBS->BG_TOO_MANY_GRANULES));
 	ASSERT(!feedResult.more);
 	std::vector<std::pair<Key, KeyRange>> results;
 	for (auto& it : feedResult) {

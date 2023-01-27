@@ -406,6 +406,13 @@ template <>
 struct Traceable<std::string_view> : TraceableStringImpl<std::string_view> {};
 
 template <class T>
+struct Traceable<Reference<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
+	static std::string toString(const Reference<T>& value) {
+		return value ? Traceable<T>::toString(*value) : "[not set]";
+	}
+};
+
+template <class T>
 struct SpecialTraceMetricType
   : std::conditional<std::is_integral<T>::value || std::is_enum<T>::value, std::true_type, std::false_type>::type {
 	static int64_t getValue(T v) { return v; }

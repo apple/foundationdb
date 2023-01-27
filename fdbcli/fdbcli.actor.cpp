@@ -1635,6 +1635,24 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "audit_storage")) {
+					UID auditId = wait(makeInterruptable(auditStorageCommandActor(ccf, tokens)));
+					if (!auditId.isValid()) {
+						is_error = true;
+					} else {
+						printf("Started audit: %s\n", auditId.toString().c_str());
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "get_audit_status")) {
+					bool _result = wait(makeInterruptable(getAuditStatusCommandActor(localDb, tokens)));
+					if (!_result) {
+						is_error = true;
+					}
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "force_recovery_with_data_loss")) {
 					bool _result = wait(makeInterruptable(forceRecoveryWithDataLossCommandActor(db, tokens)));
 					if (!_result)

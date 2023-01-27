@@ -70,6 +70,8 @@
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/serialize.h"
+#include "flow/ChaosMetrics.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -97,6 +99,21 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #else
 #define KV_STORE(filename, uid) keyValueStoreMemory(filename, uid)
 #endif
+
+template class RequestStream<RecruitMasterRequest, false>;
+template struct NetNotifiedQueue<RecruitMasterRequest, false>;
+
+template class RequestStream<RegisterMasterRequest, false>;
+template struct NetNotifiedQueue<RegisterMasterRequest, false>;
+
+template class RequestStream<InitializeCommitProxyRequest, false>;
+template struct NetNotifiedQueue<InitializeCommitProxyRequest, false>;
+
+template class RequestStream<InitializeGrvProxyRequest, false>;
+template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
+
+template class RequestStream<GetServerDBInfoRequest, false>;
+template struct NetNotifiedQueue<GetServerDBInfoRequest, false>;
 
 namespace {
 RoleLineageCollector roleLineageCollector;
@@ -248,7 +265,7 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 				CODE_PROBE(true, "Worker terminated with file_not_found error");
 				return Void();
 			} else if (e.getError().code() == error_code_lock_file_failure) {
-				CODE_PROBE(true, "Unable to lock file", probe::decoration::rare);
+				CODE_PROBE(true, "Unable to lock file", probe::context::net2, probe::assert::noSim);
 				throw please_reboot_kv_store();
 			}
 			throw e.getError();
@@ -1732,7 +1749,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 int64_t memoryLimit,
                                 std::string metricsConnFile,
                                 std::string metricsPrefix,
-                                Promise<Void> recoveredDiskFiles,
                                 int64_t memoryProfileThreshold,
                                 std::string _coordFolder,
                                 std::string whitelistBinPaths,
@@ -1837,6 +1853,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	                                                              locality.dcId(),
 	                                                              locality.zoneId(),
 	                                                              locality.machineId(),
+	                                                              locality.dataHallId(),
 	                                                              g_network->getLocalAddress().ip,
 	                                                              FDB_VT_VERSION));
 
@@ -2064,24 +2081,18 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		// However, the worker server can still serve stateless roles, and if encryption is on, it is crucial to have
 		// some worker available to serve the EncryptKeyProxy role, before opening encrypted storage files.
 		//
-		// When encryption-at-rest is enabled, the follow code allows a worker to first register with the
-		// cluster controller to be recruited only as a stateless process i.e. it can't be recruited as a SS or TLog
-		// process; once the local disk recovery is complete (if applicable), the process re-registers with cluster
-		// controller as a stateful process role.
-		//
-		// TODO(yiwu): Unify behavior for encryption and non-encryption once the change is stable.
+		// To achieve it, registrationClient allows a worker to first register with the cluster controller to be
+		// recruited only as a stateless process i.e. it can't be recruited as a SS or TLog process; once the local disk
+		// recovery is complete (if applicable), the process re-registers with cluster controller as a stateful process
+		// role.
+		Promise<Void> recoveredDiskFiles;
 		Future<Void> recoverDiskFiles = trigger(
 		    [=]() {
-			    TraceEvent("RecoveriesComplete", interf.id());
+			    TraceEvent("DiskFileRecoveriesComplete", interf.id());
 			    recoveredDiskFiles.send(Void());
-			    return Void();
 		    },
 		    waitForAll(recoveries));
-		if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
-			wait(recoverDiskFiles);
-		} else {
-			errorForwarders.add(recoverDiskFiles);
-		}
+		errorForwarders.add(recoverDiskFiles);
 
 		errorForwarders.add(registrationClient(ccInterface,
 		                                       interf,
@@ -2679,6 +2690,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.getStorageServerRejoinInfo);
 				DUMPTOKEN(recruited.waitFailure);
 				DUMPTOKEN(recruited.txnState);
+				DUMPTOKEN(recruited.getTenantId);
 
 				// printf("Recruited as commitProxyServer\n");
 				errorForwarders.add(zombie(recruited,
@@ -3489,15 +3501,12 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
     Reference<IClusterConnectionRecord> connRecord,
     Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
     Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-    Future<Void> recoveredDiskFiles,
     LocalityData locality,
     Reference<AsyncVar<ServerDBInfo>> dbInfo,
     ConfigDBType configDBType,
     Reference<AsyncVar<Optional<UID>>> clusterId) {
 	state Future<Void> monitor = monitorLeaderWithDelayedCandidacyImpl(connRecord, currentCC);
 	state Future<Void> timeout;
-
-	wait(recoveredDiskFiles);
 
 	loop {
 		if (currentCC->get().present() && dbInfo->get().clusterInterface == currentCC->get().get() &&
@@ -3519,8 +3528,7 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
 			                                     : Never())) {}
 			when(wait(timeout.isValid() ? timeout : Never())) {
 				monitor.cancel();
-				wait(clusterController(
-				    connRecord, currentCC, asyncPriorityInfo, recoveredDiskFiles, locality, configDBType, clusterId));
+				wait(clusterController(connRecord, currentCC, asyncPriorityInfo, locality, configDBType, clusterId));
 				return Void();
 			}
 		}
@@ -3595,7 +3603,6 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
                         std::map<std::string, std::string> manualKnobOverrides,
                         ConfigDBType configDBType) {
 	state std::vector<Future<Void>> actors;
-	state Promise<Void> recoveredDiskFiles;
 	state Reference<ConfigNode> configNode;
 	state Reference<LocalConfiguration> localConfig;
 	if (configDBType != ConfigDBType::DISABLED) {
@@ -3664,24 +3671,14 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 			actors.push_back(reportErrors(monitorLeader(connRecord, cc), "ClusterController"));
 		} else if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::WorstFit &&
 		           SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS > 0) {
-			actors.push_back(reportErrors(monitorLeaderWithDelayedCandidacy(connRecord,
-			                                                                cc,
-			                                                                asyncPriorityInfo,
-			                                                                recoveredDiskFiles.getFuture(),
-			                                                                localities,
-			                                                                dbInfo,
-			                                                                configDBType,
-			                                                                clusterId),
-			                              "ClusterController"));
+			actors.push_back(
+			    reportErrors(monitorLeaderWithDelayedCandidacy(
+			                     connRecord, cc, asyncPriorityInfo, localities, dbInfo, configDBType, clusterId),
+			                 "ClusterController"));
 		} else {
-			actors.push_back(reportErrors(clusterController(connRecord,
-			                                                cc,
-			                                                asyncPriorityInfo,
-			                                                recoveredDiskFiles.getFuture(),
-			                                                localities,
-			                                                configDBType,
-			                                                clusterId),
-			                              "ClusterController"));
+			actors.push_back(
+			    reportErrors(clusterController(connRecord, cc, asyncPriorityInfo, localities, configDBType, clusterId),
+			                 "ClusterController"));
 		}
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
 		actors.push_back(reportErrorsExcept(workerServer(connRecord,
@@ -3693,7 +3690,6 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		                                                 memoryLimit,
 		                                                 metricsConnFile,
 		                                                 metricsPrefix,
-		                                                 recoveredDiskFiles,
 		                                                 memoryProfileThreshold,
 		                                                 coordFolder,
 		                                                 whitelistBinPaths,

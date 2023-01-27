@@ -18,7 +18,15 @@
  * limitations under the License.
  */
 
+#ifdef __unixish__
+#include <fcntl.h>
+#endif
+
 #include "fdbclient/IClientApi.h"
+#include "fdbclient/json_spirit/json_spirit_reader_template.h"
+#include "fdbclient/json_spirit/json_spirit_writer_template.h"
+#include "fdbclient/json_spirit/json_spirit_value.h"
+#include "flow/ThreadHelper.actor.h"
 #include "flow/Trace.h"
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
@@ -38,6 +46,10 @@
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
+
+#ifdef __unixish__
+#include <fcntl.h>
+#endif // __unixish__
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -474,6 +486,21 @@ Reference<ITransaction> DLTenant::createTransaction() {
 	return Reference<ITransaction>(new DLTransaction(api, tr));
 }
 
+ThreadFuture<int64_t> DLTenant::getId() {
+	if (!api->tenantGetId) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->tenantGetId(tenant);
+
+	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		int64_t res = 0;
+		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &res);
+		ASSERT(!error);
+		return res;
+	});
+}
+
 ThreadFuture<Key> DLTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
 	if (!api->tenantPurgeBlobGranules) {
 		return unsupported_operation();
@@ -792,6 +819,22 @@ ThreadFuture<Version> DLDatabase::verifyBlobRange(const KeyRangeRef& keyRange, O
 	});
 }
 
+ThreadFuture<Standalone<StringRef>> DLDatabase::getClientStatus() {
+	if (!api->databaseGetClientStatus) {
+		return unsupported_operation();
+	}
+	FdbCApi::FDBFuture* f = api->databaseGetClientStatus(db);
+	return toThreadFuture<Standalone<StringRef>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const uint8_t* str;
+		int strLength;
+		FdbCApi::fdb_error_t error = api->futureGetKey(f, &str, &strLength);
+		ASSERT(!error);
+
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
+		return Standalone<StringRef>(StringRef(str, strLength), Arena());
+	});
+}
+
 // DLApi
 
 // Loads the specified function from a dynamic library
@@ -902,7 +945,11 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_database_verify_blob_range",
 	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
-
+	loadClientFunction(&api->databaseGetClientStatus,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_database_get_client_status",
+	                   headerVersion >= ApiVersion::withGetClientStatus().version());
 	loadClientFunction(
 	    &api->tenantCreateTransaction, lib, fdbCPath, "fdb_tenant_create_transaction", headerVersion >= 710);
 	loadClientFunction(&api->tenantPurgeBlobGranules,
@@ -935,6 +982,7 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_tenant_verify_blob_range",
 	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
+	loadClientFunction(&api->tenantGetId, lib, fdbCPath, "fdb_tenant_get_id", headerVersion >= 730);
 	loadClientFunction(&api->tenantDestroy, lib, fdbCPath, "fdb_tenant_destroy", headerVersion >= 710);
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option", headerVersion >= 0);
@@ -1759,6 +1807,10 @@ ThreadFuture<T> MultiVersionTenant::executeOperation(ThreadFuture<T> (ITenant::*
 	return abortableFuture(ThreadFuture<T>(Never()), tenantDb.onChange);
 }
 
+ThreadFuture<int64_t> MultiVersionTenant::getId() {
+	return executeOperation(&ITenant::getId);
+}
+
 ThreadFuture<Key> MultiVersionTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
 	return executeOperation(
 	    &ITenant::purgeBlobGranules, keyRange, std::forward<Version>(purgeVersion), std::forward<bool>(force));
@@ -2024,6 +2076,27 @@ ThreadFuture<Version> MultiVersionDatabase::verifyBlobRange(const KeyRangeRef& k
 // Note: this will never return if the server is running a protocol from FDB 5.0 or older
 ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<ProtocolVersion> expectedVersion) {
 	return dbState->versionMonitorDb->getServerProtocol(expectedVersion);
+}
+
+ThreadFuture<Standalone<StringRef>> MultiVersionDatabase::getClientStatus() {
+	auto stateRef = dbState;
+	auto db = stateRef->db;
+	if (!db.isValid()) {
+		db = stateRef->versionMonitorDb;
+	}
+	if (!db.isValid()) {
+		return onMainThread([stateRef] { return Future<Standalone<StringRef>>(stateRef->getClientStatus(""_sr)); });
+	} else {
+		// If a database is created first retrieve its status
+		auto f = db->getClientStatus();
+		auto statusFuture = abortableFuture(f, dbState->dbVar->get().onChange);
+		return flatMapThreadFuture<Standalone<StringRef>, Standalone<StringRef>>(
+		    statusFuture, [stateRef](ErrorOr<Standalone<StringRef>> dbContextStatus) {
+			    return onMainThread([stateRef, dbContextStatus] {
+				    return Future<Standalone<StringRef>>(stateRef->getClientStatus(dbContextStatus));
+			    });
+		    });
+	}
 }
 
 MultiVersionDatabase::DatabaseState::DatabaseState(ClusterConnectionRecord const& connectionRecord,
@@ -2307,6 +2380,92 @@ void MultiVersionDatabase::DatabaseState::close() {
 
 		self->legacyVersionMonitors.clear();
 	});
+}
+
+namespace {
+
+const char* initializationStateToString(MultiVersionDatabase::InitializationState initState) {
+	switch (initState) {
+	case MultiVersionDatabase::InitializationState::INITIALIZING:
+		return "initializing";
+	case MultiVersionDatabase::InitializationState::INITIALIZATION_FAILED:
+		return "initialization_failed";
+	case MultiVersionDatabase::InitializationState::CREATED:
+		return "created";
+	case MultiVersionDatabase::InitializationState::INCOMPATIBLE:
+		return "incompatible";
+	case MultiVersionDatabase::InitializationState::CLOSED:
+		return "closed";
+	default:
+		ASSERT(false);
+		return "invalid_state";
+	}
+}
+
+} // namespace
+
+//
+// Generates the client-side status report for the Multi-Version Database
+//
+// The parameter dbContextStatus contains the status report generated by
+// the wrapped Native Database (from external or local client), which is then
+// embedded within the status report of the Multi-Version Database
+//
+// The overall report schema is as follows:
+// { "Healthy": <overall health status, true or false>,
+//   "InitializationState": <initialization state of the Multi-Version Database>,
+//   "InitializationError": <initialization error code, present if initialization failed>,
+//   "ProtocolVersion" : <determined protocol version of the cluster, present if determined>,
+//   "ConnectionRecord" : <connection file name or connection string>,
+//   "DatabaseStatus" : <Native Database status report, present if successfully retrieved>,
+//   "ErrorRetrievingDatabaseStatus" : <error code of retrieving status of the Native Database, present if failed>,
+//   "AvailableClients" : [
+//      { "ProtocolVersion" : <protocol version of the client>,
+//        "ReleaseVersion" : <release version of the client>,
+//        "ThreadIndex" : <the index of the client thread serving this database>
+//      },
+//      ...
+//   ]
+// }
+//
+//
+Standalone<StringRef> MultiVersionDatabase::DatabaseState::getClientStatus(
+    ErrorOr<Standalone<StringRef>> dbContextStatus) {
+	json_spirit::mObject statusObj;
+	statusObj["InitializationState"] = initializationStateToString(initializationState);
+	if (initializationState == InitializationState::INITIALIZATION_FAILED) {
+		statusObj["InitializationError"] = initializationError.code();
+	}
+	json_spirit::mArray clientArr;
+	for (auto [protocolVersion, client] : this->clients) {
+		json_spirit::mObject clientDesc;
+		clientDesc["ProtocolVersion"] = format("%llx", client->protocolVersion.version());
+		clientDesc["ReleaseVersion"] = client->releaseVersion;
+		clientDesc["ThreadIndex"] = client->threadIndex;
+		clientArr.push_back(clientDesc);
+	}
+	statusObj["AvailableClients"] = clientArr;
+	statusObj["ConnectionRecord"] = connectionRecord.toString();
+	if (dbProtocolVersion.present()) {
+		statusObj["ProtocolVersion"] = format("%llx", dbProtocolVersion.get().version());
+	}
+	bool dbContextHealthy = false;
+	if (initializationState != InitializationState::INITIALIZATION_FAILED) {
+		if (dbContextStatus.isError()) {
+			statusObj["ErrorRetrievingDatabaseStatus"] = dbContextStatus.getError().code();
+		} else {
+			json_spirit::mValue dbContextStatusVal;
+			json_spirit::read_string(dbContextStatus.get().toString(), dbContextStatusVal);
+			statusObj["DatabaseStatus"] = dbContextStatusVal;
+			auto& dbContextStatusObj = dbContextStatusVal.get_obj();
+			auto healthyIter = dbContextStatusObj.find("Healthy");
+			if (healthyIter != dbContextStatusObj.end() && healthyIter->second.type() == json_spirit::bool_type) {
+				dbContextHealthy = healthyIter->second.get_bool();
+			}
+		}
+	}
+	statusObj["Healthy"] = initializationState == InitializationState::CREATED && dbContextHealthy;
+	return StringRef(json_spirit::write_string(json_spirit::mValue(statusObj)));
 }
 
 // Starts the connection monitor by creating a database object at an old version.
@@ -2596,7 +2755,7 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 
 	return paths;
 }
-#else
+#else // if defined (__unixish__)
 std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
 	if (threadCount > 1) {
 		TraceEvent(SevError, "MultipleClientThreadsUnsupportedOnWindows").log();
@@ -2606,7 +2765,7 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 	paths.push_back({ path, false });
 	return paths;
 }
-#endif
+#endif // if defined (__unixish__)
 
 void MultiVersionApi::disableLocalClient() {
 	MutexHolder holder(lock);

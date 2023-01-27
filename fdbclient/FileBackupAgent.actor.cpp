@@ -19,6 +19,10 @@
  */
 
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/TenantEntryCache.actor.h"
+#include "fdbclient/TenantManagement.actor.h"
+#include "fdbrpc/simulator.h"
+#include "flow/FastRef.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
@@ -659,7 +663,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	}
 
 	ACTOR static Future<Void> updateEncryptionKeysCtx(EncryptedRangeFileWriter* self, KeyRef key) {
-		state EncryptCipherDomainId curDomainId = wait(getEncryptionDomainDetails(key, self->encryptMode));
+		state EncryptCipherDomainId curDomainId = getEncryptionDomainDetails(key, self->encryptMode);
 		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 
 		// Get text and header cipher key
@@ -698,10 +702,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		copyToBuffer(self, s->begin(), s->size());
 	}
 
-	static bool isSystemKey(KeyRef key) { return key.size() && key[0] == systemKeys.begin[0]; }
-
-	ACTOR static Future<EncryptCipherDomainId> getEncryptionDomainDetailsImpl(KeyRef key,
-	                                                                          EncryptionAtRestMode encryptMode) {
+	static EncryptCipherDomainId getEncryptionDomainDetails(KeyRef key, EncryptionAtRestMode encryptMode) {
 		if (isSystemKey(key)) {
 			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 		}
@@ -711,10 +712,6 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		// dealing with domain aware encryption so all keys should belong to a tenant
 		KeyRef tenantPrefix = KeyRef(key.begin(), TenantAPI::PREFIX_SIZE);
 		return TenantAPI::prefixToId(tenantPrefix);
-	}
-
-	static Future<EncryptCipherDomainId> getEncryptionDomainDetails(KeyRef key, EncryptionAtRestMode encryptMode) {
-		return getEncryptionDomainDetailsImpl(key, encryptMode);
 	}
 
 	// Handles the first block and internal blocks.  Ends current block if needed.
@@ -824,9 +821,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (self->lastKey.size() == 0 || k.size() == 0) {
 			return false;
 		}
-		state EncryptCipherDomainId curKeyDomainId = wait(getEncryptionDomainDetails(k, self->encryptMode));
-		state EncryptCipherDomainId prevKeyDomainId =
-		    wait(getEncryptionDomainDetails(self->lastKey, self->encryptMode));
+		state EncryptCipherDomainId curKeyDomainId = getEncryptionDomainDetails(k, self->encryptMode);
+		state EncryptCipherDomainId prevKeyDomainId = getEncryptionDomainDetails(self->lastKey, self->encryptMode);
 		if (curKeyDomainId != prevKeyDomainId) {
 			CODE_PROBE(true, "crossed tenant boundaries");
 			wait(handleTenantBondary(self, k, v, writeValue, curKeyDomainId));
@@ -1033,8 +1029,9 @@ private:
 ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
                                         Standalone<VectorRef<KeyValueRef>>* results,
                                         bool encryptedBlock,
-                                        Optional<EncryptionAtRestMode> encryptMode,
-                                        Optional<BlobCipherEncryptHeader> encryptHeader) {
+                                        EncryptionAtRestMode encryptMode,
+                                        Optional<BlobCipherEncryptHeader> encryptHeader,
+                                        Optional<Reference<TenantEntryCache<Void>>> tenantCache) {
 	// Read begin key, if this fails then block was invalid.
 	state uint32_t kLen = reader->consumeNetworkUInt32();
 	state const uint8_t* k = reader->consume(kLen);
@@ -1052,16 +1049,15 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 		// make sure that all keys in a block belong to exactly one tenant,
 		// unless its the last key in which case it can be a truncated (different) tenant prefix
 		if (encryptedBlock && g_network && g_network->isSimulated()) {
-			ASSERT(encryptMode.present());
 			ASSERT(encryptHeader.present());
 			state KeyRef curKey = KeyRef(k, kLen);
 			if (!prevDomainId.present()) {
 				EncryptCipherDomainId domainId =
-				    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, encryptMode.get()));
+				    EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, encryptMode);
 				prevDomainId = domainId;
 			}
 			EncryptCipherDomainId curDomainId =
-			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, encryptMode.get()));
+			    EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, encryptMode);
 			if (!curKey.empty() && !prevKey.empty() && prevDomainId.get() != curDomainId) {
 				ASSERT(!done);
 				if (curDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && curDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
@@ -1084,9 +1080,22 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 		}
 
 		// Read a value, which must exist or the block is invalid
-		uint32_t vLen = reader->consumeNetworkUInt32();
-		const uint8_t* v = reader->consume(vLen);
-		results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
+		state uint32_t vLen = reader->consumeNetworkUInt32();
+		state const uint8_t* v = reader->consume(vLen);
+		if (tenantCache.present() && !isSystemKey(KeyRef(k, kLen))) {
+			state int64_t tenantId = TenantAPI::extractTenantIdFromKeyRef(StringRef(k, kLen));
+			Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache.get()->getById(tenantId));
+			// The first and last KV pairs are not restored so if the tenant is not found for the last key then it's ok
+			// to include it in the restore set
+			if (!payload.present() && !(reader->eof() || *reader->rptr == 0xFF)) {
+				TraceEvent(SevWarnAlways, "SnapshotRestoreTenantNotFound").detail("TenantId", tenantId);
+				CODE_PROBE(true, "Snapshot restore tenant not found");
+			} else {
+				results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
+			}
+		} else {
+			results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
+		}
 
 		// If eof reached or first byte of next key len is 0xFF then a valid block end was reached.
 		if (reader->eof() || *reader->rptr == 0xFF)
@@ -1104,7 +1113,7 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
                                                                       int len,
-                                                                      Optional<Database> cx) {
+                                                                      Database cx) {
 	state Standalone<StringRef> buf = makeString(len);
 	int rLen = wait(uncancellable(holdWhile(buf, file->read(mutateString(buf), len, offset))));
 	if (rLen != len)
@@ -1115,17 +1124,23 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 	state Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
 	state StringRefReader reader(buf, restore_corrupted_data());
 	state Arena arena;
+	state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+	state Optional<Reference<TenantEntryCache<Void>>> tenantCache;
+	if (config.tenantMode == TenantMode::REQUIRED) {
+		tenantCache = makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
+		wait(tenantCache.get()->init());
+	}
+	state EncryptionAtRestMode encryptMode = config.encryptionAtRestMode;
 
 	try {
 		// Read header, currently only decoding BACKUP_AGENT_SNAPSHOT_FILE_VERSION or
 		// BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION
 		int32_t file_version = reader.consume<int32_t>();
 		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
-			wait(decodeKVPairs(
-			    &reader, &results, false, Optional<EncryptionAtRestMode>(), Optional<BlobCipherEncryptHeader>()));
+			wait(
+			    decodeKVPairs(&reader, &results, false, encryptMode, Optional<BlobCipherEncryptHeader>(), tenantCache));
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 			CODE_PROBE(true, "decoding encrypted block");
-			ASSERT(cx.present());
 			// decode options struct
 			uint32_t optionsLen = reader.consumeNetworkUInt32();
 			const uint8_t* o = reader.consume(optionsLen);
@@ -1144,15 +1159,9 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			// get the size of the encrypted payload and decrypt it
 			int64_t dataLen = len - bytesRead;
 			StringRef decryptedData =
-			    wait(EncryptedRangeFileWriter::decrypt(cx.get(), header, dataPayloadStart, dataLen, &results.arena()));
+			    wait(EncryptedRangeFileWriter::decrypt(cx, header, dataPayloadStart, dataLen, &results.arena()));
 			reader = StringRefReader(decryptedData, restore_corrupted_data());
-			state Optional<EncryptionAtRestMode> encryptMode;
-			if (g_network && g_network->isSimulated()) {
-				// The encyption mode is only used during simulation for a sanity check
-				DatabaseConfiguration config = wait(getDatabaseConfiguration(cx.get()));
-				encryptMode = config.encryptionAtRestMode;
-			}
-			wait(decodeKVPairs(&reader, &results, true, encryptMode, header));
+			wait(decodeKVPairs(&reader, &results, true, encryptMode, header, tenantCache));
 		} else {
 			throw restore_unsupported_file_version();
 		}
@@ -3537,6 +3546,19 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		return returnStr;
 	}
 
+	ACTOR static Future<Void> _validTenantAccess(KeyRef key, Reference<TenantEntryCache<Void>> tenantCache) {
+		if (isSystemKey(key)) {
+			return Void();
+		}
+		state int64_t tenantId = TenantAPI::extractTenantIdFromKeyRef(key);
+		Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getById(tenantId));
+		if (!payload.present()) {
+			TraceEvent(SevError, "SnapshotRestoreInvalidTenantAccess").detail("Tenant", tenantId);
+		}
+		ASSERT(payload.present());
+		return Void();
+	}
+
 	ACTOR static Future<Void> _execute(Database cx,
 	                                   Reference<TaskBucket> taskBucket,
 	                                   Reference<FutureBucket> futureBucket,
@@ -3587,6 +3609,14 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		state Reference<IAsyncFile> inFile = wait(bc.get()->readFile(rangeFile.fileName));
 		state Standalone<VectorRef<KeyValueRef>> blockData =
 		    wait(decodeRangeFileBlock(inFile, readOffset, readLen, cx));
+		state Optional<Reference<TenantEntryCache<Void>>> tenantCache;
+		state std::vector<Future<Void>> validTenantCheckFutures;
+		state Arena arena;
+		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+		if (config.tenantMode == TenantMode::REQUIRED && g_network && g_network->isSimulated()) {
+			tenantCache = makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
+			wait(tenantCache.get()->init());
+		}
 
 		// First and last key are the range for this file
 		state KeyRange fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
@@ -3664,6 +3694,12 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 
 					for (; i < iend; ++i) {
 						tr->setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
+						if (tenantCache.present()) {
+							validTenantCheckFutures.push_back(_validTenantAccess(
+							    StringRef(arena,
+							              data[i].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get())),
+							    tenantCache.get()));
+						}
 						tr->set(data[i].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()),
 						        data[i].value);
 					}
@@ -3678,6 +3714,11 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 					wait(checkLock);
 
 					wait(tr->commit());
+
+					if (!validTenantCheckFutures.empty()) {
+						waitForAll(validTenantCheckFutures);
+						validTenantCheckFutures.clear();
+					}
 
 					TraceEvent("FileRestoreCommittedRange")
 					    .suppressFor(60)
@@ -4651,7 +4692,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("RestoreVersion", restoreVersion)
 				    .detail("Dest", destVersion);
 				if (destVersion <= restoreVersion) {
-					CODE_PROBE(true, "Forcing restored cluster to higher version", probe::decoration::rare);
+					CODE_PROBE(true, "Forcing restored cluster to higher version");
 					tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(restoreVersion + 1, Unversioned()));
 					wait(tr->commit());
 				} else {
@@ -4671,7 +4712,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
 		}
 		state Optional<RestorableFileSet> restorable =
-		    wait(bc->getRestoreSet(restoreVersion, cx, keyRangesFilter, logsOnly, beginVersion));
+		    wait(bc->getRestoreSet(restoreVersion, keyRangesFilter, logsOnly, beginVersion));
 		if (!restorable.present())
 			throw restore_missing_data();
 
@@ -4925,7 +4966,7 @@ public:
 			    .detail("OverrideTargetVersion", targetVersion);
 		}
 
-		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion, cx));
+		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
@@ -5251,14 +5292,16 @@ public:
 			oldRestore.clear(tr);
 		}
 
-		state int index;
-		for (index = 0; index < restoreRanges.size(); index++) {
-			KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
-			                                .removePrefix(removePrefix)
-			                                .withPrefix(addPrefix);
-			RangeResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
-			if (existingRows.size() > 0 && !onlyApplyMutationLogs) {
-				throw restore_destination_not_empty();
+		if (!onlyApplyMutationLogs) {
+			state int index;
+			for (index = 0; index < restoreRanges.size(); index++) {
+				KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
+				                                .removePrefix(removePrefix)
+				                                .withPrefix(addPrefix);
+				RangeResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
+				if (existingRows.size() > 0) {
+					throw restore_destination_not_empty();
+				}
 			}
 		}
 		// Make new restore config
@@ -5901,7 +5944,7 @@ public:
 			beginVersion = *std::min_element(beginVersions.begin(), beginVersions.end());
 		}
 		Optional<RestorableFileSet> restoreSet =
-		    wait(bc->getRestoreSet(targetVersion, cx, ranges, onlyApplyMutationLogs, beginVersion));
+		    wait(bc->getRestoreSet(targetVersion, ranges, onlyApplyMutationLogs, beginVersion));
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
@@ -6169,7 +6212,7 @@ public:
 			state Standalone<VectorRef<KeyRangeRef>> restoreRange;
 			state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
 			for (auto r : ranges) {
-				if (!config.encryptionAtRestMode.isEncryptionEnabled() || !r.intersects(getSystemBackupRanges())) {
+				if (config.tenantMode != TenantMode::REQUIRED || !r.intersects(getSystemBackupRanges())) {
 					restoreRange.push_back_deep(restoreRange.arena(), r);
 				} else {
 					KeyRangeRef normalKeyRange = r & normalKeys;

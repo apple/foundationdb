@@ -18,12 +18,97 @@
  * limitations under the License.
  */
 
-#include "flow/Arena.h"
-#include "boost/asio.hpp"
+#include <memory>
 
+#include <boost/asio.hpp>
+
+#include "flow/Arena.h"
 #include "flow/network.h"
+#include "flow/IUDPSocket.h"
 #include "flow/flow.h"
+#include "flow/ChaosMetrics.h"
 #include "flow/UnitTest.h"
+#include "flow/IConnection.h"
+
+ChaosMetrics::ChaosMetrics() {
+	clear();
+}
+
+void ChaosMetrics::clear() {
+	std::memset(this, 0, sizeof(ChaosMetrics));
+	startTime = g_network ? g_network->now() : 0;
+}
+
+void ChaosMetrics::getFields(TraceEvent* e) {
+	std::pair<const char*, unsigned int> metrics[] = { { "DiskDelays", diskDelays }, { "BitFlips", bitFlips } };
+	if (e != nullptr) {
+		for (auto& m : metrics) {
+			char c = m.first[0];
+			if (c != 0) {
+				e->detail(m.first, m.second);
+			}
+		}
+	}
+}
+
+DiskFailureInjector* DiskFailureInjector::injector() {
+	auto res = g_network->global(INetwork::enDiskFailureInjector);
+	if (!res) {
+		res = new DiskFailureInjector();
+		g_network->setGlobal(INetwork::enDiskFailureInjector, res);
+	}
+	return static_cast<DiskFailureInjector*>(res);
+}
+
+void DiskFailureInjector::setDiskFailure(double interval, double stallFor, double throttleFor) {
+	stallInterval = interval;
+	stallPeriod = stallFor;
+	stallUntil = std::max(stallUntil, g_network->now() + stallFor);
+	// random stall duration in ms (chosen once)
+	// TODO: make this delay configurable
+	stallDuration = 0.001 * deterministicRandom()->randomInt(1, 5);
+	throttlePeriod = throttleFor;
+	throttleUntil = std::max(throttleUntil, g_network->now() + throttleFor);
+	TraceEvent("SetDiskFailure")
+	    .detail("Now", g_network->now())
+	    .detail("StallInterval", interval)
+	    .detail("StallPeriod", stallFor)
+	    .detail("StallUntil", stallUntil)
+	    .detail("ThrottlePeriod", throttleFor)
+	    .detail("ThrottleUntil", throttleUntil);
+}
+
+double DiskFailureInjector::getStallDelay() const {
+	// If we are in a stall period and a stallInterval was specified, determine the
+	// delay to be inserted
+	if (((stallUntil - g_network->now()) > 0.0) && stallInterval) {
+		auto timeElapsed = fmod(g_network->now(), stallInterval);
+		return std::max(0.0, stallDuration - timeElapsed);
+	}
+	return 0.0;
+}
+
+double DiskFailureInjector::getThrottleDelay() const {
+	// If we are in the throttle period, insert a random delay (in ms)
+	// TODO: make this delay configurable
+	if ((throttleUntil - g_network->now()) > 0.0)
+		return (0.001 * deterministicRandom()->randomInt(1, 3));
+
+	return 0.0;
+}
+
+double DiskFailureInjector::getDiskDelay() const {
+	return getStallDelay() + getThrottleDelay();
+}
+
+BitFlipper* BitFlipper::flipper() {
+	auto res = g_network->global(INetwork::enBitFlipper);
+	if (!res) {
+		res = new BitFlipper();
+		g_network->setGlobal(INetwork::enBitFlipper, res);
+	}
+	return static_cast<BitFlipper*>(res);
+}
 
 bool IPAddress::operator==(const IPAddress& rhs) const {
 	return addr == rhs.addr;

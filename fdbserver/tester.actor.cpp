@@ -29,6 +29,8 @@
 #include "flow/DeterministicRandom.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
+#include "fdbclient/Audit.h"
+#include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
@@ -44,6 +46,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 FDB_DEFINE_BOOLEAN_PARAM(UntrustedMode);
@@ -245,6 +248,23 @@ std::vector<std::string> getOption(VectorRef<KeyValueRef> options, Key key, std:
 					begin = c + 1;
 				}
 			v.push_back(options[i].value.substr(begin).toString());
+			options[i].value = ""_sr;
+			return v;
+		}
+	return defaultValue;
+}
+
+std::vector<int> getOption(VectorRef<KeyValueRef> options, Key key, std::vector<int> defaultValue) {
+	for (int i = 0; i < options.size(); i++)
+		if (options[i].key == key) {
+			std::vector<int> v;
+			int begin = 0;
+			for (int c = 0; c < options[i].value.size(); c++)
+				if (options[i].value[c] == ',') {
+					v.push_back(atoi((char*)options[i].value.begin() + begin));
+					begin = c + 1;
+				}
+			v.push_back(atoi((char*)options[i].value.begin() + begin));
 			options[i].value = ""_sr;
 			return v;
 		}
@@ -1081,6 +1101,44 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 	return Void();
 }
 
+ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+	state UID auditId;
+	TraceEvent("AuditStorageCorrectnessBegin");
+
+	loop {
+		try {
+			TriggerAuditRequest req(AuditType::ValidateHA, allKeys);
+			req.async = true;
+			UID auditId_ = wait(dbInfo->get().clusterInterface.clientInterface.triggerAudit.getReply(req));
+			auditId = auditId_;
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
+			wait(delay(1));
+		}
+	}
+
+	state Database cx = openDBOnServer(dbInfo);
+	loop {
+		try {
+			AuditStorageState auditState = wait(getAuditState(cx, AuditType::ValidateHA, auditId));
+			if (auditState.getPhase() != AuditPhase::Complete) {
+				ASSERT(auditState.getPhase() == AuditPhase::Running);
+				wait(delay(30));
+			} else {
+				TraceEvent(SevInfo, "AuditStorageResult").detail("AuditStorageState", auditState.toString());
+				ASSERT(auditState.getPhase() == AuditPhase::Complete);
+				break;
+			}
+		} catch (Error& e) {
+			TraceEvent("WaitAuditStorageError").errorUnsuppressed(e).detail("AuditID", auditId);
+			wait(delay(1));
+		}
+	}
+
+	return Void();
+}
+
 // Runs the consistency check workload, which verifies that the database is in a consistent state
 ACTOR Future<Void> checkConsistency(Database cx,
                                     std::vector<TesterInterface> testers,
@@ -1766,22 +1824,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	}
 
 	// Read cluster configuration
-	if (useDB) {
-		state Transaction tr = Transaction(cx);
-		state DatabaseConfiguration configuration;
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				RangeResult results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
-				configuration.fromKeyValues((VectorRef<KeyValueRef>)results);
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
+	if (useDB && g_network->isSimulated()) {
+		DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 
 		g_simulator->storagePolicy = configuration.storagePolicy;
 		g_simulator->tLogPolicy = configuration.tLogPolicy;

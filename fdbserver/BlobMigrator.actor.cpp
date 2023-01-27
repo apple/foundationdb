@@ -18,7 +18,10 @@
  * limitations under the License.
  */
 #include <algorithm>
+#include <cmath>
 #include <string>
+#include "fdbclient/ClientBooleanParams.h"
+#include "fdbserver/RestoreUtil.h"
 #include "flow/network.h"
 #include "flow/flow.h"
 #include "flow/ActorCollection.h"
@@ -103,7 +106,7 @@ private:
 					                         BlobRestorePhase::LOADED_MANIFEST));
 					return Void();
 				}
-			} else if (phase >= BlobRestorePhase::COPYING_DATA) {
+			} else if (phase >= BlobRestorePhase::COPYING_DATA && phase < BlobRestorePhase::DONE) {
 				TraceEvent("BlobMigratorUnexpectedPhase", self->interf_.id()).detail("Phase", status.get().phase);
 				throw restore_error();
 			}
@@ -259,9 +262,13 @@ private:
 
 				// Count incompleted size
 				int64_t incompleted = 0;
-				for (auto i = 0; i < ranges.size() - 1; ++i) {
+				for (auto i = 0; i < ranges.size(); ++i) {
 					if (ranges[i].value == serverKeysTrue) {
-						KeyRangeRef range(ranges[i].key, ranges[i + 1].key);
+						KeyRef end = normalKeys.end;
+						if (i < ranges.size() - 1) {
+							end = ranges[i + 1].key;
+						}
+						KeyRangeRef range(ranges[i].key, end);
 						int64_t bytes = sizeInBytes(self, range);
 						dprint("   incompleted {}, size: {}\n", range.toString(), bytes);
 						incompleted += bytes;
@@ -309,51 +316,66 @@ private:
 		}
 	}
 
-	// Find mutation logs url
-	static std::string mlogsUrl(Reference<BlobMigrator> self) {
-		std::string url = SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL;
-
-		// A special case for local directory.
-		// See FileBackupAgent.actor.cpp. if the container string describes a local directory then "/backup-<timestamp>"
-		// will be added to it. so we need to append this directory name to the url
-		if (url.find("file://") == 0) {
-			std::string path = url.substr(7);
-			path.erase(path.find_last_not_of("\\/") + 1); // Remove trailing slashes
-			std::vector<std::string> dirs = platform::listDirectories(path);
-			if (dirs.empty()) {
-				TraceEvent(SevError, "BlobMigratorMissingMutationLogs").detail("Url", url);
-				throw restore_missing_data();
+	// Check if we need to apply mutation logs. If all granules have data up to targetVersion, we don't need to apply
+	// mutation logs
+	static bool needApplyLogs(Reference<BlobMigrator> self, Version targetVersion) {
+		for (auto& granule : self->blobGranules_) {
+			if (granule.version < targetVersion) {
+				// at least one granule doesn't have data up to target version, so we'll need to apply mutation logs
+				return true;
 			}
-			// Pick the newest backup folder
-			std::sort(dirs.begin(), dirs.end());
-			std::string name = dirs.back();
-			url.erase(url.find_last_not_of("\\/") + 1); // Remove trailing slashes
-			return url + "/" + name;
 		}
-		return url;
+		return false;
 	}
 
 	// Apply mutation logs to blob granules so that they reach to a consistent version for all blob granules
 	ACTOR static Future<Void> applyMutationLogs(Reference<BlobMigrator> self) {
-		state std::string mutationLogsUrl = mlogsUrl(self);
-		TraceEvent("ApplyMutationLogs", self->interf_.id()).detail("Url", mutationLogsUrl);
-
 		// check last version in mutation logs
-		Optional<std::string> proxy; // unused
-		Optional<std::string> encryptionKeyFile; // unused
-		state Reference<IBackupContainer> bc =
-		    IBackupContainer::openContainer(mutationLogsUrl, proxy, encryptionKeyFile);
+
+		state std::string baseUrl = SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL;
+		state std::string mlogsUrl;
+		if (baseUrl.starts_with("file://")) {
+			state std::vector<std::string> containers = wait(IBackupContainer::listContainers(baseUrl, {}));
+			if (containers.size() == 0) {
+				TraceEvent("MissingMutationLogs", self->interf_.id()).detail("Url", baseUrl);
+				throw restore_missing_data();
+			}
+			mlogsUrl = containers.front();
+		} else {
+			mlogsUrl = baseUrl;
+		}
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
 		BackupDescription desc = wait(bc->describeBackup());
 		if (!desc.contiguousLogEnd.present()) {
-			TraceEvent("InvalidMutationLogs").detail("Url", mutationLogsUrl);
+			TraceEvent("InvalidMutationLogs").detail("Url", baseUrl);
 			throw restore_missing_data();
 		}
 		if (!desc.minLogBegin.present()) {
-			TraceEvent("InvalidMutationLogs").detail("Url", mutationLogsUrl);
+			TraceEvent("InvalidMutationLogs").detail("Url", baseUrl);
 			throw restore_missing_data();
 		}
 		state Version minLogVersion = desc.minLogBegin.get();
 		state Version maxLogVersion = desc.contiguousLogEnd.get() - 1;
+		state Version targetVersion = wait(getRestoreTargetVersion(self->db_, normalKeys, maxLogVersion));
+		if (targetVersion < maxLogVersion) {
+			if (!needApplyLogs(self, targetVersion)) {
+				TraceEvent("SkipMutationLogs").detail("TargetVersion", targetVersion);
+				dprint("Skip mutation logs as all granules are at version {}\n", targetVersion);
+				return Void();
+			}
+		}
+
+		if (targetVersion < minLogVersion) {
+			TraceEvent("MissingMutationLogs")
+			    .detail("MinLogVersion", minLogVersion)
+			    .detail("TargetVersion", maxLogVersion);
+			throw restore_missing_data();
+		}
+		if (targetVersion > maxLogVersion) {
+			TraceEvent("SkipTargetVersion")
+			    .detail("MaxLogVersion", maxLogVersion)
+			    .detail("TargetVersion", targetVersion);
+		}
 
 		// restore to target version
 		state Standalone<VectorRef<KeyRangeRef>> ranges;
@@ -364,17 +386,21 @@ private:
 				    .detail("Granule", granule.granuleID)
 				    .detail("GranuleVersion", granule.version)
 				    .detail("MinLogVersion", minLogVersion)
-				    .detail("MaxLogVersion", maxLogVersion);
+				    .detail("MaxLogVersion", maxLogVersion)
+				    .detail("TargetVersion", targetVersion);
 				throw restore_missing_data();
 			}
 			// no need to apply mutation logs if granule is already on that version
-			if (granule.version < maxLogVersion) {
+			if (granule.version < targetVersion) {
 				ranges.push_back(ranges.arena(), granule.keyRange);
-				beginVersions.push_back(beginVersions.arena(), granule.version + 1);
+				// Blob granule ends at granule.version(inclusive), so we need to apply mutation logs
+				// after granule.version(exclusive).
+				beginVersions.push_back(beginVersions.arena(), granule.version);
+				TraceEvent("ApplyMutationLogVersion").detail("GID", granule.granuleID).detail("Ver", granule.version);
 			}
 		}
 		Optional<RestorableFileSet> restoreSet =
-		    wait(bc->getRestoreSet(maxLogVersion, self->db_, ranges, OnlyApplyMutationLogs::True, minLogVersion));
+		    wait(bc->getRestoreSet(maxLogVersion, ranges, OnlyApplyMutationLogs::True, minLogVersion));
 		if (!restoreSet.present()) {
 			TraceEvent("InvalidMutationLogs")
 			    .detail("MinLogVersion", minLogVersion)
@@ -382,9 +408,11 @@ private:
 			throw restore_missing_data();
 		}
 		std::string tagName = "blobrestore-" + self->interf_.id().shortString();
-		TraceEvent("ApplyMutationLogs", self->interf_.id()).detail("Version", minLogVersion);
+		TraceEvent("ApplyMutationLogs", self->interf_.id())
+		    .detail("MinVer", minLogVersion)
+		    .detail("MaxVer", maxLogVersion);
 
-		wait(submitRestore(self, KeyRef(tagName), KeyRef(mutationLogsUrl), ranges, beginVersions));
+		wait(submitRestore(self, KeyRef(tagName), KeyRef(mlogsUrl), ranges, beginVersions, targetVersion));
 		return Void();
 	}
 
@@ -393,7 +421,8 @@ private:
 	                                        Key tagName,
 	                                        Key mutationLogsUrl,
 	                                        Standalone<VectorRef<KeyRangeRef>> ranges,
-	                                        Standalone<VectorRef<Version>> beginVersions) {
+	                                        Standalone<VectorRef<Version>> beginVersions,
+	                                        Version endVersion) {
 		state Optional<std::string> proxy; // unused
 		state Optional<Database> origDb; // unused
 
@@ -406,7 +435,7 @@ private:
 		                                                  ranges,
 		                                                  beginVersions,
 		                                                  WaitForComplete::True,
-		                                                  invalidVersion,
+		                                                  endVersion,
 		                                                  Verbose::True,
 		                                                  ""_sr, // addPrefix
 		                                                  ""_sr, // removePrefix
@@ -414,6 +443,7 @@ private:
 		                                                  UnlockDB::True,
 		                                                  OnlyApplyMutationLogs::True));
 		TraceEvent("ApplyMutationLogsComplete", self->interf_.id()).detail("Version", version);
+		dprint("Restore to version {} done. Target version {} \n", version, endVersion);
 		return Void();
 	}
 
@@ -471,7 +501,6 @@ private:
 						req.reply.send(rep);
 					}
 					when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
-						// fmt::print("Handle GetStorageMetrics\n");
 						StorageMetrics metrics;
 						metrics.bytes = sizeInBytes(self);
 						GetStorageMetricsReply resp;
@@ -503,7 +532,7 @@ private:
 				choose {
 					when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
 						dprint("Unsupported SplitRangeRequest\n");
-						req.reply.sendError(unsupported_operation());
+						req.reply.sendError(broken_promise());
 					}
 					when(StorageQueuingMetricsRequest req = waitNext(ssi.getQueuingMetrics.getFuture())) {
 						self->actors_.add(processStorageQueuingMetricsRequest(req));

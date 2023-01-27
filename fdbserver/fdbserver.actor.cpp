@@ -45,6 +45,7 @@
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
 #include "fdbrpc/WellKnownEndpoints.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/IPAllowList.h"
@@ -363,7 +364,7 @@ ACTOR void failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simula
 	wait(trigger);
 	if (enableFailures) {
 		printf("Killing machine: %s at %f\n", m->address.toString().c_str(), now());
-		g_simulator->killProcess(m, ISimulator::KillInstantly);
+		g_simulator->killProcess(m, ISimulator::KillType::KillInstantly);
 	}
 }
 
@@ -509,9 +510,10 @@ void skipListTest();
 Future<Void> startSystemMonitor(std::string dataFolder,
                                 Optional<Standalone<StringRef>> dcId,
                                 Optional<Standalone<StringRef>> zoneId,
-                                Optional<Standalone<StringRef>> machineId) {
+                                Optional<Standalone<StringRef>> machineId,
+                                Optional<Standalone<StringRef>> datahallId) {
 	initializeSystemMonitorMachineState(SystemMonitorMachineState(
-	    dataFolder, dcId, zoneId, machineId, g_network->getLocalAddress().ip, FDB_VT_VERSION));
+	    dataFolder, dcId, zoneId, machineId, datahallId, g_network->getLocalAddress().ip, FDB_VT_VERSION));
 
 	systemMonitor();
 	return recurring(&systemMonitor, SERVER_KNOBS->SYSTEM_MONITOR_FREQUENCY, TaskPriority::FlushTrace);
@@ -1968,18 +1970,6 @@ int main(int argc, char* argv[]) {
 		g_knobs.initialize(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
 
 		if (!SERVER_KNOBS->ALLOW_DANGEROUS_KNOBS) {
-			if (SERVER_KNOBS->FETCH_USING_STREAMING) {
-				fprintf(stderr,
-				        "ERROR : explicitly setting FETCH_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
-				        "proceed anyways\n");
-				flushAndExit(FDB_EXIT_ERROR);
-			}
-			if (SERVER_KNOBS->PEEK_USING_STREAMING) {
-				fprintf(stderr,
-				        "ERROR : explicitly setting PEEK_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
-				        "proceed anyways\n");
-				flushAndExit(FDB_EXIT_ERROR);
-			}
 			if (SERVER_KNOBS->REMOTE_KV_STORE) {
 				fprintf(stderr,
 				        "ERROR : explicitly setting REMOTE_KV_STORE is dangerous! set ALLOW_DANGEROUS_KNOBS to "
@@ -2279,6 +2269,11 @@ int main(int argc, char* argv[]) {
 				// Disable domain-aware encryption in Redwood until encryption mode from db config is being handled.
 				// TODO(yiwu): clean it up once we cleanup the knob.
 				g_knobs.setKnob("redwood_split_encrypted_pages_by_tenant", KnobValue::create(bool{ false }));
+				g_knobs.setKnob("encrypt_header_auth_token_enabled",
+				                KnobValue::create(ini.GetBoolValue("META", "encryptHeaderAuthTokenEnabled", false)));
+				g_knobs.setKnob("encrypt_header_auth_token_algo",
+				                KnobValue::create((int)ini.GetLongValue(
+				                    "META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO)));
 			}
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator->run();
@@ -2349,14 +2344,16 @@ int main(int argc, char* argv[]) {
 		} else if (role == ServerRole::Test) {
 			TraceEvent("NonSimulationTest").detail("TestFile", opts.testFile);
 			setupRunLoopProfiler();
-			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
+			auto m =
+			    startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId, opts.localities.dataHallId());
 			f = stopAfter(runTests(
 			    opts.connectionFile, TEST_TYPE_FROM_FILE, TEST_HERE, 1, opts.testFile, StringRef(), opts.localities));
 			g_network->run();
 		} else if (role == ServerRole::ConsistencyCheck) {
 			setupRunLoopProfiler();
 
-			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
+			auto m =
+			    startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId, opts.localities.dataHallId());
 			f = stopAfter(runTests(opts.connectionFile,
 			                       TEST_TYPE_CONSISTENCY_CHECK,
 			                       TEST_HERE,
@@ -2367,7 +2364,8 @@ int main(int argc, char* argv[]) {
 			g_network->run();
 		} else if (role == ServerRole::UnitTests) {
 			setupRunLoopProfiler();
-			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
+			auto m =
+			    startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId, opts.localities.dataHallId());
 			f = stopAfter(runTests(opts.connectionFile,
 			                       TEST_TYPE_UNIT_TESTS,
 			                       TEST_HERE,
@@ -2412,7 +2410,8 @@ int main(int argc, char* argv[]) {
 			// create the trace file with the correct process address
 			openTraceFile(
 			    g_network->getLocalAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
-			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
+			auto m =
+			    startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId, opts.localities.dataHallId());
 			TraceEvent(SevDebug, "StartingFlowProcess").detail("FlowProcessName", opts.flowProcessName);
 #if defined(__linux__)
 			prctl(PR_SET_PDEATHSIG, SIGTERM);

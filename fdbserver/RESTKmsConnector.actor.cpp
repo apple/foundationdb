@@ -35,6 +35,7 @@
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/IAsyncFile.h"
+#include "flow/IConnection.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
@@ -47,6 +48,7 @@
 #include <rapidjson/writer.h>
 #include <boost/algorithm/string.hpp>
 #include <cstring>
+#include <stack>
 #include <memory>
 #include <queue>
 #include <sstream>
@@ -66,8 +68,8 @@ const char* ERROR_TAG = "error";
 const char* ERROR_MSG_TAG = "errMsg";
 const char* ERROR_CODE_TAG = "errCode";
 const char* KMS_URLS_TAG = "kms_urls";
-const char* QUERY_MODE_TAG = "query_mode";
 const char* REFRESH_KMS_URLS_TAG = "refresh_kms_urls";
+const char* REQUEST_VERSION_TAG = "version";
 const char* VALIDATION_TOKENS_TAG = "validation_tokens";
 const char* VALIDATION_TOKEN_NAME_TAG = "token_name";
 const char* VALIDATION_TOKEN_VALUE_TAG = "token_value";
@@ -81,6 +83,8 @@ const char* BLOB_METADATA_DETAILS_TAG = "blob_metadata_details";
 const char* BLOB_METADATA_DOMAIN_ID_TAG = "domain_id";
 const char* BLOB_METADATA_BASE_LOCATION_TAG = "base_location";
 const char* BLOB_METADATA_PARTITIONS_TAG = "partitions";
+
+constexpr int INVALID_REQUEST_VERSION = 0;
 
 bool canReplyWith(Error e) {
 	switch (e.code()) {
@@ -285,7 +289,23 @@ ACTOR Future<Void> discoverKmsUrls(Reference<RESTKmsConnectorCtx> ctx, RefreshPe
 	return Void();
 }
 
-void checkResponseForError(Reference<RESTKmsConnectorCtx> ctx, const rapidjson::Document& doc) {
+void checkResponseForError(Reference<RESTKmsConnectorCtx> ctx, const rapidjson::Document& doc, bool isCipher) {
+	// check version tag sanity
+	if (!doc.HasMember(REQUEST_VERSION_TAG) || !doc[REQUEST_VERSION_TAG].IsInt()) {
+		TraceEvent(SevWarn, "KMSResponseMissingVersion", ctx->uid).log();
+		throw operation_failed();
+	} else {
+		const int version = doc[REQUEST_VERSION_TAG].GetInt();
+		const int maxSupportedVersion = isCipher ? SERVER_KNOBS->REST_KMS_CURRENT_CIPHER_REQUEST_VERSION
+		                                         : SERVER_KNOBS->REST_KMS_CURRENT_BLOB_METADATA_REQUEST_VERSION;
+		if (version == INVALID_REQUEST_VERSION || version > maxSupportedVersion) {
+			TraceEvent(SevWarn, "KMSResponseInvalidVersion", ctx->uid)
+			    .detail("Version", version)
+			    .detail("MaxSupportedVersion", maxSupportedVersion);
+			throw operation_failed();
+		}
+	}
+
 	// Check if response has error
 	if (doc.HasMember(ERROR_TAG)) {
 		Standalone<StringRef> errMsgRef;
@@ -305,11 +325,11 @@ void checkResponseForError(Reference<RESTKmsConnectorCtx> ctx, const rapidjson::
 		}
 
 		if (!errCodeRef.empty() || !errMsgRef.empty()) {
-			TraceEvent("KMSErrorResponse", ctx->uid)
+			TraceEvent(SevWarn, "KMSErrorResponse", ctx->uid)
 			    .detail("ErrorMsg", errMsgRef.empty() ? "" : errMsgRef.toString())
 			    .detail("ErrorCode", errCodeRef.empty() ? "" : errCodeRef.toString());
 		} else {
-			TraceEvent("KMSErrorResponseEmptyDetails", ctx->uid).log();
+			TraceEvent(SevWarn, "KMSErrorResponseEmptyDetails", ctx->uid).log();
 		}
 
 		throw encrypt_keys_fetch_failed();
@@ -334,6 +354,7 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 	// Acceptable response payload json format:
 	//
 	// response_json_payload {
+	//   "version" = <version>
 	//   "cipher_key_details" : [
 	//     {
 	//        "base_cipher_id"    : <cipherKeyId>,
@@ -363,7 +384,7 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 	rapidjson::Document doc;
 	doc.Parse(resp->content.c_str());
 
-	checkResponseForError(ctx, doc);
+	checkResponseForError(ctx, doc, true);
 
 	Standalone<VectorRef<EncryptCipherKeyDetailsRef>> result;
 
@@ -422,6 +443,7 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 	// (baseLocation and partitions follow the same properties as described in BlobMetadataUtils.h)
 	//
 	// response_json_payload {
+	//   "version" = <version>
 	//   "blob_metadata_details" : [
 	//     {
 	//        "domain_id" : <domainId>,
@@ -454,7 +476,7 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 	rapidjson::Document doc;
 	doc.Parse(resp->content.c_str());
 
-	checkResponseForError(ctx, doc);
+	checkResponseForError(ctx, doc, false);
 
 	Standalone<VectorRef<BlobMetadataDetailsRef>> result;
 
@@ -494,7 +516,7 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 		// just do extra memory copy for simplicity here
 		Standalone<VectorRef<StringRef>> partitions;
 		if (isPartitionsPresent) {
-			for (const auto& partition : doc[BLOB_METADATA_PARTITIONS_TAG].GetArray()) {
+			for (const auto& partition : detail[BLOB_METADATA_PARTITIONS_TAG].GetArray()) {
 				if (!partition.IsString()) {
 					TraceEvent("ParseBlobMetadataResponseFailurePartitionNotString", ctx->uid)
 					    .detail("Type", partition.GetType());
@@ -522,13 +544,12 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 	return result;
 }
 
-void addQueryModeSection(Reference<RESTKmsConnectorCtx> ctx, rapidjson::Document& doc, const char* mode) {
-	rapidjson::Value key(QUERY_MODE_TAG, doc.GetAllocator());
-	rapidjson::Value queryMode;
-	queryMode.SetString(mode, doc.GetAllocator());
+void addVersionToDoc(rapidjson::Document& doc, const int requestVersion) {
+	rapidjson::Value version;
+	version.SetInt(requestVersion);
 
-	// Append 'query_mode' object to the parent document
-	doc.AddMember(key, queryMode, doc.GetAllocator());
+	rapidjson::Value versionKey(REQUEST_VERSION_TAG, doc.GetAllocator());
+	doc.AddMember(versionKey, version, doc.GetAllocator());
 }
 
 void addLatestDomainDetailsToDoc(rapidjson::Document& doc,
@@ -608,7 +629,7 @@ StringRef getEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 	// Acceptable request payload json format:
 	//
 	// request_json_payload {
-	//   "query_mode": "lookupByKeyId" / "lookupByDomainId"
+	//   "version" = <version>
 	//   "cipher_key_details" = [
 	//     {
 	//        "base_cipher_id"      : <cipherKeyId>
@@ -633,6 +654,9 @@ StringRef getEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 
 	rapidjson::Document doc;
 	doc.SetObject();
+
+	// Append 'request version'
+	addVersionToDoc(doc, SERVER_KNOBS->REST_KMS_CURRENT_BLOB_METADATA_REQUEST_VERSION);
 
 	// Append 'cipher_key_details' as json array
 	rapidjson::Value keyIdDetails(rapidjson::kArrayType);
@@ -783,7 +807,7 @@ StringRef getEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ct
 	// Acceptable request payload json format:
 	//
 	// request_json_payload {
-	//   "query_mode": "lookupByKeyId" / "lookupByDomainId"
+	//   "version" = <version>
 	//   "cipher_key_details" = [
 	//     {
 	//        "encrypt_domain_id"   : <domainId>
@@ -807,6 +831,9 @@ StringRef getEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ct
 
 	rapidjson::Document doc;
 	doc.SetObject();
+
+	// Append 'request version'
+	addVersionToDoc(doc, SERVER_KNOBS->REST_KMS_CURRENT_CIPHER_REQUEST_VERSION);
 
 	// Append 'cipher_key_details' as json array
 	addLatestDomainDetailsToDoc(doc, CIPHER_KEY_DETAILS_TAG, ENCRYPT_DOMAIN_ID_TAG, req.encryptDomainIds);
@@ -862,6 +889,7 @@ StringRef getBlobMetadataRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 	// Acceptable request payload json format:
 	//
 	// request_json_payload {
+	//   "version" = <version>
 	//   "blob_metadata_details" = [
 	//     {
 	//        "domain_id"   : <domainId>
@@ -885,6 +913,9 @@ StringRef getBlobMetadataRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 
 	rapidjson::Document doc;
 	doc.SetObject();
+
+	// Append 'request version'
+	addVersionToDoc(doc, SERVER_KNOBS->REST_KMS_CURRENT_BLOB_METADATA_REQUEST_VERSION);
 
 	// Append 'blob_metadata_details' as json array
 	addLatestDomainDetailsToDoc(doc, BLOB_METADATA_DETAILS_TAG, BLOB_METADATA_DOMAIN_ID_TAG, req.domainIds);
@@ -1263,7 +1294,10 @@ void getFakeEncryptCipherResponse(StringRef jsonReqRef,
 	rapidjson::Document resDoc;
 	resDoc.SetObject();
 
+	ASSERT(reqDoc.HasMember(REQUEST_VERSION_TAG) && reqDoc[REQUEST_VERSION_TAG].IsInt());
 	ASSERT(reqDoc.HasMember(CIPHER_KEY_DETAILS_TAG) && reqDoc[CIPHER_KEY_DETAILS_TAG].IsArray());
+
+	addVersionToDoc(resDoc, reqDoc[REQUEST_VERSION_TAG].GetInt());
 
 	rapidjson::Value cipherKeyDetails(rapidjson::kArrayType);
 	for (const auto& detail : reqDoc[CIPHER_KEY_DETAILS_TAG].GetArray()) {
@@ -1317,7 +1351,10 @@ void getFakeBlobMetadataResponse(StringRef jsonReqRef,
 	rapidjson::Document resDoc;
 	resDoc.SetObject();
 
+	ASSERT(reqDoc.HasMember(REQUEST_VERSION_TAG) && reqDoc[REQUEST_VERSION_TAG].IsInt());
 	ASSERT(reqDoc.HasMember(BLOB_METADATA_DETAILS_TAG) && reqDoc[BLOB_METADATA_DETAILS_TAG].IsArray());
+
+	addVersionToDoc(resDoc, reqDoc[REQUEST_VERSION_TAG].GetInt());
 
 	rapidjson::Value blobMetadataDetails(rapidjson::kArrayType);
 	for (const auto& detail : reqDoc[BLOB_METADATA_DETAILS_TAG].GetArray()) {
@@ -1473,6 +1510,56 @@ void testGetBlobMetadataRequestBody(Reference<RESTKmsConnectorCtx> ctx) {
 	}
 }
 
+void testMissingOrInvalidVersion(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
+	rapidjson::Document doc;
+	doc.SetObject();
+
+	rapidjson::Value cDetails(rapidjson::kArrayType);
+	rapidjson::Value detail(rapidjson::kObjectType);
+	rapidjson::Value key(isCipher ? BASE_CIPHER_ID_TAG : BLOB_METADATA_DOMAIN_ID_TAG, doc.GetAllocator());
+	rapidjson::Value id;
+	id.SetUint(12345);
+	detail.AddMember(key, id, doc.GetAllocator());
+	cDetails.PushBack(detail, doc.GetAllocator());
+	key.SetString(isCipher ? CIPHER_KEY_DETAILS_TAG : BLOB_METADATA_DETAILS_TAG, doc.GetAllocator());
+	doc.AddMember(key, cDetails, doc.GetAllocator());
+
+	rapidjson::Value versionKey(REQUEST_VERSION_TAG, doc.GetAllocator());
+	rapidjson::Value versionValue;
+	int version = INVALID_REQUEST_VERSION;
+	if (deterministicRandom()->coinflip()) {
+		if (deterministicRandom()->coinflip()) {
+			version = -7;
+		} else {
+			version = (isCipher ? SERVER_KNOBS->REST_KMS_CURRENT_CIPHER_REQUEST_VERSION
+			                    : SERVER_KNOBS->REST_KMS_CURRENT_BLOB_METADATA_REQUEST_VERSION) +
+			          10;
+		}
+	} else {
+		// set to invalid_version
+	}
+	versionValue.SetInt(version);
+	doc.AddMember(versionKey, versionValue, doc.GetAllocator());
+
+	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
+	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
+	rapidjson::StringBuffer sb;
+	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
+	doc.Accept(writer);
+	httpResp->content.resize(sb.GetSize(), '\0');
+	memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
+
+	try {
+		if (isCipher) {
+			parseEncryptCipherResponse(ctx, httpResp);
+		} else {
+			parseBlobMetadataResponse(ctx, httpResp);
+		}
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_operation_failed);
+	}
+}
+
 void testMissingDetailsTag(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 	rapidjson::Document doc;
 	doc.SetObject();
@@ -1565,6 +1652,8 @@ void testMalformedDetailObj(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 void testKMSErrorResponse(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 	rapidjson::Document doc;
 	doc.SetObject();
+
+	addVersionToDoc(doc, 1);
 
 	// Construct fake response, it should get ignored anyways
 	rapidjson::Value cDetails(rapidjson::kArrayType);
@@ -1687,6 +1776,7 @@ TEST_CASE("/KmsConnector/REST/ParseEncryptCipherResponse") {
 	// initialize cipher key used for testing
 	deterministicRandom()->randomBytes(&BASE_CIPHER_KEY_TEST[0], 32);
 
+	testMissingOrInvalidVersion(ctx, true);
 	testMissingDetailsTag(ctx, true);
 	testMalformedDetails(ctx, true);
 	testMalformedDetailObj(ctx, true);
@@ -1698,6 +1788,7 @@ TEST_CASE("/KmsConnector/REST/ParseBlobMetadataResponse") {
 	state Reference<RESTKmsConnectorCtx> ctx = makeReference<RESTKmsConnectorCtx>();
 	state Arena arena;
 
+	testMissingOrInvalidVersion(ctx, true);
 	testMissingDetailsTag(ctx, false);
 	testMalformedDetails(ctx, false);
 	testMalformedDetailObj(ctx, true);
