@@ -475,6 +475,33 @@ struct MoveInShard {
 	bool isDataTransferred() const { return meta->getPhase() >= MoveInPhase::ApplyingUpdates; }
 	bool isDataAndCFTransferred() const { throw not_implemented(); }
 
+	KeyRangeRef getAffectedRange(const MutationRef& mutation) const {
+		ASSERT(meta != nullptr);
+		KeyRangeRef res;
+		if (mutation.type == mutation.ClearRange) {
+			const KeyRangeRef mr(mutation.param1, mutation.param2);
+			for (const auto& range : meta->ranges) {
+				if (range.intersects(mr)) {
+					ASSERT(range.contains(mr));
+					res = range;
+					break;
+				}
+			}
+			ASSERT(false);
+			// ASSERT(meta->range.begin <= mutation.param1 && mutation.param2 <= meta->range.end);
+		} else if (isSingleKeyMutation((MutationRef::Type)mutation.type)) {
+			// ASSERT(meta->range.contains(mutation.param1));
+			for (const auto& range : meta->ranges) {
+				if (range.contains(mutation.param1)) {
+					res = range;
+					break;
+				}
+			}
+			ASSERT(false);
+		}
+		return res;
+	}
+
 	std::string toString() const {
 		if (meta != nullptr) {
 			return meta->toString();
@@ -705,7 +732,7 @@ public:
 		       (moveInShard && moveInShard->fetchComplete.isSet());
 	}
 
-	const char* debugDescribeState() const {
+	std::string debugDescribeState() const {
 		if (notAssigned()) {
 			return "NotAssigned";
 		} else if (adding && !adding->isDataAndCFTransferred()) {
@@ -2418,8 +2445,8 @@ std::shared_ptr<MoveInShard> StorageServer::getMoveInShard(const UID& dataMoveId
 		}
 	}
 	const UID id = deterministicRandom()->randomUniqueID();
-	std::shared_ptr<MoveInShard> shard = std::make_shared<MoveInShard>(this, id, dataMoveId, version);
-	shard->meta->ranges.push_back(range);
+	std::shared_ptr<MoveInShard> shard = std::make_shared<MoveInShard>(this, id, dataMoveId, range, version);
+	// shard->meta->ranges.push_back(range);
 	moveInShards.emplace(id, shard);
 	return shard;
 }
@@ -8071,13 +8098,14 @@ MoveInShard::MoveInShard(StorageServer* server,
                          KeyRange range,
                          const Version version,
                          MoveInPhase state)
-  : meta(std::make_shared<MoveInShardMetaData>(id, dataMoveId, range, version, state)), server(server),
+  : meta(std::make_shared<MoveInShardMetaData>(id, dataMoveId, std::vector<KeyRange>(), version, state)), server(server),
     updates(std::make_shared<MoveInUpdates>(id, version, server, server->storage.getKeyValueStore())) {
 	if (state != MoveInPhase::Pending) {
 		fetchClient = fetchShard(server, this);
 	} else {
 		fetchClient = Void();
 	}
+	// meta->ranges.push_back(range);
 }
 
 MoveInShard::MoveInShard(StorageServer* server,
@@ -8105,10 +8133,11 @@ MoveInShard::MoveInShard(StorageServer* server, MoveInShardMetaData meta)
 
 void MoveInShard::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
 	server->counters.logicalBytesMoveInOverhead += mutation.expectedSize();
+	const KeyRangeRef range = this->getAffectedRange(mutation);
 	if (mutation.type == mutation.ClearRange) {
-		// ASSERT(meta->range.begin <= mutation.param1 && mutation.param2 <= meta->range.end);
+		ASSERT(range.begin <= mutation.param1 && mutation.param2 <= range.end);
 	} else if (isSingleKeyMutation((MutationRef::Type)mutation.type)) {
-		// ASSERT(meta->range.contains(mutation.param1));
+		ASSERT(range.contains(mutation.param1));
 	}
 
 	if (this->getPhase() < MoveInPhase::ReadWritePending && version > this->meta->highWatermark) {
@@ -8130,14 +8159,15 @@ void MoveInShard::addMutation(Version version, bool fromFetch, MutationRef const
 
 	} else if (getPhase() == MoveInPhase::ReadWritePending || getPhase() == MoveInPhase::Complete) {
 		// updates.addMutation(version, fromFetch, mutation);
-		server->addMutation(version, fromFetch, mutation, meta->range, server->updateEagerReads);
+		server->addMutation(version, fromFetch, mutation, range, server->updateEagerReads);
 	}
 }
 
-AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys)
-  : keys(keys), server(server), transferredVersion(invalidVersion), fetchVersion(invalidVersion), phase(WaitPrevious) {
-	fetchClient = fetchKeys(server, this);
-}
+// AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys)
+//   : keys(keys), server(server), transferredVersion(invalidVersion), fetchVersion(invalidVersion), phase(WaitPrevious)
+//   {
+// 	fetchClient = fetchKeys(server, this);
+// }
 
 // void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
 // 	ASSERT((void*)this);
