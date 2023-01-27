@@ -386,7 +386,7 @@ Optional<StringRef> parseField(Arena& arena,
 					if (decodedString.present()) {
 						vector[i] = decodedString.get();
 					} else {
-						CODE_PROBE(true, "Base64 token field has failed to be parsed", probe::decoration::rare);
+						CODE_PROBE(true, "Base64 token field has failed to be parsed");
 						return StringRef(arena,
 						                 fmt::format("Failed to base64-decode {}th element of '{}'", i + 1, fieldName));
 					}

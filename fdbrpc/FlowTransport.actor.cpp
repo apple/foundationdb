@@ -49,9 +49,14 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/WatchFile.actor.h"
+#include "flow/IConnection.h"
 #define XXH_INLINE_ALL
 #include "flow/xxhash.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+void removeCachedDNS(const std::string& host, const std::string& service) {
+	INetworkConnections::net()->removeCachedDNS(host, service);
+}
 
 namespace {
 
@@ -321,7 +326,6 @@ public:
 	HealthMonitor healthMonitor;
 	std::set<NetworkAddress> orderedAddresses;
 	Reference<AsyncVar<bool>> degraded;
-	bool warnAlwaysForLargePacket;
 
 	EndpointMap endpoints;
 	EndpointNotFoundReceiver endpointNotFoundReceiver{ endpoints };
@@ -367,7 +371,8 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 				peer->lastLoggedTime = peer->lastConnectTime;
 			}
 
-			if (peer && peer->pingLatencies.getPopulationSize() >= 10) {
+			if (peer && (peer->pingLatencies.getPopulationSize() >= 10 || peer->connectFailedCount > 0 ||
+			             peer->timeoutCount > 0)) {
 				TraceEvent("PingLatency")
 				    .detail("Elapsed", now() - peer->lastLoggedTime)
 				    .detail("PeerAddr", lastAddress)
@@ -408,8 +413,8 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 }
 
 TransportData::TransportData(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList)
-  : warnAlwaysForLargePacket(true), endpoints(maxWellKnownEndpoints), endpointNotFoundReceiver(endpoints),
-    pingReceiver(endpoints), numIncompatibleConnections(0), lastIncompatibleMessage(0), transportId(transportId),
+  : endpoints(maxWellKnownEndpoints), endpointNotFoundReceiver(endpoints), pingReceiver(endpoints),
+    numIncompatibleConnections(0), lastIncompatibleMessage(0), transportId(transportId),
     allowList(allowList == nullptr ? IPAllowList() : *allowList) {
 	degraded = makeReference<AsyncVar<bool>>(false);
 	pingLogger = pingLatencyLogger(this);
@@ -1211,14 +1216,11 @@ static void scanPackets(TransportData* transport,
 		++transport->countPacketsReceived;
 
 		if (packetLen > FLOW_KNOBS->PACKET_WARNING) {
-			TraceEvent(transport->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "LargePacketReceived")
+			TraceEvent(SevWarn, "LargePacketReceived")
 			    .suppressFor(1.0)
 			    .detail("FromPeer", peerAddress.toString())
 			    .detail("Length", (int)packetLen)
 			    .detail("Token", token);
-
-			if (g_network->isSimulated())
-				transport->warnAlwaysForLargePacket = false;
 		}
 
 		ASSERT(!reader.empty());
@@ -1878,15 +1880,12 @@ static ReliablePacket* sendPacket(TransportData* self,
 		    .detail("Length", (int)len);
 		// throw platform_error();  // FIXME: How to recover from this situation?
 	} else if (len > FLOW_KNOBS->PACKET_WARNING) {
-		TraceEvent(self->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "LargePacketSent")
+		TraceEvent(SevWarn, "LargePacketSent")
 		    .suppressFor(1.0)
 		    .detail("ToPeer", destination.getPrimaryAddress())
 		    .detail("Length", (int)len)
 		    .detail("Token", destination.token)
 		    .backtrace();
-
-		if (g_network->isSimulated())
-			self->warnAlwaysForLargePacket = false;
 	}
 
 #if VALGRIND

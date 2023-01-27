@@ -18,6 +18,10 @@
  * limitations under the License.
  */
 
+#ifdef __unixish__
+#include <fcntl.h>
+#endif
+
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
@@ -43,6 +47,10 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/Trace.h"
+
+#ifdef __unixish__
+#include <fcntl.h>
+#endif // __unixish__
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -477,6 +485,21 @@ Reference<ITransaction> DLTenant::createTransaction() {
 	FdbCApi::FDBTransaction* tr;
 	api->tenantCreateTransaction(tenant, &tr);
 	return Reference<ITransaction>(new DLTransaction(api, tr));
+}
+
+ThreadFuture<int64_t> DLTenant::getId() {
+	if (!api->tenantGetId) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->tenantGetId(tenant);
+
+	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		int64_t res = 0;
+		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &res);
+		ASSERT(!error);
+		return res;
+	});
 }
 
 ThreadFuture<Key> DLTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
@@ -960,6 +983,7 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_tenant_verify_blob_range",
 	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
+	loadClientFunction(&api->tenantGetId, lib, fdbCPath, "fdb_tenant_get_id", headerVersion >= 730);
 	loadClientFunction(&api->tenantDestroy, lib, fdbCPath, "fdb_tenant_destroy", headerVersion >= 710);
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option", headerVersion >= 0);
@@ -1782,6 +1806,10 @@ ThreadFuture<T> MultiVersionTenant::executeOperation(ThreadFuture<T> (ITenant::*
 
 	// Wait for the database to be initialized
 	return abortableFuture(ThreadFuture<T>(Never()), tenantDb.onChange);
+}
+
+ThreadFuture<int64_t> MultiVersionTenant::getId() {
+	return executeOperation(&ITenant::getId);
 }
 
 ThreadFuture<Key> MultiVersionTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
@@ -2728,7 +2756,7 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 
 	return paths;
 }
-#else
+#else // if defined (__unixish__)
 std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
 	if (threadCount > 1) {
 		TraceEvent(SevError, "MultipleClientThreadsUnsupportedOnWindows").log();
@@ -2738,7 +2766,7 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 	paths.push_back({ path, false });
 	return paths;
 }
-#endif
+#endif // if defined (__unixish__)
 
 void MultiVersionApi::disableLocalClient() {
 	MutexHolder holder(lock);

@@ -46,6 +46,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 FDB_DEFINE_BOOLEAN_PARAM(UntrustedMode);

@@ -99,16 +99,13 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             bool& confChange,
                             Version version,
                             Version popVersion,
-                            bool initialCommit);
+                            bool initialCommit,
+                            bool provisionalCommitProxy);
 void applyMetadataMutations(SpanContext const& spanContext,
                             const UID& dbgid,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,
                             IKeyValueStore* txnStateStore);
-
-inline bool isSystemKey(KeyRef key) {
-	return key.size() && key[0] == systemKeys.begin[0];
-}
 
 inline bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 	for (auto const& m : mutations) {

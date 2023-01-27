@@ -23,9 +23,13 @@
 
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobCipher.h"
+#include "fdbclient/CommitTransaction.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Metacluster.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h" // has to be last include
@@ -266,7 +270,9 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
                                                Key removePrefix,
                                                Version version,
                                                Reference<KeyRangeMap<Version>> key_version,
-                                               Database cx) {
+                                               Database cx,
+                                               std::map<int64_t, TenantName>* tenantMap,
+                                               bool provisionalProxy) {
 	try {
 		state uint64_t offset(0);
 		uint64_t protocolVersion = 0;
@@ -289,6 +295,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			throw restore_missing_data();
 
 		state int originalOffset = offset;
+		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 
 		while (consumed < totalBytes) {
 			uint32_t type = 0;
@@ -321,6 +328,20 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 				logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::BACKUP);
 			}
 			ASSERT(!logValue.isEncrypted());
+
+			if (config.tenantMode == TenantMode::REQUIRED && !isSystemKey(logValue.param1)) {
+				// If a tenant is not found for a given mutation then exclude it from the batch
+				int64_t tenantId = TenantAPI::extractTenantIdFromMutation(logValue);
+				ASSERT(tenantMap != nullptr);
+				if (tenantMap->find(tenantId) == tenantMap->end()) {
+					ASSERT(!provisionalProxy);
+					TraceEvent("TenantNotFound").detail("Version", version).detail("TenantId", tenantId);
+					CODE_PROBE(true, "mutation log restore tenant not found");
+					consumed += BackupAgentBase::logHeaderSize + len1 + len2;
+					continue;
+				}
+			}
+
 			MutationRef originalLogValue = logValue;
 
 			if (logValue.type == MutationRef::ClearRange) {
@@ -623,19 +644,21 @@ Future<Void> readCommitted(Database cx,
 	    cx, results, Void(), lock, range, groupBy, Terminator::True, AccessSystemKeys::True, LockAware::True);
 }
 
-ACTOR Future<int> dumpData(Database cx,
-                           PromiseStream<RCGroup> results,
-                           Reference<FlowLock> lock,
-                           Key uid,
-                           Key addPrefix,
-                           Key removePrefix,
-                           PublicRequestStream<CommitTransactionRequest> commit,
-                           NotifiedVersion* committedVersion,
-                           Optional<Version> endVersion,
-                           Key rangeBegin,
-                           PromiseStream<Future<Void>> addActor,
-                           FlowLock* commitLock,
-                           Reference<KeyRangeMap<Version>> keyVersion) {
+ACTOR Future<int> kvMutationLogToTransactions(Database cx,
+                                              PromiseStream<RCGroup> results,
+                                              Reference<FlowLock> lock,
+                                              Key uid,
+                                              Key addPrefix,
+                                              Key removePrefix,
+                                              PublicRequestStream<CommitTransactionRequest> commit,
+                                              NotifiedVersion* committedVersion,
+                                              Optional<Version> endVersion,
+                                              Key rangeBegin,
+                                              PromiseStream<Future<Void>> addActor,
+                                              FlowLock* commitLock,
+                                              Reference<KeyRangeMap<Version>> keyVersion,
+                                              std::map<int64_t, TenantName>* tenantMap,
+                                              bool provisionalProxy) {
 	state Version lastVersion = invalidVersion;
 	state bool endOfStream = false;
 	state int totalBytes = 0;
@@ -662,7 +685,9 @@ ACTOR Future<int> dumpData(Database cx,
 				                          removePrefix,
 				                          group.groupKey,
 				                          keyVersion,
-				                          cx));
+				                          cx,
+				                          tenantMap,
+				                          provisionalProxy));
 				newBeginVersion = group.groupKey + 1;
 				if (mutationSize >= CLIENT_KNOBS->BACKUP_LOG_WRITE_BATCH_MAX_SIZE) {
 					break;
@@ -763,7 +788,9 @@ ACTOR Future<Void> applyMutations(Database cx,
                                   Version* endVersion,
                                   PublicRequestStream<CommitTransactionRequest> commit,
                                   NotifiedVersion* committedVersion,
-                                  Reference<KeyRangeMap<Version>> keyVersion) {
+                                  Reference<KeyRangeMap<Version>> keyVersion,
+                                  std::map<int64_t, TenantName>* tenantMap,
+                                  bool provisionalProxy) {
 	state FlowLock commitLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> error = actorCollection(addActor.getFuture());
@@ -800,19 +827,22 @@ ACTOR Future<Void> applyMutations(Database cx,
 
 			maxBytes = std::max<int>(maxBytes * CLIENT_KNOBS->APPLY_MAX_DECAY_RATE, CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES);
 			for (idx = 0; idx < ranges.size(); ++idx) {
-				int bytes = wait(dumpData(cx,
-				                          results[idx],
-				                          locks[idx],
-				                          uid,
-				                          addPrefix,
-				                          removePrefix,
-				                          commit,
-				                          committedVersion,
-				                          idx == ranges.size() - 1 ? newEndVersion : Optional<Version>(),
-				                          ranges[idx].begin,
-				                          addActor,
-				                          &commitLock,
-				                          keyVersion));
+				int bytes =
+				    wait(kvMutationLogToTransactions(cx,
+				                                     results[idx],
+				                                     locks[idx],
+				                                     uid,
+				                                     addPrefix,
+				                                     removePrefix,
+				                                     commit,
+				                                     committedVersion,
+				                                     idx == ranges.size() - 1 ? newEndVersion : Optional<Version>(),
+				                                     ranges[idx].begin,
+				                                     addActor,
+				                                     &commitLock,
+				                                     keyVersion,
+				                                     tenantMap,
+				                                     provisionalProxy));
 				maxBytes = std::max<int>(CLIENT_KNOBS->APPLY_MAX_INCREASE_FACTOR * bytes, maxBytes);
 				if (error.isError())
 					throw error.getError();

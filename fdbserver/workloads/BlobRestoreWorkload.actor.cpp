@@ -24,6 +24,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -52,6 +53,7 @@ struct BlobRestoreWorkload : TestWorkload {
 		extraDb_ = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
 		setupBlob_ = getOption(options, "setupBlob"_sr, false);
 		performRestore_ = getOption(options, "performRestore"_sr, false);
+		readBatchSize_ = getOption(options, "readBatchSize"_sr, 3000);
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
@@ -71,7 +73,7 @@ struct BlobRestoreWorkload : TestWorkload {
 
 		if (self->performRestore_) {
 			fmt::print("Perform blob restore\n");
-			wait(store(result, self->extraDb_->blobRestore(normalKeys)));
+			wait(store(result, self->extraDb_->blobRestore(normalKeys, {})));
 
 			state std::vector<Future<Void>> futures;
 			futures.push_back(self->runBackupAgent(self));
@@ -97,7 +99,7 @@ struct BlobRestoreWorkload : TestWorkload {
 			if (status.present()) {
 				state BlobRestoreStatus s = status.get();
 				if (s.phase == BlobRestorePhase::DONE) {
-					wait(copyToOriginalDb(cx, self));
+					wait(verify(cx, self));
 					return Void();
 				}
 				// TODO need to define more specific error handling
@@ -106,40 +108,106 @@ struct BlobRestoreWorkload : TestWorkload {
 					return Void();
 				}
 			}
-			wait(delay(1));
+			wait(delay(5)); // delay to avoid busy loop
 		}
 	}
 
-	ACTOR static Future<Void> copyToOriginalDb(Database cx, BlobRestoreWorkload* self) {
-		state RangeResult data;
-
-		// Read data from restored db
-		state Transaction tr1(self->extraDb_->clone());
+	ACTOR static Future<Standalone<VectorRef<KeyValueRef>>> read(Database cx,
+	                                                             KeySelectorRef begin,
+	                                                             BlobRestoreWorkload* self) {
+		state Standalone<VectorRef<KeyValueRef>> data;
+		state Transaction tr(cx);
+		state KeySelectorRef end = firstGreaterOrEqual(normalKeys.end);
+		state Arena arena;
 		loop {
 			try {
-				RangeResult result = wait(tr1.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
-				data = result;
-				break;
-			} catch (Error& e) {
-				wait(tr1.onError(e));
-			}
-		}
-
-		// Write back to original db for Cycle worker load to verify
-		state Transaction tr2(cx);
-		loop {
-			try {
-				tr2.clear(normalKeys);
-				for (auto kv : data) {
-					tr2.set(kv.key, kv.value);
+				GetRangeLimits limits(self->readBatchSize_ - data.size());
+				limits.minRows = 0;
+				RangeResult result = wait(tr.getRange(begin, end, limits, Snapshot::True));
+				for (auto& row : result) {
+					data.push_back_deep(data.arena(), KeyValueRef(row.key, row.value));
 				}
-				wait(tr2.commit());
-				fmt::print("Copied {} rows to origin db\n", data.size());
-				return Void();
+				if (!result.more) {
+					break;
+				}
+				if (data.size() == self->readBatchSize_) {
+					break;
+				}
+				if (result.readThrough.present()) {
+					begin = firstGreaterOrEqual(KeyRef(arena, result.readThrough.get()));
+				} else {
+					begin = firstGreaterThan(KeyRef(arena, result.back().key));
+				}
 			} catch (Error& e) {
-				wait(tr2.onError(e));
+				wait(tr.onError(e));
 			}
 		}
+		return data;
+	}
+
+	static bool compare(VectorRef<KeyValueRef> src, VectorRef<KeyValueRef> dest) {
+		if (src.size() != dest.size()) {
+			fmt::print("Size mismatch src {} dest {}\n", src.size(), dest.size());
+			int i = 0;
+			for (; i < src.size() && i < dest.size(); ++i) {
+				if (src[i].key != dest[i].key || src[i].value != dest[i].value) {
+					fmt::print("First mismatch row at {}\n", i);
+					fmt::print("  src {} = {}\n", src[i].key.printable(), src[i].value.printable());
+					fmt::print("  dest {} = {}\n", dest[i].key.printable(), dest[i].value.printable());
+					break;
+				}
+			}
+
+			TraceEvent(SevError, "TestFailure")
+			    .detail("Reason", "Size Mismatch")
+			    .detail("Src", dest.size())
+			    .detail("Dest", src.size());
+			return false;
+		}
+
+		for (int i = 0; i < src.size(); ++i) {
+			if (src[i].key != dest[i].key) {
+				fmt::print("Key mismatch at {} src {} dest {}\n", i, src[i].key.printable(), dest[i].key.printable());
+				TraceEvent(SevError, "TestFailure")
+				    .detail("Reason", "Key Mismatch")
+				    .detail("Index", i)
+				    .detail("SrcKey", src[i].key.printable())
+				    .detail("DestKey", dest[i].key.printable());
+				return false;
+			}
+			if (src[i].value != dest[i].value) {
+				fmt::print("Value mismatch at {}\n", i);
+				TraceEvent(SevError, "TestFailure")
+				    .detail("Reason", "Key Mismatch")
+				    .detail("Index", i)
+				    .detail("SrcValue", src[i].value.printable())
+				    .detail("DestValue", dest[i].value.printable());
+				return false;
+			}
+		}
+		fmt::print("Restore src({} rows) and dest({} rows) are consistent\n", src.size(), dest.size());
+		return true;
+	}
+
+	ACTOR static Future<Void> verify(Database cx, BlobRestoreWorkload* self) {
+		state Arena arena;
+		state KeySelectorRef srcBegin = firstGreaterOrEqual(normalKeys.begin);
+		state KeySelectorRef destBegin = firstGreaterOrEqual(normalKeys.begin);
+		loop {
+			// restore src. data before restore
+			state Standalone<VectorRef<KeyValueRef>> src = wait(read(cx, srcBegin, self));
+			// restore dest. data after restore
+			state Standalone<VectorRef<KeyValueRef>> dest = wait(read(self->extraDb_, destBegin, self));
+			if (src.size() == 0 && dest.size() == 0) {
+				break;
+			}
+			if (!compare(src, dest)) {
+				break;
+			}
+			srcBegin = firstGreaterThan(KeyRef(arena, src.back().key));
+			destBegin = firstGreaterThan(KeyRef(arena, dest.back().key));
+		}
+		return Void();
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
@@ -151,6 +219,7 @@ private:
 	Database extraDb_;
 	bool setupBlob_;
 	bool performRestore_;
+	int readBatchSize_;
 };
 
 WorkloadFactory<BlobRestoreWorkload> BlobRestoreWorkloadFactory;
