@@ -227,7 +227,7 @@ typedef enum { FDB_BG_MUTATION_TYPE_SET_VALUE = 0, FDB_BG_MUTATION_TYPE_CLEAR_RA
 
 #pragma pack(push, 4)
 typedef struct bgmutation {
-  /* FDBBGMutationType */ uint8_t type;
+	/* FDBBGMutationType */ uint8_t type;
 	int64_t version;
 	const uint8_t* param1_ptr;
 	int param1_length;
