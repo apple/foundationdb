@@ -545,6 +545,11 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		if (!self->cancelWorkersAtDuration)
 			self->clients = clients; // Don't cancel them until check()
 
+		// If this workload is used during a restore we want to ensure we don't start reading/writing during the restore
+		// Otherwise this could lead to tenant_not_found errors in certain cases
+		if (self->exitEarly && now() - startTime > self->testDuration) {
+			return Void();
+		}
 		wait(self->cancelWorkersAtDuration ? timeout(waitForAll(clients), self->testDuration, Void())
 		                                   : delay(self->testDuration));
 		return Void();

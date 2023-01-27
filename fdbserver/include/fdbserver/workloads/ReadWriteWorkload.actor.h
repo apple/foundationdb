@@ -68,6 +68,7 @@ struct ReadWriteCommon : KVWorkload {
 	double alpha; // probability for run TransactionA type
 	// transaction setting
 	bool useRYW;
+	bool exitEarly;
 
 	// states of metric
 	Int64MetricHandle totalReadsMetric;
@@ -107,6 +108,7 @@ struct ReadWriteCommon : KVWorkload {
 		readsPerTransactionB = getOption(options, "readsPerTransactionB"_sr, 1);
 		writesPerTransactionB = getOption(options, "writesPerTransactionB"_sr, 9);
 		alpha = getOption(options, "alpha"_sr, 0.1);
+		exitEarly = getOption(options, "exitEarly"_sr, false);
 
 		valueString = std::string(maxValueBytes, '.');
 		if (nodePrefix > 0) {
