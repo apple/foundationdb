@@ -400,7 +400,7 @@ private:
 			}
 		}
 		Optional<RestorableFileSet> restoreSet =
-		    wait(bc->getRestoreSet(maxLogVersion, self->db_, ranges, OnlyApplyMutationLogs::True, minLogVersion));
+		    wait(bc->getRestoreSet(maxLogVersion, ranges, OnlyApplyMutationLogs::True, minLogVersion));
 		if (!restoreSet.present()) {
 			TraceEvent("InvalidMutationLogs")
 			    .detail("MinLogVersion", minLogVersion)

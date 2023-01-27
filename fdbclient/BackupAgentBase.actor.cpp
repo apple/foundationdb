@@ -32,6 +32,7 @@
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 FDB_DEFINE_BOOLEAN_PARAM(LockDB);
@@ -335,7 +336,9 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 				ASSERT(tenantMap != nullptr);
 				if (tenantMap->find(tenantId) == tenantMap->end()) {
 					ASSERT(!provisionalProxy);
-					TraceEvent("TenantNotFound").detail("Version", version).detail("TenantId", tenantId);
+					TraceEvent(SevWarnAlways, "MutationLogRestoreTenantNotFound")
+					    .detail("Version", version)
+					    .detail("TenantId", tenantId);
 					CODE_PROBE(true, "mutation log restore tenant not found");
 					consumed += BackupAgentBase::logHeaderSize + len1 + len2;
 					continue;
