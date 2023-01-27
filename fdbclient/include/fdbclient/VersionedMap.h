@@ -350,6 +350,41 @@ void removeRoot(Reference<PTree<T>>& p, Version at) {
 	}
 }
 
+// changes p to point to a PTree with finger removed. p must be the root of the
+// tree associated with finger.
+//
+// Invalidates finger.
+template <class T>
+void removeFinger(Reference<PTree<T>>& p, Version at, PTreeFinger<T> finger) {
+	ASSERT_GT(finger.size(), 0);
+	// Start at the end of the finger, remove, and propagate copies up along the
+	// search path (finger) as needed.
+	auto node = Reference<PTree<T>>::addRef(const_cast<PTree<T>*>(finger.back()));
+	auto* before = node.getPtr();
+	removeRoot(node, at);
+	for (;;) {
+		if (before == node.getPtr()) {
+			// Done propagating copies
+			return;
+		}
+		if (finger.size() == 1) {
+			// Check we passed the correct root for this finger
+			ASSERT(p.getPtr() == before);
+			// Propagate copy to root
+			p = node;
+			return;
+		}
+		finger.pop_back();
+		auto parent = Reference<PTree<T>>::addRef(const_cast<PTree<T>*>(finger.back()));
+		bool isLeftChild = parent->left(at).getPtr() == before;
+		bool isRightChild = parent->right(at).getPtr() == before;
+		ASSERT(isLeftChild || isRightChild); // Corrupt finger?
+		// Prepare for next iteration
+		before = parent.getPtr();
+		node = update(parent, isRightChild, node, at);
+	}
+}
+
 // changes p to point to a PTree with x removed
 template <class T, class X>
 void remove(Reference<PTree<T>>& p, Version at, const X& x) {
@@ -744,9 +779,8 @@ public:
 		PTreeImpl::remove(roots.back().second, latestVersion, key);
 	}
 	void erase(iterator const& item) { // iterator must be in latest version!
-		// SOMEDAY: Optimize to use item.finger and avoid repeated search
-		K key = item.key();
-		erase(key);
+		ASSERT_EQ(item.at, latestVersion);
+		PTreeImpl::removeFinger(roots.back().second, latestVersion, item.finger);
 	}
 
 	void printDetail() { PTreeImpl::printTreeDetails(roots.back().second, 0); }
