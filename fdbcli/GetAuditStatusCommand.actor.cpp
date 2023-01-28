@@ -53,7 +53,7 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 		AuditStorageState res = wait(getAuditState(cx, type, id));
 		printf("Audit result is:\n%s", res.toString().c_str());
 	} else if (tokencmp(tokens[2], "recent")) {
-		int count = 5;
+		int count = CLIENT_KNOBS->TOO_MANY;
 		if (tokens.size() == 4) {
 			count = std::stoi(tokens[3].toString());
 		}
