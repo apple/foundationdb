@@ -21,6 +21,7 @@
 #ifndef __ASYNC_TASK_THREAD_H__
 #define __ASYNC_TASK_THREAD_H__
 
+#include <condition_variable>
 #include <thread>
 #include <memory>
 #include <mutex>

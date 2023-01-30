@@ -26,6 +26,7 @@
 #include "flow/UnitTest.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "flow/Platform.h"
+#include "flow/IConnection.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace {

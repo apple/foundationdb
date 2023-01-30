@@ -29,6 +29,7 @@
 #include <string_view>
 #include <signal.h>
 #include <sys/wait.h>
+#include <thread>
 #include <type_traits>
 #include "flow/Arena.h"
 #include "flow/Error.h"

@@ -22,11 +22,13 @@
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 #include "flow/Knobs.h"
+#include "flow/IConnection.h"
 #include "fdbclient/IKnobCollection.h"
 #include "flow/network.h"
 #include <functional>
 #include <iomanip>
 #include <memory>
+#include "flow/IUDPSocket.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 

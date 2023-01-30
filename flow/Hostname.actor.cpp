@@ -23,7 +23,7 @@
 #include <regex>
 
 #include "flow/UnitTest.h"
-
+#include "flow/IConnection.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace {
