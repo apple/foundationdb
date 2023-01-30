@@ -348,11 +348,11 @@ private:
 		BackupDescription desc = wait(bc->describeBackup());
 		if (!desc.contiguousLogEnd.present()) {
 			TraceEvent("InvalidMutationLogs").detail("Url", baseUrl);
-			throw restore_missing_data();
+			throw blob_restore_missing_logs();
 		}
 		if (!desc.minLogBegin.present()) {
 			TraceEvent("InvalidMutationLogs").detail("Url", baseUrl);
-			throw restore_missing_data();
+			throw blob_restore_missing_logs();
 		}
 		state Version minLogVersion = desc.minLogBegin.get();
 		state Version maxLogVersion = desc.contiguousLogEnd.get() - 1;
@@ -369,7 +369,7 @@ private:
 			TraceEvent("MissingMutationLogs")
 			    .detail("MinLogVersion", minLogVersion)
 			    .detail("TargetVersion", maxLogVersion);
-			throw restore_missing_data();
+			throw blob_restore_missing_logs();
 		}
 		if (targetVersion > maxLogVersion) {
 			TraceEvent("SkipTargetVersion")
@@ -388,7 +388,7 @@ private:
 				    .detail("MinLogVersion", minLogVersion)
 				    .detail("MaxLogVersion", maxLogVersion)
 				    .detail("TargetVersion", targetVersion);
-				throw restore_missing_data();
+				throw blob_restore_corrupted_logs();
 			}
 			// no need to apply mutation logs if granule is already on that version
 			if (granule.version < targetVersion) {
@@ -405,7 +405,7 @@ private:
 			TraceEvent("InvalidMutationLogs")
 			    .detail("MinLogVersion", minLogVersion)
 			    .detail("MaxLogVersion", maxLogVersion);
-			throw restore_missing_data();
+			throw blob_restore_corrupted_logs();
 		}
 		std::string tagName = "blobrestore-" + self->interf_.id().shortString();
 		TraceEvent("ApplyMutationLogs", self->interf_.id())
