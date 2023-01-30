@@ -5007,6 +5007,8 @@ ACTOR Future<Void> handleFlushGranuleReq(Reference<BlobWorkerData> self, FlushGr
 		return Void();
 	}
 
+	state Promise<Void> granuleCancelled = metadata->cancelled;
+
 	try {
 		if (BW_DEBUG) {
 			fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}\n",
@@ -5015,7 +5017,6 @@ ACTOR Future<Void> handleFlushGranuleReq(Reference<BlobWorkerData> self, FlushGr
 			           req.granuleRange.end.printable(),
 			           req.flushVersion);
 		}
-		state Promise<Void> granuleCancelled = metadata->cancelled;
 		choose {
 			when(wait(metadata->readable.getFuture())) {}
 			when(wait(granuleCancelled.getFuture())) {
