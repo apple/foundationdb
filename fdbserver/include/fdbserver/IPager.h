@@ -104,14 +104,13 @@ enum EncodingType : uint8_t {
 	MAX_ENCODING_TYPE = 4
 };
 
+static constexpr std::array EncryptedEncodingTypes = { AESEncryption, AESEncryptionWithAuth, XOREncryption_TestOnly };
 inline bool isEncodingTypeEncrypted(EncodingType encoding) {
-	constexpr std::array encryptedEncodingTypes = { AESEncryption, AESEncryptionWithAuth, XOREncryption_TestOnly };
-	return std::count(encryptedEncodingTypes.begin(), encryptedEncodingTypes.end(), encoding) > 0;
+	return std::count(EncryptedEncodingTypes.begin(), EncryptedEncodingTypes.end(), encoding) > 0;
 }
 
 inline bool isEncodingTypeAESEncrypted(EncodingType encoding) {
-	constexpr std::array aesEncryptedEncodingTypes = { AESEncryption, AESEncryptionWithAuth };
-	return std::count(aesEncryptedEncodingTypes.begin(), aesEncryptedEncodingTypes.end(), encoding) > 0;
+	return encoding == AESEncryption || encoding == AESEncryptionWithAuth;
 }
 
 enum PageType : uint8_t {

@@ -2713,7 +2713,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 
 	state Optional<TenantName> defaultTenant;
 	state Standalone<VectorRef<TenantNameRef>> tenantsToCreate;
-	state TenantMode tenantMode = TenantMode::DISABLED;
+	state TenantMode tenantMode = TenantMode::END;
 
 	try {
 		// systemActors.push_back( startSystemMonitor(dataFolder) );
@@ -2744,6 +2744,8 @@ ACTOR void setupAndRun(std::string dataFolder,
 			                     &tenantMode);
 			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
 		}
+		// setupSimulatedSystem/restartSimulatedSystem should fill tenantMode with valid value.
+		ASSERT(tenantMode < TenantMode::END);
 		// restartSimulatedSystem can adjust some testConfig params related to tenants
 		// so set/overwrite those options if necessary here
 		if (rebooting && testConfig.tenantModes.size()) {

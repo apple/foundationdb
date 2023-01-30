@@ -18,7 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbclient/FDBTypes.h"
+#include "fdbclient/TenantManagement.actor.h"
+#include "fdbrpc/TenantInfo.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_IPAGEENCRYPTIONKEYPROVIDER_ACTOR_G_H)
 #define FDBSERVER_IPAGEENCRYPTIONKEYPROVIDER_ACTOR_G_H
 #include "fdbserver/IPageEncryptionKeyProvider.actor.g.h"
@@ -343,10 +344,8 @@ public:
 		if (key.size() < TenantAPI::PREFIX_SIZE) {
 			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
 		}
-		StringRef prefix = key.substr(0, TenantAPI::PREFIX_SIZE);
-		int64_t tenantId = TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
-		// Tenant id must be non-negative.
-		if (tenantId < 0) {
+		int64_t tenantId = TenantAPI::extractTenantIdFromKeyRef(key);
+		if (tenantId == TenantInfo::INVALID_TENANT) {
 			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
 		}
 		return { tenantId, TenantAPI::PREFIX_SIZE };

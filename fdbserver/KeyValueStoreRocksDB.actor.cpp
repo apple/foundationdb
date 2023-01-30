@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
 #include <rocksdb/c.h>
@@ -2265,6 +2266,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			throw internal_error();
 		}
 		return Void();
+	}
+
+	Future<EncryptionAtRestMode> encryptionMode() override {
+		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
 	}
 
 	DB db = nullptr;

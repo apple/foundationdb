@@ -20,6 +20,7 @@
 
 #ifndef FDBSERVER_IKEYVALUESTORE_H
 #define FDBSERVER_IKEYVALUESTORE_H
+#include "flow/Trace.h"
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -134,9 +135,7 @@ public:
 	virtual Future<Void> init() { return Void(); }
 
 	// Obtain the encryption mode of the storage. The encryption mode needs to match the encryption mode of the cluster.
-	virtual Future<EncryptionAtRestMode> encryptionMode() {
-		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
-	}
+	virtual Future<EncryptionAtRestMode> encryptionMode() = 0;
 
 protected:
 	virtual ~IKeyValueStore() {}
@@ -194,7 +193,7 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 	// Only Redwood support encryption currently.
 	if (encryptionMode.present() && encryptionMode.get().isEncryptionEnabled() &&
 	    storeType != KeyValueStoreType::SSD_REDWOOD_V1) {
-		TraceEvent("KVStoreTypeNotSupportingEncryption")
+		TraceEvent(SevWarn, "KVStoreTypeNotSupportingEncryption")
 		    .detail("KVStoreType", storeType)
 		    .detail("EncryptionMode", encryptionMode);
 		throw encrypt_mode_mismatch();
