@@ -480,8 +480,6 @@ Future<std::vector<std::pair<TenantName, int64_t>>> listTenantIdsTransaction(Tra
                                                                              TenantName end,
                                                                              int limit) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	auto future = TenantMetadata::tenantNameIndex().getRange(tr, begin, end, limit);
 	return fmap([](auto f) -> std::vector<std::pair<TenantName, int64_t>> { return f.results; }, future);
 }
@@ -492,7 +490,10 @@ Future<std::vector<std::pair<TenantName, int64_t>>> listTenantIds(Reference<DB> 
                                                                   TenantName end,
                                                                   int limit) {
 	return runTransaction(
-	    db, [=](Reference<typename DB::TransactionT> tr) { return listTenantIdsTransaction(tr, begin, end, limit); });
+	    db, [=](Reference<typename DB::TransactionT> tr) {
+		    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		    return listTenantIdsTransaction(tr, begin, end, limit);
+	    });
 }
 
 ACTOR template <class Transaction>
@@ -523,7 +524,10 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(Reference
                                                                        TenantName end,
                                                                        int limit) {
 	return runTransaction(
-	    db, [=](Reference<typename DB::TransactionT> tr) { return listTenantsTransaction(tr, begin, end, limit); });
+	    db, [=](Reference<typename DB::TransactionT> tr) {
+		    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		    return listTenantsTransaction(tr, begin, end, limit);
+	    });
 }
 
 ACTOR template <class Transaction>

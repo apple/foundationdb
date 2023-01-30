@@ -202,8 +202,8 @@ private:
 	                                            TenantName beginTenant,
 	                                            TenantName endTenant,
 	                                            std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
-		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants = wait(
-		    TenantAPI::listTenantsTransaction(&ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->TOO_MANY));
+		state std::vector<std::pair<TenantName, int64_t>> tenants = wait(
+		    TenantAPI::listTenantIdsTransaction(&ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->TOO_MANY));
 
 		if (tenants.size() == CLIENT_KNOBS->TOO_MANY) {
 			TraceEvent(SevWarn, "DeleteTenantRangeTooLange")
