@@ -300,8 +300,15 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL,  2 ); if( randomize && BUGGIFY ) TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL = deterministicRandom()->randomInt(1, 10);
 	init( CLIENT_ENABLE_USING_CLUSTER_ID_KEY,     false );
 
-	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,     false );
-	init( SIMULATION_EKP_TENANT_IDS_TO_DROP,        "-1" );
+	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,       false );
+	init( SIMULATION_EKP_TENANT_IDS_TO_DROP,         "-1" );
+	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,       false );
+	init( ENABLE_CONFIGURABLE_ENCRYPTION,           false );
+	init( ENCRYPT_HEADER_FLAGS_VERSION,                 1 );
+	init( ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION,       1 );
+	init( ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION, 1 );
+	init( ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION, 1 );
+
 	// clang-format on
 }
 
