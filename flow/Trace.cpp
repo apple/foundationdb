@@ -93,7 +93,7 @@ struct SuppressionMap {
 
 #define TRACE_BATCH_IMPLICIT_SEVERITY SevInfo
 TraceBatch g_traceBatch;
-std::atomic<trace_clock_t> g_trace_clock{ TRACE_CLOCK_NOW };
+std::atomic<trace_clock_t> g_trace_clock{ TRACE_CLOCK_DEFAULT };
 
 LatestEventCache latestEventCache;
 SuppressionMap suppressedEvents;
@@ -1332,14 +1332,30 @@ bool BaseTraceEvent::isNetworkThread() {
 }
 
 double BaseTraceEvent::getCurrentTime() {
-	if (g_trace_clock.load() == TRACE_CLOCK_NOW) {
+	switch (g_trace_clock.load()) {
+	case TRACE_CLOCK_REALTIME:
+		return timer();
+
+	case TRACE_CLOCK_DEFAULT:
+		// Unless we're simulated, use the real timer for trace events.
+		if (!(g_network && g_network->isSimulated())) {
+			return timer();
+		}
+		// Fallthrough to now() in simulation.
+
+	case TRACE_CLOCK_NOW:
+		// Avoid the problem of accessing the current time from multiple
+		// threads by have non-network threads use a real-time clock.
+		// See: https://github.com/apple/foundationdb/pull/1875
 		if (!isNetworkThread() || !g_network) {
 			return timer_monotonic();
-		} else {
-			return now();
 		}
-	} else {
-		return timer();
+
+		return now();
+
+	default:
+		UNSTOPPABLE_ASSERT(false);
+		return 0;
 	}
 }
 

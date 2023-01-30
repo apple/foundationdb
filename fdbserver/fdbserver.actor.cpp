@@ -707,9 +707,9 @@ static void printUsage(const char* name, bool devhelp) {
 		                 " `net2-threadpool'.");
 		printOptionUsage("--unbufferedout", " Do not buffer stdout and stderr.");
 		printOptionUsage("--bufferedout", " Buffer stdout and stderr.");
-		printOptionUsage("--traceclock CLOCKIMPL",
-		                 " Select clock source for trace files, `now' (default) or"
-		                 " `realtime'.");
+		printOptionUsage("--traceclock [now,realtime]",
+		                 " Select clock source for trace events, defaults to `now' in simulation"
+		                 " and `realtime' otherwise.");
 		printOptionUsage("--num-testers NUM",
 		                 " A multitester will wait for NUM testers before starting"
 		                 " (defaults to 1).");
