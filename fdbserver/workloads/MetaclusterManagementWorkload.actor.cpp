@@ -853,7 +853,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	                                           ClusterName clusterName,
 	                                           DataClusterData clusterData) {
 		state Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
-		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
+		state std::vector<std::pair<TenantName, int64_t>> tenants;
 		state Reference<ReadYourWritesTransaction> tr = clusterData.db->createTransaction();
 
 		loop {
@@ -863,7 +863,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				    store(metaclusterRegistration,
 				          MetaclusterMetadata::metaclusterRegistration().get(clusterData.db.getReference())) &&
 				    store(tenants,
-				          TenantAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, clusterData.tenants.size() + 1)));
+				          TenantAPI::listTenantIdsTransaction(tr, ""_sr, "\xff\xff"_sr, clusterData.tenants.size() + 1)));
 				break;
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(tr->onError(e)));
@@ -878,7 +878,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		}
 
 		ASSERT(tenants.size() == clusterData.tenants.size());
-		for (auto [tenantName, tenantEntry] : tenants) {
+		for (auto [tenantName, tid] : tenants) {
 			ASSERT(clusterData.tenants.count(tenantName));
 			ASSERT(self->createdTenants[tenantName].cluster == clusterName);
 		}
@@ -892,11 +892,11 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		state bool deleteTenants = deterministicRandom()->coinflip();
 
 		if (deleteTenants) {
-			state std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
-			    wait(MetaclusterAPI::listTenants(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6));
+			state std::vector<std::pair<TenantName, int64_t>> tenants =
+			    wait(MetaclusterAPI::listTenantIds(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6));
 
 			state std::vector<Future<Void>> deleteTenantFutures;
-			for (auto [tenantName, tenantMapEntry] : tenants) {
+			for (auto [tenantName, tid] : tenants) {
 				deleteTenantFutures.push_back(MetaclusterAPI::deleteTenant(self->managementDb, tenantName));
 			}
 

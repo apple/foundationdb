@@ -1544,6 +1544,28 @@ Future<Void> deleteTenant(Reference<DB> db, int64_t id) {
 	return Void();
 }
 
+template <class Transaction>
+Future<std::vector<std::pair<TenantName, int64_t>>> listTenantIdsTransaction(Transaction tr,
+                                                                             TenantName begin,
+                                                                             TenantName end,
+                                                                             int limit) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	auto future = ManagementClusterMetadata::tenantMetadata().tenantNameIndex.getRange(tr, begin, end, limit);
+	return fmap([](auto f) -> std::vector<std::pair<TenantName, int64_t>> { return f.results; }, future);
+}
+
+template <class DB>
+Future<std::vector<std::pair<TenantName, int64_t>>> listTenantIds(Reference<DB> db,
+                                                                  TenantName begin,
+                                                                  TenantName end,
+                                                                  int limit) {
+	return runTransaction(
+	    db, [=](Reference<typename DB::TransactionT> tr) {
+		    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		    return listTenantIdsTransaction(tr, begin, end, limit);
+	    });
+}
+
 ACTOR template <class Transaction>
 Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantsTransaction(Transaction tr,
                                                                                   TenantNameRef begin,
