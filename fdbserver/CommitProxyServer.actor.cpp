@@ -1073,9 +1073,6 @@ void assertResolutionStateMutationsSizeConsistent(const std::vector<ResolveTrans
 
 // Return true if a single-key mutation is associated with a valid tenant id or a system key
 bool validTenantAccess(MutationRef m, std::map<int64_t, TenantName> const& tenantMap, Optional<int64_t>& tenantId) {
-	if (isSystemKey(m.param1))
-		return true;
-
 	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 		tenantId = TenantAPI::extractTenantIdFromMutation(m);
 		return tenantMap.count(tenantId.get()) > 0;
@@ -1085,7 +1082,7 @@ bool validTenantAccess(MutationRef m, std::map<int64_t, TenantName> const& tenan
 
 inline bool tenantMapChanging(MutationRef const& mutation) {
 	const KeyRangeRef tenantMapRange = TenantMetadata::tenantMap().subspace;
-	if (mutation.type == MutationRef::SetValue && mutation.param1.startsWith(tenantMapRange.begin)) {
+	if (isSingleKeyMutation((MutationRef::Type)mutation.type) && mutation.param1.startsWith(tenantMapRange.begin)) {
 		return true;
 	} else if (mutation.type == MutationRef::ClearRange &&
 	           tenantMapRange.intersects(KeyRangeRef(mutation.param1, mutation.param2))) {
@@ -1106,9 +1103,9 @@ Error validateAndProcessTenantAccess(VectorRef<MutationRef> mutations,
 	for (auto& mutation : mutations) {
 		Optional<int64_t> tenantId;
 		bool validAccess = true;
-		if (tenantMapChanging(mutation)) {
-			changeTenant = true;
-		} else if (mutation.type == MutationRef::ClearRange) {
+		changeTenant = changeTenant || tenantMapChanging(mutation);
+
+		if (mutation.type == MutationRef::ClearRange) {
 			auto beginTenantId = TenantAPI::extractTenantIdFromKeyRef(mutation.param1);
 			auto endTenantId = TenantAPI::extractTenantIdFromKeyRef(mutation.param2);
 			CODE_PROBE(beginTenantId != endTenantId, "Clear Range raw access or cross multiple tenants");
@@ -1131,7 +1128,17 @@ Error validateAndProcessTenantAccess(VectorRef<MutationRef> mutations,
 			    .detail("Mutation", mutation.param1);
 		}
 
-		if ((writeNormalKey && changeTenant) || !validAccess) {
+		if (!validAccess) {
+			TraceEvent(SevWarn, "TenantAccessCheck_IllegalTenantWrite", pProxyCommitData->dbgid)
+			    .suppressFor(10.0)
+			    .detail("Reason", "Invalid tenant data access");
+			return illegal_tenant_access();
+		}
+
+		if (writeNormalKey && changeTenant) {
+			TraceEvent(SevWarn, "TenantAccessCheck_IllegalTenantChange", pProxyCommitData->dbgid)
+			    .suppressFor(10.0)
+			    .detail("Reason", "Tenant change and normal key write in same transaction");
 			return illegal_tenant_access();
 		}
 	}
@@ -1186,9 +1193,8 @@ void applyMetadataEffect(CommitBatchContext* self) {
 					            return self->pProxyCommitData->tenantMap.count(tid);
 				            });
 
-				// TODO debug trace
 				if (self->debugID.present()) {
-					TraceEvent(SevDebug, "TenantCheck_ApplyMetadataEffect", self->debugID.get())
+					TraceEvent(SevDebug, "TenantAccessCheck_ApplyMetadataEffect", self->debugID.get())
 					    .detail("TenantIds", tenantIds)
 					    .detail("Mutations", mutations);
 				}

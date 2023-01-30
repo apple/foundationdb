@@ -312,8 +312,11 @@ struct CommitTransactionRef {
 	bool report_conflicting_keys = false;
 	bool lock_aware = false; // set when metadata mutations are present
 	Optional<SpanContext> spanContext;
-	Optional<VectorRef<int64_t>> tenantIds; // The tenants associated with this transaction. This field only existing
-	                                        // when tenant mode is required and this transaction has metadata mutations
+
+	// set by Commit Proxy
+	// The tenants associated with this transaction. This field only existing
+	// when tenant mode is required and this transaction has metadata mutations
+	Optional<VectorRef<int64_t>> tenantIds;
 
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
@@ -362,8 +365,7 @@ struct CommitTransactionRef {
 	}
 
 	size_t expectedSize() const {
-		return read_conflict_ranges.expectedSize() + write_conflict_ranges.expectedSize() + mutations.expectedSize() +
-		       tenantIds.expectedSize();
+		return read_conflict_ranges.expectedSize() + write_conflict_ranges.expectedSize() + mutations.expectedSize();
 	}
 };
 
