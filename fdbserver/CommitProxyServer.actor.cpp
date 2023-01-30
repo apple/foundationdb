@@ -203,7 +203,6 @@ struct ResolutionRequestBuilder {
 		ASSERT(transactionNumberInBatch >= 0 && transactionNumberInBatch < 32768);
 
 		bool isTXNStateTransaction = false;
-		TraceEvent(SevDebug, "AddTransaction", self->dbgid).detail("TenantMode", (int)self->getTenantMode());
 		bool needParseTenantId = !trRequest.tenantInfo.hasTenant() && self->getTenantMode() == TenantMode::REQUIRED;
 		VectorRef<int64_t> tenantIds;
 		for (auto& m : trIn.mutations) {
@@ -1073,9 +1072,7 @@ void assertResolutionStateMutationsSizeConsistent(const std::vector<ResolveTrans
 }
 
 // Return true if a single-key mutation is associated with a valid tenant id or a system key
-bool validTenantAccess(MutationRef m,
-                       std::unordered_map<int64_t, TenantName> const& tenantMap,
-                       Optional<int64_t>& tenantId) {
+bool validTenantAccess(MutationRef m, std::map<int64_t, TenantName> const& tenantMap, Optional<int64_t>& tenantId) {
 	if (isSystemKey(m.param1))
 		return true;
 
@@ -1178,7 +1175,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 			if (committed && self->pProxyCommitData->getTenantMode() == TenantMode::REQUIRED) {
 				auto& tenantIds = self->resolution[0].stateMutations[versionIndex][transactionIndex].tenantIds;
 				ASSERT(tenantIds.present());
-				// check whether contains tenant changes and normal key writing
+				// fail transaction if it contain both of tenant changes and normal key writing
 				auto& mutations = self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations;
 				committed =
 				    tenantIds.get().empty() || std::none_of(mutations.begin(), mutations.end(), tenantMapChanging);

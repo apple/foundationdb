@@ -47,9 +47,6 @@ int64_t extractTenantIdFromMutation(MutationRef m) {
 			// when the timestamp overlap with first 8 bytes
 			if (parseVersionstampOffset(m.param1) < 8) {
 				return TenantInfo::INVALID_TENANT;
-			} else {
-				// parse the tenant id as usual
-				return extractTenantIdFromKeyRef(m.param1);
 			}
 		}
 	} else {
