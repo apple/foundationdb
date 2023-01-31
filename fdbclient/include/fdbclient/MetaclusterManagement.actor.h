@@ -1546,32 +1546,32 @@ Future<Void> deleteTenant(Reference<DB> db, int64_t id) {
 
 template <class Transaction>
 Future<std::vector<std::pair<TenantName, int64_t>>> listTenantsTransaction(Transaction tr,
-                                                                             TenantName begin,
-                                                                             TenantName end,
-                                                                             int limit) {
+                                                                           TenantName begin,
+                                                                           TenantName end,
+                                                                           int limit) {
 	auto future = ManagementClusterMetadata::tenantMetadata().tenantNameIndex.getRange(tr, begin, end, limit);
 	return fmap([](auto f) -> std::vector<std::pair<TenantName, int64_t>> { return f.results; }, future);
 }
 
 template <class DB>
 Future<std::vector<std::pair<TenantName, int64_t>>> listTenants(Reference<DB> db,
-                                                                  TenantName begin,
-                                                                  TenantName end,
-                                                                  int limit) {
-	return runTransaction(
-	    db, [=](Reference<typename DB::TransactionT> tr) {
-		    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		    return listTenantsTransaction(tr, begin, end, limit);
-	    });
+                                                                TenantName begin,
+                                                                TenantName end,
+                                                                int limit) {
+	return runTransaction(db, [=](Reference<typename DB::TransactionT> tr) {
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		return listTenantsTransaction(tr, begin, end, limit);
+	});
 }
 
 ACTOR template <class Transaction>
 Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadataTransaction(Transaction tr,
-                                                                                  TenantNameRef begin,
-                                                                                  TenantNameRef end,
-                                                                                  int limit) {
-	state std::vector<std::pair<TenantName, int64_t>> matchingTenants = wait(listTenantsTransaction(tr, begin, end, limit));
+                                                                                         TenantNameRef begin,
+                                                                                         TenantNameRef end,
+                                                                                         int limit) {
+	state std::vector<std::pair<TenantName, int64_t>> matchingTenants =
+	    wait(listTenantsTransaction(tr, begin, end, limit));
 	state std::vector<Future<TenantMapEntry>> tenantEntryFutures;
 	for (auto const& [name, id] : matchingTenants) {
 		tenantEntryFutures.push_back(getTenantTransaction(tr, id));
@@ -1597,7 +1597,7 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadataTra
     int offset = 0) {
 	state int i = offset;
 	state std::vector<Future<Optional<TenantMapEntry>>> futures;
-	for (; i < tenantIds.size()  && futures.size() < limit; ++i) {
+	for (; i < tenantIds.size() && futures.size() < limit; ++i) {
 		futures.push_back(MetaclusterAPI::tryGetTenantTransaction(tr, tenantIds[i].second));
 	}
 	wait(waitForAll(futures));
