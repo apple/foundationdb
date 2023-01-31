@@ -87,11 +87,15 @@ struct GranuleFilePointer {
 	int64_t length;
 	int64_t fullFileLength;
 
+	// just keep raw data structures to pass to callbacks
+	native::FDBBGEncryptionCtx encryptionCtx;
+
 	GranuleFilePointer(const native::FDBBGFilePointer& nativePointer) {
 		filename = fdb::Key(nativePointer.filename_ptr, nativePointer.filename_length);
 		offset = nativePointer.file_offset;
 		length = nativePointer.file_length;
 		fullFileLength = nativePointer.full_file_length;
+		encryptionCtx = nativePointer.encryption_ctx;
 	}
 };
 
@@ -115,6 +119,9 @@ struct GranuleDescription {
 	std::vector<GranuleFilePointer> deltaFiles;
 	std::vector<GranuleMutation> memoryMutations;
 
+	// just keep raw data structures to pass to callbacks
+	native::FDBBGTenantPrefix tenantPrefix;
+
 	GranuleDescription(const native::FDBBGFileDescription& nativeDesc) {
 		keyRange.beginKey = fdb::Key(nativeDesc.key_range.begin_key, nativeDesc.key_range.begin_key_length);
 		keyRange.endKey = fdb::Key(nativeDesc.key_range.end_key, nativeDesc.key_range.end_key_length);
@@ -133,6 +140,7 @@ struct GranuleDescription {
 				memoryMutations.emplace_back(nativeDesc.memory_mutations[i]);
 			}
 		}
+		tenantPrefix = nativeDesc.tenant_prefix;
 	}
 };
 
@@ -761,12 +769,18 @@ public:
 		                                                              readVersionOut);
 	}
 
-	Result parseSnapshotFile(BytesRef fileData) {
-		return Result(native::fdb_readbg_parse_snapshot_file(fileData.data(), intSize(fileData)));
+	Result parseSnapshotFile(BytesRef fileData,
+	                         native::FDBBGTenantPrefix const* tenantPrefix,
+	                         native::FDBBGEncryptionCtx const* encryptionCtx) {
+		return Result(
+		    native::fdb_readbg_parse_snapshot_file(fileData.data(), intSize(fileData), tenantPrefix, encryptionCtx));
 	}
 
-	Result parseDeltaFile(BytesRef fileData) {
-		return Result(native::fdb_readbg_parse_delta_file(fileData.data(), intSize(fileData)));
+	Result parseDeltaFile(BytesRef fileData,
+	                      native::FDBBGTenantPrefix const* tenantPrefix,
+	                      native::FDBBGEncryptionCtx const* encryptionCtx) {
+		return Result(
+		    native::fdb_readbg_parse_delta_file(fileData.data(), intSize(fileData), tenantPrefix, encryptionCtx));
 	}
 
 	TypedFuture<future_var::None> commit() { return native::fdb_transaction_commit(tr.get()); }

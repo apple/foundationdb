@@ -601,7 +601,7 @@ private:
 		*totalBytes += data.size();
 
 		Standalone<StringRef> fileName;
-		state RangeResult rows = bgReadSnapshotFile(data, allKeys);
+		state RangeResult rows = bgReadSnapshotFile(data, {}, {}, allKeys);
 		wait(writeSystemKeys(self, rows));
 		*totalRows += rows.size();
 		return Void();

@@ -113,6 +113,8 @@ struct BlobGranuleCipherKeysMeta {
 	}
 };
 
+// When updating this struct with new fields, you must update and add new api versioning for corresponding struct in
+// fdb_c.h!
 struct BlobGranuleCipherKey {
 	constexpr static FileIdentifier file_identifier = 7274734;
 	EncryptCipherDomainId encryptDomainId;
@@ -137,6 +139,8 @@ struct BlobGranuleCipherKey {
 	}
 };
 
+// When updating this struct with new fields, you must update and add new api versioning for corresponding struct in
+// fdb_c.h!
 struct BlobGranuleCipherKeysCtx {
 	constexpr static FileIdentifier file_identifier = 1278718;
 	BlobGranuleCipherKey textCipherKey;
