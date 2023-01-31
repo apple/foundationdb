@@ -661,6 +661,8 @@ class ClientTracingTests(unittest.TestCase):
             pattern = "^trace\."
             if with_ip:
                 pattern += "127\.0\.0\.1\."
+            else:
+                pattern += "0\.0\.0\.0\."
             if identifier is not None:
                 pattern += identifier
             else:

@@ -796,10 +796,10 @@ void openTraceFile(const Optional<NetworkAddress>& na,
 			baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.get().port);
 		}
 	} else if (!identifier.empty()) {
-		baseName = format("%s.%s", baseOfBase.c_str(), identifier.c_str());
+		baseName = format("%s.0.0.0.0.%s", baseOfBase.c_str(), identifier.c_str());
 	} else {
 		// If neither network address nor identifier is provided, use PID for identification
-		baseName = format("%s.%d", baseOfBase.c_str(), ::getpid());
+		baseName = format("%s.0.0.0.0.%d", baseOfBase.c_str(), ::getpid());
 	}
 
 	g_traceLog.open(directory,
