@@ -70,8 +70,8 @@ public:
 	// Expected encoding type being used with the encryption key provider.
 	virtual EncodingType expectedEncodingType() const = 0;
 
-	// Whether domain-aware encryption is enabled.
-	virtual bool isDomainAware() const { return false; }
+	// Whether encryption domain is enabled.
+	virtual bool enableEncryptionDomain() const = 0;
 
 	// Get an encryption key from given encoding header.
 	virtual Future<EncryptionKey> getEncryptionKey(const void* encodingHeader) { throw not_implemented(); }
@@ -97,7 +97,7 @@ public:
 
 	// Check if a key fits in an encryption domain.
 	bool keyFitsInDomain(int64_t domainId, const KeyRef& key, bool canUseDefaultDomain) {
-		ASSERT(isDomainAware());
+		ASSERT(enableEncryptionDomain());
 		int64_t keyDomainId;
 		size_t prefixLength;
 		std::tie(keyDomainId, prefixLength) = getEncryptionDomain(key);
@@ -112,6 +112,7 @@ class NullEncryptionKeyProvider : public IPageEncryptionKeyProvider {
 public:
 	virtual ~NullEncryptionKeyProvider() {}
 	EncodingType expectedEncodingType() const override { return EncodingType::XXHash64; }
+	bool enableEncryptionDomain() const override { return false; }
 };
 
 // Key provider for dummy XOR encryption scheme
@@ -135,6 +136,8 @@ public:
 	virtual ~XOREncryptionKeyProvider_TestOnly() {}
 
 	EncodingType expectedEncodingType() const override { return EncodingType::XOREncryption_TestOnly; }
+
+	bool enableEncryptionDomain() const override { return false; }
 
 	Future<EncryptionKey> getEncryptionKey(const void* encodingHeader) override {
 
@@ -183,7 +186,7 @@ public:
 
 	EncodingType expectedEncodingType() const override { return encodingType; }
 
-	bool isDomainAware() const override { return mode > 0; }
+	bool enableEncryptionDomain() const override { return mode > 0; }
 
 	Future<EncryptionKey> getEncryptionKey(const void* encodingHeader) override {
 		using Header = typename ArenaPage::AESEncryptionEncoder<encodingType>::Header;
@@ -293,7 +296,7 @@ public:
 
 	EncodingType expectedEncodingType() const override { return encodingType; }
 
-	bool isDomainAware() const override {
+	bool enableEncryptionDomain() const override {
 		// Regardless of encryption mode, system keys always encrypted using system key space domain.
 		// Because of this, AESEncryptionKeyProvider always appears to be domain-aware.
 		return true;

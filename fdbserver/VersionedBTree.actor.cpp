@@ -4689,7 +4689,7 @@ public:
 		             Traceable<decltype(domainId)>::toString(domainId).c_str());
 
 		if (domainId.present()) {
-			ASSERT(keyProvider && keyProvider->isDomainAware());
+			ASSERT(keyProvider && keyProvider->enableEncryptionDomain());
 			if (!keyProvider->keyFitsInDomain(domainId.get(), lowerBound, true)) {
 				fprintf(stderr,
 				        "Page lower bound not in domain: %s %s, domain id %s, lower bound '%s'\n",
@@ -4733,10 +4733,10 @@ public:
 		}
 
 		if (!b->second.domainId.present()) {
-			ASSERT(!keyProvider || !keyProvider->isDomainAware());
+			ASSERT(!keyProvider || !keyProvider->enableEncryptionDomain());
 			ASSERT(!domainId.present());
 		} else {
-			ASSERT(keyProvider->isDomainAware());
+			ASSERT(keyProvider->enableEncryptionDomain());
 			if (b->second.domainId != domainId) {
 				fprintf(stderr,
 				        "Page encrypted with incorrect domain: %s %s, using %s, written %s\n",
@@ -5606,12 +5606,12 @@ private:
 		            int blockSize,
 		            EncodingType encodingType,
 		            unsigned int height,
-		            bool isDomainAware,
+		            bool enableEncryptionDomain,
 		            bool splitByDomain,
 		            IPageEncryptionKeyProvider* keyProvider)
 		  : startIndex(index), count(0), pageSize(blockSize),
 		    largeDeltaTree(pageSize > BTreePage::BinaryTree::SmallSizeLimit), blockSize(blockSize), blockCount(1),
-		    kvBytes(0), encodingType(encodingType), height(height), isDomainAware(isDomainAware),
+		    kvBytes(0), encodingType(encodingType), height(height), enableEncryptionDomain(enableEncryptionDomain),
 		    splitByDomain(splitByDomain), keyProvider(keyProvider) {
 
 			// Subtrace Page header overhead, BTreePage overhead, and DeltaTree (BTreePage::BinaryTree) overhead.
@@ -5620,7 +5620,8 @@ private:
 		}
 
 		PageToBuild next() {
-			return PageToBuild(endIndex(), blockSize, encodingType, height, isDomainAware, splitByDomain, keyProvider);
+			return PageToBuild(
+			    endIndex(), blockSize, encodingType, height, enableEncryptionDomain, splitByDomain, keyProvider);
 		}
 
 		int startIndex; // Index of the first record
@@ -5635,7 +5636,7 @@ private:
 
 		EncodingType encodingType;
 		unsigned int height;
-		bool isDomainAware;
+		bool enableEncryptionDomain;
 		bool splitByDomain;
 		IPageEncryptionKeyProvider* keyProvider;
 
@@ -5715,7 +5716,7 @@ private:
 				return false;
 			}
 
-			if (isDomainAware) {
+			if (enableEncryptionDomain) {
 				int64_t defaultDomainId = keyProvider->getDefaultEncryptionDomainId();
 				int64_t currentDomainId;
 				size_t prefixLength;
@@ -5789,7 +5790,7 @@ private:
 		}
 
 		void finish() {
-			if (isDomainAware && canUseDefaultDomain) {
+			if (enableEncryptionDomain && canUseDefaultDomain) {
 				domainId = keyProvider->getDefaultEncryptionDomainId();
 			}
 		}
@@ -5815,11 +5816,12 @@ private:
 		std::vector<PageToBuild> pages;
 
 		// Whether encryption is used and we need to set encryption domain for a page.
-		bool isDomainAware = isEncodingTypeEncrypted(m_encodingType) && m_keyProvider->isDomainAware();
+		bool enableEncryptionDomain =
+		    isEncodingTypeEncrypted(m_encodingType) && m_keyProvider->enableEncryptionDomain();
 		// Whether we may need to split by encryption domain. It is mean to be an optimization to avoid
 		// unnecessary domain check and may not be exhaust all cases.
 		bool splitByDomain = false;
-		if (isDomainAware && records.size() > 1) {
+		if (enableEncryptionDomain && records.size() > 1) {
 			int64_t firstDomain = std::get<0>(m_keyProvider->getEncryptionDomain(records[0].key));
 			int64_t lastDomain = std::get<0>(m_keyProvider->getEncryptionDomain(records[records.size() - 1].key));
 			// If the two record falls in the same non-default domain, we know all the records fall in the
@@ -5837,7 +5839,8 @@ private:
 			deltaSizes[i] = records[i].deltaSize(records[i - 1], prefixLen, true);
 		}
 
-		PageToBuild p(0, m_blockSize, m_encodingType, height, isDomainAware, splitByDomain, m_keyProvider.getPtr());
+		PageToBuild p(
+		    0, m_blockSize, m_encodingType, height, enableEncryptionDomain, splitByDomain, m_keyProvider.getPtr());
 
 		for (int i = 0; i < records.size();) {
 			bool force = p.count < minRecords || p.slackFraction() > maxSlack;
@@ -5877,8 +5880,8 @@ private:
 			PageToBuild& b = pages.back();
 
 			// We can rebalance the two pages only if they are in the same encryption domain.
-			ASSERT(!isDomainAware || (a.domainId.present() && b.domainId.present()));
-			if (!isDomainAware || a.domainId.get() == b.domainId.get()) {
+			ASSERT(!enableEncryptionDomain || (a.domainId.present() && b.domainId.present()));
+			if (!enableEncryptionDomain || a.domainId.get() == b.domainId.get()) {
 
 				// While the last page page has too much slack and the second to last page
 				// has more than the minimum record count, shift a record from the second
@@ -5913,8 +5916,8 @@ private:
 		state int prefixLen = lowerBound->getCommonPrefixLen(*upperBound);
 
 		// Whether encryption is used and we need to set encryption domain for a page.
-		state bool isDomainAware =
-		    isEncodingTypeEncrypted(self->m_encodingType) && self->m_keyProvider->isDomainAware();
+		state bool enableEncryptionDomain =
+		    isEncodingTypeEncrypted(self->m_encodingType) && self->m_keyProvider->enableEncryptionDomain();
 
 		state std::vector<PageToBuild> pagesToBuild =
 		    self->splitPages(lowerBound, upperBound, prefixLen, entries, height);
@@ -5928,7 +5931,7 @@ private:
 
 		state int pageIndex;
 
-		if (isDomainAware) {
+		if (enableEncryptionDomain) {
 			ASSERT(pagesToBuild[0].domainId.present());
 			int64_t domainId = pagesToBuild[0].domainId.get();
 			// We make sure the page lower bound fits in the domain of the page.
@@ -5963,7 +5966,7 @@ private:
 				pageUpperBound.truncate(commonPrefix + 1);
 			}
 
-			if (isDomainAware && pageUpperBound.key != dbEnd.key) {
+			if (enableEncryptionDomain && pageUpperBound.key != dbEnd.key) {
 				int64_t ubDomainId;
 				KeyRef ubDomainPrefix;
 				if (lastPage) {
@@ -6005,7 +6008,7 @@ private:
 				// built does not match the upper boundary of the original page that the page set is replacing, so
 				// adding the extra null link fixes this.
 				if (p->count == 0) {
-					ASSERT(isDomainAware || lastPage);
+					ASSERT(enableEncryptionDomain || lastPage);
 					records.push_back_deep(records.arena(), pageLowerBound);
 					pageLowerBound = pageUpperBound;
 					continue;
@@ -6018,8 +6021,8 @@ private:
 			    self->m_encodingType, (p->blockCount == 1) ? PageType::BTreeNode : PageType::BTreeSuperNode, height);
 			if (page->isEncrypted()) {
 				ArenaPage::EncryptionKey k =
-				    wait(isDomainAware ? self->m_keyProvider->getLatestEncryptionKey(p->domainId.get())
-				                       : self->m_keyProvider->getLatestDefaultEncryptionKey());
+				    wait(enableEncryptionDomain ? self->m_keyProvider->getLatestEncryptionKey(p->domainId.get())
+				                                : self->m_keyProvider->getLatestDefaultEncryptionKey());
 				page->encryptionKey = k;
 			}
 
@@ -6171,7 +6174,7 @@ private:
 			if (records[0].key != dbBegin.key) {
 				ASSERT(self->m_expectedEncryptionMode.present() &&
 				       self->m_expectedEncryptionMode.get().isEncryptionEnabled());
-				ASSERT(self->m_keyProvider.isValid() && self->m_keyProvider->isDomainAware());
+				ASSERT(self->m_keyProvider.isValid() && self->m_keyProvider->enableEncryptionDomain());
 				int64_t domainId;
 				size_t prefixLength;
 				std::tie(domainId, prefixLength) = self->m_keyProvider->getEncryptionDomain(records[0].key);
@@ -6580,7 +6583,7 @@ private:
 					// Fail if the inserted record does not belong to the same encryption domain as the existing
 					// page data.
 					bool canInsert = true;
-					if (page->isEncrypted() && keyProvider->isDomainAware()) {
+					if (page->isEncrypted() && keyProvider->enableEncryptionDomain()) {
 						ASSERT(keyProvider && pageDomainId.present());
 						canInsert = keyProvider->keyFitsInDomain(pageDomainId.get(), rec.key, true);
 					}
@@ -6757,9 +6760,9 @@ private:
 		// TryToUpdate indicates insert and erase operations should be tried on the existing page first
 		state bool tryToUpdate = btPage->tree()->numItems > 0 && update->boundariesNormal();
 
-		state bool isDomainAware = page->isEncrypted() && self->m_keyProvider->isDomainAware();
+		state bool enableEncryptionDomain = page->isEncrypted() && self->m_keyProvider->enableEncryptionDomain();
 		state Optional<int64_t> pageDomainId;
-		if (isDomainAware) {
+		if (enableEncryptionDomain) {
 			pageDomainId = page->getEncryptionDomainId();
 		}
 
@@ -6883,7 +6886,7 @@ private:
 						// If updating, first try to add the record to the page
 						if (updatingDeltaTree) {
 							bool canInsert = true;
-							if (isDomainAware) {
+							if (enableEncryptionDomain) {
 								ASSERT(pageDomainId.present());
 								canInsert = self->m_keyProvider->keyFitsInDomain(pageDomainId.get(), rec.key, false);
 							}
@@ -7672,7 +7675,7 @@ public:
 
 				           if (btree->m_pBoundaryVerifier != nullptr) {
 					           Optional<int64_t> domainId;
-					           if (p->isEncrypted() && btree->m_keyProvider->isDomainAware()) {
+					           if (p->isEncrypted() && btree->m_keyProvider->enableEncryptionDomain()) {
 						           domainId = p->getEncryptionDomainId();
 					           }
 					           ASSERT(btree->m_pBoundaryVerifier->verify(link.get().getChildPage().front(),
