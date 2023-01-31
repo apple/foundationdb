@@ -62,37 +62,36 @@ private:
 
 	inline bool seenReadSuccess(std::optional<int> tenantId) { return tenantsWithReadSuccess.count(tenantId); }
 
-	void debugOp(std::string opName, fdb::Key begin, fdb::Key end, std::optional<int> tenantId, std::string message) {
+	void debugOp(std::string opName, fdb::KeyRange keyRange, std::optional<int> tenantId, std::string message) {
 		if (BG_API_DEBUG_VERBOSE) {
 			info(fmt::format("{0}: [{1} - {2}) {3}: {4}",
 			                 opName,
-			                 fdb::toCharsRef(begin),
-			                 fdb::toCharsRef(end),
+			                 fdb::toCharsRef(keyRange.beginKey),
+			                 fdb::toCharsRef(keyRange.endKey),
 			                 debugTenantStr(tenantId),
 			                 message));
 		}
 	}
 
 	void randomReadOp(TTaskFct cont, std::optional<int> tenantId) {
-		fdb::Key begin = randomKeyName();
-		fdb::Key end = randomKeyName();
-		if (begin > end) {
-			std::swap(begin, end);
-		}
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 
 		auto results = std::make_shared<std::vector<fdb::KeyValue>>();
 		auto tooOld = std::make_shared<bool>(false);
 
-		debugOp("Read", begin, end, tenantId, "starting");
+		debugOp("Read", keyRange, tenantId, "starting");
 
 		execTransaction(
-		    [this, begin, end, tenantId, results, tooOld](auto ctx) {
+		    [this, keyRange, tenantId, results, tooOld](auto ctx) {
 			    ctx->tx().setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
 			    TesterGranuleContext testerContext(ctx->getBGBasePath());
 			    fdb::native::FDBReadBlobGranuleContext granuleContext = createGranuleContext(&testerContext);
 
-			    fdb::Result res = ctx->tx().readBlobGranules(
-			        begin, end, 0 /* beginVersion */, -2 /* latest read version */, granuleContext);
+			    fdb::Result res = ctx->tx().readBlobGranules(keyRange.beginKey,
+			                                                 keyRange.endKey,
+			                                                 0 /* beginVersion */,
+			                                                 -2 /* latest read version */,
+			                                                 granuleContext);
 			    auto out = fdb::Result::KeyValueRefArray{};
 			    fdb::Error err = res.getKeyValueArrayNothrow(out);
 			    if (err.code() == error_code_blob_granule_transaction_too_old) {
@@ -117,15 +116,15 @@ private:
 					    info(fmt::format("Read {0}: first success\n", debugTenantStr(tenantId)));
 					    setReadSuccess(tenantId);
 				    } else {
-					    debugOp("Read", begin, end, tenantId, "complete");
+					    debugOp("Read", keyRange, tenantId, "complete");
 				    }
 				    ctx->done();
 			    }
 		    },
-		    [this, begin, end, results, tooOld, cont, tenantId]() {
+		    [this, keyRange, results, tooOld, cont, tenantId]() {
 			    if (!*tooOld) {
 				    std::vector<fdb::KeyValue> expected =
-				        stores[tenantId].getRange(begin, end, stores[tenantId].size(), false);
+				        stores[tenantId].getRange(keyRange.beginKey, keyRange.endKey, stores[tenantId].size(), false);
 				    if (results->size() != expected.size()) {
 					    error(fmt::format("randomReadOp result size mismatch. expected: {0} actual: {1}",
 					                      expected.size(),
@@ -161,18 +160,14 @@ private:
 	}
 
 	void randomGetGranulesOp(TTaskFct cont, std::optional<int> tenantId) {
-		fdb::Key begin = randomKeyName();
-		fdb::Key end = randomKeyName();
-		if (begin > end) {
-			std::swap(begin, end);
-		}
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 		auto results = std::make_shared<std::vector<fdb::KeyRange>>();
 
-		debugOp("GetGranules", begin, end, tenantId, "starting");
+		debugOp("GetGranules", keyRange, tenantId, "starting");
 
 		execTransaction(
-		    [begin, end, results](auto ctx) {
-			    fdb::Future f = ctx->tx().getBlobGranuleRanges(begin, end, 1000).eraseType();
+		    [keyRange, results](auto ctx) {
+			    fdb::Future f = ctx->tx().getBlobGranuleRanges(keyRange.beginKey, keyRange.endKey, 1000).eraseType();
 			    ctx->continueAfter(
 			        f,
 			        [ctx, f, results]() {
@@ -181,10 +176,9 @@ private:
 			        },
 			        true);
 		    },
-		    [this, begin, end, tenantId, results, cont]() {
-			    debugOp(
-			        "GetGranules", begin, end, tenantId, fmt::format("complete with {0} granules", results->size()));
-			    this->validateRanges(results, begin, end, seenReadSuccess(tenantId));
+		    [this, keyRange, tenantId, results, cont]() {
+			    debugOp("GetGranules", keyRange, tenantId, fmt::format("complete with {0} granules", results->size()));
+			    this->validateRanges(results, keyRange, seenReadSuccess(tenantId));
 			    schedule(cont);
 		    },
 		    getTenant(tenantId));
@@ -197,18 +191,17 @@ private:
 			schedule(cont);
 			return;
 		}
-		fdb::Key begin = randomKeyName();
-		fdb::Key end = randomKeyName();
-		if (begin > end) {
-			std::swap(begin, end);
-		}
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 		auto results = std::make_shared<std::vector<fdb::GranuleSummary>>();
 
-		debugOp("Summarize", begin, end, tenantId, "starting");
+		debugOp("Summarize", keyRange, tenantId, "starting");
 
 		execTransaction(
-		    [begin, end, results](auto ctx) {
-			    fdb::Future f = ctx->tx().summarizeBlobGranules(begin, end, -2 /*latest version*/, 1000).eraseType();
+		    [keyRange, results](auto ctx) {
+			    fdb::Future f =
+			        ctx->tx()
+			            .summarizeBlobGranules(keyRange.beginKey, keyRange.endKey, -2 /*latest version*/, 1000)
+			            .eraseType();
 			    ctx->continueAfter(
 			        f,
 			        [ctx, f, results]() {
@@ -217,8 +210,8 @@ private:
 			        },
 			        true);
 		    },
-		    [this, begin, end, tenantId, results, cont]() {
-			    debugOp("Summarize", begin, end, tenantId, fmt::format("complete with {0} granules", results->size()));
+		    [this, keyRange, tenantId, results, cont]() {
+			    debugOp("Summarize", keyRange, tenantId, fmt::format("complete with {0} granules", results->size()));
 
 			    // use validateRanges to share validation
 			    auto ranges = std::make_shared<std::vector<fdb::KeyRange>>();
@@ -233,7 +226,7 @@ private:
 				    ranges->push_back((*results)[i].keyRange);
 			    }
 
-			    this->validateRanges(ranges, begin, end, true);
+			    this->validateRanges(ranges, keyRange, true);
 
 			    schedule(cont);
 		    },
@@ -241,31 +234,31 @@ private:
 	}
 
 	void validateRanges(std::shared_ptr<std::vector<fdb::KeyRange>> results,
-	                    fdb::Key begin,
-	                    fdb::Key end,
+	                    fdb::KeyRange keyRange,
 	                    bool shouldBeRanges) {
 		if (shouldBeRanges) {
 			if (results->size() == 0) {
-				error(fmt::format(
-				    "ValidateRanges: [{0} - {1}): No ranges returned!", fdb::toCharsRef(begin), fdb::toCharsRef(end)));
+				error(fmt::format("ValidateRanges: [{0} - {1}): No ranges returned!",
+				                  fdb::toCharsRef(keyRange.beginKey),
+				                  fdb::toCharsRef(keyRange.endKey)));
 			}
 			ASSERT(results->size() > 0);
-			if (results->front().beginKey > begin || results->back().endKey < end) {
+			if (results->front().beginKey > keyRange.beginKey || results->back().endKey < keyRange.endKey) {
 				error(fmt::format("ValidateRanges: [{0} - {1}): Incomplete range(s) returned [{2} - {3})!",
-				                  fdb::toCharsRef(begin),
-				                  fdb::toCharsRef(end),
+				                  fdb::toCharsRef(keyRange.beginKey),
+				                  fdb::toCharsRef(keyRange.endKey),
 				                  fdb::toCharsRef(results->front().beginKey),
 				                  fdb::toCharsRef(results->back().endKey)));
 			}
-			ASSERT(results->front().beginKey <= begin);
-			ASSERT(results->back().endKey >= end);
+			ASSERT(results->front().beginKey <= keyRange.beginKey);
+			ASSERT(results->back().endKey >= keyRange.endKey);
 		}
 		for (int i = 0; i < results->size(); i++) {
 			// no empty or inverted ranges
 			if ((*results)[i].beginKey >= (*results)[i].endKey) {
 				error(fmt::format("ValidateRanges: [{0} - {1}): Empty/inverted range [{2} - {3})",
-				                  fdb::toCharsRef(begin),
-				                  fdb::toCharsRef(end),
+				                  fdb::toCharsRef(keyRange.beginKey),
+				                  fdb::toCharsRef(keyRange.endKey),
 				                  fdb::toCharsRef((*results)[i].beginKey),
 				                  fdb::toCharsRef((*results)[i].endKey)));
 			}
@@ -276,8 +269,8 @@ private:
 			// ranges contain entire requested key range
 			if ((*results)[i].beginKey != (*results)[i].endKey) {
 				error(fmt::format("ValidateRanges: [{0} - {1}): Non-covereed range [{2} - {3})",
-				                  fdb::toCharsRef(begin),
-				                  fdb::toCharsRef(end),
+				                  fdb::toCharsRef(keyRange.beginKey),
+				                  fdb::toCharsRef(keyRange.endKey),
 				                  fdb::toCharsRef((*results)[i - 1].endKey),
 				                  fdb::toCharsRef((*results)[i].endKey)));
 			}
@@ -287,27 +280,24 @@ private:
 
 	// TODO: tenant support
 	void randomGetBlobRangesOp(TTaskFct cont, std::optional<int> tenantId) {
-		fdb::Key begin = randomKeyName();
-		fdb::Key end = randomKeyName();
-		auto results = std::make_shared<std::vector<fdb::KeyRange>>();
-		if (begin > end) {
-			std::swap(begin, end);
-		}
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 
-		debugOp("GetBlobRanges", begin, end, tenantId, "starting");
+		auto results = std::make_shared<std::vector<fdb::KeyRange>>();
+
+		debugOp("GetBlobRanges", keyRange, tenantId, "starting");
 
 		execOperation(
-		    [begin, end, results](auto ctx) {
-			    fdb::Future f = ctx->dbOps()->listBlobbifiedRanges(begin, end, 1000).eraseType();
+		    [keyRange, results](auto ctx) {
+			    fdb::Future f =
+			        ctx->dbOps()->listBlobbifiedRanges(keyRange.beginKey, keyRange.endKey, 1000).eraseType();
 			    ctx->continueAfter(f, [ctx, f, results]() {
 				    *results = copyKeyRangeArray(f.get<fdb::future_var::KeyRangeRefArray>());
 				    ctx->done();
 			    });
 		    },
-		    [this, begin, end, tenantId, results, cont]() {
-			    debugOp(
-			        "GetBlobRanges", begin, end, tenantId, fmt::format("complete with {0} ranges", results->size()));
-			    this->validateRanges(results, begin, end, seenReadSuccess(tenantId));
+		    [this, keyRange, tenantId, results, cont]() {
+			    debugOp("GetBlobRanges", keyRange, tenantId, fmt::format("complete with {0} ranges", results->size()));
+			    this->validateRanges(results, keyRange, seenReadSuccess(tenantId));
 			    schedule(cont);
 		    },
 		    getTenant(tenantId),
@@ -316,25 +306,23 @@ private:
 
 	// TODO: tenant support
 	void randomVerifyOp(TTaskFct cont, std::optional<int> tenantId) {
-		fdb::Key begin = randomKeyName();
-		fdb::Key end = randomKeyName();
-		if (begin > end) {
-			std::swap(begin, end);
-		}
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 
-		debugOp("Verify", begin, end, tenantId, "starting");
+		debugOp("Verify", keyRange, tenantId, "starting");
 
 		auto verifyVersion = std::make_shared<int64_t>(-1);
 		execOperation(
-		    [begin, end, verifyVersion](auto ctx) {
-			    fdb::Future f = ctx->dbOps()->verifyBlobRange(begin, end, -2 /* latest version*/).eraseType();
+		    [keyRange, verifyVersion](auto ctx) {
+			    fdb::Future f = ctx->dbOps()
+			                        ->verifyBlobRange(keyRange.beginKey, keyRange.endKey, -2 /* latest version*/)
+			                        .eraseType();
 			    ctx->continueAfter(f, [ctx, verifyVersion, f]() {
 				    *verifyVersion = f.get<fdb::future_var::Int64>();
 				    ctx->done();
 			    });
 		    },
-		    [this, begin, end, tenantId, verifyVersion, cont]() {
-			    debugOp("Verify", begin, end, tenantId, fmt::format("Complete @ {0}", *verifyVersion));
+		    [this, keyRange, tenantId, verifyVersion, cont]() {
+			    debugOp("Verify", keyRange, tenantId, fmt::format("Complete @ {0}", *verifyVersion));
 			    bool previousSuccess = seenReadSuccess(tenantId);
 			    if (*verifyVersion == -1) {
 				    ASSERT(!previousSuccess);

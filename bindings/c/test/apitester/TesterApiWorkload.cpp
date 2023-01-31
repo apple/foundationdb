@@ -152,6 +152,21 @@ fdb::Key ApiWorkload::randomKey(double existingKeyRatio, std::optional<int> tena
 	}
 }
 
+fdb::KeyRange ApiWorkload::randomNonEmptyKeyRange() {
+	fdb::KeyRange keyRange;
+	keyRange.beginKey = randomKeyName();
+	// avoid empty key range
+	do {
+		keyRange.endKey = randomKeyName();
+	} while (keyRange.beginKey == keyRange.endKey);
+
+	if (keyRange.beginKey > keyRange.endKey) {
+		std::swap(keyRange.beginKey, keyRange.endKey);
+	}
+	ASSERT(keyRange.beginKey < keyRange.endKey);
+	return keyRange;
+}
+
 std::optional<int> ApiWorkload::randomTenant() {
 	if (tenants.size() > 0) {
 		return Random::get().randomInt(0, tenants.size() - 1);

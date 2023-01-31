@@ -60,8 +60,15 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 
 CommandFactory getAuditStatusFactory(
     "get_audit_status",
-    CommandHelp("get_audit_status <ha> <id|recent> [ARGs]",
-                "Retrieve audit storage results of the specific type",
-                "Fetch audit result with an ID: get_audit_status [Type] id [ID];\n"
-                "Fetch most recent audit results: get_audit_status [Type] recent [Count].\n"));
+    CommandHelp("get_audit_status <Type> <id|recent> [ARGs]",
+                "Retrieve audit storage status",
+                "To fetch audit status via ID: `get_audit_status [Type] id [ID]'\n"
+                "To fetch status of most recent audit: `get_audit_status [Type] recent [Count]'\n"
+                "Only 'ha' `Type' is supported currently. If specified, `Count' is how many\n"
+                "rows to audit. If not specified, check all rows in audit.\n"
+                "Results have the following format:\n"
+                "  `[ID]: 000000000001000000000000, [Range]:  - 0xff, [Type]: 1, [Phase]: 2'\n"
+                "where `Type' is `1' for `ha' and `Phase' is `2' for `Complete'.\n"
+                "Phase can be `Invalid=0', `Running=1', `Complete=2', `Error=3', or `Failed=4'.\n"
+                "See also `audit_storage' command."));
 } // namespace fdb_cli

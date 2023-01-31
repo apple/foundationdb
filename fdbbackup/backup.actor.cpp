@@ -2383,7 +2383,7 @@ ACTOR Future<Void> runRestore(Database db,
 				fmt::print("Restored to version {}\n", restoredVersion);
 			}
 		} else {
-			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion, db, ranges));
+			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion, ranges));
 
 			if (!rset.present()) {
 				fmt::print(stderr,
@@ -2493,7 +2493,7 @@ ACTOR Future<Void> runFastRestoreTool(Database db,
 				restoreVersion = dbVersion;
 			}
 
-			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion, db));
+			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion));
 			if (!rset.present()) {
 				fmt::print(stderr, "Insufficient data to restore to version {}\n", restoreVersion);
 				throw restore_invalid_version();
@@ -2768,7 +2768,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 			                           format("the specified restorable version %lld is not valid", restoreVersion));
 			return Void();
 		}
-		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, cx, keyRangesFilter));
+		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, keyRangesFilter));
 		if (fileSet.present()) {
 			int64_t totalRangeFilesSize = 0, totalLogFilesSize = 0;
 			result["restore_version"] = fileSet.get().targetVersion;

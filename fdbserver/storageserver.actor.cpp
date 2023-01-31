@@ -1794,7 +1794,7 @@ bool validateRange(StorageServer::VersionedData::ViewAtVersion const& view,
 
 void validate(StorageServer* data, bool force = false) {
 	try {
-		if (force || (EXPENSIVE_VALIDATION)) {
+		if (!data->shuttingDown && (force || (EXPENSIVE_VALIDATION))) {
 			data->newestAvailableVersion.validateCoalesced();
 			data->newestDirtyVersion.validateCoalesced();
 
@@ -1849,15 +1849,20 @@ void validate(StorageServer* data, bool force = false) {
 			for (auto s = data->shards.ranges().begin(); s != data->shards.ranges().end(); ++s) {
 				ShardInfo* shard = s->value().getPtr();
 				if (!shard->isInVersionedData()) {
-					if (latest.lower_bound(s->begin()) != latest.lower_bound(s->end())) {
+					auto beginNext = latest.lower_bound(s->begin());
+					auto endNext = latest.lower_bound(s->end());
+					if (beginNext != endNext) {
 						TraceEvent(SevError, "VF", data->thisServerID)
 						    .detail("LastValidTime", data->debug_lastValidateTime)
 						    .detail("KeyBegin", s->begin())
 						    .detail("KeyEnd", s->end())
-						    .detail("FirstKey", latest.lower_bound(s->begin()).key())
-						    .detail("FirstInsertV", latest.lower_bound(s->begin()).insertVersion());
+						    .detail("DbgState", shard->debugDescribeState())
+						    .detail("FirstKey", beginNext.key())
+						    .detail("LastKey", endNext != latest.end() ? endNext.key() : "End"_sr)
+						    .detail("FirstInsertV", beginNext.insertVersion())
+						    .detail("LastInsertV", endNext != latest.end() ? endNext.insertVersion() : invalidVersion);
 					}
-					ASSERT(latest.lower_bound(s->begin()) == latest.lower_bound(s->end()));
+					ASSERT(beginNext == endNext);
 				}
 			}
 
@@ -6124,7 +6129,8 @@ void applyMutation(StorageServer* self,
 void applyChangeFeedMutation(StorageServer* self,
                              MutationRef const& m,
                              MutationRefAndCipherKeys const& encryptedMutation,
-                             Version version) {
+                             Version version,
+                             KeyRangeRef const& shard) {
 	if (m.type == MutationRef::SetValue) {
 		for (auto& it : self->keyChangeFeed[m.param1]) {
 			if (version < it->stopVersion && !it->removing && version > it->emptyVersion) {
@@ -6182,6 +6188,9 @@ void applyChangeFeedMutation(StorageServer* self,
 					}
 					if (clearMutation.param2 > it->range.end) {
 						clearMutation.param2 = it->range.end;
+						modified = true;
+					}
+					if (!modified && (clearMutation.param1 == shard.begin || clearMutation.param2 == shard.end)) {
 						modified = true;
 					}
 					if (it->mutations.empty() || it->mutations.back().version != version) {
@@ -8520,7 +8529,7 @@ void StorageServer::addMutation(Version version,
 		}
 
 		applyChangeFeedMutation(
-		    this, expanded.type == MutationRef::ClearRange ? nonExpanded : expanded, encrypt, version);
+		    this, expanded.type == MutationRef::ClearRange ? nonExpanded : expanded, encrypt, version, shard);
 	}
 	applyMutation(this, expanded, mLog.arena(), mutableData(), version);
 
