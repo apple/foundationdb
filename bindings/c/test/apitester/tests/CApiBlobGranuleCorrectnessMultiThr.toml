@@ -21,5 +21,6 @@ maxKeyLength = 64
 minValueLength = 1
 maxValueLength = 1000
 maxKeysPerTransaction = 50
+# TODO - increase initialSize and/or buggify down BG_SNAPSHOT_FILE_TARGET_BYTES to force multiple granules
 initialSize = 100
 numRandomOperations = 100
