@@ -33,7 +33,8 @@ The tenant API introduces some new operations:
 
     Pops the top item off of the stack as TENANT_NAME. Opens the tenant with
     name TENANT_NAME and stores it as the active tenant. Then, waits on a future
-    that initializes the tenant ID. Pushes SET_ACTIVE_TENANT onto the stack.
+    that initializes the tenant ID. When complete, pushes the string  
+    "SET_ACTIVE_TENANT" onto the stack.
 
 #### TENANT_CLEAR_ACTIVE
 
