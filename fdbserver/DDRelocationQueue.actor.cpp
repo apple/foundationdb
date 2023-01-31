@@ -1746,7 +1746,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					} else {
 						self->moveCreateNewPhysicalShard++;
 					}
-					rd.dataMoveId = newShardId(physicalShardIDCandidate, AssignEmptyRange::False);
+					rd.dataMoveId = newDataMoveId(physicalShardIDCandidate, AssignEmptyRange::False);
 					auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
 					inFlightRange.value().dataMoveId = rd.dataMoveId;
 					auto f = self->dataMoves.intersectingRanges(rd.keys);

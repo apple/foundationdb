@@ -35,9 +35,18 @@ struct StorageServerShard {
 		ReadWritePending = 2,
 		ReadWrite = 3,
 		MovingIn = 4,
+		Error = 5,
 	};
 
 	StorageServerShard() = default;
+	StorageServerShard(KeyRange range,
+	                   Version version,
+	                   const uint64_t id,
+	                   const uint64_t desiredId,
+	                   ShardState shardState,
+	                   Optional<UID> moveInShardId)
+	  : range(range), version(version), id(id), desiredId(desiredId), shardState(shardState),
+	    moveInShardId(moveInShardId) {}
 	StorageServerShard(KeyRange range,
 	                   Version version,
 	                   const uint64_t id,
@@ -66,6 +75,8 @@ struct StorageServerShard {
 			return "ReadWrite";
 		case MovingIn:
 			return "MovingIn";
+		case Error:
+			return "Error";
 		}
 
 		return "InvalidState";

@@ -243,7 +243,6 @@ struct MoveInShardMetaData {
 	std::vector<KeyRange> ranges;
 	Version createVersion;
 	Version highWatermark; // The highest version that has been applied to the MoveInShard.
-	// Version version;
 	int8_t phase;
 	std::vector<CheckpointMetaData> checkpoints;
 	Optional<Error> error;
@@ -345,8 +344,7 @@ struct MoveInUpdates {
 
 	MoveInUpdates() = default;
 	MoveInUpdates(UID id, Version version, struct StorageServer* data, IKeyValueStore* store)
-	  : id(id), oldestVersion(version), data(data), store(store), range(persistUpdatesKeyRange(id)),
-	    shardRemoved(false) {}
+	  : id(id), oldestVersion(version), data(data), store(store), range(persistUpdatesKeyRange(id)), fail(false) {}
 
 	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
 
@@ -367,7 +365,7 @@ struct MoveInUpdates {
 	struct StorageServer* data;
 	IKeyValueStore* store;
 	KeyRange range;
-	bool shardRemoved;
+	bool fail;
 
 private:
 	ACTOR static Future<Void> doRestore(MoveInUpdates* self, Version begin) {
@@ -426,7 +424,7 @@ bool MoveInUpdates::hasNext() const {
 }
 
 std::vector<Standalone<VerUpdateRef>> MoveInUpdates::next(const int byteLimit) {
-	if (this->shardRemoved) {
+	if (this->fail) {
 		throw operation_cancelled();
 	}
 	std::vector<Standalone<VerUpdateRef>> res;
@@ -453,14 +451,7 @@ struct MoveInShard {
 	PromiseStream<Key> changeFeedRemovals;
 
 	MoveInShard() = default;
-	MoveInShard(StorageServer* server,
-	            const UID& id,
-	            const UID& dataMoveId,
-	            KeyRange range,
-	            const Version version,
-	            MoveInPhase phase);
-	MoveInShard(StorageServer* server, const UID& id, const UID& dataMoveId, KeyRange range, const Version version);
-	MoveInShard(StorageServer* server, const UID& dataMoveId, KeyRange range, const Version version);
+	MoveInShard(StorageServer* server, const UID& id, const UID& dataMoveId, const Version version, MoveInPhase phase);
 	MoveInShard(StorageServer* server, const UID& id, const UID& dataMoveId, const Version version);
 	MoveInShard(StorageServer* server, MoveInShardMetaData meta);
 	~MoveInShard() {
@@ -472,6 +463,10 @@ struct MoveInShard {
 		}
 	}
 
+	UID id() const { return this->meta->id; }
+	void addRange(const KeyRangeRef range);
+	void removeRange(const KeyRangeRef range);
+	void cancel();
 	bool isDataTransferred() const { return meta->getPhase() >= MoveInPhase::ApplyingUpdates; }
 	bool isDataAndCFTransferred() const { throw not_implemented(); }
 
@@ -674,6 +669,7 @@ public:
 
 	StorageServerShard toStorageServerShard() const {
 		StorageServerShard::ShardState st = StorageServerShard::NotAssigned;
+		Optional<UID> moveInShardId;
 		if (this->isReadable()) {
 			st = StorageServerShard::ReadWrite;
 		} else if (!this->assigned()) {
@@ -693,8 +689,9 @@ public:
 			} else {
 				st = StorageServerShard::MovingIn;
 			}
+			moveInShardId = this->moveInShard->id();
 		}
-		return StorageServerShard(this->keys, this->version, this->shardId, this->desiredShardId, st);
+		return StorageServerShard(this->keys, this->version, this->shardId, this->desiredShardId, st, moveInShardId);
 	}
 
 	// Copies necessary information from `shard`.
@@ -742,7 +739,7 @@ public:
 		} else if (adding) {
 			return "AddingTransferred";
 		} else if (moveInShard) {
-			return moveInShard->meta->toString().c_str();
+			return moveInShard->meta->toString();
 		} else {
 			return "ReadWrite";
 		}
@@ -1232,7 +1229,7 @@ public:
 	KeyRangeRef clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenantInfo, Arena& arena);
 
 	std::vector<StorageServerShard> getStorageServerShards(KeyRangeRef range);
-	std::shared_ptr<MoveInShard> getMoveInShard(const UID& dataMoveId, const Version version, const KeyRangeRef range);
+	std::shared_ptr<MoveInShard> getMoveInShard(const UID& dataMoveId, const Version version);
 
 	class CurrentRunningFetchKeys {
 		std::unordered_map<UID, double> startTimeMap;
@@ -2429,24 +2426,15 @@ std::vector<StorageServerShard> StorageServer::getStorageServerShards(KeyRangeRe
 	return res;
 }
 
-std::shared_ptr<MoveInShard> StorageServer::getMoveInShard(const UID& dataMoveId,
-                                                           const Version version,
-                                                           const KeyRangeRef range) {
+std::shared_ptr<MoveInShard> StorageServer::getMoveInShard(const UID& dataMoveId, const Version version) {
 	for (auto& [id, moveInShard] : moveInShards) {
 		if (moveInShard->meta->dataMoveId == dataMoveId && moveInShard->meta->createVersion == version) {
-			for (const auto& kr : moveInShard->meta->ranges) {
-				if (range.intersects(kr)) {
-					ASSERT(range == kr);
-					return moveInShard;
-				}
-			}
-			moveInShard->meta->ranges.push_back(range);
 			return moveInShard;
 		}
 	}
+
 	const UID id = deterministicRandom()->randomUniqueID();
-	std::shared_ptr<MoveInShard> shard = std::make_shared<MoveInShard>(this, id, dataMoveId, range, version);
-	// shard->meta->ranges.push_back(range);
+	std::shared_ptr<MoveInShard> shard = std::make_shared<MoveInShard>(this, id, dataMoveId, version);
 	moveInShards.emplace(id, shard);
 	return shard;
 }
@@ -7995,7 +7983,7 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 
 	for (const auto& range : shard->ranges) {
 		const Reference<ShardInfo>& currentShard = data->shards[range.begin];
-		if (!currentShard->moveInShard || currentShard->moveInShard->meta->id != shard->id) {
+		if (!currentShard->moveInShard || currentShard->moveInShard->id() != shard->id) {
 			throw operation_cancelled();
 		}
 		StorageServerShard newShard = currentShard->toStorageServerShard();
@@ -8095,31 +8083,19 @@ void MoveInUpdates::addMutation(Version version, bool fromFetch, MutationRef con
 MoveInShard::MoveInShard(StorageServer* server,
                          const UID& id,
                          const UID& dataMoveId,
-                         KeyRange range,
                          const Version version,
                          MoveInPhase state)
-  : meta(std::make_shared<MoveInShardMetaData>(id, dataMoveId, std::vector<KeyRange>(), version, state)), server(server),
-    updates(std::make_shared<MoveInUpdates>(id, version, server, server->storage.getKeyValueStore())) {
+  : meta(std::make_shared<MoveInShardMetaData>(id, dataMoveId, std::vector<KeyRange>(), version, state)),
+    server(server), updates(std::make_shared<MoveInUpdates>(id, version, server, server->storage.getKeyValueStore())) {
 	if (state != MoveInPhase::Pending) {
 		fetchClient = fetchShard(server, this);
 	} else {
 		fetchClient = Void();
 	}
-	// meta->ranges.push_back(range);
 }
 
-MoveInShard::MoveInShard(StorageServer* server,
-                         const UID& id,
-                         const UID& dataMoveId,
-                         KeyRange range,
-                         const Version version)
-  : MoveInShard(server, id, dataMoveId, range, version, MoveInPhase::Fetching) {}
-
-MoveInShard::MoveInShard(StorageServer* server, const UID& dataMoveId, KeyRange range, const Version version)
-  : MoveInShard(server, deterministicRandom()->randomUniqueID(), dataMoveId, range, version) {}
-
 MoveInShard::MoveInShard(StorageServer* server, const UID& id, const UID& dataMoveId, const Version version)
-  : MoveInShard(server, id, dataMoveId, {}, version, MoveInPhase::Fetching) {}
+  : MoveInShard(server, id, dataMoveId, version, MoveInPhase::Fetching) {}
 
 MoveInShard::MoveInShard(StorageServer* server, MoveInShardMetaData meta)
   : meta(std::make_shared<MoveInShardMetaData>(meta)), server(server),
@@ -8129,6 +8105,32 @@ MoveInShard::MoveInShard(StorageServer* server, MoveInShardMetaData meta)
 	} else {
 		fetchClient = Void();
 	}
+}
+
+void MoveInShard::addRange(const KeyRangeRef range) {
+	for (const auto& kr : this->meta->ranges) {
+		if (kr.intersects(range)) {
+			ASSERT(kr == range);
+			return;
+		}
+	}
+	this->meta->ranges.push_back(range);
+	std::sort(this->meta->ranges.begin(), this->meta->ranges.end(), KeyRangeRef::ArbitraryOrder());
+}
+
+void MoveInShard::removeRange(const KeyRangeRef range) {
+	std::vector<KeyRange> newRanges;
+	for (const auto& kr : this->meta->ranges) {
+		const std::vector<KeyRangeRef> rs = kr - range;
+		newRanges.insert(newRanges.end(), rs.begin(), rs.end());
+	}
+	this->meta->ranges.swap(newRanges);
+	std::sort(this->meta->ranges.begin(), this->meta->ranges.end(), KeyRangeRef::ArbitraryOrder());
+}
+
+void MoveInShard::cancel() {
+	this->meta->setPhase(MoveInPhase::Fail);
+	this->updates->fail = true;
 }
 
 void MoveInShard::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
@@ -9240,7 +9242,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
                                         const UID& dataMoveId,
                                         bool nowAssigned,
                                         Version version,
-                                        ChangeServerKeysContext context) {
+                                        ChangeServerKeysContext context,
+                                        EnablePhysicalShardMove enablePSM) {
 	const Severity dmSev = SERVER_KNOBS->PHYSICAL_SHARD_MOVE_VERBOSE_TRACKING ? SevInfo : SevDebug;
 	ASSERT(!keys.empty());
 	TraceEvent(dmSev, "ChangeServerKeysWithPhysicalShards", data->thisServerID)
@@ -9271,11 +9274,12 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	auto ranges = data->shards.getAffectedRangesAfterInsertion(
 	    keys,
 	    Reference<ShardInfo>()); // null reference indicates the range being changed
+	std::unordered_map<UID, std::shared_ptr<MoveInShard>> updatedMoveInShards;
 	for (int i = 0; i < ranges.size(); i++) {
 		const Reference<ShardInfo> currentShard = ranges[i].value;
 		const KeyRangeRef currentRange = static_cast<KeyRangeRef>(ranges[i]);
 		if (currentShard.isValid()) {
-			TraceEvent(SevVerbose, "OverlappingPhysicalShard", data->thisServerID)
+			TraceEvent(dmSev, "OverlappingPhysicalShard", data->thisServerID)
 			    .detail("PhysicalShard", currentShard->toStorageServerShard().toString());
 		}
 		if (!currentShard.isValid()) {
@@ -9285,7 +9289,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			newShard.range = currentRange;
 			data->addShard(ShardInfo::newShard(data, newShard));
-			TraceEvent(SevVerbose, "SSSplitShardNotAssigned", data->thisServerID)
+			TraceEvent(dmSev, "SSSplitShardNotAssigned", data->thisServerID)
 			    .detail("Range", keys)
 			    .detail("NowAssigned", nowAssigned)
 			    .detail("Version", cVer)
@@ -9294,7 +9298,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			newShard.range = currentRange;
 			data->addShard(ShardInfo::newShard(data, newShard));
-			TraceEvent(SevVerbose, "SSSplitShardReadable", data->thisServerID)
+			TraceEvent(dmSev, "SSSplitShardReadable", data->thisServerID)
 			    .detail("Range", keys)
 			    .detail("NowAssigned", nowAssigned)
 			    .detail("Version", cVer)
@@ -9303,9 +9307,20 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			ASSERT(!nowAssigned);
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			newShard.range = currentRange;
-			// TODO(psm): Cancel or update the moving-in shard when physical shard move is enabled.
 			data->addShard(ShardInfo::newShard(data, newShard));
-			TraceEvent(SevVerbose, "SSSplitShardAdding", data->thisServerID)
+			TraceEvent(dmSev, "SSSplitShardAdding", data->thisServerID)
+			    .detail("Range", keys)
+			    .detail("NowAssigned", nowAssigned)
+			    .detail("Version", cVer)
+			    .detail("ResultingShard", newShard.toString());
+		} else if (currentShard->moveInShard) {
+			ASSERT(!nowAssigned);
+			currentShard->moveInShard->cancel();
+			updatedMoveInShards.emplace(currentShard->moveInShard->id(), currentShard->moveInShard);
+			StorageServerShard newShard = currentShard->toStorageServerShard();
+			newShard.range = currentRange;
+			data->addShard(ShardInfo::newShard(data, newShard));
+			TraceEvent(SevVerbose, "SSCancelMoveInShard", data->thisServerID)
 			    .detail("Range", keys)
 			    .detail("NowAssigned", nowAssigned)
 			    .detail("Version", cVer)
@@ -9324,7 +9339,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	for (auto r = vr.begin(); r != vr.end(); ++r) {
 		KeyRangeRef range = keys & r->range();
 		const bool dataAvailable = r->value()->isReadable();
-		TraceEvent(SevVerbose, "CSKPhysicalShard", data->thisServerID)
+		TraceEvent(dmSev, "CSKPhysicalShard", data->thisServerID)
 		    .detail("Range", range)
 		    .detail("ExistingShardRange", r->range())
 		    .detail("Available", dataAvailable)
@@ -9333,7 +9348,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 		ASSERT(keys.contains(r->range()));
 		if (context == CSK_ASSIGN_EMPTY && !dataAvailable) {
 			ASSERT(nowAssigned);
-			TraceEvent(SevVerbose, "ChangeServerKeysAddEmptyRange", data->thisServerID)
+			TraceEvent(dmSev, "ChangeServerKeysAddEmptyRange", data->thisServerID)
 			    .detail("Range", range)
 			    .detail("Version", cVer);
 			newEmptyRanges.push_back(range);
@@ -9349,16 +9364,21 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			updatedShards.push_back(StorageServerShard::notAssigned(range, cVer));
 			data->watches.triggerRange(range.begin, range.end);
 			data->pendingRemoveRanges[cVer].push_back(range);
-			// TODO(psm): When fetchKeys() is not used, make sure KV will remove the data, otherwise, removeDataShard()
-			// here.
-			TraceEvent(SevVerbose, "SSUnassignShard", data->thisServerID)
+			if (r->value()->moveInShard) {
+				r->value()->moveInShard->cancel();
+				updatedMoveInShards.emplace(r->value()->moveInShard->id(), r->value()->moveInShard);
+				// This is an overkill, and is necessary only when psm has written data to `range`; Also we don't need to 
+				// clean up the PTree.
+				removeRanges.push_back(range);
+			}
+			TraceEvent(dmSev, "SSUnassignShard", data->thisServerID)
 			    .detail("Range", range)
 			    .detail("NowAssigned", nowAssigned)
 			    .detail("Version", cVer)
 			    .detail("NewShard", updatedShards.back().toString());
 		} else if (!dataAvailable) {
 			if (version == data->initialClusterVersion - 1) {
-				TraceEvent(SevVerbose, "CSKWithPhysicalShardsSeedRange", data->thisServerID)
+				TraceEvent(dmSev, "CSKWithPhysicalShardsSeedRange", data->thisServerID)
 				    .detail("ShardID", desiredId)
 				    .detail("Range", range);
 				changeNewestAvailable.emplace_back(range, latestVersion);
@@ -9376,18 +9396,25 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			} else {
 				auto& shard = data->shards[range.begin];
 				if (!shard->assigned()) {
-					updatedShards.push_back(
-					    StorageServerShard(range, cVer, desiredId, desiredId, StorageServerShard::Adding));
-					data->pendingAddRanges[cVer].emplace_back(desiredId, range);
+					if (enablePSM) {
+						std::shared_ptr<MoveInShard> moveInShard = data->getMoveInShard(dataMoveId, cVer);
+						moveInShard->addRange(range);
+						updatedShards.push_back(StorageServerShard(
+						    range, cVer, desiredId, desiredId, StorageServerShard::MovingIn, moveInShard->id()));
+					} else {
+						updatedShards.push_back(
+						    StorageServerShard(range, cVer, desiredId, desiredId, StorageServerShard::Adding));
+						data->pendingAddRanges[cVer].emplace_back(desiredId, range);
+					}
 					data->newestDirtyVersion.insert(range, cVer);
-					TraceEvent(SevVerbose, "SSAssignShard", data->thisServerID)
+					TraceEvent(dmSev, "SSAssignShard", data->thisServerID)
 					    .detail("Range", range)
 					    .detail("NowAssigned", nowAssigned)
 					    .detail("Version", cVer)
 					    .detail("TotalAssignedAtVer", ++totalAssignedAtVer)
 					    .detail("NewShard", updatedShards.back().toString());
 				} else {
-					ASSERT(shard->adding != nullptr);
+					ASSERT(shard->adding != nullptr || shard->moveInShard != nullptr);
 					if (shard->desiredShardId != desiredId) {
 						TraceEvent(SevError, "CSKConflictingMoveInShards", data->thisServerID)
 						    .detail("DataMoveID", dataMoveId)
@@ -9395,7 +9422,6 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 						    .detail("TargetShard", desiredId)
 						    .detail("CurrentShard", shard->desiredShardId)
 						    .detail("Version", cVer);
-						// TODO(psm): Replace this with moveInShard->cancel().
 						ASSERT(false);
 					} else {
 						TraceEvent(SevInfo, "CSKMoveInToSameShard", data->thisServerID)
@@ -9404,6 +9430,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 						    .detail("MoveRange", keys)
 						    .detail("Range", range)
 						    .detail("ExistingShardRange", shard->keys)
+						    .detail("ShardDebugString", shard->debugDescribeState())
 						    .detail("Version", cVer);
 					}
 				}
@@ -9423,6 +9450,12 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	for (const auto& shard : updatedShards) {
 		data->addShard(ShardInfo::newShard(data, shard));
 		updateStorageShard(data, shard);
+	}
+	auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+	for (const auto& [id, shard] : updatedMoveInShards) {
+		data->addMutationToMutationLog(
+		    mLV,
+		    MutationRef(MutationRef::SetValue, persistMoveInShardKey(id), moveInShardValue(*shard->meta)));
 	}
 
 	// Update newestAvailableVersion when a shard becomes (un)available (in a separate loop to avoid invalidating vr
@@ -9568,6 +9601,7 @@ private:
 	KeyRef startKey;
 	bool nowAssigned;
 	bool emptyRange;
+	EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
 	UID dataMoveId;
 	bool processedStartKey;
 
@@ -9594,7 +9628,7 @@ private:
 					    .detail("NowAssigned", nowAssigned)
 					    .detail("Version", ver);
 					changeServerKeysWithPhysicalShards(
-					    data, keys, dataMoveId, nowAssigned, currentVersion - 1, context);
+					    data, keys, dataMoveId, nowAssigned, currentVersion - 1, context, enablePSM);
 				} else {
 					// add changes in shard assignment to the mutation log
 					setAssignedStatus(data, keys, nowAssigned);
@@ -9612,7 +9646,7 @@ private:
 			// We can also ignore clearRanges, because they are always accompanied by such a pair of sets with the same
 			// keys
 			startKey = m.param1;
-			decodeServerKeysValue(m.param2, nowAssigned, emptyRange, dataMoveId);
+			decodeServerKeysValue(m.param2, nowAssigned, emptyRange, enablePSM, dataMoveId);
 			processedStartKey = true;
 		} else if (m.type == MutationRef::SetValue && m.param1 == lastEpochEndPrivateKey) {
 			// lastEpochEnd transactions are guaranteed by the master to be alone in their own batch (version)

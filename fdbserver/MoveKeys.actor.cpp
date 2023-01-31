@@ -2042,7 +2042,8 @@ ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> t
 	// than one result
 	UID teamId;
 	bool assigned, emptyRange;
-	decodeServerKeysValue(keys[0].value, assigned, emptyRange, teamId);
+	EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
+	decodeServerKeysValue(keys[0].value, assigned, emptyRange, enablePSM, teamId);
 	TraceEvent(SevVerbose, "CanRemoveStorageServer")
 	    .detail("ServerID", serverID)
 	    .detail("Key1", keys[0].key)
@@ -2271,7 +2272,8 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							}
 						}
 
-						const UID shardId = newShardId(deterministicRandom()->randomUInt64(), AssignEmptyRange::True);
+						const UID shardId =
+						    newDataMoveId(deterministicRandom()->randomUInt64(), AssignEmptyRange::True);
 
 						// Assign the shard to teamForDroppedRange in keyServer space.
 						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
