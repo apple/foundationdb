@@ -1129,14 +1129,14 @@ Error validateAndProcessTenantAccess(VectorRef<MutationRef> mutations,
 		}
 
 		if (!validAccess) {
-			TraceEvent(SevWarn, "TenantAccessCheck_IllegalTenantWrite", pProxyCommitData->dbgid)
+			TraceEvent(SevWarn, "IllegalTenantAccess", pProxyCommitData->dbgid)
 			    .suppressFor(10.0)
-			    .detail("Reason", "Invalid tenant data access");
+			    .detail("Reason", "Raw write to unknown tenant");
 			return illegal_tenant_access();
 		}
 
 		if (writeNormalKey && changeTenant) {
-			TraceEvent(SevWarn, "TenantAccessCheck_IllegalTenantChange", pProxyCommitData->dbgid)
+			TraceEvent(SevWarn, "IllegalTenantAccess", pProxyCommitData->dbgid)
 			    .suppressFor(10.0)
 			    .detail("Reason", "Tenant change and normal key write in same transaction");
 			return illegal_tenant_access();
