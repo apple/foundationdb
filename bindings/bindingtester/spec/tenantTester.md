@@ -32,7 +32,8 @@ The tenant API introduces some new operations:
 #### TENANT_SET_ACTIVE
 
     Pops the top item off of the stack as TENANT_NAME. Opens the tenant with
-    name TENANT_NAME and stores it as the active tenant.
+    name TENANT_NAME and stores it as the active tenant. Then, waits on a future
+    that initializes the tenant ID. Pushes SET_ACTIVE_TENANT onto the stack.
 
 #### TENANT_CLEAR_ACTIVE
 
@@ -45,6 +46,12 @@ The tenant API introduces some new operations:
     way using these parameters. The resulting range of n tenant names are
     packed into a tuple as [t1,t2,t3,...,tn], and this single packed value
     is pushed onto the stack.
+
+#### TENANT_GET_ID
+
+    Attempts to resolve the active tenant's ID. GOT_TENANT_ID is pushed onto the stack
+    if an ID was successfully read after waiting on the ID future.
+    NO_ACTIVE_TENANT is pushed onto the stack if there is no active tenant.
 
 Updates to Existing Instructions
 --------------------------------
