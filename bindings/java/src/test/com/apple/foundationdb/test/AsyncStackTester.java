@@ -507,7 +507,9 @@ public class AsyncStackTester {
 		else if (op == StackOperation.TENANT_SET_ACTIVE) {
 			return inst.popParam().thenComposeAsync(param -> {
 				byte[] tenantName = (byte[])param;
-				return inst.context.setTenant(Optional.of(tenantName)).thenApply(id -> (Void)null);
+				return inst.context.setTenant(Optional.of(tenantName)).thenAcceptAsync(id -> {
+					inst.push("SET_ACTIVE_TENANT".getBytes());
+				}, FDB.DEFAULT_EXECUTOR);
 			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if (op == StackOperation.TENANT_CLEAR_ACTIVE) {

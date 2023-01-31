@@ -610,6 +610,7 @@ class ApiTest(Test):
                 tenant_name = self.choose_tenant(0.8)
                 instructions.push_args(tenant_name)
                 instructions.append(op)
+                self.add_strings(1)
             elif op == 'TENANT_CLEAR_ACTIVE':
                 instructions.append(op)
             elif op == 'TENANT_LIST':
