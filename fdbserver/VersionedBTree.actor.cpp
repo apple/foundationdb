@@ -5495,8 +5495,8 @@ public:
 			// for it in which case we would have returned above.
 			iterator iPrevious = ib;
 			--iPrevious;
-			// If the range we just divided was being cleared, then the dividing boundary key and range after it
-			// must also be cleared
+			// If the range we just divided was being cleared, then the dividing boundary key and range after it must
+			// also be cleared
 			if (iPrevious.mutation().clearAfterBoundary) {
 				ib.mutation().clearAll();
 			}
@@ -5626,8 +5626,8 @@ private:
 
 		int startIndex; // Index of the first record
 		int count; // Number of records added to the page
-		int pageSize; // Page or Multipage size required to hold a BTreePage of the added records, which is a
-		              // multiple of blockSize
+		int pageSize; // Page or Multipage size required to hold a BTreePage of the added records, which is a multiple
+		              // of blockSize
 		int bytesLeft; // Bytes in pageSize that are unused by the BTreePage so far
 		bool largeDeltaTree; // Whether or not the tree in the generated page is in the 'large' size range
 		int blockSize; // Base block size by which pageSize can be incremented
@@ -5653,8 +5653,7 @@ private:
 		// Unused fraction of pageSize bytes
 		double slackFraction() const { return (double)bytesLeft / pageSize; }
 
-		// Fraction of PageSize in use by key or value string bytes, disregarding all overhead including string
-		// sizes
+		// Fraction of PageSize in use by key or value string bytes, disregarding all overhead including string sizes
 		double kvFraction() const { return (double)kvBytes / pageSize; }
 
 		// Index of the last record to be included in this page
@@ -6580,8 +6579,8 @@ private:
 					const RedwoodRecordRef& rec = recs[i];
 					debug_printf("internal page (updating) insert: %s\n", rec.toString(false).c_str());
 
-					// Fail if the inserted record does not belong to the same encryption domain as the existing
-					// page data.
+					// Fail if the inserted record does not belong to the same encryption domain as the existing page
+					// data.
 					bool canInsert = true;
 					if (page->isEncrypted() && keyProvider->enableEncryptionDomain()) {
 						ASSERT(keyProvider && pageDomainId.present());
@@ -6595,8 +6594,8 @@ private:
 						debug_printf("internal page: failed to insert %s, switching to rebuild\n",
 						             rec.toString(false).c_str());
 
-						// Update failed, so populate rebuild vector with everything up to but not including end,
-						// which may include items from recs that were already added.
+						// Update failed, so populate rebuild vector with everything up to but not including end, which
+						// may include items from recs that were already added.
 						auto c = end;
 						if (c.moveFirst()) {
 							rebuild.reserve(rebuild.arena(), c.tree->numItems);
@@ -6671,8 +6670,8 @@ private:
 					insert({}, u.newLinks);
 				}
 
-				// cBegin has been erased so interating from the first entry forward will never see cBegin to use as
-				// an endpoint.
+				// cBegin has been erased so interating from the first entry forward will never see cBegin to use as an
+				// endpoint.
 				changesMade = true;
 			} else {
 
@@ -6840,8 +6839,8 @@ private:
 					bool shouldInsertBoundary = mBegin.mutation().boundarySet();
 
 					// Optimization:  In-place value update of new same-sized value
-					// If the boundary exists in the page and we're in update mode and the boundary is being set to
-					// a new value of the same length as the old value then just update the value bytes.
+					// If the boundary exists in the page and we're in update mode and the boundary is being set to a
+					// new value of the same length as the old value then just update the value bytes.
 					if (boundaryExists && updatingDeltaTree && shouldInsertBoundary &&
 					    mBegin.mutation().boundaryValue.get().size() == cursor.get().value.get().size()) {
 						changesMade = true;
@@ -6877,8 +6876,7 @@ private:
 						}
 					}
 
-					// If the boundary value is being set and we must insert it, add it to the page or the output
-					// set
+					// If the boundary value is being set and we must insert it, add it to the page or the output set
 					if (shouldInsertBoundary) {
 						RedwoodRecordRef rec(mBegin.key(), mBegin.mutation().boundaryValue.get());
 						changesMade = true;
@@ -6905,9 +6903,9 @@ private:
 								             rec.toString().c_str());
 
 								// Since the insert failed we must switch to a linear merge of existing data and
-								// mutations, accumulating the new record set in the merge vector and build new
-								// pages from it. First, we must populate the merged vector with all the records up
-								// to but not including the current mutation boundary key.
+								// mutations, accumulating the new record set in the merge vector and build new pages
+								// from it. First, we must populate the merged vector with all the records up to but not
+								// including the current mutation boundary key.
 								auto c = cursor;
 								c.moveFirst();
 								while (c != cursor) {
@@ -6941,8 +6939,7 @@ private:
 					}
 				}
 
-				// Before advancing the iterator, get whether or not the records in the following range must be
-				// removed
+				// Before advancing the iterator, get whether or not the records in the following range must be removed
 				bool remove = mBegin.mutation().clearAfterBoundary;
 				// Advance to the next boundary because we need to know the end key for the current range.
 				++mBegin;
@@ -7010,8 +7007,8 @@ private:
 					             updatingDeltaTree);
 				} else {
 					// If updating and the key is changing, we must visit the records to erase them.
-					// If not updating and the key is not changing, we must visit the records to add them to the
-					// output set.
+					// If not updating and the key is not changing, we must visit the records to add them to the output
+					// set.
 					while (cursor.valid()) {
 						if (updatingDeltaTree) {
 							debug_printf(
@@ -7132,10 +7129,9 @@ private:
 				} else {
 					u.subtreeLowerBound = u.decodeLowerBound;
 					mBegin = mEnd;
-					// mBegin is either at or greater than subtreeLowerBound->key, which was the
-					// subtreeUpperBound->key for the previous subtree slice.  But we need it to be at or *before*
-					// subtreeLowerBound->key so if mBegin.key() is not exactly the subtree lower bound key then
-					// decrement it.
+					// mBegin is either at or greater than subtreeLowerBound->key, which was the subtreeUpperBound->key
+					// for the previous subtree slice.  But we need it to be at or *before* subtreeLowerBound->key
+					// so if mBegin.key() is not exactly the subtree lower bound key then decrement it.
 					if (mBegin.key() != u.subtreeLowerBound.key) {
 						--mBegin;
 					}
@@ -7152,9 +7148,9 @@ private:
 					// subtree boundary that is now needed for reading the subtree at cBegin.
 					if (!cursor.get().value.present()) {
 						// If the upper bound is provided by a dummy record in [cBegin, cEnd) then there is no
-						// requirement on the next subtree range or the parent page to have a specific upper
-						// boundary for decoding the subtree.  The expected upper bound has not yet been set so it
-						// can remain empty.
+						// requirement on the next subtree range or the parent page to have a specific upper boundary
+						// for decoding the subtree.  The expected upper bound has not yet been set so it can remain
+						// empty.
 						cursor.moveNext();
 						// If there is another record after the null child record, it must have a child page value
 						ASSERT(!cursor.valid() || cursor.get().value.present());
@@ -7183,9 +7179,8 @@ private:
 					const RangeMutation& range = mBegin.mutation();
 					bool uniform;
 					if (range.clearAfterBoundary) {
-						// If the mutation range after the boundary key is cleared, then the mutation boundary key
-						// must be cleared or must be different than the subtree lower bound key so that it doesn't
-						// matter
+						// If the mutation range after the boundary key is cleared, then the mutation boundary key must
+						// be cleared or must be different than the subtree lower bound key so that it doesn't matter
 						uniform = range.boundaryCleared() || mutationBoundaryKey != u.subtreeLowerBound.key;
 					} else {
 						// If the mutation range after the boundary key is unchanged, then the mutation boundary key
@@ -7196,10 +7191,10 @@ private:
 
 					// If u's subtree is either all cleared or all unchanged
 					if (uniform) {
-						// We do not need to recurse to this subtree.  Next, let's see if we can embiggen u's range
-						// to include sibling subtrees also covered by (mBegin, mEnd) so we can not recurse to
-						// those, too. If the cursor is valid, u.subtreeUpperBound is the cursor's position, which
-						// is >= mEnd.key(). If equal, no range expansion is possible.
+						// We do not need to recurse to this subtree.  Next, let's see if we can embiggen u's range to
+						// include sibling subtrees also covered by (mBegin, mEnd) so we can not recurse to those, too.
+						// If the cursor is valid, u.subtreeUpperBound is the cursor's position, which is >= mEnd.key().
+						// If equal, no range expansion is possible.
 						if (cursor.valid() && mEnd.key() != u.subtreeUpperBound.key) {
 							// TODO:  If cursor hints are available, use (cursor, 1)
 							cursor.seekLessThanOrEqual(mEnd.key(), update->skipLen);
@@ -7207,9 +7202,8 @@ private:
 							// If this seek moved us ahead, to something other than cEnd, then update subtree range
 							// boundaries
 							if (cursor != u.cEnd) {
-								// If the cursor is at a record with a null child, back up one step because it is in
-								// the middle of the next logical subtree, as null child records are not subtree
-								// boundaries.
+								// If the cursor is at a record with a null child, back up one step because it is in the
+								// middle of the next logical subtree, as null child records are not subtree boundaries.
 								ASSERT(cursor.valid());
 								if (!cursor.get().value.present()) {
 									cursor.movePrev();
@@ -7219,8 +7213,8 @@ private:
 								u.subtreeUpperBound = cursor.get();
 								u.skipLen = 0; // TODO: set this
 
-								// The new decode upper bound is either cEnd or the record before it if it has no
-								// child link
+								// The new decode upper bound is either cEnd or the record before it if it has no child
+								// link
 								auto c = u.cEnd;
 								c.movePrev();
 								ASSERT(c.valid());
@@ -7264,8 +7258,8 @@ private:
 						debug_printf("%s Not recursing, one mutation range covers this slice:\n", context.c_str());
 						debug_print(addPrefix(context, u.toString()));
 
-						// u has already been initialized with the correct result, no recursion needed, so restart
-						// the loop.
+						// u has already been initialized with the correct result, no recursion needed, so restart the
+						// loop.
 						continue;
 					}
 				}
@@ -7312,8 +7306,8 @@ private:
 			// The expected next record for the final range is checked against one of the upper boundaries passed to
 			// this commitSubtree() instance.  If changes have already been made, then the subtree upper boundary is
 			// passed, so in the event a different upper boundary is needed it will be added to the already-modified
-			// page.  Otherwise, the decode boundary is used which will prevent this page from being modified for
-			// the sole purpose of adding a dummy upper bound record.
+			// page.  Otherwise, the decode boundary is used which will prevent this page from being modified for the
+			// sole purpose of adding a dummy upper bound record.
 			debug_printf("%s Applying final child range update. changesMade=%d\nSubtree Root Update:\n",
 			             context.c_str(),
 			             modifier.changesMade);
@@ -7362,8 +7356,7 @@ private:
 					self->freeBTreePage(height, rootID, batch->writeVersion);
 				} else {
 					if (modifier.updating) {
-						// Page was updated in place (or being forced to be updated in place to update child page
-						// ids)
+						// Page was updated in place (or being forced to be updated in place to update child page ids)
 						debug_printf(
 						    "%s Internal page modified in-place tryToUpdate=%d forceUpdate=%d detachChildren=%d\n",
 						    context.c_str(),
@@ -7447,8 +7440,8 @@ private:
 											PhysicalPageID newID =
 											    self->m_pager->detachRemappedPage(p, batch->writeVersion);
 											if (newID != invalidPhysicalPageID) {
-												// Records in the rebuild vector reference original page memory so
-												// make a new child link in the rebuild arena
+												// Records in the rebuild vector reference original page memory so make
+												// a new child link in the rebuild arena
 												BTreeNodeLinkRef newPages = BTreeNodeLinkRef(
 												    modifier.rebuild.arena(), BTreeNodeLinkRef(&newID, 1));
 												rec.setChildPage(newPages);
@@ -7775,8 +7768,7 @@ public:
 
 		Future<Void> seekGTE(RedwoodRecordRef query) { return seekGTE_impl(this, query); }
 
-		// Start fetching sibling nodes in the forward or backward direction, stopping after recordLimit or
-		// byteLimit
+		// Start fetching sibling nodes in the forward or backward direction, stopping after recordLimit or byteLimit
 		void prefetch(KeyRef rangeEnd, bool directionForward, int recordLimit, int byteLimit) {
 			// Prefetch scans level 2 so if there are less than 2 nodes in the path there is no level 2
 			if (path.size() < 2) {
@@ -7856,8 +7848,7 @@ public:
 					success = forward ? entry.cursor.moveFirst() : false;
 				}
 
-				// Skip over internal page entries that do not link to child pages.  There should never be two in a
-				// row.
+				// Skip over internal page entries that do not link to child pages.  There should never be two in a row.
 				if (success && !entry.btPage()->isLeaf() && !entry.cursor.get().value.present()) {
 					success = forward ? entry.cursor.moveNext() : entry.cursor.movePrev();
 					ASSERT(!success || entry.cursor.get().value.present());
@@ -8113,8 +8104,8 @@ public:
 				BTreePage::BinaryTree::Cursor& leafCursor = cur.back().cursor;
 
 				// we can bypass the bounds check for each key in the leaf if the entire leaf is in range
-				// > because both query end and page upper bound are exclusive of the query results and page
-				// contents, respectively
+				// > because both query end and page upper bound are exclusive of the query results and page contents,
+				// respectively
 				bool checkBounds = leafCursor.cache->upperBound > keys.end;
 				// Whether or not any results from this page were added to results
 				bool usedPage = false;
@@ -8168,8 +8159,8 @@ public:
 				BTreePage::BinaryTree::Cursor& leafCursor = cur.back().cursor;
 
 				// we can bypass the bounds check for each key in the leaf if the entire leaf is in range
-				// < because both query begin and page lower bound are inclusive of the query results and page
-				// contents, respectively
+				// < because both query begin and page lower bound are inclusive of the query results and page contents,
+				// respectively
 				bool checkBounds = leafCursor.cache->lowerBound < keys.begin;
 				// Whether or not any results from this page were added to results
 				bool usedPage = false;
@@ -8434,8 +8425,8 @@ ACTOR Future<Void> verifyRangeBTreeCursor(VersionedBTree* btree,
 	debug_printf(
 	    "VerifyRangeReverse(@%" PRId64 ", %s, %s): start\n", v, start.printable().c_str(), end.printable().c_str());
 
-	// Randomly use a new cursor at the same version for the reverse range read, if the version is still available
-	// for opening new cursors
+	// Randomly use a new cursor at the same version for the reverse range read, if the version is still available for
+	// opening new cursors
 	if (v >= btree->getOldestReadableVersion() && deterministicRandom()->coinflip()) {
 		cur = VersionedBTree::BTreeCursor();
 		wait(btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead));
