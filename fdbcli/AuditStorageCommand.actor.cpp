@@ -66,7 +66,11 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 }
 
 CommandFactory auditStorageFactory("audit_storage",
-                                   CommandHelp("audit_storage <ha> [BeginKey] [EndKey]",
+                                   CommandHelp("audit_storage <Type> [BeginKey EndKey]",
                                                "Start an audit storage",
-                                               "Trigger an audit storage, the auditID is returned.\n"));
+                                               "Specify audit `Type' (only `ha' `Type' is supported currently), and\n"
+                                               "optionally a sub-range with `BeginKey' and `EndKey'.\n"
+                                               "For example, to audit the full key range: `audit_storage ha'\n"
+                                               "To audit a sub-range only: `audit_storage ha 0xa 0xb'\n"
+                                               "Returns an audit `ID'. See also `get_audit_status' command.\n"));
 } // namespace fdb_cli
