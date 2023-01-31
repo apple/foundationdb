@@ -7961,6 +7961,8 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 				    .detail("TotalBytes", totalBytes)
 				    .detail("Rate", (double)totalBytes / duration);
 				break;
+			} else if (phase == MoveInShard::Error) {
+				wait(cleanUpMoveInShard(data, shard, moveInUpdates));
 			}
 		} catch (Error& e) {
 			TraceEvent("FetchShardError", data->thisServerID)
