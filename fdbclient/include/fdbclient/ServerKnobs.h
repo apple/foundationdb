@@ -372,7 +372,7 @@ public:
 	int64_t ROCKSDB_SINGLEKEY_DELETES_BYTES_LIMIT;
 	bool ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS;
 	bool ROCKSDB_ENABLE_COMPACT_ON_DELETION;
-	int64_t ROCKSDB_CDCF_SILIDING_WINDOW_SIZE; // CDCF: CompactOnDeletionCollectorFactory
+	int64_t ROCKSDB_CDCF_SLIDING_WINDOW_SIZE; // CDCF: CompactOnDeletionCollectorFactory
 	int64_t ROCKSDB_CDCF_DELETION_TRIGGER; // CDCF: CompactOnDeletionCollectorFactory
 	double ROCKSDB_CDCF_DELETION_RATIO; // CDCF: CompactOnDeletionCollectorFactory
 	int ROCKSDB_STATS_LEVEL;
@@ -990,11 +990,18 @@ public:
 	int BG_RDC_BYTES_FACTOR;
 	int BG_RDC_READ_FACTOR;
 	bool BG_WRITE_MULTIPART;
+	bool BG_ENABLE_DYNAMIC_WRITE_AMP;
+	double BG_DYNAMIC_WRITE_AMP_MIN_FACTOR;
+	double BG_DYNAMIC_WRITE_AMP_DECREASE_FACTOR;
 
 	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
 	int BLOB_WORKER_RESNAPSHOT_PARALLELISM;
 	int BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM;
 	int BLOB_WORKER_RDC_PARALLELISM;
+	// The resnapshot/delta parallelism knobs are deprecated and replaced by the budget_bytes knobs! FIXME: remove after
+	// next release
+	int64_t BLOB_WORKER_RESNAPSHOT_BUDGET_BYTES;
+	int64_t BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES;
 
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
 	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
@@ -1017,6 +1024,7 @@ public:
 	int BLOB_MANIFEST_RW_ROWS;
 	std::string BLOB_RESTORE_MLOGS_URL;
 	int BLOB_MIGRATOR_ERROR_RETRIES;
+	std::string BLOB_RESTORE_MANIFEST_URL;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;

@@ -1479,7 +1479,7 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
                                    Version beginVersion,
                                    Version readVersion,
                                    Optional<StringRef> snapshotData,
-                                   StringRef deltaFileData[],
+                                   const std::vector<StringRef>& deltaFileData,
                                    GranuleMaterializeStats& stats) {
 	// TODO REMOVE with early replying
 	ASSERT(readVersion == chunk.includedVersion);
@@ -1528,6 +1528,7 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 	if (BG_READ_DEBUG) {
 		fmt::print("Applying {} delta files\n", chunk.deltaFiles.size());
 	}
+	ASSERT(chunk.deltaFiles.size() == deltaFileData.size());
 	for (int deltaIdx = 0; deltaIdx < chunk.deltaFiles.size(); deltaIdx++) {
 		stats.inputBytes += deltaFileData[deltaIdx].size();
 		bool startClear = false;
@@ -1656,8 +1657,8 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 				}
 			}
 
-			// +1 to avoid UBSAN variable length array of size zero
-			StringRef deltaData[files[chunkIdx].deltaFiles.size() + 1];
+			std::vector<StringRef> deltaData;
+			deltaData.resize(files[chunkIdx].deltaFiles.size());
 			for (int i = 0; i < files[chunkIdx].deltaFiles.size(); i++) {
 				deltaData[i] =
 				    StringRef(granuleContext.get_load_f(loadIds[chunkIdx].deltaIds[i], granuleContext.userContext),
@@ -2438,7 +2439,9 @@ void checkDeltaRead(const KeyValueGen& kvGen,
                     Version beginVersion,
                     Version readVersion,
                     const Standalone<GranuleDeltas>& data,
-                    StringRef* serialized) {
+                    const std::vector<StringRef>& serialized) {
+	ASSERT_EQ(serialized.size(), 1);
+
 	// expected answer
 	std::map<KeyRef, ValueRef> expectedData;
 	Version lastFileEndVersion = 0;
@@ -2457,7 +2460,7 @@ void checkDeltaRead(const KeyValueGen& kvGen,
 	    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUniqueID(), readVersion, ".delta");
 	Standalone<BlobGranuleChunkRef> chunk;
 	chunk.deltaFiles.emplace_back_deep(
-	    chunk.arena(), filename, 0, serialized->size(), serialized->size(), kvGen.cipherKeys);
+	    chunk.arena(), filename, 0, serialized[0].size(), serialized[0].size(), kvGen.cipherKeys);
 	chunk.keyRange = kvGen.allRange;
 	chunk.includedVersion = readVersion;
 	chunk.snapshotVersion = invalidVersion;
@@ -2538,13 +2541,14 @@ TEST_CASE("/blobgranule/files/deltaFormatUnitTest") {
 	}*/
 	Value serialized = serializeChunkedDeltaFile(
 	    fileNameRef, data, kvGen.allRange, targetChunkSize, kvGen.compressFilter, kvGen.cipherKeys);
+	std::vector<StringRef> deltaPtr{ serialized };
 
 	// check whole file
-	checkDeltaRead(kvGen, kvGen.allRange, 0, data.back().version, data, &serialized);
+	checkDeltaRead(kvGen, kvGen.allRange, 0, data.back().version, data, deltaPtr);
 
 	for (int i = 0; i < std::min((size_t)100, kvGen.usedKeysList.size() * data.size()); i++) {
 		auto params = randomizeKeyAndVersions(kvGen, data);
-		checkDeltaRead(kvGen, std::get<0>(params), std::get<1>(params), std::get<2>(params), data, &serialized);
+		checkDeltaRead(kvGen, std::get<0>(params), std::get<1>(params), std::get<2>(params), data, deltaPtr);
 	}
 
 	return Void();
@@ -2597,10 +2601,6 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 		}
 		deltaIdx++;
 	}
-	StringRef deltaPtrs[deltaPtrsVector.size() + 1];
-	for (int i = 0; i < deltaPtrsVector.size(); i++) {
-		deltaPtrs[i] = deltaPtrsVector[i];
-	}
 
 	// add in memory deltas
 	chunk.arena().dependsOn(inMemoryDeltas.arena());
@@ -2619,7 +2619,7 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 		snapshotPtr = serializedSnapshot;
 	}
 	RangeResult actualData =
-	    materializeBlobGranule(chunk, range, beginVersion, readVersion, snapshotPtr, deltaPtrs, stats);
+	    materializeBlobGranule(chunk, range, beginVersion, readVersion, snapshotPtr, deltaPtrsVector, stats);
 
 	if (expectedData.size() != actualData.size()) {
 		fmt::print("Expected Size {0} != Actual Size {1}\n", expectedData.size(), actualData.size());
@@ -3092,7 +3092,7 @@ std::pair<int64_t, double> doDeltaWriteBench(const Standalone<GranuleDeltas>& da
 
 void chunkFromFileSet(const FileSet& fileSet,
                       Standalone<BlobGranuleChunkRef>& chunk,
-                      StringRef* deltaPtrs,
+                      std::vector<StringRef>& deltaPtrs,
                       Version readVersion,
                       Optional<BlobGranuleCipherKeysCtx> keys,
                       int numDeltaFiles) {
@@ -3145,7 +3145,7 @@ std::pair<int64_t, double> doReadBench(const FileSet& fileSet,
 	Standalone<BlobGranuleChunkRef> chunk;
 	GranuleMaterializeStats stats;
 	ASSERT(numDeltaFiles >= 0 && numDeltaFiles <= fileSet.deltaFiles.size());
-	StringRef deltaPtrs[numDeltaFiles];
+	std::vector<StringRef> deltaPtrs(numDeltaFiles);
 
 	MutationRef clearAllAtEndMutation;
 	if (clearAllAtEnd) {

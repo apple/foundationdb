@@ -137,6 +137,7 @@ ERROR( proxy_tag_throttled, 1223, "Exceeded maximum proxy tag throttling duratio
 ERROR( key_value_store_deadline_exceeded, 1224, "Exceeded maximum time allowed to read or write.")
 ERROR( storage_quota_exceeded, 1225, "Exceeded the maximum storage quota allocated to the tenant.")
 ERROR( audit_storage_error, 1226, "Found data corruption" )
+ERROR( master_failed, 1227, "Cluster recovery terminating because master has failed")
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -325,6 +326,8 @@ ERROR( restore_duplicate_uid, 2371, "Attempted to restore using a UID that had b
 ERROR( task_invalid_version, 2381, "Invalid task version")
 ERROR( task_interrupted, 2382, "Task execution stopped due to timeout, abort, or completion by another worker")
 ERROR( invalid_encryption_key_file, 2383, "The provided encryption key file has invalid contents" )
+ERROR( blob_restore_missing_logs, 2384, "Missing mutation logs" )
+ERROR( blob_restore_corrupted_logs, 2385, "Corrupted mutation logs" )
 
 ERROR( key_not_found, 2400, "Expected key is missing")
 ERROR( json_malformed, 2401, "JSON string was malformed")

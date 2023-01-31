@@ -22,6 +22,7 @@
 #define FLOW_HOSTNAME_H
 #pragma once
 
+#include <regex>
 #include "flow/network.h"
 #include "flow/genericactors.actor.h"
 

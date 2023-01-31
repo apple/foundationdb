@@ -110,6 +110,9 @@
 #endif
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+template class RequestStream<OpenDatabaseRequest, false>;
+template struct NetNotifiedQueue<OpenDatabaseRequest, false>;
+
 FDB_DEFINE_BOOLEAN_PARAM(CacheResult);
 
 extern const char* getSourceVersion();
@@ -2281,7 +2284,8 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	                                                clientInfo,
 	                                                coordinator,
 	                                                networkOptions.supportedVersions,
-	                                                StringRef(networkOptions.traceLogGroup));
+	                                                StringRef(networkOptions.traceLogGroup),
+	                                                internal);
 
 	DatabaseContext* db;
 	if (preallocatedDb) {
@@ -10907,7 +10911,7 @@ ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange rang
 			Optional<Value> value = wait(tr->get(key));
 			if (value.present()) {
 				Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(value.get());
-				if (status.phase != BlobRestorePhase::DONE) {
+				if (status.phase < BlobRestorePhase::DONE) {
 					return false; // stop if there is in-progress restore.
 				}
 			}

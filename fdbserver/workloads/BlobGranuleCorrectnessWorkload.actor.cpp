@@ -38,6 +38,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
+#include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -92,6 +93,7 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 	Version minSuccessfulReadVersion = MAX_VERSION;
 
 	Future<Void> summaryClient;
+	Future<Void> forceFlushingClient;
 	Promise<Void> triggerSummaryComplete;
 
 	// stats
@@ -198,6 +200,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 	// parameters global across all clients
 	int64_t targetByteRate;
 	bool doMergeCheckAtEnd;
+	bool doForceFlushing;
 
 	std::vector<Reference<ThreadData>> directories;
 	std::vector<Future<Void>> clients;
@@ -217,6 +220,9 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		// randomize between low and high directory count
 		int64_t targetDirectories = 1 + (randomness % 8);
 		randomness /= 8;
+
+		doForceFlushing = (randomness % 4);
+		randomness /= 4;
 
 		int64_t targetMyDirectories =
 		    (targetDirectories / clientCount) + ((targetDirectories % clientCount > clientId) ? 1 : 0);
@@ -897,6 +903,12 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			// Wait for blob worker to initialize snapshot before starting test for that range
 			Future<Void> start = waitFirstSnapshot(this, cx, it, true);
 			it->summaryClient = validateGranuleSummaries(cx, normalKeys, it->tenant, it->triggerSummaryComplete);
+			if (doForceFlushing && deterministicRandom()->random01() < 0.25) {
+				it->forceFlushingClient =
+				    validateForceFlushing(cx, it->directoryRange, testDuration, it->triggerSummaryComplete);
+			} else {
+				it->forceFlushingClient = Future<Void>(Void());
+			}
 			clients.push_back(timeout(writeWorker(this, start, cx, it), testDuration, Void()));
 			clients.push_back(timeout(readWorker(this, start, cx, it), testDuration, Void()));
 		}
@@ -1000,7 +1012,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		}
 
 		// validate that summary completes without error
-		wait(threadData->summaryClient);
+		wait(threadData->summaryClient && threadData->forceFlushingClient);
 
 		return result;
 	}
