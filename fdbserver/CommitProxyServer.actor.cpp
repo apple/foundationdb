@@ -245,7 +245,7 @@ struct ResolutionRequestBuilder {
 			// the reply from Resolver 0 has the right one back.
 			auto& tr = getOutTransaction(0, trIn.read_snapshot);
 			tr.spanContext = trRequest.spanContext;
-			if (needParseTenantId) {
+			if (self->getTenantMode() == TenantMode::REQUIRED) {
 				tr.tenantIds = tenantIds;
 			}
 		}
