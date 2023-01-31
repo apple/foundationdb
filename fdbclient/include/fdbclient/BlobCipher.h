@@ -248,12 +248,12 @@ struct AesCtrWithAuthV1 {
 	// Authentication token
 	StringRef authTokenRef;
 
-	AesCtrWithAuthV1<S>() {}
-	AesCtrWithAuthV1<S>(const BlobCipherDetails& textDetails,
-	                    const BlobCipherDetails& headerDetails,
-	                    const uint8_t* iv,
-	                    const int ivLen,
-	                    Arena& arena)
+	AesCtrWithAuthV1() {}
+	AesCtrWithAuthV1(const BlobCipherDetails& textDetails,
+	                 const BlobCipherDetails& headerDetails,
+	                 const uint8_t* iv,
+	                 const int ivLen,
+	                 Arena& arena)
 	  : cipherTextDetails(textDetails), cipherHeaderDetails(headerDetails), ivRef(makeString(AES_256_IV_LENGTH, arena)),
 	    authTokenRef(makeString(S, arena)) {
 		memcpy(mutateString(ivRef), iv, ivLen);
