@@ -1492,6 +1492,9 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  [](const std::string& value, TestSpec* spec) { spec->runFailureWorkloads = (value == "true"); } },
 	{ "disabledFailureInjectionWorkloads",
 	  [](const std::string& value, TestSpec* spec) {
+	      // Expects a comma separated list of workload names in "value".
+	      // This custom encoding is needed because both text and toml files need to be supported
+	      // and "value" is passed in as a string.
 	      std::stringstream ss(value);
 	      while (ss.good()) {
 		      std::string substr;
