@@ -237,7 +237,7 @@ public class TenantManagement {
 	 * @return an iterator where each item is a KeyValue object where the key is the tenant name
 	 * and the value is the unprocessed JSON string containing the tenant's metadata
 	 */
-	public static CloseableAsyncIterator<KeyValue> listTenantMetadata(Database db, Tuple begin, Tuple end, int limit) {
+	public static CloseableAsyncIterator<KeyValue> listTenants(Database db, Tuple begin, Tuple end, int limit) {
 		return listTenants_internal(db.createTransaction(), begin.pack(), end.pack(), limit);
 	}
 
@@ -304,7 +304,7 @@ public class TenantManagement {
 		protected void finalize() throws Throwable {
 			try {
 				if (FDB.instance().warnOnUnclosed && !closed) {
-					System.err.println("CloseableAsyncIterator not closed (listTenantMetadata)");
+					System.err.println("CloseableAsyncIterator not closed (listTenants)");
 				}
 				if (!closed) {
 					close();

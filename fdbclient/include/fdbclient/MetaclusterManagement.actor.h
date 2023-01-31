@@ -1571,18 +1571,42 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadataTra
                                                                                   TenantNameRef begin,
                                                                                   TenantNameRef end,
                                                                                   int limit) {
-	state KeyBackedRangeResult<std::pair<TenantName, int64_t>> matchingTenants = wait(listTenantsTransaction(tr, begin, end, limit));
+	state std::vector<std::pair<TenantName, int64_t>> matchingTenants = wait(listTenantsTransaction(tr, begin, end, limit));
 	state std::vector<Future<TenantMapEntry>> tenantEntryFutures;
-	for (auto const& [name, id] : matchingTenants.results) {
+	for (auto const& [name, id] : matchingTenants) {
 		tenantEntryFutures.push_back(getTenantTransaction(tr, id));
 	}
 
 	wait(waitForAll(tenantEntryFutures));
 
 	std::vector<std::pair<TenantName, TenantMapEntry>> results;
-	for (int i = 0; i < matchingTenants.results.size(); ++i) {
+	for (int i = 0; i < matchingTenants.size(); ++i) {
 		// Tenants being renamed will show up twice; once under each name
-		results.emplace_back(matchingTenants.results[i].first, tenantEntryFutures[i].get());
+		results.emplace_back(matchingTenants[i].first, tenantEntryFutures[i].get());
+	}
+
+	return results;
+}
+
+// read `limit` tenant entries of tenantIds, starting from `offset`.
+ACTOR template <class Transaction>
+Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadataTransaction(
+    Transaction tr,
+    std::vector<std::pair<TenantName, int64_t>> tenantIds,
+    int limit,
+    int offset = 0) {
+	state int i = offset;
+	state std::vector<Future<Optional<TenantMapEntry>>> futures;
+	for (; i < tenantIds.size()  && futures.size() < limit; ++i) {
+		futures.push_back(MetaclusterAPI::tryGetTenantTransaction(tr, tenantIds[i].second));
+	}
+	wait(waitForAll(futures));
+
+	std::vector<std::pair<TenantName, TenantMapEntry>> results;
+	results.reserve(futures.size());
+	for (i = 0; i < futures.size(); ++i) {
+		const TenantMapEntry& entry = futures[i].get().get();
+		results.emplace_back(entry.tenantName, entry);
 	}
 
 	return results;
@@ -1604,13 +1628,9 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadata(
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 			if (filters.empty()) {
-				wait(store(results, MetaclusterAPI::listTenantMetadataTransaction(tr, begin, end, limit + offset)));
-
-				if (offset >= results.size()) {
-					results.clear();
-				} else if (offset > 0) {
-					results.erase(results.begin(), results.begin() + offset);
-				}
+				std::vector<std::pair<TenantName, int64_t>> ids =
+				    wait(MetaclusterAPI::listTenantsTransaction(tr, begin, end, limit + offset));
+				wait(store(results, MetaclusterAPI::listTenantMetadataTransaction(tr, ids, limit, offset)));
 				return results;
 			}
 
