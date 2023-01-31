@@ -2277,10 +2277,6 @@ void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Opt
 		                              deterministicRandom()->randomUInt64()));
 
 		std::string identifier = networkOptions.traceFileIdentifier;
-		if (identifier.empty() && !localAddress.present()) {
-			// If neither identifier nor localAddress is available, use PID for identification
-			identifier = format("%d", ::getpid());
-		}
 		openTraceFile(localAddress,
 		              networkOptions.traceRollSize,
 		              networkOptions.traceMaxLogsSize,
