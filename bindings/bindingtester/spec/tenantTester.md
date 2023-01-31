@@ -50,9 +50,9 @@ The tenant API introduces some new operations:
 
 #### TENANT_GET_ID
 
-    Attempts to resolve the active tenant's ID. GOT_TENANT_ID is pushed onto the stack
-    if an ID was successfully read after waiting on the ID future.
-    NO_ACTIVE_TENANT is pushed onto the stack if there is no active tenant.
+    Attempts to resolve the active tenant's ID. Pushes the string "GOT_TENANT_ID" onto 
+    the stack if an ID was successfully read after waiting on the ID future. Pushes the string 
+    "NO_ACTIVE_TENANT" if there is no active tenant.
 
 Updates to Existing Instructions
 --------------------------------
