@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Release Notes &#8212; FoundationDB 7.2</title>
+    <title>Release Notes &#8212; FoundationDB 7.1</title>
     <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="../_static/bootstrap-sphinx.css" />
     <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
@@ -14,7 +14,6 @@
     <script src="../_static/_sphinx_javascript_frameworks_compat.js"></script>
     <script src="../_static/doctools.js"></script>
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="next" title="Release Notes" href="release-notes-720.html" />
     <link rel="prev" title="Release Notes" href="release-notes-700.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
@@ -38,7 +37,7 @@
         </button>
         <a class="navbar-brand" href="../index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -91,7 +90,6 @@
 <li class="toctree-l2"><a class="reference internal" href="../client-testing.html">Client Testing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../client-testing.html#api-tester">API Tester</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../api-general.html">Using FoundationDB Clients</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../transaction-tagging.html">Transaction Tagging</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../known-limitations.html">Known Limitations</a></li>
@@ -146,7 +144,6 @@
 <li class="toctree-l2"><a class="reference internal" href="../configuration.html">Configuration</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../tls.html">Transport Layer Security</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../authorization.html">Authorization</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="../monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
@@ -180,7 +177,6 @@
 <li class="toctree-l2"><a class="reference internal" href="release-notes-630.html">Release Notes</a></li>
 <li class="toctree-l2"><a class="reference internal" href="release-notes-700.html">Release Notes</a></li>
 <li class="toctree-l2 current"><a class="current reference internal" href="#">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes-720.html">Release Notes</a></li>
 </ul>
 </li>
 </ul>
@@ -197,30 +193,34 @@
       role="menu"
       aria-labelledby="dLabelLocalToc"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id1">7.1.23</a></li>
-<li><a class="reference internal" href="#id2">7.1.22</a></li>
-<li><a class="reference internal" href="#id3">7.1.21</a></li>
-<li><a class="reference internal" href="#id4">7.1.20</a></li>
-<li><a class="reference internal" href="#id5">7.1.19</a></li>
-<li><a class="reference internal" href="#id6">7.1.18</a></li>
-<li><a class="reference internal" href="#id7">7.1.17</a></li>
-<li><a class="reference internal" href="#id8">7.1.16</a></li>
-<li><a class="reference internal" href="#id9">7.1.15</a></li>
-<li><a class="reference internal" href="#id10">7.1.14</a></li>
-<li><a class="reference internal" href="#id11">7.1.13</a></li>
-<li><a class="reference internal" href="#id12">7.1.12</a></li>
-<li><a class="reference internal" href="#id13">7.1.11</a></li>
-<li><a class="reference internal" href="#id14">7.1.10</a></li>
-<li><a class="reference internal" href="#id15">7.1.9</a></li>
-<li><a class="reference internal" href="#id16">7.1.8</a></li>
-<li><a class="reference internal" href="#id17">7.1.7</a></li>
-<li><a class="reference internal" href="#id18">7.1.6</a></li>
-<li><a class="reference internal" href="#id19">7.1.5</a></li>
-<li><a class="reference internal" href="#id20">7.1.4</a></li>
-<li><a class="reference internal" href="#id21">7.1.3</a></li>
-<li><a class="reference internal" href="#id22">7.1.2</a></li>
-<li><a class="reference internal" href="#id23">7.1.1</a></li>
-<li><a class="reference internal" href="#id24">7.1.0</a><ul>
+<li><a class="reference internal" href="#id2">7.1.27</a></li>
+<li><a class="reference internal" href="#id3">7.1.26</a></li>
+<li><a class="reference internal" href="#id4">7.1.25</a></li>
+<li><a class="reference internal" href="#id5">7.1.24</a></li>
+<li><a class="reference internal" href="#id6">7.1.23</a></li>
+<li><a class="reference internal" href="#id7">7.1.22</a></li>
+<li><a class="reference internal" href="#id8">7.1.21</a></li>
+<li><a class="reference internal" href="#id9">7.1.20</a></li>
+<li><a class="reference internal" href="#id10">7.1.19</a></li>
+<li><a class="reference internal" href="#id11">7.1.18</a></li>
+<li><a class="reference internal" href="#id12">7.1.17</a></li>
+<li><a class="reference internal" href="#id13">7.1.16</a></li>
+<li><a class="reference internal" href="#id14">7.1.15</a></li>
+<li><a class="reference internal" href="#id15">7.1.14</a></li>
+<li><a class="reference internal" href="#id16">7.1.13</a></li>
+<li><a class="reference internal" href="#id17">7.1.12</a></li>
+<li><a class="reference internal" href="#id18">7.1.11</a></li>
+<li><a class="reference internal" href="#id19">7.1.10</a></li>
+<li><a class="reference internal" href="#id20">7.1.9</a></li>
+<li><a class="reference internal" href="#id21">7.1.8</a></li>
+<li><a class="reference internal" href="#id22">7.1.7</a></li>
+<li><a class="reference internal" href="#id23">7.1.6</a></li>
+<li><a class="reference internal" href="#id24">7.1.5</a></li>
+<li><a class="reference internal" href="#id25">7.1.4</a></li>
+<li><a class="reference internal" href="#id26">7.1.3</a></li>
+<li><a class="reference internal" href="#id27">7.1.2</a></li>
+<li><a class="reference internal" href="#id28">7.1.1</a></li>
+<li><a class="reference internal" href="#id29">7.1.0</a><ul>
 <li><a class="reference internal" href="#features">Features</a></li>
 <li><a class="reference internal" href="#performance">Performance</a></li>
 <li><a class="reference internal" href="#reliability">Reliability</a></li>
@@ -243,10 +243,6 @@
                 
   <li>
     <a href="release-notes-700.html" title="Previous Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Release Notes</span>
-    </a>
-  </li>
-  <li>
-    <a href="release-notes-720.html" title="Next Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Release Notes &raquo;</span>
     </a>
   </li>
               
@@ -275,30 +271,34 @@
       <div class="col-md-3">
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id1">7.1.23</a></li>
-<li><a class="reference internal" href="#id2">7.1.22</a></li>
-<li><a class="reference internal" href="#id3">7.1.21</a></li>
-<li><a class="reference internal" href="#id4">7.1.20</a></li>
-<li><a class="reference internal" href="#id5">7.1.19</a></li>
-<li><a class="reference internal" href="#id6">7.1.18</a></li>
-<li><a class="reference internal" href="#id7">7.1.17</a></li>
-<li><a class="reference internal" href="#id8">7.1.16</a></li>
-<li><a class="reference internal" href="#id9">7.1.15</a></li>
-<li><a class="reference internal" href="#id10">7.1.14</a></li>
-<li><a class="reference internal" href="#id11">7.1.13</a></li>
-<li><a class="reference internal" href="#id12">7.1.12</a></li>
-<li><a class="reference internal" href="#id13">7.1.11</a></li>
-<li><a class="reference internal" href="#id14">7.1.10</a></li>
-<li><a class="reference internal" href="#id15">7.1.9</a></li>
-<li><a class="reference internal" href="#id16">7.1.8</a></li>
-<li><a class="reference internal" href="#id17">7.1.7</a></li>
-<li><a class="reference internal" href="#id18">7.1.6</a></li>
-<li><a class="reference internal" href="#id19">7.1.5</a></li>
-<li><a class="reference internal" href="#id20">7.1.4</a></li>
-<li><a class="reference internal" href="#id21">7.1.3</a></li>
-<li><a class="reference internal" href="#id22">7.1.2</a></li>
-<li><a class="reference internal" href="#id23">7.1.1</a></li>
-<li><a class="reference internal" href="#id24">7.1.0</a><ul>
+<li><a class="reference internal" href="#id2">7.1.27</a></li>
+<li><a class="reference internal" href="#id3">7.1.26</a></li>
+<li><a class="reference internal" href="#id4">7.1.25</a></li>
+<li><a class="reference internal" href="#id5">7.1.24</a></li>
+<li><a class="reference internal" href="#id6">7.1.23</a></li>
+<li><a class="reference internal" href="#id7">7.1.22</a></li>
+<li><a class="reference internal" href="#id8">7.1.21</a></li>
+<li><a class="reference internal" href="#id9">7.1.20</a></li>
+<li><a class="reference internal" href="#id10">7.1.19</a></li>
+<li><a class="reference internal" href="#id11">7.1.18</a></li>
+<li><a class="reference internal" href="#id12">7.1.17</a></li>
+<li><a class="reference internal" href="#id13">7.1.16</a></li>
+<li><a class="reference internal" href="#id14">7.1.15</a></li>
+<li><a class="reference internal" href="#id15">7.1.14</a></li>
+<li><a class="reference internal" href="#id16">7.1.13</a></li>
+<li><a class="reference internal" href="#id17">7.1.12</a></li>
+<li><a class="reference internal" href="#id18">7.1.11</a></li>
+<li><a class="reference internal" href="#id19">7.1.10</a></li>
+<li><a class="reference internal" href="#id20">7.1.9</a></li>
+<li><a class="reference internal" href="#id21">7.1.8</a></li>
+<li><a class="reference internal" href="#id22">7.1.7</a></li>
+<li><a class="reference internal" href="#id23">7.1.6</a></li>
+<li><a class="reference internal" href="#id24">7.1.5</a></li>
+<li><a class="reference internal" href="#id25">7.1.4</a></li>
+<li><a class="reference internal" href="#id26">7.1.3</a></li>
+<li><a class="reference internal" href="#id27">7.1.2</a></li>
+<li><a class="reference internal" href="#id28">7.1.1</a></li>
+<li><a class="reference internal" href="#id29">7.1.0</a><ul>
 <li><a class="reference internal" href="#features">Features</a></li>
 <li><a class="reference internal" href="#performance">Performance</a></li>
 <li><a class="reference internal" href="#reliability">Reliability</a></li>
@@ -318,14 +318,66 @@
     <div class="body col-md-9 content" role="main">
       
   <section id="release-notes">
-<h1>Release Notes</h1>
-<section id="id1">
+<span id="id1"></span><h1>Release Notes</h1>
+<section id="id2">
+<h2>7.1.27</h2>
+<ul class="simple">
+<li><p>Same as 7.1.26 release with AVX enabled.</p></li>
+</ul>
+</section>
+<section id="id3">
+<h2>7.1.26</h2>
+<ul class="simple">
+<li><p>Released with AVX disabled.</p></li>
+<li><p>Fixed status json to not report fdbserver processes as clients. <a class="reference external" href="https://github.com/apple/foundationdb/pull/9252">(PR #9252)</a></p></li>
+<li><p>Added detection of disconnection to satellite TLog in gray failure detection. <a class="reference external" href="https://github.com/apple/foundationdb/pull/9107">(PR #9107)</a></p></li>
+<li><p>Fixed (non)empty peeks stats in TLogMetrics. <a class="reference external" href="https://github.com/apple/foundationdb/pull/9074">(PR #9074)</a></p></li>
+<li><p>Fixed a data distribution bug where exclusions can become stuck because DD cannot build new teams. <a class="reference external" href="https://github.com/apple/foundationdb/pull/9035">(PR #9035)</a></p></li>
+<li><p>Added FoundationDB version to ProcessMetrics. <a class="reference external" href="https://github.com/apple/foundationdb/pull/9037">(PR #9037)</a></p></li>
+<li><p>Removed RocksDB read iterator destruction from the commit path. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8971">(PR #8971)</a></p></li>
+<li><p>Added determinstic degraded server selection in gray failure detection. <a class="reference external" href="https://github.com/apple/foundationdb/pull/9001">(PR #9001)</a></p></li>
+<li><p>Fixed an interger overflow bug that causes fetching backup files to fail. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8996">(PR #8996)</a></p></li>
+<li><p>Fixed a log router race condition that blocks remote tlogs forever. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8966">(PR #8966)</a></p></li>
+<li><p>Fixed a backup worker assertion failure. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8887">(PR #8887)</a></p></li>
+<li><p>Upgraded RocksDB to 7.7.3 version. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8880">(PR #8880)</a></p></li>
+<li><p>Added byte limit for index prefetch. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8802">(PR #8802)</a></p></li>
+<li><p>Added storage server read range bytes metrics. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8724">(PR #8724)</a></p></li>
+<li><p>Added counters for single key clear requests. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8792">(PR #8792)</a></p></li>
+<li><p>Added more RocksDB knobs. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8713">(PR #8713)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/8862">(PR #8862)</a>, and <a class="reference external" href="https://github.com/apple/foundationdb/pull/9165">(PR #9165)</a></p></li>
+<li><p>Added a new network option “retain_client_library_copies” to keep the client library copies. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8740">(PR #8740)</a></p></li>
+<li><p>Fixed a transaction_too_old error on storage servers when version vector is enabled. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8710">(PR #8710)</a></p></li>
+</ul>
+</section>
+<section id="id4">
+<h2>7.1.25</h2>
+<ul class="simple">
+<li><p>Same as 7.1.24 release with AVX enabled.</p></li>
+</ul>
+</section>
+<section id="id5">
+<h2>7.1.24</h2>
+<ul class="simple">
+<li><p>Released with AVX disabled.</p></li>
+<li><p>Fixed a transaction log data corruption bug. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8525">(PR #8525)</a>, <a class="reference external" href="https://github.com/apple/foundationdb/pull/8562">(PR #8562)</a>, and <a class="reference external" href="https://github.com/apple/foundationdb/pull/8647">(PR #8647)</a></p></li>
+<li><p>Fixed a rare data race in transaction logs when PEEK_BATCHING_EMPTY_MSG is enabled. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8660">(PR #8660)</a></p></li>
+<li><p>Fixed a heap-use-after-free bug in cluster controller.  <a class="reference external" href="https://github.com/apple/foundationdb/pull/8683">(PR #8683)</a></p></li>
+<li><p>Changed consistency check to report all corruptions. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8571">(PR #8571)</a></p></li>
+<li><p>Fixed a rare storage server crashing bug after recovery. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8468">(PR #8468)</a></p></li>
+<li><p>Added client knob UNLINKONLOAD_FDBCLIB to control deletion of external client libraries. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8434">(PR #8434)</a></p></li>
+<li><p>Updated the default peer latency degradation percentile to 0.5. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8370">(PR #8370)</a></p></li>
+<li><p>Made exclusion less pessimistic when warning about low space usage. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8347">(PR #8347)</a></p></li>
+<li><p>Added storage server readrange and update latency metrics. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8353">(PR #8353)</a></p></li>
+<li><p>Increased the default PEER_DEGRADATION_CONNECTION_FAILURE_COUNT value to 5s. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8336">(PR #8336)</a></p></li>
+<li><p>Increased RocksDB block cache size. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8274">(PR #8274)</a></p></li>
+</ul>
+</section>
+<section id="id6">
 <h2>7.1.23</h2>
 <ul class="simple">
 <li><p>Same as 7.1.22 release with AVX enabled.</p></li>
 </ul>
 </section>
-<section id="id2">
+<section id="id7">
 <h2>7.1.22</h2>
 <ul class="simple">
 <li><p>Released with AVX disabled.</p></li>
@@ -338,13 +390,13 @@
 <li><p>Added back RecoveryAvailable trace event for status’s seconds_since_last_recovered field. <a class="reference external" href="https://github.com/apple/foundationdb/pull/8068">(PR #8068)</a></p></li>
 </ul>
 </section>
-<section id="id3">
+<section id="id8">
 <h2>7.1.21</h2>
 <ul class="simple">
 <li><p>Same as 7.1.20 release with AVX enabled.</p></li>
 </ul>
 </section>
-<section id="id4">
+<section id="id9">
 <h2>7.1.20</h2>
 <ul class="simple">
 <li><p>Released with AVX disabled.</p></li>
@@ -353,13 +405,13 @@
 <li><p>Fixed bugs when GRV proxy returns an error. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7860">(PR #7860)</a></p></li>
 </ul>
 </section>
-<section id="id5">
+<section id="id10">
 <h2>7.1.19</h2>
 <ul class="simple">
 <li><p>Same as 7.1.18 release with AVX enabled.</p></li>
 </ul>
 </section>
-<section id="id6">
+<section id="id11">
 <h2>7.1.18</h2>
 <ul class="simple">
 <li><p>Released with AVX disabled.</p></li>
@@ -370,13 +422,13 @@
 <li><p>Added more transaction debug events for prefetch queries. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7732">(PR #7732)</a></p></li>
 </ul>
 </section>
-<section id="id7">
+<section id="id12">
 <h2>7.1.17</h2>
 <ul class="simple">
 <li><p>Same as 7.1.16 release with AVX enabled.</p></li>
 </ul>
 </section>
-<section id="id8">
+<section id="id13">
 <h2>7.1.16</h2>
 <ul class="simple">
 <li><p>Released with AVX disabled.</p></li>
@@ -390,13 +442,13 @@
 <li><p>Added Rocksdb compression and data size stats. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7596">(PR #7596)</a></p></li>
 </ul>
 </section>
-<section id="id9">
+<section id="id14">
 <h2>7.1.15</h2>
 <ul class="simple">
 <li><p>Same as 7.1.14 release with AVX enabled.</p></li>
 </ul>
 </section>
-<section id="id10">
+<section id="id15">
 <h2>7.1.14</h2>
 <ul class="simple">
 <li><p>Released with AVX disabled.</p></li>
@@ -406,13 +458,13 @@
 <li><p>Improved hasIncompleteVersionstamp performance in Java binding to use iteration rather than stream processing. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7559">(PR #7559)</a></p></li>
 </ul>
 </section>
-<section id="id11">
+<section id="id16">
 <h2>7.1.13</h2>
 <ul class="simple">
 <li><p>Same as 7.1.12 release with AVX enabled.</p></li>
 </ul>
 </section>
-<section id="id12">
+<section id="id17">
 <h2>7.1.12</h2>
 <ul class="simple">
 <li><p>Released with AVX disabled.</p></li>
@@ -424,13 +476,13 @@
 <li><p>Fixed undefined behavior from accessing field of uninitialized object. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7430">(PR #7430)</a></p></li>
 </ul>
 </section>
-<section id="id13">
+<section id="id18">
 <h2>7.1.11</h2>
 <ul class="simple">
 <li><p>Same as 7.1.10 release with AVX enabled.</p></li>
 </ul>
 </section>
-<section id="id14">
+<section id="id19">
 <h2>7.1.10</h2>
 <ul class="simple">
 <li><p>Released with AVX disabled.</p></li>
@@ -440,13 +492,13 @@
 <li><p>Fixed an unknown error bug when hostname resolving fails. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7380">(PR #7380)</a></p></li>
 </ul>
 </section>
-<section id="id15">
+<section id="id20">
 <h2>7.1.9</h2>
 <ul class="simple">
 <li><p>Same as 7.1.8 release with AVX enabled.</p></li>
 </ul>
 </section>
-<section id="id16">
+<section id="id21">
 <h2>7.1.8</h2>
 <ul class="simple">
 <li><p>Released with AVX disabled.</p></li>
@@ -469,13 +521,13 @@
 <li><p>Fixed a sequential execution issue for fdbcli kill, suspend, and expensive_data_check commands. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7211">(PR #7211)</a></p></li>
 </ul>
 </section>
-<section id="id17">
+<section id="id22">
 <h2>7.1.7</h2>
 <ul class="simple">
 <li><p>Same as 7.1.6 release with AVX enabled.</p></li>
 </ul>
 </section>
-<section id="id18">
+<section id="id23">
 <h2>7.1.6</h2>
 <ul class="simple">
 <li><p>Released with AVX disabled.</p></li>
@@ -483,7 +535,7 @@
 <li><p>Fixed a storage server bug that read data after its failure. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7217">(PR #7217)</a></p></li>
 </ul>
 </section>
-<section id="id19">
+<section id="id24">
 <h2>7.1.5</h2>
 <ul class="simple">
 <li><p>Fixed a fdbcli kill bug that was not killing in parallel. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7150">(PR #7150)</a></p></li>
@@ -492,7 +544,7 @@
 <li><p>Added a backtrace before throwing serialization_failed. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7155">(PR #7155)</a></p></li>
 </ul>
 </section>
-<section id="id20">
+<section id="id25">
 <h2>7.1.4</h2>
 <ul class="simple">
 <li><p>Fixed a bug that prevents client from connecting to a cluster. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7060">(PR #7060)</a></p></li>
@@ -513,7 +565,7 @@
 <li><p>Fixed a limit bug in indexPrefetch. <a class="reference external" href="https://github.com/apple/foundationdb/pull/7005">(PR #7005)</a></p></li>
 </ul>
 </section>
-<section id="id21">
+<section id="id26">
 <h2>7.1.3</h2>
 <ul class="simple">
 <li><p>Added logging measuring commit compute duration. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6906">(PR #6906)</a></p></li>
@@ -524,7 +576,7 @@
 <li><p>Fixed a bug that prevents a cluster from fully recovered state after taking a snapshot. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6892">(PR #6892)</a></p></li>
 </ul>
 </section>
-<section id="id22">
+<section id="id27">
 <h2>7.1.2</h2>
 <ul class="simple">
 <li><p>Fixed failing upgrades due to non-persisted initial cluster version. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6864">(PR #6864)</a></p></li>
@@ -533,13 +585,13 @@
 <li><p>Fixed a client-side infinite loop due to provisional GRV Proxy ID not set in GetReadVersionReply. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6849">(PR #6849)</a></p></li>
 </ul>
 </section>
-<section id="id23">
+<section id="id28">
 <h2>7.1.1</h2>
 <ul class="simple">
 <li><p>Added new c libs to client package. <a class="reference external" href="https://github.com/apple/foundationdb/pull/6828">(PR #6828)</a></p></li>
 </ul>
 </section>
-<section id="id24">
+<section id="id29">
 <h2>7.1.0</h2>
 <section id="features">
 <h3>Features</h3>
@@ -629,7 +681,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 19, 2023.<br/>
+      Last updated on Jan 31, 2023.<br/>
     </p>
   </div>
 </footer>
