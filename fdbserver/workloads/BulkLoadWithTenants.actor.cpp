@@ -125,13 +125,16 @@ struct BulkSetupWorkload : TestWorkload {
 		               workload->tenants));
 
 		state int i;
+		state bool added = false;
 		for (i = 0; i < workload->tenants.size(); i++) {
 			std::vector<KeyValueRef> keysForCurTenant = wait(getKVPairsForTenant(workload, workload->tenants[i], cx));
-			if (workload->enableEKPKeyFetchFailure &&
-			    CLIENT_KNOBS->EKP_TENANT_ID_TO_DROP == TenantInfo::INVALID_TENANT && keysForCurTenant.size() > 0) {
+			if (workload->enableEKPKeyFetchFailure && keysForCurTenant.size() > 0 && !added) {
 				IKnobCollection::getMutableGlobalKnobCollection().setKnob(
-				    "ekp_tenant_id_to_drop", KnobValueRef::create(int64_t{ workload->tenants[i]->id() }));
-				TraceEvent("BulkSetupTenantForEKPToDrop").detail("Tenant", CLIENT_KNOBS->EKP_TENANT_ID_TO_DROP);
+				    "simulation_ekp_tenant_ids_to_drop",
+				    KnobValueRef::create(std::to_string(workload->tenants[i]->id())));
+				TraceEvent("BulkSetupTenantForEKPToDrop")
+				    .detail("Tenant", CLIENT_KNOBS->SIMULATION_EKP_TENANT_IDS_TO_DROP);
+				added = true;
 			}
 			workload->numKVPairsPerTenant[workload->tenants[i]->id()] = keysForCurTenant;
 		}
@@ -140,11 +143,13 @@ struct BulkSetupWorkload : TestWorkload {
 
 	ACTOR static Future<bool> _check(BulkSetupWorkload* workload, Database cx) {
 		state int i;
+		state std::unordered_set<int64_t> tenantIdsToDrop =
+		    parseStringToUnorderedSet<int64_t>(CLIENT_KNOBS->SIMULATION_EKP_TENANT_IDS_TO_DROP, ',');
 		for (i = 0; i < workload->tenants.size(); i++) {
 			state Reference<Tenant> tenant = workload->tenants[i];
 			std::vector<KeyValueRef> keysForCurTenant = wait(getKVPairsForTenant(workload, tenant, cx));
-			if (tenant->id() == CLIENT_KNOBS->EKP_TENANT_ID_TO_DROP) {
-				// Don't check the tenant that the EKP would throw errors for
+			if (tenantIdsToDrop.count(tenant->id())) {
+				// Don't check the tenants that the EKP would throw errors for
 				continue;
 			}
 			std::vector<KeyValueRef> expectedKeysForCurTenant = workload->numKVPairsPerTenant[tenant->id()];

@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/ManagementAPI.actor.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_TENANTENTRYCACHE_ACTOR_G_H)
 #define FDBCLIENT_TENANTENTRYCACHE_ACTOR_G_H
 #include "fdbclient/TenantEntryCache.actor.g.h"

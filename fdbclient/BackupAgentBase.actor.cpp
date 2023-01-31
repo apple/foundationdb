@@ -319,8 +319,11 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			offset += len2;
 			state Optional<MutationRef> encryptedLogValue = Optional<MutationRef>();
 
-			// check for valid tenant in required tenant mode if the mutation is either encrypted or is un-encrypted and
-			// NOT a system key
+			// Check for valid tenant in required tenant mode if the mutation is either encrypted or is un-encrypted and
+			// NOT a system key. If the tenant does not exist in our tenant map then we EXCLUDE the mutation (of that
+			// respective tenant) during the restore. NOTE: This simply allows a restore to make progress in the event
+			// of tenant deletion, but tenant deletion should be considered carefully so that we do not run into this
+			// case.
 			if (config.tenantMode == TenantMode::REQUIRED &&
 			    (logValue.isEncrypted() || !isSystemKey(logValue.param1))) {
 				int64_t tenantId = TenantInfo::INVALID_TENANT;
@@ -355,10 +358,10 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 					logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::BACKUP);
 				} catch (Error& e) {
 					// It's possible a tenant was deleted and the encrypt key fetch failed
+					TraceEvent(SevWarnAlways, "MutationLogRestoreEncryptKeyFetchFailed")
+					    .detail("Version", version)
+					    .detail("TenantId", domainId);
 					if (e.code() == error_code_encrypt_keys_fetch_failed) {
-						TraceEvent(SevWarnAlways, "MutationLogRestoreEncryptKeyFetchFailed")
-						    .detail("Version", version)
-						    .detail("TenantId", domainId);
 						CODE_PROBE(true, "mutation log restore encrypt keys not found");
 						consumed += BackupAgentBase::logHeaderSize + len1 + len2;
 						continue;
