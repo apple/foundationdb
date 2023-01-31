@@ -403,7 +403,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			state TenantMapEntry checkEntry2;
 			wait(store(checkEntry2, MetaclusterAPI::getTenant(self->managementDb, tenant)) &&
 			     store(tenantList,
-			           MetaclusterAPI::listTenants(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6, 0, filters)));
+			           MetaclusterAPI::listTenantMetadata(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6, 0, filters)));
 			bool found = false;
 			for (auto pair : tenantList) {
 				ASSERT(pair.second.tenantState == checkState);
@@ -863,7 +863,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				    store(metaclusterRegistration,
 				          MetaclusterMetadata::metaclusterRegistration().get(clusterData.db.getReference())) &&
 				    store(tenants,
-				          TenantAPI::listTenantIdsTransaction(tr, ""_sr, "\xff\xff"_sr, clusterData.tenants.size() + 1)));
+				          TenantAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, clusterData.tenants.size() + 1)));
 				break;
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(tr->onError(e)));
@@ -893,7 +893,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 		if (deleteTenants) {
 			state std::vector<std::pair<TenantName, int64_t>> tenants =
-			    wait(MetaclusterAPI::listTenantIds(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6));
+			    wait(MetaclusterAPI::listTenants(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6));
 
 			state std::vector<Future<Void>> deleteTenantFutures;
 			for (auto [tenantName, tid] : tenants) {

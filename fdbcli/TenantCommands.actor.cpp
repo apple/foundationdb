@@ -366,7 +366,7 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 			state std::vector<TenantName> tenantNames;
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 				std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
-				    wait(MetaclusterAPI::listTenants(db, beginTenant, endTenant, limit, offset, filters));
+				    wait(MetaclusterAPI::listTenantMetadata(db, beginTenant, endTenant, limit, offset, filters));
 				for (auto tenant : tenants) {
 					tenantNames.push_back(tenant.first);
 				}

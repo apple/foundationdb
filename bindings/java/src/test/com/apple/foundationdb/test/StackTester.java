@@ -434,7 +434,7 @@ public class StackTester {
 				byte[] begin = (byte[])params.get(0);
 				byte[] end = (byte[])params.get(1);
 				int limit = StackUtils.getInt(params.get(2));
-				CloseableAsyncIterator<KeyValue> tenantIter = TenantManagement.listTenants(inst.context.db, begin, end, limit);
+				CloseableAsyncIterator<KeyValue> tenantIter = TenantManagement.listTenantMetadata(inst.context.db, begin, end, limit);
 				List<byte[]> result = new ArrayList();
 				try {
 					while (tenantIter.hasNext()) {
