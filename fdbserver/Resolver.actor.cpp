@@ -352,8 +352,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 			stateTransactions.push_back_deep(
 			    stateTransactions.arena(),
 			    StateTransactionRef(reply.committed[t] == ConflictBatch::TransactionCommitted,
-			                        req.transactions[t].mutations,
-			                        req.transactions[t].tenantIds));
+			                        req.transactions[t].mutations));
 
 			// for (const auto& m : req.transactions[t].mutations)
 			//	DEBUG_MUTATION("Resolver", req.version, m, self->dbgid);
