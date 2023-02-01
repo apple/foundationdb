@@ -1622,7 +1622,7 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadata(
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			if (filters.empty()) {
 				std::vector<std::pair<TenantName, int64_t>> ids =
 				    wait(MetaclusterAPI::listTenantsTransaction(tr, begin, end, limit, offset));
