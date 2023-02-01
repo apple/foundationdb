@@ -55,6 +55,23 @@ struct GranuleDeltas : VectorRef<MutationsAndVersionRef> {
 	}
 };
 
+#pragma pack(push, 4)
+struct GranuleMutationRef {
+	MutationRef::Type type;
+	Version version;
+	StringRef param1;
+	StringRef param2;
+
+	GranuleMutationRef() {}
+	GranuleMutationRef(MutationRef::Type t, Version v, StringRef param1, StringRef param2)
+	  : type(t), version(v), param1(param1), param2(param2) {}
+	GranuleMutationRef(Arena& to, MutationRef::Type t, Version v, StringRef param1, StringRef param2)
+	  : type(t), version(v), param1(to, param1), param2(to, param2) {}
+	GranuleMutationRef(Arena& to, const GranuleMutationRef& from)
+	  : type(from.type), version(from.version), param1(to, from.param1), param2(to, from.param2) {}
+};
+#pragma pack(pop)
+
 struct GranuleMaterializeStats {
 	// file-level stats
 	int64_t inputBytes;
