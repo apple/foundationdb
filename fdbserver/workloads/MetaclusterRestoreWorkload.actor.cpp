@@ -253,8 +253,9 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		loop {
 			try {
 				TenantMapEntry tenantEntry;
+				tenantEntry.tenantName = tenantName;
 				tenantEntry.tenantGroup = self->chooseTenantGroup();
-				wait(MetaclusterAPI::createTenant(self->managementDb, tenantName, tenantEntry));
+				wait(MetaclusterAPI::createTenant(self->managementDb, tenantEntry, AssignClusterAutomatically::True));
 				TenantMapEntry createdEntry = wait(MetaclusterAPI::getTenant(self->managementDb, tenantName));
 				self->createdTenants[tenantName] =
 				    TenantData(createdEntry.assignedCluster.get(), createdEntry.tenantGroup, createTime);

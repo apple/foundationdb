@@ -296,9 +296,6 @@ private:
 			for (auto tenantName : expectedTenants) {
 				TenantMapEntry const& metaclusterEntry = self->managementMetadata.tenantMap[tenantName];
 				if (!dataClusterTenantMap.count(tenantName)) {
-					if (metaclusterEntry.tenantGroup.present()) {
-						tenantGroupsWithCompletedTenants.insert(metaclusterEntry.tenantGroup.get());
-					}
 					ASSERT(metaclusterEntry.tenantState == TenantState::REGISTERING ||
 					       metaclusterEntry.tenantState == TenantState::REMOVING ||
 					       metaclusterEntry.tenantState == TenantState::ERROR);
