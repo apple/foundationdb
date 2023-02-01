@@ -24,6 +24,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -251,6 +252,31 @@ Version getLogKeyVersion(Key key) {
 	return bigEndian64(*(int64_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t)));
 }
 
+bool validTenantAccess(std::map<int64_t, TenantName>* tenantMap,
+                       MutationRef m,
+                       bool provisionalProxy,
+                       Version version) {
+	int64_t tenantId = TenantInfo::INVALID_TENANT;
+	if (m.isEncrypted()) {
+		tenantId = m.encryptionHeader()->cipherTextDetails.encryptDomainId;
+	} else {
+		tenantId = TenantAPI::extractTenantIdFromMutation(m);
+	}
+	ASSERT(tenantMap != nullptr);
+	if (m.isEncrypted() && isReservedEncryptDomain(tenantId)) {
+		// These are valid encrypt domains so don't check the tenant map
+	} else if (tenantMap->find(tenantId) == tenantMap->end()) {
+		// If a tenant is not found for a given mutation then exclude it from the batch
+		ASSERT(!provisionalProxy);
+		TraceEvent(SevWarnAlways, "MutationLogRestoreTenantNotFound")
+		    .detail("Version", version)
+		    .detail("TenantId", tenantId);
+		CODE_PROBE(true, "mutation log restore tenant not found");
+		return false;
+	}
+	return true;
+}
+
 // Given a key from one of the ranges returned by get_log_ranges,
 // returns(version, part) where version is the database version number of
 // the transaction log data in the value, and part is 0 for the first such
@@ -319,32 +345,16 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			offset += len2;
 			state Optional<MutationRef> encryptedLogValue = Optional<MutationRef>();
 
-			// Check for valid tenant in required tenant mode if the mutation is either encrypted or is un-encrypted and
-			// NOT a system key. If the tenant does not exist in our tenant map then we EXCLUDE the mutation (of that
-			// respective tenant) during the restore. NOTE: This simply allows a restore to make progress in the event
-			// of tenant deletion, but tenant deletion should be considered carefully so that we do not run into this
-			// case.
-			if (config.tenantMode == TenantMode::REQUIRED &&
-			    (logValue.isEncrypted() || !isSystemKey(logValue.param1))) {
-				int64_t tenantId = TenantInfo::INVALID_TENANT;
-				if (logValue.isEncrypted()) {
-					tenantId = logValue.encryptionHeader()->cipherTextDetails.encryptDomainId;
-				} else {
-					tenantId = TenantAPI::extractTenantIdFromMutation(logValue);
-				}
-				ASSERT(tenantMap != nullptr);
-				if (logValue.isEncrypted() && isReservedEncryptDomain(tenantId)) {
-					// These are valid encrypt domains so don't check the tenant map
-				} else if (tenantMap->find(tenantId) == tenantMap->end()) {
-					// If a tenant is not found for a given mutation then exclude it from the batch
-					ASSERT(!provisionalProxy);
-					TraceEvent(SevWarnAlways, "MutationLogRestoreTenantNotFound")
-					    .detail("Version", version)
-					    .detail("TenantId", tenantId);
-					CODE_PROBE(true, "mutation log restore tenant not found");
-					consumed += BackupAgentBase::logHeaderSize + len1 + len2;
-					continue;
-				}
+			// Check for valid tenant in required tenant mode. If the tenant does not exist in our tenant map then
+			// we EXCLUDE the mutation (of that respective tenant) during the restore. NOTE: This simply allows a
+			// restore to make progress in the event of tenant deletion, but tenant deletion should be considered
+			// carefully so that we do not run into this case. We do this check here so if encrypted mutations are not
+			// found in the tenant map then we exit early without needing to reach out to the EKP.
+			if (config.tenantMode == TenantMode::REQUIRED && !isSystemKey(logValue.param1) &&
+			    config.encryptionAtRestMode.mode != EncryptionAtRestMode::CLUSTER_AWARE &&
+			    !validTenantAccess(tenantMap, logValue, provisionalProxy, version)) {
+				consumed += BackupAgentBase::logHeaderSize + len1 + len2;
+				continue;
 			}
 
 			// Decrypt mutation ref if encrypted
@@ -371,6 +381,14 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 				}
 			}
 			ASSERT(!logValue.isEncrypted());
+
+			// If the mutation was encrypted using cluster aware encryption then check after decryption
+			if (config.tenantMode == TenantMode::REQUIRED &&
+			    config.encryptionAtRestMode.mode == EncryptionAtRestMode::CLUSTER_AWARE &&
+			    !isSystemKey(logValue.param1) && !validTenantAccess(tenantMap, logValue, provisionalProxy, version)) {
+				consumed += BackupAgentBase::logHeaderSize + len1 + len2;
+				continue;
+			}
 
 			MutationRef originalLogValue = logValue;
 

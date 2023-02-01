@@ -187,12 +187,12 @@ struct BulkSetupWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(BulkSetupWorkload* workload, Database cx) {
 		// We want to ensure that tenant deletion happens before the restore phase starts
-		if (workload->deleteTenants) {
-			state double startTime = now();
+		// If there is only one tenant don't delete that tenant
+		if (workload->deleteTenants && workload->tenants.size() > 1) {
 			state Reference<TenantEntryCache<Void>> tenantCache =
 			    makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
 			wait(tenantCache->init());
-			state int numTenantsToDelete = deterministicRandom()->randomInt(0, workload->tenants.size() + 1);
+			state int numTenantsToDelete = deterministicRandom()->randomInt(0, workload->tenants.size());
 			TraceEvent("BulkSetupTenantDeletion").detail("NumTenants", numTenantsToDelete);
 			if (numTenantsToDelete > 0) {
 				state int i;
@@ -216,9 +216,6 @@ struct BulkSetupWorkload : TestWorkload {
 					}
 					// delete the tenant
 					wait(success(TenantAPI::deleteTenant(cx.getReference(), tenant->name.get(), tenant->id())));
-					if (workload->testDuration > 0 && now() - startTime >= workload->testDuration) {
-						return Void();
-					}
 				}
 			}
 		}
@@ -234,6 +231,9 @@ struct BulkSetupWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0) {
+			if (testDuration > 0) {
+				return timeout(_start(this, cx), testDuration, Void());
+			}
 			return _start(this, cx);
 		}
 		return Void();
