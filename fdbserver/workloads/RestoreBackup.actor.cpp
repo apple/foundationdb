@@ -100,6 +100,7 @@ struct RestoreBackupWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.clear(normalKeys);
 				for (auto& r : getSystemBackupRanges()) {
 					tr.clear(r);
