@@ -2803,6 +2803,10 @@ int64_t Tenant::id() const {
 	return idFuture.get();
 }
 
+Future<int64_t> Tenant::getIdFuture() const {
+	return idFuture;
+}
+
 KeyRef Tenant::prefix() const {
 	ASSERT(idFuture.isReady());
 	if (bigEndianId == -1) {
