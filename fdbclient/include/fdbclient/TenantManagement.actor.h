@@ -479,6 +479,7 @@ Future<std::vector<std::pair<TenantName, int64_t>>> listTenantsTransaction(Trans
                                                                            TenantName begin,
                                                                            TenantName end,
                                                                            int limit) {
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	auto future = TenantMetadata::tenantNameIndex().getRange(tr, begin, end, limit);
 	return fmap([](auto f) -> std::vector<std::pair<TenantName, int64_t>> { return f.results; }, future);
 }

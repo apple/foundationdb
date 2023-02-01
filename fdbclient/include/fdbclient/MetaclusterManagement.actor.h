@@ -1550,6 +1550,7 @@ Future<std::vector<std::pair<TenantName, int64_t>>> listTenantsTransaction(Trans
                                                                            TenantName end,
                                                                            int limit,
                                                                            int offset = 0) {
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	auto future = ManagementClusterMetadata::tenantMetadata().tenantNameIndex.getRange(tr, begin, end, limit + offset);
 	return fmap(
 	    [offset](auto f) {
@@ -1573,49 +1574,37 @@ Future<std::vector<std::pair<TenantName, int64_t>>> listTenants(Reference<DB> db
 	});
 }
 
-ACTOR template <class Transaction>
-Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadataTransaction(Transaction tr,
-                                                                                         TenantNameRef begin,
-                                                                                         TenantNameRef end,
-                                                                                         int limit) {
-	state std::vector<std::pair<TenantName, int64_t>> matchingTenants =
-	    wait(listTenantsTransaction(tr, begin, end, limit));
-	state std::vector<Future<TenantMapEntry>> tenantEntryFutures;
-	for (auto const& [name, id] : matchingTenants) {
-		tenantEntryFutures.push_back(getTenantTransaction(tr, id));
-	}
-
-	wait(waitForAll(tenantEntryFutures));
-
-	std::vector<std::pair<TenantName, TenantMapEntry>> results;
-	for (int i = 0; i < matchingTenants.size(); ++i) {
-		// Tenants being renamed will show up twice; once under each name
-		results.emplace_back(matchingTenants[i].first, tenantEntryFutures[i].get());
-	}
-
-	return results;
-}
-
-// read tenant entries of tenantIds
+// Scan the tenant index to get a list of tenant IDs, and then lookup the metadata for each ID individually
 ACTOR template <class Transaction>
 Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadataTransaction(
     Transaction tr,
     std::vector<std::pair<TenantName, int64_t>> tenantIds) {
 
-	state int i = 0;
+	state int idIdx = 0;
 	state std::vector<Future<Optional<TenantMapEntry>>> futures;
-	for (; i < tenantIds.size(); ++i) {
-		futures.push_back(MetaclusterAPI::tryGetTenantTransaction(tr, tenantIds[i].second));
+	for (; idIdx < tenantIds.size(); ++idIdx) {
+		futures.push_back(MetaclusterAPI::tryGetTenantTransaction(tr, tenantIds[idIdx].second));
 	}
 	wait(waitForAll(futures));
 
 	std::vector<std::pair<TenantName, TenantMapEntry>> results;
 	results.reserve(futures.size());
-	for (i = 0; i < futures.size(); ++i) {
+	for (int i = 0; i < futures.size(); ++i) {
 		const TenantMapEntry& entry = futures[i].get().get();
 		results.emplace_back(entry.tenantName, entry);
 	}
 
+	return results;
+}
+
+ACTOR template <class Transaction>
+Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadataTransaction(Transaction tr,
+                                                                                         TenantNameRef begin,
+                                                                                         TenantNameRef end,
+                                                                                         int limit) {
+	std::vector<std::pair<TenantName, int64_t>> matchingTenants = wait(listTenantsTransaction(tr, begin, end, limit));
+	std::vector<std::pair<TenantName, TenantMapEntry>> results =
+	    wait(listTenantMetadataTransaction(tr, matchingTenants));
 	return results;
 }
 
