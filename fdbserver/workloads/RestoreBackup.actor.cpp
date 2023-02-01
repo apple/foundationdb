@@ -121,20 +121,19 @@ struct RestoreBackupWorkload : TestWorkload {
 
 		if (config.tenantMode == TenantMode::REQUIRED) {
 			// restore system keys
-			VectorRef<KeyRangeRef> systemBackupRanges = getSystemBackupRanges();
-			state std::vector<Future<Version>> restores;
-			for (int i = 0; i < systemBackupRanges.size(); i++) {
-				restores.push_back((self->backupAgent.restore(cx,
-				                                              cx,
-				                                              "system_restore"_sr,
-				                                              Key(self->backupContainer->getURL()),
-				                                              self->backupContainer->getProxy(),
-				                                              WaitForComplete::True,
-				                                              ::invalidVersion,
-				                                              Verbose::True,
-				                                              systemBackupRanges[i])));
+			state VectorRef<KeyRangeRef> systemBackupRanges = getSystemBackupRanges();
+			state int i;
+			for (i = 0; i < systemBackupRanges.size(); i++) {
+				wait(success(self->backupAgent.restore(cx,
+				                                       cx,
+				                                       "system_restore"_sr,
+				                                       Key(self->backupContainer->getURL()),
+				                                       self->backupContainer->getProxy(),
+				                                       WaitForComplete::True,
+				                                       ::invalidVersion,
+				                                       Verbose::True,
+				                                       systemBackupRanges[i])));
 			}
-			waitForAll(restores);
 			// restore non-system keys
 			wait(success(self->backupAgent.restore(cx,
 			                                       cx,
