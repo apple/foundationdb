@@ -39,7 +39,6 @@
 #define FDB_API_VERSION 720
 
 #include <foundationdb/fdb_c.h>
-#include <iostream>
 
 #define JNI_NULL nullptr
 

@@ -115,6 +115,8 @@ typedef struct keyvalue {
 } FDBKeyValue;
 #endif
 
+#pragma pack(pop)
+
 /* Memory layout of KeySelectorRef. */
 typedef struct keyselector {
 	FDBKey key;
@@ -169,6 +171,7 @@ typedef struct mappedkeyvalue {
 	unsigned char buffer[32];
 } FDBMappedKeyValue;
 
+#pragma pack(push, 4)
 /* Memory layout of MappedKeyValueRefV2.
 
 Total 128 bytes

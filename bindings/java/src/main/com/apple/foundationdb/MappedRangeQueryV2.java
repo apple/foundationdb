@@ -60,11 +60,11 @@ class MappedRangeQueryV2 implements AsyncIterable<MappedKeyValueV2> {
 	private final StreamingMode streamingMode;
 	private final EventKeeper eventKeeper;
 
-	private final int code_int = 1;
+	private final int code_uint8 = 1;
 	private final int code_bool = 2;
 
 	private static final int matchIndexPos = 1;
-	private static final int fetchLocalOnlyPos = 6;
+	private static final int fetchLocalOnlyPos = 3;
 
 	MappedRangeQueryV2(FDBTransaction transaction, boolean isSnapshot, KeySelector begin, KeySelector end,
 	                   byte[] mapper, int rowLimit, int matchIndex, boolean fetchLocalOnly, boolean reverse,
@@ -83,8 +83,8 @@ class MappedRangeQueryV2 implements AsyncIterable<MappedKeyValueV2> {
 	}
 
 	byte[] getParamsBytes(int matchIndex, boolean fetchLocalOnly) {
-		byte[] paramsBytes = new byte[] { 0x02, 0, 0, 0, 0, 0, 0, 0 };
-		paramsBytes[matchIndexPos] = code_int;
+		byte[] paramsBytes = new byte[] { 0x02, 0, 0, 0, 0 };
+		paramsBytes[matchIndexPos] = code_uint8;
 		paramsBytes[matchIndexPos + 1] = (byte)matchIndex;
 		paramsBytes[fetchLocalOnlyPos] = code_bool;
 		paramsBytes[fetchLocalOnlyPos + 1] = (byte)(fetchLocalOnly ? 1 : 0);

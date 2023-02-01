@@ -21,6 +21,7 @@
 #include <algorithm>
 #include "fdbclient/MutationLogReader.actor.h"
 #include "fdbclient/Tuple.h"
+#include "fdbclient/MappedRange.h"
 #include "fdbserver/workloads/ApiWorkload.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
@@ -37,15 +38,9 @@ const KeyRef prefix = "prefix"_sr;
 const KeyRef RECORD = "RECORD"_sr;
 const KeyRef INDEX = "INDEX"_sr;
 const int MATCH_INDEX_TEST_710_API = -1;
-const int code_int = 1;
-const int code_bool = 2;
 const int code_invalid = 0;
 const int VERSION = 2;
 const int INVALID_VERSION = 1;
-static std::unordered_map<int, int> versionToPosMatchIndex = { std::make_pair(2, 1) };
-static std::unordered_map<int, int> versionToPosFetchLocalOnly = { std::make_pair(2, 6) };
-static std::unordered_map<int, int> versionToPosLocal = { std::make_pair(2, 1) };
-static std::unordered_map<int, int> versionToLength = { std::make_pair(2, 8) };
 
 int recordSize;
 int indexSize;
@@ -289,7 +284,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 
 		state bool fetchLocalOnly = deterministicRandom()->random01() < 0.5;
 		state int currentVersion = deterministicRandom()->random01() < 0.9 ? VERSION : INVALID_VERSION;
-		state int codeMatchIndex = deterministicRandom()->random01() < 0.95 ? code_int : code_invalid;
+		state int codeMatchIndex = deterministicRandom()->random01() < 0.95 ? code_uint8 : code_invalid;
 		state int codeFetchLocalOnly = deterministicRandom()->random01() < 0.95 ? code_bool : code_invalid;
 		std::cout << "start scanMappedRangeWithLimits beginSelector:" << beginSelector.toString()
 		          << " endSelector:" << endSelector.toString() << " expectedBeginId:" << expectedBeginId

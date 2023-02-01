@@ -26,6 +26,7 @@
 #include <unordered_map>
 
 #include "fdbclient/BlobCipher.h"
+#include "fdbclient/MappedRange.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbrpc/TenantInfo.h"
 #include "flow/ApiVersion.h"
@@ -5048,36 +5049,6 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 	return Void();
 }
 
-/*
-Request Schema:
-The first byte is always version.
-Each field is a type code followed by the contents.
-V = 2:
-    byte[0] = version
-    byte[1] = type code of int *matchIndex*
-    byte[2-5] = *matchIndex* content in little endian
-    byte[6] = type code of bool *fetchLocalOnly*
-    byte[7] = *fetchLocalOnly* content
-*/
-
-/*
-Reply Schema:
-The first byte is always version.
-Each field is a type code followed by the contents.
-V = 2:
-    byte[0] = version
-    byte[1] = type code of int *local*
-    byte[2] = *local* content
-*/
-
-std::unordered_map<int, int> versionToPosMatchIndex = { std::make_pair(2, 1) };
-std::unordered_map<int, int> versionToPosFetchLocalOnly = { std::make_pair(2, 6) };
-std::unordered_map<int, int> versionToPosLocal = { std::make_pair(2, 1) };
-std::set<int> supportedVersions{ 2 };
-
-const int code_int = 1;
-const int code_bool = 2;
-
 void fillReply(Arena* a, int getMappedRangeProtocolVersion, MappedKeyValueRef* kvm, int local) {
 	return;
 }
@@ -5105,13 +5076,11 @@ int parseParams(GetMappedKeyValuesRequest* req, int* matchIndex, bool* fetchLoca
 
 void parseMatchIndex(KeyRef paramsBytes, int* matchIndex, int version) {
 	int pos = versionToPosMatchIndex[version];
-	if (paramsBytes[pos] != code_int) {
+	if (paramsBytes[pos] != code_uint8) {
 		TraceEvent("ErrorParsingMatchIndex").detail("Version", version);
 		throw get_mapped_range_parsing_error();
 	}
-	std::memcpy(matchIndex,
-	            paramsBytes.begin() + pos + 1,
-	            sizeof(int)); // assuming to have little endian, if not, then build the int with customized method
+	*matchIndex = (int)paramsBytes[pos + 1];
 }
 
 void parseFetchLocalOnly(KeyRef paramsBytes, bool* fetchLocalOnly, int version) {
@@ -5149,8 +5118,7 @@ Future<Void> mapSubquery(StorageServer* data,
                          KeyValueRef* it,
                          MappedKV* kvm,
                          Key mappedKey,
-                         int getMappedRangeProtocolVersion,
-                         int index) {
+                         int getMappedRangeProtocolVersion) {
 	if (isRangeQuery) {
 		// Use the mappedKey as the prefix of the range query.
 		// if MappedKV is MappedKeyValueRefV2, then set it
@@ -5265,8 +5233,7 @@ Future<Reply> mapKeyValues(StorageServer* data,
 			                                 it,
 			                                 kvm,
 			                                 mappedKey,
-			                                 getMappedRangeProtocolVersion,
-			                                 i + offset));
+			                                 getMappedRangeProtocolVersion));
 		}
 		wait(waitForAll(subqueries));
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())

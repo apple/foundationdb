@@ -42,15 +42,13 @@
 #include <rapidjson/document.h>
 #include "doctest.h"
 #include "fdbclient/Tuple.h"
+#include "fdbclient/MappedRange.h"
 
 #include "flow/config.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IRandom.h"
 
 #include "fdb_api.hpp"
-
-const int code_int = 1;
-const int code_bool = 2;
 
 void fdb_check(fdb_error_t e) {
 	if (e) {
@@ -1044,11 +1042,6 @@ static std::string recordValue(const int i, const int split) {
 	return Tuple::makeTuple(dataOfRecord(i), split).pack().toString();
 }
 
-static std::unordered_map<int, int> versionToPosMatchIndex = { std::make_pair(2, 1) };
-static std::unordered_map<int, int> versionToPosFetchLocalOnly = { std::make_pair(2, 6) };
-static std::unordered_map<int, int> versionToLength = { std::make_pair(2, 8) };
-static std::unordered_map<int, int> versionToPosLocal = { std::make_pair(2, 1) };
-
 const static int SPLIT_SIZE = 3;
 std::map<std::string, std::string> fillInRecords(int n) {
 	// Note: The user requested `prefix` should be added as the first element of the tuple that forms the key, rather
@@ -1096,7 +1089,7 @@ GetMappedRangeResultV2 getMappedIndexEntriesInternalV2(int beginId,
 	paramsBytes[0] = version; // API protocol version
 	int posMatchIndex = versionToPosMatchIndex[version];
 	int posFetchLocalOnly = versionToPosFetchLocalOnly[version];
-	paramsBytes[posMatchIndex] = code_int;
+	paramsBytes[posMatchIndex] = code_uint8;
 	paramsBytes[posMatchIndex + 1] = matchIndex; // little endian
 	paramsBytes[posFetchLocalOnly] = code_bool;
 	paramsBytes[posFetchLocalOnly + 1] = fetchLocalOnly;

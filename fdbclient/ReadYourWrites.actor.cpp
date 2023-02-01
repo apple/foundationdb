@@ -210,8 +210,7 @@ public:
 				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
 		}
 
-		RangeResult v = wait(ryw->tr.getRange(
-		    read.begin, read.end, read.limits, snapshot, read.reverse ? Reverse::True : Reverse::False));
+		RangeResult v = wait(ryw->tr.getRange(read.begin, read.end, read.limits, snapshot, Reverse(read.reverse)));
 		KeyRef maxKey = ryw->getMaxReadKey();
 		if (v.size() > 0) {
 			if (!read.reverse && v[v.size() - 1].key >= maxKey) {
@@ -1151,8 +1150,8 @@ public:
 			else
 				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
 		}
-		MappedRangeResult res = wait(ryw->tr.getMappedRange(
-		    read.begin, read.end, read.mapper, read.limits, snapshot, read.reverse ? Reverse::True : Reverse::False));
+		MappedRangeResult res = wait(
+		    ryw->tr.getMappedRange(read.begin, read.end, read.mapper, read.limits, snapshot, Reverse(read.reverse)));
 		return res;
 	}
 
@@ -1169,13 +1168,8 @@ public:
 			else
 				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
 		}
-		MappedRangeResultV2 res = wait(ryw->tr.getMappedRangeV2(read.begin,
-		                                                        read.end,
-		                                                        read.mapper,
-		                                                        read.paramsBytes,
-		                                                        read.limits,
-		                                                        snapshot,
-		                                                        read.reverse ? Reverse::True : Reverse::False));
+		MappedRangeResultV2 res = wait(ryw->tr.getMappedRangeV2(
+		    read.begin, read.end, read.mapper, read.paramsBytes, read.limits, snapshot, Reverse(read.reverse)));
 		return res;
 	}
 	template <class Req, class Result>
@@ -1699,8 +1693,7 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 	}
 
 	Future<RangeResult> result =
-	    reverse ? RYWImpl::readWithConflictRange(this, RYWImpl::GetRangeReq(begin, end, limits, true), snapshot)
-	            : RYWImpl::readWithConflictRange(this, RYWImpl::GetRangeReq(begin, end, limits, false), snapshot);
+	    RYWImpl::readWithConflictRange(this, RYWImpl::GetRangeReq(begin, end, limits, reverse), snapshot);
 
 	reading.add(success(result));
 	return result;
@@ -1764,10 +1757,8 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 	}
 
 	Future<MappedRangeResult> result =
-	    reverse ? RYWImpl::readWithConflictRangeForGetMappedRange<RYWImpl::GetMappedRangeReq, MappedRangeResult>(
-	                  this, RYWImpl::GetMappedRangeReq(begin, end, mapper, limits, true), snapshot)
-	            : RYWImpl::readWithConflictRangeForGetMappedRange<RYWImpl::GetMappedRangeReq, MappedRangeResult>(
-	                  this, RYWImpl::GetMappedRangeReq(begin, end, mapper, limits, false), snapshot);
+	    RYWImpl::readWithConflictRangeForGetMappedRange<RYWImpl::GetMappedRangeReq, MappedRangeResult>(
+	        this, RYWImpl::GetMappedRangeReq(begin, end, mapper, limits, reverse), snapshot);
 
 	return result;
 }
@@ -1790,6 +1781,10 @@ Future<MappedRangeResultV2> ReadYourWritesTransaction::getMappedRangeV2(KeySelec
 			throw client_invalid_operation(); // Not support special keys.
 		}
 	}
+	if ((!reverse && end.getKey() >= "\xff"_sr) || (reverse && begin.getKey() <= "\xff"_sr)) {
+		throw client_invalid_operation(); // Not support system key space
+	}
+
 	if (checkUsedDuringCommit()) {
 		return used_during_commit();
 	}
@@ -1822,10 +1817,8 @@ Future<MappedRangeResultV2> ReadYourWritesTransaction::getMappedRangeV2(KeySelec
 	}
 
 	Future<MappedRangeResultV2> result =
-	    reverse ? RYWImpl::readWithConflictRangeForGetMappedRange<RYWImpl::GetMappedRangeReqV2, MappedRangeResultV2>(
-	                  this, RYWImpl::GetMappedRangeReqV2(begin, end, mapper, paramsBytes, limits, true), snapshot)
-	            : RYWImpl::readWithConflictRangeForGetMappedRange<RYWImpl::GetMappedRangeReqV2, MappedRangeResultV2>(
-	                  this, RYWImpl::GetMappedRangeReqV2(begin, end, mapper, paramsBytes, limits, false), snapshot);
+	    RYWImpl::readWithConflictRangeForGetMappedRange<RYWImpl::GetMappedRangeReqV2, MappedRangeResultV2>(
+	        this, RYWImpl::GetMappedRangeReqV2(begin, end, mapper, paramsBytes, limits, reverse), snapshot);
 
 	return result;
 }

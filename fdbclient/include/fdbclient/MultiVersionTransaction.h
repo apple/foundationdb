@@ -88,9 +88,10 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 		FDBKey value;
 		/* It's complicated to map a std::variant to C. For now we assume the underlying requests are always getRange
 		 * and take the shortcut. */
+		FDBKey responseBytes;
+		unsigned char padding[4];
 		FDBGetRangeReqAndResult getRange;
 		unsigned char buffer[32];
-		FDBKey responseBytes;
 	} FDBMappedKeyValueV2;
 
 #pragma pack(push, 4)

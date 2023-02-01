@@ -149,12 +149,6 @@ static const Tag invalidTag{ tagLocalitySpecial, 0 };
 static const Tag txsTag{ tagLocalitySpecial, 1 };
 static const Tag cacheTag{ tagLocalitySpecial, 2 };
 
-const int MATCH_INDEX_ALL = 0;
-const int MATCH_INDEX_NONE = 1;
-const int MATCH_INDEX_MATCHED_ONLY = 2;
-const int MATCH_INDEX_UNMATCHED_ONLY = 3;
-const int MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH_V2 = 3;
-
 enum { txsTagOld = -1, invalidTagOld = -100 };
 
 struct TagsAndMessage {
@@ -839,10 +833,10 @@ struct MappedKeyValueRef : KeyValueRef {
 	MappedKeyValueRef(Arena& a, const MappedKeyValueRef& copyFrom) : KeyValueRef(a, copyFrom) {
 		const auto& reqAndResultCopyFrom = copyFrom.reqAndResult;
 		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResultCopyFrom)) {
-			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResultCopyFrom);
+			const auto& getValue = std::get<GetValueReqAndResultRef>(reqAndResultCopyFrom);
 			reqAndResult = GetValueReqAndResultRef(a, getValue);
 		} else if (std::holds_alternative<GetRangeReqAndResultRef>(reqAndResultCopyFrom)) {
-			auto getRange = std::get<GetRangeReqAndResultRef>(reqAndResultCopyFrom);
+			const auto& getRange = std::get<GetRangeReqAndResultRef>(reqAndResultCopyFrom);
 			reqAndResult = GetRangeReqAndResultRef(a, getRange);
 		} else {
 			throw internal_error();
@@ -868,7 +862,7 @@ struct MappedKeyValueRef : KeyValueRef {
 struct MappedKeyValueRefV2 : KeyValueRef {
 	// Save the original key value at the base (KeyValueRef).
 
-	KeyRef responseBytes;
+	KeyRef responseBytes; // schema is defined in MappedRange.h
 	MappedReqAndResultRef reqAndResult;
 
 	MappedKeyValueRefV2() = default;
@@ -938,8 +932,8 @@ struct MappedRangeResultRefV2 : VectorRef<MappedKeyValueRefV2> {
 	// Additional information on range result. See comments on RangeResultRef.
 	bool more;
 	Optional<KeyRef> readThrough;
-	bool readToBegin;
-	bool readThroughEnd;
+	bool readToBegin; // it contains the result reading to the begin of allKeys (e.g.normalKeys.begin)
+	bool readThroughEnd; // it contains the result reading to the end of allKeys (e.g. systemKeys.end)
 
 	MappedRangeResultRefV2() : more(false), readToBegin(false), readThroughEnd(false) {}
 	MappedRangeResultRefV2(Arena& p, const MappedRangeResultRefV2& toCopy)
