@@ -766,7 +766,7 @@ Future<Standalone<T>> safeThreadFutureToFutureImpl(ThreadFuture<Standalone<T>> t
 	ASSERT(threadFuture.isReady());
 	if (threadFuture.isError())
 		throw threadFuture.getError();
-	if (g_network->isSimulated()) {
+	if (BUGGIFY) {
 		return Standalone<T>(threadFuture.get(), Arena());
 	}
 	return threadFuture.get();
@@ -795,7 +795,7 @@ Future<Optional<Standalone<T>>> safeThreadFutureToFutureImpl(ThreadFuture<Option
 	ASSERT(threadFuture.isReady());
 	if (threadFuture.isError())
 		throw threadFuture.getError();
-	if (g_network->isSimulated()) {
+	if (BUGGIFY) {
 		if (threadFuture.get().present()) {
 			return Standalone<T>(threadFuture.get().get(), Arena());
 		} else {
@@ -805,21 +805,26 @@ Future<Optional<Standalone<T>>> safeThreadFutureToFutureImpl(ThreadFuture<Option
 	return threadFuture.get();
 }
 
+// This safeThreadFutureToFutureImpl(Future) actor should be used only with BUGGIFY.
+// It simulates the case where the returned Standalone points to memory owned by `future`.
+// When `future` goes out of scope, the memory pointed to by the Standalone will be invalid.
 ACTOR
 template <typename T>
-Future<Standalone<T>> futureToFuture(Future<Standalone<T>> future) {
+Future<Standalone<T>> faultySafeThreadFutureToFutureImpl(Future<Standalone<T>> future) {
 	try {
-		Standalone<T> val = wait(future);
+		Standalone<T> _ = wait(future);
 		return Standalone<T>(future.get(), Arena());
 	} catch (Error& e) {
-		// TODO: handle exceptions
 		throw e;
 	}
 }
 
+// This safeThreadFutureToFutureImpl(Future) actor should be used only with BUGGIFY.
+// It simulates the case where the returned Optional<Standalone> points to memory owned by `future`.
+// When `future` goes out of scope, the memory pointed to by the Optional<Standalone> will be invalid.
 ACTOR
 template <typename T>
-Future<Optional<Standalone<T>>> futureToFuture(Future<Optional<Standalone<T>>> future) {
+Future<Optional<Standalone<T>>> faultySafeThreadFutureToFutureImpl(Future<Optional<Standalone<T>>> future) {
 	try {
 		Optional<Standalone<T>> val = wait(future);
 		if (val.present()) {
@@ -828,12 +833,11 @@ Future<Optional<Standalone<T>>> futureToFuture(Future<Optional<Standalone<T>>> f
 			return Optional<Standalone<T>>();
 		}
 	} catch (Error& e) {
-		// TODO: handle exceptions
 		throw e;
 	}
 }
 
-// The allow anonymous_future type is used to prevent misuse of ThreadFutures.
+// The allow_anonymous_future type is used to prevent misuse of ThreadFutures.
 // For Standalone types, the memory in some cases is actually stored in the ThreadFuture object,
 // in which case we expect the caller to keep that ThreadFuture around until the result is no
 // longer needed.
@@ -871,8 +875,10 @@ typename std::enable_if<allow_anonymous_future<T>::value, Future<T>>::type safeT
 template <class T>
 typename std::enable_if<!allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
     Future<T>& future) {
-	// Do nothing
-	return futureToFuture(future);
+	if (BUGGIFY) {
+		return faultySafeThreadFutureToFutureImpl(future);
+	}
+	return future;
 }
 
 // Helper actor. Do not use directly!
