@@ -805,6 +805,34 @@ Future<Optional<Standalone<T>>> safeThreadFutureToFutureImpl(ThreadFuture<Option
 	return threadFuture.get();
 }
 
+ACTOR
+template <typename T>
+Future<Standalone<T>> futureToFuture(Future<Standalone<T>> future) {
+	try {
+		Standalone<T> val = wait(future);
+		return Standalone<T>(future.get(), Arena());
+	} catch (Error& e) {
+		// TODO: handle exceptions
+		throw e;
+	}
+}
+
+ACTOR
+template <typename T>
+Future<Optional<Standalone<T>>> futureToFuture(Future<Optional<Standalone<T>>> future) {
+	try {
+		Optional<Standalone<T>> val = wait(future);
+		if (val.present()) {
+			return Standalone<T>(future.get().get(), Arena());
+		} else {
+			return Optional<Standalone<T>>();
+		}
+	} catch (Error& e) {
+		// TODO: handle exceptions
+		throw e;
+	}
+}
+
 // The allow anonymous_future type is used to prevent misuse of ThreadFutures.
 // For Standalone types, the memory in some cases is actually stored in the ThreadFuture object,
 // in which case we expect the caller to keep that ThreadFuture around until the result is no
@@ -844,7 +872,7 @@ template <class T>
 typename std::enable_if<!allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
     Future<T>& future) {
 	// Do nothing
-	return future;
+	return futureToFuture(future);
 }
 
 // Helper actor. Do not use directly!
