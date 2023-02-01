@@ -256,6 +256,9 @@ bool validTenantAccess(std::map<int64_t, TenantName>* tenantMap,
                        MutationRef m,
                        bool provisionalProxy,
                        Version version) {
+	if (isSystemKey(m.param1)) {
+		return true;
+	}
 	int64_t tenantId = TenantInfo::INVALID_TENANT;
 	if (m.isEncrypted()) {
 		tenantId = m.encryptionHeader()->cipherTextDetails.encryptDomainId;
@@ -350,7 +353,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			// restore to make progress in the event of tenant deletion, but tenant deletion should be considered
 			// carefully so that we do not run into this case. We do this check here so if encrypted mutations are not
 			// found in the tenant map then we exit early without needing to reach out to the EKP.
-			if (config.tenantMode == TenantMode::REQUIRED && !isSystemKey(logValue.param1) &&
+			if (config.tenantMode == TenantMode::REQUIRED &&
 			    config.encryptionAtRestMode.mode != EncryptionAtRestMode::CLUSTER_AWARE &&
 			    !validTenantAccess(tenantMap, logValue, provisionalProxy, version)) {
 				consumed += BackupAgentBase::logHeaderSize + len1 + len2;
@@ -385,7 +388,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			// If the mutation was encrypted using cluster aware encryption then check after decryption
 			if (config.tenantMode == TenantMode::REQUIRED &&
 			    config.encryptionAtRestMode.mode == EncryptionAtRestMode::CLUSTER_AWARE &&
-			    !isSystemKey(logValue.param1) && !validTenantAccess(tenantMap, logValue, provisionalProxy, version)) {
+			    !validTenantAccess(tenantMap, logValue, provisionalProxy, version)) {
 				consumed += BackupAgentBase::logHeaderSize + len1 + len2;
 				continue;
 			}
