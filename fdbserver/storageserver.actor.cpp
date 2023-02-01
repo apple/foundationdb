@@ -2224,15 +2224,22 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 
 	state Version minVersion = data->data().latestVersion;
 	state Future<Void> watchFuture = data->watches.onChange(metadata->key);
-	state Future<Void> tenantWatchFuture;
 	if (tenantId != TenantInfo::INVALID_TENANT) {
-		tenantWatchFuture = data->tenantWatches.onChange(tenantId);
+		watchFuture = watchFuture || data->tenantWatches.onChange(tenantId);
 	}
 	state ReadOptions options;
+	state bool firstPass = true;
 	loop {
 		try {
 			if (tenantId != TenantInfo::INVALID_TENANT) {
-				data->checkTenantEntry(latestVersion, TenantInfo(tenantId, Optional<Standalone<StringRef>>()));
+				try {
+					data->checkTenantEntry(latestVersion, TenantInfo(tenantId, Optional<Standalone<StringRef>>()));
+				} catch (Error& e) {
+					if (e.code() == error_code_tenant_not_found && !firstPass) {
+						throw tenant_removed();
+					}
+					throw;
+				}
 			}
 			metadata = data->getWatchMetadata(key, tenantId);
 			state Version latest = data->version.get();
@@ -2289,23 +2296,13 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 					// that occur up to or including minVersion To prevent that, we'll check the key again once the
 					// version reaches our minVersion
 					watchFuture = watchFuture || data->version.whenAtLeast(minVersion);
-					if (tenantId != TenantInfo::INVALID_TENANT) {
-						tenantWatchFuture = tenantWatchFuture || data->version.whenAtLeast(minVersion);
-					}
 				}
 				if (BUGGIFY) {
 					// Simulate a trigger on the watch that results in the loop going around without the value changing
 					watchFuture = watchFuture || delay(deterministicRandom()->random01());
-					if (tenantId != TenantInfo::INVALID_TENANT) {
-						tenantWatchFuture = tenantWatchFuture || delay(deterministicRandom()->random01());
-					}
 				}
 
-				if (tenantId != TenantInfo::INVALID_TENANT) {
-					wait(tenantWatchFuture && watchFuture);
-				} else {
-					wait(watchFuture);
-				}
+				wait(watchFuture);
 				data->watchBytes -= watchBytes;
 			} catch (Error& e) {
 				data->watchBytes -= watchBytes;
@@ -2321,8 +2318,9 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 
 		watchFuture = data->watches.onChange(metadata->key);
 		if (tenantId != TenantInfo::INVALID_TENANT) {
-			tenantWatchFuture = data->tenantWatches.onChange(tenantId);
+			watchFuture = watchFuture || data->tenantWatches.onChange(tenantId);
 		}
+		firstPass = false;
 		wait(data->version.whenAtLeast(data->data().latestVersion));
 	}
 }
