@@ -247,6 +247,7 @@ public:
 
 	Future<Void> ready() const { return success(idFuture); }
 	int64_t id() const;
+	Future<int64_t> getIdFuture() const;
 	KeyRef prefix() const;
 	std::string description() const;
 

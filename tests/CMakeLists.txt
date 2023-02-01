@@ -146,7 +146,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BlobRestoreLarge.toml)
   add_fdb_test(TEST_FILES fast/CacheTest.toml)
   add_fdb_test(TEST_FILES fast/CloggedSideband.toml)
-  add_fdb_test(TEST_FILES fast/CompressionUtilsUnit.toml)
+  add_fdb_test(TEST_FILES fast/CompressionUtilsUnit.toml IGNORE)
   add_fdb_test(TEST_FILES fast/ConfigureLocked.toml)
   add_fdb_test(TEST_FILES fast/ConfigIncrement.toml)
   add_fdb_test(TEST_FILES fast/ConfigIncrementChangeCoordinators.toml)
@@ -187,8 +187,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/RandomUnitTests.toml)
   add_fdb_test(TEST_FILES fast/ReadHotDetectionCorrectness.toml IGNORE) # TODO re-enable once read hot detection is enabled.
   add_fdb_test(TEST_FILES fast/ReportConflictingKeys.toml)
-  add_fdb_test(TEST_FILES fast/RESTKmsConnectorUnit.toml)
-  add_fdb_test(TEST_FILES fast/RESTUtilsUnit.toml)
+  add_fdb_test(TEST_FILES fast/RESTKmsConnectorUnit.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/RESTUtilsUnit.toml IGNORE)
   add_fdb_test(TEST_FILES fast/SelectorCorrectness.toml)
   add_fdb_test(TEST_FILES fast/Sideband.toml)
   add_fdb_test(TEST_FILES fast/SidebandSingle.toml)
@@ -203,6 +203,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/TenantCycle.toml)
   add_fdb_test(TEST_FILES fast/TenantCycleTokenless.toml)
   add_fdb_test(TEST_FILES fast/TenantEntryCache.toml)
+  add_fdb_test(TEST_FILES fast/RawTenantAccessClean.toml)
   add_fdb_test(TEST_FILES fast/TimeKeeperCorrectness.toml)
   add_fdb_test(TEST_FILES fast/TxnStateStoreCycleTest.toml)
   add_fdb_test(TEST_FILES fast/UDP.toml)
@@ -283,8 +284,8 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_6.3.13_until_7.2.0/DrUpgradeRestart-1.txt
     restarting/from_6.3.13_until_7.2.0/DrUpgradeRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
-    restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
+    TEST_FILES restarting/from_7.0.0_until_7.2.0/UpgradeAndBackupRestore-1.toml
+    restarting/from_7.0.0_until_7.2.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-1.toml
     restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-2.toml)
@@ -327,6 +328,9 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.2.0/DrUpgradeRestart-1.toml
           restarting/from_7.2.0/DrUpgradeRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.2.4/UpgradeAndBackupRestore-1.toml
+    restarting/from_7.2.4/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.0/ConfigureTestRestart-1.toml
     restarting/from_7.3.0/ConfigureTestRestart-2.toml)

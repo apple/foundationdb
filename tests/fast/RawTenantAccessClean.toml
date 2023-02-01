@@ -1,0 +1,17 @@
+[configuration]
+allowDefaultTenant = false
+tenantModes = ['required']
+allowCreatingTenants = false
+
+[[knobs]]
+proxy_use_resolver_private_mutations = false
+
+[[test]]
+testTitle = 'RawTenantAccessClean'
+clearAfterTest = true
+runSetup = true
+
+    [[test.workload]]
+    testName = 'RawTenantAccess'
+    tenantCount = 1000
+    testDuration = 120
