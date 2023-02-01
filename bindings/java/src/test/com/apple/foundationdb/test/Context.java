@@ -101,12 +101,14 @@ abstract class Context implements Runnable, AutoCloseable {
 		}
 	}
 
-	public synchronized void setTenant(Optional<byte[]> tenantName) {
+	public synchronized CompletableFuture<Long> setTenant(Optional<byte[]> tenantName) {
 		if (tenantName.isPresent()) {
 			tenant = Optional.of(tenantMap.computeIfAbsent(tenantName.get(), tn -> db.openTenant(tenantName.get())));
+			return tenant.get().getId();
 		}
 		else {
 			tenant = Optional.empty();
+			return CompletableFuture.completedFuture(-1L);
 		}
 	}
 
