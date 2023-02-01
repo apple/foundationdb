@@ -91,7 +91,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 		state int sendLoadParams = 0;
 		state int lastLoadReqs = 0;
 		loop {
-			TraceEvent(SevDebug, "FastRestoreLoaderDispatchRequests", self->id())
+			TraceEvent(SevVerbose, "FastRestoreLoaderDispatchRequests", self->id())
 			    .detail("SendingQueue", self->sendingQueue.size())
 			    .detail("LoadingQueue", self->loadingQueue.size())
 			    .detail("SendingLoadParamQueue", self->sendLoadParamQueue.size())
@@ -216,7 +216,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 			updateProcessStats(self);
 
 			if (self->loadingQueue.empty() && self->sendingQueue.empty() && self->sendLoadParamQueue.empty()) {
-				TraceEvent(SevDebug, "FastRestoreLoaderDispatchRequestsWaitOnRequests", self->id())
+				TraceEvent(SevVerbose, "FastRestoreLoaderDispatchRequestsWaitOnRequests", self->id())
 				    .detail("HasPendingRequests", self->hasPendingRequests->get());
 				self->hasPendingRequests->set(false);
 				wait(self->hasPendingRequests->onChange()); // CAREFUL:Improper req release may cause restore stuck here
@@ -996,7 +996,7 @@ void splitMutation(const KeyRangeMap<UID>& krMap,
                    VectorRef<MutationRef>& mvector,
                    Arena& nodeIDs_arena,
                    VectorRef<UID>& nodeIDs) {
-	TraceEvent(SevDebug, "FastRestoreSplitMutation").detail("Mutation", m);
+	TraceEvent(SevVerbose, "FastRestoreSplitMutation").detail("Mutation", m);
 	ASSERT(mvector.empty());
 	ASSERT(nodeIDs.empty());
 	auto r = krMap.intersectingRanges(KeyRangeRef(m.param1, m.param2));
