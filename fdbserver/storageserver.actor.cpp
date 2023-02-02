@@ -802,7 +802,7 @@ public:
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
 	std::unordered_map<UID, ICheckpointReader*> liveCheckpointReaders; // Active checkpoint readers
-	VersionedMap<int64_t, TenantName> tenantMap;
+	VersionedMap<int64_t, Standalone<StringRef>> tenantMap;
 	std::map<Version, std::vector<PendingNewShard>>
 	    pendingAddRanges; // Pending requests to add ranges to physical shards
 	std::map<Version, std::vector<KeyRange>>
@@ -2210,7 +2210,6 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 	state Location spanLocation = "SS:watchWaitForValueChange"_loc;
 	state Span span(spanLocation, parent);
 	state Reference<ServerWatchMetadata> metadata = data->getWatchMetadata(key, tenantId);
-
 	if (metadata->debugID.present())
 		g_traceBatch.addEvent("WatchValueDebug",
 		                      metadata->debugID.get().first(),
@@ -2228,17 +2227,12 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 		watchFuture = watchFuture || data->tenantWatches.onChange(tenantId);
 	}
 	state ReadOptions options;
-	state bool firstPass = true;
 	loop {
 		try {
 			if (tenantId != TenantInfo::INVALID_TENANT) {
-				try {
-					data->checkTenantEntry(latestVersion, TenantInfo(tenantId, Optional<Standalone<StringRef>>()));
-				} catch (Error& e) {
-					if (e.code() == error_code_tenant_not_found && !firstPass) {
-						throw tenant_removed();
-					}
-					throw;
+				auto view = data->tenantMap.at(latestVersion);
+				if (view.find(tenantId) == view.end()) {
+					throw tenant_removed();
 				}
 			}
 			metadata = data->getWatchMetadata(key, tenantId);
@@ -2320,7 +2314,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 		if (tenantId != TenantInfo::INVALID_TENANT) {
 			watchFuture = watchFuture || data->tenantWatches.onChange(tenantId);
 		}
-		firstPass = false;
+
 		wait(data->version.whenAtLeast(data->data().latestVersion));
 	}
 }
@@ -9025,7 +9019,7 @@ void StorageServer::insertTenant(StringRef tenantPrefix, TenantName tenantName, 
 	if (version >= tenantMap.getLatestVersion()) {
 		int64_t tenantId = TenantAPI::prefixToId(tenantPrefix);
 		tenantMap.createNewVersion(version);
-		tenantMap.insert(tenantId, tenantName);
+		tenantMap.insert(tenantId, ""_sr);
 
 		if (persist) {
 			auto& mLV = addVersionToMutationLog(version);
@@ -9045,18 +9039,21 @@ void StorageServer::clearTenants(StringRef startTenant, StringRef endTenant, Ver
 		auto view = tenantMap.at(version);
 		auto& mLV = addVersionToMutationLog(version);
 		std::set<int64_t> tenantsToClear;
-		for (auto itr = view.begin(); itr != view.end(); ++itr) {
-			if (*itr >= startTenant && *itr < endTenant) {
-				// Trigger any watches on the prefix associated with the tenant.
-				Key tenantPrefix = TenantAPI::idToPrefix(itr.key());
-				TraceEvent("EraseTenant", thisServerID).detail("Tenant", itr.key()).detail("Version", version);
-				tenantWatches.sendError(itr.key(), itr.key() + 1, tenant_removed());
-				tenantsToClear.insert(itr.key());
-				addMutationToMutationLog(mLV,
-				                         MutationRef(MutationRef::ClearRange,
-				                                     tenantPrefix.withPrefix(persistTenantMapKeys.begin),
-				                                     keyAfter(tenantPrefix.withPrefix(persistTenantMapKeys.begin))));
-			}
+		Optional<int64_t> startId = TenantIdCodec::lowerBound(startTenant);
+		Optional<int64_t> endId = TenantIdCodec::lowerBound(endTenant);
+		auto startItr = startId.present() ? view.lower_bound(startId.get()) : view.end();
+		auto endItr = endId.present() ? view.lower_bound(endId.get()) : view.end();
+		for (auto itr = startItr; itr != endItr; ++itr) {
+			auto mapKey = itr.key();
+			// Trigger any watches on the prefix associated with the tenant.
+			Key tenantPrefix = TenantAPI::idToPrefix(mapKey);
+			TraceEvent("EraseTenant", thisServerID).detail("TenantID", mapKey).detail("Version", version);
+			tenantWatches.sendError(mapKey, mapKey + 1, tenant_removed());
+			tenantsToClear.insert(mapKey);
+			addMutationToMutationLog(mLV,
+			                         MutationRef(MutationRef::ClearRange,
+			                                     tenantPrefix.withPrefix(persistTenantMapKeys.begin),
+			                                     keyAfter(tenantPrefix.withPrefix(persistTenantMapKeys.begin))));
 		}
 
 		for (auto tenantId : tenantsToClear) {
