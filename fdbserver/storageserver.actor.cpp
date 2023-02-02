@@ -1744,7 +1744,8 @@ void StorageServer::byteSampleApplyMutation(MutationRef const& m, Version ver) {
 
 // watchMap Operations
 Reference<ServerWatchMetadata> StorageServer::getWatchMetadata(KeyRef key, int64_t tenantId) const {
-	const auto it = watchMap.find(std::make_pair(tenantId, key));
+	const WatchMapKey mapKey(tenantId, key);
+	const auto it = watchMap.find(mapKey);
 	if (it == watchMap.end())
 		return Reference<ServerWatchMetadata>();
 	return it->second;
