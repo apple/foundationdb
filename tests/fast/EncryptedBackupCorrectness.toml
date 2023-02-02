@@ -1,4 +1,6 @@
 [configuration]
+allowDefaultTenant = false
+allowCreatingTenants = false
 tenantModes = ['required']
 encryptModes = ['domain_aware']
 

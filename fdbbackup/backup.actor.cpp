@@ -3973,7 +3973,7 @@ int main(int argc, char* argv[]) {
 		// a cluster so they should use this instead.
 		auto initTraceFile = [&]() {
 			if (trace)
-				openTraceFile(NetworkAddress(), traceRollSize, traceMaxLogsSize, traceDir, "trace", traceLogGroup);
+				openTraceFile({}, traceRollSize, traceMaxLogsSize, traceDir, "trace", traceLogGroup);
 		};
 
 		auto initCluster = [&](bool quiet = false) {

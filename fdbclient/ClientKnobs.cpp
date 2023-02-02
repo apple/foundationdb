@@ -240,8 +240,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BLOBSTORE_READ_REQUESTS_PER_SECOND,       100 );
 	init( BLOBSTORE_DELETE_REQUESTS_PER_SECOND,     200 );
 
-	init( BGR_READ_BLOCK_SIZE,             20*1024*1024 ); if( randomize && BUGGIFY ) BGR_READ_BLOCK_SIZE = 64 * 1024 * deterministicRandom()->randomInt(1, 100);
-
 	// Dynamic Knobs
 	init( COMMIT_QUORUM_TIMEOUT,                    3.0 );
 	init( GET_GENERATION_QUORUM_TIMEOUT,            3.0 );
@@ -303,6 +301,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CLIENT_ENABLE_USING_CLUSTER_ID_KEY,     false );
 
 	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,     false );
+	init( SIMULATION_EKP_TENANT_IDS_TO_DROP,        "-1" );
 	// clang-format on
 }
 

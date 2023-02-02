@@ -244,7 +244,6 @@ public:
 	double BLOBSTORE_STATS_LOGGING_INTERVAL;
 	double BLOBSTORE_LATENCY_LOGGING_INTERVAL;
 	double BLOBSTORE_LATENCY_LOGGING_ACCURACY;
-	int BGR_READ_BLOCK_SIZE;
 
 	int CONSISTENCY_CHECK_RATE_LIMIT_MAX;
 	int CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME;
@@ -298,6 +297,10 @@ public:
 
 	// Encryption-at-rest
 	bool ENABLE_ENCRYPTION_CPU_TIME_LOGGING;
+	// This Knob will be a comma-delimited string (i.e 0,1,2,3) that specifies which tenants the the EKP should throw
+	// key_not_found errors for. If TenantInfo::INVALID_TENANT is contained within the list then no tenants will be
+	// dropped. This Knob should ONLY be used in simulation for testing purposes
+	std::string SIMULATION_EKP_TENANT_IDS_TO_DROP;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
