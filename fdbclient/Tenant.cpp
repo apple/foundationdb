@@ -32,9 +32,15 @@
 FDB_DEFINE_BOOLEAN_PARAM(EnforceValidTenantId);
 
 namespace TenantAPI {
-Key idToPrefix(int64_t id) {
+
+KeyRef idToPrefix(Arena& p, int64_t id) {
 	int64_t swapped = bigEndian64(id);
-	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), TenantAPI::PREFIX_SIZE);
+	return StringRef(p, reinterpret_cast<const uint8_t*>(&swapped), TenantAPI::PREFIX_SIZE);
+}
+
+Key idToPrefix(int64_t id) {
+	Arena p(TenantAPI::PREFIX_SIZE);
+	return Key(idToPrefix(p, id), p);
 }
 
 int64_t prefixToId(KeyRef prefix, EnforceValidTenantId enforceValidTenantId) {

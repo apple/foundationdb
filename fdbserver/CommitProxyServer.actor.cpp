@@ -1091,25 +1091,139 @@ inline bool tenantMapChanging(MutationRef const& mutation) {
 	return false;
 }
 
+// return the first tenantId whose idToPrefix(id) >= prefix[0..8] in lexicographic order. If no such id, return
+// INVALID_TENANT;
+inline int64_t lowerBoundTenantId(const StringRef& prefix, const std::map<int64_t, TenantName>& tenantMap) {
+	TraceEvent("DebugLowerBoundTenantId").detail("Prefix", prefix);
+	if (prefix.size() >= TenantAPI::PREFIX_SIZE) {
+		// directly search in tenant map
+		auto id = TenantAPI::extractTenantIdFromKeyRef(prefix);
+		auto it = tenantMap.lower_bound(id);
+		if (it != tenantMap.end()) {
+			return it->first;
+		}
+	} else {
+		// fall to raw prefix comparison
+		for (const auto& [id, name] : tenantMap) {
+			if (TenantAPI::idToPrefix(id) >= prefix) {
+				return id;
+			}
+		}
+	}
+
+	return TenantInfo::INVALID_TENANT;
+}
+
+TEST_CASE("/CommitProxy/SplitRange/LowerBoundTenantId") {
+	int mapSize = 1000;
+	std::map<int64_t, TenantName> tenantMap;
+	for (int i = 0; i < mapSize; ++i) {
+		tenantMap[i * 2] = ""_sr;
+	}
+
+	int64_t tid = lowerBoundTenantId(""_sr, tenantMap);
+	ASSERT_EQ(tid, 0);
+
+	tid = lowerBoundTenantId("\xff"_sr, tenantMap);
+	ASSERT_EQ(tid, TenantInfo::INVALID_TENANT);
+
+	int64_t targetId = deterministicRandom()->randomInt64(0, mapSize) * 2;
+	Key prefix = TenantAPI::idToPrefix(targetId);
+	tid = lowerBoundTenantId(prefix, tenantMap);
+	ASSERT_EQ(tid, targetId);
+
+	targetId = deterministicRandom()->randomInt64(0, mapSize) * 2;
+	prefix = TenantAPI::idToPrefix(targetId - 1);
+	tid = lowerBoundTenantId(prefix, tenantMap);
+	ASSERT_EQ(tid, targetId);
+
+	targetId = deterministicRandom()->randomInt64(mapSize * 2, mapSize * 3);
+	prefix = TenantAPI::idToPrefix(targetId);
+	tid = lowerBoundTenantId(prefix, tenantMap);
+	ASSERT_EQ(tid, TenantInfo::INVALID_TENANT);
+
+	targetId = deterministicRandom()->randomInt64((int64_t)1 << 32, std::numeric_limits<int64_t>::max());
+	tenantMap[targetId] = ""_sr;
+	prefix = TenantAPI::idToPrefix(targetId);
+	int shift = deterministicRandom()->randomInt(0, TenantAPI::PREFIX_SIZE / 2);
+	prefix = prefix.substr(0, TenantAPI::PREFIX_SIZE - shift);
+	tid = lowerBoundTenantId(prefix, tenantMap);
+	ASSERT_EQ(tid, targetId);
+
+	return Void();
+}
+
+// Given a clear range [a, b), make a vector of clear range mutations split by tenant boundary [a, t0_end), [t1_begin,
+// t1_end), ... [tn_begin, b); The references are allocated on arena;
+VectorRef<MutationRef> splitClearRangeByTenant(Arena& arena,
+                                               MutationRef mutation,
+                                               const std::map<int64_t, TenantName>& tenantMap) {
+	VectorRef<MutationRef> results;
+	auto beginTenantId = lowerBoundTenantId(mutation.param1, tenantMap);
+	auto it = tenantMap.find(beginTenantId);
+	while (it != tenantMap.end()) {
+		KeyRef tPrefix = TenantAPI::idToPrefix(arena, it->first);
+		if (tPrefix >= mutation.param2) {
+			break;
+		}
+
+		// max(tenant_begin, range begin)
+		KeyRef param1 = tPrefix >= mutation.param1 ? tPrefix : mutation.param1;
+
+		// min(tenant end, range end)
+		KeyRef param2 = keyAfter(tPrefix, arena);
+		if (param2 >= mutation.param2) {
+			param2 = mutation.param2;
+			results.emplace_back(arena, MutationRef::ClearRange, param1, param2);
+			break;
+		}
+		results.emplace_back(arena, MutationRef::ClearRange, param1, param2);
+		++it;
+	}
+
+	return results;
+}
+
+TEST_CASE("/CommitProxy/SplitRange/SplitClearRangeByTenant") {
+	int mapSize = 1000;
+	std::map<int64_t, TenantName> tenantMap;
+	for (int i = 0; i < mapSize; ++i) {
+		tenantMap[i * 2] = ""_sr;
+	}
+
+	Arena arena(15 << 10);
+	int64_t tenantId = deterministicRandom()->randomInt64(0, mapSize) * 2;
+	KeyRef prefix = TenantAPI::idToPrefix(arena, tenantId);
+	KeyRef param1 = prefix.withSuffix("a"_sr, arena);
+	KeyRef param2 = prefix.withSuffix("b"_sr, arena);
+	MutationRef mutation(MutationRef::ClearRange, param1, param2);
+	VectorRef<MutationRef> result = splitClearRangeByTenant(arena, mutation, tenantMap);
+	ASSERT_EQ(result.size(), 1);
+	ASSERT(result.front().param1 == param1);
+	ASSERT(result.front().param2 == param2);
+
+	return Void();
+}
+
 // Return success and properly split clear range mutations if all tenant check pass. Otherwise, return corresponding
 // error
-Error validateAndProcessTenantAccess(VectorRef<MutationRef> mutations,
+Error validateAndProcessTenantAccess(Arena& arena,
+                                     VectorRef<MutationRef> mutations,
                                      ProxyCommitData* const pProxyCommitData,
                                      Optional<UID> debugId = Optional<UID>(),
                                      const char* context = "") {
 	bool changeTenant = false;
 	bool writeNormalKey = false;
-
+	VectorRef<VectorRef<MutationRef>> splitMutations;
 	for (auto& mutation : mutations) {
 		Optional<int64_t> tenantId;
 		bool validAccess = true;
 		changeTenant = changeTenant || tenantMapChanging(mutation);
 
 		if (mutation.type == MutationRef::ClearRange) {
-			auto beginTenantId = TenantAPI::extractTenantIdFromKeyRef(mutation.param1);
-			auto endTenantId = TenantAPI::extractTenantIdFromKeyRef(mutation.param2);
-			CODE_PROBE(beginTenantId != endTenantId, "Clear Range raw access or cross multiple tenants");
-			// TODO: splitting clear range
+			VectorRef<MutationRef> newClears = splitClearRangeByTenant(arena, mutation, pProxyCommitData->tenantMap);
+			CODE_PROBE(newClears.size() > 1, "Clear Range raw access or cross multiple tenants");
+			// TODO: debug traces
 		} else if (!isSystemKey(mutation.param1)) {
 			validAccess = validTenantAccess(mutation, pProxyCommitData->tenantMap, tenantId);
 			writeNormalKey = true;
@@ -1145,7 +1259,7 @@ Error validateAndProcessTenantAccess(VectorRef<MutationRef> mutations,
 	return success();
 }
 
-Error validateAndProcessTenantAccess(const CommitTransactionRequest& tr, ProxyCommitData* const pProxyCommitData) {
+Error validateAndProcessTenantAccess(CommitTransactionRequest& tr, ProxyCommitData* const pProxyCommitData) {
 	bool isValid = checkTenantNoWait(pProxyCommitData, tr.tenantInfo.tenantId, "Commit", true);
 	if (!isValid) {
 		return tenant_not_found();
@@ -1157,7 +1271,7 @@ Error validateAndProcessTenantAccess(const CommitTransactionRequest& tr, ProxyCo
 	}
 
 	return validateAndProcessTenantAccess(
-	    tr.transaction.mutations, pProxyCommitData, tr.debugID, "validateAndProcessTenantAccess");
+	    tr.arena, tr.transaction.mutations, pProxyCommitData, tr.debugID, "validateAndProcessTenantAccess");
 }
 
 // Compute and apply "metadata" effects of each other proxy's most recent batch
@@ -1292,7 +1406,7 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 // to storage servers' responsibilities)
 ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self) {
 	auto pProxyCommitData = self->pProxyCommitData;
-	const auto& trs = self->trs;
+	auto& trs = self->trs;
 
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
