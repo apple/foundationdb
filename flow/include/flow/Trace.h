@@ -687,7 +687,7 @@ class Future;
 class Void;
 Future<Void> pingTraceLogWriterThread();
 
-enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
+enum trace_clock_t { TRACE_CLOCK_DEFAULT, TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
 extern std::atomic<trace_clock_t> g_trace_clock;
 extern TraceBatch g_traceBatch;
 
