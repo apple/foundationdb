@@ -973,23 +973,6 @@ public:
 				continue;
 
 			restorable.snapshot = snapshots[i];
-			// TODO: Reenable the sanity check after TooManyFiles error is resolved
-			if (false && g_network->isSimulated()) {
-				// Sanity check key ranges
-				// TODO: If we want to re-enable this codepath, make sure that we are passing a valid DB object (instead
-				// of the DB object created on the line below)
-				ASSERT(false);
-				state Database cx;
-				state std::map<std::string, KeyRange>::iterator rit;
-				for (rit = restorable.keyRanges.begin(); rit != restorable.keyRanges.end(); rit++) {
-					auto it = std::find_if(restorable.ranges.begin(),
-					                       restorable.ranges.end(),
-					                       [file = rit->first](const RangeFile f) { return f.fileName == file; });
-					ASSERT(it != restorable.ranges.end());
-					KeyRange result = wait(bc->getSnapshotFileKeyRange(*it, cx));
-					ASSERT(rit->second.begin <= result.begin && rit->second.end >= result.end);
-				}
-			}
 
 			// No logs needed if there is a complete filtered key space snapshot at the target version.
 			if (minKeyRangeVersion == maxKeyRangeVersion && maxKeyRangeVersion == restorable.targetVersion) {

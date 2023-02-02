@@ -19,6 +19,7 @@
  */
 #pragma once
 #include "flow/EncryptUtils.h"
+#include "flow/genericactors.actor.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_GETCIPHERKEYS_ACTOR_G_H)
 #define FDBCLIENT_GETCIPHERKEYS_ACTOR_G_H
 #include "fdbclient/GetEncryptCipherKeys.actor.g.h"
@@ -27,7 +28,9 @@
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/EncryptKeyProxyInterface.h"
+#include "fdbclient/Knobs.h"
 #include "fdbrpc/Stats.h"
+#include "fdbrpc/TenantInfo.h"
 #include "flow/Knobs.h"
 #include "flow/IRandom.h"
 
@@ -181,6 +184,18 @@ Future<EKPGetBaseCipherKeysByIdsReply> getUncachedEncryptCipherKeys(Reference<As
 		if (reply.error.present()) {
 			TraceEvent(SevWarn, "GetEncryptCipherKeys_RequestFailed").error(reply.error.get());
 			throw encrypt_keys_fetch_failed();
+		}
+		if (g_network && g_network->isSimulated() && usageType == BlobCipherMetrics::RESTORE) {
+			std::unordered_set<int64_t> tenantIdsToDrop =
+			    parseStringToUnorderedSet<int64_t>(CLIENT_KNOBS->SIMULATION_EKP_TENANT_IDS_TO_DROP, ',');
+			if (!tenantIdsToDrop.count(TenantInfo::INVALID_TENANT)) {
+				for (auto& baseCipherInfo : request.baseCipherInfos) {
+					if (tenantIdsToDrop.count(baseCipherInfo.domainId)) {
+						TraceEvent("GetEncryptCipherKeys_SimulatedError").detail("DomainId", baseCipherInfo.domainId);
+						throw encrypt_keys_fetch_failed();
+					}
+				}
+			}
 		}
 		return reply;
 	} catch (Error& e) {

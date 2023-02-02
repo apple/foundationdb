@@ -1020,12 +1020,6 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 	ACTOR Future<bool> _check(Database cx, BlobGranuleCorrectnessWorkload* self) {
 		// check error counts, and do an availability check at the end
 		state std::vector<Future<bool>> results;
-		state Future<Void> checkFeedCleanupFuture;
-		if (self->clientId == 0) {
-			checkFeedCleanupFuture = checkFeedCleanup(cx, BGW_DEBUG);
-		} else {
-			checkFeedCleanupFuture = Future<Void>(Void());
-		}
 
 		for (auto& it : self->directories) {
 			results.push_back(self->checkDirectory(cx, self, it));
@@ -1034,6 +1028,14 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		for (auto& f : results) {
 			bool dirSuccess = wait(f);
 			allSuccessful &= dirSuccess;
+		}
+
+		// do feed cleanup check only after data is guaranteed to be available for each granule
+		state Future<Void> checkFeedCleanupFuture;
+		if (self->clientId == 0) {
+			checkFeedCleanupFuture = checkFeedCleanup(cx, BGW_DEBUG);
+		} else {
+			checkFeedCleanupFuture = Future<Void>(Void());
 		}
 		wait(checkFeedCleanupFuture);
 		return allSuccessful;
