@@ -364,22 +364,21 @@ struct EncryptionOpsWorkload : TestWorkload {
 		    headerRef.flagsRef, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 		ASSERT_EQ(flags.encryptMode, EncryptCipherMode::ENCRYPT_CIPHER_MODE_AES_256_CTR);
 
-		BlobCipherDetails tCipherDetails;
-		BlobCipherDetails hCipherDetails;
-		StringRef ivRef;
-		DecryptBlobCipherAes256Ctr::extractCipherDetailsIvRefFromHeader(
-		    headerRef, &tCipherDetails, &hCipherDetails, &ivRef, arena);
+		ParsedEncryptHeaderDetails parsed = DecryptBlobCipherAes256Ctr::extractDetailsFromHeaderRef(headerRef, arena);
 
-		Reference<BlobCipherKey> cipherKey =
-		    getEncryptionKey(tCipherDetails.encryptDomainId, tCipherDetails.baseCipherId, tCipherDetails.salt);
+		Reference<BlobCipherKey> cipherKey = getEncryptionKey(parsed.textCipherDetails.encryptDomainId,
+		                                                      parsed.textCipherDetails.baseCipherId,
+		                                                      parsed.textCipherDetails.salt);
 		Reference<BlobCipherKey> headerCipherKey =
-		    hCipherDetails.encryptDomainId == INVALID_ENCRYPT_DOMAIN_ID
+		    parsed.headerCipherDetails.encryptDomainId == INVALID_ENCRYPT_DOMAIN_ID
 		        ? Reference<BlobCipherKey>() // no authentication mode cipher header-key is not needed
-		        : getEncryptionKey(hCipherDetails.encryptDomainId, hCipherDetails.baseCipherId, hCipherDetails.salt);
+		        : getEncryptionKey(parsed.headerCipherDetails.encryptDomainId,
+		                           parsed.headerCipherDetails.baseCipherId,
+		                           parsed.headerCipherDetails.salt);
 		ASSERT(cipherKey.isValid());
 		ASSERT(cipherKey->isEqual(orgCipherKey));
 
-		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, ivRef.begin(), BlobCipherMetrics::TEST);
+		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, parsed.ivRef.begin(), BlobCipherMetrics::TEST);
 
 		auto start = std::chrono::high_resolution_clock::now();
 		StringRef decrypted = decryptor.decrypt(encrypted.begin(), len, headerRef, arena);

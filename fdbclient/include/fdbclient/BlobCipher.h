@@ -341,11 +341,24 @@ struct BlobCipherEncryptHeaderRef {
 		arena.dependsOn(reader.arena());
 	}
 
+	static Standalone<StringRef> toStringRef(const BlobCipherEncryptHeaderRef& headerRef) {
+		return ObjectWriter::toValue(headerRef, Unversioned());
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, flagsVersion, algoHeaderVersion, flagsRef, algoHeaderRef);
 	}
 };
+
+struct ParsedEncryptHeaderDetails {
+	EncryptAuthTokenMode mode;
+	EncryptAuthTokenAlgo algo;
+	BlobCipherDetails textCipherDetails;
+	BlobCipherDetails headerCipherDetails;
+	StringRef ivRef;
+};
+
 #pragma pack(pop)
 
 // BlobCipher Encryption header format
@@ -792,11 +805,7 @@ public:
 	                  const BlobCipherEncryptHeaderRef& headerRef,
 	                  Arena&);
 
-	static void extractCipherDetailsIvRefFromHeader(const BlobCipherEncryptHeaderRef&,
-	                                                BlobCipherDetails*,
-	                                                BlobCipherDetails*,
-	                                                StringRef*,
-	                                                Arena&);
+	static ParsedEncryptHeaderDetails extractDetailsFromHeaderRef(const BlobCipherEncryptHeaderRef&, Arena&);
 
 private:
 	EVP_CIPHER_CTX* ctx;
@@ -841,11 +850,7 @@ private:
 	                                 Arena& arena);
 
 	static void extractCipherDetailsIvRefFromHeaderV1(const BlobCipherEncryptHeaderRef&,
-	                                                  const EncryptAuthTokenMode mode,
-	                                                  const EncryptAuthTokenAlgo algo,
-	                                                  BlobCipherDetails*,
-	                                                  BlobCipherDetails*,
-	                                                  StringRef*,
+	                                                  ParsedEncryptHeaderDetails&,
 	                                                  Arena& arena);
 };
 
