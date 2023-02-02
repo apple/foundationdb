@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -58,6 +60,7 @@ struct SaveAndKillWorkload : TestWorkload {
 	ACTOR Future<Void> _start(SaveAndKillWorkload* self, Database cx) {
 		state int i;
 		wait(delay(deterministicRandom()->random01() * self->testDuration));
+		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 
 		CSimpleIni ini;
 		ini.SetUnicode();
@@ -71,7 +74,7 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SetValue("META", "testerCount", format("%d", g_simulator->testerCount).c_str());
 		ini.SetValue("META", "tssMode", format("%d", g_simulator->tssMode).c_str());
 		ini.SetValue("META", "mockDNS", INetworkConnections::net()->convertMockDNSToString().c_str());
-		ini.SetValue("META", "tenantMode", cx->clientInfo->get().tenantMode.toString().c_str());
+		ini.SetValue("META", "tenantMode", config.tenantMode.toString().c_str());
 		if (cx->defaultTenant.present()) {
 			ini.SetValue("META", "defaultTenant", cx->defaultTenant.get().toString().c_str());
 		}
