@@ -23,6 +23,7 @@
 
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobCipher.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/DatabaseContext.h"
@@ -266,6 +267,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
                                                VectorRef<MutationRef>* result,
                                                VectorRef<Optional<MutationRef>>* encryptedResult,
                                                int* mutationSize,
+                                               bool* tenantMapChanging,
                                                Standalone<StringRef> value,
                                                Key addPrefix,
                                                Key removePrefix,
@@ -362,6 +364,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 								logValue.param1 = logValue.param1.withPrefix(addPrefix, tempArena);
 							}
 							logValue.param2 = addPrefix == StringRef() ? allKeys.end : strinc(addPrefix, tempArena);
+							*tenantMapChanging = *tenantMapChanging || TenantAPI::tenantMapChanging(logValue);
 							result->push_back_deep(*arena, logValue);
 							*mutationSize += logValue.expectedSize();
 						} else {
@@ -375,6 +378,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 								logValue.param1 = logValue.param1.withPrefix(addPrefix, tempArena);
 								logValue.param2 = logValue.param2.withPrefix(addPrefix, tempArena);
 							}
+							*tenantMapChanging = *tenantMapChanging || TenantAPI::tenantMapChanging(logValue);
 							result->push_back_deep(*arena, logValue);
 							*mutationSize += logValue.expectedSize();
 						}
@@ -395,6 +399,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 					if (addPrefix.size()) {
 						logValue.param1 = logValue.param1.withPrefix(addPrefix, tempArena);
 					}
+					*tenantMapChanging = *tenantMapChanging || TenantAPI::tenantMapChanging(logValue);
 					result->push_back_deep(*arena, logValue);
 					*mutationSize += logValue.expectedSize();
 					// If we did not remove/add prefixes to the mutation then keep the original encrypted mutation so we
@@ -647,6 +652,39 @@ Future<Void> readCommitted(Database cx,
 	    cx, results, Void(), lock, range, groupBy, Terminator::True, AccessSystemKeys::True, LockAware::True);
 }
 
+ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
+                                                Key uid,
+                                                Version newBeginVersion,
+                                                Key rangeBegin,
+                                                NotifiedVersion* committedVersion,
+                                                int* totalBytes,
+                                                int* mutationSize,
+                                                PromiseStream<Future<Void>> addActor,
+                                                FlowLock* commitLock,
+                                                PublicRequestStream<CommitTransactionRequest> commit) {
+	Key applyBegin = uid.withPrefix(applyMutationsBeginRange.begin);
+	Key versionKey = BinaryWriter::toValue(newBeginVersion, Unversioned());
+	Key rangeEnd = getApplyKey(newBeginVersion, uid);
+
+	req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::SetValue, applyBegin, versionKey));
+	req.transaction.encryptedMutations.push_back_deep(req.arena, Optional<MutationRef>());
+	req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(applyBegin));
+	req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::ClearRange, rangeBegin, rangeEnd));
+	req.transaction.encryptedMutations.push_back_deep(req.arena, Optional<MutationRef>());
+	req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(rangeBegin));
+
+	// The commit request contains no read conflict ranges, so regardless of what read version we
+	// choose, it's impossible for us to get a transaction_too_old error back, and it's impossible
+	// for our transaction to be aborted due to conflicts.
+	req.transaction.read_snapshot = committedVersion->get();
+	req.flags = req.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
+
+	*totalBytes += *mutationSize;
+	wait(commitLock->take(TaskPriority::DefaultYield, *mutationSize));
+	addActor.send(commitLock->releaseWhen(success(commit.getReply(req)), *mutationSize));
+	return Void();
+}
+
 ACTOR Future<int> kvMutationLogToTransactions(Database cx,
                                               PromiseStream<RCGroup> results,
                                               Reference<FlowLock> lock,
@@ -669,20 +707,25 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 		state CommitTransactionRequest req;
 		state Version newBeginVersion = invalidVersion;
 		state int mutationSize = 0;
+		state bool tenantMapChanging = false;
 		loop {
 			try {
 				state RCGroup group = waitNext(results.getFuture());
+				state CommitTransactionRequest curReq;
 				lock->release(group.items.expectedSize());
+				state int curBatchMutationSize = 0;
+				tenantMapChanging = false;
 
 				BinaryWriter bw(Unversioned());
 				for (int i = 0; i < group.items.size(); ++i) {
 					bw.serializeBytes(group.items[i].value);
 				}
 				Standalone<StringRef> value = bw.toValue();
-				wait(decodeBackupLogValue(&req.arena,
-				                          &req.transaction.mutations,
-				                          &req.transaction.encryptedMutations,
-				                          &mutationSize,
+				wait(decodeBackupLogValue(&curReq.arena,
+				                          &curReq.transaction.mutations,
+				                          &curReq.transaction.encryptedMutations,
+				                          &curBatchMutationSize,
+				                          &tenantMapChanging,
 				                          value,
 				                          addPrefix,
 				                          removePrefix,
@@ -691,8 +734,36 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				                          cx,
 				                          tenantMap,
 				                          provisionalProxy));
+				if (tenantMapChanging && req.transaction.mutations.size()) {
+					// If the tenantMap is changing send the previous CommitTransactionRequest to the CommitProxy
+					TraceEvent("MutationLogRestoreTenantMapChanging").detail("BeginVersion", newBeginVersion);
+					CODE_PROBE(true, "mutation log tenant map changing");
+					wait(sendCommitTransactionRequest(req,
+					                                  uid,
+					                                  newBeginVersion,
+					                                  rangeBegin,
+					                                  committedVersion,
+					                                  &totalBytes,
+					                                  &mutationSize,
+					                                  addActor,
+					                                  commitLock,
+					                                  commit));
+					req = CommitTransactionRequest();
+					mutationSize = 0;
+				}
+
+				state int i;
+				for (i = 0; i < curReq.transaction.mutations.size(); i++) {
+					req.transaction.mutations.push_back_deep(req.arena, curReq.transaction.mutations[i]);
+					req.transaction.encryptedMutations.push_back_deep(req.arena,
+					                                                  curReq.transaction.encryptedMutations[i]);
+				}
+				mutationSize += curBatchMutationSize;
 				newBeginVersion = group.groupKey + 1;
-				if (mutationSize >= CLIENT_KNOBS->BACKUP_LOG_WRITE_BATCH_MAX_SIZE) {
+
+				// If we have mutations that are changing the tenant map then send those immediately to the commit proxy
+				// (don't bother batching them with other mutations)
+				if (tenantMapChanging || mutationSize >= CLIENT_KNOBS->BACKUP_LOG_WRITE_BATCH_MAX_SIZE) {
 					break;
 				}
 			} catch (Error& e) {
@@ -708,28 +779,16 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				throw;
 			}
 		}
-
-		Key applyBegin = uid.withPrefix(applyMutationsBeginRange.begin);
-		Key versionKey = BinaryWriter::toValue(newBeginVersion, Unversioned());
-		Key rangeEnd = getApplyKey(newBeginVersion, uid);
-
-		req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::SetValue, applyBegin, versionKey));
-		req.transaction.encryptedMutations.push_back_deep(req.arena, Optional<MutationRef>());
-		req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(applyBegin));
-		req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::ClearRange, rangeBegin, rangeEnd));
-		req.transaction.encryptedMutations.push_back_deep(req.arena, Optional<MutationRef>());
-		req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(rangeBegin));
-
-		// The commit request contains no read conflict ranges, so regardless of what read version we
-		// choose, it's impossible for us to get a transaction_too_old error back, and it's impossible
-		// for our transaction to be aborted due to conflicts.
-		req.transaction.read_snapshot = committedVersion->get();
-		req.flags = req.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
-
-		totalBytes += mutationSize;
-		wait(commitLock->take(TaskPriority::DefaultYield, mutationSize));
-		addActor.send(commitLock->releaseWhen(success(commit.getReply(req)), mutationSize));
-
+		wait(sendCommitTransactionRequest(req,
+		                                  uid,
+		                                  newBeginVersion,
+		                                  rangeBegin,
+		                                  committedVersion,
+		                                  &totalBytes,
+		                                  &mutationSize,
+		                                  addActor,
+		                                  commitLock,
+		                                  commit));
 		if (endOfStream) {
 			return totalBytes;
 		}

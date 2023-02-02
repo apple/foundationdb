@@ -1080,17 +1080,6 @@ bool validTenantAccess(MutationRef m, std::map<int64_t, TenantName> const& tenan
 	return true;
 }
 
-inline bool tenantMapChanging(MutationRef const& mutation) {
-	const KeyRangeRef tenantMapRange = TenantMetadata::tenantMap().subspace;
-	if (isSingleKeyMutation((MutationRef::Type)mutation.type) && mutation.param1.startsWith(tenantMapRange.begin)) {
-		return true;
-	} else if (mutation.type == MutationRef::ClearRange &&
-	           tenantMapRange.intersects(KeyRangeRef(mutation.param1, mutation.param2))) {
-		return true;
-	}
-	return false;
-}
-
 // Return success and properly split clear range mutations if all tenant check pass. Otherwise, return corresponding
 // error
 Error validateAndProcessTenantAccess(VectorRef<MutationRef> mutations,
@@ -1103,7 +1092,7 @@ Error validateAndProcessTenantAccess(VectorRef<MutationRef> mutations,
 	for (auto& mutation : mutations) {
 		Optional<int64_t> tenantId;
 		bool validAccess = true;
-		changeTenant = changeTenant || tenantMapChanging(mutation);
+		changeTenant = changeTenant || TenantAPI::tenantMapChanging(mutation);
 
 		if (mutation.type == MutationRef::ClearRange) {
 			auto beginTenantId = TenantAPI::extractTenantIdFromKeyRef(mutation.param1);
@@ -1184,8 +1173,8 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				ASSERT(tenantIds.present());
 				// fail transaction if it contain both of tenant changes and normal key writing
 				auto& mutations = self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations;
-				committed =
-				    tenantIds.get().empty() || std::none_of(mutations.begin(), mutations.end(), tenantMapChanging);
+				committed = tenantIds.get().empty() ||
+				            std::none_of(mutations.begin(), mutations.end(), TenantAPI::tenantMapChanging);
 
 				// check if all tenant ids are valid if committed == true
 				committed = committed &&
