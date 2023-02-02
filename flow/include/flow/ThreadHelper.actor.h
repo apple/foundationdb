@@ -748,25 +748,17 @@ Future<T> safeThreadFutureToFutureImpl(ThreadFuture<T> threadFuture) {
 // access to the memory via the returned standalone will be invalid.
 ACTOR template <typename T>
 Future<Standalone<T>> removeArenaFromStandalone(Future<Standalone<T>> future) {
-	try {
-		Standalone<T> _ = wait(future);
-		return Standalone<T>(future.get(), Arena());
-	} catch (Error& e) {
-		throw e;
-	}
+	Standalone<T> _ = wait(future);
+	return Standalone<T>(future.get(), Arena());
 }
 
 ACTOR template <typename T>
 Future<Optional<Standalone<T>>> removeArenaFromStandalone(Future<Optional<Standalone<T>>> future) {
-	try {
-		Optional<Standalone<T>> val = wait(future);
-		if (val.present()) {
-			return Standalone<T>(future.get().get(), Arena());
-		} else {
-			return Optional<Standalone<T>>();
-		}
-	} catch (Error& e) {
-		throw e;
+	Optional<Standalone<T>> val = wait(future);
+	if (val.present()) {
+		return Standalone<T>(future.get().get(), Arena());
+	} else {
+		return Optional<Standalone<T>>();
 	}
 }
 
@@ -795,7 +787,11 @@ typename std::enable_if<allow_anonymous_future<T>::value, Future<T>>::type safeT
 template <class T>
 typename std::enable_if<!allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
     ThreadFuture<T>& threadFuture) {
-	return safeThreadFutureToFutureImpl(threadFuture);
+	Future<T> f = safeThreadFutureToFutureImpl(threadFuture);
+	if (BUGGIFY) {
+		return removeArenaFromStandalone(f);
+	}
+	return f;
 }
 
 template <class T>
@@ -808,39 +804,6 @@ typename std::enable_if<allow_anonymous_future<T>::value, Future<T>>::type safeT
 template <class T>
 typename std::enable_if<!allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
     Future<T>& future) {
-	// Do nothing
-	return future;
-}
-
-// Specialization for Standalone<T> and Optional<Standalone<T>>
-template <class T>
-Future<Standalone<T>> safeThreadFutureToFuture(ThreadFuture<Standalone<T>>& threadFuture) {
-	Future<Standalone<T>> f = safeThreadFutureToFutureImpl(threadFuture);
-	if (BUGGIFY) {
-		return removeArenaFromStandalone(f);
-	}
-	return f;
-}
-
-template <class T>
-Future<Optional<Standalone<T>>> safeThreadFutureToFuture(ThreadFuture<Optional<Standalone<T>>>& threadFuture) {
-	Future<Optional<Standalone<T>>> f = safeThreadFutureToFutureImpl(threadFuture);
-	if (BUGGIFY) {
-		return removeArenaFromStandalone(f);
-	}
-	return f;
-}
-
-template <class T>
-Future<Standalone<T>> safeThreadFutureToFuture(Future<Standalone<T>>& future) {
-	if (BUGGIFY) {
-		return removeArenaFromStandalone(future);
-	}
-	return future;
-}
-
-template <class T>
-Future<Optional<Standalone<T>>> safeThreadFutureToFuture(Future<Optional<Standalone<T>>>& future) {
 	if (BUGGIFY) {
 		return removeArenaFromStandalone(future);
 	}
