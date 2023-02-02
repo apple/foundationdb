@@ -1094,7 +1094,6 @@ inline bool tenantMapChanging(MutationRef const& mutation) {
 // return the first tenantId whose idToPrefix(id) >= prefix[0..8] in lexicographic order. If no such id, return
 // INVALID_TENANT;
 inline int64_t lowerBoundTenantId(const StringRef& prefix, const std::map<int64_t, TenantName>& tenantMap) {
-	TraceEvent("DebugLowerBoundTenantId").detail("Prefix", prefix);
 	if (prefix.size() >= TenantAPI::PREFIX_SIZE) {
 		// directly search in tenant map
 		auto id = TenantAPI::extractTenantIdFromKeyRef(prefix);
@@ -1132,6 +1131,9 @@ TEST_CASE("/CommitProxy/SplitRange/LowerBoundTenantId") {
 	tid = lowerBoundTenantId(prefix, tenantMap);
 	ASSERT_EQ(tid, targetId);
 
+	tid = lowerBoundTenantId(prefix.withSuffix("any"_sr), tenantMap);
+	ASSERT_EQ(tid, targetId);
+
 	targetId = deterministicRandom()->randomInt64(0, mapSize) * 2;
 	prefix = TenantAPI::idToPrefix(targetId - 1);
 	tid = lowerBoundTenantId(prefix, tenantMap);
@@ -1155,10 +1157,10 @@ TEST_CASE("/CommitProxy/SplitRange/LowerBoundTenantId") {
 
 // Given a clear range [a, b), make a vector of clear range mutations split by tenant boundary [a, t0_end), [t1_begin,
 // t1_end), ... [tn_begin, b); The references are allocated on arena;
-VectorRef<MutationRef> splitClearRangeByTenant(Arena& arena,
-                                               MutationRef mutation,
-                                               const std::map<int64_t, TenantName>& tenantMap) {
-	VectorRef<MutationRef> results;
+std::vector<MutationRef> splitClearRangeByTenant(Arena& arena,
+                                                 MutationRef mutation,
+                                                 const std::map<int64_t, TenantName>& tenantMap) {
+	std::vector<MutationRef> results;
 	auto beginTenantId = lowerBoundTenantId(mutation.param1, tenantMap);
 	auto it = tenantMap.find(beginTenantId);
 	while (it != tenantMap.end()) {
@@ -1171,14 +1173,21 @@ VectorRef<MutationRef> splitClearRangeByTenant(Arena& arena,
 		KeyRef param1 = tPrefix >= mutation.param1 ? tPrefix : mutation.param1;
 
 		// min(tenant end, range end)
-		KeyRef param2 = keyAfter(tPrefix, arena);
+		KeyRef param2 = strinc(tPrefix, arena);
 		if (param2 >= mutation.param2) {
 			param2 = mutation.param2;
-			results.emplace_back(arena, MutationRef::ClearRange, param1, param2);
+			results.emplace_back(MutationRef::ClearRange, param1, param2);
 			break;
 		}
-		results.emplace_back(arena, MutationRef::ClearRange, param1, param2);
+		results.emplace_back(MutationRef::ClearRange, param1, param2);
 		++it;
+	}
+
+	// TODO: finally add system key space clear if it has
+	if (KeyRangeRef(mutation.param1, mutation.param2).intersects(systemKeys)) {
+		results.emplace_back(MutationRef::ClearRange,
+		                     std::max(mutation.param1, systemKeys.begin),
+		                     std::min(mutation.param2, systemKeys.end));
 	}
 
 	return results;
@@ -1191,39 +1200,117 @@ TEST_CASE("/CommitProxy/SplitRange/SplitClearRangeByTenant") {
 		tenantMap[i * 2] = ""_sr;
 	}
 
+	// single tenant
 	Arena arena(15 << 10);
 	int64_t tenantId = deterministicRandom()->randomInt64(0, mapSize) * 2;
 	KeyRef prefix = TenantAPI::idToPrefix(arena, tenantId);
 	KeyRef param1 = prefix.withSuffix("a"_sr, arena);
 	KeyRef param2 = prefix.withSuffix("b"_sr, arena);
 	MutationRef mutation(MutationRef::ClearRange, param1, param2);
-	VectorRef<MutationRef> result = splitClearRangeByTenant(arena, mutation, tenantMap);
+	std::vector<MutationRef> result = splitClearRangeByTenant(arena, mutation, tenantMap);
 	ASSERT_EQ(result.size(), 1);
 	ASSERT(result.front().param1 == param1);
 	ASSERT(result.front().param2 == param2);
 
+	// multiple tenant
+	int64_t tid1 = deterministicRandom()->randomInt64(0, mapSize - 1);
+	int64_t tid2 = deterministicRandom()->randomInt64(tid1 + 1, mapSize) * 2;
+	tid1 *= 2;
+	KeyRef prefix1 = TenantAPI::idToPrefix(arena, tid1);
+	param1 = deterministicRandom()->coinflip() ? prefix1 : prefix1.withSuffix("a"_sr, arena); // align or not
+	KeyRef prefix2 = TenantAPI::idToPrefix(arena, tid2);
+	bool tailAligned = deterministicRandom()->coinflip();
+	param2 = tailAligned ? prefix2 : prefix2.withSuffix("a"_sr, arena);
+	int targetSize = (tid2 - tid1) / 2 + (!tailAligned);
+	mutation.param1 = param1;
+	mutation.param2 = param2;
+	result = splitClearRangeByTenant(arena, mutation, tenantMap);
+	ASSERT_EQ(result.size(), targetSize);
+	ASSERT(result.front().param1 == param1);
+	if (tailAligned) {
+		KeyRange r = prefixRange(TenantAPI::idToPrefix(tid2 - 2));
+		ASSERT(r == KeyRangeRef(result.back().param1, result.back().param2));
+	} else {
+		ASSERT(result.back().param1 == prefix2);
+		ASSERT(result.back().param2 == param2);
+	}
+
+	// with system keys
+	targetSize = mapSize - tid1 / 2 + 1;
+	Key randomSysKey = systemKeys.begin.withSuffix("sf"_sr, arena);
+	mutation.param2 = randomSysKey;
+	result = splitClearRangeByTenant(arena, mutation, tenantMap);
+	ASSERT_EQ(result.size(), targetSize);
+	ASSERT(result.back().param1 == systemKeys.begin);
+	ASSERT(result.back().param2 == randomSysKey);
+
 	return Void();
+}
+
+void replaceRawClearRanges(Arena& arena,
+                           VectorRef<MutationRef>& mutations,
+                           std::vector<std::vector<MutationRef>>& splitMutations,
+                           size_t totalSize) {
+	if (splitMutations.empty())
+		return;
+	mutations.resize(arena, totalSize);
+	// place from back
+	int curr = totalSize - 1;
+	bool doValidation = EXPENSIVE_VALIDATION;
+	for (int i = mutations.size() - 1; i >= 0; --i) {
+		if (splitMutations.empty() && !doValidation)
+			break;
+
+		if (splitMutations.empty()) {
+			ASSERT_EQ(curr, i);
+			curr--;
+			continue;
+		}
+
+		if (mutations[i].type == MutationRef::ClearRange) {
+			// replace with tenant aligned mutations
+			auto& currMutations = splitMutations.back();
+			while (!currMutations.empty()) {
+				mutations[curr] = currMutations.back();
+				currMutations.pop_back();
+				curr--;
+			}
+			splitMutations.pop_back();
+		} else {
+			ASSERT_GE(curr, i);
+			if (curr > i) {
+				mutations[curr] = mutations[i];
+			}
+			curr--;
+		}
+	}
+
+	ASSERT_EQ(splitMutations.size(), 0);
 }
 
 // Return success and properly split clear range mutations if all tenant check pass. Otherwise, return corresponding
 // error
 Error validateAndProcessTenantAccess(Arena& arena,
-                                     VectorRef<MutationRef> mutations,
+                                     VectorRef<MutationRef>& mutations,
                                      ProxyCommitData* const pProxyCommitData,
                                      Optional<UID> debugId = Optional<UID>(),
                                      const char* context = "") {
 	bool changeTenant = false;
 	bool writeNormalKey = false;
-	VectorRef<VectorRef<MutationRef>> splitMutations;
+
+	std::vector<std::vector<MutationRef>> splitMutations;
+	size_t newMutationSize = mutations.size();
 	for (auto& mutation : mutations) {
 		Optional<int64_t> tenantId;
 		bool validAccess = true;
 		changeTenant = changeTenant || tenantMapChanging(mutation);
 
 		if (mutation.type == MutationRef::ClearRange) {
-			VectorRef<MutationRef> newClears = splitClearRangeByTenant(arena, mutation, pProxyCommitData->tenantMap);
+			std::vector<MutationRef> newClears = splitClearRangeByTenant(arena, mutation, pProxyCommitData->tenantMap);
 			CODE_PROBE(newClears.size() > 1, "Clear Range raw access or cross multiple tenants");
-			// TODO: debug traces
+			splitMutations.emplace_back(newClears);
+			newMutationSize += newClears.size() - 1;
+			// TODO: trace log
 		} else if (!isSystemKey(mutation.param1)) {
 			validAccess = validTenantAccess(mutation, pProxyCommitData->tenantMap, tenantId);
 			writeNormalKey = true;
@@ -1256,6 +1343,8 @@ Error validateAndProcessTenantAccess(Arena& arena,
 			return illegal_tenant_access();
 		}
 	}
+
+	replaceRawClearRanges(arena, mutations, splitMutations, newMutationSize);
 	return success();
 }
 
