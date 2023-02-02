@@ -743,74 +743,11 @@ Future<T> safeThreadFutureToFutureImpl(ThreadFuture<T> threadFuture) {
 	return threadFuture.get();
 }
 
-// Specialization for Standalone<T>
-ACTOR template <class T>
-Future<Standalone<T>> safeThreadFutureToFutureImpl(ThreadFuture<Standalone<T>> threadFuture) {
-	Promise<Void> ready;
-	Future<Void> onReady = ready.getFuture();
-	UtilCallback<Standalone<T>>* callback = new UtilCallback<Standalone<T>>(threadFuture, ready.extractRawPointer());
-	int unused = 0;
-	threadFuture.callOrSetAsCallback(callback, unused, 0);
-	try {
-		wait(onReady);
-	} catch (Error& e) {
-		// broken_promise can be thrown if the network is already shut down
-		ASSERT(e.code() == error_code_operation_cancelled || e.code() == error_code_broken_promise);
-		// prerequisite: we have exclusive ownership of the threadFuture
-		if (e.code() == error_code_operation_cancelled) {
-			threadFuture.cancel();
-		}
-		throw e;
-	}
-	// threadFuture should be ready
-	ASSERT(threadFuture.isReady());
-	if (threadFuture.isError())
-		throw threadFuture.getError();
-	if (BUGGIFY) {
-		return Standalone<T>(threadFuture.get(), Arena());
-	}
-	return threadFuture.get();
-}
-
-ACTOR template <class T>
-Future<Optional<Standalone<T>>> safeThreadFutureToFutureImpl(ThreadFuture<Optional<Standalone<T>>> threadFuture) {
-	Promise<Void> ready;
-	Future<Void> onReady = ready.getFuture();
-	UtilCallback<Optional<Standalone<T>>>* callback =
-	    new UtilCallback<Optional<Standalone<T>>>(threadFuture, ready.extractRawPointer());
-	int unused = 0;
-	threadFuture.callOrSetAsCallback(callback, unused, 0);
-	try {
-		wait(onReady);
-	} catch (Error& e) {
-		// broken_promise can be thrown if the network is already shut down
-		ASSERT(e.code() == error_code_operation_cancelled || e.code() == error_code_broken_promise);
-		// prerequisite: we have exclusive ownership of the threadFuture
-		if (e.code() == error_code_operation_cancelled) {
-			threadFuture.cancel();
-		}
-		throw e;
-	}
-	// threadFuture should be ready
-	ASSERT(threadFuture.isReady());
-	if (threadFuture.isError())
-		throw threadFuture.getError();
-	if (BUGGIFY) {
-		if (threadFuture.get().present()) {
-			return Standalone<T>(threadFuture.get().get(), Arena());
-		} else {
-			return Optional<Standalone<T>>();
-		}
-	}
-	return threadFuture.get();
-}
-
-// This safeThreadFutureToFutureImpl(Future) actor should be used only with BUGGIFY.
-// It simulates the case where the returned Standalone points to memory owned by `future`.
-// When `future` goes out of scope, the memory pointed to by the Standalone will be invalid.
-ACTOR
-template <typename T>
-Future<Standalone<T>> faultySafeThreadFutureToFutureImpl(Future<Standalone<T>> future) {
+// The removeArenaFromStandalone() actors simulate the behavior of DLApi. In this case,
+// the memory is not owned by the Standalone. If the `future` goes out of scope, subsequent
+// access to the memory via the returned standalone will be invalid.
+ACTOR template <typename T>
+Future<Standalone<T>> removeArenaFromStandalone(Future<Standalone<T>> future) {
 	try {
 		Standalone<T> _ = wait(future);
 		return Standalone<T>(future.get(), Arena());
@@ -819,12 +756,8 @@ Future<Standalone<T>> faultySafeThreadFutureToFutureImpl(Future<Standalone<T>> f
 	}
 }
 
-// This safeThreadFutureToFutureImpl(Future) actor should be used only with BUGGIFY.
-// It simulates the case where the returned Optional<Standalone> points to memory owned by `future`.
-// When `future` goes out of scope, the memory pointed to by the Optional<Standalone> will be invalid.
-ACTOR
-template <typename T>
-Future<Optional<Standalone<T>>> faultySafeThreadFutureToFutureImpl(Future<Optional<Standalone<T>>> future) {
+ACTOR template <typename T>
+Future<Optional<Standalone<T>>> removeArenaFromStandalone(Future<Optional<Standalone<T>>> future) {
 	try {
 		Optional<Standalone<T>> val = wait(future);
 		if (val.present()) {
@@ -875,8 +808,41 @@ typename std::enable_if<allow_anonymous_future<T>::value, Future<T>>::type safeT
 template <class T>
 typename std::enable_if<!allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
     Future<T>& future) {
+	// Do nothing
+	return future;
+}
+
+// Specialization for Standalone<T> and Optional<Standalone<T>>
+template <class T>
+Future<Standalone<T>> safeThreadFutureToFuture(ThreadFuture<Standalone<T>>& threadFuture) {
+	Future<Standalone<T>> f = safeThreadFutureToFutureImpl(threadFuture);
 	if (BUGGIFY) {
-		return faultySafeThreadFutureToFutureImpl(future);
+		return removeArenaFromStandalone(f);
+	}
+	return f;
+}
+
+template <class T>
+Future<Optional<Standalone<T>>> safeThreadFutureToFuture(ThreadFuture<Optional<Standalone<T>>>& threadFuture) {
+	Future<Optional<Standalone<T>>> f = safeThreadFutureToFutureImpl(threadFuture);
+	if (BUGGIFY) {
+		return removeArenaFromStandalone(f);
+	}
+	return f;
+}
+
+template <class T>
+Future<Standalone<T>> safeThreadFutureToFuture(Future<Standalone<T>>& future) {
+	if (BUGGIFY) {
+		return removeArenaFromStandalone(future);
+	}
+	return future;
+}
+
+template <class T>
+Future<Optional<Standalone<T>>> safeThreadFutureToFuture(Future<Optional<Standalone<T>>>& future) {
+	if (BUGGIFY) {
+		return removeArenaFromStandalone(future);
 	}
 	return future;
 }
