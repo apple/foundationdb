@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
-import platform
 import shutil
 import subprocess
 import sys
@@ -53,7 +52,7 @@ class TestEnv(LocalCluster):
             self.downloader.binary_path(version, "fdbcli"),
             1,
         )
-        self.set_env_var("LD_LIBRARY_PATH", self.downloader.lib_dir(version))
+        self.set_env_var("LD_LIBRARY_PATH", "%s:%s" % (self.downloader.lib_dir(version), os.getenv("LD_LIBRARY_PATH")))
         client_lib = self.downloader.lib_path(version)
         assert client_lib.exists(), "{} does not exist".format(client_lib)
         self.client_lib_external = self.tmp_dir.joinpath("libfdb_c_external.so")
@@ -91,9 +90,8 @@ class FdbCShimTests:
         self.api_test_dir = Path(args.api_test_dir).resolve()
         assert self.api_test_dir.exists(), "{} does not exist".format(self.api_test_dir)
         self.downloader = FdbBinaryDownloader(args.build_dir)
-        # binary downloads are currently available only for x86_64
-        self.platform = platform.machine()
-        if self.platform == "x86_64":
+        self.test_prev_versions = not args.disable_prev_version_tests
+        if self.test_prev_versions:
             self.downloader.download_old_binaries(PREV_RELEASE_VERSION)
             self.downloader.download_old_binaries("7.0.0")
 
@@ -182,7 +180,8 @@ class FdbCShimTests:
         if use_external_lib:
             cmd_args = cmd_args + ["--disable-local-client", "--external-client-library", test_env.client_lib_external]
         env_vars = os.environ.copy()
-        env_vars["LD_LIBRARY_PATH"] = self.downloader.lib_dir(version) if set_ld_lib_path else ""
+        if set_ld_lib_path:
+            env_vars["LD_LIBRARY_PATH"] = "%s:%s" % (self.downloader.lib_dir(version), os.getenv("LD_LIBRARY_PATH"))
         if set_env_path:
             env_vars["FDB_LOCAL_CLIENT_LIBRARY_PATH"] = (
                 "dummy" if invalid_lib_path else self.downloader.lib_path(version)
@@ -230,8 +229,7 @@ class FdbCShimTests:
             # Test calling a function that exists in the loaded library, but not for the selected API version
             self.run_c_shim_lib_tester(CURRENT_VERSION, test_env, call_set_path=True, api_version=700)
 
-        # binary downloads are currently available only for x86_64
-        if self.platform == "x86_64":
+        if self.test_prev_versions:
             # Test the API workload with the release version
             self.run_c_api_test(PREV_RELEASE_VERSION, DEFAULT_TEST_FILE)
 
@@ -282,6 +280,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--api-test-dir", type=str, help="Path to a directory with api test definitions.", required=True
+    )
+    parser.add_argument(
+        "--disable-prev-version-tests",
+        action="store_true",
+        default=False,
+        help="Disable tests that need binaries of previous versions",
     )
     args = parser.parse_args()
     test = FdbCShimTests(args)
