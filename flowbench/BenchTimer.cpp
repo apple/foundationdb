@@ -36,13 +36,5 @@ static void bench_timer_monotonic(benchmark::State& state) {
 	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }
 
-static void bench_timestamp_counter(benchmark::State& state) {
-	for (auto _ : state) {
-		benchmark::DoNotOptimize(timestampCounter());
-	}
-	state.SetItemsProcessed(static_cast<long>(state.iterations()));
-}
-
 BENCHMARK(bench_timer)->ReportAggregatesOnly(true);
 BENCHMARK(bench_timer_monotonic)->ReportAggregatesOnly(true);
-BENCHMARK(bench_timestamp_counter)->ReportAggregatesOnly(true);
