@@ -70,6 +70,7 @@ public:
 		KV_REDWOOD,
 		BLOB_GRANULE,
 		BACKUP,
+		RESTORE,
 		TEST,
 		MAX,
 	};
