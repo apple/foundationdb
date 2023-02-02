@@ -356,24 +356,16 @@ public:
 	                                                                 Req req,
 	                                                                 Snapshot snapshot) {
 		choose {
-			when(typename Req::Result result = wait(readThrough(ryw, req, snapshot))) {
-				return result;
-			}
-			when(wait(ryw->resetPromise.getFuture())) {
-				throw internal_error();
-			}
+			when(typename Req::Result result = wait(readThrough(ryw, req, snapshot))) { return result; }
+			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
 		}
 	}
 	ACTOR template <class Req>
 	static Future<typename Req::Result> readWithConflictRangeSnapshot(ReadYourWritesTransaction* ryw, Req req) {
 		state SnapshotCache::iterator it(&ryw->cache, &ryw->writes);
 		choose {
-			when(typename Req::Result result = wait(read(ryw, req, &it))) {
-				return result;
-			}
-			when(wait(ryw->resetPromise.getFuture())) {
-				throw internal_error();
-			}
+			when(typename Req::Result result = wait(read(ryw, req, &it))) { return result; }
+			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
 		}
 	}
 	ACTOR template <class Req>
@@ -389,9 +381,7 @@ public:
 					addConflictRange(ryw, req, it.extractWriteMapIterator(), result);
 				return result;
 			}
-			when(wait(ryw->resetPromise.getFuture())) {
-				throw internal_error();
-			}
+			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
 		}
 	}
 	template <class Req>
@@ -1211,9 +1201,7 @@ public:
 				addConflictRangeAndMustUnmodified<backwards>(ryw, req, writes, result);
 				return result;
 			}
-			when(wait(ryw->resetPromise.getFuture())) {
-				throw internal_error();
-			}
+			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
 		}
 	}
 
@@ -1464,13 +1452,9 @@ public:
 
 	ACTOR static Future<Version> getReadVersion(ReadYourWritesTransaction* ryw) {
 		choose {
-			when(Version v = wait(ryw->tr.getReadVersion())) {
-				return v;
-			}
+			when(Version v = wait(ryw->tr.getReadVersion())) { return v; }
 
-			when(wait(ryw->resetPromise.getFuture())) {
-				throw internal_error();
-			}
+			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
 		}
 	}
 };
