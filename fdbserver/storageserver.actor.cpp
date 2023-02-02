@@ -392,6 +392,8 @@ struct StorageServerDisk {
 
 	void persistRangeMapping(KeyRangeRef range, bool isAdd) { storage->persistRangeMapping(range, isAdd); }
 
+	CoalescedKeyRangeMap<std::string> getExistingRanges() { return storage->getExistingRanges(); }
+
 	Future<Void> getError() { return storage->getError(); }
 	Future<Void> init() { return storage->init(); }
 	Future<Void> canCommit() { return storage->canCommit(); }
@@ -1071,10 +1073,6 @@ public:
 	                                      // when the disk permits
 	NotifiedVersion oldestVersion; // See also storageVersion()
 	NotifiedVersion durableVersion; // At least this version will be readable from storage after a power failure
-	// In the event of the disk corruption, sqlite and redwood will either not recover, recover to durableVersion
-	// but be unable to read some data, or they could lose the last commit. If we lose the last commit, the storage
-	// might not be able to peek from the tlog (depending on when it sent the last pop). So this version just keeps
-	// track of the version we committed to the storage engine before we did commit durableVersion.
 	Version storageMinRecoverVersion = 0;
 	Version rebootAfterDurableVersion;
 	int8_t primaryLocality;
@@ -11175,6 +11173,72 @@ ACTOR Future<Void> serveChangeFeedVersionUpdateRequests(
 	}
 }
 
+ACTOR Future<Void> storageEngineConsistencyCheck(StorageServer* self) {
+	if (SERVER_KNOBS->STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL == 0.0) {
+		return Void();
+	}
+
+	if (self->storage.getKeyValueStoreType() != KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
+		return Void();
+	}
+
+	loop {
+		wait(delay(SERVER_KNOBS->STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL));
+		// Only validate when storage server and storage engine are expected to have the same shard mapping.
+		while (self->pendingAddRanges.size() > 0 || self->pendingRemoveRanges.size() > 0) {
+			wait(delay(5.0));
+		}
+
+		CoalescedKeyRangeMap<std::string> currentShards;
+		currentShards.insert(allKeys, "");
+		auto fullRange = self->shards.ranges();
+		for (auto it = fullRange.begin(); it != fullRange.end(); ++it) {
+			if (!it.value()) {
+				continue;
+			}
+			if (it.value()->assigned()) {
+				currentShards.insert(it.range(), format("%016llx", it.value()->shardId));
+			}
+		}
+
+		auto kvShards = self->storage.getExistingRanges();
+
+		TraceEvent(SevInfo, "StorageEngineConsistencyCheckStarted");
+
+		auto kvRanges = kvShards.ranges();
+		for (auto it = kvRanges.begin(); it != kvRanges.end(); ++it) {
+			if (it.value() == "") {
+				continue;
+			}
+
+			for (auto v : currentShards.intersectingRanges(it.range())) {
+				if (v.value() == "") {
+					TraceEvent(SevWarn, "MissingShardSS").detail("Range", v.range()).detail("ShardIdKv", it.value());
+				} else if (v.value() != it.value()) {
+					TraceEvent(SevWarn, "ShardMismatch")
+					    .detail("Range", v.range())
+					    .detail("ShardIdKv", it.value())
+					    .detail("ShardIdSs", v.value());
+				}
+			}
+		}
+
+		for (auto it : currentShards.ranges()) {
+			if (it.value() == "") {
+				continue;
+			}
+
+			for (auto v : kvShards.intersectingRanges(it.range())) {
+				if (v.value() == "") {
+					TraceEvent(SevWarn, "MissingShardKv").detail("Range", v.range()).detail("ShardIdSS", it.value());
+				}
+			}
+		}
+
+		TraceEvent(SevInfo, "StorageEngineConsistencyCheckComplete");
+	}
+}
+
 ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 	if (!SERVER_KNOBS->REPORT_DD_METRICS) {
 		return Void();
@@ -11231,6 +11295,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(serveChangeFeedVersionUpdateRequests(self, ssi.changeFeedVersionUpdate.getFuture()));
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));
+	self->actors.add(storageEngineConsistencyCheck(self));
 
 	self->transactionTagCounter.startNewInterval();
 	self->actors.add(
