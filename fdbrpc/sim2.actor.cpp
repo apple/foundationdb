@@ -1675,7 +1675,7 @@ public:
 			}
 
 			// Reboot if dead machines do fulfill policies
-			if (tooManyDead) {
+			if (tooManyDead || (usableRegions > 1 && notEnoughLeft)) {
 				newKt = KillType::Reboot;
 				canSurvive = false;
 				TraceEvent("KillChanged")

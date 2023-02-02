@@ -335,6 +335,7 @@ public:
 	ISimulator::BackupAgentType simDrAgents;
 
 	KnobKeyValuePairs overrideKnobs;
+	std::vector<std::string> disabledFailureInjectionWorkloads;
 };
 
 ACTOR Future<DistributedTestResults> runWorkload(Database cx,
