@@ -1094,20 +1094,20 @@ inline bool tenantMapChanging(MutationRef const& mutation) {
 // return the first tenantId whose idToPrefix(id) >= prefix[0..8] in lexicographic order. If no such id, return
 // INVALID_TENANT;
 inline int64_t lowerBoundTenantId(const StringRef& prefix, const std::map<int64_t, TenantName>& tenantMap) {
+	if(isSystemKey(prefix)) {
+		return TenantInfo::INVALID_TENANT;
+	}
+	Optional<int64_t> id;
 	if (prefix.size() >= TenantAPI::PREFIX_SIZE) {
-		// directly search in tenant map
-		auto id = TenantAPI::extractTenantIdFromKeyRef(prefix);
-		auto it = tenantMap.lower_bound(id);
-		if (it != tenantMap.end()) {
-			return it->first;
-		}
+		// directly extract without copy
+		id = TenantAPI::extractTenantIdFromKeyRef(prefix);
 	} else {
-		// fall to raw prefix comparison
-		for (const auto& [id, name] : tenantMap) {
-			if (TenantAPI::idToPrefix(id) >= prefix) {
-				return id;
-			}
-		}
+		// fall to generate a prefix
+		id = TenantIdCodec::lowerBound(prefix);
+	}
+	auto it = tenantMap.lower_bound(id.get());
+	if (it != tenantMap.end()) {
+		return it->first;
 	}
 
 	return TenantInfo::INVALID_TENANT;
@@ -1124,6 +1124,9 @@ TEST_CASE("/CommitProxy/SplitRange/LowerBoundTenantId") {
 	ASSERT_EQ(tid, 0);
 
 	tid = lowerBoundTenantId("\xff"_sr, tenantMap);
+	ASSERT_EQ(tid, TenantInfo::INVALID_TENANT);
+
+	tid = lowerBoundTenantId("\xff\x01\x02\x03\x04\x05\x06\x07\x08"_sr, tenantMap);
 	ASSERT_EQ(tid, TenantInfo::INVALID_TENANT);
 
 	int64_t targetId = deterministicRandom()->randomInt64(0, mapSize) * 2;
@@ -1158,7 +1161,7 @@ TEST_CASE("/CommitProxy/SplitRange/LowerBoundTenantId") {
 // Given a clear range [a, b), make a vector of clear range mutations split by tenant boundary [a, t0_end), [t1_begin,
 // t1_end), ... [tn_begin, b); The references are allocated on arena;
 std::vector<MutationRef> splitClearRangeByTenant(Arena& arena,
-                                                 MutationRef mutation,
+                                                 const MutationRef& mutation,
                                                  const std::map<int64_t, TenantName>& tenantMap) {
 	std::vector<MutationRef> results;
 	auto beginTenantId = lowerBoundTenantId(mutation.param1, tenantMap);
@@ -1183,7 +1186,6 @@ std::vector<MutationRef> splitClearRangeByTenant(Arena& arena,
 		++it;
 	}
 
-	// TODO: finally add system key space clear if it has
 	if (KeyRangeRef(mutation.param1, mutation.param2).intersects(systemKeys)) {
 		results.emplace_back(MutationRef::ClearRange,
 		                     std::max(mutation.param1, systemKeys.begin),
@@ -1244,6 +1246,13 @@ TEST_CASE("/CommitProxy/SplitRange/SplitClearRangeByTenant") {
 	ASSERT(result.back().param1 == systemKeys.begin);
 	ASSERT(result.back().param2 == randomSysKey);
 
+	// within system keys
+	Key sysKey1 = systemKeys.begin.withSuffix("a"_sr, arena);
+	mutation.param1 = sysKey1;
+	result = splitClearRangeByTenant(arena, mutation, tenantMap);
+	ASSERT_EQ(result.size(), 1);
+	ASSERT(result.front().param1 == sysKey1);
+	ASSERT(result.front().param2 == randomSysKey);
 	return Void();
 }
 
