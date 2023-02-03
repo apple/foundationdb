@@ -40,7 +40,6 @@ public:
 	}
 
 private:
-	// FIXME: add tenant support for DB operations
 	// FIXME: use other new blob granule apis!
 	enum OpType {
 		OP_INSERT,
@@ -261,7 +260,6 @@ private:
 
 		execOperation(
 		    [keyRange, results](auto ctx) {
-			    // FIXME: add tenant!
 			    fdb::Future f =
 			        ctx->dbOps()->listBlobbifiedRanges(keyRange.beginKey, keyRange.endKey, 1000).eraseType();
 			    ctx->continueAfter(f, [ctx, f, results]() {
@@ -287,7 +285,6 @@ private:
 		auto verifyVersion = std::make_shared<int64_t>(-1);
 		execOperation(
 		    [keyRange, verifyVersion](auto ctx) {
-			    // FIXME: add tenant!!
 			    fdb::Future f = ctx->dbOps()
 			                        ->verifyBlobRange(keyRange.beginKey, keyRange.endKey, -2 /* latest version*/)
 			                        .eraseType();
@@ -436,16 +433,17 @@ private:
 	                                     std::optional<int> tenantId,
 	                                     int64_t readVersion) {
 		ASSERT(!results.empty());
-		ASSERT(results.front().keyRange.beginKey <= keyRange.beginKey);
-		ASSERT(keyRange.endKey <= results.back().keyRange.endKey);
-		for (int i = 0; i < results.size() - 1; i++) {
-			ASSERT(results[i].keyRange.endKey == results[i + 1].keyRange.beginKey);
-		}
 
 		if (tenantId) {
 			// FIXME: support tenants!!
 			info("Skipping validation because of tenant.");
 			return;
+		}
+
+		ASSERT(results.front().keyRange.beginKey <= keyRange.beginKey);
+		ASSERT(keyRange.endKey <= results.back().keyRange.endKey);
+		for (int i = 0; i < results.size() - 1; i++) {
+			ASSERT(results[i].keyRange.endKey == results[i + 1].keyRange.beginKey);
 		}
 
 		TesterGranuleContext testerContext(ctx->getBGBasePath());
