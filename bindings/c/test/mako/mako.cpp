@@ -1716,32 +1716,6 @@ void Arguments::collectTenantIds() {
 	auto db = Database(cluster_files[0]);
 	tenant_ids.clear();
 	tenant_ids.reserve(active_tenants);
-	for (auto tenant_idx = 0; tenant_idx < active_tenants; tenant_idx++) {
-		auto tenant_name = getTenantNameByIndex(tenant_idx);
-		auto tenant = db.openTenant(toBytesRef(tenant_name));
-		while (true) {
-			auto f = tenant.getId();
-			if (auto err = f.blockUntilReady()) {
-				logr.error("error while waiting for tenant id of tenant name '{}': {}", tenant_name, err.what());
-				throwError("ERROR: Tenant::getId().blockUntilReady(): ", err);
-			}
-			if (auto err = f.error()) {
-				if (err.retryable()) {
-					logr.info(
-					    "get tenant id for tenant name '{}' returned a retryable error: {}", tenant_name, err.what());
-					continue;
-				} else {
-					logr.error("get tenant id for tenant name '{}' returned an unretryable error: {}",
-					           tenant_name,
-					           err.what());
-					throwError("ERROR: Tenant::getId() returned an unretryable error: ", err);
-				}
-			} else {
-				tenant_ids.push_back(f.get());
-				break;
-			}
-		}
-	}
 }
 
 void Arguments::generateAuthorizationTokens() {
@@ -1750,14 +1724,10 @@ void Arguments::generateAuthorizationTokens() {
 	assert(private_key_pem.has_value());
 	authorization_tokens.clear();
 	assert(num_fdb_clusters == 1);
+	assert(!tenant_ids.empty());
 	// assumes tenants have already been populated
-	logr.info("collecting tenant ids");
-	auto stopwatch = Stopwatch(StartAtCtor{});
-	collectTenantIds();
-	logr.info(
-	    "collected IDs of {} tenants in {:6.3f} seconds", active_tenants, toDoubleSeconds(stopwatch.stop().diff()));
 	logr.info("generating authorization tokens to be used by worker threads");
-	stopwatch.start();
+	auto stopwatch = Stopwatch(StartAtCtor{});
 	authorization_tokens =
 	    generateAuthorizationTokenMap(active_tenants, keypair_id.value(), private_key_pem.value(), tenant_ids);
 	assert(authorization_tokens.size() == active_tenants);
@@ -2547,10 +2517,6 @@ int main(int argc, char* argv[]) {
 
 	logr.setVerbosity(args.verbose);
 
-	if (args.isAuthorizationEnabled()) {
-		args.generateAuthorizationTokens();
-	}
-
 	if (args.mode == MODE_CLEAN) {
 		/* cleanup will be done from a single thread */
 		args.num_processes = 1;
@@ -2569,7 +2535,8 @@ int main(int argc, char* argv[]) {
 		return 0;
 	}
 
-	if (args.total_tenants > 0 && (args.mode == MODE_BUILD || args.mode == MODE_CLEAN)) {
+	if (args.total_tenants > 0 &&
+	    (args.isAuthorizationEnabled() || args.mode == MODE_BUILD || args.mode == MODE_CLEAN)) {
 
 		// below construction fork()s internally
 		auto server = ipc::AdminServer(args);
@@ -2586,12 +2553,11 @@ int main(int argc, char* argv[]) {
 				logr.info("admin server ready");
 			}
 		}
-		// Use admin server to request tenant creation or deletion.
-		// This is necessary when tenant authorization is enabled,
-		// in which case the worker threads connect to database as untrusted clients,
-		// as which they wouldn't be allowed to create/delete tenants on their own.
-		// Although it is possible to allow worker threads to create/delete
-		// tenants in a authorization-disabled mode, use the admin server anyway for simplicity.
+		// Use admin server as proxy to creating/deleting tenants or pre-fetching tenant IDs for token signing when
+		// authorization is enabled This is necessary when tenant authorization is enabled, in which case the worker
+		// threads connect to database as untrusted clients, as which they wouldn't be allowed to create/delete tenants
+		// on their own. Although it is possible to allow worker threads to create/delete tenants in a
+		// authorization-disabled mode, use the admin server anyway for simplicity.
 		if (args.mode == MODE_CLEAN) {
 			// short-circuit tenant cleanup
 			const auto num_dbs = std::min(args.num_fdb_clusters, args.num_databases);
@@ -2606,6 +2572,21 @@ int main(int argc, char* argv[]) {
 			if (populateTenants(server, args) < 0) {
 				return -1;
 			}
+		}
+		if ((args.mode == MODE_BUILD || args.mode == MODE_RUN) && args.isAuthorizationEnabled()) {
+			assert(args.num_fdb_clusters == 1);
+			// need to fetch tenant IDs to pre-generate tokens
+			// fetch all IDs in one go
+			auto res = server.send(ipc::FetchTenantIdsRequest{ args.cluster_files[0], 0, args.active_tenants });
+			if (res.error_message) {
+				logr.error("tenant ID fetch failed: {}", *res.error_message);
+				return -1;
+			} else {
+				logr.info("Successfully prefetched {} tenant IDs", res.ids.size());
+				assert(res.ids.size() == args.active_tenants);
+				args.tenant_ids = std::move(res.ids);
+			}
+			args.generateAuthorizationTokens();
 		}
 	}
 

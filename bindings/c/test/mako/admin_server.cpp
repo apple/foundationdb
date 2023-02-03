@@ -22,6 +22,7 @@
 #include "future.hpp"
 #include "logger.hpp"
 #include "tenant.hpp"
+#include "time.hpp"
 #include "utils.hpp"
 #include <map>
 #include <cerrno>
@@ -30,38 +31,18 @@
 #include <sstream>
 #include <stdexcept>
 #include <thread>
+#include <tuple>
 
 #include <unistd.h>
 #include <sys/wait.h>
 
-#include <boost/archive/binary_iarchive.hpp>
-#include <boost/archive/binary_oarchive.hpp>
-#include <boost/serialization/optional.hpp>
-#include <boost/serialization/string.hpp>
-#include <boost/serialization/variant.hpp>
+#include <boost/variant/apply_visitor.hpp>
 
 #include "rapidjson/document.h"
 
 extern thread_local mako::Logger logr;
 
-using oarchive = boost::archive::binary_oarchive;
-using iarchive = boost::archive::binary_iarchive;
-
 namespace {
-
-template <class T>
-void sendObject(boost::process::pstream& pipe, T obj) {
-	oarchive oa(pipe);
-	oa << obj;
-}
-
-template <class T>
-T receiveObject(boost::process::pstream& pipe) {
-	iarchive ia(pipe);
-	T obj;
-	ia >> obj;
-	return obj;
-}
 
 fdb::Database getOrCreateDatabase(std::map<std::string, fdb::Database>& db_map, const std::string& cluster_file) {
 	auto iter = db_map.find(cluster_file);
@@ -122,35 +103,54 @@ void AdminServer::start() {
 		}
 	});
 
-	while (true) {
+	bool stop = false;
+	while (!stop) {
 		try {
 			auto req = receiveObject<Request>(pipe_to_server);
-			if (setup_error) {
-				sendObject(pipe_to_client, Response{ setup_error });
-			} else if (boost::get<PingRequest>(&req)) {
-				sendObject(pipe_to_client, Response{});
-			} else if (boost::get<StopRequest>(&req)) {
-				logr.info("server was requested to stop");
-				sendObject(pipe_to_client, Response{});
-				return;
-			} else if (auto p = boost::get<BatchCreateTenantRequest>(&req)) {
-				logr.info("received request to batch-create tenants [{}:{}) in database '{}'",
-				          p->id_begin,
-				          p->id_end,
-				          p->cluster_file);
-				auto err_msg = createTenant(getOrCreateDatabase(databases, p->cluster_file), p->id_begin, p->id_end);
-				sendObject(pipe_to_client, Response{ std::move(err_msg) });
-			} else if (auto p = boost::get<BatchDeleteTenantRequest>(&req)) {
-				logr.info("received request to batch-delete tenants [{}:{}) in database '{}'",
-				          p->id_begin,
-				          p->id_end,
-				          p->cluster_file);
-				auto err_msg = deleteTenant(getOrCreateDatabase(databases, p->cluster_file), p->id_begin, p->id_end);
-				sendObject(pipe_to_client, Response{ std::move(err_msg) });
-			} else {
-				logr.error("unknown request received");
-				sendObject(pipe_to_client, Response{ std::string("unknown request type") });
-			}
+			boost::apply_visitor(
+			    [this, &databases, &setup_error, &stop](auto&& request) -> void {
+				    using ReqType = std::decay_t<decltype(request)>;
+				    if (setup_error) {
+					    sendResponse<ReqType>(pipe_to_client, ReqType::ResponseType::makeError(*setup_error));
+					    return;
+				    }
+				    if constexpr (std::is_same_v<ReqType, PingRequest>) {
+					    sendResponse<ReqType>(pipe_to_client, DefaultResponse{});
+				    } else if constexpr (std::is_same_v<ReqType, StopRequest>) {
+					    logr.info("server was requested to stop");
+					    sendResponse<ReqType>(pipe_to_client, DefaultResponse{});
+					    stop = true;
+				    } else if constexpr (std::is_same_v<ReqType, BatchCreateTenantRequest>) {
+					    logr.info("received request to batch-create tenants [{}:{}) in database '{}'",
+					              request.id_begin,
+					              request.id_end,
+					              request.cluster_file);
+					    auto err_msg = createTenant(
+					        getOrCreateDatabase(databases, request.cluster_file), request.id_begin, request.id_end);
+					    sendResponse<ReqType>(pipe_to_client, DefaultResponse{ std::move(err_msg) });
+				    } else if constexpr (std::is_same_v<ReqType, BatchDeleteTenantRequest>) {
+					    logr.info("received request to batch-delete tenants [{}:{}) in database '{}'",
+					              request.id_begin,
+					              request.id_end,
+					              request.cluster_file);
+					    auto err_msg = deleteTenant(
+					        getOrCreateDatabase(databases, request.cluster_file), request.id_begin, request.id_end);
+					    sendResponse<ReqType>(pipe_to_client, DefaultResponse{ std::move(err_msg) });
+				    } else if constexpr (std::is_same_v<ReqType, FetchTenantIdsRequest>) {
+					    logr.info("received request to fetch tenant IDs [{}:{}) in database '{}'",
+					              request.id_begin,
+					              request.id_end,
+					              request.cluster_file);
+					    sendResponse<ReqType>(pipe_to_client,
+					                          fetchTenantIds(getOrCreateDatabase(databases, request.cluster_file),
+					                                         request.id_begin,
+					                                         request.id_end));
+				    } else {
+					    logr.error("unknown request received, typename '{}'", typeid(ReqType).name());
+					    sendResponse<ReqType>(pipe_to_client, ReqType::ResponseType::makeError("unknown request type"));
+				    }
+			    },
+			    req);
 		} catch (const std::exception& e) {
 			logr.error("fatal exception: {}", e.what());
 			return;
@@ -161,6 +161,7 @@ void AdminServer::start() {
 boost::optional<std::string> AdminServer::createTenant(fdb::Database db, int id_begin, int id_end) {
 	try {
 		auto tx = db.createTransaction();
+		auto stopwatch = Stopwatch(StartAtCtor{});
 		logr.info("create_tenants [{}-{})", id_begin, id_end);
 		while (true) {
 			for (auto id = id_begin; id < id_end; id++) {
@@ -180,7 +181,8 @@ boost::optional<std::string> AdminServer::createTenant(fdb::Database db, int id_
 				return fmt::format("create_tenants [{}:{}) failed with '{}'", id_begin, id_end, f.error().what());
 			}
 		}
-		logr.info("create_tenants [{}-{}) OK", id_begin, id_end);
+		logr.info("create_tenants [{}-{}) OK ({:.3f}s)", id_begin, id_end, toDoubleSeconds(stopwatch.stop().diff()));
+		stopwatch.start();
 		logr.info("blobbify_tenants [{}-{})", id_begin, id_end);
 		for (auto id = id_begin; id < id_end; id++) {
 			while (true) {
@@ -204,7 +206,7 @@ boost::optional<std::string> AdminServer::createTenant(fdb::Database db, int id_
 				}
 			}
 		}
-		logr.info("blobbify_tenants [{}-{}) OK", id_begin, id_end);
+		logr.info("blobbify_tenants [{}-{}) OK ({:.3f}s)", id_begin, id_end, toDoubleSeconds(stopwatch.stop().diff()));
 		return {};
 	} catch (const std::exception& e) {
 		return std::string(e.what());
@@ -307,12 +309,52 @@ boost::optional<std::string> AdminServer::deleteTenant(fdb::Database db, int id_
 	}
 }
 
-Response AdminServer::request(Request req) {
-	// should always be invoked from client side (currently just the main process)
-	assert(server_pid > 0);
-	assert(logr.isFor(ProcKind::MAIN));
-	sendObject(pipe_to_server, std::move(req));
-	return receiveObject<Response>(pipe_to_client);
+TenantIdsResponse AdminServer::fetchTenantIds(fdb::Database db, int id_begin, int id_end) {
+	try {
+		logr.info("fetch_tenant_ids [{}:{})", id_begin, id_end);
+		auto stopwatch = Stopwatch(StartAtCtor{});
+		size_t const count = id_end - id_begin;
+		std::vector<int64_t> ids(count);
+		std::vector<std::tuple<fdb::TypedFuture<fdb::future_var::Int64>, fdb::Tenant, bool>> state(count);
+		boost::optional<std::string> err_msg;
+		for (auto idx = id_begin; idx < id_end; idx++) {
+			auto& [future, tenant, done] = state[idx - id_begin];
+			tenant = db.openTenant(fdb::toBytesRef(getTenantNameByIndex(idx)));
+			future = tenant.getId();
+			done = false;
+		}
+		while (true) {
+			bool has_retries = false;
+			for (auto idx = id_begin; idx < id_end; idx++) {
+				auto& [future, tenant, done] = state[idx - id_begin];
+				if (!done) {
+					if (auto err = future.blockUntilReady()) {
+						return TenantIdsResponse::makeError(
+						    fmt::format("error while waiting for tenant ID of tenant {}: {}", idx, err.what()));
+					}
+					if (auto err = future.error()) {
+						if (err.retryable()) {
+							logr.info("retryable error while getting tenant ID of tenant {}: {}", idx, err.what());
+							future = tenant.getId();
+							has_retries = true;
+						} else {
+							return TenantIdsResponse::makeError(fmt::format(
+							    "unretryable error while getting tenant ID of tenant {}: {}", idx, err.what()));
+						}
+					} else {
+						ids[idx - id_begin] = future.get();
+						done = true;
+					}
+				}
+			}
+			if (!has_retries)
+				break;
+		}
+		logr.info("fetch_tenant_ids [{}:{}) OK ({:.3f}s)", id_begin, id_end, toDoubleSeconds(stopwatch.stop().diff()));
+		return TenantIdsResponse{ {}, std::move(ids) };
+	} catch (const std::exception& e) {
+		return TenantIdsResponse::makeError(fmt::format("unexpected exception: {}", e.what()));
+	}
 }
 
 AdminServer::~AdminServer() {
