@@ -220,7 +220,7 @@ private:
 			if (!cache->lastTenantId.present()) {
 				return false;
 			}
-			return cache->lastTenantId.get() > 0;
+			return cache->lastTenantId.get() >= 0;
 		}
 		return true;
 	}
