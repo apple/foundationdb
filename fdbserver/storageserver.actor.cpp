@@ -802,7 +802,7 @@ public:
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
 	std::unordered_map<UID, ICheckpointReader*> liveCheckpointReaders; // Active checkpoint readers
-	VersionedMap<int64_t, Standalone<StringRef>> tenantMap;
+	VersionedMap<int64_t, Void> tenantMap;
 	std::map<Version, std::vector<PendingNewShard>>
 	    pendingAddRanges; // Pending requests to add ranges to physical shards
 	std::map<Version, std::vector<KeyRange>>
@@ -5144,7 +5144,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	return result;
 }
 
-bool rangeIntersectsAnyTenant(VersionedMap<int64_t, TenantName>& tenantMap, KeyRangeRef range, Version ver) {
+bool rangeIntersectsAnyTenant(VersionedMap<int64_t, Void>& tenantMap, KeyRangeRef range, Version ver) {
 	auto view = tenantMap.at(ver);
 
 	// There are no tenants, so we don't need to do any work
@@ -5194,10 +5194,10 @@ bool rangeIntersectsAnyTenant(VersionedMap<int64_t, TenantName>& tenantMap, KeyR
 TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
 	std::set<int64_t> entries = { 0, 2, 3, 4, 6 };
 
-	VersionedMap<int64_t, TenantName> tenantMap;
+	VersionedMap<int64_t, Void> tenantMap;
 	tenantMap.createNewVersion(1);
 	for (auto entry : entries) {
-		tenantMap.insert(entry, ""_sr);
+		tenantMap.insert(entry, Void());
 	}
 
 	// Before all tenants
@@ -5282,13 +5282,13 @@ TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
 }
 
 TEST_CASE("/fdbserver/storageserver/randomRangeIntersectsAnyTenant") {
-	VersionedMap<int64_t, TenantName> tenantMap;
+	VersionedMap<int64_t, Void> tenantMap;
 	std::set<Key> tenantPrefixes;
 	tenantMap.createNewVersion(1);
 	int numEntries = deterministicRandom()->randomInt(0, 20);
 	for (int i = 0; i < numEntries; ++i) {
 		int64_t tenantId = deterministicRandom()->randomInt64(0, std::numeric_limits<int64_t>::max());
-		tenantMap.insert(tenantId, ""_sr);
+		tenantMap.insert(tenantId, Void());
 		tenantPrefixes.insert(TenantAPI::idToPrefix(tenantId));
 	}
 
@@ -9025,7 +9025,7 @@ void StorageServer::insertTenant(StringRef tenantPrefix, TenantName tenantName, 
 	if (version >= tenantMap.getLatestVersion()) {
 		int64_t tenantId = TenantAPI::prefixToId(tenantPrefix);
 		tenantMap.createNewVersion(version);
-		tenantMap.insert(tenantId, ""_sr);
+		tenantMap.insert(tenantId, Void());
 
 		if (persist) {
 			auto& mLV = addVersionToMutationLog(version);
@@ -9052,15 +9052,16 @@ void StorageServer::clearTenants(StringRef startTenant, StringRef endTenant, Ver
 		for (auto itr = startItr; itr != endItr; ++itr) {
 			auto mapKey = itr.key();
 			// Trigger any watches on the prefix associated with the tenant.
-			Key tenantPrefix = TenantAPI::idToPrefix(mapKey);
 			TraceEvent("EraseTenant", thisServerID).detail("TenantID", mapKey).detail("Version", version);
 			tenantWatches.sendError(mapKey, mapKey + 1, tenant_removed());
 			tenantsToClear.insert(mapKey);
-			addMutationToMutationLog(mLV,
-			                         MutationRef(MutationRef::ClearRange,
-			                                     tenantPrefix.withPrefix(persistTenantMapKeys.begin),
-			                                     keyAfter(tenantPrefix.withPrefix(persistTenantMapKeys.begin))));
 		}
+		Key startPrefix = TenantAPI::idToPrefix(startId.get());
+		Key endPrefix = TenantAPI::idToPrefix(endId.get());
+		addMutationToMutationLog(mLV,
+		                         MutationRef(MutationRef::ClearRange,
+		                                     startPrefix.withPrefix(persistTenantMapKeys.begin),
+		                                     endPrefix.withPrefix(persistTenantMapKeys.begin)));
 
 		for (auto tenantId : tenantsToClear) {
 			tenantMap.erase(tenantId);
@@ -10052,7 +10053,7 @@ void StorageServerDisk::makeNewStorageServerDurable(const bool shardAware) {
 
 	auto view = data->tenantMap.atLatest();
 	for (auto itr = view.begin(); itr != view.end(); ++itr) {
-		storage->set(KeyValueRef(TenantAPI::idToPrefix(itr.key()).withPrefix(persistTenantMapKeys.begin), *itr));
+		storage->set(KeyValueRef(TenantAPI::idToPrefix(itr.key()).withPrefix(persistTenantMapKeys.begin), ""_sr));
 	}
 }
 
@@ -10547,7 +10548,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		auto const& result = tenantMap[tenantMapLoc];
 		int64_t tenantId = TenantAPI::prefixToId(result.key.substr(persistTenantMapKeys.begin.size()));
 
-		data->tenantMap.insert(tenantId, result.value);
+		data->tenantMap.insert(tenantId, Void());
 
 		TraceEvent("RestoringTenant", data->thisServerID)
 		    .detail("Key", tenantMap[tenantMapLoc].key)
