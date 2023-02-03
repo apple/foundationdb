@@ -22,10 +22,8 @@
 
 import sys
 import subprocess
-import struct
 import random
 import argparse
-import math
 import os
 import copy
 import traceback
