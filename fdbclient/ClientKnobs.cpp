@@ -301,6 +301,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CLIENT_ENABLE_USING_CLUSTER_ID_KEY,     false );
 
 	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,     false );
+	init( SIMULATION_EKP_TENANT_IDS_TO_DROP,        "-1" );
 	// clang-format on
 }
 

@@ -643,7 +643,10 @@ struct EventCacheHolder : public ReferenceCounted<EventCacheHolder> {
 #endif
 
 struct NetworkAddress;
-void openTraceFile(const NetworkAddress& na,
+template <class T>
+class Optional;
+
+void openTraceFile(const Optional<NetworkAddress>& na,
                    uint64_t rollsize,
                    uint64_t maxLogsSize,
                    std::string directory = ".",
@@ -673,6 +676,7 @@ void removeTraceRole(std::string const& role);
 void retrieveTraceLogIssues(std::set<std::string>& out);
 void setTraceLogGroup(const std::string& role);
 void addUniversalTraceField(std::string const& name, std::string const& value);
+bool isTraceLocalAddressSet();
 void setTraceLocalAddress(const NetworkAddress& addr);
 void disposeTraceFileWriter();
 std::string getTraceFormatExtension();
