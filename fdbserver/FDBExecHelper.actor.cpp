@@ -19,7 +19,9 @@
  */
 
 #if !defined(_WIN32) && !defined(__APPLE__) && !defined(__INTEL_COMPILER)
+#ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
+#endif
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #include <boost/process.hpp>
