@@ -58,14 +58,7 @@ private:
 
 	void setup(TTaskFct cont) override { setupBlobGranules(cont); }
 
-	// FIXME: get rid of readSuccess* in this test now that setup is verify()-ing
-	// Allow reads at the start to get blob_granule_transaction_too_old if BG data isn't initialized yet
-	std::unordered_set<std::optional<int>> tenantsWithReadSuccess;
 	std::set<fdb::ByteString> validatedFiles;
-
-	inline void setReadSuccess(std::optional<int> tenantId) { tenantsWithReadSuccess.insert(tenantId); }
-
-	inline bool seenReadSuccess(std::optional<int> tenantId) { return tenantsWithReadSuccess.count(tenantId); }
 
 	void debugOp(std::string opName, fdb::KeyRange keyRange, std::optional<int> tenantId, std::string message) {
 		if (BG_API_DEBUG_VERBOSE) {
@@ -99,30 +92,15 @@ private:
 			                                                 granuleContext);
 			    auto out = fdb::Result::KeyValueRefArray{};
 			    fdb::Error err = res.getKeyValueArrayNothrow(out);
-			    if (err.code() == error_code_blob_granule_transaction_too_old) {
-				    bool previousSuccess = seenReadSuccess(tenantId);
-				    if (previousSuccess) {
-					    error("Read bg too old after read success!\n");
-				    } else {
-					    info("Read bg too old\n");
-				    }
-				    ASSERT(!previousSuccess);
-				    *tooOld = true;
-				    ctx->done();
-			    } else if (err.code() != error_code_success) {
+			    ASSERT(err.code() != error_code_blob_granule_transaction_too_old);
+			    if (err.code() != error_code_success) {
 				    ctx->onError(err);
 			    } else {
 				    auto resCopy = copyKeyValueArray(out);
 				    auto& [resVector, out_more] = resCopy;
 				    ASSERT(!out_more);
 				    results.get()->assign(resVector.begin(), resVector.end());
-				    bool previousSuccess = seenReadSuccess(tenantId);
-				    if (!previousSuccess) {
-					    info(fmt::format("Read {0}: first success\n", debugTenantStr(tenantId)));
-					    setReadSuccess(tenantId);
-				    } else {
-					    debugOp("Read", keyRange, tenantId, "complete");
-				    }
+				    debugOp("Read", keyRange, tenantId, "complete");
 				    ctx->done();
 			    }
 		    },
@@ -183,19 +161,13 @@ private:
 		    },
 		    [this, keyRange, tenantId, results, cont]() {
 			    debugOp("GetGranules", keyRange, tenantId, fmt::format("complete with {0} granules", results->size()));
-			    this->validateRanges(results, keyRange, seenReadSuccess(tenantId));
+			    this->validateRanges(results, keyRange);
 			    schedule(cont);
 		    },
 		    getTenant(tenantId));
 	}
 
 	void randomSummarizeOp(TTaskFct cont, std::optional<int> tenantId) {
-		if (!seenReadSuccess(tenantId)) {
-			// tester can't handle this throwing bg_txn_too_old, so just don't call it unless we have already seen a
-			// read success
-			schedule(cont);
-			return;
-		}
 		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 		auto results = std::make_shared<std::vector<fdb::GranuleSummary>>();
 
@@ -231,33 +203,29 @@ private:
 				    ranges->push_back((*results)[i].keyRange);
 			    }
 
-			    this->validateRanges(ranges, keyRange, true);
+			    this->validateRanges(ranges, keyRange);
 
 			    schedule(cont);
 		    },
 		    getTenant(tenantId));
 	}
 
-	void validateRanges(std::shared_ptr<std::vector<fdb::KeyRange>> results,
-	                    fdb::KeyRange keyRange,
-	                    bool shouldBeRanges) {
-		if (shouldBeRanges) {
-			if (results->size() == 0) {
-				error(fmt::format("ValidateRanges: [{0} - {1}): No ranges returned!",
-				                  fdb::toCharsRef(keyRange.beginKey),
-				                  fdb::toCharsRef(keyRange.endKey)));
-			}
-			ASSERT(results->size() > 0);
-			if (results->front().beginKey > keyRange.beginKey || results->back().endKey < keyRange.endKey) {
-				error(fmt::format("ValidateRanges: [{0} - {1}): Incomplete range(s) returned [{2} - {3})!",
-				                  fdb::toCharsRef(keyRange.beginKey),
-				                  fdb::toCharsRef(keyRange.endKey),
-				                  fdb::toCharsRef(results->front().beginKey),
-				                  fdb::toCharsRef(results->back().endKey)));
-			}
-			ASSERT(results->front().beginKey <= keyRange.beginKey);
-			ASSERT(results->back().endKey >= keyRange.endKey);
+	void validateRanges(std::shared_ptr<std::vector<fdb::KeyRange>> results, fdb::KeyRange keyRange) {
+		if (results->size() == 0) {
+			error(fmt::format("ValidateRanges: [{0} - {1}): No ranges returned!",
+			                  fdb::toCharsRef(keyRange.beginKey),
+			                  fdb::toCharsRef(keyRange.endKey)));
 		}
+		ASSERT(results->size() > 0);
+		if (results->front().beginKey > keyRange.beginKey || results->back().endKey < keyRange.endKey) {
+			error(fmt::format("ValidateRanges: [{0} - {1}): Incomplete range(s) returned [{2} - {3})!",
+			                  fdb::toCharsRef(keyRange.beginKey),
+			                  fdb::toCharsRef(keyRange.endKey),
+			                  fdb::toCharsRef(results->front().beginKey),
+			                  fdb::toCharsRef(results->back().endKey)));
+		}
+		ASSERT(results->front().beginKey <= keyRange.beginKey);
+		ASSERT(results->back().endKey >= keyRange.endKey);
 		for (int i = 0; i < results->size(); i++) {
 			// no empty or inverted ranges
 			if ((*results)[i].beginKey >= (*results)[i].endKey) {
@@ -303,7 +271,7 @@ private:
 		    },
 		    [this, keyRange, tenantId, results, cont]() {
 			    debugOp("GetBlobRanges", keyRange, tenantId, fmt::format("complete with {0} ranges", results->size()));
-			    this->validateRanges(results, keyRange, seenReadSuccess(tenantId));
+			    this->validateRanges(results, keyRange);
 			    schedule(cont);
 		    },
 		    getTenant(tenantId),
@@ -330,13 +298,6 @@ private:
 		    },
 		    [this, keyRange, tenantId, verifyVersion, cont]() {
 			    debugOp("Verify", keyRange, tenantId, fmt::format("Complete @ {0}", *verifyVersion));
-			    bool previousSuccess = seenReadSuccess(tenantId);
-			    if (*verifyVersion == -1) {
-				    ASSERT(!previousSuccess);
-			    } else if (!previousSuccess) {
-				    info(fmt::format("Verify {0}: first success\n", debugTenantStr(tenantId)));
-				    setReadSuccess(tenantId);
-			    }
 			    schedule(cont);
 		    },
 		    getTenant(tenantId),
@@ -495,9 +456,6 @@ private:
 	}
 
 	void randomReadDescription(TTaskFct cont, std::optional<int> tenantId) {
-		if (!seenReadSuccess(tenantId)) {
-			return;
-		}
 		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 		auto results = std::make_shared<std::vector<fdb::GranuleDescription>>();
 		auto readVersionOut = std::make_shared<int64_t>();
