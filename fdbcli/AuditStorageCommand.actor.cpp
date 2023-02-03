@@ -47,11 +47,8 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 		return UID();
 	}
 
-	Key begin, end;
-	if (tokens.size() == 2) {
-		begin = allKeys.begin;
-		end = allKeys.end;
-	} else if (tokens.size() == 3) {
+	Key begin = allKeys.begin, end = allKeys.end;
+	if (tokens.size() == 3) {
 		begin = tokens[2];
 	} else if (tokens.size() == 4) {
 		begin = tokens[2];
