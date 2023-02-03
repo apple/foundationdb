@@ -1685,6 +1685,10 @@ int Arguments::validate() {
 	}
 
 	if (enable_token_based_authorization) {
+		if (num_fdb_clusters > 1) {
+			logr.error("for simplicity, --enable_token_based_authorization must be used with exactly one fdb cluster");
+			return -1;
+		}
 		if (active_tenants <= 0 || total_tenants <= 0) {
 			logr.error("--enable_token_based_authorization must be used with at least one tenant");
 			return -1;
@@ -1708,14 +1712,54 @@ bool Arguments::isAuthorizationEnabled() const noexcept {
 	       private_key_pem.has_value();
 }
 
+void Arguments::collectTenantIds() {
+	auto db = Database(cluster_files[0]);
+	tenant_ids.clear();
+	tenant_ids.reserve(active_tenants);
+	for (auto tenant_idx = 0; tenant_idx < active_tenants; tenant_idx++) {
+		auto tenant_name = getTenantNameByIndex(tenant_idx);
+		auto tenant = db.openTenant(toBytesRef(tenant_name));
+		while (true) {
+			auto f = tenant.getId();
+			if (auto err = f.blockUntilReady()) {
+				logr.error("error while waiting for tenant id of tenant name '{}': {}", tenant_name, err.what());
+				throwError("ERROR: Tenant::getId().blockUntilReady(): ", err);
+			}
+			if (auto err = f.error()) {
+				if (err.retryable()) {
+					logr.info(
+					    "get tenant id for tenant name '{}' returned a retryable error: {}", tenant_name, err.what());
+					continue;
+				} else {
+					logr.error("get tenant id for tenant name '{}' returned an unretryable error: {}",
+					           tenant_name,
+					           err.what());
+					throwError("ERROR: Tenant::getId() returned an unretryable error: ", err);
+				}
+			} else {
+				tenant_ids.push_back(f.get());
+				break;
+			}
+		}
+	}
+}
+
 void Arguments::generateAuthorizationTokens() {
 	assert(active_tenants > 0);
 	assert(keypair_id.has_value());
 	assert(private_key_pem.has_value());
 	authorization_tokens.clear();
-	logr.info("generating authorization tokens to be used by worker threads");
+	assert(num_fdb_clusters == 1);
+	// assumes tenants have already been populated
+	logr.info("collecting tenant ids");
 	auto stopwatch = Stopwatch(StartAtCtor{});
-	authorization_tokens = generateAuthorizationTokenMap(active_tenants, keypair_id.value(), private_key_pem.value());
+	collectTenantIds();
+	logr.info(
+	    "collected IDs of {} tenants in {:6.3f} seconds", active_tenants, toDoubleSeconds(stopwatch.stop().diff()));
+	logr.info("generating authorization tokens to be used by worker threads");
+	stopwatch.start();
+	authorization_tokens =
+	    generateAuthorizationTokenMap(active_tenants, keypair_id.value(), private_key_pem.value(), tenant_ids);
 	assert(authorization_tokens.size() == active_tenants);
 	logr.info("generated {} tokens in {:6.3f} seconds", active_tenants, toDoubleSeconds(stopwatch.stop().diff()));
 }

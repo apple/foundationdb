@@ -143,10 +143,12 @@ constexpr const int MAX_REPORT_FILES = 200;
 struct Arguments {
 	Arguments();
 	int validate();
+	void collectTenantIds();
 	bool isAuthorizationEnabled() const noexcept;
 	void generateAuthorizationTokens();
 
-	// Needs to be called once per fdb-accessing process
+	// Needs to be called once per fdb client process from a clean state:
+	// i.e. no FDB API called
 	int setGlobalOptions() const;
 	bool isAnyTimeoutEnabled() const;
 
@@ -206,6 +208,7 @@ struct Arguments {
 	std::optional<std::string> keypair_id;
 	std::optional<std::string> private_key_pem;
 	std::map<std::string, std::string> authorization_tokens; // maps tenant name to token string
+	std::vector<int64_t> tenant_ids; // maps tenant index to tenant id for signing tokens
 	int transaction_timeout_db;
 	int transaction_timeout_tx;
 };

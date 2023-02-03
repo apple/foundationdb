@@ -18,10 +18,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+import base64
 import fdb
 import pytest
 import subprocess
 import admin_server
+import time
 from local_cluster import TLSConfig
 from tmp_cluster import TempCluster
 from typing import Union
@@ -134,3 +136,22 @@ def tenant_tr_gen(db):
         tenant = db.open_tenant(to_bytes(tenant))
         return tenant.create_transaction()
     return fn
+
+@pytest.fixture
+def token_claim_1h(db):
+	# JWT claim that is valid for 1 hour since time of invocation
+	def get_claim(tenant_name):
+		tenant = db.open_tenant(to_bytes(tenant_name))
+		tenant_id = tenant.get_id().wait()
+		now = time.time()
+		return {
+			"iss": "fdb-authz-tester",
+			"sub": "authz-test",
+			"aud": ["tmp-cluster"],
+			"iat": now,
+			"nbf": now - 1,
+			"exp": now + 60 * 60,
+			"jti": random_alphanum_str(10),
+			"tenants": [to_str(base64.b64encode(tenant_id.to_bytes(8, "big")))],
+		}
+	return get_claim

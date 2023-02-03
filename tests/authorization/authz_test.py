@@ -30,7 +30,7 @@ import time
 from multiprocessing import Process, Pipe
 from typing import Union
 from authz_util import token_gen, private_key_gen, public_keyset_from_keys, alg_from_kty
-from util import random_alphanum_str, random_alphanum_bytes, to_str, to_bytes, KeyFileReverter, token_claim_1h, wait_until_tenant_tr_succeeds, wait_until_tenant_tr_fails
+from util import random_alphanum_str, random_alphanum_bytes, to_str, to_bytes, KeyFileReverter, wait_until_tenant_tr_succeeds, wait_until_tenant_tr_fails
 
 special_key_ranges = [
     ("transaction description", b"/description", b"/description\x00"),
@@ -43,7 +43,7 @@ special_key_ranges = [
     ("kill storage", b"/globals/killStorage", b"/globals/killStorage\x00"),
 ]
 
-def test_simple_tenant_access(cluster, default_tenant, tenant_tr_gen):
+def test_simple_tenant_access(cluster, default_tenant, tenant_tr_gen, token_claim_1h):
     token = token_gen(cluster.private_key, token_claim_1h(default_tenant))
     tr = tenant_tr_gen(default_tenant)
     tr.options.set_authorization_token(token)
@@ -53,7 +53,7 @@ def test_simple_tenant_access(cluster, default_tenant, tenant_tr_gen):
     tr.options.set_authorization_token(token)
     assert tr[b"abc"] == b"def", "tenant write transaction not visible"
 
-def test_cross_tenant_access_disallowed(cluster, default_tenant, tenant_gen, tenant_tr_gen):
+def test_cross_tenant_access_disallowed(cluster, default_tenant, tenant_gen, tenant_tr_gen, token_claim_1h):
     # use default tenant token with second tenant transaction and see it fail
     second_tenant = random_alphanum_bytes(12)
     tenant_gen(second_tenant)
@@ -137,7 +137,7 @@ def test_system_and_special_key_range_disallowed(db, tenant_tr_gen):
 
 def test_public_key_set_rollover(
         kty, public_key_refresh_interval,
-        cluster, default_tenant, tenant_gen, tenant_tr_gen):
+        cluster, default_tenant, tenant_gen, tenant_tr_gen, token_claim_1h):
     new_kid = random_alphanum_str(12)
     new_kty = "EC" if kty == "RSA" else "RSA"
     new_key = private_key_gen(kty=new_kty, kid=new_kid)
@@ -160,16 +160,16 @@ def test_public_key_set_rollover(
     with KeyFileReverter(cluster.public_key_json_file, old_key_json, delay):
         with open(cluster.public_key_json_file, "w") as keyfile:
             keyfile.write(interim_set)
-        wait_until_tenant_tr_succeeds(second_tenant, new_key, tenant_tr_gen, max_repeat, delay)
+        wait_until_tenant_tr_succeeds(second_tenant, new_key, tenant_tr_gen, max_repeat, delay, token_claim_1h)
         print("interim key set activated")
         final_set = public_keyset_from_keys([new_key])
         print(f"final keyset: {final_set}")
         with open(cluster.public_key_json_file, "w") as keyfile:
             keyfile.write(final_set)
-        wait_until_tenant_tr_fails(default_tenant, cluster.private_key, tenant_tr_gen, max_repeat, delay)
+        wait_until_tenant_tr_fails(default_tenant, cluster.private_key, tenant_tr_gen, max_repeat, delay, token_claim_1h)
 
 def test_public_key_set_broken_file_tolerance(
-        cluster, public_key_refresh_interval, default_tenant, tenant_tr_gen):
+        cluster, public_key_refresh_interval, default_tenant, tenant_tr_gen, token_claim_1h):
     delay = public_key_refresh_interval
     # retry limit in waiting for keyset file update to propagate to FDB server's internal keyset
     max_repeat = 10
@@ -187,10 +187,10 @@ def test_public_key_set_broken_file_tolerance(
         with open(cluster.public_key_json_file, "w") as keyfile:
             keyfile.write('{"keys":[]}')
         # eventually internal key set will become empty and won't accept any new tokens
-        wait_until_tenant_tr_fails(default_tenant, cluster.private_key, tenant_tr_gen, max_repeat, delay)
+        wait_until_tenant_tr_fails(default_tenant, cluster.private_key, tenant_tr_gen, max_repeat, delay, token_claim_1h)
 
 def test_public_key_set_deletion_tolerance(
-        cluster, public_key_refresh_interval, default_tenant, tenant_tr_gen):
+        cluster, public_key_refresh_interval, default_tenant, tenant_tr_gen, token_claim_1h):
     delay = public_key_refresh_interval
     # retry limit in waiting for keyset file update to propagate to FDB server's internal keyset
     max_repeat = 10
@@ -200,16 +200,16 @@ def test_public_key_set_deletion_tolerance(
         with open(cluster.public_key_json_file, "w") as keyfile:
             keyfile.write('{"keys":[]}')
         time.sleep(delay)
-        wait_until_tenant_tr_fails(default_tenant, cluster.private_key, tenant_tr_gen, max_repeat, delay)
+        wait_until_tenant_tr_fails(default_tenant, cluster.private_key, tenant_tr_gen, max_repeat, delay, token_claim_1h)
         os.remove(cluster.public_key_json_file)
         time.sleep(delay * 2)
         with open(cluster.public_key_json_file, "w") as keyfile:
             keyfile.write(cluster.public_key_jwks_str)
         # eventually updated key set should take effect and transaction should be accepted
-        wait_until_tenant_tr_succeeds(default_tenant, cluster.private_key, tenant_tr_gen, max_repeat, delay)
+        wait_until_tenant_tr_succeeds(default_tenant, cluster.private_key, tenant_tr_gen, max_repeat, delay, token_claim_1h)
 
 def test_public_key_set_empty_file_tolerance(
-        cluster, public_key_refresh_interval, default_tenant, tenant_tr_gen):
+        cluster, public_key_refresh_interval, default_tenant, tenant_tr_gen, token_claim_1h):
     delay = public_key_refresh_interval
     # retry limit in waiting for keyset file update to propagate to FDB server's internal keyset
     max_repeat = 10
@@ -219,7 +219,7 @@ def test_public_key_set_empty_file_tolerance(
         with open(cluster.public_key_json_file, "w") as keyfile:
             keyfile.write('{"keys":[]}')
         # eventually internal key set will become empty and won't accept any new tokens
-        wait_until_tenant_tr_fails(default_tenant, cluster.private_key, tenant_tr_gen, max_repeat, delay)
+        wait_until_tenant_tr_fails(default_tenant, cluster.private_key, tenant_tr_gen, max_repeat, delay, token_claim_1h)
         # empty the key file
         with open(cluster.public_key_json_file, "w") as keyfile:
             pass
@@ -227,9 +227,9 @@ def test_public_key_set_empty_file_tolerance(
         with open(cluster.public_key_json_file, "w") as keyfile:
             keyfile.write(cluster.public_key_jwks_str)
         # eventually key file should update and transactions should go through
-        wait_until_tenant_tr_succeeds(default_tenant, cluster.private_key, tenant_tr_gen, max_repeat, delay)
+        wait_until_tenant_tr_succeeds(default_tenant, cluster.private_key, tenant_tr_gen, max_repeat, delay, token_claim_1h)
 
-def test_bad_token(cluster, default_tenant, tenant_tr_gen):
+def test_bad_token(cluster, default_tenant, tenant_tr_gen, token_claim_1h):
     def del_attr(d, attr):
         del d[attr]
         return d
