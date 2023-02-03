@@ -1094,7 +1094,7 @@ inline bool tenantMapChanging(MutationRef const& mutation) {
 // return the first tenantId whose idToPrefix(id) >= prefix[0..8] in lexicographic order. If no such id, return
 // INVALID_TENANT;
 inline int64_t lowerBoundTenantId(const StringRef& prefix, const std::map<int64_t, TenantName>& tenantMap) {
-	if(isSystemKey(prefix)) {
+	if (isSystemKey(prefix)) {
 		return TenantInfo::INVALID_TENANT;
 	}
 	Optional<int64_t> id;
@@ -1258,27 +1258,26 @@ TEST_CASE("/CommitProxy/SplitRange/SplitClearRangeByTenant") {
 
 void replaceRawClearRanges(Arena& arena,
                            VectorRef<MutationRef>& mutations,
-                           std::vector<std::vector<MutationRef>>& splitMutations,
+                           std::vector<std::pair<int, std::vector<MutationRef>>>& splitMutations,
                            size_t totalSize) {
 	if (splitMutations.empty())
 		return;
+
+	int i = mutations.size() - 1;
 	mutations.resize(arena, totalSize);
 	// place from back
 	int curr = totalSize - 1;
-	bool doValidation = EXPENSIVE_VALIDATION;
-	for (int i = mutations.size() - 1; i >= 0; --i) {
-		if (splitMutations.empty() && !doValidation)
-			break;
-
+	bool doValidation = g_network->isSimulated();
+	for (; i >= 0; --i) {
 		if (splitMutations.empty()) {
 			ASSERT_EQ(curr, i);
-			curr--;
-			continue;
+			break;
 		}
 
-		if (mutations[i].type == MutationRef::ClearRange) {
+		if (splitMutations.back().first == i) {
+			ASSERT_EQ(mutations[i].type, MutationRef::ClearRange);
 			// replace with tenant aligned mutations
-			auto& currMutations = splitMutations.back();
+			auto& currMutations = splitMutations.back().second;
 			while (!currMutations.empty()) {
 				mutations[curr] = currMutations.back();
 				currMutations.pop_back();
@@ -1286,10 +1285,8 @@ void replaceRawClearRanges(Arena& arena,
 			}
 			splitMutations.pop_back();
 		} else {
-			ASSERT_GE(curr, i);
-			if (curr > i) {
-				mutations[curr] = mutations[i];
-			}
+			ASSERT_GT(curr, i);
+			mutations[curr] = mutations[i];
 			curr--;
 		}
 	}
@@ -1307,19 +1304,32 @@ Error validateAndProcessTenantAccess(Arena& arena,
 	bool changeTenant = false;
 	bool writeNormalKey = false;
 
-	std::vector<std::vector<MutationRef>> splitMutations;
+	std::vector<std::pair<int, std::vector<MutationRef>>> idxSplitMutations;
 	size_t newMutationSize = mutations.size();
-	for (auto& mutation : mutations) {
+	for (int i = 0; i < mutations.size(); ++i) {
+		auto& mutation = mutations[i];
 		Optional<int64_t> tenantId;
 		bool validAccess = true;
 		changeTenant = changeTenant || tenantMapChanging(mutation);
 
 		if (mutation.type == MutationRef::ClearRange) {
 			std::vector<MutationRef> newClears = splitClearRangeByTenant(arena, mutation, pProxyCommitData->tenantMap);
-			CODE_PROBE(newClears.size() > 1, "Clear Range raw access or cross multiple tenants");
-			splitMutations.emplace_back(newClears);
-			newMutationSize += newClears.size() - 1;
-			// TODO: trace log
+			if (newClears.size() == 1) {
+				mutation = newClears[0];
+			} else if (newClears.size() > 1) {
+				CODE_PROBE(true, "Clear Range raw access or cross multiple tenants");
+				idxSplitMutations.emplace_back(i, newClears);
+				newMutationSize += newClears.size() - 1;
+			}
+
+			if (debugId.present()) {
+				TraceEvent(SevDebug, "SplitTenantClearRange", pProxyCommitData->dbgid)
+				    .detail("TxnId", debugId.get())
+				    .detail("Idx", i)
+				    .detail("NewMutationSize", newMutationSize)
+				    .detail("OldMutationSize", mutations.size())
+				    .detail("NewClears", newClears.size());
+			}
 		} else if (!isSystemKey(mutation.param1)) {
 			validAccess = validTenantAccess(mutation, pProxyCommitData->tenantMap, tenantId);
 			writeNormalKey = true;
@@ -1353,7 +1363,7 @@ Error validateAndProcessTenantAccess(Arena& arena,
 		}
 	}
 
-	replaceRawClearRanges(arena, mutations, splitMutations, newMutationSize);
+	replaceRawClearRanges(arena, mutations, idxSplitMutations, newMutationSize);
 	return success();
 }
 
