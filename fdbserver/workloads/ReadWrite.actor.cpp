@@ -471,7 +471,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		}
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return timeout(_start(cx, this), testDuration, Void()); }
 
 	ACTOR template <class Trans>
 	static Future<Void> readOp(Trans* tr, std::vector<int64_t> keys, ReadWriteWorkload* self, bool shouldRecord) {

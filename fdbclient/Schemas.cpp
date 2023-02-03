@@ -981,6 +981,10 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "expired_age": 0,
          "oldest_id_version": 0,
          "oldest_id_age": 0
+      },
+      "version_epoch":{
+         "enabled": false,
+         "epoch": 0
       }
    },
    "client":{

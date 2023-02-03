@@ -1077,7 +1077,7 @@ if __name__ == '__main__':
                             description="""
     The test calls fdbcli commands through fdbcli --exec "<command>" interactively using subprocess.
     The outputs from fdbcli are returned and compared to predefined results.
-    Consequently, changing fdbcli outputs or breaking any commands will casue the test to fail.
+    Consequently, changing fdbcli outputs or breaking any commands will cause the test to fail.
     Commands that are easy to test will run against a single process cluster.
     For complex commands like exclude, they will run against a cluster with multiple(current set to 5) processes.
     If external_client_library is given, we will disable the local client and use the external client to run fdbcli.

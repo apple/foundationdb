@@ -290,6 +290,10 @@ struct RegisterMasterRequest {
 	}
 };
 
+// Instantiated in worker.actor.cpp
+extern template class RequestStream<RegisterMasterRequest, false>;
+extern template struct NetNotifiedQueue<RegisterMasterRequest, false>;
+
 struct RecruitFromConfigurationReply {
 	constexpr static FileIdentifier file_identifier = 2224085;
 	std::vector<WorkerInterface> backupWorkers;
@@ -1297,6 +1301,8 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 
 typedef decltype(&tLog) TLogFn;
 
+extern bool isSimulatorProcessReliable();
+
 ACTOR template <class T>
 Future<T> ioTimeoutError(Future<T> what, double time, const char* context = nullptr) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
@@ -1311,7 +1317,7 @@ Future<T> ioTimeoutError(Future<T> what, double time, const char* context = null
 		}
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable()) {
+			if (!isSimulatorProcessReliable()) {
 				err = err.asInjectedFault();
 			}
 			TraceEvent e(SevError, "IoTimeoutError");
@@ -1360,7 +1366,7 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 		}
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable()) {
+			if (!isSimulatorProcessReliable()) {
 				err = err.asInjectedFault();
 			}
 			TraceEvent e(SevError, "IoTimeoutError");

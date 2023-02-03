@@ -85,6 +85,7 @@ BlobCipherMetrics::BlobCipherMetrics()
                   CounterSet(cc, "KVRedwood"),
                   CounterSet(cc, "BlobGranule"),
                   CounterSet(cc, "Backup"),
+                  CounterSet(cc, "Restore"),
                   CounterSet(cc, "Test") }) {
 	specialCounter(cc, "CacheSize", []() { return BlobCipherKeyCache::getInstance()->getSize(); });
 	traceFuture = cc.traceCounters("BlobCipherMetrics", UID(), FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL);
@@ -102,6 +103,8 @@ std::string toString(BlobCipherMetrics::UsageType type) {
 		return "BlobGranule";
 	case BlobCipherMetrics::UsageType::BACKUP:
 		return "Backup";
+	case BlobCipherMetrics::UsageType::RESTORE:
+		return "Restore";
 	case BlobCipherMetrics::UsageType::TEST:
 		return "Test";
 	default:

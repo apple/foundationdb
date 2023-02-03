@@ -45,6 +45,7 @@
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
 #include "fdbrpc/WellKnownEndpoints.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/IPAllowList.h"
@@ -363,7 +364,7 @@ ACTOR void failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simula
 	wait(trigger);
 	if (enableFailures) {
 		printf("Killing machine: %s at %f\n", m->address.toString().c_str(), now());
-		g_simulator->killProcess(m, ISimulator::KillInstantly);
+		g_simulator->killProcess(m, ISimulator::KillType::KillInstantly);
 	}
 }
 
@@ -706,9 +707,9 @@ static void printUsage(const char* name, bool devhelp) {
 		                 " `net2-threadpool'.");
 		printOptionUsage("--unbufferedout", " Do not buffer stdout and stderr.");
 		printOptionUsage("--bufferedout", " Buffer stdout and stderr.");
-		printOptionUsage("--traceclock CLOCKIMPL",
-		                 " Select clock source for trace files, `now' (default) or"
-		                 " `realtime'.");
+		printOptionUsage("--traceclock [now,realtime]",
+		                 " Select clock source for trace events, defaults to `now' in simulation"
+		                 " and `realtime' otherwise.");
 		printOptionUsage("--num-testers NUM",
 		                 " A multitester will wait for NUM testers before starting"
 		                 " (defaults to 1).");
@@ -2017,7 +2018,7 @@ int main(int argc, char* argv[]) {
 			// startOldSimulator();
 			opts.buildNetwork(argv[0]);
 			startNewSimulator(opts.printSimTime);
-			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
+			openTraceFile({}, opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			openTracer(TracerType(deterministicRandom()->randomInt(static_cast<int>(TracerType::DISABLED),
 			                                                       static_cast<int>(TracerType::SIM_END))));
 		} else {
@@ -2268,6 +2269,11 @@ int main(int argc, char* argv[]) {
 				// Disable domain-aware encryption in Redwood until encryption mode from db config is being handled.
 				// TODO(yiwu): clean it up once we cleanup the knob.
 				g_knobs.setKnob("redwood_split_encrypted_pages_by_tenant", KnobValue::create(bool{ false }));
+				g_knobs.setKnob("encrypt_header_auth_token_enabled",
+				                KnobValue::create(ini.GetBoolValue("META", "encryptHeaderAuthTokenEnabled", false)));
+				g_knobs.setKnob("encrypt_header_auth_token_algo",
+				                KnobValue::create((int)ini.GetLongValue(
+				                    "META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO)));
 			}
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator->run();

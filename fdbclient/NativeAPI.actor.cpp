@@ -110,6 +110,9 @@
 #endif
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+template class RequestStream<OpenDatabaseRequest, false>;
+template struct NetNotifiedQueue<OpenDatabaseRequest, false>;
+
 FDB_DEFINE_BOOLEAN_PARAM(CacheResult);
 
 extern const char* getSourceVersion();
@@ -158,7 +161,7 @@ TLSConfig tlsConfig(TLSEndpointType::CLIENT);
 // The default values, TRACE_DEFAULT_ROLL_SIZE and TRACE_DEFAULT_MAX_LOGS_SIZE are located in Trace.h.
 NetworkOptions::NetworkOptions()
   : traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-    traceFormat("xml"), traceClockSource("now"),
+    traceFormat("xml"), traceClockSource("now"), traceInitializeOnSetup(false),
     supportedVersions(new ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>()), runLoopProfilingEnabled(false),
     primaryClient(true) {}
 
@@ -2214,6 +2217,99 @@ void DatabaseContext::expireThrottles() {
 
 extern IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs);
 
+// Initialize tracing for FDB client
+//
+// connRecord is necessary for determining the local IP, which is then included in the trace
+// file name, and also used to annotate all trace events.
+//
+// If trace_initialize_on_setup is not set, tracing is initialized when opening a database.
+// In that case we can immediatelly determine the IP. Thus, we can use the IP in the
+// trace file name and annotate all events with it.
+//
+// If trace_initialize_on_setup network option is set, tracing is at first initialized without
+// connRecord and thus without the local IP. In that case we cannot use the local IP in the
+// trace file names. The IP is then provided by a repeated call to initializeClientTracing
+// when opening a database. All tracing events from this point are annotated with the local IP
+//
+// If tracing initialization is completed, further calls to initializeClientTracing are ignored
+void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Optional<int> apiVersion) {
+	if (!networkOptions.traceDirectory.present()) {
+		return;
+	}
+
+	bool initialized = traceFileIsOpen();
+	if (initialized && (isTraceLocalAddressSet() || !connRecord)) {
+		// Tracing initialization is completed
+		return;
+	}
+
+	// Network must be created before initializing tracing
+	ASSERT(g_network);
+
+	Optional<NetworkAddress> localAddress;
+	if (connRecord) {
+		auto publicIP = determinePublicIPAutomatically(connRecord->getConnectionString());
+		localAddress = NetworkAddress(publicIP, ::getpid());
+	}
+	platform::ImageInfo imageInfo = platform::getImageInfo();
+
+	if (initialized) {
+		// Tracing already initialized, just need to update the IP address
+		setTraceLocalAddress(localAddress.get());
+		TraceEvent("ClientStart")
+		    .detail("SourceVersion", getSourceVersion())
+		    .detail("Version", FDB_VT_VERSION)
+		    .detail("PackageName", FDB_VT_PACKAGE_NAME)
+		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
+		    .detail("ApiVersion", apiVersion)
+		    .detail("ClientLibrary", imageInfo.fileName)
+		    .detailf("ImageOffset", "%p", imageInfo.offset)
+		    .detail("Primary", networkOptions.primaryClient)
+		    .trackLatest("ClientStart");
+	} else {
+		// Initialize tracing
+		selectTraceFormatter(networkOptions.traceFormat);
+		selectTraceClockSource(networkOptions.traceClockSource);
+		addUniversalTraceField("ClientDescription",
+		                       format("%s-%s-%" PRIu64,
+		                              networkOptions.primaryClient ? "primary" : "external",
+		                              FDB_VT_VERSION,
+		                              deterministicRandom()->randomUInt64()));
+
+		std::string identifier = networkOptions.traceFileIdentifier;
+		openTraceFile(localAddress,
+		              networkOptions.traceRollSize,
+		              networkOptions.traceMaxLogsSize,
+		              networkOptions.traceDirectory.get(),
+		              "trace",
+		              networkOptions.traceLogGroup,
+		              identifier,
+		              networkOptions.tracePartialFileSuffix);
+
+		TraceEvent("ClientStart")
+		    .detail("SourceVersion", getSourceVersion())
+		    .detail("Version", FDB_VT_VERSION)
+		    .detail("PackageName", FDB_VT_PACKAGE_NAME)
+		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
+		    .detail("ApiVersion", apiVersion)
+		    .detail("ClientLibrary", imageInfo.fileName)
+		    .detailf("ImageOffset", "%p", imageInfo.offset)
+		    .detail("Primary", networkOptions.primaryClient)
+		    .trackLatest("ClientStart");
+
+		g_network->initMetrics();
+		FlowTransport::transport().initMetrics();
+		initTraceEventMetrics();
+	}
+
+	// Initialize system monitoring once the local IP is available
+	if (localAddress.present()) {
+		initializeSystemMonitorMachineState(SystemMonitorMachineState(IPAddress(localAddress.get().ip)));
+		systemMonitor();
+		uncancellable(recurring(&systemMonitor, CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskPriority::FlushTrace));
+	}
+}
+
 // Creates a database object that represents a connection to a cluster
 // This constructor uses a preallocated DatabaseContext that may have been created
 // on another thread
@@ -2227,49 +2323,7 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 
 	ASSERT(TraceEvent::isNetworkThread());
 
-	platform::ImageInfo imageInfo = platform::getImageInfo();
-
-	if (connRecord) {
-		if (networkOptions.traceDirectory.present() && !traceFileIsOpen()) {
-			g_network->initMetrics();
-			FlowTransport::transport().initMetrics();
-			initTraceEventMetrics();
-
-			auto publicIP = determinePublicIPAutomatically(connRecord->getConnectionString());
-			selectTraceFormatter(networkOptions.traceFormat);
-			selectTraceClockSource(networkOptions.traceClockSource);
-			addUniversalTraceField("ClientDescription",
-			                       format("%s-%s-%" PRIu64,
-			                              networkOptions.primaryClient ? "primary" : "external",
-			                              FDB_VT_VERSION,
-			                              getTraceThreadId()));
-
-			openTraceFile(NetworkAddress(publicIP, ::getpid()),
-			              networkOptions.traceRollSize,
-			              networkOptions.traceMaxLogsSize,
-			              networkOptions.traceDirectory.get(),
-			              "trace",
-			              networkOptions.traceLogGroup,
-			              networkOptions.traceFileIdentifier,
-			              networkOptions.tracePartialFileSuffix);
-
-			TraceEvent("ClientStart")
-			    .detail("SourceVersion", getSourceVersion())
-			    .detail("Version", FDB_VT_VERSION)
-			    .detail("PackageName", FDB_VT_PACKAGE_NAME)
-			    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
-			    .detail("ApiVersion", apiVersion)
-			    .detail("ClientLibrary", imageInfo.fileName)
-			    .detailf("ImageOffset", "%p", imageInfo.offset)
-			    .detail("Primary", networkOptions.primaryClient)
-			    .trackLatest("ClientStart");
-
-			initializeSystemMonitorMachineState(SystemMonitorMachineState(IPAddress(publicIP)));
-
-			systemMonitor();
-			uncancellable(recurring(&systemMonitor, CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskPriority::FlushTrace));
-		}
-	}
+	initializeClientTracing(connRecord, apiVersion);
 
 	g_network->initTLS();
 
@@ -2281,7 +2335,8 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	                                                clientInfo,
 	                                                coordinator,
 	                                                networkOptions.supportedVersions,
-	                                                StringRef(networkOptions.traceLogGroup));
+	                                                StringRef(networkOptions.traceLogGroup),
+	                                                internal);
 
 	DatabaseContext* db;
 	if (preallocatedDb) {
@@ -2320,7 +2375,7 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	    .detail("Version", FDB_VT_VERSION)
 	    .detail("ClusterFile", connRecord ? connRecord->toString() : "None")
 	    .detail("ConnectionString", connRecord ? connRecord->getConnectionString().toString() : "None")
-	    .detail("ClientLibrary", imageInfo.fileName)
+	    .detail("ClientLibrary", platform::getImageInfo().fileName)
 	    .detail("Primary", networkOptions.primaryClient)
 	    .detail("Internal", internal)
 	    .trackLatest(database->connectToDatabaseEventCacheHolder.trackingKey);
@@ -2403,6 +2458,9 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 	case FDBNetworkOptions::TRACE_PARTIAL_FILE_SUFFIX:
 		validateOptionValuePresent(value);
 		networkOptions.tracePartialFileSuffix = value.get().toString();
+		break;
+	case FDBNetworkOptions::TRACE_INITIALIZE_ON_SETUP:
+		networkOptions.traceInitializeOnSetup = true;
 		break;
 	case FDBNetworkOptions::KNOB: {
 		validateOptionValuePresent(value);
@@ -2604,6 +2662,10 @@ void setupNetwork(uint64_t transportId, UseMetrics useMetrics) {
 	FlowTransport::createInstance(true, transportId, WLTOKEN_RESERVED_COUNT);
 	Net2FileSystem::newFileSystem();
 
+	if (networkOptions.traceInitializeOnSetup) {
+		::initializeClientTracing({}, {});
+	}
+
 	uncancellable(monitorNetworkBusyness());
 }
 
@@ -2797,6 +2859,10 @@ Tenant::Tenant(Future<int64_t> id, Optional<TenantName> name) : idFuture(id), na
 int64_t Tenant::id() const {
 	ASSERT(idFuture.isReady());
 	return idFuture.get();
+}
+
+Future<int64_t> Tenant::getIdFuture() const {
+	return idFuture;
 }
 
 KeyRef Tenant::prefix() const {
@@ -3715,12 +3781,12 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, parameters->taskID));
 			} else if (e.code() == error_code_watch_cancelled || e.code() == error_code_process_behind) {
 				// clang-format off
-				CODE_PROBE(e.code() == error_code_watch_cancelled, "Too many watches on the storage server, poll for changes instead");
-				CODE_PROBE(e.code() == error_code_process_behind, "The storage servers are all behind", probe::decoration::rare);
+						CODE_PROBE(e.code() == error_code_watch_cancelled, "Too many watches on the storage server, poll for changes instead");
+						CODE_PROBE(e.code() == error_code_process_behind, "The storage servers are all behind", probe::decoration::rare);
 				// clang-format on
 				wait(delay(CLIENT_KNOBS->WATCH_POLLING_TIME, parameters->taskID));
 			} else if (e.code() == error_code_timed_out) { // The storage server occasionally times out watches in case
-				                                           // it was cancelled
+				// it was cancelled
 				CODE_PROBE(true, "A watch timed out");
 				wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, parameters->taskID));
 			} else {
@@ -4390,7 +4456,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 			if (reverse && (begin - 1).isDefinitelyLess(shard.begin) &&
 			    (!begin.isFirstGreaterOrEqual() ||
 			     begin.getKey() != shard.begin)) { // In this case we would be setting modifiedSelectors to true, but
-				                                   // not modifying anything
+				// not modifying anything
 
 				req.begin = firstGreaterOrEqual(shard.begin);
 				modifiedSelectors = true;
@@ -9863,7 +9929,8 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
                                          Version end,
                                          int replyBufferSize,
                                          bool canReadPopped,
-                                         ReadOptions readOptions) {
+                                         ReadOptions readOptions,
+                                         bool encrypted) {
 	state std::vector<Future<Void>> fetchers(interfs.size());
 	state std::vector<Future<Void>> onErrors(interfs.size());
 	state std::vector<MutationAndVersionStream> streams(interfs.size());
@@ -9893,6 +9960,7 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		}
 		req.options = readOptions;
 		req.id = deterministicRandom()->randomUniqueID();
+		req.encrypted = encrypted;
 
 		debugUIDs.push_back(req.id);
 		mergeCursorUID = UID(mergeCursorUID.first() ^ req.id.first(), mergeCursorUID.second() ^ req.id.second());
@@ -10099,7 +10167,8 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
                                           Version end,
                                           int replyBufferSize,
                                           bool canReadPopped,
-                                          ReadOptions readOptions) {
+                                          ReadOptions readOptions,
+                                          bool encrypted) {
 	state Database cx(db);
 	state ChangeFeedStreamRequest req;
 	state Optional<ChangeFeedTSSValidationData> tssData;
@@ -10111,6 +10180,7 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	req.replyBufferSize = replyBufferSize;
 	req.options = readOptions;
 	req.id = deterministicRandom()->randomUniqueID();
+	req.encrypted = encrypted;
 
 	if (DEBUG_CF_CLIENT_TRACE) {
 		TraceEvent(SevDebug, "TraceChangeFeedClientSingleCursor", req.id)
@@ -10196,7 +10266,8 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
                                             KeyRange range,
                                             int replyBufferSize,
                                             bool canReadPopped,
-                                            ReadOptions readOptions) {
+                                            ReadOptions readOptions,
+                                            bool encrypted) {
 	state Database cx(db);
 	state Span span("NAPI:GetChangeFeedStream"_loc);
 	db->usedAnyChangeFeeds = true;
@@ -10290,8 +10361,16 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				}
 				CODE_PROBE(true, "Change feed merge cursor");
 				// TODO (jslocum): validate connectionFileChanged behavior
-				wait(mergeChangeFeedStream(
-				         db, interfs, results, rangeID, &begin, end, replyBufferSize, canReadPopped, readOptions) ||
+				wait(mergeChangeFeedStream(db,
+				                           interfs,
+				                           results,
+				                           rangeID,
+				                           &begin,
+				                           end,
+				                           replyBufferSize,
+				                           canReadPopped,
+				                           readOptions,
+				                           encrypted) ||
 				     cx->connectionFileChanged());
 			} else {
 				CODE_PROBE(true, "Change feed single cursor");
@@ -10305,7 +10384,8 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				                            end,
 				                            replyBufferSize,
 				                            canReadPopped,
-				                            readOptions) ||
+				                            readOptions,
+				                            encrypted) ||
 				     cx->connectionFileChanged());
 			}
 		} catch (Error& e) {
@@ -10373,7 +10453,8 @@ Future<Void> DatabaseContext::getChangeFeedStream(Reference<ChangeFeedData> resu
                                                   KeyRange range,
                                                   int replyBufferSize,
                                                   bool canReadPopped,
-                                                  ReadOptions readOptions) {
+                                                  ReadOptions readOptions,
+                                                  bool encrypted) {
 	return getChangeFeedStreamActor(Reference<DatabaseContext>::addRef(this),
 	                                results,
 	                                rangeID,
@@ -10382,7 +10463,8 @@ Future<Void> DatabaseContext::getChangeFeedStream(Reference<ChangeFeedData> resu
 	                                range,
 	                                replyBufferSize,
 	                                canReadPopped,
-	                                readOptions);
+	                                readOptions,
+	                                encrypted);
 }
 
 Version OverlappingChangeFeedsInfo::getFeedMetadataVersion(const KeyRangeRef& range) const {
@@ -10891,7 +10973,7 @@ ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange rang
 			Optional<Value> value = wait(tr->get(key));
 			if (value.present()) {
 				Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(value.get());
-				if (status.phase != BlobRestorePhase::DONE) {
+				if (status.phase < BlobRestorePhase::DONE) {
 					return false; // stop if there is in-progress restore.
 				}
 			}

@@ -392,7 +392,8 @@ public:
 	                                 KeyRange range = allKeys,
 	                                 int replyBufferSize = -1,
 	                                 bool canReadPopped = true,
-	                                 ReadOptions readOptions = { ReadType::NORMAL, CacheResult::False });
+	                                 ReadOptions readOptions = { ReadType::NORMAL, CacheResult::False },
+	                                 bool encrypted = false);
 
 	Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
