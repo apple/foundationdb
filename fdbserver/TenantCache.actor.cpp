@@ -196,7 +196,7 @@ public:
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				state KeyBackedRangeResult<std::pair<TenantGroupName, int64_t>> currentQuotas =
-				    wait(TenantMetadata::storageQuota().getRange(tr, {}, {}, CLIENT_KNOBS->TOO_MANY));
+				    wait(TenantMetadata::storageQuota().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER));
 				// Reset the quota for all groups; this essentially sets the quota to `max` for groups where the
 				// quota might have been cleared (i.e., groups that will not be returned in `getRange` request above).
 				for (auto& [group, storage] : tenantCache->tenantStorageMap) {

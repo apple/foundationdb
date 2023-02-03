@@ -35,6 +35,14 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// Runs a RYW transaction in a retry loop on the given Database.
+//
+// Takes a function func that accepts a Reference<ReadYourWritesTransaction> as a parameter and returns a non-Void
+// Future. This function is run inside the transaction, and when the transaction is successfully committed the result of
+// the function is returned.
+//
+// The supplied function should be idempotent. Otherwise, outcome of this function will depend on how many times the
+// transaction is retried.
 ACTOR template <class Function>
 Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue())> runRYWTransaction(
     Database cx,
@@ -42,7 +50,6 @@ Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>())
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	loop {
 		try {
-			// func should be idempotent; otherwise, retry will get undefined result
 			state decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result =
 			    wait(func(tr));
 			wait(tr->commit());
@@ -53,12 +60,18 @@ Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>())
 	}
 }
 
+// Runs a RYW transaction in a retry loop on the given Database.
+//
+// Takes a function func that accepts a Reference<ReadYourWritesTransaction> as a parameter and returns a Void
+// Future. This function is run inside the transaction.
+//
+// The supplied function should be idempotent. Otherwise, outcome of this function will depend on how many times the
+// transaction is retried.
 ACTOR template <class Function>
 Future<Void> runRYWTransactionVoid(Database cx, Function func) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	loop {
 		try {
-			// func should be idempotent; otherwise, retry will get undefined result
 			wait(func(tr));
 			wait(tr->commit());
 			return Void();
