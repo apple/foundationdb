@@ -71,6 +71,7 @@ struct NetworkOptions {
 	std::string traceClockSource;
 	std::string traceFileIdentifier;
 	std::string tracePartialFileSuffix;
+	bool traceInitializeOnSetup;
 	Optional<bool> logClientInfo;
 	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
 	bool runLoopProfilingEnabled;
@@ -247,6 +248,7 @@ public:
 
 	Future<Void> ready() const { return success(idFuture); }
 	int64_t id() const;
+	Future<int64_t> getIdFuture() const;
 	KeyRef prefix() const;
 	std::string description() const;
 

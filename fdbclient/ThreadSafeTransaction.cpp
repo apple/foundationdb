@@ -245,7 +245,7 @@ Reference<ITransaction> ThreadSafeTenant::createTransaction() {
 
 ThreadFuture<int64_t> ThreadSafeTenant::getId() {
 	Tenant* tenant = this->tenant;
-	return onMainThread([tenant]() -> Future<int64_t> { return tenant->id(); });
+	return onMainThread([tenant]() -> Future<int64_t> { return tenant->getIdFuture(); });
 }
 
 ThreadFuture<Key> ThreadSafeTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
