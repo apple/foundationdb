@@ -1325,9 +1325,9 @@ Error validateAndProcessTenantAccess(Arena& arena,
 				newMutationSize += newClears.size() - 1;
 			}
 
-			if (debugId.present() || true) {
+			if (debugId.present()) {
 				TraceEvent(SevDebug, "SplitTenantClearRange", pProxyCommitData->dbgid)
-				    // .detail("TxnId", debugId.get())
+				    .detail("TxnId", debugId.get())
 				    .detail("Idx", i)
 				    .detail("NewMutationSize", newMutationSize)
 				    .detail("OldMutationSize", mutations.size())
@@ -1338,10 +1338,10 @@ Error validateAndProcessTenantAccess(Arena& arena,
 			writeNormalKey = true;
 		}
 
-		if (debugId.present() || true) {
+		if (debugId.present()) {
 			TraceEvent(SevDebug, "ValidateAndProcessTenantAccess", pProxyCommitData->dbgid)
 			    .detail("Context", context)
-			    // .detail("TxnId", debugId.get())
+			    .detail("TxnId", debugId.get())
 			    .detail("Version", pProxyCommitData->version.get())
 			    .detail("ChangeTenant", changeTenant)
 			    .detail("WriteNormalKey", writeNormalKey)
@@ -1367,7 +1367,7 @@ Error validateAndProcessTenantAccess(Arena& arena,
 		}
 	}
 
-	replaceRawClearRanges(arena, mutations, idxSplitMutations, newMutationSize);
+	// replaceRawClearRanges(arena, mutations, idxSplitMutations, newMutationSize);
 	return success();
 }
 
