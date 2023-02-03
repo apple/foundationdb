@@ -8,8 +8,7 @@ proxy_use_resolver_private_mutations = false
 
 [[test]]
 testTitle = 'RawTenantAccessClean'
-clearAfterTest = true
-timeout = 200
+clearAfterTest = false
 runSetup = true
 
     [[test.workload]]
