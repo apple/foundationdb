@@ -1105,11 +1105,12 @@ inline int64_t lowerBoundTenantId(const StringRef& prefix, const std::map<int64_
 		// fall to generate a prefix
 		id = TenantIdCodec::lowerBound(prefix);
 	}
-	auto it = tenantMap.lower_bound(id.get());
-	if (it != tenantMap.end()) {
-		return it->first;
+	if (id.present() && id.get() >= 0) {
+		auto it = tenantMap.lower_bound(id.get());
+		if (it != tenantMap.end()) {
+			return it->first;
+		}
 	}
-
 	return TenantInfo::INVALID_TENANT;
 }
 
@@ -1127,6 +1128,9 @@ TEST_CASE("/CommitProxy/SplitRange/LowerBoundTenantId") {
 	ASSERT_EQ(tid, TenantInfo::INVALID_TENANT);
 
 	tid = lowerBoundTenantId("\xff\x01\x02\x03\x04\x05\x06\x07\x08"_sr, tenantMap);
+	ASSERT_EQ(tid, TenantInfo::INVALID_TENANT);
+
+	tid = lowerBoundTenantId("\x99\x01\x02\x03\x04\x05\x06\x07\x08"_sr, tenantMap);
 	ASSERT_EQ(tid, TenantInfo::INVALID_TENANT);
 
 	int64_t targetId = deterministicRandom()->randomInt64(0, mapSize) * 2;
@@ -1267,7 +1271,6 @@ void replaceRawClearRanges(Arena& arena,
 	mutations.resize(arena, totalSize);
 	// place from back
 	int curr = totalSize - 1;
-	bool doValidation = g_network->isSimulated();
 	for (; i >= 0; --i) {
 		if (splitMutations.empty()) {
 			ASSERT_EQ(curr, i);
@@ -1322,9 +1325,9 @@ Error validateAndProcessTenantAccess(Arena& arena,
 				newMutationSize += newClears.size() - 1;
 			}
 
-			if (debugId.present()) {
+			if (debugId.present() || true) {
 				TraceEvent(SevDebug, "SplitTenantClearRange", pProxyCommitData->dbgid)
-				    .detail("TxnId", debugId.get())
+				    // .detail("TxnId", debugId.get())
 				    .detail("Idx", i)
 				    .detail("NewMutationSize", newMutationSize)
 				    .detail("OldMutationSize", mutations.size())
@@ -1335,17 +1338,18 @@ Error validateAndProcessTenantAccess(Arena& arena,
 			writeNormalKey = true;
 		}
 
-		if (debugId.present()) {
+		if (debugId.present() || true) {
 			TraceEvent(SevDebug, "ValidateAndProcessTenantAccess", pProxyCommitData->dbgid)
 			    .detail("Context", context)
-			    .detail("TxnId", debugId.get())
+			    // .detail("TxnId", debugId.get())
 			    .detail("Version", pProxyCommitData->version.get())
 			    .detail("ChangeTenant", changeTenant)
 			    .detail("WriteNormalKey", writeNormalKey)
 			    .detail("TenantId", tenantId)
 			    .detail("ValidAccess", validAccess)
 			    .detail("MutationType", getTypeString(mutation.type))
-			    .detail("Mutation", mutation.param1);
+			    .detail("Mutation1", mutation.param1)
+			    .detail("Mutation2", mutation.param2);
 		}
 
 		if (!validAccess) {
