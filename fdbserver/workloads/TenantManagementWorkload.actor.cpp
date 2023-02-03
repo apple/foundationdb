@@ -66,6 +66,9 @@ struct TenantManagementWorkload : TestWorkload {
 
 	std::map<TenantName, TenantData> createdTenants;
 	std::map<TenantGroupName, TenantGroupData> createdTenantGroups;
+	// Contains references to ALL tenants that were created by this workload
+	// Possible to have been deleted, but will be tracked historically here
+	std::vector<Reference<Tenant>> allTestTenants;
 	int64_t maxId = -1;
 
 	const Key keyName = "key"_sr;
@@ -562,8 +565,9 @@ struct TenantManagementWorkload : TestWorkload {
 
 					// Update our local tenant state to include the newly created one
 					self->maxId = entry.get().id;
-					self->createdTenants[tenantItr->first] =
-					    TenantData(entry.get().id, tenantItr->second.tenantGroup, true);
+					TenantData tData = TenantData(entry.get().id, tenantItr->second.tenantGroup, true);
+					self->createdTenants[tenantItr->first] = tData;
+					self->allTestTenants.push_back(tData.tenant);
 
 					// If this tenant has a tenant group, create or update the entry for it
 					if (tenantItr->second.tenantGroup.present()) {
@@ -1719,6 +1723,28 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR static Future<Void> readTenantKeys(TenantManagementWorkload* self) {
+		if (self->allTestTenants.size() == 0) {
+			return Void();
+		}
+		state Reference<Tenant> tenant = deterministicRandom()->randomChoice(self->allTestTenants);
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb, tenant);
+		loop {
+			try {
+				Optional<Value> val = wait(tr->get(self->keyName));
+				break;
+			} catch (Error& e) {
+				state Error err = e;
+				if (err.code() == error_code_tenant_not_found || err.code() == error_code_tenant_removed) {
+					CODE_PROBE(true, "Attempted to read key from non-existent tenant");
+					return Void();
+				}
+				wait(tr->onError(err));
+			}
+		}
+		return Void();
+	}
+
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0 || !singleClient) {
 			return _start(cx, this);
@@ -1732,7 +1758,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 		// Run a random sequence of tenant management operations for the duration of the test
 		while (now() < start + self->testDuration) {
-			state int operation = deterministicRandom()->randomInt(0, 8);
+			state int operation = deterministicRandom()->randomInt(0, 9);
 			if (operation == 0) {
 				wait(createTenant(self));
 			} else if (operation == 1) {
@@ -1749,6 +1775,8 @@ struct TenantManagementWorkload : TestWorkload {
 				wait(getTenantGroup(self));
 			} else if (operation == 7) {
 				wait(listTenantGroups(self));
+			} else if (operation == 8) {
+				wait(readTenantKeys(self));
 			}
 		}
 
