@@ -292,6 +292,10 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 			if (key == req.keys.end)
 				break;
 			reply.splits.push_back_deep(reply.splits.arena(), key);
+			if (reply.splits.size() > SERVER_KNOBS->SPLIT_METRICS_MAX_ROWS) {
+				reply.more = true;
+				break;
+			}
 
 			StorageMetrics diff = (getMetrics(KeyRangeRef(lastKey, key)) + used);
 			remaining -= diff;
@@ -301,7 +305,7 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 			lastKey = key;
 		}
 
-		reply.used = getMetrics(KeyRangeRef(lastKey, req.keys.end)) + used;
+		reply.used = reply.more ? StorageMetrics() : getMetrics(KeyRangeRef(lastKey, req.keys.end)) + used;
 		req.reply.send(reply);
 	} catch (Error& e) {
 		req.reply.sendError(e);

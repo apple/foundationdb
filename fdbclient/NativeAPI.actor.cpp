@@ -8661,24 +8661,36 @@ ACTOR Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLoc
 	try {
 		state int i = 0;
 		for (; i < locations.size(); i++) {
-			SplitMetricsRequest req(
-			    locations[i].range, limit, used, estimated, i == locations.size() - 1, minSplitBytes);
-			SplitMetricsReply res = wait(loadBalance(locations[i].locations->locations(),
-			                                         &StorageServerInterface::splitMetrics,
-			                                         req,
-			                                         TaskPriority::DataDistribution));
-			if (res.splits.size() && res.splits[0] <= results.back()) { // split points are out of order, possibly
-				                                                        // because of moving data, throw error to retry
-				ASSERT_WE_THINK(false); // FIXME: This seems impossible and doesn't seem to be covered by testing
-				throw all_alternatives_failed();
-			}
-			if (res.splits.size()) {
-				results.append(results.arena(), res.splits.begin(), res.splits.size());
-				results.arena().dependsOn(res.splits.arena());
-			}
-			used = res.used;
+			state Key beginKey = locations[i].range.begin;
+			loop {
+				KeyRangeRef range(beginKey, locations[i].range.end);
+				SplitMetricsRequest req(range, limit, used, estimated, i == locations.size() - 1, minSplitBytes);
+				SplitMetricsReply res = wait(loadBalance(locations[i].locations->locations(),
+				                                         &StorageServerInterface::splitMetrics,
+				                                         req,
+				                                         TaskPriority::DataDistribution));
+				if (res.splits.size() &&
+				    res.splits[0] <= results.back()) { // split points are out of order, possibly
+					                                   // because of moving data, throw error to retry
+					ASSERT_WE_THINK(false); // FIXME: This seems impossible and doesn't seem to be covered by testing
+					throw all_alternatives_failed();
+				}
 
-			//TraceEvent("SplitStorageMetricsResult").detail("Used", used.bytes).detail("Location", i).detail("Size", res.splits.size());
+				if (res.splits.size()) {
+					results.append(results.arena(), res.splits.begin(), res.splits.size());
+					results.arena().dependsOn(res.splits.arena());
+				}
+
+				used = res.used;
+
+				if (res.more && res.splits.size()) {
+					// Next request will return split points after this one
+					beginKey = KeyRef(beginKey.arena(), res.splits.back());
+				} else {
+					break;
+				}
+				//TraceEvent("SplitStorageMetricsResult").detail("Used", used.bytes).detail("Location", i).detail("Size", res.splits.size());
+			}
 		}
 
 		if (used.allLessOrEqual(limit * CLIENT_KNOBS->STORAGE_METRICS_UNFAIR_SPLIT_LIMIT) && results.size() > 1) {
