@@ -9056,12 +9056,10 @@ void StorageServer::clearTenants(StringRef startTenant, StringRef endTenant, Ver
 			tenantWatches.sendError(mapKey, mapKey + 1, tenant_removed());
 			tenantsToClear.insert(mapKey);
 		}
-		Key startPrefix = TenantAPI::idToPrefix(startId.get());
-		Key endPrefix = TenantAPI::idToPrefix(endId.get());
 		addMutationToMutationLog(mLV,
 		                         MutationRef(MutationRef::ClearRange,
-		                                     startPrefix.withPrefix(persistTenantMapKeys.begin),
-		                                     endPrefix.withPrefix(persistTenantMapKeys.begin)));
+		                                     startTenant.withPrefix(persistTenantMapKeys.begin),
+		                                     endTenant.withPrefix(persistTenantMapKeys.begin)));
 
 		for (auto tenantId : tenantsToClear) {
 			tenantMap.erase(tenantId);

@@ -66,7 +66,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 	std::map<TenantName, TenantData> createdTenants;
 	std::map<TenantGroupName, TenantGroupData> createdTenantGroups;
-	// Contains references to ALL tenants that were created by this workload
+	// Contains references to ALL tenants that were created by this client
 	// Possible to have been deleted, but will be tracked historically here
 	std::vector<Reference<Tenant>> allTestTenants;
 	int64_t maxId = -1;
@@ -566,6 +566,7 @@ struct TenantManagementWorkload : TestWorkload {
 					// Update our local tenant state to include the newly created one
 					self->maxId = entry.get().id;
 					TenantData tData = TenantData(entry.get().id, tenantItr->second.tenantGroup, true);
+					tData.tenant->name = tenantItr->first;
 					self->createdTenants[tenantItr->first] = tData;
 					self->allTestTenants.push_back(tData.tenant);
 
@@ -1723,19 +1724,34 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> readTenantKeys(TenantManagementWorkload* self) {
+	ACTOR static Future<Void> readTenantKey(TenantManagementWorkload* self) {
 		if (self->allTestTenants.size() == 0) {
 			return Void();
 		}
 		state Reference<Tenant> tenant = deterministicRandom()->randomChoice(self->allTestTenants);
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb, tenant);
+		state TenantName tName = tenant->name.get();
+		state bool tenantPresent = false;
+		state TenantData tData = TenantData();
+		auto itr = self->createdTenants.find(tName);
+		if (itr != self->createdTenants.end() && itr->second.tenant->id() == tenant->id()) {
+			tenantPresent = true;
+			tData = itr->second;
+		}
+		state bool keyPresent = tenantPresent && !tData.empty;
 		loop {
 			try {
 				Optional<Value> val = wait(tr->get(self->keyName));
+				if (val.present()) {
+					ASSERT(keyPresent && val.get() == tName);
+				} else {
+					ASSERT(!keyPresent);
+				}
 				break;
 			} catch (Error& e) {
 				state Error err = e;
 				if (err.code() == error_code_tenant_not_found || err.code() == error_code_tenant_removed) {
+					ASSERT(!tenantPresent);
 					CODE_PROBE(true, "Attempted to read key from non-existent tenant");
 					return Void();
 				}
@@ -1776,7 +1792,7 @@ struct TenantManagementWorkload : TestWorkload {
 			} else if (operation == 7) {
 				wait(listTenantGroups(self));
 			} else if (operation == 8) {
-				wait(readTenantKeys(self));
+				wait(readTenantKey(self));
 			}
 		}
 
