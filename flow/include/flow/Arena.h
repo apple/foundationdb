@@ -112,6 +112,9 @@ public:
 
 	void dependsOn(const Arena& p);
 	void* allocate4kAlignedBuffer(uint32_t size);
+	// Take ownership of |resource|. destructor(resource) will be called when the lifetime of this Arena (and all
+	// Arena's depending on this Arena) ends.
+	void addResourceWithDestructor(void* resource, void (*destructor)(void*));
 
 	// If fastInaccurateEstimate is true this operation is O(1) but it is inaccurate in that it
 	// will omit memory added to this Arena's block tree using Arena handles which reference
@@ -144,18 +147,45 @@ struct scalar_traits<Arena> : std::true_type {
 	}
 };
 
+// Pragma pack 1 is usually a bad idea, so I will try to justify why it makes sense here.
+// 1. We already ignore alignment since this is placed in an Arena
+// 2. This is not part of any stable ABI
+//
+// The upside is that we save bytes in the ArenaBlock.
+//
+// This is a reference to a resource within an ArenaBlock. That resource may be
+// another ArenaBlock, or it may be a 4k aligned buffer, or it may be an
+// arbitrary pointer + destructor.
+#pragma pack(push, 1)
 struct ArenaBlockRef {
-	union {
-		ArenaBlock* next;
-		void* aligned4kBuffer;
-	};
-
-	// Only one of (next, aligned4kBuffer) is valid at any one time, as they occupy the same space.
-	// If aligned4kBufferSize is not 0, aligned4kBuffer is valid, otherwise next is valid.
-	uint32_t aligned4kBufferSize;
-
+	// An ArenaBlock may have many ArenaBlockRef's within its buffer. These
+	// ArenaBlockRef's form a null-terminated singly linked list, with
+	// nextBlockOffset serving logically as a pointer to
+	// (ArenaBlockRef*)((char*)b->getData() + o), for an ArenaBlock b, and
+	// nextBlockOffset == 0 serving as null.
 	uint32_t nextBlockOffset;
+
+	enum class Type : uint8_t {
+		kBlock,
+		kAligned4kBuffer,
+		kResourceWithDestructor,
+	};
+	// Indicates which of the subclass of ArenaBlockRef this is.
+	Type type;
 };
+
+struct BlockRef : ArenaBlockRef {
+	ArenaBlock* next;
+};
+struct Aligned4kBufferRef : ArenaBlockRef {
+	void* aligned4kBuffer;
+	uint32_t aligned4kBufferSize;
+};
+struct ResourceWithDestructorRef : ArenaBlockRef {
+	void* resource;
+	void (*destructor)(void*);
+};
+#pragma pack(pop)
 
 struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 	enum {
@@ -186,9 +216,13 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 	void getUniqueBlocks(std::set<ArenaBlock*>& a);
 	int addUsed(int bytes);
 	void makeReference(ArenaBlock* next);
+	void addResourceWithDestructor(void* resource, void (*destructor)(void*));
 	void* make4kAlignedBuffer(uint32_t size);
 	static void dependOn(Reference<ArenaBlock>& self, ArenaBlock* other);
-	static void* dependOn4kAlignedBuffer(Reference<ArenaBlock>& self, uint32_t size);
+	static void* makeDependent4kAlignedBuffer(Reference<ArenaBlock>& self, uint32_t size);
+	static void addDependentResourceWithDestructor(Reference<ArenaBlock>& self,
+	                                               void* resource,
+	                                               void (*destructor)(void*));
 	static void* allocate(Reference<ArenaBlock>& self, int bytes);
 	// Return an appropriately-sized ArenaBlock to store the given data
 	static ArenaBlock* create(int dataSize, Reference<ArenaBlock>& next);
@@ -584,6 +618,11 @@ public:
 private:
 	// Unimplemented; blocks conversion through std::string
 	StringRef(char*);
+
+	// This friend class is so that we can static_assert that it's not
+	// completely invalid to cast something to KeyValueRef in the multiversion
+	// client. Overall motivation is to save a copy.
+	friend class DLTransaction;
 
 	const uint8_t* data;
 	int length;

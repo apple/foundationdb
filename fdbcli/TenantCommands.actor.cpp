@@ -197,9 +197,7 @@ ACTOR Future<bool> tenantCreateCommand(Reference<IDatabase> db, std::vector<Stri
 				wait(MetaclusterAPI::createTenant(db, tenantEntry, assignClusterAutomatically));
 			} else {
 				if (!doneExistenceCheck) {
-					// Hold the reference to the standalone's memory
-					state ThreadFuture<Optional<Value>> existingTenantFuture = tr->get(tenantNameKey);
-					Optional<Value> existingTenant = wait(safeThreadFutureToFuture(existingTenantFuture));
+					Optional<Value> existingTenant = wait(safeThreadFutureToFuture(tr->get(tenantNameKey)));
 					if (existingTenant.present()) {
 						throw tenant_already_exists();
 					}
@@ -249,9 +247,7 @@ ACTOR Future<bool> tenantDeleteCommand(Reference<IDatabase> db, std::vector<Stri
 				wait(MetaclusterAPI::deleteTenant(db, tokens[2]));
 			} else {
 				if (!doneExistenceCheck) {
-					// Hold the reference to the standalone's memory
-					state ThreadFuture<Optional<Value>> existingTenantFuture = tr->get(tenantNameKey);
-					Optional<Value> existingTenant = wait(safeThreadFutureToFuture(existingTenantFuture));
+					Optional<Value> existingTenant = wait(safeThreadFutureToFuture(tr->get(tenantNameKey)));
 					if (!existingTenant.present()) {
 						throw tenant_not_found();
 					}
@@ -371,10 +367,8 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 					tenantNames.push_back(tenant.first);
 				}
 			} else {
-				// Hold the reference to the standalone's memory
-				state ThreadFuture<RangeResult> kvsFuture =
-				    tr->getRange(firstGreaterOrEqual(beginTenantKey), firstGreaterOrEqual(endTenantKey), limit);
-				RangeResult tenants = wait(safeThreadFutureToFuture(kvsFuture));
+				RangeResult tenants = wait(safeThreadFutureToFuture(
+				    tr->getRange(firstGreaterOrEqual(beginTenantKey), firstGreaterOrEqual(endTenantKey), limit)));
 				for (auto tenant : tenants) {
 					tenantNames.push_back(tenant.key.removePrefix(tenantMapSpecialKeyRange.begin));
 				}
@@ -428,9 +422,7 @@ ACTOR Future<bool> tenantGetCommand(Reference<IDatabase> db, std::vector<StringR
 				TenantMapEntry entry = wait(MetaclusterAPI::getTenantTransaction(tr, tokens[2]));
 				tenantJson = entry.toJson();
 			} else {
-				// Hold the reference to the standalone's memory
-				state ThreadFuture<Optional<Value>> tenantFuture = tr->get(tenantNameKey);
-				Optional<Value> tenant = wait(safeThreadFutureToFuture(tenantFuture));
+				Optional<Value> tenant = wait(safeThreadFutureToFuture(tr->get(tenantNameKey)));
 				if (!tenant.present()) {
 					throw tenant_not_found();
 				}

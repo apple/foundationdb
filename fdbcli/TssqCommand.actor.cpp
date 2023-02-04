@@ -38,9 +38,8 @@ ACTOR Future<Void> tssQuarantineList(Reference<IDatabase> db) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			// Hold the reference to the standalone's memory
-			state ThreadFuture<RangeResult> resultFuture = tr->getRange(tssQuarantineKeys, CLIENT_KNOBS->TOO_MANY);
-			RangeResult result = wait(safeThreadFutureToFuture(resultFuture));
+			RangeResult result =
+			    wait(safeThreadFutureToFuture(tr->getRange(tssQuarantineKeys, CLIENT_KNOBS->TOO_MANY)));
 			// shouldn't have many quarantined TSSes
 			ASSERT(!result.more);
 			printf("Found %d quarantined TSS processes%s\n", result.size(), result.size() == 0 ? "." : ":");
@@ -64,9 +63,7 @@ ACTOR Future<bool> tssQuarantine(Reference<IDatabase> db, bool enable, UID tssId
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			// Do some validation first to make sure the command is valid
-			// hold the returned standalone object's memory
-			state ThreadFuture<Optional<Value>> serverListValueF = tr->get(serverListKeyFor(tssId));
-			Optional<Value> serverListValue = wait(safeThreadFutureToFuture(serverListValueF));
+			Optional<Value> serverListValue = wait(safeThreadFutureToFuture(tr->get(serverListKeyFor(tssId))));
 			if (!serverListValue.present()) {
 				printf("No TSS %s found in cluster!\n", tssId.toString().c_str());
 				return false;
@@ -77,9 +74,8 @@ ACTOR Future<bool> tssQuarantine(Reference<IDatabase> db, bool enable, UID tssId
 				return false;
 			}
 
-			// hold the returned standalone object's memory
-			state ThreadFuture<Optional<Value>> currentQuarantineValueF = tr->get(tssQuarantineKeyFor(tssId));
-			Optional<Value> currentQuarantineValue = wait(safeThreadFutureToFuture(currentQuarantineValueF));
+			Optional<Value> currentQuarantineValue =
+			    wait(safeThreadFutureToFuture(tr->get(tssQuarantineKeyFor(tssId))));
 			if (enable && currentQuarantineValue.present()) {
 				printf("TSS %s already in quarantine, doing nothing.\n", tssId.toString().c_str());
 				return false;

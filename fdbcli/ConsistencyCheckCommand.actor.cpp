@@ -39,9 +39,7 @@ ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
 	// If not, the outer loop catch block(fdbcli.actor.cpp) will handle the error and print out the error message
 	tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 	if (tokens.size() == 1) {
-		// hold the returned standalone object's memory
-		state ThreadFuture<Optional<Value>> suspendedF = tr->get(consistencyCheckSpecialKey);
-		Optional<Value> suspended = wait(safeThreadFutureToFuture(suspendedF));
+		Optional<Value> suspended = wait(safeThreadFutureToFuture(tr->get(consistencyCheckSpecialKey)));
 		printf("ConsistencyCheck is %s\n", suspended.present() ? "off" : "on");
 	} else if (tokens.size() == 2 && tokencmp(tokens[1], "off")) {
 		tr->set(consistencyCheckSpecialKey, Value());

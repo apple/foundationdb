@@ -114,10 +114,8 @@ ACTOR Future<bool> profileCommandActor(Database db,
 			fprintf(stderr, "ERROR: Usage: profile list\n");
 			return false;
 		}
-		// Hold the reference to the standalone's memory
-		state ThreadFuture<RangeResult> kvsFuture = tr->getRange(
-		    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr), CLIENT_KNOBS->TOO_MANY);
-		RangeResult kvs = wait(safeThreadFutureToFuture(kvsFuture));
+		RangeResult kvs = wait(safeThreadFutureToFuture(tr->getRange(
+		    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr), CLIENT_KNOBS->TOO_MANY)));
 		ASSERT(!kvs.more);
 		for (const auto& pair : kvs) {
 			auto ip_port = (pair.key.endsWith(":tls"_sr) ? pair.key.removeSuffix(":tls"_sr) : pair.key)

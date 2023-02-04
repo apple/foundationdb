@@ -633,10 +633,15 @@ void showArena(ArenaBlock* a, ArenaBlock* parent) {
 			ArenaBlockRef* r = (ArenaBlockRef*)((char*)a->getData() + o);
 
 			// If alignedBuffer is valid then print its pointer and size, else recurse
-			if (r->aligned4kBufferSize != 0) {
-				printf("AlignedBuffer %p (<-%p) %u bytes\n", r->aligned4kBuffer, a, r->aligned4kBufferSize);
+			if (r->type == ArenaBlockRef::Type::kAligned4kBuffer) {
+				auto* b = static_cast<Aligned4kBufferRef*>(r);
+				printf("AlignedBuffer %p (<-%p) %u bytes\n", b->aligned4kBuffer, a, b->aligned4kBufferSize);
+			} else if (r->type == ArenaBlockRef::Type::kResourceWithDestructor) {
+				auto* b = static_cast<ResourceWithDestructorRef*>(r);
+				printf("Resource %p (<-%p), destructor %p\n", b->resource, a, b->destructor);
 			} else {
-				showArena(r->next, a);
+				auto* b = static_cast<BlockRef*>(r);
+				showArena(b->next, a);
 			}
 
 			o = r->nextBlockOffset;

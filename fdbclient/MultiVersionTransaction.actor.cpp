@@ -76,7 +76,7 @@ void DLTransaction::setVersion(Version v) {
 ThreadFuture<Version> DLTransaction::getReadVersion() {
 	FdbCApi::FDBFuture* f = api->transactionGetReadVersion(tr);
 
-	return toThreadFuture<Version>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<Version>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
 		int64_t version;
 		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &version);
 		ASSERT(!error);
@@ -87,15 +87,14 @@ ThreadFuture<Version> DLTransaction::getReadVersion() {
 ThreadFuture<Optional<Value>> DLTransaction::get(const KeyRef& key, bool snapshot) {
 	FdbCApi::FDBFuture* f = api->transactionGet(tr, key.begin(), key.size(), snapshot);
 
-	return toThreadFuture<Optional<Value>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<Optional<Value>>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
 		FdbCApi::fdb_bool_t present;
 		const uint8_t* value;
 		int valueLength;
 		FdbCApi::fdb_error_t error = api->futureGetValue(f, &present, &value, &valueLength);
 		ASSERT(!error);
 		if (present) {
-			// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-			return Optional<Value>(Value(ValueRef(value, valueLength), Arena()));
+			return Optional<Value>(Value(ValueRef(value, valueLength), arena));
 		} else {
 			return Optional<Value>();
 		}
@@ -106,14 +105,13 @@ ThreadFuture<Key> DLTransaction::getKey(const KeySelectorRef& key, bool snapshot
 	FdbCApi::FDBFuture* f =
 	    api->transactionGetKey(tr, key.getKey().begin(), key.getKey().size(), key.orEqual, key.offset, snapshot);
 
-	return toThreadFuture<Key>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<Key>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
 		const uint8_t* key;
 		int keyLength;
 		FdbCApi::fdb_error_t error = api->futureGetKey(f, &key, &keyLength);
 		ASSERT(!error);
 
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return Key(KeyRef(key, keyLength), Arena());
+		return Key(KeyRef(key, keyLength), arena);
 	});
 }
 
@@ -145,15 +143,14 @@ ThreadFuture<RangeResult> DLTransaction::getRange(const KeySelectorRef& begin,
 	                                                 0,
 	                                                 snapshot,
 	                                                 reverse);
-	return toThreadFuture<RangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<RangeResult>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
 		const FdbCApi::FDBKeyValue* kvs;
 		int count;
 		FdbCApi::fdb_bool_t more;
 		FdbCApi::fdb_error_t error = api->futureGetKeyValueArray(f, &kvs, &count, &more);
 		ASSERT(!error);
 
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena());
+		return RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), arena);
 	});
 }
 
@@ -194,31 +191,30 @@ ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorR
 	                                                       matchIndex,
 	                                                       snapshot,
 	                                                       reverse);
-	return toThreadFuture<MappedRangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<MappedRangeResult>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
 		const FdbCApi::FDBMappedKeyValue* kvms;
 		int count;
 		FdbCApi::fdb_bool_t more;
 		FdbCApi::fdb_error_t error = api->futureGetMappedKeyValueArray(f, &kvms, &count, &more);
 		ASSERT(!error);
 
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
 		return MappedRangeResult(
-		    MappedRangeResultRef(VectorRef<MappedKeyValueRef>((MappedKeyValueRef*)kvms, count), more), Arena());
+		    MappedRangeResultRef(VectorRef<MappedKeyValueRef>((MappedKeyValueRef*)kvms, count), more), arena);
 	});
 }
 
 ThreadFuture<Standalone<VectorRef<const char*>>> DLTransaction::getAddressesForKey(const KeyRef& key) {
 	FdbCApi::FDBFuture* f = api->transactionGetAddressesForKey(tr, key.begin(), key.size());
 
-	return toThreadFuture<Standalone<VectorRef<const char*>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const char** addresses;
-		int count;
-		FdbCApi::fdb_error_t error = api->futureGetStringArray(f, &addresses, &count);
-		ASSERT(!error);
+	return toThreadFuture<Standalone<VectorRef<const char*>>>(
+	    api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
+		    const char** addresses;
+		    int count;
+		    FdbCApi::fdb_error_t error = api->futureGetStringArray(f, &addresses, &count);
+		    ASSERT(!error);
 
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return Standalone<VectorRef<const char*>>(VectorRef<const char*>(addresses, count), Arena());
-	});
+		    return Standalone<VectorRef<const char*>>(VectorRef<const char*>(addresses, count), arena);
+	    });
 }
 
 ThreadFuture<Standalone<StringRef>> DLTransaction::getVersionstamp() {
@@ -228,14 +224,13 @@ ThreadFuture<Standalone<StringRef>> DLTransaction::getVersionstamp() {
 
 	FdbCApi::FDBFuture* f = api->transactionGetVersionstamp(tr);
 
-	return toThreadFuture<Standalone<StringRef>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<Standalone<StringRef>>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
 		const uint8_t* str;
 		int strLength;
 		FdbCApi::fdb_error_t error = api->futureGetKey(f, &str, &strLength);
 		ASSERT(!error);
 
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return Standalone<StringRef>(StringRef(str, strLength), Arena());
+		return Standalone<StringRef>(StringRef(str, strLength), arena);
 	});
 }
 
@@ -246,7 +241,7 @@ ThreadFuture<int64_t> DLTransaction::getEstimatedRangeSizeBytes(const KeyRangeRe
 	FdbCApi::FDBFuture* f = api->transactionGetEstimatedRangeSizeBytes(
 	    tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size());
 
-	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
 		int64_t sampledSize;
 		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &sampledSize);
 		ASSERT(!error);
@@ -262,13 +257,12 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> DLTransaction::getRangeSplitPoints(c
 	FdbCApi::FDBFuture* f = api->transactionGetRangeSplitPoints(
 	    tr, range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size(), chunkSize);
 
-	return toThreadFuture<Standalone<VectorRef<KeyRef>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<Standalone<VectorRef<KeyRef>>>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
 		const FdbCApi::FDBKey* splitKeys;
 		int keysArrayLength;
 		FdbCApi::fdb_error_t error = api->futureGetKeyArray(f, &splitKeys, &keysArrayLength);
 		ASSERT(!error);
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return Standalone<VectorRef<KeyRef>>(VectorRef<KeyRef>((KeyRef*)splitKeys, keysArrayLength), Arena());
+		return Standalone<VectorRef<KeyRef>>(VectorRef<KeyRef>((KeyRef*)splitKeys, keysArrayLength), arena);
 	});
 }
 
@@ -280,15 +274,15 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> DLTransaction::getBlobGranuleRa
 
 	FdbCApi::FDBFuture* f = api->transactionGetBlobGranuleRanges(
 	    tr, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), rangeLimit);
-	return toThreadFuture<Standalone<VectorRef<KeyRangeRef>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const FdbCApi::FDBKeyRange* keyRanges;
-		int keyRangesLength;
-		FdbCApi::fdb_error_t error = api->futureGetKeyRangeArray(f, &keyRanges, &keyRangesLength);
-		ASSERT(!error);
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return Standalone<VectorRef<KeyRangeRef>>(VectorRef<KeyRangeRef>((KeyRangeRef*)keyRanges, keyRangesLength),
-		                                          Arena());
-	});
+	return toThreadFuture<Standalone<VectorRef<KeyRangeRef>>>(
+	    api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
+		    const FdbCApi::FDBKeyRange* keyRanges;
+		    int keyRangesLength;
+		    FdbCApi::fdb_error_t error = api->futureGetKeyRangeArray(f, &keyRanges, &keyRangesLength);
+		    ASSERT(!error);
+		    return Standalone<VectorRef<KeyRangeRef>>(VectorRef<KeyRangeRef>((KeyRangeRef*)keyRanges, keyRangesLength),
+		                                              arena);
+	    });
 }
 
 ThreadResult<RangeResult> DLTransaction::readBlobGranules(const KeyRangeRef& keyRange,
@@ -354,7 +348,28 @@ ThreadResult<RangeResult> DLTransaction::readBlobGranulesFinish(
 	                                                               readVersion,
 	                                                               &context);
 
-	return ThreadResult<RangeResult>((ThreadSingleAssignmentVar<RangeResult>*)(r));
+	const FdbCApi::FDBKeyValue* kvs;
+	int count;
+	FdbCApi::fdb_bool_t more;
+	FdbCApi::fdb_error_t error = api->resultGetKeyValueArray(r, &kvs, &count, &more);
+	if (error) {
+	    api->resultDestroy(r);
+	    return ThreadResult<RangeResult>(Error(error));
+	}
+
+	Arena arena;
+	typedef void (*destructor)(void*);
+	arena.addResourceWithDestructor(r, (destructor)api->resultDestroy);
+
+	// If we want to avoid copying by casting FdbCApi::FDBKeyValue* to KeyValueRef*, then we need to be sure that the
+	// corresponding fields share offsets.
+	static_assert(offsetof(KeyValueRef, key.data) == offsetof(FdbCApi::FDBKeyValue, key));
+	static_assert(offsetof(KeyValueRef, key.length) == offsetof(FdbCApi::FDBKeyValue, keyLength));
+	static_assert(offsetof(KeyValueRef, value.data) == offsetof(FdbCApi::FDBKeyValue, value));
+	static_assert(offsetof(KeyValueRef, value.length) == offsetof(FdbCApi::FDBKeyValue, valueLength));
+
+	return ThreadResult<RangeResult>(
+	    RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), arena));
 };
 
 ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>>
@@ -369,14 +384,13 @@ DLTransaction::summarizeBlobGranules(const KeyRangeRef& keyRange, Optional<Versi
 	    tr, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), sv, rangeLimit);
 
 	return toThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>>(
-	    api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	    api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
 		    const FdbCApi::FDBGranuleSummary* summaries;
 		    int summariesLength;
 		    FdbCApi::fdb_error_t error = api->futureGetGranuleSummaryArray(f, &summaries, &summariesLength);
 		    ASSERT(!error);
-		    // The memory for this is stored in the FDBFuture and is released when the future gets destroyed
 		    return Standalone<VectorRef<BlobGranuleSummaryRef>>(
-		        VectorRef<BlobGranuleSummaryRef>((BlobGranuleSummaryRef*)summaries, summariesLength), Arena());
+		        VectorRef<BlobGranuleSummaryRef>((BlobGranuleSummaryRef*)summaries, summariesLength), arena);
 	    });
 }
 
@@ -409,7 +423,7 @@ void DLTransaction::clear(const KeyRef& key) {
 ThreadFuture<Void> DLTransaction::watch(const KeyRef& key) {
 	FdbCApi::FDBFuture* f = api->transactionWatch(tr, key.begin(), key.size());
 
-	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) { return Void(); });
 }
 
 void DLTransaction::addWriteConflictRange(const KeyRangeRef& keys) {
@@ -420,7 +434,7 @@ void DLTransaction::addWriteConflictRange(const KeyRangeRef& keys) {
 ThreadFuture<Void> DLTransaction::commit() {
 	FdbCApi::FDBFuture* f = api->transactionCommit(tr);
 
-	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) { return Void(); });
 }
 
 Version DLTransaction::getCommittedVersion() {
@@ -435,7 +449,7 @@ ThreadFuture<int64_t> DLTransaction::getTotalCost() {
 	}
 
 	FdbCApi::FDBFuture* f = api->transactionGetTotalCost(tr);
-	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, Arena&, FdbCApi* api) {
 		int64_t size = 0;
 		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &size);
 		ASSERT(!error);
@@ -449,7 +463,7 @@ ThreadFuture<int64_t> DLTransaction::getApproximateSize() {
 	}
 
 	FdbCApi::FDBFuture* f = api->transactionGetApproximateSize(tr);
-	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
 		int64_t size = 0;
 		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &size);
 		ASSERT(!error);
@@ -467,7 +481,7 @@ void DLTransaction::setOption(FDBTransactionOptions::Option option, Optional<Str
 ThreadFuture<Void> DLTransaction::onError(Error const& e) {
 	FdbCApi::FDBFuture* f = api->transactionOnError(tr, e.code());
 
-	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) { return Void(); });
 }
 
 void DLTransaction::reset() {
@@ -514,14 +528,13 @@ ThreadFuture<Key> DLTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Versi
 	                                                     purgeVersion,
 	                                                     force);
 
-	return toThreadFuture<Key>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<Key>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
 		const uint8_t* key;
 		int keyLength;
 		FdbCApi::fdb_error_t error = api->futureGetKey(f, &key, &keyLength);
 		ASSERT(!error);
 
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return Key(KeyRef(key, keyLength), Arena());
+		return Key(KeyRef(key, keyLength), arena);
 	});
 }
 
@@ -531,7 +544,7 @@ ThreadFuture<Void> DLTenant::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
 	}
 
 	FdbCApi::FDBFuture* f = api->tenantWaitPurgeGranulesComplete(tenant, purgeKey.begin(), purgeKey.size());
-	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, Arena&, FdbCApi* api) { return Void(); });
 }
 
 ThreadFuture<bool> DLTenant::blobbifyRange(const KeyRangeRef& keyRange) {
@@ -542,7 +555,7 @@ ThreadFuture<bool> DLTenant::blobbifyRange(const KeyRangeRef& keyRange) {
 	FdbCApi::FDBFuture* f = api->tenantBlobbifyRange(
 	    tenant, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
 
-	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, Arena&, FdbCApi* api) {
 		FdbCApi::fdb_bool_t ret = false;
 		ASSERT(!api->futureGetBool(f, &ret));
 		return ret;
@@ -557,7 +570,7 @@ ThreadFuture<bool> DLTenant::unblobbifyRange(const KeyRangeRef& keyRange) {
 	FdbCApi::FDBFuture* f = api->tenantUnblobbifyRange(
 	    tenant, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
 
-	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, Arena&, FdbCApi* api) {
 		FdbCApi::fdb_bool_t ret = false;
 		ASSERT(!api->futureGetBool(f, &ret));
 		return ret;
@@ -573,15 +586,15 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> DLTenant::listBlobbifiedRanges(
 	FdbCApi::FDBFuture* f = api->tenantListBlobbifiedRanges(
 	    tenant, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), rangeLimit);
 
-	return toThreadFuture<Standalone<VectorRef<KeyRangeRef>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const FdbCApi::FDBKeyRange* keyRanges;
-		int keyRangesLength;
-		FdbCApi::fdb_error_t error = api->futureGetKeyRangeArray(f, &keyRanges, &keyRangesLength);
-		ASSERT(!error);
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed.
-		return Standalone<VectorRef<KeyRangeRef>>(VectorRef<KeyRangeRef>((KeyRangeRef*)keyRanges, keyRangesLength),
-		                                          Arena());
-	});
+	return toThreadFuture<Standalone<VectorRef<KeyRangeRef>>>(
+	    api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
+		    const FdbCApi::FDBKeyRange* keyRanges;
+		    int keyRangesLength;
+		    FdbCApi::fdb_error_t error = api->futureGetKeyRangeArray(f, &keyRanges, &keyRangesLength);
+		    ASSERT(!error);
+		    return Standalone<VectorRef<KeyRangeRef>>(VectorRef<KeyRangeRef>((KeyRangeRef*)keyRanges, keyRangesLength),
+		                                              arena);
+	    });
 }
 
 ThreadFuture<Version> DLTenant::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
@@ -594,7 +607,7 @@ ThreadFuture<Version> DLTenant::verifyBlobRange(const KeyRangeRef& keyRange, Opt
 	FdbCApi::FDBFuture* f = api->tenantVerifyBlobRange(
 	    tenant, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), readVersion);
 
-	return toThreadFuture<Version>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<Version>(api, f, [](FdbCApi::FDBFuture* f, Arena&, FdbCApi* api) {
 		Version version = invalidVersion;
 		ASSERT(!api->futureGetInt64(f, &version));
 		return version;
@@ -649,7 +662,7 @@ ThreadFuture<int64_t> DLDatabase::rebootWorker(const StringRef& address, bool ch
 	}
 
 	FdbCApi::FDBFuture* f = api->databaseRebootWorker(db, address.begin(), address.size(), check, duration);
-	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
 		int64_t res;
 		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &res);
 		ASSERT(!error);
@@ -663,7 +676,7 @@ ThreadFuture<Void> DLDatabase::forceRecoveryWithDataLoss(const StringRef& dcid) 
 	}
 
 	FdbCApi::FDBFuture* f = api->databaseForceRecoveryWithDataLoss(db, dcid.begin(), dcid.size());
-	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) { return Void(); });
 }
 
 ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& uid, const StringRef& snapshot_command) {
@@ -673,7 +686,7 @@ ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& uid, const String
 
 	FdbCApi::FDBFuture* f =
 	    api->databaseCreateSnapshot(db, uid.begin(), uid.size(), snapshot_command.begin(), snapshot_command.size());
-	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) { return Void(); });
 }
 
 ThreadFuture<DatabaseSharedState*> DLDatabase::createSharedState() {
@@ -681,7 +694,7 @@ ThreadFuture<DatabaseSharedState*> DLDatabase::createSharedState() {
 		return unsupported_operation();
 	}
 	FdbCApi::FDBFuture* f = api->databaseCreateSharedState(db);
-	return toThreadFuture<DatabaseSharedState*>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<DatabaseSharedState*>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
 		DatabaseSharedState* res;
 		FdbCApi::fdb_error_t error = api->futureGetSharedState(f, &res);
 		ASSERT(!error);
@@ -713,7 +726,7 @@ ThreadFuture<ProtocolVersion> DLDatabase::getServerProtocol(Optional<ProtocolVer
 
 	uint64_t expected = expectedVersion.map(&ProtocolVersion::version).orDefault(0);
 	FdbCApi::FDBFuture* f = api->databaseGetServerProtocol(db, expected);
-	return toThreadFuture<ProtocolVersion>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<ProtocolVersion>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
 		uint64_t pv;
 		FdbCApi::fdb_error_t error = api->futureGetUInt64(f, &pv);
 		ASSERT(!error);
@@ -733,14 +746,13 @@ ThreadFuture<Key> DLDatabase::purgeBlobGranules(const KeyRangeRef& keyRange, Ver
 	                                                       purgeVersion,
 	                                                       force);
 
-	return toThreadFuture<Key>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<Key>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
 		const uint8_t* key;
 		int keyLength;
 		FdbCApi::fdb_error_t error = api->futureGetKey(f, &key, &keyLength);
 		ASSERT(!error);
 
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return Key(KeyRef(key, keyLength), Arena());
+		return Key(KeyRef(key, keyLength), arena);
 	});
 }
 
@@ -750,7 +762,7 @@ ThreadFuture<Void> DLDatabase::waitPurgeGranulesComplete(const KeyRef& purgeKey)
 	}
 
 	FdbCApi::FDBFuture* f = api->databaseWaitPurgeGranulesComplete(db, purgeKey.begin(), purgeKey.size());
-	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) { return Void(); });
 }
 
 ThreadFuture<bool> DLDatabase::blobbifyRange(const KeyRangeRef& keyRange) {
@@ -761,7 +773,7 @@ ThreadFuture<bool> DLDatabase::blobbifyRange(const KeyRangeRef& keyRange) {
 	FdbCApi::FDBFuture* f = api->databaseBlobbifyRange(
 	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
 
-	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, Arena&, FdbCApi* api) {
 		FdbCApi::fdb_bool_t ret = false;
 		ASSERT(!api->futureGetBool(f, &ret));
 		return ret;
@@ -776,7 +788,7 @@ ThreadFuture<bool> DLDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {
 	FdbCApi::FDBFuture* f = api->databaseUnblobbifyRange(
 	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
 
-	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, Arena&, FdbCApi* api) {
 		FdbCApi::fdb_bool_t ret = false;
 		ASSERT(!api->futureGetBool(f, &ret));
 		return ret;
@@ -792,15 +804,15 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> DLDatabase::listBlobbifiedRange
 	FdbCApi::FDBFuture* f = api->databaseListBlobbifiedRanges(
 	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), rangeLimit);
 
-	return toThreadFuture<Standalone<VectorRef<KeyRangeRef>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const FdbCApi::FDBKeyRange* keyRanges;
-		int keyRangesLength;
-		FdbCApi::fdb_error_t error = api->futureGetKeyRangeArray(f, &keyRanges, &keyRangesLength);
-		ASSERT(!error);
-		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed.
-		return Standalone<VectorRef<KeyRangeRef>>(VectorRef<KeyRangeRef>((KeyRangeRef*)keyRanges, keyRangesLength),
-		                                          Arena());
-	});
+	return toThreadFuture<Standalone<VectorRef<KeyRangeRef>>>(
+	    api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
+		    const FdbCApi::FDBKeyRange* keyRanges;
+		    int keyRangesLength;
+		    FdbCApi::fdb_error_t error = api->futureGetKeyRangeArray(f, &keyRanges, &keyRangesLength);
+		    ASSERT(!error);
+		    return Standalone<VectorRef<KeyRangeRef>>(VectorRef<KeyRangeRef>((KeyRangeRef*)keyRanges, keyRangesLength),
+		                                              arena);
+	    });
 }
 
 ThreadFuture<Version> DLDatabase::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
@@ -813,7 +825,7 @@ ThreadFuture<Version> DLDatabase::verifyBlobRange(const KeyRangeRef& keyRange, O
 	FdbCApi::FDBFuture* f = api->databaseVerifyBlobRange(
 	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), readVersion);
 
-	return toThreadFuture<Version>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<Version>(api, f, [](FdbCApi::FDBFuture* f, Arena&, FdbCApi* api) {
 		Version version = invalidVersion;
 		ASSERT(!api->futureGetInt64(f, &version));
 		return version;
@@ -1170,11 +1182,12 @@ void DLApi::stopNetwork() {
 Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
 	FdbCApi::FDBFuture* f = api->createCluster(clusterFilePath);
 
-	auto clusterFuture = toThreadFuture<FdbCApi::FDBCluster*>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		FdbCApi::FDBCluster* cluster;
-		api->futureGetCluster(f, &cluster);
-		return cluster;
-	});
+	auto clusterFuture =
+	    toThreadFuture<FdbCApi::FDBCluster*>(api, f, [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
+		    FdbCApi::FDBCluster* cluster;
+		    api->futureGetCluster(f, &cluster);
+		    return cluster;
+	    });
 
 	Reference<FdbCApi> innerApi = api;
 	auto dbFuture = flatMapThreadFuture<FdbCApi::FDBCluster*, FdbCApi::FDBDatabase*>(
@@ -1186,7 +1199,7 @@ Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
 		    auto innerDbFuture =
 		        toThreadFuture<FdbCApi::FDBDatabase*>(innerApi,
 		                                              innerApi->clusterCreateDatabase(cluster.get(), (uint8_t*)"DB", 2),
-		                                              [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		                                              [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
 			                                              FdbCApi::FDBDatabase* db;
 			                                              api->futureGetDatabase(f, &db);
 			                                              return db;
@@ -3734,7 +3747,7 @@ struct DLTest {
 		return FutureInfo(
 		    toThreadFuture<int>(getApi(),
 		                        (FdbCApi::FDBFuture*)f.future.extractPtr(),
-		                        [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		                        [](FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api) {
 			                        ASSERT_GE(((ThreadSingleAssignmentVar<int>*)f)->debugGetReferenceCount(), 1);
 			                        return ((ThreadSingleAssignmentVar<int>*)f)->get();
 		                        }),

@@ -151,8 +151,10 @@ class DLThreadSingleAssignmentVar final : public ThreadSingleAssignmentVar<T> {
 public:
 	DLThreadSingleAssignmentVar(Reference<FdbCApi> api,
 	                            FdbCApi::FDBFuture* f,
-	                            std::function<T(FdbCApi::FDBFuture*, FdbCApi*)> extractValue)
+	                            std::function<T(FdbCApi::FDBFuture*, Arena&, FdbCApi*)> extractValue)
 	  : api(api), f(f), extractValue(extractValue), futureRefCount(1) {
+		typedef void (*destructor)(void*);
+		arena.addResourceWithDestructor(f, (destructor)api->futureDestroy);
 		ThreadSingleAssignmentVar<T>::addref();
 		api->futureSetCallback(f, &futureCallback, this);
 	}
@@ -161,7 +163,7 @@ public:
 		lock.assertNotEntered();
 		if (f) {
 			ASSERT_ABORT(futureRefCount == 1);
-			api->futureDestroy(f);
+			arena = Arena();
 		}
 	}
 
@@ -187,7 +189,7 @@ public:
 		lock.leave();
 
 		if (destroyNow) {
-			api->futureDestroy(f);
+			arena = Arena();
 			f = nullptr;
 		}
 
@@ -214,7 +216,7 @@ public:
 			delFutureRef();
 			ThreadSingleAssignmentVar<T>::sendError(Error(error));
 		} else {
-			T val = extractValue(f, api.getPtr());
+			T val = extractValue(f, arena, api.getPtr());
 			delFutureRef();
 			ThreadSingleAssignmentVar<T>::send(val);
 		}
@@ -235,7 +237,9 @@ public:
 private:
 	const Reference<FdbCApi> api;
 	FdbCApi::FDBFuture* f;
-	const std::function<T(FdbCApi::FDBFuture* f, FdbCApi* api)> extractValue;
+	// Shared ownership of f
+	Arena arena;
+	const std::function<T(FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api)> extractValue;
 	ThreadSpinLock lock;
 
 	int futureRefCount;
@@ -244,7 +248,7 @@ private:
 template <class T>
 ThreadFuture<T> toThreadFuture(Reference<FdbCApi> api,
                                FdbCApi::FDBFuture* f,
-                               std::function<T(FdbCApi::FDBFuture* f, FdbCApi* api)> extractValue) {
+                               std::function<T(FdbCApi::FDBFuture* f, Arena& arena, FdbCApi* api)> extractValue) {
 	return ThreadFuture<T>(new DLThreadSingleAssignmentVar<T>(api, f, extractValue));
 }
 
