@@ -1264,6 +1264,7 @@ struct TenantManagementWorkload : TestWorkload {
 		ASSERT(!oldTenantEntry.present());
 		ASSERT(newTenantEntry.present());
 		TenantData tData = self->createdTenants[oldTenantName];
+		tData.tenant->name = newTenantName;
 		self->createdTenants[newTenantName] = tData;
 		self->createdTenants.erase(oldTenantName);
 		state Transaction insertTr(self->dataDb, tData.tenant);
