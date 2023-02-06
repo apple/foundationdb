@@ -111,7 +111,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		sharedRandomNumber /= 3;
 
 		// randomly some tests write data first and then turn on blob granules later, to test conversion of existing DB
-		initAtEnd = !enablePurging && sharedRandomNumber % 10 == 0;
+		initAtEnd = getOption(options, "initAtEnd"_sr, sharedRandomNumber % 10 == 0);
 		sharedRandomNumber /= 10;
 		// FIXME: enable and fix bugs!
 		// granuleSizeCheck = initAtEnd;
@@ -1061,13 +1061,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			wait(self->setUpBlobRange(cx));
 		}
 
-		state Future<Void> checkFeedCleanupFuture;
-		if (self->clientId == 0) {
-			checkFeedCleanupFuture = checkFeedCleanup(cx, BGV_DEBUG);
-		} else {
-			checkFeedCleanupFuture = Future<Void>(Void());
-		}
-
 		state Version readVersion = wait(self->doGrv(&tr));
 		state Version startReadVersion = readVersion;
 		state int checks = 0;
@@ -1185,6 +1178,14 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 		if (BGV_DEBUG && startReadVersion != readVersion) {
 			fmt::print("Availability check updated read version from {0} to {1}\n", startReadVersion, readVersion);
+		}
+
+		// start feed cleanup check after there's guaranteed to be data for each granule
+		state Future<Void> checkFeedCleanupFuture;
+		if (self->clientId == 0) {
+			checkFeedCleanupFuture = checkFeedCleanup(cx, BGV_DEBUG);
+		} else {
+			checkFeedCleanupFuture = Future<Void>(Void());
 		}
 
 		state bool dataPassed = wait(self->checkAllData(cx, self));

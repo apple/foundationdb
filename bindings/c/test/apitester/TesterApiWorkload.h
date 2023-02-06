@@ -141,6 +141,7 @@ private:
 	void populateDataTx(TTaskFct cont, std::optional<int> tenantId);
 	void populateTenantData(TTaskFct cont, std::optional<int> tenantId);
 	void createTenants(TTaskFct cont);
+	void createTenantsIfNecessary(TTaskFct cont);
 
 	void clearTenantData(TTaskFct cont, std::optional<int> tenantId);
 
