@@ -2744,13 +2744,18 @@ ACTOR void setupAndRun(std::string dataFolder,
 			                     &tenantMode);
 			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
 		}
-		// setupSimulatedSystem/restartSimulatedSystem should fill tenantMode with valid value.
-		ASSERT(tenantMode.present());
+
 		// restartSimulatedSystem can adjust some testConfig params related to tenants
 		// so set/overwrite those options if necessary here
-		if (rebooting && testConfig.tenantModes.size()) {
-			tenantMode = TenantMode::fromString(testConfig.tenantModes[0]);
+		if (rebooting) {
+			if (testConfig.tenantModes.size()) {
+				tenantMode = TenantMode::fromString(testConfig.tenantModes[0]);
+			} else {
+				tenantMode = TenantMode::DISABLED;
+			}
 		}
+		// setupSimulatedSystem/restartSimulatedSystem should fill tenantMode with valid value.
+		ASSERT(tenantMode.present());
 		if (tenantMode != TenantMode::DISABLED && allowDefaultTenant) {
 			// Default tenant set by testConfig or restarting data in restartInfo.ini
 			if (testConfig.defaultTenant.present()) {
