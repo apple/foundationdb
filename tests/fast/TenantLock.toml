@@ -1,0 +1,22 @@
+[configuration]
+allowDefaultTenant = false
+tenantModes = ['optional', 'required']
+
+[[test]]
+testTitle = 'TenantCreation'
+
+[[test.workload]]
+testName = 'CreateTenant'
+name = 'First'
+
+[[test.workload]]
+testName = 'CreateTenant'
+name = 'Second'
+
+[[test]]
+testTitle = 'TenantLock'
+
+[[test.workload]]
+testName = 'TenantLock'
+tenant1 = 'First'
+tenant2 = 'Second'

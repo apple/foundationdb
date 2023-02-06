@@ -9009,16 +9009,17 @@ private:
 
 void StorageServer::insertTenant(TenantMapEntry const& tenant, Version version, bool persist) {
 	if (version >= tenantMap.getLatestVersion()) {
+		TenantSSInfo tenantSSInfo{ tenant.tenantName, tenant.tenantLockState };
 		int64_t tenantId = TenantAPI::prefixToId(tenant.prefix);
 		tenantMap.createNewVersion(version);
-		tenantMap.insert(tenant.id, TenantSSInfo{ tenant.tenantName, tenant.tenantLockState });
+		tenantMap.insert(tenant.id, tenantSSInfo);
 
 		if (persist) {
 			auto& mLV = addVersionToMutationLog(version);
 			addMutationToMutationLog(mLV,
 			                         MutationRef(MutationRef::SetValue,
 			                                     tenant.prefix.withPrefix(persistTenantMapKeys.begin),
-			                                     tenant.tenantName));
+			                                     ObjectWriter::toValue(tenantSSInfo, IncludeVersion())));
 		}
 
 		TraceEvent("InsertTenant", thisServerID).detail("Tenant", tenantId).detail("Version", version);
