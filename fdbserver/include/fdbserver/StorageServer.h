@@ -1155,13 +1155,6 @@ public:
 
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 
-		this->storage.kvCommitLogicalBytes = &counters.kvCommitLogicalBytes;
-		this->storage.kvClearRanges = &counters.kvClearRanges;
-		this->storage.kvClearSingleKey = &counters.kvClearSingleKey;
-		this->storage.kvGets = &counters.kvGets;
-		this->storage.kvScans = &counters.kvScans;
-		this->storage.kvCommits = &counters.kvCommits;
-
 		if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
 			try {
 				blobConn = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BG_URL);

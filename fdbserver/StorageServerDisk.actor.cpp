@@ -18,7 +18,7 @@ ACTOR static Future<Key> readFirstKey(IKeyValueStore* storage, KeyRangeRef range
 }
 
 Future<Key> StorageServerDisk::readNextKeyInclusive(KeyRef key, Optional<ReadOptions> options) {
-	++(*kvScans);
+	++(data->counters.kvScans);
 	return readFirstKey(storage, KeyRangeRef(key, allKeys.end), options);
 }
 
@@ -50,26 +50,26 @@ void StorageServerDisk::makeNewStorageServerDurable(const bool shardAware) {
 
 void StorageServerDisk::clearRange(KeyRangeRef keys) {
 	storage->clear(keys, &data->metrics);
-	++(*kvClearRanges);
+	++(data->counters.kvClearRanges);
 	if (keys.singleKeyRange()) {
-		++(*kvClearSingleKey);
+		++(data->counters.kvClearSingleKey);
 	}
 }
 
 void StorageServerDisk::writeKeyValue(KeyValueRef kv) {
 	storage->set(kv);
-	*kvCommitLogicalBytes += kv.expectedSize();
+	data->counters.kvCommitLogicalBytes += kv.expectedSize();
 }
 
 void StorageServerDisk::writeMutation(MutationRef mutation) {
 	if (mutation.type == MutationRef::SetValue) {
 		storage->set(KeyValueRef(mutation.param1, mutation.param2));
-		*kvCommitLogicalBytes += mutation.expectedSize();
+		data->counters.kvCommitLogicalBytes += mutation.expectedSize();
 	} else if (mutation.type == MutationRef::ClearRange) {
 		storage->clear(KeyRangeRef(mutation.param1, mutation.param2), &data->metrics);
-		++(*kvClearRanges);
+		++(data->counters.kvClearRanges);
 		if (KeyRangeRef(mutation.param1, mutation.param2).singleKeyRange()) {
-			++(*kvClearSingleKey);
+			++(data->counters.kvClearSingleKey);
 		}
 	} else
 		ASSERT(false);
@@ -82,12 +82,12 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
 		DEBUG_MUTATION(debugContext, debugVersion, m, data->thisServerID);
 		if (m.type == MutationRef::SetValue) {
 			storage->set(KeyValueRef(m.param1, m.param2));
-			*kvCommitLogicalBytes += m.expectedSize();
+			data->counters.kvCommitLogicalBytes += m.expectedSize();
 		} else if (m.type == MutationRef::ClearRange) {
 			storage->clear(KeyRangeRef(m.param1, m.param2), &data->metrics);
-			++(*kvClearRanges);
+			++(data->counters.kvClearRanges);
 			if (KeyRangeRef(m.param1, m.param2).singleKeyRange()) {
-				++(*kvClearSingleKey);
+				++(data->counters.kvClearSingleKey);
 			}
 		}
 	}
@@ -121,7 +121,7 @@ bool StorageServerDisk::makeVersionMutationsDurable(Version& prevStorageVersion,
 // Update data->storage to persist the changes from (data->storageVersion(),version]
 void StorageServerDisk::makeVersionDurable(Version version) {
 	storage->set(KeyValueRef(persistVersion, BinaryWriter::toValue(version, Unversioned())));
-	*kvCommitLogicalBytes += persistVersion.expectedSize() + sizeof(Version);
+	data->counters.kvCommitLogicalBytes += persistVersion.expectedSize() + sizeof(Version);
 
 	// TraceEvent("MakeDurable", data->thisServerID)
 	//     .detail("FromVersion", prevStorageVersion)
@@ -137,4 +137,22 @@ void StorageServerDisk::changeLogProtocol(Version version, ProtocolVersion proto
 	data->addMutationToMutationLogOrStorage(
 	    version,
 	    MutationRef(MutationRef::SetValue, persistLogProtocol, BinaryWriter::toValue(protocol, Unversioned())));
+}
+
+Future<Optional<Value>> StorageServerDisk::readValue(KeyRef key, Optional<ReadOptions> options) {
+	++(data->counters.kvGets);
+	return storage->readValue(key, options);
+}
+
+Future<Optional<Value>> StorageServerDisk::readValuePrefix(KeyRef key, int maxLength, Optional<ReadOptions> options) {
+	++(data->counters.kvGets);
+	return storage->readValuePrefix(key, maxLength, options);
+}
+
+Future<RangeResult> StorageServerDisk::readRange(KeyRangeRef keys,
+                                                 int rowLimit,
+                                                 int byteLimit,
+                                                 Optional<ReadOptions> options) {
+	++(data->counters.kvScans);
+	return storage->readRange(keys, rowLimit, byteLimit, options);
 }

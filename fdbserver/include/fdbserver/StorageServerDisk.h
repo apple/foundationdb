@@ -5,7 +5,12 @@
 
 FDB_DECLARE_BOOLEAN_PARAM(UnlimitedCommitBytes);
 
-struct StorageServerDisk {
+class StorageServerDisk {
+	struct StorageServer* data;
+	IKeyValueStore* storage;
+	void writeMutations(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
+
+public:
 	explicit StorageServerDisk(struct StorageServer* data, IKeyValueStore* storage) : data(data), storage(storage) {}
 
 	void makeNewStorageServerDurable(const bool shardAware);
@@ -41,23 +46,14 @@ struct StorageServerDisk {
 	//  - "b", if key "a" doesn't exist, and "b" is the next existing key in total order
 	//  - allKeys.end, if keyrange [a, allKeys.end) is empty
 	Future<Key> readNextKeyInclusive(KeyRef key, Optional<ReadOptions> options = Optional<ReadOptions>());
-	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options = Optional<ReadOptions>()) {
-		++(*kvGets);
-		return storage->readValue(key, options);
-	}
+	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options = Optional<ReadOptions>());
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
-	                                        Optional<ReadOptions> options = Optional<ReadOptions>()) {
-		++(*kvGets);
-		return storage->readValuePrefix(key, maxLength, options);
-	}
+	                                        Optional<ReadOptions> options = Optional<ReadOptions>());
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit = 1 << 30,
 	                              int byteLimit = 1 << 30,
-	                              Optional<ReadOptions> options = Optional<ReadOptions>()) {
-		++(*kvScans);
-		return storage->readRange(keys, rowLimit, byteLimit, options);
-	}
+	                              Optional<ReadOptions> options = Optional<ReadOptions>());
 
 	Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) { return storage->checkpoint(request); }
 
@@ -70,17 +66,4 @@ struct StorageServerDisk {
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
-
-	// The following are pointers to the Counters in StorageServer::counters of the same names.
-	Counter* kvCommitLogicalBytes;
-	Counter* kvClearRanges;
-	Counter* kvClearSingleKey;
-	Counter* kvGets;
-	Counter* kvScans;
-	Counter* kvCommits;
-
-private:
-	struct StorageServer* data;
-	IKeyValueStore* storage;
-	void writeMutations(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
 };
