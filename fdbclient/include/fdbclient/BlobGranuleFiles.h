@@ -51,12 +51,16 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
                                    Version beginVersion,
                                    Version readVersion,
                                    Optional<StringRef> snapshotData,
-                                   StringRef deltaFileData[],
+                                   const std::vector<StringRef>& deltaFileData,
                                    GranuleMaterializeStats& stats);
 
 std::string randomBGFilename(UID blobWorkerID, UID granuleID, Version version, std::string suffix);
 
 // For benchmark testing only. It should never be called in prod.
 void sortDeltasByKey(const Standalone<GranuleDeltas>& deltasByVersion, const KeyRangeRef& fileRange);
+
+// just for client passthrough. reads all key-value pairs from a snapshot file, and all mutations from a delta file
+RangeResult bgReadSnapshotFile(const StringRef& data);
+Standalone<VectorRef<GranuleMutationRef>> bgReadDeltaFile(const StringRef& data);
 
 #endif

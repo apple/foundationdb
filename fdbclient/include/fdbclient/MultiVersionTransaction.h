@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_MULTIVERSIONTRANSACTION_H
 #define FDBCLIENT_MULTIVERSIONTRANSACTION_H
+#include "flow/Arena.h"
 #pragma once
 
 #include "fdbclient/fdb_c_options.g.h"
@@ -205,6 +206,8 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                      int end_key_name_length,
 	                                      int64_t version);
 
+	FDBFuture* (*databaseGetClientStatus)(FDBDatabase* db);
+
 	// Tenant
 	fdb_error_t (*tenantCreateTransaction)(FDBTenant* tenant, FDBTransaction** outTransaction);
 
@@ -246,6 +249,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                    int end_key_name_length,
 	                                    int64_t version);
 
+	FDBFuture* (*tenantGetId)(FDBTenant* tenant);
 	void (*tenantDestroy)(FDBTenant* tenant);
 
 	// Transaction
@@ -537,6 +541,7 @@ public:
 
 	Reference<ITransaction> createTransaction() override;
 
+	ThreadFuture<int64_t> getId() override;
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
@@ -599,6 +604,9 @@ public:
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
+
+	// Return a JSON string containing database client-side status information
+	ThreadFuture<Standalone<StringRef>> getClientStatus() override;
 
 private:
 	const Reference<FdbCApi> api;
@@ -851,6 +859,7 @@ public:
 	template <class T, class... Args>
 	ThreadFuture<T> executeOperation(ThreadFuture<T> (ITenant::*func)(Args...), Args&&... args);
 
+	ThreadFuture<int64_t> getId() override;
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
@@ -991,6 +1000,9 @@ public:
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
 
+	// Return a JSON string containing database client-side status information
+	ThreadFuture<Standalone<StringRef>> getClientStatus() override;
+
 	// private:
 
 	struct LegacyVersionMonitor;
@@ -1026,6 +1038,9 @@ public:
 
 		// Get database intialization error if initialization failed
 		ErrorOr<Void> getInitializationError();
+
+		// Return a JSON string containing database client-side status information
+		Standalone<StringRef> getClientStatus(ErrorOr<Standalone<StringRef>> dbContextStatus);
 
 		// Cleans up state for the legacy version monitors to break reference cycles
 		void close();

@@ -603,6 +603,8 @@ class Tester:
                 elif inst.op == six.u("TENANT_SET_ACTIVE"):
                     name = inst.pop()
                     self.tenant = self.db.open_tenant(name)
+                    self.tenant.get_id().wait()
+                    inst.push(b"SET_ACTIVE_TENANT")
                 elif inst.op == six.u("TENANT_CLEAR_ACTIVE"):
                     self.tenant = None
                 elif inst.op == six.u("TENANT_LIST"):
@@ -618,6 +620,12 @@ class Tester:
                         except (json.decoder.JSONDecodeError, KeyError):
                             assert False, "Invalid Tenant Metadata"
                     inst.push(fdb.tuple.pack(tuple(result)))
+                elif inst.op == six.u("TENANT_GET_ID"):
+                    if self.tenant != None:
+                        self.tenant.get_id().wait()
+                        inst.push(b"GOT_TENANT_ID")
+                    else:
+                        inst.push(b"NO_ACTIVE_TENANT")
                 elif inst.op == six.u("UNIT_TESTS"):
                     try:
                         test_db_options(db)

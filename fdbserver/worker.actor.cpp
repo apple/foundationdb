@@ -70,6 +70,8 @@
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/serialize.h"
+#include "flow/ChaosMetrics.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -97,6 +99,21 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #else
 #define KV_STORE(filename, uid) keyValueStoreMemory(filename, uid)
 #endif
+
+template class RequestStream<RecruitMasterRequest, false>;
+template struct NetNotifiedQueue<RecruitMasterRequest, false>;
+
+template class RequestStream<RegisterMasterRequest, false>;
+template struct NetNotifiedQueue<RegisterMasterRequest, false>;
+
+template class RequestStream<InitializeCommitProxyRequest, false>;
+template struct NetNotifiedQueue<InitializeCommitProxyRequest, false>;
+
+template class RequestStream<InitializeGrvProxyRequest, false>;
+template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
+
+template class RequestStream<GetServerDBInfoRequest, false>;
+template struct NetNotifiedQueue<GetServerDBInfoRequest, false>;
 
 namespace {
 RoleLineageCollector roleLineageCollector;
@@ -248,7 +265,7 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 				CODE_PROBE(true, "Worker terminated with file_not_found error");
 				return Void();
 			} else if (e.getError().code() == error_code_lock_file_failure) {
-				CODE_PROBE(true, "Unable to lock file", probe::decoration::rare);
+				CODE_PROBE(true, "Unable to lock file", probe::context::net2, probe::assert::noSim);
 				throw please_reboot_kv_store();
 			}
 			throw e.getError();
@@ -1836,6 +1853,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	                                                              locality.dcId(),
 	                                                              locality.zoneId(),
 	                                                              locality.machineId(),
+	                                                              locality.dataHallId(),
 	                                                              g_network->getLocalAddress().ip,
 	                                                              FDB_VT_VERSION));
 
@@ -2672,8 +2690,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.getStorageServerRejoinInfo);
 				DUMPTOKEN(recruited.waitFailure);
 				DUMPTOKEN(recruited.txnState);
+				DUMPTOKEN(recruited.getTenantId);
 
-				// printf("Recruited as commitProxyServer\n");
 				errorForwarders.add(zombie(recruited,
 				                           forwardError(errors,
 				                                        Role::COMMIT_PROXY,

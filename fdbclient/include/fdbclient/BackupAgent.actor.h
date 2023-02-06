@@ -574,7 +574,9 @@ ACTOR Future<Void> applyMutations(Database cx,
                                   Version* endVersion,
                                   PublicRequestStream<CommitTransactionRequest> commit,
                                   NotifiedVersion* committedVersion,
-                                  Reference<KeyRangeMap<Version>> keyVersion);
+                                  Reference<KeyRangeMap<Version>> keyVersion,
+                                  std::map<int64_t, TenantName>* tenantMap,
+                                  bool provisionalProxy);
 ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData);
 
 using EBackupState = BackupAgentBase::EnumState;
@@ -1002,7 +1004,7 @@ namespace fileBackup {
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
                                                                       int len,
-                                                                      Optional<Database> cx);
+                                                                      Database cx);
 
 // Reads a mutation log block from file and parses into batch mutation blocks for further parsing.
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Reference<IAsyncFile> file,

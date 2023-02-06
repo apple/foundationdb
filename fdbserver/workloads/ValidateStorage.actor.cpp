@@ -113,6 +113,24 @@ struct ValidateStorage : TestWorkload {
 				}
 			} catch (Error& e) {
 				TraceEvent("WaitAuditStorageError").errorUnsuppressed(e).detail("AuditID", auditId);
+<<<<<<< HEAD
+=======
+				wait(delay(1));
+			}
+		}
+
+		loop {
+			try {
+				Optional<UID> auditId_ = wait(timeout(
+				    auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA, /*async=*/true), 30));
+				if (!auditId_.present()) {
+					throw audit_storage_failed();
+				}
+				ASSERT(auditId_ != auditId);
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
+>>>>>>> de670b7129c75a604783f56919a7f2530a7bb55f
 				wait(delay(1));
 			}
 		}

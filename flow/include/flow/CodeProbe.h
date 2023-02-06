@@ -110,7 +110,7 @@ constexpr std::enable_if_t<T::type == AnnotationType::Assertion, AssertNot<T>> o
 }
 
 constexpr SimOnly simOnly;
-constexpr auto noSim = !simOnly;
+constexpr NoSim noSim;
 
 } // namespace assert
 

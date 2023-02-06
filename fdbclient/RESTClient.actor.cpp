@@ -33,6 +33,7 @@
 #include "flow/serialize.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
+#include "flow/IConnection.h"
 
 #include <memory>
 #include <unordered_map>

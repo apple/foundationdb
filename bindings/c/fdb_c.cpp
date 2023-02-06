@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/FDBTypes.h"
 #include "flow/ProtocolVersion.h"
 #include <cstdint>
@@ -61,6 +63,11 @@ int g_api_version = 0;
 /* This must be true so that we can return the data pointer of a
    Standalone<RangeResultRef> as an array of FDBKeyValue. */
 static_assert(sizeof(FDBKeyValue) == sizeof(KeyValueRef), "FDBKeyValue / KeyValueRef size mismatch");
+static_assert(sizeof(FDBBGMutation) == sizeof(GranuleMutationRef), "FDBBGMutation / GranuleMutationRef size mismatch");
+static_assert(static_cast<int>(FDB_BG_MUTATION_TYPE_SET_VALUE) == static_cast<int>(MutationRef::Type::SetValue),
+              "FDB_BG_MUTATION_TYPE_SET_VALUE enum value mismatch");
+static_assert(static_cast<int>(FDB_BG_MUTATION_TYPE_CLEAR_RANGE) == static_cast<int>(MutationRef::Type::ClearRange),
+              "FDB_BG_MUTATION_TYPE_CLEAR_RANGE enum value mismatch");
 
 #define TSAV_ERROR(type, error) ((FDBFuture*)(ThreadFuture<type>(error())).extractPtr())
 
@@ -82,8 +89,7 @@ extern "C" DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_erro
 		       code == error_code_grv_proxy_memory_limit_exceeded ||
 		       code == error_code_commit_proxy_memory_limit_exceeded ||
 		       code == error_code_batch_transaction_throttled || code == error_code_process_behind ||
-		       code == error_code_tag_throttled || code == error_code_unknown_tenant ||
-		       code == error_code_proxy_tag_throttled;
+		       code == error_code_tag_throttled || code == error_code_proxy_tag_throttled;
 	}
 	return false;
 }
@@ -334,6 +340,99 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_granule_summary_array(FDBFuture*
 	                 *out_count = na.size(););
 }
 
+namespace {
+void setBlobFilePointer(FDBBGFilePointer* dest, const BlobFilePointerRef& source) {
+	dest->filename_ptr = source.filename.begin();
+	dest->filename_length = source.filename.size();
+	dest->file_offset = source.offset;
+	dest->file_length = source.length;
+	dest->full_file_length = source.fullFileLength;
+}
+
+void setBGMutation(FDBBGMutation* dest, int64_t version, const MutationRef& source) {
+	dest->version = version;
+	dest->type = source.type;
+	dest->param1_ptr = source.param1.begin();
+	dest->param1_length = source.param1.size();
+	dest->param2_ptr = source.param2.begin();
+	dest->param2_length = source.param2.size();
+}
+
+void setBGMutations(FDBBGMutation** mutationsOut, int* mutationCountOut, Arena& ar, const GranuleDeltas& deltas) {
+	// convert mutations from MutationsAndVersionRef to single mutations
+	int mutationCount = 0;
+	for (auto& it : deltas) {
+		mutationCount += it.mutations.size();
+	}
+	*mutationCountOut = mutationCount;
+
+	if (mutationCount > 0) {
+		*mutationsOut = new (ar) FDBBGMutation[mutationCount];
+		mutationCount = 0;
+		for (auto& it : deltas) {
+			for (auto& m : it.mutations) {
+				setBGMutation(&((*mutationsOut)[mutationCount]), it.version, m);
+				mutationCount++;
+			}
+		}
+		ASSERT(mutationCount == *mutationCountOut);
+	}
+}
+} // namespace
+
+extern "C" DLLEXPORT fdb_error_t fdb_future_readbg_get_descriptions(FDBFuture* f,
+                                                                    FDBBGFileDescription** out,
+                                                                    int* desc_count) {
+	CATCH_AND_RETURN(Standalone<VectorRef<BlobGranuleChunkRef>> results =
+	                     TSAV(Standalone<VectorRef<BlobGranuleChunkRef>>, f)->get();
+	                 *desc_count = results.size();
+	                 Arena ar;
+	                 *out = new (ar) FDBBGFileDescription[results.size()];
+	                 for (int chunkIdx = 0; chunkIdx < results.size(); chunkIdx++) {
+		                 BlobGranuleChunkRef& chunk = results[chunkIdx];
+		                 FDBBGFileDescription& desc = (*out)[chunkIdx];
+
+		                 // set key range
+		                 desc.key_range.begin_key = chunk.keyRange.begin.begin();
+		                 desc.key_range.begin_key_length = chunk.keyRange.begin.size();
+		                 desc.key_range.end_key = chunk.keyRange.end.begin();
+		                 desc.key_range.end_key_length = chunk.keyRange.end.size();
+
+		                 // snapshot file
+		                 desc.snapshot_present = chunk.snapshotFile.present();
+		                 if (desc.snapshot_present) {
+			                 setBlobFilePointer(&desc.snapshot_file_pointer, chunk.snapshotFile.get());
+		                 }
+
+		                 // delta files
+		                 desc.delta_file_count = chunk.deltaFiles.size();
+		                 if (chunk.deltaFiles.size()) {
+			                 desc.delta_files = new (ar) FDBBGFilePointer[chunk.deltaFiles.size()];
+			                 for (int d = 0; d < chunk.deltaFiles.size(); d++) {
+				                 setBlobFilePointer(&desc.delta_files[d], chunk.deltaFiles[d]);
+			                 }
+		                 }
+
+		                 setBGMutations(&desc.memory_mutations, &desc.memory_mutation_count, ar, chunk.newDeltas);
+	                 }
+
+	                 // make this memory owned by the arena of the object stored in the future
+	                 results.arena()
+	                     .dependsOn(ar););
+}
+
+extern "C" DLLEXPORT FDBResult* fdb_readbg_parse_snapshot_file(const uint8_t* file_data, int file_len) {
+	RETURN_RESULT_ON_ERROR(RangeResult,
+	                       RangeResult parsedSnapshotData = bgReadSnapshotFile(StringRef(file_data, file_len));
+	                       return ((FDBResult*)(ThreadResult<RangeResult>(parsedSnapshotData)).extractPtr()););
+}
+extern "C" DLLEXPORT FDBResult* fdb_readbg_parse_delta_file(const uint8_t* file_data, int file_len) {
+	RETURN_RESULT_ON_ERROR(
+	    Standalone<VectorRef<GranuleMutationRef>>,
+	    Standalone<VectorRef<GranuleMutationRef>> parsedDeltaData = bgReadDeltaFile(StringRef(file_data, file_len));
+	    return ((FDBResult*)(ThreadResult<Standalone<VectorRef<GranuleMutationRef>>>(parsedDeltaData)).extractPtr()););
+}
+
 extern "C" DLLEXPORT void fdb_result_destroy(FDBResult* r) {
 	CATCH_AND_DIE(TSAVB(r)->cancel(););
 }
@@ -345,6 +444,13 @@ fdb_error_t fdb_result_get_keyvalue_array(FDBResult* r,
 	CATCH_AND_RETURN(RangeResult rr = TSAV(RangeResult, r)->get(); *out_kv = (FDBKeyValue*)rr.begin();
 	                 *out_count = rr.size();
 	                 *out_more = rr.more;);
+}
+
+fdb_error_t fdb_result_get_bg_mutations_array(FDBResult* r, FDBBGMutation const** out_mutations, int* out_count) {
+	CATCH_AND_RETURN(Standalone<VectorRef<GranuleMutationRef>> mutations =
+	                     TSAV(Standalone<VectorRef<GranuleMutationRef>>, r)->get();
+	                 *out_mutations = (FDBBGMutation*)mutations.begin();
+	                 *out_count = mutations.size(););
 }
 
 FDBFuture* fdb_create_cluster_v609(const char* cluster_file_path) {
@@ -560,6 +666,10 @@ extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_verify_blob_rang
 	                        .extractPtr());
 }
 
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_client_status(FDBDatabase* db) {
+	return (FDBFuture*)(DB(db)->getClientStatus().extractPtr());
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant, FDBTransaction** out_transaction) {
 	CATCH_AND_RETURN(*out_transaction = (FDBTransaction*)TENANT(tenant)->createTransaction().extractPtr(););
 }
@@ -636,6 +746,10 @@ extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_verify_blob_range(
 	                                                      StringRef(end_key_name, end_key_name_length)),
 	                                          rv)
 	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_get_id(FDBTenant* tenant) {
+	return (FDBFuture*)(TENANT(tenant)->getId().extractPtr());
 }
 
 extern "C" DLLEXPORT void fdb_tenant_destroy(FDBTenant* tenant) {
@@ -1079,6 +1193,28 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_summarize_blob_granules(FDBTrans
 	    if (summaryVersion != latestVersion) { sv = summaryVersion; }
 
 	    return (FDBFuture*)(TXN(tr)->summarizeBlobGranules(range, sv, rangeLimit).extractPtr()););
+}
+
+// copied from read_blob_granules_start
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules_description(FDBTransaction* tr,
+                                                                               uint8_t const* begin_key_name,
+                                                                               int begin_key_name_length,
+                                                                               uint8_t const* end_key_name,
+                                                                               int end_key_name_length,
+                                                                               int64_t begin_version,
+                                                                               int64_t read_version,
+                                                                               int64_t* read_version_out) {
+	Optional<Version> rv;
+	if (read_version != latestVersion) {
+		rv = read_version;
+	}
+	return (FDBFuture*)(TXN(tr)
+	                        ->readBlobGranulesStart(KeyRangeRef(KeyRef(begin_key_name, begin_key_name_length),
+	                                                            KeyRef(end_key_name, end_key_name_length)),
+	                                                begin_version,
+	                                                rv,
+	                                                read_version_out)
+	                        .extractPtr());
 }
 
 #include "fdb_c_function_pointers.g.h"

@@ -265,6 +265,7 @@ struct OpenDatabaseCoordRequest {
 	std::vector<Hostname> hostnames;
 	std::vector<NetworkAddress> coordinators;
 	ReplyPromise<CachedSerialization<struct ClientDBInfo>> reply;
+	bool internal{ true };
 
 	bool verify() const { return true; }
 
@@ -278,9 +279,12 @@ struct OpenDatabaseCoordRequest {
 		           clusterKey,
 		           coordinators,
 		           reply,
-		           hostnames);
+		           hostnames,
+		           internal);
 	}
 };
+
+extern template struct NetNotifiedQueue<OpenDatabaseCoordRequest, true>;
 
 class ClientCoordinators {
 public:
