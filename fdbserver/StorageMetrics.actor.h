@@ -41,6 +41,7 @@ const StringRef STORAGE_COMMIT_LATENCY_HISTOGRAM = LiteralStringRef("StorageComm
 const StringRef SS_DURABLE_VERSION_UPDATE_LATENCY_HISTOGRAM = LiteralStringRef("SSDurableVersionUpdateLatency");
 const StringRef SS_READ_RANGE_BYTES_RETURNED_HISTOGRAM = LiteralStringRef("SSReadRangeBytesReturned");
 const StringRef SS_READ_RANGE_BYTES_LIMIT_HISTOGRAM = LiteralStringRef("SSReadRangeBytesLimit");
+const StringRef SS_READ_RANGE_KV_PAIRS_RETURNED_HISTOGRAM = LiteralStringRef("SSReadRangeKVPairsReturned");
 
 struct StorageMetricSample {
 	IndexedSet<Key, int64_t> sample;
