@@ -86,11 +86,11 @@ struct TenantLock : TestWorkload {
 				ASSERT(entry.present());
 				wait(TenantAPI::changeLockState(&tr, entry.get(), desiredState, lockID));
 				wait(tr.commit());
+				return Void();
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
 		}
-		return Void();
 	}
 
 	ACTOR static Future<Void> _start(TenantLock* self, Database db) {

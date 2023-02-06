@@ -1132,7 +1132,7 @@ private:
 					auto startItr = startId.present()
 					                    ? std::lower_bound(lockedTenants->begin(), lockedTenants->end(), startId.get())
 					                    : lockedTenants->end();
-					auto endItr = startId.present()
+					auto endItr = endId.present()
 					                  ? std::lower_bound(lockedTenants->begin(), lockedTenants->end(), endId.get())
 					                  : lockedTenants->end();
 					lockedTenants->erase(startItr, endItr);

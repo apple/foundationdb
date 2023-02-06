@@ -488,7 +488,7 @@ Future<Void> changeLockState(Transaction* tr, TenantMapEntry tenant, TenantLockS
 	}
 	TenantMapEntry newState = tenant;
 	newState.tenantLockState = desiredLockState;
-	configureTenantTransaction(tr, tenant, newState);
+	wait(configureTenantTransaction(tr, tenant, newState));
 	if (desiredLockState == TenantLockState::UNLOCKED) {
 		TenantMetadata::tenantLockID().clear(tr);
 	} else {
