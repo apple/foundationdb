@@ -1284,6 +1284,9 @@ void MultiVersionTransaction::updateTransaction(bool setPersistentOptions) {
 			}
 		}
 	}
+	if (authzToken.present() && !authzToken.get().empty() && newTr.transaction) {
+		newTr.transaction->setOption(FDBTransactionOptions::AUTHORIZATION_TOKEN, authzToken.castTo<StringRef>());
+	}
 	lock.enter();
 	transaction = newTr;
 	lock.leave();
@@ -1586,6 +1589,10 @@ void MultiVersionTransaction::setOption(FDBTransactionOptions::Option option, Op
 
 	if (MultiVersionApi::api->getApiVersion().hasPersistentOptions() && itr->second.persistent) {
 		persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
+	}
+
+	if (option == FDBTransactionOptions::AUTHORIZATION_TOKEN) {
+		authzToken = value.castTo<Standalone<StringRef>>();
 	}
 
 	auto tr = getTransaction();

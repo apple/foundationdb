@@ -809,6 +809,19 @@ private:
 	ThreadFuture<T> executeOperation(ThreadFuture<T> (ITransaction::*func)(Args...), Args&&... args);
 
 	std::vector<std::pair<FDBTransactionOptions::Option, Optional<Standalone<StringRef>>>> persistentOptions;
+
+	// Normally transaction options such as authzToken shall not survive "hard resets": i.e. call to reset().
+	// Even options marked persistent only survive "soft resets": i.e. as side-effect of onError().
+	// An authorization token, however, occupies a unique position as a transaction option
+	// in that it is signed and issued at the tenant granularity (its parent entity),
+	// but, at the same time, is also subject to expiration after its time runs out.
+	// The former property requires that the token should tolerate any state clearance such as hard reset
+	// (the same way the tenant context a transaction was created with also survives the hard reset).
+	// At the same time, however, the latter property requires that the token stays updatable via setOption().
+	// Given its unique circumstances, tokens are, therefore, NOT marked and tracked as persistentOptions, but survives
+	// any reset. Note: lower-level transaction objects such as RYOW or NativeAPI Transaction already implement this
+	// behavior
+	Optional<Standalone<StringRef>> authzToken;
 };
 
 struct ClientDesc {

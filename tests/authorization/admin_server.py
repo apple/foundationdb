@@ -85,8 +85,6 @@ def main_loop(main_pipe, pipe):
                     resp = Exception("db not open")
                 else:
                     tr = db.create_transaction()
-                    if use_grv_cache:
-                        tr.options.set_use_grv_cache()
                     del tr[b'':b'\xff']
                     tr.commit().wait()
                     tenants = list(map(lambda x: x.key, list(fdb.tenant_management.list_tenants(db, b'', b'\xff', 0).to_list())))
@@ -108,7 +106,7 @@ def get():
 
 # server needs to be a singleton running in subprocess, because FDB network layer (including active TLS config) is a global var
 class Server(object):
-    def __init__(self, force_multi_version_client: bool=False, use_grv_cache: bool=False):
+    def __init__(self):
         global _admin_server
         assert _admin_server is None, "admin server may be setup once per process"
         _admin_server = self

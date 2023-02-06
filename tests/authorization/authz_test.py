@@ -52,7 +52,8 @@ def loop_until_success(tr: fdb.Transaction, func):
         try:
             return func(tr)
         except fdb.FDBError as e:
-            tr.on_error(e)
+            tr.on_error(e).wait()
+#print("{} failed with {} retrying...", func.__name__, e)
 
 def test_token_option(cluster, default_tenant, tenant_tr_gen, token_claim_1h):
     token = token_gen(cluster.private_key, token_claim_1h(default_tenant))

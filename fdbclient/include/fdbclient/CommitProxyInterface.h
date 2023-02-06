@@ -683,6 +683,8 @@ struct GlobalConfigRefreshRequest {
 	GlobalConfigRefreshRequest() {}
 	explicit GlobalConfigRefreshRequest(Version lastKnown) : lastKnown(lastKnown) {}
 
+	bool verify() const noexcept { return true; }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, lastKnown, reply);
