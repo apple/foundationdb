@@ -791,6 +791,7 @@ public:
 	std::string STORAGESERVER_READ_PRIORITIES;
 	int STORAGE_SERVER_READ_CONCURRENCY;
 	std::string STORAGESERVER_READTYPE_PRIORITY_MAP;
+	int SPLIT_METRICS_MAX_ROWS;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -990,11 +991,18 @@ public:
 	int BG_RDC_BYTES_FACTOR;
 	int BG_RDC_READ_FACTOR;
 	bool BG_WRITE_MULTIPART;
+	bool BG_ENABLE_DYNAMIC_WRITE_AMP;
+	double BG_DYNAMIC_WRITE_AMP_MIN_FACTOR;
+	double BG_DYNAMIC_WRITE_AMP_DECREASE_FACTOR;
 
 	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
 	int BLOB_WORKER_RESNAPSHOT_PARALLELISM;
 	int BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM;
 	int BLOB_WORKER_RDC_PARALLELISM;
+	// The resnapshot/delta parallelism knobs are deprecated and replaced by the budget_bytes knobs! FIXME: remove after
+	// next release
+	int64_t BLOB_WORKER_RESNAPSHOT_BUDGET_BYTES;
+	int64_t BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES;
 
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
 	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
@@ -1017,6 +1025,7 @@ public:
 	int BLOB_MANIFEST_RW_ROWS;
 	std::string BLOB_RESTORE_MLOGS_URL;
 	int BLOB_MIGRATOR_ERROR_RETRIES;
+	std::string BLOB_RESTORE_MANIFEST_URL;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;

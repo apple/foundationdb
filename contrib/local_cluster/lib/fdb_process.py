@@ -67,6 +67,8 @@ class _ExecutablePath:
         path = overridden_path
         if path is None:
             path = shutil.which(self._executable)
+        else:
+            path = os.path.abspath(path)
 
         if path is None or not os.path.exists(path):
             raise FileNotFoundError(

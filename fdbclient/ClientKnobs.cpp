@@ -224,6 +224,11 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE,      2 );
 	init( BLOBSTORE_MULTIPART_MAX_PART_SIZE,  20000000 );
 	init( BLOBSTORE_MULTIPART_MIN_PART_SIZE,   5242880 );
+	init( BLOBSTORE_GLOBAL_CONNECTION_POOL,       true );
+	init( BLOBSTORE_ENABLE_LOGGING,               true );
+	init( BLOBSTORE_STATS_LOGGING_INTERVAL,       10.0 );
+	init( BLOBSTORE_LATENCY_LOGGING_INTERVAL,    120.0 );
+	init( BLOBSTORE_LATENCY_LOGGING_ACCURACY,     0.01 );
 
 	// These are basically unlimited by default but can be used to reduce blob IO if needed
 	init( BLOBSTORE_REQUESTS_PER_SECOND,            200 );
@@ -234,8 +239,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BLOBSTORE_WRITE_REQUESTS_PER_SECOND,       50 );
 	init( BLOBSTORE_READ_REQUESTS_PER_SECOND,       100 );
 	init( BLOBSTORE_DELETE_REQUESTS_PER_SECOND,     200 );
-
-	init( BGR_READ_BLOCK_SIZE,             20*1024*1024 ); if( randomize && BUGGIFY ) BGR_READ_BLOCK_SIZE = 64 * 1024 * deterministicRandom()->randomInt(1, 100);
 
 	// Dynamic Knobs
 	init( COMMIT_QUORUM_TIMEOUT,                    3.0 );
@@ -280,7 +283,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	// Blob granules
 	init( BG_MAX_GRANULE_PARALLELISM,                10 );
-	init( BG_TOO_MANY_GRANULES,                   10000 );
+	init( BG_TOO_MANY_GRANULES,                   20000 );
 	init( BLOB_METADATA_REFRESH_INTERVAL,          3600 ); if ( randomize && BUGGIFY ) { BLOB_METADATA_REFRESH_INTERVAL = deterministicRandom()->randomInt(5, 120); }
 
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_TIMES,        3 );
@@ -298,6 +301,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CLIENT_ENABLE_USING_CLUSTER_ID_KEY,     false );
 
 	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,     false );
+	init( SIMULATION_EKP_TENANT_IDS_TO_DROP,        "-1" );
 	// clang-format on
 }
 

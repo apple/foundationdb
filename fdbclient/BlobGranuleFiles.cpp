@@ -1479,7 +1479,7 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
                                    Version beginVersion,
                                    Version readVersion,
                                    Optional<StringRef> snapshotData,
-                                   StringRef deltaFileData[],
+                                   const std::vector<StringRef>& deltaFileData,
                                    GranuleMaterializeStats& stats) {
 	// TODO REMOVE with early replying
 	ASSERT(readVersion == chunk.includedVersion);
@@ -1528,6 +1528,7 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 	if (BG_READ_DEBUG) {
 		fmt::print("Applying {} delta files\n", chunk.deltaFiles.size());
 	}
+	ASSERT(chunk.deltaFiles.size() == deltaFileData.size());
 	for (int deltaIdx = 0; deltaIdx < chunk.deltaFiles.size(); deltaIdx++) {
 		stats.inputBytes += deltaFileData[deltaIdx].size();
 		bool startClear = false;
@@ -1656,8 +1657,8 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 				}
 			}
 
-			// +1 to avoid UBSAN variable length array of size zero
-			StringRef deltaData[files[chunkIdx].deltaFiles.size() + 1];
+			std::vector<StringRef> deltaData;
+			deltaData.resize(files[chunkIdx].deltaFiles.size());
 			for (int i = 0; i < files[chunkIdx].deltaFiles.size(); i++) {
 				deltaData[i] =
 				    StringRef(granuleContext.get_load_f(loadIds[chunkIdx].deltaIds[i], granuleContext.userContext),
@@ -1682,6 +1683,85 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 	} catch (Error& e) {
 		return ErrorOr<RangeResult>(e);
 	}
+}
+
+// just for client passthrough. reads all key-value pairs from a snapshot file, and all mutations from a delta file
+RangeResult bgReadSnapshotFile(const StringRef& data) {
+	Standalone<StringRef> fname = "f"_sr;
+	Standalone<VectorRef<ParsedDeltaBoundaryRef>> results = loadSnapshotFile(fname, data, normalKeys, {});
+	RangeResult snapshot;
+	snapshot.reserve(snapshot.arena(), results.size());
+	snapshot.arena().dependsOn(results.arena());
+	for (auto& it : results) {
+		snapshot.emplace_back(snapshot.arena(), it.key, it.value);
+	}
+	return snapshot;
+}
+
+// FIXME: refactor if possible, just copy-pasted from loadChunkedDeltaFile for prototyping
+Standalone<VectorRef<GranuleMutationRef>> bgReadDeltaFile(const StringRef& deltaData) {
+	Standalone<VectorRef<GranuleMutationRef>> deltas;
+	Standalone<IndexedBlobGranuleFile> file = IndexedBlobGranuleFile::fromFileBytes(deltaData, {});
+
+	ASSERT(file.fileType == DELTA_FILE_TYPE);
+	ASSERT(file.chunkStartOffset > 0);
+
+	// empty delta file
+	if (file.indexBlockRef.block.children.empty()) {
+		return deltas;
+	}
+
+	ASSERT(file.indexBlockRef.block.children.size() >= 2);
+
+	// find range of blocks needed to read
+	ChildBlockPointerRef* currentBlock = file.indexBlockRef.block.children.begin();
+
+	bool lastBlock = false;
+	bool prevClearAfter = false;
+	KeyRef prevClearAfterKey;
+	Version prevClearAfterVersion;
+	while (!lastBlock) {
+		auto nextBlock = currentBlock;
+		nextBlock++;
+		lastBlock = (nextBlock == file.indexBlockRef.block.children.end() - 1);
+
+		Standalone<GranuleSortedDeltas> deltaBlock =
+		    file.getChild<GranuleSortedDeltas>(currentBlock, {}, file.chunkStartOffset);
+		ASSERT(!deltaBlock.boundaries.empty());
+		ASSERT(currentBlock->key == deltaBlock.boundaries.front().key);
+
+		for (auto& entry : deltaBlock.boundaries) {
+			if (prevClearAfter) {
+				deltas.emplace_back(
+				    deltas.arena(), MutationRef::Type::ClearRange, prevClearAfterVersion, prevClearAfterKey, entry.key);
+			}
+			prevClearAfter = entry.clearVersion.present();
+			if (prevClearAfter) {
+				prevClearAfterVersion = entry.clearVersion.get();
+				prevClearAfterKey = entry.key;
+			}
+
+			for (auto& v : entry.values) {
+				if (v.op == MutationRef::Type::ClearRange) {
+					if (entry.clearVersion.present() && v.version == entry.clearVersion.get()) {
+						// we'll handle that in the next loop with prevClearAfter
+						continue;
+					}
+					deltas.emplace_back(deltas.arena(),
+					                    MutationRef::Type::ClearRange,
+					                    v.version,
+					                    entry.key,
+					                    keyAfter(entry.key, deltas.arena()));
+				} else {
+					ASSERT(v.op == MutationRef::Type::SetValue);
+					deltas.emplace_back(deltas.arena(), MutationRef::Type::SetValue, v.version, entry.key, v.value);
+				}
+			}
+		}
+		deltas.arena().dependsOn(deltaBlock.arena());
+		currentBlock++;
+	}
+	return deltas;
 }
 
 std::string randomBGFilename(UID blobWorkerID, UID granuleID, Version version, std::string suffix) {
@@ -2359,7 +2439,9 @@ void checkDeltaRead(const KeyValueGen& kvGen,
                     Version beginVersion,
                     Version readVersion,
                     const Standalone<GranuleDeltas>& data,
-                    StringRef* serialized) {
+                    const std::vector<StringRef>& serialized) {
+	ASSERT_EQ(serialized.size(), 1);
+
 	// expected answer
 	std::map<KeyRef, ValueRef> expectedData;
 	Version lastFileEndVersion = 0;
@@ -2378,7 +2460,7 @@ void checkDeltaRead(const KeyValueGen& kvGen,
 	    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUniqueID(), readVersion, ".delta");
 	Standalone<BlobGranuleChunkRef> chunk;
 	chunk.deltaFiles.emplace_back_deep(
-	    chunk.arena(), filename, 0, serialized->size(), serialized->size(), kvGen.cipherKeys);
+	    chunk.arena(), filename, 0, serialized[0].size(), serialized[0].size(), kvGen.cipherKeys);
 	chunk.keyRange = kvGen.allRange;
 	chunk.includedVersion = readVersion;
 	chunk.snapshotVersion = invalidVersion;
@@ -2459,13 +2541,14 @@ TEST_CASE("/blobgranule/files/deltaFormatUnitTest") {
 	}*/
 	Value serialized = serializeChunkedDeltaFile(
 	    fileNameRef, data, kvGen.allRange, targetChunkSize, kvGen.compressFilter, kvGen.cipherKeys);
+	std::vector<StringRef> deltaPtr{ serialized };
 
 	// check whole file
-	checkDeltaRead(kvGen, kvGen.allRange, 0, data.back().version, data, &serialized);
+	checkDeltaRead(kvGen, kvGen.allRange, 0, data.back().version, data, deltaPtr);
 
 	for (int i = 0; i < std::min((size_t)100, kvGen.usedKeysList.size() * data.size()); i++) {
 		auto params = randomizeKeyAndVersions(kvGen, data);
-		checkDeltaRead(kvGen, std::get<0>(params), std::get<1>(params), std::get<2>(params), data, &serialized);
+		checkDeltaRead(kvGen, std::get<0>(params), std::get<1>(params), std::get<2>(params), data, deltaPtr);
 	}
 
 	return Void();
@@ -2518,10 +2601,6 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 		}
 		deltaIdx++;
 	}
-	StringRef deltaPtrs[deltaPtrsVector.size() + 1];
-	for (int i = 0; i < deltaPtrsVector.size(); i++) {
-		deltaPtrs[i] = deltaPtrsVector[i];
-	}
 
 	// add in memory deltas
 	chunk.arena().dependsOn(inMemoryDeltas.arena());
@@ -2540,7 +2619,7 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 		snapshotPtr = serializedSnapshot;
 	}
 	RangeResult actualData =
-	    materializeBlobGranule(chunk, range, beginVersion, readVersion, snapshotPtr, deltaPtrs, stats);
+	    materializeBlobGranule(chunk, range, beginVersion, readVersion, snapshotPtr, deltaPtrsVector, stats);
 
 	if (expectedData.size() != actualData.size()) {
 		fmt::print("Expected Size {0} != Actual Size {1}\n", expectedData.size(), actualData.size());
@@ -2679,6 +2758,87 @@ TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 		                 serializedSnapshot,
 		                 serializedDeltaFiles,
 		                 inMemoryDeltas);
+	}
+
+	return Void();
+}
+
+namespace {
+MutationsAndVersionRef singleMutation(Version v,
+                                      MutationRef::Type type,
+                                      Arena& ar,
+                                      const StringRef& param1,
+                                      const StringRef& param2) {
+	MutationsAndVersionRef ref(v, v);
+	ref.mutations.emplace_back(ar, type, param1, param2);
+	return ref;
+}
+
+void checkMutations(const Standalone<VectorRef<GranuleMutationRef>>& expected,
+                    const Standalone<VectorRef<GranuleMutationRef>>& actual) {
+	ASSERT(expected.size() == actual.size());
+	for (int i = 0; i < expected.size(); i++) {
+		ASSERT(expected[i].version == actual[i].version);
+		ASSERT(expected[i].type == actual[i].type);
+		ASSERT(expected[i].param1 == actual[i].param1);
+		ASSERT(expected[i].param2 == actual[i].param2);
+	}
+}
+} // namespace
+
+/*
+Input mutations:
+Set A=5 @ 100
+Clear [A - C) @ 200
+Set E=6 @ 300
+Set A=7 @ 400
+Clear [A - E) @ 500
+Clear [E - E\x00) @ 600 (single key clear)
+
+Output mutations:
+Set A=5 @ 100
+Set A=7 @ 400
+Clear [A - A\x00) @ 500
+Clear [A - C) @ 200
+Clear [C - C\x00] @ 500
+Set E=6 @ 300
+Clear [E - E\x00) @ 600
+*/
+TEST_CASE("/blobgranule/files/bgReadDeltaFile") {
+	Arena ar;
+	Standalone<StringRef> strA = "A"_sr;
+	Standalone<StringRef> strC = "C"_sr;
+	Standalone<StringRef> strE = "E"_sr;
+	Standalone<StringRef> str5 = "5"_sr;
+	Standalone<StringRef> str6 = "6"_sr;
+	Standalone<StringRef> str7 = "7"_sr;
+
+	Standalone<StringRef> strAfterA = keyAfter(strA);
+	Standalone<StringRef> strAfterE = keyAfter(strE);
+
+	Standalone<GranuleDeltas> originalMutations;
+	originalMutations.push_back(ar, singleMutation(100, MutationRef::Type::SetValue, ar, strA, str5));
+	originalMutations.push_back(ar, singleMutation(200, MutationRef::Type::ClearRange, ar, strA, strC));
+	originalMutations.push_back(ar, singleMutation(300, MutationRef::Type::SetValue, ar, strE, str6));
+	originalMutations.push_back(ar, singleMutation(400, MutationRef::Type::SetValue, ar, strA, str7));
+	originalMutations.push_back(ar, singleMutation(500, MutationRef::Type::ClearRange, ar, strA, strE));
+	originalMutations.push_back(ar, singleMutation(600, MutationRef::Type::ClearRange, ar, strE, strAfterE));
+
+	Standalone<VectorRef<GranuleMutationRef>> expectedMutations;
+	expectedMutations.emplace_back(ar, MutationRef::Type::SetValue, 100, strA, str5);
+	expectedMutations.emplace_back(ar, MutationRef::Type::SetValue, 400, strA, str7);
+	expectedMutations.emplace_back(ar, MutationRef::Type::ClearRange, 500, strA, strAfterA);
+	expectedMutations.emplace_back(ar, MutationRef::Type::ClearRange, 200, strA, strC);
+	expectedMutations.emplace_back(ar, MutationRef::Type::ClearRange, 500, strC, strE);
+	expectedMutations.emplace_back(ar, MutationRef::Type::SetValue, 300, strE, str6);
+	expectedMutations.emplace_back(ar, MutationRef::Type::ClearRange, 600, strE, strAfterE);
+
+	for (int chunkSize = 1; chunkSize <= 32 * 1024; chunkSize *= 2) {
+		Value serialized =
+		    serializeChunkedDeltaFile(strA, originalMutations, KeyRangeRef(strA, strAfterE), chunkSize, {}, {});
+		Standalone<VectorRef<GranuleMutationRef>> actualMutations = bgReadDeltaFile(serialized);
+
+		checkMutations(expectedMutations, actualMutations);
 	}
 
 	return Void();
@@ -2932,7 +3092,7 @@ std::pair<int64_t, double> doDeltaWriteBench(const Standalone<GranuleDeltas>& da
 
 void chunkFromFileSet(const FileSet& fileSet,
                       Standalone<BlobGranuleChunkRef>& chunk,
-                      StringRef* deltaPtrs,
+                      std::vector<StringRef>& deltaPtrs,
                       Version readVersion,
                       Optional<BlobGranuleCipherKeysCtx> keys,
                       int numDeltaFiles) {
@@ -2985,7 +3145,7 @@ std::pair<int64_t, double> doReadBench(const FileSet& fileSet,
 	Standalone<BlobGranuleChunkRef> chunk;
 	GranuleMaterializeStats stats;
 	ASSERT(numDeltaFiles >= 0 && numDeltaFiles <= fileSet.deltaFiles.size());
-	StringRef deltaPtrs[numDeltaFiles];
+	std::vector<StringRef> deltaPtrs(numDeltaFiles);
 
 	MutationRef clearAllAtEndMutation;
 	if (clearAllAtEnd) {

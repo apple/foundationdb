@@ -113,6 +113,7 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	Version historyVersion = invalidVersion;
 	Version knownCommittedVersion;
 	NotifiedVersion forceFlushVersion; // Version to force a flush at, if necessary
+	Version forceCompactVersion = invalidVersion;
 
 	int64_t originalEpoch;
 	int64_t originalSeqno;
@@ -196,7 +197,10 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 		return false;
 	}
 
-	inline bool doReadDrivenCompaction() { return runRDC.isSet(); }
+	inline bool doEarlyReSnapshot() {
+		return runRDC.isSet() ||
+		       (forceCompactVersion <= pendingDeltaVersion && forceCompactVersion > pendingSnapshotVersion);
+	}
 };
 
 struct GranuleRangeMetadata {
@@ -275,8 +279,8 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	Promise<Void> doReadDrivenCompaction;
 
 	Reference<FlowLock> initialSnapshotLock;
-	Reference<FlowLock> resnapshotLock;
-	Reference<FlowLock> deltaWritesLock;
+	Reference<FlowLock> resnapshotBudget;
+	Reference<FlowLock> deltaWritesBudget;
 
 	BlobWorkerStats stats;
 
@@ -297,13 +301,13 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	BlobWorkerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db)
 	  : id(id), db(db), tenantData(BGTenantMap(dbInfo)), dbInfo(dbInfo),
 	    initialSnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM)),
-	    resnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_RESNAPSHOT_PARALLELISM)),
-	    deltaWritesLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM)),
+	    resnapshotBudget(new FlowLock(SERVER_KNOBS->BLOB_WORKER_RESNAPSHOT_BUDGET_BYTES)),
+	    deltaWritesBudget(new FlowLock(SERVER_KNOBS->BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES)),
 	    stats(id,
 	          SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
 	          initialSnapshotLock,
-	          resnapshotLock,
-	          deltaWritesLock,
+	          resnapshotBudget,
+	          deltaWritesBudget,
 	          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	          SERVER_KNOBS->FILE_LATENCY_SKETCH_ACCURACY,
 	          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
@@ -358,17 +362,15 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 		// worker, before agreeing to take on a new assignment, given that several large sources of memory can grow and
 		// change post-assignment
 
-		// estimate slack in bytes buffered as max(0, assignments * (delta file size / 2) - bytesBuffered)
+		// FIXME: change these to be byte counts
+		// FIXME: buggify an extra multiplication factor for short periods of time to hopefully trigger this logic more
+		// often? estimate slack in bytes buffered as max(0, assignments * (delta file size / 2) - bytesBuffered)
+		// FIXME: this doesn't take increased delta file size for heavy write amp cases into account
 		int64_t expectedExtraBytesBuffered = std::max(
 		    0, stats.numRangesAssigned * (SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 2) - stats.mutationBytesBuffered);
-		// estimate slack in potential pending delta file writes
-		int64_t maximumExtraDeltaWrite = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES * deltaWritesLock->available();
 		// estimate slack in potential pending resnapshot
-		int64_t maximumExtraReSnapshot =
-		    (SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES + SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) * 2 *
-		    resnapshotLock->available();
-
-		int64_t totalExtra = expectedExtraBytesBuffered + maximumExtraDeltaWrite + maximumExtraReSnapshot;
+		int64_t totalExtra =
+		    expectedExtraBytesBuffered + deltaWritesBudget->available() + resnapshotBudget->available();
 		// assumes initial snapshot parallelism is small enough and uncommon enough to not add it to this computation
 		stats.estimatedMaxResidentMemory = stats.lastResidentMemory + totalExtra;
 
@@ -814,9 +816,10 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
                                            Future<BlobFileIndex> previousDeltaFileFuture,
                                            Future<Void> waitCommitted,
                                            Optional<std::pair<KeyRange, UID>> oldGranuleComplete,
-                                           Future<Void> startDeltaFileWrite) {
+                                           Future<Void> startDeltaFileWrite,
+                                           int64_t deltaFileBudget) {
 	wait(startDeltaFileWrite);
-	state FlowLock::Releaser holdingLock(*bwData->deltaWritesLock);
+	state FlowLock::Releaser holdingLock(*bwData->deltaWritesBudget, deltaFileBudget);
 
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 
@@ -911,8 +914,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 				}
 
 				if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-					wait(delay(0)); // should be cancelled
-					ASSERT(false);
+					wait(Never());
 				}
 
 				if (BUGGIFY_WITH_PROB(0.01)) {
@@ -1058,6 +1060,16 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	// free snapshot to reduce memory
 	snapshot = Standalone<GranuleSnapshot>();
 
+	if (serializedSize >= 5 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
+		// TODO REMOVE key range from log
+		TraceEvent(SevWarn, "BGSnapshotTooBig", bwData->id)
+		    .suppressFor(60)
+		    .detail("GranuleID", granuleID)
+		    .detail("Granule", keyRange)
+		    .detail("Version", version)
+		    .detail("Size", serializedSize);
+	}
+
 	// write to blob using multi part upload
 	state Reference<BackupContainerFileSystem> writeBStore;
 	state std::string fname;
@@ -1145,8 +1157,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	}
 
 	if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-		wait(delay(0)); // should be cancelled
-		ASSERT(false);
+		wait(Never());
 	}
 
 	// FIXME: change when we implement multiplexing
@@ -1200,8 +1211,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			DEBUG_KEY_RANGE("BlobWorkerFDBSnapshot", readVersion, metadata->keyRange, bwData->id);
 
 			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-				wait(delay(0)); // should be cancelled
-				ASSERT(false);
+				wait(Never());
 			}
 
 			// initial snapshot is committed in fdb, we can pop the change feed up to this version
@@ -1251,8 +1261,24 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
                                             UID granuleID,
                                             std::vector<GranuleFiles> fileSet,
                                             Version version) {
-	wait(bwData->resnapshotLock->take());
-	state FlowLock::Releaser holdingLock(*bwData->resnapshotLock);
+	state int64_t requiredBudget = 0;
+	for (auto& f : fileSet) {
+		ASSERT(!f.snapshotFiles.empty());
+		ASSERT(!f.deltaFiles.empty());
+		Version snapshotVersion = f.snapshotFiles.back().version;
+		requiredBudget += f.snapshotFiles.back().length;
+		int deltaIdx = f.deltaFiles.size() - 1;
+		while (deltaIdx >= 0 && f.deltaFiles[deltaIdx].version > snapshotVersion) {
+			requiredBudget += f.deltaFiles[deltaIdx].length;
+			deltaIdx--;
+		}
+	}
+	// assume new snapshot is the combined size of snapshot and deltas, worst case
+	requiredBudget *= 2;
+	// ensure it fits in budget
+	requiredBudget = std::min(requiredBudget, SERVER_KNOBS->BLOB_WORKER_RESNAPSHOT_BUDGET_BYTES);
+	wait(bwData->resnapshotBudget->take(TaskPriority::DefaultYield, requiredBudget));
+	state FlowLock::Releaser holdingLock(*bwData->resnapshotBudget, requiredBudget);
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 	if (BW_DEBUG) {
 		fmt::print("Compacting snapshot from blob for [{0} - {1}) @ {2}\n",
@@ -1267,9 +1293,6 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 	state double resnapshotStartTimer = g_network->timer();
 
 	for (auto& f : fileSet) {
-		ASSERT(!f.snapshotFiles.empty());
-		ASSERT(!f.deltaFiles.empty());
-
 		state BlobGranuleChunkRef chunk;
 		state GranuleFiles files = f;
 		state Version snapshotVersion = files.snapshotFiles.back().version;
@@ -1554,6 +1577,7 @@ ACTOR Future<BlobFileIndex> reSnapshotNoCheck(Reference<BlobWorkerData> bwData,
 	TraceEvent(SevDebug, "BlobGranuleReSnapshotOldFeed", bwData->id)
 	    .detail("Granule", metadata->keyRange)
 	    .detail("Version", reSnapshotVersion);
+	++bwData->stats.oldFeedSnapshots;
 
 	// wait for file updater to make sure that last delta file is in the metadata before
 	while (metadata->files.deltaFiles.empty() || metadata->files.deltaFiles.back().version < reSnapshotVersion) {
@@ -1606,8 +1630,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
 			reply.proposedSplitKey = proposedSplitKey;
 			bwData->currentManagerStatusStream.get().send(reply);
 			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-				wait(delay(0)); // should be cancelled
-				ASSERT(false);
+				wait(Never());
 			}
 			// if a new manager appears, also tell it about this granule being splittable, or retry after a certain
 			// amount of time of not hearing back
@@ -2051,6 +2074,58 @@ ACTOR Future<Void> forceFlushCleanup(Reference<BlobWorkerData> bwData, Reference
 	return Void();
 }
 
+// We have a normal target snapshot/delta ratio, but in write-heavy cases where are behind and need to catch up,
+// we want to change this target to get more efficient. To maintain a consistent write amp if the snapshot size is
+// growing without the ability to split, we scale the bytes before recompact to reach the target write amp. We also
+// decrease the target write amp the further behind we are to be more efficient.
+struct WriteAmpTarget {
+	double targetWriteAmp;
+	int bytesBeforeCompact;
+	int targetSnapshotBytes;
+	bool catchingUp;
+
+	WriteAmpTarget() { reset(); }
+
+	void reset() {
+		catchingUp = false;
+		bytesBeforeCompact = SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT;
+		targetSnapshotBytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
+		targetWriteAmp = 1.0 * (bytesBeforeCompact + targetSnapshotBytes) / bytesBeforeCompact;
+	}
+
+	void decrease(int deltaBytes) {
+		if (SERVER_KNOBS->BG_ENABLE_DYNAMIC_WRITE_AMP) {
+			catchingUp = true;
+			double minWriteAmp =
+			    SERVER_KNOBS->BG_DYNAMIC_WRITE_AMP_MIN_FACTOR *
+			    (SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT + SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) /
+			    SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT;
+			targetWriteAmp = std::max(targetWriteAmp * SERVER_KNOBS->BG_DYNAMIC_WRITE_AMP_DECREASE_FACTOR, minWriteAmp);
+			// To not wait for next re-snapshot, pessimistically assume that all deltas are inserts and new snapshot
+			// will be bigger. This is usually the case in write-heavy catchup cases, but helps us catch up faster
+			// regardless
+			targetSnapshotBytes += deltaBytes;
+			bytesBeforeCompact = targetSnapshotBytes / (targetWriteAmp - 1.0);
+		}
+	}
+
+	void newSnapshotSize(int snapshotSize) {
+		if (SERVER_KNOBS->BG_ENABLE_DYNAMIC_WRITE_AMP) {
+			snapshotSize = std::max(snapshotSize, SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES);
+			if (catchingUp) {
+				// if catching up, always aim for larger snapshot cycles to help catch up faster
+				snapshotSize = std::max(targetSnapshotBytes, snapshotSize);
+			}
+			targetSnapshotBytes = snapshotSize;
+			bytesBeforeCompact = targetSnapshotBytes / (targetWriteAmp - 1.0);
+		}
+	}
+
+	int getDeltaFileBytes() { return getBytesBeforeCompact() / 10; }
+
+	int getBytesBeforeCompact() { return bytesBeforeCompact; }
+};
+
 // updater for a single granule
 // TODO: this is getting kind of large. Should try to split out this actor if it continues to grow?
 ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
@@ -2076,6 +2151,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 	state std::deque<std::pair<Version, Version>> rollbacksInProgress;
 	state std::deque<std::pair<Version, Version>> rollbacksCompleted;
 	state Future<Void> startDeltaFileWrite = Future<Void>(Void());
+	state WriteAmpTarget writeAmpTarget;
 
 	state bool snapshotEligible; // just wrote a delta file or just took granule over from another worker
 	state bool justDidRollback = false;
@@ -2127,6 +2203,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					}
 				}
 			}
+
+			if (!files.snapshotFiles.empty()) {
+				writeAmpTarget.newSnapshotSize(files.snapshotFiles.back().length);
+			}
+
 			metadata->files = startState.existingFiles.get();
 			snapshotEligible = true;
 		}
@@ -2266,6 +2347,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 						metadata->files.snapshotFiles.push_back(completedFile);
 						metadata->durableSnapshotVersion.set(completedFile.version);
+						writeAmpTarget.newSnapshotSize(completedFile.length);
 						pendingSnapshots--;
 					} else {
 						handleCompletedDeltaFile(bwData,
@@ -2341,12 +2423,26 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					}
 					when(wait(inFlightFiles.empty() ? Never() : success(inFlightFiles.front().future))) {}
 					when(wait(nextForceFlush)) {
-						if (forceFlushVersions.empty() ||
-						    forceFlushVersions.back() < metadata->forceFlushVersion.get()) {
-							forceFlushVersions.push_back(metadata->forceFlushVersion.get());
+						Version nextForceFlushVersion = metadata->forceFlushVersion.get();
+						// if flush version is during a known rollback, increase it to after the rollback, so we don't
+						// write a snapshot or delta across rollbacks.
+						for (auto& it : rollbacksCompleted) {
+							if (nextForceFlushVersion > it.first && nextForceFlushVersion < it.second) {
+								nextForceFlushVersion = it.second;
+							}
 						}
-						if (metadata->forceFlushVersion.get() > lastForceFlushVersion) {
-							lastForceFlushVersion = metadata->forceFlushVersion.get();
+						for (auto& it : rollbacksInProgress) {
+							if (nextForceFlushVersion > it.first && nextForceFlushVersion < it.second) {
+								nextForceFlushVersion = it.second;
+							}
+						}
+						CODE_PROBE(nextForceFlushVersion != metadata->forceFlushVersion.get(),
+						           "force flush version bumped by rollback");
+						if (forceFlushVersions.empty() || forceFlushVersions.back() < nextForceFlushVersion) {
+							forceFlushVersions.push_back(nextForceFlushVersion);
+						}
+						if (nextForceFlushVersion > lastForceFlushVersion) {
+							lastForceFlushVersion = nextForceFlushVersion;
 						}
 						nextForceFlush = metadata->forceFlushVersion.whenAtLeast(lastForceFlushVersion + 1);
 					}
@@ -2389,6 +2485,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				// Start actors BEFORE setting new change feed data to ensure the change feed data is properly
 				// initialized by the client
 				metadata->activeCFData.set(cfData);
+
+				// no longer catching up on old feed, resume desired write amp target
+				writeAmpTarget.reset();
 			}
 
 			// process mutations
@@ -2413,6 +2512,15 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							BinaryReader br(deltas.mutations[0].param2, Unversioned());
 							br >> rollbackVersion;
 
+							if (BW_DEBUG && rollbackVersion < metadata->durableDeltaVersion.get()) {
+								fmt::print("Granule [{0} - {1}) on BW {2} invalid rollback!! {3} -> {4} (DDV={5})\n",
+								           metadata->keyRange.begin.printable().c_str(),
+								           metadata->keyRange.end.printable().c_str(),
+								           bwData->id.toString().substr(0, 5).c_str(),
+								           deltas.version,
+								           rollbackVersion,
+								           metadata->durableDeltaVersion.get());
+							}
 							ASSERT(rollbackVersion >= metadata->durableDeltaVersion.get());
 
 							if (!rollbacksInProgress.empty()) {
@@ -2591,17 +2699,18 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			// Write a new delta file IF we have enough bytes OR force flush.
 			// The force flush contract is a version cannot be put in forceFlushVersion unless the change feed
 			// is already whenAtLeast that version
+			// FIXME: with non-uniform delta file sizes, we could potentially over-shoot target write amp
 			bool forceFlush = !forceFlushVersions.empty() && forceFlushVersions.back() > metadata->pendingDeltaVersion;
-			bool doReadDrivenFlush = !metadata->currentDeltas.empty() && metadata->doReadDrivenCompaction();
+			bool doEarlyFlush = !metadata->currentDeltas.empty() && metadata->doEarlyReSnapshot();
 			CODE_PROBE(forceFlush, "Force flushing granule");
-			if (metadata->bufferedDeltaBytes >= SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES || forceFlush ||
-			    doReadDrivenFlush) {
+			if ((processedAnyMutations && metadata->bufferedDeltaBytes >= writeAmpTarget.getDeltaFileBytes()) ||
+			    forceFlush || doEarlyFlush) {
 				TraceEvent(SevDebug, "BlobGranuleDeltaFile", bwData->id)
 				    .detail("Granule", metadata->keyRange)
 				    .detail("Version", lastDeltaVersion);
 
 				// sanity check for version order
-				if (forceFlush || doReadDrivenFlush) {
+				if (forceFlush || doEarlyFlush) {
 					if (lastDeltaVersion == invalidVersion) {
 						lastDeltaVersion = metadata->bufferedDeltaVersion;
 					}
@@ -2654,7 +2763,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					           oldChangeFeedDataComplete.present() ? ". Finalizing " : "");
 				}
 
-				startDeltaFileWrite = bwData->deltaWritesLock->take();
+				int64_t deltaFileBudget =
+				    std::min((int64_t)metadata->bufferedDeltaBytes, SERVER_KNOBS->BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES);
+				startDeltaFileWrite = bwData->deltaWritesBudget->take(TaskPriority::DefaultYield, deltaFileBudget);
 				Future<BlobFileIndex> dfFuture =
 				    writeDeltaFile(bwData,
 				                   bstore,
@@ -2667,7 +2778,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				                   previousFuture,
 				                   waitVersionCommitted(bwData, metadata, lastDeltaVersion),
 				                   oldChangeFeedDataComplete,
-				                   startDeltaFileWrite);
+				                   startDeltaFileWrite,
+				                   deltaFileBudget);
 				inFlightFiles.push_back(InFlightFile(dfFuture, lastDeltaVersion, metadata->bufferedDeltaBytes, false));
 
 				// add new pending delta file
@@ -2695,7 +2807,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				// Wait on delta file starting here. If we have too many pending delta file writes, we need to not
 				// continue to consume from the change feed, as that will pile on even more delta files to write
 				wait(startDeltaFileWrite);
-			} else if (metadata->doReadDrivenCompaction()) {
+			} else if (metadata->doEarlyReSnapshot()) {
 				ASSERT(metadata->currentDeltas.empty());
 				snapshotEligible = true;
 			}
@@ -2705,17 +2817,17 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			// yet
 
 			// If we have enough delta files, try to re-snapshot
-			if (snapshotEligible && (metadata->doReadDrivenCompaction() ||
-			                         metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT)) {
+			// FIXME: have max file count in addition to bytes count
+			if (snapshotEligible && (metadata->doEarlyReSnapshot() ||
+			                         metadata->bytesInNewDeltaFiles >= writeAmpTarget.getBytesBeforeCompact())) {
 				if (BW_DEBUG && !inFlightFiles.empty()) {
 					fmt::print("Granule [{0} - {1}) ready to re-snapshot at {2} after {3} > {4} bytes, "
-					           "waiting for "
-					           "outstanding {5} files to finish\n",
+					           "waiting for outstanding {5} files to finish\n",
 					           metadata->keyRange.begin.printable(),
 					           metadata->keyRange.end.printable(),
 					           metadata->pendingDeltaVersion,
 					           metadata->bytesInNewDeltaFiles,
-					           SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT,
+					           writeAmpTarget.getBytesBeforeCompact(),
 					           inFlightFiles.size());
 				}
 
@@ -2746,6 +2858,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				} else {
 					inFlightBlobSnapshot =
 					    reSnapshotNoCheck(bwData, bstore, metadata, startState.granuleID, previousFuture);
+					writeAmpTarget.decrease(metadata->bytesInNewDeltaFiles);
 				}
 				inFlightFiles.push_back(InFlightFile(inFlightBlobSnapshot, metadata->pendingDeltaVersion, 0, true));
 				pendingSnapshots++;
@@ -2757,9 +2870,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				metadata->resetReadStats();
 
 				// If we have more than one snapshot file and that file is unblocked (committedVersion >=
-				// snapshotVersion), wait for it to finish
-
-				if (pendingSnapshots > 1) {
+				// snapshotVersion), wait for it to finish. Otherwise, we might write way too many delta files that then
+				// get discarded if one of the snapshots splits If catching up on old feed, allow more parallel
+				// snapshots because none of them can split
+				int maxAllowedPendingSnapshots =
+				    (metadata->pendingSnapshotVersion >= startState.changeFeedStartVersion) ? 1 : 3;
+				if (pendingSnapshots > maxAllowedPendingSnapshots) {
 					state int waitIdx = 0;
 					int idx = 0;
 					Version safeVersion =
@@ -2790,6 +2906,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							}
 							metadata->files.snapshotFiles.push_back(completedFile);
 							metadata->durableSnapshotVersion.set(completedFile.version);
+							writeAmpTarget.newSnapshotSize(completedFile.length);
 							pendingSnapshots--;
 						} else {
 							handleCompletedDeltaFile(bwData,
@@ -2813,25 +2930,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				    metadata,
 				    startState.granuleID,
 				    inFlightFiles.empty() ? Future<Void>(Void()) : success(inFlightFiles.back().future));
-
-			} else if (snapshotEligible &&
-			           metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) {
-				// if we're in the old change feed case and can't snapshot but we have enough data to, don't
-				// queue too many files in parallel, and slow down change feed consuming to let file writing
-				// catch up
-
-				CODE_PROBE(true, "Granule processing long tail of old change feed", probe::decoration::rare);
-				if (inFlightFiles.size() > 10 && inFlightFiles.front().version <= metadata->knownCommittedVersion) {
-					if (BW_DEBUG) {
-						fmt::print("[{0} - {1}) Waiting on delta file b/c old change feed\n",
-						           metadata->keyRange.begin.printable(),
-						           metadata->keyRange.end.printable());
-					}
-					choose {
-						when(BlobFileIndex completedDeltaFile = wait(inFlightFiles.front().future)) {}
-						when(wait(delay(0.1))) {}
-					}
-				}
 			}
 			snapshotEligible = false;
 		}
@@ -4275,8 +4373,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			}
 
 			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-				wait(delay(0)); // should be cancelled
-				ASSERT(false);
+				wait(Never());
 			}
 
 			return info;
@@ -4884,32 +4981,162 @@ ACTOR Future<Void> handleFlushGranuleReq(Reference<BlobWorkerData> self, FlushGr
 
 	auto myGranule = self->granuleMetadata.rangeContaining(req.granuleRange.begin);
 	state Reference<GranuleMetadata> metadata = myGranule.cvalue().activeMetadata;
-	if (req.granuleRange != myGranule.range() || !metadata.isValid() || !metadata->cancelled.canBeSet()) {
+	// if req is a client request (epoch == -1), granule ranges may not line up exactly, but if it's from the blob
+	// manager, they should
+	bool reqInRange =
+	    (req.managerEpoch == -1) ? myGranule.range().contains(req.granuleRange) : req.granuleRange == myGranule.range();
+	if (!reqInRange || !metadata.isValid() || !metadata->cancelled.canBeSet()) {
 		if (BW_DEBUG) {
-			fmt::print("BW {0} cannot flush granule [{1} - {2})\n",
-			           self->id.toString().substr(0, 5),
-			           req.granuleRange.begin.printable(),
-			           req.granuleRange.end.printable());
+			fmt::print(
+			    "BW {0} cannot flush req [{1} - {2}) from BM {3}: granule [{4} - {5}), valid: {6}, cancelled: {7}\n",
+			    self->id.toString().substr(0, 5),
+			    req.granuleRange.begin.printable(),
+			    req.granuleRange.end.printable(),
+			    req.managerEpoch,
+			    myGranule.begin().printable(),
+			    myGranule.end().printable(),
+			    metadata.isValid(),
+			    metadata.isValid() && !metadata->cancelled.canBeSet());
 		}
 		req.reply.sendError(wrong_shard_server());
 		return Void();
 	}
 
-	if (metadata->durableDeltaVersion.get() < req.flushVersion) {
-		try {
+	state Promise<Void> granuleCancelled = metadata->cancelled;
+
+	try {
+		if (BW_DEBUG) {
+			fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}\n",
+			           self->id.toString().substr(0, 5),
+			           req.granuleRange.begin.printable(),
+			           req.granuleRange.end.printable(),
+			           req.flushVersion);
+		}
+		choose {
+			when(wait(metadata->readable.getFuture())) {}
+			when(wait(granuleCancelled.getFuture())) {
+				if (BW_DEBUG) {
+					fmt::print("BW {0} flush granule [{1} - {2}) cancelled 2\n",
+					           self->id.toString().substr(0, 5),
+					           req.granuleRange.begin.printable(),
+					           req.granuleRange.end.printable());
+				}
+				req.reply.sendError(wrong_shard_server());
+				return Void();
+			}
+		}
+
+		// if delta file is already written after flush version, but that delta file did not compact,
+		// we have to write another one to trigger compaction
+		if (req.compactAfter && metadata->pendingSnapshotVersion < req.flushVersion &&
+		    metadata->pendingDeltaVersion >= req.flushVersion) {
+			CODE_PROBE(true, "Bumping granule force flush version to guarantee re-snapshot");
 			if (BW_DEBUG) {
-				fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}\n",
+				fmt::print("BW {0} granule flush version [{1} - {2}) @ {3} increased to {4}\n",
+				           self->id.toString().substr(0, 5),
+				           req.granuleRange.begin.printable(),
+				           req.granuleRange.end.printable(),
+				           req.flushVersion,
+				           metadata->pendingDeltaVersion + 1);
+			}
+
+			req.flushVersion = metadata->pendingDeltaVersion + 1;
+		}
+		if (req.compactAfter) {
+			metadata->forceCompactVersion = std::max(req.flushVersion, metadata->forceCompactVersion);
+		}
+
+		loop {
+			// force granule to flush at this version, and wait
+			if (req.flushVersion > metadata->pendingDeltaVersion) {
+				// first, wait for granule active
+				if (!metadata->activeCFData.get().isValid()) {
+					req.reply.sendError(wrong_shard_server());
+					return Void();
+				}
+
+				// wait for change feed version to catch up to ensure we have all data
+				if (metadata->activeCFData.get()->getVersion() < req.flushVersion) {
+					if (BW_DEBUG) {
+						fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: waiting for CF version "
+						           "(currently {4})\n",
+						           self->id.toString().substr(0, 5),
+						           req.granuleRange.begin.printable(),
+						           req.granuleRange.end.printable(),
+						           req.flushVersion,
+						           metadata->activeCFData.get()->getVersion());
+					}
+
+					loop {
+						choose {
+							when(wait(metadata->activeCFData.get().isValid()
+							              ? metadata->activeCFData.get()->whenAtLeast(req.flushVersion)
+							              : Never())) {
+								break;
+							}
+							when(wait(metadata->activeCFData.onChange())) {}
+							when(wait(granuleCancelled.getFuture())) {
+								if (BW_DEBUG) {
+									fmt::print("BW {0} flush granule [{1} - {2}) cancelled 2\n",
+									           self->id.toString().substr(0, 5),
+									           req.granuleRange.begin.printable(),
+									           req.granuleRange.end.printable());
+								}
+								req.reply.sendError(wrong_shard_server());
+								return Void();
+							}
+						}
+					}
+
+					ASSERT(metadata->activeCFData.get()->getVersion() >= req.flushVersion);
+					if (BW_DEBUG) {
+						fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got CF version\n",
+						           self->id.toString().substr(0, 5),
+						           req.granuleRange.begin.printable(),
+						           req.granuleRange.end.printable(),
+						           req.flushVersion);
+					}
+				}
+
+				if (req.flushVersion > metadata->pendingDeltaVersion &&
+				    req.flushVersion > metadata->forceFlushVersion.get()) {
+					if (BW_DEBUG) {
+						fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: setting force flush version\n",
+						           self->id.toString().substr(0, 5),
+						           req.granuleRange.begin.printable(),
+						           req.granuleRange.end.printable(),
+						           req.flushVersion);
+					}
+					// if after waiting for CF version, flushVersion still higher than pendingDeltaVersion,
+					// set forceFlushVersion
+					metadata->forceFlushVersion.set(req.flushVersion);
+				}
+			}
+
+			if (BW_DEBUG) {
+				fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: waiting durable\n",
 				           self->id.toString().substr(0, 5),
 				           req.granuleRange.begin.printable(),
 				           req.granuleRange.end.printable(),
 				           req.flushVersion);
 			}
-			state Promise<Void> granuleCancelled = metadata->cancelled;
 			choose {
-				when(wait(metadata->readable.getFuture())) {}
+				when(wait(metadata->durableDeltaVersion.whenAtLeast(req.flushVersion))) {
+					if (BW_DEBUG) {
+						fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got durable\n",
+						           self->id.toString().substr(0, 5),
+						           req.granuleRange.begin.printable(),
+						           req.granuleRange.end.printable(),
+						           req.flushVersion);
+					}
+					break;
+				}
+				when(wait(metadata->activeCFData.onChange())) {
+					// if a rollback happens, need to restart flush process
+				}
 				when(wait(granuleCancelled.getFuture())) {
 					if (BW_DEBUG) {
-						fmt::print("BW {0} flush granule [{1} - {2}) cancelled 2\n",
+						fmt::print("BW {0} flush granule [{1} - {2}) cancelled 3\n",
 						           self->id.toString().substr(0, 5),
 						           req.granuleRange.begin.printable(),
 						           req.granuleRange.end.printable());
@@ -4918,157 +5145,73 @@ ACTOR Future<Void> handleFlushGranuleReq(Reference<BlobWorkerData> self, FlushGr
 					return Void();
 				}
 			}
-
-			loop {
-				// force granule to flush at this version, and wait
-				if (req.flushVersion > metadata->pendingDeltaVersion) {
-					// first, wait for granule active
-					if (!metadata->activeCFData.get().isValid()) {
-						req.reply.sendError(wrong_shard_server());
-						return Void();
-					}
-
-					// wait for change feed version to catch up to ensure we have all data
-					if (metadata->activeCFData.get()->getVersion() < req.flushVersion) {
-						if (BW_DEBUG) {
-							fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: waiting for CF version "
-							           "(currently {4})\n",
-							           self->id.toString().substr(0, 5),
-							           req.granuleRange.begin.printable(),
-							           req.granuleRange.end.printable(),
-							           req.flushVersion,
-							           metadata->activeCFData.get()->getVersion());
-						}
-
-						loop {
-							choose {
-								when(wait(metadata->activeCFData.get().isValid()
-								              ? metadata->activeCFData.get()->whenAtLeast(req.flushVersion)
-								              : Never())) {
-									break;
-								}
-								when(wait(metadata->activeCFData.onChange())) {}
-								when(wait(granuleCancelled.getFuture())) {
-									if (BW_DEBUG) {
-										fmt::print("BW {0} flush granule [{1} - {2}) cancelled 2\n",
-										           self->id.toString().substr(0, 5),
-										           req.granuleRange.begin.printable(),
-										           req.granuleRange.end.printable());
-									}
-									req.reply.sendError(wrong_shard_server());
-									return Void();
-								}
-							}
-						}
-
-						ASSERT(metadata->activeCFData.get()->getVersion() >= req.flushVersion);
-						if (BW_DEBUG) {
-							fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got CF version\n",
-							           self->id.toString().substr(0, 5),
-							           req.granuleRange.begin.printable(),
-							           req.granuleRange.end.printable(),
-							           req.flushVersion);
-						}
-					}
-
-					if (req.flushVersion > metadata->pendingDeltaVersion) {
-						if (BW_DEBUG) {
-							fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: setting force flush version\n",
-							           self->id.toString().substr(0, 5),
-							           req.granuleRange.begin.printable(),
-							           req.granuleRange.end.printable(),
-							           req.flushVersion);
-						}
-						// if after waiting for CF version, flushVersion still higher than pendingDeltaVersion,
-						// set forceFlushVersion
-						metadata->forceFlushVersion.set(req.flushVersion);
-					}
-				}
-
-				if (BW_DEBUG) {
-					fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: waiting durable\n",
-					           self->id.toString().substr(0, 5),
-					           req.granuleRange.begin.printable(),
-					           req.granuleRange.end.printable(),
-					           req.flushVersion);
-				}
-				choose {
-					when(wait(metadata->durableDeltaVersion.whenAtLeast(req.flushVersion))) {
-						if (BW_DEBUG) {
-							fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got durable\n",
-							           self->id.toString().substr(0, 5),
-							           req.granuleRange.begin.printable(),
-							           req.granuleRange.end.printable(),
-							           req.flushVersion);
-						}
-
-						req.reply.send(Void());
-						return Void();
-					}
-					when(wait(metadata->activeCFData.onChange())) {
-						// if a rollback happens, need to restart flush process
-					}
-					when(wait(granuleCancelled.getFuture())) {
-						if (BW_DEBUG) {
-							fmt::print("BW {0} flush granule [{1} - {2}) cancelled 3\n",
-							           self->id.toString().substr(0, 5),
-							           req.granuleRange.begin.printable(),
-							           req.granuleRange.end.printable());
-						}
-						req.reply.sendError(wrong_shard_server());
-						return Void();
-					}
-				}
-			}
-		} catch (Error& e) {
-			if (BW_DEBUG) {
-				fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got unexpected error {4}\n",
-				           self->id.toString().substr(0, 5),
-				           req.granuleRange.begin.printable(),
-				           req.granuleRange.end.printable(),
-				           req.flushVersion,
-				           e.name());
-			}
-			throw e;
 		}
-	} else {
+	} catch (Error& e) {
 		if (BW_DEBUG) {
-			fmt::print("BW {0} already flushed granule [{1} - {2}) @ {3}\n",
+			fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got unexpected error {4}\n",
 			           self->id.toString().substr(0, 5),
 			           req.granuleRange.begin.printable(),
 			           req.granuleRange.end.printable(),
-			           req.flushVersion);
+			           req.flushVersion,
+			           e.name());
 		}
-
-		req.reply.send(Void());
-		return Void();
+		throw e;
 	}
+
+	if (req.compactAfter) {
+		// if delta is now durable, wait for re-snapshot
+		choose {
+			when(wait(metadata->durableSnapshotVersion.whenAtLeast(req.flushVersion))) {
+				if (BW_DEBUG) {
+					fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got durable snapshot {4}\n",
+					           self->id.toString().substr(0, 5),
+					           req.granuleRange.begin.printable(),
+					           req.granuleRange.end.printable(),
+					           req.flushVersion,
+					           metadata->durableSnapshotVersion.get());
+				}
+			}
+			when(wait(granuleCancelled.getFuture())) {
+				if (BW_DEBUG) {
+					fmt::print("BW {0} flush granule [{1} - {2}) cancelled 4\n",
+					           self->id.toString().substr(0, 5),
+					           req.granuleRange.begin.printable(),
+					           req.granuleRange.end.printable());
+				}
+				req.reply.sendError(wrong_shard_server());
+				return Void();
+			}
+		}
+	}
+
+	req.reply.send(Void());
+	return Void();
 }
 
 ACTOR Future<Void> simForceFileWriteContention(Reference<BlobWorkerData> bwData) {
 	// take the file write contention lock down to just 1 or 2 open writes
-	int numToLeave = deterministicRandom()->randomInt(1, 3);
-	state int numToTake = SERVER_KNOBS->BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM - numToLeave;
-	ASSERT(bwData->deltaWritesLock->available() >= numToTake);
+	int64_t amountToLeave = (1 + 2 * deterministicRandom()->random01()) * SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES;
+	state int64_t amountToTake = SERVER_KNOBS->BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES - amountToLeave;
 
-	if (numToTake <= 0) {
+	if (amountToTake <= 0) {
 		return Void();
 	}
 	if (BW_DEBUG) {
-		fmt::print("BW {0} forcing file contention down to {1}\n", bwData->id.toString().substr(0, 5), numToTake);
+		fmt::print("BW {0} forcing file contention down to {1}\n", bwData->id.toString().substr(0, 5), amountToTake);
 	}
 
-	wait(bwData->deltaWritesLock->take(TaskPriority::DefaultYield, numToTake));
+	wait(bwData->deltaWritesBudget->take(TaskPriority::DefaultYield, amountToTake));
 	if (BW_DEBUG) {
-		fmt::print("BW {0} force acquired {1} file writes\n", bwData->id.toString().substr(0, 5), numToTake);
+		fmt::print("BW {0} force acquired {1} file write bytes\n", bwData->id.toString().substr(0, 5), amountToTake);
 	}
-	state FlowLock::Releaser holdingLock(*bwData->deltaWritesLock, numToTake);
+	state FlowLock::Releaser holdingLock(*bwData->deltaWritesBudget, amountToTake);
 	state Future<Void> delayFor = delay(deterministicRandom()->randomInt(10, 60));
 	loop {
 		choose {
 			when(wait(delayFor)) {
 				if (BW_DEBUG) {
-					fmt::print("BW {0} releasing {1} file writes\n", bwData->id.toString().substr(0, 5), numToTake);
+					fmt::print(
+					    "BW {0} releasing {1} file write bytes\n", bwData->id.toString().substr(0, 5), amountToTake);
 				}
 				return Void();
 			}
@@ -5076,9 +5219,9 @@ ACTOR Future<Void> simForceFileWriteContention(Reference<BlobWorkerData> bwData)
 			when(wait(delay(5.0))) {
 				if (g_simulator->speedUpSimulation) {
 					if (BW_DEBUG) {
-						fmt::print("BW {0} releasing {1} file writes b/c speed up simulation\n",
+						fmt::print("BW {0} releasing {1} file write bytes b/c speed up simulation\n",
 						           bwData->id.toString().substr(0, 5),
-						           numToTake);
+						           amountToTake);
 					}
 					return Void();
 				}
@@ -5275,14 +5418,15 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				handleBlobVersionRequest(self, req);
 			}
 			when(FlushGranuleRequest req = waitNext(bwInterf.flushGranuleRequest.getFuture())) {
-				if (self->managerEpochOk(req.managerEpoch)) {
+				if (req.managerEpoch == -1 || self->managerEpochOk(req.managerEpoch)) {
 					if (BW_DEBUG) {
-						fmt::print("BW {0} got flush granule req from {1}: [{2} - {3}) @ {4}\n",
+						fmt::print("BW {0} got flush granule req from {1}: [{2} - {3}) @ {4}{5}\n",
 						           bwInterf.id().toString(),
 						           req.managerEpoch,
 						           req.granuleRange.begin.printable(),
 						           req.granuleRange.end.printable(),
-						           req.flushVersion);
+						           req.flushVersion,
+						           req.compactAfter ? " (compact)" : "");
 					}
 					self->addActor.send(handleFlushGranuleReq(self, req));
 				} else {

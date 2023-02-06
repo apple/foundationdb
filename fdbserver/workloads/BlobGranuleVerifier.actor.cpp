@@ -36,6 +36,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
+#include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -72,6 +73,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	bool purgeAtLatest;
 	bool clearAndMergeCheck;
 	bool granuleSizeCheck;
+	bool doForceFlushing;
 
 	DatabaseConfiguration config;
 
@@ -85,6 +87,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	std::vector<std::tuple<KeyRange, Version, UID, Future<GranuleFiles>>> purgedDataToCheck;
 
 	Future<Void> summaryClient;
+	Future<Void> forceFlushingClient;
 	Promise<Void> triggerSummaryComplete;
 
 	BlobGranuleVerifierWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -117,11 +120,21 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		clearAndMergeCheck = getOption(options, "clearAndMergeCheck"_sr, sharedRandomNumber % 10 == 0);
 		sharedRandomNumber /= 10;
 
+		doForceFlushing = getOption(options, "doForceFlushing"_sr, sharedRandomNumber % 4 == 0);
+		sharedRandomNumber /= 4;
+
 		// don't do strictPurgeChecking or forcePurge if !enablePurging
 		if (!enablePurging) {
 			strictPurgeChecking = false;
 			doForcePurge = false;
 			purgeAtLatest = false;
+		} else {
+			// don't do force flushing if purging enabled
+			doForceFlushing = false;
+		}
+
+		if (initAtEnd) {
+			doForceFlushing = false;
 		}
 
 		if (doForcePurge) {
@@ -544,6 +557,11 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			summaryClient = validateGranuleSummaries(cx, normalKeys, {}, triggerSummaryComplete);
 		} else {
 			summaryClient = Future<Void>(Void());
+		}
+		if (doForceFlushing) {
+			forceFlushingClient = validateForceFlushing(cx, normalKeys, testDuration, triggerSummaryComplete);
+		} else {
+			forceFlushingClient = Future<Void>(Void());
 		}
 		return delay(testDuration);
 	}
@@ -1043,13 +1061,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			wait(self->setUpBlobRange(cx));
 		}
 
-		state Future<Void> checkFeedCleanupFuture;
-		if (self->clientId == 0) {
-			checkFeedCleanupFuture = checkFeedCleanup(cx, BGV_DEBUG);
-		} else {
-			checkFeedCleanupFuture = Future<Void>(Void());
-		}
-
 		state Version readVersion = wait(self->doGrv(&tr));
 		state Version startReadVersion = readVersion;
 		state int checks = 0;
@@ -1169,6 +1180,14 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			fmt::print("Availability check updated read version from {0} to {1}\n", startReadVersion, readVersion);
 		}
 
+		// start feed cleanup check after there's guaranteed to be data for each granule
+		state Future<Void> checkFeedCleanupFuture;
+		if (self->clientId == 0) {
+			checkFeedCleanupFuture = checkFeedCleanup(cx, BGV_DEBUG);
+		} else {
+			checkFeedCleanupFuture = Future<Void>(Void());
+		}
+
 		state bool dataPassed = wait(self->checkAllData(cx, self));
 		wait(checkFeedCleanupFuture);
 
@@ -1255,7 +1274,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 
 		// validate that summary completes without error
-		wait(self->summaryClient);
+		wait(self->summaryClient && self->forceFlushingClient);
 
 		if (BGV_DEBUG) {
 			fmt::print("BGV {0}) check done\n", self->clientId);

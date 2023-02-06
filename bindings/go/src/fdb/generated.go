@@ -107,6 +107,11 @@ func (o NetworkOptions) SetTraceShareAmongClientThreads() error {
 	return o.setOpt(37, nil)
 }
 
+// Initialize trace files on network setup, determine the local IP later. Otherwise tracing is initialized when opening the first database.
+func (o NetworkOptions) SetTraceInitializeOnSetup() error {
+	return o.setOpt(38, nil)
+}
+
 // Set file suffix for partially written log files.
 //
 // Parameter: Append this suffix to partially written log files. When a log file is complete, it is renamed to remove the suffix. No separator is added between the file and the suffix. If you want to add a file extension, you should include the separator - e.g. '.tmp' instead of 'tmp' to add the 'tmp' extension.
@@ -422,9 +427,11 @@ func (o DatabaseOptions) SetUseConfigDatabase() error {
 	return o.setOpt(800, nil)
 }
 
-// An integer between 0 and 100 (default is 0) expressing the probability that a client will verify it can't read stale data whenever it detects a recovery.
-func (o DatabaseOptions) SetTestCausalReadRisky() error {
-	return o.setOpt(900, nil)
+// Enables verification of causal read risky by checking whether clients are able to read stale data when they detect a recovery, and logging an error if so.
+//
+// Parameter: integer between 0 and 100 expressing the probability a client will verify it can't read stale data
+func (o DatabaseOptions) SetTestCausalReadRisky(param int64) error {
+	return o.setOpt(900, int64ToBytes(param))
 }
 
 // The transaction, if not self-conflicting, may be committed a second time after commit succeeds, in the event of a fault
