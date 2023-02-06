@@ -18,16 +18,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-import base64
 import fdb
 import pytest
 import subprocess
 import admin_server
+import base64
+import glob
 import time
 from local_cluster import TLSConfig
 from tmp_cluster import TempCluster
 from typing import Union
 from util import random_alphanum_str, random_alphanum_bytes, to_str, to_bytes
+import xml.etree.ElementTree as ET
 
 fdb.api_version(720)
 
@@ -50,6 +52,18 @@ def pytest_addoption(parser):
             default=1,
             dest="public_key_refresh_interval",
             help="How frequently server refreshes authorization public key file")
+    parser.addoption(
+            "--force-multi-version-client",
+            action="store_true",
+            default=False,
+            dest="force_multi_version_client",
+            help="Whether to force multi-version client mode")
+    parser.addoption(
+            "--use-grv-cache",
+            action="store_true",
+            default=False,
+            dest="use_grv_cache",
+            help="Whether to make client use cached GRV from database context")
 
 @pytest.fixture(scope="session")
 def build_dir(request):
@@ -68,6 +82,14 @@ def public_key_refresh_interval(request):
     return request.config.option.public_key_refresh_interval
 
 @pytest.fixture(scope="session")
+def force_multi_version_client(request):
+    return request.config.option.force_multi_version_client
+
+@pytest.fixture(scope="session")
+def use_grv_cache(request):
+    return request.config.option.use_grv_cache
+
+@pytest.fixture(scope="session")
 def kid():
     return random_alphanum_str(12)
 
@@ -79,26 +101,51 @@ def admin_ipc():
     server.join()
 
 @pytest.fixture(autouse=True, scope=cluster_scope)
-def cluster(admin_ipc, build_dir, public_key_refresh_interval, trusted_client):
+def cluster(admin_ipc, build_dir, public_key_refresh_interval, trusted_client, force_multi_version_client, use_grv_cache):
     with TempCluster(
             build_dir=build_dir,
             tls_config=TLSConfig(server_chain_len=3, client_chain_len=2),
             authorization_kty="EC",
             authorization_keypair_id="authz-key",
-            remove_at_exit=True,
+            remove_at_exit=False,
             custom_config={
                 "knob-public-key-file-refresh-interval-seconds": public_key_refresh_interval,
             }) as cluster:
         keyfile = str(cluster.client_key_file)
         certfile = str(cluster.client_cert_file)
         cafile = str(cluster.server_ca_file)
+        logdir = str(cluster.log)
         fdb.options.set_tls_key_path(keyfile if trusted_client else "")
         fdb.options.set_tls_cert_path(certfile if trusted_client else "")
         fdb.options.set_tls_ca_path(cafile)
-        fdb.options.set_trace_enable()
+        fdb.options.set_trace_enable(logdir)
+        fdb.options.set_trace_file_identifier("testclient")
+        if force_multi_version_client:
+            fdb.options.set_disable_client_bypass()
+        admin_ipc.request("configure_client", [force_multi_version_client, use_grv_cache, logdir])
         admin_ipc.request("configure_tls", [keyfile, certfile, cafile])
         admin_ipc.request("connect", [str(cluster.cluster_file)])
         yield cluster
+        err_count = {}
+        for file in glob.glob(str(cluster.log.joinpath("*.xml"))):
+            lineno = 1
+            for line in open(file):
+                try:
+                    doc = ET.fromstring(line)
+                except:
+                    continue
+                if doc.attrib.get("Severity", "") == "40":
+                    ev_type = doc.attrib.get("Type", "[unset]")
+                    err = doc.attrib.get("Error", "[unset]")
+                    tup = (file, ev_type, err)
+                    err_count[tup] = err_count.get(tup, 0) + 1
+                lineno += 1
+        print("Sev40 Summary:")
+        if len(err_count) == 0:
+            print("  No errors")
+        else:
+            for tup, count in err_count.items():
+                print("  {}: {}".format(tup, count))
 
 @pytest.fixture
 def db(cluster, admin_ipc):
@@ -131,27 +178,30 @@ def default_tenant(tenant_gen, tenant_del):
     tenant_del(tenant)
 
 @pytest.fixture
-def tenant_tr_gen(db):
+def tenant_tr_gen(db, use_grv_cache):
     def fn(tenant):
         tenant = db.open_tenant(to_bytes(tenant))
-        return tenant.create_transaction()
+        tr = tenant.create_transaction()
+        if use_grv_cache:
+            tr.options.set_use_grv_cache()
+        return tr
     return fn
 
 @pytest.fixture
 def token_claim_1h(db):
-	# JWT claim that is valid for 1 hour since time of invocation
-	def get_claim(tenant_name):
-		tenant = db.open_tenant(to_bytes(tenant_name))
-		tenant_id = tenant.get_id().wait()
-		now = time.time()
-		return {
-			"iss": "fdb-authz-tester",
-			"sub": "authz-test",
-			"aud": ["tmp-cluster"],
-			"iat": now,
-			"nbf": now - 1,
-			"exp": now + 60 * 60,
-			"jti": random_alphanum_str(10),
-			"tenants": [to_str(base64.b64encode(tenant_id.to_bytes(8, "big")))],
-		}
-	return get_claim
+    # JWT claim that is valid for 1 hour since time of invocation
+    def fn(tenant_name: Union[bytes, str]):
+        tenant = db.open_tenant(to_bytes(tenant_name))
+        tenant_id = tenant.get_id().wait()
+        now = time.time()
+        return {
+            "iss": "fdb-authz-tester",
+            "sub": "authz-test",
+            "aud": ["tmp-cluster"],
+            "iat": now,
+            "nbf": now - 1,
+            "exp": now + 60 * 60,
+            "jti": random_alphanum_str(10),
+            "tenants": [to_str(base64.b64encode(tenant_id.to_bytes(8, "big")))],
+        }
+    return fn

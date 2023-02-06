@@ -36,6 +36,7 @@ class _admin_request(object):
 
 def main_loop(main_pipe, pipe):
     main_pipe.close()
+    use_grv_cache = False
     db = None
     while True:
         try:
@@ -49,7 +50,14 @@ def main_loop(main_pipe, pipe):
         args = req.args
         resp = True
         try:
-            if op == "connect":
+            if op == "configure_client":
+                force_multi_version_client, use_grv_cache, logdir = req.args[:3]
+                if force_multi_version_client:
+                    fdb.options.set_disable_client_bypass()
+                if len(logdir) > 0:
+                    fdb.options.set_trace_enable(logdir)
+                    fdb.options.set_trace_file_identifier("adminserver")
+            elif op == "connect":
                 db = fdb.open(req.args[0])
             elif op == "configure_tls":
                 keyfile, certfile, cafile = req.args[:3]
@@ -77,6 +85,8 @@ def main_loop(main_pipe, pipe):
                     resp = Exception("db not open")
                 else:
                     tr = db.create_transaction()
+                    if use_grv_cache:
+                        tr.options.set_use_grv_cache()
                     del tr[b'':b'\xff']
                     tr.commit().wait()
                     tenants = list(map(lambda x: x.key, list(fdb.tenant_management.list_tenants(db, b'', b'\xff', 0).to_list())))
@@ -98,7 +108,7 @@ def get():
 
 # server needs to be a singleton running in subprocess, because FDB network layer (including active TLS config) is a global var
 class Server(object):
-    def __init__(self):
+    def __init__(self, force_multi_version_client: bool=False, use_grv_cache: bool=False):
         global _admin_server
         assert _admin_server is None, "admin server may be setup once per process"
         _admin_server = self

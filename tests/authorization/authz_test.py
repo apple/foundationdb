@@ -27,6 +27,7 @@ import pytest
 import random
 import sys
 import time
+from collections.abc import Callable
 from multiprocessing import Process, Pipe
 from typing import Union
 from authz_util import token_gen, private_key_gen, public_keyset_from_keys, alg_from_kty
@@ -43,15 +44,56 @@ special_key_ranges = [
     ("kill storage", b"/globals/killStorage", b"/globals/killStorage\x00"),
 ]
 
+# handler for when looping is assumed with usage
+# e.g. GRV cache enablement removes the guarantee that transaction always gets the latest read version before it starts,
+#      which could introduce arbitrary conflicts even on idle test clusters, and those need to be resolved via retrying.
+def loop_until_success(tr: fdb.Transaction, func):
+    while True:
+        try:
+            return func(tr)
+        except fdb.FDBError as e:
+            tr.on_error(e)
+
+def test_token_option(cluster, default_tenant, tenant_tr_gen, token_claim_1h):
+    token = token_gen(cluster.private_key, token_claim_1h(default_tenant))
+    tr = tenant_tr_gen(default_tenant)
+    tr.options.set_authorization_token(token)
+    def commit_some_value(tr):
+        tr[b"abc"] = b"def"
+        return tr.commit().wait()
+
+    loop_until_success(tr, commit_some_value)
+
+    tr.reset() # token should survive reset
+    def read_back_value(tr):
+        return tr[b"abc"].value
+
+    value = loop_until_success(tr, read_back_value)
+    assert value == b"def", f"unexpected value found: {value}"
+    tr.reset() # again, token survives reset
+    tr.options.set_authorization_token() # set with no arg clears the token
+
+    try:
+        value = tr[b"abc"].value
+        assert False, "expected permission_denied, but succeeded"
+    except fdb.FDBError as e:
+        assert e.code == 6000, f"expected permission_denied, got {e} instead"
+
 def test_simple_tenant_access(cluster, default_tenant, tenant_tr_gen, token_claim_1h):
     token = token_gen(cluster.private_key, token_claim_1h(default_tenant))
     tr = tenant_tr_gen(default_tenant)
     tr.options.set_authorization_token(token)
-    tr[b"abc"] = b"def"
-    tr.commit().wait()
+    def commit_some_value(tr):
+        tr[b"abc"] = b"def"
+        tr.commit().wait()
+
+    loop_until_success(tr, commit_some_value)
     tr = tenant_tr_gen(default_tenant)
     tr.options.set_authorization_token(token)
-    assert tr[b"abc"] == b"def", "tenant write transaction not visible"
+    def read_back_value(tr):
+       return tr[b"abc"].value
+    value = loop_until_success(tr, read_back_value)
+    assert value == b"def", "tenant write transaction not visible"
 
 def test_cross_tenant_access_disallowed(cluster, default_tenant, tenant_gen, tenant_tr_gen, token_claim_1h):
     # use default tenant token with second tenant transaction and see it fail
@@ -60,8 +102,10 @@ def test_cross_tenant_access_disallowed(cluster, default_tenant, tenant_gen, ten
     token_second = token_gen(cluster.private_key, token_claim_1h(second_tenant))
     tr_second = tenant_tr_gen(second_tenant)
     tr_second.options.set_authorization_token(token_second)
-    tr_second[b"abc"] = b"def"
-    tr_second.commit().wait()
+    def commit_some_value(tr):
+        tr[b"abc"] = b"def"
+        return tr.commit().wait()
+    loop_until_success(tr_second, commit_some_value)
     token_default = token_gen(cluster.private_key, token_claim_1h(default_tenant))
     tr_second = tenant_tr_gen(second_tenant)
     tr_second.options.set_authorization_token(token_default)
