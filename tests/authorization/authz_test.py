@@ -21,6 +21,7 @@
 import admin_server
 import argparse
 import authlib
+import base64
 import fdb
 import os
 import pytest
@@ -53,7 +54,6 @@ def loop_until_success(tr: fdb.Transaction, func):
             return func(tr)
         except fdb.FDBError as e:
             tr.on_error(e).wait()
-#print("{} failed with {} retrying...", func.__name__, e)
 
 def test_token_option(cluster, default_tenant, tenant_tr_gen, token_claim_1h):
     token = token_gen(cluster.private_key, token_claim_1h(default_tenant))
@@ -123,6 +123,44 @@ def test_cross_tenant_access_disallowed(cluster, default_tenant, tenant_gen, ten
         tr_second[b"def"] = b"ghi"
         tr_second.commit().wait()
         assert False, "expected permission denied, but write transaction went through"
+    except fdb.FDBError as e:
+        assert e.code == 6000, f"expected permission_denied, got {e} instead"
+
+def test_cross_tenant_raw_access_disallowed_with_token(cluster, db, default_tenant, tenant_gen, tenant_tr_gen, token_claim_1h):
+    def commit_some_value(tr):
+        tr[b"abc"] = b"def"
+        return tr.commit().wait()
+
+    second_tenant = random_alphanum_bytes(12)
+    tenant_gen(second_tenant)
+
+    first_tenant_token_claim = token_claim_1h(default_tenant)
+    second_tenant_token_claim = token_claim_1h(second_tenant)
+    # create a token that's good for both tenants
+    first_tenant_token_claim["tenants"] += second_tenant_token_claim["tenants"]
+    token = token_gen(cluster.private_key, first_tenant_token_claim)
+    tr_first = tenant_tr_gen(default_tenant)
+    tr_first.options.set_authorization_token(token)
+    loop_until_success(tr_first, commit_some_value)
+    tr_second = tenant_tr_gen(second_tenant)
+    tr_second.options.set_authorization_token(token)
+    loop_until_success(tr_second, commit_some_value)
+
+    # now try a normal keyspace transaction to raw-access both tenants' keyspace at once, with token
+    tr = db.create_transaction()
+    tr.options.set_authorization_token(token)
+    tr.options.set_raw_access()
+    prefix_first = base64.b64decode(first_tenant_token_claim["tenants"][0])
+    assert len(prefix_first) == 8
+    prefix_second = base64.b64decode(first_tenant_token_claim["tenants"][1])
+    assert len(prefix_second) == 8
+    lhs = min(prefix_first, prefix_second)
+    rhs = max(prefix_first, prefix_second)
+    rhs = bytearray(rhs)
+    rhs[-1] += 1 # exclusive end
+    try:
+        value = tr[lhs:bytes(rhs)].to_list()
+        assert False, f"expected permission_denied, but succeeded, value: {value}"
     except fdb.FDBError as e:
         assert e.code == 6000, f"expected permission_denied, got {e} instead"
 

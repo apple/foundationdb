@@ -107,7 +107,7 @@ def cluster(admin_ipc, build_dir, public_key_refresh_interval, trusted_client, f
             tls_config=TLSConfig(server_chain_len=3, client_chain_len=2),
             authorization_kty="EC",
             authorization_keypair_id="authz-key",
-            remove_at_exit=False,
+            remove_at_exit=True,
             custom_config={
                 "knob-public-key-file-refresh-interval-seconds": public_key_refresh_interval,
             }) as cluster:
