@@ -5,12 +5,39 @@ timestamps {
         stage('checkout') {
             scmInfo = checkout scm
             println("${scmInfo}")
+            script {
+                 user_id=sh(script: "git show -s --pretty=%ae | cut -d '@' -f 1 | cut -d '-' -f 3", returnStdout: true).trim()
+            }
+        }
+
+        stage('clang format check') {
+            println("**** Starting Clang format check  **** ")
+
+            setBuildStatus("clang format check", "clang format check", "PENDING", currentBuild.absoluteUrl);
+
+            def j = build job: "FDB_Build/FDB_clang_format_check",
+                parameters: [
+                    string(name: 'ARCH', value: "x86_64"),
+                    string(name: 'GIT_REMOTE', value: "https://github.com/snowflakedb/foundationdb.git"),
+                    string(name: 'GIT_SPECIFIER', value: "${scmInfo.GIT_COMMIT}")
+                ],
+            propagate: false,
+            wait: true
+
+            setBuildStatus("clang format check", "clang format check", j.result, j.absoluteUrl+"/clang");
+
+            if ("${j.result}" == "SUCCESS") {
+                currentBuild.result = 'SUCCESS'
+            } else {
+                currentBuild.result = 'FAILURE'
+                println("clang format check failure.")
+            }
         }
 
         stage('build and test') {
             println("**** Starting FDB_Precommit Job **** ")
-            println("${scmInfo}")
 
+            setBuildStatus("precommit_job", "build and test", "PENDING", currentBuild.absoluteUrl);
             def trigger_comment = "@fdb-ci precommit start"
 
             def build_trigger_cause = "${currentBuild.getBuildCauses()[0].shortDescription}"
@@ -28,7 +55,9 @@ timestamps {
 
                 def params = [string(name: 'ARCH', value: "x86_64"),
                             string(name: 'GIT_REMOTE', value: "https://github.com/snowflakedb/foundationdb.git"),
-                            string(name: 'GIT_SPECIFIER', value: "${scmInfo.GIT_COMMIT}")]
+                            string(name: 'GIT_SPECIFIER', value: "${scmInfo.GIT_COMMIT}"),
+                            string(name: 'SLACK_USER_NAME', value: "${user_id}"),
+                            string(name: 'PR_ID', value: "${env.BRANCH_NAME}")]
 
                 def deployments = [:]
                 def results = [:]
@@ -58,6 +87,7 @@ timestamps {
                     if ("${v.result}" != "SUCCESS") {
                         // In case if any of the build or test fails we will mark current build as FAILURE
                         currentBuild.result = 'FAILURE'
+                        setBuildStatus("build and test", "build and test", "FAILURE", currentBuild.absoluteUrl);
                     }
 
                     println("${k} result : ${v.result}")
@@ -67,6 +97,8 @@ timestamps {
 
             } else {
                 currentBuild.result = 'FAILURE'
+                setBuildStatus("precommit_job", "To start build and test comment: '${trigger_comment}'",
+                               "PENDING", currentBuild.absoluteUrl);
                 println("FDB_Precommit build job execution is skipped. Please comment: ${trigger_comment}")
             }
         }
