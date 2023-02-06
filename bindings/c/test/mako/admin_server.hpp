@@ -45,9 +45,7 @@ namespace mako::ipc {
 struct DefaultResponse {
 	boost::optional<std::string> error_message;
 
-	static DefaultResponse makeError(std::string msg) {
-		return DefaultResponse{ msg };
-	}
+	static DefaultResponse makeError(std::string msg) { return DefaultResponse{ msg }; }
 
 	template <class Ar>
 	void serialize(Ar& ar, unsigned int) {
@@ -59,9 +57,7 @@ struct TenantIdsResponse {
 	boost::optional<std::string> error_message;
 	std::vector<int64_t> ids;
 
-	static TenantIdsResponse makeError(std::string msg) {
-		return TenantIdsResponse{ msg };
-	}
+	static TenantIdsResponse makeError(std::string msg) { return TenantIdsResponse{ msg }; }
 
 	template <class Ar>
 	void serialize(Ar& ar, unsigned int) {
@@ -124,7 +120,8 @@ struct StopRequest {
 	void serialize(Ar&, unsigned int) {}
 };
 
-using Request = boost::variant<PingRequest, StopRequest, BatchCreateTenantRequest, BatchDeleteTenantRequest, FetchTenantIdsRequest>;
+using Request =
+    boost::variant<PingRequest, StopRequest, BatchCreateTenantRequest, BatchDeleteTenantRequest, FetchTenantIdsRequest>;
 
 class AdminServer {
 	const Arguments& args;
