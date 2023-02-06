@@ -58,6 +58,8 @@ struct TenantManagementWorkload : TestWorkload {
 		TenantData() : empty(true) {}
 		TenantData(int64_t id, Optional<TenantGroupName> tenantGroup, bool empty)
 		  : tenant(makeReference<Tenant>(id)), tenantGroup(tenantGroup), empty(empty) {}
+		TenantData(int64_t id, Optional<TenantName> tName, Optional<TenantGroupName> tenantGroup, bool empty)
+		  : tenant(makeReference<Tenant>(id, tName)), tenantGroup(tenantGroup), empty(empty) {}
 	};
 
 	struct TenantGroupData {
@@ -565,8 +567,8 @@ struct TenantManagementWorkload : TestWorkload {
 
 					// Update our local tenant state to include the newly created one
 					self->maxId = entry.get().id;
-					TenantData tData = TenantData(entry.get().id, tenantItr->second.tenantGroup, true);
-					tData.tenant->name = tenantItr->first;
+					TenantData tData =
+					    TenantData(entry.get().id, tenantItr->first, tenantItr->second.tenantGroup, true);
 					self->createdTenants[tenantItr->first] = tData;
 					self->allTestTenants.push_back(tData.tenant);
 
@@ -1751,7 +1753,7 @@ struct TenantManagementWorkload : TestWorkload {
 				break;
 			} catch (Error& e) {
 				state Error err = e;
-				if (err.code() == error_code_tenant_not_found || err.code() == error_code_tenant_removed) {
+				if (err.code() == error_code_tenant_not_found) {
 					ASSERT(!tenantPresent);
 					CODE_PROBE(true, "Attempted to read key from non-existent tenant");
 					return Void();
