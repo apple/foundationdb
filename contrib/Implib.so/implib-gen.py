@@ -358,6 +358,9 @@ Examples:
     parser.add_argument(
         "--symbol-list", help="Path to file with symbols that should be present in wrapper " "(all by default)"
     )
+    parser.add_argument(
+        "--symbol-filter", help="Regular expression filter on symbols to be wrapped", default=""
+    )
     parser.add_argument("--symbol-prefix", metavar="PFX", help="Prefix wrapper symbols with PFX", default="")
     parser.add_argument("-q", "--quiet", help="Do not print progress info", action="store_true")
     parser.add_argument("--outdir", "-o", help="Path to create wrapper at", default="./")
@@ -410,6 +413,9 @@ Examples:
         )
 
     syms = list(filter(is_exported, collect_syms(input_name)))
+    if args.symbol_filter:
+        pattern = re.compile(args.symbol_filter)
+        syms = [ s for s in syms if pattern.match(s["Name"]) ]
 
     def is_data_symbol(s):
         return (
