@@ -5,6 +5,7 @@ import asyncio
 import logging
 import os
 import os.path
+import random
 import sys
 
 import lib.fdb_process
@@ -45,16 +46,22 @@ def _setup_logs(log_level: int = logging.INFO):
 
     logger.handlers.clear()
 
-    stdout_handler = logging.StreamHandler(stream=sys.stderr)
+    stdout_handler = logging.StreamHandler(stream=sys.stdout)
     stdout_handler.setLevel(log_level)
     stdout_handler.setFormatter(log_format)
 
     logger.addHandler(stdout_handler)
     logger.setLevel(log_level)
 
-    # Here we might lose some of the logging from lib
+    # Here we might lose some of the logging from lib as the logger is set after
+    # importing the modules
     lib_logger = logging.getLogger("lib")
+    lib_logger.addHandler(stdout_handler)
     lib_logger.setLevel(log_level)
+
+    local_cluster_logger = logging.getLogger("local_cluster")
+    local_cluster_logger.addHandler(stdout_handler)
+    local_cluster_logger.setLevel(log_level)
 
 
 def _setup_args() -> argparse.Namespace:
@@ -109,6 +116,12 @@ def _setup_args() -> argparse.Namespace:
         default=DEFAULT_TIMEOUT_PER_TEST,
         help="Timeout for each single test",
     )
+    parser.add_argument(
+        "--random",
+        action="store_true",
+        default=False,
+        help="Randomly pick up a test",
+    )
     return parser.parse_args()
 
 
@@ -137,10 +150,15 @@ class TestSet:
         self._concurrency = concurrency
         self._timeout = timeout
         self._logging_level = logging_level
+        self._cluster_file = None
 
         self._env = dict(os.environ)
         self._update_path_from_env("LD_LIBRARY_PATH", ld_library_path)
         self._update_path_from_env("PYTHONPATH", DEFAULT_PYTHON_BINDER)
+
+    def set_cluster_file(self, cluster_file: str):
+        """Sets the cluster file for the test"""
+        self._cluster_file = cluster_file
 
     def _update_path_from_env(self, environment_variable_name: str, new_path: str):
         original_path = os.getenv(environment_variable_name)
@@ -159,6 +177,8 @@ class TestSet:
     ):
         arguments = [
             api_language,
+            "--cluster-file",
+            self._cluster_file,
             "--test-name",
             test_name,
             "--logging-level",
@@ -190,6 +210,7 @@ class TestSet:
         test_name: str,
         additional_args: List[str],
     ):
+        assert self._cluster_file is not None, "Must set cluster file before the test"
         logger.debug(f"Run test API [{api_language}] Test name [{test_name}]")
         try:
             await self._test_coroutine(
@@ -272,9 +293,7 @@ def _log_cluster_lines_with_severity(
             else:
                 reporter = logger.debug
 
-            if len(lines) == 0:
-                reporter(f"{log_file}: No Severity={severity} lines")
-            else:
+            if len(lines) > 0:
                 reporter(
                     "{}: {} lines with Severity={}\n{}".format(
                         log_file, len(lines), severity, "".join(lines)
@@ -282,9 +301,7 @@ def _log_cluster_lines_with_severity(
                 )
 
 
-async def run_binding_tests(
-    test_set: TestSet, num_cycles: int, stop_at_failure: int = None
-):
+def _generate_test_list(test_set: TestSet, api_languages: List[str]):
     tests = [
         test_set.run_scripted_test,
         test_set.run_api_test,
@@ -292,39 +309,78 @@ async def run_binding_tests(
         test_set.run_directory_test,
         test_set.run_directory_hca_test,
     ]
+    return [
+        lambda: test(api_language) for test in tests for api_language in API_LANGUAGES
+    ]
+
+
+async def run_binding_tests(
+    test_set: TestSet,
+    num_cycles: int,
+    stop_at_failure: int = None,
+    random_pick_single: bool = False,
+) -> int:
+    """Run the binding tests
+
+    :param TestSet test_set:
+    :param int num_cycles: Number of tests to run
+    :param int stop_at_failure: Stop at i-th failure, defaults to None
+    :param bool random_pick_single: Randomly pick a single test, defaults to False
+    :return int: Number of failures
+    """
+    tests = _generate_test_list(test_set=test_set, api_languages=API_LANGUAGES)
     num_failures: int = 0
 
     async def run_tests():
         nonlocal num_failures
-        for api_language in API_LANGUAGES:
-            for test in tests:
-                test_success = await test(api_language)
-                if not test_success:
-                    num_failures += 1
-                    if stop_at_failure and num_failures > stop_at_failure:
-                        raise RuntimeError(
-                            f"Maximum number of test failures have reached"
-                        )
+        for test in tests:
+            test_success = await test()
+            if not test_success:
+                num_failures += 1
+                if stop_at_failure and num_failures > stop_at_failure:
+                    return
+
+    async def run_test_random():
+        nonlocal num_failures
+        test = random.choice(tests)
+        test_success = await test()
+        if not test_success:
+            num_failures += 1
+
+    async def run_test_cycles() -> int:
+        for cycle in range(num_cycles):
+            logger.info(f"Starting cycle {cycle}")
+            if random_pick_single:
+                await run_test_random()
+            else:
+                await run_tests()
+            if stop_at_failure and num_failures > stop_at_failure:
+                logger.error(
+                    f"Reached maximum failures of {num_failures}, prematurely terminating"
+                )
+                return num_failures
+        return num_failures
 
     async with lib.local_cluster.FDBServerLocalCluster(1) as local_cluster:
-        logger.info("Start binding test")
+        test_set.set_cluster_file(local_cluster)
 
         try:
-            for cycle in range(num_cycles):
-                logger.info(f"Starting cycle {cycle}")
-                await run_tests()
+            await run_test_cycles()
         except:
             logger.exception("Error found during the binding test")
+            raise
         finally:
             logger.info(f"Binding test completed with {num_failures} failures")
 
             _log_cluster_lines_with_severity(local_cluster, 40)
             _log_cluster_lines_with_severity(local_cluster, 30)
 
+        return num_failures
 
-def main():
+
+def main() -> int:
     args = _setup_args()
-    _setup_logs(args.debug)
+    _setup_logs(logging.DEBUG if args.debug else logging.INFO)
 
     _check_file(args.fdbserver_path, True)
     _check_file(args.fdbcli_path, True)
@@ -333,12 +389,12 @@ def main():
     lib.fdb_process.set_fdbserver_path(args.fdbserver_path)
     lib.fdb_process.set_fdbcli_path(args.fdbcli_path)
 
-    logger.info(f"Executable: {__file__}")
-    logger.info(f"PID: {os.getpid()}")
-    logger.info(f"fdbserver: {args.fdbserver_path}")
-    logger.info(f"fdbcli: {args.fdbcli_path}")
-    logger.info(f"libfdb: {args.libfdb_path}")
-    logger.info(f"NumCycles: {args.num_cycles}")
+    logger.debug(f"Executable: {__file__}")
+    logger.debug(f"PID: {os.getpid()}")
+    logger.debug(f"fdbserver: {args.fdbserver_path}")
+    logger.debug(f"fdbcli: {args.fdbcli_path}")
+    logger.debug(f"libfdb: {args.libfdb_path}")
+    logger.debug(f"NumCycles: {args.num_cycles}")
 
     test_set = TestSet(
         binding_tester=args.binding_tester_path,
@@ -349,9 +405,13 @@ def main():
         timeout=args.test_timeout,
     )
 
-    asyncio.run(run_binding_tests(test_set, args.num_cycles, args.stop_at_failure))
+    logger.info(f"Binding test start")
+    num_failures = asyncio.run(
+        run_binding_tests(test_set, args.num_cycles, args.stop_at_failure, args.random)
+    )
+    logger.info(f"Binding test finished with {num_failures} failures")
 
-    return 0
+    return 0 if num_failures == 0 else 1
 
 
 if __name__ == "__main__":

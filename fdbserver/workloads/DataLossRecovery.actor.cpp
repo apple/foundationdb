@@ -81,6 +81,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		state Value oldValue = "TestValue"_sr;
 		state Value newValue = "TestNewValue"_sr;
 
+		TraceEvent("DataLossRecovery").detail("Phase", "Starting");
 		wait(self->writeAndVerify(self, cx, key, oldValue));
 
 		TraceEvent("DataLossRecovery").detail("Phase", "InitialWrites");
@@ -118,7 +119,8 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		loop {
 			try {
-				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
+				// add timeout to read so test fails faster if something goes wrong
+				state Optional<Value> res = wait(timeoutError(tr.get(key), 90.0));
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
 					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));

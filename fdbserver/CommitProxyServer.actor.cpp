@@ -203,6 +203,8 @@ struct ResolutionRequestBuilder {
 		ASSERT(transactionNumberInBatch >= 0 && transactionNumberInBatch < 32768);
 
 		bool isTXNStateTransaction = false;
+		bool needParseTenantId = !trRequest.tenantInfo.hasTenant() && self->getTenantMode() == TenantMode::REQUIRED;
+		VectorRef<int64_t> tenantIds;
 		for (auto& m : trIn.mutations) {
 			DEBUG_MUTATION("AddTr", ver, m, self->dbgid).detail("Idx", transactionNumberInBatch);
 			if (m.type == MutationRef::SetVersionstampedKey) {
@@ -216,6 +218,8 @@ struct ResolutionRequestBuilder {
 				auto& tr = getOutTransaction(0, trIn.read_snapshot);
 				tr.mutations.push_back(requests[0].arena, m);
 				tr.lock_aware = trRequest.isLockAware();
+			} else if (needParseTenantId && !isSystemKey(m.param1) && isSingleKeyMutation((MutationRef::Type)m.type)) {
+				tenantIds.push_back(requests[0].arena, TenantAPI::extractTenantIdFromMutation(m));
 			}
 		}
 		if (isTXNStateTransaction && !trRequest.isLockAware()) {
@@ -239,7 +243,11 @@ struct ResolutionRequestBuilder {
 			}
 			// Note only Resolver 0 got the correct spanContext, which means
 			// the reply from Resolver 0 has the right one back.
-			getOutTransaction(0, trIn.read_snapshot).spanContext = trRequest.spanContext;
+			auto& tr = getOutTransaction(0, trIn.read_snapshot);
+			tr.spanContext = trRequest.spanContext;
+			if (self->getTenantMode() == TenantMode::REQUIRED) {
+				tr.tenantIds = tenantIds;
+			}
 		}
 
 		std::vector<int> resolversUsed;
@@ -1063,6 +1071,95 @@ void assertResolutionStateMutationsSizeConsistent(const std::vector<ResolveTrans
 	}
 }
 
+// Return true if a single-key mutation is associated with a valid tenant id or a system key
+bool validTenantAccess(MutationRef m, std::map<int64_t, TenantName> const& tenantMap, Optional<int64_t>& tenantId) {
+	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+		tenantId = TenantAPI::extractTenantIdFromMutation(m);
+		return tenantMap.count(tenantId.get()) > 0;
+	}
+	return true;
+}
+
+inline bool tenantMapChanging(MutationRef const& mutation) {
+	const KeyRangeRef tenantMapRange = TenantMetadata::tenantMap().subspace;
+	if (isSingleKeyMutation((MutationRef::Type)mutation.type) && mutation.param1.startsWith(tenantMapRange.begin)) {
+		return true;
+	} else if (mutation.type == MutationRef::ClearRange &&
+	           tenantMapRange.intersects(KeyRangeRef(mutation.param1, mutation.param2))) {
+		return true;
+	}
+	return false;
+}
+
+// Return success and properly split clear range mutations if all tenant check pass. Otherwise, return corresponding
+// error
+Error validateAndProcessTenantAccess(VectorRef<MutationRef> mutations,
+                                     ProxyCommitData* const pProxyCommitData,
+                                     Optional<UID> debugId = Optional<UID>(),
+                                     const char* context = "") {
+	bool changeTenant = false;
+	bool writeNormalKey = false;
+
+	for (auto& mutation : mutations) {
+		Optional<int64_t> tenantId;
+		bool validAccess = true;
+		changeTenant = changeTenant || tenantMapChanging(mutation);
+
+		if (mutation.type == MutationRef::ClearRange) {
+			auto beginTenantId = TenantAPI::extractTenantIdFromKeyRef(mutation.param1);
+			auto endTenantId = TenantAPI::extractTenantIdFromKeyRef(mutation.param2);
+			CODE_PROBE(beginTenantId != endTenantId, "Clear Range raw access or cross multiple tenants");
+			// TODO: splitting clear range
+		} else if (!isSystemKey(mutation.param1)) {
+			validAccess = validTenantAccess(mutation, pProxyCommitData->tenantMap, tenantId);
+			writeNormalKey = true;
+		}
+
+		if (debugId.present()) {
+			TraceEvent(SevDebug, "ValidateAndProcessTenantAccess", pProxyCommitData->dbgid)
+			    .detail("Context", context)
+			    .detail("TxnId", debugId.get())
+			    .detail("Version", pProxyCommitData->version.get())
+			    .detail("ChangeTenant", changeTenant)
+			    .detail("WriteNormalKey", writeNormalKey)
+			    .detail("TenantId", tenantId)
+			    .detail("ValidAccess", validAccess)
+			    .detail("MutationType", getTypeString(mutation.type))
+			    .detail("Mutation", mutation.param1);
+		}
+
+		if (!validAccess) {
+			TraceEvent(SevWarn, "IllegalTenantAccess", pProxyCommitData->dbgid)
+			    .suppressFor(10.0)
+			    .detail("Reason", "Raw write to unknown tenant");
+			return illegal_tenant_access();
+		}
+
+		if (writeNormalKey && changeTenant) {
+			TraceEvent(SevWarn, "IllegalTenantAccess", pProxyCommitData->dbgid)
+			    .suppressFor(10.0)
+			    .detail("Reason", "Tenant change and normal key write in same transaction");
+			return illegal_tenant_access();
+		}
+	}
+	return success();
+}
+
+Error validateAndProcessTenantAccess(const CommitTransactionRequest& tr, ProxyCommitData* const pProxyCommitData) {
+	bool isValid = checkTenantNoWait(pProxyCommitData, tr.tenantInfo.tenantId, "Commit", true);
+	if (!isValid) {
+		return tenant_not_found();
+	}
+
+	// only do the mutation check when the transaction use raw_access option and the tenant mode is required
+	if (pProxyCommitData->getTenantMode() != TenantMode::REQUIRED || tr.tenantInfo.hasTenant()) {
+		return success();
+	}
+
+	return validateAndProcessTenantAccess(
+	    tr.transaction.mutations, pProxyCommitData, tr.debugID, "validateAndProcessTenantAccess");
+}
+
 // Compute and apply "metadata" effects of each other proxy's most recent batch
 void applyMetadataEffect(CommitBatchContext* self) {
 	bool initialState = self->isMyFirstBatch;
@@ -1077,9 +1174,32 @@ void applyMetadataEffect(CommitBatchContext* self) {
 		     transactionIndex < self->resolution[0].stateMutations[versionIndex].size() && !self->forceRecovery;
 		     transactionIndex++) {
 			bool committed = true;
-			for (int resolver = 0; resolver < self->resolution.size(); resolver++)
+			for (int resolver = 0; resolver < self->resolution.size(); resolver++) {
 				committed =
 				    committed && self->resolution[resolver].stateMutations[versionIndex][transactionIndex].committed;
+			}
+
+			if (committed && self->pProxyCommitData->getTenantMode() == TenantMode::REQUIRED) {
+				auto& tenantIds = self->resolution[0].stateMutations[versionIndex][transactionIndex].tenantIds;
+				ASSERT(tenantIds.present());
+				// fail transaction if it contain both of tenant changes and normal key writing
+				auto& mutations = self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations;
+				committed =
+				    tenantIds.get().empty() || std::none_of(mutations.begin(), mutations.end(), tenantMapChanging);
+
+				// check if all tenant ids are valid if committed == true
+				committed = committed &&
+				            std::all_of(tenantIds.get().begin(), tenantIds.get().end(), [self](const int64_t& tid) {
+					            return self->pProxyCommitData->tenantMap.count(tid);
+				            });
+
+				if (self->debugID.present()) {
+					TraceEvent(SevDebug, "TenantAccessCheck_ApplyMetadataEffect", self->debugID.get())
+					    .detail("TenantIds", tenantIds)
+					    .detail("Mutations", mutations);
+				}
+			}
+
 			if (committed) {
 				// Note: since we are not to commit, we don't need to pass cipherKeys for encryption.
 				applyMetadataMutations(SpanContext(),
@@ -1096,6 +1216,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				                       /* initialCommit */ false,
 				                       /* provisionalCommitProxy */ self->pProxyCommitData->provisional);
 			}
+
 			if (self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations.size() &&
 			    self->firstStateMutations) {
 				ASSERT(committed);
@@ -1224,7 +1345,9 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
-			if (!validTenantAccess(trs[t], pProxyCommitData)) {
+			Error e = validateAndProcessTenantAccess(trs[t], pProxyCommitData);
+			if (e.code() != error_code_success) {
+				trs[t].reply.sendError(e);
 				self->committed[t] = ConflictBatch::TransactionTenantFailure;
 			} else {
 				self->commitCount++;
@@ -3126,15 +3249,32 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	}
 }
 
-ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
-                                uint64_t recoveryCount,
-                                CommitProxyInterface myInterface) {
+// only update the local Db info if the CP is not removed
+ACTOR Future<Void> updateLocalDbInfo(Reference<AsyncVar<ServerDBInfo> const> in,
+                                     Reference<AsyncVar<ServerDBInfo>> out,
+                                     uint64_t recoveryCount,
+                                     CommitProxyInterface myInterface) {
+	// whether this CP already receive the db info including itself
+	state bool firstValidDbInfo = false;
+
 	loop {
-		if (db->get().recoveryCount >= recoveryCount &&
-		    !std::count(db->get().client.commitProxies.begin(), db->get().client.commitProxies.end(), myInterface)) {
+		bool isIncluded =
+		    std::count(in->get().client.commitProxies.begin(), in->get().client.commitProxies.end(), myInterface);
+		if (in->get().recoveryCount >= recoveryCount && !isIncluded) {
 			throw worker_removed();
 		}
-		wait(db->onChange());
+
+		if (isIncluded) {
+			firstValidDbInfo = true;
+		}
+
+		// only update the db info if this is the current CP, or before we received first one including current CP.
+		// Several db infos at the beginning just contain the provisional CP
+		if (isIncluded || !firstValidDbInfo) {
+			out->set(in->get());
+		}
+
+		wait(in->onChange());
 	}
 }
 
@@ -3143,17 +3283,18 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
                                      Reference<AsyncVar<ServerDBInfo> const> db,
                                      std::string whitelistBinPaths) {
 	try {
+		state Reference<AsyncVar<ServerDBInfo>> localDb = makeReference<AsyncVar<ServerDBInfo>>();
 		state Future<Void> core = commitProxyServerCore(proxy,
 		                                                req.master,
 		                                                req.masterLifetime,
-		                                                db,
+		                                                localDb,
 		                                                req.recoveryCount,
 		                                                req.recoveryTransactionVersion,
 		                                                req.firstProxy,
 		                                                whitelistBinPaths,
 		                                                req.encryptMode,
 		                                                proxy.provisional);
-		wait(core || checkRemoved(db, req.recoveryCount, proxy));
+		wait(core || updateLocalDbInfo(db, localDb, req.recoveryCount, proxy));
 	} catch (Error& e) {
 		TraceEvent("CommitProxyTerminated", proxy.id()).errorUnsuppressed(e);
 

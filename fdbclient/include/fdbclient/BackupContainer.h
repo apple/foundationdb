@@ -253,7 +253,7 @@ public:
 
 	// Returns the key ranges in the snapshot file. This is an expensive function
 	// and should only be used in simulation for sanity check.
-	virtual Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file, Optional<Database> cx) = 0;
+	virtual Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file, Database cx) = 0;
 
 	struct ExpireProgress {
 		std::string step;
@@ -292,7 +292,6 @@ public:
 	// If logsOnly is set, only use log files in [beginVersion, targetVervions) in restore set.
 	// Returns non-present if restoring to the given version is not possible.
 	virtual Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
-	                                                          Optional<Database> cx,
 	                                                          VectorRef<KeyRangeRef> keyRangesFilter = {},
 	                                                          bool logsOnly = false,
 	                                                          Version beginVersion = -1) = 0;

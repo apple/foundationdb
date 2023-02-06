@@ -160,9 +160,9 @@ struct DataMoveMetaData {
 	void setPhase(Phase phase) { this->phase = static_cast<int16_t>(phase); }
 
 	std::string toString() const {
-		std::string res = "DataMoveMetaData: [ID]: " + id.shortString() + " [Range]: " + describe(ranges) +
-		                  " [Phase]: " + std::to_string(static_cast<int>(phase)) +
-		                  " [Source Servers]: " + describe(src) + " [Destination Servers]: " + describe(dest);
+		std::string res = "DataMoveMetaData: [ID]: " + id.shortString() + ", [Range]: " + describe(ranges) +
+		                  ", [Phase]: " + std::to_string(static_cast<int>(phase)) +
+		                  ", [Source Servers]: " + describe(src) + ", [Destination Servers]: " + describe(dest);
 		return res;
 	}
 

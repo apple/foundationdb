@@ -26,7 +26,9 @@
 #include "flow/Trace.h"
 #include <algorithm>
 #include <memory>
+#ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
+#endif
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #include <boost/asio.hpp>
