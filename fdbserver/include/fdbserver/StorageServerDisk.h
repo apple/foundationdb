@@ -1,0 +1,89 @@
+/*
+ * StorageServerDisk.h
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#pragma once
+
+#include "fdbclient/FDBTypes.h"
+#include "fdbserver/IKeyValueStore.h"
+
+FDB_DECLARE_BOOLEAN_PARAM(UnlimitedCommitBytes);
+
+class StorageServerDisk {
+	struct StorageServer* data;
+	IKeyValueStore* storage;
+	void writeMutations(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
+
+public:
+	explicit StorageServerDisk(struct StorageServer* data, IKeyValueStore* storage) : data(data), storage(storage) {}
+
+	void makeNewStorageServerDurable(const bool shardAware);
+	bool makeVersionMutationsDurable(Version& prevStorageVersion,
+	                                 Version newStorageVersion,
+	                                 int64_t& bytesLeft,
+	                                 UnlimitedCommitBytes unlimitedCommitBytes);
+	void makeVersionDurable(Version version);
+	void makeTssQuarantineDurable();
+	Future<bool> restoreDurableState();
+
+	void changeLogProtocol(Version version, ProtocolVersion protocol);
+
+	void writeMutation(MutationRef mutation);
+	void writeKeyValue(KeyValueRef kv);
+	void clearRange(KeyRangeRef keys);
+
+	Future<Void> addRange(KeyRangeRef range, std::string id) { return storage->addRange(range, id); }
+
+	std::vector<std::string> removeRange(KeyRangeRef range) { return storage->removeRange(range); }
+
+	void persistRangeMapping(KeyRangeRef range, bool isAdd) { storage->persistRangeMapping(range, isAdd); }
+
+	Future<Void> getError() { return storage->getError(); }
+	Future<Void> init() { return storage->init(); }
+	Future<Void> canCommit() { return storage->canCommit(); }
+	Future<Void> commit() { return storage->commit(); }
+
+	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
+	// Read the key that is equal or greater then 'key' from the storage engine.
+	// For example, readNextKeyInclusive("a") should return:
+	//  - "a", if key "a" exist
+	//  - "b", if key "a" doesn't exist, and "b" is the next existing key in total order
+	//  - allKeys.end, if keyrange [a, allKeys.end) is empty
+	Future<Key> readNextKeyInclusive(KeyRef key, Optional<ReadOptions> options = Optional<ReadOptions>());
+	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options = Optional<ReadOptions>());
+	Future<Optional<Value>> readValuePrefix(KeyRef key,
+	                                        int maxLength,
+	                                        Optional<ReadOptions> options = Optional<ReadOptions>());
+	Future<RangeResult> readRange(KeyRangeRef keys,
+	                              int rowLimit = 1 << 30,
+	                              int byteLimit = 1 << 30,
+	                              Optional<ReadOptions> options = Optional<ReadOptions>());
+
+	Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) { return storage->checkpoint(request); }
+
+	Future<Void> restore(const std::vector<CheckpointMetaData>& checkpoints) { return storage->restore(checkpoints); }
+
+	Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) {
+		return storage->deleteCheckpoint(checkpoint);
+	}
+
+	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
+	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
+	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
+};
