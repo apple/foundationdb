@@ -307,7 +307,8 @@ bool TokenCacheImpl::validate(TenantId tenantId, StringRef token) {
 		return false;
 	}
 	// audit logging
-	logTokenUsage(currentTime, AuditEntry(peer, tenantId, *cachedEntry.get()));
+	if (FLOW_KNOBS->AUDIT_LOGGING_ENABLED)
+		logTokenUsage(currentTime, AuditEntry(peer, tenantId, *cachedEntry.get()));
 	return true;
 }
 
