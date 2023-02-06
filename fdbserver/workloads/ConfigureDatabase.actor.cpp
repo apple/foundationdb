@@ -273,18 +273,17 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 	ACTOR Future<Void> _setup(Database cx, ConfigureDatabaseWorkload* self) {
 		wait(success(ManagementAPI::changeConfig(cx.getReference(), "single storage_migration_type=aggressive", true)));
-
-		// Redwood is the only storage engine type supporting encryption.
-		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
-		if (config.encryptionAtRestMode.isEncryptionEnabled()) {
-			self->storageEngineExcludeTypes = { 0, 1, 2, 4, 5 };
-			wait(success(ManagementAPI::changeConfig(cx.getReference(), "ssd-redwood-1-experimental", true)));
-		}
-
 		return Void();
 	}
 
 	ACTOR Future<Void> _start(ConfigureDatabaseWorkload* self, Database cx) {
+		// Redwood is the only storage engine type supporting encryption.
+		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+		TraceEvent("ConfigureDatabase_Config").detail("Config", config.toString());
+		if (config.encryptionAtRestMode.isEncryptionEnabled()) {
+			TraceEvent("ConfigureDatabase_EncryptionEnabled");
+			self->storageEngineExcludeTypes = { 0, 1, 2, 4, 5 };
+		}
 		if (self->clientId == 0) {
 			self->clients.push_back(timeout(self->singleDB(self, cx), self->testDuration, Void()));
 			wait(waitForAll(self->clients));
