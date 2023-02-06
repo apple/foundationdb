@@ -2120,7 +2120,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
                           std::string whitelistBinPaths,
                           TestConfig testConfig,
                           ProtocolVersion protocolVersion,
-                          TenantMode* tenantMode) {
+                          Optional<TenantMode>* tenantMode) {
 	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(testConfig);
@@ -2713,7 +2713,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 
 	state Optional<TenantName> defaultTenant;
 	state Standalone<VectorRef<TenantNameRef>> tenantsToCreate;
-	state TenantMode tenantMode = TenantMode::END;
+	state Optional<TenantMode> tenantMode;
 
 	try {
 		// systemActors.push_back( startSystemMonitor(dataFolder) );
@@ -2745,7 +2745,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
 		}
 		// setupSimulatedSystem/restartSimulatedSystem should fill tenantMode with valid value.
-		ASSERT(tenantMode < TenantMode::END);
+		ASSERT(tenantMode.present());
 		// restartSimulatedSystem can adjust some testConfig params related to tenants
 		// so set/overwrite those options if necessary here
 		if (rebooting && testConfig.tenantModes.size()) {
@@ -2773,7 +2773,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 		}
 		TraceEvent("SimulatedClusterTenantMode")
 		    .detail("UsingTenant", defaultTenant)
-		    .detail("TenantMode", tenantMode.toString())
+		    .detail("TenantMode", tenantMode.get().toString())
 		    .detail("TotalTenants", tenantsToCreate.size());
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(clusterFileDir);
