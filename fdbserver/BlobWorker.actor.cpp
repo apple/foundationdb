@@ -914,8 +914,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 				}
 
 				if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-					wait(delay(0)); // should be cancelled
-					ASSERT(false);
+					wait(Never());
 				}
 
 				if (BUGGIFY_WITH_PROB(0.01)) {
@@ -1236,8 +1235,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	}
 
 	if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-		wait(delay(0)); // should be cancelled
-		ASSERT(false);
+		wait(Never());
 	}
 
 	// FIXME: change when we implement multiplexing
@@ -1291,8 +1289,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			DEBUG_KEY_RANGE("BlobWorkerFDBSnapshot", readVersion, metadata->keyRange, bwData->id);
 
 			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-				wait(delay(0)); // should be cancelled
-				ASSERT(false);
+				wait(Never());
 			}
 
 			// initial snapshot is committed in fdb, we can pop the change feed up to this version
@@ -1711,8 +1708,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
 			reply.proposedSplitKey = proposedSplitKey;
 			bwData->currentManagerStatusStream.get().send(reply);
 			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-				wait(delay(0)); // should be cancelled
-				ASSERT(false);
+				wait(Never());
 			}
 			// if a new manager appears, also tell it about this granule being splittable, or retry after a certain
 			// amount of time of not hearing back
@@ -4484,8 +4480,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			}
 
 			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-				wait(delay(0)); // should be cancelled
-				ASSERT(false);
+				wait(Never());
 			}
 
 			return info;
