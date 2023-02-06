@@ -866,10 +866,12 @@ struct InitializeStorageRequest {
 	    tssPairIDAndVersion; // Only set if recruiting a tss. Will be the UID and Version of its SS pair.
 	Version initialClusterVersion;
 	ReplyPromise<InitializeStorageReply> reply;
+	EncryptionAtRestMode encryptMode;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, initialClusterVersion);
+		serializer(
+		    ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, initialClusterVersion, encryptMode);
 	}
 };
 
@@ -1186,7 +1188,6 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei, Reference<
 class IKeyValueStore;
 class ServerCoordinators;
 class IDiskQueue;
-class IPageEncryptionKeyProvider;
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
@@ -1194,8 +1195,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder,
-                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider);
+                                 std::string folder);
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,
@@ -1203,8 +1203,7 @@ ACTOR Future<Void> storageServer(
     std::string folder,
     Promise<Void> recovered,
     Reference<IClusterConnectionRecord>
-        connRecord, // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
-    Reference<IPageEncryptionKeyProvider> encryptionKeyProvider);
+        connRecord); // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,

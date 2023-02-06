@@ -2265,10 +2265,6 @@ int main(int argc, char* argv[]) {
 				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
 				g_knobs.setKnob("enable_blob_granule_compression",
 				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
-				// Restart test does not preserve encryption mode (tenant-aware or domain-aware).
-				// Disable domain-aware encryption in Redwood until encryption mode from db config is being handled.
-				// TODO(yiwu): clean it up once we cleanup the knob.
-				g_knobs.setKnob("redwood_split_encrypted_pages_by_tenant", KnobValue::create(bool{ false }));
 				g_knobs.setKnob("encrypt_header_auth_token_enabled",
 				                KnobValue::create(ini.GetBoolValue("META", "encryptHeaderAuthTokenEnabled", false)));
 				g_knobs.setKnob("encrypt_header_auth_token_algo",
