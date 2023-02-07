@@ -192,9 +192,22 @@ struct hash<BlobCipherDetails> {
 } // namespace std
 
 #pragma pack(push, 1) // exact fit - no padding
-struct BlobCipherEncryptHeaderFlagsV1 {
-	constexpr static FileIdentifier file_identifier = 8269919;
 
+// Why BinarySerialization instead of ObjectSerialization?
+//
+// By running experiments comparing: BlobCipherEncryptHeaderFlagsV1 and AesCtr algorithms header (with/without
+// authentication encryption), below table summarizes on-disk storage penalty (bytes) due to storing
+// BlobCipherEncryptHeader using both formats:
+//
+//  ----------------------------------------------------------------------------------------------------------
+// |         S.No      |   ObjFlags  |  BinaryFlags |  ObjectAlgo  | BinaryAlgo | TotalObject  | TotalBinary  |
+// | ----------------- | ----------- | ------------ |  ----------- | ---------- | ------------ | ------------ |
+// |   AesCtrNoAuth    |     40      |     3        |       104    |      40    |     208      |    104       |
+// |   AesCtrHmacSha   |     40      |     3        |       184    |      96    |     288      |    160       |
+// |   AesCtrAesCmac   |     40      |     3        |       168    |      80    |     272      |    144       |
+//  ----------------------------------------------------------------------------------------------------------
+
+struct BlobCipherEncryptHeaderFlagsV1 {
 	// Serializable fields
 
 	uint8_t encryptMode;
@@ -205,14 +218,22 @@ struct BlobCipherEncryptHeaderFlagsV1 {
 		return encryptMode == o.encryptMode && authTokenMode == o.authTokenMode && authTokenAlgo == o.authTokenAlgo;
 	}
 
-	static void deserialize(const StringRef& flagsRef, BlobCipherEncryptHeaderFlagsV1& ret) {
-		ObjectReader headerReader(flagsRef.begin(), Unversioned());
-		headerReader.deserialize<BlobCipherEncryptHeaderFlagsV1>(ret);
+	static StringRef toStringRef(const BlobCipherEncryptHeaderFlagsV1& flags, Arena& arena) {
+		BinaryWriter wr(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		wr.serializeBytes(&flags, sizeof(BlobCipherEncryptHeaderFlagsV1));
+		return wr.toValue(arena);
+	}
+
+	static BlobCipherEncryptHeaderFlagsV1 fromStringRef(const StringRef& flagsRef) {
+		BlobCipherEncryptHeaderFlagsV1 flags;
+		BinaryReader rd(flagsRef.begin(), flagsRef.size(), AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		rd >> flags;
+		return flags;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, encryptMode, authTokenMode, authTokenAlgo);
+		ar.serializeBytes(this, sizeof(BlobCipherEncryptHeaderFlagsV1));
 	}
 };
 
@@ -233,10 +254,8 @@ struct BlobCipherEncryptHeaderFlagsV1 {
 // 'encrypted buffer', compared to reading only encryptionHeader and ensuring its sanity; for instance:
 // backup-files.
 
-template <uint32_t S>
+template <uint32_t AuthTokenSize>
 struct AesCtrWithAuthV1 {
-	constexpr static FileIdentifier file_identifier = 3110923;
-
 	// Serializable fields
 
 	// Text cipher encryption information
@@ -244,68 +263,83 @@ struct AesCtrWithAuthV1 {
 	// Header cipher encryption information
 	BlobCipherDetails cipherHeaderDetails;
 	// Initialization vector
-	StringRef ivRef;
+	uint8_t iv[AES_256_IV_LENGTH];
 	// Authentication token
-	StringRef authTokenRef;
+	uint8_t authToken[AuthTokenSize];
 
 	AesCtrWithAuthV1() {}
 	AesCtrWithAuthV1(const BlobCipherDetails& textDetails,
 	                 const BlobCipherDetails& headerDetails,
-	                 const uint8_t* iv,
+	                 const uint8_t* ivBuf,
 	                 const int ivLen,
 	                 Arena& arena)
-	  : cipherTextDetails(textDetails), cipherHeaderDetails(headerDetails), ivRef(makeString(AES_256_IV_LENGTH, arena)),
-	    authTokenRef(makeString(S, arena)) {
-		memcpy(mutateString(ivRef), iv, ivLen);
-		memset(mutateString(authTokenRef), 0, S);
+	  : cipherTextDetails(textDetails), cipherHeaderDetails(headerDetails) {
+		ASSERT_EQ(ivLen, AES_256_IV_LENGTH);
+		memcpy(&iv[0], ivBuf, ivLen);
+		memset(&authToken[0], 0, AuthTokenSize);
 	}
 
-	bool operator==(const AesCtrWithAuthV1<S>& o) const {
+	bool operator==(const AesCtrWithAuthV1<AuthTokenSize>& o) const {
 		return cipherHeaderDetails == o.cipherHeaderDetails && cipherTextDetails == o.cipherTextDetails &&
-		       ivRef.compare(o.ivRef) == 0 && authTokenRef.compare(o.authTokenRef) == 0;
+		       memcmp(&iv[0], &o.iv[0], AES_256_IV_LENGTH) == 0 &&
+		       memcmp(&authToken[0], &o.authToken[0], AuthTokenSize) == 0;
 	}
 
-	static void deserialize(const StringRef& header, AesCtrWithAuthV1<S>& ret, Arena& arena) {
-		ObjectReader dataReader(header.begin(), Unversioned());
-		dataReader.deserialize(FileIdentifierFor<AesCtrWithAuthV1<S>>::value, ret);
-		arena.dependsOn(dataReader.arena());
+	static StringRef toStringRef(const AesCtrWithAuthV1<AuthTokenSize>& algoHeader, Arena& arena) {
+		BinaryWriter wr(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		wr.serializeBytes(&algoHeader, sizeof(AesCtrWithAuthV1<AuthTokenSize>));
+		return wr.toValue(arena);
+	}
+
+	static AesCtrWithAuthV1<AuthTokenSize> fromStringRef(const StringRef& algoHeaderRef, Arena& arena) {
+		AesCtrWithAuthV1<AuthTokenSize> algoHeader;
+		BinaryReader rd(
+		    algoHeaderRef.begin(), algoHeaderRef.size(), AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		rd >> algoHeader;
+		return algoHeader;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, cipherTextDetails, cipherHeaderDetails, ivRef, authTokenRef);
+		ar.serializeBytes(this, sizeof(AesCtrWithAuthV1<AuthTokenSize>));
 	}
 };
 
 struct AesCtrNoAuthV1 {
-	constexpr static FileIdentifier file_identifier = 1837528;
-
 	// Serializable fields
 
 	// Text cipher encryption information
 	BlobCipherDetails cipherTextDetails;
 	// Initialization vector
-	StringRef ivRef;
+	uint8_t iv[AES_256_IV_LENGTH];
 
 	AesCtrNoAuthV1() {}
-	AesCtrNoAuthV1(const BlobCipherDetails& textDetails, const uint8_t* iv, const int ivLen, Arena& arena)
-	  : cipherTextDetails(textDetails), ivRef(makeString(AES_256_IV_LENGTH, arena)) {
-		memcpy(mutateString(ivRef), iv, ivLen);
+	AesCtrNoAuthV1(const BlobCipherDetails& textDetails, const uint8_t* ivBuf, const int ivLen, Arena& arena)
+	  : cipherTextDetails(textDetails) {
+		ASSERT_EQ(ivLen, AES_256_IV_LENGTH);
+		memcpy(&iv[0], ivBuf, ivLen);
 	}
 
 	bool operator==(const AesCtrNoAuthV1& o) const {
-		return cipherTextDetails == o.cipherTextDetails && ivRef.compare(o.ivRef) == 0;
+		return cipherTextDetails == o.cipherTextDetails && memcmp(&iv[0], &o.iv[0], AES_256_IV_LENGTH) == 0;
 	}
 
-	static void deserialize(const StringRef& header, AesCtrNoAuthV1& ret, Arena& arena) {
-		ObjectReader dataReader(header.begin(), Unversioned());
-		dataReader.deserialize(FileIdentifierFor<AesCtrNoAuthV1>::value, ret);
-		arena.dependsOn(dataReader.arena());
+	static StringRef toStringRef(const AesCtrNoAuthV1& noAuth, Arena& arena) {
+		BinaryWriter wr(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		wr.serializeBytes(&noAuth, sizeof(AesCtrNoAuthV1));
+		return wr.toValue(arena);
+	}
+
+	static AesCtrNoAuthV1 fromStringRef(const StringRef& headerRef, Arena& arena) {
+		AesCtrNoAuthV1 noAuth;
+		BinaryReader rd(headerRef.begin(), headerRef.size(), AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		rd >> noAuth;
+		return noAuth;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, cipherTextDetails, ivRef);
+		ar.serializeBytes(this, sizeof(AesCtrNoAuthV1));
 	}
 };
 
@@ -326,7 +360,7 @@ struct BlobCipherEncryptHeaderRef {
 	BlobCipherEncryptHeaderRef()
 	  : flagsVersion(INVALID_ENCRYPT_HEADERS_FLAG_VERSION),
 	    algoHeaderVersion(INVALID_ENCRYPT_HEADER_ALGO_HEADER_VERSION) {}
-	BlobCipherEncryptHeaderRef(const BlobCipherEncryptHeaderRef& src, Arena& arena)
+	BlobCipherEncryptHeaderRef(Arena& arena, const BlobCipherEncryptHeaderRef& src)
 	  : flagsVersion(src.flagsVersion), algoHeaderVersion(src.algoHeaderVersion),
 	    flagsRef(StringRef(arena, src.flagsRef)), algoHeaderRef(StringRef(arena, src.algoHeaderRef)) {}
 
@@ -335,10 +369,12 @@ struct BlobCipherEncryptHeaderRef {
 		       flagsRef.compare(o.flagsRef) == 0 && algoHeaderRef.compare(o.algoHeaderRef) == 0;
 	}
 
-	static void deserialize(const StringRef& header, BlobCipherEncryptHeaderRef& ret, Arena& arena) {
+	static BlobCipherEncryptHeaderRef fromStringRef(const StringRef& header, Arena& arena) {
+		BlobCipherEncryptHeaderRef ret;
 		ObjectReader reader(header.begin(), Unversioned());
 		reader.deserialize(FileIdentifierFor<BlobCipherEncryptHeaderRef>::value, ret);
 		arena.dependsOn(reader.arena());
+		return ret;
 	}
 
 	static Standalone<StringRef> toStringRef(const BlobCipherEncryptHeaderRef& headerRef) {
@@ -356,7 +392,7 @@ struct ParsedEncryptHeaderDetails {
 	EncryptAuthTokenAlgo algo;
 	BlobCipherDetails textCipherDetails;
 	BlobCipherDetails headerCipherDetails;
-	StringRef ivRef;
+	uint8_t iv[AES_256_IV_LENGTH];
 };
 
 #pragma pack(pop)

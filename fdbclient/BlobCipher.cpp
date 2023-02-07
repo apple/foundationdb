@@ -619,7 +619,7 @@ void EncryptBlobCipherAes265Ctr::init() {
 	}
 }
 
-template <uint32_t S>
+template <uint32_t AuthTokenSize>
 void EncryptBlobCipherAes265Ctr::setCipherAlgoHeaderWithAuthV1(const uint8_t* ciphertext,
                                                                const int ciphertextLen,
                                                                const BlobCipherEncryptHeaderFlagsV1& flags,
@@ -627,39 +627,40 @@ void EncryptBlobCipherAes265Ctr::setCipherAlgoHeaderWithAuthV1(const uint8_t* ci
                                                                Arena& arena) {
 	// Construct algorithm specific details except 'authToken', serialize the details into 'headerRef' to allow
 	// authToken generation
-	AesCtrWithAuthV1<S> algoHeader(
+	AesCtrWithAuthV1<AuthTokenSize> algoHeader(
 	    BlobCipherDetails(textCipherKey->getDomainId(), textCipherKey->getBaseCipherId(), textCipherKey->getSalt()),
 	    BlobCipherDetails(
 	        headerCipherKey->getDomainId(), headerCipherKey->getBaseCipherId(), headerCipherKey->getSalt()),
 	    iv,
 	    AES_256_IV_LENGTH,
 	    arena);
-	uint8_t computed[S];
-	Standalone<StringRef> serializedAlgoHeader = ObjectWriter::toValue(algoHeader, Unversioned());
+	Standalone<StringRef> serializedAlgoHeader = AesCtrWithAuthV1<AuthTokenSize>::toStringRef(algoHeader, arena);
 	arena.dependsOn(serializedAlgoHeader.arena());
 	headerRef->algoHeaderRef = serializedAlgoHeader;
 	// compute the authentication token
-	Standalone<StringRef> serialized = ObjectWriter::toValue(*headerRef, Unversioned());
-	computeAuthToken({ { ciphertext, ciphertextLen }, { serialized.contents().begin(), serialized.size() } },
+	Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(*headerRef);
+	uint8_t computed[AuthTokenSize];
+	computeAuthToken({ { ciphertext, ciphertextLen }, { serialized.begin(), serialized.size() } },
 	                 headerCipherKey->rawCipher(),
 	                 AES_256_KEY_LENGTH,
 	                 &computed[0],
 	                 (EncryptAuthTokenAlgo)flags.authTokenAlgo,
 	                 AUTH_TOKEN_MAX_SIZE);
-	memcpy(mutateString(algoHeader.authTokenRef), computed, S);
+	memcpy(&algoHeader.authToken[0], &computed[0], AuthTokenSize);
 
 	// Populate headerRef algorithm specific header details
-	serializedAlgoHeader = ObjectWriter::toValue(algoHeader, Unversioned());
+	serializedAlgoHeader = AesCtrWithAuthV1<AuthTokenSize>::toStringRef(algoHeader, arena);
 	arena.dependsOn(serializedAlgoHeader.arena());
 	headerRef->algoHeaderRef = serializedAlgoHeader;
 
 	if (BLOB_CIPHER_SERIALIZATION_CHECKS) {
-		AesCtrWithAuthV1<S> verify;
-		AesCtrWithAuthV1<S>::deserialize(headerRef->algoHeaderRef, verify, arena);
-		ASSERT(verify.cipherTextDetails == algoHeader.cipherTextDetails);
-		ASSERT(verify.cipherHeaderDetails == algoHeader.cipherHeaderDetails);
-		ASSERT_EQ(verify.ivRef.compare(StringRef(iv, AES_256_IV_LENGTH)), 0);
-		ASSERT_EQ(verify.authTokenRef.compare(algoHeader.authTokenRef), 0);
+		TraceEvent(SevDebug, "SingleAuthTokenGeneration")
+		    .detail("AuthTokenMode", flags.authTokenAlgo)
+		    .detail("Token", StringRef(arena, &algoHeader.authToken[0], AuthTokenSize));
+
+		AesCtrWithAuthV1<AuthTokenSize> verify =
+		    AesCtrWithAuthV1<AuthTokenSize>::fromStringRef(headerRef->algoHeaderRef, arena);
+		ASSERT(verify == algoHeader);
 	}
 }
 
@@ -673,15 +674,14 @@ void EncryptBlobCipherAes265Ctr::setCipherAlgoHeaderNoAuthV1(const BlobCipherEnc
 	    iv,
 	    AES_256_IV_LENGTH,
 	    arena);
-	Standalone<StringRef> serialized = ObjectWriter::toValue(aesCtrNoAuth, Unversioned());
+	Standalone<StringRef> serialized = AesCtrNoAuthV1::toStringRef(aesCtrNoAuth, arena);
 	arena.dependsOn(serialized.arena());
 	headerRef->algoHeaderRef = serialized;
 
 	if (BLOB_CIPHER_SERIALIZATION_CHECKS) {
-		AesCtrNoAuthV1 verify;
-		AesCtrNoAuthV1::deserialize(headerRef->algoHeaderRef, verify, arena);
+		AesCtrNoAuthV1 verify = AesCtrNoAuthV1::fromStringRef(headerRef->algoHeaderRef, arena);
 		ASSERT(aesCtrNoAuth.cipherTextDetails == verify.cipherTextDetails);
-		ASSERT_EQ(verify.ivRef.compare(StringRef(iv, AES_256_IV_LENGTH)), 0);
+		ASSERT_EQ(memcmp(&verify.iv[0], iv, AES_256_IV_LENGTH), 0);
 	}
 }
 
@@ -712,13 +712,12 @@ void EncryptBlobCipherAes265Ctr::updateEncryptHeaderFlagsV1(BlobCipherEncryptHea
 	flags->encryptMode = ENCRYPT_CIPHER_MODE_AES_256_CTR;
 	flags->authTokenMode = authTokenMode;
 	flags->authTokenAlgo = authTokenAlgo;
-	Standalone<StringRef> serializedFlags = ObjectWriter::toValue(*flags, Unversioned());
+	Standalone<StringRef> serializedFlags = BlobCipherEncryptHeaderFlagsV1::toStringRef(*flags, arena);
 	arena.dependsOn(serializedFlags.arena());
 	headerRef->flagsRef = serializedFlags;
 
 	if (BLOB_CIPHER_SERIALIZATION_CHECKS) {
-		BlobCipherEncryptHeaderFlagsV1 toVerify;
-		BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef->flagsRef, toVerify);
+		BlobCipherEncryptHeaderFlagsV1 toVerify = BlobCipherEncryptHeaderFlagsV1::fromStringRef(headerRef->flagsRef);
 		ASSERT_EQ(flags->encryptMode, toVerify.encryptMode);
 		ASSERT_EQ(flags->authTokenMode, toVerify.authTokenMode);
 		ASSERT_EQ(flags->authTokenAlgo, toVerify.authTokenAlgo);
@@ -911,12 +910,10 @@ void DecryptBlobCipherAes256Ctr::extractCipherDetailsIvRefFromHeaderV1(const Blo
 
 	if (parsedDetails.mode == ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
 		if (headerRef.algoHeaderVersion == 1) {
-			AesCtrNoAuthV1 noAuth;
-			AesCtrNoAuthV1::deserialize(headerRef.algoHeaderRef, noAuth, arena);
+			AesCtrNoAuthV1 noAuth = AesCtrNoAuthV1::fromStringRef(headerRef.algoHeaderRef, arena);
 			parsedDetails.textCipherDetails = noAuth.cipherTextDetails;
 			parsedDetails.headerCipherDetails = BlobCipherDetails(); // invalid for no-auth mode
-			// noAuth.ivRef deserialized using client supplied arena, safe assignment
-			parsedDetails.ivRef = noAuth.ivRef;
+			memcpy(&parsedDetails.iv[0], &noAuth.iv[0], AES_256_IV_LENGTH);
 		} else {
 			throw not_implemented();
 		}
@@ -924,19 +921,17 @@ void DecryptBlobCipherAes256Ctr::extractCipherDetailsIvRefFromHeaderV1(const Blo
 		ASSERT_EQ(parsedDetails.mode, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
 		if (headerRef.algoHeaderVersion == 1) {
 			if (parsedDetails.algo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA) {
-				AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE> hmacSha;
-				AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>::deserialize(headerRef.algoHeaderRef, hmacSha, arena);
+				AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE> hmacSha =
+				    AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>::fromStringRef(headerRef.algoHeaderRef, arena);
 				parsedDetails.textCipherDetails = hmacSha.cipherTextDetails;
 				parsedDetails.headerCipherDetails = hmacSha.cipherHeaderDetails;
-				// hmacSha.ivRef deserialized using client supplied arena, safe assignment
-				parsedDetails.ivRef = hmacSha.ivRef;
+				memcpy(&parsedDetails.iv[0], &hmacSha.iv[0], AES_256_IV_LENGTH);
 			} else if (parsedDetails.algo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC) {
-				AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE> aesCmac;
-				AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>::deserialize(headerRef.algoHeaderRef, aesCmac, arena);
+				AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE> aesCmac =
+				    AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>::fromStringRef(headerRef.algoHeaderRef, arena);
 				parsedDetails.textCipherDetails = aesCmac.cipherTextDetails;
 				parsedDetails.headerCipherDetails = aesCmac.cipherHeaderDetails;
-				// aesCmac.ivRef deserialized using client supplied arena, safe assignment
-				parsedDetails.ivRef = aesCmac.ivRef;
+				memcpy(&parsedDetails.iv[0], &aesCmac.iv[0], AES_256_IV_LENGTH);
 			} else {
 				throw not_implemented();
 			}
@@ -952,8 +947,7 @@ ParsedEncryptHeaderDetails DecryptBlobCipherAes256Ctr::extractDetailsFromHeaderR
 	ParsedEncryptHeaderDetails parsed;
 
 	if (headerRef.flagsVersion == 1) {
-		BlobCipherEncryptHeaderFlagsV1 flags;
-		BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, flags);
+		BlobCipherEncryptHeaderFlagsV1 flags = BlobCipherEncryptHeaderFlagsV1::fromStringRef(headerRef.flagsRef);
 		parsed.mode = (EncryptAuthTokenMode)flags.authTokenMode;
 		parsed.algo = (EncryptAuthTokenAlgo)flags.authTokenAlgo;
 	} else {
@@ -985,46 +979,32 @@ DecryptBlobCipherAes256Ctr::DecryptBlobCipherAes256Ctr(Reference<BlobCipherKey> 
 	}
 }
 
-template <uint32_t S>
+template <uint32_t AuthTokenSize>
 void DecryptBlobCipherAes256Ctr::validateAuthTokenV1(const uint8_t* ciphertext,
                                                      const int ciphertextLen,
                                                      const BlobCipherEncryptHeaderFlagsV1& flags,
                                                      const BlobCipherEncryptHeaderRef& headerRef) {
 	ASSERT_EQ(flags.encryptMode, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
-	ASSERT_LE(S, AUTH_TOKEN_MAX_SIZE);
+	ASSERT_LE(AuthTokenSize, AUTH_TOKEN_MAX_SIZE);
 
 	Arena tmpArena;
-	uint8_t persited[S];
-	uint8_t computed[S];
+	uint8_t persited[AuthTokenSize];
+	uint8_t computed[AuthTokenSize];
 
 	// prepare the payload {cipherText + encryptionHeader}
 	// ensure the 'authToken' is reset before computing the 'authentication token'
-	BlobCipherEncryptHeaderRef headerRefCopy = BlobCipherEncryptHeaderRef(headerRef);
+	BlobCipherEncryptHeaderRef headerRefCopy = BlobCipherEncryptHeaderRef(tmpArena, headerRef);
 
-	AesCtrWithAuthV1<S> algoHeaderCopy;
-	AesCtrWithAuthV1<S>::deserialize(headerRef.algoHeaderRef, algoHeaderCopy, tmpArena);
-	if (algoHeaderCopy.authTokenRef.size() != S) {
-		TraceEvent(SevWarn, "BlobCipherVerifyEncryptBlobHeaderAuthTokenSizeMismatch")
-		    .detail("HeaderFlagsVersion", headerRef.flagsVersion)
-		    .detail("HeaderMode", flags.encryptMode)
-		    .detail("Persisted", algoHeaderCopy.authTokenRef.size())
-		    .detail("Expected", S);
-
-		CODE_PROBE(flags.authTokenAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
-		           "ConfigurableEncryption: AuthToken size mismatch - HMAC_SHA auth token generation");
-		CODE_PROBE(flags.authTokenAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
-		           "ConfigurableEncryption: AuthToken size mismatch - AES_CMAC auth token generation");
-
-		throw encrypt_header_authtoken_mismatch();
-	}
+	AesCtrWithAuthV1<AuthTokenSize> algoHeaderCopy =
+	    AesCtrWithAuthV1<AuthTokenSize>::fromStringRef(headerRef.algoHeaderRef, tmpArena);
 	// preserve the 'persisted' token for future validation before reseting the field
-	memcpy(&persited[0], algoHeaderCopy.authTokenRef.begin(), S);
-	memset(mutateString(algoHeaderCopy.authTokenRef), 0, S);
+	memcpy(&persited[0], &algoHeaderCopy.authToken[0], AuthTokenSize);
+	memset(&algoHeaderCopy.authToken[0], 0, AuthTokenSize);
 
-	Standalone<StringRef> serializedAlgoHeader = ObjectWriter::toValue(algoHeaderCopy, Unversioned());
+	Standalone<StringRef> serializedAlgoHeader = AesCtrWithAuthV1<AuthTokenSize>::toStringRef(algoHeaderCopy, tmpArena);
 	tmpArena.dependsOn(serializedAlgoHeader.arena());
 	headerRefCopy.algoHeaderRef = serializedAlgoHeader;
-	Standalone<StringRef> serializedHeader = ObjectWriter::toValue(headerRefCopy, Unversioned());
+	Standalone<StringRef> serializedHeader = BlobCipherEncryptHeaderRef::toStringRef(headerRefCopy);
 	computeAuthToken({ { ciphertext, ciphertextLen }, { serializedHeader.begin(), serializedHeader.size() } },
 	                 headerCipherKey->rawCipher(),
 	                 AES_256_KEY_LENGTH,
@@ -1032,12 +1012,12 @@ void DecryptBlobCipherAes256Ctr::validateAuthTokenV1(const uint8_t* ciphertext,
 	                 (EncryptAuthTokenAlgo)flags.authTokenAlgo,
 	                 AUTH_TOKEN_MAX_SIZE);
 
-	if (memcmp(&persited[0], &computed[0], S) != 0) {
+	if (memcmp(&persited[0], &computed[0], AuthTokenSize) != 0) {
 		TraceEvent(SevWarn, "BlobCipherVerifyEncryptBlobHeaderAuthTokenMismatch")
 		    .detail("HeaderFlagsVersion", headerRef.flagsVersion)
 		    .detail("HeaderMode", flags.encryptMode)
-		    .detail("SingleAuthToken", StringRef(tmpArena, persited, S))
-		    .detail("ComputedSingleAuthToken", StringRef(tmpArena, computed, S));
+		    .detail("SingleAuthToken", StringRef(tmpArena, persited, AuthTokenSize))
+		    .detail("ComputedSingleAuthToken", StringRef(tmpArena, computed, AuthTokenSize));
 
 		CODE_PROBE(flags.authTokenAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
 		           "ConfigurableEncryption: AuthToken value mismatch - HMAC_SHA auth token generation");
@@ -1110,8 +1090,7 @@ void DecryptBlobCipherAes256Ctr::validateEncryptHeader(const uint8_t* ciphertext
 		throw encrypt_header_metadata_mismatch();
 	}
 	if (headerRef.flagsVersion == 1) {
-		BlobCipherEncryptHeaderFlagsV1 flags;
-		BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, flags);
+		BlobCipherEncryptHeaderFlagsV1 flags = BlobCipherEncryptHeaderFlagsV1::fromStringRef(headerRef.flagsRef);
 		validateEncryptHeaderFlagsV1(headerRef.flagsVersion, flags);
 		validateAuthTokensV1(ciphertext, ciphertextLen, flags, headerRef);
 
@@ -1679,6 +1658,55 @@ void testNoAuthMode(const int minDomainId) {
 	TraceEvent("BlobCipherTestNoAuthModeDone");
 }
 
+void testConfigurableEncryptionHeaderNoAuthMode(const int minDomainId) {
+	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
+
+	TraceEvent("TestConfigurableEncryptionHeader").detail("Mode", "No-Auth");
+
+	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
+
+	// Validate Encryption ops
+	Reference<BlobCipherKey> cipherKey = cipherKeyCache->getLatestCipherKey(minDomainId);
+	Reference<BlobCipherKey> headerCipherKey = cipherKeyCache->getLatestCipherKey(ENCRYPT_HEADER_DOMAIN_ID);
+	const int bufLen = deterministicRandom()->randomInt(786, 2127) + 512;
+	uint8_t orgData[bufLen];
+	deterministicRandom()->randomBytes(&orgData[0], bufLen);
+
+	Arena arena;
+	uint8_t iv[AES_256_IV_LENGTH];
+	deterministicRandom()->randomBytes(&iv[0], AES_256_IV_LENGTH);
+
+	EncryptBlobCipherAes265Ctr encryptor(cipherKey,
+	                                     headerCipherKey,
+	                                     iv,
+	                                     AES_256_IV_LENGTH,
+	                                     EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
+	                                     BlobCipherMetrics::TEST);
+
+	BlobCipherEncryptHeaderRef headerRef;
+	encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+
+	Arena ar;
+	BlobCipherEncryptHeaderFlagsV1 flags = BlobCipherEncryptHeaderFlagsV1::fromStringRef(headerRef.flagsRef);
+	AesCtrNoAuthV1 noAuth = AesCtrNoAuthV1::fromStringRef(headerRef.algoHeaderRef, ar);
+	Standalone<StringRef> serHeaderRef = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
+
+	BlobCipherEncryptHeaderRef validateHeader = BlobCipherEncryptHeaderRef::fromStringRef(serHeaderRef, ar);
+	BlobCipherEncryptHeaderFlagsV1 validateFlags =
+	    BlobCipherEncryptHeaderFlagsV1::fromStringRef(validateHeader.flagsRef);
+	AesCtrNoAuthV1 validateAlgo = AesCtrNoAuthV1::fromStringRef(validateHeader.algoHeaderRef, ar);
+	ASSERT(validateFlags == flags);
+	ASSERT(validateAlgo.cipherTextDetails == noAuth.cipherTextDetails);
+	ASSERT_EQ(memcmp(&iv[0], &validateAlgo.iv[0], AES_256_IV_LENGTH), 0);
+
+	TraceEvent("NoAuthHeaderSize")
+	    .detail("Flags", headerRef.flagsRef.size())
+	    .detail("AlgoHeader", headerRef.algoHeaderRef.size())
+	    .detail("TotalHeader", serHeaderRef.size());
+
+	TraceEvent("TestConfigurableEncryptionHeader").detail("Mode", "No-Auth");
+}
+
 void testConfigirableEncryptionNoAuthMode(const int minDomainId) {
 	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
 
@@ -1707,14 +1735,6 @@ void testConfigirableEncryptionNoAuthMode(const int minDomainId) {
 	BlobCipherEncryptHeaderRef headerRef;
 	StringRef encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 
-	if (headerRef.flagsVersion == 1) {
-		BlobCipherEncryptHeaderFlagsV1 flags;
-		BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, flags);
-		EncryptAuthTokenMode mode = (EncryptAuthTokenMode)flags.authTokenMode;
-		EncryptAuthTokenAlgo algo = (EncryptAuthTokenAlgo)flags.authTokenAlgo;
-		TraceEvent("Dummy").detail("M", mode).detail("A", algo);
-	}
-
 	// validate header version details
 	ParsedEncryptHeaderDetails parsed = DecryptBlobCipherAes256Ctr::extractDetailsFromHeaderRef(headerRef, arena);
 	ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
@@ -1723,7 +1743,7 @@ void testConfigirableEncryptionNoAuthMode(const int minDomainId) {
 	    parsed.textCipherDetails.encryptDomainId, parsed.textCipherDetails.baseCipherId, parsed.textCipherDetails.salt);
 	ASSERT(tCipherKeyKey->isEqual(cipherKey));
 	DecryptBlobCipherAes256Ctr decryptor(
-	    tCipherKeyKey, Reference<BlobCipherKey>(), parsed.ivRef.begin(), BlobCipherMetrics::TEST);
+	    tCipherKeyKey, Reference<BlobCipherKey>(), &parsed.iv[0], BlobCipherMetrics::TEST);
 
 	StringRef decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), encryptedBuf.size(), headerRef, arena);
 	ASSERT_EQ(decryptedBuf.size(), bufLen);
@@ -1740,7 +1760,7 @@ void testConfigirableEncryptionNoAuthMode(const int minDomainId) {
 	    .detail("Salt", parsed.textCipherDetails.salt);
 
 	// induce encryption header corruption - headerVersion corrupted
-	BlobCipherEncryptHeaderRef corruptedHeaderRef = BlobCipherEncryptHeaderRef(headerRef, arena);
+	BlobCipherEncryptHeaderRef corruptedHeaderRef = BlobCipherEncryptHeaderRef(arena, headerRef);
 	corruptedHeaderRef.flagsVersion += 1;
 	try {
 		encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
@@ -1756,11 +1776,10 @@ void testConfigirableEncryptionNoAuthMode(const int minDomainId) {
 	}
 
 	// induce encryption header corruption - encryptionMode corrupted
-	corruptedHeaderRef = BlobCipherEncryptHeaderRef(headerRef, arena);
-	BlobCipherEncryptHeaderFlagsV1 corruptedFlags;
-	BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, corruptedFlags);
+	corruptedHeaderRef = BlobCipherEncryptHeaderRef(arena, headerRef);
+	BlobCipherEncryptHeaderFlagsV1 corruptedFlags = BlobCipherEncryptHeaderFlagsV1::fromStringRef(headerRef.flagsRef);
 	corruptedFlags.encryptMode += 1;
-	Standalone<StringRef> serializedFlags = ObjectWriter::toValue(corruptedFlags, Unversioned());
+	Standalone<StringRef> serializedFlags = BlobCipherEncryptHeaderFlagsV1::toStringRef(corruptedFlags, arena);
 	arena.dependsOn(serializedFlags.arena());
 	corruptedHeaderRef.flagsRef = serializedFlags;
 	try {
@@ -1797,8 +1816,14 @@ void testConfigirableEncryptionNoAuthMode(const int minDomainId) {
 
 // validate basic encrypt followed by decrypt operation for AUTH_TOKEN_MODE_SINGLE
 // HMAC_SHA authToken algorithm
-void testSingleAuthModeHmacSha(const int minDomainId) {
-	TraceEvent("BlobCipherTestSingleAuthTokenStart").detail("Mode", "HMAC_SHA");
+template <uint32_t AuthTokenSize>
+void testSingleAuthMode(const int minDomainId) {
+	const std::string authAlgoStr = AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE ? "HMAC-SHA" : "AES-CMAC";
+	const EncryptAuthTokenAlgo authAlgo = AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE
+	                                          ? EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA
+	                                          : EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC;
+
+	TraceEvent("BlobCipherTestSingleAuthTokenStart").detail("Mode", authAlgoStr);
 
 	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 
@@ -1817,7 +1842,7 @@ void testSingleAuthModeHmacSha(const int minDomainId) {
 	                                     iv,
 	                                     AES_256_IV_LENGTH,
 	                                     EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
-	                                     EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
+	                                     authAlgo,
 	                                     BlobCipherMetrics::TEST);
 	BlobCipherEncryptHeader header;
 	Reference<EncryptBuf> encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
@@ -1827,7 +1852,7 @@ void testSingleAuthModeHmacSha(const int minDomainId) {
 	ASSERT_EQ(header.flags.headerVersion, EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION);
 	ASSERT_EQ(header.flags.encryptMode, ENCRYPT_CIPHER_MODE_AES_256_CTR);
 	ASSERT_EQ(header.flags.authTokenMode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
-	ASSERT_EQ(header.flags.authTokenAlgo, EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA);
+	ASSERT_EQ(header.flags.authTokenAlgo, authAlgo);
 
 	TraceEvent("BlobCipherTestEncryptDone")
 	    .detail("HeaderVersion", header.flags.headerVersion)
@@ -1836,8 +1861,7 @@ void testSingleAuthModeHmacSha(const int minDomainId) {
 	    .detail("HeaderEncryptAuthTokenAlgo", header.flags.authTokenAlgo)
 	    .detail("DomainId", header.cipherTextDetails.encryptDomainId)
 	    .detail("BaseCipherId", header.cipherTextDetails.baseCipherId)
-	    .detail("HeaderAuthToken",
-	            StringRef(arena, &header.singleAuthToken.authToken[0], AUTH_TOKEN_HMAC_SHA_SIZE).toString());
+	    .detail("HeaderAuthToken", StringRef(arena, &header.singleAuthToken.authToken[0], AuthTokenSize).toString());
 
 	Reference<BlobCipherKey> tCipherKeyKey = cipherKeyCache->getCipherKey(
 	    header.cipherTextDetails.encryptDomainId, header.cipherTextDetails.baseCipherId, header.cipherTextDetails.salt);
@@ -1891,7 +1915,7 @@ void testSingleAuthModeHmacSha(const int minDomainId) {
 	memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
 	       reinterpret_cast<const uint8_t*>(&header),
 	       sizeof(BlobCipherEncryptHeader));
-	int hIdx = deterministicRandom()->randomInt(0, AUTH_TOKEN_HMAC_SHA_SIZE - 1);
+	int hIdx = deterministicRandom()->randomInt(0, AuthTokenSize - 1);
 	headerCopy.singleAuthToken.authToken[hIdx] += 1;
 	try {
 		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
@@ -1918,15 +1942,15 @@ void testSingleAuthModeHmacSha(const int minDomainId) {
 		}
 	}
 
-	TraceEvent("BlobCipherTestSingleAuthTokenEnd").detail("Mode", "HMAC_SHA");
+	TraceEvent("BlobCipherTestSingleAuthTokenEnd").detail("Mode", authAlgoStr);
 }
 
-// validate basic encrypt followed by decrypt operation for AUTH_TOKEN_MODE_SINGLE
-// HMAC_SHA authToken algorithm with configurable encryption semantics
-void testConfigurableEncryptionSingleAuthModeHmacSha(const int minDomainId) {
+template <uint32_t AuthTokenSize>
+void testConfigurableEncryptionHeaderSingleAuthMode(int minDomainId) {
 	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
 
-	TraceEvent("BlobCipherTestSingleAuthTokenConfigurableEncryptionStart").detail("Mode", "HMAC_SHA");
+	TraceEvent("TestEncryptionHeaderStart")
+	    .detail("Mode", AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE ? "HMAC_SHA" : "AES-CMAC");
 
 	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 
@@ -1940,14 +1964,77 @@ void testConfigurableEncryptionSingleAuthModeHmacSha(const int minDomainId) {
 	uint8_t orgData[bufLen];
 	deterministicRandom()->randomBytes(&orgData[0], bufLen);
 
-	TraceEvent("ConfigurableEncryptionSingleAuthModeStart").detail("Mode", "HMAC-SHA");
+	EncryptBlobCipherAes265Ctr encryptor(cipherKey,
+	                                     headerCipherKey,
+	                                     iv,
+	                                     AES_256_IV_LENGTH,
+	                                     EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+	                                     AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE
+	                                         ? EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA
+	                                         : EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
+	                                     BlobCipherMetrics::TEST);
+	BlobCipherEncryptHeaderRef headerRef;
+	encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+
+	Arena ar;
+	BlobCipherEncryptHeaderFlagsV1 flags = BlobCipherEncryptHeaderFlagsV1::fromStringRef(headerRef.flagsRef);
+	AesCtrWithAuthV1<AuthTokenSize> algoHeader =
+	    AesCtrWithAuthV1<AuthTokenSize>::fromStringRef(headerRef.algoHeaderRef, arena);
+	Standalone<StringRef> serHeaderRef = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
+
+	BlobCipherEncryptHeaderRef validateHeader = BlobCipherEncryptHeaderRef::fromStringRef(serHeaderRef, ar);
+	BlobCipherEncryptHeaderFlagsV1 validateFlags =
+	    BlobCipherEncryptHeaderFlagsV1::fromStringRef(validateHeader.flagsRef);
+	AesCtrWithAuthV1<AuthTokenSize> validateAlgo =
+	    AesCtrWithAuthV1<AuthTokenSize>::fromStringRef(validateHeader.algoHeaderRef, ar);
+	ASSERT(validateFlags == flags);
+	ASSERT(validateAlgo.cipherTextDetails == algoHeader.cipherTextDetails);
+	ASSERT(validateAlgo.cipherHeaderDetails == algoHeader.cipherHeaderDetails);
+	ASSERT_EQ(memcmp(&iv[0], &validateAlgo.iv[0], AES_256_IV_LENGTH), 0);
+	ASSERT_EQ(memcmp(&algoHeader.authToken[0], &validateAlgo.authToken[0], AuthTokenSize), 0);
+
+	TraceEvent("HmacShaHeaderSize")
+	    .detail("Flags", headerRef.flagsRef.size())
+	    .detail("AlgoHeader", headerRef.algoHeaderRef.size())
+	    .detail("TotalHeader", serHeaderRef.size());
+
+	TraceEvent("TestEncryptionHeaderEnd")
+	    .detail("Mode", AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE ? "HMAC_SHA" : "AES-CMAC");
+}
+
+// validate basic encrypt followed by decrypt operation for AUTH_TOKEN_MODE_SINGLE
+template <uint32_t AuthTokenSize>
+void testConfigurableEncryptionSingleAuthMode(const int minDomainId) {
+	const std::string authAlgoStr = AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE ? "HMAC-SHA" : "AES-CMAC";
+	const EncryptAuthTokenAlgo authAlgo = AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE
+	                                          ? EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA
+	                                          : EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA;
+	const int algoHeaderVersion = AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE
+	                                  ? CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION
+	                                  : CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION;
+
+	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
+
+	TraceEvent("BlobCipherTestEncryptionHeaderStart").detail("Mode", authAlgoStr);
+
+	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
+
+	// Validate Encryption ops
+	Reference<BlobCipherKey> cipherKey = cipherKeyCache->getLatestCipherKey(minDomainId);
+	Reference<BlobCipherKey> headerCipherKey = cipherKeyCache->getLatestCipherKey(ENCRYPT_HEADER_DOMAIN_ID);
+	const int bufLen = deterministicRandom()->randomInt(786, 2127) + 512;
+	Arena arena;
+	uint8_t iv[AES_256_IV_LENGTH];
+	deterministicRandom()->randomBytes(&iv[0], AES_256_IV_LENGTH);
+	uint8_t orgData[bufLen];
+	deterministicRandom()->randomBytes(&orgData[0], bufLen);
 
 	EncryptBlobCipherAes265Ctr encryptor(cipherKey,
 	                                     headerCipherKey,
 	                                     iv,
 	                                     AES_256_IV_LENGTH,
 	                                     EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
-	                                     EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
+	                                     authAlgo,
 	                                     BlobCipherMetrics::TEST);
 	BlobCipherEncryptHeaderRef headerRef;
 	StringRef encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
@@ -1955,20 +2042,18 @@ void testConfigurableEncryptionSingleAuthModeHmacSha(const int minDomainId) {
 	ASSERT_EQ(encryptedBuf.size(), bufLen);
 	ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
 	ASSERT_EQ(headerRef.flagsVersion, CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
-	ASSERT_EQ(headerRef.algoHeaderVersion, CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION);
+	ASSERT_EQ(headerRef.algoHeaderVersion, algoHeaderVersion);
 
 	// validate flags
-	BlobCipherEncryptHeaderFlagsV1 flags;
-	BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, flags);
+	BlobCipherEncryptHeaderFlagsV1 flags = BlobCipherEncryptHeaderFlagsV1::fromStringRef(headerRef.flagsRef);
 	ASSERT_EQ(flags.encryptMode, EncryptCipherMode::ENCRYPT_CIPHER_MODE_AES_256_CTR);
 	ASSERT_EQ(flags.authTokenMode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
-	ASSERT_EQ(flags.authTokenAlgo, EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA);
+	ASSERT_EQ(flags.authTokenAlgo, authAlgo);
 
 	ParsedEncryptHeaderDetails parsed = DecryptBlobCipherAes256Ctr::extractDetailsFromHeaderRef(headerRef, arena);
 
 	// validate IV
-	ASSERT_EQ(parsed.ivRef.size(), AES_256_IV_LENGTH);
-	ASSERT_EQ(memcmp(&iv[0], parsed.ivRef.begin(), AES_256_IV_LENGTH), 0);
+	ASSERT_EQ(memcmp(&iv[0], &parsed.iv[0], AES_256_IV_LENGTH), 0);
 	ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
 	// validate cipherKey details
 	ASSERT_EQ(parsed.textCipherDetails.encryptDomainId, cipherKey->getDomainId());
@@ -1985,7 +2070,7 @@ void testConfigurableEncryptionSingleAuthModeHmacSha(const int minDomainId) {
 	                                                                   parsed.headerCipherDetails.salt);
 	ASSERT(tCipherKeyKey->isEqual(cipherKey));
 	ASSERT(hCipherKey->isEqual(headerCipherKey));
-	DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, parsed.ivRef.begin(), BlobCipherMetrics::TEST);
+	DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &parsed.iv[0], BlobCipherMetrics::TEST);
 	StringRef decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, headerRef, arena);
 
 	ASSERT_EQ(decryptedBuf.size(), bufLen);
@@ -2005,7 +2090,7 @@ void testConfigurableEncryptionSingleAuthModeHmacSha(const int minDomainId) {
 	    .detail("HeaderSalt", parsed.headerCipherDetails.salt);
 
 	// induce encryption header corruption - headerVersion corrupted
-	BlobCipherEncryptHeaderRef corruptedHeaderRef = BlobCipherEncryptHeaderRef(headerRef, arena);
+	BlobCipherEncryptHeaderRef corruptedHeaderRef = BlobCipherEncryptHeaderRef(arena, headerRef);
 	corruptedHeaderRef.flagsVersion += 1;
 	try {
 		encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
@@ -2016,15 +2101,14 @@ void testConfigurableEncryptionSingleAuthModeHmacSha(const int minDomainId) {
 		if (e.code() != error_code_encrypt_header_metadata_mismatch) {
 			throw;
 		}
-		TraceEvent("ConfigurableEncryptionCorruptFlagsDone").detail("Mode", "HMAC-SHA");
+		TraceEvent("ConfigurableEncryptionCorruptFlagsDone").detail("Mode", authAlgoStr);
 	}
 
 	// induce encryption header corruption - encryptionMode corrupted
-	corruptedHeaderRef = BlobCipherEncryptHeaderRef(headerRef);
-	BlobCipherEncryptHeaderFlagsV1 corruptedFlags;
-	BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, corruptedFlags);
+	corruptedHeaderRef = BlobCipherEncryptHeaderRef(arena, headerRef);
+	BlobCipherEncryptHeaderFlagsV1 corruptedFlags = BlobCipherEncryptHeaderFlagsV1::fromStringRef(headerRef.flagsRef);
 	corruptedFlags.encryptMode += 1;
-	Standalone<StringRef> serializedFlags = ObjectWriter::toValue(corruptedFlags, Unversioned());
+	Standalone<StringRef> serializedFlags = BlobCipherEncryptHeaderFlagsV1::toStringRef(corruptedFlags, arena);
 	arena.dependsOn(serializedFlags.arena());
 	corruptedHeaderRef.flagsRef = serializedFlags;
 	try {
@@ -2036,29 +2120,7 @@ void testConfigurableEncryptionSingleAuthModeHmacSha(const int minDomainId) {
 		if (e.code() != error_code_encrypt_header_metadata_mismatch) {
 			throw;
 		}
-		TraceEvent("ConfigurableEncryptionCorruptEncryptModeDone").detail("Mode", "HMAC-SHA");
-	}
-	// induce encryption header corruption - incorrect authToken size
-	corruptedHeaderRef = BlobCipherEncryptHeaderRef(headerRef);
-	AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE> hmacSha;
-	AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>::deserialize(corruptedHeaderRef.algoHeaderRef, hmacSha, arena);
-	StringRef corruptedTokenRef = makeString(hmacSha.authTokenRef.size() + 1, arena);
-	memset(mutateString(corruptedTokenRef), 1, hmacSha.authTokenRef.size() + 1);
-	memcpy(mutateString(corruptedTokenRef), hmacSha.authTokenRef.begin(), hmacSha.authTokenRef.size());
-	hmacSha.authTokenRef = corruptedTokenRef;
-	Standalone<StringRef> algoRef = ObjectWriter::toValue(hmacSha, Unversioned());
-	arena.dependsOn(algoRef.arena());
-	corruptedHeaderRef.algoHeaderRef = algoRef;
-	try {
-		encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
-		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
-		decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, corruptedHeaderRef, arena);
-		ASSERT(false); // error expected
-	} catch (Error& e) {
-		if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
-			throw;
-		}
-		TraceEvent("ConfigurableEncryptionCorruptAuthTokenSizeDone").detail("Mode", "HMAC-SHA");
+		TraceEvent("ConfigurableEncryptionCorruptEncryptModeDone").detail("Mode", authAlgoStr);
 	}
 
 	// induce encrypted buffer payload corruption
@@ -2075,293 +2137,10 @@ void testConfigurableEncryptionSingleAuthModeHmacSha(const int minDomainId) {
 		if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
 			throw;
 		}
-		TraceEvent("ConfigurableEncryptionCorruptPayloadDone").detail("Mode", "HMAC-SHA");
+		TraceEvent("ConfigurableEncryptionCorruptPayloadDone").detail("Mode", authAlgoStr);
 	}
 
-	TraceEvent("BlobCipherTestSingleAuthTokenConfigurableEncryptionEnd").detail("Mode", "HMAC-SHA");
-}
-
-// AES_CMAC authToken algorithm
-void testSingleAuthTokenAesCmac(const int minDomainId) {
-	TraceEvent("BlobCipherTestSingleAuthTokenStart").detail("Mode", "AES-CMAC");
-
-	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
-
-	// Validate Encryption ops
-	Reference<BlobCipherKey> cipherKey = cipherKeyCache->getLatestCipherKey(minDomainId);
-	Reference<BlobCipherKey> headerCipherKey = cipherKeyCache->getLatestCipherKey(ENCRYPT_HEADER_DOMAIN_ID);
-	const int bufLen = deterministicRandom()->randomInt(786, 2127) + 512;
-	Arena arena;
-	uint8_t iv[AES_256_IV_LENGTH];
-	deterministicRandom()->randomBytes(&iv[0], AES_256_IV_LENGTH);
-	uint8_t orgData[bufLen];
-	deterministicRandom()->randomBytes(&orgData[0], bufLen);
-
-	EncryptBlobCipherAes265Ctr encryptor(cipherKey,
-	                                     headerCipherKey,
-	                                     iv,
-	                                     AES_256_IV_LENGTH,
-	                                     EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
-	                                     EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
-	                                     BlobCipherMetrics::TEST);
-	BlobCipherEncryptHeader header;
-	Reference<EncryptBuf> encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-
-	ASSERT_EQ(encrypted->getLogicalSize(), bufLen);
-	ASSERT_NE(memcmp(&orgData[0], encrypted->begin(), bufLen), 0);
-	ASSERT_EQ(header.flags.headerVersion, EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION);
-	ASSERT_EQ(header.flags.encryptMode, ENCRYPT_CIPHER_MODE_AES_256_CTR);
-	ASSERT_EQ(header.flags.authTokenMode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
-	ASSERT_EQ(header.flags.authTokenAlgo, EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC);
-
-	TraceEvent("BlobCipherTestEncryptDone")
-	    .detail("HeaderVersion", header.flags.headerVersion)
-	    .detail("HeaderEncryptMode", header.flags.encryptMode)
-	    .detail("HeaderEncryptAuthTokenMode", header.flags.authTokenMode)
-	    .detail("HeaderEncryptAuthTokenAlgo", header.flags.authTokenAlgo)
-	    .detail("DomainId", header.cipherTextDetails.encryptDomainId)
-	    .detail("BaseCipherId", header.cipherTextDetails.baseCipherId)
-	    .detail("HeaderAuthToken",
-	            StringRef(arena, &header.singleAuthToken.authToken[0], AUTH_TOKEN_AES_CMAC_SIZE).toString());
-
-	Reference<BlobCipherKey> tCipherKeyKey = cipherKeyCache->getCipherKey(
-	    header.cipherTextDetails.encryptDomainId, header.cipherTextDetails.baseCipherId, header.cipherTextDetails.salt);
-	Reference<BlobCipherKey> hCipherKey = cipherKeyCache->getCipherKey(header.cipherHeaderDetails.encryptDomainId,
-	                                                                   header.cipherHeaderDetails.baseCipherId,
-	                                                                   header.cipherHeaderDetails.salt);
-	ASSERT(tCipherKeyKey->isEqual(cipherKey));
-	DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-	Reference<EncryptBuf> decrypted = decryptor.decrypt(encrypted->begin(), bufLen, header, arena);
-
-	ASSERT_EQ(decrypted->getLogicalSize(), bufLen);
-	ASSERT_EQ(memcmp(decrypted->begin(), &orgData[0], bufLen), 0);
-
-	TraceEvent("BlobCipherTestDecryptDone").log();
-
-	// induce encryption header corruption - headerVersion corrupted
-	BlobCipherEncryptHeader headerCopy;
-	encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-	memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
-	       reinterpret_cast<const uint8_t*>(&header),
-	       sizeof(BlobCipherEncryptHeader));
-	headerCopy.flags.headerVersion += 1;
-	try {
-		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-		decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
-		ASSERT(false); // error expected
-	} catch (Error& e) {
-		if (e.code() != error_code_encrypt_header_metadata_mismatch) {
-			throw;
-		}
-	}
-
-	// induce encryption header corruption - encryptionMode corrupted
-	encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-	memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
-	       reinterpret_cast<const uint8_t*>(&header),
-	       sizeof(BlobCipherEncryptHeader));
-	headerCopy.flags.encryptMode += 1;
-	try {
-		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-		decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
-		ASSERT(false); // error expected
-	} catch (Error& e) {
-		if (e.code() != error_code_encrypt_header_metadata_mismatch) {
-			throw;
-		}
-	}
-
-	// induce encryption header corruption - authToken mismatch
-	encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-	memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
-	       reinterpret_cast<const uint8_t*>(&header),
-	       sizeof(BlobCipherEncryptHeader));
-	int hIdx = deterministicRandom()->randomInt(0, AUTH_TOKEN_AES_CMAC_SIZE - 1);
-	headerCopy.singleAuthToken.authToken[hIdx] += 1;
-	try {
-		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-		decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
-		ASSERT(false); // error expected
-	} catch (Error& e) {
-		if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
-			throw;
-		}
-	}
-
-	// induce encrypted buffer payload corruption
-	try {
-		encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-		uint8_t temp[bufLen];
-		memcpy(encrypted->begin(), &temp[0], bufLen);
-		int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
-		temp[tIdx] += 1;
-		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-		decrypted = decryptor.decrypt(&temp[0], bufLen, header, arena);
-	} catch (Error& e) {
-		if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
-			throw;
-		}
-	}
-
-	TraceEvent("BlobCipherTestSingleAuthTokenEnd").detail("Mode", "AES-CMAC");
-}
-
-// validate basic encrypt followed by decrypt operation for AUTH_TOKEN_MODE_SINGLE
-// HMAC_SHA authToken algorithm with configurable encryption semantics
-void testConfigurableEncryptionSingleAuthModeAesCmac(const int minDomainId) {
-	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
-
-	TraceEvent("BlobCipherTestSingleAuthTokenConfigurableEncryptionStart").detail("Mode", "AES-CMAC");
-
-	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
-
-	// Validate Encryption ops
-	Reference<BlobCipherKey> cipherKey = cipherKeyCache->getLatestCipherKey(minDomainId);
-	Reference<BlobCipherKey> headerCipherKey = cipherKeyCache->getLatestCipherKey(ENCRYPT_HEADER_DOMAIN_ID);
-	const int bufLen = deterministicRandom()->randomInt(786, 2127) + 512;
-	Arena arena;
-	uint8_t iv[AES_256_IV_LENGTH];
-	deterministicRandom()->randomBytes(&iv[0], AES_256_IV_LENGTH);
-	uint8_t orgData[bufLen];
-	deterministicRandom()->randomBytes(&orgData[0], bufLen);
-
-	EncryptBlobCipherAes265Ctr encryptor(cipherKey,
-	                                     headerCipherKey,
-	                                     iv,
-	                                     AES_256_IV_LENGTH,
-	                                     EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
-	                                     EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
-	                                     BlobCipherMetrics::TEST);
-	BlobCipherEncryptHeaderRef headerRef;
-	StringRef encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
-
-	ASSERT_EQ(encryptedBuf.size(), bufLen);
-	ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
-	ASSERT_EQ(headerRef.flagsVersion, CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
-	ASSERT_EQ(headerRef.algoHeaderVersion, CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION);
-
-	// validate flags
-	BlobCipherEncryptHeaderFlagsV1 flags;
-	BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, flags);
-	ASSERT_EQ(flags.encryptMode, EncryptCipherMode::ENCRYPT_CIPHER_MODE_AES_256_CTR);
-	ASSERT_EQ(flags.authTokenMode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
-	ASSERT_EQ(flags.authTokenAlgo, EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC);
-
-	// validate algo header
-	ParsedEncryptHeaderDetails parsed = DecryptBlobCipherAes256Ctr::extractDetailsFromHeaderRef(headerRef, arena);
-
-	// validate IV
-	ASSERT_EQ(parsed.ivRef.size(), AES_256_IV_LENGTH);
-	ASSERT_EQ(memcmp(&iv[0], parsed.ivRef.begin(), AES_256_IV_LENGTH), 0);
-	ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
-	// validate cipherKey details
-	ASSERT_EQ(parsed.textCipherDetails.encryptDomainId, cipherKey->getDomainId());
-	ASSERT_EQ(parsed.textCipherDetails.baseCipherId, cipherKey->getBaseCipherId());
-	ASSERT_EQ(parsed.textCipherDetails.salt, cipherKey->getSalt());
-	ASSERT_EQ(parsed.headerCipherDetails.encryptDomainId, headerCipherKey->getDomainId());
-	ASSERT_EQ(parsed.headerCipherDetails.baseCipherId, headerCipherKey->getBaseCipherId());
-	ASSERT_EQ(parsed.headerCipherDetails.salt, headerCipherKey->getSalt());
-
-	Reference<BlobCipherKey> tCipherKeyKey = cipherKeyCache->getCipherKey(
-	    parsed.textCipherDetails.encryptDomainId, parsed.textCipherDetails.baseCipherId, parsed.textCipherDetails.salt);
-	Reference<BlobCipherKey> hCipherKey = cipherKeyCache->getCipherKey(parsed.headerCipherDetails.encryptDomainId,
-	                                                                   parsed.headerCipherDetails.baseCipherId,
-	                                                                   parsed.headerCipherDetails.salt);
-	ASSERT(tCipherKeyKey->isEqual(cipherKey));
-	ASSERT(hCipherKey->isEqual(headerCipherKey));
-	DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, parsed.ivRef.begin(), BlobCipherMetrics::TEST);
-	StringRef decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, headerRef, arena);
-
-	ASSERT_EQ(decryptedBuf.size(), bufLen);
-	ASSERT_EQ(memcmp(decryptedBuf.begin(), &orgData[0], bufLen), 0);
-
-	TraceEvent("BlobCipherTestEncryptDecryptDone")
-	    .detail("HeaderFlagsVersion", headerRef.flagsVersion)
-	    .detail("AlgoHeaderVersion", headerRef.algoHeaderVersion)
-	    .detail("HeaderEncryptMode", flags.encryptMode)
-	    .detail("HeaderEncryptAuthTokenMode", flags.authTokenMode)
-	    .detail("HeaderEncryptAuthTokenAlgo", flags.authTokenAlgo)
-	    .detail("TextDomainId", parsed.textCipherDetails.encryptDomainId)
-	    .detail("TextBaseCipherId", parsed.textCipherDetails.baseCipherId)
-	    .detail("TextSalt", parsed.textCipherDetails.salt)
-	    .detail("HeaderDomainId", parsed.headerCipherDetails.encryptDomainId)
-	    .detail("HeaderBaseCipherId", parsed.headerCipherDetails.baseCipherId)
-	    .detail("HeaderSalt", parsed.headerCipherDetails.salt);
-
-	// induce encryption header corruption - headerVersion corrupted
-	BlobCipherEncryptHeaderRef corruptedHeaderRef = BlobCipherEncryptHeaderRef(headerRef, arena);
-	corruptedHeaderRef.flagsVersion += 1;
-	try {
-		encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
-		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
-		decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, corruptedHeaderRef, arena);
-		ASSERT(false); // error expected
-	} catch (Error& e) {
-		if (e.code() != error_code_encrypt_header_metadata_mismatch) {
-			throw;
-		}
-		TraceEvent("ConfigurableEncryptionCorruptFlagsDone").detail("Mode", "AES-CMAC");
-	}
-
-	// induce encryption header corruption - encryptionMode corrupted
-	corruptedHeaderRef = BlobCipherEncryptHeaderRef(headerRef, arena);
-	BlobCipherEncryptHeaderFlagsV1 corruptedFlags;
-	BlobCipherEncryptHeaderFlagsV1::deserialize(headerRef.flagsRef, corruptedFlags);
-	corruptedFlags.encryptMode += 1;
-	Standalone<StringRef> serializedFlags = ObjectWriter::toValue(corruptedFlags, Unversioned());
-	arena.dependsOn(serializedFlags.arena());
-	corruptedHeaderRef.flagsRef = serializedFlags;
-	try {
-		encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
-		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
-		decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, corruptedHeaderRef, arena);
-		ASSERT(false); // error expected
-	} catch (Error& e) {
-		if (e.code() != error_code_encrypt_header_metadata_mismatch) {
-			throw;
-		}
-		TraceEvent("ConfigurableEncryptionCorruptEncryptModeDone").detail("Mode", "AES-CMAC");
-	}
-	// induce encryption header corruption - incorrect authToken size
-	corruptedHeaderRef = BlobCipherEncryptHeaderRef(headerRef);
-	AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE> aesCmac;
-	AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>::deserialize(corruptedHeaderRef.algoHeaderRef, aesCmac, arena);
-	StringRef corruptedTokenRef = makeString(aesCmac.authTokenRef.size() + 1, arena);
-	memset(mutateString(corruptedTokenRef), 1, aesCmac.authTokenRef.size() + 1);
-	memcpy(mutateString(corruptedTokenRef), aesCmac.authTokenRef.begin(), aesCmac.authTokenRef.size());
-	aesCmac.authTokenRef = corruptedTokenRef;
-	Standalone<StringRef> algoRef = ObjectWriter::toValue(aesCmac, Unversioned());
-	arena.dependsOn(algoRef.arena());
-	corruptedHeaderRef.algoHeaderRef = algoRef;
-	try {
-		encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
-		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
-		decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, corruptedHeaderRef, arena);
-		ASSERT(false); // error expected
-	} catch (Error& e) {
-		if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
-			throw;
-		}
-		TraceEvent("ConfigurableEncryptionCorruptAuthTokenSizeDone").detail("Mode", "AES-CMAC");
-	}
-	// induce encrypted buffer payload corruption
-	try {
-		encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
-		uint8_t temp[bufLen];
-		memcpy((void*)encryptedBuf.begin(), &temp[0], bufLen);
-		int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
-		temp[tIdx] += 1;
-		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
-		decryptedBuf = decryptor.decrypt(&temp[0], bufLen, headerRef, arena);
-		ASSERT_NE(memcmp(decryptedBuf.begin(), &orgData[0], bufLen), 0);
-	} catch (Error& e) {
-		if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
-			throw;
-		}
-		TraceEvent("ConfigurableEncryptionCorruptPayloadDone").detail("Mode", "AES-CMAC");
-	}
-
-	TraceEvent("BlobCipherTestSingleAuthTokenConfigurableEncryptionEnd").detail("Mode", "AES-CMAC");
+	TraceEvent("TestSingleAuthTokenConfigurableEncryptionEnd").detail("Mode", authAlgoStr);
 }
 
 void testKeyCacheCleanup(const int minDomainId, const int maxDomainId) {
@@ -2402,12 +2181,18 @@ TEST_CASE("/blobCipher") {
 	ASSERT_EQ(domainKeyMap.size(), maxDomainId);
 
 	testKeyCacheEssentials(domainKeyMap, minDomainId, maxDomainId, minBaseCipherKeyId);
+
+	testConfigurableEncryptionHeaderNoAuthMode(minDomainId);
+	testConfigurableEncryptionHeaderSingleAuthMode<AUTH_TOKEN_HMAC_SHA_SIZE>(minDomainId);
+	testConfigurableEncryptionHeaderSingleAuthMode<AUTH_TOKEN_AES_CMAC_SIZE>(minDomainId);
+
 	testNoAuthMode(minDomainId);
-	testSingleAuthModeHmacSha(minDomainId);
-	testSingleAuthTokenAesCmac(minDomainId);
+	testSingleAuthMode<AUTH_TOKEN_HMAC_SHA_SIZE>(minDomainId);
+	testSingleAuthMode<AUTH_TOKEN_AES_CMAC_SIZE>(minDomainId);
+
 	testConfigirableEncryptionNoAuthMode(minDomainId);
-	testConfigurableEncryptionSingleAuthModeHmacSha(minDomainId);
-	testConfigurableEncryptionSingleAuthModeAesCmac(minDomainId);
+	testConfigurableEncryptionSingleAuthMode<AUTH_TOKEN_HMAC_SHA_SIZE>(minDomainId);
+	testConfigurableEncryptionSingleAuthMode<AUTH_TOKEN_AES_CMAC_SIZE>(minDomainId);
 	testKeyCacheCleanup(minDomainId, maxDomainId);
 
 	return Void();

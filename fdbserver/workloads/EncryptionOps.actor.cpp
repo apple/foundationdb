@@ -355,13 +355,16 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 	void doDecryption(StringRef encrypted,
 	                  int len,
-	                  const BlobCipherEncryptHeaderRef& headerRef,
+	                  const Standalone<StringRef>& headerStr,
 	                  uint8_t* originalPayload,
 	                  Reference<BlobCipherKey> orgCipherKey) {
+		Arena tmpArena;
+		BlobCipherEncryptHeaderRef headerRef = BlobCipherEncryptHeaderRef::fromStringRef(headerStr, tmpArena);
+
 		ASSERT_EQ(headerRef.flagsVersion, CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
+
 		// validate flags
-		BlobCipherEncryptHeaderFlagsV1 flags = ObjectReader::fromStringRef<BlobCipherEncryptHeaderFlagsV1>(
-		    headerRef.flagsRef, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		BlobCipherEncryptHeaderFlagsV1 flags = BlobCipherEncryptHeaderFlagsV1::fromStringRef(headerRef.flagsRef);
 		ASSERT_EQ(flags.encryptMode, EncryptCipherMode::ENCRYPT_CIPHER_MODE_AES_256_CTR);
 
 		ParsedEncryptHeaderDetails parsed = DecryptBlobCipherAes256Ctr::extractDetailsFromHeaderRef(headerRef, arena);
@@ -378,7 +381,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		ASSERT(cipherKey.isValid());
 		ASSERT(cipherKey->isEqual(orgCipherKey));
 
-		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, parsed.ivRef.begin(), BlobCipherMetrics::TEST);
+		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, &parsed.iv[0], BlobCipherMetrics::TEST);
 
 		auto start = std::chrono::high_resolution_clock::now();
 		StringRef decrypted = decryptor.decrypt(encrypted.begin(), len, headerRef, arena);
@@ -456,10 +459,12 @@ struct EncryptionOpsWorkload : TestWorkload {
 					BlobCipherEncryptHeaderRef headerRef;
 					StringRef encrypted =
 					    doEncryption(cipherKey, headerCipherKey, buff.get(), dataLen, authMode, authAlgo, &headerRef);
+					// simulate 'header' on-disk read, serialize buffer and deserialize on decryption
+					Standalone<StringRef> serHeader = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
 
 					// Decrypt the payload - parses the BlobCipherEncryptHeader, fetch corresponding cipherKey and
 					// decrypt
-					doDecryption(encrypted, dataLen, headerRef, buff.get(), cipherKey);
+					doDecryption(encrypted, dataLen, serHeader, buff.get(), cipherKey);
 				}
 			} catch (Error& e) {
 				TraceEvent("Failed")
