@@ -1253,7 +1253,13 @@ struct DDQueue : public IDDRelocationQueue {
 						if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 							rrs.dataMoveId = UID();
 						} else {
-							rrs.dataMoveId = deterministicRandom()->randomUniqueID();
+							rrs.dataMoveId =
+							    newDataMoveId(deterministicRandom()->randomUInt64(),
+							                  AssignEmptyRange::False,
+							                  EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
+							TraceEvent(SevInfo, "DDDataMoveInitiatedWithRandomDestID")
+							    .detail("DataMoveID", rrs.dataMoveId.toString())
+							    .detail("Reason", rrs.reason.toString());
 						}
 					} else {
 						rrs.dataMoveId = anonymousShardId;
@@ -1746,7 +1752,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					} else {
 						self->moveCreateNewPhysicalShard++;
 					}
-					rd.dataMoveId = newDataMoveId(physicalShardIDCandidate, AssignEmptyRange::False);
+					rd.dataMoveId = newDataMoveId(physicalShardIDCandidate,
+					                              AssignEmptyRange::False,
+					                              EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
+					TraceEvent(SevInfo, "DDDataMoveInitiated")
+					    .detail("DataMoveID", rd.dataMoveId.toString())
+					    .detail("Reason", rd.reason.toString());
 					auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
 					inFlightRange.value().dataMoveId = rd.dataMoveId;
 					auto f = self->dataMoves.intersectingRanges(rd.keys);
@@ -2527,9 +2538,7 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 						debug_setCheckRelocationDuration(false);
 					}
 				}
-				when(KeyRange done = waitNext(rangesComplete.getFuture())) {
-					keysToLaunchFrom = done;
-				}
+				when(KeyRange done = waitNext(rangesComplete.getFuture())) { keysToLaunchFrom = done; }
 				when(wait(recordMetrics)) {
 					Promise<int64_t> req;
 					getAverageShardBytes.send(req);
@@ -2632,9 +2641,7 @@ TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
 	std::cout << "Start trace counter unit test for " << duration << "s ...\n";
 	loop choose {
 		when(wait(counterFuture)) {}
-		when(wait(finishFuture)) {
-			break;
-		}
+		when(wait(finishFuture)) { break; }
 		when(wait(delayJittered(2.0))) {
 			std::vector<UID> team(3);
 			for (int i = 0; i < team.size(); ++i) {

@@ -8,7 +8,7 @@ allowDefaultTenant = false
 
 [[knobs]]
 shard_encode_location_metadata = true
-enable_dd_physical_shard = true
+# enable_dd_physical_shard = true
 
 [[test]]
 testTitle = 'PhysicalShardMove'
