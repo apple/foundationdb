@@ -111,7 +111,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		sharedRandomNumber /= 3;
 
 		// randomly some tests write data first and then turn on blob granules later, to test conversion of existing DB
-		initAtEnd = !enablePurging && sharedRandomNumber % 10 == 0;
+		initAtEnd = getOption(options, "initAtEnd"_sr, sharedRandomNumber % 10 == 0);
 		sharedRandomNumber /= 10;
 		// FIXME: enable and fix bugs!
 		// granuleSizeCheck = initAtEnd;

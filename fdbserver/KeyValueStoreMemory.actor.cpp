@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/BlobCipher.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
@@ -289,6 +290,12 @@ public:
 	void enableSnapshot() override { disableSnapshot = false; }
 
 	int uncommittedBytes() { return queue.totalSize(); }
+
+	// KeyValueStoreMemory does not support encryption-at-rest in general, despite it supports encryption
+	// when being used as TxnStateStore backend.
+	Future<EncryptionAtRestMode> encryptionMode() override {
+		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
+	}
 
 private:
 	enum OpType {
