@@ -30,8 +30,6 @@ description is not currently required but encouraged.
 
 <Options>
   <Scope name="NetworkOption">
-    <Option name="retain_client_library_copies" code="67"
-            description="Retain temporary external client library copies that are created for enabling multi-threading." />
     <Option name="local_address"  code="10" 
             paramType="String" paramDescription="IP:PORT" 
             description="Deprecated"/>
@@ -117,6 +115,8 @@ description is not currently required but encouraged.
     <Option name="client_threads_per_version" code="65"
             paramType="Int" paramDescription="Number of client threads to be spawned.  Each cluster will be serviced by a single client thread."
             description="Spawns multiple worker threads for each version of the client that is loaded.  Setting this to a number greater than one implies disable_local_client." />
+    <Option name="retain_client_library_copies" code="67"
+            description="Retain temporary external client library copies that are created for enabling multi-threading." />
     <Option name="disable_client_statistics_logging" code="70"
             description="Disables logging of client statistics, such as sampled transaction activity." />
     <Option name="enable_slow_task_profiling" code="71"

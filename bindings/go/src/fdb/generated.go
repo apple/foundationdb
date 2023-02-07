@@ -39,11 +39,6 @@ func int64ToBytes(i int64) []byte {
 	return buf
 }
 
-// Retain temporary external client library copies that are created for enabling multi-threading.
-func (o NetworkOptions) SetRetainClientLibraryCopies() error {
-	return o.setOpt(67, nil)
-}
-
 // Deprecated
 //
 // Parameter: IP:PORT
@@ -242,6 +237,11 @@ func (o NetworkOptions) SetDisableLocalClient() error {
 // Parameter: Number of client threads to be spawned.  Each cluster will be serviced by a single client thread.
 func (o NetworkOptions) SetClientThreadsPerVersion(param int64) error {
 	return o.setOpt(65, int64ToBytes(param))
+}
+
+// Retain temporary external client library copies that are created for enabling multi-threading.
+func (o NetworkOptions) SetRetainClientLibraryCopies() error {
+	return o.setOpt(67, nil)
 }
 
 // Disables logging of client statistics, such as sampled transaction activity.
