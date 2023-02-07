@@ -474,18 +474,37 @@ Future<Void> configureTenantTransaction(Transaction tr,
 	return Void();
 }
 
-ACTOR template <class Transaction>
-Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantsTransaction(Transaction tr,
-                                                                                  TenantName begin,
-                                                                                  TenantName end,
-                                                                                  int limit) {
+template <class Transaction>
+Future<std::vector<std::pair<TenantName, int64_t>>> listTenantsTransaction(Transaction tr,
+                                                                           TenantName begin,
+                                                                           TenantName end,
+                                                                           int limit) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+	auto future = TenantMetadata::tenantNameIndex().getRange(tr, begin, end, limit);
+	return fmap([](auto f) -> std::vector<std::pair<TenantName, int64_t>> { return f.results; }, future);
+}
 
-	KeyBackedRangeResult<std::pair<TenantName, int64_t>> matchingTenants =
-	    wait(TenantMetadata::tenantNameIndex().getRange(tr, begin, end, limit));
+template <class DB>
+Future<std::vector<std::pair<TenantName, int64_t>>> listTenants(Reference<DB> db,
+                                                                TenantName begin,
+                                                                TenantName end,
+                                                                int limit) {
+	return runTransaction(db, [=](Reference<typename DB::TransactionT> tr) {
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		return listTenantsTransaction(tr, begin, end, limit);
+	});
+}
+
+ACTOR template <class Transaction>
+Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadataTransaction(Transaction tr,
+                                                                                         TenantName begin,
+                                                                                         TenantName end,
+                                                                                         int limit) {
+	std::vector<std::pair<TenantName, int64_t>> matchingTenants = wait(listTenantsTransaction(tr, begin, end, limit));
 
 	state std::vector<Future<TenantMapEntry>> tenantEntryFutures;
-	for (auto const& [name, id] : matchingTenants.results) {
+	for (auto const& [name, id] : matchingTenants) {
 		tenantEntryFutures.push_back(getTenantTransaction(tr, id));
 	}
 
@@ -499,24 +518,16 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantsTransactio
 	return results;
 }
 
-ACTOR template <class DB>
-Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(Reference<DB> db,
-                                                                       TenantName begin,
-                                                                       TenantName end,
-                                                                       int limit) {
-	state Reference<typename DB::TransactionT> tr = db->createTransaction();
-
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
-			    wait(listTenantsTransaction(tr, begin, end, limit));
-			return tenants;
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
-		}
-	}
+template <class DB>
+Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadata(Reference<DB> db,
+                                                                              TenantName begin,
+                                                                              TenantName end,
+                                                                              int limit) {
+	return runTransaction(db, [=](Reference<typename DB::TransactionT> tr) {
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		return listTenantMetadataTransaction(tr, begin, end, limit);
+	});
 }
 
 ACTOR template <class Transaction>

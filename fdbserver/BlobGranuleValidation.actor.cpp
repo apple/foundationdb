@@ -300,7 +300,6 @@ ACTOR Future<Void> validateGranuleSummaries(Database cx,
 						// same invariant isn't always true for delta version because of force flushing around granule
 						// merges
 						if (it.keyRange == itLast.range()) {
-							ASSERT(it.deltaVersion >= last.deltaVersion);
 							if (it.snapshotVersion == last.snapshotVersion) {
 								ASSERT(it.snapshotSize == last.snapshotSize);
 							}
@@ -308,7 +307,11 @@ ACTOR Future<Void> validateGranuleSummaries(Database cx,
 								ASSERT(it.snapshotSize == last.snapshotSize);
 								ASSERT(it.deltaSize == last.deltaSize);
 							} else if (it.snapshotVersion == last.snapshotVersion) {
-								ASSERT(it.deltaSize > last.deltaSize);
+								// empty delta files can cause version to decrease or size to remain same with a version
+								// increase
+								if (it.deltaVersion >= last.deltaVersion) {
+									ASSERT(it.deltaSize >= last.deltaSize);
+								} // else can happen because of empty delta file version bump
 							}
 							break;
 						}
