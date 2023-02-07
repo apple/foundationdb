@@ -2472,6 +2472,7 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 				}
 				rep.newTag = Tag(maxTagLocality + 1, 0);
 			}
+			rep.encryptMode = commitData->encryptMode;
 			req.reply.send(rep);
 		} else {
 			req.reply.sendError(worker_removed());
@@ -3059,7 +3060,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	state GetHealthMetricsReply healthMetricsReply;
 	state GetHealthMetricsReply detailedHealthMetricsReply;
 
-	TraceEvent("CPEncryptionAtRestMode").detail("Mode", commitData.encryptMode.toString());
+	TraceEvent("CPEncryptionAtRestMode", proxy.id()).detail("Mode", commitData.encryptMode);
 
 	addActor.send(waitFailureServer(proxy.waitFailure.getFuture()));
 	addActor.send(traceRole(Role::COMMIT_PROXY, proxy.id()));

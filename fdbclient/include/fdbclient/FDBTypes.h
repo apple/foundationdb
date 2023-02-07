@@ -1520,6 +1520,8 @@ struct EncryptionAtRestMode {
 
 	bool operator==(const EncryptionAtRestMode& e) const { return isEquals(e); }
 	bool operator!=(const EncryptionAtRestMode& e) const { return !isEquals(e); }
+	bool operator==(Mode m) const { return mode == m; }
+	bool operator!=(Mode m) const { return mode != m; }
 
 	bool isEncryptionEnabled() const { return mode != EncryptionAtRestMode::DISABLED; }
 
@@ -1546,6 +1548,11 @@ struct EncryptionAtRestMode {
 	}
 
 	uint32_t mode;
+};
+
+template <>
+struct Traceable<EncryptionAtRestMode> : std::true_type {
+	static std::string toString(const EncryptionAtRestMode& mode) { return mode.toString(); }
 };
 
 typedef StringRef ClusterNameRef;
