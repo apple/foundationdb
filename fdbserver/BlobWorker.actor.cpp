@@ -661,8 +661,7 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 	state RangeResult totalState = wait(tr->getRange(currentRange, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1));
 	// FIXME: remove above conflict range?
 	tr->addWriteConflictRange(currentRange);
-	ASSERT_WE_THINK(!totalState.more && totalState.size() <= SERVER_KNOBS->BG_MAX_SPLIT_FANOUT);
-	// maybe someone decreased the knob, we should gracefully handle it not in simulation
+	// maybe someone decreased the knob, we should gracefully handle it
 	if (totalState.more || totalState.size() > SERVER_KNOBS->BG_MAX_SPLIT_FANOUT) {
 		RangeResult tryAgain = wait(tr->getRange(currentRange, 10000));
 		ASSERT(!tryAgain.more);
