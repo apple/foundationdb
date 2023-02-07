@@ -2666,14 +2666,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 		testConfig.storageEngineExcludeTypes.push_back(5);
 	}
 
-	// The RocksDB storage engine does not support the restarting tests because you cannot consistently get a clean
-	// snapshot of the storage engine without a snapshotting file system.
-	// https://github.com/apple/foundationdb/issues/5155
-	if (std::string_view(testFile).find("restarting") != std::string_view::npos) {
-		testConfig.storageEngineExcludeTypes.push_back(4);
-		testConfig.storageEngineExcludeTypes.push_back(5);
-	}
-
 	// The RocksDB engine is not always built with the rest of fdbserver. Don't try to use it if it is not included
 	// in the build.
 	if (!rocksDBEnabled) {

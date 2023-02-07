@@ -5,7 +5,7 @@ allowDefaultTenant = false
 injectTargetedSSRestart = true
 injectSSDelay = true
 # FIXME: re-enable rocks at some point
-storageEngineExcludeTypes = [4, 5]
+# storageEngineExcludeTypes = [4, 5]
 
 [[test]]
 testTitle = 'BlobGranuleVerifySmall'
