@@ -25,6 +25,7 @@
 #include "flow/Error.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/CommitProxyInterface.h"
+#include <string>
 
 typedef enum { TLOG_ENCRYPTION = 0, STORAGE_SERVER_ENCRYPTION = 1, BLOB_GRANULE_ENCRYPTION = 2 } EncryptOperationType;
 
