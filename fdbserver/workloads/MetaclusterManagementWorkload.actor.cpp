@@ -905,8 +905,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				wait(
-				    store(metaclusterRegistration,
-				          MetaclusterMetadata::metaclusterRegistration().get(clusterData.db.getReference())) &&
+				    store(metaclusterRegistration, MetaclusterMetadata::metaclusterRegistration().get(tr)) &&
 				    store(tenants,
 				          TenantAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, clusterData.tenants.size() + 1)));
 				break;

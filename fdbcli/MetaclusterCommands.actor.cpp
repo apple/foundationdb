@@ -197,7 +197,8 @@ ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vecto
 		fmt::print("The cluster `{}' has been restored\n", printable(tokens[2]).c_str());
 		return true;
 	} else if (tokens[4] == "repopulate_from_data_cluster"_sr) {
-		fmt::print(stderr, "ERROR: the `repopulate_from_data_cluster' restore mode is not currently supported\n");
+		wait(MetaclusterAPI::restoreCluster(
+		    db, tokens[2], config.get().first.get(), ApplyManagementClusterUpdates::False));
 		return false;
 	} else {
 		fmt::print(stderr, "ERROR: unrecognized restore mode `{}'\n", printable(tokens[4]));

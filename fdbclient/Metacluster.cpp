@@ -24,6 +24,8 @@
 FDB_DEFINE_BOOLEAN_PARAM(ApplyManagementClusterUpdates);
 FDB_DEFINE_BOOLEAN_PARAM(RemoveMissingTenants);
 FDB_DEFINE_BOOLEAN_PARAM(AssignClusterAutomatically);
+FDB_DEFINE_BOOLEAN_PARAM(GroupAlreadyExists);
+FDB_DEFINE_BOOLEAN_PARAM(IsRestoring);
 
 std::string clusterTypeToString(const ClusterType& clusterType) {
 	switch (clusterType) {

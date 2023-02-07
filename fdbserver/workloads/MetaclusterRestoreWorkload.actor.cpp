@@ -43,7 +43,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 	struct DataClusterData {
 		Database db;
-		std::set<TenantName> tenants;
+		std::set<int64_t> tenants;
 		std::set<TenantGroupName> tenantGroups;
 		bool restored = false;
 
@@ -52,28 +52,42 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	};
 
 	struct TenantData {
-		enum class CreateTime { BEFORE_BACKUP, DURING_BACKUP, AFTER_BACKUP };
+		enum class AccessTime { NONE, BEFORE_BACKUP, DURING_BACKUP, AFTER_BACKUP };
 
+		TenantName name;
 		ClusterName cluster;
 		Optional<TenantGroupName> tenantGroup;
-		CreateTime createTime = CreateTime::BEFORE_BACKUP;
+		AccessTime createTime = AccessTime::BEFORE_BACKUP;
+		AccessTime renameTime = AccessTime::NONE;
+		AccessTime configureTime = AccessTime::NONE;
 
 		TenantData() {}
-		TenantData(ClusterName cluster, Optional<TenantGroupName> tenantGroup, CreateTime createTime)
-		  : cluster(cluster), tenantGroup(tenantGroup), createTime(createTime) {}
+		TenantData(TenantName name, ClusterName cluster, Optional<TenantGroupName> tenantGroup, AccessTime createTime)
+		  : name(name), cluster(cluster), tenantGroup(tenantGroup), createTime(createTime) {}
+	};
+
+	struct TenantGroupData {
+		ClusterName cluster;
+		std::set<int64_t> tenants;
 	};
 
 	Reference<IDatabase> managementDb;
 	std::map<ClusterName, DataClusterData> dataDbs;
 	std::vector<ClusterName> dataDbIndex;
 
-	std::map<TenantName, TenantData> createdTenants;
-	std::map<TenantGroupName, std::set<TenantName>> tenantGroups;
+	std::map<int64_t, TenantData> createdTenants;
+	std::map<TenantName, int64_t> tenantNameIndex;
+	std::map<TenantGroupName, TenantGroupData> tenantGroups;
+
+	std::set<int64_t> deletedTenants;
 
 	int initialTenants;
 	int maxTenants;
 	int maxTenantGroups;
 	int tenantGroupCapacity;
+
+	bool recoverManagementCluster;
+	bool recoverDataClusters;
 
 	bool backupComplete = false;
 	double endTime = std::numeric_limits<double>::max();
@@ -84,6 +98,9 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
 
 		tenantGroupCapacity = (initialTenants / 2 + maxTenantGroups - 1) / g_simulator->extraDatabases.size();
+		int mode = deterministicRandom()->randomInt(0, 3);
+		recoverManagementCluster = (mode != 2);
+		recoverDataClusters = (mode != 1);
 	}
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
@@ -180,7 +197,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		}
 
 		while (self->createdTenants.size() < self->initialTenants) {
-			wait(createTenant(self, TenantData::CreateTime::BEFORE_BACKUP));
+			wait(createTenant(self, TenantData::AccessTime::BEFORE_BACKUP));
 		}
 
 		return Void();
@@ -195,6 +212,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 		addDefaultBackupRanges(backupRanges);
 
+		TraceEvent("MetaclusterRestoreWorkloadSubmitBackup").detail("ClusterName", clusterName);
 		try {
 			wait(backupAgent.submitBackup(
 			    dataDb, backupContainer, {}, 0, 0, clusterName.toString(), backupRanges, StopWhenDone::True));
@@ -203,19 +221,23 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				throw;
 		}
 
+		TraceEvent("MetaclusterRestoreWorkloadWaitBackup").detail("ClusterName", clusterName);
 		state Reference<IBackupContainer> container;
 		wait(success(backupAgent.waitBackup(dataDb, clusterName.toString(), StopWhenDone::True, &container)));
+		TraceEvent("MetaclusterRestoreWorkloadBackupComplete").detail("ClusterName", clusterName);
 		return container->getURL();
 	}
 
 	ACTOR static Future<Void> restoreCluster(ClusterName clusterName,
 	                                         Database dataDb,
 	                                         std::string backupUrl,
+	                                         bool addToMetacluster,
 	                                         MetaclusterRestoreWorkload* self) {
 		state FileBackupAgent backupAgent;
 		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
 		addDefaultBackupRanges(backupRanges);
 
+		TraceEvent("MetaclusterRestoreWorkloadClearDatabase").detail("ClusterName", clusterName);
 		wait(runTransaction(dataDb.getReference(),
 		                    [backupRanges = backupRanges](Reference<ReadYourWritesTransaction> tr) {
 			                    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -225,28 +247,264 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			                    return Future<Void>(Void());
 		                    }));
 
+		TraceEvent("MetaclusterRestoreWorkloadRestoreCluster").detail("ClusterName", clusterName);
 		wait(success(backupAgent.restore(dataDb, dataDb, clusterName, StringRef(backupUrl), {}, backupRanges)));
 
-		wait(MetaclusterAPI::restoreCluster(self->managementDb,
-		                                    clusterName,
-		                                    dataDb->getConnectionRecord()->getConnectionString(),
-		                                    ApplyManagementClusterUpdates::True));
+		if (addToMetacluster) {
+			TraceEvent("MetaclusterRestoreWorkloadAddClusterToMetacluster").detail("ClusterName", clusterName);
+			wait(MetaclusterAPI::restoreCluster(self->managementDb,
+			                                    clusterName,
+			                                    dataDb->getConnectionRecord()->getConnectionString(),
+			                                    ApplyManagementClusterUpdates::True));
+			TraceEvent("MetaclusterRestoreWorkloadRestoreComplete").detail("ClusterName", clusterName);
+		}
 
 		self->dataDbs[clusterName].restored = true;
 
 		return Void();
 	}
 
-	ACTOR static Future<Void> createTenant(MetaclusterRestoreWorkload* self, TenantData::CreateTime createTime) {
+	void removeTrackedTenant(int64_t tenantId) {
+		auto itr = createdTenants.find(tenantId);
+		if (itr != createdTenants.end()) {
+			TraceEvent(SevDebug, "MetaclusterRestoreWorkloadRemoveTrackedTenant")
+			    .detail("TenantId", tenantId)
+			    .detail("TenantName", itr->second.name);
+			deletedTenants.insert(tenantId);
+			dataDbs[itr->second.cluster].tenants.erase(tenantId);
+			if (itr->second.tenantGroup.present()) {
+				tenantGroups[itr->second.tenantGroup.get()].tenants.erase(tenantId);
+			}
+			createdTenants.erase(itr);
+		}
+	}
+
+	Future<Void> resolveTenantCollisions(
+	    MetaclusterRestoreWorkload* self,
+	    ClusterName clusterName,
+	    Database dataDb,
+	    std::unordered_map<TenantName, std::pair<int64_t, int64_t>> const& tenantCollisions) {
+		TraceEvent("MetaclusterRestoreWorkloadDeleteTenantCollisions")
+		    .detail("FromCluster", clusterName)
+		    .detail("TenantCollisions", tenantCollisions.size());
+		std::vector<Future<Void>> deleteFutures;
+		for (auto const& t : tenantCollisions) {
+			// If the data cluster tenant is expected, then remove the management tenant
+			// Note that the management tenant may also have been expected
+			if (self->createdTenants.count(t.second.first)) {
+				removeTrackedTenant(t.second.second);
+				deleteFutures.push_back(MetaclusterAPI::deleteTenant(self->managementDb, t.second.second));
+			}
+			// We don't expect the data cluster tenant, so delete it
+			else {
+				removeTrackedTenant(t.second.first);
+				deleteFutures.push_back(TenantAPI::deleteTenant(
+				    dataDb.getReference(), t.first, t.second.first, ClusterType::METACLUSTER_DATA));
+			}
+		}
+
+		return waitForAll(deleteFutures);
+	}
+
+	ACTOR template <class Transaction>
+	static Future<std::unordered_set<int64_t>> getTenantsInGroup(Transaction tr,
+	                                                             TenantMetadataSpecification tenantMetadata,
+	                                                             TenantGroupName tenantGroup) {
+		KeyBackedRangeResult<Tuple> groupTenants =
+		    wait(tenantMetadata.tenantGroupTenantIndex.getRange(tr,
+		                                                        Tuple::makeTuple(tenantGroup),
+		                                                        Tuple::makeTuple(keyAfter(tenantGroup)),
+		                                                        CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
+		std::unordered_set<int64_t> tenants;
+		for (auto const& tuple : groupTenants.results) {
+			tenants.insert(tuple.getInt(1));
+		}
+
+		return tenants;
+	}
+
+	ACTOR Future<Void> resolveGroupCollisions(MetaclusterRestoreWorkload* self,
+	                                          ClusterName clusterName,
+	                                          Database dataDb,
+	                                          std::unordered_map<TenantGroupName, TenantGroupEntry> groupCollisions) {
+		TraceEvent("MetaclusterRestoreWorkloadDeleteTenantGroupCollisions")
+		    .detail("FromCluster", clusterName)
+		    .detail("GroupCollisions", groupCollisions.size());
+
+		state std::vector<Future<Void>> deleteFutures;
+
+		state std::unordered_map<TenantGroupName, TenantGroupEntry>::const_iterator collisionItr;
+		for (collisionItr = groupCollisions.begin(); collisionItr != groupCollisions.end(); ++collisionItr) {
+			// The tenant group from the data cluster is what we expect
+			auto itr = self->tenantGroups.find(collisionItr->first);
+			if (itr->second.cluster == clusterName) {
+				TraceEvent(SevDebug, "MetaclusterRestoreWorlkoadDeleteTenantGroupCollision")
+				    .detail("From", "ManagementCluster")
+				    .detail("TenantGroup", collisionItr->first);
+				std::unordered_set<int64_t> tenantsInGroup =
+				    wait(runTransaction(self->managementDb, [collisionItr = collisionItr](Reference<ITransaction> tr) {
+					    return getTenantsInGroup(
+					        tr, MetaclusterAPI::ManagementClusterMetadata::tenantMetadata(), collisionItr->first);
+				    }));
+
+				for (auto const& t : tenantsInGroup) {
+					self->removeTrackedTenant(t);
+					deleteFutures.push_back(MetaclusterAPI::deleteTenant(self->managementDb, t));
+				}
+
+			}
+			// The tenant group from the management cluster is what we expect
+			else {
+				TraceEvent(SevDebug, "MetaclusterRestoreWorlkoadDeleteTenantGroupCollision")
+				    .detail("From", "DataCluster")
+				    .detail("TenantGroup", collisionItr->first);
+				std::unordered_set<int64_t> tenantsInGroup = wait(runTransaction(
+				    dataDb.getReference(), [collisionItr = collisionItr](Reference<ReadYourWritesTransaction> tr) {
+					    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					    return getTenantsInGroup(tr, TenantMetadata::instance(), collisionItr->first);
+				    }));
+
+				deleteFutures.push_back(runTransactionVoid(
+				    dataDb.getReference(), [self = self, tenantsInGroup](Reference<ReadYourWritesTransaction> tr) {
+					    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					    std::vector<Future<Void>> groupDeletions;
+					    for (auto const& t : tenantsInGroup) {
+						    self->removeTrackedTenant(t);
+						    groupDeletions.push_back(
+						        TenantAPI::deleteTenantTransaction(tr, t, ClusterType::METACLUSTER_DATA));
+					    }
+					    return waitForAll(groupDeletions);
+				    }));
+			}
+		}
+
+		wait(waitForAll(deleteFutures));
+		return Void();
+	}
+
+	ACTOR static Future<Void> restoreManagementCluster(MetaclusterRestoreWorkload* self) {
+		wait(success(MetaclusterAPI::createMetacluster(self->managementDb, "management_cluster"_sr)));
+		state std::map<ClusterName, DataClusterData>::iterator clusterItr;
+		for (clusterItr = self->dataDbs.begin(); clusterItr != self->dataDbs.end(); ++clusterItr) {
+			TraceEvent("MetaclusterRestoreWorkloadRecoverManagementCluster").detail("FromCluster", clusterItr->first);
+			state KeyBackedRangeResult<std::pair<TenantName, int64_t>> managementTenantList;
+			state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> managementGroupList;
+
+			wait(runTransactionVoid(
+			    self->managementDb,
+			    [managementTenantList = &managementTenantList,
+			     managementGroupList = &managementGroupList](Reference<ITransaction> tr) {
+				    return store(*managementTenantList,
+				                 MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantNameIndex.getRange(
+				                     tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)) &&
+				           store(*managementGroupList,
+				                 MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantGroupMap.getRange(
+				                     tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
+			    }));
+			ASSERT(managementTenantList.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+			ASSERT(managementGroupList.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+
+			state std::unordered_map<TenantName, int64_t> managementTenants(managementTenantList.results.begin(),
+			                                                                managementTenantList.results.end());
+			state std::unordered_map<TenantGroupName, TenantGroupEntry> managementGroups(
+			    managementGroupList.results.begin(), managementGroupList.results.end());
+
+			state KeyBackedRangeResult<std::pair<TenantName, int64_t>> dataClusterTenants;
+			state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> dataClusterGroups;
+
+			wait(runTransaction(clusterItr->second.db.getReference(),
+			                    [dataClusterTenants = &dataClusterTenants,
+			                     dataClusterGroups = &dataClusterGroups](Reference<ReadYourWritesTransaction> tr) {
+				                    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				                    return store(*dataClusterTenants,
+				                                 TenantMetadata::tenantNameIndex().getRange(
+				                                     tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)) &&
+				                           store(*dataClusterGroups,
+				                                 TenantMetadata::tenantGroupMap().getRange(
+				                                     tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
+			                    }));
+			ASSERT(dataClusterTenants.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+			ASSERT(dataClusterGroups.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+
+			state std::unordered_map<TenantName, std::pair<int64_t, int64_t>> tenantCollisions;
+			state std::unordered_map<TenantGroupName, TenantGroupEntry> groupCollisions;
+			for (auto const& t : dataClusterTenants.results) {
+				auto itr = managementTenants.find(t.first);
+				if (itr != managementTenants.end()) {
+					tenantCollisions[t.first] = std::make_pair(t.second, itr->second);
+				}
+			}
+			for (auto const& g : dataClusterGroups.results) {
+				if (managementGroups.count(g.first)) {
+					groupCollisions[g.first] = g.second;
+				}
+			}
+
+			loop {
+				try {
+					TraceEvent("MetaclusterRestoreWorkloadRecoverManagementCluster")
+					    .detail("FromCluster", clusterItr->first)
+					    .detail("TenantCollisions", tenantCollisions.size());
+					wait(MetaclusterAPI::restoreCluster(
+					    self->managementDb,
+					    clusterItr->first,
+					    clusterItr->second.db->getConnectionRecord()->getConnectionString(),
+					    ApplyManagementClusterUpdates::False));
+
+					ASSERT(tenantCollisions.empty() && groupCollisions.empty());
+					break;
+				} catch (Error& e) {
+					if ((e.code() == error_code_tenant_already_exists && !tenantCollisions.empty()) ||
+					    (e.code() == error_code_invalid_tenant_configuration && !groupCollisions.empty())) {
+						if (!tenantCollisions.empty()) {
+							wait(self->resolveTenantCollisions(
+							    self, clusterItr->first, clusterItr->second.db, tenantCollisions));
+							tenantCollisions.clear();
+						}
+						if (!groupCollisions.empty()) {
+							wait(self->resolveGroupCollisions(
+							    self, clusterItr->first, clusterItr->second.db, groupCollisions));
+							groupCollisions.clear();
+						}
+					} else {
+						throw;
+					}
+				}
+			}
+			TraceEvent("MetaclusterRestoreWorkloadRecoveredManagementCluster").detail("FromCluster", clusterItr->first);
+		}
+
+		TraceEvent("MetaclusterRestoreWorkloadRestoredManagementCluster");
+		return Void();
+	}
+
+	ACTOR static Future<Void> resetManagementCluster(MetaclusterRestoreWorkload* self) {
+		state Reference<ITransaction> tr = self->managementDb->createTransaction();
+		TraceEvent("MetaclusterRestoreWorkloadEraseManagementCluster");
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->clear(""_sr, "\xff"_sr);
+				MetaclusterMetadata::metaclusterRegistration().clear(tr);
+				wait(safeThreadFutureToFuture(tr->commit()));
+				TraceEvent("MetaclusterRestoreWorkloadManagementClusterErased");
+				return Void();
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> createTenant(MetaclusterRestoreWorkload* self, TenantData::AccessTime createTime) {
 		state TenantName tenantName;
 		for (int i = 0; i < 10; ++i) {
 			tenantName = self->chooseTenantName();
-			if (self->createdTenants.count(tenantName) == 0) {
+			if (self->tenantNameIndex.count(tenantName) == 0) {
 				break;
 			}
 		}
 
-		if (self->createdTenants.count(tenantName)) {
+		if (self->tenantNameIndex.count(tenantName)) {
 			return Void();
 		}
 
@@ -257,12 +515,19 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				tenantEntry.tenantGroup = self->chooseTenantGroup();
 				wait(MetaclusterAPI::createTenant(self->managementDb, tenantEntry, AssignClusterAutomatically::True));
 				TenantMapEntry createdEntry = wait(MetaclusterAPI::getTenant(self->managementDb, tenantName));
-				self->createdTenants[tenantName] =
-				    TenantData(createdEntry.assignedCluster.get(), createdEntry.tenantGroup, createTime);
+				TraceEvent(SevDebug, "MetaclusterRestoreWorkloadCreatedTenant")
+				    .detail("Tenant", tenantName)
+				    .detail("TenantId", createdEntry.id)
+				    .detail("AccessTime", createTime);
+				self->createdTenants[createdEntry.id] =
+				    TenantData(tenantName, createdEntry.assignedCluster.get(), createdEntry.tenantGroup, createTime);
+				self->tenantNameIndex[tenantName] = createdEntry.id;
 				auto& dataDb = self->dataDbs[createdEntry.assignedCluster.get()];
-				dataDb.tenants.insert(tenantName);
+				dataDb.tenants.insert(createdEntry.id);
 				if (createdEntry.tenantGroup.present()) {
-					self->tenantGroups[createdEntry.tenantGroup.get()].insert(tenantName);
+					auto& tenantGroupData = self->tenantGroups[createdEntry.tenantGroup.get()];
+					tenantGroupData.cluster = createdEntry.assignedCluster.get();
+					tenantGroupData.tenants.insert(createdEntry.id);
 					dataDb.tenantGroups.insert(createdEntry.tenantGroup.get());
 				}
 				return Void();
@@ -276,52 +541,62 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> deleteTenant(MetaclusterRestoreWorkload* self) {
+	ACTOR static Future<Void> deleteTenant(MetaclusterRestoreWorkload* self, TenantData::AccessTime accessTime) {
 		state TenantName tenantName;
 		for (int i = 0; i < 10; ++i) {
 			tenantName = self->chooseTenantName();
-			if (self->createdTenants.count(tenantName) != 0) {
+			if (self->tenantNameIndex.count(tenantName) != 0) {
 				break;
 			}
 		}
 
-		if (self->createdTenants.count(tenantName) == 0) {
+		if (self->tenantNameIndex.count(tenantName) == 0) {
 			return Void();
 		}
 
+		state int64_t tenantId = self->tenantNameIndex[tenantName];
+
+		TraceEvent(SevDebug, "MetaclusterRestoreWorkloadDeleteTenant")
+		    .detail("Tenant", tenantName)
+		    .detail("TenantId", tenantId)
+		    .detail("AccessTime", accessTime);
 		wait(MetaclusterAPI::deleteTenant(self->managementDb, tenantName));
-		auto const& tenantData = self->createdTenants[tenantName];
+		auto const& tenantData = self->createdTenants[tenantId];
 
 		auto& dataDb = self->dataDbs[tenantData.cluster];
-		dataDb.tenants.erase(tenantName);
+		dataDb.tenants.erase(tenantId);
 		if (tenantData.tenantGroup.present()) {
 			auto groupItr = self->tenantGroups.find(tenantData.tenantGroup.get());
-			groupItr->second.erase(tenantName);
-			if (groupItr->second.empty()) {
+			groupItr->second.tenants.erase(tenantId);
+			if (groupItr->second.tenants.empty()) {
 				self->tenantGroups.erase(groupItr);
 				dataDb.tenantGroups.erase(tenantData.tenantGroup.get());
 			}
 		}
 
-		self->createdTenants.erase(tenantName);
+		self->createdTenants.erase(tenantId);
+		self->tenantNameIndex.erase(tenantName);
+		self->deletedTenants.insert(tenantId);
 
 		return Void();
 	}
 
-	ACTOR static Future<Void> configureTenant(MetaclusterRestoreWorkload* self) {
+	ACTOR static Future<Void> configureTenant(MetaclusterRestoreWorkload* self, TenantData::AccessTime accessTime) {
 		state TenantName tenantName;
 		for (int i = 0; i < 10; ++i) {
 			tenantName = self->chooseTenantName();
-			if (self->createdTenants.count(tenantName) != 0) {
+			if (self->tenantNameIndex.count(tenantName) != 0) {
 				break;
 			}
 		}
 
-		if (self->createdTenants.count(tenantName) == 0) {
+		if (self->tenantNameIndex.count(tenantName) == 0) {
 			return Void();
 		}
 
-		state Optional<TenantGroupName> tenantGroup = self->chooseTenantGroup(self->createdTenants[tenantName].cluster);
+		state int64_t tenantId = self->tenantNameIndex[tenantName];
+
+		state Optional<TenantGroupName> tenantGroup = self->chooseTenantGroup(self->createdTenants[tenantId].cluster);
 		state std::map<Standalone<StringRef>, Optional<Value>> configurationParams = { { "tenant_group"_sr,
 			                                                                             tenantGroup } };
 
@@ -329,25 +604,33 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			try {
 				wait(MetaclusterAPI::configureTenant(self->managementDb, tenantName, configurationParams));
 
-				auto& tenantData = self->createdTenants[tenantName];
+				auto& tenantData = self->createdTenants[tenantId];
+
+				TraceEvent(SevDebug, "MetaclusterRestoreWorkloadConfigureTenant")
+				    .detail("Tenant", tenantName)
+				    .detail("TenantId", tenantId)
+				    .detail("OldTenantGroup", tenantData.tenantGroup)
+				    .detail("NewTenantGroup", tenantGroup)
+				    .detail("AccessTime", accessTime);
+
 				if (tenantData.tenantGroup != tenantGroup) {
 					auto& dataDb = self->dataDbs[tenantData.cluster];
 					if (tenantData.tenantGroup.present()) {
 						auto groupItr = self->tenantGroups.find(tenantData.tenantGroup.get());
-						groupItr->second.erase(tenantName);
-						if (groupItr->second.empty()) {
+						groupItr->second.tenants.erase(tenantId);
+						if (groupItr->second.tenants.empty()) {
 							self->tenantGroups.erase(groupItr);
 							dataDb.tenantGroups.erase(tenantData.tenantGroup.get());
 						}
-						self->tenantGroups[tenantData.tenantGroup.get()].erase(tenantName);
 					}
 
 					if (tenantGroup.present()) {
-						self->tenantGroups[tenantGroup.get()].insert(tenantName);
+						self->tenantGroups[tenantGroup.get()].tenants.insert(tenantId);
 						dataDb.tenantGroups.insert(tenantGroup.get());
 					}
 
 					tenantData.tenantGroup = tenantGroup;
+					tenantData.configureTime = accessTime;
 				}
 				return Void();
 			} catch (Error& e) {
@@ -360,41 +643,40 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> renameTenant(MetaclusterRestoreWorkload* self) {
+	ACTOR static Future<Void> renameTenant(MetaclusterRestoreWorkload* self, TenantData::AccessTime accessTime) {
 		state TenantName oldTenantName;
 		state TenantName newTenantName;
 		for (int i = 0; i < 10; ++i) {
 			oldTenantName = self->chooseTenantName();
-			if (self->createdTenants.count(oldTenantName) != 0) {
+			if (self->tenantNameIndex.count(oldTenantName) != 0) {
 				break;
 			}
 		}
 		for (int i = 0; i < 10; ++i) {
 			newTenantName = self->chooseTenantName();
-			if (self->createdTenants.count(newTenantName) == 0) {
+			if (self->tenantNameIndex.count(newTenantName) == 0) {
 				break;
 			}
 		}
 
-		if (self->createdTenants.count(oldTenantName) == 0 || self->createdTenants.count(newTenantName) != 0) {
+		if (self->tenantNameIndex.count(oldTenantName) == 0 || self->tenantNameIndex.count(newTenantName) != 0) {
 			return Void();
 		}
 
+		state int64_t tenantId = self->tenantNameIndex[oldTenantName];
+
+		TraceEvent(SevDebug, "MetaclusterRestoreWorkloadRenameTenant")
+		    .detail("OldTenantName", oldTenantName)
+		    .detail("NewTenantName", newTenantName)
+		    .detail("TenantId", tenantId)
+		    .detail("AccessTime", accessTime);
 		wait(MetaclusterAPI::renameTenant(self->managementDb, oldTenantName, newTenantName));
 
-		auto const& tenantData = self->createdTenants[oldTenantName];
-		if (tenantData.tenantGroup.present()) {
-			auto& tenantGroup = self->tenantGroups[tenantData.tenantGroup.get()];
-			tenantGroup.erase(oldTenantName);
-			tenantGroup.insert(newTenantName);
-		}
-
-		auto& dataDb = self->dataDbs[tenantData.cluster];
-		dataDb.tenants.erase(oldTenantName);
-		dataDb.tenants.insert(newTenantName);
-
-		self->createdTenants[newTenantName] = tenantData;
-		self->createdTenants.erase(oldTenantName);
+		TenantData& tenantData = self->createdTenants[tenantId];
+		tenantData.name = newTenantName;
+		tenantData.renameTime = accessTime;
+		self->tenantNameIndex[newTenantName] = tenantId;
+		self->tenantNameIndex.erase(oldTenantName);
 
 		return Void();
 	}
@@ -402,16 +684,16 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	ACTOR static Future<Void> runOperations(MetaclusterRestoreWorkload* self) {
 		while (now() < self->endTime) {
 			state int operation = deterministicRandom()->randomInt(0, 4);
+			state TenantData::AccessTime accessTime =
+			    self->backupComplete ? TenantData::AccessTime::AFTER_BACKUP : TenantData::AccessTime::DURING_BACKUP;
 			if (operation == 0) {
-				wait(createTenant(self,
-				                  self->backupComplete ? TenantData::CreateTime::AFTER_BACKUP
-				                                       : TenantData::CreateTime::DURING_BACKUP));
+				wait(createTenant(self, accessTime));
 			} else if (operation == 1) {
-				wait(deleteTenant(self));
+				wait(deleteTenant(self, accessTime));
 			} else if (operation == 2) {
-				wait(configureTenant(self));
+				wait(configureTenant(self, accessTime));
 			} else if (operation == 3) {
-				wait(renameTenant(self));
+				wait(renameTenant(self, accessTime));
 			}
 		}
 
@@ -428,14 +710,24 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(Database cx, MetaclusterRestoreWorkload* self) {
 		state std::set<ClusterName> clustersToRestore;
 
-		for (auto db : self->dataDbIndex) {
-			if (deterministicRandom()->random01() < 0.1) {
-				clustersToRestore.insert(db);
-			}
-		}
+		TraceEvent("MetaclusterRestoreWorkloadStart")
+		    .detail("RecoverManagementCluster", self->recoverManagementCluster)
+		    .detail("RecoverDataClusters", self->recoverDataClusters);
 
-		if (clustersToRestore.empty()) {
-			clustersToRestore.insert(deterministicRandom()->randomChoice(self->dataDbIndex));
+		if (self->recoverDataClusters) {
+			for (auto db : self->dataDbIndex) {
+				if (deterministicRandom()->random01() < 0.1) {
+					clustersToRestore.insert(db);
+				}
+			}
+
+			if (clustersToRestore.empty()) {
+				clustersToRestore.insert(deterministicRandom()->randomChoice(self->dataDbIndex));
+			}
+
+			for (auto c : clustersToRestore) {
+				TraceEvent("MetaclusterRestoreWorkloadChoseClusterForRestore").detail("ClusterName", c);
+			}
 		}
 
 		state Future<Void> opsFuture = runOperations(self);
@@ -453,13 +745,23 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		self->endTime = now() + 30.0;
 
 		wait(opsFuture);
+		TraceEvent("MetaclusterRestoreWorkloadOperationsComplete");
+
+		if (self->recoverManagementCluster) {
+			wait(resetManagementCluster(self));
+		}
 
 		std::vector<Future<Void>> restores;
 		for (auto [cluster, backupUrl] : backups) {
-			restores.push_back(restoreCluster(cluster, self->dataDbs[cluster].db, backupUrl.get(), self));
+			restores.push_back(restoreCluster(
+			    cluster, self->dataDbs[cluster].db, backupUrl.get(), !self->recoverManagementCluster, self));
 		}
 
 		wait(waitForAll(restores));
+
+		if (self->recoverManagementCluster) {
+			wait(restoreManagementCluster(self));
+		}
 
 		return Void();
 	}
@@ -469,75 +771,107 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	                                           ClusterName clusterName,
 	                                           DataClusterData clusterData) {
 		state Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
-		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
+		state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants;
 		state Reference<ReadYourWritesTransaction> tr = clusterData.db->createTransaction();
 
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				wait(
-				    store(metaclusterRegistration,
-				          MetaclusterMetadata::metaclusterRegistration().get(clusterData.db.getReference())) &&
+				    store(metaclusterRegistration, MetaclusterMetadata::metaclusterRegistration().get(tr)) &&
 				    store(tenants,
-				          TenantAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, clusterData.tenants.size() + 1)));
+				          TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
 				break;
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
 		}
+		ASSERT_LE(tenants.results.size(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
 
 		ASSERT(metaclusterRegistration.present() &&
 		       metaclusterRegistration.get().clusterType == ClusterType::METACLUSTER_DATA);
 
 		if (!clusterData.restored) {
-			ASSERT(tenants.size() == clusterData.tenants.size());
-			for (auto [tenantName, tenantEntry] : tenants) {
-				ASSERT(clusterData.tenants.count(tenantName));
-				auto tenantData = self->createdTenants[tenantName];
+			ASSERT_EQ(tenants.results.size(), clusterData.tenants.size());
+			for (auto [tenantId, tenantEntry] : tenants.results) {
+				ASSERT(clusterData.tenants.count(tenantId));
+				auto tenantData = self->createdTenants[tenantId];
 				ASSERT(tenantData.cluster == clusterName);
 				ASSERT(tenantData.tenantGroup == tenantEntry.tenantGroup);
+				ASSERT(tenantData.name == tenantEntry.tenantName);
 			}
 		} else {
 			int expectedTenantCount = 0;
-			std::map<TenantName, TenantMapEntry> tenantMap(tenants.begin(), tenants.end());
-			for (auto tenantName : clusterData.tenants) {
-				TenantData tenantData = self->createdTenants[tenantName];
-				auto tenantItr = tenantMap.find(tenantName);
-				if (tenantData.createTime == TenantData::CreateTime::BEFORE_BACKUP) {
+			std::map<int64_t, TenantMapEntry> tenantMap(tenants.results.begin(), tenants.results.end());
+			for (auto tenantId : clusterData.tenants) {
+				TenantData tenantData = self->createdTenants[tenantId];
+				auto tenantItr = tenantMap.find(tenantId);
+				if (tenantData.createTime == TenantData::AccessTime::BEFORE_BACKUP) {
 					++expectedTenantCount;
 					ASSERT(tenantItr != tenantMap.end());
 					ASSERT(tenantData.cluster == clusterName);
-					ASSERT(tenantItr->second.tenantGroup == tenantData.tenantGroup);
-				} else if (tenantData.createTime == TenantData::CreateTime::AFTER_BACKUP) {
+					if (!self->recoverManagementCluster ||
+					    tenantData.configureTime <= TenantData::AccessTime::BEFORE_BACKUP) {
+						ASSERT(tenantItr->second.tenantGroup == tenantData.tenantGroup);
+					}
+					if (!self->recoverManagementCluster ||
+					    tenantData.renameTime <= TenantData::AccessTime::BEFORE_BACKUP) {
+						ASSERT(tenantItr->second.tenantName == tenantData.name);
+					}
+				} else if (tenantData.createTime == TenantData::AccessTime::AFTER_BACKUP) {
 					ASSERT(tenantItr == tenantMap.end());
 				} else if (tenantItr != tenantMap.end()) {
 					++expectedTenantCount;
 				}
 			}
 
-			ASSERT(tenants.size() == expectedTenantCount);
+			// Check for deleted tenants that reappeared
+			int unexpectedTenants = 0;
+			for (auto const& [tenantId, tenantEntry] : tenantMap) {
+				if (!clusterData.tenants.count(tenantId)) {
+					ASSERT(self->recoverManagementCluster);
+					ASSERT(self->deletedTenants.count(tenantId));
+					++unexpectedTenants;
+				}
+			}
+
+			ASSERT_EQ(tenantMap.size() - unexpectedTenants, expectedTenantCount);
 		}
 
 		return Void();
 	}
 
 	ACTOR static Future<Void> checkTenants(MetaclusterRestoreWorkload* self) {
-		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants = wait(MetaclusterAPI::listTenants(
-		    self->managementDb, ""_sr, "\xff\xff"_sr, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
-		ASSERT(tenants.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+		state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants =
+		    wait(runTransaction(self->managementDb, [](Reference<ITransaction> tr) {
+			    return MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(
+			        tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1);
+		    }));
 
-		std::map<TenantName, TenantMapEntry> tenantMap(tenants.begin(), tenants.end());
-		for (auto& [tenantName, tenantData] : self->createdTenants) {
-			TenantMapEntry const& entry = tenantMap[tenantName];
-			if (tenantData.createTime != TenantData::CreateTime::BEFORE_BACKUP &&
-			    self->dataDbs[tenantData.cluster].restored) {
-				ASSERT(entry.tenantState == TenantState::ERROR ||
-				       (entry.tenantState == TenantState::READY &&
-				        tenantData.createTime == TenantData::CreateTime::DURING_BACKUP));
+		ASSERT_LE(tenants.results.size(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+
+		std::map<int64_t, TenantMapEntry> tenantMap(tenants.results.begin(), tenants.results.end());
+		for (auto& [tenantId, tenantData] : self->createdTenants) {
+			auto tenantItr = tenantMap.find(tenantId);
+			if (tenantItr == tenantMap.end()) {
+				// A tenant that we expected to have been created can only be missing from the management cluster if we
+				// lost data in the process of recovering both the management and some data clusters
+				ASSERT_NE(tenantData.createTime, TenantData::AccessTime::BEFORE_BACKUP);
+				ASSERT(self->dataDbs[tenantData.cluster].restored && self->recoverManagementCluster);
 			} else {
-				ASSERT(entry.tenantState == TenantState::READY);
+				if (tenantData.createTime != TenantData::AccessTime::BEFORE_BACKUP &&
+				    self->dataDbs[tenantData.cluster].restored) {
+					ASSERT(tenantItr->second.tenantState == TenantState::ERROR ||
+					       (tenantItr->second.tenantState == TenantState::READY &&
+					        tenantData.createTime == TenantData::AccessTime::DURING_BACKUP));
+				} else {
+					ASSERT_EQ(tenantItr->second.tenantState, TenantState::READY);
+				}
 			}
 		}
+
+		// TODO: evaluate extra tenants in tenantMap
+
 		return Void();
 	}
 
