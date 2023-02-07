@@ -1748,7 +1748,7 @@ struct TenantManagementWorkload : TestWorkload {
 				if (val.present()) {
 					ASSERT(keyPresent && val.get() == tName);
 				} else {
-					ASSERT(!keyPresent);
+					ASSERT(tenantPresent && tData.empty);
 				}
 				break;
 			} catch (Error& e) {
