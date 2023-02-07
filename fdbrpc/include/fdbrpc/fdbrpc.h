@@ -28,6 +28,7 @@
 #include "fdbrpc/FlowTransport.h" // NetworkMessageReceiver Endpoint
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/networksender.actor.h"
+#include "fdbrpc/simulator.h"
 
 // Common endpoint code for NetSAV<> and NetNotifiedQueue<>
 class FlowReceiver : public NetworkMessageReceiver, public NonCopyable {
@@ -822,8 +823,8 @@ public:
 			Future<Void> disc =
 			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
 			auto& p = getReplyPromiseStream(value);
-			// FIXME: buggify only in simulation/not during speed up simulation?
-			if (disc.isReady() || BUGGIFY_WITH_PROB(0.01)) {
+			if (disc.isReady() ||
+			    (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01))) {
 				if (disc.isReady() && IFailureMonitor::failureMonitor().knownUnauthorized(getEndpoint())) {
 					p.sendError(unauthorized_attempt());
 				} else {

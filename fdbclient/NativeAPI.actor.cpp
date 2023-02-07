@@ -10441,6 +10441,8 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				TraceEvent("ChangeFeedClientError")
 				    .errorUnsuppressed(e)
 				    .suppressFor(30.0)
+				    .detail("FeedID", rangeID)
+				    .detail("BeginVersion", begin)
 				    .detail("AnyProgress", begin != lastBeginVersion);
 				wait(delay(sleepWithBackoff));
 			} else {
