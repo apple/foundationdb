@@ -334,7 +334,7 @@ TenantIdsResponse AdminServer::fetchTenantIds(fdb::Database db, int id_begin, in
 					}
 					if (auto err = future.error()) {
 						if (err.retryable()) {
-							logr.info("retryable error while getting tenant ID of tenant {}: {}", idx, err.what());
+							logr.debug("retryable error while getting tenant ID of tenant {}: {}", idx, err.what());
 							future = tenant.getId();
 							has_retries = true;
 						} else {
