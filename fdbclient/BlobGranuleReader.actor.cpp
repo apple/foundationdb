@@ -36,21 +36,12 @@ ACTOR Future<Standalone<StringRef>> readFile(Reference<BlobConnectionProvider> b
 		state Arena arena;
 		std::string fname = f.filename.toString();
 		state Reference<BackupContainerFileSystem> bstore = bstoreProvider->getForRead(fname);
-		// printf("Starting read of snapshot file %s\n", fname.c_str());
 		state Reference<IAsyncFile> reader = wait(bstore->readFile(fname));
-		// printf("Got snapshot file size %lld\n", size);
-		state uint8_t* data = new (arena) uint8_t[f.length];
-		// printf("Reading %lld bytes from snapshot file %s\n", size, filename.c_str());
 
-		state int lengthRemaining = f.length;
-		state int64_t blockOffset = f.offset;
-		while (lengthRemaining > 0) {
-			int blockSize = std::min(lengthRemaining, CLIENT_KNOBS->BGR_READ_BLOCK_SIZE);
-			int readSize = wait(reader->read(data + (blockOffset - f.offset), blockSize, blockOffset));
-			ASSERT(readSize <= lengthRemaining);
-			lengthRemaining -= readSize;
-			blockOffset += readSize;
-		}
+		state uint8_t* data = new (arena) uint8_t[f.length];
+
+		int readSize = wait(reader->read(data, f.length, f.offset));
+		ASSERT(f.length == readSize);
 
 		StringRef dataRef(data, f.length);
 		return Standalone<StringRef>(dataRef, arena);
@@ -102,13 +93,13 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
 		}
 
 		state int numDeltaFiles = chunk.deltaFiles.size();
-		state StringRef* deltaData = new (arena) StringRef[numDeltaFiles];
+		state std::vector<StringRef> deltaData;
 		state int deltaIdx;
 
-		// for (Future<Standalone<StringRef>> deltaFuture : readDeltaFutures) {
+		deltaData.reserve(numDeltaFiles);
 		for (deltaIdx = 0; deltaIdx < numDeltaFiles; deltaIdx++) {
 			Standalone<StringRef> data = wait(readDeltaFutures[deltaIdx]);
-			deltaData[deltaIdx] = data;
+			deltaData.push_back(data);
 			arena.dependsOn(data.arena());
 		}
 

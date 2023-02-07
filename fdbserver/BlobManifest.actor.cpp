@@ -140,6 +140,9 @@ private:
 				for (auto& r : getSystemBackupRanges()) {
 					ranges.push_back(r);
 				}
+				// last updated version for table metadata
+				ranges.push_back(KeyRangeRef(metadataVersionKey, metadataVersionKeyEnd));
+
 				for (auto range : ranges) {
 					state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
 					limits.minRows = 0;

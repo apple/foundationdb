@@ -59,8 +59,8 @@ struct AuditStorageState {
 
 	std::string toString() const {
 		std::string res = "AuditStorageState: [ID]: " + id.toString() +
-		                  "[Range]: " + Traceable<KeyRangeRef>::toString(range) + "[Type]: " + std::to_string(type) +
-		                  "[Phase]: " + std::to_string(phase);
+		                  ", [Range]: " + Traceable<KeyRangeRef>::toString(range) +
+		                  ", [Type]: " + std::to_string(type) + ", [Phase]: " + std::to_string(phase);
 		if (!error.empty()) {
 			res += "[Error]: " + error;
 		}

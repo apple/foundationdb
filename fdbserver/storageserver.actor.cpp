@@ -437,6 +437,8 @@ struct StorageServerDisk {
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
 
+	Future<EncryptionAtRestMode> encryptionMode() { return storage->encryptionMode(); }
+
 	// The following are pointers to the Counters in StorageServer::counters of the same names.
 	Counter* kvCommitLogicalBytes;
 	Counter* kvClearRanges;
@@ -796,8 +798,6 @@ public:
 	    pendingAddRanges; // Pending requests to add ranges to physical shards
 	std::map<Version, std::vector<KeyRange>>
 	    pendingRemoveRanges; // Pending requests to remove ranges from physical shards
-
-	Reference<IPageEncryptionKeyProvider> encryptionKeyProvider;
 
 	bool shardAware; // True if the storage server is aware of the physical shards.
 
@@ -1162,6 +1162,8 @@ public:
 
 	Optional<LatencyBandConfig> latencyBandConfig;
 
+	Optional<EncryptionAtRestMode> encryptionMode;
+
 	struct Counters {
 		CounterCollection cc;
 		Counter allQueries, systemKeyQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeSystemKeyQueries,
@@ -1374,12 +1376,10 @@ public:
 
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
-	              StorageServerInterface const& ssi,
-	              Reference<IPageEncryptionKeyProvider> encryptionKeyProvider)
-	  : encryptionKeyProvider(encryptionKeyProvider), shardAware(false),
-	    tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
-	                                                            TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
-	                                                            Histogram::Unit::milliseconds)),
+	              StorageServerInterface const& ssi)
+	  : shardAware(false), tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                                               TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
+	                                                                               Histogram::Unit::milliseconds)),
 	    ssVersionLockLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                          SS_VERSION_LOCK_LATENCY_HISTOGRAM,
 	                                                          Histogram::Unit::milliseconds)),
@@ -1794,7 +1794,7 @@ bool validateRange(StorageServer::VersionedData::ViewAtVersion const& view,
 
 void validate(StorageServer* data, bool force = false) {
 	try {
-		if (force || (EXPENSIVE_VALIDATION)) {
+		if (!data->shuttingDown && (force || (EXPENSIVE_VALIDATION))) {
 			data->newestAvailableVersion.validateCoalesced();
 			data->newestDirtyVersion.validateCoalesced();
 
@@ -1849,15 +1849,20 @@ void validate(StorageServer* data, bool force = false) {
 			for (auto s = data->shards.ranges().begin(); s != data->shards.ranges().end(); ++s) {
 				ShardInfo* shard = s->value().getPtr();
 				if (!shard->isInVersionedData()) {
-					if (latest.lower_bound(s->begin()) != latest.lower_bound(s->end())) {
+					auto beginNext = latest.lower_bound(s->begin());
+					auto endNext = latest.lower_bound(s->end());
+					if (beginNext != endNext) {
 						TraceEvent(SevError, "VF", data->thisServerID)
 						    .detail("LastValidTime", data->debug_lastValidateTime)
 						    .detail("KeyBegin", s->begin())
 						    .detail("KeyEnd", s->end())
-						    .detail("FirstKey", latest.lower_bound(s->begin()).key())
-						    .detail("FirstInsertV", latest.lower_bound(s->begin()).insertVersion());
+						    .detail("DbgState", shard->debugDescribeState())
+						    .detail("FirstKey", beginNext.key())
+						    .detail("LastKey", endNext != latest.end() ? endNext.key() : "End"_sr)
+						    .detail("FirstInsertV", beginNext.insertVersion())
+						    .detail("LastInsertV", endNext != latest.end() ? endNext.insertVersion() : invalidVersion);
 					}
-					ASSERT(latest.lower_bound(s->begin()) == latest.lower_bound(s->end()));
+					ASSERT(beginNext == endNext);
 				}
 			}
 
@@ -6124,7 +6129,8 @@ void applyMutation(StorageServer* self,
 void applyChangeFeedMutation(StorageServer* self,
                              MutationRef const& m,
                              MutationRefAndCipherKeys const& encryptedMutation,
-                             Version version) {
+                             Version version,
+                             KeyRangeRef const& shard) {
 	if (m.type == MutationRef::SetValue) {
 		for (auto& it : self->keyChangeFeed[m.param1]) {
 			if (version < it->stopVersion && !it->removing && version > it->emptyVersion) {
@@ -6182,6 +6188,9 @@ void applyChangeFeedMutation(StorageServer* self,
 					}
 					if (clearMutation.param2 > it->range.end) {
 						clearMutation.param2 = it->range.end;
+						modified = true;
+					}
+					if (!modified && (clearMutation.param1 == shard.begin || clearMutation.param2 == shard.end)) {
 						modified = true;
 					}
 					if (it->mutations.empty() || it->mutations.back().version != version) {
@@ -8520,7 +8529,7 @@ void StorageServer::addMutation(Version version,
 		}
 
 		applyChangeFeedMutation(
-		    this, expanded.type == MutationRef::ClearRange ? nonExpanded : expanded, encrypt, version);
+		    this, expanded.type == MutationRef::ClearRange ? nonExpanded : expanded, encrypt, version, shard);
 	}
 	applyMutation(this, expanded, mLog.arena(), mutableData(), version);
 
@@ -9188,11 +9197,13 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				} else {
 					MutationRef msg;
 					cloneReader >> msg;
-					if (g_network && g_network->isSimulated() &&
-					    isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) && !msg.isEncrypted() &&
-					    !(isSingleKeyMutation((MutationRef::Type)msg.type) &&
-					      (backupLogKeys.contains(msg.param1) || (applyLogKeys.contains(msg.param1))))) {
-						ASSERT(false);
+					if (g_network && g_network->isSimulated()) {
+						bool isBackupLogMutation =
+						    isSingleKeyMutation((MutationRef::Type)msg.type) &&
+						    (backupLogKeys.contains(msg.param1) || applyLogKeys.contains(msg.param1));
+						ASSERT(data->encryptionMode.present());
+						ASSERT(!data->encryptionMode.get().isEncryptionEnabled() || msg.isEncrypted() ||
+						       isBackupLogMutation);
 					}
 					if (msg.isEncrypted()) {
 						if (!cipherKeys.present()) {
@@ -9349,11 +9360,13 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				MutationRef msg;
 				MutationRefAndCipherKeys encryptedMutation;
 				rd >> msg;
-				if (g_network && g_network->isSimulated() &&
-				    isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) && !msg.isEncrypted() &&
-				    !(isSingleKeyMutation((MutationRef::Type)msg.type) &&
-				      (backupLogKeys.contains(msg.param1) || (applyLogKeys.contains(msg.param1))))) {
-					ASSERT(false);
+				if (g_network && g_network->isSimulated()) {
+					bool isBackupLogMutation =
+					    isSingleKeyMutation((MutationRef::Type)msg.type) &&
+					    (backupLogKeys.contains(msg.param1) || applyLogKeys.contains(msg.param1));
+					ASSERT(data->encryptionMode.present());
+					ASSERT(!data->encryptionMode.get().isEncryptionEnabled() || msg.isEncrypted() ||
+					       isBackupLogMutation);
 				}
 				if (msg.isEncrypted()) {
 					ASSERT(cipherKeys.present());
@@ -11393,6 +11406,7 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 
 ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface ssi) {
 	ASSERT(!ssi.isTss());
+	state EncryptionAtRestMode encryptionMode = wait(self->storage.encryptionMode());
 	state Transaction tr(self->cx);
 
 	loop {
@@ -11406,6 +11420,12 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 			                                     GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()))
 			                  : Never())) {
 				state GetStorageServerRejoinInfoReply rep = _rep;
+				if (rep.encryptMode != encryptionMode) {
+					TraceEvent(SevWarnAlways, "SSEncryptModeMismatch", self->thisServerID)
+					    .detail("StorageEncryptionMode", encryptionMode)
+					    .detail("ClusterEncryptionMode", rep.encryptMode);
+					throw encrypt_mode_mismatch();
+				}
 
 				try {
 					tr.reset();
@@ -11560,9 +11580,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder,
-                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider) {
-	state StorageServer self(persistentData, db, ssi, encryptionKeyProvider);
+                                 std::string folder) {
+	state StorageServer self(persistentData, db, ssi);
 	self.shardAware = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && persistentData->shardAware();
 	state Future<Void> ssCore;
 	self.initialClusterVersion = startVersion;
@@ -11579,6 +11598,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		wait(self.storage.init());
 		wait(self.storage.commit());
 		++self.counters.kvCommits;
+
+		EncryptionAtRestMode encryptionMode = wait(self.storage.encryptionMode());
+		self.encryptionMode = encryptionMode;
 
 		if (seedTag == invalidTag) {
 			ssi.startAcceptingRequests();
@@ -11652,9 +11674,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
                                  Promise<Void> recovered,
-                                 Reference<IClusterConnectionRecord> connRecord,
-                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider) {
-	state StorageServer self(persistentData, db, ssi, encryptionKeyProvider);
+                                 Reference<IClusterConnectionRecord> connRecord) {
+	state StorageServer self(persistentData, db, ssi);
 	state Future<Void> ssCore;
 	self.folder = folder;
 
@@ -11674,6 +11695,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			}
 		}
 		++self.counters.kvCommits;
+
+		EncryptionAtRestMode encryptionMode = wait(self.storage.encryptionMode());
+		self.encryptionMode = encryptionMode;
 
 		bool ok = wait(self.storage.restoreDurableState());
 		if (!ok) {

@@ -155,10 +155,9 @@ public:
 	                        ExpireProgress* progress,
 	                        Version restorableBeginVersion) final;
 
-	Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file, Optional<Database> cx) final;
+	Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file, Database cx) final;
 
 	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
-	                                                  Optional<Database> cx,
 	                                                  VectorRef<KeyRangeRef> keyRangesFilter,
 	                                                  bool logsOnly,
 	                                                  Version beginVersion) final;

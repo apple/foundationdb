@@ -1170,12 +1170,13 @@ struct TenantManagementWorkload : TestWorkload {
 				                                 TenantManagementWorkload::jsonToTenantMapEntry(result.value)));
 			}
 		} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
-			wait(store(tenants, TenantAPI::listTenants(self->dataDb.getReference(), beginTenant, endTenant, limit)));
+			wait(store(tenants,
+			           TenantAPI::listTenantMetadata(self->dataDb.getReference(), beginTenant, endTenant, limit)));
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			wait(store(tenants, TenantAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit)));
+			wait(store(tenants, TenantAPI::listTenantMetadataTransaction(tr, beginTenant, endTenant, limit)));
 		} else {
-			wait(store(tenants, MetaclusterAPI::listTenants(self->mvDb, beginTenant, endTenant, limit)));
+			wait(store(tenants, MetaclusterAPI::listTenantMetadata(self->mvDb, beginTenant, endTenant, limit)));
 		}
 
 		return tenants;
@@ -1765,7 +1766,7 @@ struct TenantManagementWorkload : TestWorkload {
 		loop {
 			// Read the tenant list from the data cluster.
 			state std::vector<std::pair<TenantName, TenantMapEntry>> dataClusterTenants =
-			    wait(TenantAPI::listTenants(self->dataDb.getReference(), beginTenant, endTenant, 1000));
+			    wait(TenantAPI::listTenantMetadata(self->dataDb.getReference(), beginTenant, endTenant, 1000));
 
 			auto dataItr = dataClusterTenants.begin();
 

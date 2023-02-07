@@ -1350,8 +1350,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
                                                  int64_t memoryLimit,
                                                  IKeyValueStore* store,
                                                  bool validateDataFiles,
-                                                 Promise<Void>* rebootKVStore,
-                                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider) {
+                                                 Promise<Void>* rebootKVStore) {
 	state TrackRunningStorage _(id, storeType, runningStorages);
 	loop {
 		ErrorOr<Void> e = wait(errorOr(prevStorageServer));
@@ -1418,13 +1417,8 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		DUMPTOKEN(recruited.changeFeedPop);
 		DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
-		prevStorageServer = storageServer(store,
-		                                  recruited,
-		                                  db,
-		                                  folder,
-		                                  Promise<Void>(),
-		                                  Reference<IClusterConnectionRecord>(nullptr),
-		                                  encryptionKeyProvider);
+		prevStorageServer =
+		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<IClusterConnectionRecord>(nullptr));
 		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
 	}
 }
@@ -1888,14 +1882,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
 
-				Reference<IPageEncryptionKeyProvider> encryptionKeyProvider;
-				if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
-					encryptionKeyProvider =
-					    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryptionWithAuth>>(dbInfo);
-				} else {
-					encryptionKeyProvider =
-					    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryption>>(dbInfo);
-				}
 				IKeyValueStore* kv = openKVStore(
 				    s.storeType,
 				    s.filename,
@@ -1909,7 +1895,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                s.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 				                deterministicRandom()->coinflip())
 				             : true),
-				    encryptionKeyProvider);
+				    dbInfo);
 				Future<Void> kvClosed =
 				    kv->onClosed() ||
 				    rebootKVSPromise.getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
@@ -1957,8 +1943,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
 				Promise<Void> recovery;
-				Future<Void> f =
-				    storageServer(kv, recruited, dbInfo, folder, recovery, connRecord, encryptionKeyProvider);
+				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connRecord);
 				recoveries.push_back(recovery.getFuture());
 				f = handleIOErrors(f, kv, s.storeID, kvClosed);
 				f = storageServerRollbackRebooter(&runningStorages,
@@ -1974,8 +1959,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                                  memoryLimit,
 				                                  kv,
 				                                  validateDataFiles,
-				                                  &rebootKVSPromise,
-				                                  encryptionKeyProvider);
+				                                  &rebootKVSPromise);
 				errorForwarders.add(forwardError(errors, ssRole, recruited.id(), f));
 			} else if (s.storedComponent == DiskStore::TLogData) {
 				LocalLineage _;
@@ -2581,15 +2565,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                   folder,
 					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
-					Reference<IPageEncryptionKeyProvider> encryptionKeyProvider;
-					if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
-						encryptionKeyProvider =
-						    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryptionWithAuth>>(
-						        dbInfo);
-					} else {
-						encryptionKeyProvider =
-						    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryption>>(dbInfo);
-					}
 					IKeyValueStore* data = openKVStore(
 					    req.storeType,
 					    filename,
@@ -2603,7 +2578,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                req.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 					                deterministicRandom()->coinflip())
 					             : true),
-					    encryptionKeyProvider);
+					    dbInfo,
+					    req.encryptMode);
 
 					Future<Void> kvClosed =
 					    data->onClosed() ||
@@ -2619,8 +2595,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                               isTss ? req.tssPairIDAndVersion.get().second : 0,
 					                               storageReady,
 					                               dbInfo,
-					                               folder,
-					                               encryptionKeyProvider);
+					                               folder);
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(&runningStorages,
@@ -2636,8 +2611,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                                  memoryLimit,
 					                                  data,
 					                                  false,
-					                                  &rebootKVSPromise2,
-					                                  encryptionKeyProvider);
+					                                  &rebootKVSPromise2);
 					errorForwarders.add(forwardError(errors, ssRole, recruited.id(), s));
 				} else if (storageCache.exists(req.reqId)) {
 					forwardPromise(req.reply, storageCache.get(req.reqId));
@@ -2692,7 +2666,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.txnState);
 				DUMPTOKEN(recruited.getTenantId);
 
-				// printf("Recruited as commitProxyServer\n");
 				errorForwarders.add(zombie(recruited,
 				                           forwardError(errors,
 				                                        Role::COMMIT_PROXY,

@@ -87,7 +87,7 @@ void fdb_flow_test() {
 
 	g_network = newNet2(TLSConfig());
 
-	openTraceFile(NetworkAddress(), 1000000, 1000000, ".");
+	openTraceFile({}, 1000000, 1000000, ".");
 	systemMonitor();
 	uncancellable(recurring(&systemMonitor, 5.0, TaskPriority::FlushTrace));
 
