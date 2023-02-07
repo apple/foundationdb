@@ -5,7 +5,7 @@ allowDisablingTenants = false
 injectTargetedSSRestart = true
 injectSSDelay = true
 # FIXME: re-enable rocks at some point
-storageEngineExcludeTypes = [4, 5]
+# storageEngineExcludeTypes = [4, 5]
 
 [[knobs]]
 bg_metadata_source = "tenant"

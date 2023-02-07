@@ -2483,22 +2483,14 @@ ACTOR void setupAndRun(std::string dataFolder,
 	// snapshot of the storage engine without a snapshotting file system.
 	// https://github.com/apple/foundationdb/issues/5155
 	if (std::string_view(testFile).find("restarting") != std::string_view::npos) {
-		testConfig.storageEngineExcludeTypes.push_back(4);
-		testConfig.storageEngineExcludeTypes.push_back(5);
+		// testConfig.storageEngineExcludeTypes.push_back(4);
+		// testConfig.storageEngineExcludeTypes.push_back(5);
 
 		// Disable the default tenant in restarting tests for now
 		// TODO: persist the chosen default tenant in the restartInfo.ini file for the second test
 		allowDefaultTenant = false;
 		allowCreatingTenants = false;
 		tenantModeRequired = false;
-	}
-
-	// TODO: Currently backup and restore related simulation tests are failing when run with rocksDB storage engine
-	// possibly due to running the rocksdb in single thread in simulation.
-	// Re-enable the backup and restore related simulation tests when the tests are passing again.
-	if (std::string_view(testFile).find("Backup") != std::string_view::npos) {
-		testConfig.storageEngineExcludeTypes.push_back(4);
-		testConfig.storageEngineExcludeTypes.push_back(5);
 	}
 
 	// The RocksDB engine is not always built with the rest of fdbserver. Don't try to use it if it is not included
