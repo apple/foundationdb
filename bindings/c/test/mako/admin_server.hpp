@@ -57,7 +57,7 @@ struct TenantIdsResponse {
 	boost::optional<std::string> error_message;
 	std::vector<int64_t> ids;
 
-	static TenantIdsResponse makeError(std::string msg) { return TenantIdsResponse{ msg }; }
+	static TenantIdsResponse makeError(std::string msg) { return TenantIdsResponse{ msg, {} }; }
 
 	template <class Ar>
 	void serialize(Ar& ar, unsigned int) {

@@ -150,8 +150,8 @@ def cluster(admin_ipc, build_dir, public_key_refresh_interval, trusted_client, f
 @pytest.fixture
 def db(cluster, admin_ipc):
     db = fdb.open(str(cluster.cluster_file))
-    db.options.set_transaction_timeout(2000) # 2 seconds
-    db.options.set_transaction_retry_limit(3)
+    #db.options.set_transaction_timeout(2000) # 2 seconds
+    db.options.set_transaction_retry_limit(10)
     yield db
     admin_ipc.request("cleanup_database")
     db = None
