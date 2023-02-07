@@ -10,7 +10,7 @@ This diagram shows the flow of information:
 
 ### Storage Usage
 The storage used by tenants is estimated using the `getEstimatedRangeSizeBytes()` function. This function aggregates the storage estimates from the storage servers that own shards for the given range. On a given storage server, the estimate is based on a byte sample, and the probability that a kv pair is sampled is:
-`(size(key) + size(value)) / (size(key) + 100) / 250`.
+`(size(key) + size(value)) / ((size(key) + 100) * 250)`.
 
 ### Tuple Layer
 TODO: Update after https://github.com/apple/foundationdb/pull/9241
