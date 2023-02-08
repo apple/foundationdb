@@ -358,30 +358,26 @@ struct EncryptionOpsWorkload : TestWorkload {
 	                  const Standalone<StringRef>& headerStr,
 	                  uint8_t* originalPayload,
 	                  Reference<BlobCipherKey> orgCipherKey) {
-		Arena tmpArena;
-		BlobCipherEncryptHeaderRef headerRef = BlobCipherEncryptHeaderRef::fromStringRef(headerStr, tmpArena);
+		BlobCipherEncryptHeaderRef headerRef = BlobCipherEncryptHeaderRef::fromStringRef(headerStr);
 
 		ASSERT_EQ(headerRef.flagsVersion, CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
 
 		// validate flags
-		BlobCipherEncryptHeaderFlagsV1 flags = BlobCipherEncryptHeaderFlagsV1::fromStringRef(headerRef.flagsRef);
-		ASSERT_EQ(flags.encryptMode, EncryptCipherMode::ENCRYPT_CIPHER_MODE_AES_256_CTR);
-
-		ParsedEncryptHeaderDetails parsed = DecryptBlobCipherAes256Ctr::extractDetailsFromHeaderRef(headerRef, arena);
-
-		Reference<BlobCipherKey> cipherKey = getEncryptionKey(parsed.textCipherDetails.encryptDomainId,
-		                                                      parsed.textCipherDetails.baseCipherId,
-		                                                      parsed.textCipherDetails.salt);
+		ParsedEncryptHeaderDetails details = BlobCipherEncryptHeaderRef::getCipherDetailsAndIv(headerRef);
+		ASSERT_EQ(details.encryptMode, EncryptCipherMode::ENCRYPT_CIPHER_MODE_AES_256_CTR);
+		Reference<BlobCipherKey> cipherKey = getEncryptionKey(details.textCipherDetails.encryptDomainId,
+		                                                      details.textCipherDetails.baseCipherId,
+		                                                      details.textCipherDetails.salt);
 		Reference<BlobCipherKey> headerCipherKey =
-		    parsed.headerCipherDetails.encryptDomainId == INVALID_ENCRYPT_DOMAIN_ID
+		    details.headerCipherDetails.encryptDomainId == INVALID_ENCRYPT_DOMAIN_ID
 		        ? Reference<BlobCipherKey>() // no authentication mode cipher header-key is not needed
-		        : getEncryptionKey(parsed.headerCipherDetails.encryptDomainId,
-		                           parsed.headerCipherDetails.baseCipherId,
-		                           parsed.headerCipherDetails.salt);
+		        : getEncryptionKey(details.headerCipherDetails.encryptDomainId,
+		                           details.headerCipherDetails.baseCipherId,
+		                           details.headerCipherDetails.salt);
 		ASSERT(cipherKey.isValid());
 		ASSERT(cipherKey->isEqual(orgCipherKey));
 
-		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, &parsed.iv[0], BlobCipherMetrics::TEST);
+		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, &details.iv[0], BlobCipherMetrics::TEST);
 
 		auto start = std::chrono::high_resolution_clock::now();
 		StringRef decrypted = decryptor.decrypt(encrypted.begin(), len, headerRef, arena);
