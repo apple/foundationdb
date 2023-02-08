@@ -78,13 +78,12 @@ struct TenantLock : TestWorkload {
 
 	ACTOR static Future<Void> changeLockState(Database db, TenantName name, TenantLockState desiredState, UID lockID) {
 		state Reference<Tenant> tenant = makeReference<Tenant>(db, name);
-		state ReadYourWritesTransaction tr(db, tenant);
+		state ReadYourWritesTransaction tr(db);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		loop {
 			try {
 				wait(tenant->ready());
-				Optional<TenantMapEntry> entry = wait(TenantAPI::tryGetTenantTransaction(&tr, tenant->id()));
-				ASSERT(entry.present());
-				wait(TenantAPI::changeLockState(&tr, entry.get(), desiredState, lockID));
+				wait(TenantAPI::changeLockState(&tr, tenant->id(), desiredState, lockID));
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
@@ -101,7 +100,11 @@ struct TenantLock : TestWorkload {
 		TraceEvent("TenantLockProgress").detail("Phase", "First Tx against unlocked tenant").log();
 		wait(store(currentValue1, probeTx(db, self->tenant1, currentValue1)));
 		wait(store(currentValue2, probeTx(db, self->tenant2, currentValue2)));
-		TraceEvent("TenantLockProgress").detail("Phase", "Lock Both tenants").log();
+		TraceEvent("TenantLockProgress")
+		    .detail("Phase", "Lock Both tenants")
+		    .detail("LockID1", lockID1)
+		    .detail("LockID2", lockID2)
+		    .log();
 		wait(changeLockState(db, self->tenant1, TenantLockState::LOCKED, lockID1));
 		wait(changeLockState(db, self->tenant2, TenantLockState::LOCKED, lockID2));
 		TraceEvent("TenantLockProgress").detail("Phase", "Tx against locked tenant").log();

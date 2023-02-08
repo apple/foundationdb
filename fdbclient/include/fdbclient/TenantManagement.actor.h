@@ -475,8 +475,15 @@ Future<Void> configureTenantTransaction(Transaction tr,
 }
 
 ACTOR template <class Transaction>
-Future<Void> changeLockState(Transaction* tr, TenantMapEntry tenant, TenantLockState desiredLockState, UID lockID) {
-	Optional<UID> currLockID = wait(TenantMetadata::tenantLockID().get(tr));
+Future<Void> changeLockState(Transaction* tr, int64_t tenant, TenantLockState desiredLockState, UID lockID) {
+	state Optional<TenantMapEntry> entry;
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+	wait(store(entry, TenantAPI::tryGetTenantTransaction(tr, tenant)));
+	ASSERT(entry.present());
+	Optional<UID> currLockID = wait(TenantMetadata::tenantLockID().get(tr, tenant));
 	if (currLockID.present()) {
 		if (currLockID.get() != lockID) {
 			throw tenant_locked();
@@ -486,13 +493,13 @@ Future<Void> changeLockState(Transaction* tr, TenantMapEntry tenant, TenantLockS
 		}
 		// otherwise we can now continue with unlock
 	}
-	TenantMapEntry newState = tenant;
+	TenantMapEntry newState = entry.get();
 	newState.tenantLockState = desiredLockState;
-	wait(configureTenantTransaction(tr, tenant, newState));
+	wait(configureTenantTransaction(tr, entry.get(), newState));
 	if (desiredLockState == TenantLockState::UNLOCKED) {
-		TenantMetadata::tenantLockID().clear(tr);
+		TenantMetadata::tenantLockID().erase(tr, tenant);
 	} else {
-		TenantMetadata::tenantLockID().set(tr, lockID);
+		TenantMetadata::tenantLockID().set(tr, tenant, lockID);
 	}
 	return Void();
 }

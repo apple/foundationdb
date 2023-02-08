@@ -194,7 +194,7 @@ struct TenantMetadataSpecification {
 
 	KeyBackedObjectMap<int64_t, TenantMapEntry, decltype(IncludeVersion()), TenantIdCodec> tenantMap;
 	KeyBackedMap<TenantName, int64_t> tenantNameIndex;
-	KeyBackedProperty<UID> lockID;
+	KeyBackedMap<int64_t, UID> lockID;
 	KeyBackedProperty<int64_t> lastTenantId;
 	KeyBackedBinaryValue<int64_t> tenantCount;
 	KeyBackedSet<int64_t> tenantTombstones;

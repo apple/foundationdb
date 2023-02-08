@@ -179,7 +179,7 @@ struct ProxyCommitData {
 	int64_t commitBatchesMemBytesCount;
 	std::unordered_map<TenantName, int64_t> tenantNameIndex;
 	std::map<int64_t, TenantName> tenantMap;
-	std::unordered_set<int64_t> lockedTenants;
+	std::set<int64_t> lockedTenants;
 	std::unordered_set<int64_t> tenantsOverStorageQuota;
 	ProxyStats stats;
 	MasterInterface master;

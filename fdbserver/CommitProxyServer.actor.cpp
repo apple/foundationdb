@@ -1150,6 +1150,9 @@ Error validateAndProcessTenantAccess(const CommitTransactionRequest& tr, ProxyCo
 	if (!isValid) {
 		return tenant_not_found();
 	}
+	if (!tr.isLockAware() && pProxyCommitData->lockedTenants.count(tr.tenantInfo.tenantId) > 0) {
+		return tenant_locked();
+	}
 
 	// only do the mutation check when the transaction use raw_access option and the tenant mode is required
 	if (pProxyCommitData->getTenantMode() != TenantMode::REQUIRED || tr.tenantInfo.hasTenant()) {
@@ -1305,33 +1308,6 @@ bool validTenantAccess(MutationRef m) {
 		auto beginTenantId = TenantAPI::extractTenantIdFromKeyRef(m.param1);
 		auto endTenantId = TenantAPI::extractTenantIdFromKeyRef(m.param2);
 		CODE_PROBE(beginTenantId != endTenantId, "Clear Range raw access or cross multiple tenants");
-	}
-	return true;
-}
-
-// Return true if all tenant check pass. Otherwise, return false and send error back
-bool validTenantAccess(const CommitTransactionRequest& tr, ProxyCommitData* const pProxyCommitData) {
-	bool isValid = checkTenantNoWait(pProxyCommitData, tr.tenantInfo.tenantId, "Commit", true);
-	if (!isValid) {
-		tr.reply.sendError(tenant_not_found());
-		return false;
-	}
-
-	if (!tr.isLockAware() && pProxyCommitData->lockedTenants.contains(tr.tenantInfo.tenantId)) {
-		tr.reply.sendError(tenant_locked());
-		return false;
-	}
-
-	// only do the mutation check when the transaction use raw_access option and the tenant mode is required
-	if (pProxyCommitData->getTenantMode() != TenantMode::REQUIRED || tr.tenantInfo.hasTenant()) {
-		return true;
-	}
-
-	for (auto& mutation : tr.transaction.mutations) {
-		if (!validTenantAccess(mutation)) {
-			tr.reply.sendError(illegal_tenant_access());
-			return false;
-		}
 	}
 	return true;
 }

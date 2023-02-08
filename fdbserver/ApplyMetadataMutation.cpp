@@ -139,7 +139,7 @@ private:
 
 	std::map<int64_t, TenantName>* tenantMap = nullptr;
 	std::unordered_map<TenantName, int64_t>* tenantNameIndex = nullptr;
-	std::unordered_set<int64_t>* lockedTenants = nullptr;
+	std::set<int64_t>* lockedTenants = nullptr;
 	EncryptionAtRestMode encryptMode;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
@@ -689,10 +689,10 @@ private:
 				}
 			}
 			if (lockedTenants) {
-				if (tenantEntry.tenantLockState == TenantLockState::LOCKED) {
-					lockedTenants->insert(tenantEntry.id);
-				} else {
+				if (tenantEntry.tenantLockState == TenantLockState::UNLOCKED) {
 					lockedTenants->erase(tenantEntry.id);
+				} else {
+					lockedTenants->insert(tenantEntry.id);
 				}
 			}
 
