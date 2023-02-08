@@ -67,7 +67,7 @@ uint32_t BlobCipherEncryptHeaderRef::getHeaderSize(const int flagVersion,
                                                    const EncryptCipherMode cipherMode,
                                                    const EncryptAuthTokenMode authMode,
                                                    const EncryptAuthTokenAlgo authAlgo) {
-	uint32_t total = sizeof(uint16_t) * 2; // sizeof(flagVersion + algoHeaderVersion)
+	uint32_t total = sizeof(uint16_t) * 2 + 2; // sizeof(flagVersion + algoHeaderVersion) + 2 std::variant index
 	if (flagVersion != 1) {
 		throw not_implemented();
 	}
@@ -1711,7 +1711,7 @@ void testConfigurableEncryptionAesCtrNoAuthV1Ser(const int minDomainId) {
 	BlobCipherEncryptHeaderFlagsV1 flags = BlobCipherEncryptHeaderFlagsV1(
 	    ENCRYPT_CIPHER_MODE_AES_256_CTR, ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE, ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE);
 	size += sizeof(BlobCipherEncryptHeaderFlagsV1);
-	size += sizeof(uint16_t) * 2;
+	size += sizeof(uint16_t) * 2 + 2;
 
 	headerRef.flagsVersion = CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION;
 	headerRef.algoHeaderVersion = CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION;
@@ -1749,7 +1749,7 @@ void testConfigurableEncryptionAesCtrWithAuthSer(const int minDomainId) {
 	    ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
 	    AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE ? ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA
 	                                              : ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC);
-	size += (sizeof(BlobCipherEncryptHeaderFlagsV1) + 2 * sizeof(uint16_t));
+	size += (sizeof(BlobCipherEncryptHeaderFlagsV1) + 2 * sizeof(uint16_t)) + 2;
 
 	headerRef.flags = flags;
 	headerRef.flagsVersion = CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION;
