@@ -205,7 +205,7 @@ struct TenantMetadataSpecification {
 
 	TenantMetadataSpecification(KeyRef prefix)
 	  : subspace(prefix.withSuffix("tenant/"_sr)), tenantMap(subspace.withSuffix("map/"_sr), IncludeVersion()),
-	    tenantNameIndex(subspace.withSuffix("nameIndex/"_sr)), lockID(subspace.withSuffix("lockID"_sr)),
+	    tenantNameIndex(subspace.withSuffix("nameIndex/"_sr)), lockId(subspace.withSuffix("lockId"_sr)),
 	    lastTenantId(subspace.withSuffix("lastId"_sr)), tenantCount(subspace.withSuffix("count"_sr)),
 	    tenantTombstones(subspace.withSuffix("tombstones/"_sr)),
 	    tombstoneCleanupData(subspace.withSuffix("tombstoneCleanup"_sr), IncludeVersion()),
