@@ -649,6 +649,7 @@ struct KeyRangeLocationInfo;
 // Return the aggregated StorageMetrics of range keys to the caller. The locations tell which interface should
 // serve the request. The final result is within (min-permittedError/2, max + permittedError/2) if valid.
 ACTOR Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(TenantInfo tenantInfo,
+                                                                      Version version,
                                                                       KeyRange keys,
                                                                       std::vector<KeyRangeLocationInfo> locations,
                                                                       StorageMetrics min,

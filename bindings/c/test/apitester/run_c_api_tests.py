@@ -31,19 +31,24 @@ import random
 import string
 import toml
 
-sys.path[:0] = [os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "tests", "TestRunner")]
-
 # fmt: off
 from tmp_cluster import TempCluster
 from local_cluster import TLSConfig
 # fmt: on
 
+sys.path[:0] = [
+    os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "..", "tests", "TestRunner"
+    )
+]
 
 TESTER_STATS_INTERVAL_SEC = 5
 
 
 def random_string(len):
-    return "".join(random.choice(string.ascii_letters + string.digits) for i in range(len))
+    return "".join(
+        random.choice(string.ascii_letters + string.digits) for i in range(len)
+    )
 
 
 def get_logger():
@@ -77,7 +82,9 @@ def dump_client_logs(log_dir):
 def run_tester(args, cluster, test_file):
     build_dir = Path(args.build_dir).resolve()
     tester_binary = Path(args.api_tester_bin).resolve()
-    external_client_library = build_dir.joinpath("bindings", "c", "libfdb_c_external.so")
+    external_client_library = build_dir.joinpath(
+        "bindings", "c", "libfdb_c_external.so"
+    )
     log_dir = Path(cluster.log).joinpath("client")
     log_dir.mkdir(exist_ok=True)
     cmd = [
@@ -141,7 +148,9 @@ def run_tester(args, cluster, test_file):
             reason = signal.Signals(-ret_code).name
         else:
             reason = "exit code: %d" % ret_code
-        get_logger().error("\n'%s' did not complete succesfully (%s)" % (cmd[0], reason))
+        get_logger().error(
+            "\n'%s' did not complete succesfully (%s)" % (cmd[0], reason)
+        )
         if log_dir is not None and not args.disable_log_dump:
             dump_client_logs(log_dir)
 
@@ -160,7 +169,9 @@ class TestConfig:
         self.server_chain_len = server_config.get("tls_server_chain_len", 3)
         self.min_num_processes = server_config.get("min_num_processes", 1)
         self.max_num_processes = server_config.get("max_num_processes", 3)
-        self.num_processes = random.randint(self.min_num_processes, self.max_num_processes)
+        self.num_processes = random.randint(
+            self.min_num_processes, self.max_num_processes
+        )
 
 
 def run_test(args, test_file):
@@ -210,9 +221,20 @@ def run_tests(args):
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="FoundationDB C API Tester")
-    parser.add_argument("--build-dir", "-b", type=str, required=True, help="FDB build directory")
-    parser.add_argument("--api-tester-bin", type=str, help="Path to the fdb_c_api_tester executable.", required=True)
-    parser.add_argument("--external-client-library", type=str, help="Path to the external client library.")
+    parser.add_argument(
+        "--build-dir", "-b", type=str, required=True, help="FDB build directory"
+    )
+    parser.add_argument(
+        "--api-tester-bin",
+        type=str,
+        help="Path to the fdb_c_api_tester executable.",
+        required=True,
+    )
+    parser.add_argument(
+        "--external-client-library",
+        type=str,
+        help="Path to the external client library.",
+    )
     parser.add_argument(
         "--retain-client-lib-copies",
         action="store_true",

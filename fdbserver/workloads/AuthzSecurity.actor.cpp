@@ -46,6 +46,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 	std::vector<Future<Void>> clients;
 	Arena arena;
 	Reference<Tenant> tenant;
+	Reference<Tenant> anotherTenant;
 	TenantName tenantName;
 	TenantName anotherTenantName;
 	Standalone<StringRef> signedToken;
@@ -68,10 +69,6 @@ struct AuthzSecurityWorkload : TestWorkload {
 		tLogConfigKey = getOption(options, "tLogConfigKey"_sr, "TLogInterface"_sr);
 		ASSERT(g_network->isSimulated());
 		// make it comfortably longer than the timeout of the workload
-		signedToken = g_simulator->makeToken(
-		    tenantName, uint64_t(std::lround(getCheckTimeout())) + uint64_t(std::lround(testDuration)) + 100);
-		signedTokenAnotherTenant = g_simulator->makeToken(
-		    anotherTenantName, uint64_t(std::lround(getCheckTimeout())) + uint64_t(std::lround(testDuration)) + 100);
 		testFunctions.push_back(
 		    [this](Database cx) { return testCrossTenantGetDisallowed(this, cx, PositiveTestcase::True); });
 		testFunctions.push_back(
@@ -87,10 +84,15 @@ struct AuthzSecurityWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		tenant = makeReference<Tenant>(cx, tenantName);
-		return tenant->ready();
+		anotherTenant = makeReference<Tenant>(cx, anotherTenantName);
+		return tenant->ready() && anotherTenant->ready();
 	}
 
 	Future<Void> start(Database const& cx) override {
+		signedToken = g_simulator->makeToken(
+		    tenant->id(), uint64_t(std::lround(getCheckTimeout())) + uint64_t(std::lround(testDuration)) + 100);
+		signedTokenAnotherTenant = g_simulator->makeToken(
+		    anotherTenant->id(), uint64_t(std::lround(getCheckTimeout())) + uint64_t(std::lround(testDuration)) + 100);
 		for (int c = 0; c < actorCount; c++)
 			clients.push_back(timeout(runTestClient(this, cx->clone()), testDuration, Void()));
 		return waitForAll(clients);
@@ -128,9 +130,9 @@ struct AuthzSecurityWorkload : TestWorkload {
 	                                                               StringRef key,
 	                                                               StringRef value) {
 		state Transaction tr(cx, tenant);
-		self->setAuthToken(tr, token);
 		loop {
 			try {
+				self->setAuthToken(tr, token);
 				tr.set(key, value);
 				wait(tr.commit());
 				return tr.getCommittedVersion();
@@ -146,10 +148,10 @@ struct AuthzSecurityWorkload : TestWorkload {
 	                                                                      Standalone<StringRef> token,
 	                                                                      StringRef key) {
 		state Transaction tr(cx, tenant);
-		self->setAuthToken(tr, token);
 		loop {
 			try {
 				// trigger GetKeyServerLocationsRequest and subsequent cache update
+				self->setAuthToken(tr, token);
 				wait(success(tr.get(key)));
 				auto loc = cx->getCachedLocation(tr.trState->getTenantInfo(), key);
 				if (loc.present()) {
@@ -342,10 +344,10 @@ struct AuthzSecurityWorkload : TestWorkload {
 		state Version committedVersion =
 		    wait(setAndCommitKeyValueAndGetVersion(self, cx, self->tenant, self->signedToken, key, value));
 		state Transaction tr(cx, self->tenant);
-		self->setAuthToken(tr, self->signedToken);
 		state Optional<Value> tLogConfigString;
 		loop {
 			try {
+				self->setAuthToken(tr, self->signedToken);
 				Optional<Value> value = wait(tr.get(self->tLogConfigKey));
 				ASSERT(value.present());
 				tLogConfigString = value;
