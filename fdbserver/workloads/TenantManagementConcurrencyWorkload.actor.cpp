@@ -171,14 +171,15 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 	ACTOR static Future<Void> createTenant(TenantManagementConcurrencyWorkload* self) {
 		state TenantName tenant = self->chooseTenantName();
 		state TenantMapEntry entry;
-		entry.tenantName = tenant;
-		entry.tenantGroup = self->chooseTenantGroup();
+		state MetaclusterTenantMapEntry mEntry;
+		entry.tenantName = mEntry.tenantName = tenant;
+		entry.tenantGroup = mEntry.tenantGroup = self->chooseTenantGroup();
 
 		try {
 			loop {
 				Future<Void> createFuture =
 				    self->useMetacluster
-				        ? MetaclusterAPI::createTenant(self->mvDb, entry, AssignClusterAutomatically::True)
+				        ? MetaclusterAPI::createTenant(self->mvDb, mEntry, AssignClusterAutomatically::True)
 				        : success(TenantAPI::createTenant(self->dataDb.getReference(), tenant, entry));
 				Optional<Void> result = wait(timeout(createFuture, 30));
 				if (result.present()) {
@@ -333,7 +334,8 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 			    self->mvDb, AllowPartialMetaclusterOperations::True);
 			wait(metaclusterConsistencyCheck.run());
 		} else {
-			state TenantConsistencyCheck<DatabaseContext> tenantConsistencyCheck(self->dataDb.getReference());
+			state TenantConsistencyCheck<DatabaseContext, TenantMapEntry> tenantConsistencyCheck(
+			    self->dataDb.getReference());
 			wait(tenantConsistencyCheck.run());
 		}
 

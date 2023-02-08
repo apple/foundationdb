@@ -52,7 +52,7 @@ private:
 		KeyBackedRangeResult<Tuple> clusterTenantTuples;
 		KeyBackedRangeResult<Tuple> clusterTenantGroupTuples;
 
-		std::map<int64_t, TenantMapEntry> tenantMap;
+		std::map<int64_t, MetaclusterTenantMapEntry> tenantMap;
 		KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroups;
 
 		std::map<ClusterName, std::set<int64_t>> clusterTenantMap;
@@ -70,7 +70,7 @@ private:
 
 	ACTOR static Future<Void> loadManagementClusterMetadata(MetaclusterConsistencyCheck* self) {
 		state Reference<typename DB::TransactionT> managementTr = self->managementDb->createTransaction();
-		state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantList;
+		state KeyBackedRangeResult<std::pair<int64_t, MetaclusterTenantMapEntry>> tenantList;
 
 		loop {
 			try {
@@ -114,7 +114,7 @@ private:
 		}
 
 		self->managementMetadata.tenantMap =
-		    std::map<int64_t, TenantMapEntry>(tenantList.results.begin(), tenantList.results.end());
+		    std::map<int64_t, MetaclusterTenantMapEntry>(tenantList.results.begin(), tenantList.results.end());
 
 		for (auto t : self->managementMetadata.clusterTenantTuples.results) {
 			ASSERT_EQ(t.size(), 3);
@@ -255,7 +255,7 @@ private:
 		state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> dataClusterTenantList;
 		state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> dataClusterTenantGroupList;
 
-		state TenantConsistencyCheck<IDatabase> tenantConsistencyCheck(dataDb);
+		state TenantConsistencyCheck<IDatabase, TenantMapEntry> tenantConsistencyCheck(dataDb);
 		wait(tenantConsistencyCheck.run());
 
 		loop {
@@ -294,13 +294,13 @@ private:
 		} else {
 			ASSERT_LE(dataClusterTenantMap.size(), expectedTenants.size());
 			for (auto tenantName : expectedTenants) {
-				TenantMapEntry const& metaclusterEntry = self->managementMetadata.tenantMap[tenantName];
+				MetaclusterTenantMapEntry const& metaclusterEntry = self->managementMetadata.tenantMap[tenantName];
 				if (!dataClusterTenantMap.count(tenantName)) {
 					if (metaclusterEntry.tenantGroup.present()) {
 						groupExpectedTenantCounts.try_emplace(metaclusterEntry.tenantGroup.get(), 0);
 					}
-					ASSERT(metaclusterEntry.tenantState == TenantState::REGISTERING ||
-					       metaclusterEntry.tenantState == TenantState::REMOVING);
+					ASSERT(metaclusterEntry.tenantState == TenantAPI::TenantState::REGISTERING ||
+					       metaclusterEntry.tenantState == TenantAPI::TenantState::REMOVING);
 				} else if (metaclusterEntry.tenantGroup.present()) {
 					++groupExpectedTenantCounts[metaclusterEntry.tenantGroup.get()];
 				}
@@ -309,17 +309,15 @@ private:
 
 		for (auto [tenantId, entry] : dataClusterTenantMap) {
 			ASSERT(expectedTenants.count(tenantId));
-			TenantMapEntry const& metaclusterEntry = self->managementMetadata.tenantMap[tenantId];
-			ASSERT(!entry.assignedCluster.present());
+			MetaclusterTenantMapEntry const& metaclusterEntry = self->managementMetadata.tenantMap[tenantId];
 			ASSERT_EQ(entry.id, metaclusterEntry.id);
 			ASSERT(entry.tenantName == metaclusterEntry.tenantName);
 
-			ASSERT_EQ(entry.tenantState, TenantState::READY);
 			if (!self->allowPartialMetaclusterOperations) {
-				ASSERT_EQ(metaclusterEntry.tenantState, TenantState::READY);
+				ASSERT_EQ(metaclusterEntry.tenantState, TenantAPI::TenantState::READY);
 			}
-			if (metaclusterEntry.tenantState != TenantState::UPDATING_CONFIGURATION &&
-			    metaclusterEntry.tenantState != TenantState::REMOVING) {
+			if (metaclusterEntry.tenantState != TenantAPI::TenantState::UPDATING_CONFIGURATION &&
+			    metaclusterEntry.tenantState != TenantAPI::TenantState::REMOVING) {
 				ASSERT_EQ(entry.configurationSequenceNum, metaclusterEntry.configurationSequenceNum);
 			} else {
 				ASSERT_LE(entry.configurationSequenceNum, metaclusterEntry.configurationSequenceNum);
@@ -352,7 +350,8 @@ private:
 	}
 
 	ACTOR static Future<Void> run(MetaclusterConsistencyCheck* self) {
-		state TenantConsistencyCheck<DB> managementTenantConsistencyCheck(self->managementDb);
+		state TenantConsistencyCheck<DB, MetaclusterTenantMapEntry> managementTenantConsistencyCheck(
+		    self->managementDb);
 		wait(managementTenantConsistencyCheck.run());
 		wait(loadManagementClusterMetadata(self));
 		self->validateManagementCluster();

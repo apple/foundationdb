@@ -38,14 +38,14 @@
 #include "fdbclient/TenantManagement.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-template <class DB>
+template <class DB, class TenantMapEntryImpl>
 class TenantConsistencyCheck {
 private:
 	Reference<DB> db;
 
 	struct TenantData {
 		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
-		std::map<int64_t, TenantMapEntry> tenantMap;
+		std::map<int64_t, TenantMapEntryImpl> tenantMap;
 		std::map<TenantName, int64_t> tenantNameIndex;
 		int64_t lastTenantId;
 		int64_t tenantCount;
@@ -67,12 +67,12 @@ private:
 
 	ACTOR static Future<Void> loadTenantMetadata(TenantConsistencyCheck* self) {
 		state Reference<typename DB::TransactionT> tr = self->db->createTransaction();
-		state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantList;
+		state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntryImpl>> tenantList;
 		state KeyBackedRangeResult<std::pair<TenantName, int64_t>> tenantNameIndexList;
 		state KeyBackedRangeResult<int64_t> tenantTombstoneList;
 		state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroupList;
 		state KeyBackedRangeResult<Tuple> tenantGroupTenantTuples;
-		state TenantMetadataSpecification* tenantMetadata;
+		state TenantMetadataSpecification<TenantMapEntryImpl>* tenantMetadata;
 
 		loop {
 			try {
@@ -111,7 +111,7 @@ private:
 
 		ASSERT(!tenantList.more);
 		self->metadata.tenantMap =
-		    std::map<int64_t, TenantMapEntry>(tenantList.results.begin(), tenantList.results.end());
+		    std::map<int64_t, TenantMapEntryImpl>(tenantList.results.begin(), tenantList.results.end());
 
 		ASSERT(!tenantNameIndexList.more);
 		self->metadata.tenantNameIndex =
@@ -160,28 +160,28 @@ private:
 			if (tenantMapEntry.tenantGroup.present()) {
 				auto tenantGroupMapItr = metadata.tenantGroupMap.find(tenantMapEntry.tenantGroup.get());
 				ASSERT(tenantGroupMapItr != metadata.tenantGroupMap.end());
-				ASSERT(tenantMapEntry.assignedCluster == tenantGroupMapItr->second.assignedCluster);
+				if (metadata.clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
+					ASSERT(tenantMapEntry.assignedCluster == tenantGroupMapItr->second.assignedCluster.get());
+				}
 				ASSERT(metadata.tenantGroupIndex[tenantMapEntry.tenantGroup.get()].count(tenantId));
 			} else {
 				ASSERT(!metadata.tenantsInTenantGroupIndex.count(tenantId));
 			}
 
 			if (metadata.clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				ASSERT(tenantMapEntry.assignedCluster.present());
 				if (tenantMapEntry.renameDestination.present()) {
-					ASSERT(tenantMapEntry.tenantState == TenantState::RENAMING ||
-					       tenantMapEntry.tenantState == TenantState::REMOVING);
+					ASSERT(tenantMapEntry.tenantState == TenantAPI::TenantState::RENAMING ||
+					       tenantMapEntry.tenantState == TenantAPI::TenantState::REMOVING);
 
 					auto nameIndexItr = metadata.tenantNameIndex.find(tenantMapEntry.renameDestination.get());
 					ASSERT(nameIndexItr != metadata.tenantNameIndex.end());
 					ASSERT_EQ(nameIndexItr->second, tenantMapEntry.id);
 					++renameCount;
 				} else {
-					ASSERT_NE(tenantMapEntry.tenantState, TenantState::RENAMING);
+					ASSERT_NE(tenantMapEntry.tenantState, TenantAPI::TenantState::RENAMING);
 				}
 			} else {
-				ASSERT_EQ(tenantMapEntry.tenantState, TenantState::READY);
-				ASSERT(!tenantMapEntry.assignedCluster.present());
+				ASSERT_EQ(tenantMapEntry.tenantState, TenantAPI::TenantState::READY);
 				ASSERT(!tenantMapEntry.renameDestination.present());
 			}
 		}

@@ -37,7 +37,6 @@ Key idToPrefix(int64_t id);
 int64_t prefixToId(KeyRef prefix, EnforceValidTenantId = EnforceValidTenantId::True);
 
 constexpr static int PREFIX_SIZE = sizeof(int64_t);
-} // namespace TenantAPI
 
 // Represents the various states that a tenant could be in.
 // In a standalone cluster, a tenant should only ever be in the READY state.
@@ -65,41 +64,44 @@ enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, R
 // Can be used in conjunction with the other tenant states above.
 enum class TenantLockState : uint8_t { UNLOCKED, READ_ONLY, LOCKED };
 
-struct TenantMapEntry {
+std::string tenantStateToString(TenantState tenantState);
+TenantState stringToTenantState(std::string stateStr);
+
+std::string tenantLockStateToString(TenantLockState tenantState);
+TenantLockState stringToTenantLockState(std::string stateStr);
+} // namespace TenantAPI
+struct MetaclusterTenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
-
-	static std::string tenantStateToString(TenantState tenantState);
-	static TenantState stringToTenantState(std::string stateStr);
-
-	static std::string tenantLockStateToString(TenantLockState tenantState);
-	static TenantLockState stringToTenantLockState(std::string stateStr);
 
 	int64_t id = -1;
 	Key prefix;
 	TenantName tenantName;
-	TenantState tenantState = TenantState::READY;
-	TenantLockState tenantLockState = TenantLockState::UNLOCKED;
+	TenantAPI::TenantState tenantState = TenantAPI::TenantState::READY;
+	TenantAPI::TenantLockState tenantLockState = TenantAPI::TenantLockState::UNLOCKED;
 	Optional<TenantGroupName> tenantGroup;
-	Optional<ClusterName> assignedCluster;
+	ClusterName assignedCluster;
 	int64_t configurationSequenceNum = 0;
 	Optional<TenantName> renameDestination;
 
 	// Can be set to an error string if the tenant is in the ERROR state
 	std::string error;
 
-	TenantMapEntry();
-	TenantMapEntry(int64_t id, TenantName tenantName, TenantState tenantState);
-	TenantMapEntry(int64_t id, TenantName tenantName, TenantState tenantState, Optional<TenantGroupName> tenantGroup);
+	MetaclusterTenantMapEntry();
+	MetaclusterTenantMapEntry(int64_t id, TenantName tenantName, TenantAPI::TenantState tenantState);
+	MetaclusterTenantMapEntry(int64_t id,
+	                          TenantName tenantName,
+	                          TenantAPI::TenantState tenantState,
+	                          Optional<TenantGroupName> tenantGroup);
 
 	void setId(int64_t id);
 	std::string toJson() const;
 
-	bool matchesConfiguration(TenantMapEntry const& other) const;
+	bool matchesConfiguration(MetaclusterTenantMapEntry const& other) const;
 	void configure(Standalone<StringRef> parameter, Optional<Value> value);
 
 	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
-	static TenantMapEntry decode(ValueRef const& value) {
-		return ObjectReader::fromStringRef<TenantMapEntry>(value, IncludeVersion());
+	static MetaclusterTenantMapEntry decode(ValueRef const& value) {
+		return ObjectReader::fromStringRef<MetaclusterTenantMapEntry>(value, IncludeVersion());
 	}
 
 	template <class Ar>
@@ -118,7 +120,44 @@ struct TenantMapEntry {
 			if (id >= 0) {
 				prefix = TenantAPI::idToPrefix(id);
 			}
-			ASSERT(tenantState >= TenantState::REGISTERING && tenantState <= TenantState::ERROR);
+			ASSERT(tenantState >= TenantAPI::TenantState::REGISTERING && tenantState <= TenantAPI::TenantState::ERROR);
+		}
+	}
+};
+
+struct TenantMapEntry {
+	constexpr static FileIdentifier file_identifier = 7054389;
+
+	int64_t id = -1;
+	Key prefix;
+	TenantName tenantName;
+	TenantAPI::TenantLockState tenantLockState = TenantAPI::TenantLockState::UNLOCKED;
+	Optional<TenantGroupName> tenantGroup;
+	int64_t configurationSequenceNum = 0;
+
+	TenantMapEntry();
+	TenantMapEntry(int64_t id, TenantName tenantName);
+	TenantMapEntry(int64_t id, TenantName tenantName, Optional<TenantGroupName> tenantGroup);
+	TenantMapEntry(MetaclusterTenantMapEntry metaclusterEntry);
+
+	void setId(int64_t id);
+	std::string toJson() const;
+
+	bool matchesConfiguration(TenantMapEntry const& other) const;
+	void configure(Standalone<StringRef> parameter, Optional<Value> value);
+
+	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
+	static TenantMapEntry decode(ValueRef const& value) {
+		return ObjectReader::fromStringRef<TenantMapEntry>(value, IncludeVersion());
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, id, tenantName, tenantLockState, tenantGroup, configurationSequenceNum);
+		if constexpr (Ar::isDeserializing) {
+			if (id >= 0) {
+				prefix = TenantAPI::idToPrefix(id);
+			}
 		}
 	}
 };
@@ -189,10 +228,11 @@ struct TenantIdCodec {
 	}
 };
 
+template <class TenantMapEntryImpl>
 struct TenantMetadataSpecification {
 	Key subspace;
 
-	KeyBackedObjectMap<int64_t, TenantMapEntry, decltype(IncludeVersion()), TenantIdCodec> tenantMap;
+	KeyBackedObjectMap<int64_t, TenantMapEntryImpl, decltype(IncludeVersion()), TenantIdCodec> tenantMap;
 	KeyBackedMap<TenantName, int64_t> tenantNameIndex;
 	KeyBackedProperty<int64_t> lastTenantId;
 	KeyBackedBinaryValue<int64_t> tenantCount;
@@ -213,7 +253,7 @@ struct TenantMetadataSpecification {
 };
 
 struct TenantMetadata {
-	static TenantMetadataSpecification& instance();
+	static TenantMetadataSpecification<TenantMapEntry>& instance();
 
 	static inline auto& subspace() { return instance().subspace; }
 	static inline auto& tenantMap() { return instance().tenantMap; }

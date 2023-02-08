@@ -394,11 +394,13 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(tr->commit());
 		} else {
 			ASSERT(tenantsToCreate.size() == 1);
+			TenantMapEntry tEntry = tenantsToCreate.begin()->second;
+			MetaclusterTenantMapEntry modifiedEntry(
+			    tEntry.id, tEntry.tenantName, TenantAPI::TenantState::REGISTERING, tEntry.tenantGroup);
 			if (deterministicRandom()->coinflip()) {
-				tenantsToCreate.begin()->second.assignedCluster = self->dataClusterName;
+				modifiedEntry.assignedCluster = self->dataClusterName;
 			}
-			wait(MetaclusterAPI::createTenant(
-			    self->mvDb, tenantsToCreate.begin()->second, AssignClusterAutomatically::True));
+			wait(MetaclusterAPI::createTenant(self->mvDb, modifiedEntry, AssignClusterAutomatically::True));
 		}
 
 		return Void();
@@ -503,18 +505,18 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 
 					// Check the state of the first created tenant
-					Optional<TenantMapEntry> resultEntry =
-					    wait(self->tryGetTenant(tenantsToCreate.begin()->first, operationType));
-
-					if (resultEntry.present()) {
-						if (resultEntry.get().tenantState == TenantState::READY) {
-							// The tenant now exists, so we will retry and expect the creation to react accordingly
-							alreadyExists = true;
-						} else {
-							// Only a metacluster tenant creation can end up in a partially created state
-							// We should be able to retry and pick up where we left off
-							ASSERT(operationType == OperationType::METACLUSTER);
-							ASSERT(resultEntry.get().tenantState == TenantState::REGISTERING);
+					if (operationType == OperationType::METACLUSTER) {
+						Optional<MetaclusterTenantMapEntry> resultEntry =
+						    wait(MetaclusterAPI::tryGetTenant(self->mvDb, tenantsToCreate.begin()->first));
+						if (resultEntry.present()) {
+							if (resultEntry.get().tenantState == TenantAPI::TenantState::READY) {
+								// The tenant now exists, so we will retry and expect the creation to react accordingly
+								alreadyExists = true;
+							} else {
+								// Only a metacluster tenant creation can end up in a partially created state
+								// We should be able to retry and pick up where we left off
+								ASSERT(resultEntry.get().tenantState == TenantAPI::TenantState::REGISTERING);
+							}
 						}
 					}
 				}
@@ -1072,7 +1074,7 @@ struct TenantManagementWorkload : TestWorkload {
 			assignedCluster = ClusterNameRef(assignedClusterStr);
 		}
 
-		TenantMapEntry entry(id, TenantNameRef(name), TenantMapEntry::stringToTenantState(tenantStateStr), tenantGroup);
+		TenantMapEntry entry(id, TenantNameRef(name), tenantGroup);
 		ASSERT(entry.prefix == prefix);
 		return entry;
 	}
@@ -1907,7 +1909,8 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(metaclusterConsistencyCheck.run());
 			wait(checkTombstoneCleanup(self));
 		} else {
-			state TenantConsistencyCheck<DatabaseContext> tenantConsistencyCheck(self->dataDb.getReference());
+			state TenantConsistencyCheck<DatabaseContext, TenantMapEntry> tenantConsistencyCheck(
+			    self->dataDb.getReference());
 			wait(tenantConsistencyCheck.run());
 		}
 
