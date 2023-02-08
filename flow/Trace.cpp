@@ -1402,7 +1402,8 @@ void TraceBatch::addEvent(const char* name, uint64_t id, const char* location) {
 	if (FLOW_KNOBS->MIN_TRACE_SEVERITY > TRACE_BATCH_IMPLICIT_SEVERITY) {
 		return;
 	}
-	auto& eventInfo = eventBatch.emplace_back(EventInfo(TraceEvent::getCurrentTime(), name, id, location));
+	auto& eventInfo =
+	    eventBatch.emplace_back(EventInfo(TraceEvent::getCurrentTime(), ::timer_monotonic(), name, id, location));
 	if (dumpImmediately())
 		dump();
 	else
@@ -1471,9 +1472,16 @@ void TraceBatch::dump() {
 	buggifyBatch.clear();
 }
 
-TraceBatch::EventInfo::EventInfo(double time, const char* name, uint64_t id, const char* location) {
+TraceBatch::EventInfo::EventInfo(double time,
+                                 double monotonicTime,
+                                 const char* name,
+                                 uint64_t id,
+                                 const char* location) {
 	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
 	fields.addField("Time", format("%.6f", time));
+	// Include monotonic time for computing elapsed time between events on the same machine.
+	// The Time field is based on now(), which doesn't advance between wait()'s.
+	fields.addField("MonotonicTime", format(">%.6f", monotonicTime));
 	if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 		fields.addField("DateTime", TraceEvent::printRealTime(time));
 	}
