@@ -213,7 +213,7 @@ struct TenantMetadataSpecification {
 	    tombstoneCleanupData(subspace.withSuffix("tombstoneCleanup"_sr), IncludeVersion()),
 	    tenantGroupTenantIndex(subspace.withSuffix("tenantGroup/tenantIndex/"_sr)),
 	    tenantGroupMap(subspace.withSuffix("tenantGroup/map/"_sr), IncludeVersion()),
-	    storageQuota(subspace.withPrefix("storageQuota/"_sr)),
+	    storageQuota(subspace.withSuffix("storageQuota/"_sr)),
 	    lastTenantModification(subspace.withSuffix("lastModification"_sr)) {}
 };
 
