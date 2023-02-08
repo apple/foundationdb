@@ -695,6 +695,10 @@ struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<Ne
 			if (!message.verify()) {
 				if constexpr (HasReply<T>) {
 					message.reply.sendError(permission_denied());
+					TraceEvent(SevWarnAlways, "UnauthorizedAccessPrevented")
+					    .detail("RequestType", typeid(T).name())
+					    .detail("ClientIP", FlowTransport::transport().currentDeliveryPeerAddress())
+					    .log();
 				}
 			} else {
 				this->send(std::move(message));
