@@ -445,6 +445,7 @@ elseif(NOT WIN32 AND NOT APPLE) # Linux Only
     --target ${CMAKE_SYSTEM_PROCESSOR}
     --outdir ${SHIM_LIB_OUTPUT_DIR}
     --dlopen-callback=fdb_shim_dlopen_callback
+    --symbol-filter='^fdb_.*$$'
     $<TARGET_FILE:fdb_c>
     DEPENDS ${IMPLIBSO_SRC} fdb_c
     COMMENT "Generating source code for C shim library")
