@@ -3232,7 +3232,7 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
 extern void setupStackSignal();
 
 ACTOR Future<Void> serveProtocolInfo() {
-	state RequestStream<ProtocolInfoRequest> protocolInfo(
+	state PublicRequestStream<ProtocolInfoRequest> protocolInfo(
 	    PeerCompatibilityPolicy{ RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() });
 	protocolInfo.makeWellKnownEndpoint(WLTOKEN_PROTOCOL_INFO, TaskPriority::DefaultEndpoint);
 	loop {

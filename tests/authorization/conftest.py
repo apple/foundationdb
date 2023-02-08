@@ -22,6 +22,7 @@ import fdb
 import pytest
 import subprocess
 import admin_server
+import os
 from authlib.jose import JsonWebKey, KeySet, jwt
 from local_cluster import TLSConfig
 from tmp_cluster import TempCluster
@@ -44,6 +45,12 @@ def pytest_addoption(parser):
             dest="trusted_client",
             help="Whether client shall be configured trusted, i.e. mTLS-ready")
     parser.addoption(
+            "--force-multi-version-client",
+            action="store_true",
+            default=False,
+            dest="force_multi_version_client",
+            help="Whether to force multi-version client mode")
+    parser.addoption(
             "--public-key-refresh-interval",
             action="store",
             default=1,
@@ -53,6 +60,10 @@ def pytest_addoption(parser):
 @pytest.fixture(scope="session")
 def build_dir(request):
     return request.config.option.build_dir
+
+@pytest.fixture(scope="session")
+def external_lib_path(build_dir):
+    return os.path.join(build_dir, "bindings/c/libfdb_c_external.so")
 
 @pytest.fixture(scope="session")
 def kty(request):
@@ -65,6 +76,10 @@ def trusted_client(request):
 @pytest.fixture(scope="session")
 def public_key_refresh_interval(request):
     return request.config.option.public_key_refresh_interval
+
+@pytest.fixture(scope="session")
+def force_multi_version_client(request):
+    return request.config.option.force_multi_version_client
 
 @pytest.fixture(scope="session")
 def alg(kty):
@@ -108,14 +123,14 @@ def token_gen():
     return fn
 
 @pytest.fixture(scope=cluster_scope)
-def admin_ipc():
-    server = admin_server.Server()
+def admin_ipc(force_multi_version_client, external_lib_path):
+    server = admin_server.Server(external_lib_path if force_multi_version_client else None)
     server.start()
     yield server
     server.join()
 
 @pytest.fixture(autouse=True, scope=cluster_scope)
-def cluster(admin_ipc, build_dir, public_key_jwks_str, public_key_refresh_interval, trusted_client):
+def cluster(admin_ipc, build_dir, public_key_jwks_str, public_key_refresh_interval, trusted_client, force_multi_version_client, external_lib_path):
     with TempCluster(
             build_dir=build_dir,
             tls_config=TLSConfig(server_chain_len=3, client_chain_len=2),
@@ -131,14 +146,16 @@ def cluster(admin_ipc, build_dir, public_key_jwks_str, public_key_refresh_interv
         fdb.options.set_tls_cert_path(certfile if trusted_client else "")
         fdb.options.set_tls_ca_path(cafile)
         fdb.options.set_trace_enable()
-        admin_ipc.request("configure_tls", [keyfile, certfile, cafile])
+        if force_multi_version_client:
+            fdb.options.set_external_client_library(external_lib_path)
+        admin_ipc.request("configure_client", [keyfile, certfile, cafile])
         admin_ipc.request("connect", [str(cluster.cluster_file)])
         yield cluster
 
 @pytest.fixture
 def db(cluster, admin_ipc):
     db = fdb.open(str(cluster.cluster_file))
-    db.options.set_transaction_timeout(2000) # 2 seconds
+    # db.options.set_transaction_timeout(2000) # 2 seconds
     db.options.set_transaction_retry_limit(3)
     yield db
     admin_ipc.request("cleanup_database")
