@@ -194,7 +194,7 @@ struct TenantMetadataSpecification {
 
 	KeyBackedObjectMap<int64_t, TenantMapEntry, decltype(IncludeVersion()), TenantIdCodec> tenantMap;
 	KeyBackedMap<TenantName, int64_t> tenantNameIndex;
-	KeyBackedMap<int64_t, UID> lockID;
+	KeyBackedMap<int64_t, UID> lockId;
 	KeyBackedProperty<int64_t> lastTenantId;
 	KeyBackedBinaryValue<int64_t> tenantCount;
 	KeyBackedSet<int64_t> tenantTombstones;
@@ -220,7 +220,7 @@ struct TenantMetadata {
 	static inline auto& subspace() { return instance().subspace; }
 	static inline auto& tenantMap() { return instance().tenantMap; }
 	static inline auto& tenantNameIndex() { return instance().tenantNameIndex; }
-	static inline auto& tenantLockID() { return instance().lockID; }
+	static inline auto& tenantLockId() { return instance().lockId; }
 	static inline auto& lastTenantId() { return instance().lastTenantId; }
 	static inline auto& tenantCount() { return instance().tenantCount; }
 	static inline auto& tenantTombstones() { return instance().tenantTombstones; }

@@ -483,7 +483,7 @@ Future<Void> changeLockState(Transaction* tr, int64_t tenant, TenantLockState de
 	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 	wait(store(entry, TenantAPI::tryGetTenantTransaction(tr, tenant)));
 	ASSERT(entry.present());
-	Optional<UID> currLockID = wait(TenantMetadata::tenantLockID().get(tr, tenant));
+	Optional<UID> currLockID = wait(TenantMetadata::tenantLockId().get(tr, tenant));
 	if (currLockID.present()) {
 		if (currLockID.get() != lockID) {
 			throw tenant_locked();
@@ -497,9 +497,9 @@ Future<Void> changeLockState(Transaction* tr, int64_t tenant, TenantLockState de
 	newState.tenantLockState = desiredLockState;
 	wait(configureTenantTransaction(tr, entry.get(), newState));
 	if (desiredLockState == TenantLockState::UNLOCKED) {
-		TenantMetadata::tenantLockID().erase(tr, tenant);
+		TenantMetadata::tenantLockId().erase(tr, tenant);
 	} else {
-		TenantMetadata::tenantLockID().set(tr, tenant, lockID);
+		TenantMetadata::tenantLockId().set(tr, tenant, lockID);
 	}
 	return Void();
 }
