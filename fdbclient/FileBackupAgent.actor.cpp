@@ -1067,7 +1067,8 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 
 		// make sure that all keys in a block belong to exactly one tenant,
 		// unless its the last key in which case it can be a truncated (different) tenant prefix
-		if (encryptedBlock && g_network && g_network->isSimulated()) {
+		if (encryptedBlock && g_network && g_network->isSimulated() &&
+		    !isReservedEncryptDomain(encryptHeader.get().cipherTextDetails.encryptDomainId)) {
 			ASSERT(encryptHeader.present());
 			state KeyRef curKey = KeyRef(k, kLen);
 			if (!prevDomainId.present()) {
