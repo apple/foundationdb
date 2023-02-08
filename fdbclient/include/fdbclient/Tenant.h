@@ -174,6 +174,9 @@ struct TenantIdCodec {
 	static int64_t unpack(Standalone<StringRef> val) { return bigEndian64(*(int64_t*)val.begin()); }
 
 	static Optional<int64_t> lowerBound(Standalone<StringRef> val) {
+		if (val.startsWith("\xff"_sr)) {
+			return {};
+		}
 		if (val.size() == 8) {
 			return unpack(val);
 		} else if (val.size() > 8) {

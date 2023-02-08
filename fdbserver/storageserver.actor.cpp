@@ -640,9 +640,15 @@ public:
 	Promise<Version> versionPromise;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
+	int64_t tenantId;
 
-	ServerWatchMetadata(Key key, Optional<Value> value, Version version, Optional<TagSet> tags, Optional<UID> debugID)
-	  : key(key), value(value), version(version), tags(tags), debugID(debugID) {}
+	ServerWatchMetadata(Key key,
+	                    Optional<Value> value,
+	                    Version version,
+	                    Optional<TagSet> tags,
+	                    Optional<UID> debugID,
+	                    int64_t tenantId)
+	  : key(key), value(value), version(version), tags(tags), debugID(debugID), tenantId(tenantId) {}
 };
 
 struct BusiestWriteTagContext {
@@ -774,7 +780,12 @@ private:
 
 	VersionedData versionedData;
 	std::map<Version, Standalone<VerUpdateRef>> mutationLog; // versions (durableVersion, version]
-	std::unordered_map<KeyRef, Reference<ServerWatchMetadata>> watchMap; // keep track of server watches
+
+	using WatchMapKey = std::pair<int64_t, Key>;
+	using WatchMapKeyHasher = boost::hash<WatchMapKey>;
+	using WatchMapValue = Reference<ServerWatchMetadata>;
+	using WatchMap_t = std::unordered_map<WatchMapKey, WatchMapValue, WatchMapKeyHasher>;
+	WatchMap_t watchMap; // keep track of server watches
 
 public:
 	struct PendingNewShard {
@@ -793,7 +804,7 @@ public:
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
 	std::unordered_map<UID, ICheckpointReader*> liveCheckpointReaders; // Active checkpoint readers
-	VersionedMap<int64_t, TenantName> tenantMap;
+	VersionedMap<int64_t, Void> tenantMap;
 	std::map<Version, std::vector<PendingNewShard>>
 	    pendingAddRanges; // Pending requests to add ranges to physical shards
 	std::map<Version, std::vector<KeyRange>>
@@ -833,9 +844,9 @@ public:
 	Reference<Histogram> readRangeKVPairsReturnedHistogram;
 
 	// watch map operations
-	Reference<ServerWatchMetadata> getWatchMetadata(KeyRef key) const;
+	Reference<ServerWatchMetadata> getWatchMetadata(KeyRef key, int64_t tenantId) const;
 	KeyRef setWatchMetadata(Reference<ServerWatchMetadata> metadata);
-	void deleteWatchMetadata(KeyRef key);
+	void deleteWatchMetadata(KeyRef key, int64_t tenantId);
 	void clearWatchMetadata();
 
 	// tenant map operations
@@ -1100,6 +1111,7 @@ public:
 	Future<Void> durableInProgress;
 
 	AsyncMap<Key, bool> watches;
+	AsyncMap<int64_t, bool> tenantWatches;
 	int64_t watchBytes;
 	int64_t numWatches;
 	AsyncVar<bool> noRecentUpdates;
@@ -1731,8 +1743,9 @@ void StorageServer::byteSampleApplyMutation(MutationRef const& m, Version ver) {
 }
 
 // watchMap Operations
-Reference<ServerWatchMetadata> StorageServer::getWatchMetadata(KeyRef key) const {
-	const auto it = watchMap.find(key);
+Reference<ServerWatchMetadata> StorageServer::getWatchMetadata(KeyRef key, int64_t tenantId) const {
+	const WatchMapKey mapKey(tenantId, key);
+	const auto it = watchMap.find(mapKey);
 	if (it == watchMap.end())
 		return Reference<ServerWatchMetadata>();
 	return it->second;
@@ -1740,13 +1753,16 @@ Reference<ServerWatchMetadata> StorageServer::getWatchMetadata(KeyRef key) const
 
 KeyRef StorageServer::setWatchMetadata(Reference<ServerWatchMetadata> metadata) {
 	KeyRef keyRef = metadata->key.contents();
+	int64_t tenantId = metadata->tenantId;
+	const WatchMapKey mapKey(tenantId, keyRef);
 
-	watchMap[keyRef] = metadata;
+	watchMap[mapKey] = metadata;
 	return keyRef;
 }
 
-void StorageServer::deleteWatchMetadata(KeyRef key) {
-	watchMap.erase(key);
+void StorageServer::deleteWatchMetadata(KeyRef key, int64_t tenantId) {
+	const WatchMapKey mapKey(tenantId, key);
+	watchMap.erase(mapKey);
 }
 
 void StorageServer::clearWatchMetadata() {
@@ -2029,8 +2045,35 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 	}
 }
 
+ACTOR Future<Version> waitForMinVersion(StorageServer* data, Version version) {
+	// This could become an Actor transparently, but for now it just does the lookup
+	if (version == latestVersion)
+		version = std::max(Version(1), data->version.get());
+	if (version < data->oldestVersion.get() || version <= 0) {
+		return data->oldestVersion.get();
+	} else if (version <= data->version.get()) {
+		return version;
+	}
+	choose {
+		when(wait(data->version.whenAtLeast(version))) {
+			return version;
+		}
+		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
+			if (deterministicRandom()->random01() < 0.001)
+				TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
+				    .detail("Version", version)
+				    .detail("MyVersion", data->version.get())
+				    .detail("ServerID", data->thisServerID);
+			throw future_version();
+		}
+	}
+}
+
 void StorageServer::checkTenantEntry(Version version, TenantInfo tenantInfo) {
 	if (tenantInfo.hasTenant()) {
+		if (version < tenantMap.oldestVersion) {
+			version = tenantMap.oldestVersion;
+		}
 		auto view = tenantMap.at(version);
 		auto itr = view.find(tenantInfo.tenantId);
 		if (itr == view.end()) {
@@ -2196,11 +2239,10 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 // must be kept alive until the watch is finished.
 extern size_t WATCH_OVERHEAD_WATCHQ, WATCH_OVERHEAD_WATCHIMPL;
 
-ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext parent, KeyRef key) {
+ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext parent, KeyRef key, int64_t tenantId) {
 	state Location spanLocation = "SS:watchWaitForValueChange"_loc;
 	state Span span(spanLocation, parent);
-	state Reference<ServerWatchMetadata> metadata = data->getWatchMetadata(key);
-
+	state Reference<ServerWatchMetadata> metadata = data->getWatchMetadata(key, tenantId);
 	if (metadata->debugID.present())
 		g_traceBatch.addEvent("WatchValueDebug",
 		                      metadata->debugID.get().first(),
@@ -2214,10 +2256,19 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 
 	state Version minVersion = data->data().latestVersion;
 	state Future<Void> watchFuture = data->watches.onChange(metadata->key);
+	if (tenantId != TenantInfo::INVALID_TENANT) {
+		watchFuture = watchFuture || data->tenantWatches.onChange(tenantId);
+	}
 	state ReadOptions options;
 	loop {
 		try {
-			metadata = data->getWatchMetadata(key);
+			if (tenantId != TenantInfo::INVALID_TENANT) {
+				auto view = data->tenantMap.at(latestVersion);
+				if (view.find(tenantId) == view.end()) {
+					throw tenant_removed();
+				}
+			}
+			metadata = data->getWatchMetadata(key, tenantId);
 			state Version latest = data->version.get();
 			options.debugID = metadata->debugID;
 
@@ -2277,6 +2328,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 					// Simulate a trigger on the watch that results in the loop going around without the value changing
 					watchFuture = watchFuture || delay(deterministicRandom()->random01());
 				}
+
 				wait(watchFuture);
 				data->watchBytes -= watchBytes;
 			} catch (Error& e) {
@@ -2292,15 +2344,19 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 		}
 
 		watchFuture = data->watches.onChange(metadata->key);
+		if (tenantId != TenantInfo::INVALID_TENANT) {
+			watchFuture = watchFuture || data->tenantWatches.onChange(tenantId);
+		}
+
 		wait(data->version.whenAtLeast(data->data().latestVersion));
 	}
 }
 
 void checkCancelWatchImpl(StorageServer* data, WatchValueRequest req) {
-	Reference<ServerWatchMetadata> metadata = data->getWatchMetadata(req.key.contents());
+	Reference<ServerWatchMetadata> metadata = data->getWatchMetadata(req.key.contents(), req.tenantInfo.tenantId);
 	if (metadata.isValid() && metadata->versionPromise.getFutureReferenceCount() == 1) {
 		// last watch timed out so cancel watch_impl and delete key from the map
-		data->deleteWatchMetadata(req.key.contents());
+		data->deleteWatchMetadata(req.key.contents(), req.tenantInfo.tenantId);
 		metadata->watch_impl.cancel();
 	}
 }
@@ -5115,7 +5171,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	return result;
 }
 
-bool rangeIntersectsAnyTenant(VersionedMap<int64_t, TenantName>& tenantMap, KeyRangeRef range, Version ver) {
+bool rangeIntersectsAnyTenant(VersionedMap<int64_t, Void>& tenantMap, KeyRangeRef range, Version ver) {
 	auto view = tenantMap.at(ver);
 
 	// There are no tenants, so we don't need to do any work
@@ -5165,10 +5221,10 @@ bool rangeIntersectsAnyTenant(VersionedMap<int64_t, TenantName>& tenantMap, KeyR
 TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
 	std::set<int64_t> entries = { 0, 2, 3, 4, 6 };
 
-	VersionedMap<int64_t, TenantName> tenantMap;
+	VersionedMap<int64_t, Void> tenantMap;
 	tenantMap.createNewVersion(1);
 	for (auto entry : entries) {
-		tenantMap.insert(entry, ""_sr);
+		tenantMap.insert(entry, Void());
 	}
 
 	// Before all tenants
@@ -5253,13 +5309,13 @@ TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
 }
 
 TEST_CASE("/fdbserver/storageserver/randomRangeIntersectsAnyTenant") {
-	VersionedMap<int64_t, TenantName> tenantMap;
+	VersionedMap<int64_t, Void> tenantMap;
 	std::set<Key> tenantPrefixes;
 	tenantMap.createNewVersion(1);
 	int numEntries = deterministicRandom()->randomInt(0, 20);
 	for (int i = 0; i < numEntries; ++i) {
 		int64_t tenantId = deterministicRandom()->randomInt64(0, std::numeric_limits<int64_t>::max());
-		tenantMap.insert(tenantId, ""_sr);
+		tenantMap.insert(tenantId, Void());
 		tenantPrefixes.insert(TenantAPI::idToPrefix(tenantId));
 	}
 
@@ -8996,7 +9052,7 @@ void StorageServer::insertTenant(StringRef tenantPrefix, TenantName tenantName, 
 	if (version >= tenantMap.getLatestVersion()) {
 		int64_t tenantId = TenantAPI::prefixToId(tenantPrefix);
 		tenantMap.createNewVersion(version);
-		tenantMap.insert(tenantId, tenantName);
+		tenantMap.insert(tenantId, Void());
 
 		if (persist) {
 			auto& mLV = addVersionToMutationLog(version);
@@ -9016,20 +9072,21 @@ void StorageServer::clearTenants(StringRef startTenant, StringRef endTenant, Ver
 		auto view = tenantMap.at(version);
 		auto& mLV = addVersionToMutationLog(version);
 		std::set<int64_t> tenantsToClear;
-		for (auto itr = view.begin(); itr != view.end(); ++itr) {
-			if (*itr >= startTenant && *itr < endTenant) {
-				// Trigger any watches on the prefix associated with the tenant.
-				Key tenantPrefix = TenantAPI::idToPrefix(itr.key());
-				TraceEvent("EraseTenant", thisServerID).detail("Tenant", itr.key()).detail("Version", version);
-				watches.sendError(tenantPrefix, strinc(tenantPrefix), tenant_removed());
-
-				tenantsToClear.insert(itr.key());
-				addMutationToMutationLog(mLV,
-				                         MutationRef(MutationRef::ClearRange,
-				                                     tenantPrefix.withPrefix(persistTenantMapKeys.begin),
-				                                     keyAfter(tenantPrefix.withPrefix(persistTenantMapKeys.begin))));
-			}
+		Optional<int64_t> startId = TenantIdCodec::lowerBound(startTenant);
+		Optional<int64_t> endId = TenantIdCodec::lowerBound(endTenant);
+		auto startItr = startId.present() ? view.lower_bound(startId.get()) : view.end();
+		auto endItr = endId.present() ? view.lower_bound(endId.get()) : view.end();
+		for (auto itr = startItr; itr != endItr; ++itr) {
+			auto mapKey = itr.key();
+			// Trigger any watches on the prefix associated with the tenant.
+			TraceEvent("EraseTenant", thisServerID).detail("TenantID", mapKey).detail("Version", version);
+			tenantWatches.sendError(mapKey, mapKey + 1, tenant_removed());
+			tenantsToClear.insert(mapKey);
 		}
+		addMutationToMutationLog(mLV,
+		                         MutationRef(MutationRef::ClearRange,
+		                                     startTenant.withPrefix(persistTenantMapKeys.begin),
+		                                     endTenant.withPrefix(persistTenantMapKeys.begin)));
 
 		for (auto tenantId : tenantsToClear) {
 			tenantMap.erase(tenantId);
@@ -10025,7 +10082,7 @@ void StorageServerDisk::makeNewStorageServerDurable(const bool shardAware) {
 
 	auto view = data->tenantMap.atLatest();
 	for (auto itr = view.begin(); itr != view.end(); ++itr) {
-		storage->set(KeyValueRef(TenantAPI::idToPrefix(itr.key()).withPrefix(persistTenantMapKeys.begin), *itr));
+		storage->set(KeyValueRef(TenantAPI::idToPrefix(itr.key()).withPrefix(persistTenantMapKeys.begin), ""_sr));
 	}
 }
 
@@ -10520,7 +10577,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		auto const& result = tenantMap[tenantMapLoc];
 		int64_t tenantId = TenantAPI::prefixToId(result.key.substr(persistTenantMapKeys.begin.size()));
 
-		data->tenantMap.insert(tenantId, result.value);
+		data->tenantMap.insert(tenantId, Void());
 
 		TraceEvent("RestoringTenant", data->thisServerID)
 		    .detail("Key", tenantMap[tenantMapLoc].key)
@@ -10783,12 +10840,13 @@ Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Vo
 ACTOR Future<Void> waitMetricsTenantAware_internal(StorageServer* self, WaitMetricsRequest req) {
 	if (req.tenantInfo.hasTenant()) {
 		try {
-			// The call to `waitForVersionNoTooOld()` can throw `future_version()`. Since we're requesting
-			// `latestVersion`, this can only happen if the version at the storage server is currently `0`.
+			// The call to `waitForMinVersion()` can throw `future_version()`.
 			// It is okay for the caller to retry after a delay to give the server some time to catch up.
-			state Version version = wait(waitForVersionNoTooOld(self, latestVersion));
+			state Version version = wait(waitForMinVersion(self, req.minVersion));
 			self->checkTenantEntry(version, req.tenantInfo);
 		} catch (Error& e) {
+			if (!canReplyWith(e))
+				throw;
 			self->sendErrorWithPenalty(req.reply, e, self->getPenalty());
 			return Void();
 		}
@@ -10983,16 +11041,19 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 	loop {
 		getCurrentLineage()->modify(&TransactionLineage::txID) = UID();
 		state WatchValueRequest req = waitNext(stream);
-		state Reference<ServerWatchMetadata> metadata = self->getWatchMetadata(req.key.contents());
+		state Reference<ServerWatchMetadata> metadata =
+		    self->getWatchMetadata(req.key.contents(), req.tenantInfo.tenantId);
 		state Span span("SS:serveWatchValueRequestsImpl"_loc, req.spanContext);
 		getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 		state ReadOptions options;
 
 		// case 1: no watch set for the current key
 		if (!metadata.isValid()) {
-			metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
+			metadata = makeReference<ServerWatchMetadata>(
+			    req.key, req.value, req.version, req.tags, req.debugID, req.tenantInfo.tenantId);
 			KeyRef key = self->setWatchMetadata(metadata);
-			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key), metadata->versionPromise);
+			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key, req.tenantInfo.tenantId),
+			                               metadata->versionPromise);
 			self->actors.add(watchValueSendReply(self, req, metadata->versionPromise.getFuture(), span.context));
 		}
 		// case 2: there is a watch in the map and it has the same value so just update version
@@ -11006,13 +11067,15 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 		}
 		// case 3: version in map has a lower version so trigger watch and create a new entry in map
 		else if (req.version > metadata->version) {
-			self->deleteWatchMetadata(req.key.contents());
+			self->deleteWatchMetadata(req.key.contents(), req.tenantInfo.tenantId);
 			metadata->versionPromise.send(req.version);
 			metadata->watch_impl.cancel();
 
-			metadata = makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
+			metadata = makeReference<ServerWatchMetadata>(
+			    req.key, req.value, req.version, req.tags, req.debugID, req.tenantInfo.tenantId);
 			KeyRef key = self->setWatchMetadata(metadata);
-			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key), metadata->versionPromise);
+			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key, req.tenantInfo.tenantId),
+			                               metadata->versionPromise);
 
 			self->actors.add(watchValueSendReply(self, req, metadata->versionPromise.getFuture(), span.context));
 		}
@@ -11033,20 +11096,21 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 					    span.context, TenantInfo(), metadata->key, latest, metadata->tags, options, VersionVector());
 					state Future<Void> getValue = getValueQ(self, getReq);
 					GetValueReply reply = wait(getReq.reply.getFuture());
-					metadata = self->getWatchMetadata(req.key.contents());
+					metadata = self->getWatchMetadata(req.key.contents(), req.tenantInfo.tenantId);
 
 					if (metadata.isValid() && reply.value != metadata->value) { // valSS != valMap
-						self->deleteWatchMetadata(req.key.contents());
+						self->deleteWatchMetadata(req.key.contents(), req.tenantInfo.tenantId);
 						metadata->versionPromise.send(req.version);
 						metadata->watch_impl.cancel();
 					}
 
 					if (reply.value == req.value) { // valSS == valreq
-						metadata =
-						    makeReference<ServerWatchMetadata>(req.key, req.value, req.version, req.tags, req.debugID);
+						metadata = makeReference<ServerWatchMetadata>(
+						    req.key, req.value, req.version, req.tags, req.debugID, req.tenantInfo.tenantId);
 						KeyRef key = self->setWatchMetadata(metadata);
 						metadata->watch_impl =
-						    forward(watchWaitForValueChange(self, span.context, key), metadata->versionPromise);
+						    forward(watchWaitForValueChange(self, span.context, key, req.tenantInfo.tenantId),
+						            metadata->versionPromise);
 						self->actors.add(
 						    watchValueSendReply(self, req, metadata->versionPromise.getFuture(), span.context));
 					} else {

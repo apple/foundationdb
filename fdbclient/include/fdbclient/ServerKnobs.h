@@ -667,6 +667,11 @@ public:
 	double PROXY_MAX_TAG_THROTTLE_DURATION;
 	// Interval at which latency bands are logged for each tag on grv proxy
 	double GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL;
+	// When the measured tps for a tag gets too low, the denominator in the
+	// average cost calculation gets small, resulting in an unstable calculation.
+	// To protect against this, we do not compute the average cost when the
+	// measured tps drops below a certain threshold
+	double GLOBAL_TAG_THROTTLING_MIN_TPS;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 

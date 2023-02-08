@@ -104,8 +104,10 @@ if __name__ == "__main__":
 
     tls_config = None
     if args.tls_enabled:
-        tls_config = TLSConfig(server_chain_len=args.server_cert_chain_len,
-                               client_chain_len=args.client_cert_chain_len)
+        tls_config = TLSConfig(
+            server_chain_len=args.server_cert_chain_len,
+            client_chain_len=args.client_cert_chain_len,
+        )
     errcode = 1
     with TempCluster(
         args.build_dir,
@@ -133,16 +135,15 @@ if __name__ == "__main__":
             ("@SERVER_CA_FILE@", str(cluster.server_ca_file)),
             ("@CLIENT_CERT_FILE@", str(cluster.client_cert_file)),
             ("@CLIENT_KEY_FILE@", str(cluster.client_key_file)),
-            ("@CLIENT_CA_FILE@", str(cluster.client_ca_file))]
+            ("@CLIENT_CA_FILE@", str(cluster.client_ca_file)),
+        ]
 
         for cmd in args.cmd:
             for (placeholder, value) in substitution_table:
                 cmd = cmd.replace(placeholder, value)
             cmd_args.append(cmd)
         env = dict(**os.environ)
-        env["FDB_CLUSTER_FILE"] = env.get(
-            "FDB_CLUSTER_FILE", cluster.cluster_file
-        )
+        env["FDB_CLUSTER_FILE"] = env.get("FDB_CLUSTER_FILE", cluster.cluster_file)
         print("command: {}".format(cmd_args))
         errcode = subprocess.run(
             cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env
