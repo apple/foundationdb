@@ -1142,7 +1142,7 @@ TEST_CASE("/CommitProxy/SplitRange/LowerBoundTenantId") {
 	tid = lowerBoundTenantId(prefix.withSuffix("any"_sr), tenantMap);
 	ASSERT_EQ(tid, targetId);
 
-	targetId = deterministicRandom()->randomInt64(0, mapSize) * 2;
+	targetId = deterministicRandom()->randomInt64(1, mapSize) * 2;
 	prefix = TenantAPI::idToPrefix(targetId - 1);
 	tid = lowerBoundTenantId(prefix, tenantMap);
 	ASSERT_EQ(tid, targetId);
@@ -1220,14 +1220,14 @@ TEST_CASE("/CommitProxy/SplitRange/SplitClearRangeByTenant") {
 	ASSERT(result.front().param2 == param2);
 
 	// multiple tenant
-	int64_t tid1 = deterministicRandom()->randomInt64(0, mapSize - 1);
-	int64_t tid2 = deterministicRandom()->randomInt64(tid1 + 1, mapSize) * 2;
+	int64_t tid1 = deterministicRandom()->randomInt64(0, mapSize - 2);
+	int64_t tid2 = deterministicRandom()->randomInt64(tid1 + 2, mapSize) * 2;
 	tid1 *= 2;
 	KeyRef prefix1 = TenantAPI::idToPrefix(arena, tid1);
 	param1 = deterministicRandom()->coinflip() ? prefix1 : prefix1.withSuffix("a"_sr, arena); // align or not
 	KeyRef prefix2 = TenantAPI::idToPrefix(arena, tid2);
 	bool tailAligned = deterministicRandom()->coinflip();
-	param2 = tailAligned ? prefix2 : prefix2.withSuffix("a"_sr, arena);
+	param2 = tailAligned ? prefix2 : prefix2.withSuffix("b"_sr, arena);
 	int targetSize = (tid2 - tid1) / 2 + (!tailAligned);
 	mutation.param1 = param1;
 	mutation.param2 = param2;
