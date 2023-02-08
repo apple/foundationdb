@@ -64,6 +64,7 @@ struct BatchDeleteTenantRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar, unsigned int) {
+		ar& cluster_file;
 		ar& id_begin;
 		ar& id_end;
 	}

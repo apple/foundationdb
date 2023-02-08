@@ -81,7 +81,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CHANGE_FEED_CACHE_SIZE,               100000 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_SIZE = 1;
 	init( CHANGE_FEED_POP_TIMEOUT,                10.0 );
 	init( CHANGE_FEED_STREAM_MIN_BYTES,            1e4 ); if( randomize && BUGGIFY ) CHANGE_FEED_STREAM_MIN_BYTES = 1;
-	init( CHANGE_FEED_START_INTERVAL,             10.0 );
+	init( CHANGE_FEED_START_INTERVAL,             20.0 ); if( randomize && BUGGIFY ) CHANGE_FEED_START_INTERVAL = 10.0;
+	init( CHANGE_FEED_COALESCE_LOCATIONS,         true ); if( randomize && BUGGIFY ) CHANGE_FEED_COALESCE_LOCATIONS = false;
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1;
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && BUGGIFY ) GRV_BATCH_TIMEOUT = 0.1;
@@ -92,8 +93,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
 	init( LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD,     60 );
 	init( LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL,    60 );
-	init( TENANT_CACHE_EVICTION_SIZE,           100000 );
-	init( TENANT_CACHE_EVICTION_SIZE_SIM,           10 ); if( randomize && BUGGIFY ) TENANT_CACHE_EVICTION_SIZE_SIM = 3;
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
 	init( WARM_RANGE_SHARD_LIMIT,                  100 );
@@ -225,6 +224,11 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE,      2 );
 	init( BLOBSTORE_MULTIPART_MAX_PART_SIZE,  20000000 );
 	init( BLOBSTORE_MULTIPART_MIN_PART_SIZE,   5242880 );
+	init( BLOBSTORE_GLOBAL_CONNECTION_POOL,       true );
+	init( BLOBSTORE_ENABLE_LOGGING,               true );
+	init( BLOBSTORE_STATS_LOGGING_INTERVAL,       10.0 );
+	init( BLOBSTORE_LATENCY_LOGGING_INTERVAL,    120.0 );
+	init( BLOBSTORE_LATENCY_LOGGING_ACCURACY,     0.01 );
 
 	// These are basically unlimited by default but can be used to reduce blob IO if needed
 	init( BLOBSTORE_REQUESTS_PER_SECOND,            200 );
@@ -280,7 +284,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	// Blob granules
 	init( BG_MAX_GRANULE_PARALLELISM,                10 );
-	init( BG_TOO_MANY_GRANULES,                   10000 );
+	init( BG_TOO_MANY_GRANULES,                   20000 );
 	init( BLOB_METADATA_REFRESH_INTERVAL,          3600 ); if ( randomize && BUGGIFY ) { BLOB_METADATA_REFRESH_INTERVAL = deterministicRandom()->randomInt(5, 120); }
 
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_TIMES,        3 );
@@ -298,6 +302,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CLIENT_ENABLE_USING_CLUSTER_ID_KEY,     false );
 
 	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,     false );
+	init( SIMULATION_EKP_TENANT_IDS_TO_DROP,        "-1" );
 	// clang-format on
 }
 

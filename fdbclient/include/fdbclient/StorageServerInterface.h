@@ -740,10 +740,11 @@ struct SplitMetricsReply {
 	constexpr static FileIdentifier file_identifier = 11530792;
 	Standalone<VectorRef<KeyRef>> splits;
 	StorageMetrics used;
+	bool more = false;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, splits, used);
+		serializer(ar, splits, used, more);
 	}
 };
 
@@ -892,14 +893,26 @@ struct ChangeFeedStreamRequest {
 	bool canReadPopped = true;
 	UID id; // This must be globally unique among ChangeFeedStreamRequest instances
 	Optional<ReadOptions> options;
+	bool encrypted = false;
 
 	ReplyPromiseStream<ChangeFeedStreamReply> reply;
 
 	ChangeFeedStreamRequest() {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, rangeID, begin, end, range, reply, spanContext, replyBufferSize, canReadPopped, id, options, arena);
+		serializer(ar,
+		           rangeID,
+		           begin,
+		           end,
+		           range,
+		           reply,
+		           spanContext,
+		           replyBufferSize,
+		           canReadPopped,
+		           id,
+		           options,
+		           encrypted,
+		           arena);
 	}
 };
 

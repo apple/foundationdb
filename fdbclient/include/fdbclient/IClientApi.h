@@ -149,6 +149,7 @@ public:
 
 	virtual Reference<ITransaction> createTransaction() = 0;
 
+	virtual ThreadFuture<int64_t> getId() = 0;
 	virtual ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) = 0;
 	virtual ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) = 0;
 
@@ -209,6 +210,9 @@ public:
 	// Interface to manage shared state across multiple connections to the same Database
 	virtual ThreadFuture<DatabaseSharedState*> createSharedState() = 0;
 	virtual void setSharedState(DatabaseSharedState* p) = 0;
+
+	// Return a JSON string containing database client-side status information
+	virtual ThreadFuture<Standalone<StringRef>> getClientStatus() = 0;
 
 	// used in template functions as the Transaction type that can be created through createTransaction()
 	using TransactionT = ITransaction;

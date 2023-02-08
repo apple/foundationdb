@@ -79,6 +79,7 @@ public:
 	double CHANGE_FEED_POP_TIMEOUT;
 	int64_t CHANGE_FEED_STREAM_MIN_BYTES;
 	double CHANGE_FEED_START_INTERVAL;
+	bool CHANGE_FEED_COALESCE_LOCATIONS;
 
 	int MAX_BATCH_SIZE;
 	double GRV_BATCH_TIMEOUT;
@@ -90,8 +91,6 @@ public:
 	int LOCATION_CACHE_EVICTION_SIZE_SIM;
 	double LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD;
 	double LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL;
-	int TENANT_CACHE_EVICTION_SIZE;
-	int TENANT_CACHE_EVICTION_SIZE_SIM;
 
 	int GET_RANGE_SHARD_LIMIT;
 	int WARM_RANGE_SHARD_LIMIT;
@@ -240,6 +239,11 @@ public:
 	int BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE;
 	int BLOBSTORE_MAX_SEND_BYTES_PER_SECOND;
 	int BLOBSTORE_MAX_RECV_BYTES_PER_SECOND;
+	bool BLOBSTORE_GLOBAL_CONNECTION_POOL;
+	bool BLOBSTORE_ENABLE_LOGGING;
+	double BLOBSTORE_STATS_LOGGING_INTERVAL;
+	double BLOBSTORE_LATENCY_LOGGING_INTERVAL;
+	double BLOBSTORE_LATENCY_LOGGING_ACCURACY;
 
 	int CONSISTENCY_CHECK_RATE_LIMIT_MAX;
 	int CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME;
@@ -295,6 +299,10 @@ public:
 
 	// Encryption-at-rest
 	bool ENABLE_ENCRYPTION_CPU_TIME_LOGGING;
+	// This Knob will be a comma-delimited string (i.e 0,1,2,3) that specifies which tenants the the EKP should throw
+	// key_not_found errors for. If TenantInfo::INVALID_TENANT is contained within the list then no tenants will be
+	// dropped. This Knob should ONLY be used in simulation for testing purposes
+	std::string SIMULATION_EKP_TENANT_IDS_TO_DROP;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

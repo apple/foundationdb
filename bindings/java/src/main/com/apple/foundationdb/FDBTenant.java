@@ -34,6 +34,7 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 	private final byte[] name;
 	private final Executor executor;
 	private final EventKeeper eventKeeper;
+	private FutureInt64 idFuture;
 
 	protected FDBTenant(long cPtr, Database database, byte[] name, Executor executor) {
 		this(cPtr, database, name, executor, null);
@@ -45,6 +46,7 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 		this.name = name;
 		this.executor = executor;
 		this.eventKeeper = eventKeeper;
+		this.idFuture = null;
 	}
 
 	@Override
@@ -199,6 +201,19 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 	}
 
 	@Override
+	public CompletableFuture<Long> getId(Executor e) {
+		pointerReadLock.lock();
+		try {
+			if (idFuture == null) {
+				this.idFuture = new FutureInt64(Tenant_getId(getPtr()), e);
+			}
+			return idFuture;
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
 	public byte[] getName() {
 		return name;
 	}
@@ -221,4 +236,5 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 	private native long Tenant_unblobbifyRange(long cPtr, byte[] beginKey, byte[] endKey);
 	private native long Tenant_listBlobbifiedRanges(long cPtr, byte[] beginKey, byte[] endKey, int rangeLimit);
 	private native long Tenant_verifyBlobRange(long cPtr, byte[] beginKey, byte[] endKey, long version);
+	private native long Tenant_getId(long cPtr);
 }

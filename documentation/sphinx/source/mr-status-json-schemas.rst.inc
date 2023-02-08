@@ -909,6 +909,10 @@
          "expired_age" : 0, // The age in seconds of expired_version.
          "oldest_id_version" : 0, // The version of the oldest idempotency id still stored in the database.
          "oldest_id_age" : 0 // The age in seconds of the oldest_id_version.
+      },
+      "version_epoch":{
+         "enabled": true,
+         "epoch": 0 // The version epoch, as an offset from the Unix epoch. This field will be excluded if enabled is false.
       }
    },
    "client":{

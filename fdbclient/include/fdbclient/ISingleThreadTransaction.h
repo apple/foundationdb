@@ -47,10 +47,10 @@ public:
 	static ISingleThreadTransaction* allocateOnForeignThread(Type);
 
 	static Reference<ISingleThreadTransaction> create(Type, Database const&);
-	static Reference<ISingleThreadTransaction> create(Type, Database const&, TenantName const&);
+	static Reference<ISingleThreadTransaction> create(Type, Database const&, Reference<Tenant> const&);
 
 	virtual void construct(Database const&) = 0;
-	virtual void construct(Database const&, TenantName const&) {
+	virtual void construct(Database const&, Reference<Tenant> const&) {
 		// By default, a transaction implementation does not support tenants.
 		ASSERT(false);
 	}

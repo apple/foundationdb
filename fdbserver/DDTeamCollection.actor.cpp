@@ -1945,9 +1945,10 @@ public:
 	}
 
 	ACTOR static Future<Void> updateNextWigglingStorageID(DDTeamCollection* self) {
-		state Key writeKey = perpetualStorageWiggleIDPrefix.withSuffix(self->primary ? "primary/"_sr : "remote/"_sr);
-		state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(writeKey,
-		                                                                                          IncludeVersion());
+		state StorageWiggleData wiggleState;
+		state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap =
+		    wiggleState.wigglingStorageServer(PrimaryRegion(self->primary));
+
 		state UID nextId = wait(self->getNextWigglingServerID());
 		state StorageWiggleValue value(nextId);
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->dbContext()));
@@ -1971,12 +1972,33 @@ public:
 		return Void();
 	}
 
+	ACTOR static Future<Void> waitPerpetualWiggleDelay(DDTeamCollection* self) {
+		if (SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY <= 60.0) {
+			wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY));
+			return Void();
+		}
+		state double nextDelay = 60.0;
+		while (true) {
+			wait(delay(nextDelay));
+
+			double totalDelay = wait(self->storageWiggler->wiggleData.addPerpetualWiggleDelay(
+			    self->dbContext().getReference(), PrimaryRegion(self->primary), nextDelay));
+			nextDelay = std::min(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY - totalDelay, 60.0);
+
+			if (totalDelay >= SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY) {
+				wait(self->storageWiggler->wiggleData.clearPerpetualWiggleDelay(self->dbContext().getReference(),
+				                                                                PrimaryRegion(self->primary)));
+				return Void();
+			}
+		}
+	}
+
 	ACTOR static Future<Void> perpetualStorageWiggleRest(DDTeamCollection* self) {
 		state bool takeRest = true;
 		state Promise<int64_t> avgShardBytes;
 		while (takeRest) {
 			// a minimal delay to avoid excluding and including SS too fast
-			wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY));
+			wait(waitPerpetualWiggleDelay(self));
 
 			avgShardBytes.reset();
 			self->getAverageShardBytes.send(avgShardBytes);
@@ -2057,8 +2079,9 @@ public:
 	ACTOR static Future<Void> perpetualStorageWiggler(DDTeamCollection* self,
 	                                                  AsyncVar<bool>* stopSignal,
 	                                                  PromiseStream<Void> finishStorageWiggleSignal) {
-		state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(
-		    perpetualStorageWiggleIDPrefix.withSuffix(self->primary ? "primary/"_sr : "remote/"_sr), IncludeVersion());
+		state StorageWiggleData wiggleState;
+		state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap =
+		    wiggleState.wigglingStorageServer(PrimaryRegion(self->primary));
 
 		state Future<StorageWiggleValue> nextFuture = Never();
 		state Future<Void> moveFinishFuture = Never();
@@ -2332,6 +2355,7 @@ public:
 			isr.seedTag = invalidTag;
 			isr.reqId = deterministicRandom()->randomUniqueID();
 			isr.interfaceId = interfaceId;
+			isr.encryptMode = self->configuration.encryptionAtRestMode;
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
 			state bool doRecruit = true;

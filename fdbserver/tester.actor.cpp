@@ -26,9 +26,17 @@
 #include <toml.hpp>
 
 #include "flow/ActorCollection.h"
+#include "flow/ChaosMetrics.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/Histogram.h"
+#include "flow/IAsyncFile.h"
+#include "flow/TDMetric.actor.h"
+#include "fdbrpc/Locality.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
+#include "fdbclient/Audit.h"
+#include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
@@ -44,6 +52,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "flow/Platform.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 FDB_DEFINE_BOOLEAN_PARAM(UntrustedMode);
@@ -251,6 +260,23 @@ std::vector<std::string> getOption(VectorRef<KeyValueRef> options, Key key, std:
 	return defaultValue;
 }
 
+std::vector<int> getOption(VectorRef<KeyValueRef> options, Key key, std::vector<int> defaultValue) {
+	for (int i = 0; i < options.size(); i++)
+		if (options[i].key == key) {
+			std::vector<int> v;
+			int begin = 0;
+			for (int c = 0; c < options[i].value.size(); c++)
+				if (options[i].value[c] == ',') {
+					v.push_back(atoi((char*)options[i].value.begin() + begin));
+					begin = c + 1;
+				}
+			v.push_back(atoi((char*)options[i].value.begin() + begin));
+			options[i].value = ""_sr;
+			return v;
+		}
+	return defaultValue;
+}
+
 bool hasOption(VectorRef<KeyValueRef> options, Key key) {
 	for (const auto& option : options) {
 		if (option.key == key) {
@@ -401,8 +427,18 @@ void CompoundWorkload::addFailureInjection(WorkloadRequest& work) {
 		if (disabledWorkloads.count(workload->description()) > 0) {
 			continue;
 		}
+		if (std::count(work.disabledFailureInjectionWorkloads.begin(),
+		               work.disabledFailureInjectionWorkloads.end(),
+		               workload->description()) > 0) {
+			continue;
+		}
 		while (shouldInjectFailure(random, work, workload)) {
 			workload->initFailureInjectionMode(random);
+			TraceEvent("AddFailureInjectionWorkload")
+			    .detail("Name", workload->description())
+			    .detail("ClientID", work.clientId)
+			    .detail("ClientCount", clientCount)
+			    .detail("Title", work.title);
 			failureInjection.push_back(workload);
 			workload = factory->create(*this);
 		}
@@ -985,6 +1021,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx,
 		req.clientCount = testers.size();
 		req.sharedRandomNumber = sharedRandom;
 		req.defaultTenant = defaultTenant.castTo<TenantNameRef>();
+		req.disabledFailureInjectionWorkloads = spec.disabledFailureInjectionWorkloads;
 		workRequests.push_back(testers[i].recruitments.getReply(req));
 	}
 
@@ -1077,6 +1114,44 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 	spec.options.push_back_deep(spec.options.arena(), options);
 
 	DistributedTestResults testResults = wait(runWorkload(cx, testers, spec, Optional<TenantName>()));
+
+	return Void();
+}
+
+ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+	state UID auditId;
+	TraceEvent("AuditStorageCorrectnessBegin");
+
+	loop {
+		try {
+			TriggerAuditRequest req(AuditType::ValidateHA, allKeys);
+			req.async = true;
+			UID auditId_ = wait(dbInfo->get().clusterInterface.clientInterface.triggerAudit.getReply(req));
+			auditId = auditId_;
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
+			wait(delay(1));
+		}
+	}
+
+	state Database cx = openDBOnServer(dbInfo);
+	loop {
+		try {
+			AuditStorageState auditState = wait(getAuditState(cx, AuditType::ValidateHA, auditId));
+			if (auditState.getPhase() != AuditPhase::Complete) {
+				ASSERT(auditState.getPhase() == AuditPhase::Running);
+				wait(delay(30));
+			} else {
+				TraceEvent(SevInfo, "AuditStorageResult").detail("AuditStorageState", auditState.toString());
+				ASSERT(auditState.getPhase() == AuditPhase::Complete);
+				break;
+			}
+		} catch (Error& e) {
+			TraceEvent("WaitAuditStorageError").errorUnsuppressed(e).detail("AuditID", auditId);
+			wait(delay(1));
+		}
+	}
 
 	return Void();
 }
@@ -1415,6 +1490,21 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  } },
 	{ "runFailureWorkloads",
 	  [](const std::string& value, TestSpec* spec) { spec->runFailureWorkloads = (value == "true"); } },
+	{ "disabledFailureInjectionWorkloads",
+	  [](const std::string& value, TestSpec* spec) {
+	      // Expects a comma separated list of workload names in "value".
+	      // This custom encoding is needed because both text and toml files need to be supported
+	      // and "value" is passed in as a string.
+	      std::stringstream ss(value);
+	      while (ss.good()) {
+		      std::string substr;
+		      getline(ss, substr, ',');
+		      substr = removeWhitespace(substr);
+		      if (!substr.empty()) {
+			      spec->disabledFailureInjectionWorkloads.push_back(substr);
+		      }
+	      }
+	  } },
 };
 
 std::vector<TestSpec> readTests(std::ifstream& ifs) {
@@ -1766,22 +1856,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	}
 
 	// Read cluster configuration
-	if (useDB) {
-		state Transaction tr = Transaction(cx);
-		state DatabaseConfiguration configuration;
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				RangeResult results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
-				configuration.fromKeyValues((VectorRef<KeyValueRef>)results);
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
+	if (useDB && g_network->isSimulated()) {
+		DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 
 		g_simulator->storagePolicy = configuration.storagePolicy;
 		g_simulator->tLogPolicy = configuration.tLogPolicy;

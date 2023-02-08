@@ -574,6 +574,11 @@ public:
 		universalFields[name] = value;
 	}
 
+	Optional<NetworkAddress> getLocalAddress() {
+		MutexHolder holder(mutex);
+		return this->localAddress;
+	}
+
 	void setLocalAddress(const NetworkAddress& addr) {
 		MutexHolder holder(mutex);
 		this->localAddress = addr;
@@ -763,7 +768,7 @@ void flushTraceFileVoid() {
 	}
 }
 
-void openTraceFile(const NetworkAddress& na,
+void openTraceFile(const Optional<NetworkAddress>& na,
                    uint64_t rollsize,
                    uint64_t maxLogsSize,
                    std::string directory,
@@ -780,14 +785,23 @@ void openTraceFile(const NetworkAddress& na,
 	if (baseOfBase.empty())
 		baseOfBase = "trace";
 
-	std::string ip = na.ip.toString();
-	std::replace(ip.begin(), ip.end(), ':', '_'); // For IPv6, Windows doesn't accept ':' in filenames.
 	std::string baseName;
-	if (identifier.size() > 0) {
-		baseName = format("%s.%s.%s", baseOfBase.c_str(), ip.c_str(), identifier.c_str());
+	if (na.present()) {
+		std::string ip = na.get().ip.toString();
+		std::replace(ip.begin(), ip.end(), ':', '_'); // For IPv6, Windows doesn't accept ':' in filenames.
+
+		if (!identifier.empty()) {
+			baseName = format("%s.%s.%s", baseOfBase.c_str(), ip.c_str(), identifier.c_str());
+		} else {
+			baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.get().port);
+		}
+	} else if (!identifier.empty()) {
+		baseName = format("%s.0.0.0.0.%s", baseOfBase.c_str(), identifier.c_str());
 	} else {
-		baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.port);
+		// If neither network address nor identifier is provided, use PID for identification
+		baseName = format("%s.0.0.0.0.%d", baseOfBase.c_str(), ::getpid());
 	}
+
 	g_traceLog.open(directory,
 	                baseName,
 	                logGroup,
@@ -827,6 +841,10 @@ void setTraceLogGroup(const std::string& logGroup) {
 
 void addUniversalTraceField(const std::string& name, const std::string& value) {
 	g_traceLog.addUniversalTraceField(name, value);
+}
+
+bool isTraceLocalAddressSet() {
+	return g_traceLog.getLocalAddress().present();
 }
 
 void setTraceLocalAddress(const NetworkAddress& addr) {

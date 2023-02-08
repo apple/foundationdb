@@ -2267,16 +2267,13 @@ ACTOR Future<SrcDestTeamPair> getSrcDestTeams(DDQueue* self,
 
 	state std::pair<Optional<ITeamRef>, bool> randomTeam =
 	    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(destReq)));
-	traceEvent->detail(
-	    "DestTeam", printable(randomTeam.first.map<std::string>([](const ITeamRef& team) { return team->getDesc(); })));
+	traceEvent->detail("DestTeam", printable(randomTeam.first.mapRef(&IDataDistributionTeam::getDesc)));
 
 	if (randomTeam.first.present()) {
 		state std::pair<Optional<ITeamRef>, bool> loadedTeam =
 		    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(srcReq)));
 
-		traceEvent->detail("SourceTeam", printable(loadedTeam.first.map<std::string>([](const ITeamRef& team) {
-			                   return team->getDesc();
-		                   })));
+		traceEvent->detail("SourceTeam", printable(loadedTeam.first.mapRef(&IDataDistributionTeam::getDesc)));
 
 		if (loadedTeam.first.present()) {
 			return std::make_pair(loadedTeam.first.get(), randomTeam.first.get());

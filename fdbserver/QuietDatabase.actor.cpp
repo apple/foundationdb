@@ -31,7 +31,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -731,8 +731,6 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
 			    .detail("RemoteDead", remoteDead)
 			    .detail("PrimaryDead", primaryDead);
 			g_simulator->usableRegions = 1;
-			g_simulator->killDataCenter(
-			    primaryDead ? g_simulator->primaryDcId : g_simulator->remoteDcId, ISimulator::KillInstantly, true);
 			wait(success(ManagementAPI::changeConfig(
 			    cx.getReference(),
 			    (primaryDead ? g_simulator->disablePrimary : g_simulator->disableRemote) + " repopulate_anti_quorum=1",
