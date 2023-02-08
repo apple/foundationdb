@@ -2071,9 +2071,6 @@ ACTOR Future<Version> waitForMinVersion(StorageServer* data, Version version) {
 
 void StorageServer::checkTenantEntry(Version version, TenantInfo tenantInfo) {
 	if (tenantInfo.hasTenant()) {
-		if (version < tenantMap.oldestVersion) {
-			version = tenantMap.oldestVersion;
-		}
 		auto view = tenantMap.at(version);
 		auto itr = view.find(tenantInfo.tenantId);
 		if (itr == view.end()) {
