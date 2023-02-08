@@ -203,6 +203,7 @@ struct ResolutionRequestBuilder {
 		ASSERT(transactionNumberInBatch >= 0 && transactionNumberInBatch < 32768);
 
 		bool isTXNStateTransaction = false;
+		DisabledTraceEvent("AddTransaction", self->dbgid).detail("TenantMode", (int)self->getTenantMode());
 		bool needParseTenantId = !trRequest.tenantInfo.hasTenant() && self->getTenantMode() == TenantMode::REQUIRED;
 		VectorRef<int64_t> tenantIds;
 		for (auto& m : trIn.mutations) {
@@ -2471,6 +2472,7 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 				}
 				rep.newTag = Tag(maxTagLocality + 1, 0);
 			}
+			rep.encryptMode = commitData->encryptMode;
 			req.reply.send(rep);
 		} else {
 			req.reply.sendError(worker_removed());
@@ -3058,7 +3060,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	state GetHealthMetricsReply healthMetricsReply;
 	state GetHealthMetricsReply detailedHealthMetricsReply;
 
-	TraceEvent("CPEncryptionAtRestMode").detail("Mode", commitData.encryptMode.toString());
+	TraceEvent("CPEncryptionAtRestMode", proxy.id()).detail("Mode", commitData.encryptMode);
 
 	addActor.send(waitFailureServer(proxy.waitFailure.getFuture()));
 	addActor.send(traceRole(Role::COMMIT_PROXY, proxy.id()));
@@ -3223,7 +3225,16 @@ ACTOR Future<Void> updateLocalDbInfo(Reference<AsyncVar<ServerDBInfo> const> in,
 		// only update the db info if this is the current CP, or before we received first one including current CP.
 		// Several db infos at the beginning just contain the provisional CP
 		if (isIncluded || !firstValidDbInfo) {
-			out->set(in->get());
+			DisabledTraceEvent("UpdateLocalDbInfo", myInterface.id())
+			    .detail("Provisional", myInterface.provisional)
+			    .detail("Included", isIncluded)
+			    .detail("FirstValid", firstValidDbInfo)
+			    .detail("ReceivedRC", in->get().recoveryCount)
+			    .detail("RecoveryCount", recoveryCount)
+			    .detail("TenantMode", (int)in->get().client.tenantMode);
+			if (in->get().recoveryCount >= out->get().recoveryCount) {
+				out->set(in->get());
+			}
 		}
 
 		wait(in->onChange());
