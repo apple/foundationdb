@@ -1184,7 +1184,7 @@ public:
 		    feedVersionQueries;
 
 		// counters related to getMappedRange queries
-		Counter getMappedRangeBytesQueried, getMappedRangeSecondaryQueries, getMappedRangeQueries,
+		Counter getMappedRangeBytesQueried, finishedGetMappedRangeSecondaryQueries, getMappedRangeQueries,
 		    finishedGetMappedRangeQueries;
 
 		// Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
@@ -1297,7 +1297,7 @@ public:
 		    kvScans("KVScans", cc), kvCommits("KVCommits", cc), changeFeedDiskReads("ChangeFeedDiskReads", cc),
 		    getMappedRangeBytesQueried("GetMappedRangeBytesQueried", cc),
 		    finishedGetMappedRangeQueries("FinishedGetMappedRangeQueries", cc),
-		    getMappedRangeSecondaryQueries("GetMappedRangeSecondaryQueries", cc),
+		    finishedGetMappedRangeSecondaryQueries("FinishedGetMappedRangeSecondaryQueries", cc),
 		    readLatencySample("ReadLatencyMetrics",
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -5531,7 +5531,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 
 			resultSize = req.limitBytes - remainingLimitBytes;
 			data->counters.getMappedRangeBytesQueried += resultSize;
-			data->counters.getMappedRangeSecondaryQueries += r.data.size();
+			data->counters.finishedGetMappedRangeSecondaryQueries += r.data.size();
 			if (r.data.size() == 0) {
 				++data->counters.emptyQueries;
 			}
