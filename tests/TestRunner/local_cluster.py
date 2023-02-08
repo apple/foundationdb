@@ -30,7 +30,9 @@ class PortProvider:
         while True:
             counter += 1
             if counter > MAX_PORT_ACQUIRE_ATTEMPTS:
-                assert False, "Failed to acquire a free port after {} attempts".format(MAX_PORT_ACQUIRE_ATTEMPTS)
+                assert False, "Failed to acquire a free port after {} attempts".format(
+                    MAX_PORT_ACQUIRE_ATTEMPTS
+                )
             port = PortProvider._get_free_port_internal()
             if port in self._used_ports:
                 continue
@@ -42,7 +44,12 @@ class PortProvider:
                 self._used_ports.add(port)
                 return port
             except OSError:
-                print("Failed to lock file {}. Trying to aquire another port".format(lock_path), file=sys.stderr)
+                print(
+                    "Failed to lock file {}. Trying to aquire another port".format(
+                        lock_path
+                    ),
+                    file=sys.stderr,
+                )
                 pass
 
     def is_port_in_use(port):
@@ -59,9 +66,10 @@ class PortProvider:
             fd.close()
             try:
                 os.remove(fd.name)
-            except:
+            except Exception:
                 pass
         self._lock_files.clear()
+
 
 class TLSConfig:
     # Passing a negative chain length generates expired leaf certificate
@@ -74,6 +82,7 @@ class TLSConfig:
         self.server_chain_len = server_chain_len
         self.client_chain_len = client_chain_len
         self.verify_peers = verify_peers
+
 
 class LocalCluster:
     configuration_template = """
@@ -170,8 +179,12 @@ logdir = {logdir}
 
         if self.first_port is not None:
             self.last_used_port = int(self.first_port) - 1
-        self.server_ports = {server_id: self.__next_port() for server_id in range(self.process_number)}
-        self.server_by_port = {port: server_id for server_id, port in self.server_ports.items()}
+        self.server_ports = {
+            server_id: self.__next_port() for server_id in range(self.process_number)
+        }
+        self.server_by_port = {
+            port: server_id for server_id, port in self.server_ports.items()
+        }
         self.next_server_id = self.process_number
         self.cluster_desc = random_alphanum_string(8)
         self.cluster_secret = random_alphanum_string(8)
@@ -198,16 +211,23 @@ logdir = {logdir}
         self.client_ca_file = self.cert.joinpath("client_ca.pem")
 
         if self.authorization_kty:
-            assert self.authorization_keypair_id, "keypair ID must be set to enable authorization"
+            assert (
+                self.authorization_keypair_id
+            ), "keypair ID must be set to enable authorization"
             self.public_key_json_file = self.etc.joinpath("public_keys.json")
             self.private_key = private_key_gen(
-                    kty=self.authorization_kty, kid=self.authorization_keypair_id)
+                kty=self.authorization_kty, kid=self.authorization_keypair_id
+            )
             self.public_key_jwks_str = public_keyset_from_keys([self.private_key])
             with open(self.public_key_json_file, "w") as pubkeyfile:
                 pubkeyfile.write(self.public_key_jwks_str)
-            self.authorization_private_key_pem_file = self.etc.joinpath("authorization_private_key.pem")
+            self.authorization_private_key_pem_file = self.etc.joinpath(
+                "authorization_private_key.pem"
+            )
             with open(self.authorization_private_key_pem_file, "w") as privkeyfile:
-                privkeyfile.write(self.private_key.as_pem(is_private=True).decode("utf8"))
+                privkeyfile.write(
+                    self.private_key.as_pem(is_private=True).decode("utf8")
+                )
 
         if create_config:
             self.create_cluster_file()
@@ -246,7 +266,10 @@ logdir = {logdir}
                     authz_public_key_config=self.authz_public_key_conf_string(),
                     optional_tls=":tls" if self.tls_config is not None else "",
                     custom_config="\n".join(
-                        ["{} = {}".format(key, value) for key, value in self.custom_config.items()]
+                        [
+                            "{} = {}".format(key, value)
+                            for key, value in self.custom_config.items()
+                        ]
                     ),
                     use_future_protocol_version="use-future-protocol-version = true"
                     if self.use_future_protocol_version
@@ -259,7 +282,11 @@ logdir = {logdir}
             # Then 4000,4001,4002,4003,4004 will be used as ports
             # If port number is not given, we will randomly pick free ports
             for server_id in self.active_servers:
-                f.write("[fdbserver.{server_port}]\n".format(server_port=self.server_ports[server_id]))
+                f.write(
+                    "[fdbserver.{server_port}]\n".format(
+                        server_port=self.server_ports[server_id]
+                    )
+                )
                 if self.use_legacy_conf_syntax:
                     f.write("machine_id = {}\n".format(server_id))
                 else:
@@ -353,8 +380,12 @@ logdir = {logdir}
             ]
         if self.use_future_protocol_version:
             args += ["--use-future-protocol-version"]
-        res = subprocess.run(args, env=self.process_env(), stderr=stderr, stdout=stdout, timeout=timeout)
-        assert res.returncode == 0, "fdbcli command {} failed with {}".format(cmd, res.returncode)
+        res = subprocess.run(
+            args, env=self.process_env(), stderr=stderr, stdout=stdout, timeout=timeout
+        )
+        assert res.returncode == 0, "fdbcli command {} failed with {}".format(
+            cmd, res.returncode
+        )
         return res.stdout
 
     # Execute a fdbcli command
@@ -376,9 +407,9 @@ logdir = {logdir}
     # Generate and install test certificate chains and keys
     def create_tls_cert(self):
         assert self.tls_config is not None, "TLS not enabled"
-        assert self.mkcert_binary.exists() and self.mkcert_binary.is_file(), "{} does not exist".format(
-            self.mkcert_binary
-        )
+        assert (
+            self.mkcert_binary.exists() and self.mkcert_binary.is_file()
+        ), "{} does not exist".format(self.mkcert_binary)
         self.cert.mkdir(exist_ok=True)
         server_chain_len = abs(self.tls_config.server_chain_len)
         client_chain_len = abs(self.tls_config.client_chain_len)
@@ -425,7 +456,9 @@ logdir = {logdir}
 
     def authz_public_key_conf_string(self):
         if self.public_key_json_file is not None:
-            return "authorization-public-key-file = {}".format(self.public_key_json_file)
+            return "authorization-public-key-file = {}".format(
+                self.public_key_json_file
+            )
         else:
             return ""
 
@@ -441,7 +474,11 @@ logdir = {logdir}
             return {}
 
         servers_found = set()
-        addresses = [proc_info["address"] for proc_info in status["cluster"]["processes"].values() if filter(proc_info)]
+        addresses = [
+            proc_info["address"]
+            for proc_info in status["cluster"]["processes"].values()
+            if filter(proc_info)
+        ]
         for addr in addresses:
             port = int(addr.split(":", 1)[1])
             assert port in self.server_by_port, "Unknown server port {}".format(port)
@@ -472,7 +509,9 @@ logdir = {logdir}
     # Need to call save_config to apply the changes
     def add_server(self):
         server_id = self.next_server_id
-        assert server_id not in self.server_ports, "Server ID {} is already in use".format(server_id)
+        assert (
+            server_id not in self.server_ports
+        ), "Server ID {} is already in use".format(server_id)
         self.next_server_id += 1
         port = self.__next_port()
         self.server_ports[server_id] = port
@@ -483,7 +522,9 @@ logdir = {logdir}
     # Remove the server with the given ID from the cluster
     # Need to call save_config to apply the changes
     def remove_server(self, server_id):
-        assert server_id in self.active_servers, "Server {} does not exist".format(server_id)
+        assert server_id in self.active_servers, "Server {} does not exist".format(
+            server_id
+        )
         self.active_servers.remove(server_id)
 
     # Wait until changes to the set of servers (additions & removals) are applied
@@ -501,7 +542,10 @@ logdir = {logdir}
 
     # Apply changes to the set of the coordinators, based on the current value of self.coordinators
     def update_coordinators(self):
-        urls = ["{}:{}".format(self.ip_address, self.server_ports[id]) for id in self.coordinators]
+        urls = [
+            "{}:{}".format(self.ip_address, self.server_ports[id])
+            for id in self.coordinators
+        ]
         self.fdbcli_exec("coordinators {}".format(" ".join(urls)))
 
     # Wait until the changes to the set of the coordinators are applied
@@ -521,13 +565,20 @@ logdir = {logdir}
         for server_id in self.coordinators:
             assert (
                 connection_string.find(str(self.server_ports[server_id])) != -1
-            ), "Missing coordinator {} port {} in the cluster file".format(server_id, self.server_ports[server_id])
+            ), "Missing coordinator {} port {} in the cluster file".format(
+                server_id, self.server_ports[server_id]
+            )
 
     # Exclude the servers with the given ID from the cluster, i.e. move out their data
     # The method waits until the changes are applied
     def exclude_servers(self, server_ids):
-        urls = ["{}:{}".format(self.ip_address, self.server_ports[id]) for id in server_ids]
-        self.fdbcli_exec("exclude FORCE {}".format(" ".join(urls)), timeout=EXCLUDE_SERVERS_TIMEOUT_SEC)
+        urls = [
+            "{}:{}".format(self.ip_address, self.server_ports[id]) for id in server_ids
+        ]
+        self.fdbcli_exec(
+            "exclude FORCE {}".format(" ".join(urls)),
+            timeout=EXCLUDE_SERVERS_TIMEOUT_SEC,
+        )
 
     # Perform a cluster wiggle: replace all servers with new ones
     def cluster_wiggle(self):
@@ -552,7 +603,11 @@ logdir = {logdir}
         )
         self.save_config()
         self.wait_for_server_update()
-        print("New servers successfully added to the cluster. Time: {}s".format(time.time() - start_time))
+        print(
+            "New servers successfully added to the cluster. Time: {}s".format(
+                time.time() - start_time
+            )
+        )
 
         # Step 2: change coordinators
         start_time = time.time()
@@ -561,12 +616,20 @@ logdir = {logdir}
         self.coordinators = new_coordinators.copy()
         self.update_coordinators()
         self.wait_for_coordinator_update()
-        print("Coordinators successfully changed. Time: {}s".format(time.time() - start_time))
+        print(
+            "Coordinators successfully changed. Time: {}s".format(
+                time.time() - start_time
+            )
+        )
 
         # Step 3: exclude old servers from the cluster, i.e. move out their data
         start_time = time.time()
         self.exclude_servers(old_servers)
-        print("Old servers successfully excluded from the cluster. Time: {}s".format(time.time() - start_time))
+        print(
+            "Old servers successfully excluded from the cluster. Time: {}s".format(
+                time.time() - start_time
+            )
+        )
 
         # Step 4: remove the old servers
         start_time = time.time()
@@ -574,11 +637,21 @@ logdir = {logdir}
             self.remove_server(server_id)
         self.save_config()
         self.wait_for_server_update()
-        print("Old servers successfully removed from the cluster. Time: {}s".format(time.time() - start_time))
+        print(
+            "Old servers successfully removed from the cluster. Time: {}s".format(
+                time.time() - start_time
+            )
+        )
 
     # Check the cluster log for errors
     def check_cluster_logs(self, error_limit=100):
-        sev40s = subprocess.getoutput("grep -r 'Severity=\"40\"' {}".format(self.log.as_posix())).rstrip().splitlines()
+        sev40s = (
+            subprocess.getoutput(
+                "grep -r 'Severity=\"40\"' {}".format(self.log.as_posix())
+            )
+            .rstrip()
+            .splitlines()
+        )
 
         err_cnt = 0
         for line in sev40s:
