@@ -203,7 +203,8 @@ class TestPicker:
     def choose_test(self) -> List[Path]:
         min_runtime: float | None = None
         candidates: List[TestDescription] = []
-        for _, v in self.tests.items():
+        for _k, v in self.tests.items():
+            sys.stdout.write("Test item, key: {}; paths: {}; name: {}; priority: {}, total_runtime: {}, num_runs: {}\n".format(_k, v.paths, v.name, v.priority, v.total_runtime, v.num_runs))
             this_time = v.total_runtime * v.priority
             if min_runtime is None or this_time < min_runtime:
                 min_runtime = this_time
@@ -241,9 +242,7 @@ class OldBinaries:
         ver = Version.parse(version_str)
         self.binaries[ver] = file
 
-    def choose_binary(self, test_file: Path) -> Path:
-        if len(self.binaries) == 0:
-            return config.binary
+    def choose_binary(self, test_file: Path) -> Path | None:
         max_version = Version.max_version()
         min_version = Version.parse("5.0.0")
         dirs = test_file.parent.parts
@@ -259,15 +258,15 @@ class OldBinaries:
             return config.binary
         if version_expr[0] == "from" or version_expr[0] == "to":
             min_version = Version.parse(version_expr[1])
+        candidates: List[Path] = []
         if len(version_expr) == 4 and version_expr[2] == "until":
             max_version = Version.parse(version_expr[3])
-        candidates: List[Path] = []
+        else:
+            candidates.append(config.binary)
         for ver, binary in self.binaries.items():
-            if min_version <= ver <= max_version:
+            if min_version <= ver < max_version:
                 candidates.append(binary)
-        if len(candidates) == 0:
-            return config.binary
-        return config.random.choice(candidates)
+        return config.random.choice(candidates) if len(candidates) else None
 
 
 def is_restarting_test(test_file: Path):
@@ -499,6 +498,8 @@ class TestRunner:
         for count, file in enumerate(test_files):
             will_restart = count + 1 < len(test_files)
             binary = self.binary_chooser.choose_binary(file)
+            if binary is None:
+                break
             unseed_check = (
                 not is_no_sim(file)
                 and config.random.random() < config.unseed_check_ratio
@@ -556,3 +557,4 @@ class TestRunner:
         if config.clean_up:
             shutil.rmtree(config.run_dir / str(self.uid))
         return success
+
