@@ -1801,6 +1801,67 @@ inline bool shouldBackup(MutationRef const& m) {
 	return false;
 }
 
+void pushToBackupMutations(CommitBatchContext* self,
+                           ProxyCommitData* const pProxyCommitData,
+                           Arena& arena,
+                           MutationRef const& m,
+                           MutationRef const& writtenMutation,
+                           Optional<MutationRef> const& encryptedMutation) {
+	// In required tenant mode, the clear ranges are already split by tenant
+	TraceEvent(SevDebug, "BackupMutationLog", pProxyCommitData->dbgid)
+	    .detail("TenantMode", (int)pProxyCommitData->getTenantMode());
+
+	if (m.type != MutationRef::Type::ClearRange || pProxyCommitData->getTenantMode() == TenantMode::REQUIRED) {
+		if (EXPENSIVE_VALIDATION && m.type == MutationRef::ClearRange) {
+			ASSERT(TenantAPI::withinSingleTenant(KeyRangeRef(m.param1, m.param2)));
+		}
+
+		// Add the mutation to the relevant backup tag
+		for (auto backupName : pProxyCommitData->vecBackupKeys[m.param1]) {
+			// If encryption is enabled make sure the mutation we are writing is also encrypted
+			ASSERT(!pProxyCommitData->encryptMode.isEncryptionEnabled() || writtenMutation.isEncrypted());
+			CODE_PROBE(writtenMutation.isEncrypted(), "using encrypted backup mutation");
+			self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, writtenMutation);
+		}
+
+	} else {
+		KeyRangeRef mutationRange(m.param1, m.param2);
+		KeyRangeRef intersectionRange;
+
+		// Identify and add the intersecting ranges of the mutation to the array of mutations to serialize
+		for (auto backupRange : pProxyCommitData->vecBackupKeys.intersectingRanges(mutationRange)) {
+			// Get the backup sub range
+			const auto& backupSubrange = backupRange.range();
+
+			// Determine the intersecting range
+			intersectionRange = mutationRange & backupSubrange;
+
+			// Create the custom mutation for the specific backup tag
+			MutationRef backupMutation(MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
+
+			// TODO (Nim): Currently clear ranges are encrypted using the default encryption key, this must
+			// be changed to account for clear ranges which span tenant boundaries
+			if (pProxyCommitData->encryptMode.isEncryptionEnabled()) {
+				CODE_PROBE(true, "encrypting clear range backup mutation");
+				if (backupMutation.param1 == m.param1 && backupMutation.param2 == m.param2 &&
+				    encryptedMutation.present()) {
+					backupMutation = encryptedMutation.get();
+				} else {
+					EncryptCipherDomainId domainId = getEncryptDetailsFromMutationRef(pProxyCommitData, backupMutation);
+					backupMutation =
+					    backupMutation.encrypt(self->cipherKeys, domainId, arena, BlobCipherMetrics::BACKUP);
+				}
+				ASSERT(backupMutation.isEncrypted());
+			}
+
+			// Add the mutation to the relevant backup tag
+			for (auto backupName : backupRange.value()) {
+				self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, backupMutation);
+			}
+		}
+	}
+}
+
 /// This second pass through committed transactions assigns the actual mutations to the appropriate storage servers'
 /// tags
 ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
@@ -1963,56 +2024,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				continue;
 			}
 
-			// In required tenant mode, the clear ranges are already split by tenant
-			TraceEvent(SevDebug, "BackupMutationLog", pProxyCommitData->dbgid)
-			    .detail("TenantMode", (int)pProxyCommitData->getTenantMode());
-			if (m.type != MutationRef::Type::ClearRange || pProxyCommitData->getTenantMode() == TenantMode::REQUIRED) {
-				// Add the mutation to the relevant backup tag
-				for (auto backupName : pProxyCommitData->vecBackupKeys[m.param1]) {
-					// If encryption is enabled make sure the mutation we are writing is also encrypted
-					ASSERT(!self->pProxyCommitData->encryptMode.isEncryptionEnabled() || writtenMutation.isEncrypted());
-					CODE_PROBE(writtenMutation.isEncrypted(), "using encrypted backup mutation");
-					self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, writtenMutation);
-				}
-			} else {
-				KeyRangeRef mutationRange(m.param1, m.param2);
-				KeyRangeRef intersectionRange;
-
-				// Identify and add the intersecting ranges of the mutation to the array of mutations to serialize
-				for (auto backupRange : pProxyCommitData->vecBackupKeys.intersectingRanges(mutationRange)) {
-					// Get the backup sub range
-					const auto& backupSubrange = backupRange.range();
-
-					// Determine the intersecting range
-					intersectionRange = mutationRange & backupSubrange;
-
-					// Create the custom mutation for the specific backup tag
-					MutationRef backupMutation(
-					    MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
-
-					// TODO (Nim): Currently clear ranges are encrypted using the default encryption key, this must
-					// be changed to account for clear ranges which span tenant boundaries
-					if (self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
-						CODE_PROBE(true, "encrypting clear range backup mutation");
-						if (backupMutation.param1 == m.param1 && backupMutation.param2 == m.param2 &&
-						    encryptedMutation.present()) {
-							backupMutation = encryptedMutation.get();
-						} else {
-							EncryptCipherDomainId domainId =
-							    getEncryptDetailsFromMutationRef(self->pProxyCommitData, backupMutation);
-							backupMutation =
-							    backupMutation.encrypt(self->cipherKeys, domainId, arena, BlobCipherMetrics::BACKUP);
-						}
-						ASSERT(backupMutation.isEncrypted());
-					}
-
-					// Add the mutation to the relevant backup tag
-					for (auto backupName : backupRange.value()) {
-						self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena,
-						                                                   backupMutation);
-					}
-				}
-			}
+			pushToBackupMutations(self, pProxyCommitData, arena, m, writtenMutation, encryptedMutation);
 		}
 
 		if (checkSample) {
@@ -3585,3 +3597,5 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
 	}
 	return Void();
 }
+
+void forceLinkCommitProxyTests() {}
