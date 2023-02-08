@@ -19,16 +19,7 @@
  */
 package com.apple.foundationdb;
 
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.NavigableMap;
 import java.util.Random;
-import java.util.TreeMap;
-
-import com.apple.foundationdb.async.AsyncIterable;
-import com.apple.foundationdb.async.AsyncIterator;
-import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
@@ -68,7 +59,7 @@ class BlobGranuleIntegrationTest {
                 return;
             } else {
                 System.out.println("Verify failed, sleeping");
-                Thread.sleep(1000);
+                Thread.sleep(100);
             }
         }
     }
