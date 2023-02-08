@@ -311,7 +311,6 @@ ACTOR static Future<Void> mockServer(GrvProxyTagThrottler* throttler) {
 			outBatchPriority.front().reply.send(GetReadVersionReply{});
 			outBatchPriority.pop_front();
 		}
-		TraceEvent("HERE_ServerProcessing").detail("Size", outDefaultPriority.size());
 		while (!outDefaultPriority.empty()) {
 			outDefaultPriority.front().reply.send(GetReadVersionReply{});
 			outDefaultPriority.pop_front();
