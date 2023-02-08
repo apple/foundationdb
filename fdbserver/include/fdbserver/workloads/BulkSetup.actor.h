@@ -76,6 +76,7 @@ Future<bool> checkRangeSimpleValueSize(Database cx,
 		} catch (Error& e) {
 			TraceEvent("CheckRangeError").error(e).detail("Begin", begin).detail("End", end);
 			wait(tr.onError(e));
+			setAuthToken(*workload, tr);
 		}
 	}
 }
@@ -130,6 +131,7 @@ Future<uint64_t> setupRange(Database cx,
 			return bytesInserted;
 		} catch (Error& e) {
 			wait(tr.onError(e));
+			setAuthToken(*workload, tr);
 		}
 	}
 }
@@ -177,6 +179,7 @@ Future<uint64_t> setupRangeWorker(Database cx,
 					lastStoredKeysLoaded = keysLoaded;
 				} catch (Error& e) {
 					wait(tr.onError(e));
+					setAuthToken(*workload, tr);
 				}
 			}
 		}

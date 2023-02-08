@@ -55,6 +55,8 @@ def loop_until_success(tr: fdb.Transaction, func):
         except fdb.FDBError as e:
             tr.on_error(e).wait()
 
+# test that token option on a transaction should survive soft transaction resets,
+# be cleared by hard transaction resets, and also clearable by setting empty value
 def test_token_option(cluster, default_tenant, tenant_tr_gen, token_claim_1h):
     token = token_gen(cluster.private_key, token_claim_1h(default_tenant))
     tr = tenant_tr_gen(default_tenant)
@@ -65,17 +67,26 @@ def test_token_option(cluster, default_tenant, tenant_tr_gen, token_claim_1h):
 
     loop_until_success(tr, commit_some_value)
 
-    tr.reset() # token should survive reset
+    # token option should survive a soft reset by a retryable error
+    tr.on_error(fdb.FDBError(1020)).wait() # not_committed (conflict)
     def read_back_value(tr):
         return tr[b"abc"].value
-
     value = loop_until_success(tr, read_back_value)
     assert value == b"def", f"unexpected value found: {value}"
-    tr.reset() # again, token survives reset
-    tr.options.set_authorization_token() # set with no arg clears the token
+
+    tr.reset() # token shouldn't survive a hard reset
+    try:
+        value = read_back_value(tr)
+        assert False, "expected permission_denied, but succeeded"
+    except fdb.FDBError as e:
+        assert e.code == 6000, f"expected permission_denied, got {e} instead"
+
+    tr.reset()
+    tr.options.set_authorization_token(token)
+    tr.options.set_authorization_token() # option set with no arg should clear the token
 
     try:
-        value = tr[b"abc"].value
+        value = read_back_value(tr)
         assert False, "expected permission_denied, but succeeded"
     except fdb.FDBError as e:
         assert e.code == 6000, f"expected permission_denied, got {e} instead"

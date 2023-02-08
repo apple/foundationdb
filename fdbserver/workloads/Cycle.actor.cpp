@@ -193,6 +193,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 						else if (e.code() == error_code_not_committed)
 							++self->commitFailedRetries;
 						wait(tr.onError(e));
+						self->setAuthToken(tr); // token does not survive reset by onError()
 					}
 					++self->retries;
 				}
@@ -318,6 +319,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 						g_simulator->speedUpSimulation = true;
 					}
 					wait(tr.onError(e));
+					self->setAuthToken(tr);
 				}
 			}
 		}

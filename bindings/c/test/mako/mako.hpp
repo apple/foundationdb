@@ -31,6 +31,7 @@
 #include <chrono>
 #include <list>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -145,6 +146,7 @@ struct Arguments {
 	int validate();
 	void collectTenantIds();
 	bool isAuthorizationEnabled() const noexcept;
+	std::optional<std::vector<fdb::Tenant>> prepareTenants(fdb::Database db) const;
 	void generateAuthorizationTokens();
 
 	// Needs to be called once per fdb client process from a clean state:

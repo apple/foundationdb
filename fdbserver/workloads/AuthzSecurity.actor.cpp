@@ -138,6 +138,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 				return tr.getCommittedVersion();
 			} catch (Error& e) {
 				wait(tr.onError(e));
+				self->setAuthToken(tr, token);
 			}
 		}
 	}
@@ -161,6 +162,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 				}
 			} catch (Error& e) {
 				wait(tr.onError(e));
+				self->setAuthToken(tr, token);
 			}
 		}
 	}
@@ -354,6 +356,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
+				self->setAuthToken(tr, self->signedToken);
 			}
 		}
 		ASSERT(tLogConfigString.present());

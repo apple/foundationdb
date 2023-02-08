@@ -3312,7 +3312,6 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
 	newState->startTime = startTime;
 	newState->committedVersion = committedVersion;
 	newState->conflictingKeys = conflictingKeys;
-	newState->authToken = authToken;
 	newState->tenantSet = tenantSet;
 
 	return newState;
@@ -6969,7 +6968,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		break;
 
 	case FDBTransactionOptions::AUTHORIZATION_TOKEN:
-		if (value.present() && !value.get().empty())
+		if (value.present())
 			trState->authToken = Standalone<StringRef>(value.get());
 		else
 			trState->authToken.reset();
