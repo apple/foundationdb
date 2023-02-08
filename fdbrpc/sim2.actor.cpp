@@ -26,7 +26,9 @@
 #include "fmt/format.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Arena.h"
+#ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
+#endif
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #include "fdbrpc/SimExternalConnection.h"
@@ -1676,7 +1678,7 @@ public:
 			}
 
 			// Reboot if dead machines do fulfill policies
-			if (tooManyDead) {
+			if (tooManyDead || (usableRegions > 1 && notEnoughLeft)) {
 				newKt = KillType::Reboot;
 				canSurvive = false;
 				TraceEvent("KillChanged")
