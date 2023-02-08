@@ -130,15 +130,14 @@ struct AuthzSecurityWorkload : TestWorkload {
 	                                                               StringRef key,
 	                                                               StringRef value) {
 		state Transaction tr(cx, tenant);
-		self->setAuthToken(tr, token);
 		loop {
 			try {
+				self->setAuthToken(tr, token);
 				tr.set(key, value);
 				wait(tr.commit());
 				return tr.getCommittedVersion();
 			} catch (Error& e) {
 				wait(tr.onError(e));
-				self->setAuthToken(tr, token);
 			}
 		}
 	}
@@ -149,10 +148,10 @@ struct AuthzSecurityWorkload : TestWorkload {
 	                                                                      Standalone<StringRef> token,
 	                                                                      StringRef key) {
 		state Transaction tr(cx, tenant);
-		self->setAuthToken(tr, token);
 		loop {
 			try {
 				// trigger GetKeyServerLocationsRequest and subsequent cache update
+				self->setAuthToken(tr, token);
 				wait(success(tr.get(key)));
 				auto loc = cx->getCachedLocation(tr.trState->getTenantInfo(), key);
 				if (loc.present()) {
@@ -162,7 +161,6 @@ struct AuthzSecurityWorkload : TestWorkload {
 				}
 			} catch (Error& e) {
 				wait(tr.onError(e));
-				self->setAuthToken(tr, token);
 			}
 		}
 	}
@@ -346,17 +344,16 @@ struct AuthzSecurityWorkload : TestWorkload {
 		state Version committedVersion =
 		    wait(setAndCommitKeyValueAndGetVersion(self, cx, self->tenant, self->signedToken, key, value));
 		state Transaction tr(cx, self->tenant);
-		self->setAuthToken(tr, self->signedToken);
 		state Optional<Value> tLogConfigString;
 		loop {
 			try {
+				self->setAuthToken(tr, self->signedToken);
 				Optional<Value> value = wait(tr.get(self->tLogConfigKey));
 				ASSERT(value.present());
 				tLogConfigString = value;
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
-				self->setAuthToken(tr, self->signedToken);
 			}
 		}
 		ASSERT(tLogConfigString.present());
