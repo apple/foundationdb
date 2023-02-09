@@ -501,7 +501,8 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadataTra
                                                                                          TenantName begin,
                                                                                          TenantName end,
                                                                                          int limit) {
-	std::vector<std::pair<TenantName, int64_t>> matchingTenants = wait(listTenantsTransaction(tr, begin, end, limit));
+	state std::vector<std::pair<TenantName, int64_t>> matchingTenants =
+	    wait(listTenantsTransaction(tr, begin, end, limit));
 
 	state std::vector<Future<TenantMapEntry>> tenantEntryFutures;
 	for (auto const& [name, id] : matchingTenants) {
@@ -511,8 +512,10 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadataTra
 	wait(waitForAll(tenantEntryFutures));
 
 	std::vector<std::pair<TenantName, TenantMapEntry>> results;
-	for (auto const& f : tenantEntryFutures) {
-		results.emplace_back(f.get().tenantName, f.get());
+	state int idx = 0;
+	for (; idx < tenantEntryFutures.size(); ++idx) {
+		auto const& f = tenantEntryFutures[idx];
+		results.emplace_back(matchingTenants[idx].first, f.get());
 	}
 
 	return results;

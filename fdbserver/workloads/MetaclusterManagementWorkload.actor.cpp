@@ -392,7 +392,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> verifyListFilter(MetaclusterManagementWorkload* self, TenantName tenant) {
+	ACTOR static Future<Void> verifyListFilter(MetaclusterManagementWorkload* self,
+	                                           TenantName tenant,
+	                                           const char* context) {
 		try {
 			state TenantMapEntry checkEntry = wait(MetaclusterAPI::getTenant(self->managementDb, tenant));
 			state TenantState checkState = checkEntry.tenantState;
@@ -404,6 +406,13 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			wait(store(checkEntry2, MetaclusterAPI::getTenant(self->managementDb, tenant)) &&
 			     store(tenantList,
 			           MetaclusterAPI::listTenantMetadata(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6, 0, filters)));
+
+			DisabledTraceEvent(SevDebug, "VerifyListFilter")
+			    .detail("Context", context)
+			    .detail("Tenant", tenant)
+			    .detail("CheckState", (int)checkState)
+			    .detail("Entry2State", (int)checkEntry2.tenantState);
+
 			bool found = false;
 			for (auto pair : tenantList) {
 				ASSERT(pair.second.tenantState == checkState);
@@ -463,7 +472,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 						break;
 					} else {
 						retried = true;
-						wait(verifyListFilter(self, tenant));
+						wait(verifyListFilter(self, tenant, "createTenant"));
 					}
 				} catch (Error& e) {
 					if (e.code() == error_code_tenant_already_exists && retried && !exists) {
@@ -564,7 +573,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 						break;
 					} else {
 						retried = true;
-						wait(verifyListFilter(self, tenant));
+						wait(verifyListFilter(self, tenant, "deleteTenant"));
 					}
 				} catch (Error& e) {
 					if (e.code() == error_code_tenant_not_found && retried && exists) {
@@ -654,7 +663,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				if (result.present()) {
 					break;
 				}
-				wait(verifyListFilter(self, tenant));
+				wait(verifyListFilter(self, tenant, "configureTenant"));
 			}
 
 			ASSERT(exists);
@@ -749,8 +758,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 					}
 
 					retried = true;
-					wait(verifyListFilter(self, tenant));
-					wait(verifyListFilter(self, newTenantName));
+					wait(verifyListFilter(self, tenant, "renameTenant"));
+					wait(verifyListFilter(self, newTenantName, "renameTenantNew"));
 				} catch (Error& e) {
 					// If we retry the rename after it had succeeded, we will get an error that we should ignore
 					if (e.code() == error_code_tenant_not_found && exists && !newTenantExists && retried) {
