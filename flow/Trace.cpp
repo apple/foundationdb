@@ -1481,7 +1481,7 @@ TraceBatch::EventInfo::EventInfo(double time,
 	fields.addField("Time", format("%.6f", time));
 	// Include monotonic time for computing elapsed time between events on the same machine.
 	// The Time field is based on now(), which doesn't advance between wait()'s.
-	fields.addField("MonotonicTime", format(">%.6f", monotonicTime));
+	fields.addField("MonotonicTime", format("%.6f", monotonicTime));
 	if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 		fields.addField("DateTime", TraceEvent::printRealTime(time));
 	}
