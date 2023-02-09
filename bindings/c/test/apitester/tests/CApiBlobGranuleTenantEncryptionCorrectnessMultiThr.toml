@@ -11,6 +11,7 @@ maxTenants = 5
 
 [[server]]
 blob_granules_enabled = true
+enable_encryption_at_rest = true
 
 [[test.workload]]
 name = 'ApiBlobGranuleCorrectness'
