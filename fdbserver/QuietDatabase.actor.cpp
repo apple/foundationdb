@@ -19,12 +19,10 @@
  */
 
 #include <cinttypes>
-#include <unordered_map>
 #include <vector>
 #include <type_traits>
 
 #include "fdbclient/FDBOptions.g.h"
-#include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
@@ -681,8 +679,8 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
 			wait(excludeServers(cx, servers, false));
 			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration")
 			    .detail("Location", context)
-			    .detail("Stage", "LocalityExcluded")
-			    .detail("Localities", describe(servers));
+			    .detail("Stage", "ServerExcluded")
+			    .detail("Servers", describe(servers));
 
 			wait(success(ManagementAPI::changeConfig(
 			    cx.getReference(),
