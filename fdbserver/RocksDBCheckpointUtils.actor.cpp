@@ -545,6 +545,66 @@ ACTOR Future<Void> RocksDBCheckpointReader::doClose(RocksDBCheckpointReader* sel
 	return Void();
 }
 
+class RocksDBSstFileWriter : public IRocksDBSstFileWriter {
+public:
+	RocksDBSstFileWriter()
+	  : writer(std::make_shared<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options())), hasData(false){};
+
+	void open(const std::string localFile) override;
+
+	void write(const KeyRef key, const ValueRef value) override;
+
+	void finish() override;
+
+private:
+	std::shared_ptr<rocksdb::SstFileWriter> writer;
+	std::string localFile;
+	bool hasData;
+};
+
+void RocksDBSstFileWriter::open(const std::string localFile) {
+	rocksdb::Status status;
+	this->localFile = localFile;
+	status = this->writer->Open(this->localFile);
+	if (!status.ok()) {
+		Error e = statusToError(status);
+		TraceEvent(SevError, "RocksDBSstFileWriterWrapperOpenFileError")
+		    .detail("LocalFile", this->localFile)
+		    .detail("Status", status.ToString());
+		throw e;
+	}
+}
+
+void RocksDBSstFileWriter::write(const KeyRef key, const ValueRef value) {
+	rocksdb::Status status;
+	status = this->writer->Put(toSlice(key), toSlice(value));
+	if (!status.ok()) {
+		Error e = statusToError(status);
+		TraceEvent(SevError, "RocksDBSstFileWriterWrapperWriteError")
+		    .detail("LocalFile", this->localFile)
+		    .detail("Key", key)
+		    .detail("Value", value)
+		    .detail("Status", status.ToString());
+		throw e;
+	}
+	this->hasData = true;
+}
+
+void RocksDBSstFileWriter::finish() {
+	if (!this->hasData) {
+		return;
+	}
+	rocksdb::Status status;
+	status = this->writer->Finish();
+	if (!status.ok()) {
+		Error e = statusToError(status);
+		TraceEvent(SevError, "RocksDBSstFileWriterWrapperCloseError")
+		    .detail("LocalFile", this->localFile)
+		    .detail("Status", status.ToString());
+		throw e;
+	}
+}
+
 // RocksDBCFCheckpointReader reads an exported RocksDB Column Family checkpoint, and returns the serialized
 // checkpoint via nextChunk.
 class RocksDBCFCheckpointReader : public ICheckpointReader {
@@ -1036,6 +1096,21 @@ ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoi
 	}
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 	return nullptr;
+}
+
+IRocksDBSstFileWriter* beginRocksDBSstFileWriter(std::string localFile) {
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
+	IRocksDBSstFileWriter* sstWriter = new RocksDBSstFileWriter();
+	sstWriter->open(localFile);
+	return sstWriter;
+#endif // SSD_ROCKSDB_EXPERIMENTAL
+	return nullptr;
+}
+
+void endRocksDBSstFileWriter(IRocksDBSstFileWriter* sstWriter) {
+	ASSERT(sstWriter != nullptr);
+	sstWriter->finish();
+	delete sstWriter;
 }
 
 RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint) {

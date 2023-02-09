@@ -31,6 +31,17 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+class IRocksDBSstFileWriter {
+public:
+	virtual void open(const std::string localFile) = 0;
+
+	virtual void write(const KeyRef key, const ValueRef value) = 0;
+
+	virtual void finish() = 0;
+
+	virtual ~IRocksDBSstFileWriter() {}
+};
+
 struct CheckpointFile {
 	constexpr static FileIdentifier file_identifier = 13804348;
 	std::string path;
@@ -284,6 +295,10 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint);
 ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint,
                                               const CheckpointAsKeyValues checkpointAsKeyValues,
                                               UID logID);
+
+IRocksDBSstFileWriter* beginRocksDBSstFileWriter(std::string localFile);
+
+void endRocksDBSstFileWriter(IRocksDBSstFileWriter* sstWriter);
 
 RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint);
 
