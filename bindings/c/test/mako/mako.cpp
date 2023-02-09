@@ -382,7 +382,11 @@ transaction_begin:
 		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END", args.isAnyTimeoutEnabled());
 		updateErrorStatsRunMode(stats, f.error(), OP_COMMIT);
 		watch_commit.stop();
-		auto tx_resetter = ExitGuard([&tx]() { tx.reset(); });
+		auto tx_resetter = ExitGuard([&tx, &token]() {
+			tx.reset();
+			if (token)
+				tx.setOption(FDB_TR_OPTION_AUTHORIZATION_TOKEN, *token);
+		});
 		if (rc == FutureRC::OK) {
 			if (do_sample) {
 				const auto commit_latency = watch_commit.diff();
@@ -1681,6 +1685,10 @@ int Arguments::validate() {
 	}
 
 	if (enable_token_based_authorization) {
+		if (async_xacts > 0) {
+			logr.error("async mode does not support authorization yet");
+			return -1;
+		}
 		if (num_fdb_clusters > 1) {
 			logr.error("for simplicity, --enable_token_based_authorization must be used with exactly one fdb cluster");
 			return -1;
