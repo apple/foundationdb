@@ -400,13 +400,11 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			state TenantState checkState = checkEntry.tenantState;
 			state std::vector<TenantState> filters;
 			filters.push_back(checkState);
-			state std::vector<std::pair<TenantName, TenantMapEntry>> tenantList;
-			state TenantMapEntry checkEntry2;
 
-			wait(store(tenantList,
-			           MetaclusterAPI::listTenantMetadata(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6, 0, filters)));
+			state std::vector<std::pair<TenantName, TenantMapEntry>> tenantList =
+			    wait(MetaclusterAPI::listTenantMetadata(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6, 0, filters));
 			// Possible to have changed state between now and the getTenant call above
-			wait(store(checkEntry2, MetaclusterAPI::getTenant(self->managementDb, tenant)));
+			state TenantMapEntry checkEntry2 = wait(MetaclusterAPI::getTenant(self->managementDb, tenant));
 
 			DisabledTraceEvent(SevDebug, "VerifyListFilter")
 			    .detail("Context", context)
