@@ -174,7 +174,7 @@ void ISimulator::displayWorkers() const {
 	return;
 }
 
-Standalone<StringRef> ISimulator::makeToken(StringRef tenantName, uint64_t ttlSecondsFromNow) {
+Standalone<StringRef> ISimulator::makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow) {
 	ASSERT_GT(authKeys.size(), 0);
 	auto tokenSpec = authz::jwt::TokenRef{};
 	auto [keyName, key] = *authKeys.begin();
@@ -188,7 +188,7 @@ Standalone<StringRef> ISimulator::makeToken(StringRef tenantName, uint64_t ttlSe
 	tokenSpec.expiresAtUnixTime = now + ttlSecondsFromNow;
 	auto const tokenId = deterministicRandom()->randomAlphaNumeric(10);
 	tokenSpec.tokenId = StringRef(tokenId);
-	tokenSpec.tenants = VectorRef<StringRef>(&tenantName, 1);
+	tokenSpec.tenants = VectorRef<int64_t>(&tenantId, 1);
 	auto ret = Standalone<StringRef>();
 	ret.contents() = authz::jwt::signToken(ret.arena(), tokenSpec, key);
 	return ret;
