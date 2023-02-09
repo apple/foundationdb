@@ -176,6 +176,9 @@ public:
 	ACTOR static Future<Void> getTeam(DDTeamCollection* self, GetTeamRequest req) {
 		try {
 			wait(self->checkBuildTeams());
+			TraceEvent("GetTeam", self->distributorId)
+			    .detail("Primary", self->primary)
+			    .detail("ZeroHealthy", self->zeroHealthyTeams->get());
 			// report the median available space
 			if (now() - self->lastMedianAvailableSpaceUpdate > SERVER_KNOBS->AVAILABLE_SPACE_UPDATE_DELAY) {
 				self->lastMedianAvailableSpaceUpdate = now();
@@ -225,6 +228,9 @@ public:
 			// The situation happens rarely. We may want to eliminate this situation someday
 			if (!self->teams.size()) {
 				req.reply.send(std::make_pair(Optional<Reference<IDataDistributionTeam>>(), foundSrc));
+				TraceEvent("GetTeam2", self->distributorId)
+				    .detail("Primary", self->primary)
+				    .detail("ZeroHealthy", self->zeroHealthyTeams->get());
 				return Void();
 			}
 
@@ -253,6 +259,10 @@ public:
 						if (found && teamList[j]->isHealthy()) {
 							bestOption = teamList[j];
 							req.reply.send(std::make_pair(bestOption, foundSrc));
+							TraceEvent("GetTeam3", self->distributorId)
+							    .detail("Primary", self->primary)
+							    .detail("Team", teamList[j]->getServerIDsStr())
+							    .detail("ZeroHealthy", self->zeroHealthyTeams->get());
 							return Void();
 						}
 					}
@@ -382,7 +392,19 @@ public:
 			// 	self->traceAllInfo(true);
 			// }
 
+			if (!self->readyToStart.isReady()) {
+				TraceEvent("GetTeam4", self->distributorId)
+				    .detail("Primary", self->primary)
+				    .detail("ZeroHealthy", self->zeroHealthyTeams->get());
+				req.reply.send(std::make_pair(Optional<Reference<IDataDistributionTeam>>(), foundSrc));
+				return Void();
+			}
+
 			req.reply.send(std::make_pair(bestOption, foundSrc));
+			TraceEvent("GetTeam5", self->distributorId)
+			    .detail("Primary", self->primary)
+			    .detail("Team", bestOption.present() ? describe(bestOption.get()->getServerIDs()) : "")
+			    .detail("ZeroHealthy", self->zeroHealthyTeams->get());
 
 			return Void();
 		} catch (Error& e) {
@@ -1138,6 +1160,10 @@ public:
 				NetworkAddress a = server->getLastKnownInterface().address();
 				AddressExclusion worstAddr(a.ip, a.port);
 				DDTeamCollection::Status worstStatus = self->excludedServers.get(worstAddr);
+				TraceEvent("DDD", self->distributorId)
+				    .detail("Address", worstAddr.toString())
+				    .detail("ServerId", server->getId())
+				    .detail("Status", (int)worstStatus);
 
 				if (worstStatus == DDTeamCollection::Status::WIGGLING && invalidWiggleServer(worstAddr, self, server)) {
 					TraceEvent(SevInfo, "InvalidWiggleServer", self->distributorId)
@@ -1395,7 +1421,6 @@ public:
 			state Error err = e;
 			TraceEvent("StorageServerTrackerCancelled", self->distributorId)
 			    .errorUnsuppressed(e)
-			    .suppressFor(1.0)
 			    .detail("Primary", self->primary)
 			    .detail("Server", server->getId());
 			if (e.code() != error_code_actor_cancelled && errorOut.canBeSet()) {
@@ -1854,6 +1879,7 @@ public:
 		// Fetch the list of excluded servers
 		state ReadYourWritesTransaction tr(self->dbContext());
 		loop {
+			TraceEvent("DDExcludedServersChanged000", self->distributorId).detail("Primary", self->isPrimary());
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				state Future<RangeResult> fresultsExclude = tr.getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY);
@@ -1891,8 +1917,10 @@ public:
 						failed.insert(addr);
 					}
 				}
+				TraceEvent("DDExcludedServersChangedBefore", self->distributorId).detail("Primary", self->isPrimary());
 
 				wait(success(fworkers));
+				TraceEvent("DDExcludedServersChangedAfter", self->distributorId).detail("Primary", self->isPrimary());
 				std::vector<ProcessData> workers = fworkers.get();
 				for (const auto& r : excludedLocalityResults) {
 					std::string locality = decodeExcludedLocalityKey(r.key);
@@ -1917,6 +1945,10 @@ public:
 					}
 				}
 				for (const auto& n : excluded) {
+					TraceEvent("DDExcludedServersChanged0", self->distributorId)
+					    .detail("N", n.toString())
+					    .detail("Primary", self->isPrimary())
+					    .detail("Failed", failed.count(n));
 					if (!failed.count(n)) {
 						self->excludedServers.set(n, DDTeamCollection::Status::EXCLUDED);
 					}
@@ -1930,6 +1962,7 @@ public:
 				    .detail("AddressesExcluded", excludedResults.size())
 				    .detail("AddressesFailed", failedResults.size())
 				    .detail("LocalitiesExcluded", excludedLocalityResults.size())
+				    .detail("Primary", self->isPrimary())
 				    .detail("LocalitiesFailed", failedLocalityResults.size());
 
 				self->restartRecruiting.trigger();
@@ -2981,6 +3014,7 @@ public:
 					    .detail("UnhealthyServers", self->unhealthyServers)
 					    .detail("ServerCount", self->server_info.size())
 					    .detail("StorageTeamSize", self->configuration.storageTeamSize)
+					    .detail("ZeroHealthy", self->zeroOptimalTeams.get())
 					    .detail("HighestPriority", highestPriority)
 					    .trackLatest(self->primary ? "TotalDataInFlight"
 					                               : "TotalDataInFlightRemote"); // This trace event's trackLatest

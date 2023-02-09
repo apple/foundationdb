@@ -1419,6 +1419,19 @@ public:
 		return canKillProcesses(processesLeft, processesDead, KillType::KillInstantly, nullptr);
 	}
 
+	std::vector<AddressExclusion> getExcludeDCAddresses(Optional<Standalone<StringRef>> dcId) const override {
+		std::vector<AddressExclusion> addresses;
+		if (!dcId.present()) {
+			return addresses;
+		}
+		for (const auto& processInfo : getAllProcesses()) {
+			if (processInfo->locality.dcId() == dcId) {
+				addresses.emplace_back(processInfo->address.ip, processInfo->address.port);
+			}
+		}
+		return addresses;
+	}
+
 	bool datacenterDead(Optional<Standalone<StringRef>> dcId) const override {
 		if (!dcId.present()) {
 			return false;
