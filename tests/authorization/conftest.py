@@ -23,6 +23,7 @@ import pytest
 import subprocess
 import admin_server
 import os
+import sys
 from authlib.jose import JsonWebKey, KeySet, jwt
 from local_cluster import TLSConfig
 from tmp_cluster import TempCluster
@@ -63,7 +64,7 @@ def build_dir(request):
 
 @pytest.fixture(scope="session")
 def external_lib_path(build_dir):
-    return os.path.join(build_dir, "bindings/c/libfdb_c_external.so")
+    return os.path.join(build_dir, "bindings/c/libfdb_c_external.{}".format("dylib" if sys.platform.startswith("darwin") else "so"))
 
 @pytest.fixture(scope="session")
 def kty(request):
@@ -155,7 +156,6 @@ def cluster(admin_ipc, build_dir, public_key_jwks_str, public_key_refresh_interv
 @pytest.fixture
 def db(cluster, admin_ipc):
     db = fdb.open(str(cluster.cluster_file))
-    # db.options.set_transaction_timeout(2000) # 2 seconds
     db.options.set_transaction_retry_limit(3)
     yield db
     admin_ipc.request("cleanup_database")

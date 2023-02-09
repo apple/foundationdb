@@ -58,6 +58,12 @@ def test_token_option(private_key, token_gen, default_tenant, tenant_tr_gen):
         assert False, f"expected permission denied, but read transaction went through, value: {value}"
     except fdb.FDBError as e:
         assert e.code == 6000, f"expected permission_denied, got {e} instead"
+
+    # setting token again after reset should work normally
+    tr.options.set_authorization_token(token)
+    assert tr[b"abc"].value == b"def"
+
+    tr.reset() # to clear any read cache
     tr.options.set_authorization_token(token)
     tr.options.set_authorization_token() # setting empty option should invalidate any set token
     try:
