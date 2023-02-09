@@ -267,7 +267,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	// transaction tags
 	init( MAX_TAGS_PER_TRANSACTION,                   5 );
-	init( MAX_TRANSACTION_TAG_LENGTH,                16 );
+	init( MAX_TRANSACTION_TAG_LENGTH,               255 );
 	init( COMMIT_SAMPLE_COST,                       100 ); if( randomize && BUGGIFY ) COMMIT_SAMPLE_COST = 10;
 	init( INCOMPLETE_SHARD_PLUS,                   4096 );
 	init( READ_TAG_SAMPLE_RATE,                    0.01 ); if( randomize && BUGGIFY ) READ_TAG_SAMPLE_RATE = 1.0; // Communicated to clients from cluster

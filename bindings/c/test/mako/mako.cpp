@@ -116,12 +116,14 @@ createNewTransaction(Database db, Arguments const& args, int id, std::optional<s
 		auto token_map_iter = args.authorization_tokens.find(tenant_name);
 		if (token_map_iter != args.authorization_tokens.end()) {
 			tr.setOption(FDB_TR_OPTION_AUTHORIZATION_TOKEN, token_map_iter->second);
+			return { tr, { token_map_iter->second } };
 		} else {
 			logr.error("could not find token for tenant '{}'", tenant_name);
 			_exit(1);
 		}
+	} else {
+		return { tr, {} };
 	}
-	return { tr, { tenant_name } };
 }
 
 int cleanupTenants(ipc::AdminServer& server, Arguments const& args, int db_id) {
@@ -382,7 +384,11 @@ transaction_begin:
 		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END", args.isAnyTimeoutEnabled());
 		updateErrorStatsRunMode(stats, f.error(), OP_COMMIT);
 		watch_commit.stop();
-		auto tx_resetter = ExitGuard([&tx]() { tx.reset(); });
+		auto tx_resetter = ExitGuard([&tx, &token]() {
+			tx.reset();
+			if (token)
+				tx.setOption(FDB_TR_OPTION_AUTHORIZATION_TOKEN, *token);
+		});
 		if (rc == FutureRC::OK) {
 			if (do_sample) {
 				const auto commit_latency = watch_commit.diff();
@@ -1681,6 +1687,10 @@ int Arguments::validate() {
 	}
 
 	if (enable_token_based_authorization) {
+		if (async_xacts > 0) {
+			logr.error("async mode does not support authorization yet");
+			return -1;
+		}
 		if (num_fdb_clusters > 1) {
 			logr.error("for simplicity, --enable_token_based_authorization must be used with exactly one fdb cluster");
 			return -1;
