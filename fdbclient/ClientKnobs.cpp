@@ -299,6 +299,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT, 10.0 ); if ( randomize && BUGGIFY ) METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT = 1 + deterministicRandom()->random01() * 59;
 	init( TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL,  2 ); if( randomize && BUGGIFY ) TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL = deterministicRandom()->randomInt(1, 10);
 	init( CLIENT_ENABLE_USING_CLUSTER_ID_KEY,     false );
+	init( SIMULATION_HIT_TENANT_CAPACITY_LIMITS,  false );
 
 	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,     false );
 	init( SIMULATION_EKP_TENANT_IDS_TO_DROP,        "-1" );

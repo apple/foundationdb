@@ -132,11 +132,15 @@ private:
 	    std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
 		state Future<int64_t> tenantCountFuture =
 		    TenantMetadata::tenantCount().getD(&ryw->getTransaction(), Snapshot::False, 0);
-		int64_t _nextId = wait(TenantAPI::getNextTenantId(&ryw->getTransaction()));
+		int64_t _nextId = wait(TenantAPI::getNextTenantId(&ryw->getTransaction(), tenants.size()));
 		state int64_t nextId = _nextId;
+		ASSERT(nextId > 0);
 
 		state std::vector<Future<bool>> createFutures;
 		for (auto const& [tenant, config] : tenants) {
+			if (!TenantAPI::nextTenantIdPrefixMatches(nextId - 1, nextId)) {
+				throw cluster_no_capacity();
+			}
 			createFutures.push_back(createTenant(ryw, tenant, config, nextId++, tenantGroupNetTenantDelta));
 		}
 

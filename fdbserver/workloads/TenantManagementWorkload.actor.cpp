@@ -30,6 +30,7 @@
 #include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/TenantSpecialKeys.actor.h"
@@ -40,7 +41,9 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ApiVersion.h"
+#include "flow/CodeProbe.h"
 #include "flow/Error.h"
+#include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/flow.h"
@@ -93,6 +96,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 	int maxTenants;
 	int maxTenantGroups;
+	int64_t tenantIdPrefix;
 	double testDuration;
 	bool useMetacluster;
 	bool singleClient;
@@ -132,6 +136,10 @@ struct TenantManagementWorkload : TestWorkload {
 		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 		singleClient = getOption(options, "singleClient"_sr, false);
+		tenantIdPrefix = getOption(options,
+		                           "tenantIdPrefix"_sr,
+		                           deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
+		                                                            TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1));
 
 		localTenantNamePrefix = format("%stenant_%d_", tenantNamePrefix.toString().c_str(), clientId);
 		localTenantGroupNamePrefix = format("%stenantgroup_%d_", tenantNamePrefix.toString().c_str(), clientId);
@@ -167,6 +175,8 @@ struct TenantManagementWorkload : TestWorkload {
 		if (clientId == 0 && g_network->isSimulated() && BUGGIFY) {
 			IKnobCollection::getMutableGlobalKnobCollection().setKnob(
 			    "max_tenants_per_cluster", KnobValueRef::create(int{ deterministicRandom()->randomInt(20, 100) }));
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob("simulation_hit_tenant_capacity_limits",
+			                                                          KnobValueRef::create(bool{ true }));
 		}
 
 		if (clientId == 0 || !singleClient) {
@@ -236,7 +246,8 @@ struct TenantManagementWorkload : TestWorkload {
 		if (self->useMetacluster) {
 			fmt::print("Create metacluster and register data cluster ... \n");
 			// Configure the metacluster (this changes the tenant mode)
-			wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
+			wait(success(
+			    MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix)));
 
 			DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;
@@ -386,11 +397,15 @@ struct TenantManagementWorkload : TestWorkload {
 			    self->dataDb.getReference(), tenantsToCreate.begin()->first, tenantsToCreate.begin()->second)));
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			int64_t _nextId = wait(TenantAPI::getNextTenantId(tr));
+			int64_t _nextId = wait(TenantAPI::getNextTenantId(tr, tenantsToCreate.size()));
 			int64_t nextId = _nextId;
+			ASSERT(nextId > 0);
 
 			std::vector<Future<Void>> createFutures;
 			for (auto [tenant, entry] : tenantsToCreate) {
+				if (!TenantAPI::nextTenantIdPrefixMatches(nextId - 1, nextId)) {
+					throw cluster_no_capacity();
+				}
 				entry.setId(nextId++);
 				createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, entry)));
 			}
@@ -407,6 +422,19 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 
 		return Void();
+	}
+
+	ACTOR static Future<int64_t> getLastTenantId(Database cx) {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				state int64_t lastId = wait(TenantMetadata::lastTenantId().getD(tr, Snapshot::False, 0));
+				return lastId;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
 	}
 
 	ACTOR static Future<Void> createTenant(TenantManagementWorkload* self) {
@@ -449,6 +477,10 @@ struct TenantManagementWorkload : TestWorkload {
 			tenantsToCreate[tenant] = entry;
 			hasSystemTenant = hasSystemTenant || tenant.startsWith("\xff"_sr);
 			hasSystemTenantGroup = hasSystemTenantGroup || entry.tenantGroup.orDefault(""_sr).startsWith("\xff"_sr);
+		}
+
+		if (newTenants == 0) {
+			return Void();
 		}
 
 		// If any tenant existed at the start of this function, then we expect the creation to fail or be a no-op,
@@ -549,6 +581,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 					ASSERT(entry.present());
 					ASSERT(entry.get().id > self->maxId);
+					ASSERT(entry.get().id >> 48 == self->tenantIdPrefix);
 					ASSERT(entry.get().tenantGroup == tenantItr->second.tenantGroup);
 					ASSERT(entry.get().tenantState == TenantState::READY);
 
@@ -561,6 +594,7 @@ struct TenantManagementWorkload : TestWorkload {
 						    wait(TenantAPI::tryGetTenant(self->dataDb.getReference(), tenantItr->first));
 						ASSERT(dataEntry.present());
 						ASSERT(dataEntry.get().id == entry.get().id);
+						ASSERT(dataEntry.get().id >> 48 == self->tenantIdPrefix);
 						ASSERT(dataEntry.get().tenantGroup == entry.get().tenantGroup);
 						ASSERT(dataEntry.get().tenantState == TenantState::READY);
 					}
@@ -626,6 +660,17 @@ struct TenantManagementWorkload : TestWorkload {
 					ASSERT(operationType == OperationType::METACLUSTER != self->useMetacluster);
 					return Void();
 				} else if (e.code() == error_code_cluster_no_capacity) {
+					int64_t lastTenantId = wait(getLastTenantId(self->dataDb));
+					TraceEvent(SevWarn, "TenantCapcityLimitsExceeded")
+					    .detail("LastTenantId", lastTenantId)
+					    .detail("NewTenants", newTenants)
+					    .detail("ClientID", self->clientId);
+					// Overshot our capacity because we cannot assign anymore tenant ids with the same prefix
+					if (lastTenantId >> 48 != (lastTenantId + newTenants) >> 48) {
+						CODE_PROBE(true, "prefix change from reaching tenant capacity limits");
+						ASSERT(lastTenantId >> 48 == self->tenantIdPrefix);
+						return Void();
+					}
 					// Confirm that we overshot our capacity. This check cannot be done for database operations
 					// because we cannot transactionally get the tenant count with the creation.
 					if (operationType == OperationType::MANAGEMENT_TRANSACTION ||
@@ -1775,6 +1820,20 @@ struct TenantManagementWorkload : TestWorkload {
 
 	ACTOR Future<Void> _start(Database cx, TenantManagementWorkload* self) {
 		state double start = now();
+		// Only one client will set the tenantId prefix on the metacluster so fetch that value
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				int64_t tenantIdPrefix =
+				    wait(KeyBackedProperty<int64_t>(tenantIdPrefixKey).getD(tr, Snapshot::False, 0));
+				self->tenantIdPrefix = tenantIdPrefix;
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+		TraceEvent("TenantManagementIdPrefix").detail("Prefix", self->tenantIdPrefix);
 
 		// Run a random sequence of tenant management operations for the duration of the test
 		while (now() < start + self->testDuration) {

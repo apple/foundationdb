@@ -294,6 +294,7 @@ extern const KeyRef encryptionAtRestModeConfKey;
 
 // Tenant mode config key
 extern const KeyRef tenantModeConfKey;
+extern const KeyRef tenantIdPrefixKey;
 
 //	The differences between excluded and failed can be found in "command-line-interface.rst"
 //	and in the help message of the fdbcli command "exclude".

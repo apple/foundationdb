@@ -451,9 +451,12 @@ Future<Void> managementClusterCheckEmpty(Transaction tr) {
 }
 
 ACTOR template <class DB>
-Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName name) {
+Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName name, int64_t tenantIdPrefix) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	state Optional<UID> metaclusterUid;
+	ASSERT(tenantIdPrefix >= TenantAPI::TENANT_ID_PREFIX_MIN_VALUE &&
+	       tenantIdPrefix <= TenantAPI::TENANT_ID_PREFIX_MAX_VALUE);
+	TraceEvent("TenantIdPrefix").detail("Prefix", tenantIdPrefix);
 
 	loop {
 		try {
@@ -461,8 +464,6 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName na
 
 			state Future<Optional<MetaclusterRegistrationEntry>> metaclusterRegistrationFuture =
 			    MetaclusterMetadata::metaclusterRegistration().get(tr);
-
-			wait(managementClusterCheckEmpty(tr));
 
 			Optional<MetaclusterRegistrationEntry> existingRegistration = wait(metaclusterRegistrationFuture);
 			if (existingRegistration.present()) {
@@ -477,12 +478,16 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName na
 				}
 			}
 
+			wait(managementClusterCheckEmpty(tr));
+
 			if (!metaclusterUid.present()) {
 				metaclusterUid = deterministicRandom()->randomUniqueID();
 			}
 
 			MetaclusterMetadata::metaclusterRegistration().set(
 			    tr, MetaclusterRegistrationEntry(name, metaclusterUid.get()));
+
+			KeyBackedProperty<int64_t>(tenantIdPrefixKey).set(tr, tenantIdPrefix);
 
 			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 			break;
@@ -1266,8 +1271,18 @@ struct CreateTenantImpl {
 		state Future<Void> setClusterFuture = self->ctx.setCluster(tr, assignment.first);
 
 		// Create a tenant entry in the management cluster
-		Optional<int64_t> lastId = wait(ManagementClusterMetadata::tenantMetadata().lastTenantId.get(tr));
-		self->tenantEntry.setId(lastId.orDefault(-1) + 1);
+		state Optional<int64_t> lastId = wait(ManagementClusterMetadata::tenantMetadata().lastTenantId.get(tr));
+		// If the last tenant id is not present fetch the prefix from system keys and make it the prefix for the next
+		// allocated tenant id
+		if (!lastId.present()) {
+			Optional<int64_t> tenantIdPrefix = wait(KeyBackedProperty<int64_t>(tenantIdPrefixKey).get(tr));
+			ASSERT(tenantIdPrefix.present());
+			lastId = tenantIdPrefix.get() << 48;
+		}
+		if (!TenantAPI::nextTenantIdPrefixMatches(lastId.get(), lastId.get() + 1)) {
+			throw cluster_no_capacity();
+		}
+		self->tenantEntry.setId(lastId.orDefault(0) + 1);
 		ManagementClusterMetadata::tenantMetadata().lastTenantId.set(tr, self->tenantEntry.id);
 
 		self->tenantEntry.tenantState = TenantState::REGISTERING;

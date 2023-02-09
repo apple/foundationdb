@@ -24,6 +24,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Tuple.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace TenantAPI {
@@ -64,6 +65,26 @@ int64_t extractTenantIdFromKeyRef(StringRef s) {
 	// Parse mutation key to determine tenant prefix
 	StringRef prefix = s.substr(0, TenantAPI::PREFIX_SIZE);
 	return TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
+}
+
+// validates whether the lastTenantId and the nextTenantId share the same 2 byte prefix
+bool nextTenantIdPrefixMatches(int64_t lastTenantId, int64_t nextTenantId) {
+	if (nextTenantId >> 48 != lastTenantId >> 48) {
+		TraceEvent(SevWarnAlways, "TenantIdPrefixMismatch")
+		    .detail("CurrentTenantId", lastTenantId)
+		    .detail("NewTenantId", nextTenantId)
+		    .detail("CurrentTenantIdPrefix", lastTenantId >> 48)
+		    .detail("NewTenantIdPrefix", nextTenantId >> 48);
+		return false;
+	}
+	return true;
+}
+
+// returns the maximum allowable tenant id in which the 2 byte prefix is not overriden
+int64_t getMaxAllowableTenantId(int64_t curTenantId) {
+	int64_t maxTenantId = pow(2, 48) - 1 + ((curTenantId >> 48) << 48);
+	ASSERT(maxTenantId > 0);
+	return maxTenantId;
 }
 
 } // namespace TenantAPI
