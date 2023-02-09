@@ -9597,14 +9597,77 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	}
 }
 
+ACTOR Future<Void> createSstFileForCheckPointMetadata(StorageServer* data,
+                                                      CheckpointMetaData metaData,
+                                                      std::string dir) {
+	state int failureCount = 0;
+	loop {
+		try {
+			ASSERT(metaData.ranges.size() > 0);
+			state std::string localFile = dir + "/metadata_bytes.sst";
+			state IRocksDBSstFileWriter* sstWriter = nullptr;
+			sstWriter = beginRocksDBSstFileWriter(localFile);
+			if (sstWriter == nullptr) {
+				return Void();
+			}
+			state std::vector<KeyRange>::iterator iter = metaData.ranges.begin();
+			std::sort(metaData.ranges.begin(), metaData.ranges.end(), [](KeyRange a, KeyRange b) {
+				return a.begin > b.begin;
+			}); // inplacement sorting acceptable?
+			state int64_t numGetRangeQueries = 0;
+			state int64_t numSampledKeys = 0;
+			while (iter != metaData.ranges.end()) {
+				state KeyRange range = *iter;
+				state Key readBegin = range.begin.withPrefix(persistByteSampleKeys.begin);
+				state Key readEnd = range.end.withPrefix(persistByteSampleKeys.begin);
+				loop {
+					try {
+						state RangeResult result = wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd),
+						                                                        SERVER_KNOBS->STORAGE_LIMIT_BYTES,
+						                                                        SERVER_KNOBS->STORAGE_LIMIT_BYTES));
+						numGetRangeQueries++;
+						for (int i = 0; i < result.size(); i++) {
+							numSampledKeys++;
+							sstWriter->write(result[i].key, result[i].value);
+						}
+						if (result.more) {
+							ASSERT(result.readThrough.present());
+							readBegin = keyAfter(result.readThrough.get());
+						} else {
+							break;
+						}
+					} catch (Error& e) {
+						if (failureCount < SERVER_KNOBS->ROCKSDB_CREATE_SST_FILE_RETRY_COUNT_MAX) {
+							failureCount++;
+							continue;
+						} else {
+							throw e;
+						}
+					}
+				}
+				iter++;
+			}
+			endRocksDBSstFileWriter(sstWriter);
+			TraceEvent("DumpCheckPointMetaData", data->thisServerID)
+			    .detail("NumSampledKeys", numSampledKeys)
+			    .detail("NumGetRangeQueries", numGetRangeQueries)
+			    .detail("CheckpointID", metaData.checkpointID);
+			break;
+
+		} catch (Error& e) {
+			throw e;
+		}
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData metaData) {
 	ASSERT(std::find(metaData.src.begin(), metaData.src.end(), data->thisServerID) != metaData.src.end() &&
 	       !metaData.ranges.empty());
-	const CheckpointRequest req(metaData.version,
-	                            metaData.ranges,
-	                            static_cast<CheckpointFormat>(metaData.format),
-	                            metaData.checkpointID,
-	                            data->folder + rocksdbCheckpointDirPrefix + metaData.checkpointID.toString());
+	state std::string dir = data->folder + rocksdbCheckpointDirPrefix + metaData.checkpointID.toString();
+	const CheckpointRequest req(
+	    metaData.version, metaData.ranges, static_cast<CheckpointFormat>(metaData.format), metaData.checkpointID, dir);
 	state CheckpointMetaData checkpointResult;
 	try {
 		wait(store(checkpointResult, data->storage.checkpoint(req)));
@@ -9619,6 +9682,20 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		checkpointResult.setState(CheckpointMetaData::Fail);
 		TraceEvent("StorageCreatedCheckpointFailure", data->thisServerID)
 		    .detail("PendingCheckpoint", checkpointResult.toString());
+	}
+
+	// Dump the checkpoint meta data to the sst file of metadata.
+	try {
+		wait(createSstFileForCheckPointMetadata(data, metaData, dir));
+		TraceEvent("StorageCreateCheckpointMetaDataSstFileDumped", data->thisServerID)
+		    .detail("Checkpoint", checkpointResult.toString());
+	} catch (Error& e) {
+		// If the checkpoint meta data is not dumped successfully, remove the checkpoint.
+		TraceEvent(SevWarn, "StorageCreateCheckpointMetaDataSstFileDumped", data->thisServerID)
+		    .errorUnsuppressed(e)
+		    .detail("Checkpoint", checkpointResult.toString());
+		data->checkpoints[checkpointResult.checkpointID].setState(CheckpointMetaData::Deleting);
+		data->actors.add(deleteCheckpointQ(data, metaData.version, checkpointResult));
 	}
 
 	// Persist the checkpoint meta data.
