@@ -177,6 +177,13 @@ void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> 
 	}
 }
 
+bool TenantMapEntry::operator==(TenantMapEntry const& other) const {
+	return id == other.id && tenantName == other.tenantName && tenantState == other.tenantState &&
+	       tenantLockState == other.tenantLockState && tenantGroup == other.tenantGroup &&
+	       assignedCluster == other.assignedCluster && configurationSequenceNum == other.configurationSequenceNum &&
+	       renameDestination == other.renameDestination && error == other.error;
+}
+
 json_spirit::mObject TenantGroupEntry::toJson() const {
 	json_spirit::mObject tenantGroupEntry;
 	if (assignedCluster.present()) {

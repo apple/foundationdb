@@ -102,6 +102,8 @@ struct TenantMapEntry {
 		return ObjectReader::fromStringRef<TenantMapEntry>(value, IncludeVersion());
 	}
 
+	bool operator==(TenantMapEntry const& other) const;
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,

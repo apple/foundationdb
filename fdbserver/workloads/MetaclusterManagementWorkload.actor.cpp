@@ -271,13 +271,15 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		state ClusterName clusterName = self->chooseClusterName();
 		state DataClusterData* dataDb = &self->dataDbs[clusterName];
 
+		state std::vector<std::string> messages;
 		try {
 			loop {
 				Future<Void> restoreFuture =
 				    MetaclusterAPI::restoreCluster(self->managementDb,
 				                                   clusterName,
 				                                   dataDb->db->getConnectionRecord()->getConnectionString(),
-				                                   ApplyManagementClusterUpdates::True);
+				                                   ApplyManagementClusterUpdates::True,
+				                                   &messages);
 				Optional<Void> result = wait(timeout(restoreFuture, deterministicRandom()->randomInt(1, 30)));
 				if (result.present()) {
 					break;

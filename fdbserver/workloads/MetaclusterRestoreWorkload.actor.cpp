@@ -46,6 +46,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		std::set<int64_t> tenants;
 		std::set<TenantGroupName> tenantGroups;
 		bool restored = false;
+		bool restoreHasMessages = false;
 
 		DataClusterData() {}
 		DataClusterData(Database db) : db(db) {}
@@ -80,6 +81,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	std::map<TenantGroupName, TenantGroupData> tenantGroups;
 
 	std::set<int64_t> deletedTenants;
+	std::vector<std::pair<int64_t, TenantMapEntry>> managementTenantsBeforeRestore;
 
 	int initialTenants;
 	int maxTenants;
@@ -94,7 +96,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 	MetaclusterRestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 1000));
-		initialTenants = std::min<int>(maxTenants, getOption(options, "initialTenants"_sr, 100));
+		initialTenants = std::min<int>(maxTenants, getOption(options, "initialTenants"_sr, 40));
 		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
 
 		tenantGroupCapacity = (initialTenants / 2 + maxTenantGroups - 1) / g_simulator->extraDatabases.size();
@@ -196,9 +198,13 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			wait(MetaclusterAPI::registerCluster(self->managementDb, clusterName, ccs, clusterEntry));
 		}
 
+		TraceEvent(SevDebug, "MetaclusterRestoreWorkloadCreateTenants").detail("NumTenants", self->initialTenants);
+
 		while (self->createdTenants.size() < self->initialTenants) {
 			wait(createTenant(self, TenantData::AccessTime::BEFORE_BACKUP));
 		}
+
+		TraceEvent(SevDebug, "MetaclusterRestoreWorkloadCreateTenantsComplete");
 
 		return Void();
 	}
@@ -228,11 +234,11 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		return container->getURL();
 	}
 
-	ACTOR static Future<Void> restoreCluster(ClusterName clusterName,
-	                                         Database dataDb,
-	                                         std::string backupUrl,
-	                                         bool addToMetacluster,
-	                                         MetaclusterRestoreWorkload* self) {
+	ACTOR static Future<Void> restoreDataCluster(ClusterName clusterName,
+	                                             Database dataDb,
+	                                             std::string backupUrl,
+	                                             bool addToMetacluster,
+	                                             MetaclusterRestoreWorkload* self) {
 		state FileBackupAgent backupAgent;
 		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
 		addDefaultBackupRanges(backupRanges);
@@ -250,16 +256,19 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		TraceEvent("MetaclusterRestoreWorkloadRestoreCluster").detail("ClusterName", clusterName);
 		wait(success(backupAgent.restore(dataDb, dataDb, clusterName, StringRef(backupUrl), {}, backupRanges)));
 
+		state std::vector<std::string> messages;
 		if (addToMetacluster) {
 			TraceEvent("MetaclusterRestoreWorkloadAddClusterToMetacluster").detail("ClusterName", clusterName);
 			wait(MetaclusterAPI::restoreCluster(self->managementDb,
 			                                    clusterName,
 			                                    dataDb->getConnectionRecord()->getConnectionString(),
-			                                    ApplyManagementClusterUpdates::True));
+			                                    ApplyManagementClusterUpdates::True,
+			                                    &messages));
 			TraceEvent("MetaclusterRestoreWorkloadRestoreComplete").detail("ClusterName", clusterName);
 		}
 
 		self->dataDbs[clusterName].restored = true;
+		self->dataDbs[clusterName].restoreHasMessages = !messages.empty();
 
 		return Void();
 	}
@@ -338,7 +347,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			// The tenant group from the data cluster is what we expect
 			auto itr = self->tenantGroups.find(collisionItr->first);
 			if (itr->second.cluster == clusterName) {
-				TraceEvent(SevDebug, "MetaclusterRestoreWorlkoadDeleteTenantGroupCollision")
+				TraceEvent(SevDebug, "MetaclusterRestoreWorkloadDeleteTenantGroupCollision")
 				    .detail("From", "ManagementCluster")
 				    .detail("TenantGroup", collisionItr->first);
 				std::unordered_set<int64_t> tenantsInGroup =
@@ -355,7 +364,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			}
 			// The tenant group from the management cluster is what we expect
 			else {
-				TraceEvent(SevDebug, "MetaclusterRestoreWorlkoadDeleteTenantGroupCollision")
+				TraceEvent(SevDebug, "MetaclusterRestoreWorkloadDeleteTenantGroupCollision")
 				    .detail("From", "DataCluster")
 				    .detail("TenantGroup", collisionItr->first);
 				std::unordered_set<int64_t> tenantsInGroup = wait(runTransaction(
@@ -380,6 +389,17 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 		wait(waitForAll(deleteFutures));
 		return Void();
+	}
+
+	ACTOR static Future<std::vector<std::pair<int64_t, TenantMapEntry>>> getDataClusterTenants(Database db) {
+		KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants =
+		    wait(runTransaction(db.getReference(), [](Reference<ReadYourWritesTransaction> tr) {
+			    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			    return TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1);
+		    }));
+
+		ASSERT_LE(tenants.results.size(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+		return tenants.results;
 	}
 
 	ACTOR static Future<Void> restoreManagementCluster(MetaclusterRestoreWorkload* self) {
@@ -440,34 +460,58 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				}
 			}
 
-			loop {
+			state std::vector<std::string> messages;
+			state bool completed = false;
+			while (!completed) {
+				state std::vector<std::pair<int64_t, TenantMapEntry>> dataTenantsBeforeRestore =
+				    wait(getDataClusterTenants(clusterItr->second.db));
+
 				try {
 					TraceEvent("MetaclusterRestoreWorkloadRecoverManagementCluster")
 					    .detail("FromCluster", clusterItr->first)
 					    .detail("TenantCollisions", tenantCollisions.size());
+
 					wait(MetaclusterAPI::restoreCluster(
 					    self->managementDb,
 					    clusterItr->first,
 					    clusterItr->second.db->getConnectionRecord()->getConnectionString(),
-					    ApplyManagementClusterUpdates::False));
+					    ApplyManagementClusterUpdates::False,
+					    &messages));
 
 					ASSERT(tenantCollisions.empty() && groupCollisions.empty());
-					break;
+					completed = true;
 				} catch (Error& e) {
-					if ((e.code() == error_code_tenant_already_exists && !tenantCollisions.empty()) ||
-					    (e.code() == error_code_invalid_tenant_configuration && !groupCollisions.empty())) {
-						if (!tenantCollisions.empty()) {
-							wait(self->resolveTenantCollisions(
-							    self, clusterItr->first, clusterItr->second.db, tenantCollisions));
-							tenantCollisions.clear();
-						}
-						if (!groupCollisions.empty()) {
-							wait(self->resolveGroupCollisions(
-							    self, clusterItr->first, clusterItr->second.db, groupCollisions));
-							groupCollisions.clear();
-						}
-					} else {
+					bool failedDueToCollision =
+					    (e.code() == error_code_tenant_already_exists && !tenantCollisions.empty()) ||
+					    (e.code() == error_code_invalid_tenant_configuration && !groupCollisions.empty());
+					if (!failedDueToCollision) {
 						throw;
+					}
+				}
+
+				std::vector<std::pair<int64_t, TenantMapEntry>> dataTenantsAfterRestore =
+				    wait(getDataClusterTenants(clusterItr->second.db));
+
+				// Restoring a management cluster from data clusters should not change the data clusters at all
+				fmt::print("Checking data clusters: {}\n", completed);
+				ASSERT_EQ(dataTenantsBeforeRestore.size(), dataTenantsAfterRestore.size());
+				for (int i = 0; i < dataTenantsBeforeRestore.size(); ++i) {
+					ASSERT_EQ(dataTenantsBeforeRestore[i].first, dataTenantsAfterRestore[i].first);
+					ASSERT(dataTenantsBeforeRestore[i].second == dataTenantsAfterRestore[i].second);
+				}
+
+				// If we didn't succeed, resolve tenant and group collisions and try again
+				if (!completed) {
+					ASSERT(messages.size() > 0);
+					if (!tenantCollisions.empty()) {
+						wait(self->resolveTenantCollisions(
+						    self, clusterItr->first, clusterItr->second.db, tenantCollisions));
+						tenantCollisions.clear();
+					}
+					if (!groupCollisions.empty()) {
+						wait(self->resolveGroupCollisions(
+						    self, clusterItr->first, clusterItr->second.db, groupCollisions));
+						groupCollisions.clear();
 					}
 				}
 			}
@@ -749,11 +793,19 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 		if (self->recoverManagementCluster) {
 			wait(resetManagementCluster(self));
+		} else {
+			KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants =
+			    wait(runTransaction(self->managementDb, [](Reference<ITransaction> tr) {
+				    return MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(
+				        tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1);
+			    }));
+			ASSERT_LE(tenants.results.size(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+			self->managementTenantsBeforeRestore = tenants.results;
 		}
 
 		std::vector<Future<Void>> restores;
 		for (auto [cluster, backupUrl] : backups) {
-			restores.push_back(restoreCluster(
+			restores.push_back(restoreDataCluster(
 			    cluster, self->dataDbs[cluster].db, backupUrl.get(), !self->recoverManagementCluster, self));
 		}
 
@@ -849,9 +901,31 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		    }));
 
 		ASSERT_LE(tenants.results.size(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
-
 		std::map<int64_t, TenantMapEntry> tenantMap(tenants.results.begin(), tenants.results.end());
-		for (auto& [tenantId, tenantData] : self->createdTenants) {
+
+		// If we did not restore the management cluster, then every tenant present in the management cluster before the
+		// restore should be present after the restore. All tenants in the management cluster should be unchanged except
+		// for those tenants that were created after the backup and lost during the restore, which will be marked in an
+		// error state.
+		for (auto const& [tenantId, tenantEntry] : self->managementTenantsBeforeRestore) {
+			auto itr = tenantMap.find(tenantId);
+			ASSERT(itr != tenantMap.end());
+
+			TenantMapEntry postRecoveryEntry = itr->second;
+			if (postRecoveryEntry.tenantState == TenantState::ERROR) {
+				ASSERT(self->dataDbs[itr->second.assignedCluster.get()].restored);
+				postRecoveryEntry.tenantState = tenantEntry.tenantState;
+				postRecoveryEntry.error.clear();
+			}
+
+			ASSERT(tenantEntry == postRecoveryEntry);
+		}
+
+		if (!self->managementTenantsBeforeRestore.empty()) {
+			ASSERT_EQ(self->managementTenantsBeforeRestore.size(), tenantMap.size());
+		}
+
+		for (auto const& [tenantId, tenantData] : self->createdTenants) {
 			auto tenantItr = tenantMap.find(tenantId);
 			if (tenantItr == tenantMap.end()) {
 				// A tenant that we expected to have been created can only be missing from the management cluster if we
@@ -864,13 +938,24 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 					ASSERT(tenantItr->second.tenantState == TenantState::ERROR ||
 					       (tenantItr->second.tenantState == TenantState::READY &&
 					        tenantData.createTime == TenantData::AccessTime::DURING_BACKUP));
+					if (tenantItr->second.tenantState == TenantState::ERROR) {
+						ASSERT(self->dataDbs[tenantData.cluster].restoreHasMessages);
+					}
 				} else {
 					ASSERT_EQ(tenantItr->second.tenantState, TenantState::READY);
 				}
 			}
 		}
 
-		// TODO: evaluate extra tenants in tenantMap
+		// If we recovered both the management and some data clusters, we might undelete a tenant
+		// Check that any unexpected tenants were deleted and that we had a potentially lossy recovery
+		for (auto const& [tenantId, tenantEntry] : tenantMap) {
+			if (!self->createdTenants.count(tenantId)) {
+				ASSERT(self->deletedTenants.count(tenantId));
+				ASSERT(self->recoverManagementCluster);
+				ASSERT(self->recoverDataClusters);
+			}
+		}
 
 		return Void();
 	}

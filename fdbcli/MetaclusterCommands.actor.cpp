@@ -190,20 +190,46 @@ ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vecto
 		return false;
 	}
 
-	if (tokens[4] == "restore_known_data_cluster"_sr) {
-		wait(MetaclusterAPI::restoreCluster(
-		    db, tokens[2], config.get().first.get(), ApplyManagementClusterUpdates::True));
+	state std::vector<std::string> messages;
+	state bool success = true;
 
-		fmt::print("The cluster `{}' has been restored\n", printable(tokens[2]).c_str());
-		return true;
-	} else if (tokens[4] == "repopulate_from_data_cluster"_sr) {
-		wait(MetaclusterAPI::restoreCluster(
-		    db, tokens[2], config.get().first.get(), ApplyManagementClusterUpdates::False));
-		return false;
-	} else {
-		fmt::print(stderr, "ERROR: unrecognized restore mode `{}'\n", printable(tokens[4]));
-		return false;
+	try {
+		if (tokens[4] == "restore_known_data_cluster"_sr) {
+			wait(MetaclusterAPI::restoreCluster(
+			    db, tokens[2], config.get().first.get(), ApplyManagementClusterUpdates::True, &messages));
+
+		} else if (tokens[4] == "repopulate_from_data_cluster"_sr) {
+			wait(MetaclusterAPI::restoreCluster(
+			    db, tokens[2], config.get().first.get(), ApplyManagementClusterUpdates::False, &messages));
+		} else {
+			fmt::print(stderr, "ERROR: unrecognized restore mode `{}'\n", printable(tokens[4]));
+			success = false;
+		}
+	} catch (Error& e) {
+		success = false;
+		fmt::print(stderr, "ERROR: {} ({})\n", e.what(), e.code());
 	}
+
+	if (!messages.empty()) {
+		if (!success) {
+			fmt::print("\n");
+		}
+
+		fmt::print(success ? stdout : stderr, "The restore reported the following messages:\n");
+		for (int i = 0; i < messages.size(); ++i) {
+			fmt::print(success ? stdout : stderr, "  {}. {}\n", i + 1, messages[i]);
+		}
+
+		if (success) {
+			fmt::print("\n");
+		}
+	}
+
+	if (success) {
+		fmt::print("The cluster `{}' has been restored\n", printable(tokens[2]).c_str());
+	}
+
+	return success;
 }
 
 // metacluster configure command
