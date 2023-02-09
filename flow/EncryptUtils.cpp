@@ -116,10 +116,8 @@ EncryptAuthTokenAlgo getAuthTokenAlgoFromMode(const EncryptAuthTokenMode mode) {
 }
 
 EncryptAuthTokenMode getRandomAuthTokenMode() {
-	std::vector<EncryptAuthTokenMode> modes = { EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
-		                                        EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE };
-	int idx = deterministicRandom()->randomInt(0, modes.size());
-	return modes[idx];
+	return deterministicRandom()->coinflip() ? EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE
+	                                         : EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE;
 }
 
 EncryptAuthTokenAlgo getRandomAuthTokenAlgo() {

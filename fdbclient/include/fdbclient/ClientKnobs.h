@@ -301,6 +301,11 @@ public:
 	// key_not_found errors for. If TenantInfo::INVALID_TENANT is contained within the list then no tenants will be
 	// dropped. This Knob should ONLY be used in simulation for testing purposes
 	std::string SIMULATION_EKP_TENANT_IDS_TO_DROP;
+	bool ENABLE_CONFIGURABLE_ENCRYPTION;
+	int ENCRYPT_HEADER_FLAGS_VERSION;
+	int ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION;
+	int ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION;
+	int ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
