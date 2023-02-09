@@ -36,6 +36,7 @@
 #include <limits>
 #include <memory>
 #include <random>
+#include <variant>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -363,21 +364,39 @@ struct EncryptionOpsWorkload : TestWorkload {
 		ASSERT_EQ(headerRef.flagsVersion, CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
 
 		// validate flags
-		ParsedEncryptHeaderDetails details = BlobCipherEncryptHeaderRef::getCipherDetailsAndIv(headerRef);
-		ASSERT_EQ(details.encryptMode, EncryptCipherMode::ENCRYPT_CIPHER_MODE_AES_256_CTR);
-		Reference<BlobCipherKey> cipherKey = getEncryptionKey(details.textCipherDetails.encryptDomainId,
-		                                                      details.textCipherDetails.baseCipherId,
-		                                                      details.textCipherDetails.salt);
+		BlobCipherDetails textCipherDetails;
+		BlobCipherDetails headerCipherDetails;
+		uint8_t iv[AES_256_IV_LENGTH];
+		if (std::holds_alternative<AesCtrNoAuthV1>(headerRef.algoHeader)) {
+			AesCtrNoAuthV1 noAuth = std::get<AesCtrNoAuthV1>(headerRef.algoHeader);
+			memcpy(&iv[0], &noAuth.iv[0], AES_256_IV_LENGTH);
+			textCipherDetails = noAuth.cipherTextDetails;
+			headerCipherDetails = BlobCipherDetails();
+		} else if (std::holds_alternative<AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>>(headerRef.algoHeader)) {
+			AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE> hmacSha =
+			    std::get<AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>>(headerRef.algoHeader);
+			memcpy(&iv[0], &hmacSha.iv[0], AES_256_IV_LENGTH);
+			textCipherDetails = hmacSha.cipherTextDetails;
+			headerCipherDetails = hmacSha.cipherHeaderDetails;
+		} else {
+			ASSERT(std::holds_alternative<AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>(headerRef.algoHeader));
+			AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE> aesCmac =
+			    std::get<AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>(headerRef.algoHeader);
+			memcpy(&iv[0], &aesCmac.iv[0], AES_256_IV_LENGTH);
+			textCipherDetails = aesCmac.cipherTextDetails;
+			headerCipherDetails = aesCmac.cipherHeaderDetails;
+		}
+		Reference<BlobCipherKey> cipherKey =
+		    getEncryptionKey(textCipherDetails.encryptDomainId, textCipherDetails.baseCipherId, textCipherDetails.salt);
 		Reference<BlobCipherKey> headerCipherKey =
-		    details.headerCipherDetails.encryptDomainId == INVALID_ENCRYPT_DOMAIN_ID
+		    headerCipherDetails.encryptDomainId == INVALID_ENCRYPT_DOMAIN_ID
 		        ? Reference<BlobCipherKey>() // no authentication mode cipher header-key is not needed
-		        : getEncryptionKey(details.headerCipherDetails.encryptDomainId,
-		                           details.headerCipherDetails.baseCipherId,
-		                           details.headerCipherDetails.salt);
+		        : getEncryptionKey(
+		              headerCipherDetails.encryptDomainId, headerCipherDetails.baseCipherId, headerCipherDetails.salt);
 		ASSERT(cipherKey.isValid());
 		ASSERT(cipherKey->isEqual(orgCipherKey));
 
-		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, &details.iv[0], BlobCipherMetrics::TEST);
+		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, &iv[0], BlobCipherMetrics::TEST);
 
 		auto start = std::chrono::high_resolution_clock::now();
 		StringRef decrypted = decryptor.decrypt(encrypted.begin(), len, headerRef, arena);

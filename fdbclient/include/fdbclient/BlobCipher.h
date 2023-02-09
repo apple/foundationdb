@@ -19,7 +19,6 @@
  */
 #ifndef FDBCLIENT_BLOB_CIPHER_H
 #define FDBCLIENT_BLOB_CIPHER_H
-#include <variant>
 #pragma once
 
 #include "fdbrpc/Stats.h"
@@ -51,6 +50,7 @@
 #include <openssl/sha.h>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 #if defined(HAVE_WOLFSSL)
 #include <wolfssl/options.h>
@@ -203,9 +203,9 @@ struct hash<BlobCipherDetails> {
 //  ----------------------------------------------------------------------------------------------------------
 // |         S.No      |   ObjFlags  |  BinaryFlags |  ObjectAlgo  | BinaryAlgo | TotalObject  | TotalBinary  |
 // | ----------------- | ----------- | ------------ |  ----------- | ---------- | ------------ | ------------ |
-// |   AesCtrNoAuth    |     40      |     3        |       104    |      40    |     208      |     55       |
-// |   AesCtrHmacSha   |     40      |     3        |       184    |      96    |     288      |    111       |
-// |   AesCtrAesCmac   |     40      |     3        |       168    |      80    |     272      |     95       |
+// |   AesCtrNoAuth    |     40      |     3        |       104    |      40    |     208      |     47       |
+// |   AesCtrHmacSha   |     40      |     3        |       184    |      96    |     288      |    103       |
+// |   AesCtrAesCmac   |     40      |     3        |       168    |      80    |     272      |     87       |
 //  ----------------------------------------------------------------------------------------------------------
 
 struct BlobCipherEncryptHeaderFlagsV1 {
@@ -215,21 +215,20 @@ struct BlobCipherEncryptHeaderFlagsV1 {
 	uint8_t authTokenMode;
 	uint8_t authTokenAlgo;
 
+	BlobCipherEncryptHeaderFlagsV1() {}
+	BlobCipherEncryptHeaderFlagsV1(const EncryptCipherMode& cipherMode,
+	                               const EncryptAuthTokenMode& tokenMode,
+	                               const EncryptAuthTokenAlgo& authAlgo)
+	  : encryptMode(cipherMode), authTokenMode(tokenMode), authTokenAlgo(authAlgo) {}
+
 	bool operator==(const BlobCipherEncryptHeaderFlagsV1& o) const {
 		return encryptMode == o.encryptMode && authTokenMode == o.authTokenMode && authTokenAlgo == o.authTokenAlgo;
 	}
 
-	static StringRef toStringRef(const BlobCipherEncryptHeaderFlagsV1& flags, Arena& arena) {
+	static Standalone<StringRef> toStringRef(const BlobCipherEncryptHeaderFlagsV1& flags, Arena& arena) {
 		BinaryWriter wr(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 		wr.serializeBytes(&flags, sizeof(BlobCipherEncryptHeaderFlagsV1));
 		return wr.toValue(arena);
-	}
-
-	static BlobCipherEncryptHeaderFlagsV1 fromStringRef(const StringRef& flagsRef) {
-		BlobCipherEncryptHeaderFlagsV1 flags;
-		BinaryReader rd(flagsRef.begin(), flagsRef.size(), AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
-		rd >> flags;
-		return flags;
 	}
 
 	template <class Ar>
@@ -286,9 +285,17 @@ struct AesCtrWithAuthV1 {
 		       memcmp(&authToken[0], &o.authToken[0], AuthTokenSize) == 0;
 	}
 
+	static Standalone<StringRef> toStringRef(const AesCtrWithAuthV1<AuthTokenSize>& algoHeader, Arena& arena) {
+		BinaryWriter wr(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		wr.serializeBytes(&algoHeader, sizeof(AesCtrWithAuthV1<AuthTokenSize>));
+		return wr.toValue(arena);
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar.serializeBytes(this, sizeof(AesCtrWithAuthV1<AuthTokenSize>));
+		serializer(ar, cipherTextDetails, cipherHeaderDetails);
+		ar.serializeBytes(iv, AES_256_IV_LENGTH);
+		ar.serializeBytes(authToken, AuthTokenSize);
 	}
 };
 
@@ -311,19 +318,17 @@ struct AesCtrNoAuthV1 {
 		return cipherTextDetails == o.cipherTextDetails && memcmp(&iv[0], &o.iv[0], AES_256_IV_LENGTH) == 0;
 	}
 
+	static Standalone<StringRef> toStringRef(const AesCtrNoAuthV1& algoHeader, Arena& arena) {
+		BinaryWriter wr(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		wr.serializeBytes(&algoHeader, sizeof(AesCtrNoAuthV1));
+		return wr.toValue(arena);
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar.serializeBytes(this, sizeof(AesCtrNoAuthV1));
+		serializer(ar, cipherTextDetails);
+		ar.serializeBytes(iv, AES_256_IV_LENGTH);
 	}
-};
-
-struct ParsedEncryptHeaderDetails {
-	EncryptCipherMode encryptMode;
-	EncryptAuthTokenMode authMode;
-	EncryptAuthTokenAlgo authAlgo;
-	BlobCipherDetails textCipherDetails;
-	BlobCipherDetails headerCipherDetails;
-	uint8_t iv[AES_256_IV_LENGTH];
 };
 
 struct BlobCipherEncryptHeaderRef {
@@ -349,11 +354,12 @@ struct BlobCipherEncryptHeaderRef {
 	    algoHeader(src.algoHeader) {}
 
 	static BlobCipherEncryptHeaderRef fromStringRef(const StringRef& header) {
-		return BinaryReader::fromStringRef<BlobCipherEncryptHeaderRef>(header, IncludeVersion());
+		return BinaryReader::fromStringRef<BlobCipherEncryptHeaderRef>(
+		    header, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 	}
 
 	static Standalone<StringRef> toStringRef(const BlobCipherEncryptHeaderRef& headerRef) {
-		return BinaryWriter::toValue(headerRef, IncludeVersion());
+		return BinaryWriter::toValue(headerRef, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 	}
 
 	// Routine computes EncryptHeaderSize based on input params.
@@ -363,11 +369,80 @@ struct BlobCipherEncryptHeaderRef {
 	                              const EncryptAuthTokenMode authMode,
 	                              const EncryptAuthTokenAlgo authAlgo);
 
-	// Assists in extracting necessary information from the headerRef string (on-disk read)
-	static ParsedEncryptHeaderDetails getCipherDetailsAndIv(const BlobCipherEncryptHeaderRef&);
-
 	template <class Ar>
-	void serialize(Ar& ar);
+	void serialize(Ar& ar) {
+		// TODO: once std::variant native (de)serialization support is added, the method would transform to much shorter
+		// implementaion
+		uint8_t encryptMode;
+		EncryptAuthTokenMode authMode;
+		EncryptAuthTokenAlgo authAlgo;
+
+		serializer(ar, flagsVersion, algoHeaderVersion);
+		if (ar.isSerializing) {
+			if (flagsVersion != 1) {
+				throw not_implemented();
+			}
+
+			BlobCipherEncryptHeaderFlagsV1 f = std::get<BlobCipherEncryptHeaderFlagsV1>(flags);
+			encryptMode = f.encryptMode;
+			authMode = (EncryptAuthTokenMode)f.authTokenMode;
+			authAlgo = (EncryptAuthTokenAlgo)f.authTokenAlgo;
+			serializer(ar, f);
+
+			if (encryptMode != ENCRYPT_CIPHER_MODE_AES_256_CTR || algoHeaderVersion != 1) {
+				throw not_implemented();
+			}
+
+			if (authMode == ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
+				AesCtrNoAuthV1 noAuth = std::get<AesCtrNoAuthV1>(algoHeader);
+				serializer(ar, noAuth);
+			} else {
+				ASSERT_EQ(authMode, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+				if (authAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA) {
+					AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE> hmacSha =
+					    std::get<AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>>(algoHeader);
+					serializer(ar, hmacSha);
+				} else {
+					ASSERT_EQ(authAlgo, ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC);
+					AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE> aesCmac =
+					    std::get<AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>(algoHeader);
+					serializer(ar, aesCmac);
+				}
+			}
+		} else if (ar.isDeserializing) {
+			if (flagsVersion != 1) {
+				throw not_implemented();
+			}
+			BlobCipherEncryptHeaderFlagsV1 f;
+			serializer(ar, f);
+			this->flags = f;
+			encryptMode = f.encryptMode;
+			authMode = (EncryptAuthTokenMode)f.authTokenMode;
+			authAlgo = (EncryptAuthTokenAlgo)f.authTokenAlgo;
+
+			if (encryptMode != ENCRYPT_CIPHER_MODE_AES_256_CTR || algoHeaderVersion != 1) {
+				throw not_implemented();
+			}
+
+			if (authMode == ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
+				AesCtrNoAuthV1 noAuth;
+				serializer(ar, noAuth);
+				this->algoHeader = noAuth;
+			} else {
+				ASSERT_EQ(authMode, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+				if (authAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA) {
+					AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE> hmacSha;
+					serializer(ar, hmacSha);
+					this->algoHeader = hmacSha;
+				} else {
+					ASSERT_EQ(authAlgo, ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC);
+					AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE> aesCmac;
+					serializer(ar, aesCmac);
+					this->algoHeader = aesCmac;
+				}
+			}
+		}
+	}
 };
 
 #pragma pack(pop)
