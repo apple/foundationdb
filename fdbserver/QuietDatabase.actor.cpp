@@ -19,6 +19,7 @@
  */
 
 #include <cinttypes>
+#include <unordered_map>
 #include <vector>
 #include <type_traits>
 
@@ -715,7 +716,7 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
                                         Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                         std::string context) {
 	if (g_network->isSimulated() && g_simulator->usableRegions > 1 && !g_simulator->quiesced) {
-		bool primaryDead = g_simulator->datacenterDead(g_simulator->primaryDcId);
+		state bool primaryDead = g_simulator->datacenterDead(g_simulator->primaryDcId);
 		bool remoteDead = g_simulator->datacenterDead(g_simulator->remoteDcId);
 
 		// FIXME: the primary and remote can both be considered dead because excludes are not handled properly by the
@@ -731,6 +732,15 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
 			    .detail("RemoteDead", remoteDead)
 			    .detail("PrimaryDead", primaryDead);
 			g_simulator->usableRegions = 1;
+
+			state std::vector<AddressExclusion> servers =
+			    g_simulator->getExcludeDCAddresses(primaryDead ? g_simulator->primaryDcId : g_simulator->remoteDcId);
+			wait(excludeServers(cx, servers, false));
+			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration")
+			    .detail("Location", context)
+			    .detail("Stage", "LocalityExcluded")
+			    .detail("Localities", describe(servers));
+
 			wait(success(ManagementAPI::changeConfig(
 			    cx.getReference(),
 			    (primaryDead ? g_simulator->disablePrimary : g_simulator->disableRemote) + " repopulate_anti_quorum=1",
