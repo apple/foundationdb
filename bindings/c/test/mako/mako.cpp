@@ -116,12 +116,14 @@ createNewTransaction(Database db, Arguments const& args, int id, std::optional<s
 		auto token_map_iter = args.authorization_tokens.find(tenant_name);
 		if (token_map_iter != args.authorization_tokens.end()) {
 			tr.setOption(FDB_TR_OPTION_AUTHORIZATION_TOKEN, token_map_iter->second);
+			return { tr, { token_map_iter->second } };
 		} else {
 			logr.error("could not find token for tenant '{}'", tenant_name);
 			_exit(1);
 		}
+	} else {
+		return { tr, {} };
 	}
-	return { tr, { tenant_name } };
 }
 
 int cleanupTenants(ipc::AdminServer& server, Arguments const& args, int db_id) {
