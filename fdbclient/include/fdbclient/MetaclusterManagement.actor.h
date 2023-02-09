@@ -1644,7 +1644,7 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadata(
 					if (std::count(filters.begin(), filters.end(), entry.tenantState)) {
 						++count;
 						if (count > offset) {
-							results.push_back(std::make_pair(name, entry));
+							results.emplace_back(name, entry);
 							if (count - offset == limit) {
 								ASSERT(count - offset == results.size());
 								return results;
