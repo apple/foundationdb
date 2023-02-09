@@ -307,8 +307,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			// We don't expect the data cluster tenant, so delete it
 			else {
 				removeTrackedTenant(t.second.first);
-				deleteFutures.push_back(TenantAPI::deleteTenant(
-				    dataDb.getReference(), t.first, t.second.first, ClusterType::METACLUSTER_DATA));
+				deleteFutures.push_back(TenantAPI::deleteTenant(dataDb.getReference(), t.first, t.second.first));
 			}
 		}
 
@@ -379,8 +378,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 					    std::vector<Future<Void>> groupDeletions;
 					    for (auto const& t : tenantsInGroup) {
 						    self->removeTrackedTenant(t);
-						    groupDeletions.push_back(
-						        TenantAPI::deleteTenantTransaction(tr, t, ClusterType::METACLUSTER_DATA));
+						    groupDeletions.push_back(TenantAPI::deleteTenantTransaction(tr, t));
 					    }
 					    return waitForAll(groupDeletions);
 				    }));
@@ -403,10 +401,16 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> restoreManagementCluster(MetaclusterRestoreWorkload* self) {
+		TraceEvent("MetaclusterRestoreWorkloadRestoringManagementCluster");
 		wait(success(MetaclusterAPI::createMetacluster(self->managementDb, "management_cluster"_sr)));
 		state std::map<ClusterName, DataClusterData>::iterator clusterItr;
 		for (clusterItr = self->dataDbs.begin(); clusterItr != self->dataDbs.end(); ++clusterItr) {
-			TraceEvent("MetaclusterRestoreWorkloadRecoverManagementCluster").detail("FromCluster", clusterItr->first);
+			TraceEvent("MetaclusterRestoreWorkloadProcessDataCluster").detail("FromCluster", clusterItr->first);
+
+			wait(MetaclusterAPI::removeCluster(
+			    clusterItr->second.db.getReference(), clusterItr->first, ClusterType::METACLUSTER_DATA, true));
+			TraceEvent("MetaclusterRestoreWorkloadForgotMetacluster").detail("ClusterName", clusterItr->first);
+
 			state KeyBackedRangeResult<std::pair<TenantName, int64_t>> managementTenantList;
 			state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> managementGroupList;
 
@@ -467,7 +471,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				    wait(getDataClusterTenants(clusterItr->second.db));
 
 				try {
-					TraceEvent("MetaclusterRestoreWorkloadRecoverManagementCluster")
+					TraceEvent("MetaclusterRestoreWorkloadRestoreManagementCluster")
 					    .detail("FromCluster", clusterItr->first)
 					    .detail("TenantCollisions", tenantCollisions.size());
 
@@ -486,6 +490,17 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 					    (e.code() == error_code_invalid_tenant_configuration && !groupCollisions.empty());
 					if (!failedDueToCollision) {
 						throw;
+					}
+
+					try {
+						wait(MetaclusterAPI::removeCluster(
+						    self->managementDb, clusterItr->first, ClusterType::METACLUSTER_MANAGEMENT, true));
+						TraceEvent("MetaclusterRestoreWorkloadRemoveFailedCluster")
+						    .detail("ClusterName", clusterItr->first);
+					} catch (Error& e) {
+						if (e.code() != error_code_cluster_not_found) {
+							throw;
+						}
 					}
 				}
 
@@ -515,7 +530,8 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 					}
 				}
 			}
-			TraceEvent("MetaclusterRestoreWorkloadRecoveredManagementCluster").detail("FromCluster", clusterItr->first);
+			TraceEvent("MetaclusterRestoreWorkloadRestoredDataClusterToManagementCluster")
+			    .detail("FromCluster", clusterItr->first);
 		}
 
 		TraceEvent("MetaclusterRestoreWorkloadRestoredManagementCluster");

@@ -151,13 +151,37 @@ ACTOR Future<bool> metaclusterRemoveCommand(Reference<IDatabase> db, std::vector
 		fmt::print("Removes the specified data cluster from a metacluster.\n");
 		fmt::print("If FORCE is specified, then the cluster will be detached even if it has\n"
 		           "tenants assigned to it.\n");
+		fmt::print("If run on a data cluster, the data cluster will remove its association\n"
+		           "with the metacluster without modifying the management cluster. Doing so\n"
+		           "requires the FORCE option to be set. Use of this mode is required to\n"
+		           "repopulate a management cluster from a data cluster using the\n"
+		           "`metacluster restore' command.\n");
 		return false;
 	}
 
 	state ClusterNameRef clusterName = tokens[tokens.size() - 1];
-	wait(MetaclusterAPI::removeCluster(db, clusterName, tokens.size() == 4));
+	state bool force = tokens.size() == 4;
 
-	fmt::print("The cluster `{}' has been removed\n", printable(clusterName).c_str());
+	state ClusterType clusterType = wait(runTransaction(db, [](Reference<ITransaction> tr) {
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		return TenantAPI::getClusterType(tr);
+	}));
+
+	if (clusterType == ClusterType::METACLUSTER_DATA && !force) {
+		fmt::print("ERROR: cannot remove a data cluster directly. To remove a data cluster,\n"
+		           "use the `remove' command on the management cluster. To force a data cluster\n"
+		           "to forget its metacluster association without fully removing it, use FORCE.\n");
+	}
+
+	wait(MetaclusterAPI::removeCluster(db, clusterName, clusterType, force));
+
+	if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
+		fmt::print("The cluster `{}' has been removed\n", printable(clusterName).c_str());
+	} else {
+		fmt::print("The cluster `{}' has removed its association with its metacluster.\n"
+		           "The metacluster has not been modified.\n",
+		           printable(clusterName).c_str());
+	}
 	return true;
 }
 
@@ -166,17 +190,23 @@ ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vecto
 	if (tokens.size() != 5) {
 		fmt::print("Usage: metacluster restore <NAME> connection_string=<CONNECTION_STRING>\n"
 		           "<restore_known_data_cluster|repopulate_from_data_cluster>\n\n");
-		fmt::print("Add a restored data cluster back to a metacluster.\n");
+
+		fmt::print("Add a restored data cluster back to a metacluster.\n\n");
+
 		fmt::print("Use `restore_known_data_cluster' to add back a restored copy of a data cluster\n");
 		fmt::print("that the metacluster is already tracking. This mode should be used if only data\n");
 		fmt::print("clusters are being restored, and any discrepancies between the management and\n");
-		fmt::print("data clusters will be resolved using the management cluster metadata.\n");
+		fmt::print("data clusters will be resolved using the management cluster metadata.\n\n");
+
 		fmt::print("Use `repopulate_from_data_cluster' to rebuild a lost management cluster from the\n");
 		fmt::print("data clusters in a metacluster. This mode should be used if the management\n");
 		fmt::print("cluster is being restored. If any data clusters are also being restored, the\n");
 		fmt::print("oldest data clusters should be added first before any non-recovered data\n");
-		fmt::print("clusters. Any discrepancies arising between the data clusters will be resolved\n");
-		fmt::print("using the data cluster that was added last.");
+		fmt::print("clusters. Any conflicts arising between the added data cluster and existing data\n");
+		fmt::print("will cause the restore to fail. Before repopulating a metacluster from a data\n");
+		fmt::print("cluster, that data cluster needs to be detached from its prior metacluster using\n");
+		fmt::print("the `metacluster remove' command.\n");
+
 		return false;
 	}
 
