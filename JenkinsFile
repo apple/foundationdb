@@ -16,11 +16,11 @@ timestamps {
             setBuildStatus("clang format check", "clang format check", "PENDING", currentBuild.absoluteUrl);
 
             def j = build job: "FDB_Build/FDB_clang_format_check",
-                parameters: [
-                    string(name: 'ARCH', value: "x86_64"),
-                    string(name: 'GIT_REMOTE', value: "https://github.com/snowflakedb/foundationdb.git"),
-                    string(name: 'GIT_SPECIFIER', value: "${scmInfo.GIT_COMMIT}")
-                ],
+                    parameters: [
+                        string(name: 'ARCH', value: "x86_64"),
+                        string(name: 'GIT_REMOTE', value: "https://github.com/snowflakedb/foundationdb.git"),
+                        string(name: 'GIT_SPECIFIER', value: "${scmInfo.GIT_COMMIT}")
+                    ],
             propagate: false,
             wait: true
 
@@ -53,11 +53,11 @@ timestamps {
                             build_test_asan: "precommit_asan.yml",
                             build_test_ubsan: "precommit_ubsan.yml"]
 
-                def params = [string(name: 'ARCH', value: "x86_64"),
-                            string(name: 'GIT_REMOTE', value: "https://github.com/snowflakedb/foundationdb.git"),
-                            string(name: 'GIT_SPECIFIER', value: "${scmInfo.GIT_COMMIT}"),
-                            string(name: 'SLACK_USER_NAME', value: "${user_id}"),
-                            string(name: 'PR_ID', value: "${env.BRANCH_NAME}")]
+                def job_params = [string(name: 'ARCH', value: "x86_64"),
+                                 string(name: 'GIT_REMOTE', value: "https://github.com/snowflakedb/foundationdb.git"),
+                                 string(name: 'GIT_SPECIFIER', value: "${scmInfo.GIT_COMMIT}"),
+                                 string(name: 'SLACK_USER_NAME', value: "${user_id}"),
+                                 string(name: 'PR_ID', value: "${env.BRANCH_NAME}")]
 
                 def deployments = [:]
                 def results = [:]
@@ -66,7 +66,7 @@ timestamps {
                     setBuildStatus(k, "Build And Test", "PENDING", currentBuild.absoluteUrl);
                     deployments[k] = {
                         results[k] = build job: 'FDB_BuildAndTest/FDB_Precommit',
-                                    parameters: params + [string('name': 'BUILD_TEST_PROFILE', value: v)],
+                                    parameters: job_params + [string('name': 'BUILD_TEST_PROFILE', value: v)],
                                     propagate: false,
                                     wait: true
                     }
