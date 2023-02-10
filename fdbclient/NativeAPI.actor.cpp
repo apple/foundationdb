@@ -2122,6 +2122,9 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 		case FDBDatabaseOptions::TEST_CAUSAL_READ_RISKY:
 			verifyCausalReadsProp = double(extractIntOption(value, 0, 100)) / 100.0;
 			break;
+		case FDBDatabaseOptions::ALWAYS_CONFIRM_PROXY_VALID: {
+			alwaysConfirmProxyValid = extractIntOption(value, 0, 1);
+		}
 		default:
 			break;
 		}
@@ -3649,7 +3652,11 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, Span
 				         cx->getGrvProxies(UseProvisionalProxies::False),
 				         &GrvProxyInterface::getConsistentReadVersion,
 				         GetReadVersionRequest(
-				             span.context, 0, TransactionPriority::IMMEDIATE, cx->ssVersionVectorCache.getMaxVersion()),
+				             span.context,
+				             0,
+				             TransactionPriority::IMMEDIATE,
+				             cx->ssVersionVectorCache.getMaxVersion(),
+				             !cx->alwaysConfirmProxyValid ? GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY : 0),
 				         cx->taskID))) {
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
 					if (v.midShardSize > 0)
@@ -3686,14 +3693,16 @@ ACTOR Future<Version> getRawVersion(Reference<TransactionState> trState) {
 	loop {
 		choose {
 			when(wait(trState->cx->onProxiesChanged())) {}
-			when(GetReadVersionReply v =
-			         wait(basicLoadBalance(trState->cx->getGrvProxies(UseProvisionalProxies::False),
-			                               &GrvProxyInterface::getConsistentReadVersion,
-			                               GetReadVersionRequest(trState->spanContext,
-			                                                     0,
-			                                                     TransactionPriority::IMMEDIATE,
-			                                                     trState->cx->ssVersionVectorCache.getMaxVersion()),
-			                               trState->cx->taskID))) {
+			when(GetReadVersionReply v = wait(basicLoadBalance(
+			         trState->cx->getGrvProxies(UseProvisionalProxies::False),
+			         &GrvProxyInterface::getConsistentReadVersion,
+			         GetReadVersionRequest(
+			             trState->spanContext,
+			             0,
+			             TransactionPriority::IMMEDIATE,
+			             trState->cx->ssVersionVectorCache.getMaxVersion(),
+			             !trState->cx->alwaysConfirmProxyValid ? GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY : 0),
+			         trState->cx->taskID))) {
 				if (trState->cx->versionVectorCacheActive(v.ssVersionVectorDelta)) {
 					if (trState->cx->isCurrentGrvProxy(v.proxyId)) {
 						trState->cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
@@ -7015,6 +7024,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.Before");
 	loop {
 		try {
+			flags |= !cx->alwaysConfirmProxyValid ? GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY : 0;
 			state GetReadVersionRequest req(span.context,
 			                                transactionCount,
 			                                priority,

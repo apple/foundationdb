@@ -616,6 +616,7 @@ public:
 	int snapshotRywEnabled;
 
 	bool transactionTracingSample;
+	bool alwaysConfirmProxyValid = true;
 	double verifyCausalReadsProp = 0.0;
 	bool blobGranuleNoMaterialize = false;
 

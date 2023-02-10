@@ -564,8 +564,8 @@ public class AsyncStackTester {
 				db.options().setTransactionMaxRetryDelay(100);
 				db.options().setTransactionRetryLimit(10);
 				db.options().setTransactionRetryLimit(-1);
-				db.options().setTransactionCausalReadRisky();
 				db.options().setTransactionIncludePortInAddress();
+				db.options().setAlwaysConfirmProxyValid(1);
 
 				// Test network busyness
 				double busyness = db.getMainThreadBusyness();

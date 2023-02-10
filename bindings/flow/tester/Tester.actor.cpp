@@ -1638,6 +1638,7 @@ struct UnitTestsFunc : InstructionFunc {
 		const uint64_t maxRetryDelay = 100;
 		const uint64_t sizeLimit = 100000;
 		const uint64_t maxFieldLength = 1000;
+		const uint64_t alwaysConfirmProxyValid = 1;
 
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_LOCATION_CACHE_SIZE,
 		                            Optional<StringRef>(StringRef((const uint8_t*)&locationCacheSize, 8)));
@@ -1661,8 +1662,9 @@ struct UnitTestsFunc : InstructionFunc {
 		                            Optional<StringRef>(StringRef((const uint8_t*)&retryLimit, 8)));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_RETRY_LIMIT,
 		                            Optional<StringRef>(StringRef((const uint8_t*)&noRetryLimit, 8)));
-		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_CAUSAL_READ_RISKY);
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_INCLUDE_PORT_IN_ADDRESS);
+		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_ALWAYS_CONFIRM_PROXY_VALID,
+		                            Optional<StringRef>(StringRef((const uint8_t*)&alwaysConfirmProxyValid, 8)));
 
 		state Reference<Transaction> tr = data->db->createTransaction();
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_PRIORITY_SYSTEM_IMMEDIATE);

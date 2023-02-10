@@ -402,7 +402,7 @@ func (o DatabaseOptions) SetTransactionSizeLimit(param int64) error {
 	return o.setOpt(503, int64ToBytes(param))
 }
 
-// The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock.
+// Deprecated. See ``always_confirm_proxy_valid``.
 func (o DatabaseOptions) SetTransactionCausalReadRisky() error {
 	return o.setOpt(504, nil)
 }
@@ -432,6 +432,13 @@ func (o DatabaseOptions) SetUseConfigDatabase() error {
 // Parameter: integer between 0 and 100 expressing the probability a client will verify it can't read stale data
 func (o DatabaseOptions) SetTestCausalReadRisky(param int64) error {
 	return o.setOpt(900, int64ToBytes(param))
+}
+
+// When disabled, the read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock. Defaults to true.
+//
+// Parameter: true if the proxy should always confirm it is part of the current generation
+func (o DatabaseOptions) SetAlwaysConfirmProxyValid(param int64) error {
+	return o.setOpt(1000, int64ToBytes(param))
 }
 
 // The transaction, if not self-conflicting, may be committed a second time after commit succeeds, in the event of a fault

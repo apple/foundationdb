@@ -503,8 +503,8 @@ public class StackTester {
 						db.options().setTransactionMaxRetryDelay(100);
 						db.options().setTransactionRetryLimit(10);
 						db.options().setTransactionRetryLimit(-1);
-						db.options().setTransactionCausalReadRisky();
 						db.options().setTransactionIncludePortInAddress();
+						db.options().setAlwaysConfirmProxyValid(1);
 
 						tr.options().setPrioritySystemImmediate();
 						tr.options().setPriorityBatch();

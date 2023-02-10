@@ -204,7 +204,7 @@ description is not currently required but encouraged.
             description="Set the maximum transaction size in bytes. This sets the ``size_limit`` option on each transaction created by this database. See the transaction option description for more information." 
             defaultFor="503"/>
     <Option name="transaction_causal_read_risky" code="504"
-            description="The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock."
+            description="Deprecated. See ``always_confirm_proxy_valid``."
             defaultFor="20"/>
     <Option name="transaction_include_port_in_address" code="505"
             description="Deprecated. Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect."
@@ -220,6 +220,9 @@ description is not currently required but encouraged.
     <Option name="test_causal_read_risky" code="900"
             paramType="Int" paramDescription="integer between 0 and 100 expressing the probability a client will verify it can't read stale data"
             description="Enables verification of causal read risky by checking whether clients are able to read stale data when they detect a recovery, and logging an error if so." />
+    <Option name="always_confirm_proxy_valid" code="1000"
+            paramType="Int" paramDescription="true if the proxy should always confirm it is part of the current generation before serving requests"
+            description="When disabled, the read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock. Defaults to true." />
   </Scope>
   
   <Scope name="TransactionOption">

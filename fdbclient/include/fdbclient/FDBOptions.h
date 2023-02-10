@@ -95,11 +95,17 @@ private:
 	std::map<typename T::Option, typename OptionList::iterator> optionsIndexMap;
 
 public:
-	void addOption(typename T::Option option, Optional<Standalone<StringRef>> value) {
+	bool removeOption(typename T::Option option) {
 		auto itr = optionsIndexMap.find(option);
-		if (itr != optionsIndexMap.end()) {
+		bool exists = itr != optionsIndexMap.end();
+		if (exists) {
 			options.erase(itr->second);
 		}
+		return exists;
+	}
+
+	void addOption(typename T::Option option, Optional<Standalone<StringRef>> value) {
+		removeOption(option);
 		options.emplace_back(option, value);
 		optionsIndexMap[option] = --options.end();
 	}
