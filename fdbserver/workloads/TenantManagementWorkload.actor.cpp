@@ -449,12 +449,6 @@ struct TenantManagementWorkload : TestWorkload {
 		// Read the created tenant object and verify that its state is correct
 		state Optional<TenantMapEntry> entry = wait(self->tryGetTenant(tenantItr->first, operationType));
 
-		// TraceEvent("Nim::updateLocState")
-		//     .detail("TN", tenantItr->first)
-		//     .detail("TG", tenantItr->second.tenantGroup)
-		//     .detail("Client", self->clientId)
-		//     .detail("OP", operationType);
-
 		ASSERT(entry.present());
 		ASSERT(entry.get().id > self->maxId);
 		ASSERT(entry.get().id >> 48 == self->tenantIdPrefix);
@@ -478,13 +472,11 @@ struct TenantManagementWorkload : TestWorkload {
 		// Update our local tenant state to include the newly created one
 		self->maxId = std::max(self->maxId, entry.get().id);
 		TenantData tData = TenantData(entry.get().id, tenantItr->first, tenantItr->second.tenantGroup, true);
-		// TraceEvent("Nim::insert1").detail("TN", tenantItr->first);
 		self->createdTenants[tenantItr->first] = tData;
 		self->allTestTenants.push_back(tData.tenant);
 
 		// If this tenant has a tenant group, create or update the entry for it
 		if (tenantItr->second.tenantGroup.present()) {
-			// TraceEvent("Nim::insertTG1").detail("TN", tenantItr->second.tenantGroup.get());
 			self->createdTenantGroups[tenantItr->second.tenantGroup.get()].tenantCount++;
 		}
 
@@ -545,8 +537,6 @@ struct TenantManagementWorkload : TestWorkload {
 		// True if any tenant group name starts with \xff
 		state bool hasSystemTenantGroup = false;
 
-		// TraceEvent("Nim::CreateTenant0").detail("Client", self->clientId);
-
 		state int newTenants = 0;
 		state std::map<TenantName, TenantMapEntry> tenantsToCreate;
 		for (int i = 0; i < numTenants; ++i) {
@@ -596,14 +586,6 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 
 					try {
-						for (auto [tenant, entry] : tenantsToCreate) {
-							// TraceEvent("Nim::CreateTenant1")
-							//     .detail("TN", tenant)
-							//     .detail("TG", entry.tenantGroup)
-							//     .detail("Client", self->clientId)
-							//     .detail("OP", operationType)
-							//     .detail("NumTenants", tenantsToCreate.size());
-						}
 						Optional<Void> result = wait(timeout(createTenantImpl(tr, tenantsToCreate, operationType, self),
 						                                     deterministicRandom()->randomInt(1, 30)));
 
@@ -618,25 +600,8 @@ struct TenantManagementWorkload : TestWorkload {
 								// Database operations shouldn't get here if the tenant already exists
 								ASSERT(!alreadyExists);
 							}
-							for (auto [tenant, entry] : tenantsToCreate) {
-								// TraceEvent("Nim::CreateTenant2")
-								//     .detail("TN", tenant)
-								//     .detail("TG", entry.tenantGroup)
-								//     .detail("Client", self->clientId)
-								//     .detail("OP", operationType);
-							}
 
 							break;
-						}
-
-						for (auto [tenant, entry] : tenantsToCreate) {
-							// TraceEvent("Nim::CreateTenant1.5")
-							//     .detail("TN", tenant)
-							//     .detail("TG", entry.tenantGroup)
-							//     .detail("Client", self->clientId)
-							//     .detail("OP", operationType)
-							//     .detail("ResP", result.present())
-							//     .detail("NumTenants", tenantsToCreate.size());
 						}
 
 						retried = true;
@@ -645,22 +610,12 @@ struct TenantManagementWorkload : TestWorkload {
 						// If we retried the creation after our initial attempt succeeded, then we proceed with the rest
 						// of the creation steps normally. Otherwise, the creation happened elsewhere and we failed
 						// here, so we can rethrow the error.
-						for (auto [tenant, entry] : tenantsToCreate) {
-							// TraceEvent("Nim::CreateTenant3")
-							//     .detail("TN", tenant)
-							//     .detail("TG", entry.tenantGroup)
-							//     .detail("Client", self->clientId)
-							//     .detail("OP", operationType)
-							//     .detail("Err", e.what());
-						}
 						if (e.code() == error_code_tenant_already_exists && !existedAtStart) {
 							ASSERT(operationType == OperationType::METACLUSTER ||
 							       operationType == OperationType::MANAGEMENT_DATABASE);
 							ASSERT(retried);
-							// TraceEvent("Nim::CreateTenant3.5");
 							break;
 						} else {
-							// TraceEvent("Nim::CreateTenant3.5");
 							throw;
 						}
 					}
@@ -682,14 +637,6 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 				}
 
-				for (auto [tenant, entry] : tenantsToCreate) {
-					// TraceEvent("Nim::CreateTenant4")
-					//     .detail("TN", tenant)
-					//     .detail("TG", entry.tenantGroup)
-					//     .detail("Client", self->clientId)
-					//     .detail("OP", operationType);
-				}
-
 				// Check that using the wrong creation type fails depending on whether we are using a metacluster
 				ASSERT(self->useMetacluster == (operationType == OperationType::METACLUSTER));
 
@@ -705,12 +652,6 @@ struct TenantManagementWorkload : TestWorkload {
 
 				state std::map<TenantName, TenantMapEntry>::iterator tenantItr;
 				for (tenantItr = tenantsToCreate.begin(); tenantItr != tenantsToCreate.end(); ++tenantItr) {
-					// TraceEvent("Nim::CreateTenant5")
-					//     .detail("TN", tenantItr->first)
-					//     .detail("TG", tenantItr->second.tenantGroup)
-					//     .detail("Client", self->clientId)
-					//     .detail("OP", operationType);
-
 					wait(updateLocalState(self, tenantItr, operationType, originalReadVersion));
 				}
 
@@ -756,7 +697,6 @@ struct TenantManagementWorkload : TestWorkload {
 							state Optional<TenantMapEntry> curEntry =
 							    wait(self->tryGetTenant(curTenantItr->first, operationType));
 							if (curEntry.present()) {
-								// TraceEvent("Nim::startUpdateLoc");
 								wait(updateLocalState(self, curTenantItr, operationType, originalReadVersion));
 							} else {
 								break;
@@ -1359,11 +1299,7 @@ struct TenantManagementWorkload : TestWorkload {
 				auto localItr = self->createdTenants.lower_bound(beginTenant);
 				auto tenantMapItr = tenants.begin();
 				for (; tenantMapItr != tenants.end(); ++tenantMapItr, ++localItr) {
-					if (localItr == self->createdTenants.end()) {
-						// TraceEvent("Nim::here2").detail("TenItr", tenantMapItr->first);
-					}
 					ASSERT(localItr != self->createdTenants.end());
-					// TraceEvent("Nim::here").detail("Loc", localItr->first).detail("TenItr", tenantMapItr->first);
 					ASSERT(localItr->first == tenantMapItr->first);
 				}
 
@@ -1411,7 +1347,6 @@ struct TenantManagementWorkload : TestWorkload {
 		ASSERT(newTenantEntry.present());
 		TenantData tData = self->createdTenants[oldTenantName];
 		tData.tenant->name = newTenantName;
-		// TraceEvent("Nim::insert2").detail("NTN", newTenantName).detail("OTN", oldTenantName);
 		self->createdTenants[newTenantName] = tData;
 		self->createdTenants.erase(oldTenantName);
 		state Transaction insertTr(self->dataDb, tData.tenant);
@@ -1676,14 +1611,11 @@ struct TenantManagementWorkload : TestWorkload {
 				if (itr->second.tenantGroup.present()) {
 					auto tenantGroupItr = self->createdTenantGroups.find(itr->second.tenantGroup.get());
 					ASSERT(tenantGroupItr != self->createdTenantGroups.end());
-					// TraceEvent("Nim::insertTG2.3").detail("TN", itr->second.tenantGroup);
 					if (--tenantGroupItr->second.tenantCount == 0) {
-						// TraceEvent("Nim::insertTG2.5").detail("TN", itr->second.tenantGroup);
 						self->createdTenantGroups.erase(tenantGroupItr);
 					}
 				}
 				if (newTenantGroup.present()) {
-					// TraceEvent("Nim::insertTG2").detail("TN", newTenantGroup);
 					self->createdTenantGroups[newTenantGroup.get()].tenantCount++;
 				}
 				itr->second.tenantGroup = newTenantGroup;
@@ -1840,7 +1772,6 @@ struct TenantManagementWorkload : TestWorkload {
 				auto tenantMapItr = tenantGroups.begin();
 				for (; tenantMapItr != tenantGroups.end(); ++tenantMapItr, ++localItr) {
 					ASSERT(localItr != self->createdTenantGroups.end());
-					// TraceEvent("Nim::LTG").detail("LT", localItr->first).detail("TT", tenantMapItr->first);
 					ASSERT(localItr->first == tenantMapItr->first);
 				}
 
@@ -1982,7 +1913,6 @@ struct TenantManagementWorkload : TestWorkload {
 			TenantNameRef lastTenant;
 			while (dataItr != dataClusterTenants.end()) {
 				ASSERT(localItr != self->createdTenants.end());
-				// TraceEvent("Nim::here2").detail("DF", dataItr->first).detail("LF", localItr->first);
 				ASSERT(dataItr->first == localItr->first);
 				ASSERT(dataItr->second.tenantGroup == localItr->second.tenantGroup);
 
