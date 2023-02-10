@@ -113,6 +113,7 @@ protected:
 	fdb::Key randomNotExistingKey(std::optional<int> tenantId);
 	fdb::Key randomExistingKey(std::optional<int> tenantId);
 	fdb::Key randomKey(double existingKeyRatio, std::optional<int> tenantId);
+	fdb::KeyRange randomNonEmptyKeyRange();
 
 	// Chooses a random tenant from the available tenants (or an empty optional if tenants aren't used in the test)
 	std::optional<int> randomTenant();
@@ -140,6 +141,7 @@ private:
 	void populateDataTx(TTaskFct cont, std::optional<int> tenantId);
 	void populateTenantData(TTaskFct cont, std::optional<int> tenantId);
 	void createTenants(TTaskFct cont);
+	void createTenantsIfNecessary(TTaskFct cont);
 
 	void clearTenantData(TTaskFct cont, std::optional<int> tenantId);
 

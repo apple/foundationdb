@@ -217,8 +217,8 @@ if(NOT WIN32)
   target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads doctest)
   target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads flow doctest)
   target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads doctest)
-  target_link_libraries(fdb_c_client_config_tester PRIVATE SimpleOpt fdb_cpp fdb_c Threads::Threads fmt::fmt)
-  target_include_directories(fdb_c_client_config_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include)
+  target_link_libraries(fdb_c_client_config_tester PRIVATE SimpleOpt fdb_cpp fdb_c fdbclient Threads::Threads fmt::fmt)
+  target_include_directories(fdb_c_client_config_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
@@ -423,18 +423,18 @@ if(OPEN_FOR_IDE)
   target_link_libraries(fdb_c_shim_lib_tester PRIVATE fdb_c_shim SimpleOpt fdb_cpp Threads::Threads)
   target_include_directories(fdb_c_shim_lib_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include)
 
-elseif(NOT WIN32 AND NOT APPLE AND NOT USE_SANITIZER) # Linux Only, non-santizer only
+elseif(NOT WIN32 AND NOT APPLE) # Linux Only
 
   set(SHIM_LIB_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
   set(SHIM_LIB_GEN_SRC
-    ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.init.c
+    ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.init.cpp
     ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.tramp.S)
 
   set(IMPLIBSO_SRC_DIR ${CMAKE_SOURCE_DIR}/contrib/Implib.so)
   set(IMPLIBSO_SRC
     ${IMPLIBSO_SRC_DIR}/implib-gen.py
-    ${IMPLIBSO_SRC_DIR}/arch/common/init.c.tpl
+    ${IMPLIBSO_SRC_DIR}/arch/common/init.cpp.tpl
     ${IMPLIBSO_SRC_DIR}/arch/${CMAKE_SYSTEM_PROCESSOR}/config.ini
     ${IMPLIBSO_SRC_DIR}/arch/${CMAKE_SYSTEM_PROCESSOR}/table.S.tpl
     ${IMPLIBSO_SRC_DIR}/arch/${CMAKE_SYSTEM_PROCESSOR}/trampoline.S.tpl
@@ -445,6 +445,7 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT USE_SANITIZER) # Linux Only, non-santizer
     --target ${CMAKE_SYSTEM_PROCESSOR}
     --outdir ${SHIM_LIB_OUTPUT_DIR}
     --dlopen-callback=fdb_shim_dlopen_callback
+    --symbol-filter='^fdb_.*$$'
     $<TARGET_FILE:fdb_c>
     DEPENDS ${IMPLIBSO_SRC} fdb_c
     COMMENT "Generating source code for C shim library")
@@ -467,6 +468,11 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT USE_SANITIZER) # Linux Only, non-santizer
   target_link_libraries(fdb_c_shim_lib_tester PRIVATE fdb_c_shim SimpleOpt fdb_cpp Threads::Threads)
   target_include_directories(fdb_c_shim_lib_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include)
 
+  set(SHIM_LIB_TEST_EXTRA_OPTIONS "")
+  if(NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" OR USE_SANITIZER)
+    list(APPEND SHIM_LIB_TEST_EXTRA_OPTIONS --disable-prev-version-tests)
+  endif()  
+
   add_python_venv_test(NAME fdb_c_shim_library_tests
     COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_shim_tests.py
     --build-dir ${CMAKE_BINARY_DIR}
@@ -474,6 +480,7 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT USE_SANITIZER) # Linux Only, non-santizer
     --api-tester-bin $<TARGET_FILE:fdb_c_shim_api_tester>
     --shim-lib-tester-bin $<TARGET_FILE:fdb_c_shim_lib_tester>
     --api-test-dir ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
+    ${SHIM_LIB_TEST_EXTRA_OPTIONS}
     )
 
 endif() # End Linux only, non-sanitizer only

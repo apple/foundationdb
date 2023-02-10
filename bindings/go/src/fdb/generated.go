@@ -107,6 +107,11 @@ func (o NetworkOptions) SetTraceShareAmongClientThreads() error {
 	return o.setOpt(37, nil)
 }
 
+// Initialize trace files on network setup, determine the local IP later. Otherwise tracing is initialized when opening the first database.
+func (o NetworkOptions) SetTraceInitializeOnSetup() error {
+	return o.setOpt(38, nil)
+}
+
 // Set file suffix for partially written log files.
 //
 // Parameter: Append this suffix to partially written log files. When a log file is complete, it is renamed to remove the suffix. No separator is added between the file and the suffix. If you want to add a file extension, you should include the separator - e.g. '.tmp' instead of 'tmp' to add the 'tmp' extension.

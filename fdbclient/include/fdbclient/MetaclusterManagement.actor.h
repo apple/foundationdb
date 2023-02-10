@@ -604,7 +604,7 @@ struct RegisterClusterImpl {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-				state Future<std::vector<std::pair<TenantName, TenantMapEntry>>> existingTenantsFuture =
+				state Future<std::vector<std::pair<TenantName, int64_t>>> existingTenantsFuture =
 				    TenantAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, 1);
 				state ThreadFuture<RangeResult> existingDataFuture = tr->getRange(normalKeys, 1);
 
@@ -624,7 +624,7 @@ struct RegisterClusterImpl {
 				}
 
 				// Check for any existing data
-				std::vector<std::pair<TenantName, TenantMapEntry>> existingTenants =
+				std::vector<std::pair<TenantName, int64_t>> existingTenants =
 				    wait(safeThreadFutureToFuture(existingTenantsFuture));
 				if (!existingTenants.empty()) {
 					TraceEvent(SevWarn, "CannotRegisterClusterWithTenants").detail("ClusterName", self->clusterName);
@@ -1544,34 +1544,72 @@ Future<Void> deleteTenant(Reference<DB> db, int64_t id) {
 	return Void();
 }
 
-ACTOR template <class Transaction>
-Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantsTransaction(Transaction tr,
-                                                                                  TenantNameRef begin,
-                                                                                  TenantNameRef end,
-                                                                                  int limit) {
+template <class Transaction>
+Future<std::vector<std::pair<TenantName, int64_t>>> listTenantsTransaction(Transaction tr,
+                                                                           TenantName begin,
+                                                                           TenantName end,
+                                                                           int limit,
+                                                                           int offset = 0) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+	auto future = ManagementClusterMetadata::tenantMetadata().tenantNameIndex.getRange(tr, begin, end, limit + offset);
+	return fmap(
+	    [offset](auto f) {
+		    std::vector<std::pair<TenantName, int64_t>>& results = f.results;
+		    results.erase(results.begin(), results.begin() + offset);
+		    return results;
+	    },
+	    future);
+}
 
-	state KeyBackedRangeResult<std::pair<TenantName, int64_t>> matchingTenants =
-	    wait(ManagementClusterMetadata::tenantMetadata().tenantNameIndex.getRange(tr, begin, end, limit));
+template <class DB>
+Future<std::vector<std::pair<TenantName, int64_t>>> listTenants(Reference<DB> db,
+                                                                TenantName begin,
+                                                                TenantName end,
+                                                                int limit,
+                                                                int offset = 0) {
+	return runTransaction(db, [=](Reference<typename DB::TransactionT> tr) {
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		return listTenantsTransaction(tr, begin, end, limit, offset);
+	});
+}
 
-	state std::vector<Future<TenantMapEntry>> tenantEntryFutures;
-	for (auto const& [name, id] : matchingTenants.results) {
-		tenantEntryFutures.push_back(getTenantTransaction(tr, id));
+// Scan the tenant index to get a list of tenant IDs, and then lookup the metadata for each ID individually
+ACTOR template <class Transaction>
+Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadataTransaction(
+    Transaction tr,
+    std::vector<std::pair<TenantName, int64_t>> tenantIds) {
+
+	state int idIdx = 0;
+	state std::vector<Future<Optional<TenantMapEntry>>> futures;
+	for (; idIdx < tenantIds.size(); ++idIdx) {
+		futures.push_back(MetaclusterAPI::tryGetTenantTransaction(tr, tenantIds[idIdx].second));
 	}
-
-	wait(waitForAll(tenantEntryFutures));
+	wait(waitForAll(futures));
 
 	std::vector<std::pair<TenantName, TenantMapEntry>> results;
-	for (int i = 0; i < matchingTenants.results.size(); ++i) {
-		// Tenants being renamed will show up twice; once under each name
-		results.emplace_back(matchingTenants.results[i].first, tenantEntryFutures[i].get());
+	results.reserve(futures.size());
+	for (int i = 0; i < futures.size(); ++i) {
+		const TenantMapEntry& entry = futures[i].get().get();
+		results.emplace_back(tenantIds[i].first, entry);
 	}
 
 	return results;
 }
 
+ACTOR template <class Transaction>
+Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadataTransaction(Transaction tr,
+                                                                                         TenantNameRef begin,
+                                                                                         TenantNameRef end,
+                                                                                         int limit) {
+	std::vector<std::pair<TenantName, int64_t>> matchingTenants = wait(listTenantsTransaction(tr, begin, end, limit));
+	std::vector<std::pair<TenantName, TenantMapEntry>> results =
+	    wait(listTenantMetadataTransaction(tr, matchingTenants));
+	return results;
+}
+
 ACTOR template <class DB>
-Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(
+Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadata(
     Reference<DB> db,
     TenantName begin,
     TenantName end,
@@ -1586,30 +1624,24 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenants(
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			if (filters.empty()) {
-				wait(store(results, listTenantsTransaction(tr, begin, end, limit + offset)));
-
-				if (offset >= results.size()) {
-					results.clear();
-				} else if (offset > 0) {
-					results.erase(results.begin(), results.begin() + offset);
-				}
-
+				std::vector<std::pair<TenantName, int64_t>> ids =
+				    wait(MetaclusterAPI::listTenantsTransaction(tr, begin, end, limit, offset));
+				wait(store(results, MetaclusterAPI::listTenantMetadataTransaction(tr, ids)));
 				return results;
 			}
 
-			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-
+			// read in batch
 			state int count = 0;
 			loop {
 				std::vector<std::pair<TenantName, TenantMapEntry>> tenantBatch =
-				    wait(listTenantsTransaction(tr, begin, end, std::max(limit + offset, 1000)));
+				    wait(MetaclusterAPI::listTenantMetadataTransaction(tr, begin, end, std::max(limit + offset, 1000)));
 
 				if (tenantBatch.empty()) {
 					return results;
 				}
 
 				for (auto const& [name, entry] : tenantBatch) {
-					if (filters.empty() || std::count(filters.begin(), filters.end(), entry.tenantState)) {
+					if (std::count(filters.begin(), filters.end(), entry.tenantState)) {
 						++count;
 						if (count > offset) {
 							results.push_back(std::make_pair(name, entry));

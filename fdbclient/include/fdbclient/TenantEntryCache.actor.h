@@ -220,7 +220,7 @@ private:
 			if (!cache->lastTenantId.present()) {
 				return false;
 			}
-			return cache->lastTenantId.get() > 0;
+			return cache->lastTenantId.get() >= 0;
 		}
 		return true;
 	}
@@ -559,7 +559,7 @@ public:
 		mapByTenantId[entry.id] = payload;
 		mapByTenantName[entry.tenantName] = payload;
 
-		TraceEvent("TenantEntryCachePut")
+		TraceEvent("TenantEntryCachePut", uid)
 		    .detail("TenantName", entry.tenantName)
 		    .detail("TenantNameExisting", existingName)
 		    .detail("TenantID", entry.id)
