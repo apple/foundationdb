@@ -42,6 +42,7 @@ template <class DB>
 class TenantConsistencyCheck {
 private:
 	Reference<DB> db;
+	bool isDataCluster = false;
 
 	struct TenantData {
 		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
@@ -132,10 +133,14 @@ private:
 		ASSERT_EQ(tenantMap.size(), metadata.tenantCount);
 		ASSERT_EQ(metadata.tenantNameIndex.size(), metadata.tenantCount);
 
-		int renameCount = 0;
 		for (auto [tenantId, tenantMapEntry] : tenantMap) {
 			ASSERT_EQ(tenantId, tenantMapEntry.id);
-			ASSERT_LE(tenantId, metadata.lastTenantId);
+			// Only standalone clusters will have lastTenantId set
+			// For Metacluster, the lastTenantId field is updated for MetaclusterMetadata
+			// and not TenantMetadata
+			if (!isDataCluster) {
+				ASSERT_LE(tenantId, metadata.lastTenantId);
+			}
 			ASSERT_EQ(metadata.tenantNameIndex[tenantMapEntry.tenantName], tenantId);
 
 			if (tenantMapEntry.tenantGroup.present()) {
@@ -147,7 +152,7 @@ private:
 			}
 		}
 
-		ASSERT_EQ(tenantMap.size() + renameCount, metadata.tenantNameIndex.size());
+		ASSERT_EQ(tenantMap.size(), metadata.tenantNameIndex.size());
 	}
 
 	void validateTenantMetadata(std::map<int64_t, MetaclusterTenantMapEntry> tenantMap) {
@@ -242,6 +247,7 @@ private:
 public:
 	TenantConsistencyCheck() {}
 	TenantConsistencyCheck(Reference<DB> db) : db(db) {}
+	TenantConsistencyCheck(Reference<DB> db, bool isDataCluster) : db(db), isDataCluster(isDataCluster) {}
 
 	Future<Void> run() { return run(this); }
 };
