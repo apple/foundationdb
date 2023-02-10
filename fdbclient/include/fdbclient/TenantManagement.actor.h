@@ -265,11 +265,6 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			state Future<int64_t> tenantIdFuture;
-			if (generateTenantId) {
-				tenantIdFuture = getNextTenantId(tr, 1);
-			}
-
 			if (checkExistence) {
 				Optional<int64_t> existingId = wait(TenantMetadata::tenantNameIndex().get(tr, name));
 				if (existingId.present()) {
@@ -277,6 +272,17 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 				}
 
 				checkExistence = false;
+			}
+
+			state Future<int64_t> tenantIdFuture;
+			if (generateTenantId) {
+				Optional<int64_t> existingId = wait(TenantMetadata::tenantNameIndex().get(tr, name));
+				// If a tenant already exists then the id here doesnt matter since the tenant will not be created
+				if (existingId.present()) {
+					tenantIdFuture = existingId.get();
+				} else {
+					tenantIdFuture = getNextTenantId(tr, 1);
+				}
 			}
 
 			if (generateTenantId) {

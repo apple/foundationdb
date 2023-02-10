@@ -437,6 +437,95 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR static Future<Void> updateLocalState(TenantManagementWorkload* self,
+	                                           std::map<TenantName, TenantMapEntry>::iterator tenantItr,
+	                                           OperationType operationType,
+	                                           Version originalReadVersion) {
+		// Ignore any tenants that already existed
+		if (self->createdTenants.count(tenantItr->first)) {
+			return Void();
+		}
+
+		// Read the created tenant object and verify that its state is correct
+		state Optional<TenantMapEntry> entry = wait(self->tryGetTenant(tenantItr->first, operationType));
+
+		// TraceEvent("Nim::updateLocState")
+		//     .detail("TN", tenantItr->first)
+		//     .detail("TG", tenantItr->second.tenantGroup)
+		//     .detail("Client", self->clientId)
+		//     .detail("OP", operationType);
+
+		ASSERT(entry.present());
+		ASSERT(entry.get().id > self->maxId);
+		ASSERT(entry.get().id >> 48 == self->tenantIdPrefix);
+		ASSERT(entry.get().tenantGroup == tenantItr->second.tenantGroup);
+		ASSERT(entry.get().tenantState == TenantState::READY);
+
+		Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
+		ASSERT_GT(currentVersionstamp.version, originalReadVersion);
+
+		if (self->useMetacluster) {
+			// In a metacluster, we should also see that the tenant was created on the data cluster
+			Optional<TenantMapEntry> dataEntry =
+			    wait(TenantAPI::tryGetTenant(self->dataDb.getReference(), tenantItr->first));
+			ASSERT(dataEntry.present());
+			ASSERT(dataEntry.get().id == entry.get().id);
+			ASSERT(dataEntry.get().id >> 48 == self->tenantIdPrefix);
+			ASSERT(dataEntry.get().tenantGroup == entry.get().tenantGroup);
+			ASSERT(dataEntry.get().tenantState == TenantState::READY);
+		}
+
+		// Update our local tenant state to include the newly created one
+		self->maxId = std::max(self->maxId, entry.get().id);
+		TenantData tData = TenantData(entry.get().id, tenantItr->first, tenantItr->second.tenantGroup, true);
+		// TraceEvent("Nim::insert1").detail("TN", tenantItr->first);
+		self->createdTenants[tenantItr->first] = tData;
+		self->allTestTenants.push_back(tData.tenant);
+
+		// If this tenant has a tenant group, create or update the entry for it
+		if (tenantItr->second.tenantGroup.present()) {
+			// TraceEvent("Nim::insertTG1").detail("TN", tenantItr->second.tenantGroup.get());
+			self->createdTenantGroups[tenantItr->second.tenantGroup.get()].tenantCount++;
+		}
+
+		// Randomly decide to insert a key into the tenant
+		state bool insertData = deterministicRandom()->random01() < 0.5;
+		if (insertData) {
+			state Transaction insertTr(self->dataDb, self->createdTenants[tenantItr->first].tenant);
+			loop {
+				try {
+					// The value stored in the key will be the name of the tenant
+					insertTr.set(self->keyName, tenantItr->first);
+					wait(insertTr.commit());
+					break;
+				} catch (Error& e) {
+					wait(insertTr.onError(e));
+				}
+			}
+
+			self->createdTenants[tenantItr->first].empty = false;
+
+			// Make sure that the key inserted correctly concatenates the tenant prefix with the
+			// relative key
+			state Transaction checkTr(self->dataDb);
+			loop {
+				try {
+					checkTr.setOption(FDBTransactionOptions::RAW_ACCESS);
+					Optional<Value> val = wait(checkTr.get(self->keyName.withPrefix(entry.get().prefix)));
+					ASSERT(val.present());
+					ASSERT(val.get() == tenantItr->first);
+					break;
+				} catch (Error& e) {
+					wait(checkTr.onError(e));
+				}
+			}
+		}
+
+		// Perform some final tenant validation
+		wait(checkTenantContents(self, tenantItr->first, self->createdTenants[tenantItr->first]));
+		return Void();
+	}
+
 	ACTOR static Future<Void> createTenant(TenantManagementWorkload* self) {
 		state OperationType operationType = self->randomOperationType();
 		int numTenants = 1;
@@ -455,6 +544,8 @@ struct TenantManagementWorkload : TestWorkload {
 
 		// True if any tenant group name starts with \xff
 		state bool hasSystemTenantGroup = false;
+
+		// TraceEvent("Nim::CreateTenant0").detail("Client", self->clientId);
 
 		state int newTenants = 0;
 		state std::map<TenantName, TenantMapEntry> tenantsToCreate;
@@ -505,6 +596,14 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 
 					try {
+						for (auto [tenant, entry] : tenantsToCreate) {
+							// TraceEvent("Nim::CreateTenant1")
+							//     .detail("TN", tenant)
+							//     .detail("TG", entry.tenantGroup)
+							//     .detail("Client", self->clientId)
+							//     .detail("OP", operationType)
+							//     .detail("NumTenants", tenantsToCreate.size());
+						}
 						Optional<Void> result = wait(timeout(createTenantImpl(tr, tenantsToCreate, operationType, self),
 						                                     deterministicRandom()->randomInt(1, 30)));
 
@@ -519,8 +618,25 @@ struct TenantManagementWorkload : TestWorkload {
 								// Database operations shouldn't get here if the tenant already exists
 								ASSERT(!alreadyExists);
 							}
+							for (auto [tenant, entry] : tenantsToCreate) {
+								// TraceEvent("Nim::CreateTenant2")
+								//     .detail("TN", tenant)
+								//     .detail("TG", entry.tenantGroup)
+								//     .detail("Client", self->clientId)
+								//     .detail("OP", operationType);
+							}
 
 							break;
+						}
+
+						for (auto [tenant, entry] : tenantsToCreate) {
+							// TraceEvent("Nim::CreateTenant1.5")
+							//     .detail("TN", tenant)
+							//     .detail("TG", entry.tenantGroup)
+							//     .detail("Client", self->clientId)
+							//     .detail("OP", operationType)
+							//     .detail("ResP", result.present())
+							//     .detail("NumTenants", tenantsToCreate.size());
 						}
 
 						retried = true;
@@ -529,12 +645,22 @@ struct TenantManagementWorkload : TestWorkload {
 						// If we retried the creation after our initial attempt succeeded, then we proceed with the rest
 						// of the creation steps normally. Otherwise, the creation happened elsewhere and we failed
 						// here, so we can rethrow the error.
+						for (auto [tenant, entry] : tenantsToCreate) {
+							// TraceEvent("Nim::CreateTenant3")
+							//     .detail("TN", tenant)
+							//     .detail("TG", entry.tenantGroup)
+							//     .detail("Client", self->clientId)
+							//     .detail("OP", operationType)
+							//     .detail("Err", e.what());
+						}
 						if (e.code() == error_code_tenant_already_exists && !existedAtStart) {
 							ASSERT(operationType == OperationType::METACLUSTER ||
 							       operationType == OperationType::MANAGEMENT_DATABASE);
 							ASSERT(retried);
+							// TraceEvent("Nim::CreateTenant3.5");
 							break;
 						} else {
+							// TraceEvent("Nim::CreateTenant3.5");
 							throw;
 						}
 					}
@@ -556,6 +682,14 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 				}
 
+				for (auto [tenant, entry] : tenantsToCreate) {
+					// TraceEvent("Nim::CreateTenant4")
+					//     .detail("TN", tenant)
+					//     .detail("TG", entry.tenantGroup)
+					//     .detail("Client", self->clientId)
+					//     .detail("OP", operationType);
+				}
+
 				// Check that using the wrong creation type fails depending on whether we are using a metacluster
 				ASSERT(self->useMetacluster == (operationType == OperationType::METACLUSTER));
 
@@ -571,81 +705,13 @@ struct TenantManagementWorkload : TestWorkload {
 
 				state std::map<TenantName, TenantMapEntry>::iterator tenantItr;
 				for (tenantItr = tenantsToCreate.begin(); tenantItr != tenantsToCreate.end(); ++tenantItr) {
-					// Ignore any tenants that already existed
-					if (self->createdTenants.count(tenantItr->first)) {
-						continue;
-					}
+					// TraceEvent("Nim::CreateTenant5")
+					//     .detail("TN", tenantItr->first)
+					//     .detail("TG", tenantItr->second.tenantGroup)
+					//     .detail("Client", self->clientId)
+					//     .detail("OP", operationType);
 
-					// Read the created tenant object and verify that its state is correct
-					state Optional<TenantMapEntry> entry = wait(self->tryGetTenant(tenantItr->first, operationType));
-
-					ASSERT(entry.present());
-					ASSERT(entry.get().id > self->maxId);
-					ASSERT(entry.get().id >> 48 == self->tenantIdPrefix);
-					ASSERT(entry.get().tenantGroup == tenantItr->second.tenantGroup);
-					ASSERT(entry.get().tenantState == TenantState::READY);
-
-					Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
-					ASSERT_GT(currentVersionstamp.version, originalReadVersion);
-
-					if (self->useMetacluster) {
-						// In a metacluster, we should also see that the tenant was created on the data cluster
-						Optional<TenantMapEntry> dataEntry =
-						    wait(TenantAPI::tryGetTenant(self->dataDb.getReference(), tenantItr->first));
-						ASSERT(dataEntry.present());
-						ASSERT(dataEntry.get().id == entry.get().id);
-						ASSERT(dataEntry.get().id >> 48 == self->tenantIdPrefix);
-						ASSERT(dataEntry.get().tenantGroup == entry.get().tenantGroup);
-						ASSERT(dataEntry.get().tenantState == TenantState::READY);
-					}
-
-					// Update our local tenant state to include the newly created one
-					self->maxId = entry.get().id;
-					TenantData tData =
-					    TenantData(entry.get().id, tenantItr->first, tenantItr->second.tenantGroup, true);
-					self->createdTenants[tenantItr->first] = tData;
-					self->allTestTenants.push_back(tData.tenant);
-
-					// If this tenant has a tenant group, create or update the entry for it
-					if (tenantItr->second.tenantGroup.present()) {
-						self->createdTenantGroups[tenantItr->second.tenantGroup.get()].tenantCount++;
-					}
-
-					// Randomly decide to insert a key into the tenant
-					state bool insertData = deterministicRandom()->random01() < 0.5;
-					if (insertData) {
-						state Transaction insertTr(self->dataDb, self->createdTenants[tenantItr->first].tenant);
-						loop {
-							try {
-								// The value stored in the key will be the name of the tenant
-								insertTr.set(self->keyName, tenantItr->first);
-								wait(insertTr.commit());
-								break;
-							} catch (Error& e) {
-								wait(insertTr.onError(e));
-							}
-						}
-
-						self->createdTenants[tenantItr->first].empty = false;
-
-						// Make sure that the key inserted correctly concatenates the tenant prefix with the
-						// relative key
-						state Transaction checkTr(self->dataDb);
-						loop {
-							try {
-								checkTr.setOption(FDBTransactionOptions::RAW_ACCESS);
-								Optional<Value> val = wait(checkTr.get(self->keyName.withPrefix(entry.get().prefix)));
-								ASSERT(val.present());
-								ASSERT(val.get() == tenantItr->first);
-								break;
-							} catch (Error& e) {
-								wait(checkTr.onError(e));
-							}
-						}
-					}
-
-					// Perform some final tenant validation
-					wait(checkTenantContents(self, tenantItr->first, self->createdTenants[tenantItr->first]));
+					wait(updateLocalState(self, tenantItr, operationType, originalReadVersion));
 				}
 
 				return Void();
@@ -661,14 +727,42 @@ struct TenantManagementWorkload : TestWorkload {
 					return Void();
 				} else if (e.code() == error_code_cluster_no_capacity) {
 					int64_t lastTenantId = wait(getLastTenantId(self->dataDb));
+					int tenantsCreating = newTenants;
+					// For special keys and management transactions since we create multiple tenants it's possible some
+					// of them are duplicates in which case the whole transaction will fail if we overshoot capacity but
+					// newTenants will not accurately reflect the total ids we attempt to assign
+					if (operationType == OperationType::SPECIAL_KEYS ||
+					    operationType == OperationType::MANAGEMENT_TRANSACTION) {
+						tenantsCreating = tenantsToCreate.size();
+					}
 					TraceEvent(SevWarn, "TenantCapcityLimitsExceeded")
 					    .detail("LastTenantId", lastTenantId)
-					    .detail("NewTenants", newTenants)
-					    .detail("ClientID", self->clientId);
+					    .detail("NewTenants", tenantsCreating)
+					    .detail("ClientID", self->clientId)
+					    .detail("Opetation", operationType);
 					// Overshot our capacity because we cannot assign anymore tenant ids with the same prefix
-					if (lastTenantId >> 48 != (lastTenantId + newTenants) >> 48) {
+					if (lastTenantId >> 48 != (lastTenantId + tenantsCreating) >> 48) {
 						CODE_PROBE(true, "prefix change from reaching tenant capacity limits");
 						ASSERT(lastTenantId >> 48 == self->tenantIdPrefix);
+
+						// It's possible that we created tenants but the createTenantImpl actor timed out so we had to
+						// retry. Between when this retry is invoked to when the attempt is made to insert tenants the
+						// tenant id could have increased greatly throwing capacity errors even though we're not
+						// inserting new tenants. Thus when we get to this codepath we need to ensure we update our
+						// local state and add any missing tenants that were created.
+						state std::map<TenantName, TenantMapEntry>::iterator curTenantItr;
+						for (curTenantItr = tenantsToCreate.begin(); curTenantItr != tenantsToCreate.end();
+						     ++curTenantItr) {
+							state Optional<TenantMapEntry> curEntry =
+							    wait(self->tryGetTenant(curTenantItr->first, operationType));
+							if (curEntry.present()) {
+								// TraceEvent("Nim::startUpdateLoc");
+								wait(updateLocalState(self, curTenantItr, operationType, originalReadVersion));
+							} else {
+								break;
+							}
+						}
+
 						return Void();
 					}
 					// Confirm that we overshot our capacity. This check cannot be done for database operations
@@ -1265,7 +1359,11 @@ struct TenantManagementWorkload : TestWorkload {
 				auto localItr = self->createdTenants.lower_bound(beginTenant);
 				auto tenantMapItr = tenants.begin();
 				for (; tenantMapItr != tenants.end(); ++tenantMapItr, ++localItr) {
+					if (localItr == self->createdTenants.end()) {
+						// TraceEvent("Nim::here2").detail("TenItr", tenantMapItr->first);
+					}
 					ASSERT(localItr != self->createdTenants.end());
+					// TraceEvent("Nim::here").detail("Loc", localItr->first).detail("TenItr", tenantMapItr->first);
 					ASSERT(localItr->first == tenantMapItr->first);
 				}
 
@@ -1313,6 +1411,7 @@ struct TenantManagementWorkload : TestWorkload {
 		ASSERT(newTenantEntry.present());
 		TenantData tData = self->createdTenants[oldTenantName];
 		tData.tenant->name = newTenantName;
+		// TraceEvent("Nim::insert2").detail("NTN", newTenantName).detail("OTN", oldTenantName);
 		self->createdTenants[newTenantName] = tData;
 		self->createdTenants.erase(oldTenantName);
 		state Transaction insertTr(self->dataDb, tData.tenant);
@@ -1577,11 +1676,14 @@ struct TenantManagementWorkload : TestWorkload {
 				if (itr->second.tenantGroup.present()) {
 					auto tenantGroupItr = self->createdTenantGroups.find(itr->second.tenantGroup.get());
 					ASSERT(tenantGroupItr != self->createdTenantGroups.end());
+					// TraceEvent("Nim::insertTG2.3").detail("TN", itr->second.tenantGroup);
 					if (--tenantGroupItr->second.tenantCount == 0) {
+						// TraceEvent("Nim::insertTG2.5").detail("TN", itr->second.tenantGroup);
 						self->createdTenantGroups.erase(tenantGroupItr);
 					}
 				}
 				if (newTenantGroup.present()) {
+					// TraceEvent("Nim::insertTG2").detail("TN", newTenantGroup);
 					self->createdTenantGroups[newTenantGroup.get()].tenantCount++;
 				}
 				itr->second.tenantGroup = newTenantGroup;
@@ -1738,6 +1840,7 @@ struct TenantManagementWorkload : TestWorkload {
 				auto tenantMapItr = tenantGroups.begin();
 				for (; tenantMapItr != tenantGroups.end(); ++tenantMapItr, ++localItr) {
 					ASSERT(localItr != self->createdTenantGroups.end());
+					// TraceEvent("Nim::LTG").detail("LT", localItr->first).detail("TT", tenantMapItr->first);
 					ASSERT(localItr->first == tenantMapItr->first);
 				}
 
@@ -1879,6 +1982,7 @@ struct TenantManagementWorkload : TestWorkload {
 			TenantNameRef lastTenant;
 			while (dataItr != dataClusterTenants.end()) {
 				ASSERT(localItr != self->createdTenants.end());
+				// TraceEvent("Nim::here2").detail("DF", dataItr->first).detail("LF", localItr->first);
 				ASSERT(dataItr->first == localItr->first);
 				ASSERT(dataItr->second.tenantGroup == localItr->second.tenantGroup);
 
