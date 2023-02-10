@@ -8123,6 +8123,10 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			continue;
 		}
 		workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
+		if (!self->trState->cx->blobWorker_interf.count(workerId)) {
+			throw connection_failed();
+		}
+
 		// prune first/last granules to requested range
 		if (keyRange.begin > granuleStartKey) {
 			granuleStartKey = keyRange.begin;

@@ -332,6 +332,7 @@ StringRef fileLogDataPrefix = "log-"_sr;
 StringRef fileVersionedLogDataPrefix = "log2-"_sr;
 StringRef fileLogQueuePrefix = "logqueue-"_sr;
 StringRef tlogQueueExtension = "fdq"_sr;
+StringRef fileBlobWorkerPrefix = "bw-"_sr;
 
 enum class FilesystemCheck {
 	FILES_ONLY,
@@ -483,7 +484,7 @@ TLogFn tLogFnForOptions(TLogOptions options) {
 }
 
 struct DiskStore {
-	enum COMPONENT { TLogData, Storage, UNSET };
+	enum COMPONENT { TLogData, Storage, BlobWorker, UNSET };
 
 	UID storeID = UID();
 	std::string filename = ""; // For KVStoreMemory just the base filename to be passed to IDiskQueue
@@ -542,6 +543,9 @@ std::vector<DiskStore> getDiskStores(std::string folder,
 			store.tLogOptions.version = TLogVersion::V2;
 			store.tLogOptions.spillType = TLogSpillType::VALUE;
 			prefix = fileLogDataPrefix;
+		} else if (filename.startsWith(fileBlobWorkerPrefix)) {
+			store.storedComponent = DiskStore::BlobWorker;
+			prefix = fileBlobWorkerPrefix;
 		} else {
 			continue;
 		}
@@ -2033,6 +2037,35 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				logData.back().actor = oldLog.getFuture() || tl;
 				logData.back().uid = s.storeID;
 				errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, s.storeID, tl));
+			} else if (s.storedComponent == DiskStore::BlobWorker) {
+				LocalLineage _;
+				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobWorker;
+
+				BlobWorkerInterface recruited(locality, s.storeID);
+				recruited.initEndpoints();
+
+				std::map<std::string, std::string> details;
+				details["StorageEngine"] = s.storeType.toString();
+				startRole(Role::BLOB_WORKER, recruited.id(), interf.id(), details, "Restored");
+
+				DUMPTOKEN(recruited.waitFailure);
+				DUMPTOKEN(recruited.blobGranuleFileRequest);
+				DUMPTOKEN(recruited.assignBlobRangeRequest);
+				DUMPTOKEN(recruited.revokeBlobRangeRequest);
+				DUMPTOKEN(recruited.granuleAssignmentsRequest);
+				DUMPTOKEN(recruited.granuleStatusStreamRequest);
+				DUMPTOKEN(recruited.haltBlobWorker);
+				DUMPTOKEN(recruited.minBlobVersionRequest);
+
+				TraceEvent("BlobWorkerOpen1", recruited.id()).detail("Filename", s.filename);
+				IKeyValueStore* data = openKVStore(s.storeType, s.filename, recruited.id(), memoryLimit);
+				filesClosed.add(data->onClosed());
+
+				Promise<Void> recovery;
+				Future<Void> bw = blobWorker(recruited, recovery, dbInfo, data);
+				recoveries.push_back(recovery.getFuture());
+				bw = handleIOErrors(bw, data, recruited.id());
+				errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
 			}
 		}
 
@@ -2651,6 +2684,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			}
 			when(InitializeBlobWorkerRequest req = waitNext(interf.blobWorker.getFuture())) {
 				if (!blobWorkerCache.exists(req.reqId)) {
+					LocalLineage _;
+					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobWorker;
+
 					BlobWorkerInterface recruited(locality, req.interfaceId);
 					recruited.initEndpoints();
 					startRole(Role::BLOB_WORKER, recruited.id(), interf.id());
@@ -2664,8 +2700,21 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.haltBlobWorker);
 					DUMPTOKEN(recruited.minBlobVersionRequest);
 
+					IKeyValueStore* data = nullptr;
+					if (req.storeType != KeyValueStoreType::END) {
+						std::string filename =
+						    filenameFromId(req.storeType, folder, fileBlobWorkerPrefix.toString(), recruited.id());
+
+						TraceEvent("BlobWorkerOpen2", recruited.id()).detail("Filename", filename);
+						data = openKVStore(req.storeType, filename, recruited.id(), memoryLimit);
+						filesClosed.add(data->onClosed());
+					}
+
 					ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady = req.reply;
-					Future<Void> bw = blobWorker(recruited, blobWorkerReady, dbInfo);
+					Future<Void> bw = blobWorker(recruited, blobWorkerReady, dbInfo, data);
+					if (req.storeType != KeyValueStoreType::END) {
+						bw = handleIOErrors(bw, data, recruited.id());
+					}
 					errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
 
 				} else {

@@ -43,6 +43,7 @@
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
+#include "fdbserver/IKeyValueStore.h"
 
 #include "flow/Arena.h"
 #include "flow/CompressionUtils.h"
@@ -245,6 +246,7 @@ struct GranuleHistoryEntry : NonCopyable, ReferenceCounted<GranuleHistoryEntry> 
 struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	UID id;
 	Database db;
+	IKeyValueStore* storage;
 
 	PromiseStream<Future<Void>> addActor;
 
@@ -294,8 +296,8 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 	bool isFullRestoreMode = false;
 
-	BlobWorkerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db)
-	  : id(id), db(db), tenantData(BGTenantMap(dbInfo)), dbInfo(dbInfo),
+	BlobWorkerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db, IKeyValueStore* storage)
+	  : id(id), db(db), storage(storage), tenantData(BGTenantMap(dbInfo)), dbInfo(dbInfo),
 	    initialSnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM)),
 	    resnapshotBudget(new FlowLock(SERVER_KNOBS->BLOB_WORKER_RESNAPSHOT_BUDGET_BYTES)),
 	    deltaWritesBudget(new FlowLock(SERVER_KNOBS->BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES)),
@@ -4722,6 +4724,33 @@ ACTOR Future<Void> handleRangeRevoke(Reference<BlobWorkerData> bwData, RevokeBlo
 	}
 }
 
+ACTOR Future<Void> restartRangeAssignment(Reference<BlobWorkerData> self, Key begin, Key end) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
+	state AssignBlobRangeRequest req;
+	req.keyRange = KeyRangeRef(begin, end);
+	req.type = AssignRequestType::Normal;
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> lockValue = wait(tr->get(blobGranuleLockKeyFor(req.keyRange)));
+			if (lockValue.present()) {
+				std::tuple<int64_t, int64_t, UID> currentOwner = decodeBlobGranuleLockValue(lockValue.get());
+				req.managerEpoch = std::get<0>(currentOwner);
+				req.managerSeqno = std::get<1>(currentOwner);
+			}
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+
+	wait(handleRangeAssign(self, req, true));
+	return Void();
+}
+
 void handleBlobVersionRequest(Reference<BlobWorkerData> bwData, MinBlobVersionRequest req) {
 	bwData->db->setDesiredChangeFeedVersion(
 	    std::max<Version>(0, req.grv - (SERVER_KNOBS->TARGET_BW_LAG_UPDATE * SERVER_KNOBS->VERSIONS_PER_SECOND)));
@@ -4733,17 +4762,28 @@ void handleBlobVersionRequest(Reference<BlobWorkerData> bwData, MinBlobVersionRe
 	req.reply.send(rep);
 }
 
-ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData, BlobWorkerInterface interf) {
+ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData,
+                                      BlobWorkerInterface interf,
+                                      bool replaceExisting) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
+	state Key blobWorkerListKey = blobWorkerListKeyFor(interf.id());
+
 	TraceEvent("BlobWorkerRegister", bwData->id);
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
-			Key blobWorkerListKey = blobWorkerListKeyFor(interf.id());
-			// FIXME: should be able to remove this conflict range
-			tr->addReadConflictRange(singleKeyRange(blobWorkerListKey));
+			if (replaceExisting) {
+				Optional<Value> val = wait(tr->get(blobWorkerListKey));
+				if (!val.present()) {
+					throw worker_removed();
+				}
+			} else {
+				// FIXME: should be able to remove this conflict range
+				tr->addReadConflictRange(singleKeyRange(blobWorkerListKey));
+			}
+
 			tr->set(blobWorkerListKey, blobWorkerListValue(interf));
 
 			// Get manager lock from DB
@@ -5181,56 +5221,8 @@ ACTOR Future<Void> simForceFullMemory(Reference<BlobWorkerData> bwData) {
 	}
 }
 
-ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
-                              ReplyPromise<InitializeBlobWorkerReply> recruitReply,
-                              Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	state Database cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
-	state Reference<BlobWorkerData> self(new BlobWorkerData(bwInterf.id(), dbInfo, cx));
-	self->id = bwInterf.id();
-	self->locality = bwInterf.locality;
-	// Since the blob worker gets initalized through the blob manager it is more reliable to fetch the encryption state
-	// using the DB Config rather than passing it through the initalization request for the blob manager and blob worker
-	DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
-	self->encryptMode = config.encryptionAtRestMode;
-	TraceEvent("BWEncryptionAtRestMode").detail("Mode", self->encryptMode.toString());
-
+ACTOR Future<Void> blobWorkerCore(BlobWorkerInterface bwInterf, Reference<BlobWorkerData> self) {
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
-
-	if (BW_DEBUG) {
-		printf("Initializing blob worker s3 stuff\n");
-	}
-
-	try {
-		if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
-			if (BW_DEBUG) {
-				fmt::print("BW constructing backup container from {0}\n", SERVER_KNOBS->BG_URL);
-			}
-			self->bstore = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BG_URL);
-			if (BW_DEBUG) {
-				printf("BW constructed backup container\n");
-			}
-		}
-
-		// register the blob worker to the system keyspace
-		wait(registerBlobWorker(self, bwInterf));
-	} catch (Error& e) {
-		if (BW_DEBUG) {
-			fmt::print("BW got init error {0}\n", e.name());
-		}
-		// if any errors came up while initializing the blob worker, let the blob manager know
-		// that recruitment failed
-		if (!recruitReply.isSet()) {
-			recruitReply.sendError(recruitment_failed());
-		}
-		throw e;
-	}
-
-	// By now, we know that initialization was successful, so
-	// respond to the initialization request with the interface itself
-	// Note: this response gets picked up by the blob manager
-	InitializeBlobWorkerReply rep;
-	rep.interf = bwInterf;
-	recruitReply.send(rep);
 
 	self->addActor.send(waitFailureServer(bwInterf.waitFailure.getFuture()));
 	self->addActor.send(runGRVChecks(self));
@@ -5243,8 +5235,6 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	if (g_network->isSimulated() && SERVER_KNOBS->BLOB_WORKER_DO_REJECT_WHEN_FULL && BUGGIFY_WITH_PROB(0.25)) {
 		self->addActor.send(simForceFullMemory(self));
 	}
-
-	TraceEvent("BlobWorkerInit", self->id).log();
 
 	try {
 		loop choose {
@@ -5405,7 +5395,227 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	self->shuttingDown = true;
 
 	wait(self->granuleMetadata.clearAsync());
+	throw worker_removed();
+}
+
+bool blobWorkerTerminated(Reference<BlobWorkerData> self, IKeyValueStore* persistentData, Error const& e) {
+	if (persistentData) {
+		if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
+			persistentData->dispose();
+		} else {
+			persistentData->close();
+		}
+	}
+
+	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
+	    e.code() == error_code_file_not_found || e.code() == error_code_actor_cancelled) {
+		TraceEvent("BlobWorkerTerminated", self->id).errorUnsuppressed(e);
+		return true;
+	} else {
+		return false;
+	}
+}
+
+#define PERSIST_PREFIX "\xff\xff"
+static const KeyRef persistID = PERSIST_PREFIX "ID"_sr;
+
+ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
+                              ReplyPromise<InitializeBlobWorkerReply> recruitReply,
+                              Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                              IKeyValueStore* persistentData) {
+
+	state Database cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+	state Reference<BlobWorkerData> self(new BlobWorkerData(bwInterf.id(), dbInfo, cx, persistentData));
+	self->id = bwInterf.id();
+	self->locality = bwInterf.locality;
+	try {
+		// Since the blob worker gets initalized through the blob manager it is more reliable to fetch the encryption
+		// state using the DB Config rather than passing it through the initalization request for the blob manager and
+		// blob worker
+		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+		self->encryptMode = config.encryptionAtRestMode;
+		TraceEvent("BWEncryptionAtRestMode").detail("Mode", self->encryptMode.toString());
+
+		if (self->storage) {
+			TraceEvent("BlobWorkerInit4", self->id);
+			wait(self->storage->init());
+			TraceEvent("BlobWorkerInit5", self->id);
+			self->storage->set(KeyValueRef(persistID, BinaryWriter::toValue(self->id, Unversioned())));
+			wait(self->storage->commit());
+			TraceEvent("BlobWorkerInit6", self->id);
+		}
+
+		if (BW_DEBUG) {
+			printf("Initializing blob worker s3 stuff\n");
+		}
+
+		try {
+			if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
+				if (BW_DEBUG) {
+					fmt::print("BW constructing backup container from {0}\n", SERVER_KNOBS->BG_URL);
+				}
+				self->bstore = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BG_URL);
+				if (BW_DEBUG) {
+					printf("BW constructed backup container\n");
+				}
+			}
+
+			// register the blob worker to the system keyspace
+			wait(registerBlobWorker(self, bwInterf, false));
+		} catch (Error& e) {
+			if (BW_DEBUG) {
+				fmt::print("BW got init error {0}\n", e.name());
+			}
+			// if any errors came up while initializing the blob worker, let the blob manager know
+			// that recruitment failed
+			if (!recruitReply.isSet()) {
+				recruitReply.sendError(recruitment_failed());
+			}
+			throw e;
+		}
+
+		// By now, we know that initialization was successful, so
+		// respond to the initialization request with the interface itself
+		// Note: this response gets picked up by the blob manager
+		InitializeBlobWorkerReply rep;
+		rep.interf = bwInterf;
+		recruitReply.send(rep);
+
+		TraceEvent("BlobWorkerInit", self->id).log();
+		wait(blobWorkerCore(bwInterf, self));
+		return Void();
+	} catch (Error& e) {
+		if (blobWorkerTerminated(self, persistentData, e)) {
+			return Void();
+		}
+		throw e;
+	}
+}
+
+ACTOR Future<Void> restorePersistentState(Reference<BlobWorkerData> self) {
+	state Future<Optional<Value>> fID = self->storage->readValue(persistID);
+
+	wait(waitForAll(std::vector{ fID }));
+
+	if (!fID.get().present()) {
+		CODE_PROBE(true, "Restored uninitialized blob worker");
+		throw worker_removed();
+	}
+	UID recoveredID = BinaryReader::fromStringRef<UID>(fID.get().get(), Unversioned());
+	ASSERT(recoveredID == self->id);
 	return Void();
+}
+
+ACTOR Future<Void> restoreGranules(Reference<BlobWorkerData> self) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
+	state Key beginKey = blobGranuleMappingKeys.begin;
+	// FIXME: use range stream instead
+	state int rowLimit = BUGGIFY ? deterministicRandom()->randomInt(2, 10) : 10000;
+	state std::vector<Future<Void>> assignments;
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			KeyRange nextRange(KeyRangeRef(beginKey, blobGranuleMappingKeys.end));
+			// using the krm functions can produce incorrect behavior here as it does weird stuff with beginKey
+			state GetRangeLimits limits(rowLimit, GetRangeLimits::BYTE_LIMIT_UNLIMITED);
+			limits.minRows = 2;
+			RangeResult results = wait(tr->getRange(nextRange, limits));
+
+			// Add the mappings to our in memory key range map
+			for (int rangeIdx = 0; rangeIdx < results.size() - 1; rangeIdx++) {
+				Key granuleStartKey = results[rangeIdx].key.removePrefix(blobGranuleMappingKeys.begin);
+				Key granuleEndKey = results[rangeIdx + 1].key.removePrefix(blobGranuleMappingKeys.begin);
+				if (results[rangeIdx].value.size()) {
+					UID existingOwner = decodeBlobGranuleMappingValue(results[rangeIdx].value);
+					if (existingOwner == self->id) {
+						assignments.push_back(restartRangeAssignment(self, granuleStartKey, granuleEndKey));
+					}
+				}
+			}
+
+			if (!results.more || results.size() <= 1) {
+				break;
+			}
+
+			// re-read last key to get range that starts there
+			beginKey = results.back().key;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+
+	wait(waitForAll(assignments));
+	return Void();
+}
+
+ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
+                              Promise<Void> recovered,
+                              Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                              IKeyValueStore* persistentData) {
+
+	state Database cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+	state Reference<BlobWorkerData> self(new BlobWorkerData(bwInterf.id(), dbInfo, cx, persistentData));
+	self->id = bwInterf.id();
+	self->locality = bwInterf.locality;
+	try {
+		// Since the blob worker gets initalized through the blob manager it is more reliable to fetch the encryption
+		// state using the DB Config rather than passing it through the initalization request for the blob manager and
+		// blob worker
+		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+		self->encryptMode = config.encryptionAtRestMode;
+		TraceEvent("BWEncryptionAtRestMode").detail("Mode", self->encryptMode.toString());
+
+		TraceEvent("BlobWorkerInit1", self->id);
+		wait(self->storage->init());
+		TraceEvent("BlobWorkerInit2", self->id);
+		wait(self->storage->commit());
+		TraceEvent("BlobWorkerInit3", self->id);
+		wait(restorePersistentState(self));
+
+		TraceEvent("BlobWorkerInit4", self->id);
+		if (BW_DEBUG) {
+			printf("Initializing blob worker s3 stuff\n");
+		}
+
+		try {
+			if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
+				if (BW_DEBUG) {
+					fmt::print("BW constructing backup container from {0}\n", SERVER_KNOBS->BG_URL);
+				}
+				self->bstore = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BG_URL);
+				if (BW_DEBUG) {
+					printf("BW constructed backup container\n");
+				}
+			}
+			wait(restoreGranules(self));
+			// register the blob worker to the system keyspace
+			wait(registerBlobWorker(self, bwInterf, true));
+		} catch (Error& e) {
+			if (BW_DEBUG) {
+				fmt::print("BW got init error {0}\n", e.name());
+			}
+			throw e;
+		}
+
+		if (recovered.canBeSet()) {
+			recovered.send(Void());
+		}
+
+		TraceEvent("BlobWorkerInit", self->id).log();
+		wait(blobWorkerCore(bwInterf, self));
+		return Void();
+	} catch (Error& e) {
+		if (recovered.canBeSet())
+			recovered.send(Void());
+		if (blobWorkerTerminated(self, persistentData, e)) {
+			return Void();
+		}
+		throw e;
+	}
 }
 
 // TODO add unit tests for assign/revoke range, especially version ordering
