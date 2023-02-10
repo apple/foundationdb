@@ -56,6 +56,9 @@ int64_t prefixToId(KeyRef prefix, EnforceValidTenantId enforceValidTenantId) {
 }
 
 bool withinSingleTenant(KeyRangeRef const& range) {
+	if (range.begin >= systemKeys.begin) {
+		return true;
+	}
 	if (range.begin.size() < TenantAPI::PREFIX_SIZE || range.end.size() < TenantAPI::PREFIX_SIZE) {
 		return false;
 	}

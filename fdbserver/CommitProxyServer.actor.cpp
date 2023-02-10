@@ -1258,6 +1258,11 @@ TEST_CASE("/CommitProxy/SplitRange/SplitClearRangeByTenant") {
 	ASSERT_EQ(result.size(), 1);
 	ASSERT(result.front().param1 == sysKey1);
 	ASSERT(result.front().param2 == randomSysKey);
+
+	// empty tenant map
+	tenantMap.clear();
+	result = splitClearRangeByTenant(arena, mutation, tenantMap);
+	ASSERT(result.empty());
 	return Void();
 }
 
@@ -1312,6 +1317,8 @@ size_t processClearRangeMutation(Arena& arena,
 		CODE_PROBE(true, "Clear Range raw access or cross multiple tenants");
 		idxSplitMutations.emplace_back(mutationIdx, newClears);
 		newMutationSize += newClears.size() - 1;
+	} else {
+		mutation.type = MutationRef::NoOp;
 	}
 	return newClears.size();
 }
@@ -1399,8 +1406,8 @@ Error validateAndProcessTenantAccess(Arena& arena,
 			    arena, pProxyCommitData->tenantMap, mutation, i, newMutationSize, idxSplitMutations);
 
 			if (debugId.present()) {
-				TraceEvent(SevDebug, "SplitTenantClearRange", pProxyCommitData->dbgid)
-				    .detail("TxnId", debugId.get())
+				DisabledTraceEvent(SevDebug, "SplitTenantClearRange", pProxyCommitData->dbgid)
+				    .detail("TxnId", debugId)
 				    .detail("Idx", i)
 				    .detail("NewMutationSize", newMutationSize)
 				    .detail("OldMutationSize", mutations.size())
@@ -1412,9 +1419,9 @@ Error validateAndProcessTenantAccess(Arena& arena,
 		}
 
 		if (debugId.present()) {
-			TraceEvent(SevDebug, "ValidateAndProcessTenantAccess", pProxyCommitData->dbgid)
+			DisabledTraceEvent(SevDebug, "ValidateAndProcessTenantAccess", pProxyCommitData->dbgid)
 			    .detail("Context", context)
-			    .detail("TxnId", debugId.get())
+			    .detail("TxnId", debugId)
 			    .detail("Version", pProxyCommitData->version.get())
 			    .detail("ChangeTenant", changeTenant)
 			    .detail("WriteNormalKey", writeNormalKey)
@@ -1808,9 +1815,6 @@ void pushToBackupMutations(CommitBatchContext* self,
                            MutationRef const& writtenMutation,
                            Optional<MutationRef> const& encryptedMutation) {
 	// In required tenant mode, the clear ranges are already split by tenant
-	TraceEvent(SevDebug, "BackupMutationLog", pProxyCommitData->dbgid)
-	    .detail("TenantMode", (int)pProxyCommitData->getTenantMode());
-
 	if (m.type != MutationRef::Type::ClearRange || pProxyCommitData->getTenantMode() == TenantMode::REQUIRED) {
 		if (EXPENSIVE_VALIDATION && m.type == MutationRef::ClearRange) {
 			ASSERT(TenantAPI::withinSingleTenant(KeyRangeRef(m.param1, m.param2)));
@@ -2016,9 +2020,21 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				// FIXME: Remove assert once ClearRange RAW_ACCESS usecase handling is done
 				ASSERT(std::holds_alternative<MutationRef>(var));
 				writtenMutation = std::get<MutationRef>(var);
+			} else if (m.type == MutationRef::NoOp) {
+				ASSERT_EQ(pProxyCommitData->getTenantMode(), TenantMode::REQUIRED);
+				continue;
 			} else {
 				UNREACHABLE();
 			}
+
+			DisabledTraceEvent(SevDebug, "BeforeBackup", pProxyCommitData->dbgid)
+			    .detail("M1", m.param1)
+			    .detail("M2", m.param2)
+			    .detail("MT", getTypeString(m.type))
+			    .detail("VecBackupKeys", pProxyCommitData->vecBackupKeys.size())
+			    .detail("ShouldBackup", shouldBackup(m))
+			    .detail("TenantMapSize", pProxyCommitData->tenantMap.size())
+			    .detail("TenantMode", (int)pProxyCommitData->getTenantMode());
 
 			if (pProxyCommitData->vecBackupKeys.size() <= 1 || !shouldBackup(m)) {
 				continue;
