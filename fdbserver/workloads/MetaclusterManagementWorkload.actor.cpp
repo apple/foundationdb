@@ -908,16 +908,16 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	                                           ClusterName clusterName,
 	                                           DataClusterData clusterData) {
 		state Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
-		state std::vector<std::pair<TenantName, int64_t>> tenants;
+		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
 		state Reference<ReadYourWritesTransaction> tr = clusterData.db->createTransaction();
 
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				wait(
-				    store(metaclusterRegistration, MetaclusterMetadata::metaclusterRegistration().get(tr)) &&
-				    store(tenants,
-				          TenantAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, clusterData.tenants.size() + 1)));
+				wait(store(metaclusterRegistration, MetaclusterMetadata::metaclusterRegistration().get(tr)) &&
+				     store(tenants,
+				           TenantAPI::listTenantMetadataTransaction(
+				               tr, ""_sr, "\xff\xff"_sr, clusterData.tenants.size() + 1)));
 				break;
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(tr->onError(e)));
@@ -932,7 +932,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		}
 
 		ASSERT(tenants.size() == clusterData.tenants.size());
-		for (auto [tenantName, tid] : tenants) {
+		for (auto [tenantName, tenantEntry] : tenants) {
 			ASSERT(clusterData.tenants.count(tenantName));
 			auto tenantData = self->createdTenants[tenantName];
 			ASSERT(tenantData.cluster == clusterName);
