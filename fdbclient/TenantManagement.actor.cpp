@@ -69,12 +69,12 @@ int64_t extractTenantIdFromKeyRef(StringRef s) {
 
 // validates whether the lastTenantId and the nextTenantId share the same 2 byte prefix
 bool nextTenantIdPrefixMatches(int64_t lastTenantId, int64_t nextTenantId) {
-	if (nextTenantId >> 48 != lastTenantId >> 48) {
+	if (getTenantIdPrefix(nextTenantId) != getTenantIdPrefix(lastTenantId)) {
 		TraceEvent(SevWarnAlways, "TenantIdPrefixMismatch")
 		    .detail("CurrentTenantId", lastTenantId)
 		    .detail("NewTenantId", nextTenantId)
-		    .detail("CurrentTenantIdPrefix", lastTenantId >> 48)
-		    .detail("NewTenantIdPrefix", nextTenantId >> 48);
+		    .detail("CurrentTenantIdPrefix", getTenantIdPrefix(lastTenantId))
+		    .detail("NewTenantIdPrefix", getTenantIdPrefix(nextTenantId));
 		return false;
 	}
 	return true;
@@ -82,9 +82,15 @@ bool nextTenantIdPrefixMatches(int64_t lastTenantId, int64_t nextTenantId) {
 
 // returns the maximum allowable tenant id in which the 2 byte prefix is not overriden
 int64_t getMaxAllowableTenantId(int64_t curTenantId) {
-	int64_t maxTenantId = pow(2, 48) - 1 + ((curTenantId >> 48) << 48);
+	// The maximum tenant id allowed is 1 for the first 48 bits (6 bytes) with the first 16 bits (2 bytes) being the
+	// tenant prefix
+	int64_t maxTenantId = pow(2, 48) - 1 + ((getTenantIdPrefix(curTenantId)) << 48);
 	ASSERT(maxTenantId > 0);
 	return maxTenantId;
+}
+
+int64_t getTenantIdPrefix(int64_t tenantId) {
+	return tenantId >> 48;
 }
 
 } // namespace TenantAPI

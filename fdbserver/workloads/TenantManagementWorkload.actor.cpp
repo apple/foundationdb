@@ -451,7 +451,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 		ASSERT(entry.present());
 		ASSERT(entry.get().id > self->maxId);
-		ASSERT(entry.get().id >> 48 == self->tenantIdPrefix);
+		ASSERT(TenantAPI::getTenantIdPrefix(entry.get().id) == self->tenantIdPrefix);
 		ASSERT(entry.get().tenantGroup == tenantItr->second.tenantGroup);
 		ASSERT(entry.get().tenantState == TenantState::READY);
 
@@ -464,7 +464,7 @@ struct TenantManagementWorkload : TestWorkload {
 			    wait(TenantAPI::tryGetTenant(self->dataDb.getReference(), tenantItr->first));
 			ASSERT(dataEntry.present());
 			ASSERT(dataEntry.get().id == entry.get().id);
-			ASSERT(dataEntry.get().id >> 48 == self->tenantIdPrefix);
+			ASSERT(TenantAPI::getTenantIdPrefix(dataEntry.get().id) == self->tenantIdPrefix);
 			ASSERT(dataEntry.get().tenantGroup == entry.get().tenantGroup);
 			ASSERT(dataEntry.get().tenantState == TenantState::READY);
 		}
@@ -682,9 +682,10 @@ struct TenantManagementWorkload : TestWorkload {
 					    .detail("ClientID", self->clientId)
 					    .detail("Opetation", operationType);
 					// Overshot our capacity because we cannot assign anymore tenant ids with the same prefix
-					if (lastTenantId >> 48 != (lastTenantId + tenantsCreating) >> 48) {
+					if (TenantAPI::getTenantIdPrefix(lastTenantId) !=
+					    TenantAPI::getTenantIdPrefix(lastTenantId + tenantsCreating)) {
 						CODE_PROBE(true, "prefix change from reaching tenant capacity limits");
-						ASSERT(lastTenantId >> 48 == self->tenantIdPrefix);
+						ASSERT(TenantAPI::getTenantIdPrefix(lastTenantId) == self->tenantIdPrefix);
 
 						// It's possible that we created tenants but the createTenantImpl actor timed out so we had to
 						// retry. Between when this retry is invoked to when the attempt is made to insert tenants the

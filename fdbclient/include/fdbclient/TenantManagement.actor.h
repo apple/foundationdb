@@ -127,6 +127,7 @@ int64_t extractTenantIdFromMutation(MutationRef m);
 int64_t extractTenantIdFromKeyRef(StringRef s);
 bool nextTenantIdPrefixMatches(int64_t lastTenantId, int64_t nextTenantId);
 int64_t getMaxAllowableTenantId(int64_t curTenantId);
+int64_t getTenantIdPrefix(int64_t tenantId);
 
 // Returns true if the specified ID has already been deleted and false if not. If the ID is old enough
 // that we no longer keep tombstones for it, an error is thrown.

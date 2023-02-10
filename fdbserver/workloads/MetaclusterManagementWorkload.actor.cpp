@@ -498,7 +498,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			ASSERT(hasCapacity);
 			ASSERT(entry.assignedCluster.present());
 			ASSERT(entry.tenantGroup == tenantGroup);
-			ASSERT(entry.id >> 48 == self->tenantIdPrefix);
+			ASSERT(TenantAPI::getTenantIdPrefix(entry.id) == self->tenantIdPrefix);
 
 			if (tenantGroup.present()) {
 				auto tenantGroupData =
