@@ -1512,6 +1512,13 @@ struct TenantManagementWorkload : TestWorkload {
 			hasSystemTenantGroup = hasSystemTenantGroup || newTenantGroup.orDefault(""_sr).startsWith("\xff"_sr);
 			configuration["tenant_group"_sr] = newTenantGroup;
 		}
+		if (!hasInvalidOption || deterministicRandom()->coinflip()) {
+			Standalone<StringRef> newClusterName = "newcluster"_sr;
+			if (deterministicRandom()->coinflip()) {
+				newClusterName = self->dataClusterName;
+			}
+			configuration["assigned_cluster"_sr] = newClusterName;
+		}
 		if (hasInvalidOption) {
 			configuration["invalid_option"_sr] = ""_sr;
 		}

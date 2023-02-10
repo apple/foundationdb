@@ -1749,6 +1749,23 @@ struct ConfigureTenantImpl {
 			throw invalid_tenant_state();
 		}
 
+		{
+			// For now, disallow updating assigned cluster of a tenant.
+			auto iter = self->configurationParameters.find("assigned_cluster"_sr);
+			if (iter != self->configurationParameters.end() && iter->second.present()) {
+				const auto& newClusterName = iter->second.get();
+				if (!tenantEntry.get().assignedCluster.present() ||
+				    tenantEntry.get().assignedCluster.get() != newClusterName) {
+					TraceEvent("UpdateManagementCluster")
+					    .detail("OriginalAssignedCluster",
+					            tenantEntry.get().assignedCluster.present() ? tenantEntry.get().assignedCluster.get()
+					                                                        : "null"_sr)
+					    .detail("NewAssignedCluster", newClusterName);
+					throw invalid_tenant_configuration();
+				}
+			}
+		}
+
 		wait(self->ctx.setCluster(tr, tenantEntry.get().assignedCluster.get()));
 
 		self->updatedEntry = tenantEntry.get();

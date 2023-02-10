@@ -639,6 +639,10 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	ACTOR static Future<Void> configureTenant(MetaclusterManagementWorkload* self) {
 		state TenantName tenant = self->chooseTenantName();
 		state Optional<TenantGroupName> newTenantGroup = self->chooseTenantGroup();
+		state Optional<ClusterName> newClusterName;
+		if (deterministicRandom()->coinflip()) {
+			newClusterName = self->chooseClusterName();
+		}
 
 		auto itr = self->createdTenants.find(tenant);
 		state bool exists = itr != self->createdTenants.end();
@@ -651,8 +655,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			hasCapacity = dataDb.ungroupedTenants.size() + dataDb.tenantGroups.size() < dataDb.tenantGroupCapacity;
 		}
 
-		state std::map<Standalone<StringRef>, Optional<Value>> configurationParameters = { { "tenant_group"_sr,
-			                                                                                 newTenantGroup } };
+		state std::map<Standalone<StringRef>, Optional<Value>> configurationParameters = {
+			{ "tenant_group"_sr, newTenantGroup }, { "assigned_cluster"_sr, newClusterName }
+		};
 
 		try {
 			loop {
