@@ -176,6 +176,20 @@ public:
 	ACTOR static Future<Void> getTeam(DDTeamCollection* self, GetTeamRequest req) {
 		try {
 			wait(self->checkBuildTeams());
+
+			if (!self->primary && !self->readyToStart.isReady()) {
+				// When remote DC is not ready, DD shouldn't reply with a new team because
+				// a data movement to that team can't be completed and such a move
+				// may block the primary DC from reaching "storage_recovered".
+				auto team = self->findTeamFromServers(req.completeSources, /*wantHealthy=*/false);
+				TraceEvent("GetTeamNotReady", self->distributorId)
+				    .suppressFor(1.0)
+				    .detail("Primary", self->primary)
+				    .detail("Team", team.present() ? describe(team.get()->getServerIDs()) : "");
+				req.reply.send(std::make_pair(team, true));
+				return Void();
+			}
+
 			// report the median available space
 			if (now() - self->lastMedianAvailableSpaceUpdate > SERVER_KNOBS->AVAILABLE_SPACE_UPDATE_DELAY) {
 				self->lastMedianAvailableSpaceUpdate = now();
@@ -232,30 +246,13 @@ public:
 			bool wigglingBestOption = false; // best option contains server in paused wiggle state
 			Optional<Reference<IDataDistributionTeam>> bestOption;
 			std::vector<Reference<TCTeamInfo>> randomTeams;
-			const std::set<UID> completeSources(req.completeSources.begin(), req.completeSources.end());
 
 			// Note: this block does not apply any filters from the request
 			if (!req.wantsNewServers) {
-				for (int i = 0; i < req.completeSources.size(); i++) {
-					if (!self->server_info.count(req.completeSources[i])) {
-						continue;
-					}
-					auto const& teamList = self->server_info[req.completeSources[i]]->getTeams();
-					for (int j = 0; j < teamList.size(); j++) {
-						bool found = true;
-						auto serverIDs = teamList[j]->getServerIDs();
-						for (int k = 0; k < teamList[j]->size(); k++) {
-							if (!completeSources.count(serverIDs[k])) {
-								found = false;
-								break;
-							}
-						}
-						if (found && teamList[j]->isHealthy()) {
-							bestOption = teamList[j];
-							req.reply.send(std::make_pair(bestOption, foundSrc));
-							return Void();
-						}
-					}
+				auto healthyTeam = self->findTeamFromServers(req.completeSources, /* wantHealthy=*/true);
+				if (healthyTeam.present()) {
+					req.reply.send(std::make_pair(healthyTeam, foundSrc));
+					return Void();
 				}
 			}
 
@@ -355,41 +352,16 @@ public:
 			// Note: this block does not apply any filters from the request
 			if (!bestOption.present() && self->zeroHealthyTeams->get()) {
 				// Attempt to find the unhealthy source server team and return it
-				for (int i = 0; i < req.completeSources.size(); i++) {
-					if (!self->server_info.count(req.completeSources[i])) {
-						continue;
-					}
-					auto const& teamList = self->server_info[req.completeSources[i]]->getTeams();
-					for (int j = 0; j < teamList.size(); j++) {
-						bool found = true;
-						auto serverIDs = teamList[j]->getServerIDs();
-						for (int k = 0; k < teamList[j]->size(); k++) {
-							if (!completeSources.count(serverIDs[k])) {
-								found = false;
-								break;
-							}
-						}
-						if (found) {
-							bestOption = teamList[j];
-							req.reply.send(std::make_pair(bestOption, foundSrc));
-							return Void();
-						}
-					}
+				auto healthyTeam = self->findTeamFromServers(req.completeSources, /* wantHealthy=*/false);
+				if (healthyTeam.present()) {
+					req.reply.send(std::make_pair(healthyTeam, foundSrc));
+					return Void();
 				}
 			}
 			// if (!bestOption.present()) {
 			// 	TraceEvent("GetTeamRequest").detail("Request", req.getDesc());
 			// 	self->traceAllInfo(true);
 			// }
-
-			if (!self->readyToStart.isReady()) {
-				// When remote DC is not ready, DD shouldn't reply with a team because
-				// a data movement to that team can't be completed and such a move
-				// may block the primary DC from reaching "storage_recovered".
-				TraceEvent("GetTeamNotReady", self->distributorId).detail("Primary", self->primary);
-				req.reply.send(std::make_pair(Optional<Reference<IDataDistributionTeam>>(), foundSrc));
-				return Void();
-			}
 
 			req.reply.send(std::make_pair(bestOption, foundSrc));
 			return Void();
@@ -3366,6 +3338,31 @@ bool DDTeamCollection::teamContainsFailedServer(Reference<TCTeamInfo> team) cons
 		}
 	}
 	return false;
+}
+
+Optional<Reference<IDataDistributionTeam>> DDTeamCollection::findTeamFromServers(const std::vector<UID>& servers,
+                                                                                 bool wantHealthy) {
+	const std::set<UID> completeSources(servers.begin(), servers.end());
+
+	for (const auto& server : servers) {
+		if (!server_info.count(server)) {
+			continue;
+		}
+		auto const& teamList = server_info[server]->getTeams();
+		for (const auto& team : teamList) {
+			bool found = true;
+			for (const UID& s : team->getServerIDs()) {
+				if (!completeSources.count(s)) {
+					found = false;
+					break;
+				}
+			}
+			if (found && (!wantHealthy || team->isHealthy())) {
+				return team;
+			}
+		}
+	}
+	return Optional<Reference<IDataDistributionTeam>>();
 }
 
 Future<Void> DDTeamCollection::logOnCompletion(Future<Void> signal) {
