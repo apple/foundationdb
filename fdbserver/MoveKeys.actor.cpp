@@ -1447,7 +1447,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						checkpoint.setState(CheckpointMetaData::Pending);
 						tr.set(checkpointKeyFor(checkpointId), checkpointValue(checkpoint));
 						TraceEvent(sevDm, "InitiatedCheckpoint")
-						    .detail("CheckpointID", checkpointId)
+						    .detail("CheckpointID", checkpointId.toString())
 						    .detail("Range", rangeIntersectKeys)
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("SrcServers", describe(src))

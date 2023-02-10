@@ -127,8 +127,10 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 		// state std::vector<KeyRange> checkpointRanges;
 		// checkpointRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyAC"_sr));
-		// // wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::True, &kvs));
-		// // wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::False, &kvs));
+		// // wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::True,
+		// &kvs));
+		// // wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::False,
+		// &kvs));
 
 		// // Move range [TestKeyD, TestKeyF) to sh0;
 		// includes.insert(teamA.begin(), teamA.end());
@@ -158,8 +160,10 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		// checkpointRanges.clear();
 		// checkpointRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
 		// checkpointRanges.push_back(KeyRangeRef("TestKeyD"_sr, "TestKeyE"_sr));
-		// // wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::True, &kvs));
-		// // wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::False, &kvs));
+		// // wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::True,
+		// &kvs));
+		// // wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::False,
+		// &kvs));
 
 		// // Move range [TestKeyB, TestKeyC) to sh1, on the same server.
 		// includes.insert(teamA.begin(), teamA.end());
@@ -189,7 +193,8 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		// std::vector<KeyRange> restoreRanges;
 		// restoreRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
 		// restoreRanges.push_back(KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr));
-		// // wait(self->checkpointRestore(self, cx, checkpointRanges, restoreRanges, CheckpointAsKeyValues::True, &kvs));
+		// // wait(self->checkpointRestore(self, cx, checkpointRanges, restoreRanges, CheckpointAsKeyValues::True,
+		// &kvs));
 
 		// state std::vector<UID> teamC = wait(self->moveShard(self,
 		//                                                     cx,
@@ -248,7 +253,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		}
 
 		// Fetch checkpoint meta data.
-		state std::vector<CheckpointMetaData> records;
+		state std::vector<std::pair<KeyRange, CheckpointMetaData>> records;
 		loop {
 			records.clear();
 			try {
@@ -256,8 +261,8 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				           getCheckpointMetaData(cx, checkpointRanges, version, format, Optional<UID>(dataMoveId))));
 				TraceEvent(SevDebug, "TestCheckpointMetaDataFetched")
 				    .detail("Range", describe(checkpointRanges))
-				    .detail("Version", version)
-				    .detail("Checkpoints", describe(records));
+				    .detail("Version", version);
+				// .detail("Checkpoints", describe(records));
 
 				break;
 			} catch (Error& e) {
@@ -278,28 +283,21 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state std::vector<CheckpointMetaData> fetchedCheckpoints;
 		loop {
 			fetchedCheckpoints.clear();
-			TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", describe(records));
+			// TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", describe(records));
 			try {
 				std::vector<Future<CheckpointMetaData>> fCheckpointMetaData;
 				if (asKeyValues) {
 					TraceEvent(SevDebug, "FetchCheckpointAsKeyValues");
-					std::unordered_map<UID, std::vector<KeyRange>> checkpointRangeMap;
-					for (const auto& range : restoreRanges) {
-						for (const auto& record : records) {
-							for (const auto& cRange : record.ranges) {
-								if (range.intersects(cRange)) {
-									checkpointRangeMap[record.checkpointID].push_back(range & cRange);
-								}
-							}
-						}
-					}
-					for (const auto& record : records) {
-						ASSERT(!checkpointRangeMap[record.checkpointID].empty());
-						fCheckpointMetaData.push_back(
-						    fetchCheckpointRanges(cx, record, checkpointDir, checkpointRangeMap[record.checkpointID]));
+					// std::unordered_map<UID, std::vector<KeyRange>> checkpointRangeMap;
+					// for (const auto& [range, record] : records) {
+					// 	checkpointRangeMap[record.checkpointID].push_back(range);
+					// }
+					for (const auto& [range, record] : records) {
+						// ASSERT(!checkpointRangeMap[record.checkpointID].empty());
+						fCheckpointMetaData.push_back(fetchCheckpointRanges(cx, record, checkpointDir, { range }));
 					}
 				} else {
-					for (const auto& record : records) {
+					for (const auto& [range, record] : records) {
 						fCheckpointMetaData.push_back(fetchCheckpoint(cx, record, checkpointDir));
 					}
 				}

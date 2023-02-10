@@ -76,7 +76,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		state Key endKey = "TestKey0"_sr;
 		state Value oldValue = "TestValue"_sr;
 		state KeyRange testRange = KeyRangeRef(key, endKey);
-		state std::vector<CheckpointMetaData> records;
+		state std::vector<std::pair<KeyRange, CheckpointMetaData>> records;
 
 		TraceEvent("TestCheckpointRestoreBegin");
 		int ignore = wait(setDDMode(cx, 0));
@@ -123,10 +123,11 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 			}
 		}
 
+		ASSERT(records.size() == 1);
 		TraceEvent("TestCheckpointFetched")
 		    .detail("Range", testRange)
 		    .detail("Version", version)
-		    .detail("Checkpoints", describe(records));
+		    .detail("Checkpoints", records[0].second.toString());
 
 		state std::string pwd = platform::getWorkingDirectory();
 		state std::string folder = pwd + "/checkpoints";
@@ -138,16 +139,16 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		state int i = 0;
 		for (; i < records.size(); ++i) {
 			loop {
-				TraceEvent("TestFetchingCheckpoint").detail("Checkpoint", records[i].toString());
+				TraceEvent("TestFetchingCheckpoint").detail("Checkpoint", records[i].second.toString());
 				try {
-					state CheckpointMetaData record = wait(fetchCheckpoint(cx, records[0], folder));
+					state CheckpointMetaData record = wait(fetchCheckpoint(cx, records[i].second, folder));
 					fetchedCheckpoints.push_back(record);
 					TraceEvent("TestCheckpointFetched").detail("Checkpoint", record.toString());
 					break;
 				} catch (Error& e) {
 					TraceEvent("TestFetchCheckpointError")
 					    .errorUnsuppressed(e)
-					    .detail("Checkpoint", records[i].toString());
+					    .detail("Checkpoint", records[i].second.toString());
 					wait(delay(1));
 				}
 			}
@@ -165,7 +166,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		} catch (Error& e) {
 			TraceEvent(SevError, "TestRestoreCheckpointError")
 			    .errorUnsuppressed(e)
-			    .detail("Checkpoint", describe(records));
+			    .detail("Checkpoint", describe(fetchedCheckpoints));
 		}
 
 		// Compare the keyrange between the original database and the one restored from checkpoint.

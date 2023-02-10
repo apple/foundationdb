@@ -852,8 +852,8 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 		++attempt;
 		try {
 			TraceEvent(SevInfo, "FetchCheckpointRangeBegin", metaData->checkpointID)
+			    .detail("Range", range)
 			    .detail("CheckpointID", metaData->checkpointID)
-			    .detail("Range", range.toString())
 			    .detail("TargetStorageServerUID", ssID)
 			    .detail("LocalFile", localFile)
 			    .detail("Attempt", attempt)
@@ -873,9 +873,9 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 			    ssi.fetchCheckpointKeyValues.getReplyStream(
 			        FetchCheckpointKeyValuesRequest(metaData->checkpointID, range));
 			TraceEvent(SevDebug, "FetchCheckpointKeyValuesReceivingData", metaData->checkpointID)
+			    .detail("Range", range)
 			    .detail("CheckpointID", metaData->checkpointID)
-			    .detail("Range", range.toString())
-			    .detail("TargetStorageServerUID", ssID.toString())
+			    .detail("TargetStorageServerUID", ssID)
 			    .detail("LocalFile", localFile)
 			    .detail("Attempt", attempt)
 			    .log();
@@ -883,13 +883,16 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 			loop {
 				FetchCheckpointKeyValuesStreamReply rep = waitNext(stream.getFuture());
 				for (int i = 0; i < rep.data.size(); ++i) {
+					TraceEvent(SevDebug, "FetchCheckpointRangeData", metaData->checkpointID)
+					    .detail("Key", rep.data[i].key)
+					    .detail("Value", rep.data[i].value);
 					status = writer->Put(toSlice(rep.data[i].key), toSlice(rep.data[i].value));
 					if (!status.ok()) {
 						Error e = statusToError(status);
 						TraceEvent(SevError, "FetchCheckpointRangeWriteError", metaData->checkpointID)
 						    .detail("LocalFile", localFile)
-						    .detail("Key", rep.data[i].key.toString())
-						    .detail("Value", rep.data[i].value.toString())
+						    .detail("Key", rep.data[i].key)
+						    .detail("Value", rep.data[i].value)
 						    .detail("Status", status.ToString());
 						throw e;
 					}
@@ -908,9 +911,9 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 			if (err.code() != error_code_end_of_stream) {
 				TraceEvent(SevWarn, "FetchCheckpointRangeError", metaData->checkpointID)
 				    .errorUnsuppressed(err)
+				    .detail("Range", range)
 				    .detail("CheckpointID", metaData->checkpointID)
-				    .detail("Range", range.toString())
-				    .detail("TargetStorageServerUID", ssID.toString())
+				    .detail("TargetStorageServerUID", ssID)
 				    .detail("LocalFile", localFile)
 				    .detail("Attempt", attempt);
 				if (attempt >= maxRetries) {
@@ -918,25 +921,27 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 					break;
 				}
 			} else {
+				RocksDBCheckpointKeyValues rcp = getRocksKeyValuesCheckpoint(*metaData);
 				if (totalBytes > 0) {
-					RocksDBCheckpointKeyValues rcp = getRocksKeyValuesCheckpoint(*metaData);
 					rcp.fetchedFiles.emplace_back(localFile, range, totalBytes);
-					metaData->serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
+				} else {
+					rcp.fetchedFiles.emplace_back(emptySstFilePath, range, totalBytes);
 				}
+				metaData->serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
 				if (!fileExists(localFile)) {
 					TraceEvent(SevWarn, "FetchCheckpointRangeEndFileNotFound", metaData->checkpointID)
+					    .detail("Range", range)
 					    .detail("CheckpointID", metaData->checkpointID)
-					    .detail("Range", range.toString())
-					    .detail("TargetStorageServerUID", ssID.toString())
+					    .detail("TargetStorageServerUID", ssID)
 					    .detail("LocalFile", localFile)
 					    .detail("Attempt", attempt)
 					    .detail("TotalKeys", totalKeys)
 					    .detail("TotalBytes", totalBytes);
 				} else {
 					TraceEvent(SevInfo, "FetchCheckpointRangeEnd", metaData->checkpointID)
+					    .detail("Range", range)
 					    .detail("CheckpointID", metaData->checkpointID)
-					    .detail("Range", range.toString())
-					    .detail("TargetStorageServerUID", ssID.toString())
+					    .detail("TargetStorageServerUID", ssID)
 					    .detail("LocalFile", localFile)
 					    .detail("Attempt", attempt)
 					    .detail("TotalKeys", totalKeys)
@@ -1042,6 +1047,15 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 		    .detail("CheckpointID", checkpoint.checkpointID)
 		    .detail("RocksCheckpoint", rocksCheckpoint.toString());
 		dirs.insert(rocksCheckpoint.checkpointDir);
+	} else if (format == RocksDBKeyValues) {
+		RocksDBCheckpointKeyValues rocksKv = getRocksKeyValuesCheckpoint(checkpoint);
+		TraceEvent(SevInfo, "DeleteRocksKeyValuesCheckpoint", checkpoint.checkpointID)
+		    .detail("CheckpointID", checkpoint.checkpointID)
+		    .detail("RocksCF", rocksKv.toString());
+
+		for (const CheckpointFile& file : rocksKv.fetchedFiles) {
+			dirs.insert(file.path);
+		}
 	} else {
 		ASSERT(false);
 	}

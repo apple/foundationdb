@@ -24,6 +24,8 @@
 
 #include "fdbclient/FDBTypes.h"
 
+const std::string emptySstFilePath = "Dummy Empty SST File Path";
+
 // FDB storage checkpoint format.
 enum CheckpointFormat {
 	InvalidFormat = 0,
@@ -122,7 +124,17 @@ namespace std {
 template <>
 class hash<CheckpointMetaData> {
 public:
-	size_t operator()(CheckpointMetaData const& checkpoint) const { return checkpoint.checkpointID.hash(); }
+	size_t operator()(CheckpointMetaData const& checkpoint) const {
+		size_t hash1 = checkpoint.checkpointID.hash();
+		size_t hash2 = hash1;
+		if (!checkpoint.src.empty()) {
+			hash2 = checkpoint.src.front().hash();
+		}
+		if (hash1 != hash2) {
+			return hash1 ^ hash2;
+		}
+		return hash1;
+	}
 };
 } // namespace std
 
