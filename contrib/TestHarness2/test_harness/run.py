@@ -58,7 +58,7 @@ class StatFetcher:
 
 
 class TestPicker:
-    def __init__(self, test_dir: Path):
+    def __init__(self, test_dir: Path, binaries: OrderedDict[Version, Path]):
         if not test_dir.exists():
             raise RuntimeError("{} is neither a directory nor a file".format(test_dir))
         self.include_files_regex = re.compile(config.include_test_files)
@@ -69,6 +69,7 @@ class TestPicker:
         self.tests: OrderedDict[str, TestDescription] = collections.OrderedDict()
         self.restart_test: Pattern = re.compile(r".*-\d+\.(txt|toml)")
         self.follow_test: Pattern = re.compile(r".*-[2-9]\d*\.(txt|toml)")
+        self.old_binaries: OrderedDict[Version, Path] = binaries
 
         for subdir in self.test_dir.iterdir():
             if subdir.is_dir() and subdir.name in config.test_dirs:
@@ -132,6 +133,21 @@ class TestPicker:
             or self.exclude_files_regex.search(str(path)) is not None
         ):
             return
+        if 'restarting' in path.parent.parts:
+            candidates: List[Path] = []
+            dirs = path.parent.parts
+            version_expr = dirs[-1].split("_")
+            if (version_expr[0] == "from" or version_expr[0] == "to") and len(version_expr) == 4 and version_expr[2] == "until":
+                max_version = Version.parse(version_expr[3])
+                min_version = Version.parse(version_expr[1])
+                for ver, binary in self.old_binaries.items():
+                    if min_version <= ver < max_version:
+                        candidates.append(binary)
+                if not len(candidates):
+                    sys.stdout.write(
+                        "Cannot find valid old binary for restarting test {}\n".format(path))
+                    return
+
         with path.open("r") as f:
             test_name: str | None = None
             test_class: str | None = None
@@ -204,7 +220,8 @@ class TestPicker:
         min_runtime: float | None = None
         candidates: List[TestDescription] = []
         for _k, v in self.tests.items():
-            sys.stdout.write("Test item, key: {}; paths: {}; name: {}; priority: {}, total_runtime: {}, num_runs: {}\n".format(_k, v.paths, v.name, v.priority, v.total_runtime, v.num_runs))
+            sys.stdout.write("Test item, key: {}; paths: {}; name: {}; priority: {}, total_runtime: {}, num_runs: {}\n".format(
+                _k, v.paths, v.name, v.priority, v.total_runtime, v.num_runs))
             this_time = v.total_runtime * v.priority
             if min_runtime is None or this_time < min_runtime:
                 min_runtime = this_time
@@ -234,15 +251,18 @@ class OldBinaries:
                 continue
             if exec_pattern.fullmatch(file.name) is not None:
                 self._add_file(file)
+                sys.stdout.write("Old binary {}\n".format(file))
 
     def _add_file(self, file: Path):
         version_str = file.name.split("-")[1]
         if version_str.endswith(".exe"):
-            version_str = version_str[0 : -len(".exe")]
+            version_str = version_str[0: -len(".exe")]
         ver = Version.parse(version_str)
         self.binaries[ver] = file
 
-    def choose_binary(self, test_file: Path) -> Path | None:
+    def choose_binary(self, test_file: Path) -> Path:
+        if len(self.binaries) == 0:
+            return config.binary
         max_version = Version.max_version()
         min_version = Version.parse("5.0.0")
         dirs = test_file.parent.parts
@@ -473,7 +493,7 @@ class TestRunner:
         self.cluster_file: str | None = None
         self.fdb_app_dir: str | None = None
         self.binary_chooser = OldBinaries()
-        self.test_picker = TestPicker(self.test_path)
+        self.test_picker = TestPicker(self.test_path, self.binary_chooser.binaries)
 
     def backup_sim_dir(self, seed: int):
         temp_dir = config.run_dir / str(self.uid)
@@ -498,8 +518,6 @@ class TestRunner:
         for count, file in enumerate(test_files):
             will_restart = count + 1 < len(test_files)
             binary = self.binary_chooser.choose_binary(file)
-            if binary is None:
-                break
             unseed_check = (
                 not is_no_sim(file)
                 and config.random.random() < config.unseed_check_ratio
@@ -557,4 +575,3 @@ class TestRunner:
         if config.clean_up:
             shutil.rmtree(config.run_dir / str(self.uid))
         return success
-
