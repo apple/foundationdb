@@ -20,7 +20,6 @@
 
 #ifndef ENCRYPT_UTILS_H
 #define ENCRYPT_UTILS_H
-#include "flow/Knobs.h"
 #pragma once
 
 #include "flow/Arena.h"

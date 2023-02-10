@@ -334,9 +334,12 @@ struct EncryptionOpsWorkload : TestWorkload {
 		Reference<BlobCipherKey> cipherKey = getEncryptionKey(header.cipherTextDetails.encryptDomainId,
 		                                                      header.cipherTextDetails.baseCipherId,
 		                                                      header.cipherTextDetails.salt);
-		Reference<BlobCipherKey> headerCipherKey = getEncryptionKey(header.cipherHeaderDetails.encryptDomainId,
-		                                                            header.cipherHeaderDetails.baseCipherId,
-		                                                            header.cipherHeaderDetails.salt);
+		Reference<BlobCipherKey> headerCipherKey;
+		if (header.flags.authTokenMode != EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
+			headerCipherKey = getEncryptionKey(header.cipherHeaderDetails.encryptDomainId,
+			                                   header.cipherHeaderDetails.baseCipherId,
+			                                   header.cipherHeaderDetails.salt);
+		}
 		ASSERT(cipherKey.isValid());
 		ASSERT(cipherKey->isEqual(orgCipherKey));
 		ASSERT(headerCipherKey.isValid() ||
@@ -389,7 +392,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		Reference<BlobCipherKey> cipherKey =
 		    getEncryptionKey(textCipherDetails.encryptDomainId, textCipherDetails.baseCipherId, textCipherDetails.salt);
 		Reference<BlobCipherKey> headerCipherKey =
-		    headerCipherDetails.encryptDomainId == INVALID_ENCRYPT_DOMAIN_ID
+		    !headerCipherDetails.isValid()
 		        ? Reference<BlobCipherKey>() // no authentication mode cipher header-key is not needed
 		        : getEncryptionKey(
 		              headerCipherDetails.encryptDomainId, headerCipherDetails.baseCipherId, headerCipherDetails.salt);

@@ -91,7 +91,9 @@ public:
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
 			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
-			ASSERT(cipherKeys->count(ENCRYPT_HEADER_DOMAIN_ID));
+			if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+				ASSERT(cipherKeys->count(ENCRYPT_HEADER_DOMAIN_ID));
+			}
 		}
 	}
 
@@ -108,7 +110,9 @@ public:
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
 			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
-			ASSERT(cipherKeys->count(ENCRYPT_HEADER_DOMAIN_ID));
+			if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+				ASSERT(cipherKeys->count(ENCRYPT_HEADER_DOMAIN_ID));
+			}
 		}
 	}
 

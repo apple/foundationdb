@@ -721,7 +721,9 @@ EncryptBlobCipherAes265Ctr::EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> 
 
 void EncryptBlobCipherAes265Ctr::init() {
 	ASSERT(textCipherKey.isValid());
-	ASSERT(headerCipherKey.isValid());
+	if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+		ASSERT(headerCipherKey.isValid());
+	}
 
 	if (!isEncryptHeaderAuthTokenDetailsValid(authTokenMode, authTokenAlgo)) {
 		TraceEvent(SevWarn, "InvalidAuthTokenDetails")
@@ -944,10 +946,15 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 	header->cipherTextDetails.encryptDomainId = textCipherKey->getDomainId();
 	header->cipherTextDetails.salt = textCipherKey->getSalt();
 	// Populate header encryption-key details
-	// TODO: HeaderCipherKey is not necessary if AuthTokenMode == NONE
-	header->cipherHeaderDetails.encryptDomainId = headerCipherKey->getDomainId();
-	header->cipherHeaderDetails.baseCipherId = headerCipherKey->getBaseCipherId();
-	header->cipherHeaderDetails.salt = headerCipherKey->getSalt();
+	if (authTokenMode != ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
+		header->cipherHeaderDetails.encryptDomainId = headerCipherKey->getDomainId();
+		header->cipherHeaderDetails.baseCipherId = headerCipherKey->getBaseCipherId();
+		header->cipherHeaderDetails.salt = headerCipherKey->getSalt();
+	} else {
+		header->cipherHeaderDetails.encryptDomainId = INVALID_ENCRYPT_DOMAIN_ID;
+		header->cipherHeaderDetails.baseCipherId = INVALID_ENCRYPT_CIPHER_KEY_ID;
+		header->cipherHeaderDetails.salt = INVALID_ENCRYPT_RANDOM_SALT;
+	}
 
 	memcpy(&header->iv[0], &iv[0], AES_256_IV_LENGTH);
 

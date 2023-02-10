@@ -308,7 +308,6 @@ Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(Reference<As
 	return result;
 }
 
-// Differs to getLatestEncryptCipherKeysForSystemDomain only in that it returns a TextAndHeaderCipherKeys struct.
 template <class T>
 Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(const Reference<AsyncVar<T> const>& db,
                                                                  BlobCipherMetrics::UsageType usageType) {
@@ -319,15 +318,24 @@ ACTOR template <class T>
 Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
                                                      BlobCipherEncryptHeader header,
                                                      BlobCipherMetrics::UsageType usageType) {
-	std::unordered_set<BlobCipherDetails> cipherDetails{ header.cipherTextDetails, header.cipherHeaderDetails };
+	ASSERT(header.cipherTextDetails.isValid());
+	std::unordered_set<BlobCipherDetails> cipherDetails{ header.cipherTextDetails };
+	if (header.cipherHeaderDetails.isValid()) {
+		cipherDetails.insert(header.cipherHeaderDetails);
+	}
 	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys =
 	    wait(getEncryptCipherKeys(db, cipherDetails, usageType));
-	ASSERT(cipherKeys.count(header.cipherTextDetails) > 0);
-	ASSERT(cipherKeys.count(header.cipherHeaderDetails) > 0);
-	TextAndHeaderCipherKeys result{ cipherKeys.at(header.cipherTextDetails),
-		                            cipherKeys.at(header.cipherHeaderDetails) };
-	ASSERT(result.cipherTextKey.isValid());
-	ASSERT(result.cipherHeaderKey.isValid());
+	TextAndHeaderCipherKeys result;
+	auto setCipherKey = [&](const BlobCipherDetails& details, Reference<BlobCipherKey>& cipherKey) {
+		if (!details.isValid()) {
+			return;
+		}
+		auto iter = cipherKeys.find(details);
+		ASSERT(iter != cipherKeys.end() && iter->second.isValid());
+		cipherKey = iter->second;
+	};
+	setCipherKey(header.cipherTextDetails, result.cipherTextKey);
+	setCipherKey(header.cipherHeaderDetails, result.cipherHeaderKey);
 	return result;
 }
 

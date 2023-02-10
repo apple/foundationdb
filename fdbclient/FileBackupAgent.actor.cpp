@@ -579,7 +579,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                                     Reference<BlobCipherKey> textCipherKey,
 	                                     BlobCipherEncryptHeader& header) {
 		// Validate encryption header 'cipherHeader' details
-		if (!(header.cipherHeaderDetails.baseCipherId == headerCipherKey->getBaseCipherId() &&
+		if (header.cipherHeaderDetails.isValid() &&
+		    !(header.cipherHeaderDetails.baseCipherId == headerCipherKey->getBaseCipherId() &&
 		      header.cipherHeaderDetails.encryptDomainId == headerCipherKey->getDomainId() &&
 		      header.cipherHeaderDetails.salt == headerCipherKey->getSalt())) {
 			TraceEvent(SevWarn, "EncryptionHeader_CipherHeaderMismatch")
@@ -593,7 +594,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		}
 
 		// Validate encryption text 'cipherText' details sanity
-		if (!(header.cipherTextDetails.baseCipherId == textCipherKey->getBaseCipherId() &&
+		if (!(header.cipherTextDetails.isValid() &&
+		      header.cipherTextDetails.baseCipherId == textCipherKey->getBaseCipherId() &&
 		      header.cipherTextDetails.encryptDomainId == textCipherKey->getDomainId() &&
 		      header.cipherTextDetails.salt == textCipherKey->getSalt())) {
 			TraceEvent(SevWarn, "EncryptionHeader_CipherTextMismatch")
@@ -614,7 +616,6 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                                           Arena* arena) {
 		Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
 		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, header, BlobCipherMetrics::RESTORE));
-		ASSERT(cipherKeys.cipherHeaderKey.isValid() && cipherKeys.cipherTextKey.isValid());
 		validateEncryptionHeader(cipherKeys.cipherHeaderKey, cipherKeys.cipherTextKey, header);
 		DecryptBlobCipherAes256Ctr decryptor(
 		    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.iv, BlobCipherMetrics::BACKUP);
