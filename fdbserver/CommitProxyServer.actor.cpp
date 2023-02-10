@@ -1268,6 +1268,8 @@ TEST_CASE("/CommitProxy/SplitRange/SplitClearRangeByTenant") {
 	return Void();
 }
 
+// If the splitMutations is not empty, which means some clear range in mutations are split into multiple clear range
+// ops. Modify mutations by replace the old clear range with the split clear ranges
 void replaceRawClearRanges(Arena& arena,
                            VectorRef<MutationRef>& mutations,
                            std::vector<std::pair<int, std::vector<MutationRef>>>& splitMutations,
@@ -1306,6 +1308,8 @@ void replaceRawClearRanges(Arena& arena,
 	ASSERT_EQ(splitMutations.size(), 0);
 }
 
+// split clear range mutation according to tenantMap. If the original mutation is split to multiple mutations, push the
+// mutation offset and the split ones into idxSplitMutations
 size_t processClearRangeMutation(Arena& arena,
                                  const std::map<int64_t, TenantName>& tenantMap,
                                  MutationRef& mutation,
