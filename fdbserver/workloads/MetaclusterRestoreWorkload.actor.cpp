@@ -105,10 +105,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		recoverDataClusters = (mode != 1);
 	}
 
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
-		out.insert("MachineAttritionWorkload");
-	}
-
 	ClusterName chooseClusterName() { return dataDbIndex[deterministicRandom()->randomInt(0, dataDbIndex.size())]; }
 
 	TenantName chooseTenantName() {
@@ -288,11 +284,16 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		}
 	}
 
-	Future<Void> resolveTenantCollisions(
-	    MetaclusterRestoreWorkload* self,
-	    ClusterName clusterName,
-	    Database dataDb,
-	    std::unordered_map<TenantName, std::pair<int64_t, int64_t>> const& tenantCollisions) {
+	// A map from tenant name to a pair of IDs. The first ID is from the data cluster, and the second is from the
+	// management cluster.
+	using TenantCollisions = std::unordered_map<TenantName, std::pair<int64_t, int64_t>>;
+
+	using GroupCollisions = std::unordered_set<TenantGroupName>;
+
+	Future<Void> resolveTenantCollisions(MetaclusterRestoreWorkload* self,
+	                                     ClusterName clusterName,
+	                                     Database dataDb,
+	                                     TenantCollisions const& tenantCollisions) {
 		TraceEvent("MetaclusterRestoreWorkloadDeleteTenantCollisions")
 		    .detail("FromCluster", clusterName)
 		    .detail("TenantCollisions", tenantCollisions.size());
@@ -334,25 +335,26 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	ACTOR Future<Void> resolveGroupCollisions(MetaclusterRestoreWorkload* self,
 	                                          ClusterName clusterName,
 	                                          Database dataDb,
-	                                          std::unordered_map<TenantGroupName, TenantGroupEntry> groupCollisions) {
+	                                          GroupCollisions groupCollisions) {
 		TraceEvent("MetaclusterRestoreWorkloadDeleteTenantGroupCollisions")
 		    .detail("FromCluster", clusterName)
 		    .detail("GroupCollisions", groupCollisions.size());
 
 		state std::vector<Future<Void>> deleteFutures;
 
-		state std::unordered_map<TenantGroupName, TenantGroupEntry>::const_iterator collisionItr;
+		state GroupCollisions::const_iterator collisionItr;
 		for (collisionItr = groupCollisions.begin(); collisionItr != groupCollisions.end(); ++collisionItr) {
-			// The tenant group from the data cluster is what we expect
-			auto itr = self->tenantGroups.find(collisionItr->first);
+			// If the data cluster tenant group is expected, then remove the management tenant group
+			// Note that the management tenant group may also have been expected
+			auto itr = self->tenantGroups.find(*collisionItr);
 			if (itr->second.cluster == clusterName) {
 				TraceEvent(SevDebug, "MetaclusterRestoreWorkloadDeleteTenantGroupCollision")
 				    .detail("From", "ManagementCluster")
-				    .detail("TenantGroup", collisionItr->first);
+				    .detail("TenantGroup", *collisionItr);
 				std::unordered_set<int64_t> tenantsInGroup =
 				    wait(runTransaction(self->managementDb, [collisionItr = collisionItr](Reference<ITransaction> tr) {
 					    return getTenantsInGroup(
-					        tr, MetaclusterAPI::ManagementClusterMetadata::tenantMetadata(), collisionItr->first);
+					        tr, MetaclusterAPI::ManagementClusterMetadata::tenantMetadata(), *collisionItr);
 				    }));
 
 				for (auto const& t : tenantsInGroup) {
@@ -365,11 +367,11 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			else {
 				TraceEvent(SevDebug, "MetaclusterRestoreWorkloadDeleteTenantGroupCollision")
 				    .detail("From", "DataCluster")
-				    .detail("TenantGroup", collisionItr->first);
+				    .detail("TenantGroup", *collisionItr);
 				std::unordered_set<int64_t> tenantsInGroup = wait(runTransaction(
 				    dataDb.getReference(), [collisionItr = collisionItr](Reference<ReadYourWritesTransaction> tr) {
 					    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					    return getTenantsInGroup(tr, TenantMetadata::instance(), collisionItr->first);
+					    return getTenantsInGroup(tr, TenantMetadata::instance(), *collisionItr);
 				    }));
 
 				deleteFutures.push_back(runTransactionVoid(
@@ -400,6 +402,67 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		return tenants.results;
 	}
 
+	ACTOR static Future<std::pair<TenantCollisions, GroupCollisions>> getCollisions(MetaclusterRestoreWorkload* self,
+	                                                                                Database db) {
+		state KeyBackedRangeResult<std::pair<TenantName, int64_t>> managementTenantList;
+		state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> managementGroupList;
+		state KeyBackedRangeResult<std::pair<TenantName, int64_t>> dataClusterTenants;
+		state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> dataClusterGroups;
+
+		state TenantCollisions tenantCollisions;
+		state GroupCollisions groupCollisions;
+
+		// Read the management cluster tenant map and tenant group map
+		wait(runTransactionVoid(
+		    self->managementDb,
+		    [managementTenantList = &managementTenantList,
+		     managementGroupList = &managementGroupList](Reference<ITransaction> tr) {
+			    return store(*managementTenantList,
+			                 MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantNameIndex.getRange(
+			                     tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)) &&
+			           store(*managementGroupList,
+			                 MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantGroupMap.getRange(
+			                     tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
+		    }));
+
+		// Read the data cluster tenant map and tenant group map
+		wait(runTransaction(db.getReference(),
+		                    [dataClusterTenants = &dataClusterTenants,
+		                     dataClusterGroups = &dataClusterGroups](Reference<ReadYourWritesTransaction> tr) {
+			                    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			                    return store(*dataClusterTenants,
+			                                 TenantMetadata::tenantNameIndex().getRange(
+			                                     tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)) &&
+			                           store(*dataClusterGroups,
+			                                 TenantMetadata::tenantGroupMap().getRange(
+			                                     tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
+		                    }));
+
+		std::unordered_map<TenantName, int64_t> managementTenants(managementTenantList.results.begin(),
+		                                                          managementTenantList.results.end());
+		std::unordered_map<TenantGroupName, TenantGroupEntry> managementGroups(managementGroupList.results.begin(),
+		                                                                       managementGroupList.results.end());
+
+		ASSERT(managementTenants.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+		ASSERT(managementGroups.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+		ASSERT(dataClusterTenants.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+		ASSERT(dataClusterGroups.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
+
+		for (auto const& t : dataClusterTenants.results) {
+			auto itr = managementTenants.find(t.first);
+			if (itr != managementTenants.end()) {
+				tenantCollisions[t.first] = std::make_pair(t.second, itr->second);
+			}
+		}
+		for (auto const& g : dataClusterGroups.results) {
+			if (managementGroups.count(g.first)) {
+				groupCollisions.insert(g.first);
+			}
+		}
+
+		return std::make_pair(tenantCollisions, groupCollisions);
+	}
+
 	ACTOR static Future<Void> restoreManagementCluster(MetaclusterRestoreWorkload* self) {
 		TraceEvent("MetaclusterRestoreWorkloadRestoringManagementCluster");
 		wait(success(MetaclusterAPI::createMetacluster(self->managementDb, "management_cluster"_sr)));
@@ -407,62 +470,13 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		for (clusterItr = self->dataDbs.begin(); clusterItr != self->dataDbs.end(); ++clusterItr) {
 			TraceEvent("MetaclusterRestoreWorkloadProcessDataCluster").detail("FromCluster", clusterItr->first);
 
+			// Remove the data cluster from its old metacluster
 			wait(MetaclusterAPI::removeCluster(
 			    clusterItr->second.db.getReference(), clusterItr->first, ClusterType::METACLUSTER_DATA, true));
 			TraceEvent("MetaclusterRestoreWorkloadForgotMetacluster").detail("ClusterName", clusterItr->first);
 
-			state KeyBackedRangeResult<std::pair<TenantName, int64_t>> managementTenantList;
-			state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> managementGroupList;
-
-			wait(runTransactionVoid(
-			    self->managementDb,
-			    [managementTenantList = &managementTenantList,
-			     managementGroupList = &managementGroupList](Reference<ITransaction> tr) {
-				    return store(*managementTenantList,
-				                 MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantNameIndex.getRange(
-				                     tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)) &&
-				           store(*managementGroupList,
-				                 MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantGroupMap.getRange(
-				                     tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
-			    }));
-			ASSERT(managementTenantList.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
-			ASSERT(managementGroupList.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
-
-			state std::unordered_map<TenantName, int64_t> managementTenants(managementTenantList.results.begin(),
-			                                                                managementTenantList.results.end());
-			state std::unordered_map<TenantGroupName, TenantGroupEntry> managementGroups(
-			    managementGroupList.results.begin(), managementGroupList.results.end());
-
-			state KeyBackedRangeResult<std::pair<TenantName, int64_t>> dataClusterTenants;
-			state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> dataClusterGroups;
-
-			wait(runTransaction(clusterItr->second.db.getReference(),
-			                    [dataClusterTenants = &dataClusterTenants,
-			                     dataClusterGroups = &dataClusterGroups](Reference<ReadYourWritesTransaction> tr) {
-				                    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				                    return store(*dataClusterTenants,
-				                                 TenantMetadata::tenantNameIndex().getRange(
-				                                     tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)) &&
-				                           store(*dataClusterGroups,
-				                                 TenantMetadata::tenantGroupMap().getRange(
-				                                     tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
-			                    }));
-			ASSERT(dataClusterTenants.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
-			ASSERT(dataClusterGroups.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
-
-			state std::unordered_map<TenantName, std::pair<int64_t, int64_t>> tenantCollisions;
-			state std::unordered_map<TenantGroupName, TenantGroupEntry> groupCollisions;
-			for (auto const& t : dataClusterTenants.results) {
-				auto itr = managementTenants.find(t.first);
-				if (itr != managementTenants.end()) {
-					tenantCollisions[t.first] = std::make_pair(t.second, itr->second);
-				}
-			}
-			for (auto const& g : dataClusterGroups.results) {
-				if (managementGroups.count(g.first)) {
-					groupCollisions[g.first] = g.second;
-				}
-			}
+			state std::pair<TenantCollisions, GroupCollisions> collisions =
+			    wait(getCollisions(self, clusterItr->second.db));
 
 			state std::vector<std::string> messages;
 			state bool completed = false;
@@ -473,7 +487,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				try {
 					TraceEvent("MetaclusterRestoreWorkloadRestoreManagementCluster")
 					    .detail("FromCluster", clusterItr->first)
-					    .detail("TenantCollisions", tenantCollisions.size());
+					    .detail("TenantCollisions", collisions.first.size());
 
 					wait(MetaclusterAPI::restoreCluster(
 					    self->managementDb,
@@ -482,16 +496,17 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 					    ApplyManagementClusterUpdates::False,
 					    &messages));
 
-					ASSERT(tenantCollisions.empty() && groupCollisions.empty());
+					ASSERT(collisions.first.empty() && collisions.second.empty());
 					completed = true;
 				} catch (Error& e) {
 					bool failedDueToCollision =
-					    (e.code() == error_code_tenant_already_exists && !tenantCollisions.empty()) ||
-					    (e.code() == error_code_invalid_tenant_configuration && !groupCollisions.empty());
+					    (e.code() == error_code_tenant_already_exists && !collisions.first.empty()) ||
+					    (e.code() == error_code_invalid_tenant_configuration && !collisions.second.empty());
 					if (!failedDueToCollision) {
 						throw;
 					}
 
+					// If the restore did not succeed, remove the partially restored cluster
 					try {
 						wait(MetaclusterAPI::removeCluster(
 						    self->managementDb, clusterItr->first, ClusterType::METACLUSTER_MANAGEMENT, true));
@@ -518,16 +533,14 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				// If we didn't succeed, resolve tenant and group collisions and try again
 				if (!completed) {
 					ASSERT(messages.size() > 0);
-					if (!tenantCollisions.empty()) {
-						wait(self->resolveTenantCollisions(
-						    self, clusterItr->first, clusterItr->second.db, tenantCollisions));
-						tenantCollisions.clear();
-					}
-					if (!groupCollisions.empty()) {
-						wait(self->resolveGroupCollisions(
-						    self, clusterItr->first, clusterItr->second.db, groupCollisions));
-						groupCollisions.clear();
-					}
+
+					wait(self->resolveTenantCollisions(
+					    self, clusterItr->first, clusterItr->second.db, collisions.first));
+					wait(self->resolveGroupCollisions(
+					    self, clusterItr->first, clusterItr->second.db, collisions.second));
+
+					collisions.first.clear();
+					collisions.second.clear();
 				}
 			}
 			TraceEvent("MetaclusterRestoreWorkloadRestoredDataClusterToManagementCluster")

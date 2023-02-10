@@ -242,7 +242,7 @@ ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vecto
 
 	if (!messages.empty()) {
 		if (!success) {
-			fmt::print("\n");
+			fmt::print(stderr, "\n");
 		}
 
 		fmt::print(success ? stdout : stderr, "The restore reported the following messages:\n");

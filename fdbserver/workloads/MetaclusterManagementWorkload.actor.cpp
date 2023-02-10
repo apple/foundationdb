@@ -213,7 +213,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 		try {
 			loop {
-				// TODO: check force removal
 				Future<Void> removeFuture = MetaclusterAPI::removeCluster(
 				    self->managementDb, clusterName, ClusterType::METACLUSTER_MANAGEMENT, detachCluster);
 				try {
