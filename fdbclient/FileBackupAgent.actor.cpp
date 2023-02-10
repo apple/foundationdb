@@ -639,6 +639,16 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	ACTOR static Future<Void> encrypt(EncryptedRangeFileWriter* self) {
 		ASSERT(self->cipherKeys.headerCipherKey.isValid() && self->cipherKeys.textCipherKey.isValid());
+		if (g_network && g_network->isSimulated()) {
+			state EncryptCipherDomainId textDomainId = self->cipherKeys.textCipherKey->getDomainId();
+			if (self->tenantCache.present()) {
+				state Optional<TenantEntryCachePayload<Void>> payload =
+				    wait(self->tenantCache.get()->getById(textDomainId));
+				ASSERT(payload.present() || isReservedEncryptDomain(textDomainId));
+			} else {
+				ASSERT(isReservedEncryptDomain(textDomainId));
+			}
+		}
 		// Ensure that the keys we got are still valid before flushing the block
 		if (self->cipherKeys.headerCipherKey->isExpired() || self->cipherKeys.headerCipherKey->needsRefresh()) {
 			Reference<BlobCipherKey> cipherKey =
