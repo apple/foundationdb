@@ -21,6 +21,7 @@
 #pragma once
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/Knobs.h"
+#include "fdbclient/Tenant.h"
 #include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
 #include <algorithm>
@@ -223,21 +224,17 @@ createTenantTransaction(Transaction tr, TenantMapEntry tenantEntry, ClusterType 
 }
 
 ACTOR template <class Transaction>
-Future<int64_t> getNextTenantId(Transaction tr, int numTenantsCreating) {
+Future<int64_t> getNextTenantId(Transaction tr) {
 	state Optional<int64_t> lastId = wait(TenantMetadata::lastTenantId().get(tr));
 	if (!lastId.present()) {
 		// If the last tenant id is not present fetch the tenantIdPrefix (if any) and initalize the lastId
-		int64_t tenantIdPrefix =
-		    wait(KeyBackedProperty<int64_t>(TenantAPI::tenantIdPrefixKey).getD(tr, Snapshot::False, 0));
+		int64_t tenantIdPrefix = wait(TenantMetadata::tenantIdPrefix().getD(tr, Snapshot::False, 0));
 		// Shift by 6 bytes to make the prefix the first two bytes of the tenant id
 		lastId = tenantIdPrefix << 48;
 	}
 	int64_t tenantId = lastId.get() + 1;
-	// Only increment the tenant Id by a large factor if there is enough tenantIds for all tenants being created
-	// (without overriding the tenant prefix)
-	if (BUGGIFY && tenantId < getMaxAllowableTenantId(lastId.get()) - numTenantsCreating) {
+	if (BUGGIFY) {
 		tenantId += deterministicRandom()->randomSkewedUInt32(1, 1e9);
-		tenantId = std::min(tenantId, getMaxAllowableTenantId(lastId.get()) - numTenantsCreating);
 	}
 	if (!TenantAPI::nextTenantIdPrefixMatches(lastId.get(), tenantId)) {
 		throw cluster_no_capacity();
@@ -266,7 +263,7 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 
 			state Future<int64_t> tenantIdFuture;
 			if (generateTenantId) {
-				tenantIdFuture = getNextTenantId(tr, 1);
+				tenantIdFuture = getNextTenantId(tr);
 			}
 
 			if (checkExistence) {

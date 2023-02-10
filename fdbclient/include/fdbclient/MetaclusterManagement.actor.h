@@ -464,7 +464,7 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName na
 			state Future<Optional<MetaclusterRegistrationEntry>> metaclusterRegistrationFuture =
 			    MetaclusterMetadata::metaclusterRegistration().get(tr);
 
-			state Future<Void> metaClusterEmptinessCheck = managementClusterCheckEmpty(tr);
+			state Future<Void> metaclusterEmptinessCheck = managementClusterCheckEmpty(tr);
 
 			Optional<MetaclusterRegistrationEntry> existingRegistration = wait(metaclusterRegistrationFuture);
 			if (existingRegistration.present()) {
@@ -479,7 +479,7 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName na
 				}
 			}
 
-			wait(metaClusterEmptinessCheck);
+			wait(metaclusterEmptinessCheck);
 
 			if (!metaclusterUid.present()) {
 				metaclusterUid = deterministicRandom()->randomUniqueID();
@@ -488,7 +488,7 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName na
 			MetaclusterMetadata::metaclusterRegistration().set(
 			    tr, MetaclusterRegistrationEntry(name, metaclusterUid.get()));
 
-			KeyBackedProperty<int64_t>(TenantAPI::tenantIdPrefixKey).set(tr, tenantIdPrefix);
+			TenantMetadata::tenantIdPrefix().set(tr, tenantIdPrefix);
 
 			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 			break;
@@ -1278,7 +1278,7 @@ struct CreateTenantImpl {
 		// If the last tenant id is not present fetch the prefix from system keys and make it the prefix for the next
 		// allocated tenant id
 		if (!lastId.present()) {
-			Optional<int64_t> tenantIdPrefix = wait(KeyBackedProperty<int64_t>(TenantAPI::tenantIdPrefixKey).get(tr));
+			Optional<int64_t> tenantIdPrefix = wait(TenantMetadata::tenantIdPrefix().get(tr));
 			ASSERT(tenantIdPrefix.present());
 			lastId = tenantIdPrefix.get() << 48;
 		}

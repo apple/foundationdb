@@ -37,10 +37,6 @@ Key idToPrefix(int64_t id);
 int64_t prefixToId(KeyRef prefix, EnforceValidTenantId = EnforceValidTenantId::True);
 
 constexpr static int PREFIX_SIZE = sizeof(int64_t);
-
-// This system keys stores the tenant id prefix that is used during metacluster/standalone cluster creation. If the key
-// is not present then we will assume the prefix to be 0
-const KeyRef tenantIdPrefixKey = "\xff/tenant_id_prefix"_sr;
 } // namespace TenantAPI
 
 // Represents the various states that a tenant could be in.
@@ -232,6 +228,9 @@ struct TenantMetadata {
 	static inline auto& tenantGroupTenantIndex() { return instance().tenantGroupTenantIndex; }
 	static inline auto& tenantGroupMap() { return instance().tenantGroupMap; }
 	static inline auto& lastTenantModification() { return instance().lastTenantModification; }
+	// This system keys stores the tenant id prefix that is used during metacluster/standalone cluster creation. If the
+	// key is not present then we will assume the prefix to be 0
+	static KeyBackedProperty<int64_t>& tenantIdPrefix();
 
 	static Key tenantMapPrivatePrefix();
 };

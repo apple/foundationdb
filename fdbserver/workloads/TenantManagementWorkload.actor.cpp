@@ -388,7 +388,7 @@ struct TenantManagementWorkload : TestWorkload {
 			    self->dataDb.getReference(), tenantsToCreate.begin()->first, tenantsToCreate.begin()->second)));
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			int64_t _nextId = wait(TenantAPI::getNextTenantId(tr, tenantsToCreate.size()));
+			int64_t _nextId = wait(TenantAPI::getNextTenantId(tr));
 			int64_t nextId = _nextId;
 
 			std::vector<Future<Void>> createFutures;

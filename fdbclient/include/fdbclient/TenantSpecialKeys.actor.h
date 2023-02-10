@@ -132,7 +132,7 @@ private:
 	    std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
 		state Future<int64_t> tenantCountFuture =
 		    TenantMetadata::tenantCount().getD(&ryw->getTransaction(), Snapshot::False, 0);
-		int64_t _nextId = wait(TenantAPI::getNextTenantId(&ryw->getTransaction(), tenants.size()));
+		int64_t _nextId = wait(TenantAPI::getNextTenantId(&ryw->getTransaction()));
 		state int64_t nextId = _nextId;
 		ASSERT(nextId > 0);
 
