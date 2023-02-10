@@ -70,7 +70,7 @@ int64_t extractTenantIdFromKeyRef(StringRef s) {
 // validates whether the lastTenantId and the nextTenantId share the same 2 byte prefix
 bool nextTenantIdPrefixMatches(int64_t lastTenantId, int64_t nextTenantId) {
 	if (getTenantIdPrefix(nextTenantId) != getTenantIdPrefix(lastTenantId)) {
-		TraceEvent(SevWarnAlways, "TenantIdPrefixMismatch")
+		TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "TenantIdPrefixMismatch")
 		    .detail("CurrentTenantId", lastTenantId)
 		    .detail("NewTenantId", nextTenantId)
 		    .detail("CurrentTenantIdPrefix", getTenantIdPrefix(lastTenantId))
@@ -84,7 +84,7 @@ bool nextTenantIdPrefixMatches(int64_t lastTenantId, int64_t nextTenantId) {
 int64_t getMaxAllowableTenantId(int64_t curTenantId) {
 	// The maximum tenant id allowed is 1 for the first 48 bits (6 bytes) with the first 16 bits (2 bytes) being the
 	// tenant prefix
-	int64_t maxTenantId = pow(2, 48) - 1 + ((getTenantIdPrefix(curTenantId)) << 48);
+	int64_t maxTenantId = curTenantId | 0xFFFFFFFFFFFFLL;
 	ASSERT(maxTenantId > 0);
 	return maxTenantId;
 }

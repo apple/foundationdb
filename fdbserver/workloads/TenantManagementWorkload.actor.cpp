@@ -30,7 +30,6 @@
 #include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
-#include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/TenantSpecialKeys.actor.h"
@@ -41,9 +40,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ApiVersion.h"
-#include "flow/CodeProbe.h"
 #include "flow/Error.h"
-#include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/flow.h"
@@ -96,7 +93,6 @@ struct TenantManagementWorkload : TestWorkload {
 
 	int maxTenants;
 	int maxTenantGroups;
-	int64_t tenantIdPrefix;
 	double testDuration;
 	bool useMetacluster;
 	bool singleClient;
@@ -107,6 +103,7 @@ struct TenantManagementWorkload : TestWorkload {
 	Reference<IDatabase> mvDb;
 	Database dataDb;
 	bool hasNoTenantKey = false; // whether this workload has non-tenant key
+	int64_t tenantIdPrefix = 0;
 
 	// This test exercises multiple different ways to work with tenants
 	enum class OperationType {
@@ -136,10 +133,6 @@ struct TenantManagementWorkload : TestWorkload {
 		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 		singleClient = getOption(options, "singleClient"_sr, false);
-		tenantIdPrefix = getOption(options,
-		                           "tenantIdPrefix"_sr,
-		                           deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
-		                                                            TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1));
 
 		localTenantNamePrefix = format("%stenant_%d_", tenantNamePrefix.toString().c_str(), clientId);
 		localTenantGroupNamePrefix = format("%stenantgroup_%d_", tenantNamePrefix.toString().c_str(), clientId);
@@ -175,8 +168,6 @@ struct TenantManagementWorkload : TestWorkload {
 		if (clientId == 0 && g_network->isSimulated() && BUGGIFY) {
 			IKnobCollection::getMutableGlobalKnobCollection().setKnob(
 			    "max_tenants_per_cluster", KnobValueRef::create(int{ deterministicRandom()->randomInt(20, 100) }));
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob("simulation_hit_tenant_capacity_limits",
-			                                                          KnobValueRef::create(bool{ true }));
 		}
 
 		if (clientId == 0 || !singleClient) {
@@ -399,13 +390,9 @@ struct TenantManagementWorkload : TestWorkload {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			int64_t _nextId = wait(TenantAPI::getNextTenantId(tr, tenantsToCreate.size()));
 			int64_t nextId = _nextId;
-			ASSERT(nextId > 0);
 
 			std::vector<Future<Void>> createFutures;
 			for (auto [tenant, entry] : tenantsToCreate) {
-				if (!TenantAPI::nextTenantIdPrefixMatches(nextId - 1, nextId)) {
-					throw cluster_no_capacity();
-				}
 				entry.setId(nextId++);
 				createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, entry)));
 			}
@@ -421,100 +408,6 @@ struct TenantManagementWorkload : TestWorkload {
 			    self->mvDb, tenantsToCreate.begin()->second, AssignClusterAutomatically::True));
 		}
 
-		return Void();
-	}
-
-	ACTOR static Future<int64_t> getLastTenantId(Database cx) {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				state int64_t lastId = wait(TenantMetadata::lastTenantId().getD(tr, Snapshot::False, 0));
-				return lastId;
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
-	}
-
-	ACTOR static Future<Void> updateLocalState(TenantManagementWorkload* self,
-	                                           std::map<TenantName, TenantMapEntry>::iterator tenantItr,
-	                                           OperationType operationType,
-	                                           Version originalReadVersion) {
-		// Ignore any tenants that already existed
-		if (self->createdTenants.count(tenantItr->first)) {
-			return Void();
-		}
-
-		// Read the created tenant object and verify that its state is correct
-		state Optional<TenantMapEntry> entry = wait(self->tryGetTenant(tenantItr->first, operationType));
-
-		ASSERT(entry.present());
-		ASSERT(entry.get().id > self->maxId);
-		ASSERT(TenantAPI::getTenantIdPrefix(entry.get().id) == self->tenantIdPrefix);
-		ASSERT(entry.get().tenantGroup == tenantItr->second.tenantGroup);
-		ASSERT(entry.get().tenantState == TenantState::READY);
-
-		Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
-		ASSERT_GT(currentVersionstamp.version, originalReadVersion);
-
-		if (self->useMetacluster) {
-			// In a metacluster, we should also see that the tenant was created on the data cluster
-			Optional<TenantMapEntry> dataEntry =
-			    wait(TenantAPI::tryGetTenant(self->dataDb.getReference(), tenantItr->first));
-			ASSERT(dataEntry.present());
-			ASSERT(dataEntry.get().id == entry.get().id);
-			ASSERT(TenantAPI::getTenantIdPrefix(dataEntry.get().id) == self->tenantIdPrefix);
-			ASSERT(dataEntry.get().tenantGroup == entry.get().tenantGroup);
-			ASSERT(dataEntry.get().tenantState == TenantState::READY);
-		}
-
-		// Update our local tenant state to include the newly created one
-		self->maxId = std::max(self->maxId, entry.get().id);
-		TenantData tData = TenantData(entry.get().id, tenantItr->first, tenantItr->second.tenantGroup, true);
-		self->createdTenants[tenantItr->first] = tData;
-		self->allTestTenants.push_back(tData.tenant);
-
-		// If this tenant has a tenant group, create or update the entry for it
-		if (tenantItr->second.tenantGroup.present()) {
-			self->createdTenantGroups[tenantItr->second.tenantGroup.get()].tenantCount++;
-		}
-
-		// Randomly decide to insert a key into the tenant
-		state bool insertData = deterministicRandom()->random01() < 0.5;
-		if (insertData) {
-			state Transaction insertTr(self->dataDb, self->createdTenants[tenantItr->first].tenant);
-			loop {
-				try {
-					// The value stored in the key will be the name of the tenant
-					insertTr.set(self->keyName, tenantItr->first);
-					wait(insertTr.commit());
-					break;
-				} catch (Error& e) {
-					wait(insertTr.onError(e));
-				}
-			}
-
-			self->createdTenants[tenantItr->first].empty = false;
-
-			// Make sure that the key inserted correctly concatenates the tenant prefix with the
-			// relative key
-			state Transaction checkTr(self->dataDb);
-			loop {
-				try {
-					checkTr.setOption(FDBTransactionOptions::RAW_ACCESS);
-					Optional<Value> val = wait(checkTr.get(self->keyName.withPrefix(entry.get().prefix)));
-					ASSERT(val.present());
-					ASSERT(val.get() == tenantItr->first);
-					break;
-				} catch (Error& e) {
-					wait(checkTr.onError(e));
-				}
-			}
-		}
-
-		// Perform some final tenant validation
-		wait(checkTenantContents(self, tenantItr->first, self->createdTenants[tenantItr->first]));
 		return Void();
 	}
 
@@ -558,10 +451,6 @@ struct TenantManagementWorkload : TestWorkload {
 			tenantsToCreate[tenant] = entry;
 			hasSystemTenant = hasSystemTenant || tenant.startsWith("\xff"_sr);
 			hasSystemTenantGroup = hasSystemTenantGroup || entry.tenantGroup.orDefault(""_sr).startsWith("\xff"_sr);
-		}
-
-		if (newTenants == 0) {
-			return Void();
 		}
 
 		// If any tenant existed at the start of this function, then we expect the creation to fail or be a no-op,
@@ -652,7 +541,81 @@ struct TenantManagementWorkload : TestWorkload {
 
 				state std::map<TenantName, TenantMapEntry>::iterator tenantItr;
 				for (tenantItr = tenantsToCreate.begin(); tenantItr != tenantsToCreate.end(); ++tenantItr) {
-					wait(updateLocalState(self, tenantItr, operationType, originalReadVersion));
+					// Ignore any tenants that already existed
+					if (self->createdTenants.count(tenantItr->first)) {
+						continue;
+					}
+
+					// Read the created tenant object and verify that its state is correct
+					state Optional<TenantMapEntry> entry = wait(self->tryGetTenant(tenantItr->first, operationType));
+
+					ASSERT(entry.present());
+					ASSERT(entry.get().id > self->maxId);
+					ASSERT(TenantAPI::getTenantIdPrefix(entry.get().id) == self->tenantIdPrefix);
+					ASSERT(entry.get().tenantGroup == tenantItr->second.tenantGroup);
+					ASSERT(entry.get().tenantState == TenantState::READY);
+
+					Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
+					ASSERT_GT(currentVersionstamp.version, originalReadVersion);
+
+					if (self->useMetacluster) {
+						// In a metacluster, we should also see that the tenant was created on the data cluster
+						Optional<TenantMapEntry> dataEntry =
+						    wait(TenantAPI::tryGetTenant(self->dataDb.getReference(), tenantItr->first));
+						ASSERT(dataEntry.present());
+						ASSERT(dataEntry.get().id == entry.get().id);
+						ASSERT(TenantAPI::getTenantIdPrefix(dataEntry.get().id) == self->tenantIdPrefix);
+						ASSERT(dataEntry.get().tenantGroup == entry.get().tenantGroup);
+						ASSERT(dataEntry.get().tenantState == TenantState::READY);
+					}
+
+					// Update our local tenant state to include the newly created one
+					self->maxId = entry.get().id;
+					TenantData tData =
+					    TenantData(entry.get().id, tenantItr->first, tenantItr->second.tenantGroup, true);
+					self->createdTenants[tenantItr->first] = tData;
+					self->allTestTenants.push_back(tData.tenant);
+
+					// If this tenant has a tenant group, create or update the entry for it
+					if (tenantItr->second.tenantGroup.present()) {
+						self->createdTenantGroups[tenantItr->second.tenantGroup.get()].tenantCount++;
+					}
+
+					// Randomly decide to insert a key into the tenant
+					state bool insertData = deterministicRandom()->random01() < 0.5;
+					if (insertData) {
+						state Transaction insertTr(self->dataDb, self->createdTenants[tenantItr->first].tenant);
+						loop {
+							try {
+								// The value stored in the key will be the name of the tenant
+								insertTr.set(self->keyName, tenantItr->first);
+								wait(insertTr.commit());
+								break;
+							} catch (Error& e) {
+								wait(insertTr.onError(e));
+							}
+						}
+
+						self->createdTenants[tenantItr->first].empty = false;
+
+						// Make sure that the key inserted correctly concatenates the tenant prefix with the
+						// relative key
+						state Transaction checkTr(self->dataDb);
+						loop {
+							try {
+								checkTr.setOption(FDBTransactionOptions::RAW_ACCESS);
+								Optional<Value> val = wait(checkTr.get(self->keyName.withPrefix(entry.get().prefix)));
+								ASSERT(val.present());
+								ASSERT(val.get() == tenantItr->first);
+								break;
+							} catch (Error& e) {
+								wait(checkTr.onError(e));
+							}
+						}
+					}
+
+					// Perform some final tenant validation
+					wait(checkTenantContents(self, tenantItr->first, self->createdTenants[tenantItr->first]));
 				}
 
 				return Void();
@@ -667,45 +630,6 @@ struct TenantManagementWorkload : TestWorkload {
 					ASSERT(operationType == OperationType::METACLUSTER != self->useMetacluster);
 					return Void();
 				} else if (e.code() == error_code_cluster_no_capacity) {
-					int64_t lastTenantId = wait(getLastTenantId(self->dataDb));
-					int tenantsCreating = newTenants;
-					// For special keys and management transactions since we create multiple tenants it's possible some
-					// of them are duplicates in which case the whole transaction will fail if we overshoot capacity but
-					// newTenants will not accurately reflect the total ids we attempt to assign
-					if (operationType == OperationType::SPECIAL_KEYS ||
-					    operationType == OperationType::MANAGEMENT_TRANSACTION) {
-						tenantsCreating = tenantsToCreate.size();
-					}
-					TraceEvent(SevWarn, "TenantCapcityLimitsExceeded")
-					    .detail("LastTenantId", lastTenantId)
-					    .detail("NewTenants", tenantsCreating)
-					    .detail("ClientID", self->clientId)
-					    .detail("Opetation", operationType);
-					// Overshot our capacity because we cannot assign anymore tenant ids with the same prefix
-					if (TenantAPI::getTenantIdPrefix(lastTenantId) !=
-					    TenantAPI::getTenantIdPrefix(lastTenantId + tenantsCreating)) {
-						CODE_PROBE(true, "prefix change from reaching tenant capacity limits");
-						ASSERT(TenantAPI::getTenantIdPrefix(lastTenantId) == self->tenantIdPrefix);
-
-						// It's possible that we created tenants but the createTenantImpl actor timed out so we had to
-						// retry. Between when this retry is invoked to when the attempt is made to insert tenants the
-						// tenant id could have increased greatly throwing capacity errors even though we're not
-						// inserting new tenants. Thus when we get to this codepath we need to ensure we update our
-						// local state and add any missing tenants that were created.
-						state std::map<TenantName, TenantMapEntry>::iterator curTenantItr;
-						for (curTenantItr = tenantsToCreate.begin(); curTenantItr != tenantsToCreate.end();
-						     ++curTenantItr) {
-							state Optional<TenantMapEntry> curEntry =
-							    wait(self->tryGetTenant(curTenantItr->first, operationType));
-							if (curEntry.present()) {
-								wait(updateLocalState(self, curTenantItr, operationType, originalReadVersion));
-							} else {
-								break;
-							}
-						}
-
-						return Void();
-					}
 					// Confirm that we overshot our capacity. This check cannot be done for database operations
 					// because we cannot transactionally get the tenant count with the creation.
 					if (operationType == OperationType::MANAGEMENT_TRANSACTION ||
@@ -1855,20 +1779,6 @@ struct TenantManagementWorkload : TestWorkload {
 
 	ACTOR Future<Void> _start(Database cx, TenantManagementWorkload* self) {
 		state double start = now();
-		// Only one client will set the tenantId prefix on the metacluster so fetch that value
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				int64_t tenantIdPrefix =
-				    wait(KeyBackedProperty<int64_t>(tenantIdPrefixKey).getD(tr, Snapshot::False, 0));
-				self->tenantIdPrefix = tenantIdPrefix;
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
-		TraceEvent("TenantManagementIdPrefix").detail("Prefix", self->tenantIdPrefix);
 
 		// Run a random sequence of tenant management operations for the duration of the test
 		while (now() < start + self->testDuration) {

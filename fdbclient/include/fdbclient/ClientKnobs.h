@@ -294,9 +294,6 @@ public:
 	double METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT;
 	int TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantEntryCache is refreshed
 	bool CLIENT_ENABLE_USING_CLUSTER_ID_KEY;
-	// If true will increase the generated tenant ids by very large increments in an attempt to hit the cluster capcity
-	// for total number of allowable tenants
-	bool SIMULATION_HIT_TENANT_CAPACITY_LIMITS;
 
 	// Encryption-at-rest
 	bool ENABLE_ENCRYPTION_CPU_TIME_LOGGING;
