@@ -7737,9 +7737,9 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 			    e.code() == error_code_connection_failed || e.code() == error_code_broken_promise ||
 			    e.code() == error_code_timed_out) {
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::FetchKeys));
-			} else if (e.code() == error_code_checkpoint_not_found) {
-				wait(fallBackToAddingShard(data, moveInShard));
-				return Void();
+			// } else if (e.code() == error_code_checkpoint_not_found) {
+			// 	wait(fallBackToAddingShard(data, moveInShard));
+			// 	return Void();
 			} else {
 				throw;
 			}
