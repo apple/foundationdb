@@ -3166,9 +3166,28 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData,
 	}
 }
 
+ACTOR Future<Void> reassignRangesAfterReboot(Reference<BlobManagerData> bmData,
+                                             Reference<AsyncVar<BlobWorkerInterface>> bwInterf) {
+	loop {
+		wait(bwInterf->onChange());
+		UID workerID = bwInterf->get().id();
+		for (auto& it : bmData->workerAssignments.ranges()) {
+			if (it.value() == workerID) {
+				RangeAssignment raAssign;
+				raAssign.isAssign = true;
+				raAssign.worker = workerID;
+				raAssign.keyRange = it.range();
+				raAssign.assign = RangeAssignmentData(AssignRequestType::Normal);
+				handleRangeAssign(bmData, raAssign);
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> monitorBlobWorker(Reference<BlobManagerData> bmData,
                                      Reference<AsyncVar<BlobWorkerInterface>> bwInterf) {
 	state Future<Void> monitorStatus = monitorBlobWorkerStatus(bmData, bwInterf);
+	state Future<Void> reassign = reassignRangesAfterReboot(bmData, bwInterf);
 	try {
 		loop {
 			state Future<Void> waitFailure =

@@ -1474,13 +1474,9 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 				// wait for manager stream to become ready, and send a message
 				loop {
 					choose {
-						when(wait(bwData->currentManagerStatusStream.get().onReady())) {
-							break;
-						}
+						when(wait(bwData->currentManagerStatusStream.get().onReady())) { break; }
 						when(wait(bwData->currentManagerStatusStream.onChange())) {}
-						when(wait(metadata->resumeSnapshot.getFuture())) {
-							break;
-						}
+						when(wait(metadata->resumeSnapshot.getFuture())) { break; }
 					}
 				}
 				if (metadata->resumeSnapshot.isSet()) {
@@ -1519,9 +1515,7 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 		// manager change/no response
 		choose {
 			when(wait(bwData->currentManagerStatusStream.onChange())) {}
-			when(wait(metadata->resumeSnapshot.getFuture())) {
-				break;
-			}
+			when(wait(metadata->resumeSnapshot.getFuture())) { break; }
 			when(wait(delay(1.0))) {}
 		}
 
@@ -1609,9 +1603,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
 			// wait for manager stream to become ready, and send a message
 			loop {
 				choose {
-					when(wait(bwData->currentManagerStatusStream.get().onReady())) {
-						break;
-					}
+					when(wait(bwData->currentManagerStatusStream.get().onReady())) { break; }
 					when(wait(bwData->currentManagerStatusStream.onChange())) {}
 				}
 			}
@@ -1695,12 +1687,8 @@ ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
 				// wait for manager stream to become ready, and send a message
 				loop {
 					choose {
-						when(wait(delay(std::max(0.0, sendTimeGiveUp - now())))) {
-							break;
-						}
-						when(wait(bwData->currentManagerStatusStream.get().onReady())) {
-							break;
-						}
+						when(wait(delay(std::max(0.0, sendTimeGiveUp - now())))) { break; }
+						when(wait(bwData->currentManagerStatusStream.get().onReady())) { break; }
 						when(wait(bwData->currentManagerStatusStream.onChange())) {}
 					}
 				}
@@ -1983,9 +1971,7 @@ ACTOR Future<Void> waitOnCFVersion(Reference<GranuleMetadata> metadata, Version 
 			                                 ? metadata->activeCFData.get()->whenAtLeast(waitVersion)
 			                                 : Never();
 			choose {
-				when(wait(atLeast)) {
-					break;
-				}
+				when(wait(atLeast)) { break; }
 				when(wait(metadata->activeCFData.onChange())) {}
 			}
 		} catch (Error& e) {
@@ -3716,9 +3702,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			// skip waiting for CF ready for recovery mode
 			choose {
 				when(wait(metadata->readable.getFuture())) {}
-				when(wait(metadata->cancelled.getFuture())) {
-					throw wrong_shard_server();
-				}
+				when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
 			}
 
 			// in case both readable and cancelled are ready, check cancelled
@@ -3734,9 +3718,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				if (metadata->historyLoaded.canBeSet()) {
 					choose {
 						when(wait(metadata->historyLoaded.getFuture())) {}
-						when(wait(metadata->cancelled.getFuture())) {
-							throw wrong_shard_server();
-						}
+						when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
 					}
 				}
 
@@ -3748,9 +3730,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 						when(GranuleFiles f = wait(finalChunks[chunkIdx].second)) {
 							rangeGranulePair.push_back(std::pair(finalChunks[chunkIdx].first, f));
 						}
-						when(wait(metadata->cancelled.getFuture())) {
-							throw wrong_shard_server();
-						}
+						when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
 					}
 
 					if (rangeGranulePair.back().second.snapshotFiles.empty()) {
@@ -3791,13 +3771,9 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					// version on rollback
 					try {
 						choose {
-							when(wait(waitForVersionFuture)) {
-								break;
-							}
+							when(wait(waitForVersionFuture)) { break; }
 							when(wait(metadata->activeCFData.onChange())) {}
-							when(wait(metadata->cancelled.getFuture())) {
-								throw wrong_shard_server();
-							}
+							when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
 						}
 					} catch (Error& e) {
 						// We can get change feed cancelled from whenAtLeast. This means the change feed may
@@ -4724,33 +4700,6 @@ ACTOR Future<Void> handleRangeRevoke(Reference<BlobWorkerData> bwData, RevokeBlo
 	}
 }
 
-ACTOR Future<Void> restartRangeAssignment(Reference<BlobWorkerData> self, Key begin, Key end) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
-	state AssignBlobRangeRequest req;
-	req.keyRange = KeyRangeRef(begin, end);
-	req.type = AssignRequestType::Normal;
-
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> lockValue = wait(tr->get(blobGranuleLockKeyFor(req.keyRange)));
-			if (lockValue.present()) {
-				std::tuple<int64_t, int64_t, UID> currentOwner = decodeBlobGranuleLockValue(lockValue.get());
-				req.managerEpoch = std::get<0>(currentOwner);
-				req.managerSeqno = std::get<1>(currentOwner);
-			}
-			break;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-
-	wait(handleRangeAssign(self, req, true));
-	return Void();
-}
-
 void handleBlobVersionRequest(Reference<BlobWorkerData> bwData, MinBlobVersionRequest req) {
 	bwData->db->setDesiredChangeFeedVersion(
 	    std::max<Version>(0, req.grv - (SERVER_KNOBS->TARGET_BW_LAG_UPDATE * SERVER_KNOBS->VERSIONS_PER_SECOND)));
@@ -5506,52 +5455,6 @@ ACTOR Future<Void> restorePersistentState(Reference<BlobWorkerData> self) {
 	return Void();
 }
 
-ACTOR Future<Void> restoreGranules(Reference<BlobWorkerData> self) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
-	state Key beginKey = blobGranuleMappingKeys.begin;
-	// FIXME: use range stream instead
-	state int rowLimit = BUGGIFY ? deterministicRandom()->randomInt(2, 10) : 10000;
-	state std::vector<Future<Void>> assignments;
-
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-			KeyRange nextRange(KeyRangeRef(beginKey, blobGranuleMappingKeys.end));
-			// using the krm functions can produce incorrect behavior here as it does weird stuff with beginKey
-			state GetRangeLimits limits(rowLimit, GetRangeLimits::BYTE_LIMIT_UNLIMITED);
-			limits.minRows = 2;
-			RangeResult results = wait(tr->getRange(nextRange, limits));
-
-			// Add the mappings to our in memory key range map
-			for (int rangeIdx = 0; rangeIdx < results.size() - 1; rangeIdx++) {
-				Key granuleStartKey = results[rangeIdx].key.removePrefix(blobGranuleMappingKeys.begin);
-				Key granuleEndKey = results[rangeIdx + 1].key.removePrefix(blobGranuleMappingKeys.begin);
-				if (results[rangeIdx].value.size()) {
-					UID existingOwner = decodeBlobGranuleMappingValue(results[rangeIdx].value);
-					if (existingOwner == self->id) {
-						assignments.push_back(restartRangeAssignment(self, granuleStartKey, granuleEndKey));
-					}
-				}
-			}
-
-			if (!results.more || results.size() <= 1) {
-				break;
-			}
-
-			// re-read last key to get range that starts there
-			beginKey = results.back().key;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-
-	wait(waitForAll(assignments));
-	return Void();
-}
-
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
                               Promise<Void> recovered,
                               Reference<AsyncVar<ServerDBInfo> const> dbInfo,
@@ -5591,7 +5494,6 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 					printf("BW constructed backup container\n");
 				}
 			}
-			wait(restoreGranules(self));
 			// register the blob worker to the system keyspace
 			wait(registerBlobWorker(self, bwInterf, true));
 		} catch (Error& e) {
