@@ -110,7 +110,7 @@ private:
 	    std::vector<std::pair<Standalone<StringRef>, Optional<Value>>> configMutations,
 	    int64_t tenantId,
 	    std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
-		state TenantMapEntry tenantEntry(tenantId, tenantName, TenantState::READY);
+		state TenantMapEntry tenantEntry(tenantId, tenantName);
 
 		for (auto const& [name, value] : configMutations) {
 			tenantEntry.configure(name, value);

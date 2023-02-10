@@ -1307,8 +1307,9 @@ struct CreateTenantImpl {
 	}
 
 	ACTOR static Future<Void> storeTenantInDataCluster(CreateTenantImpl* self, Reference<ITransaction> tr) {
-		std::pair<Optional<MetaclusterTenantMapEntry>, bool> dataClusterTenant =
-		    wait(TenantAPI::createTenantTransaction(tr, self->tenantEntry, ClusterType::METACLUSTER_DATA));
+		TenantMapEntry entry(self->tenantEntry);
+		std::pair<Optional<TenantMapEntry>, bool> dataClusterTenant =
+		    wait(TenantAPI::createTenantTransaction(tr, entry, ClusterType::METACLUSTER_DATA));
 
 		// If the tenant map entry is empty, then we encountered a tombstone indicating that the tenant was
 		// simultaneously removed.

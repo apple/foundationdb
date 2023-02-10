@@ -137,7 +137,28 @@ TenantMapEntry::TenantMapEntry(int64_t id, TenantName tenantName, Optional<Tenan
 TenantMapEntry::TenantMapEntry(MetaclusterTenantMapEntry metaclusterEntry)
   : tenantName(metaclusterEntry.tenantName), tenantLockState(metaclusterEntry.tenantLockState),
     tenantGroup(metaclusterEntry.tenantGroup), configurationSequenceNum(metaclusterEntry.configurationSequenceNum) {
+	setId(metaclusterEntry.id);
+}
+
+MetaclusterTenantMapEntry::MetaclusterTenantMapEntry() {}
+MetaclusterTenantMapEntry::MetaclusterTenantMapEntry(int64_t id,
+                                                     TenantName tenantName,
+                                                     TenantAPI::TenantState tenantState)
+  : tenantName(tenantName), tenantState(tenantState) {
 	setId(id);
+}
+MetaclusterTenantMapEntry::MetaclusterTenantMapEntry(int64_t id,
+                                                     TenantName tenantName,
+                                                     TenantAPI::TenantState tenantState,
+                                                     Optional<TenantGroupName> tenantGroup)
+  : tenantName(tenantName), tenantState(tenantState), tenantGroup(tenantGroup) {
+	setId(id);
+}
+
+void MetaclusterTenantMapEntry::setId(int64_t id) {
+	ASSERT(id >= 0);
+	this->id = id;
+	prefix = TenantAPI::idToPrefix(id);
 }
 
 void TenantMapEntry::setId(int64_t id) {

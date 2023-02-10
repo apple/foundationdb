@@ -394,13 +394,13 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 	ACTOR static Future<Void> verifyListFilter(MetaclusterManagementWorkload* self, TenantName tenant) {
 		try {
-			state TenantMapEntry checkEntry = wait(MetaclusterAPI::getTenant(self->managementDb, tenant));
-			state TenantState checkState = checkEntry.tenantState;
-			state std::vector<TenantState> filters;
+			state MetaclusterTenantMapEntry checkEntry = wait(MetaclusterAPI::getTenant(self->managementDb, tenant));
+			state TenantAPI::TenantState checkState = checkEntry.tenantState;
+			state std::vector<TenantAPI::TenantState> filters;
 			filters.push_back(checkState);
-			state std::vector<std::pair<TenantName, TenantMapEntry>> tenantList;
+			state std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenantList;
 			// Possible to have changed state between now and the getTenant call above
-			state TenantMapEntry checkEntry2;
+			state MetaclusterTenantMapEntry checkEntry2;
 			wait(store(checkEntry2, MetaclusterAPI::getTenant(self->managementDb, tenant)) &&
 			     store(tenantList,
 			           MetaclusterAPI::listTenantMetadata(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6, 0, filters)));
@@ -442,7 +442,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			preferredClusters.second = self->chooseClusterName();
 		}
 
-		state TenantMapEntry tenantMapEntry;
+		state MetaclusterTenantMapEntry tenantMapEntry;
 		tenantMapEntry.tenantName = tenant;
 		tenantMapEntry.tenantGroup = tenantGroup;
 
@@ -453,7 +453,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 						tenantMapEntry.assignedCluster =
 						    deterministicRandom()->coinflip() ? preferredClusters.first : preferredClusters.second;
 						if (!originalPreferredCluster.present()) {
-							originalPreferredCluster = tenantMapEntry.assignedCluster.get();
+							originalPreferredCluster = tenantMapEntry.assignedCluster;
 						}
 					}
 					Future<Void> createFuture =
@@ -467,12 +467,13 @@ struct MetaclusterManagementWorkload : TestWorkload {
 					}
 				} catch (Error& e) {
 					if (e.code() == error_code_tenant_already_exists && retried && !exists) {
-						Optional<TenantMapEntry> entry = wait(MetaclusterAPI::tryGetTenant(self->managementDb, tenant));
+						Optional<MetaclusterTenantMapEntry> entry =
+						    wait(MetaclusterAPI::tryGetTenant(self->managementDb, tenant));
 						ASSERT(entry.present());
 						tenantMapEntry = entry.get();
 						break;
 					} else if (!assignClusterAutomatically && retried &&
-					           originalPreferredCluster.get() != tenantMapEntry.assignedCluster.get() &&
+					           originalPreferredCluster.get() != tenantMapEntry.assignedCluster &&
 					           (e.code() == error_code_cluster_no_capacity ||
 					            e.code() == error_code_cluster_not_found ||
 					            e.code() == error_code_invalid_tenant_configuration)) {
@@ -487,24 +488,22 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				}
 			}
 
-			TenantMapEntry entry = wait(MetaclusterAPI::getTenant(self->managementDb, tenant));
+			MetaclusterTenantMapEntry entry = wait(MetaclusterAPI::getTenant(self->managementDb, tenant));
 
 			ASSERT(!exists);
 			ASSERT(hasCapacity);
-			ASSERT(entry.assignedCluster.present());
 			ASSERT(entry.tenantGroup == tenantGroup);
 
 			if (tenantGroup.present()) {
-				auto tenantGroupData =
-				    self->tenantGroups.try_emplace(tenantGroup.get(), entry.assignedCluster.get()).first;
-				ASSERT(tenantGroupData->second.cluster == entry.assignedCluster.get());
+				auto tenantGroupData = self->tenantGroups.try_emplace(tenantGroup.get(), entry.assignedCluster).first;
+				ASSERT(tenantGroupData->second.cluster == entry.assignedCluster);
 				tenantGroupData->second.tenants.insert(tenant);
 			} else {
 				self->ungroupedTenants.insert(tenant);
 			}
 
-			auto assignedCluster = self->dataDbs.find(entry.assignedCluster.get());
-			ASSERT(assignClusterAutomatically || tenantMapEntry.assignedCluster.get() == assignedCluster->first);
+			auto assignedCluster = self->dataDbs.find(entry.assignedCluster);
+			ASSERT(assignClusterAutomatically || tenantMapEntry.assignedCluster == assignedCluster->first);
 			ASSERT(assignedCluster != self->dataDbs.end());
 			ASSERT(assignedCluster->second.tenants.insert(tenant).second);
 
@@ -518,7 +517,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			       assignedCluster->second.tenantGroupCapacity >=
 			           assignedCluster->second.tenantGroups.size() + assignedCluster->second.ungroupedTenants.size());
 
-			self->createdTenants[tenant] = TenantData(entry.assignedCluster.get(), tenantGroup);
+			self->createdTenants[tenant] = TenantData(entry.assignedCluster, tenantGroup);
 		} catch (Error& e) {
 			if (e.code() == error_code_tenant_already_exists) {
 				ASSERT(exists);
@@ -534,9 +533,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				return Void();
 			} else if (e.code() == error_code_invalid_tenant_configuration) {
 				ASSERT(tenantGroup.present());
-				ASSERT(tenantMapEntry.assignedCluster.present());
 				auto itr = self->tenantGroups.find(tenantGroup.get());
-				ASSERT(itr->second.cluster != tenantMapEntry.assignedCluster.get());
+				ASSERT(itr->second.cluster != tenantMapEntry.assignedCluster);
 				return Void();
 			}
 
@@ -568,7 +566,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 					}
 				} catch (Error& e) {
 					if (e.code() == error_code_tenant_not_found && retried && exists) {
-						Optional<TenantMapEntry> entry = wait(MetaclusterAPI::tryGetTenant(self->managementDb, tenant));
+						Optional<MetaclusterTenantMapEntry> entry =
+						    wait(MetaclusterAPI::tryGetTenant(self->managementDb, tenant));
 						ASSERT(!entry.present());
 						break;
 					} else {
@@ -763,20 +762,21 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			ASSERT(exists);
 			ASSERT(!newTenantExists);
 
-			Optional<TenantMapEntry> oldEntry = wait(MetaclusterAPI::tryGetTenant(self->managementDb, tenant));
+			Optional<MetaclusterTenantMapEntry> oldEntry =
+			    wait(MetaclusterAPI::tryGetTenant(self->managementDb, tenant));
 			ASSERT(!oldEntry.present());
 
-			TenantMapEntry newEntry = wait(MetaclusterAPI::getTenant(self->managementDb, newTenantName));
+			MetaclusterTenantMapEntry newEntry = wait(MetaclusterAPI::getTenant(self->managementDb, newTenantName));
 
 			auto tenantData = self->createdTenants.find(tenant);
 			ASSERT(tenantData != self->createdTenants.end());
 			ASSERT(tenantData->second.tenantGroup == newEntry.tenantGroup);
-			ASSERT(newEntry.assignedCluster.present() && tenantData->second.cluster == newEntry.assignedCluster.get());
+			ASSERT(tenantData->second.cluster == newEntry.assignedCluster);
 
 			self->createdTenants[newTenantName] = tenantData->second;
 			self->createdTenants.erase(tenantData);
 
-			auto& dataDb = self->dataDbs[newEntry.assignedCluster.get()];
+			auto& dataDb = self->dataDbs[newEntry.assignedCluster];
 			ASSERT(dataDb.registered);
 
 			dataDb.tenants.erase(tenant);

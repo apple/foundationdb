@@ -202,27 +202,25 @@ private:
 		std::map<ClusterName, int> clusterAllocated;
 		std::set<TenantGroupName> processedTenantGroups;
 		for (auto [tenantId, entry] : managementMetadata.tenantMap) {
-			ASSERT(entry.assignedCluster.present());
-
 			// Each tenant should be assigned to the same cluster where it is stored in the cluster tenant index
-			auto clusterItr = managementMetadata.clusterTenantMap.find(entry.assignedCluster.get());
+			auto clusterItr = managementMetadata.clusterTenantMap.find(entry.assignedCluster);
 			ASSERT(clusterItr != managementMetadata.clusterTenantMap.end());
 			ASSERT(clusterItr->second.count(tenantId));
 
 			if (entry.tenantGroup.present()) {
 				// Count the number of tenant groups allocated in each cluster
 				if (processedTenantGroups.insert(entry.tenantGroup.get()).second) {
-					++clusterAllocated[entry.assignedCluster.get()];
+					++clusterAllocated[entry.assignedCluster];
 				}
 				// The tenant group should be stored in the same cluster where it is stored in the cluster tenant
 				// group index
-				auto clusterTenantGroupItr = managementMetadata.clusterTenantGroupMap.find(entry.assignedCluster.get());
+				auto clusterTenantGroupItr = managementMetadata.clusterTenantGroupMap.find(entry.assignedCluster);
 				ASSERT(clusterTenantGroupItr != managementMetadata.clusterTenantGroupMap.end());
 				ASSERT(clusterTenantGroupItr->second.count(entry.tenantGroup.get()));
 			} else {
 				// Track the actual tenant group allocation per cluster (a tenant with no group counts against the
 				// allocation)
-				++clusterAllocated[entry.assignedCluster.get()];
+				++clusterAllocated[entry.assignedCluster];
 			}
 		}
 
@@ -255,7 +253,7 @@ private:
 		state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> dataClusterTenantList;
 		state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> dataClusterTenantGroupList;
 
-		state TenantConsistencyCheck<IDatabase, TenantMapEntry> tenantConsistencyCheck(dataDb);
+		state TenantConsistencyCheck<IDatabase> tenantConsistencyCheck(dataDb);
 		wait(tenantConsistencyCheck.run());
 
 		loop {
@@ -350,8 +348,7 @@ private:
 	}
 
 	ACTOR static Future<Void> run(MetaclusterConsistencyCheck* self) {
-		state TenantConsistencyCheck<DB, MetaclusterTenantMapEntry> managementTenantConsistencyCheck(
-		    self->managementDb);
+		state TenantConsistencyCheck<DB> managementTenantConsistencyCheck(self->managementDb);
 		wait(managementTenantConsistencyCheck.run());
 		wait(loadManagementClusterMetadata(self));
 		self->validateManagementCluster();
