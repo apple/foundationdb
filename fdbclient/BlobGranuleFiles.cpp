@@ -1742,7 +1742,8 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 // just for client passthrough. reads all key-value pairs from a snapshot file, and all mutations from a delta file
 RangeResult bgReadSnapshotFile(const StringRef& data,
                                Optional<KeyRef> tenantPrefix,
-                               Optional<BlobGranuleCipherKeysCtx> encryptionCtx, const KeyRangeRef& keys) {
+                               Optional<BlobGranuleCipherKeysCtx> encryptionCtx,
+                               const KeyRangeRef& keys) {
 	Standalone<StringRef> fname = "f"_sr;
 	Standalone<VectorRef<ParsedDeltaBoundaryRef>> results = loadSnapshotFile(fname, data, keys, encryptionCtx);
 	RangeResult snapshot;
