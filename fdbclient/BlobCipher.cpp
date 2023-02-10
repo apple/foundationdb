@@ -40,6 +40,7 @@
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/xxhash.h"
+#include "include/fdbclient/BlobCipher.h"
 
 #include <chrono>
 #include <cstring>
@@ -63,94 +64,95 @@
 // BlobCipherEncryptHeaderRef
 
 uint32_t BlobCipherEncryptHeaderRef::getHeaderSize(const int flagVersion,
-                                                   const int authAlgoVersion,
+                                                   const int algoVersion,
                                                    const EncryptCipherMode cipherMode,
                                                    const EncryptAuthTokenMode authMode,
                                                    const EncryptAuthTokenAlgo authAlgo) {
-	uint32_t total = sizeof(uint16_t) * 2; // sizeof(flagVersion + algoHeaderVersion)
 	if (flagVersion != 1) {
+		TraceEvent("BlobCipherGetHeaderSizeInvalidFlagVersion").detail("FlagVersion", flagVersion);
+		throw not_implemented();
+	}
+	if (algoVersion != 1) {
+		TraceEvent("BlobCipherGetHeaderSizeInvalidAlgoVersion").detail("AlgoVersion", algoVersion);
 		throw not_implemented();
 	}
 
-	total += sizeof(BlobCipherEncryptHeaderFlagsV1);
+	uint32_t total = sizeof(BlobCipherEncryptHeaderFlagsV1) + 2; // 2 bytes of std::variant index
 
 	if (cipherMode != ENCRYPT_CIPHER_MODE_AES_256_CTR) {
 		throw not_implemented();
 	}
 
 	if (authMode == ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
-		total += sizeof(AesCtrNoAuthV1);
+		total += AesCtrNoAuth::getSize();
 	} else {
 		if (authAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA) {
-			total += sizeof(AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>);
+			total += AesCtrWithHmac::getSize();
 		} else {
 			ASSERT_EQ(authAlgo, ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC);
-			total += sizeof(AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>);
+			total += AesCtrWithCmac::getSize();
 		}
 	}
 	return total;
 }
+
+namespace {
+int getEncryptAlgoHeaderVersion(const EncryptAuthTokenMode mode, const EncryptAuthTokenAlgo algo) {
+	if (mode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
+		return CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION;
+	} else {
+		ASSERT_EQ(mode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+		if (algo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC) {
+			return CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION;
+		} else {
+			ASSERT_EQ(algo, ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA);
+			return CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION;
+		}
+	}
+}
+} // namespace
 
 void BlobCipherEncryptHeaderRef::validateEncryptionHeaderDetails(const BlobCipherDetails& textCipherDetails,
                                                                  const BlobCipherDetails& headerCipherDetails,
                                                                  const StringRef& ivRef) const {
 	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
 
-	if (flagsVersion > CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION) {
+	if (flagsVersion() > CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION) {
 		TraceEvent("ValidateEncryptHeaderUnsupportedFlagVersion")
 		    .detail("MaxSupportedVersion", CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION)
-		    .detail("Version", flagsVersion);
+		    .detail("Version", flagsVersion());
 		throw not_implemented();
 	}
 
-	BlobCipherEncryptHeaderFlagsV1 flags = std::get<BlobCipherEncryptHeaderFlagsV1>(this->flags);
+	BlobCipherEncryptHeaderFlagsV1 f = std::get<BlobCipherEncryptHeaderFlagsV1>(flags);
+
+	int maxSupportedVersion =
+	    getEncryptAlgoHeaderVersion((EncryptAuthTokenMode)f.authTokenMode, (EncryptAuthTokenAlgo)f.authTokenAlgo);
+	if (algoHeaderVersion() != maxSupportedVersion) {
+		TraceEvent("ValidateEncryptHeaderUnsupportedAlgoHeaderVersion")
+		    .detail("AuthTokenMode", f.authTokenMode)
+		    .detail("AuthTokenAlgo", f.authTokenAlgo)
+		    .detail("MaxSupportedVersion", maxSupportedVersion)
+		    .detail("Version", algoHeaderVersion());
+		throw not_implemented();
+	}
+
 	BlobCipherDetails persistedTextCipherDetails;
 	BlobCipherDetails persistedHeaderCipherDetails;
 	uint8_t* persistedIV = nullptr;
-
-	if (flags.authTokenMode == ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
-		if (algoHeaderVersion > CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION) {
-			TraceEvent("ValidateEncryptHeaderUnsupportedAlgoHeaderVersion")
-			    .detail("AuthMode", "No-Auth")
-			    .detail("MaxSupportedVersion", CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION)
-			    .detail("Version", algoHeaderVersion);
-			throw not_implemented();
-		}
-		persistedTextCipherDetails = std::get<AesCtrNoAuthV1>(this->algoHeader).cipherTextDetails;
-		persistedIV = (uint8_t*)(&std::get<AesCtrNoAuthV1>(this->algoHeader).iv[0]);
-	} else {
-		if (flags.authTokenAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA) {
-			if (algoHeaderVersion > CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION) {
-				TraceEvent("ValidateEncryptHeaderUnsupportedAlgoHeaderVersion")
-				    .detail("AuthMode", "Hmac-Sha")
-				    .detail("MaxSupportedVersion", CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION)
-				    .detail("Version", algoHeaderVersion);
-			}
-			persistedTextCipherDetails =
-			    std::get<AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>>(this->algoHeader).cipherTextDetails;
-			persistedHeaderCipherDetails =
-			    std::get<AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>>(this->algoHeader).cipherHeaderDetails;
-			persistedIV = (uint8_t*)(&std::get<AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>>(this->algoHeader).iv[0]);
-		} else if (flags.authTokenAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC) {
-			if (algoHeaderVersion > CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION) {
-				TraceEvent("ValidateEncryptHeaderUnsupportedAlgoHeaderVersion")
-				    .detail("AuthMode", "Aes-Cmac")
-				    .detail("MaxSupportedVersion", CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION)
-				    .detail("Version", algoHeaderVersion);
-			}
-			persistedTextCipherDetails =
-			    std::get<AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>(this->algoHeader).cipherTextDetails;
-			persistedHeaderCipherDetails =
-			    std::get<AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>(this->algoHeader).cipherHeaderDetails;
-			persistedIV = (uint8_t*)(&std::get<AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>(this->algoHeader).iv[0]);
-		} else {
-			throw not_implemented();
-		}
-	}
+	std::visit(
+	    [&](auto& h) {
+		    persistedTextCipherDetails = h.cipherTextDetails;
+		    using HeaderType = std::decay_t<decltype(h)>;
+		    if constexpr (std::is_same_v<HeaderType, AesCtrWithHmac> || std::is_same_v<HeaderType, AesCtrWithCmac>) {
+			    persistedHeaderCipherDetails = h.cipherHeaderDetails;
+		    }
+		    persistedIV = (uint8_t*)h.iv;
+	    },
+	    algoHeader);
 
 	// Validate encryption header 'cipherHeader' details sanity
-	if (flags.authTokenMode != ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE &&
-	    headerCipherDetails != persistedHeaderCipherDetails) {
+	if (f.authTokenMode != ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE && headerCipherDetails != persistedHeaderCipherDetails) {
 		TraceEvent(SevError, "ValidateEncryptHeaderMismatch")
 		    .detail("HeaderDomainId", headerCipherDetails.encryptDomainId)
 		    .detail("PersistedHeaderDomainId", persistedHeaderCipherDetails.encryptDomainId)
@@ -651,22 +653,6 @@ std::vector<Reference<BlobCipherKey>> BlobCipherKeyCache::getAllCiphers(const En
 	return keyIdCache->getAllCipherKeys();
 }
 
-namespace {
-int getEncryptAlgoHeaderVersion(const EncryptAuthTokenMode mode, const EncryptAuthTokenAlgo algo) {
-	if (mode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
-		return CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION;
-	} else {
-		ASSERT_EQ(mode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
-		if (algo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC) {
-			return CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION;
-		} else {
-			ASSERT_EQ(algo, ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA);
-			return CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION;
-		}
-	}
-}
-} // namespace
-
 // EncryptBlobCipherAes265Ctr class methods
 
 EncryptBlobCipherAes265Ctr::EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
@@ -741,7 +727,7 @@ void EncryptBlobCipherAes265Ctr::init() {
 	}
 }
 
-template <uint32_t AuthTokenSize>
+template <class Params>
 void EncryptBlobCipherAes265Ctr::setCipherAlgoHeaderWithAuthV1(const uint8_t* ciphertext,
                                                                const int ciphertextLen,
                                                                const BlobCipherEncryptHeaderFlagsV1& flags,
@@ -749,7 +735,7 @@ void EncryptBlobCipherAes265Ctr::setCipherAlgoHeaderWithAuthV1(const uint8_t* ci
                                                                Arena& arena) {
 	// Construct algorithm specific details except 'authToken', serialize the details into 'headerRef' to allow
 	// authToken generation
-	AesCtrWithAuthV1<AuthTokenSize> algoHeader(
+	AesCtrWithAuth<Params> algoHeader(
 	    BlobCipherDetails(textCipherKey->getDomainId(), textCipherKey->getBaseCipherId(), textCipherKey->getSalt()),
 	    BlobCipherDetails(
 	        headerCipherKey->getDomainId(), headerCipherKey->getBaseCipherId(), headerCipherKey->getSalt()),
@@ -759,14 +745,14 @@ void EncryptBlobCipherAes265Ctr::setCipherAlgoHeaderWithAuthV1(const uint8_t* ci
 	headerRef->algoHeader = algoHeader;
 	// compute the authentication token
 	Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(*headerRef);
-	uint8_t computed[AuthTokenSize];
+	uint8_t computed[Params::authTokenSize];
 	computeAuthToken({ { ciphertext, ciphertextLen }, { serialized.begin(), serialized.size() } },
 	                 headerCipherKey->rawCipher(),
 	                 AES_256_KEY_LENGTH,
 	                 &computed[0],
 	                 (EncryptAuthTokenAlgo)flags.authTokenAlgo,
 	                 AUTH_TOKEN_MAX_SIZE);
-	memcpy(&algoHeader.authToken[0], &computed[0], AuthTokenSize);
+	memcpy(&algoHeader.authToken[0], &computed[0], Params::authTokenSize);
 
 	// Populate headerRef algorithm specific header details
 	headerRef->algoHeader = algoHeader;
@@ -777,7 +763,7 @@ void EncryptBlobCipherAes265Ctr::setCipherAlgoHeaderNoAuthV1(const BlobCipherEnc
                                                              Arena& arena) {
 	ASSERT_EQ(flags.authTokenMode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE);
 
-	AesCtrNoAuthV1 aesCtrNoAuth(
+	AesCtrNoAuth aesCtrNoAuth(
 	    BlobCipherDetails(textCipherKey->getDomainId(), textCipherKey->getBaseCipherId(), textCipherKey->getSalt()),
 	    iv,
 	    AES_256_IV_LENGTH,
@@ -797,10 +783,10 @@ void EncryptBlobCipherAes265Ctr::setCipherAlgoHeaderV1(const uint8_t* ciphertext
 	if (flags.authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
 		setCipherAlgoHeaderNoAuthV1(flags, headerRef, arena);
 	} else if (flags.authTokenAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC) {
-		setCipherAlgoHeaderWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>(ciphertext, ciphertextLen, flags, headerRef, arena);
+		setCipherAlgoHeaderWithAuthV1<AesCtrWithCmacParams>(ciphertext, ciphertextLen, flags, headerRef, arena);
 	} else {
 		ASSERT_EQ(flags.authTokenAlgo, ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA);
-		setCipherAlgoHeaderWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>(ciphertext, ciphertextLen, flags, headerRef, arena);
+		setCipherAlgoHeaderWithAuthV1<AesCtrWithHmacParams>(ciphertext, ciphertextLen, flags, headerRef, arena);
 	}
 }
 
@@ -820,18 +806,15 @@ void EncryptBlobCipherAes265Ctr::updateEncryptHeader(const uint8_t* ciphertext,
                                                      BlobCipherEncryptHeaderRef* headerRef,
                                                      Arena& arena) {
 	ASSERT_LE(CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION, std::numeric_limits<uint8_t>::max());
-
-	headerRef->flagsVersion = CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION;
+	ASSERT_EQ(1, CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
 
 	// update header flags
-	ASSERT_EQ(headerRef->flagsVersion, 1);
 	BlobCipherEncryptHeaderFlagsV1 flags;
 	updateEncryptHeaderFlagsV1(headerRef, &flags, arena);
 
 	// update cipher algo header
 	int algoHeaderVersion = getEncryptAlgoHeaderVersion(authTokenMode, authTokenAlgo);
 	ASSERT_EQ(algoHeaderVersion, 1);
-	headerRef->algoHeaderVersion = algoHeaderVersion;
 	setCipherAlgoHeaderV1(ciphertext, ciphertextLen, flags, headerRef, arena);
 }
 
@@ -1011,27 +994,26 @@ DecryptBlobCipherAes256Ctr::DecryptBlobCipherAes256Ctr(Reference<BlobCipherKey> 
 	}
 }
 
-template <uint32_t AuthTokenSize>
+template <class Params>
 void DecryptBlobCipherAes256Ctr::validateAuthTokenV1(const uint8_t* ciphertext,
                                                      const int ciphertextLen,
                                                      const BlobCipherEncryptHeaderFlagsV1& flags,
                                                      const BlobCipherEncryptHeaderRef& headerRef) {
 	ASSERT_EQ(flags.encryptMode, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
-	ASSERT_LE(AuthTokenSize, AUTH_TOKEN_MAX_SIZE);
+	ASSERT_LE(Params::authTokenSize, AUTH_TOKEN_MAX_SIZE);
 
 	Arena tmpArena;
-	uint8_t persited[AuthTokenSize];
-	uint8_t computed[AuthTokenSize];
+	uint8_t persited[Params::authTokenSize];
+	uint8_t computed[Params::authTokenSize];
 
 	// prepare the payload {cipherText + encryptionHeader}
 	// ensure the 'authToken' is reset before computing the 'authentication token'
 	BlobCipherEncryptHeaderRef headerRefCopy = BlobCipherEncryptHeaderRef(headerRef);
 
-	AesCtrWithAuthV1<AuthTokenSize> algoHeaderCopy =
-	    std::get<AesCtrWithAuthV1<AuthTokenSize>>(headerRefCopy.algoHeader);
+	AesCtrWithAuth<Params> algoHeaderCopy = std::get<AesCtrWithAuth<Params>>(headerRefCopy.algoHeader);
 	// preserve the 'persisted' token for future validation before reseting the field
-	memcpy(&persited[0], &algoHeaderCopy.authToken[0], AuthTokenSize);
-	memset(&algoHeaderCopy.authToken[0], 0, AuthTokenSize);
+	memcpy(&persited[0], &algoHeaderCopy.authToken[0], Params::authTokenSize);
+	memset(&algoHeaderCopy.authToken[0], 0, Params::authTokenSize);
 
 	headerRefCopy.algoHeader = algoHeaderCopy;
 	Standalone<StringRef> serializedHeader = BlobCipherEncryptHeaderRef::toStringRef(headerRefCopy);
@@ -1042,12 +1024,12 @@ void DecryptBlobCipherAes256Ctr::validateAuthTokenV1(const uint8_t* ciphertext,
 	                 (EncryptAuthTokenAlgo)flags.authTokenAlgo,
 	                 AUTH_TOKEN_MAX_SIZE);
 
-	if (memcmp(&persited[0], &computed[0], AuthTokenSize) != 0) {
+	if (memcmp(&persited[0], &computed[0], Params::authTokenSize) != 0) {
 		TraceEvent(SevWarn, "BlobCipherVerifyEncryptBlobHeaderAuthTokenMismatch")
-		    .detail("HeaderFlagsVersion", headerRef.flagsVersion)
+		    .detail("HeaderFlagsVersion", headerRef.flagsVersion())
 		    .detail("HeaderMode", flags.encryptMode)
-		    .detail("SingleAuthToken", StringRef(tmpArena, persited, AuthTokenSize))
-		    .detail("ComputedSingleAuthToken", StringRef(tmpArena, computed, AuthTokenSize));
+		    .detail("SingleAuthToken", StringRef(tmpArena, persited, Params::authTokenSize))
+		    .detail("ComputedSingleAuthToken", StringRef(tmpArena, computed, Params::authTokenSize));
 
 		CODE_PROBE(flags.authTokenAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
 		           "ConfigurableEncryption: AuthToken value mismatch - HMAC_SHA auth token generation");
@@ -1066,10 +1048,10 @@ void DecryptBlobCipherAes256Ctr::validateHeaderSingleAuthTokenV1(const uint8_t* 
 	// ensure the 'authToken' is reset before computing the 'authentication token'
 
 	if (flags.authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC) {
-		validateAuthTokenV1<AUTH_TOKEN_AES_CMAC_SIZE>(ciphertext, ciphertextLen, flags, headerRef);
+		validateAuthTokenV1<AesCtrWithCmacParams>(ciphertext, ciphertextLen, flags, headerRef);
 	} else {
 		ASSERT_EQ(flags.authTokenAlgo, EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA);
-		validateAuthTokenV1<AUTH_TOKEN_HMAC_SHA_SIZE>(ciphertext, ciphertextLen, flags, headerRef);
+		validateAuthTokenV1<AesCtrWithHmacParams>(ciphertext, ciphertextLen, flags, headerRef);
 	}
 }
 
@@ -1110,9 +1092,9 @@ void DecryptBlobCipherAes256Ctr::validateEncryptHeader(const uint8_t* ciphertext
                                                        const BlobCipherEncryptHeaderRef& headerRef,
                                                        EncryptAuthTokenMode* authTokenMode,
                                                        EncryptAuthTokenAlgo* authTokenAlgo) {
-	if (headerRef.flagsVersion > CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION) {
+	if (headerRef.flagsVersion() != 1) {
 		TraceEvent(SevWarn, "BlobCipherVerifyEncryptBlobHeader")
-		    .detail("HeaderVersion", headerRef.flagsVersion)
+		    .detail("HeaderVersion", headerRef.flagsVersion())
 		    .detail("MaxSupportedVersion", CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
 
 		CODE_PROBE(true, "ConfigurableEncryption: Encryption header version unsupported");
@@ -1120,12 +1102,12 @@ void DecryptBlobCipherAes256Ctr::validateEncryptHeader(const uint8_t* ciphertext
 		throw encrypt_header_metadata_mismatch();
 	}
 
-	if (headerRef.flagsVersion != 1) {
+	if (headerRef.flagsVersion() != 1) {
 		throw not_implemented();
 	}
 
 	BlobCipherEncryptHeaderFlagsV1 flags = std::get<BlobCipherEncryptHeaderFlagsV1>(headerRef.flags);
-	validateEncryptHeaderFlagsV1(headerRef.flagsVersion, flags);
+	validateEncryptHeaderFlagsV1(headerRef.flagsVersion(), flags);
 	validateAuthTokensV1(ciphertext, ciphertextLen, flags, headerRef);
 
 	*authTokenMode = (EncryptAuthTokenMode)flags.authTokenMode;
@@ -1710,34 +1692,31 @@ void testConfigurableEncryptionAesCtrNoAuthV1Ser(const int minDomainId) {
 
 	BlobCipherEncryptHeaderFlagsV1 flags = BlobCipherEncryptHeaderFlagsV1(
 	    ENCRYPT_CIPHER_MODE_AES_256_CTR, ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE, ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE);
-	size += sizeof(BlobCipherEncryptHeaderFlagsV1);
-	size += sizeof(uint16_t) * 2;
-
-	headerRef.flagsVersion = CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION;
-	headerRef.algoHeaderVersion = CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION;
+	size += sizeof(BlobCipherEncryptHeaderFlagsV1) + 2;
 	headerRef.flags = flags;
 
-	AesCtrNoAuthV1 noAuth;
+	AesCtrNoAuth noAuth;
 	noAuth.cipherTextDetails = BlobCipherDetails(1, 2, 23);
 	deterministicRandom()->randomBytes(&noAuth.iv[0], AES_256_IV_LENGTH);
-	Standalone<StringRef> serAlgo = AesCtrNoAuthV1::toStringRef(noAuth, arena);
+	Standalone<StringRef> serAlgo = AesCtrNoAuth::toStringRef(noAuth, arena);
 	ASSERT_EQ(serAlgo.size(), sizeof(noAuth));
 
-	size += sizeof(noAuth);
+	size += AesCtrNoAuth::getSize();
 
 	headerRef.algoHeader = noAuth;
 	Standalone<StringRef> serHeader = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
 	ASSERT_EQ(serHeader.size(), size);
 	ASSERT_EQ(size,
-	          BlobCipherEncryptHeaderRef::getHeaderSize(headerRef.flagsVersion,
-	                                                    headerRef.algoHeaderVersion,
+	          BlobCipherEncryptHeaderRef::getHeaderSize(headerRef.flagsVersion(),
+	                                                    headerRef.algoHeaderVersion(),
 	                                                    (EncryptCipherMode)flags.encryptMode,
 	                                                    (EncryptAuthTokenMode)flags.authTokenMode,
 	                                                    (EncryptAuthTokenAlgo)flags.authTokenAlgo));
 }
 
-template <uint32_t AuthTokenSize>
+template <class Params>
 void testConfigurableEncryptionAesCtrWithAuthSer(const int minDomainId) {
+	constexpr bool isHmac = std::is_same_v<Params, AesCtrWithHmacParams>;
 	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
 
 	Arena arena;
@@ -1747,32 +1726,27 @@ void testConfigurableEncryptionAesCtrWithAuthSer(const int minDomainId) {
 	BlobCipherEncryptHeaderFlagsV1 flags = BlobCipherEncryptHeaderFlagsV1(
 	    ENCRYPT_CIPHER_MODE_AES_256_CTR,
 	    ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
-	    AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE ? ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA
-	                                              : ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC);
-	size += (sizeof(BlobCipherEncryptHeaderFlagsV1) + 2 * sizeof(uint16_t));
+	    isHmac ? ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA : ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC);
+	size += sizeof(BlobCipherEncryptHeaderFlagsV1) + 2;
 
 	headerRef.flags = flags;
-	headerRef.flagsVersion = CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION;
-	headerRef.algoHeaderVersion = AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE
-	                                  ? CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION
-	                                  : CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION;
 
-	AesCtrWithAuthV1<AuthTokenSize> withAuth;
+	AesCtrWithAuth<Params> withAuth;
 	withAuth.cipherTextDetails = BlobCipherDetails(1, 2, 23);
 	withAuth.cipherHeaderDetails = BlobCipherDetails(ENCRYPT_HEADER_DOMAIN_ID, 2, 23);
 	deterministicRandom()->randomBytes(&withAuth.iv[0], AES_256_IV_LENGTH);
-	deterministicRandom()->randomBytes(&withAuth.authToken[0], AuthTokenSize);
-	Standalone<StringRef> serAlgo = AesCtrWithAuthV1<AuthTokenSize>::toStringRef(withAuth, arena);
+	deterministicRandom()->randomBytes(&withAuth.authToken[0], Params::authTokenSize);
+	Standalone<StringRef> serAlgo = AesCtrWithAuth<Params>::toStringRef(withAuth, arena);
 	ASSERT_EQ(serAlgo.size(), sizeof(withAuth));
 
-	size += sizeof(withAuth);
+	size += AesCtrWithAuth<Params>::getSize();
 
 	headerRef.algoHeader = withAuth;
 	Standalone<StringRef> serHeader = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
 	ASSERT_EQ(serHeader.size(), size);
 	ASSERT_EQ(size,
-	          BlobCipherEncryptHeaderRef::getHeaderSize(headerRef.flagsVersion,
-	                                                    headerRef.algoHeaderVersion,
+	          BlobCipherEncryptHeaderRef::getHeaderSize(headerRef.flagsVersion(),
+	                                                    headerRef.algoHeaderVersion(),
 	                                                    (EncryptCipherMode)flags.encryptMode,
 	                                                    (EncryptAuthTokenMode)flags.authTokenMode,
 	                                                    (EncryptAuthTokenAlgo)flags.authTokenAlgo));
@@ -1807,14 +1781,14 @@ void testConfigurableEncryptionHeaderNoAuthMode(const int minDomainId) {
 	encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 
 	BlobCipherEncryptHeaderFlagsV1 flags = std::get<BlobCipherEncryptHeaderFlagsV1>(headerRef.flags);
-	AesCtrNoAuthV1 noAuth = std::get<AesCtrNoAuthV1>(headerRef.algoHeader);
+	AesCtrNoAuth noAuth = std::get<AesCtrNoAuth>(headerRef.algoHeader);
 	Standalone<StringRef> serHeaderRef = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
 
 	BlobCipherEncryptHeaderRef validateHeader = BlobCipherEncryptHeaderRef::fromStringRef(serHeaderRef);
 	BlobCipherEncryptHeaderFlagsV1 validateFlags = std::get<BlobCipherEncryptHeaderFlagsV1>(validateHeader.flags);
 	ASSERT(validateFlags == flags);
 
-	AesCtrNoAuthV1 validateAlgo = std::get<AesCtrNoAuthV1>(validateHeader.algoHeader);
+	AesCtrNoAuth validateAlgo = std::get<AesCtrNoAuth>(validateHeader.algoHeader);
 	ASSERT(validateAlgo.cipherTextDetails == noAuth.cipherTextDetails);
 	ASSERT_EQ(memcmp(&validateAlgo.iv[0], &noAuth.iv[0], AES_256_IV_LENGTH), 0);
 
@@ -1855,7 +1829,7 @@ void testConfigurableEncryptionNoAuthMode(const int minDomainId) {
 	StringRef encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 
 	// validate header version details
-	AesCtrNoAuthV1 noAuth = std::get<AesCtrNoAuthV1>(headerRef.algoHeader);
+	AesCtrNoAuth noAuth = std::get<AesCtrNoAuth>(headerRef.algoHeader);
 	Reference<BlobCipherKey> tCipherKeyKey = cipherKeyCache->getCipherKey(
 	    noAuth.cipherTextDetails.encryptDomainId, noAuth.cipherTextDetails.baseCipherId, noAuth.cipherTextDetails.salt);
 	ASSERT(tCipherKeyKey->isEqual(cipherKey));
@@ -1867,8 +1841,8 @@ void testConfigurableEncryptionNoAuthMode(const int minDomainId) {
 	ASSERT_EQ(memcmp(decryptedBuf.begin(), &orgData[0], bufLen), 0);
 
 	TraceEvent("BlobCipherTestEncryptDecryptDone")
-	    .detail("HeaderFlagsVersion", headerRef.flagsVersion)
-	    .detail("AlgoHeaderVersion", headerRef.algoHeaderVersion)
+	    .detail("HeaderFlagsVersion", headerRef.flagsVersion())
+	    .detail("AlgoHeaderVersion", headerRef.algoHeaderVersion())
 	    .detail("HeaderEncryptMode", ENCRYPT_CIPHER_MODE_AES_256_CTR)
 	    .detail("HeaderEncryptAuthTokenMode", ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE)
 	    .detail("HeaderEncryptAuthTokenAlgo", ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE)
@@ -1876,24 +1850,8 @@ void testConfigurableEncryptionNoAuthMode(const int minDomainId) {
 	    .detail("BaseCipherId", noAuth.cipherTextDetails.baseCipherId)
 	    .detail("Salt", noAuth.cipherTextDetails.salt);
 
-	// induce encryption header corruption - headerVersion corrupted
-	BlobCipherEncryptHeaderRef corruptedHeaderRef = BlobCipherEncryptHeaderRef(headerRef);
-	corruptedHeaderRef.flagsVersion += 1;
-	try {
-		encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
-		DecryptBlobCipherAes256Ctr decryptor(
-		    tCipherKeyKey, Reference<BlobCipherKey>(), &iv[0], BlobCipherMetrics::TEST);
-		decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, corruptedHeaderRef, arena);
-		ASSERT(false); // error expected
-	} catch (Error& e) {
-		if (e.code() != error_code_encrypt_header_metadata_mismatch) {
-			throw;
-		}
-		TraceEvent("ConfigurableEncryptionNoAuthCorruptFlagsDone");
-	}
-
 	// induce encryption header corruption - encryptionMode corrupted
-	corruptedHeaderRef = BlobCipherEncryptHeaderRef(headerRef);
+	BlobCipherEncryptHeaderRef corruptedHeaderRef = BlobCipherEncryptHeaderRef(headerRef);
 	BlobCipherEncryptHeaderFlagsV1 corruptedFlags = std::get<BlobCipherEncryptHeaderFlagsV1>(headerRef.flags);
 	corruptedFlags.encryptMode += 1;
 	corruptedHeaderRef.flags = corruptedFlags;
@@ -1931,12 +1889,12 @@ void testConfigurableEncryptionNoAuthMode(const int minDomainId) {
 
 // validate basic encrypt followed by decrypt operation for AUTH_TOKEN_MODE_SINGLE
 // HMAC_SHA authToken algorithm
-template <uint32_t AuthTokenSize>
+template <class Params>
 void testSingleAuthMode(const int minDomainId) {
-	const std::string authAlgoStr = AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE ? "HMAC-SHA" : "AES-CMAC";
-	const EncryptAuthTokenAlgo authAlgo = AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE
-	                                          ? EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA
-	                                          : EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC;
+	constexpr bool isHmac = std::is_same_v<Params, AesCtrWithHmacParams>;
+	const std::string authAlgoStr = isHmac ? "HMAC-SHA" : "AES-CMAC";
+	const EncryptAuthTokenAlgo authAlgo = isHmac ? EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA
+	                                             : EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC;
 
 	TraceEvent("BlobCipherTestSingleAuthTokenStart").detail("Mode", authAlgoStr);
 
@@ -1976,7 +1934,8 @@ void testSingleAuthMode(const int minDomainId) {
 	    .detail("HeaderEncryptAuthTokenAlgo", header.flags.authTokenAlgo)
 	    .detail("DomainId", header.cipherTextDetails.encryptDomainId)
 	    .detail("BaseCipherId", header.cipherTextDetails.baseCipherId)
-	    .detail("HeaderAuthToken", StringRef(arena, &header.singleAuthToken.authToken[0], AuthTokenSize).toString());
+	    .detail("HeaderAuthToken",
+	            StringRef(arena, &header.singleAuthToken.authToken[0], Params::authTokenSize).toString());
 
 	Reference<BlobCipherKey> tCipherKeyKey = cipherKeyCache->getCipherKey(
 	    header.cipherTextDetails.encryptDomainId, header.cipherTextDetails.baseCipherId, header.cipherTextDetails.salt);
@@ -2030,7 +1989,7 @@ void testSingleAuthMode(const int minDomainId) {
 	memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
 	       reinterpret_cast<const uint8_t*>(&header),
 	       sizeof(BlobCipherEncryptHeader));
-	int hIdx = deterministicRandom()->randomInt(0, AuthTokenSize - 1);
+	int hIdx = deterministicRandom()->randomInt(0, Params::authTokenSize - 1);
 	headerCopy.singleAuthToken.authToken[hIdx] += 1;
 	try {
 		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
@@ -2060,12 +2019,12 @@ void testSingleAuthMode(const int minDomainId) {
 	TraceEvent("BlobCipherTestSingleAuthTokenEnd").detail("Mode", authAlgoStr);
 }
 
-template <uint32_t AuthTokenSize>
+template <class Params>
 void testConfigurableEncryptionHeaderSingleAuthMode(int minDomainId) {
+	constexpr bool isHmac = std::is_same_v<Params, AesCtrWithHmac>;
 	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
 
-	TraceEvent("TestEncryptionHeaderStart")
-	    .detail("Mode", AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE ? "HMAC_SHA" : "AES-CMAC");
+	TraceEvent("TestEncryptionHeaderStart").detail("Mode", isHmac ? "HMAC_SHA" : "AES-CMAC");
 
 	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 
@@ -2084,7 +2043,7 @@ void testConfigurableEncryptionHeaderSingleAuthMode(int minDomainId) {
 	                                     iv,
 	                                     AES_256_IV_LENGTH,
 	                                     EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
-	                                     AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE
+	                                     std::is_same_v<Params, AesCtrWithHmacParams>
 	                                         ? EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA
 	                                         : EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
 	                                     BlobCipherMetrics::TEST);
@@ -2092,38 +2051,36 @@ void testConfigurableEncryptionHeaderSingleAuthMode(int minDomainId) {
 	encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 
 	BlobCipherEncryptHeaderFlagsV1 flags = std::get<BlobCipherEncryptHeaderFlagsV1>(headerRef.flags);
-	AesCtrWithAuthV1<AuthTokenSize> algoHeader = std::get<AesCtrWithAuthV1<AuthTokenSize>>(headerRef.algoHeader);
+	AesCtrWithAuth<Params> algoHeader = std::get<AesCtrWithAuth<Params>>(headerRef.algoHeader);
 	Standalone<StringRef> serHeaderRef = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
 
 	BlobCipherEncryptHeaderRef validateHeader = BlobCipherEncryptHeaderRef::fromStringRef(serHeaderRef);
 	BlobCipherEncryptHeaderFlagsV1 validateFlags = std::get<BlobCipherEncryptHeaderFlagsV1>(validateHeader.flags);
 	ASSERT(validateFlags == flags);
 
-	AesCtrWithAuthV1<AuthTokenSize> validateAlgo = std::get<AesCtrWithAuthV1<AuthTokenSize>>(validateHeader.algoHeader);
+	AesCtrWithAuth<Params> validateAlgo = std::get<AesCtrWithAuth<Params>>(validateHeader.algoHeader);
 	ASSERT(validateAlgo.cipherTextDetails == algoHeader.cipherTextDetails);
 	ASSERT(validateAlgo.cipherHeaderDetails == algoHeader.cipherHeaderDetails);
 	ASSERT_EQ(memcmp(&iv[0], &validateAlgo.iv[0], AES_256_IV_LENGTH), 0);
-	ASSERT_EQ(memcmp(&algoHeader.authToken[0], &validateAlgo.authToken[0], AuthTokenSize), 0);
+	ASSERT_EQ(memcmp(&algoHeader.authToken[0], &validateAlgo.authToken[0], Params::authTokenSize), 0);
 
 	TraceEvent("HmacShaHeaderSize")
 	    .detail("Flags", sizeof(flags))
 	    .detail("AlgoHeader", sizeof(algoHeader))
 	    .detail("TotalHeader", serHeaderRef.size());
 
-	TraceEvent("TestEncryptionHeaderEnd")
-	    .detail("Mode", AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE ? "HMAC_SHA" : "AES-CMAC");
+	TraceEvent("TestEncryptionHeaderEnd").detail("Mode", isHmac ? "HMAC_SHA" : "AES-CMAC");
 }
 
 // validate basic encrypt followed by decrypt operation for AUTH_TOKEN_MODE_SINGLE
-template <uint32_t AuthTokenSize>
+template <class Params>
 void testConfigurableEncryptionSingleAuthMode(const int minDomainId) {
-	const std::string authAlgoStr = AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE ? "HMAC-SHA" : "AES-CMAC";
-	const EncryptAuthTokenAlgo authAlgo = AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE
-	                                          ? EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA
-	                                          : EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC;
-	const int algoHeaderVersion = AuthTokenSize == AUTH_TOKEN_HMAC_SHA_SIZE
-	                                  ? CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION
-	                                  : CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION;
+	constexpr bool isHmac = std::is_same_v<Params, AesCtrWithHmacParams>;
+	const std::string authAlgoStr = isHmac ? "HMAC-SHA" : "AES-CMAC";
+	const EncryptAuthTokenAlgo authAlgo = isHmac ? EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA
+	                                             : EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC;
+	const int algoHeaderVersion = isHmac ? CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION
+	                                     : CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION;
 
 	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
 
@@ -2153,8 +2110,8 @@ void testConfigurableEncryptionSingleAuthMode(const int minDomainId) {
 
 	ASSERT_EQ(encryptedBuf.size(), bufLen);
 	ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
-	ASSERT_EQ(headerRef.flagsVersion, CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
-	ASSERT_EQ(headerRef.algoHeaderVersion, algoHeaderVersion);
+	ASSERT_EQ(headerRef.flagsVersion(), CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
+	ASSERT_EQ(headerRef.algoHeaderVersion(), algoHeaderVersion);
 
 	// validate flags
 	BlobCipherEncryptHeaderFlagsV1 flags = std::get<BlobCipherEncryptHeaderFlagsV1>(headerRef.flags);
@@ -2163,7 +2120,7 @@ void testConfigurableEncryptionSingleAuthMode(const int minDomainId) {
 	ASSERT_EQ(flags.authTokenAlgo, authAlgo);
 
 	// validate IV
-	AesCtrWithAuthV1<AuthTokenSize> withAuth = std::get<AesCtrWithAuthV1<AuthTokenSize>>(headerRef.algoHeader);
+	AesCtrWithAuth<Params> withAuth = std::get<AesCtrWithAuth<Params>>(headerRef.algoHeader);
 	ASSERT_EQ(memcmp(&iv[0], &withAuth.iv[0], AES_256_IV_LENGTH), 0);
 	ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
 	// validate cipherKey details
@@ -2189,8 +2146,8 @@ void testConfigurableEncryptionSingleAuthMode(const int minDomainId) {
 	ASSERT_EQ(memcmp(decryptedBuf.begin(), &orgData[0], bufLen), 0);
 
 	TraceEvent("BlobCipherTestEncryptDecryptDone")
-	    .detail("HeaderFlagsVersion", headerRef.flagsVersion)
-	    .detail("AlgoHeaderVersion", headerRef.algoHeaderVersion)
+	    .detail("HeaderFlagsVersion", headerRef.flagsVersion())
+	    .detail("AlgoHeaderVersion", headerRef.algoHeaderVersion())
 	    .detail("HeaderEncryptMode", flags.encryptMode)
 	    .detail("HeaderEncryptAuthTokenMode", flags.authTokenMode)
 	    .detail("HeaderEncryptAuthTokenAlgo", flags.authTokenAlgo)
@@ -2201,23 +2158,8 @@ void testConfigurableEncryptionSingleAuthMode(const int minDomainId) {
 	    .detail("HeaderBaseCipherId", withAuth.cipherHeaderDetails.baseCipherId)
 	    .detail("HeaderSalt", withAuth.cipherHeaderDetails.salt);
 
-	// induce encryption header corruption - headerVersion corrupted
-	BlobCipherEncryptHeaderRef corruptedHeaderRef = BlobCipherEncryptHeaderRef(headerRef);
-	corruptedHeaderRef.flagsVersion += 1;
-	try {
-		encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
-		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
-		decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, corruptedHeaderRef, arena);
-		ASSERT(false); // error expected
-	} catch (Error& e) {
-		if (e.code() != error_code_encrypt_header_metadata_mismatch) {
-			throw;
-		}
-		TraceEvent("ConfigurableEncryptionCorruptFlagsDone").detail("Mode", authAlgoStr);
-	}
-
 	// induce encryption header corruption - encryptionMode corrupted
-	corruptedHeaderRef = BlobCipherEncryptHeaderRef(headerRef);
+	BlobCipherEncryptHeaderRef corruptedHeaderRef = BlobCipherEncryptHeaderRef(headerRef);
 	BlobCipherEncryptHeaderFlagsV1 corruptedFlags = std::get<BlobCipherEncryptHeaderFlagsV1>(headerRef.flags);
 	corruptedFlags.encryptMode += 1;
 	corruptedHeaderRef.flags = corruptedFlags;
@@ -2297,20 +2239,20 @@ TEST_CASE("/blobCipher") {
 
 	testConfigurableEncryptionBlobCipherHeaderFlagsV1Ser();
 	testConfigurableEncryptionAesCtrNoAuthV1Ser(minDomainId);
-	testConfigurableEncryptionAesCtrWithAuthSer<AUTH_TOKEN_HMAC_SHA_SIZE>(minDomainId);
-	testConfigurableEncryptionAesCtrWithAuthSer<AUTH_TOKEN_AES_CMAC_SIZE>(minDomainId);
+	testConfigurableEncryptionAesCtrWithAuthSer<AesCtrWithHmacParams>(minDomainId);
+	testConfigurableEncryptionAesCtrWithAuthSer<AesCtrWithCmacParams>(minDomainId);
 
 	testConfigurableEncryptionHeaderNoAuthMode(minDomainId);
-	testConfigurableEncryptionHeaderSingleAuthMode<AUTH_TOKEN_HMAC_SHA_SIZE>(minDomainId);
-	testConfigurableEncryptionHeaderSingleAuthMode<AUTH_TOKEN_AES_CMAC_SIZE>(minDomainId);
+	testConfigurableEncryptionHeaderSingleAuthMode<AesCtrWithHmacParams>(minDomainId);
+	testConfigurableEncryptionHeaderSingleAuthMode<AesCtrWithCmacParams>(minDomainId);
 
 	testNoAuthMode(minDomainId);
-	testSingleAuthMode<AUTH_TOKEN_HMAC_SHA_SIZE>(minDomainId);
-	testSingleAuthMode<AUTH_TOKEN_AES_CMAC_SIZE>(minDomainId);
+	testSingleAuthMode<AesCtrWithHmacParams>(minDomainId);
+	testSingleAuthMode<AesCtrWithCmacParams>(minDomainId);
 
 	testConfigurableEncryptionNoAuthMode(minDomainId);
-	testConfigurableEncryptionSingleAuthMode<AUTH_TOKEN_HMAC_SHA_SIZE>(minDomainId);
-	testConfigurableEncryptionSingleAuthMode<AUTH_TOKEN_AES_CMAC_SIZE>(minDomainId);
+	testConfigurableEncryptionSingleAuthMode<AesCtrWithHmacParams>(minDomainId);
+	testConfigurableEncryptionSingleAuthMode<AesCtrWithCmacParams>(minDomainId);
 	testKeyCacheCleanup(minDomainId, maxDomainId);
 
 	return Void();
