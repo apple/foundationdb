@@ -1,19 +1,17 @@
 [[test]]
-title = 'Blob Granule API Correctness Multi Threaded'
+title = 'Blob Granule API Tenant Correctness Multi Threaded'
 multiThreaded = true
 buggify = true
 minFdbThreads = 2
 maxFdbThreads = 8
-minDatabases = 2
-maxDatabases = 8
-minClientThreads = 2
-maxClientThreads = 8
-minClients = 2
+minClients = 1
 maxClients = 8
+minTenants = 1
+maxTenants = 5
 
 [[server]]
 blob_granules_enabled = true
-# FIXME: enable EAR once other PRs merged
+enable_encryption_at_rest = true
 
 [[test.workload]]
 name = 'ApiBlobGranuleCorrectness'

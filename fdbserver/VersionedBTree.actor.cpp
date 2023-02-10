@@ -10402,7 +10402,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	wait(verifyTask);
 
 	// Sometimes close and reopen before destructive sanity check
-	if (deterministicRandom()->coinflip()) {
+	if (!pagerMemoryOnly && deterministicRandom()->coinflip()) {
 		Future<Void> closedFuture = btree->onClosed();
 		btree->close();
 		wait(closedFuture);
