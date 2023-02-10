@@ -1261,6 +1261,8 @@ TEST_CASE("/CommitProxy/SplitRange/SplitClearRangeByTenant") {
 
 	// empty tenant map
 	tenantMap.clear();
+	mutation.param1 = prefix.withSuffix("a"_sr, arena);
+	mutation.param2 = prefix.withSuffix("b"_sr, arena);
 	result = splitClearRangeByTenant(arena, mutation, tenantMap);
 	ASSERT(result.empty());
 	return Void();
@@ -1409,6 +1411,7 @@ Error validateAndProcessTenantAccess(Arena& arena,
 				DisabledTraceEvent(SevDebug, "SplitTenantClearRange", pProxyCommitData->dbgid)
 				    .detail("TxnId", debugId)
 				    .detail("Idx", i)
+				    .detail("TenantMap", pProxyCommitData->tenantMap.size())
 				    .detail("NewMutationSize", newMutationSize)
 				    .detail("OldMutationSize", mutations.size())
 				    .detail("NewClears", newClearSize);
@@ -1817,6 +1820,10 @@ void pushToBackupMutations(CommitBatchContext* self,
 	// In required tenant mode, the clear ranges are already split by tenant
 	if (m.type != MutationRef::Type::ClearRange || pProxyCommitData->getTenantMode() == TenantMode::REQUIRED) {
 		if (EXPENSIVE_VALIDATION && m.type == MutationRef::ClearRange) {
+			DisabledTraceEvent("DebugSingleTenant", pProxyCommitData->dbgid)
+			    .detail("M1", m.param1)
+			    .detail("M2", m.param2)
+			    .detail("TenantMap", pProxyCommitData->tenantMap.size());
 			ASSERT(TenantAPI::withinSingleTenant(KeyRangeRef(m.param1, m.param2)));
 		}
 

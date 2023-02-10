@@ -59,11 +59,11 @@ bool withinSingleTenant(KeyRangeRef const& range) {
 	if (range.begin >= systemKeys.begin) {
 		return true;
 	}
-	if (range.begin.size() < TenantAPI::PREFIX_SIZE || range.end.size() < TenantAPI::PREFIX_SIZE) {
+	if (range.begin.size() < TenantAPI::PREFIX_SIZE) {
 		return false;
 	}
-	auto id1 = prefixToId(range.begin.substr(0, TenantAPI::PREFIX_SIZE), EnforceValidTenantId::False);
-	return id1 == prefixToId(range.end.substr(0, TenantAPI::PREFIX_SIZE), EnforceValidTenantId::False);
+	auto tRange = prefixRange(range.begin.substr(0, TenantAPI::PREFIX_SIZE));
+	return tRange.contains(range);
 }
 
 }; // namespace TenantAPI
