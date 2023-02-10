@@ -731,8 +731,8 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
 			    .detail("PrimaryDead", primaryDead);
 			g_simulator->usableRegions = 1;
 
-			state std::vector<AddressExclusion> servers =
-			    g_simulator->getExcludeDCAddresses(primaryDead ? g_simulator->primaryDcId : g_simulator->remoteDcId);
+			state std::vector<AddressExclusion> servers = g_simulator->getAllAddressesInDCToExclude(
+			    primaryDead ? g_simulator->primaryDcId : g_simulator->remoteDcId);
 			wait(excludeServers(cx, servers, false));
 			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration")
 			    .detail("Location", context)

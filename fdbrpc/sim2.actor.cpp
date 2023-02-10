@@ -1422,7 +1422,7 @@ public:
 		return canKillProcesses(processesLeft, processesDead, KillType::KillInstantly, nullptr);
 	}
 
-	std::vector<AddressExclusion> getExcludeDCAddresses(Optional<Standalone<StringRef>> dcId) const override {
+	std::vector<AddressExclusion> getAllAddressesInDCToExclude(Optional<Standalone<StringRef>> dcId) const override {
 		std::vector<AddressExclusion> addresses;
 		if (!dcId.present()) {
 			return addresses;
