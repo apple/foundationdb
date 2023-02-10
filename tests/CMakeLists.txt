@@ -423,14 +423,26 @@ if(WITH_PYTHON)
     set_tests_properties(authorization_venv_setup PROPERTIES FIXTURES_SETUP authz_virtual_env TIMEOUT 60)
 
     set(authz_script_dir ${CMAKE_SOURCE_DIR}/tests/authorization)
-    set(authz_test_cmd "${authz_venv_activate} && pytest ${authz_script_dir}/authz_test.py -rA --build-dir ${CMAKE_BINARY_DIR} -vvv")
-    add_test(
-      NAME token_based_tenant_authorization
-      WORKING_DIRECTORY ${authz_venv_dir}
-      COMMAND bash -c ${authz_test_cmd})
-    set_tests_properties(token_based_tenant_authorization PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/tests/TestRunner;${ld_env_name}=${CMAKE_BINARY_DIR}/lib")
-    set_tests_properties(token_based_tenant_authorization PROPERTIES FIXTURES_REQUIRED authz_virtual_env)
-    set_tests_properties(token_based_tenant_authorization PROPERTIES TIMEOUT 120)
+
+    set(force_mvc 0 1)
+    foreach(is_mvc_forced IN LISTS force_mvc)
+        set(authz_test_name "authz")
+        set(test_opt "")
+        if(is_mvc_forced)
+            string(APPEND authz_test_name "_with_forced_multi_version_client")
+            string(APPEND test_opt " --force-multi-version-client")
+        else()
+            string(APPEND authz_test_name "_without_forced_multi_version_client")
+        endif()
+        set(authz_test_cmd "${authz_venv_activate} && pytest ${authz_script_dir}/authz_test.py -rA --build-dir ${CMAKE_BINARY_DIR} -vvv${test_opt}")
+        add_test(
+          NAME ${authz_test_name}
+          WORKING_DIRECTORY ${authz_venv_dir}
+          COMMAND bash -c ${authz_test_cmd})
+        set_tests_properties(${authz_test_name} PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/tests/TestRunner;${ld_env_name}=${CMAKE_BINARY_DIR}/lib")
+        set_tests_properties(${authz_test_name} PROPERTIES FIXTURES_REQUIRED authz_virtual_env)
+        set_tests_properties(${authz_test_name} PROPERTIES TIMEOUT 120)
+    endforeach()
   endif()
 else()
   message(WARNING "Python not found, won't configure ctest")

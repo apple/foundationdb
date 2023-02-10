@@ -36,7 +36,7 @@ class _admin_request(object):
     def __repr__(self):
         return f"admin_request({self.op}, {self.args})"
 
-def main_loop(main_pipe, pipe):
+def main_loop(main_pipe, pipe, external_lib_path):
     main_pipe.close()
     db = None
     while True:
@@ -53,11 +53,13 @@ def main_loop(main_pipe, pipe):
         try:
             if op == "connect":
                 db = fdb.open(req.args[0])
-            elif op == "configure_tls":
+            elif op == "configure_client":
                 keyfile, certfile, cafile = req.args[:3]
                 fdb.options.set_tls_key_path(keyfile)
                 fdb.options.set_tls_cert_path(certfile)
                 fdb.options.set_tls_ca_path(cafile)
+                if external_lib_path:
+                    fdb.options.set_external_client_library(external_lib_path)
             elif op == "create_tenant":
                 if db is None:
                     resp = Exception("db not open")
@@ -100,12 +102,12 @@ def get():
 
 # server needs to be a singleton running in subprocess, because FDB network layer (including active TLS config) is a global var
 class Server(object):
-    def __init__(self):
+    def __init__(self, external_lib_path):
         global _admin_server
         assert _admin_server is None, "admin server may be setup once per process"
         _admin_server = self
         self._main_pipe, self._admin_pipe = Pipe(duplex=True)
-        self._admin_proc = Process(target=main_loop, args=(self._main_pipe, self._admin_pipe))
+        self._admin_proc = Process(target=main_loop, args=(self._main_pipe, self._admin_pipe, external_lib_path))
 
     def start(self):
         self._admin_proc.start()

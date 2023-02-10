@@ -165,7 +165,6 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 				state double tstart = now();
 				state int r = deterministicRandom()->randomInt(0, self->nodeCount);
 				state Transaction tr(cx);
-				self->setAuthToken(tr);
 				if (deterministicRandom()->random01() <= self->traceParentProbability) {
 					state Span span("CycleClient"_loc);
 					TraceEvent("CycleTracingTransaction", span.context.traceID).log();
@@ -174,6 +173,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 				}
 				while (true) {
 					try {
+						self->setAuthToken(tr);
 						// Reverse next and next^2 node
 						Optional<Value> v = wait(tr.get(self->key(r)));
 						if (!v.present())
@@ -312,9 +312,9 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 			// One client checks the validity of the cycle
 			state Transaction tr(cx);
 			state int retryCount = 0;
-			self->setAuthToken(tr);
 			loop {
 				try {
+					self->setAuthToken(tr);
 					state Version v = wait(tr.getReadVersion());
 					RangeResult data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
 					                                    firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)),
