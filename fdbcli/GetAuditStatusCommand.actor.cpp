@@ -31,7 +31,7 @@
 namespace fdb_cli {
 
 ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens) {
-	if (tokens.size() != 4) {
+	if (tokens.size() < 3 || tokens.size() > 4) {
 		printUsage(tokens[0]);
 		return false;
 	}
@@ -45,11 +45,18 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 	}
 
 	if (tokencmp(tokens[2], "id")) {
+		if (tokens.size() != 4) {
+			printUsage(tokens[0]);
+			return false;
+		}
 		const UID id = UID::fromString(tokens[3].toString());
 		AuditStorageState res = wait(getAuditState(cx, type, id));
 		printf("Audit result is:\n%s", res.toString().c_str());
 	} else if (tokencmp(tokens[2], "recent")) {
-		const int count = std::stoi(tokens[3].toString());
+		int count = CLIENT_KNOBS->TOO_MANY;
+		if (tokens.size() == 4) {
+			count = std::stoi(tokens[3].toString());
+		}
 		std::vector<AuditStorageState> res = wait(getLatestAuditStates(cx, type, count));
 		for (const auto& it : res) {
 			printf("Audit result is:\n%s\n", it.toString().c_str());
@@ -60,8 +67,15 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 
 CommandFactory getAuditStatusFactory(
     "get_audit_status",
-    CommandHelp("get_audit_status <ha> <id|recent> [ARGs]",
-                "Retrieve audit storage results of the specific type",
-                "Fetch audit result with an ID: get_audit_status [Type] id [ID];\n"
-                "Fetch most recent audit results: get_audit_status [Type] recent [Count].\n"));
+    CommandHelp("get_audit_status <Type> <id|recent> [ARGs]",
+                "Retrieve audit storage status",
+                "To fetch audit status via ID: `get_audit_status [Type] id [ID]'\n"
+                "To fetch status of most recent audit: `get_audit_status [Type] recent [Count]'\n"
+                "Only 'ha' `Type' is supported currently. If specified, `Count' is how many\n"
+                "rows to audit. If not specified, check all rows in audit.\n"
+                "Results have the following format:\n"
+                "  `[ID]: 000000000001000000000000, [Range]:  - 0xff, [Type]: 1, [Phase]: 2'\n"
+                "where `Type' is `1' for `ha' and `Phase' is `2' for `Complete'.\n"
+                "Phase can be `Invalid=0', `Running=1', `Complete=2', `Error=3', or `Failed=4'.\n"
+                "See also `audit_storage' command."));
 } // namespace fdb_cli

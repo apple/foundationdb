@@ -313,6 +313,11 @@ struct CommitTransactionRef {
 	bool lock_aware = false; // set when metadata mutations are present
 	Optional<SpanContext> spanContext;
 
+	// set by Commit Proxy
+	// The tenants associated with this transaction. This field only existing
+	// when tenant mode is required and this transaction has metadata mutations
+	Optional<VectorRef<int64_t>> tenantIds;
+
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
 		if constexpr (is_fb_function<Ar>) {
@@ -323,7 +328,8 @@ struct CommitTransactionRef {
 			           read_snapshot,
 			           report_conflicting_keys,
 			           lock_aware,
-			           spanContext);
+			           spanContext,
+			           tenantIds);
 		} else {
 			serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot);
 			if (ar.protocolVersion().hasReportConflictingKeys()) {

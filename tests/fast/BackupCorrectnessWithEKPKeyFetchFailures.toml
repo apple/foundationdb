@@ -1,0 +1,28 @@
+[configuration]
+allowDefaultTenant = false
+tenantModes = ['required']
+allowCreatingTenants = false
+encryptModes = ['domain_aware']
+
+[[knobs]]
+enable_encryption = true
+
+[[test]]
+testTitle = 'BackupAndRestoreWithEKPKeyFetchFailures'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+
+    [[test.workload]]
+    testName = 'BulkLoadWithTenants'
+    maxNumTenants = 100
+    minNumTenants = 1
+    enableEKPKeyFetchFailure = true
+    transactionsPerSecond = 2500.0
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'BackupAndRestoreCorrectness'
+    defaultBackup = true
+    backupAfter = 10.0
+    restoreAfter = 100.0
+    backupRangesCount = -1

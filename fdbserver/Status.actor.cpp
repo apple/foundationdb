@@ -2512,13 +2512,13 @@ ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std
 				break;
 			case BlobRestorePhase::APPLYING_MLOGS:
 				statusObj["blob_full_restore_phase"] = "Applying mutation logs";
-				statusObj["blob_full_restore_progress"] = status.get().status;
 				break;
 			case BlobRestorePhase::DONE:
 				statusObj["blob_full_restore_phase"] = "Completed successfully";
 				break;
 			case BlobRestorePhase::ERROR:
-				statusObj["blob_full_restore_phase"] = "Completed with fatal error";
+				statusObj["blob_full_restore_phase"] =
+				    "Completed with fatal error: " + std::string(Error(status.get().status).what());
 				break;
 			default:
 				statusObj["blob_full_restore_phase"] = "Unexpected phase";

@@ -661,8 +661,7 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 	state RangeResult totalState = wait(tr->getRange(currentRange, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1));
 	// FIXME: remove above conflict range?
 	tr->addWriteConflictRange(currentRange);
-	ASSERT_WE_THINK(!totalState.more && totalState.size() <= SERVER_KNOBS->BG_MAX_SPLIT_FANOUT);
-	// maybe someone decreased the knob, we should gracefully handle it not in simulation
+	// maybe someone decreased the knob, we should gracefully handle it
 	if (totalState.more || totalState.size() > SERVER_KNOBS->BG_MAX_SPLIT_FANOUT) {
 		RangeResult tryAgain = wait(tr->getRange(currentRange, 10000));
 		ASSERT(!tryAgain.more);
@@ -914,8 +913,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 				}
 
 				if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-					wait(delay(0)); // should be cancelled
-					ASSERT(false);
+					wait(Never());
 				}
 
 				if (BUGGIFY_WITH_PROB(0.01)) {
@@ -950,6 +948,84 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 		++bwData->stats.s3DeleteReqs;
 		bwData->addActor.send(writeBStore->deleteFile(fname));
 		throw e;
+	}
+}
+
+ACTOR Future<BlobFileIndex> writeEmptyDeltaFile(Reference<BlobWorkerData> bwData,
+                                                KeyRange keyRange,
+                                                UID granuleID,
+                                                int64_t epoch,
+                                                int64_t seqno,
+                                                Version previousVersion,
+                                                Version currentDeltaVersion,
+                                                Future<BlobFileIndex> previousDeltaFileFuture,
+                                                Future<Void> waitCommitted,
+                                                Optional<std::pair<KeyRange, UID>> oldGranuleComplete) {
+	ASSERT(previousVersion < currentDeltaVersion);
+	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
+
+	// before updating FDB, wait for the delta file version to be committed and previous delta files to finish
+	wait(waitCommitted);
+	BlobFileIndex prev = wait(previousDeltaFileFuture);
+	wait(delay(0, TaskPriority::BlobWorkerUpdateFDB));
+
+	// update FDB with new file
+	state Key oldDFKey = blobGranuleFileKeyFor(granuleID, previousVersion, 'D');
+	state Key newDFKey = blobGranuleFileKeyFor(granuleID, currentDeltaVersion, 'D');
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
+	state Optional<Value> dfValue;
+	loop {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			wait(readAndCheckGranuleLock(tr, keyRange, epoch, seqno));
+
+			// FIXME: could construct this value from the prev BlobFileIndex, but checking that the key exists in the DB
+			// is a good sanity check anyway
+			if (!dfValue.present()) {
+				// Only check if not seen yet. If we get commit unknown result and then retry, we'd see our own delete
+				wait(store(dfValue, tr->get(oldDFKey)));
+				ASSERT(dfValue.present());
+			} else {
+				tr->addReadConflictRange(singleKeyRange(oldDFKey));
+			}
+
+			tr->clear(oldDFKey);
+			tr->set(newDFKey, dfValue.get());
+
+			if (oldGranuleComplete.present()) {
+				wait(updateGranuleSplitState(&tr->getTransaction(),
+				                             oldGranuleComplete.get().first,
+				                             oldGranuleComplete.get().second,
+				                             granuleID,
+				                             BlobGranuleSplitState::Done));
+			}
+
+			wait(tr->commit());
+			if (BW_DEBUG) {
+				fmt::print(
+				    "Granule {0} [{1} - {2}) empty delta file bumped version last delta file from {3} -> {4}, cv={5}\n",
+				    granuleID.toString(),
+				    keyRange.begin.printable(),
+				    keyRange.end.printable(),
+				    previousVersion,
+				    currentDeltaVersion,
+				    tr->getCommittedVersion());
+			}
+
+			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
+				wait(Never());
+			}
+
+			if (BUGGIFY_WITH_PROB(0.01)) {
+				wait(delay(deterministicRandom()->random01()));
+			}
+
+			return BlobFileIndex(currentDeltaVersion, "", 0, 0, 0, {});
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
 	}
 }
 
@@ -1158,8 +1234,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	}
 
 	if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-		wait(delay(0)); // should be cancelled
-		ASSERT(false);
+		wait(Never());
 	}
 
 	// FIXME: change when we implement multiplexing
@@ -1213,8 +1288,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			DEBUG_KEY_RANGE("BlobWorkerFDBSnapshot", readVersion, metadata->keyRange, bwData->id);
 
 			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-				wait(delay(0)); // should be cancelled
-				ASSERT(false);
+				wait(Never());
 			}
 
 			// initial snapshot is committed in fdb, we can pop the change feed up to this version
@@ -1633,8 +1707,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
 			reply.proposedSplitKey = proposedSplitKey;
 			bwData->currentManagerStatusStream.get().send(reply);
 			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-				wait(delay(0)); // should be cancelled
-				ASSERT(false);
+				wait(Never());
 			}
 			// if a new manager appears, also tell it about this granule being splittable, or retry after a certain
 			// amount of time of not hearing back
@@ -1755,8 +1828,16 @@ void handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
                               Key cfKey,
                               Version cfStartVersion,
                               std::deque<std::pair<Version, Version>>* rollbacksCompleted,
-                              std::deque<Future<Void>>& inFlightPops) {
-	metadata->files.deltaFiles.push_back(completedDeltaFile);
+                              std::deque<Future<Void>>& inFlightPops,
+                              bool emptyDeltaFile) {
+	if (emptyDeltaFile) {
+		ASSERT(!metadata->files.deltaFiles.empty());
+		ASSERT(completedDeltaFile.length == 0);
+		ASSERT(metadata->files.deltaFiles.back().version < completedDeltaFile.version);
+		metadata->files.deltaFiles.back().version = completedDeltaFile.version;
+	} else {
+		metadata->files.deltaFiles.push_back(completedDeltaFile);
+	}
 	ASSERT(metadata->durableDeltaVersion.get() < completedDeltaFile.version);
 	metadata->durableDeltaVersion.set(completedDeltaFile.version);
 
@@ -1813,9 +1894,10 @@ struct InFlightFile {
 	Version version;
 	uint64_t bytes;
 	bool snapshot;
+	bool emptyDeltaFile;
 
-	InFlightFile(Future<BlobFileIndex> future, Version version, uint64_t bytes, bool snapshot)
-	  : future(future), version(version), bytes(bytes), snapshot(snapshot) {}
+	InFlightFile(Future<BlobFileIndex> future, Version version, uint64_t bytes, bool snapshot, bool emptyDeltaFile)
+	  : future(future), version(version), bytes(bytes), snapshot(snapshot), emptyDeltaFile(emptyDeltaFile) {}
 };
 
 namespace {
@@ -2233,7 +2315,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				startVersion = startState.previousDurableVersion;
 				Future<BlobFileIndex> inFlightBlobSnapshot = compactFromBlob(
 				    bwData, bstore, metadata, startState.granuleID, startState.blobFilesToSnapshot, startVersion);
-				inFlightFiles.push_back(InFlightFile(inFlightBlobSnapshot, startVersion, 0, true));
+				inFlightFiles.push_back(InFlightFile(inFlightBlobSnapshot, startVersion, 0, true, false));
 				pendingSnapshots++;
 
 				metadata->durableSnapshotVersion.set(minDurableSnapshotV);
@@ -2260,6 +2342,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				if (inFlightFiles.front().future.isReady()) {
 					BlobFileIndex completedFile = wait(inFlightFiles.front().future);
 					if (inFlightFiles.front().snapshot) {
+						ASSERT(!inFlightFiles.front().emptyDeltaFile);
 						if (metadata->files.deltaFiles.empty()) {
 							ASSERT(completedFile.version == metadata->initialSnapshotVersion);
 						} else {
@@ -2343,6 +2426,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				if (inFlightFiles.front().future.isReady()) {
 					BlobFileIndex completedFile = wait(inFlightFiles.front().future);
 					if (inFlightFiles.front().snapshot) {
+						ASSERT(!inFlightFiles.front().emptyDeltaFile);
 						if (metadata->files.deltaFiles.empty()) {
 							ASSERT(completedFile.version == metadata->initialSnapshotVersion);
 						} else {
@@ -2360,7 +2444,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						                         cfKey,
 						                         startState.changeFeedStartVersion,
 						                         &rollbacksCompleted,
-						                         inFlightPops);
+						                         inFlightPops,
+						                         inFlightFiles.front().emptyDeltaFile);
 					}
 
 					inFlightFiles.pop_front();
@@ -2733,8 +2818,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					ASSERT(lastDeltaVersion >= metadata->currentDeltas.back().version);
 					ASSERT(metadata->pendingDeltaVersion < metadata->currentDeltas.front().version);
 				} else {
-					// FIXME: could always write special metadata for empty file, so we don't actually
-					// write/read a bunch of empty blob files
 					ASSERT(forceFlush);
 					ASSERT(!forceFlushVersions.empty());
 					CODE_PROBE(true, "Force flushing empty delta file!");
@@ -2767,24 +2850,40 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					           oldChangeFeedDataComplete.present() ? ". Finalizing " : "");
 				}
 
-				int64_t deltaFileBudget =
-				    std::min((int64_t)metadata->bufferedDeltaBytes, SERVER_KNOBS->BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES);
-				startDeltaFileWrite = bwData->deltaWritesBudget->take(TaskPriority::DefaultYield, deltaFileBudget);
-				Future<BlobFileIndex> dfFuture =
-				    writeDeltaFile(bwData,
-				                   bstore,
-				                   metadata->keyRange,
-				                   startState.granuleID,
-				                   metadata->originalEpoch,
-				                   metadata->originalSeqno,
-				                   metadata->currentDeltas,
-				                   lastDeltaVersion,
-				                   previousFuture,
-				                   waitVersionCommitted(bwData, metadata, lastDeltaVersion),
-				                   oldChangeFeedDataComplete,
-				                   startDeltaFileWrite,
-				                   deltaFileBudget);
-				inFlightFiles.push_back(InFlightFile(dfFuture, lastDeltaVersion, metadata->bufferedDeltaBytes, false));
+				Future<BlobFileIndex> dfFuture;
+				bool emptyDeltaFile = metadata->bytesInNewDeltaFiles > 0 && metadata->currentDeltas.empty();
+				if (emptyDeltaFile) {
+					// Optimization to do a metadata-only update if flushing an empty delta file
+					dfFuture = writeEmptyDeltaFile(bwData,
+					                               metadata->keyRange,
+					                               startState.granuleID,
+					                               metadata->originalEpoch,
+					                               metadata->originalSeqno,
+					                               metadata->pendingDeltaVersion,
+					                               lastDeltaVersion,
+					                               previousFuture,
+					                               waitVersionCommitted(bwData, metadata, lastDeltaVersion),
+					                               oldChangeFeedDataComplete);
+				} else {
+					int64_t deltaFileBudget = std::min((int64_t)metadata->bufferedDeltaBytes,
+					                                   SERVER_KNOBS->BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES);
+					startDeltaFileWrite = bwData->deltaWritesBudget->take(TaskPriority::DefaultYield, deltaFileBudget);
+					dfFuture = writeDeltaFile(bwData,
+					                          bstore,
+					                          metadata->keyRange,
+					                          startState.granuleID,
+					                          metadata->originalEpoch,
+					                          metadata->originalSeqno,
+					                          metadata->currentDeltas,
+					                          lastDeltaVersion,
+					                          previousFuture,
+					                          waitVersionCommitted(bwData, metadata, lastDeltaVersion),
+					                          oldChangeFeedDataComplete,
+					                          startDeltaFileWrite,
+					                          deltaFileBudget);
+				}
+				inFlightFiles.push_back(
+				    InFlightFile(dfFuture, lastDeltaVersion, metadata->bufferedDeltaBytes, false, emptyDeltaFile));
 
 				// add new pending delta file
 				ASSERT(metadata->pendingDeltaVersion < lastDeltaVersion);
@@ -2864,7 +2963,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					    reSnapshotNoCheck(bwData, bstore, metadata, startState.granuleID, previousFuture);
 					writeAmpTarget.decrease(metadata->bytesInNewDeltaFiles);
 				}
-				inFlightFiles.push_back(InFlightFile(inFlightBlobSnapshot, metadata->pendingDeltaVersion, 0, true));
+				inFlightFiles.push_back(
+				    InFlightFile(inFlightBlobSnapshot, metadata->pendingDeltaVersion, 0, true, false));
 				pendingSnapshots++;
 
 				metadata->pendingSnapshotVersion = metadata->pendingDeltaVersion;
@@ -2903,6 +3003,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						// TODO don't duplicate code
 						BlobFileIndex completedFile = wait(inFlightFiles.front().future);
 						if (inFlightFiles.front().snapshot) {
+							ASSERT(!inFlightFiles.front().emptyDeltaFile);
 							if (metadata->files.deltaFiles.empty()) {
 								ASSERT(completedFile.version == metadata->initialSnapshotVersion);
 							} else {
@@ -2919,7 +3020,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							                         cfKey,
 							                         startState.changeFeedStartVersion,
 							                         &rollbacksCompleted,
-							                         inFlightPops);
+							                         inFlightPops,
+							                         inFlightFiles.front().emptyDeltaFile);
 						}
 
 						inFlightFiles.pop_front();
@@ -4377,8 +4479,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			}
 
 			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-				wait(delay(0)); // should be cancelled
-				ASSERT(false);
+				wait(Never());
 			}
 
 			return info;

@@ -4,6 +4,8 @@ tenantModes = ['optional', 'required']
 
 [[knobs]]
 allow_tokenless_tenant_access = true
+audit_logging_enabled = false
+max_trace_lines = 2000000
 
 [[test]]
 testTitle = 'TenantCreation'

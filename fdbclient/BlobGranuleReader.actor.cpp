@@ -93,13 +93,13 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
 		}
 
 		state int numDeltaFiles = chunk.deltaFiles.size();
-		state StringRef* deltaData = new (arena) StringRef[numDeltaFiles];
+		state std::vector<StringRef> deltaData;
 		state int deltaIdx;
 
-		// for (Future<Standalone<StringRef>> deltaFuture : readDeltaFutures) {
+		deltaData.reserve(numDeltaFiles);
 		for (deltaIdx = 0; deltaIdx < numDeltaFiles; deltaIdx++) {
 			Standalone<StringRef> data = wait(readDeltaFutures[deltaIdx]);
-			deltaData[deltaIdx] = data;
+			deltaData.push_back(data);
 			arena.dependsOn(data.arena());
 		}
 

@@ -714,9 +714,11 @@ struct WaitMetricsRequest {
 	// Waits for any of the given minimum or maximum metrics to be exceeded, and then returns the current values
 	// Send a reversed range for min, max to receive an immediate report
 	constexpr static FileIdentifier file_identifier = 1795961;
-	// Setting the tenantInfo makes the request tenant-aware.
-	TenantInfo tenantInfo;
 	Arena arena;
+	// Setting the tenantInfo makes the request tenant-aware. Need to set `minVersion` to a version where
+	// the tenant info was read.
+	TenantInfo tenantInfo;
+	Version minVersion;
 	KeyRangeRef keys;
 	StorageMetrics min, max;
 	ReplyPromise<StorageMetrics> reply;
@@ -725,14 +727,15 @@ struct WaitMetricsRequest {
 
 	WaitMetricsRequest() {}
 	WaitMetricsRequest(TenantInfo tenantInfo,
+	                   Version minVersion,
 	                   KeyRangeRef const& keys,
 	                   StorageMetrics const& min,
 	                   StorageMetrics const& max)
-	  : tenantInfo(tenantInfo), keys(arena, keys), min(min), max(max) {}
+	  : tenantInfo(tenantInfo), minVersion(minVersion), keys(arena, keys), min(min), max(max) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, min, max, reply, tenantInfo, arena);
+		serializer(ar, keys, min, max, reply, tenantInfo, minVersion, arena);
 	}
 };
 
@@ -740,10 +743,11 @@ struct SplitMetricsReply {
 	constexpr static FileIdentifier file_identifier = 11530792;
 	Standalone<VectorRef<KeyRef>> splits;
 	StorageMetrics used;
+	bool more = false;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, splits, used);
+		serializer(ar, splits, used, more);
 	}
 };
 

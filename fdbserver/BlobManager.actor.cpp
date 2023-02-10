@@ -357,6 +357,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	BlobManagerStats stats;
 
 	Reference<BlobConnectionProvider> bstore;
+	Reference<BlobConnectionProvider> manifestStore;
 
 	std::unordered_map<UID, BlobWorkerInterface> workersById;
 	std::unordered_map<UID, BlobWorkerInfo> workerStats; // mapping between workerID -> workerStats
@@ -417,6 +418,10 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 			if (BM_DEBUG) {
 				fmt::print("BM {} constructed backup container\n", epoch);
 			}
+		}
+
+		if (SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL != "") {
+			manifestStore = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
 		}
 	}
 
@@ -3455,19 +3460,24 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	bool isFullRestore = wait(isFullRestoreMode(bmData->db, normalKeys));
 	bmData->isFullRestoreMode = isFullRestore;
 	if (bmData->isFullRestoreMode) {
+		if (!bmData->manifestStore.isValid()) {
+			TraceEvent(SevError, "InvalidBlobManifestUrl").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
+			throw blob_restore_invalid_manifest_url();
+		}
 		Optional<BlobRestoreStatus> status = wait(getRestoreStatus(bmData->db, normalKeys));
 		ASSERT(status.present());
 		state BlobRestorePhase phase = status.get().phase;
 		if (phase == BlobRestorePhase::STARTING_MIGRATOR || phase == BlobRestorePhase::LOADING_MANIFEST) {
 			wait(updateRestoreStatus(bmData->db, normalKeys, BlobRestoreStatus(LOADING_MANIFEST), {}));
 			try {
-				wait(loadManifest(bmData->db, bmData->bstore));
-				int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->bstore));
+				wait(loadManifest(bmData->db, bmData->manifestStore));
+				int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->manifestStore));
 				wait(updateEpoch(bmData, epoc + 1));
 				BlobRestoreStatus completedStatus(BlobRestorePhase::LOADED_MANIFEST);
 				wait(updateRestoreStatus(bmData->db, normalKeys, completedStatus, BlobRestorePhase::LOADING_MANIFEST));
 			} catch (Error& e) {
-				if (e.code() != error_code_restore_missing_data) {
+				if (e.code() != error_code_restore_missing_data &&
+				    e.code() != error_code_blob_restore_missing_manifest) {
 					throw e; // retryable errors
 				}
 				// terminate blob restore for non-retryable errors
@@ -5247,8 +5257,12 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 			}
 		}
 		if (activeRanges) {
-			wait(dumpManifest(bmData->db, bmData->bstore, bmData->epoch, bmData->manifestDumperSeqNo));
-			bmData->manifestDumperSeqNo++;
+			if (bmData->manifestStore.isValid()) {
+				wait(dumpManifest(bmData->db, bmData->manifestStore, bmData->epoch, bmData->manifestDumperSeqNo));
+				bmData->manifestDumperSeqNo++;
+			} else {
+				TraceEvent(SevError, "InvalidBlobManifestUrl").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
+			}
 		}
 		wait(delay(SERVER_KNOBS->BLOB_MANIFEST_BACKUP_INTERVAL));
 	}
