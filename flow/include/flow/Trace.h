@@ -175,7 +175,7 @@ public:
 private:
 	struct EventInfo {
 		TraceEventFields fields;
-		EventInfo(double time, const char* name, uint64_t id, const char* location);
+		EventInfo(double time, double monotonicTime, const char* name, uint64_t id, const char* location);
 	};
 
 	struct AttachInfo {

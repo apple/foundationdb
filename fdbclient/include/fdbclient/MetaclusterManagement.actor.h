@@ -1591,7 +1591,7 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadataTra
 	results.reserve(futures.size());
 	for (int i = 0; i < futures.size(); ++i) {
 		const TenantMapEntry& entry = futures[i].get().get();
-		results.emplace_back(entry.tenantName, entry);
+		results.emplace_back(tenantIds[i].first, entry);
 	}
 
 	return results;
