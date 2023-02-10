@@ -128,7 +128,8 @@ private:
 	}
 
 	void validateTenantMetadata(std::map<int64_t, TenantMapEntry> tenantMap) {
-		ASSERT(metadata.clusterType == ClusterType::METACLUSTER_DATA);
+		ASSERT(metadata.clusterType == ClusterType::METACLUSTER_DATA ||
+		       metadata.clusterType == ClusterType::STANDALONE);
 		ASSERT_LE(tenantMap.size(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
 		ASSERT_EQ(tenantMap.size(), metadata.tenantCount);
 		ASSERT_EQ(metadata.tenantNameIndex.size(), metadata.tenantCount);
