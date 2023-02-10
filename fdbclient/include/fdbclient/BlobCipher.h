@@ -171,6 +171,7 @@ struct BlobCipherDetails {
 	bool operator==(const BlobCipherDetails& o) const {
 		return encryptDomainId == o.encryptDomainId && baseCipherId == o.baseCipherId && salt == o.salt;
 	}
+	bool operator!=(const BlobCipherDetails& o) const { return !(*this == o); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -443,6 +444,10 @@ struct BlobCipherEncryptHeaderRef {
 			}
 		}
 	}
+
+	void validateEncryptionHeaderDetails(const BlobCipherDetails& textCipherDetails,
+	                                     const BlobCipherDetails& headerCipherDetails,
+	                                     const StringRef& ivRef) const;
 };
 
 #pragma pack(pop)

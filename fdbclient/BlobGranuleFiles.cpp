@@ -253,6 +253,19 @@ void validateEncryptionHeaderDetails(const BlobGranuleFileEncryptionKeys& eKeys,
 		throw encrypt_header_metadata_mismatch();
 	}
 }
+
+void validateEncryptionHeaderDetails(const BlobGranuleFileEncryptionKeys& eKeys,
+                                     const BlobCipherEncryptHeaderRef& headerRef,
+                                     const StringRef& ivRef) {
+	headerRef.validateEncryptionHeaderDetails(BlobCipherDetails(eKeys.textCipherKey->getDomainId(),
+	                                                            eKeys.textCipherKey->getBaseCipherId(),
+	                                                            eKeys.textCipherKey->getSalt()),
+	                                          BlobCipherDetails(eKeys.headerCipherKey->getDomainId(),
+	                                                            eKeys.headerCipherKey->getBaseCipherId(),
+	                                                            eKeys.headerCipherKey->getSalt()),
+	                                          ivRef);
+}
+
 } // namespace
 
 struct IndexBlock {
@@ -287,6 +300,7 @@ struct IndexBlockRef {
 			TraceEvent(SevDebug, "IndexBlockEncrypt_Before").detail("Chksum", chksum);
 		}
 
+		Value serializedBuff = ObjectWriter::toValue(block, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 		EncryptBlobCipherAes265Ctr encryptor(
 		    eKeys.textCipherKey,
 		    eKeys.headerCipherKey,
@@ -294,11 +308,20 @@ struct IndexBlockRef {
 		    AES_256_IV_LENGTH,
 		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 		    BlobCipherMetrics::BLOB_GRANULE);
-		Value serializedBuff = ObjectWriter::toValue(block, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
-		BlobCipherEncryptHeader header;
-		buffer = encryptor.encrypt(serializedBuff.contents().begin(), serializedBuff.contents().size(), &header, arena)
-		             ->toStringRef();
-		encryptHeaderRef = BlobCipherEncryptHeader::toStringRef(header, arena);
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			BlobCipherEncryptHeaderRef headerRef;
+			buffer = encryptor.encrypt(
+			    serializedBuff.contents().begin(), serializedBuff.contents().size(), &headerRef, arena);
+			Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
+			arena.dependsOn(serialized.arena());
+			encryptHeaderRef = serialized;
+		} else {
+			BlobCipherEncryptHeader header;
+			buffer =
+			    encryptor.encrypt(serializedBuff.contents().begin(), serializedBuff.contents().size(), &header, arena)
+			        ->toStringRef();
+			encryptHeaderRef = BlobCipherEncryptHeader::toStringRef(header, arena);
+		}
 
 		if (BG_ENCRYPT_COMPRESS_DEBUG) {
 			XXH64_hash_t chksum = XXH3_64bits(buffer.begin(), buffer.size());
@@ -316,15 +339,25 @@ struct IndexBlockRef {
 			XXH64_hash_t chksum = XXH3_64bits(idxRef.buffer.begin(), idxRef.buffer.size());
 			TraceEvent(SevDebug, "IndexBlockEncrypt_Before").detail("Chksum", chksum);
 		}
-
-		BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(idxRef.encryptHeaderRef.get());
-
-		validateEncryptionHeaderDetails(eKeys, header, cipherKeysCtx.ivRef);
-
-		DecryptBlobCipherAes256Ctr decryptor(
-		    eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin(), BlobCipherMetrics::BLOB_GRANULE);
-		StringRef decrypted =
-		    decryptor.decrypt(idxRef.buffer.begin(), idxRef.buffer.size(), header, arena)->toStringRef();
+		StringRef decrypted;
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			BlobCipherEncryptHeaderRef headerRef =
+			    BlobCipherEncryptHeaderRef::fromStringRef(idxRef.encryptHeaderRef.get());
+			validateEncryptionHeaderDetails(eKeys, headerRef, cipherKeysCtx.ivRef);
+			DecryptBlobCipherAes256Ctr decryptor(eKeys.textCipherKey,
+			                                     eKeys.headerCipherKey,
+			                                     cipherKeysCtx.ivRef.begin(),
+			                                     BlobCipherMetrics::BLOB_GRANULE);
+			decrypted = decryptor.decrypt(idxRef.buffer.begin(), idxRef.buffer.size(), headerRef, arena);
+		} else {
+			BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(idxRef.encryptHeaderRef.get());
+			validateEncryptionHeaderDetails(eKeys, header, cipherKeysCtx.ivRef);
+			DecryptBlobCipherAes256Ctr decryptor(eKeys.textCipherKey,
+			                                     eKeys.headerCipherKey,
+			                                     cipherKeysCtx.ivRef.begin(),
+			                                     BlobCipherMetrics::BLOB_GRANULE);
+			decrypted = decryptor.decrypt(idxRef.buffer.begin(), idxRef.buffer.size(), header, arena)->toStringRef();
+		}
 
 		if (BG_ENCRYPT_COMPRESS_DEBUG) {
 			XXH64_hash_t chksum = XXH3_64bits(decrypted.begin(), decrypted.size());
@@ -418,10 +451,18 @@ struct IndexBlobGranuleFileChunkRef {
 		    AES_256_IV_LENGTH,
 		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 		    BlobCipherMetrics::BLOB_GRANULE);
-		BlobCipherEncryptHeader header;
-		chunkRef.buffer =
-		    encryptor.encrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), &header, arena)->toStringRef();
-		chunkRef.encryptHeaderRef = BlobCipherEncryptHeader::toStringRef(header, arena);
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			BlobCipherEncryptHeaderRef headerRef;
+			chunkRef.buffer = encryptor.encrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), &headerRef, arena);
+			Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
+			arena.dependsOn(serialized.arena());
+			chunkRef.encryptHeaderRef = serialized;
+		} else {
+			BlobCipherEncryptHeader header;
+			chunkRef.buffer =
+			    encryptor.encrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), &header, arena)->toStringRef();
+			chunkRef.encryptHeaderRef = BlobCipherEncryptHeader::toStringRef(header, arena);
+		}
 
 		if (BG_ENCRYPT_COMPRESS_DEBUG) {
 			XXH64_hash_t chksum = XXH3_64bits(chunkRef.buffer.begin(), chunkRef.buffer.size());
@@ -442,14 +483,26 @@ struct IndexBlobGranuleFileChunkRef {
 			TraceEvent(SevDebug, "BlobChunkDecrypt_Before").detail("Chksum", chksum);
 		}
 
-		BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(chunkRef.encryptHeaderRef.get());
-
-		validateEncryptionHeaderDetails(eKeys, header, cipherKeysCtx.ivRef);
-
-		DecryptBlobCipherAes256Ctr decryptor(
-		    eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin(), BlobCipherMetrics::BLOB_GRANULE);
-		StringRef decrypted =
-		    decryptor.decrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), header, arena)->toStringRef();
+		StringRef decrypted;
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			BlobCipherEncryptHeaderRef headerRef =
+			    BlobCipherEncryptHeaderRef::fromStringRef(chunkRef.encryptHeaderRef.get());
+			validateEncryptionHeaderDetails(eKeys, headerRef, cipherKeysCtx.ivRef);
+			DecryptBlobCipherAes256Ctr decryptor(eKeys.textCipherKey,
+			                                     eKeys.headerCipherKey,
+			                                     cipherKeysCtx.ivRef.begin(),
+			                                     BlobCipherMetrics::BLOB_GRANULE);
+			decrypted = decryptor.decrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), headerRef, arena);
+		} else {
+			BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(chunkRef.encryptHeaderRef.get());
+			validateEncryptionHeaderDetails(eKeys, header, cipherKeysCtx.ivRef);
+			DecryptBlobCipherAes256Ctr decryptor(eKeys.textCipherKey,
+			                                     eKeys.headerCipherKey,
+			                                     cipherKeysCtx.ivRef.begin(),
+			                                     BlobCipherMetrics::BLOB_GRANULE);
+			decrypted =
+			    decryptor.decrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), header, arena)->toStringRef();
+		}
 
 		if (BG_ENCRYPT_COMPRESS_DEBUG) {
 			XXH64_hash_t chksum = XXH3_64bits(decrypted.begin(), decrypted.size());
