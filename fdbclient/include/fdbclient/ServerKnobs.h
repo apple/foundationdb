@@ -667,6 +667,11 @@ public:
 	double PROXY_MAX_TAG_THROTTLE_DURATION;
 	// Interval at which latency bands are logged for each tag on grv proxy
 	double GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL;
+	// When the measured tps for a tag gets too low, the denominator in the
+	// average cost calculation gets small, resulting in an unstable calculation.
+	// To protect against this, we do not compute the average cost when the
+	// measured tps drops below a certain threshold
+	double GLOBAL_TAG_THROTTLING_MIN_TPS;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
@@ -1025,6 +1030,8 @@ public:
 	std::string BLOB_RESTORE_MLOGS_URL;
 	int BLOB_MIGRATOR_ERROR_RETRIES;
 	std::string BLOB_RESTORE_MANIFEST_URL;
+	int BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE;
+	int BLOB_RESTORE_MANIFEST_RETENTION_MAX;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;
