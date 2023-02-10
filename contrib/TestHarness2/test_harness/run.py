@@ -256,7 +256,7 @@ class OldBinaries:
     def _add_file(self, file: Path):
         version_str = file.name.split("-")[1]
         if version_str.endswith(".exe"):
-            version_str = version_str[0: -len(".exe")]
+            version_str = version_str[0 : -len(".exe")]
         ver = Version.parse(version_str)
         self.binaries[ver] = file
 
@@ -278,15 +278,13 @@ class OldBinaries:
             return config.binary
         if version_expr[0] == "from" or version_expr[0] == "to":
             min_version = Version.parse(version_expr[1])
-        candidates: List[Path] = []
         if len(version_expr) == 4 and version_expr[2] == "until":
             max_version = Version.parse(version_expr[3])
-        else:
-            candidates.append(config.binary)
+        candidates: List[Path] = []
         for ver, binary in self.binaries.items():
             if min_version <= ver < max_version:
                 candidates.append(binary)
-        return config.random.choice(candidates) if len(candidates) else None
+        return config.random.choice(candidates) if len(candidates) else config.binary
 
 
 def is_restarting_test(test_file: Path):
