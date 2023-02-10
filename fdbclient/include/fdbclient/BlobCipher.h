@@ -36,6 +36,7 @@
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/serialize.h"
+#include "flow/Trace.h"
 
 #include <boost/functional/hash.hpp>
 #include <cinttypes>
@@ -381,6 +382,7 @@ struct BlobCipherEncryptHeaderRef {
 		serializer(ar, flagsVersion, algoHeaderVersion);
 		if (ar.isSerializing) {
 			if (flagsVersion != 1) {
+				TraceEvent(SevWarn, "BlobCipherEncryptHeaderUnsupportedFlagVersion").detail("Version", flagsVersion);
 				throw not_implemented();
 			}
 
@@ -390,7 +392,13 @@ struct BlobCipherEncryptHeaderRef {
 			authAlgo = (EncryptAuthTokenAlgo)f.authTokenAlgo;
 			serializer(ar, f);
 
-			if (encryptMode != ENCRYPT_CIPHER_MODE_AES_256_CTR || algoHeaderVersion != 1) {
+			if (encryptMode != ENCRYPT_CIPHER_MODE_AES_256_CTR) {
+				TraceEvent(SevWarn, "BlobCipherEncryptHeaderUnsupportedEncryptMode").detail("Mode", encryptMode);
+				throw not_implemented();
+			}
+			if (algoHeaderVersion != 1) {
+				TraceEvent(SevWarn, "BlobCipherEncryptHeaderUnsupportedAlgoHeaderVersion")
+				    .detail("Version", algoHeaderVersion);
 				throw not_implemented();
 			}
 
@@ -412,6 +420,7 @@ struct BlobCipherEncryptHeaderRef {
 			}
 		} else if (ar.isDeserializing) {
 			if (flagsVersion != 1) {
+				TraceEvent(SevWarn, "BlobCipherEncryptHeaderUnsupportedFlagVersion").detail("Version", flagsVersion);
 				throw not_implemented();
 			}
 			BlobCipherEncryptHeaderFlagsV1 f;
@@ -421,7 +430,13 @@ struct BlobCipherEncryptHeaderRef {
 			authMode = (EncryptAuthTokenMode)f.authTokenMode;
 			authAlgo = (EncryptAuthTokenAlgo)f.authTokenAlgo;
 
-			if (encryptMode != ENCRYPT_CIPHER_MODE_AES_256_CTR || algoHeaderVersion != 1) {
+			if (encryptMode != ENCRYPT_CIPHER_MODE_AES_256_CTR) {
+				TraceEvent(SevWarn, "BlobCipherEncryptHeaderUnsupportedEncryptMode").detail("Mode", encryptMode);
+				throw not_implemented();
+			}
+			if (algoHeaderVersion != 1) {
+				TraceEvent(SevWarn, "BlobCipherEncryptHeaderUnsupportedAlgoHeaderVersion")
+				    .detail("Version", algoHeaderVersion);
 				throw not_implemented();
 			}
 
