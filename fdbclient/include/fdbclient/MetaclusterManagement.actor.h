@@ -1809,12 +1809,8 @@ struct RestoreClusterImpl {
 		wait(getAllTenantsFromManagementCluster(self));
 
 		// get all the tenant information from the newly registered data cluster
-		try {
-			wait(self->ctx.runDataClusterTransaction(
-			    [self = self](Reference<ITransaction> tr) { return getTenantsFromDataCluster(self, tr); }));
-		} catch (Error& e) {
-			throw;
-		}
+		wait(self->ctx.runDataClusterTransaction(
+		    [self = self](Reference<ITransaction> tr) { return getTenantsFromDataCluster(self, tr); }));
 
 		// Fix any differences between the data cluster and the management cluster
 		wait(addTenantsToManagementCluster(self));
