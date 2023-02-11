@@ -231,6 +231,9 @@ struct TenantMetadata {
 	static inline auto& tenantGroupMap() { return instance().tenantGroupMap; }
 	static inline auto& storageQuota() { return instance().storageQuota; }
 	static inline auto& lastTenantModification() { return instance().lastTenantModification; }
+	// This system keys stores the tenant id prefix that is used during metacluster/standalone cluster creation. If the
+	// key is not present then we will assume the prefix to be 0
+	static KeyBackedProperty<int64_t>& tenantIdPrefix();
 
 	static Key tenantMapPrivatePrefix();
 };
