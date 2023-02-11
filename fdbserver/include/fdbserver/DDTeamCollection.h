@@ -290,6 +290,10 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	// When configuration is changed, we may have machine teams with old storageTeamSize
 	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(TCServerInfo const& chosenServer) const;
 
+	// Returns a server team from given "servers", empty team if not found.
+	// When "wantHealthy" is true, only return if the team is healthy.
+	Optional<Reference<IDataDistributionTeam>> findTeamFromServers(const std::vector<UID>& servers, bool wantHealthy);
+
 	Future<Void> logOnCompletion(Future<Void> signal);
 
 	void resetLocalitySet();
