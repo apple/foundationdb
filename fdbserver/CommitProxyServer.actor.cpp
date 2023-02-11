@@ -1094,25 +1094,9 @@ inline bool tenantMapChanging(MutationRef const& mutation) {
 
 // return the first tenantId whose idToPrefix(id) >= prefix[0..8] in lexicographic order. If no such id, return
 // INVALID_TENANT;
-inline int64_t lowerBoundTenantId(const StringRef& prefix, const std::map<int64_t, TenantName>& tenantMap) {
-	if (isSystemKey(prefix)) {
-		return TenantInfo::INVALID_TENANT;
-	}
-	Optional<int64_t> id;
-	if (prefix.size() >= TenantAPI::PREFIX_SIZE) {
-		// directly extract without copy
-		id = TenantAPI::extractTenantIdFromKeyRef(prefix);
-	} else {
-		// fall to generate a prefix
-		id = TenantIdCodec::lowerBound(prefix);
-	}
-	if (id.present() && id.get() >= 0) {
-		auto it = tenantMap.lower_bound(id.get());
-		if (it != tenantMap.end()) {
-			return it->first;
-		}
-	}
-	return TenantInfo::INVALID_TENANT;
+inline auto lowerBoundTenantId(const StringRef& prefix, const std::map<int64_t, TenantName>& tenantMap) {
+	Optional<int64_t> id = TenantIdCodec::lowerBound(prefix.substr(0, std::min(prefix.size(), TenantAPI::PREFIX_SIZE)));
+	return id.present() ? tenantMap.lower_bound(id.get()) : tenantMap.end();
 }
 
 TEST_CASE("/CommitProxy/SplitRange/LowerBoundTenantId") {
@@ -1122,42 +1106,42 @@ TEST_CASE("/CommitProxy/SplitRange/LowerBoundTenantId") {
 		tenantMap[i * 2] = ""_sr;
 	}
 
-	int64_t tid = lowerBoundTenantId(""_sr, tenantMap);
+	int64_t tid = lowerBoundTenantId(""_sr, tenantMap)->first;
 	ASSERT_EQ(tid, 0);
 
-	tid = lowerBoundTenantId("\xff"_sr, tenantMap);
-	ASSERT_EQ(tid, TenantInfo::INVALID_TENANT);
+	auto it = lowerBoundTenantId("\xff"_sr, tenantMap);
+	ASSERT(it == tenantMap.end());
 
-	tid = lowerBoundTenantId("\xff\x01\x02\x03\x04\x05\x06\x07\x08"_sr, tenantMap);
-	ASSERT_EQ(tid, TenantInfo::INVALID_TENANT);
+	it = lowerBoundTenantId("\xff\x01\x02\x03\x04\x05\x06\x07\x08"_sr, tenantMap);
+	ASSERT(it == tenantMap.end());
 
-	tid = lowerBoundTenantId("\x99\x01\x02\x03\x04\x05\x06\x07\x08"_sr, tenantMap);
-	ASSERT_EQ(tid, TenantInfo::INVALID_TENANT);
+	it = lowerBoundTenantId("\x99\x01\x02\x03\x04\x05\x06\x07\x08"_sr, tenantMap);
+	ASSERT(it == tenantMap.end());
 
 	int64_t targetId = deterministicRandom()->randomInt64(0, mapSize) * 2;
 	Key prefix = TenantAPI::idToPrefix(targetId);
-	tid = lowerBoundTenantId(prefix, tenantMap);
+	tid = lowerBoundTenantId(prefix, tenantMap)->first;
 	ASSERT_EQ(tid, targetId);
 
-	tid = lowerBoundTenantId(prefix.withSuffix("any"_sr), tenantMap);
+	tid = lowerBoundTenantId(prefix.withSuffix("any"_sr), tenantMap)->first;
 	ASSERT_EQ(tid, targetId);
 
 	targetId = deterministicRandom()->randomInt64(1, mapSize) * 2;
 	prefix = TenantAPI::idToPrefix(targetId - 1);
-	tid = lowerBoundTenantId(prefix, tenantMap);
+	tid = lowerBoundTenantId(prefix, tenantMap)->first;
 	ASSERT_EQ(tid, targetId);
 
 	targetId = deterministicRandom()->randomInt64(mapSize * 2, mapSize * 3);
 	prefix = TenantAPI::idToPrefix(targetId);
-	tid = lowerBoundTenantId(prefix, tenantMap);
-	ASSERT_EQ(tid, TenantInfo::INVALID_TENANT);
+	it = lowerBoundTenantId(prefix, tenantMap);
+	ASSERT(it == tenantMap.end());
 
 	targetId = deterministicRandom()->randomInt64((int64_t)1 << 32, std::numeric_limits<int64_t>::max());
 	tenantMap[targetId] = ""_sr;
 	prefix = TenantAPI::idToPrefix(targetId);
 	int shift = deterministicRandom()->randomInt(0, TenantAPI::PREFIX_SIZE / 2);
 	prefix = prefix.substr(0, TenantAPI::PREFIX_SIZE - shift);
-	tid = lowerBoundTenantId(prefix, tenantMap);
+	tid = lowerBoundTenantId(prefix, tenantMap)->first;
 	ASSERT_EQ(tid, targetId);
 
 	return Void();
@@ -1169,8 +1153,7 @@ std::vector<MutationRef> splitClearRangeByTenant(Arena& arena,
                                                  const MutationRef& mutation,
                                                  const std::map<int64_t, TenantName>& tenantMap) {
 	std::vector<MutationRef> results;
-	auto beginTenantId = lowerBoundTenantId(mutation.param1, tenantMap);
-	auto it = tenantMap.find(beginTenantId);
+	auto it = lowerBoundTenantId(mutation.param1, tenantMap);
 	while (it != tenantMap.end()) {
 		KeyRef tPrefix = TenantAPI::idToPrefix(arena, it->first);
 		if (tPrefix >= mutation.param2) {
@@ -1822,7 +1805,8 @@ void pushToBackupMutations(CommitBatchContext* self,
                            MutationRef const& writtenMutation,
                            Optional<MutationRef> const& encryptedMutation) {
 	// In required tenant mode, the clear ranges are already split by tenant
-	if (m.type != MutationRef::Type::ClearRange || pProxyCommitData->getTenantMode() == TenantMode::REQUIRED) {
+	if (m.type != MutationRef::Type::ClearRange ||
+	    (pProxyCommitData->getTenantMode() == TenantMode::REQUIRED && !systemKeys.contains(m.param1))) {
 		if (EXPENSIVE_VALIDATION && m.type == MutationRef::ClearRange) {
 			DisabledTraceEvent("DebugSingleTenant", pProxyCommitData->dbgid)
 			    .detail("M1", m.param1)
