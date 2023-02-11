@@ -103,6 +103,7 @@ struct TenantManagementWorkload : TestWorkload {
 	Reference<IDatabase> mvDb;
 	Database dataDb;
 	bool hasNoTenantKey = false; // whether this workload has non-tenant key
+	int64_t tenantIdPrefix = 0;
 
 	// This test exercises multiple different ways to work with tenants
 	enum class OperationType {
@@ -236,7 +237,8 @@ struct TenantManagementWorkload : TestWorkload {
 		if (self->useMetacluster) {
 			fmt::print("Create metacluster and register data cluster ... \n");
 			// Configure the metacluster (this changes the tenant mode)
-			wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
+			wait(success(
+			    MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix)));
 
 			DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;
@@ -549,6 +551,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 					ASSERT(entry.present());
 					ASSERT(entry.get().id > self->maxId);
+					ASSERT(TenantAPI::getTenantIdPrefix(entry.get().id) == self->tenantIdPrefix);
 					ASSERT(entry.get().tenantGroup == tenantItr->second.tenantGroup);
 					ASSERT(entry.get().tenantState == TenantState::READY);
 
@@ -561,6 +564,7 @@ struct TenantManagementWorkload : TestWorkload {
 						    wait(TenantAPI::tryGetTenant(self->dataDb.getReference(), tenantItr->first));
 						ASSERT(dataEntry.present());
 						ASSERT(dataEntry.get().id == entry.get().id);
+						ASSERT(TenantAPI::getTenantIdPrefix(dataEntry.get().id) == self->tenantIdPrefix);
 						ASSERT(dataEntry.get().tenantGroup == entry.get().tenantGroup);
 						ASSERT(dataEntry.get().tenantState == TenantState::READY);
 					}

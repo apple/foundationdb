@@ -101,7 +101,11 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		self->mvDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
 		if (self->useMetacluster && self->clientId == 0) {
-			wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
+			wait(success(MetaclusterAPI::createMetacluster(
+			    cx.getReference(),
+			    "management_cluster"_sr,
+			    deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
+			                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1))));
 
 			DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;
