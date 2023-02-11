@@ -213,10 +213,11 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		try {
 			loop {
 				// TODO: check force removal
-				Future<Void> removeFuture = MetaclusterAPI::removeCluster(self->managementDb, clusterName, false);
+				Future<bool> removeFuture = MetaclusterAPI::removeCluster(self->managementDb, clusterName, false);
 				try {
-					Optional<Void> result = wait(timeout(removeFuture, deterministicRandom()->randomInt(1, 30)));
+					Optional<bool> result = wait(timeout(removeFuture, deterministicRandom()->randomInt(1, 30)));
 					if (result.present()) {
+						ASSERT(result.get());
 						break;
 					} else {
 						retried = true;
@@ -924,7 +925,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		std::vector<Future<Void>> removeClusterFutures;
 		for (auto [clusterName, clusterMetadata] : dataClusters) {
 			removeClusterFutures.push_back(
-			    MetaclusterAPI::removeCluster(self->managementDb, clusterName, !deleteTenants));
+			    success(MetaclusterAPI::removeCluster(self->managementDb, clusterName, !deleteTenants)));
 		}
 
 		wait(waitForAll(removeClusterFutures));
