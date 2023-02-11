@@ -1092,8 +1092,8 @@ inline bool tenantMapChanging(MutationRef const& mutation) {
 	return false;
 }
 
-// return the first tenantId whose idToPrefix(id) >= prefix[0..8] in lexicographic order. If no such id, return
-// INVALID_TENANT;
+// return an iterator to the first tenantId whose idToPrefix(id) >= prefix[0..8] in lexicographic order. If no such id,
+// return tenantMap.end()
 inline auto lowerBoundTenantId(const StringRef& prefix, const std::map<int64_t, TenantName>& tenantMap) {
 	Optional<int64_t> id = TenantIdCodec::lowerBound(prefix.substr(0, std::min(prefix.size(), TenantAPI::PREFIX_SIZE)));
 	return id.present() ? tenantMap.lower_bound(id.get()) : tenantMap.end();
@@ -1680,14 +1680,6 @@ ACTOR Future<WriteMutationRefVar> writeMutationEncryptedMutation(CommitBatchCont
 	header = encryptedMutation.encryptionHeader();
 	TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, *header, BlobCipherMetrics::TLOG));
 	MutationRef decryptedMutation = encryptedMutation.decrypt(cipherKeys, *arena, BlobCipherMetrics::TLOG);
-
-	TraceEvent(SevDebug, "MutationEncryptedMutation")
-	    .detail("DeType", decryptedMutation.type)
-	    .detail("EnType", mutation->type)
-	    .detail("DeP1", decryptedMutation.param1)
-	    .detail("DeP2", decryptedMutation.param2)
-	    .detail("EnP1", mutation->param1)
-	    .detail("EnP2", mutation->param2);
 
 	ASSERT(decryptedMutation.type == mutation->type);
 	ASSERT(decryptedMutation.param1 == mutation->param1);
