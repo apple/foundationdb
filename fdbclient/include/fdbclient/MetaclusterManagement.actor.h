@@ -1749,23 +1749,6 @@ struct ConfigureTenantImpl {
 			throw invalid_tenant_state();
 		}
 
-		{
-			// For now, disallow updating assigned cluster of a tenant.
-			auto iter = self->configurationParameters.find("assigned_cluster"_sr);
-			if (iter != self->configurationParameters.end() && iter->second.present()) {
-				const auto& newClusterName = iter->second.get();
-				if (!tenantEntry.get().assignedCluster.present() ||
-				    tenantEntry.get().assignedCluster.get() != newClusterName) {
-					TraceEvent("UpdateManagementCluster")
-					    .detail("OriginalAssignedCluster",
-					            tenantEntry.get().assignedCluster.present() ? tenantEntry.get().assignedCluster.get()
-					                                                        : "null"_sr)
-					    .detail("NewAssignedCluster", newClusterName);
-					throw invalid_tenant_configuration();
-				}
-			}
-		}
-
 		wait(self->ctx.setCluster(tr, tenantEntry.get().assignedCluster.get()));
 
 		self->updatedEntry = tenantEntry.get();
@@ -1776,6 +1759,17 @@ struct ConfigureTenantImpl {
 		     ++configItr) {
 			if (configItr->first == "tenant_group"_sr) {
 				wait(updateTenantGroup(self, tr, self->updatedEntry, configItr->second));
+			} else if (configItr->first == "assigned_cluster"_sr && configItr->second.present()) {
+				const auto& newClusterName = configItr->second.get();
+				if (!tenantEntry.get().assignedCluster.present() ||
+				    tenantEntry.get().assignedCluster.get() != newClusterName) {
+					TraceEvent("UpdateManagementCluster")
+					    .detail("OriginalAssignedCluster",
+					            tenantEntry.get().assignedCluster.present() ? tenantEntry.get().assignedCluster.get()
+					                                                        : "null"_sr)
+					    .detail("NewAssignedCluster", newClusterName);
+					throw invalid_tenant_configuration();
+				}
 			}
 			self->updatedEntry.configure(configItr->first, configItr->second);
 		}

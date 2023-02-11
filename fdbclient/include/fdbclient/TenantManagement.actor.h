@@ -431,19 +431,6 @@ Future<Void> configureTenantTransaction(Transaction tr,
                                         TenantMapEntry updatedTenantEntry) {
 	ASSERT(updatedTenantEntry.id == originalEntry.id);
 
-	// For now, disallow updating assigned cluster of a tenant.
-	if (updatedTenantEntry.assignedCluster.present()) {
-		if (!originalEntry.assignedCluster.present() ||
-		    originalEntry.assignedCluster.get() != updatedTenantEntry.assignedCluster.get()) {
-			TraceEvent("ConfigureTenant")
-			    .detail("OriginalAssignedCluster",
-			            originalEntry.assignedCluster.present() ? originalEntry.assignedCluster.get().toString().c_str()
-			                                                    : "null")
-			    .detail("NewAssignedCluster", updatedTenantEntry.assignedCluster.get().toString().c_str());
-			throw invalid_tenant_configuration();
-		}
-	}
-
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	TenantMetadata::tenantMap().set(tr, updatedTenantEntry.id, updatedTenantEntry);
 	TenantMetadata::lastTenantModification().setVersionstamp(tr, Versionstamp(), 0);
