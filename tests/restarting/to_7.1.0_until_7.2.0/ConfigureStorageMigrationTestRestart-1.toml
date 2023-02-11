@@ -4,8 +4,7 @@ maxTLogVersion=6
 disableHostname=true
 disableEncryption=true
 storageEngineExcludeTypes=[3, 4]
-allowDefaultTenant=false
-allowCreatingTenants=false
+tenantModes=['disabled']
 
 [[knobs]]
 # This can be removed once the lower bound of this downgrade test is a version that understands the new protocol

@@ -39,6 +39,7 @@
 #include "flow/serialize.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
+#include "flow/xxhash.h"
 
 #include <chrono>
 #include <cstring>
@@ -88,6 +89,95 @@ uint32_t BlobCipherEncryptHeaderRef::getHeaderSize(const int flagVersion,
 		}
 	}
 	return total;
+}
+
+void BlobCipherEncryptHeaderRef::validateEncryptionHeaderDetails(const BlobCipherDetails& textCipherDetails,
+                                                                 const BlobCipherDetails& headerCipherDetails,
+                                                                 const StringRef& ivRef) const {
+	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
+
+	if (flagsVersion > CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION) {
+		TraceEvent("ValidateEncryptHeaderUnsupportedFlagVersion")
+		    .detail("MaxSupportedVersion", CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION)
+		    .detail("Version", flagsVersion);
+		throw not_implemented();
+	}
+
+	BlobCipherEncryptHeaderFlagsV1 flags = std::get<BlobCipherEncryptHeaderFlagsV1>(this->flags);
+	BlobCipherDetails persistedTextCipherDetails;
+	BlobCipherDetails persistedHeaderCipherDetails;
+	uint8_t* persistedIV = nullptr;
+
+	if (flags.authTokenMode == ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
+		if (algoHeaderVersion > CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION) {
+			TraceEvent("ValidateEncryptHeaderUnsupportedAlgoHeaderVersion")
+			    .detail("AuthMode", "No-Auth")
+			    .detail("MaxSupportedVersion", CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION)
+			    .detail("Version", algoHeaderVersion);
+			throw not_implemented();
+		}
+		persistedTextCipherDetails = std::get<AesCtrNoAuthV1>(this->algoHeader).cipherTextDetails;
+		persistedIV = (uint8_t*)(&std::get<AesCtrNoAuthV1>(this->algoHeader).iv[0]);
+	} else {
+		if (flags.authTokenAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA) {
+			if (algoHeaderVersion > CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION) {
+				TraceEvent("ValidateEncryptHeaderUnsupportedAlgoHeaderVersion")
+				    .detail("AuthMode", "Hmac-Sha")
+				    .detail("MaxSupportedVersion", CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION)
+				    .detail("Version", algoHeaderVersion);
+			}
+			persistedTextCipherDetails =
+			    std::get<AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>>(this->algoHeader).cipherTextDetails;
+			persistedHeaderCipherDetails =
+			    std::get<AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>>(this->algoHeader).cipherHeaderDetails;
+			persistedIV = (uint8_t*)(&std::get<AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>>(this->algoHeader).iv[0]);
+		} else if (flags.authTokenAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC) {
+			if (algoHeaderVersion > CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION) {
+				TraceEvent("ValidateEncryptHeaderUnsupportedAlgoHeaderVersion")
+				    .detail("AuthMode", "Aes-Cmac")
+				    .detail("MaxSupportedVersion", CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION)
+				    .detail("Version", algoHeaderVersion);
+			}
+			persistedTextCipherDetails =
+			    std::get<AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>(this->algoHeader).cipherTextDetails;
+			persistedHeaderCipherDetails =
+			    std::get<AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>(this->algoHeader).cipherHeaderDetails;
+			persistedIV = (uint8_t*)(&std::get<AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>(this->algoHeader).iv[0]);
+		} else {
+			throw not_implemented();
+		}
+	}
+
+	// Validate encryption header 'cipherHeader' details sanity
+	if (flags.authTokenMode != ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE &&
+	    headerCipherDetails != persistedHeaderCipherDetails) {
+		TraceEvent(SevError, "ValidateEncryptHeaderMismatch")
+		    .detail("HeaderDomainId", headerCipherDetails.encryptDomainId)
+		    .detail("PersistedHeaderDomainId", persistedHeaderCipherDetails.encryptDomainId)
+		    .detail("HeaderBaseCipherId", headerCipherDetails.baseCipherId)
+		    .detail("ExpectedHeaderBaseCipherId", persistedHeaderCipherDetails.baseCipherId)
+		    .detail("HeaderSalt", headerCipherDetails.salt)
+		    .detail("ExpectedHeaderSalt", persistedHeaderCipherDetails.salt);
+		throw encrypt_header_metadata_mismatch();
+	}
+	// Validate encryption header 'cipherText' details sanity
+	if (textCipherDetails != persistedTextCipherDetails) {
+		TraceEvent(SevError, "ValidateEncryptHeaderMismatch")
+		    .detail("TextDomainId", textCipherDetails.encryptDomainId)
+		    .detail("PersistedTextDomainId", persistedTextCipherDetails.encryptDomainId)
+		    .detail("TextBaseCipherId", textCipherDetails.baseCipherId)
+		    .detail("PersistedTextBaseCipherId", persistedTextCipherDetails.encryptDomainId)
+		    .detail("TextSalt", textCipherDetails.salt)
+		    .detail("PersistedTextSalt", persistedTextCipherDetails.salt);
+		throw encrypt_header_metadata_mismatch();
+	}
+	// Validate 'Initialization Vector' sanity
+	if (memcmp(ivRef.begin(), persistedIV, AES_256_IV_LENGTH) != 0) {
+		TraceEvent(SevError, "EncryptionHeader_IVMismatch")
+		    .detail("IVChecksum", XXH3_64bits(ivRef.begin(), ivRef.size()))
+		    .detail("ExpectedIVChecksum", XXH3_64bits(persistedIV, AES_256_IV_LENGTH));
+		throw encrypt_header_metadata_mismatch();
+	}
 }
 
 // BlobCipherMetrics methods
@@ -2185,6 +2275,9 @@ void testKeyCacheCleanup(const int minDomainId, const int maxDomainId) {
 
 TEST_CASE("/blobCipher") {
 	DomainKeyMap domainKeyMap;
+	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+	g_knobs.setKnob("enable_configurable_encryption", KnobValueRef::create(bool{ true }));
+
 	const EncryptCipherDomainId minDomainId = 1;
 	const EncryptCipherDomainId maxDomainId = deterministicRandom()->randomInt(minDomainId, minDomainId + 10) + 5;
 	const EncryptCipherBaseKeyId minBaseCipherKeyId = 100;

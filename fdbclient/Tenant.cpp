@@ -196,6 +196,11 @@ Key TenantMetadata::tenantMapPrivatePrefix() {
 	return _prefix;
 }
 
+KeyBackedProperty<int64_t>& TenantMetadata::tenantIdPrefix() {
+	static KeyBackedProperty<int64_t> instance(TenantMetadata::instance().subspace.withSuffix("idPrefix"_sr));
+	return instance;
+}
+
 TEST_CASE("/fdbclient/libb64/base64decoder") {
 	Standalone<StringRef> buf = makeString(100);
 	for (int i = 0; i < 1000; ++i) {
