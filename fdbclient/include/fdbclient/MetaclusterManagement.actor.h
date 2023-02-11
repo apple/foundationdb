@@ -1759,17 +1759,15 @@ struct ConfigureTenantImpl {
 		     ++configItr) {
 			if (configItr->first == "tenant_group"_sr) {
 				wait(updateTenantGroup(self, tr, self->updatedEntry, configItr->second));
-			} else if (configItr->first == "assigned_cluster"_sr && configItr->second.present()) {
-				const auto& newClusterName = configItr->second.get();
-				if (!tenantEntry.get().assignedCluster.present() ||
-				    tenantEntry.get().assignedCluster.get() != newClusterName) {
-					TraceEvent("UpdateManagementCluster")
-					    .detail("OriginalAssignedCluster",
-					            tenantEntry.get().assignedCluster.present() ? tenantEntry.get().assignedCluster.get()
-					                                                        : "null"_sr)
-					    .detail("NewAssignedCluster", newClusterName);
-					throw invalid_tenant_configuration();
-				}
+			} else if (configItr->first == "assigned_cluster"_sr &&
+			           configItr->second != tenantEntry.get().assignedCluster) {
+				auto& newClusterName = configItr->second;
+				TraceEvent("UpdateManagementCluster")
+				    .detail("OriginalAssignedCluster",
+				            tenantEntry.get().assignedCluster.present() ? tenantEntry.get().assignedCluster.get()
+				                                                        : "null"_sr)
+				    .detail("NewAssignedCluster", newClusterName.present() ? newClusterName.get() : "null"_sr);
+				throw invalid_tenant_configuration();
 			}
 			self->updatedEntry.configure(configItr->first, configItr->second);
 		}
