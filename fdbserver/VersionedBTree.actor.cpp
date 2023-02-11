@@ -4970,13 +4970,14 @@ public:
 	// VersionedBTree takes ownership of pager
 	VersionedBTree(IPager2* pager,
 	               std::string name,
+	               UID logID,
 	               Reference<AsyncVar<ServerDBInfo> const> db,
 	               Optional<EncryptionAtRestMode> expectedEncryptionMode,
 	               EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE,
 	               Reference<IPageEncryptionKeyProvider> keyProvider = {})
 	  : m_pager(pager), m_db(db), m_expectedEncryptionMode(expectedEncryptionMode), m_encodingType(encodingType),
 	    m_enforceEncodingType(false), m_keyProvider(keyProvider), m_pBuffer(nullptr), m_mutationCount(0), m_name(name),
-	    m_pBoundaryVerifier(DecodeBoundaryVerifier::getVerifier(name)) {
+	    m_logID(logID), m_pBoundaryVerifier(DecodeBoundaryVerifier::getVerifier(name)) {
 		m_pDecodeCacheMemory = m_pager->getPageCachePenaltySource();
 		m_lazyClearActor = 0;
 		m_init = init_impl(this);
@@ -5121,7 +5122,7 @@ public:
 		// default encoding is expected.
 		if (encodingType == EncodingType::MAX_ENCODING_TYPE) {
 			encodingType = expectedEncodingType;
-			if (encodingType == EncodingType::XXHash64 && g_network->isSimulated() && BUGGIFY) {
+			if (encodingType == EncodingType::XXHash64 && g_network->isSimulated() && m_logID.hash() % 2 == 0) {
 				encodingType = EncodingType::XOREncryption_TestOnly;
 			}
 		} else if (encodingType != expectedEncodingType) {
@@ -5592,6 +5593,7 @@ private:
 	Future<Void> m_latestCommit;
 	Future<Void> m_init;
 	std::string m_name;
+	UID m_logID;
 	int m_blockSize;
 	ParentInfoMapT childUpdateTracker;
 
@@ -7965,7 +7967,7 @@ public:
 		                               SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
 		                               false,
 		                               m_error);
-		m_tree = new VersionedBTree(pager, filename, db, encryptionMode, encodingType, keyProvider);
+		m_tree = new VersionedBTree(pager, filename, logID, db, encryptionMode, encodingType, keyProvider);
 		m_init = catchError(init_impl(this));
 	}
 
@@ -10126,7 +10128,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	printf("Initializing...\n");
 	pager = new DWALPager(
 	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, pagerMemoryOnly);
-	state VersionedBTree* btree = new VersionedBTree(pager, file, {}, encryptionMode, encodingType, keyProvider);
+	state VersionedBTree* btree = new VersionedBTree(pager, file, UID(), {}, encryptionMode, encodingType, keyProvider);
 	wait(btree->init());
 
 	state DecodeBoundaryVerifier* pBoundaries = DecodeBoundaryVerifier::getVerifier(file);
@@ -10365,7 +10367,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 				printf("Reopening btree from disk.\n");
 				IPager2* pager = new DWALPager(
 				    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, false);
-				btree = new VersionedBTree(pager, file, {}, encryptionMode, encodingType, keyProvider);
+				btree = new VersionedBTree(pager, file, UID(), {}, encryptionMode, encodingType, keyProvider);
 
 				wait(btree->init());
 
@@ -10414,6 +10416,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 		                                         concurrentExtentReads,
 		                                         pagerMemoryOnly),
 		                           file,
+		                           UID(),
 		                           {},
 		                           {},
 		                           encodingType,
@@ -10750,8 +10753,8 @@ TEST_CASE(":/redwood/performance/set") {
 
 	DWALPager* pager = new DWALPager(
 	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, pagerMemoryOnly);
-	state VersionedBTree* btree =
-	    new VersionedBTree(pager, file, {}, {}, EncodingType::XXHash64, makeReference<NullEncryptionKeyProvider>());
+	state VersionedBTree* btree = new VersionedBTree(
+	    pager, file, UID(), {}, {}, EncodingType::XXHash64, makeReference<NullEncryptionKeyProvider>());
 	wait(btree->init());
 	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 
