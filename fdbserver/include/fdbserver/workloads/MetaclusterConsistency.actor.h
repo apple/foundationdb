@@ -62,7 +62,8 @@ private:
 
 		int64_t tenantCount;
 		RangeResult systemTenantSubspaceKeys;
-		int64_t tenantIdPrefix;
+		Optional<int64_t> tenantIdPrefix;
+		Optional<int64_t> lastTenantId;
 	};
 
 	ManagementClusterData managementMetadata;
@@ -74,21 +75,17 @@ private:
 	ACTOR static Future<Void> loadManagementClusterMetadata(MetaclusterConsistencyCheck* self) {
 		state Reference<typename DB::TransactionT> managementTr = self->managementDb->createTransaction();
 		state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantList;
-		state Optional<int64_t> lastTenantId;
 
 		loop {
 			try {
 				managementTr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				state typename transaction_future_type<typename DB::TransactionT, RangeResult>::type
 				    systemTenantSubspaceKeysFuture = managementTr->getRange(prefixRange(TenantMetadata::subspace()), 2);
-				state Optional<int64_t> tenantIdPrefix = wait(TenantMetadata::tenantIdPrefix().get(managementTr));
-				ASSERT(tenantIdPrefix.present());
-				ASSERT(tenantIdPrefix.get() >= TenantAPI::TENANT_ID_PREFIX_MIN_VALUE &&
-				       tenantIdPrefix.get() <= TenantAPI::TENANT_ID_PREFIX_MAX_VALUE);
-				self->managementMetadata.tenantIdPrefix = tenantIdPrefix.get();
 
 				wait(
-				    store(lastTenantId,
+				    store(self->managementMetadata.tenantIdPrefix,
+				          TenantMetadata::tenantIdPrefix().get(managementTr)) &&
+				    store(self->managementMetadata.lastTenantId,
 				          MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().lastTenantId.get(managementTr)) &&
 				    store(self->managementMetadata.metaclusterRegistration,
 				          MetaclusterMetadata::metaclusterRegistration().get(managementTr)) &&
@@ -125,10 +122,6 @@ private:
 			}
 		}
 
-		if (lastTenantId.present()) {
-			ASSERT(TenantAPI::getTenantIdPrefix(lastTenantId.get()) == self->managementMetadata.tenantIdPrefix);
-		}
-
 		self->managementMetadata.tenantMap =
 		    std::map<int64_t, TenantMapEntry>(tenantList.results.begin(), tenantList.results.end());
 
@@ -136,7 +129,6 @@ private:
 			ASSERT_EQ(t.size(), 3);
 			TenantName tenantName = t.getString(1);
 			int64_t tenantId = t.getInt(2);
-			ASSERT(TenantAPI::getTenantIdPrefix(tenantId) == self->managementMetadata.tenantIdPrefix);
 			ASSERT(tenantName == self->managementMetadata.tenantMap[tenantId].tenantName);
 			self->managementMetadata.clusterTenantMap[t.getString(0)].insert(tenantId);
 		}
@@ -172,6 +164,12 @@ private:
 		       !managementMetadata.tenantGroups.more);
 		ASSERT_EQ(managementMetadata.clusterTenantGroupTuples.results.size(),
 		          managementMetadata.tenantGroups.results.size());
+		ASSERT(managementMetadata.tenantIdPrefix.present());
+
+		if (managementMetadata.lastTenantId.present()) {
+			ASSERT(TenantAPI::getTenantIdPrefix(managementMetadata.lastTenantId.get()) ==
+			       managementMetadata.tenantIdPrefix.get());
+		}
 
 		// Parse the cluster capacity index. Check that no cluster is represented in the index more than once.
 		std::map<ClusterName, int64_t> clusterAllocatedMap;
@@ -220,6 +218,7 @@ private:
 		std::set<TenantGroupName> processedTenantGroups;
 		for (auto [tenantId, entry] : managementMetadata.tenantMap) {
 			ASSERT(entry.assignedCluster.present());
+			ASSERT(TenantAPI::getTenantIdPrefix(tenantId) == managementMetadata.tenantIdPrefix.get());
 
 			// Each tenant should be assigned to the same cluster where it is stored in the cluster tenant index
 			auto clusterItr = managementMetadata.clusterTenantMap.find(entry.assignedCluster.get());
@@ -295,7 +294,7 @@ private:
 		}
 
 		if (lastTenantId.present()) {
-			ASSERT(TenantAPI::getTenantIdPrefix(lastTenantId.get()) == self->managementMetadata.tenantIdPrefix);
+			ASSERT(TenantAPI::getTenantIdPrefix(lastTenantId.get()) == self->managementMetadata.tenantIdPrefix.get());
 		}
 
 		state std::map<int64_t, TenantMapEntry> dataClusterTenantMap(dataClusterTenantList.results.begin(),
@@ -335,7 +334,7 @@ private:
 			TenantMapEntry const& metaclusterEntry = self->managementMetadata.tenantMap[tenantId];
 			ASSERT(!entry.assignedCluster.present());
 			ASSERT_EQ(entry.id, metaclusterEntry.id);
-			ASSERT(TenantAPI::getTenantIdPrefix(entry.id) == self->managementMetadata.tenantIdPrefix);
+			ASSERT(TenantAPI::getTenantIdPrefix(entry.id) == self->managementMetadata.tenantIdPrefix.get());
 			ASSERT(entry.tenantName == metaclusterEntry.tenantName);
 
 			ASSERT_EQ(entry.tenantState, TenantState::READY);
