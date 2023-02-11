@@ -650,9 +650,11 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		    newTenantGroup.present() && self->tenantGroups.find(newTenantGroup.get()) != self->tenantGroups.end();
 
 		state bool hasCapacity = false;
+		state Optional<ClusterName> oldClusterName;
 		if (exists) {
 			auto& dataDb = self->dataDbs[itr->second.cluster];
 			hasCapacity = dataDb.ungroupedTenants.size() + dataDb.tenantGroups.size() < dataDb.tenantGroupCapacity;
+			oldClusterName = itr->second.cluster;
 		}
 
 		state std::map<Standalone<StringRef>, Optional<Value>> configurationParameters = {
@@ -718,6 +720,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 					--self->totalTenantGroupCapacity;
 				}
 			}
+			ASSERT(oldClusterName == newClusterName);
 		} catch (Error& e) {
 			if (e.code() == error_code_tenant_not_found) {
 				ASSERT(!exists);
@@ -727,7 +730,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				return Void();
 			} else if (e.code() == error_code_invalid_tenant_configuration) {
 				ASSERT(exists && tenantGroupExists &&
-				       self->createdTenants[tenant].cluster != self->tenantGroups[newTenantGroup.get()].cluster);
+				       (self->createdTenants[tenant].cluster != self->tenantGroups[newTenantGroup.get()].cluster ||
+				        oldClusterName != newClusterName));
 				return Void();
 			}
 
