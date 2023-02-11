@@ -1085,7 +1085,7 @@ void DLApi::init() {
 	loadClientFunction(&api->futureGetDouble,
 	                   lib,
 	                   fdbCPath,
-	                   "fdb_get_double",
+	                   "fdb_future_get_double",
 	                   headerVersion >= ApiVersion::withFutureGetDouble().version());
 	loadClientFunction(&api->futureGetInt64,
 	                   lib,
