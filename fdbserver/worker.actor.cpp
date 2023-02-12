@@ -2041,7 +2041,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobWorker;
 
-				BlobWorkerInterface recruited(locality, s.storeID);
+				BlobWorkerInterface recruited(locality, deterministicRandom()->randomUniqueID());
 				recruited.initEndpoints();
 
 				std::map<std::string, std::string> details;

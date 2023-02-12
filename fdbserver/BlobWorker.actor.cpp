@@ -5386,12 +5386,9 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		TraceEvent("BWEncryptionAtRestMode").detail("Mode", self->encryptMode.toString());
 
 		if (self->storage) {
-			TraceEvent("BlobWorkerInit4", self->id);
 			wait(self->storage->init());
-			TraceEvent("BlobWorkerInit5", self->id);
 			self->storage->set(KeyValueRef(persistID, BinaryWriter::toValue(self->id, Unversioned())));
 			wait(self->storage->commit());
-			TraceEvent("BlobWorkerInit6", self->id);
 		}
 
 		if (BW_DEBUG) {
@@ -5451,7 +5448,7 @@ ACTOR Future<Void> restorePersistentState(Reference<BlobWorkerData> self) {
 		throw worker_removed();
 	}
 	UID recoveredID = BinaryReader::fromStringRef<UID>(fID.get().get(), Unversioned());
-	ASSERT(recoveredID == self->id);
+	ASSERT(recoveredID != self->id);
 	return Void();
 }
 
@@ -5472,12 +5469,10 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		self->encryptMode = config.encryptionAtRestMode;
 		TraceEvent("BWEncryptionAtRestMode").detail("Mode", self->encryptMode.toString());
 
-		TraceEvent("BlobWorkerInit1", self->id);
 		wait(self->storage->init());
-		TraceEvent("BlobWorkerInit2", self->id);
-		wait(self->storage->commit());
-		TraceEvent("BlobWorkerInit3", self->id);
 		wait(restorePersistentState(self));
+		self->storage->set(KeyValueRef(persistID, BinaryWriter::toValue(self->id, Unversioned())));
+		wait(self->storage->commit());
 
 		TraceEvent("BlobWorkerInit4", self->id);
 		if (BW_DEBUG) {

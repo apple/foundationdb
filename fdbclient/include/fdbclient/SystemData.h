@@ -721,6 +721,14 @@ UID decodeBlobWorkerListKey(KeyRef const& key);
 const Value blobWorkerListValue(BlobWorkerInterface const& interface);
 BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 
+// \xff/bwa/[[BlobWorkerID]] = [[UID]]
+extern const KeyRangeRef blobWorkerAffinityKeys;
+
+const Key blobWorkerAffinityKeyFor(UID workerID);
+UID decodeBlobWorkerAffinityKey(KeyRef const& key);
+const Value blobWorkerAffinityValue(UID const& id);
+UID decodeBlobWorkerAffinityValue(ValueRef const& value);
+
 // Blob restore command
 extern const KeyRangeRef blobRestoreCommandKeys;
 const Value blobRestoreCommandKeyFor(const KeyRangeRef range);

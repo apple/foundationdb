@@ -8123,9 +8123,6 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			continue;
 		}
 		workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
-		if (!self->trState->cx->blobWorker_interf.count(workerId)) {
-			throw connection_failed();
-		}
 
 		// prune first/last granules to requested range
 		if (keyRange.begin > granuleStartKey) {
@@ -8250,9 +8247,6 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 				}
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled && e.code() != error_code_wrong_shard_server) {
-				self->trState->cx->blobWorker_interf.erase(workerId);
-			}
 			if (BG_REQUEST_DEBUG) {
 				fmt::print("Blob granule request for [{0} - {1}) @ {2} - {3} got error from {4}: {5}\n",
 				           granuleStartKey.printable(),
