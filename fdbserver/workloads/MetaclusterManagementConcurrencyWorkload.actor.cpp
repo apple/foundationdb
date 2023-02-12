@@ -123,6 +123,7 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 				TraceEvent(SevError, "MetaclusterManagementConcurrencyRegisterClusterFailure", debugId)
 				    .error(e)
 				    .detail("ClusterName", clusterName);
+				ASSERT(false);
 			}
 			return Void();
 		}
@@ -158,6 +159,7 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 				TraceEvent(SevError, "MetaclusterManagementConcurrencyRemoveClusterFailure", debugId)
 				    .error(e)
 				    .detail("ClusterName", clusterName);
+				ASSERT(false);
 			}
 			return Void();
 		}
@@ -194,10 +196,11 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 			    .detail("Limit", limit);
 
 			if (e.code() != error_code_inverted_range) {
-				TraceEvent(SevError, "ListClusterFailure")
+				TraceEvent(SevError, "MetaclusterManagementConcurrencyListClusterFailure")
 				    .error(e)
 				    .detail("ClusterName1", clusterName1)
 				    .detail("ClusterName2", clusterName2);
+				ASSERT(false);
 			}
 			return Void();
 		}
@@ -220,7 +223,10 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 			    .error(e)
 			    .detail("ClusterName", clusterName);
 			if (e.code() != error_code_cluster_not_found) {
-				TraceEvent(SevError, "GetClusterFailure").error(e).detail("ClusterName", clusterName);
+				TraceEvent(SevError, "MetaclusterManagementConcurrencyGetClusterFailure")
+				    .error(e)
+				    .detail("ClusterName", clusterName);
+				ASSERT(false);
 			}
 			return Void();
 		}
@@ -300,7 +306,10 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 			    .detail("NewConnectionString", connectionString.map(&ClusterConnectionString::toString).orDefault(""));
 			if (e.code() != error_code_cluster_not_found && e.code() != error_code_cluster_removed &&
 			    e.code() != error_code_invalid_metacluster_operation) {
-				TraceEvent(SevError, "ConfigureClusterFailure").error(e).detail("ClusterName", clusterName);
+				TraceEvent(SevError, "MetaclusterManagementConcurrencyConfigureClusterFailure")
+				    .error(e)
+				    .detail("ClusterName", clusterName);
+				ASSERT(false);
 			}
 		}
 

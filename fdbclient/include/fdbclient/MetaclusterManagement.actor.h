@@ -272,7 +272,7 @@ struct MetaclusterOperationContext {
 				// entry.
 				if (self->clusterName.present()) {
 					if (!currentDataClusterMetadata.present()) {
-						throw cluster_not_found();
+						throw cluster_removed();
 					} else {
 						currentMetaclusterRegistration = currentMetaclusterRegistration.get().toDataClusterRegistration(
 						    self->clusterName.get(), currentDataClusterMetadata.get().entry.id);
@@ -288,7 +288,7 @@ struct MetaclusterOperationContext {
 				// cluster metadata in the context and open a connection to the data DB.
 				if (self->dataClusterMetadata.present() &&
 				    self->dataClusterMetadata.get().entry.id != currentDataClusterMetadata.get().entry.id) {
-					throw cluster_not_found();
+					throw cluster_removed();
 				} else if (self->clusterName.present()) {
 					self->dataClusterMetadata = currentDataClusterMetadata;
 					if (!self->dataClusterDb) {
@@ -342,12 +342,12 @@ struct MetaclusterOperationContext {
 				// Check that this is the expected data cluster and is part of the right metacluster
 				if (!currentMetaclusterRegistration.present()) {
 					if (!runOnDisconnectedCluster) {
-						throw invalid_metacluster_operation();
+						throw cluster_removed();
 					}
 				} else if (currentMetaclusterRegistration.get().clusterType != ClusterType::METACLUSTER_DATA) {
-					throw invalid_metacluster_operation();
+					throw cluster_removed();
 				} else if (!self->metaclusterRegistration.get().matches(currentMetaclusterRegistration.get())) {
-					throw invalid_metacluster_operation();
+					throw cluster_removed();
 				}
 
 				self->dataClusterIsRegistered = currentMetaclusterRegistration.present();
@@ -805,6 +805,7 @@ struct RemoveClusterImpl {
 	MetaclusterOperationContext<DB> ctx;
 
 	// Initialization parameters
+	ClusterName clusterName;
 	bool forceRemove;
 	double dataClusterTimeout;
 
@@ -815,11 +816,14 @@ struct RemoveClusterImpl {
 	bool dataClusterUpdated = false;
 
 	RemoveClusterImpl(Reference<DB> managementDb, ClusterName clusterName, bool forceRemove, double dataClusterTimeout)
-	  : ctx(managementDb, clusterName, { DataClusterState::REGISTERING, DataClusterState::REMOVING }),
-	    forceRemove(forceRemove) {}
+	  : ctx(managementDb, Optional<ClusterName>(), { DataClusterState::REGISTERING, DataClusterState::REMOVING }),
+	    clusterName(clusterName), forceRemove(forceRemove), dataClusterTimeout(dataClusterTimeout) {}
 
 	// Returns false if the cluster is no longer present, or true if it is present and the removal should proceed.
 	ACTOR static Future<Void> markClusterRemoving(RemoveClusterImpl* self, Reference<typename DB::TransactionT> tr) {
+		state DataClusterMetadata clusterMetadata = wait(getClusterTransaction(tr, self->clusterName));
+		wait(self->ctx.setCluster(tr, self->clusterName));
+
 		if (!self->forceRemove && self->ctx.dataClusterMetadata.get().entry.allocated.numTenantGroups > 0) {
 			throw cluster_not_empty();
 		} else if (self->ctx.dataClusterMetadata.get().entry.clusterState != DataClusterState::REMOVING) {
@@ -1016,7 +1020,7 @@ struct RemoveClusterImpl {
 			self->dataClusterUpdated = true;
 		} catch (Error& e) {
 			// If this transaction gets retried, the metacluster information may have already been erased.
-			if (e.code() == error_code_invalid_metacluster_operation) {
+			if (e.code() == error_code_cluster_removed) {
 				self->dataClusterUpdated = true;
 			} else if (e.code() != error_code_timed_out) {
 				throw;
@@ -1028,7 +1032,7 @@ struct RemoveClusterImpl {
 			wait(managementClusterPurgeDataCluster(self));
 		} catch (Error& e) {
 			// If this transaction gets retried, the cluster may have already been deleted.
-			if (e.code() != error_code_cluster_not_found) {
+			if (e.code() != error_code_cluster_removed) {
 				throw;
 			}
 		}
