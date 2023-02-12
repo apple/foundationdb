@@ -731,10 +731,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				return Void();
 			} else if (e.code() == error_code_invalid_tenant_configuration) {
 				ASSERT(exists);
-				if (tenantGroupExists) {
-					ASSERT(self->createdTenants[tenant].cluster != self->tenantGroups[newTenantGroup.get()].cluster);
-				} else {
-					ASSERT(oldClusterName != newClusterName);
+				if (oldClusterName == newClusterName) {
+					ASSERT(tenantGroupExists &&
+					       self->createdTenants[tenant].cluster != self->tenantGroups[newTenantGroup.get()].cluster);
 				}
 				return Void();
 			}
