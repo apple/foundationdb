@@ -4713,9 +4713,10 @@ void handleBlobVersionRequest(Reference<BlobWorkerData> bwData, MinBlobVersionRe
 
 ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData,
                                       BlobWorkerInterface interf,
-                                      bool replaceExisting) {
+                                      Optional<UID> previous) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
 	state Key blobWorkerListKey = blobWorkerListKeyFor(interf.id());
+	state Key blobWorkerAffinityKey = blobWorkerAffinityKeyFor(interf.id());
 
 	TraceEvent("BlobWorkerRegister", bwData->id);
 	loop {
@@ -4723,16 +4724,12 @@ ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData,
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
-			if (replaceExisting) {
-				Optional<Value> val = wait(tr->get(blobWorkerListKey));
-				if (!val.present()) {
-					throw worker_removed();
-				}
-			} else {
-				// FIXME: should be able to remove this conflict range
-				tr->addReadConflictRange(singleKeyRange(blobWorkerListKey));
+			if (previous.present()) {
+				tr->set(blobWorkerAffinityKey, blobWorkerAffinityValue(previous.get()));
 			}
 
+			// FIXME: should be able to remove this conflict range
+			tr->addReadConflictRange(singleKeyRange(blobWorkerListKey));
 			tr->set(blobWorkerListKey, blobWorkerListValue(interf));
 
 			// Get manager lock from DB
@@ -5407,7 +5404,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 			}
 
 			// register the blob worker to the system keyspace
-			wait(registerBlobWorker(self, bwInterf, false));
+			wait(registerBlobWorker(self, bwInterf, Optional<UID>()));
 		} catch (Error& e) {
 			if (BW_DEBUG) {
 				fmt::print("BW got init error {0}\n", e.name());
@@ -5438,7 +5435,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	}
 }
 
-ACTOR Future<Void> restorePersistentState(Reference<BlobWorkerData> self) {
+ACTOR Future<UID> restorePersistentState(Reference<BlobWorkerData> self) {
 	state Future<Optional<Value>> fID = self->storage->readValue(persistID);
 
 	wait(waitForAll(std::vector{ fID }));
@@ -5449,7 +5446,7 @@ ACTOR Future<Void> restorePersistentState(Reference<BlobWorkerData> self) {
 	}
 	UID recoveredID = BinaryReader::fromStringRef<UID>(fID.get().get(), Unversioned());
 	ASSERT(recoveredID != self->id);
-	return Void();
+	return recoveredID;
 }
 
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
@@ -5470,9 +5467,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		TraceEvent("BWEncryptionAtRestMode").detail("Mode", self->encryptMode.toString());
 
 		wait(self->storage->init());
-		wait(restorePersistentState(self));
-		self->storage->set(KeyValueRef(persistID, BinaryWriter::toValue(self->id, Unversioned())));
-		wait(self->storage->commit());
+		state UID previous = wait(restorePersistentState(self));
 
 		TraceEvent("BlobWorkerInit4", self->id);
 		if (BW_DEBUG) {
@@ -5490,7 +5485,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				}
 			}
 			// register the blob worker to the system keyspace
-			wait(registerBlobWorker(self, bwInterf, true));
+			wait(registerBlobWorker(self, bwInterf, previous));
 		} catch (Error& e) {
 			if (BW_DEBUG) {
 				fmt::print("BW got init error {0}\n", e.name());
@@ -5501,6 +5496,9 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		if (recovered.canBeSet()) {
 			recovered.send(Void());
 		}
+
+		self->storage->set(KeyValueRef(persistID, BinaryWriter::toValue(self->id, Unversioned())));
+		wait(self->storage->commit());
 
 		TraceEvent("BlobWorkerInit", self->id).log();
 		wait(blobWorkerCore(bwInterf, self));
