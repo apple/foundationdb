@@ -639,10 +639,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	ACTOR static Future<Void> configureTenant(MetaclusterManagementWorkload* self) {
 		state TenantName tenant = self->chooseTenantName();
 		state Optional<TenantGroupName> newTenantGroup = self->chooseTenantGroup();
-		state Optional<ClusterName> newClusterName;
-		if (deterministicRandom()->coinflip()) {
-			newClusterName = self->chooseClusterName();
-		}
 
 		auto itr = self->createdTenants.find(tenant);
 		state bool exists = itr != self->createdTenants.end();
@@ -657,8 +653,13 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			oldClusterName = itr->second.cluster;
 		}
 
+		state Optional<ClusterName> newClusterName = oldClusterName;
+		if (deterministicRandom()->coinflip()) {
+			newClusterName = self->chooseClusterName();
+		}
+
 		state std::map<Standalone<StringRef>, Optional<Value>> configurationParameters = {
-			{ "tenant_group"_sr, newTenantGroup }, { "assigned_cluster"_sr, newClusterName }
+			{ "assigned_cluster"_sr, newClusterName }, { "tenant_group"_sr, newTenantGroup }
 		};
 
 		try {
@@ -729,9 +730,12 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				ASSERT(exists && !hasCapacity);
 				return Void();
 			} else if (e.code() == error_code_invalid_tenant_configuration) {
-				ASSERT(exists && tenantGroupExists &&
-				       (self->createdTenants[tenant].cluster != self->tenantGroups[newTenantGroup.get()].cluster ||
-				        oldClusterName != newClusterName));
+				ASSERT(exists);
+				if (tenantGroupExists) {
+					ASSERT(self->createdTenants[tenant].cluster != self->tenantGroups[newTenantGroup.get()].cluster);
+				} else {
+					ASSERT(oldClusterName != newClusterName);
+				}
 				return Void();
 			}
 
