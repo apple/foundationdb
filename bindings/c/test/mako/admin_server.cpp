@@ -186,7 +186,7 @@ boost::optional<std::string> AdminServer::createTenant(fdb::Database db, int id_
 			while (true) {
 				auto tenant = db.openTenant(fdb::toBytesRef(getTenantNameByIndex(id)));
 				std::string range_end = "\xff";
-				auto blobbify_future = tenant.blobbifyRange(fdb::BytesRef(), fdb::toBytesRef(range_end));
+				auto blobbify_future = tenant.blobbifyRange(fdb::BytesRef(), fdb::toBytesRef(range_end), false);
 				const auto rc = waitAndHandleError(tx, blobbify_future);
 				if (rc == FutureRC::OK) {
 					if (!blobbify_future.get()) {

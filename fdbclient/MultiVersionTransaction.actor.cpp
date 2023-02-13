@@ -549,6 +549,25 @@ ThreadFuture<bool> DLTenant::blobbifyRange(const KeyRangeRef& keyRange) {
 	});
 }
 
+ThreadFuture<bool> DLTenant::blobbifyRangeV2(const KeyRangeRef& keyRange, bool wait) {
+	if (!api->tenantBlobbifyRangeV2) {
+		// in case a client called the new version of this function with an old external client
+		if (api->tenantBlobbifyRange && !wait) {
+			return blobbifyRange(keyRange);
+		}
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->tenantBlobbifyRangeV2(
+	    tenant, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), wait);
+
+	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		FdbCApi::fdb_bool_t ret = false;
+		ASSERT(!api->futureGetBool(f, &ret));
+		return ret;
+	});
+}
+
 ThreadFuture<bool> DLTenant::unblobbifyRange(const KeyRangeRef& keyRange) {
 	if (!api->tenantUnblobbifyRange) {
 		return unsupported_operation();
@@ -768,6 +787,25 @@ ThreadFuture<bool> DLDatabase::blobbifyRange(const KeyRangeRef& keyRange) {
 	});
 }
 
+ThreadFuture<bool> DLDatabase::blobbifyRangeV2(const KeyRangeRef& keyRange, bool wait) {
+	if (!api->databaseBlobbifyRangeV2) {
+		// in case a client called the new version of this function with an old external client
+		if (api->databaseBlobbifyRange && !wait) {
+			return blobbifyRange(keyRange);
+		}
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseBlobbifyRange(
+	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
+
+	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		FdbCApi::fdb_bool_t ret = false;
+		ASSERT(!api->futureGetBool(f, &ret));
+		return ret;
+	});
+}
+
 ThreadFuture<bool> DLDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {
 	if (!api->databaseUnblobbifyRange) {
 		return unsupported_operation();
@@ -931,6 +969,11 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_database_blobbify_range",
 	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
+	loadClientFunction(&api->databaseBlobbifyRangeV2,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_database_blobbify_range_v2",
+	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
 	loadClientFunction(&api->databaseUnblobbifyRange,
 	                   lib,
 	                   fdbCPath,
@@ -967,6 +1010,11 @@ void DLApi::init() {
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_tenant_blobbify_range",
+	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
+	loadClientFunction(&api->tenantBlobbifyRangeV2,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_tenant_blobbify_range_v2",
 	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
 	loadClientFunction(&api->tenantUnblobbifyRange,
 	                   lib,
@@ -1828,6 +1876,10 @@ ThreadFuture<bool> MultiVersionTenant::blobbifyRange(const KeyRangeRef& keyRange
 	return executeOperation(&ITenant::blobbifyRange, keyRange);
 }
 
+ThreadFuture<bool> MultiVersionTenant::blobbifyRangeV2(const KeyRangeRef& keyRange, bool wait) {
+	return executeOperation(&ITenant::blobbifyRangeV2, keyRange, std::forward<bool>(wait));
+}
+
 ThreadFuture<bool> MultiVersionTenant::unblobbifyRange(const KeyRangeRef& keyRange) {
 	return executeOperation(&ITenant::unblobbifyRange, keyRange);
 }
@@ -2060,6 +2112,10 @@ ThreadFuture<Void> MultiVersionDatabase::waitPurgeGranulesComplete(const KeyRef&
 
 ThreadFuture<bool> MultiVersionDatabase::blobbifyRange(const KeyRangeRef& keyRange) {
 	return executeOperation(&IDatabase::blobbifyRange, keyRange);
+}
+
+ThreadFuture<bool> MultiVersionDatabase::blobbifyRangeV2(const KeyRangeRef& keyRange, bool wait) {
+	return executeOperation(&IDatabase::blobbifyRangeV2, keyRange, std::forward<bool>(wait));
 }
 
 ThreadFuture<bool> MultiVersionDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {

@@ -10914,8 +10914,26 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
 	}
 }
 
-Future<bool> DatabaseContext::blobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant) {
-	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, true, tenant);
+ACTOR Future<bool> blobbifyRangeActor(Reference<DatabaseContext> cx,
+                                      KeyRange range,
+                                      bool doWait,
+                                      Optional<Reference<Tenant>> tenant) {
+	state bool result = wait(setBlobRangeActor(cx, range, true, tenant));
+	if (!doWait || !result) {
+		return result;
+	}
+	// FIXME: add blob worker verifyRange rpc call that just waits for granule to become readable at any version
+	loop {
+		Version verifyVersion = wait(cx->verifyBlobRange(range, latestVersion, tenant));
+		if (verifyVersion != invalidVersion) {
+			return result;
+		}
+		wait(delay(0.1));
+	}
+}
+
+Future<bool> DatabaseContext::blobbifyRange(KeyRange range, bool doWait, Optional<Reference<Tenant>> tenant) {
+	return blobbifyRangeActor(Reference<DatabaseContext>::addRef(this), range, doWait, tenant);
 }
 
 Future<bool> DatabaseContext::unblobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant) {

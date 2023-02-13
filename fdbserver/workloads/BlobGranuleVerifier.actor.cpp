@@ -171,24 +171,11 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	// FIXME: run the actual FDBCLI command instead of copy/pasting its implementation
 	// Sets the whole user keyspace to be blobified
 	ACTOR Future<Void> setUpBlobRange(Database cx) {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->set(blobRangeChangeKey, deterministicRandom()->randomUniqueID().toString());
-				wait(krmSetRange(tr, blobRangeKeys.begin, KeyRange(normalKeys), "1"_sr));
-				wait(tr->commit());
-				if (BGV_DEBUG) {
-					printf("Successfully set up blob granule range for normalKeys\n");
-				}
-				TraceEvent("BlobGranuleVerifierSetup");
-				return Void();
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
+		bool success = wait(cx->blobbifyRange(normalKeys, false));
+		ASSERT(success);
+		return Void();
 	}
+
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.emplace("Attrition"); }
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }

@@ -383,11 +383,19 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_wait_purge_granules_complet
                                                                                   uint8_t const* purge_key_name,
                                                                                   int purge_key_name_length);
 
+// FIXME: deprecated, clean up in release following this one!
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_blobbify_range(FDBDatabase* db,
                                                                     uint8_t const* begin_key_name,
                                                                     int begin_key_name_length,
                                                                     uint8_t const* end_key_name,
                                                                     int end_key_name_length);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_blobbify_range_v2(FDBDatabase* db,
+                                                                       uint8_t const* begin_key_name,
+                                                                       int begin_key_name_length,
+                                                                       uint8_t const* end_key_name,
+                                                                       int end_key_name_length,
+                                                                       fdb_bool_t wait);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_unblobbify_range(FDBDatabase* db,
                                                                       uint8_t const* begin_key_name,
@@ -426,11 +434,19 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_wait_purge_granules_complete(
                                                                                 uint8_t const* purge_key_name,
                                                                                 int purge_key_name_length);
 
+// FIXME: deprecated, clean up in release following this one!
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_blobbify_range(FDBTenant* tenant,
                                                                   uint8_t const* begin_key_name,
                                                                   int begin_key_name_length,
                                                                   uint8_t const* end_key_name,
                                                                   int end_key_name_length);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_blobbify_range_v2(FDBTenant* tenant,
+                                                                     uint8_t const* begin_key_name,
+                                                                     int begin_key_name_length,
+                                                                     uint8_t const* end_key_name,
+                                                                     int end_key_name_length,
+                                                                     fdb_bool_t wait);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_unblobbify_range(FDBTenant* tenant,
                                                                     uint8_t const* begin_key_name,
