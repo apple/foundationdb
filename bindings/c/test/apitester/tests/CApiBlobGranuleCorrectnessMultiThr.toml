@@ -13,6 +13,7 @@ maxClients = 8
 
 [[server]]
 blob_granules_enabled = true
+# FIXME: enable EAR once other PRs merged
 
 [[test.workload]]
 name = 'ApiBlobGranuleCorrectness'

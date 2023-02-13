@@ -364,7 +364,9 @@ public:
 
 			wait(self->loadDatabaseConfiguration());
 			self->initDcInfo();
-			TraceEvent("DDInitGotConfiguration", self->ddId).detail("Conf", self->configuration.toString());
+			TraceEvent("DDInitGotConfiguration", self->ddId)
+			    .setMaxFieldLength(-1)
+			    .detail("Conf", self->configuration.toString());
 
 			wait(self->updateReplicaKeys());
 			TraceEvent("DDInitUpdatedReplicaKeys", self->ddId).log();
@@ -461,7 +463,7 @@ public:
 				teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteSrc, false));
 			}
 			if (traceShard) {
-				TraceEvent(SevDebug, "DDInitShard")
+				TraceEvent(SevDebug, "DDInitShard", self->ddId)
 				    .detail("Keys", keys)
 				    .detail("PrimarySrc", describe(iShard.primarySrc))
 				    .detail("RemoteSrc", describe(iShard.remoteSrc))

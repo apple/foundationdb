@@ -512,10 +512,11 @@ struct GetStorageServerRejoinInfoReply {
 	Optional<Tag> newTag;
 	bool newLocality;
 	std::vector<std::pair<Version, Tag>> history;
+	EncryptionAtRestMode encryptMode;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, tag, newTag, newLocality, history);
+		serializer(ar, version, tag, newTag, newLocality, history, encryptMode);
 	}
 };
 
@@ -682,6 +683,8 @@ struct GlobalConfigRefreshRequest {
 
 	GlobalConfigRefreshRequest() {}
 	explicit GlobalConfigRefreshRequest(Version lastKnown) : lastKnown(lastKnown) {}
+
+	bool verify() const noexcept { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

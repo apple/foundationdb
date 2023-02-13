@@ -25,10 +25,11 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
+#include "flow/Knobs.h"
+
 #include "boost/algorithm/string/predicate.hpp"
 #include "flow/IConnection.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "flow/Knobs.h"
 
 #undef state
 #include "fdbclient/SimpleIni.h"

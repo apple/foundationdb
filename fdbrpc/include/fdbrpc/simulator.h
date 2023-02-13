@@ -130,6 +130,7 @@ public:
 	                              KillType kt,
 	                              KillType* newKillType) const = 0;
 	virtual bool isAvailable() const = 0;
+	virtual std::vector<AddressExclusion> getAllAddressesInDCToExclude(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
 	ProtocolVersion protocolVersion() const override = 0;
@@ -346,7 +347,7 @@ public:
 	double checkDisabled(const std::string& desc) const;
 
 	// generate authz token for use in simulation environment
-	Standalone<StringRef> makeToken(StringRef tenantName, uint64_t ttlSecondsFromNow);
+	Standalone<StringRef> makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow);
 
 	static thread_local ProcessInfo* currentProcess;
 
