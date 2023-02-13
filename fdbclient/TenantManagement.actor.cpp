@@ -24,6 +24,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Tuple.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace TenantAPI {
@@ -43,9 +44,11 @@ int64_t extractTenantIdFromMutation(MutationRef m) {
 
 	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 		// The first 8 bytes of the key of this OP is also an 8-byte number
-		if (m.type == MutationRef::SetVersionstampedKey && m.param1.size() >= 4 &&
-		    parseVersionstampOffset(m.param1) < 8) {
-			return TenantInfo::INVALID_TENANT;
+		if (m.type == MutationRef::SetVersionstampedKey && m.param1.size() >= 4) {
+			// when the timestamp overlap with first 8 bytes
+			if (parseVersionstampOffset(m.param1) < 8) {
+				return TenantInfo::INVALID_TENANT;
+			}
 		}
 	} else {
 		// Assumes clear range mutations are split on tenant boundaries
@@ -62,6 +65,32 @@ int64_t extractTenantIdFromKeyRef(StringRef s) {
 	// Parse mutation key to determine tenant prefix
 	StringRef prefix = s.substr(0, TenantAPI::PREFIX_SIZE);
 	return TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
+}
+
+// validates whether the lastTenantId and the nextTenantId share the same 2 byte prefix
+bool nextTenantIdPrefixMatches(int64_t lastTenantId, int64_t nextTenantId) {
+	if (getTenantIdPrefix(nextTenantId) != getTenantIdPrefix(lastTenantId)) {
+		TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "TenantIdPrefixMismatch")
+		    .detail("CurrentTenantId", lastTenantId)
+		    .detail("NewTenantId", nextTenantId)
+		    .detail("CurrentTenantIdPrefix", getTenantIdPrefix(lastTenantId))
+		    .detail("NewTenantIdPrefix", getTenantIdPrefix(nextTenantId));
+		return false;
+	}
+	return true;
+}
+
+// returns the maximum allowable tenant id in which the 2 byte prefix is not overriden
+int64_t getMaxAllowableTenantId(int64_t curTenantId) {
+	// The maximum tenant id allowed is 1 for the first 48 bits (6 bytes) with the first 16 bits (2 bytes) being the
+	// tenant prefix
+	int64_t maxTenantId = curTenantId | 0xFFFFFFFFFFFFLL;
+	ASSERT(maxTenantId > 0);
+	return maxTenantId;
+}
+
+int64_t getTenantIdPrefix(int64_t tenantId) {
+	return tenantId >> 48;
 }
 
 } // namespace TenantAPI

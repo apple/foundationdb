@@ -76,9 +76,7 @@ struct serializable_traits<TenantInfo> : std::true_type {
 		if constexpr (Archiver::isDeserializing) {
 			bool tenantAuthorized = FLOW_KNOBS->ALLOW_TOKENLESS_TENANT_ACCESS;
 			if (!tenantAuthorized && v.tenantId != TenantInfo::INVALID_TENANT && v.token.present()) {
-				// TODO: update tokens to be ID based
-				// tenantAuthorized = TokenCache::instance().validate(v.tenantId, v.token.get());
-				tenantAuthorized = true;
+				tenantAuthorized = TokenCache::instance().validate(v.tenantId, v.token.get());
 			}
 			v.trusted = FlowTransport::transport().currentDeliveryPeerIsTrusted();
 			v.tenantAuthorized = tenantAuthorized;

@@ -25,6 +25,7 @@ class TempCluster(LocalCluster):
         remove_at_exit: bool = True,
         custom_config: dict = {},
         enable_tenants: bool = True,
+        enable_encryption_at_rest: bool = False,
     ):
         self.build_dir = Path(build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(build_dir)
@@ -34,6 +35,7 @@ class TempCluster(LocalCluster):
         self.tmp_dir = tmp_dir
         self.remove_at_exit = remove_at_exit
         self.enable_tenants = enable_tenants
+        self.enable_encryption_at_rest = enable_encryption_at_rest
         super().__init__(
             tmp_dir,
             self.build_dir.joinpath("bin", "fdbserver"),
@@ -42,6 +44,7 @@ class TempCluster(LocalCluster):
             process_number,
             port=port,
             blob_granules_enabled=blob_granules_enabled,
+            enable_encryption_at_rest=enable_encryption_at_rest,
             tls_config=tls_config,
             mkcert_binary=self.build_dir.joinpath("bin", "mkcert"),
             authorization_kty=authorization_kty,
@@ -104,8 +107,10 @@ if __name__ == "__main__":
 
     tls_config = None
     if args.tls_enabled:
-        tls_config = TLSConfig(server_chain_len=args.server_cert_chain_len,
-                               client_chain_len=args.client_cert_chain_len)
+        tls_config = TLSConfig(
+            server_chain_len=args.server_cert_chain_len,
+            client_chain_len=args.client_cert_chain_len,
+        )
     errcode = 1
     with TempCluster(
         args.build_dir,
@@ -133,16 +138,15 @@ if __name__ == "__main__":
             ("@SERVER_CA_FILE@", str(cluster.server_ca_file)),
             ("@CLIENT_CERT_FILE@", str(cluster.client_cert_file)),
             ("@CLIENT_KEY_FILE@", str(cluster.client_key_file)),
-            ("@CLIENT_CA_FILE@", str(cluster.client_ca_file))]
+            ("@CLIENT_CA_FILE@", str(cluster.client_ca_file)),
+        ]
 
         for cmd in args.cmd:
             for (placeholder, value) in substitution_table:
                 cmd = cmd.replace(placeholder, value)
             cmd_args.append(cmd)
         env = dict(**os.environ)
-        env["FDB_CLUSTER_FILE"] = env.get(
-            "FDB_CLUSTER_FILE", cluster.cluster_file
-        )
+        env["FDB_CLUSTER_FILE"] = env.get("FDB_CLUSTER_FILE", cluster.cluster_file)
         print("command: {}".format(cmd_args))
         errcode = subprocess.run(
             cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env

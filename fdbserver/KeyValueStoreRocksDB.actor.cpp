@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
 #include <rocksdb/c.h>
@@ -236,9 +237,7 @@ rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
 
 	options.db_log_dir = g_network->isSimulated() ? "" : SERVER_KNOBS->LOG_DIRECTORY;
 
-	if (SERVER_KNOBS->ROCKSDB_MUTE_LOGS) {
-		options.info_log = std::make_shared<NullRocksDBLogForwarder>();
-	} else {
+	if (!SERVER_KNOBS->ROCKSDB_MUTE_LOGS) {
 		options.info_log = std::make_shared<RocksDBLogForwarder>(id, options.info_log_level);
 	}
 
@@ -2267,6 +2266,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			throw internal_error();
 		}
 		return Void();
+	}
+
+	Future<EncryptionAtRestMode> encryptionMode() override {
+		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
 	}
 
 	DB db = nullptr;

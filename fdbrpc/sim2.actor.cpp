@@ -26,7 +26,9 @@
 #include "fmt/format.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Arena.h"
+#ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
+#endif
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #include "fdbrpc/SimExternalConnection.h"
@@ -172,7 +174,7 @@ void ISimulator::displayWorkers() const {
 	return;
 }
 
-Standalone<StringRef> ISimulator::makeToken(StringRef tenantName, uint64_t ttlSecondsFromNow) {
+Standalone<StringRef> ISimulator::makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow) {
 	ASSERT_GT(authKeys.size(), 0);
 	auto tokenSpec = authz::jwt::TokenRef{};
 	auto [keyName, key] = *authKeys.begin();
@@ -186,7 +188,7 @@ Standalone<StringRef> ISimulator::makeToken(StringRef tenantName, uint64_t ttlSe
 	tokenSpec.expiresAtUnixTime = now + ttlSecondsFromNow;
 	auto const tokenId = deterministicRandom()->randomAlphaNumeric(10);
 	tokenSpec.tokenId = StringRef(tokenId);
-	tokenSpec.tenants = VectorRef<StringRef>(&tenantName, 1);
+	tokenSpec.tenants = VectorRef<int64_t>(&tenantId, 1);
 	auto ret = Standalone<StringRef>();
 	ret.contents() = authz::jwt::signToken(ret.arena(), tokenSpec, key);
 	return ret;
@@ -1420,6 +1422,19 @@ public:
 		return canKillProcesses(processesLeft, processesDead, KillType::KillInstantly, nullptr);
 	}
 
+	std::vector<AddressExclusion> getAllAddressesInDCToExclude(Optional<Standalone<StringRef>> dcId) const override {
+		std::vector<AddressExclusion> addresses;
+		if (!dcId.present()) {
+			return addresses;
+		}
+		for (const auto& processInfo : getAllProcesses()) {
+			if (processInfo->locality.dcId() == dcId) {
+				addresses.emplace_back(processInfo->address.ip, processInfo->address.port);
+			}
+		}
+		return addresses;
+	}
+
 	bool datacenterDead(Optional<Standalone<StringRef>> dcId) const override {
 		if (!dcId.present()) {
 			return false;
@@ -1676,7 +1691,7 @@ public:
 			}
 
 			// Reboot if dead machines do fulfill policies
-			if (tooManyDead) {
+			if (tooManyDead || (usableRegions > 1 && notEnoughLeft)) {
 				newKt = KillType::Reboot;
 				canSurvive = false;
 				TraceEvent("KillChanged")
