@@ -137,6 +137,9 @@ class TestPicker:
             or self.exclude_files_regex.search(str(path)) is not None
         ):
             return
+        # Skip restarting tests that do not have old binaries in the given version range
+        # In particular, this is only for restarting tests with the "until" keyword,
+        # since without "until", it will at least run with the current binary.
         if is_restarting_test(path):
             candidates: List[Path] = []
             dirs = path.parent.parts
@@ -148,8 +151,7 @@ class TestPicker:
                     if min_version <= ver < max_version:
                         candidates.append(binary)
                 if not len(candidates):
-                    sys.stdout.write(
-                        "Cannot find valid old binary for restarting test {}\n".format(path))
+                    # No valid old binary found
                     return
 
         with path.open("r") as f:
@@ -285,7 +287,9 @@ class OldBinaries:
         for ver, binary in self.binaries.items():
             if min_version <= ver < max_version:
                 candidates.append(binary)
-        return config.random.choice(candidates) if len(candidates) else config.binary
+        if len(candidates) == 0:
+            return config.binary
+        return config.random.choice(candidates)
 
 
 def is_restarting_test(test_file: Path):
