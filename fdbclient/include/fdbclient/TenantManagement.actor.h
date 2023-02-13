@@ -374,6 +374,7 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 
 		// This is idempotent because we only erase an entry from the tenant map if it is present
 		TenantMetadata::tenantMap().erase(tr, tenantId);
+		TenantMetadata::tenantLockId().erase(tr, tenantId);
 		TenantMetadata::tenantNameIndex().erase(tr, tenantEntry.get().tenantName);
 		TenantMetadata::tenantCount().atomicOp(tr, -1, MutationRef::AddValue);
 		TenantMetadata::lastTenantModification().setVersionstamp(tr, Versionstamp(), 0);
@@ -522,11 +523,6 @@ Future<Void> changeLockState(Transaction* tr, int64_t tenant, TenantLockState de
 	return Void();
 }
 
-ACTOR template <class Transaction>
-Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantsTransaction(Transaction tr,
-                                                                                  TenantName begin,
-                                                                                  TenantName end,
-                                                                                  int limit) {
 template <class Transaction>
 Future<std::vector<std::pair<TenantName, int64_t>>> listTenantsTransaction(Transaction tr,
                                                                            TenantName begin,
