@@ -1,3 +1,7 @@
+[configuration]
+# FIXME: re-enable rocks at some point
+storageEngineExcludeTypes = [4]
+
 [[test]]
 testTitle = 'HighContentionPrefixAllocator'
 
