@@ -469,7 +469,11 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 	ACTOR static Future<Void> restoreManagementCluster(MetaclusterRestoreWorkload* self) {
 		TraceEvent("MetaclusterRestoreWorkloadRestoringManagementCluster");
-		wait(success(MetaclusterAPI::createMetacluster(self->managementDb, "management_cluster"_sr, 0)));
+		wait(success(MetaclusterAPI::createMetacluster(
+		    self->managementDb,
+		    "management_cluster"_sr,
+		    deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
+		                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1))));
 		state std::map<ClusterName, DataClusterData>::iterator clusterItr;
 		for (clusterItr = self->dataDbs.begin(); clusterItr != self->dataDbs.end(); ++clusterItr) {
 			TraceEvent("MetaclusterRestoreWorkloadProcessDataCluster").detail("FromCluster", clusterItr->first);

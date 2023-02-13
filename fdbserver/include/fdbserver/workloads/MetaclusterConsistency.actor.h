@@ -219,7 +219,6 @@ private:
 		std::set<TenantGroupName> processedTenantGroups;
 		for (auto [tenantId, entry] : managementMetadata.tenantMap) {
 			ASSERT(entry.assignedCluster.present());
-			ASSERT(TenantAPI::getTenantIdPrefix(tenantId) == managementMetadata.tenantIdPrefix.get());
 
 			// Each tenant should be assigned to the same cluster where it is stored in the cluster tenant index
 			auto clusterItr = managementMetadata.clusterTenantMap.find(entry.assignedCluster.get());
@@ -333,7 +332,6 @@ private:
 			TenantMapEntry const& metaclusterEntry = self->managementMetadata.tenantMap[tenantId];
 			ASSERT(!entry.assignedCluster.present());
 			ASSERT_EQ(entry.id, metaclusterEntry.id);
-			ASSERT(TenantAPI::getTenantIdPrefix(entry.id) == self->managementMetadata.tenantIdPrefix.get());
 			ASSERT(entry.tenantName == metaclusterEntry.tenantName);
 
 			ASSERT_EQ(entry.tenantState, TenantState::READY);

@@ -153,7 +153,9 @@ private:
 		for (auto [tenantId, tenantMapEntry] : metadata.tenantMap) {
 			ASSERT_EQ(tenantId, tenantMapEntry.id);
 			if (metadata.clusterType != ClusterType::METACLUSTER_DATA) {
-				ASSERT_LE(tenantId, metadata.lastTenantId);
+				if (TenantAPI::getTenantIdPrefix(tenantId) == TenantAPI::getTenantIdPrefix(metadata.lastTenantId)) {
+					ASSERT_LE(tenantId, metadata.lastTenantId);
+				}
 			}
 			ASSERT_EQ(metadata.tenantNameIndex[tenantMapEntry.tenantName], tenantId);
 
