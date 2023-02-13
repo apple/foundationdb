@@ -253,7 +253,7 @@ private:
 		state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> dataClusterTenantList;
 		state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> dataClusterTenantGroupList;
 
-		state TenantConsistencyCheck<IDatabase> tenantConsistencyCheck(dataDb, true);
+		state TenantConsistencyCheck<IDatabase> tenantConsistencyCheck(dataDb);
 		wait(tenantConsistencyCheck.run());
 
 		loop {

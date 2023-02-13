@@ -46,6 +46,8 @@ struct ClusterUsage {
 	}
 };
 
+json_spirit::mObject binaryToJson(StringRef bytes);
+
 template <>
 struct Traceable<ClusterUsage> : std::true_type {
 	static std::string toString(const ClusterUsage& value) {
@@ -97,6 +99,61 @@ struct DataClusterEntry {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, id, capacity, allocated, clusterState);
+	}
+};
+
+struct MetaclusterTenantMapEntry {
+	constexpr static FileIdentifier file_identifier = 12247338;
+
+	int64_t id = -1;
+	Key prefix;
+	TenantName tenantName;
+	TenantAPI::TenantState tenantState = TenantAPI::TenantState::READY;
+	TenantAPI::TenantLockState tenantLockState = TenantAPI::TenantLockState::UNLOCKED;
+	Optional<TenantGroupName> tenantGroup;
+	ClusterName assignedCluster;
+	int64_t configurationSequenceNum = 0;
+	Optional<TenantName> renameDestination;
+
+	// Can be set to an error string if the tenant is in the ERROR state
+	std::string error;
+
+	MetaclusterTenantMapEntry();
+	MetaclusterTenantMapEntry(int64_t id, TenantName tenantName, TenantAPI::TenantState tenantState);
+	MetaclusterTenantMapEntry(int64_t id,
+	                          TenantName tenantName,
+	                          TenantAPI::TenantState tenantState,
+	                          Optional<TenantGroupName> tenantGroup);
+
+	void setId(int64_t id);
+	std::string toJson() const;
+
+	bool matchesConfiguration(MetaclusterTenantMapEntry const& other) const;
+	void configure(Standalone<StringRef> parameter, Optional<Value> value);
+
+	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
+	static MetaclusterTenantMapEntry decode(ValueRef const& value) {
+		return ObjectReader::fromStringRef<MetaclusterTenantMapEntry>(value, IncludeVersion());
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar,
+		           id,
+		           tenantName,
+		           tenantState,
+		           tenantLockState,
+		           tenantGroup,
+		           assignedCluster,
+		           configurationSequenceNum,
+		           renameDestination,
+		           error);
+		if constexpr (Ar::isDeserializing) {
+			if (id >= 0) {
+				prefix = TenantAPI::idToPrefix(id);
+			}
+			ASSERT(tenantState >= TenantAPI::TenantState::REGISTERING && tenantState <= TenantAPI::TenantState::ERROR);
+		}
 	}
 };
 

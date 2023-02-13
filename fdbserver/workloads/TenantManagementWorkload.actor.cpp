@@ -544,7 +544,14 @@ struct TenantManagementWorkload : TestWorkload {
 								// We should be able to retry and pick up where we left off
 								ASSERT(resultEntry.get().tenantState == TenantAPI::TenantState::REGISTERING);
 							}
+						} else {
+							CODE_PROBE(true, "Created tenant (metacluster) is not present and may have been removed.");
 						}
+					} else {
+						Optional<TenantMapEntry> tenantEntry =
+						    wait(TenantAPI::tryGetTenant(self->dataDb.getReference(), tenantsToCreate.begin()->first));
+						CODE_PROBE(!tenantEntry.present(),
+						           "Created tenant (non-metacluster) is not present and may have been removed.");
 					}
 				}
 
@@ -575,6 +582,7 @@ struct TenantManagementWorkload : TestWorkload {
 						    wait(MetaclusterAPI::tryGetTenant(self->mvDb, tenantItr->first));
 						wait(verifyTenantCreate<MetaclusterTenantMapEntry>(
 						    self, metaEntry, tenantItr->first, tenantItr->second.tenantGroup));
+						ASSERT(metaEntry.get().tenantState == TenantAPI::TenantState::READY);
 						tPrefix = metaEntry.get().prefix;
 					} else {
 						state Optional<TenantMapEntry> normalEntry =
@@ -903,16 +911,23 @@ struct TenantManagementWorkload : TestWorkload {
 						}
 					}
 
-					if (!tenants.empty() && operationType == OperationType::METACLUSTER) {
-						// Check the state of the first deleted tenant
-						Optional<MetaclusterTenantMapEntry> resultEntry =
-						    wait(MetaclusterAPI::tryGetTenant(self->mvDb, tenants.begin()->first));
-
-						if (!resultEntry.present()) {
-							alreadyExists = false;
+					if (!tenants.empty()) {
+						if (operationType == OperationType::METACLUSTER) {
+							// Check the state of the first deleted tenant
+							Optional<MetaclusterTenantMapEntry> resultEntry =
+							    wait(MetaclusterAPI::tryGetTenant(self->mvDb, tenants.begin()->first));
+							if (!resultEntry.present()) {
+								alreadyExists = false;
+							} else {
+								ASSERT(resultEntry.get().tenantState == TenantAPI::TenantState::READY ||
+								       resultEntry.get().tenantState == TenantAPI::TenantState::REMOVING);
+							}
 						} else {
-							ASSERT(resultEntry.get().tenantState == TenantAPI::TenantState::READY ||
-							       resultEntry.get().tenantState == TenantAPI::TenantState::REMOVING);
+							Optional<TenantMapEntry> tenantEntry =
+							    wait(TenantAPI::tryGetTenant(self->dataDb.getReference(), tenants.begin()->first));
+							if (!tenantEntry.present()) {
+								alreadyExists = false;
+							}
 						}
 					}
 				}

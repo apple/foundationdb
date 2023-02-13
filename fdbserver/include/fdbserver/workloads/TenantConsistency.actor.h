@@ -42,7 +42,6 @@ template <class DB>
 class TenantConsistencyCheck {
 private:
 	Reference<DB> db;
-	bool isDataCluster = false;
 
 	struct TenantData {
 		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
@@ -139,7 +138,7 @@ private:
 			// Only standalone clusters will have lastTenantId set
 			// For Metacluster, the lastTenantId field is updated for MetaclusterMetadata
 			// and not TenantMetadata
-			if (!isDataCluster) {
+			if (metadata.clusterType != ClusterType::METACLUSTER_DATA) {
 				ASSERT_LE(tenantId, metadata.lastTenantId);
 			}
 			ASSERT_EQ(metadata.tenantNameIndex[tenantMapEntry.tenantName], tenantId);
@@ -248,7 +247,6 @@ private:
 public:
 	TenantConsistencyCheck() {}
 	TenantConsistencyCheck(Reference<DB> db) : db(db) {}
-	TenantConsistencyCheck(Reference<DB> db, bool isDataCluster) : db(db), isDataCluster(isDataCluster) {}
 
 	Future<Void> run() { return run(this); }
 };
