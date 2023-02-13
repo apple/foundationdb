@@ -1512,7 +1512,9 @@ struct TenantManagementWorkload : TestWorkload {
 			hasSystemTenantGroup = hasSystemTenantGroup || newTenantGroup.orDefault(""_sr).startsWith("\xff"_sr);
 			configuration["tenant_group"_sr] = newTenantGroup;
 		}
-		if (!hasInvalidOption || deterministicRandom()->coinflip()) {
+		// Configuring 'assignedCluster' requires reading existing tenant entry which is handled in
+		// `updateManagementCluster`.
+		if (operationType == OperationType::METACLUSTER && (!hasInvalidOption || deterministicRandom()->coinflip())) {
 			Standalone<StringRef> newClusterName = "newcluster"_sr;
 			if (deterministicRandom()->coinflip()) {
 				newClusterName = self->dataClusterName;
