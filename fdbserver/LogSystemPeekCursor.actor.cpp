@@ -452,7 +452,9 @@ ACTOR Future<Void> serverPeekGetMore(ILogSystem::ServerPeekCursor* self, TaskPri
 					    .detail("Popped", res.popped.present() ? res.popped.get() : 0);
 					return Void();
 				}
-				when(wait(self->interf->onChange())) { self->onlySpilled = false; }
+				when(wait(self->interf->onChange())) {
+					self->onlySpilled = false;
+				}
 			}
 		}
 	} catch (Error& e) {

@@ -111,6 +111,7 @@ public:
 	bool PEEK_BATCHING_EMPTY_MSG;
 	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
 	double POP_FROM_LOG_DELAY;
+	double TLOG_PULL_ASYNC_DATA_WARNING_TIMEOUT_SECS;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
@@ -186,9 +187,14 @@ public:
 	double METRIC_DELAY;
 	double ALL_DATA_REMOVED_DELAY;
 	double INITIAL_FAILURE_REACTION_DELAY;
-	double CHECK_TEAM_DELAY;
-	double PERPETUAL_WIGGLE_DELAY;
-	bool PERPETUAL_WIGGLE_DISABLE_REMOVER;
+	double CHECK_TEAM_DELAY; // Perpetual wiggle check cluster team healthy
+	double PERPETUAL_WIGGLE_SMALL_LOAD_RATIO; // If the average load of storage server is less than this ratio * average
+	                                          // shard bytes, the perpetual wiggle won't consider the available space
+	                                          // load balance in the cluster
+	double PERPETUAL_WIGGLE_MIN_BYTES_BALANCE_RATIO; // target min : average space load balance ratio after re-include
+	                                                 // before perpetual wiggle will start the next wiggle
+	double PERPETUAL_WIGGLE_DELAY; // The max interval between the last wiggle finish and the next wiggle start
+	bool PERPETUAL_WIGGLE_DISABLE_REMOVER; // Whether the start of perpetual wiggle replace team remover
 	double LOG_ON_COMPLETION_DELAY;
 	int BEST_TEAM_MAX_TEAM_TRIES;
 	int BEST_TEAM_OPTION_COUNT;
@@ -264,6 +270,7 @@ public:
 
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
+	int DD_BUILD_EXTRA_TEAMS_OVERRIDE; // build extra teams to allow data movement to progress. must be larger than 0
 
 	// Run storage enginee on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;
@@ -321,6 +328,7 @@ public:
 	int ROCKSDB_WRITER_THREAD_PRIORITY;
 	int ROCKSDB_BACKGROUND_PARALLELISM;
 	int ROCKSDB_READ_PARALLELISM;
+	int ROCKSDB_CHECKPOINT_READER_PARALLELISM;
 	int64_t ROCKSDB_MEMTABLE_BYTES;
 	bool ROCKSDB_LEVEL_STYLE_COMPACTION;
 	bool ROCKSDB_UNSAFE_AUTO_FSYNC;
@@ -332,6 +340,8 @@ public:
 	double ROCKSDB_READ_VALUE_TIMEOUT;
 	double ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
 	double ROCKSDB_READ_RANGE_TIMEOUT;
+	double ROCKSDB_READ_CHECKPOINT_TIMEOUT;
+	int64_t ROCKSDB_CHECKPOINT_READ_AHEAD_SIZE;
 	double ROCKSDB_READ_QUEUE_WAIT;
 	int ROCKSDB_READ_QUEUE_SOFT_MAX;
 	int ROCKSDB_READ_QUEUE_HARD_MAX;
@@ -361,6 +371,10 @@ public:
 	bool ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE;
 	int64_t ROCKSDB_SINGLEKEY_DELETES_BYTES_LIMIT;
 	bool ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS;
+	bool ROCKSDB_ENABLE_COMPACT_ON_DELETION;
+	int64_t ROCKSDB_CDCF_SLIDING_WINDOW_SIZE; // CDCF: CompactOnDeletionCollectorFactory
+	int64_t ROCKSDB_CDCF_DELETION_TRIGGER; // CDCF: CompactOnDeletionCollectorFactory
+	double ROCKSDB_CDCF_DELETION_RATIO; // CDCF: CompactOnDeletionCollectorFactory
 	int ROCKSDB_STATS_LEVEL;
 	int64_t ROCKSDB_COMPACTION_READAHEAD_SIZE;
 	int64_t ROCKSDB_BLOCK_SIZE;
@@ -394,6 +408,7 @@ public:
 	double START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET;
 	int START_TRANSACTION_MAX_QUEUE_SIZE;
 	int KEY_LOCATION_MAX_QUEUE_SIZE;
+	int TENANT_ID_REQUEST_MAX_QUEUE_SIZE;
 	double COMMIT_PROXY_LIVENESS_TIMEOUT;
 
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE;
@@ -409,6 +424,7 @@ public:
 	int64_t COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT;
 	double COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL;
 	double COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR;
+	double COMMIT_TRIGGER_DELAY;
 
 	double RESOLVER_COALESCE_TIME;
 	int BUGGIFIED_ROW_LIMIT;
@@ -651,6 +667,11 @@ public:
 	double PROXY_MAX_TAG_THROTTLE_DURATION;
 	// Interval at which latency bands are logged for each tag on grv proxy
 	double GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL;
+	// When the measured tps for a tag gets too low, the denominator in the
+	// average cost calculation gets small, resulting in an unstable calculation.
+	// To protect against this, we do not compute the average cost when the
+	// measured tps drops below a certain threshold
+	double GLOBAL_TAG_THROTTLING_MIN_TPS;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
@@ -775,6 +796,7 @@ public:
 	std::string STORAGESERVER_READ_PRIORITIES;
 	int STORAGE_SERVER_READ_CONCURRENCY;
 	std::string STORAGESERVER_READTYPE_PRIORITY_MAP;
+	int SPLIT_METRICS_MAX_ROWS;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -928,7 +950,6 @@ public:
 	double REDWOOD_HISTOGRAM_INTERVAL;
 	bool REDWOOD_EVICT_UPDATED_PAGES; // Whether to prioritize eviction of updated pages from cache.
 	int REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT; // Minimum height for which to keep and reuse page decode caches
-	bool REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT; // Whether to split pages by tenant if encryption is enabled
 
 	std::string REDWOOD_IO_PRIORITIES;
 
@@ -981,11 +1002,18 @@ public:
 	int BG_RDC_BYTES_FACTOR;
 	int BG_RDC_READ_FACTOR;
 	bool BG_WRITE_MULTIPART;
+	bool BG_ENABLE_DYNAMIC_WRITE_AMP;
+	double BG_DYNAMIC_WRITE_AMP_MIN_FACTOR;
+	double BG_DYNAMIC_WRITE_AMP_DECREASE_FACTOR;
 
 	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
 	int BLOB_WORKER_RESNAPSHOT_PARALLELISM;
 	int BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM;
 	int BLOB_WORKER_RDC_PARALLELISM;
+	// The resnapshot/delta parallelism knobs are deprecated and replaced by the budget_bytes knobs! FIXME: remove after
+	// next release
+	int64_t BLOB_WORKER_RESNAPSHOT_BUDGET_BYTES;
+	int64_t BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES;
 
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
 	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
@@ -1007,6 +1035,10 @@ public:
 	double BLOB_MIGRATOR_CHECK_INTERVAL;
 	int BLOB_MANIFEST_RW_ROWS;
 	std::string BLOB_RESTORE_MLOGS_URL;
+	int BLOB_MIGRATOR_ERROR_RETRIES;
+	std::string BLOB_RESTORE_MANIFEST_URL;
+	int BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE;
+	int BLOB_RESTORE_MANIFEST_RETENTION_MAX;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;
@@ -1021,10 +1053,15 @@ public:
 	bool REST_KMS_CONNECTOR_REFRESH_KMS_URLS;
 	double REST_KMS_CONNECTOR_REFRESH_KMS_URLS_INTERVAL_SEC;
 	std::string REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT;
+	std::string REST_KMS_CONNECTOR_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT;
 	std::string REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT;
+	int REST_KMS_CURRENT_BLOB_METADATA_REQUEST_VERSION;
+	int REST_KMS_CURRENT_CIPHER_REQUEST_VERSION;
 
 	// Idempotency ids
 	double IDEMPOTENCY_ID_IN_MEMORY_LIFETIME;
+	double IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL;
+	double IDEMPOTENCY_IDS_MIN_AGE_SECONDS;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

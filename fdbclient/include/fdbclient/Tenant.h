@@ -30,10 +30,18 @@
 #include "flow/BooleanParam.h"
 #include "flow/flat_buffers.h"
 
-typedef StringRef TenantNameRef;
-typedef Standalone<TenantNameRef> TenantName;
-typedef StringRef TenantGroupNameRef;
-typedef Standalone<TenantGroupNameRef> TenantGroupName;
+FDB_DECLARE_BOOLEAN_PARAM(EnforceValidTenantId);
+
+namespace TenantAPI {
+KeyRef idToPrefix(Arena& p, int64_t id);
+Key idToPrefix(int64_t id);
+int64_t prefixToId(KeyRef prefix, EnforceValidTenantId = EnforceValidTenantId::True);
+
+// return true if begin and end has the same non-negative prefix id
+bool withinSingleTenant(KeyRangeRef const&);
+
+constexpr static int PREFIX_SIZE = sizeof(int64_t);
+} // namespace TenantAPI
 
 // Represents the various states that a tenant could be in.
 // In a standalone cluster, a tenant should only ever be in the READY state.
@@ -45,33 +53,24 @@ typedef Standalone<TenantGroupNameRef> TenantGroupName;
 // REMOVING - the tenant has been marked for removal and is being removed on the data cluster
 // UPDATING_CONFIGURATION - the tenant configuration has changed on the management cluster and is being applied to the
 //                          data cluster
-// RENAMING_FROM - the tenant is being renamed to a new name and is awaiting the rename to complete on the data cluster
-// RENAMING_TO - the tenant is being created as a rename from an existing tenant and is awaiting the rename to complete
-//               on the data cluster
+// RENAMING - the tenant is in the process of being renamed
 // ERROR - the tenant is in an error state
 //
 // A tenant in any configuration is allowed to be removed. Only tenants in the READY or UPDATING_CONFIGURATION phases
 // can have their configuration updated. A tenant must not exist or be in the REGISTERING phase to be created. To be
-// renamed, a tenant must be in the READY or RENAMING_FROM state. In the latter case, the rename destination must match
+// renamed, a tenant must be in the READY or RENAMING state. In the latter case, the rename destination must match
 // the original rename attempt.
 //
 // If an operation fails and the tenant is left in a non-ready state, re-running the same operation is legal. If
 // successful, the tenant will return to the READY state.
-enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, RENAMING_FROM, RENAMING_TO, ERROR };
+enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, RENAMING, ERROR };
 
 // Represents the lock state the tenant could be in.
 // Can be used in conjunction with the other tenant states above.
-enum class TenantLockState { UNLOCKED, READ_ONLY, LOCKED };
-
-constexpr int TENANT_PREFIX_SIZE = sizeof(int64_t);
-
-FDB_DECLARE_BOOLEAN_PARAM(EnforceValidTenantId);
+enum class TenantLockState : uint8_t { UNLOCKED, READ_ONLY, LOCKED };
 
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
-
-	static Key idToPrefix(int64_t id);
-	static int64_t prefixToId(KeyRef prefix, EnforceValidTenantId enforceTenantId = EnforceValidTenantId::True);
 
 	static std::string tenantStateToString(TenantState tenantState);
 	static TenantState stringToTenantState(std::string stateStr);
@@ -87,12 +86,10 @@ struct TenantMapEntry {
 	Optional<TenantGroupName> tenantGroup;
 	Optional<ClusterName> assignedCluster;
 	int64_t configurationSequenceNum = 0;
-	Optional<TenantName> renamePair;
+	Optional<TenantName> renameDestination;
 
 	// Can be set to an error string if the tenant is in the ERROR state
 	std::string error;
-
-	constexpr static int PREFIX_SIZE = sizeof(id);
 
 	TenantMapEntry();
 	TenantMapEntry(int64_t id, TenantName tenantName, TenantState tenantState);
@@ -119,11 +116,11 @@ struct TenantMapEntry {
 		           tenantGroup,
 		           assignedCluster,
 		           configurationSequenceNum,
-		           renamePair,
+		           renameDestination,
 		           error);
 		if constexpr (Ar::isDeserializing) {
 			if (id >= 0) {
-				prefix = idToPrefix(id);
+				prefix = TenantAPI::idToPrefix(id);
 			}
 			ASSERT(tenantState >= TenantState::REGISTERING && tenantState <= TenantState::ERROR);
 		}
@@ -170,26 +167,57 @@ struct TenantTombstoneCleanupData {
 	}
 };
 
+// This is used so that tenant IDs will be ordered and so that we can easily map arbitrary ranges in the tenant map to
+// the affected tenant IDs.
+struct TenantIdCodec {
+	static Standalone<StringRef> pack(int64_t val) {
+		int64_t swapped = bigEndian64(val);
+		return StringRef((uint8_t*)&swapped, sizeof(swapped));
+	}
+	static int64_t unpack(Standalone<StringRef> val) { return bigEndian64(*(int64_t*)val.begin()); }
+
+	static Optional<int64_t> lowerBound(Standalone<StringRef> val) {
+		if (val >= "\x80"_sr) {
+			return {};
+		}
+		if (val.size() == 8) {
+			return unpack(val);
+		} else if (val.size() > 8) {
+			int64_t result = unpack(val);
+			if (result == std::numeric_limits<int64_t>::max()) {
+				return {};
+			}
+			return result + 1;
+		} else {
+			int64_t result = 0;
+			memcpy(&result, val.begin(), val.size());
+			return bigEndian64(result);
+		}
+	}
+};
+
 struct TenantMetadataSpecification {
 	Key subspace;
 
-	KeyBackedObjectMap<TenantName, TenantMapEntry, decltype(IncludeVersion()), NullCodec> tenantMap;
-	KeyBackedMap<int64_t, TenantName> tenantIdIndex;
+	KeyBackedObjectMap<int64_t, TenantMapEntry, decltype(IncludeVersion()), TenantIdCodec> tenantMap;
+	KeyBackedMap<TenantName, int64_t> tenantNameIndex;
 	KeyBackedProperty<int64_t> lastTenantId;
 	KeyBackedBinaryValue<int64_t> tenantCount;
 	KeyBackedSet<int64_t> tenantTombstones;
 	KeyBackedObjectProperty<TenantTombstoneCleanupData, decltype(IncludeVersion())> tombstoneCleanupData;
 	KeyBackedSet<Tuple> tenantGroupTenantIndex;
 	KeyBackedObjectMap<TenantGroupName, TenantGroupEntry, decltype(IncludeVersion()), NullCodec> tenantGroupMap;
+	KeyBackedMap<TenantGroupName, int64_t> storageQuota;
 	KeyBackedBinaryValue<Versionstamp> lastTenantModification;
 
 	TenantMetadataSpecification(KeyRef prefix)
 	  : subspace(prefix.withSuffix("tenant/"_sr)), tenantMap(subspace.withSuffix("map/"_sr), IncludeVersion()),
-	    tenantIdIndex(subspace.withSuffix("idIndex/"_sr)), lastTenantId(subspace.withSuffix("lastId"_sr)),
+	    tenantNameIndex(subspace.withSuffix("nameIndex/"_sr)), lastTenantId(subspace.withSuffix("lastId"_sr)),
 	    tenantCount(subspace.withSuffix("count"_sr)), tenantTombstones(subspace.withSuffix("tombstones/"_sr)),
 	    tombstoneCleanupData(subspace.withSuffix("tombstoneCleanup"_sr), IncludeVersion()),
 	    tenantGroupTenantIndex(subspace.withSuffix("tenantGroup/tenantIndex/"_sr)),
 	    tenantGroupMap(subspace.withSuffix("tenantGroup/map/"_sr), IncludeVersion()),
+	    storageQuota(subspace.withSuffix("storageQuota/"_sr)),
 	    lastTenantModification(subspace.withSuffix("lastModification"_sr)) {}
 };
 
@@ -198,43 +226,19 @@ struct TenantMetadata {
 
 	static inline auto& subspace() { return instance().subspace; }
 	static inline auto& tenantMap() { return instance().tenantMap; }
-	static inline auto& tenantIdIndex() { return instance().tenantIdIndex; }
+	static inline auto& tenantNameIndex() { return instance().tenantNameIndex; }
 	static inline auto& lastTenantId() { return instance().lastTenantId; }
 	static inline auto& tenantCount() { return instance().tenantCount; }
 	static inline auto& tenantTombstones() { return instance().tenantTombstones; }
 	static inline auto& tombstoneCleanupData() { return instance().tombstoneCleanupData; }
 	static inline auto& tenantGroupTenantIndex() { return instance().tenantGroupTenantIndex; }
 	static inline auto& tenantGroupMap() { return instance().tenantGroupMap; }
+	static inline auto& storageQuota() { return instance().storageQuota; }
 	static inline auto& lastTenantModification() { return instance().lastTenantModification; }
+	// This system keys stores the tenant id prefix that is used during metacluster/standalone cluster creation. If the
+	// key is not present then we will assume the prefix to be 0
+	static KeyBackedProperty<int64_t>& tenantIdPrefix();
 
 	static Key tenantMapPrivatePrefix();
 };
-
-typedef VersionedMap<TenantName, TenantMapEntry> TenantMap;
-
-// A set of tenant names that is generally expected to have one item in it. The set can have more than one item in it
-// during certain periods when the set is being updated (e.g. while restoring a backup), but it is expected to have
-// one item at the end. It is not possible to use the set while it contains more than one item.
-struct TenantNameUniqueSet {
-	std::unordered_set<TenantName> tenantNames;
-
-	// Returns the single tenant name stored in the set
-	// It is an error to call this function if the set holds more than one name
-	TenantName get() const {
-		ASSERT(tenantNames.size() == 1);
-		return *tenantNames.begin();
-	}
-
-	void insert(TenantName const& name) { tenantNames.insert(name); }
-
-	// Removes a tenant name from the set. Returns true if the set is now empty.
-	bool remove(TenantName const& name) {
-		auto itr = tenantNames.find(name);
-		ASSERT(itr != tenantNames.end());
-		tenantNames.erase(itr);
-		return tenantNames.empty();
-	}
-};
-typedef VersionedMap<Key, TenantNameUniqueSet> TenantPrefixIndex;
-
 #endif

@@ -119,9 +119,13 @@ public:
 	const Field& operator[](int index) const;
 	bool tryGetValue(std::string key, std::string& outValue) const;
 	std::string getValue(std::string key) const;
+	bool tryGetInt(std::string key, int& outVal, bool permissive = false) const;
 	int getInt(std::string key, bool permissive = false) const;
+	bool tryGetInt64(std::string key, int64_t& outVal, bool permissive = false) const;
 	int64_t getInt64(std::string key, bool permissive = false) const;
+	bool tryGetUint64(std::string key, uint64_t& outVal, bool permissive = false) const;
 	uint64_t getUint64(std::string key, bool permissive = false) const;
+	bool tryGetDouble(std::string key, double& outVal, bool permissive = false) const;
 	double getDouble(std::string key, bool permissive = false) const;
 
 	Field& mutate(int index);
@@ -171,7 +175,7 @@ public:
 private:
 	struct EventInfo {
 		TraceEventFields fields;
-		EventInfo(double time, const char* name, uint64_t id, const char* location);
+		EventInfo(double time, double monotonicTime, const char* name, uint64_t id, const char* location);
 	};
 
 	struct AttachInfo {
@@ -400,6 +404,13 @@ template <>
 struct Traceable<std::string> : TraceableStringImpl<std::string> {};
 template <>
 struct Traceable<std::string_view> : TraceableStringImpl<std::string_view> {};
+
+template <class T>
+struct Traceable<Reference<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
+	static std::string toString(const Reference<T>& value) {
+		return value ? Traceable<T>::toString(*value) : "[not set]";
+	}
+};
 
 template <class T>
 struct SpecialTraceMetricType
@@ -632,7 +643,10 @@ struct EventCacheHolder : public ReferenceCounted<EventCacheHolder> {
 #endif
 
 struct NetworkAddress;
-void openTraceFile(const NetworkAddress& na,
+template <class T>
+class Optional;
+
+void openTraceFile(const Optional<NetworkAddress>& na,
                    uint64_t rollsize,
                    uint64_t maxLogsSize,
                    std::string directory = ".",
@@ -662,6 +676,7 @@ void removeTraceRole(std::string const& role);
 void retrieveTraceLogIssues(std::set<std::string>& out);
 void setTraceLogGroup(const std::string& role);
 void addUniversalTraceField(std::string const& name, std::string const& value);
+bool isTraceLocalAddressSet();
 void setTraceLocalAddress(const NetworkAddress& addr);
 void disposeTraceFileWriter();
 std::string getTraceFormatExtension();

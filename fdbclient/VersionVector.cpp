@@ -112,7 +112,7 @@ void populateVersionVector(VersionVector& vv,
 	int tagsPerLocality = tagCount / localityCount;
 
 	// Populate localities.
-	for (int i = 0; localities.size() < (size_t)localityCount; i++) {
+	while (localities.size() < (size_t)localityCount) {
 		int8_t locality = deterministicRandom()->randomInt(tagLocalityInvalid + 1, INT8_MAX);
 		if (std::find(localities.begin(), localities.end(), locality) == localities.end()) {
 			localities.push_back(locality);

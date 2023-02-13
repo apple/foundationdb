@@ -25,6 +25,7 @@
 #include "flow/UnitTest.h"
 #include <inttypes.h>
 
+#include "flow/IConnection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 constexpr int WLTOKEN_NETWORKTEST = WLTOKEN_FIRST_AVAILABLE;

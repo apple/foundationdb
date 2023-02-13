@@ -21,9 +21,10 @@
 #ifndef __ASYNC_TASK_THREAD_H__
 #define __ASYNC_TASK_THREAD_H__
 
-#include <thread>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <thread>
 
 #include "flow/network.h"
 #include "flow/ThreadHelper.actor.h"

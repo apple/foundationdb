@@ -70,12 +70,15 @@ void ApiWorkload::start() {
 	schedule([this]() {
 		// 1. Clear data
 		clearData([this]() {
-			// 2. Workload setup
-			setup([this]() {
-				// 3. Populate initial data
-				populateData([this]() {
-					// 4. Generate random workload
-					runTests();
+			// 2. Create tenants if necessary.
+			createTenantsIfNecessary([this] {
+				// 3. Workload setup.
+				setup([this]() {
+					// 4. Populate initial data
+					populateData([this]() {
+						// 5. Generate random workload
+						runTests();
+					});
 				});
 			});
 		});
@@ -150,6 +153,21 @@ fdb::Key ApiWorkload::randomKey(double existingKeyRatio, std::optional<int> tena
 	} else {
 		return randomNotExistingKey(tenantId);
 	}
+}
+
+fdb::KeyRange ApiWorkload::randomNonEmptyKeyRange() {
+	fdb::KeyRange keyRange;
+	keyRange.beginKey = randomKeyName();
+	// avoid empty key range
+	do {
+		keyRange.endKey = randomKeyName();
+	} while (keyRange.beginKey == keyRange.endKey);
+
+	if (keyRange.beginKey > keyRange.endKey) {
+		std::swap(keyRange.beginKey, keyRange.endKey);
+	}
+	ASSERT(keyRange.beginKey < keyRange.endKey);
+	return keyRange;
 }
 
 std::optional<int> ApiWorkload::randomTenant() {
@@ -244,9 +262,17 @@ void ApiWorkload::createTenants(TTaskFct cont) {
 	    [this, cont]() { schedule(cont); });
 }
 
+void ApiWorkload::createTenantsIfNecessary(TTaskFct cont) {
+	if (tenants.size() > 0) {
+		createTenants(cont);
+	} else {
+		schedule(cont);
+	}
+}
+
 void ApiWorkload::populateData(TTaskFct cont) {
 	if (tenants.size() > 0) {
-		createTenants([this, cont]() { populateTenantData(cont, std::make_optional(0)); });
+		populateTenantData(cont, std::make_optional(0));
 	} else {
 		populateTenantData(cont, {});
 	}

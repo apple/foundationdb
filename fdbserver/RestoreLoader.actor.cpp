@@ -86,7 +86,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     Reference<IBackupContainer> bc,
     Version version,
     RestoreAsset asset,
-    Optional<Database> cx);
+    Database cx);
 ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreLoaderData> self);
 
 // Dispatch requests based on node's business (i.e, cpu usage for now) and requests' priorities
@@ -98,7 +98,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self, Database 
 		state int sendLoadParams = 0;
 		state int lastLoadReqs = 0;
 		loop {
-			TraceEvent(SevDebug, "FastRestoreLoaderDispatchRequests", self->id())
+			TraceEvent(SevVerbose, "FastRestoreLoaderDispatchRequests", self->id())
 			    .detail("SendingQueue", self->sendingQueue.size())
 			    .detail("LoadingQueue", self->loadingQueue.size())
 			    .detail("SendingLoadParamQueue", self->sendLoadParamQueue.size())
@@ -223,7 +223,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self, Database 
 			updateProcessStats(self);
 
 			if (self->loadingQueue.empty() && self->sendingQueue.empty() && self->sendLoadParamQueue.empty()) {
-				TraceEvent(SevDebug, "FastRestoreLoaderDispatchRequestsWaitOnRequests", self->id())
+				TraceEvent(SevVerbose, "FastRestoreLoaderDispatchRequestsWaitOnRequests", self->id())
 				    .detail("HasPendingRequests", self->hasPendingRequests->get());
 				self->hasPendingRequests->set(false);
 				wait(self->hasPendingRequests->onChange()); // CAREFUL:Improper req release may cause restore stuck here
@@ -303,7 +303,9 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
 					TraceEvent("FastRestoreLoaderCoreExitRole", self->id());
 					break;
 				}
-				when(wait(error)) { TraceEvent("FastRestoreLoaderActorCollectionError", self->id()); }
+				when(wait(error)) {
+					TraceEvent("FastRestoreLoaderActorCollectionError", self->id());
+				}
 			}
 		} catch (Error& e) {
 			bool isError = e.code() != error_code_operation_cancelled; // == error_code_broken_promise
@@ -1039,7 +1041,7 @@ void splitMutation(const KeyRangeMap<UID>& krMap,
                    VectorRef<MutationRef>& mvector,
                    Arena& nodeIDs_arena,
                    VectorRef<UID>& nodeIDs) {
-	TraceEvent(SevDebug, "FastRestoreSplitMutation").detail("Mutation", m);
+	TraceEvent(SevVerbose, "FastRestoreSplitMutation").detail("Mutation", m);
 	ASSERT(mvector.empty());
 	ASSERT(nodeIDs.empty());
 	auto r = krMap.intersectingRanges(KeyRangeRef(m.param1, m.param2));
@@ -1248,7 +1250,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     Reference<IBackupContainer> bc,
     Version version,
     RestoreAsset asset,
-    Optional<Database> cx) {
+    Database cx) {
 	state VersionedMutationsMap& kvOps = kvOpsIter->second;
 	state SampledMutationsVec& sampleMutations = samplesIter->second;
 

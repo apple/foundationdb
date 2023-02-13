@@ -91,11 +91,18 @@ void decodeKeyServersValue(RangeResult result,
                            UID& srcID,
                            UID& destID,
                            bool missingIsError = true);
+bool isSystemKey(KeyRef key);
 
-extern const KeyRangeRef auditRange;
+extern const KeyRangeRef auditKeys;
 extern const KeyRef auditPrefix;
-const Key auditRangeKey(const AuditType type, const UID& auditId, const KeyRef& key);
-const Key auditRangePrefix(const AuditType type, const UID& auditId);
+extern const KeyRangeRef auditRanges;
+extern const KeyRef auditRangePrefix;
+
+const Key auditKey(const AuditType type, const UID& auditId);
+const KeyRange auditKeyRange(const AuditType type);
+const Key auditRangeKey(const UID& auditId, const KeyRef& key);
+const Key auditRangePrefixFor(const UID& auditId);
+
 const Value auditStorageStateValue(const AuditStorageState& auditStorageState);
 AuditStorageState decodeAuditStorageState(const ValueRef& value);
 
@@ -277,6 +284,7 @@ extern const KeyRef perpetualStorageWiggleKey;
 extern const KeyRef perpetualStorageWiggleLocalityKey;
 extern const KeyRef perpetualStorageWiggleIDPrefix;
 extern const KeyRef perpetualStorageWiggleStatsPrefix;
+extern const KeyRef perpetualStorageWigglePrefix;
 
 // Change the value of this key to anything and that will trigger detailed data distribution team info log.
 extern const KeyRef triggerDDTeamInfoPrintKey;
@@ -719,12 +727,12 @@ const Value blobRestoreCommandKeyFor(const KeyRangeRef range);
 const KeyRange decodeBlobRestoreCommandKeyFor(const KeyRef key);
 const Value blobRestoreCommandValueFor(BlobRestoreStatus status);
 Standalone<BlobRestoreStatus> decodeBlobRestoreStatus(ValueRef const& value);
-
-// Storage quota per tenant
-// "\xff/storageQuota/[[tenantGroupName]]" := "[[quota]]"
-extern const KeyRangeRef storageQuotaKeys;
-extern const KeyRef storageQuotaPrefix;
-Key storageQuotaKey(StringRef tenantGroupName);
+extern const KeyRangeRef blobRestoreArgKeys;
+const Value blobRestoreArgKeyFor(const KeyRangeRef range);
+const KeyRange decodeBlobRestoreArgKeyFor(const KeyRef key);
+const Value blobRestoreArgValueFor(BlobRestoreArg args);
+Standalone<BlobRestoreArg> decodeBlobRestoreArg(ValueRef const& value);
+extern const Key blobManifestVersionKey;
 
 extern const KeyRangeRef idempotencyIdKeys;
 extern const KeyRef idempotencyIdsExpiredVersion;

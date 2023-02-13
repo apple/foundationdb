@@ -41,7 +41,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 	static constexpr auto NAME = "TenantManagementConcurrency";
 
 	const TenantName tenantNamePrefix = "tenant_management_concurrency_workload_"_sr;
-	const Key testParametersKey = "test_parameters"_sr;
+	const Key testParametersKey = nonMetadataSystemKeys.begin.withSuffix("/tenant_test/test_parameters"_sr);
 
 	int maxTenants;
 	int maxTenantGroups;
@@ -101,7 +101,11 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		self->mvDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
 		if (self->useMetacluster && self->clientId == 0) {
-			wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
+			wait(success(MetaclusterAPI::createMetacluster(
+			    cx.getReference(),
+			    "management_cluster"_sr,
+			    deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
+			                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1))));
 
 			DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;
@@ -171,13 +175,15 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 	ACTOR static Future<Void> createTenant(TenantManagementConcurrencyWorkload* self) {
 		state TenantName tenant = self->chooseTenantName();
 		state TenantMapEntry entry;
+		entry.tenantName = tenant;
 		entry.tenantGroup = self->chooseTenantGroup();
 
 		try {
 			loop {
 				Future<Void> createFuture =
-				    self->useMetacluster ? MetaclusterAPI::createTenant(self->mvDb, tenant, entry)
-				                         : success(TenantAPI::createTenant(self->dataDb.getReference(), tenant, entry));
+				    self->useMetacluster
+				        ? MetaclusterAPI::createTenant(self->mvDb, entry, AssignClusterAutomatically::True)
+				        : success(TenantAPI::createTenant(self->dataDb.getReference(), tenant, entry));
 				Optional<Void> result = wait(timeout(createFuture, 30));
 				if (result.present()) {
 					break;
@@ -236,7 +242,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 					for (auto param : configParams) {
 						updatedEntry.configure(param.first, param.second);
 					}
-					wait(TenantAPI::configureTenantTransaction(tr, tenant, entry, updatedEntry));
+					wait(TenantAPI::configureTenantTransaction(tr, entry, updatedEntry));
 					wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 					break;
 				} catch (Error& e) {

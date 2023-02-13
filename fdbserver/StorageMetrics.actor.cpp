@@ -292,6 +292,10 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 			if (key == req.keys.end)
 				break;
 			reply.splits.push_back_deep(reply.splits.arena(), key);
+			if (reply.splits.size() > SERVER_KNOBS->SPLIT_METRICS_MAX_ROWS) {
+				reply.more = true;
+				break;
+			}
 
 			StorageMetrics diff = (getMetrics(KeyRangeRef(lastKey, key)) + used);
 			remaining -= diff;
@@ -301,7 +305,7 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 			lastKey = key;
 		}
 
-		reply.used = getMetrics(KeyRangeRef(lastKey, req.keys.end)) + used;
+		reply.used = reply.more ? StorageMetrics() : getMetrics(KeyRangeRef(lastKey, req.keys.end)) + used;
 		req.reply.send(reply);
 	} catch (Error& e) {
 		req.reply.sendError(e);
@@ -415,7 +419,7 @@ void StorageServerMetrics::getReadHotRanges(ReadHotSubRangeRequest req) const {
 	req.reply.send(reply);
 }
 
-void StorageServerMetrics::getSplitPoints(SplitRangeRequest req, Optional<Key> prefix) const {
+void StorageServerMetrics::getSplitPoints(SplitRangeRequest req, Optional<KeyRef> prefix) const {
 	SplitRangeReply reply;
 	KeyRangeRef range = req.keys;
 	if (prefix.present()) {
@@ -429,7 +433,7 @@ void StorageServerMetrics::getSplitPoints(SplitRangeRequest req, Optional<Key> p
 
 std::vector<KeyRef> StorageServerMetrics::getSplitPoints(KeyRangeRef range,
                                                          int64_t chunkSize,
-                                                         Optional<Key> prefixToRemove) const {
+                                                         Optional<KeyRef> prefixToRemove) const {
 	std::vector<KeyRef> toReturn;
 	KeyRef beginKey = range.begin;
 	IndexedSet<Key, int64_t>::const_iterator endKey =
@@ -586,7 +590,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/simple") {
 	ssm.byteSample.sample.insert("But"_sr, 100 * sampleUnit);
 	ssm.byteSample.sample.insert("Cat"_sr, 300 * sampleUnit);
 
-	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 2000 * sampleUnit, Optional<Key>());
+	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 2000 * sampleUnit, {});
 
 	ASSERT(t.size() == 1 && t[0] == "Bah"_sr);
 
@@ -607,7 +611,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/multipleReturnedPoint
 	ssm.byteSample.sample.insert("But"_sr, 100 * sampleUnit);
 	ssm.byteSample.sample.insert("Cat"_sr, 300 * sampleUnit);
 
-	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 600 * sampleUnit, Optional<Key>());
+	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 600 * sampleUnit, {});
 
 	ASSERT(t.size() == 3 && t[0] == "Absolute"_sr && t[1] == "Apple"_sr && t[2] == "Bah"_sr);
 
@@ -628,7 +632,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/noneSplitable") {
 	ssm.byteSample.sample.insert("But"_sr, 100 * sampleUnit);
 	ssm.byteSample.sample.insert("Cat"_sr, 300 * sampleUnit);
 
-	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 10000 * sampleUnit, Optional<Key>());
+	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 10000 * sampleUnit, {});
 
 	ASSERT(t.size() == 0);
 
@@ -649,7 +653,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/chunkTooLarge") {
 	ssm.byteSample.sample.insert("But"_sr, 10 * sampleUnit);
 	ssm.byteSample.sample.insert("Cat"_sr, 30 * sampleUnit);
 
-	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 1000 * sampleUnit, Optional<Key>());
+	std::vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef("A"_sr, "C"_sr), 1000 * sampleUnit, {});
 
 	ASSERT(t.size() == 0);
 

@@ -108,4 +108,6 @@ std::string getEncryptDbgTraceKeyWithTS(std::string_view prefix,
 
 int getEncryptHeaderAuthTokenSize(int algo);
 
+bool isReservedEncryptDomain(EncryptCipherDomainId domainId);
+
 #endif

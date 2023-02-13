@@ -26,6 +26,7 @@
 #include "flow/network.h"
 #include <utility>
 #include <functional>
+#include <unordered_set>
 #if defined(NO_INTELLISENSE) && !defined(FLOW_GENERICACTORS_ACTOR_G_H)
 #define FLOW_GENERICACTORS_ACTOR_G_H
 #include "flow/genericactors.actor.g.h"
@@ -111,6 +112,21 @@ std::vector<T> parseStringToVector(std::string str, char delim) {
 		T item;
 		tokenStream >> item;
 		result.push_back(item);
+	}
+	return result;
+}
+
+template <class T>
+std::unordered_set<T> parseStringToUnorderedSet(std::string str, char delim) {
+	std::unordered_set<T> result;
+	std::stringstream stream(str);
+	std::string token;
+	while (stream.good()) {
+		getline(stream, token, delim);
+		std::istringstream tokenStream(token);
+		T item;
+		tokenStream >> item;
+		result.emplace(item);
 	}
 	return result;
 }
@@ -204,8 +220,12 @@ ACTOR template <class T>
 Future<T> timeout(Future<T> what, double time, T timedoutValue, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	Future<Void> end = delay(time, taskID);
 	choose {
-		when(T t = wait(what)) { return t; }
-		when(wait(end)) { return timedoutValue; }
+		when(T t = wait(what)) {
+			return t;
+		}
+		when(wait(end)) {
+			return timedoutValue;
+		}
 	}
 }
 
@@ -213,8 +233,12 @@ ACTOR template <class T>
 Future<Optional<T>> timeout(Future<T> what, double time) {
 	Future<Void> end = delay(time);
 	choose {
-		when(T t = wait(what)) { return t; }
-		when(wait(end)) { return Optional<T>(); }
+		when(T t = wait(what)) {
+			return t;
+		}
+		when(wait(end)) {
+			return Optional<T>();
+		}
 	}
 }
 
@@ -222,8 +246,12 @@ ACTOR template <class T>
 Future<T> timeoutError(Future<T> what, double time, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	Future<Void> end = delay(time, taskID);
 	choose {
-		when(T t = wait(what)) { return t; }
-		when(wait(end)) { throw timed_out(); }
+		when(T t = wait(what)) {
+			return t;
+		}
+		when(wait(end)) {
+			throw timed_out();
+		}
 	}
 }
 
@@ -332,10 +360,10 @@ Future<Void> storeOrThrow(T& out, Future<Optional<T>> what, Error e = key_not_fo
 }
 
 // Waits for a future to be ready, and then applies an asynchronous function to it.
-ACTOR template <class T, class F, class U = decltype(std::declval<F>()(std::declval<T>()).getValue())>
-Future<U> mapAsync(Future<T> what, F actorFunc) {
+ACTOR template <class T, class F>
+Future<decltype(std::declval<F>()(std::declval<T>()).getValue())> mapAsync(Future<T> what, F actorFunc) {
 	T val = wait(what);
-	U ret = wait(actorFunc(val));
+	decltype(std::declval<F>()(std::declval<T>()).getValue()) ret = wait(actorFunc(val));
 	return ret;
 }
 
@@ -357,7 +385,9 @@ Future<Void> mapAsync(FutureStream<T> input, F actorFunc, PromiseStream<U> outpu
 	loop {
 		try {
 			choose {
-				when(T nextInput = waitNext(input)) { futures.push_back(actorFunc(nextInput)); }
+				when(T nextInput = waitNext(input)) {
+					futures.push_back(actorFunc(nextInput));
+				}
 				when(U nextOutput = wait(futures.size() == 0 ? Never() : futures.front())) {
 					output.send(nextOutput);
 					futures.pop_front();
@@ -474,7 +504,9 @@ Future<Void> asyncFilter(FutureStream<T> input, F actorPred, PromiseStream<T> ou
 	loop {
 		try {
 			choose {
-				when(T nextInput = waitNext(input)) { futures.emplace_back(nextInput, actorPred(nextInput)); }
+				when(T nextInput = waitNext(input)) {
+					futures.emplace_back(nextInput, actorPred(nextInput));
+				}
 				when(bool pass = wait(futures.size() == 0 ? Never() : futures.front().second)) {
 					if (pass)
 						output.send(futures.front().first);
@@ -555,26 +587,26 @@ public:
 			setUnconditional(k, v, i);
 	}
 	void setUnconditional(K const& k, V const& v) { setUnconditional(k, v, items[k]); }
+
+	void sendError(K const& begin, K const& end, Error const& e) {
+		if (begin >= end)
+			return;
+		std::vector<Promise<Void>> ps = swapRangePromises(items.lower_bound(begin), items.lower_bound(end));
+		sendError(ps, e);
+	}
+
 	void triggerAll() {
-		std::vector<Promise<Void>> ps;
-		for (auto it = items.begin(); it != items.end(); ++it) {
-			ps.resize(ps.size() + 1);
-			ps.back().swap(it->second.change);
-		}
-		std::vector<Promise<Void>> noDestroy = ps; // See explanation of noDestroy in setUnconditional()
-		for (auto p = ps.begin(); p != ps.end(); ++p)
-			p->send(Void());
+		std::vector<Promise<Void>> ps = swapRangePromises(items.begin(), items.end());
+		send(ps);
 	}
+
 	void triggerRange(K const& begin, K const& end) {
-		std::vector<Promise<Void>> ps;
-		for (auto it = items.lower_bound(begin); it != items.end() && it->first < end; ++it) {
-			ps.resize(ps.size() + 1);
-			ps.back().swap(it->second.change);
-		}
-		std::vector<Promise<Void>> noDestroy = ps; // See explanation of noDestroy in setUnconditional()
-		for (auto p = ps.begin(); p != ps.end(); ++p)
-			p->send(Void());
+		if (begin >= end)
+			return;
+		std::vector<Promise<Void>> ps = swapRangePromises(items.lower_bound(begin), items.lower_bound(end));
+		send(ps);
 	}
+
 	void trigger(K const& key) {
 		if (items.count(key) != 0) {
 			auto& i = items[key];
@@ -632,6 +664,30 @@ protected:
 	std::map<K, P> items;
 	const V defaultValue;
 	bool destructing;
+
+	template <typename Iterator>
+	std::vector<Promise<Void>> swapRangePromises(Iterator begin, Iterator end) {
+		std::vector<Promise<Void>> ps;
+		for (auto it = begin; it != end; ++it) {
+			ps.resize(ps.size() + 1);
+			ps.back().swap(it->second.change);
+		}
+		return ps;
+	}
+
+	// ps can't be a reference. See explanation of noDestroy in setUnconditional()
+	void send(std::vector<Promise<Void>> ps) {
+		for (auto& p : ps) {
+			p.send(Void());
+		}
+	}
+
+	// ps can't be a reference. See explanation of noDestroy in setUnconditional()
+	void sendError(std::vector<Promise<Void>> ps, Error const& e) {
+		for (auto& p : ps) {
+			p.sendError(e);
+		}
+	}
 
 	void setUnconditional(K const& k, V const& v, P& i) {
 		Promise<Void> trigger;
@@ -768,7 +824,9 @@ private:
 			loop {
 				choose {
 					when(wait(self->input.onChange())) {}
-					when(wait(delay(bounceTime))) { break; }
+					when(wait(delay(bounceTime))) {
+						break;
+					}
 				}
 			}
 			self->output.setUnconditional(Void());
@@ -1013,8 +1071,12 @@ Future<Void> smartQuorum(std::vector<Future<T>> results,
 		return Void();
 	wait(quorum(results, required));
 	choose {
-		when(wait(quorum(results, (int)results.size()))) { return Void(); }
-		when(wait(delay(extraSeconds, taskID))) { return Void(); }
+		when(wait(quorum(results, (int)results.size()))) {
+			return Void();
+		}
+		when(wait(delay(extraSeconds, taskID))) {
+			return Void();
+		}
 	}
 }
 
@@ -1202,8 +1264,12 @@ Future<Void> orYield(Future<Void> f);
 ACTOR template <class T>
 Future<T> chooseActor(Future<T> lhs, Future<T> rhs) {
 	choose {
-		when(T t = wait(lhs)) { return t; }
-		when(T t = wait(rhs)) { return t; }
+		when(T t = wait(lhs)) {
+			return t;
+		}
+		when(T t = wait(rhs)) {
+			return t;
+		}
 	}
 }
 
@@ -1247,7 +1313,9 @@ inline Future<Void> operator||(Future<Void> const& lhs, Future<Void> const& rhs)
 ACTOR template <class Func>
 Future<Void> recurring(Func what, double interval, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	loop choose {
-		when(wait(delay(interval, taskID))) { what(); }
+		when(wait(delay(interval, taskID))) {
+			what();
+		}
 	}
 }
 
@@ -1340,7 +1408,9 @@ void tagAndForwardError(PromiseStream<T>* pOutput, Error value, Future<Void> sig
 ACTOR template <class T>
 Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 	choose {
-		when(T val = wait(f)) { return val; }
+		when(T val = wait(f)) {
+			return val;
+		}
 		when(wait(errorSignal)) {
 			ASSERT(false);
 			throw internal_error();

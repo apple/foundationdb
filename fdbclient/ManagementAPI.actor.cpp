@@ -43,6 +43,7 @@
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"
 #include "fdbclient/Schemas.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -1182,7 +1183,9 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 
 	choose {
 		when(wait(waitForAll(leaderServers))) {}
-		when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
+		when(wait(delay(5.0))) {
+			return CoordinatorsResult::COORDINATOR_UNREACHABLE;
+		}
 	}
 	TraceEvent("ChangeQuorumCheckerSetCoordinatorsKey")
 	    .detail("CurrentCoordinators", old.toString())
@@ -1284,7 +1287,9 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 				                                           TaskPriority::CoordinationReply));
 			choose {
 				when(wait(waitForAll(leaderServers))) {}
-				when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
+				when(wait(delay(5.0))) {
+					return CoordinatorsResult::COORDINATOR_UNREACHABLE;
+				}
 			}
 
 			tr.set(coordinatorsKey, newClusterConnectionString.toString());
@@ -2531,16 +2536,22 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 	}
 }
 
-ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile, KeyRange range, AuditType type) {
+ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
+                               KeyRange range,
+                               AuditType type,
+                               bool async) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+	TraceEvent(SevDebug, "ManagementAPIAuditStorageBegin");
 
 	loop {
 		while (!clusterInterface->get().present()) {
 			wait(clusterInterface->onChange());
 		}
 
-		UID auditId = wait(clusterInterface->get().get().triggerAudit.getReply(TriggerAuditRequest(type, range)));
+		TriggerAuditRequest req(type, range);
+		req.async = async;
+		UID auditId = wait(clusterInterface->get().get().triggerAudit.getReply(req));
 		TraceEvent(SevDebug, "ManagementAPIAuditStorageEnd").detail("AuditID", auditId);
 		return auditId;
 	}
@@ -2732,27 +2743,6 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 		    .detail("SchemaPath", schemaPath);
 		throw unknown_error();
 	}
-}
-
-void setStorageQuota(Transaction& tr, StringRef tenantGroupName, int64_t quota) {
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	auto key = storageQuotaKey(tenantGroupName);
-	tr.set(key, BinaryWriter::toValue<int64_t>(quota, Unversioned()));
-}
-
-void clearStorageQuota(Transaction& tr, StringRef tenantGroupName) {
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	auto key = storageQuotaKey(tenantGroupName);
-	tr.clear(key);
-}
-
-ACTOR Future<Optional<int64_t>> getStorageQuota(Transaction* tr, StringRef tenantGroupName) {
-	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	state Optional<Value> v = wait(tr->get(storageQuotaKey(tenantGroupName)));
-	if (!v.present()) {
-		return Optional<int64_t>();
-	}
-	return BinaryReader::fromStringRef<int64_t>(v.get(), Unversioned());
 }
 
 std::string ManagementAPI::generateErrorMessage(const CoordinatorsResult& res) {

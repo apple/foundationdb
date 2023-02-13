@@ -62,7 +62,7 @@ public:
 	                           const VectorRef<MutationRef>& mutations_,
 	                           IKeyValueStore* txnStateStore_)
 	  : spanContext(spanContext_), dbgid(dbgid_), arena(arena_), mutations(mutations_), txnStateStore(txnStateStore_),
-	    confChange(dummyConfChange) {}
+	    confChange(dummyConfChange), encryptMode(EncryptionAtRestMode::DISABLED) {}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           Arena& arena_,
@@ -71,29 +71,33 @@ public:
 	                           Reference<ILogSystem> logSystem_,
 	                           LogPushData* toCommit_,
 	                           const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* cipherKeys_,
+	                           EncryptionAtRestMode encryptMode,
 	                           bool& confChange_,
 	                           Version version,
 	                           Version popVersion_,
-	                           bool initialCommit_)
+	                           bool initialCommit_,
+	                           bool provisionalCommitProxy_)
 	  : spanContext(spanContext_), dbgid(proxyCommitData_.dbgid), arena(arena_), mutations(mutations_),
 	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_), cipherKeys(cipherKeys_),
-	    confChange(confChange_), logSystem(logSystem_), version(version), popVersion(popVersion_),
-	    vecBackupKeys(&proxyCommitData_.vecBackupKeys), keyInfo(&proxyCommitData_.keyInfo),
+	    encryptMode(encryptMode), confChange(confChange_), logSystem(logSystem_), version(version),
+	    popVersion(popVersion_), vecBackupKeys(&proxyCommitData_.vecBackupKeys), keyInfo(&proxyCommitData_.keyInfo),
 	    cacheInfo(&proxyCommitData_.cacheInfo),
 	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
 	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
-	    tenantIdIndex(&proxyCommitData_.tenantIdIndex), initialCommit(initialCommit_) {}
+	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), initialCommit(initialCommit_),
+	    provisionalCommitProxy(provisionalCommitProxy_) {}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           ResolverData& resolverData_,
 	                           const VectorRef<MutationRef>& mutations_,
-	                           const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* cipherKeys_)
+	                           const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* cipherKeys_,
+	                           EncryptionAtRestMode encryptMode)
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
-	    cipherKeys(cipherKeys_), txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
-	    confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem), popVersion(resolverData_.popVersion),
-	    keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
+	    cipherKeys(cipherKeys_), encryptMode(encryptMode), txnStateStore(resolverData_.txnStateStore),
+	    toCommit(resolverData_.toCommit), confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem),
+	    popVersion(resolverData_.popVersion), keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
 	    initialCommit(resolverData_.initialCommit), forResolver(true) {}
 
 private:
@@ -133,14 +137,18 @@ private:
 	std::map<Tag, Version>* tag_popped = nullptr;
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
-	std::map<TenantName, TenantMapEntry>* tenantMap = nullptr;
-	std::unordered_map<int64_t, TenantNameUniqueSet>* tenantIdIndex = nullptr;
+	std::map<int64_t, TenantName>* tenantMap = nullptr;
+	std::unordered_map<TenantName, int64_t>* tenantNameIndex = nullptr;
+	EncryptionAtRestMode encryptMode;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
 	bool initialCommit = false;
 
 	// true if called from Resolver
 	bool forResolver = false;
+
+	// true if called from a provisional commit proxy
+	bool provisionalCommitProxy = false;
 
 private:
 	// The following variables are used internally
@@ -162,7 +170,7 @@ private:
 
 private:
 	void writeMutation(const MutationRef& m) {
-		if (!isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION)) {
+		if (!encryptMode.isEncryptionEnabled()) {
 			toCommit->writeTypedMessage(m);
 		} else {
 			ASSERT(cipherKeys != nullptr);
@@ -496,7 +504,9 @@ private:
 		    &p.endVersion,
 		    commit,
 		    committedVersion,
-		    p.keyVersion);
+		    p.keyVersion,
+		    tenantMap,
+		    provisionalCommitProxy);
 	}
 
 	void checkSetApplyMutationsKeyVersionMapRange(MutationRef m) {
@@ -662,20 +672,19 @@ private:
 	void checkSetTenantMapPrefix(MutationRef m) {
 		KeyRef prefix = TenantMetadata::tenantMap().subspace.begin;
 		if (m.param1.startsWith(prefix)) {
-			TenantName tenantName = m.param1.removePrefix(prefix);
 			TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
 
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
 
 				TraceEvent("CommitProxyInsertTenant", dbgid)
-				    .detail("Tenant", tenantName)
+				    .detail("Tenant", tenantEntry.tenantName)
 				    .detail("Id", tenantEntry.id)
 				    .detail("Version", version);
 
-				(*tenantMap)[tenantName] = tenantEntry;
-				if (tenantIdIndex) {
-					(*tenantIdIndex)[tenantEntry.id].insert(tenantName);
+				(*tenantMap)[tenantEntry.id] = tenantEntry.tenantName;
+				if (tenantNameIndex) {
+					(*tenantNameIndex)[tenantEntry.tenantName] = tenantEntry.id;
 				}
 			}
 
@@ -1082,33 +1091,31 @@ private:
 	void checkClearTenantMapPrefix(KeyRangeRef range) {
 		KeyRangeRef subspace = TenantMetadata::tenantMap().subspace;
 		if (subspace.intersects(range)) {
-			if (tenantMap) {
+			if (tenantMap && tenantNameIndex) {
 				ASSERT(version != invalidVersion);
 
-				StringRef startTenant = std::max(range.begin, subspace.begin).removePrefix(subspace.begin);
-				StringRef endTenant =
-				    range.end.startsWith(subspace.begin) ? range.end.removePrefix(subspace.begin) : "\xff\xff"_sr;
+				Optional<int64_t> startId = 0;
+				Optional<int64_t> endId;
+
+				if (range.begin > subspace.begin) {
+					startId = TenantIdCodec::lowerBound(range.begin.removePrefix(subspace.begin));
+				}
+				if (range.end.startsWith(subspace.begin)) {
+					endId = TenantIdCodec::lowerBound(range.end.removePrefix(subspace.begin));
+				}
 
 				TraceEvent("CommitProxyEraseTenants", dbgid)
-				    .detail("BeginTenant", startTenant)
-				    .detail("EndTenant", endTenant)
+				    .detail("BeginTenant", startId)
+				    .detail("EndTenant", endId)
 				    .detail("Version", version);
 
-				auto startItr = tenantMap->lower_bound(startTenant);
-				auto endItr = tenantMap->lower_bound(endTenant);
+				auto startItr = startId.present() ? tenantMap->lower_bound(startId.get()) : tenantMap->end();
+				auto endItr = endId.present() ? tenantMap->lower_bound(endId.get()) : tenantMap->end();
 
-				if (tenantIdIndex) {
-					// Iterate over iterator-range and remove entries from TenantIdName map
-					// TODO: O(n) operation, optimize cpu
-					auto itr = startItr;
-					while (itr != endItr) {
-						auto indexItr = tenantIdIndex->find(itr->second.id);
-						ASSERT(indexItr != tenantIdIndex->end());
-						if (indexItr->second.remove(itr->first)) {
-							tenantIdIndex->erase(indexItr);
-						}
-						itr++;
-					}
+				auto itr = startItr;
+				while (itr != endItr) {
+					tenantNameIndex->erase(itr->second);
+					itr++;
 				}
 
 				tenantMap->erase(startItr, endItr);
@@ -1333,10 +1340,12 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             const VectorRef<MutationRef>& mutations,
                             LogPushData* toCommit,
                             const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* pCipherKeys,
+                            EncryptionAtRestMode encryptMode,
                             bool& confChange,
                             Version version,
                             Version popVersion,
-                            bool initialCommit) {
+                            bool initialCommit,
+                            bool provisionalCommitProxy) {
 	ApplyMetadataMutationsImpl(spanContext,
 	                           arena,
 	                           mutations,
@@ -1344,18 +1353,21 @@ void applyMetadataMutations(SpanContext const& spanContext,
 	                           logSystem,
 	                           toCommit,
 	                           pCipherKeys,
+	                           encryptMode,
 	                           confChange,
 	                           version,
 	                           popVersion,
-	                           initialCommit)
+	                           initialCommit,
+	                           provisionalCommitProxy)
 	    .apply();
 }
 
 void applyMetadataMutations(SpanContext const& spanContext,
                             ResolverData& resolverData,
                             const VectorRef<MutationRef>& mutations,
-                            const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* pCipherKeys) {
-	ApplyMetadataMutationsImpl(spanContext, resolverData, mutations, pCipherKeys).apply();
+                            const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* pCipherKeys,
+                            EncryptionAtRestMode encryptMode) {
+	ApplyMetadataMutationsImpl(spanContext, resolverData, mutations, pCipherKeys, encryptMode).apply();
 }
 
 void applyMetadataMutations(SpanContext const& spanContext,

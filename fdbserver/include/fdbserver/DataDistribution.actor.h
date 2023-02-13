@@ -28,7 +28,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/TenantCache.h"
 #include "fdbserver/TCInfo.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/DDTxnProcessor.h"
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include "fdbserver/Knobs.h"
@@ -248,27 +248,70 @@ FDB_DECLARE_BOOLEAN_PARAM(InOverSizePhysicalShard);
 FDB_DECLARE_BOOLEAN_PARAM(PhysicalShardAvailable);
 FDB_DECLARE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
 
+struct ShardMetrics {
+	StorageMetrics metrics;
+	double lastLowBandwidthStartTime;
+	int shardCount; // number of smaller shards whose metrics are aggregated in the ShardMetrics
+
+	bool operator==(ShardMetrics const& rhs) const {
+		return metrics == rhs.metrics && lastLowBandwidthStartTime == rhs.lastLowBandwidthStartTime &&
+		       shardCount == rhs.shardCount;
+	}
+
+	ShardMetrics(StorageMetrics const& metrics, double lastLowBandwidthStartTime, int shardCount)
+	  : metrics(metrics), lastLowBandwidthStartTime(lastLowBandwidthStartTime), shardCount(shardCount) {}
+};
+
+struct ShardTrackedData {
+	Future<Void> trackShard;
+	Future<Void> trackBytes;
+	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
+};
+
 class PhysicalShardCollection : public ReferenceCounted<PhysicalShardCollection> {
 public:
 	PhysicalShardCollection() : lastTransitionStartTime(now()), requireTransition(false) {}
+	PhysicalShardCollection(Reference<IDDTxnProcessor> db)
+	  : txnProcessor(db), lastTransitionStartTime(now()), requireTransition(false) {}
 
 	enum class PhysicalShardCreationTime { DDInit, DDRelocator };
 
 	struct PhysicalShard {
 		PhysicalShard() : id(UID().first()) {}
 
-		PhysicalShard(uint64_t id,
+		PhysicalShard(Reference<IDDTxnProcessor> txnProcessor,
+		              uint64_t id,
 		              StorageMetrics const& metrics,
 		              std::vector<ShardsAffectedByTeamFailure::Team> teams,
 		              PhysicalShardCreationTime whenCreated)
-		  : id(id), metrics(metrics), teams(teams), whenCreated(whenCreated) {}
+		  : txnProcessor(txnProcessor), id(id), metrics(metrics),
+		    stats(makeReference<AsyncVar<Optional<StorageMetrics>>>()), teams(teams), whenCreated(whenCreated) {}
+
+		// Adds `newRange` to this physical shard and starts monitoring the shard.
+		void addRange(const KeyRange& newRange);
+
+		// Removes `outRange` from this physical shard and updates monitored shards.
+		void removeRange(const KeyRange& outRange);
 
 		std::string toString() const { return fmt::format("{}", std::to_string(id)); }
 
+		Reference<IDDTxnProcessor> txnProcessor;
 		uint64_t id; // physical shard id (never changed)
 		StorageMetrics metrics; // current metrics, updated by shardTracker
+		// todo(zhewu): combine above metrics with stats. They are redundant.
+		Reference<AsyncVar<Optional<StorageMetrics>>> stats; // Stats of this physical shard.
 		std::vector<ShardsAffectedByTeamFailure::Team> teams; // which team owns this physical shard (never changed)
 		PhysicalShardCreationTime whenCreated; // when this physical shard is created (never changed)
+
+		struct RangeData {
+			Future<Void> trackMetrics;
+			Reference<AsyncVar<Optional<ShardMetrics>>> stats;
+		};
+		std::unordered_map<KeyRange, RangeData> rangeData;
+
+	private:
+		// Inserts a new key range into this physical shard. `newRange` must not exist in this shard already.
+		void insertNewRangeData(const KeyRange& newRange);
 	};
 
 	// Generate a random physical shard ID, which is not UID().first() nor anonymousShardId.first()
@@ -373,6 +416,9 @@ private:
 	// In keyRangePhysicalShardIDMap, set the input physical shard id to the input key range
 	void updatekeyRangePhysicalShardIDMap(KeyRange keyRange, uint64_t physicalShardID, uint64_t debugID);
 
+	// Checks the consistency between the mapping of physical shards and key ranges.
+	void checkKeyRangePhysicalShardMapping();
+
 	// Return a string concating the input IDs interleaving with " "
 	std::string convertIDsToString(std::set<uint64_t> ids);
 
@@ -401,6 +447,8 @@ private:
 	}
 
 	inline bool requireTransitionCheck() { return requireTransition; }
+
+	Reference<IDDTxnProcessor> txnProcessor;
 
 	// Core data structures
 	// Physical shard instances indexed by physical shard id
@@ -441,26 +489,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	std::vector<DDShardInfo> shards;
 	Optional<Key> initHealthyZoneValue; // set for maintenance mode
 	KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
-};
-
-struct ShardMetrics {
-	StorageMetrics metrics;
-	double lastLowBandwidthStartTime;
-	int shardCount; // number of smaller shards whose metrics are aggregated in the ShardMetrics
-
-	bool operator==(ShardMetrics const& rhs) const {
-		return metrics == rhs.metrics && lastLowBandwidthStartTime == rhs.lastLowBandwidthStartTime &&
-		       shardCount == rhs.shardCount;
-	}
-
-	ShardMetrics(StorageMetrics const& metrics, double lastLowBandwidthStartTime, int shardCount)
-	  : metrics(metrics), lastLowBandwidthStartTime(lastLowBandwidthStartTime), shardCount(shardCount) {}
-};
-
-struct ShardTrackedData {
-	Future<Void> trackShard;
-	Future<Void> trackBytes;
-	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
+	std::vector<AuditStorageState> auditStates;
 };
 
 // Holds the permitted size and IO Bounds for a shard
@@ -545,6 +574,8 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	enum State : uint8_t { INVALID = 0, RUN = 1, PAUSE = 2 };
 
 	DDTeamCollection const* teamCollection;
+	StorageWiggleData wiggleData; // the wiggle related data persistent in database
+
 	StorageWiggleMetrics metrics;
 	AsyncVar<bool> stopWiggleSignal;
 	// data structures

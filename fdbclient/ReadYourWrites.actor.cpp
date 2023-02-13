@@ -356,16 +356,24 @@ public:
 	                                                                 Req req,
 	                                                                 Snapshot snapshot) {
 		choose {
-			when(typename Req::Result result = wait(readThrough(ryw, req, snapshot))) { return result; }
-			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
+			when(typename Req::Result result = wait(readThrough(ryw, req, snapshot))) {
+				return result;
+			}
+			when(wait(ryw->resetPromise.getFuture())) {
+				throw internal_error();
+			}
 		}
 	}
 	ACTOR template <class Req>
 	static Future<typename Req::Result> readWithConflictRangeSnapshot(ReadYourWritesTransaction* ryw, Req req) {
 		state SnapshotCache::iterator it(&ryw->cache, &ryw->writes);
 		choose {
-			when(typename Req::Result result = wait(read(ryw, req, &it))) { return result; }
-			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
+			when(typename Req::Result result = wait(read(ryw, req, &it))) {
+				return result;
+			}
+			when(wait(ryw->resetPromise.getFuture())) {
+				throw internal_error();
+			}
 		}
 	}
 	ACTOR template <class Req>
@@ -381,7 +389,9 @@ public:
 					addConflictRange(ryw, req, it.extractWriteMapIterator(), result);
 				return result;
 			}
-			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
+			when(wait(ryw->resetPromise.getFuture())) {
+				throw internal_error();
+			}
 		}
 	}
 	template <class Req>
@@ -1201,7 +1211,9 @@ public:
 				addConflictRangeAndMustUnmodified<backwards>(ryw, req, writes, result);
 				return result;
 			}
-			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
+			when(wait(ryw->resetPromise.getFuture())) {
+				throw internal_error();
+			}
 		}
 	}
 
@@ -1452,15 +1464,19 @@ public:
 
 	ACTOR static Future<Version> getReadVersion(ReadYourWritesTransaction* ryw) {
 		choose {
-			when(Version v = wait(ryw->tr.getReadVersion())) { return v; }
+			when(Version v = wait(ryw->tr.getReadVersion())) {
+				return v;
+			}
 
-			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
+			when(wait(ryw->resetPromise.getFuture())) {
+				throw internal_error();
+			}
 		}
 	}
 };
 
-ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx, Optional<TenantName> tenantName)
-  : ISingleThreadTransaction(cx->deferredError), tr(cx, tenantName), cache(&arena), writes(&arena), retries(0),
+ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx, Optional<Reference<Tenant>> const& tenant)
+  : ISingleThreadTransaction(cx->deferredError), tr(cx, tenant), cache(&arena), writes(&arena), retries(0),
     approximateSize(0), creationTime(now()), commitStarted(false), versionStampFuture(tr.getVersionstamp()),
     specialKeySpaceWriteMap(std::make_pair(false, Optional<Value>()), specialKeys.end), options(tr) {
 	std::copy(
@@ -1469,11 +1485,11 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx, Optiona
 }
 
 void ReadYourWritesTransaction::construct(Database const& cx) {
-	*this = ReadYourWritesTransaction(cx, Optional<TenantName>());
+	*this = ReadYourWritesTransaction(cx);
 }
 
-void ReadYourWritesTransaction::construct(Database const& cx, TenantName const& tenantName) {
-	*this = ReadYourWritesTransaction(cx, tenantName);
+void ReadYourWritesTransaction::construct(Database const& cx, Reference<Tenant> const& tenant) {
+	*this = ReadYourWritesTransaction(cx, tenant);
 }
 
 ACTOR Future<Void> timebomb(double endTime, Promise<Void> resetPromise) {
@@ -1812,7 +1828,6 @@ Future<Standalone<VectorRef<BlobGranuleChunkRef>>> ReadYourWritesTransaction::re
     Version begin,
     Optional<Version> readVersion,
     Version* readVersionOut) {
-
 	if (!options.readYourWritesDisabled) {
 		return blob_granule_no_ryw();
 	}
@@ -1835,7 +1850,6 @@ Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> ReadYourWritesTransaction::
     const KeyRange& range,
     Optional<Version> summaryVersion,
     int rangeLimit) {
-
 	if (checkUsedDuringCommit()) {
 		return used_during_commit();
 	}

@@ -1,0 +1,48 @@
+[configuration]
+allowDefaultTenant = false
+tenantModes = ['required']
+allowCreatingTenants = false
+encryptModes = ['domain_aware']
+
+[[knobs]]
+enable_encryption = true
+
+[[test]] 
+testTitle = 'SubmitBackup'
+simBackupAgents = 'BackupToFile'
+runConsistencyCheck = false
+
+    [[test.workload]]
+    testName = 'IncrementalBackup'
+    tag = 'default'
+    submitOnly = true
+    waitForBackup = true
+
+[[test]]
+testTitle = 'BulkLoad'
+clearAfterTest = true
+simBackupAgents = 'BackupToFile'
+
+    [[test.workload]]
+    testName = 'BulkLoadWithTenants'
+    maxNumTenants = 100
+    minNumTenants = 1
+    transactionsPerSecond = 3000.0
+    enableEKPKeyFetchFailure = true
+
+    [[test.workload]]
+    testName = 'IncrementalBackup'
+    tag = 'default'
+    waitForBackup = true
+    stopBackup = true
+
+[[test]]
+testTitle = 'SubmitRestore'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+
+    [[test.workload]]
+    testName = 'IncrementalBackup'
+    tag = 'default'
+    restoreOnly = true
+

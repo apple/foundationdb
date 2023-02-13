@@ -23,6 +23,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
+#include "fdbclient/Metacluster.h"
 #include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/Schemas.h"
 
@@ -30,6 +31,7 @@
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include <string>
 
 namespace fdb_cli {
 
@@ -83,14 +85,23 @@ void printMetaclusterConfigureOptionsUsage() {
 
 // metacluster create command
 ACTOR Future<bool> metaclusterCreateCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() != 3) {
-		fmt::print("Usage: metacluster create_experimental <NAME>\n\n");
+	if (tokens.size() != 4) {
+		fmt::print("Usage: metacluster create_experimental <NAME> <TENANT_ID_PREFIX>\n\n");
 		fmt::print("Configures the cluster to be a management cluster in a metacluster.\n");
 		fmt::print("NAME is an identifier used to distinguish this metacluster from other metaclusters.\n");
+		fmt::print("TENANT_ID_PREFIX is an integer in the range [0,32767] inclusive which is prepended to all tenant "
+		           "ids in the metacluster.\n");
 		return false;
 	}
 
-	Optional<std::string> errorStr = wait(MetaclusterAPI::createMetacluster(db, tokens[2]));
+	int64_t tenantIdPrefix = std::stoi(tokens[3].toString());
+	if (tenantIdPrefix < TenantAPI::TENANT_ID_PREFIX_MIN_VALUE ||
+	    tenantIdPrefix > TenantAPI::TENANT_ID_PREFIX_MAX_VALUE) {
+		fmt::print("TENANT_ID_PREFIX must be in the range [0,32767] inclusive\n");
+		return false;
+	}
+
+	Optional<std::string> errorStr = wait(MetaclusterAPI::createMetacluster(db, tokens[2], tenantIdPrefix));
 	if (errorStr.present()) {
 		fmt::print("ERROR: {}.\n", errorStr.get());
 	} else {
@@ -252,8 +263,8 @@ ACTOR Future<bool> metaclusterGetCommand(Reference<IDatabase> db, std::vector<St
 
 		if (useJson) {
 			json_spirit::mObject obj;
-			obj["type"] = "success";
-			obj["cluster"] = metadata.toJson();
+			obj[msgTypeKey] = "success";
+			obj[msgClusterKey] = metadata.toJson();
 			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
 		} else {
 			fmt::print("  connection string: {}\n", metadata.connectionString.toString().c_str());
@@ -264,8 +275,8 @@ ACTOR Future<bool> metaclusterGetCommand(Reference<IDatabase> db, std::vector<St
 	} catch (Error& e) {
 		if (useJson) {
 			json_spirit::mObject obj;
-			obj["type"] = "error";
-			obj["error"] = e.what();
+			obj[msgTypeKey] = "error";
+			obj[msgErrorKey] = e.what();
 			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
 			return false;
 		} else {
@@ -287,39 +298,85 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 
 	state bool useJson = tokens.size() == 3;
 
-	try {
-		std::map<ClusterName, DataClusterMetadata> clusters =
-		    wait(MetaclusterAPI::listClusters(db, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
+	state Optional<std::string> metaclusterName;
 
-		auto capacityNumbers = MetaclusterAPI::metaclusterCapacity(clusters);
+	state Reference<ITransaction> tr = db->createTransaction();
 
-		if (useJson) {
-			json_spirit::mObject obj;
-			obj["type"] = "success";
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			Optional<MetaclusterRegistrationEntry> registrationEntry =
+			    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
+			const ClusterType clusterType =
+			    !registrationEntry.present() ? ClusterType::STANDALONE : registrationEntry.get().clusterType;
+			if (ClusterType::STANDALONE == clusterType) {
+				if (useJson) {
+					json_spirit::mObject obj;
+					obj[msgTypeKey] = "success";
+					obj[msgClusterTypeKey] = clusterTypeToString(clusterType);
+					fmt::print("{}\n",
+					           json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+				} else {
+					fmt::print("This cluster is not part of a metacluster\n");
+				}
+				return true;
+			} else if (ClusterType::METACLUSTER_DATA == clusterType) {
+				ASSERT(registrationEntry.present());
+				metaclusterName = registrationEntry.get().metaclusterName.toString();
+				if (useJson) {
+					json_spirit::mObject obj;
+					obj[msgTypeKey] = "success";
+					obj[msgClusterTypeKey] = clusterTypeToString(clusterType);
+					json_spirit::mObject metaclusterObj;
+					metaclusterObj[msgMetaclusterName] = metaclusterName.get();
+					obj[msgMetaclusterKey] = metaclusterObj;
+					fmt::print("{}\n",
+					           json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+				} else {
+					fmt::print("This cluster \"{}\" is a data cluster within the metacluster named \"{}\"\n",
+					           registrationEntry.get().name.toString().c_str(),
+					           metaclusterName.get().c_str());
+				}
+				return true;
+			}
 
-			json_spirit::mObject metaclusterObj;
-			metaclusterObj["data_clusters"] = (int)clusters.size();
-			metaclusterObj["capacity"] = capacityNumbers.first.toJson();
-			metaclusterObj["allocated"] = capacityNumbers.second.toJson();
+			metaclusterName = registrationEntry.get().metaclusterName.toString();
 
-			obj["metacluster"] = metaclusterObj;
-			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
-		} else {
-			fmt::print("  number of data clusters: {}\n", clusters.size());
-			fmt::print("  tenant group capacity: {}\n", capacityNumbers.first.numTenantGroups);
-			fmt::print("  allocated tenant groups: {}\n", capacityNumbers.second.numTenantGroups);
-		}
+			ASSERT(ClusterType::METACLUSTER_MANAGEMENT == clusterType);
+			std::map<ClusterName, DataClusterMetadata> clusters =
+			    wait(MetaclusterAPI::listClustersTransaction(tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
+			auto capacityNumbers = MetaclusterAPI::metaclusterCapacity(clusters);
+			if (useJson) {
+				json_spirit::mObject obj;
+				obj[msgTypeKey] = "success";
+				obj[msgClusterTypeKey] = clusterTypeToString(ClusterType::METACLUSTER_MANAGEMENT);
 
-		return true;
-	} catch (Error& e) {
-		if (useJson) {
-			json_spirit::mObject obj;
-			obj["type"] = "error";
-			obj["error"] = e.what();
-			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
-			return false;
-		} else {
-			throw;
+				json_spirit::mObject metaclusterObj;
+				metaclusterObj[msgMetaclusterName] = metaclusterName.get();
+				metaclusterObj[msgDataClustersKey] = static_cast<int>(clusters.size());
+				metaclusterObj[msgCapacityKey] = capacityNumbers.first.toJson();
+				metaclusterObj[msgAllocatedKey] = capacityNumbers.second.toJson();
+
+				obj[msgMetaclusterKey] = metaclusterObj;
+				fmt::print("{}\n",
+				           json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+			} else {
+				fmt::print("  number of data clusters: {}\n", clusters.size());
+				fmt::print("  tenant group capacity: {}\n", capacityNumbers.first.numTenantGroups);
+				fmt::print("  allocated tenant groups: {}\n", capacityNumbers.second.numTenantGroups);
+			}
+			return true;
+		} catch (Error& e) {
+			if (useJson) {
+				json_spirit::mObject obj;
+				obj[msgTypeKey] = "error";
+				obj[msgErrorKey] = e.what();
+				fmt::print("{}\n",
+				           json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+				return false;
+			} else {
+				throw;
+			}
 		}
 	}
 }
@@ -374,7 +431,7 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 	if (tokens.size() == 1) {
 		return { "<create_experimental|decommission|register|remove|configure|list|get|status>", "[ARGS]" };
 	} else if (tokencmp(tokens[1], "create_experimental")) {
-		return { "<NAME>" };
+		return { "<NAME> <TENANT_ID_PREFIX>" };
 	} else if (tokencmp(tokens[1], "decommission")) {
 		return {};
 	} else if (tokencmp(tokens[1], "register") && tokens.size() < 5) {

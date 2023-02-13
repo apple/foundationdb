@@ -38,6 +38,8 @@
 
 using RESTConnectionPoolKey = std::pair<std::string, std::string>;
 
+class IConnection;
+
 class RESTConnectionPool : public ReferenceCounted<RESTConnectionPool> {
 public:
 	struct ReusableConnection {
