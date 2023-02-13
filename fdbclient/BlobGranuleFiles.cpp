@@ -220,10 +220,7 @@ void validateEncryptionHeaderDetails(const BlobGranuleFileEncryptionKeys& eKeys,
                                      const BlobCipherEncryptHeader& header,
                                      const StringRef& ivRef) {
 	// Validate encryption header 'cipherHeader' details sanity
-	if (header.cipherHeaderDetails.isValid() &&
-	    !(header.cipherHeaderDetails.baseCipherId == eKeys.headerCipherKey->getBaseCipherId() &&
-	      header.cipherHeaderDetails.encryptDomainId == eKeys.headerCipherKey->getDomainId() &&
-	      header.cipherHeaderDetails.salt == eKeys.headerCipherKey->getSalt())) {
+	if (header.cipherHeaderDetails.isValid() && header.cipherHeaderDetails != eKeys.headerCipherKey->details()) {
 		TraceEvent(SevError, "EncryptionHeader_CipherHeaderMismatch")
 		    .detail("HeaderDomainId", eKeys.headerCipherKey->getDomainId())
 		    .detail("ExpectedHeaderDomainId", header.cipherHeaderDetails.encryptDomainId)
@@ -234,10 +231,7 @@ void validateEncryptionHeaderDetails(const BlobGranuleFileEncryptionKeys& eKeys,
 		throw encrypt_header_metadata_mismatch();
 	}
 	// Validate encryption header 'cipherText' details sanity
-	if (!(header.cipherTextDetails.isValid() &&
-	      header.cipherTextDetails.baseCipherId == eKeys.textCipherKey->getBaseCipherId() &&
-	      header.cipherTextDetails.encryptDomainId == eKeys.textCipherKey->getDomainId() &&
-	      header.cipherTextDetails.salt == eKeys.textCipherKey->getSalt())) {
+	if (!header.cipherTextDetails.isValid() || header.cipherTextDetails != eKeys.textCipherKey->details()) {
 		TraceEvent(SevError, "EncryptionHeader_CipherTextMismatch")
 		    .detail("TextDomainId", eKeys.textCipherKey->getDomainId())
 		    .detail("ExpectedTextDomainId", header.cipherTextDetails.encryptDomainId)

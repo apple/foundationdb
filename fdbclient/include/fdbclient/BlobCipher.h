@@ -76,6 +76,7 @@ public:
 	// Order of this enum has to match initializer of counterSets.
 	enum UsageType : int {
 		TLOG = 0,
+		TLOG_POST_RESOLUTION,
 		KV_MEMORY,
 		KV_REDWOOD,
 		BLOB_GRANULE,
@@ -605,6 +606,8 @@ public:
 		}
 		return now() + INetwork::TIME_EPS >= expireAtTS ? true : false;
 	}
+
+	BlobCipherDetails details() const { return BlobCipherDetails{ encryptDomainId, baseCipherId, randomSalt }; }
 
 	void reset();
 

@@ -1374,10 +1374,12 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		ASSERT(false); // ChangeCoordinatorsRequest should always throw
 	}
 
+	// If there are raw access requests or cross-tenant boundary clear ranges in the batch, tenant ids for those
+	// requests are availalbe only after resolution. We need to fetch additional cipher keys for these requests.
 	if (pProxyCommitData->encryptMode.isEncryptionEnabled() && !extraDomainIds.empty()) {
 		ASSERT_EQ(EncryptionAtRestMode::DOMAIN_AWARE, pProxyCommitData->encryptMode);
-		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> extraCipherKeys =
-		    wait(getLatestEncryptCipherKeys(pProxyCommitData->db, extraDomainIds, BlobCipherMetrics::TLOG));
+		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> extraCipherKeys = wait(
+		    getLatestEncryptCipherKeys(pProxyCommitData->db, extraDomainIds, BlobCipherMetrics::TLOG_POST_RESOLUTION));
 		self->cipherKeys.insert(extraCipherKeys.begin(), extraCipherKeys.end());
 	}
 

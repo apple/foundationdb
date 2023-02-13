@@ -579,10 +579,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                                     Reference<BlobCipherKey> textCipherKey,
 	                                     BlobCipherEncryptHeader& header) {
 		// Validate encryption header 'cipherHeader' details
-		if (header.cipherHeaderDetails.isValid() &&
-		    !(header.cipherHeaderDetails.baseCipherId == headerCipherKey->getBaseCipherId() &&
-		      header.cipherHeaderDetails.encryptDomainId == headerCipherKey->getDomainId() &&
-		      header.cipherHeaderDetails.salt == headerCipherKey->getSalt())) {
+		if (header.cipherHeaderDetails.isValid() && header.cipherHeaderDetails != headerCipherKey->details()) {
 			TraceEvent(SevWarn, "EncryptionHeader_CipherHeaderMismatch")
 			    .detail("HeaderDomainId", headerCipherKey->getDomainId())
 			    .detail("ExpectedHeaderDomainId", header.cipherHeaderDetails.encryptDomainId)
@@ -594,10 +591,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		}
 
 		// Validate encryption text 'cipherText' details sanity
-		if (!(header.cipherTextDetails.isValid() &&
-		      header.cipherTextDetails.baseCipherId == textCipherKey->getBaseCipherId() &&
-		      header.cipherTextDetails.encryptDomainId == textCipherKey->getDomainId() &&
-		      header.cipherTextDetails.salt == textCipherKey->getSalt())) {
+		if (!header.cipherTextDetails.isValid() || header.cipherTextDetails != textCipherKey->details()) {
 			TraceEvent(SevWarn, "EncryptionHeader_CipherTextMismatch")
 			    .detail("TextDomainId", textCipherKey->getDomainId())
 			    .detail("ExpectedTextDomainId", header.cipherTextDetails.encryptDomainId)

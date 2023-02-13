@@ -211,6 +211,7 @@ BlobCipherMetrics::BlobCipherMetrics()
                            FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
                            FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY),
     counterSets({ CounterSet(cc, "TLog"),
+                  CounterSet(cc, "TLogPostResolution"),
                   CounterSet(cc, "KVMemory"),
                   CounterSet(cc, "KVRedwood"),
                   CounterSet(cc, "BlobGranule"),
@@ -942,14 +943,10 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 	ASSERT(isEncryptHeaderAuthTokenDetailsValid(authTokenMode, authTokenAlgo));
 
 	// Populate cipherText encryption-key details
-	header->cipherTextDetails.baseCipherId = textCipherKey->getBaseCipherId();
-	header->cipherTextDetails.encryptDomainId = textCipherKey->getDomainId();
-	header->cipherTextDetails.salt = textCipherKey->getSalt();
+	header->cipherTextDetails = textCipherKey->details();
 	// Populate header encryption-key details
 	if (authTokenMode != ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
-		header->cipherHeaderDetails.encryptDomainId = headerCipherKey->getDomainId();
-		header->cipherHeaderDetails.baseCipherId = headerCipherKey->getBaseCipherId();
-		header->cipherHeaderDetails.salt = headerCipherKey->getSalt();
+		header->cipherHeaderDetails = headerCipherKey->details();
 	} else {
 		header->cipherHeaderDetails.encryptDomainId = INVALID_ENCRYPT_DOMAIN_ID;
 		header->cipherHeaderDetails.baseCipherId = INVALID_ENCRYPT_CIPHER_KEY_ID;
