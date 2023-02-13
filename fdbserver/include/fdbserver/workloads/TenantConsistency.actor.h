@@ -160,17 +160,6 @@ private:
 			if (tenantMapEntry.tenantGroup.present()) {
 				auto tenantGroupMapItr = metadata.tenantGroupMap.find(tenantMapEntry.tenantGroup.get());
 				ASSERT(tenantGroupMapItr != metadata.tenantGroupMap.end());
-				if (tenantMapEntry.assignedCluster != tenantGroupMapItr->second.assignedCluster) {
-					fprintf(stderr,
-					        "yanqin is_standalone?=%d 2=%s 3=%s\n",
-					        (int)(metadata.clusterType == ClusterType::STANDALONE),
-					        tenantMapEntry.assignedCluster.present()
-					            ? tenantMapEntry.assignedCluster.get().toString().c_str()
-					            : "null",
-					        tenantGroupMapItr->second.assignedCluster.present()
-					            ? tenantGroupMapItr->second.assignedCluster.get().toString().c_str()
-					            : "null");
-				}
 				ASSERT(tenantMapEntry.assignedCluster == tenantGroupMapItr->second.assignedCluster);
 				ASSERT(metadata.tenantGroupIndex[tenantMapEntry.tenantGroup.get()].count(tenantId));
 			} else {
