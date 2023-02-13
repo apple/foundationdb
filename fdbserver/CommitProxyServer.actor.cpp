@@ -1587,27 +1587,6 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 	}
 }
 
-// Return true if a single-key mutation is associated with a valid tenant id or a system key
-bool validTenantAccess(MutationRef m) {
-	if (isSystemKey(m.param1))
-		return true;
-
-	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
-		auto tenantId = TenantAPI::extractTenantIdFromMutation(m);
-		// throw exception for invalid raw access
-		if (tenantId == TenantInfo::INVALID_TENANT) {
-			return false;
-		}
-	} else {
-		// For clear range, we allow raw access
-		ASSERT_EQ(m.type, MutationRef::Type::ClearRange);
-		auto beginTenantId = TenantAPI::extractTenantIdFromKeyRef(m.param1);
-		auto endTenantId = TenantAPI::extractTenantIdFromKeyRef(m.param2);
-		CODE_PROBE(beginTenantId != endTenantId, "Clear Range raw access or cross multiple tenants");
-	}
-	return true;
-}
-
 // This first pass through committed transactions deals with "metadata" effects (modifications of txnStateStore, changes
 // to storage servers' responsibilities)
 ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self) {
