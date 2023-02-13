@@ -195,6 +195,13 @@ public:
 		return s;
 	}
 
+	// Stop handing out the lock to new users, but leave existing lock holders alone.
+	void halt() {
+		available -= concurrency;
+		concurrency = 0;
+		fRunner.cancel();
+	}
+
 private:
 	void addRunner(Lock& lock) {
 		runners.push_back(map(ready(lock.promise.getFuture()), [=](Void) {
@@ -3744,6 +3751,8 @@ public:
 	Value getCommitRecord() const override { return lastCommittedHeader.userCommitRecord; }
 
 	ACTOR void shutdown(DWALPager* self, bool dispose) {
+		debug_printf("DWALPager(%s) shutdown halt IO lock\n", self->filename.c_str());
+		self->ioLock.halt();
 		debug_printf("DWALPager(%s) shutdown cancel recovery\n", self->filename.c_str());
 		self->recoverFuture.cancel();
 		debug_printf("DWALPager(%s) shutdown cancel commit\n", self->filename.c_str());
@@ -7755,6 +7764,7 @@ public:
 
 	ACTOR void shutdown(KeyValueStoreRedwood* self, bool dispose) {
 		TraceEvent(SevInfo, "RedwoodShutdown").detail("Filename", self->m_filename).detail("Dispose", dispose);
+		self->m_concurrentReads.halt();
 
 		// In simulation, if the instance is being disposed of then sometimes run destructive sanity check.
 		if (g_network->isSimulated() && dispose && BUGGIFY) {
