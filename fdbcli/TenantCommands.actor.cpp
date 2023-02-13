@@ -651,6 +651,41 @@ ACTOR Future<bool> tenantRenameCommand(Reference<IDatabase> db, std::vector<Stri
 	return true;
 }
 
+ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	state KeyRef name;
+	state UID uid;
+	state Reference<ITransaction> tr;
+	if (tokens.size() < 3 || tokens.size() > 4) {
+		fmt::print("Usage: tenant lock <NAME> [UID]\n\n");
+		fmt::print("Locks a tenant with a given UID. If no UID is passed, fdbcli will\n");
+		fmt::print("generate one. UID has to be a 16-byte number represented in hex.\n");
+		return false;
+	}
+	name = tokens[2];
+	if (tokens.size() > 3) {
+		auto uidStr = tokens[3].toString();
+		try {
+			uid = UID::fromStringThrowsOnFailure(uidStr);
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_operation_failed);
+			fmt::print(stderr, "Couldn't not parse {} as a valid UID", uidStr);
+		}
+	} else {
+		uid = deterministicRandom()->randomUniqueID();
+	}
+	tr = db->createTransaction();
+	loop {
+		try {
+			// TenantAPI::changeLockState(tr, )
+			return true;
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
+ACTOR Future<bool> tenantUnlockCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {}
+
 // tenant command
 Future<bool> tenantCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() == 1) {
@@ -670,6 +705,10 @@ Future<bool> tenantCommand(Reference<IDatabase> db, std::vector<StringRef> token
 		return tenantConfigureCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "rename")) {
 		return tenantRenameCommand(db, tokens);
+	} else if (tokencmp(tokens[1], "lock")) {
+		return tenantLockCommand(db, tokens);
+	} else if (tokencmp(tokens[1], "unlock")) {
+		return tenantUnlockCommand(db, tokens);
 	} else {
 		printUsage(tokens[0]);
 		return true;
@@ -686,14 +725,15 @@ Future<bool> tenantCommandForwarder(Reference<IDatabase> db, std::vector<StringR
 	}
 
 	return tenantCommand(db, forwardedTokens);
-} // namespace fdb_cli
+}
 
 void tenantGenerator(const char* text,
                      const char* line,
                      std::vector<std::string>& lc,
                      std::vector<StringRef> const& tokens) {
 	if (tokens.size() == 1) {
-		const char* opts[] = { "create", "delete", "deleteId", "list", "get", "configure", "rename", nullptr };
+		const char* opts[] = { "create",    "delete", "deleteId", "list",   "get",
+			                   "configure", "rename", "lock",     "unlock", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokens.size() == 3 && tokencmp(tokens[1], "create")) {
 		const char* opts[] = { "tenant_group=", nullptr };
