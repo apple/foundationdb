@@ -184,8 +184,8 @@ ACTOR Future<bool> metaclusterRemoveCommand(Reference<IDatabase> db, std::vector
 		           "to forget its metacluster association without fully removing it, use FORCE.\n");
 	}
 
-	wait(MetaclusterAPI::removeCluster(db, clusterName, clusterType, force));
-	bool updatedDataCluster = wait(MetaclusterAPI::removeCluster(db, clusterName, clusterType, tokens.size() == 4, 15.0));
+	bool updatedDataCluster =
+	    wait(MetaclusterAPI::removeCluster(db, clusterName, clusterType, tokens.size() == 4, 15.0));
 
 	if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 		fmt::print("The cluster `{}' has been removed\n", printable(clusterName).c_str());

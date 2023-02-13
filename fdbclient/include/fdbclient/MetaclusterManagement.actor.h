@@ -861,6 +861,9 @@ struct RemoveClusterImpl {
 	// Parameters set in markClusterRemoving
 	Optional<int64_t> lastTenantId;
 
+	// Output parameter indicating whether the data cluster was updated during the removal
+	bool dataClusterUpdated = false;
+
 	RemoveClusterImpl(Reference<DB> db,
 	                  ClusterName clusterName,
 	                  ClusterType clusterType,
@@ -1166,7 +1169,7 @@ struct RemoveClusterImpl {
 };
 
 ACTOR template <class DB>
-Future<Void> removeCluster(Reference<DB> db,
+Future<bool> removeCluster(Reference<DB> db,
                            ClusterName name,
                            ClusterType clusterType,
                            bool forceRemove,

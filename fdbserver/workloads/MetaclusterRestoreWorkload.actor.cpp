@@ -174,7 +174,11 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 		self->managementDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
-		wait(success(MetaclusterAPI::createMetacluster(self->managementDb, "management_cluster"_sr)));
+		wait(success(MetaclusterAPI::createMetacluster(
+		    self->managementDb,
+		    "management_cluster"_sr,
+		    deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
+		                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1))));
 
 		ASSERT(g_simulator->extraDatabases.size() > 0);
 		state std::vector<std::string>::iterator extraDatabasesItr;
@@ -465,14 +469,14 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 	ACTOR static Future<Void> restoreManagementCluster(MetaclusterRestoreWorkload* self) {
 		TraceEvent("MetaclusterRestoreWorkloadRestoringManagementCluster");
-		wait(success(MetaclusterAPI::createMetacluster(self->managementDb, "management_cluster"_sr)));
+		wait(success(MetaclusterAPI::createMetacluster(self->managementDb, "management_cluster"_sr, 0)));
 		state std::map<ClusterName, DataClusterData>::iterator clusterItr;
 		for (clusterItr = self->dataDbs.begin(); clusterItr != self->dataDbs.end(); ++clusterItr) {
 			TraceEvent("MetaclusterRestoreWorkloadProcessDataCluster").detail("FromCluster", clusterItr->first);
 
 			// Remove the data cluster from its old metacluster
-			wait(MetaclusterAPI::removeCluster(
-			    clusterItr->second.db.getReference(), clusterItr->first, ClusterType::METACLUSTER_DATA, true));
+			wait(success(MetaclusterAPI::removeCluster(
+			    clusterItr->second.db.getReference(), clusterItr->first, ClusterType::METACLUSTER_DATA, true)));
 			TraceEvent("MetaclusterRestoreWorkloadForgotMetacluster").detail("ClusterName", clusterItr->first);
 
 			state std::pair<TenantCollisions, GroupCollisions> collisions =
@@ -508,8 +512,8 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 					// If the restore did not succeed, remove the partially restored cluster
 					try {
-						wait(MetaclusterAPI::removeCluster(
-						    self->managementDb, clusterItr->first, ClusterType::METACLUSTER_MANAGEMENT, true));
+						wait(success(MetaclusterAPI::removeCluster(
+						    self->managementDb, clusterItr->first, ClusterType::METACLUSTER_MANAGEMENT, true)));
 						TraceEvent("MetaclusterRestoreWorkloadRemoveFailedCluster")
 						    .detail("ClusterName", clusterItr->first);
 					} catch (Error& e) {
