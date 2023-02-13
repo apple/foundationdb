@@ -343,6 +343,8 @@ struct RawTenantAccessWorkload : TestWorkload {
 		// 2. write a nonexistent tenant is illegal. (invalidTenantWriteOp == true)
 		bool legalTxnOnly = deterministicRandom()->coinflip(); // whether allow generating illegal transaction
 		bool validTenantWriteOnly = deterministicRandom()->coinflip(); // whether only write to existing tenants
+		bool noTenantChange = deterministicRandom()->coinflip();
+
 		bool normalKeyWriteOp = false;
 		bool tenantMapChangeOp = false;
 
@@ -351,12 +353,12 @@ struct RawTenantAccessWorkload : TestWorkload {
 		lastCreatedTenants.clear();
 		for (int i = 0; i < 10; ++i) {
 			int op = deterministicRandom()->randomInt(0, 4);
-			if (op == 0 && hasNonexistentTenant() && !(legalTxnOnly && normalKeyWriteOp)) {
+			if (op == 0 && hasNonexistentTenant() && !(legalTxnOnly && normalKeyWriteOp) && !noTenantChange) {
 				// whether to create a new Tenant
 				txnOps.emplace_back(CREATE_TENANT, chooseNonexistentTenant());
 				lastCreatedTenants.emplace(txnOps.back().second);
 				tenantMapChangeOp = true;
-			} else if (op == 1 && hasExistingTenant() && !(legalTxnOnly && normalKeyWriteOp)) {
+			} else if (op == 1 && hasExistingTenant() && !(legalTxnOnly && normalKeyWriteOp) && !noTenantChange) {
 				// whether to delete an existing tenant
 				txnOps.emplace_back(DELETE_TENANT, chooseExistingTenant());
 				lastDeletedTenants.emplace(txnOps.back().second);
