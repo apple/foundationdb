@@ -451,9 +451,11 @@ Future<Void> managementClusterCheckEmpty(Transaction tr) {
 }
 
 ACTOR template <class DB>
-Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName name) {
+Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName name, int64_t tenantIdPrefix) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	state Optional<UID> metaclusterUid;
+	ASSERT(tenantIdPrefix >= TenantAPI::TENANT_ID_PREFIX_MIN_VALUE &&
+	       tenantIdPrefix <= TenantAPI::TENANT_ID_PREFIX_MAX_VALUE);
 
 	loop {
 		try {
@@ -462,7 +464,7 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName na
 			state Future<Optional<MetaclusterRegistrationEntry>> metaclusterRegistrationFuture =
 			    MetaclusterMetadata::metaclusterRegistration().get(tr);
 
-			wait(managementClusterCheckEmpty(tr));
+			state Future<Void> metaclusterEmptinessCheck = managementClusterCheckEmpty(tr);
 
 			Optional<MetaclusterRegistrationEntry> existingRegistration = wait(metaclusterRegistrationFuture);
 			if (existingRegistration.present()) {
@@ -477,6 +479,8 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName na
 				}
 			}
 
+			wait(metaclusterEmptinessCheck);
+
 			if (!metaclusterUid.present()) {
 				metaclusterUid = deterministicRandom()->randomUniqueID();
 			}
@@ -484,12 +488,16 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName na
 			MetaclusterMetadata::metaclusterRegistration().set(
 			    tr, MetaclusterRegistrationEntry(name, metaclusterUid.get()));
 
+			TenantMetadata::tenantIdPrefix().set(tr, tenantIdPrefix);
+
 			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 			break;
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
+
+	TraceEvent("CreatedMetacluster").detail("Name", name).detail("Prefix", tenantIdPrefix);
 
 	return Optional<std::string>();
 }
@@ -1266,8 +1274,18 @@ struct CreateTenantImpl {
 		state Future<Void> setClusterFuture = self->ctx.setCluster(tr, assignment.first);
 
 		// Create a tenant entry in the management cluster
-		Optional<int64_t> lastId = wait(ManagementClusterMetadata::tenantMetadata().lastTenantId.get(tr));
-		self->tenantEntry.setId(lastId.orDefault(-1) + 1);
+		state Optional<int64_t> lastId = wait(ManagementClusterMetadata::tenantMetadata().lastTenantId.get(tr));
+		// If the last tenant id is not present fetch the prefix from system keys and make it the prefix for the next
+		// allocated tenant id
+		if (!lastId.present()) {
+			Optional<int64_t> tenantIdPrefix = wait(TenantMetadata::tenantIdPrefix().get(tr));
+			ASSERT(tenantIdPrefix.present());
+			lastId = tenantIdPrefix.get() << 48;
+		}
+		if (!TenantAPI::nextTenantIdPrefixMatches(lastId.get(), lastId.get() + 1)) {
+			throw cluster_no_capacity();
+		}
+		self->tenantEntry.setId(lastId.get() + 1);
 		ManagementClusterMetadata::tenantMetadata().lastTenantId.set(tr, self->tenantEntry.id);
 
 		self->tenantEntry.tenantState = TenantState::REGISTERING;
@@ -1644,7 +1662,7 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadata(
 					if (std::count(filters.begin(), filters.end(), entry.tenantState)) {
 						++count;
 						if (count > offset) {
-							results.push_back(std::make_pair(name, entry));
+							results.emplace_back(name, entry);
 							if (count - offset == limit) {
 								ASSERT(count - offset == results.size());
 								return results;

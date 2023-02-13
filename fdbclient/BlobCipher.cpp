@@ -2275,6 +2275,9 @@ void testKeyCacheCleanup(const int minDomainId, const int maxDomainId) {
 
 TEST_CASE("/blobCipher") {
 	DomainKeyMap domainKeyMap;
+	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+	g_knobs.setKnob("enable_configurable_encryption", KnobValueRef::create(bool{ true }));
+
 	const EncryptCipherDomainId minDomainId = 1;
 	const EncryptCipherDomainId maxDomainId = deterministicRandom()->randomInt(minDomainId, minDomainId + 10) + 5;
 	const EncryptCipherBaseKeyId minBaseCipherKeyId = 100;

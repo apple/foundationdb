@@ -86,12 +86,17 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 	int maxTenants;
 	int maxTenantGroups;
+	int64_t tenantIdPrefix;
 	double testDuration;
 
 	MetaclusterManagementWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 1000));
 		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
+		tenantIdPrefix = getOption(options,
+		                           "tenantIdPrefix"_sr,
+		                           deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
+		                                                            TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1));
 	}
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
@@ -121,8 +126,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			self->dataDbs[self->dataDbIndex.back()] =
 			    DataClusterData(Database::createSimulatedExtraDatabase(connectionString, cx->defaultTenant));
 		}
-
-		wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
+		wait(success(
+		    MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix)));
 		return Void();
 	}
 
@@ -400,12 +405,11 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			state TenantState checkState = checkEntry.tenantState;
 			state std::vector<TenantState> filters;
 			filters.push_back(checkState);
-			state std::vector<std::pair<TenantName, TenantMapEntry>> tenantList;
+
+			state std::vector<std::pair<TenantName, TenantMapEntry>> tenantList =
+			    wait(MetaclusterAPI::listTenantMetadata(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6, 0, filters));
 			// Possible to have changed state between now and the getTenant call above
-			state TenantMapEntry checkEntry2;
-			wait(store(checkEntry2, MetaclusterAPI::getTenant(self->managementDb, tenant)) &&
-			     store(tenantList,
-			           MetaclusterAPI::listTenantMetadata(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6, 0, filters)));
+			state TenantMapEntry checkEntry2 = wait(MetaclusterAPI::getTenant(self->managementDb, tenant));
 
 			DisabledTraceEvent(SevDebug, "VerifyListFilter")
 			    .detail("Context", context)
@@ -502,6 +506,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			ASSERT(hasCapacity);
 			ASSERT(entry.assignedCluster.present());
 			ASSERT(entry.tenantGroup == tenantGroup);
+			ASSERT(TenantAPI::getTenantIdPrefix(entry.id) == self->tenantIdPrefix);
 
 			if (tenantGroup.present()) {
 				auto tenantGroupData =
