@@ -27,6 +27,7 @@
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/Knobs.h"
 #include "fdbrpc/TenantInfo.h"
 #include "flow/ApiVersion.h"
 #include "fmt/format.h"
@@ -9255,15 +9256,23 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					}
 					if (msg.isEncrypted()) {
 						if (!cipherKeys.present()) {
-							const BlobCipherEncryptHeader* header = msg.encryptionHeader();
-							cipherDetails.insert(header->cipherTextDetails);
-							cipherDetails.insert(header->cipherHeaderDetails);
+							if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+								BlobCipherEncryptHeaderRef headerRef =
+								    BlobCipherEncryptHeaderRef::fromStringRef(msg.param1);
+								std::tuple<BlobCipherDetails, BlobCipherDetails> details = headerRef.getCipherDetails();
+								cipherDetails.insert(std::get<0>(details));
+								cipherDetails.insert(std::get<1>(details));
+							} else {
+								const BlobCipherEncryptHeader* header = msg.encryptionHeader();
+								cipherDetails.insert(header->cipherTextDetails);
+								cipherDetails.insert(header->cipherHeaderDetails);
+							}
 							collectingCipherKeys = true;
 						} else {
 							msg = msg.decrypt(cipherKeys.get(), eager.arena, BlobCipherMetrics::TLOG);
 						}
 					}
-					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
+					//TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
 
 					if (!collectingCipherKeys) {
 						if (firstMutation && msg.param1.startsWith(systemKeys.end))

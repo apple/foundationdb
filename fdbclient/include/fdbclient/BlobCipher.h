@@ -445,6 +445,9 @@ struct BlobCipherEncryptHeaderRef {
 		}
 	}
 
+	uint8_t* getIV() const;
+	std::tuple<BlobCipherDetails, BlobCipherDetails> getCipherDetails() const;
+
 	void validateEncryptionHeaderDetails(const BlobCipherDetails& textCipherDetails,
 	                                     const BlobCipherDetails& headerCipherDetails,
 	                                     const StringRef& ivRef) const;
@@ -885,6 +888,10 @@ public:
 	                           Reference<BlobCipherKey> hCipherKey,
 	                           const uint8_t* iv,
 	                           BlobCipherMetrics::UsageType usageType);
+	DecryptBlobCipherAes256Ctr(Reference<BlobCipherKey> tCipherKey,
+	                           Reference<BlobCipherKey> hCipherKey,
+	                           const BlobCipherEncryptHeaderRef& header,
+	                           BlobCipherMetrics::UsageType usageType);
 	~DecryptBlobCipherAes256Ctr();
 
 	Reference<EncryptBuf> decrypt(const uint8_t* ciphertext,
@@ -902,6 +909,8 @@ private:
 	Reference<BlobCipherKey> textCipherKey;
 	Reference<BlobCipherKey> headerCipherKey;
 	bool authTokensValidationDone;
+
+	void init(const uint8_t* iv);
 
 	void validateEncryptHeader(const uint8_t*,
 	                           const int,

@@ -157,11 +157,20 @@ struct MutationRef {
 		    AES_256_IV_LENGTH,
 		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 		    usageType);
-		BlobCipherEncryptHeader* header = new (arena) BlobCipherEncryptHeader;
-		StringRef headerRef(reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader));
-		StringRef payload =
-		    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), header, arena)->toStringRef();
-		return MutationRef(Encrypted, headerRef, payload);
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			BlobCipherEncryptHeaderRef headerRef;
+			StringRef payload =
+			    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), &headerRef, arena);
+			Standalone<StringRef> serializedHeader = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
+			arena.dependsOn(serializedHeader.arena());
+			return MutationRef(Encrypted, serializedHeader, payload);
+		} else {
+			BlobCipherEncryptHeader* header = new (arena) BlobCipherEncryptHeader;
+			StringRef headerRef(reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader));
+			StringRef payload =
+			    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), header, arena)->toStringRef();
+			return MutationRef(Encrypted, headerRef, payload);
+		}
 	}
 
 	MutationRef encrypt(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
@@ -184,11 +193,20 @@ struct MutationRef {
 		    AES_256_IV_LENGTH,
 		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 		    usageType);
-		BlobCipherEncryptHeader* header = new (arena) BlobCipherEncryptHeader;
-		StringRef headerRef(reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader));
-		StringRef payload =
-		    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), header, arena)->toStringRef();
-		return MutationRef(Encrypted, headerRef, payload);
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			BlobCipherEncryptHeaderRef header;
+			StringRef payload =
+			    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), &header, arena);
+			Standalone<StringRef> headerRef = BlobCipherEncryptHeaderRef::toStringRef(header);
+			arena.dependsOn(headerRef.arena());
+			return MutationRef(Encrypted, headerRef, payload);
+		} else {
+			BlobCipherEncryptHeader* header = new (arena) BlobCipherEncryptHeader;
+			StringRef headerRef(reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader));
+			StringRef payload =
+			    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), header, arena)->toStringRef();
+			return MutationRef(Encrypted, headerRef, payload);
+		}
 	}
 
 	MutationRef encryptMetadata(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
@@ -201,9 +219,20 @@ struct MutationRef {
 	                    Arena& arena,
 	                    BlobCipherMetrics::UsageType usageType,
 	                    StringRef* buf = nullptr) const {
-		const BlobCipherEncryptHeader* header = encryptionHeader();
-		DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header->iv, usageType);
-		StringRef plaintext = cipher.decrypt(param2.begin(), param2.size(), *header, arena)->toStringRef();
+		StringRef plaintext;
+
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			BlobCipherEncryptHeaderRef headerRef = BlobCipherEncryptHeaderRef::fromStringRef(param1);
+			DecryptBlobCipherAes256Ctr cipher(
+			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, headerRef, usageType);
+			plaintext = cipher.decrypt(param2.begin(), param2.size(), headerRef, arena);
+
+		} else {
+			const BlobCipherEncryptHeader* header = encryptionHeader();
+			DecryptBlobCipherAes256Ctr cipher(
+			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header->iv, usageType);
+			plaintext = cipher.decrypt(param2.begin(), param2.size(), *header, arena)->toStringRef();
+		}
 		if (buf != nullptr) {
 			*buf = plaintext;
 		}
