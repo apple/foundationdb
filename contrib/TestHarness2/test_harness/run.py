@@ -86,6 +86,10 @@ class TestPicker:
         else:
             self.fetch_stats()
 
+        if not self.tests:
+            raise Exception(
+                "No tests to run! Please check if tests are included/excluded incorrectly or old binaries are missing for restarting tests")
+
     def add_time(self, test_file: Path, run_time: int, out: SummaryTree) -> None:
         # getting the test name is fairly inefficient. But since we only have 100s of tests, I won't bother
         test_name: str | None = None
@@ -133,7 +137,7 @@ class TestPicker:
             or self.exclude_files_regex.search(str(path)) is not None
         ):
             return
-        if 'restarting' in path.parent.parts:
+        if is_restarting_test(path):
             candidates: List[Path] = []
             dirs = path.parent.parts
             version_expr = dirs[-1].split("_")
@@ -219,9 +223,7 @@ class TestPicker:
     def choose_test(self) -> List[Path]:
         min_runtime: float | None = None
         candidates: List[TestDescription] = []
-        for _k, v in self.tests.items():
-            sys.stdout.write("Test item, key: {}; paths: {}; name: {}; priority: {}, total_runtime: {}, num_runs: {}\n".format(
-                _k, v.paths, v.name, v.priority, v.total_runtime, v.num_runs))
+        for _, v in self.tests.items():
             this_time = v.total_runtime * v.priority
             if min_runtime is None or this_time < min_runtime:
                 min_runtime = this_time
@@ -251,7 +253,6 @@ class OldBinaries:
                 continue
             if exec_pattern.fullmatch(file.name) is not None:
                 self._add_file(file)
-                sys.stdout.write("Old binary {}\n".format(file))
 
     def _add_file(self, file: Path):
         version_str = file.name.split("-")[1]
