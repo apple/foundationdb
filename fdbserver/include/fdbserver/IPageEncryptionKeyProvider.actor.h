@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Knobs.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/TenantInfo.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_IPAGEENCRYPTIONKEYPROVIDER_ACTOR_G_H)
@@ -44,6 +45,7 @@
 #include <functional>
 #include <limits>
 #include <tuple>
+#include <type_traits>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -189,13 +191,32 @@ public:
 	bool enableEncryptionDomain() const override { return mode > 0; }
 
 	Future<EncryptionKey> getEncryptionKey(const void* encodingHeader) override {
-		using Header = typename ArenaPage::AESEncryptionEncoder<encodingType>::Header;
-		const Header* h = reinterpret_cast<const Header*>(encodingHeader);
+		using Encoder = typename ArenaPage::AESEncryptionEncoder<encodingType>;
 		EncryptionKey s;
-		s.aesKey.cipherTextKey =
-		    getCipherKey(h->encryption.cipherTextDetails.encryptDomainId, h->encryption.cipherTextDetails.baseCipherId);
-		s.aesKey.cipherHeaderKey = getCipherKey(h->encryption.cipherHeaderDetails.encryptDomainId,
-		                                        h->encryption.cipherHeaderDetails.baseCipherId);
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			const BlobCipherEncryptHeaderRef headerRef = Encoder::getEncryptionHeaderRef(encodingHeader);
+			std::visit(
+			    [&](auto& algoHeader) {
+				    s.aesKey.cipherTextKey = getCipherKey(algoHeader.cipherTextDetails.encryptDomainId,
+				                                          algoHeader.cipherTextDetails.baseCipherId);
+				    using Algo = std::decay<decltype(algoHeader)>;
+				    if constexpr (std::is_same_v<Algo, AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>> ||
+				                  std::is_same_v<Algo, AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>) {
+					    ASSERT(algoHeader.cipherHeaderDetails.isValid());
+					    s.aesKey.cipherHeaderKey = getCipherKey(algoHeader.cipherHeaderDetails.encryptDomainId,
+					                                            algoHeader.cipherHeaderDetails.baseCipherId);
+				    }
+			    },
+			    headerRef.algoHeader);
+		} else {
+			const typename Encoder::Header* h = reinterpret_cast<const typename Encoder::Header*>(encodingHeader);
+			s.aesKey.cipherTextKey = getCipherKey(h->encryption.cipherTextDetails.encryptDomainId,
+			                                      h->encryption.cipherTextDetails.baseCipherId);
+			if (h->encryption.cipherHeaderDetails.isValid()) {
+				s.aesKey.cipherHeaderKey = getCipherKey(h->encryption.cipherHeaderDetails.encryptDomainId,
+				                                        h->encryption.cipherHeaderDetails.baseCipherId);
+			}
+		}
 		return s;
 	}
 
@@ -223,9 +244,17 @@ public:
 
 	int64_t getEncryptionDomainIdFromHeader(const void* encodingHeader) override {
 		ASSERT(encodingHeader != nullptr);
-		using Header = typename ArenaPage::AESEncryptionEncoder<encodingType>::Header;
-		const Header* h = reinterpret_cast<const Header*>(encodingHeader);
-		return h->encryption.cipherTextDetails.encryptDomainId;
+		using Encoder = typename ArenaPage::AESEncryptionEncoder<encodingType>;
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			const BlobCipherEncryptHeaderRef headerRef = Encoder::getEncryptionHeaderRef(encodingHeader);
+			int64_t domainId = INVALID_ENCRYPT_DOMAIN_ID;
+			std::visit([&](auto& algoHeader) { domainId = algoHeader.cipherTextDetails.encryptDomainId; },
+			           headerRef.algoHeader);
+			return domainId;
+		} else {
+			const typename Encoder::Header* h = reinterpret_cast<const typename Encoder::Header*>(encodingHeader);
+			return h->encryption.cipherTextDetails.encryptDomainId;
+		}
 	}
 
 private:
@@ -282,7 +311,8 @@ template <EncodingType encodingType,
               true>
 class AESEncryptionKeyProvider : public IPageEncryptionKeyProvider {
 public:
-	using EncodingHeader = typename ArenaPage::AESEncryptionEncoder<encodingType>::Header;
+	using Encoder = typename ArenaPage::AESEncryptionEncoder<encodingType>;
+	using EncodingHeader = typename Encoder::Header;
 
 	const StringRef systemKeysPrefix = systemKeys.begin;
 
@@ -303,9 +333,17 @@ public:
 	}
 
 	ACTOR static Future<EncryptionKey> getEncryptionKey(AESEncryptionKeyProvider* self, const void* encodingHeader) {
-		const BlobCipherEncryptHeader& header = reinterpret_cast<const EncodingHeader*>(encodingHeader)->encryption;
-		TextAndHeaderCipherKeys cipherKeys =
-		    wait(getEncryptCipherKeys(self->db, header, BlobCipherMetrics::KV_REDWOOD));
+		state TextAndHeaderCipherKeys cipherKeys;
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			BlobCipherEncryptHeaderRef headerRef = Encoder::getEncryptionHeaderRef(encodingHeader);
+			TextAndHeaderCipherKeys cks =
+			    wait(getEncryptCipherKeys(self->db, headerRef, BlobCipherMetrics::KV_REDWOOD));
+			cipherKeys = cks;
+		} else {
+			const BlobCipherEncryptHeader& header = reinterpret_cast<const EncodingHeader*>(encodingHeader)->encryption;
+			TextAndHeaderCipherKeys cks = wait(getEncryptCipherKeys(self->db, header, BlobCipherMetrics::KV_REDWOOD));
+			cipherKeys = cks;
+		}
 		EncryptionKey encryptionKey;
 		encryptionKey.aesKey = cipherKeys;
 		return encryptionKey;
@@ -356,8 +394,16 @@ public:
 
 	int64_t getEncryptionDomainIdFromHeader(const void* encodingHeader) override {
 		ASSERT(encodingHeader != nullptr);
-		const BlobCipherEncryptHeader& header = reinterpret_cast<const EncodingHeader*>(encodingHeader)->encryption;
-		return header.cipherTextDetails.encryptDomainId;
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			BlobCipherEncryptHeaderRef headerRef = Encoder::getEncryptionHeaderRef(encodingHeader);
+			int64_t domainId = INVALID_ENCRYPT_DOMAIN_ID;
+			std::visit([&](auto& algoHeader) { domainId = algoHeader.cipherTextDetails.encryptDomainId; },
+			           headerRef.algoHeader);
+			return domainId;
+		} else {
+			const BlobCipherEncryptHeader& header = reinterpret_cast<const EncodingHeader*>(encodingHeader)->encryption;
+			return header.cipherTextDetails.encryptDomainId;
+		}
 	}
 
 private:

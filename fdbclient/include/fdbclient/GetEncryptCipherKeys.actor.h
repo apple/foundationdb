@@ -338,5 +338,41 @@ Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const
 	return result;
 }
 
+ACTOR template <class T>
+Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
+                                                     BlobCipherEncryptHeaderRef header,
+                                                     BlobCipherMetrics::UsageType usageType) {
+	std::unordered_set<BlobCipherDetails> cipherDetails;
+	std::visit(
+	    [&](auto& algoHeader) {
+		    cipherDetails.insert(algoHeader.cipherTextDetails);
+		    using Algo = std::decay<decltype(algoHeader)>;
+		    if constexpr (std::is_same_v<Algo, AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>> ||
+		                  std::is_same_v<Algo, AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>) {
+			    ASSERT(algoHeader.cipherHeaderDetails.isValid());
+			    cipherDetails.insert(algoHeader.cipherHeaderDetails);
+		    }
+	    },
+	    header.algoHeader);
+	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys =
+	    wait(getEncryptCipherKeys(db, cipherDetails, usageType));
+	TextAndHeaderCipherKeys result;
+	std::visit(
+	    [&](auto& algoHeader) {
+		    ASSERT(cipherKeys.count(algoHeader.cipherTextDetails));
+		    result.cipherTextKey = cipherKeys.at(algoHeader.cipherTextDetails);
+		    ASSERT(result.cipherTextKey.isValid());
+		    using Algo = std::decay<decltype(algoHeader)>;
+		    if constexpr (std::is_same_v<Algo, AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>> ||
+		                  std::is_same_v<Algo, AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>) {
+			    ASSERT(cipherKeys.count(algoHeader.cipherHeaderDetails));
+			    result.cipherHeaderKey = cipherKeys.at(algoHeader.cipherHeaderDetails);
+			    ASSERT(result.cipherHeaderKey.isValid());
+		    }
+	    },
+	    header.algoHeader);
+	return result;
+}
+
 #include "flow/unactorcompiler.h"
 #endif

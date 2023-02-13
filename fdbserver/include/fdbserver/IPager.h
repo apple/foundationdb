@@ -19,6 +19,7 @@
  */
 #pragma once
 
+#include "fdbclient/Knobs.h"
 #ifndef FDBSERVER_IPAGER_H
 #define FDBSERVER_IPAGER_H
 
@@ -387,22 +388,39 @@ public:
 	// By default, xxhash is used to checksum the page. But ff authentication is enabled (such as when we are using
 	// aes256-ctr-hmac-sha256 encryption scheme), the auth tag plays the role of a checksum while assuring authenticity
 	// of the data. xxhash checksum is not needed in this case.
+	//
+	// To support configurable encryption, which may come with variable size encryption header, we assume the encryption
+	// header size is no larger than that of BlobCipherEncryptHeader. This is true for current supported encryption
+	// header format types. Moving forward, the plan is to make IPager support variable size encoding header, and let
+	// Redwood rebuild a page when it tries to in-place update the page, but the reserved buffer for the encoding header
+	// is not large enough.
+	// TODO(yiwu): Cleanup the old encryption header, and update headerSize to be the maximum size of the supported
+	// encryption header format type.
+	// TODO(yiwu): Support variable size encoding header.
 	template <EncodingType encodingType,
 	          typename std::enable_if<encodingType == AESEncryption || encodingType == AESEncryptionWithAuth,
 	                                  bool>::type = true>
 	struct AESEncryptionEncoder {
 		struct AESEncryptionEncodingHeader {
-			BlobCipherEncryptHeader encryption;
 			XXH64_hash_t checksum;
+			union {
+				BlobCipherEncryptHeader encryption;
+				uint8_t encryptionHeaderBuf[0]; // for configurable encryption
+			};
 		};
 
 		struct AESEncryptionWithAuthEncodingHeader {
-			BlobCipherEncryptHeader encryption;
+			union {
+				BlobCipherEncryptHeader encryption;
+				uint8_t encryptionHeaderBuf[0]; // for configurable encryption
+			};
 		};
 
 		using Header = typename std::conditional<encodingType == AESEncryption,
 		                                         AESEncryptionEncodingHeader,
 		                                         AESEncryptionWithAuthEncodingHeader>::type;
+
+		static constexpr size_t headerSize = sizeof(Header);
 
 		static void encode(void* header,
 		                   const TextAndHeaderCipherKeys& cipherKeys,
@@ -415,12 +433,32 @@ public:
 			                                  getEncryptAuthTokenMode(ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 			                                  BlobCipherMetrics::KV_REDWOOD);
 			Arena arena;
-			StringRef ciphertext = cipher.encrypt(payload, len, &h->encryption, arena)->toStringRef();
+			StringRef ciphertext;
+			if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+				BlobCipherEncryptHeaderRef headerRef;
+				ciphertext = cipher.encrypt(payload, len, &headerRef, arena);
+				Standalone<StringRef> serializedHeader = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
+				ASSERT(serializedHeader.size() <= headerSize);
+				memcpy(h->encryptionHeaderBuf, serializedHeader.begin(), serializedHeader.size());
+				if (serializedHeader.size() < headerSize) {
+					memset(h->encryptionHeaderBuf + serializedHeader.size(), 0, headerSize - serializedHeader.size());
+				}
+			} else {
+				ASSERT(false);
+				ciphertext = cipher.encrypt(payload, len, &h->encryption, arena)->toStringRef();
+			}
 			ASSERT_EQ(len, ciphertext.size());
 			memcpy(payload, ciphertext.begin(), len);
 			if constexpr (encodingType == AESEncryption) {
 				h->checksum = XXH3_64bits_withSeed(payload, len, seed);
 			}
+		}
+
+		static BlobCipherEncryptHeaderRef getEncryptionHeaderRef(const void* header) {
+			ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
+			const Header* h = reinterpret_cast<const Header*>(header);
+			return BlobCipherEncryptHeaderRef::fromStringRef(
+			    StringRef(h->encryptionHeaderBuf, headerSize - (h->encryptionHeaderBuf - (const uint8_t*)h)));
 		}
 
 		static void decode(void* header,
@@ -437,7 +475,14 @@ public:
 			DecryptBlobCipherAes256Ctr cipher(
 			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, h->encryption.iv, BlobCipherMetrics::KV_REDWOOD);
 			Arena arena;
-			StringRef plaintext = cipher.decrypt(payload, len, h->encryption, arena)->toStringRef();
+			StringRef plaintext;
+			if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+				BlobCipherEncryptHeaderRef headerRef = getEncryptionHeaderRef(header);
+				plaintext = cipher.decrypt(payload, len, headerRef, arena);
+			} else {
+				ASSERT(false);
+				plaintext = cipher.decrypt(payload, len, h->encryption, arena)->toStringRef();
+			}
 			ASSERT_EQ(len, plaintext.size());
 			memcpy(payload, plaintext.begin(), len);
 		}
