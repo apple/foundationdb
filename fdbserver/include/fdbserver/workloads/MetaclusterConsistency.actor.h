@@ -189,6 +189,7 @@ private:
 			if (!clusterMetadata.entry.hasCapacity()) {
 				ASSERT(allocatedItr == clusterAllocatedMap.end());
 			} else {
+				ASSERT(allocatedItr != clusterAllocatedMap.end());
 				ASSERT_EQ(allocatedItr->second, clusterMetadata.entry.allocated.numTenantGroups);
 				++numFoundInAllocatedMap;
 			}

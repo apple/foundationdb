@@ -163,9 +163,14 @@ ACTOR Future<bool> metaclusterRemoveCommand(Reference<IDatabase> db, std::vector
 	}
 
 	state ClusterNameRef clusterName = tokens[tokens.size() - 1];
-	wait(MetaclusterAPI::removeCluster(db, clusterName, tokens.size() == 4));
+	bool updatedDataCluster = wait(MetaclusterAPI::removeCluster(db, clusterName, tokens.size() == 4, 15.0));
 
 	fmt::print("The cluster `{}' has been removed\n", printable(clusterName).c_str());
+	if (!updatedDataCluster) {
+		fmt::print("WARNING: the data cluster could not be updated and still contains its\n"
+		           "metacluster registration info. To finish removing it, FORCE remove the\n"
+		           "data cluster directly.");
+	}
 	return true;
 }
 
