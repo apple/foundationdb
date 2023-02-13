@@ -750,12 +750,11 @@ bool SSPhysicalShard::hasRange(Reference<ShardInfo> shard) const {
 
 struct TenantSSInfo {
 	constexpr static FileIdentifier file_identifier = 3253114;
-	TenantName name;
 	TenantLockState lockState;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, name, lockState);
+		serializer(ar, lockState);
 	}
 };
 
@@ -5242,7 +5241,7 @@ TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
 	VersionedMap<int64_t, TenantSSInfo> tenantMap;
 	tenantMap.createNewVersion(1);
 	for (auto entry : entries) {
-		tenantMap.insert(entry, TenantSSInfo{ ""_sr, TenantLockState::UNLOCKED });
+		tenantMap.insert(entry, TenantSSInfo{ TenantLockState::UNLOCKED });
 	}
 
 	// Before all tenants
@@ -5333,7 +5332,7 @@ TEST_CASE("/fdbserver/storageserver/randomRangeIntersectsAnyTenant") {
 	int numEntries = deterministicRandom()->randomInt(0, 20);
 	for (int i = 0; i < numEntries; ++i) {
 		int64_t tenantId = deterministicRandom()->randomInt64(0, std::numeric_limits<int64_t>::max());
-		tenantMap.insert(tenantId, TenantSSInfo{ ""_sr, TenantLockState::UNLOCKED });
+		tenantMap.insert(tenantId, TenantSSInfo{ TenantLockState::UNLOCKED });
 		tenantPrefixes.insert(TenantAPI::idToPrefix(tenantId));
 	}
 
@@ -9056,7 +9055,7 @@ private:
 
 void StorageServer::insertTenant(TenantMapEntry const& tenant, Version version, bool persist) {
 	if (version >= tenantMap.getLatestVersion()) {
-		TenantSSInfo tenantSSInfo{ tenant.tenantName, tenant.tenantLockState };
+		TenantSSInfo tenantSSInfo{ tenant.tenantLockState };
 		int64_t tenantId = TenantAPI::prefixToId(tenant.prefix);
 		tenantMap.createNewVersion(version);
 		tenantMap.insert(tenant.id, tenantSSInfo);

@@ -495,13 +495,12 @@ Future<Void> configureTenantTransaction(Transaction tr,
 
 ACTOR template <class Transaction>
 Future<Void> changeLockState(Transaction* tr, int64_t tenant, TenantLockState desiredLockState, UID lockID) {
-	state Optional<TenantMapEntry> entry;
+	state TenantMapEntry entry;
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 	wait(store(entry, TenantAPI::tryGetTenantTransaction(tr, tenant)));
-	ASSERT(entry.present());
 	Optional<UID> currLockID = wait(TenantMetadata::tenantLockId().get(tr, tenant));
 	if (currLockID.present()) {
 		if (currLockID.get() != lockID) {
@@ -512,9 +511,9 @@ Future<Void> changeLockState(Transaction* tr, int64_t tenant, TenantLockState de
 		}
 		// otherwise we can now continue with unlock
 	}
-	TenantMapEntry newState = entry.get();
+	TenantMapEntry newState = entry;
 	newState.tenantLockState = desiredLockState;
-	wait(configureTenantTransaction(tr, entry.get(), newState));
+	wait(configureTenantTransaction(tr, entry, newState));
 	if (desiredLockState == TenantLockState::UNLOCKED) {
 		TenantMetadata::tenantLockId().erase(tr, tenant);
 	} else {
