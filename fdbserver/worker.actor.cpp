@@ -1384,7 +1384,8 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 			        (g_network->isSimulated()
 			             ? (/* Disable for RocksDB */ storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
 			                deterministicRandom()->coinflip())
-			             : true));
+			             : true),
+			    db);
 			Promise<Void> nextRebootKVStorePromise;
 			filesClosed->add(store->onClosed() ||
 			                 nextRebootKVStorePromise
@@ -1977,7 +1978,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					logQueueBasename = fileLogQueuePrefix.toString() + optionsString.toString() + "-";
 				}
 				ASSERT_WE_THINK(abspath(parentDirectory(s.filename)) == folder);
-				IKeyValueStore* kv = openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles);
+				IKeyValueStore* kv = openKVStore(s.storeType,
+				                                 s.filename,
+				                                 s.storeID,
+				                                 memoryLimit,
+				                                 validateDataFiles,
+				                                 false,
+				                                 false,
+				                                 dbInfo,
+				                                 EncryptionAtRestMode());
 				const DiskQueueVersion dqv = s.tLogOptions.getDiskQueueVersion();
 				const int64_t diskQueueWarnSize =
 				    s.tLogOptions.spillType == TLogSpillType::VALUE ? 10 * SERVER_KNOBS->TARGET_BYTES_PER_TLOG : -1;
@@ -2041,8 +2050,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.haltBlobWorker);
 				DUMPTOKEN(recruited.minBlobVersionRequest);
 
-				TraceEvent("BlobWorkerOpen1", recruited.id()).detail("Filename", s.filename);
-				IKeyValueStore* data = openKVStore(s.storeType, s.filename, recruited.id(), memoryLimit);
+				IKeyValueStore* data = openKVStore(s.storeType,
+				                                   s.filename,
+				                                   recruited.id(),
+				                                   memoryLimit,
+				                                   false,
+				                                   false,
+				                                   false,
+				                                   dbInfo,
+				                                   EncryptionAtRestMode());
 				filesClosed.add(data->onClosed());
 
 				Promise<Void> recovery;
@@ -2513,7 +2529,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
 					std::string filename =
 					    filenameFromId(req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId);
-					IKeyValueStore* data = openKVStore(req.storeType, filename, logId, memoryLimit);
+					IKeyValueStore* data = openKVStore(req.storeType,
+					                                   filename,
+					                                   logId,
+					                                   memoryLimit,
+					                                   false,
+					                                   false,
+					                                   false,
+					                                   dbInfo,
+					                                   EncryptionAtRestMode());
 					const DiskQueueVersion dqv = tLogOptions.getDiskQueueVersion();
 					IDiskQueue* queue = openDiskQueue(
 					    joinPath(folder,
@@ -2678,9 +2702,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					if (req.storeType != KeyValueStoreType::END) {
 						std::string filename =
 						    filenameFromId(req.storeType, folder, fileBlobWorkerPrefix.toString(), recruited.id());
-
-						TraceEvent("BlobWorkerOpen2", recruited.id()).detail("Filename", filename);
-						data = openKVStore(req.storeType, filename, recruited.id(), memoryLimit);
+						data = openKVStore(req.storeType,
+						                   filename,
+						                   recruited.id(),
+						                   memoryLimit,
+						                   false,
+						                   false,
+						                   false,
+						                   dbInfo,
+						                   EncryptionAtRestMode());
 						filesClosed.add(data->onClosed());
 					}
 

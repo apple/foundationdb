@@ -3888,6 +3888,8 @@ ACTOR Future<Void> initializeBlobWorker(Reference<BlobManagerData> self, Recruit
 		state InitializeBlobWorkerRequest initReq;
 		initReq.reqId = deterministicRandom()->randomUniqueID();
 		initReq.interfaceId = interfaceId;
+		initReq.storeType = (KeyValueStoreType::StoreType)(
+		    SERVER_KNOBS->BLOB_WORKER_STORE_TYPE < 0 ? KeyValueStoreType::END : SERVER_KNOBS->BLOB_WORKER_STORE_TYPE);
 
 		// acknowledge that this worker is currently being recruited on
 		self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());

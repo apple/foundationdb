@@ -5580,7 +5580,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		// blob worker
 		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		self->encryptMode = config.encryptionAtRestMode;
-		TraceEvent("BWEncryptionAtRestMode").detail("Mode", self->encryptMode.toString());
+		TraceEvent("BWEncryptionAtRestMode", self->id).detail("Mode", self->encryptMode.toString());
 
 		if (self->storage) {
 			wait(self->storage->init());
@@ -5659,17 +5659,17 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	self->id = bwInterf.id();
 	self->locality = bwInterf.locality;
 	try {
+		wait(self->storage->init());
+		wait(self->storage->commit());
+		state UID previous = wait(restorePersistentState(self));
+
 		// Since the blob worker gets initalized through the blob manager it is more reliable to fetch the encryption
 		// state using the DB Config rather than passing it through the initalization request for the blob manager and
 		// blob worker
 		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		self->encryptMode = config.encryptionAtRestMode;
-		TraceEvent("BWEncryptionAtRestMode").detail("Mode", self->encryptMode.toString());
+		TraceEvent("BWEncryptionAtRestMode", self->id).detail("Mode", self->encryptMode.toString());
 
-		wait(self->storage->init());
-		state UID previous = wait(restorePersistentState(self));
-
-		TraceEvent("BlobWorkerInit4", self->id);
 		if (BW_DEBUG) {
 			printf("Initializing blob worker s3 stuff\n");
 		}
