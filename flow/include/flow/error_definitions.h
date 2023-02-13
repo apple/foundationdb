@@ -328,6 +328,9 @@ ERROR( task_interrupted, 2382, "Task execution stopped due to timeout, abort, or
 ERROR( invalid_encryption_key_file, 2383, "The provided encryption key file has invalid contents" )
 ERROR( blob_restore_missing_logs, 2384, "Missing mutation logs" )
 ERROR( blob_restore_corrupted_logs, 2385, "Corrupted mutation logs" )
+ERROR( blob_restore_invalid_manifest_url, 2386, "Invalid manifest URL" )
+ERROR( blob_restore_corrupted_manifest, 2387, "Corrupted manifest" )
+ERROR( blob_restore_missing_manifest, 2388, "Missing manifest" )
 
 ERROR( key_not_found, 2400, "Expected key is missing")
 ERROR( json_malformed, 2401, "JSON string was malformed")

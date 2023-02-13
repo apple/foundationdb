@@ -734,12 +734,6 @@ const Value blobRestoreArgValueFor(BlobRestoreArg args);
 Standalone<BlobRestoreArg> decodeBlobRestoreArg(ValueRef const& value);
 extern const Key blobManifestVersionKey;
 
-// Storage quota per tenant
-// "\xff/storageQuota/[[tenantGroupName]]" := "[[quota]]"
-extern const KeyRangeRef storageQuotaKeys;
-extern const KeyRef storageQuotaPrefix;
-Key storageQuotaKey(StringRef tenantGroupName);
-
 extern const KeyRangeRef idempotencyIdKeys;
 extern const KeyRef idempotencyIdsExpiredVersion;
 

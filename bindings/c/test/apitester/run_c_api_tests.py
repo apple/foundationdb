@@ -164,6 +164,9 @@ class TestConfig:
         server_config = config.get("server", [{}])[0]
         self.tenants_enabled = server_config.get("tenants_enabled", True)
         self.blob_granules_enabled = server_config.get("blob_granules_enabled", False)
+        self.enable_encryption_at_rest = server_config.get(
+            "enable_encryption_at_rest", False
+        )
         self.tls_enabled = server_config.get("tls_enabled", False)
         self.client_chain_len = server_config.get("tls_client_chain_len", 2)
         self.server_chain_len = server_config.get("tls_server_chain_len", 3)
@@ -189,6 +192,7 @@ def run_test(args, test_file):
         config.num_processes,
         enable_tenants=config.tenants_enabled,
         blob_granules_enabled=config.blob_granules_enabled,
+        enable_encryption_at_rest=config.enable_encryption_at_rest,
         tls_config=tls_config,
     ) as cluster:
         ret_code = run_tester(args, cluster, test_file)
