@@ -23,6 +23,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
+#include "fdbclient/Metacluster.h"
 #include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/Schemas.h"
 
@@ -30,6 +31,7 @@
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include <string>
 
 namespace fdb_cli {
 
@@ -86,14 +88,23 @@ void printMetaclusterConfigureOptionsUsage() {
 
 // metacluster create command
 ACTOR Future<bool> metaclusterCreateCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() != 3) {
-		fmt::print("Usage: metacluster create_experimental <NAME>\n\n");
+	if (tokens.size() != 4) {
+		fmt::print("Usage: metacluster create_experimental <NAME> <TENANT_ID_PREFIX>\n\n");
 		fmt::print("Configures the cluster to be a management cluster in a metacluster.\n");
 		fmt::print("NAME is an identifier used to distinguish this metacluster from other metaclusters.\n");
+		fmt::print("TENANT_ID_PREFIX is an integer in the range [0,32767] inclusive which is prepended to all tenant "
+		           "ids in the metacluster.\n");
 		return false;
 	}
 
-	Optional<std::string> errorStr = wait(MetaclusterAPI::createMetacluster(db, tokens[2]));
+	int64_t tenantIdPrefix = std::stoi(tokens[3].toString());
+	if (tenantIdPrefix < TenantAPI::TENANT_ID_PREFIX_MIN_VALUE ||
+	    tenantIdPrefix > TenantAPI::TENANT_ID_PREFIX_MAX_VALUE) {
+		fmt::print("TENANT_ID_PREFIX must be in the range [0,32767] inclusive\n");
+		return false;
+	}
+
+	Optional<std::string> errorStr = wait(MetaclusterAPI::createMetacluster(db, tokens[2], tenantIdPrefix));
 	if (errorStr.present()) {
 		fmt::print("ERROR: {}.\n", errorStr.get());
 	} else {
@@ -174,10 +185,15 @@ ACTOR Future<bool> metaclusterRemoveCommand(Reference<IDatabase> db, std::vector
 	}
 
 	wait(MetaclusterAPI::removeCluster(db, clusterName, clusterType, force));
+	bool updatedDataCluster = wait(MetaclusterAPI::removeCluster(db, clusterName, clusterType, tokens.size() == 4, 15.0));
 
 	if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 		fmt::print("The cluster `{}' has been removed\n", printable(clusterName).c_str());
+		fmt::print("WARNING: the data cluster could not be updated and still contains its\n"
+		           "metacluster registration info. To finish removing it, FORCE remove the\n"
+		           "data cluster directly.");
 	} else {
+		ASSERT(updatedDataCluster);
 		fmt::print("The cluster `{}' has removed its association with its metacluster.\n"
 		           "The metacluster has not been modified.\n",
 		           printable(clusterName).c_str());
@@ -525,7 +541,7 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 	if (tokens.size() == 1) {
 		return { "<create_experimental|decommission|register|remove|restore|configure|list|get|status>", "[ARGS]" };
 	} else if (tokencmp(tokens[1], "create_experimental")) {
-		return { "<NAME>" };
+		return { "<NAME> <TENANT_ID_PREFIX>" };
 	} else if (tokencmp(tokens[1], "decommission")) {
 		return {};
 	} else if (tokencmp(tokens[1], "register") && tokens.size() < 5) {

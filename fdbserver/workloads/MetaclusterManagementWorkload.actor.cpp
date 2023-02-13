@@ -87,12 +87,17 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 	int maxTenants;
 	int maxTenantGroups;
+	int64_t tenantIdPrefix;
 	double testDuration;
 
 	MetaclusterManagementWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 1000));
 		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
+		tenantIdPrefix = getOption(options,
+		                           "tenantIdPrefix"_sr,
+		                           deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
+		                                                            TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1));
 	}
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
@@ -122,8 +127,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			self->dataDbs[self->dataDbIndex.back()] =
 			    DataClusterData(Database::createSimulatedExtraDatabase(connectionString, cx->defaultTenant));
 		}
-
-		wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
+		wait(success(
+		    MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix)));
 		return Void();
 	}
 
@@ -213,11 +218,12 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 		try {
 			loop {
-				Future<Void> removeFuture = MetaclusterAPI::removeCluster(
+				Future<bool> removeFuture = MetaclusterAPI::removeCluster(
 				    self->managementDb, clusterName, ClusterType::METACLUSTER_MANAGEMENT, detachCluster);
 				try {
-					Optional<Void> result = wait(timeout(removeFuture, deterministicRandom()->randomInt(1, 30)));
+					Optional<bool> result = wait(timeout(removeFuture, deterministicRandom()->randomInt(1, 30)));
 					if (result.present()) {
+						ASSERT(result.get());
 						break;
 					} else {
 						retried = true;
@@ -444,12 +450,11 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			state TenantState checkState = checkEntry.tenantState;
 			state std::vector<TenantState> filters;
 			filters.push_back(checkState);
-			state std::vector<std::pair<TenantName, TenantMapEntry>> tenantList;
+
+			state std::vector<std::pair<TenantName, TenantMapEntry>> tenantList =
+			    wait(MetaclusterAPI::listTenantMetadata(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6, 0, filters));
 			// Possible to have changed state between now and the getTenant call above
-			state TenantMapEntry checkEntry2;
-			wait(store(checkEntry2, MetaclusterAPI::getTenant(self->managementDb, tenant)) &&
-			     store(tenantList,
-			           MetaclusterAPI::listTenantMetadata(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6, 0, filters)));
+			state TenantMapEntry checkEntry2 = wait(MetaclusterAPI::getTenant(self->managementDb, tenant));
 
 			DisabledTraceEvent(SevDebug, "VerifyListFilter")
 			    .detail("Context", context)
@@ -488,11 +493,10 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		// Choose between two preferred clusters because if we get a partial completion and
 		// retry, we want the operation to eventually succeed instead of having a chance of
 		// never re-visiting the original preferred cluster.
-		state std::pair<ClusterName, ClusterName> preferredClusters;
-		state Optional<ClusterName> originalPreferredCluster;
+		state std::vector<ClusterName> preferredClusters;
 		if (!assignClusterAutomatically) {
-			preferredClusters.first = self->chooseClusterName();
-			preferredClusters.second = self->chooseClusterName();
+			preferredClusters.push_back(self->chooseClusterName());
+			preferredClusters.push_back(self->chooseClusterName());
 		}
 
 		state TenantMapEntry tenantMapEntry;
@@ -503,11 +507,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			loop {
 				try {
 					if (!assignClusterAutomatically && (!retried || deterministicRandom()->coinflip())) {
-						tenantMapEntry.assignedCluster =
-						    deterministicRandom()->coinflip() ? preferredClusters.first : preferredClusters.second;
-						if (!originalPreferredCluster.present()) {
-							originalPreferredCluster = tenantMapEntry.assignedCluster.get();
-						}
+						tenantMapEntry.assignedCluster = deterministicRandom()->randomChoice(preferredClusters);
 					}
 					Future<Void> createFuture =
 					    MetaclusterAPI::createTenant(self->managementDb, tenantMapEntry, assignClusterAutomatically);
@@ -524,16 +524,23 @@ struct MetaclusterManagementWorkload : TestWorkload {
 						ASSERT(entry.present());
 						tenantMapEntry = entry.get();
 						break;
-					} else if (!assignClusterAutomatically && retried &&
-					           originalPreferredCluster.get() != tenantMapEntry.assignedCluster.get() &&
-					           (e.code() == error_code_cluster_no_capacity ||
-					            e.code() == error_code_cluster_not_found ||
-					            e.code() == error_code_invalid_tenant_configuration)) {
-						// When picking a different assigned cluster, it is possible to leave the
-						// tenant creation in a partially completed state, which we want to avoid.
-						// Continue retrying if the new preferred cluster throws errors rather than
-						// exiting immediately so we can allow the operation to finish.
-						continue;
+					} else if (!assignClusterAutomatically && (e.code() == error_code_cluster_no_capacity ||
+					                                           e.code() == error_code_cluster_not_found ||
+					                                           e.code() == error_code_invalid_tenant_configuration)) {
+						state Error error = e;
+						Optional<TenantMapEntry> entry = wait(MetaclusterAPI::tryGetTenant(self->managementDb, tenant));
+						if (entry.present() && entry.get().assignedCluster != tenantMapEntry.assignedCluster) {
+							// When picking a different assigned cluster, it is possible to leave the
+							// tenant creation in a partially completed state, which we want to avoid.
+							// Continue retrying if the new preferred cluster throws errors rather than
+							// exiting immediately so we can allow the operation to finish.
+							preferredClusters.clear();
+							preferredClusters.push_back(entry.get().assignedCluster.get());
+							tenantMapEntry.assignedCluster = entry.get().assignedCluster;
+							continue;
+						}
+
+						throw error;
 					} else {
 						throw;
 					}
@@ -546,6 +553,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			ASSERT(hasCapacity);
 			ASSERT(entry.assignedCluster.present());
 			ASSERT(entry.tenantGroup == tenantGroup);
+			ASSERT(TenantAPI::getTenantIdPrefix(entry.id) == self->tenantIdPrefix);
 
 			if (tenantGroup.present()) {
 				auto tenantGroupData =
@@ -589,6 +597,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				ASSERT(tenantGroup.present());
 				ASSERT(tenantMapEntry.assignedCluster.present());
 				auto itr = self->tenantGroups.find(tenantGroup.get());
+				ASSERT(itr != self->tenantGroups.end());
 				ASSERT(itr->second.cluster != tenantMapEntry.assignedCluster.get());
 				return Void();
 			}
@@ -964,8 +973,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 		std::vector<Future<Void>> removeClusterFutures;
 		for (auto [clusterName, clusterMetadata] : dataClusters) {
-			removeClusterFutures.push_back(MetaclusterAPI::removeCluster(
-			    self->managementDb, clusterName, ClusterType::METACLUSTER_MANAGEMENT, !deleteTenants));
+			removeClusterFutures.push_back(success(MetaclusterAPI::removeCluster(
+			    self->managementDb, clusterName, ClusterType::METACLUSTER_MANAGEMENT, !deleteTenants)));
 		}
 
 		wait(waitForAll(removeClusterFutures));
