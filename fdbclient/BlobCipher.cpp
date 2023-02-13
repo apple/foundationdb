@@ -226,6 +226,8 @@ std::string toString(BlobCipherMetrics::UsageType type) {
 	switch (type) {
 	case BlobCipherMetrics::UsageType::TLOG:
 		return "TLog";
+	case BlobCipherMetrics::UsageType::TLOG_POST_RESOLUTION:
+		return "TLogPostResolution";
 	case BlobCipherMetrics::UsageType::KV_MEMORY:
 		return "KVMemory";
 	case BlobCipherMetrics::UsageType::KV_REDWOOD:
