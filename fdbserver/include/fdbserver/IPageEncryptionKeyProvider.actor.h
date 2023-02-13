@@ -199,7 +199,7 @@ public:
 			    [&](auto& algoHeader) {
 				    s.aesKey.cipherTextKey = getCipherKey(algoHeader.cipherTextDetails.encryptDomainId,
 				                                          algoHeader.cipherTextDetails.baseCipherId);
-				    using Algo = std::decay<decltype(algoHeader)>;
+				    using Algo = std::decay_t<decltype(algoHeader)>;
 				    if constexpr (std::is_same_v<Algo, AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>> ||
 				                  std::is_same_v<Algo, AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>) {
 					    ASSERT(algoHeader.cipherHeaderDetails.isValid());

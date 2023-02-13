@@ -12,7 +12,6 @@ encryptModes = ['domain_aware', 'cluster_aware']
 bg_metadata_source = "tenant"
 bg_key_tuple_truncate_offset = 1
 enable_encryption = true
-enable_configurable_encryption = true
 
 [[test]]
 testTitle = 'BlobGranuleCorrectness'

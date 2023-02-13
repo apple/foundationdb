@@ -2815,6 +2815,7 @@ public:
 					wait(self->keyProviderInitialized.getFuture());
 					ASSERT(self->keyProvider.isValid());
 				}
+				ASSERT_EQ(self->keyProvider->expectedEncodingType(), page->getEncodingType());
 				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
 				page->encryptionKey = k;
 			}
@@ -2883,6 +2884,11 @@ public:
 		try {
 			page->postReadHeader(pageIDs.front());
 			if (page->isEncrypted()) {
+				if (!self->keyProvider.isValid()) {
+					wait(self->keyProviderInitialized.getFuture());
+					ASSERT(self->keyProvider.isValid());
+				}
+				ASSERT_EQ(self->keyProvider->expectedEncodingType(), page->getEncodingType());
 				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
 				page->encryptionKey = k;
 			}
@@ -5255,6 +5261,7 @@ public:
 				    .detail("InstanceName", self->m_pager->getName())
 				    .detail("UsingEncodingType", self->m_encodingType)
 				    .detail("ExistingEncodingType", self->m_header.encodingType);
+				throw unexpected_encoding_type();
 			}
 			// Verify if encryption mode and encoding type in the header are consistent.
 			// This check can also fail in case of authentication mode mismatch.
@@ -6230,18 +6237,6 @@ private:
 		auto& metrics = g_redwoodMetrics.level(btPage->height).metrics;
 		metrics.pageRead += 1;
 		metrics.pageReadExt += (id.size() - 1);
-
-		// If BTree encryption is enabled, pages read must be encrypted using the desired encryption type
-		if (self->m_enforceEncodingType && (page->getEncodingType() != self->m_encodingType)) {
-			Error e = unexpected_encoding_type();
-			TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
-			    .error(e)
-			    .detail("PhysicalPageID", page->getPhysicalPageID())
-			    .detail("IsEncrypted", page->isEncrypted())
-			    .detail("EncodingTypeFound", page->getEncodingType())
-			    .detail("EncodingTypeExpected", self->m_encodingType);
-			throw e;
-		}
 
 		return std::move(page);
 	}
@@ -11448,8 +11443,8 @@ TEST_CASE("/redwood/correctness/EnforceEncodingType") {
 		                               {}, // encryptionMode
 		                               reopenEncodingType,
 		                               encryptionKeyProviders.at(reopenEncodingType));
-		wait(kvs->init());
 		try {
+			wait(kvs->init());
 			Optional<Value> v = wait(kvs->readValue("foo"_sr));
 			UNREACHABLE();
 		} catch (Error& e) {

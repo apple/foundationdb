@@ -346,7 +346,7 @@ Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const
 	std::visit(
 	    [&](auto& algoHeader) {
 		    cipherDetails.insert(algoHeader.cipherTextDetails);
-		    using Algo = std::decay<decltype(algoHeader)>;
+		    using Algo = std::decay_t<decltype(algoHeader)>;
 		    if constexpr (std::is_same_v<Algo, AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>> ||
 		                  std::is_same_v<Algo, AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>) {
 			    ASSERT(algoHeader.cipherHeaderDetails.isValid());
@@ -362,7 +362,7 @@ Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const
 		    ASSERT(cipherKeys.count(algoHeader.cipherTextDetails));
 		    result.cipherTextKey = cipherKeys.at(algoHeader.cipherTextDetails);
 		    ASSERT(result.cipherTextKey.isValid());
-		    using Algo = std::decay<decltype(algoHeader)>;
+		    using Algo = std::decay_t<decltype(algoHeader)>;
 		    if constexpr (std::is_same_v<Algo, AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>> ||
 		                  std::is_same_v<Algo, AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>) {
 			    ASSERT(cipherKeys.count(algoHeader.cipherHeaderDetails));
