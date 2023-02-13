@@ -423,6 +423,8 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 
 rocksdb::Options getOptions() {
 	rocksdb::Options options({}, getCFOptions());
+	// options.atomic_flush = true;
+	// options.allow_2pc = true;
 	options.avoid_unnecessary_blocking_io = true;
 	options.create_if_missing = true;
 	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
@@ -2313,6 +2315,19 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				    .detail("PersistVersion", version);
 				ASSERT(a.request.version == version || a.request.version == latestVersion);
 
+				// rocksdb::WriteBatch writeBatch;
+				// rocksdb::WriteOptions options;
+				// options.sync = true;
+				// writeBatch.DeleteRange(ps->cf, toSlice(specialKeys.begin), toSlice(specialKeys.end));
+				// StringRef restoreMarker = "\xff\xff/ColumnFamilyRestored"_sr;
+				// StringRef restoreValue = "true"_sr;
+				// writeBatch.Put(ps->cf, toSlice(restoreMarker), toSlice(restoreValue));
+				// s = a.shardManager->getDb()->Write(options, &writeBatch);
+				// TraceEvent(SevDebug, "ShardedRocksDBCheckpointMarkerPersisted", logId)
+				//     .detail("CheckpointID", a.request.checkpointID);
+
+				// s = a.shardManager->getDb()->Flush(rocksdb::FlushOptions(),
+				//                                    a.shardManager->getColumnFamilies());
 				s = rocksdb::Checkpoint::Create(a.shardManager->getDb(), &checkpoint);
 				if (!s.ok()) {
 					logRocksDBError(s, "CheckpointCreateRocksCheckpoint");
@@ -2335,16 +2350,20 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 						populateMetaData(&res, pMetadata);
 					} else {
 						// for (const auto& range : a.request.ranges) {
-						// 	rocksdb::Slice begin = toSlice(range.begin);
-						// 	rocksdb::Slice end = toSlice(range.end);
-						// 	s = a.shardManager->getDb()->CompactRange(
-						// 	    rocksdb::CompactRangeOptions(), ps->cf, &begin, &end);
+						// rocksdb::Slice begin = toSlice(range.begin);
+						// rocksdb::Slice end = toSlice(range.end);
+						s = a.shardManager->getDb()->CompactRange(
+						    // rocksdb::CompactRangeOptions(), ps->cf, &begin, &end);
+						    rocksdb::CompactRangeOptions(),
+						    ps->cf,
+						    nullptr,
+						    nullptr);
 						// }
-						// s = a.shardManager->getDb()->Flush(rocksdb::FlushOptions(),
-						//                                    a.shardManager->getColumnFamilies());
-						// s = a.shardManager->getDb()->FlushWAL(true);
+						s = a.shardManager->getDb()->Flush(rocksdb::FlushOptions(),
+						                                   a.shardManager->getColumnFamilies());
+						s = a.shardManager->getDb()->FlushWAL(true);
 
-						// ASSERT(s.ok());
+						ASSERT(s.ok());
 						platform::eraseDirectoryRecursive(checkpointDir);
 						s = checkpoint->ExportColumnFamily(ps->cf, checkpointDir, &pMetadata);
 						if (!s.ok()) {
@@ -3308,15 +3327,23 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		for (const KeyRange& range : ranges) {
 			std::vector<DataShard*> shards = shardManager.getDataShardsByRange(range);
 			if (!shards.empty()) {
-				TraceEvent(SevWarnAlways, "RestoreRangesNotEmpty", id)
-				    .detail("Range", range)
-				    .detail("RestoreShardID", shardId);
+				TraceEvent te(SevWarnAlways, "RestoreRangesNotEmpty", id);
+				te.detail("Range", range);
+				te.detail("RestoreShardID", shardId);
+				for (int i = 0; i < shards.size(); ++i) {
+					te.detail("DataShard-" + std::to_string(i), shards[i]->range);
+				}
+				te.log();
 				throw failed_to_restore_checkpoint();
 			}
 		}
 		for (const KeyRange& range : ranges) {
 			shardManager.addRange(range, shardId);
 		}
+		TraceEvent(SevDebug, "ShardedRocksRestoreAddRange", id)
+		    .detail("Ranges", describe(ranges))
+		    .detail("ShardID", shardId)
+		    .detail("Checkpoints", describe(checkpoints));
 		auto a = new Writer::RestoreAction(&shardManager, path, shardId, ranges, checkpoints);
 		auto res = a->done.getFuture();
 		writeThread->post(a);
@@ -3931,6 +3958,9 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
 
 TEST_CASE("noSim/ShardedRocksDB/CheckpointRestore") {
 	state std::string rocksDBTestDir = "sharded-rocks-checkpoint";
+	// state std::string rocksDBTestDir = "/root/rocksdb/storage-2203031db8e8cd8d88ca56beca4ca03c.shardedrocksdb";
+	// "/root/simfdb/60c932fcf2b446b1db1ebf6fcac8cfb5/storage-2203031db8e8cd8d88ca56beca4ca03c.shardedrocksdb";
+	// "/root/simfdb/60c932fcf2b446b1db1ebf6fcac8cfb5/storage-2203031db8e8cd8d88ca56beca4ca03c.shardedrocksdb";
 	state std::map<Key, Value> kvs({ { "a"_sr, "TestValueA"_sr },
 	                                 { "ab"_sr, "TestValueAB"_sr },
 	                                 { "ad"_sr, "TestValueAD"_sr },
@@ -3947,11 +3977,12 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointRestore") {
 	wait(kvStore->init());
 
 	state std::string shardId = "shard_1";
-	state KeyRangeRef rangeAk("a"_sr, "k"_sr);
-	// Add some ranges.
+	state KeyRangeRef rangeAk(""_sr, "k"_sr);
+	// // Add some ranges.
 	std::vector<Future<Void>> addRangeFutures;
-	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("a"_sr, "d"_sr), "shard-1"));
-	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("d"_sr, "k"_sr), "shard-2"));
+	addRangeFutures.push_back(kvStore->addRange(rangeAk, "shard-1"));
+	// addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("a"_sr, "d"_sr), "shard-1"));
+	// addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("d"_sr, "k"_sr), "shard-2"));
 	kvStore->persistRangeMapping(rangeAk, true);
 	wait(waitForAll(addRangeFutures) && kvStore->commit(false));
 
@@ -3962,21 +3993,24 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointRestore") {
 
 	state std::string checkpointDir = "checkpoint";
 	platform::eraseDirectoryRecursive(checkpointDir);
-	kvStore->clear(KeyRangeRef("b"_sr, "e"_sr));
-	kvStore->set(KeyValueRef("hb"_sr, "TestValueHB"_sr));
-	kvStore->set(KeyValueRef("\xff\xff/seudoVersion"_sr, "1"_sr));
+	kvStore->clear(KeyRangeRef("a"_sr, "b"_sr));
+	// kvStore->set(KeyValueRef("hb"_sr, "TestValueHB"_sr));
+	// kvStore->set(KeyValueRef("\xff\xff/seudoVersion"_sr, "1"_sr));
 	wait(kvStore->commit(false));
 
 	// Checkpoint iterator returns only the desired keyrange, i.e., ["ab", "b"].
 	CheckpointRequest request(latestVersion,
-	                          { KeyRangeRef("a"_sr, "d"_sr) },
+	                          //   { KeyRangeRef("a"_sr, "d"_sr) },
+	                          { KeyRangeRef(""_sr, "a"_sr) },
 	                          DataMoveRocksCF,
 	                          deterministicRandom()->randomUniqueID(),
 	                          checkpointDir);
 	state CheckpointMetaData checkpoint = wait(kvStore->checkpoint(request));
 	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
 
-	TraceEvent(SevDebug, "ShardedRocksCheckpointTest").detail("Checkpoint", checkpoint.toString());
+	TraceEvent(SevDebug, "ShardedRocksCheckpointTest")
+	    .detail("Checkpoint", checkpoint.toString())
+	    .detail("ColumnFamily", rocksCF.toString());
 
 	state std::string rocksDBRestoreDir = "sharded-rocks-restore";
 	platform::eraseDirectoryRecursive(rocksDBRestoreDir);
@@ -3984,7 +4018,7 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointRestore") {
 	    rocksDBRestoreDir, deterministicRandom()->randomUniqueID(), KeyValueStoreType::SSD_SHARDED_ROCKSDB);
 	wait(restoreKv->init());
 	try {
-		wait(restoreKv->restore(shardId, { KeyRangeRef("a"_sr, "d"_sr) }, { checkpoint }));
+		wait(restoreKv->restore(shardId, { KeyRangeRef(""_sr, "a"_sr) }, { checkpoint }));
 	} catch (Error& e) {
 		TraceEvent(SevError, "TestRestoreCheckpointError")
 		    .errorUnsuppressed(e)
@@ -4000,12 +4034,12 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointRestore") {
 
 	std::vector<Future<Void>> closes;
 	closes.push_back(kvStore->onClosed());
-	kvStore->dispose();
+	kvStore->close();
 	wait(waitForAll(closes));
 
-	platform::eraseDirectoryRecursive(rocksDBTestDir);
-	platform::eraseDirectoryRecursive(checkpointDir);
-	platform::eraseDirectoryRecursive(rocksDBRestoreDir);
+	// platform::eraseDirectoryRecursive(rocksDBTestDir);
+	// platform::eraseDirectoryRecursive(checkpointDir);
+	// platform::eraseDirectoryRecursive(rocksDBRestoreDir);
 
 	return Void();
 }
