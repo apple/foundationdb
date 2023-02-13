@@ -42,7 +42,7 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 	Version endVersion;
 	Key uid;
 	Key baLogRangePrefix;
-	bool debug = true;
+	bool debug = false;
 
 	Version recordVersion(int index) { return beginVersion + versionIncrement * index; }
 
@@ -102,16 +102,13 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 					iStart = iEnd;
 					break;
 				} catch (Error& e) {
-					TraceEvent("MutationLogReaderError").errorUnsuppressed(e);
 					wait(tr.onError(e));
 				}
 			}
 		}
-		fmt::print("Loop 1 done\n");
 
 		state Reference<MutationLogReader> reader = wait(MutationLogReader::Create(
 		    cx, self->beginVersion, self->endVersion, self->uid, backupLogKeys.begin, /*pipelineDepth=*/1));
-		fmt::print("Loop 2\n");
 
 		state int nextExpectedRecord = 0;
 
@@ -146,7 +143,6 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 			if (e.code() != error_code_end_of_stream) {
 				throw e;
 			}
-			TraceEvent("MutationLogReaderError2").errorUnsuppressed(e);
 		}
 
 		printf("records expected: %d\n", self->records);
