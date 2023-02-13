@@ -141,8 +141,11 @@ Arguments
   | Use authorization token JSON file located in ``<path>``
   | Expected content is a JSON object where each key is a tenant name and the mapped value is a token string
 
-- | ``--transaction_timeout <duration>``
-  | Duration in milliseconds after which a transaction times out in run mode.
+- | ``--transaction_timeout_tx <duration>``
+  | Duration in milliseconds after which a transaction times out in run mode. Set as transaction option.
+
+- | ``--transaction_timeout_db <duration>``
+  | Duration in milliseconds after which a transaction times out in run mode. Set as database option.
 
 Transaction Specification
 =========================

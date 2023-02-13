@@ -84,10 +84,18 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 
 	init( WRITE_TRACING_ENABLED,                              true ); if( randomize && BUGGIFY ) WRITE_TRACING_ENABLED = false;
-	init( TRACING_SPAN_ATTRIBUTES_ENABLED,                   false ); // Additional K/V and tenant data added to Span Attributes
 	init( TRACING_SAMPLE_RATE,                                 0.0 ); if (randomize && BUGGIFY) TRACING_SAMPLE_RATE = 0.01; // Fraction of distributed traces (not spans) to sample (0 means ignore all traces)
 	init( TRACING_UDP_LISTENER_ADDR,                   "127.0.0.1" ); // Only applicable if TracerType is set to a network option
 	init( TRACING_UDP_LISTENER_PORT,                          8889 ); // Only applicable if TracerType is set to a network option
+
+	// Native metrics
+	init( METRICS_DATA_MODEL,                                "none"); if (randomize && BUGGIFY) METRICS_DATA_MODEL="otel";
+	init( METRICS_EMISSION_INTERVAL,                          30.0 ); // The time (in seconds) between metric flushes
+	init( STATSD_UDP_EMISSION_ADDR,                     "127.0.0.1");
+	init( STATSD_UDP_EMISSION_PORT,                           8125 );
+	init( OTEL_UDP_EMISSION_ADDR,                       "127.0.0.1");
+	init( OTEL_UDP_EMISSION_PORT,                             8903 );
+	init( METRICS_EMIT_DDSKETCH,                             false ); // Determines if DDSketch buckets will get emitted
 
 	//connectionMonitor
 	init( CONNECTION_MONITOR_LOOP_TIME,   isSimulated ? 0.75 : 1.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_LOOP_TIME = 6.0;
@@ -132,10 +140,11 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	//Authorization
 	init( ALLOW_TOKENLESS_TENANT_ACCESS,                     false );
+	init( AUDIT_LOGGING_ENABLED,                              true );
 	init( PUBLIC_KEY_FILE_MAX_SIZE,                    1024 * 1024 );
 	init( PUBLIC_KEY_FILE_REFRESH_INTERVAL_SECONDS,             30 );
-	init( MAX_CACHED_EXPIRED_TOKENS,                          1024 );
 	init( AUDIT_TIME_WINDOW,                                   5.0 );
+	init( TOKEN_CACHE_SIZE,                                   2000 );
 
 	//AsyncFileCached
 	init( PAGE_CACHE_4K,                                   2LL<<30 );
@@ -299,13 +308,11 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	if ( randomize && BUGGIFY) { ENCRYPT_CIPHER_KEY_CACHE_TTL = deterministicRandom()->randomInt(2, 10) * 60; }
 	init( ENCRYPT_KEY_REFRESH_INTERVAL,   isSimulated ? 60 : 8 * 60 );
 	if ( randomize && BUGGIFY) { ENCRYPT_KEY_REFRESH_INTERVAL = deterministicRandom()->randomInt(2, 10); }
-	init( TOKEN_CACHE_SIZE,                                    100 );
 	init( ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,                  5.0 );
 	init( ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY,          0.01 );
 	// Refer to EncryptUtil::EncryptAuthTokenAlgo for more details
-	init( ENCRYPT_HEADER_AUTH_TOKEN_ENABLED,                  true ); if ( randomize && BUGGIFY ) { ENCRYPT_HEADER_AUTH_TOKEN_ENABLED = !ENCRYPT_HEADER_AUTH_TOKEN_ENABLED; }
-	init( ENCRYPT_HEADER_AUTH_TOKEN_ALGO,                        1 ); if ( randomize && BUGGIFY ) { ENCRYPT_HEADER_AUTH_TOKEN_ALGO = getRandomAuthTokenAlgo(); }
-
+	init( ENCRYPT_HEADER_AUTH_TOKEN_ENABLED,                 false ); if ( randomize && BUGGIFY ) { ENCRYPT_HEADER_AUTH_TOKEN_ENABLED = !ENCRYPT_HEADER_AUTH_TOKEN_ENABLED; }
+	init( ENCRYPT_HEADER_AUTH_TOKEN_ALGO,                        0 ); if ( randomize && ENCRYPT_HEADER_AUTH_TOKEN_ENABLED ) { ENCRYPT_HEADER_AUTH_TOKEN_ALGO = getRandomAuthTokenAlgo(); }
 
 	// REST Client
 	init( RESTCLIENT_MAX_CONNECTIONPOOL_SIZE,                   10 );

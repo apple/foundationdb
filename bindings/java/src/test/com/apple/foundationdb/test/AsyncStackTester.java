@@ -505,14 +505,26 @@ public class AsyncStackTester {
 			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if (op == StackOperation.TENANT_SET_ACTIVE) {
-			return inst.popParam().thenAcceptAsync(param -> {
+			return inst.popParam().thenComposeAsync(param -> {
 				byte[] tenantName = (byte[])param;
-				inst.context.setTenant(Optional.of(tenantName));
+				return inst.context.setTenant(Optional.of(tenantName)).thenAcceptAsync(id -> {
+					inst.push("SET_ACTIVE_TENANT".getBytes());
+				}, FDB.DEFAULT_EXECUTOR);
 			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if (op == StackOperation.TENANT_CLEAR_ACTIVE) {
 			inst.context.setTenant(Optional.empty());
 			return AsyncUtil.DONE;
+		}
+		else if (op == StackOperation.TENANT_GET_ID) {
+			if (inst.context.tenant.isPresent()) {
+				return inst.context.tenant.get().getId().thenAcceptAsync(id -> {
+					inst.push("GOT_TENANT_ID".getBytes());
+				}, FDB.DEFAULT_EXECUTOR);
+			} else {
+				inst.push("NO_ACTIVE_TENANT".getBytes());
+				return AsyncUtil.DONE;
+			}
 		}
 		else if (op == StackOperation.UNIT_TESTS) {
 			inst.context.db.options().setLocationCacheSize(100001);

@@ -1,0 +1,51 @@
+[configuration]
+storageEngineExcludeTypes = [3]
+maxTLogVersion = 6
+disableTss = true
+disableHostname = true
+disableEncryption = true
+allowDefaultTenant = false
+allowCreatingTenants = false
+
+[[knobs]]
+# This can be removed once the lower bound of this downgrade test is a version that understands the new protocol
+shard_encode_location_metadata = false
+
+[[test]]
+testTitle = 'Clogged'
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 500.0
+    nodeCount = 2500
+    testDuration = 10.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 10.0
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'SaveAndKill'
+    restartInfoLocation = 'simfdb/restartInfo.ini'
+    testDuration = 10.0

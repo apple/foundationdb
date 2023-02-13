@@ -31,13 +31,14 @@
 
 FDB_DEFINE_BOOLEAN_PARAM(EnforceValidTenantId);
 
-Key TenantMapEntry::idToPrefix(int64_t id) {
+namespace TenantAPI {
+Key idToPrefix(int64_t id) {
 	int64_t swapped = bigEndian64(id);
-	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), TENANT_PREFIX_SIZE);
+	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), TenantAPI::PREFIX_SIZE);
 }
 
-int64_t TenantMapEntry::prefixToId(KeyRef prefix, EnforceValidTenantId enforceValidTenantId) {
-	ASSERT(prefix.size() == TENANT_PREFIX_SIZE);
+int64_t prefixToId(KeyRef prefix, EnforceValidTenantId enforceValidTenantId) {
+	ASSERT(prefix.size() == TenantAPI::PREFIX_SIZE);
 	int64_t id = *reinterpret_cast<const int64_t*>(prefix.begin());
 	id = bigEndian64(id);
 	if (enforceValidTenantId) {
@@ -47,6 +48,7 @@ int64_t TenantMapEntry::prefixToId(KeyRef prefix, EnforceValidTenantId enforceVa
 	}
 	return id;
 }
+}; // namespace TenantAPI
 
 std::string TenantMapEntry::tenantStateToString(TenantState tenantState) {
 	switch (tenantState) {
@@ -58,10 +60,8 @@ std::string TenantMapEntry::tenantStateToString(TenantState tenantState) {
 		return "removing";
 	case TenantState::UPDATING_CONFIGURATION:
 		return "updating configuration";
-	case TenantState::RENAMING_FROM:
-		return "renaming from";
-	case TenantState::RENAMING_TO:
-		return "renaming to";
+	case TenantState::RENAMING:
+		return "renaming";
 	case TenantState::ERROR:
 		return "error";
 	default:
@@ -79,10 +79,8 @@ TenantState TenantMapEntry::stringToTenantState(std::string stateStr) {
 		return TenantState::REMOVING;
 	} else if (stateStr == "updating configuration") {
 		return TenantState::UPDATING_CONFIGURATION;
-	} else if (stateStr == "renaming from") {
-		return TenantState::RENAMING_FROM;
-	} else if (stateStr == "renaming to") {
-		return TenantState::RENAMING_TO;
+	} else if (stateStr == "renaming") {
+		return TenantState::RENAMING;
 	} else if (stateStr == "error") {
 		return TenantState::ERROR;
 	}
@@ -144,7 +142,7 @@ TenantMapEntry::TenantMapEntry(int64_t id,
 void TenantMapEntry::setId(int64_t id) {
 	ASSERT(id >= 0);
 	this->id = id;
-	prefix = idToPrefix(id);
+	prefix = TenantAPI::idToPrefix(id);
 }
 
 std::string TenantMapEntry::toJson() const {

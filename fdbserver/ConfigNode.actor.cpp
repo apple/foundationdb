@@ -513,7 +513,9 @@ class ConfigNodeImpl {
 				when(ConfigTransactionGetKnobsRequest req = waitNext(cti->getKnobs.getFuture())) {
 					wait(getKnobs(self, req));
 				}
-				when(wait(self->kvStore->getError())) { ASSERT(false); }
+				when(wait(self->kvStore->getError())) {
+					ASSERT(false);
+				}
 			}
 		}
 	}
@@ -797,7 +799,9 @@ class ConfigNodeImpl {
 					}
 					req.reply.send(Void());
 				}
-				when(wait(self->kvStore->getError())) { ASSERT(false); }
+				when(wait(self->kvStore->getError())) {
+					ASSERT(false);
+				}
 			}
 		}
 	}

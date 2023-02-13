@@ -1,3 +1,4 @@
+#include "fdbclient/FDBTypes.h"
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
 #include "fdbclient/KeyRangeMap.h"
@@ -79,15 +80,6 @@ struct ReadIterator;
 struct ShardedRocksDBKeyValueStore;
 
 using rocksdb::BackgroundErrorReason;
-
-struct RangeLessThan {
-	inline bool operator()(const KeyRange& l, const KeyRange& r) {
-		if (l.begin == r.begin) {
-			return l.end < r.end;
-		}
-		return l.begin < r.begin;
-	}
-};
 
 // Returns string representation of RocksDB background error reason.
 // Error reason code:
@@ -374,7 +366,7 @@ rocksdb::Options getOptions() {
 	options.write_buffer_size = SERVER_KNOBS->ROCKSDB_CF_WRITE_BUFFER_SIZE;
 	options.statistics = rocksdb::CreateDBStatistics();
 	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
-	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
+	options.db_log_dir = g_network->isSimulated() ? "" : SERVER_KNOBS->LOG_DIRECTORY;
 	return options;
 }
 
@@ -554,18 +546,55 @@ struct PhysicalShard {
 
 	// Restore from the checkpoint.
 	rocksdb::Status restore(const CheckpointMetaData& checkpoint) {
-		rocksdb::ExportImportFilesMetaData metaData = getMetaData(checkpoint);
-		rocksdb::ImportColumnFamilyOptions importOptions;
-		importOptions.move_files = true;
-		rocksdb::Status status = db->CreateColumnFamilyWithImport(getCFOptions(), id, importOptions, metaData, &cf);
+		const CheckpointFormat format = checkpoint.getFormat();
+		rocksdb::Status status;
+		if (format == DataMoveRocksCF) {
+			rocksdb::ExportImportFilesMetaData metaData = getMetaData(checkpoint);
+			rocksdb::ImportColumnFamilyOptions importOptions;
+			importOptions.move_files = true;
+			status = db->CreateColumnFamilyWithImport(getCFOptions(), id, importOptions, metaData, &cf);
 
-		if (!status.ok()) {
-			logRocksDBError(status, "Restore");
-			return status;
+			if (!status.ok()) {
+				logRocksDBError(status, "RocksImportColumnFamily");
+			}
+		} else if (format == RocksDBKeyValues) {
+			std::vector<std::string> sstFiles;
+			const RocksDBCheckpointKeyValues rcp = getRocksKeyValuesCheckpoint(checkpoint);
+			for (const auto& file : rcp.fetchedFiles) {
+				TraceEvent(SevDebug, "RocksDBRestoreFile")
+				    .detail("Shard", id)
+				    .detail("CheckpointID", checkpoint.checkpointID)
+				    .detail("File", file.toString());
+				sstFiles.push_back(file.path);
+			}
+
+			if (!sstFiles.empty()) {
+				ASSERT(cf != nullptr);
+				rocksdb::IngestExternalFileOptions ingestOptions;
+				ingestOptions.move_files = true;
+				ingestOptions.write_global_seqno = false;
+				ingestOptions.verify_checksums_before_ingest = true;
+				status = db->IngestExternalFile(cf, sstFiles, ingestOptions);
+				if (!status.ok()) {
+					logRocksDBError(status, "RocksIngestExternalFile");
+				}
+			} else {
+				TraceEvent(SevWarn, "RocksDBServeRestoreEmptyRange")
+				    .detail("Shard", id)
+				    .detail("RocksKeyValuesCheckpoint", rcp.toString())
+				    .detail("Checkpoint", checkpoint.toString());
+			}
+			TraceEvent(SevInfo, "RocksDBServeRestoreEnd")
+			    .detail("Shard", id)
+			    .detail("Checkpoint", checkpoint.toString());
+		} else {
+			throw not_implemented();
 		}
 
-		readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
-		this->isInitialized.store(true);
+		if (status.ok() && !this->isInitialized) {
+			readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
+			this->isInitialized.store(true);
+		}
 		return status;
 	}
 
@@ -639,7 +668,6 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef range, int rowLimit, i
 		return 0;
 	}
 
-	int accumulatedRows = 0;
 	int accumulatedBytes = 0;
 	rocksdb::Status s;
 
@@ -651,7 +679,6 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef range, int rowLimit, i
 		cursor->Seek(toSlice(range.begin));
 		while (cursor->Valid() && toStringRef(cursor->key()) < range.end) {
 			KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-			++accumulatedRows;
 			accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 			result->push_back_deep(result->arena(), kv);
 			// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
@@ -671,7 +698,6 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef range, int rowLimit, i
 		}
 		while (cursor->Valid() && toStringRef(cursor->key()) >= range.begin) {
 			KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-			++accumulatedRows;
 			accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 			result->push_back_deep(result->arena(), kv);
 			// Calling `cursor->Prev()` is potentially expensive, so short-circut here just in case.
@@ -1088,7 +1114,7 @@ public:
 		TraceEvent(SevInfo, "ShardedRocksDB", logId)
 		    .detail("PendingDeletionShardQueueSize", pendingDeletionShards.size());
 		while (!pendingDeletionShards.empty()) {
-			const auto& id = pendingDeletionShards.front();
+			const auto id = pendingDeletionShards.front();
 			auto it = physicalShards.find(id);
 			if (it == physicalShards.end() || it->second->dataShards.size() != 0) {
 				pendingDeletionShards.pop_front();
@@ -2248,10 +2274,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			rocksdb::Status status;
 			rocksdb::WriteBatch writeBatch;
+			rocksdb::WriteOptions options;
+			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
+
 			if (format == DataMoveRocksCF) {
 				CheckpointMetaData& checkpoint = a.checkpoints.front();
-				std::sort(a.ranges.begin(), a.ranges.end(), RangeLessThan());
-				std::sort(checkpoint.ranges.begin(), checkpoint.ranges.end(), RangeLessThan());
+				std::sort(a.ranges.begin(), a.ranges.end(), KeyRangeRef::ArbitraryOrder());
+				std::sort(checkpoint.ranges.begin(), checkpoint.ranges.end(), KeyRangeRef::ArbitraryOrder());
 				if (a.ranges.empty() || checkpoint.ranges.empty() || a.ranges.size() > checkpoint.ranges.size() ||
 				    a.ranges.front().begin != checkpoint.ranges.front().begin) {
 					TraceEvent(SevError, "ShardedRocksDBRestoreFailed", logId)
@@ -2304,6 +2333,93 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 						writeBatch.DeleteRange(ps->cf, toSlice(cRange.begin), toSlice(cRange.end));
 					}
 				}
+			} else if (format == RocksDBKeyValues) {
+				// Make sure the files are complete for the desired ranges.
+				std::vector<KeyRange> fetchedRanges;
+				std::vector<KeyRange> intendedRanges(a.ranges.begin(), a.ranges.end());
+				std::vector<RocksDBCheckpointKeyValues> rkvs;
+				for (const auto& checkpoint : a.checkpoints) {
+					rkvs.push_back(getRocksKeyValuesCheckpoint(checkpoint));
+					for (const auto& file : rkvs.back().fetchedFiles) {
+						fetchedRanges.push_back(file.range);
+					}
+				}
+				// Verify that the collective fetchedRanges is the same as the collective intendedRanges.
+				std::sort(fetchedRanges.begin(), fetchedRanges.end(), KeyRangeRef::ArbitraryOrder());
+				std::sort(intendedRanges.begin(), intendedRanges.end(), KeyRangeRef::ArbitraryOrder());
+				int i = 0, j = 0;
+				while (i < fetchedRanges.size() && j < intendedRanges.size()) {
+					if (fetchedRanges[i].begin != intendedRanges[j].begin) {
+						break;
+					} else if (fetchedRanges[i] == intendedRanges[j]) {
+						++i;
+						++j;
+					} else if (fetchedRanges[i].contains(intendedRanges[j])) {
+						fetchedRanges[i] = KeyRangeRef(intendedRanges[j].end, fetchedRanges[i].end);
+						++j;
+					} else if (intendedRanges[j].contains(fetchedRanges[i])) {
+						intendedRanges[j] = KeyRangeRef(fetchedRanges[i].end, intendedRanges[j].end);
+						++i;
+					} else {
+						break;
+					}
+				}
+				if (i != fetchedRanges.size() || j != intendedRanges.size()) {
+					TraceEvent(SevError, "ShardedRocksDBRestoreFailed", logId)
+					    .detail("Reason", "RestoreFilesRangesMismatch")
+					    .detail("Ranges", describe(a.ranges))
+					    .detail("FetchedFiles", describe(rkvs));
+					a.done.sendError(failed_to_restore_checkpoint());
+					return;
+				}
+
+				if (!ps->initialized()) {
+					TraceEvent(SevDebug, "ShardedRocksRestoreInitPS", logId)
+					    .detail("Path", a.path)
+					    .detail("Checkpoints", describe(a.checkpoints))
+					    .detail("PhysicalShard", ps->toString());
+					status = ps->init();
+				}
+				if (!status.ok()) {
+					logRocksDBError(status, "RestoreInitPhysicalShard");
+					a.done.sendError(statusToError(status));
+					return;
+				}
+
+				for (const auto& checkpoint : a.checkpoints) {
+					status = ps->restore(checkpoint);
+					if (!status.ok()) {
+						TraceEvent(SevWarnAlways, "ShardedRocksIngestFileError", logId)
+						    .detail("Error", status.ToString())
+						    .detail("Path", a.path)
+						    .detail("Checkpoint", checkpoint.toString())
+						    .detail("PhysicalShard", ps->toString());
+						break;
+					}
+				}
+
+				if (!status.ok()) {
+					logRocksDBError(status, "RestoreIngestFile");
+					for (const auto& range : a.ranges) {
+						writeBatch.DeleteRange(ps->cf, toSlice(range.begin), toSlice(range.end));
+					}
+					TraceEvent(SevInfo, "ShardedRocksRevertRestore", logId)
+					    .detail("Path", a.path)
+					    .detail("Checkpoints", describe(a.checkpoints))
+					    .detail("PhysicalShard", ps->toString())
+					    .detail("RestoreRanges", describe(a.ranges));
+
+					rocksdb::Status s = a.shardManager->getDb()->Write(options, &writeBatch);
+					if (!s.ok()) {
+						TraceEvent(SevError, "ShardedRocksRevertRestoreError", logId)
+						    .detail("Error", s.ToString())
+						    .detail("Path", a.path)
+						    .detail("PhysicalShard", ps->toString())
+						    .detail("RestoreRanges", describe(a.ranges));
+					}
+					a.done.sendError(statusToError(status));
+					return;
+				}
 			} else if (format == RocksDB) {
 				a.done.sendError(not_implemented());
 				return;
@@ -2314,9 +2430,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				a.shardManager->populateRangeMappingMutations(&writeBatch, range, /*isAdd=*/true);
 			}
 
-			rocksdb::WriteOptions options;
-			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
-
 			status = a.shardManager->getDb()->Write(options, &writeBatch);
 			if (!status.ok()) {
 				logRocksDBError(status, "RestorePersistMetaData");
@@ -2325,8 +2438,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			}
 			TraceEvent(SevDebug, "ShardedRocksRestoredMetaDataPersisted", logId)
 			    .detail("Path", a.path)
-			    .detail("Checkpoints", describe(a.checkpoints))
-			    .detail("RocksDBCF", getRocksCF(a.checkpoints[0]).toString());
+			    .detail("Checkpoints", describe(a.checkpoints));
 			a.shardManager->getMetaDataShard()->refreshReadIteratorPool();
 			a.done.send(Void());
 			TraceEvent(SevInfo, "ShardedRocksDBRestoreEnd", logId)
@@ -2991,6 +3103,10 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	// Used for debugging shard mapping issue.
 	std::vector<std::pair<KeyRange, std::string>> getDataMapping() { return shardManager.getDataMapping(); }
 
+	Future<EncryptionAtRestMode> encryptionMode() override {
+		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
+	}
+
 	std::shared_ptr<ShardedRocksDBState> rState;
 	rocksdb::Options dbOptions;
 	ShardManager shardManager;
@@ -3274,11 +3390,6 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 	int count = std::unique(shardIds.begin(), shardIds.end()) - shardIds.begin();
 	ASSERT_EQ(count, 1);
 	ASSERT(shardIds[0] == "shard-2");
-	shardsToCleanUp.insert(shardsToCleanUp.end(), shardIds.begin(), shardIds.end());
-
-	// Clean up empty shards. shard-2 is empty now.
-	Future<Void> cleanUpFuture = kvStore->cleanUpShardsIfNeeded(shardsToCleanUp);
-	wait(cleanUpFuture);
 
 	// Add more ranges.
 	std::vector<Future<Void>> addRangeFutures;
@@ -3332,9 +3443,6 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 
 		// Add another range to shard-2.
 		wait(kvStore->addRange(KeyRangeRef("h"_sr, "i"_sr), "shard-2"));
-
-		// Clean up shards. Shard-2 should not be removed.
-		wait(kvStore->cleanUpShardsIfNeeded(shardsToCleanUp));
 	}
 	{
 		auto dataMap = rocksdbStore->getDataMapping();
@@ -3500,6 +3608,101 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 	return Void();
 }
 
+TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
+	state std::string rocksDBTestDir = "sharded-rocks-checkpoint-restore";
+	state std::map<Key, Value> kvs({ { "a"_sr, "TestValueA"_sr },
+	                                 { "ab"_sr, "TestValueAB"_sr },
+	                                 { "ad"_sr, "TestValueAD"_sr },
+	                                 { "b"_sr, "TestValueB"_sr },
+	                                 { "ba"_sr, "TestValueBA"_sr },
+	                                 { "c"_sr, "TestValueC"_sr },
+	                                 { "d"_sr, "TestValueD"_sr },
+	                                 { "e"_sr, "TestValueE"_sr },
+	                                 { "h"_sr, "TestValueH"_sr },
+	                                 { "ha"_sr, "TestValueHA"_sr } });
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+	state IKeyValueStore* kvStore =
+	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	// Add some ranges.
+	std::vector<Future<Void>> addRangeFutures;
+	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("a"_sr, "c"_sr), "shard-1"));
+	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("c"_sr, "f"_sr), "shard-2"));
+	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("h"_sr, "k"_sr), "shard-1"));
+	kvStore->persistRangeMapping(KeyRangeRef("a"_sr, "f"_sr), true);
+	wait(waitForAll(addRangeFutures) && kvStore->commit(false));
+
+	for (const auto& [k, v] : kvs) {
+		kvStore->set(KeyValueRef(k, v));
+	}
+	wait(kvStore->commit(false));
+
+	state std::string checkpointDir = "checkpoint";
+	platform::eraseDirectoryRecursive(checkpointDir);
+
+	// Checkpoint iterator returns only the desired keyrange, i.e., ["ab", "b"].
+	CheckpointRequest request(latestVersion,
+	                          { KeyRangeRef("a"_sr, "c"_sr), KeyRangeRef("h"_sr, "k"_sr) },
+	                          DataMoveRocksCF,
+	                          deterministicRandom()->randomUniqueID(),
+	                          checkpointDir);
+	CheckpointMetaData metaData = wait(kvStore->checkpoint(request));
+
+	state Standalone<StringRef> token = BinaryWriter::toValue(KeyRangeRef("a"_sr, "k"_sr), IncludeVersion());
+	state ICheckpointReader* cpReader =
+	    newCheckpointReader(metaData, CheckpointAsKeyValues::True, deterministicRandom()->randomUniqueID());
+	ASSERT(cpReader != nullptr);
+	wait(cpReader->init(token));
+	state KeyRange testRange(KeyRangeRef("ab"_sr, "b"_sr));
+	state std::unique_ptr<ICheckpointIterator> iter0 = cpReader->getIterator(testRange);
+	state int numKeys = 0;
+	try {
+		loop {
+			RangeResult res = wait(iter0->nextBatch(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
+			for (const auto& kv : res) {
+				ASSERT(testRange.contains(kv.key));
+				ASSERT(kvs[kv.key] == kv.value);
+				++numKeys;
+			}
+		}
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_end_of_stream);
+		ASSERT(numKeys == 2);
+	}
+
+	testRange = KeyRangeRef("a"_sr, "k"_sr);
+	state std::unique_ptr<ICheckpointIterator> iter1 = cpReader->getIterator(testRange);
+	try {
+		numKeys = 0;
+		loop {
+			RangeResult res = wait(iter1->nextBatch(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
+			for (const auto& kv : res) {
+				ASSERT(testRange.contains(kv.key));
+				ASSERT(kvs[kv.key] == kv.value);
+				++numKeys;
+			}
+		}
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_end_of_stream);
+		ASSERT(numKeys == 7);
+	}
+
+	iter0.reset();
+	iter1.reset();
+	ASSERT(!cpReader->inUse());
+	TraceEvent(SevDebug, "ShardedRocksCheckpointReaaderTested");
+	std::vector<Future<Void>> closes;
+	closes.push_back(cpReader->close());
+	closes.push_back(kvStore->onClosed());
+	kvStore->dispose();
+	wait(waitForAll(closes));
+
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+	platform::eraseDirectoryRecursive(checkpointDir);
+
+	return Void();
+}
 } // namespace
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL

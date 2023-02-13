@@ -1,0 +1,59 @@
+[[knobs]]
+enable_version_vector = false
+enable_version_vector_tlog_unicast = false
+
+[[test]]
+testTitle='VersionVectorUpgrade'
+clearAfterTest=false
+
+    [[test.workload]]
+    testName='Cycle'
+    transactionsPerSecond=2500.0
+    nodeCount=1000
+    testDuration=30.0
+    expectedRate=0
+    keyPrefix = 'cycle'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+    expectedRate = 0
+    keyPrefix = '!'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+    expectedRate = 0
+    keyPrefix = 'ZZZ'
+
+    [[test.workload]]
+    testName='RandomClogging'
+    testDuration=10.0
+
+    [[test.workload]]
+    testName='Rollback'
+    meanDelay=10.0
+    testDuration=10.0
+
+    [[test.workload]]
+    testName='Attrition'
+    machinesToKill=10
+    machinesToLeave=3
+    reboot=true
+    testDuration=10.0
+
+    [[test.workload]]
+    testName='Attrition'
+    machinesToKill=10
+    machinesToLeave=3
+    reboot=true
+    testDuration=10.0
+
+    [[test.workload]]
+    testName='SaveAndKill'
+    restartInfoLocation='simfdb/restartInfo.ini'
+    testDuration=60.0

@@ -22,6 +22,8 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+using authz::TenantId;
+
 template <class Key, class Value>
 class LRUCache {
 public:
@@ -132,28 +134,26 @@ TEST_CASE("/fdbrpc/authz/LRUCache") {
 
 struct CacheEntry {
 	Arena arena;
-	VectorRef<TenantNameRef> tenants;
+	VectorRef<TenantId> tenants;
 	Optional<StringRef> tokenId;
 	double expirationTime = 0.0;
 };
 
 struct AuditEntry {
 	NetworkAddress address;
+	TenantId tenantId;
 	Optional<Standalone<StringRef>> tokenId;
-	explicit AuditEntry(NetworkAddress const& address, CacheEntry const& cacheEntry)
-	  : address(address),
+	bool operator==(const AuditEntry& other) const noexcept = default;
+	explicit AuditEntry(NetworkAddress const& address, TenantId tenantId, CacheEntry const& cacheEntry)
+	  : address(address), tenantId(tenantId),
 	    tokenId(cacheEntry.tokenId.present() ? Standalone<StringRef>(cacheEntry.tokenId.get(), cacheEntry.arena)
 	                                         : Optional<Standalone<StringRef>>()) {}
 };
 
-bool operator==(AuditEntry const& lhs, AuditEntry const& rhs) {
-	return (lhs.address == rhs.address) && (lhs.tokenId.present() == rhs.tokenId.present()) &&
-	       (!lhs.tokenId.present() || lhs.tokenId.get() == rhs.tokenId.get());
-}
-
 std::size_t hash_value(AuditEntry const& value) {
 	std::size_t seed = 0;
 	boost::hash_combine(seed, value.address);
+	boost::hash_combine(seed, value.tenantId);
 	if (value.tokenId.present()) {
 		boost::hash_combine(seed, value.tokenId.get());
 	}
@@ -161,38 +161,17 @@ std::size_t hash_value(AuditEntry const& value) {
 }
 
 struct TokenCacheImpl {
+	TokenCacheImpl();
 	LRUCache<StringRef, CacheEntry> cache;
 	boost::unordered_set<AuditEntry> usedTokens;
-	Future<Void> auditor;
-	TokenCacheImpl();
+	double lastResetTime;
 
-	bool validate(TenantNameRef tenant, StringRef token);
+	bool validate(TenantId tenantId, StringRef token);
 	bool validateAndAdd(double currentTime, StringRef token, NetworkAddress const& peer);
+	void logTokenUsage(double currentTime, AuditEntry&& entry);
 };
 
-ACTOR Future<Void> tokenCacheAudit(TokenCacheImpl* self) {
-	state boost::unordered_set<AuditEntry> audits;
-	state boost::unordered_set<AuditEntry>::iterator iter;
-	state double lastLoggedTime = 0;
-	loop {
-		auto const timeSinceLog = g_network->timer() - lastLoggedTime;
-		if (timeSinceLog < FLOW_KNOBS->AUDIT_TIME_WINDOW) {
-			wait(delay(FLOW_KNOBS->AUDIT_TIME_WINDOW - timeSinceLog));
-		}
-		lastLoggedTime = g_network->timer();
-		audits.swap(self->usedTokens);
-		for (iter = audits.begin(); iter != audits.end(); ++iter) {
-			CODE_PROBE(true, "Audit Logging Running");
-			TraceEvent("AuditTokenUsed").detail("Client", iter->address).detail("TokenId", iter->tokenId).log();
-			wait(yield());
-		}
-		audits.clear();
-	}
-}
-
-TokenCacheImpl::TokenCacheImpl() : cache(FLOW_KNOBS->TOKEN_CACHE_SIZE) {
-	auditor = tokenCacheAudit(this);
-}
+TokenCacheImpl::TokenCacheImpl() : cache(FLOW_KNOBS->TOKEN_CACHE_SIZE), usedTokens(), lastResetTime(0) {}
 
 TokenCache::TokenCache() : impl(new TokenCacheImpl()) {}
 TokenCache::~TokenCache() {
@@ -207,8 +186,8 @@ TokenCache& TokenCache::instance() {
 	return *reinterpret_cast<TokenCache*>(g_network->global(INetwork::enTokenCache));
 }
 
-bool TokenCache::validate(TenantNameRef name, StringRef token) {
-	return impl->validate(name, token);
+bool TokenCache::validate(TenantId tenantId, StringRef token) {
+	return impl->validate(tenantId, token);
 }
 
 #define TRACE_INVALID_PARSED_TOKEN(reason, token)                                                                      \
@@ -216,7 +195,7 @@ bool TokenCache::validate(TenantNameRef name, StringRef token) {
 	    .detail("From", peer)                                                                                          \
 	    .detail("Reason", reason)                                                                                      \
 	    .detail("CurrentTime", currentTime)                                                                            \
-	    .detail("Token", token.toStringRef(arena).toStringView())
+	    .detail("Token", toStringRef(arena, token).toStringView())
 
 bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, NetworkAddress const& peer) {
 	Arena arena;
@@ -225,7 +204,7 @@ bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, Network
 	Optional<StringRef> err;
 	bool verifyOutcome;
 	if ((err = authz::jwt::parseToken(arena, token, t, signInput)).present()) {
-		CODE_PROBE(true, "Token can't be parsed", probe::decoration::rare);
+		CODE_PROBE(true, "Token can't be parsed");
 		TraceEvent te(SevWarn, "InvalidToken");
 		te.detail("From", peer);
 		te.detail("Reason", "ParseError");
@@ -239,49 +218,49 @@ bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, Network
 	}
 	auto key = FlowTransport::transport().getPublicKeyByName(t.keyId);
 	if (!key.present()) {
-		CODE_PROBE(true, "Token referencing non-existing key", probe::decoration::rare);
+		CODE_PROBE(true, "Token referencing non-existing key");
 		TRACE_INVALID_PARSED_TOKEN("UnknownKey", t);
 		return false;
 	} else if (!t.issuedAtUnixTime.present()) {
-		CODE_PROBE(true, "Token has no issued-at field", probe::decoration::rare);
+		CODE_PROBE(true, "Token has no issued-at field");
 		TRACE_INVALID_PARSED_TOKEN("NoIssuedAt", t);
 		return false;
 	} else if (!t.expiresAtUnixTime.present()) {
-		CODE_PROBE(true, "Token has no expiration time", probe::decoration::rare);
+		CODE_PROBE(true, "Token has no expiration time");
 		TRACE_INVALID_PARSED_TOKEN("NoExpirationTime", t);
 		return false;
 	} else if (double(t.expiresAtUnixTime.get()) <= currentTime) {
-		CODE_PROBE(true, "Expired token", probe::decoration::rare);
+		CODE_PROBE(true, "Expired token");
 		TRACE_INVALID_PARSED_TOKEN("Expired", t);
 		return false;
 	} else if (!t.notBeforeUnixTime.present()) {
-		CODE_PROBE(true, "Token has no not-before field", probe::decoration::rare);
+		CODE_PROBE(true, "Token has no not-before field");
 		TRACE_INVALID_PARSED_TOKEN("NoNotBefore", t);
 		return false;
 	} else if (double(t.notBeforeUnixTime.get()) > currentTime) {
-		CODE_PROBE(true, "Token's not-before is in the future", probe::decoration::rare);
+		CODE_PROBE(true, "Token's not-before is in the future");
 		TRACE_INVALID_PARSED_TOKEN("TokenNotYetValid", t);
 		return false;
 	} else if (!t.tenants.present()) {
-		CODE_PROBE(true, "Token with no tenants", probe::decoration::rare);
+		CODE_PROBE(true, "Token with no tenants");
 		TRACE_INVALID_PARSED_TOKEN("NoTenants", t);
 		return false;
 	}
 	std::tie(verifyOutcome, err) = authz::jwt::verifyToken(signInput, t, key.get());
 	if (err.present()) {
-		CODE_PROBE(true, "Error while verifying token", probe::decoration::rare);
+		CODE_PROBE(true, "Error while verifying token");
 		TRACE_INVALID_PARSED_TOKEN("ErrorWhileVerifyingToken", t).detail("ErrorDetail", err.get());
 		return false;
 	} else if (!verifyOutcome) {
-		CODE_PROBE(true, "Token with invalid signature", probe::decoration::rare);
+		CODE_PROBE(true, "Token with invalid signature");
 		TRACE_INVALID_PARSED_TOKEN("InvalidSignature", t);
 		return false;
 	} else {
 		CacheEntry c;
 		c.expirationTime = t.expiresAtUnixTime.get();
 		c.tenants.reserve(c.arena, t.tenants.get().size());
-		for (auto tenant : t.tenants.get()) {
-			c.tenants.push_back_deep(c.arena, tenant);
+		for (auto tenantId : t.tenants.get()) {
+			c.tenants.push_back(c.arena, tenantId);
 		}
 		if (t.tokenId.present()) {
 			c.tokenId = StringRef(c.arena, t.tokenId.get());
@@ -291,7 +270,7 @@ bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, Network
 	}
 }
 
-bool TokenCacheImpl::validate(TenantNameRef name, StringRef token) {
+bool TokenCacheImpl::validate(TenantId tenantId, StringRef token) {
 	NetworkAddress peer = FlowTransport::transport().currentDeliveryPeerAddress();
 	auto cachedEntry = cache.get(token);
 	double currentTime = g_network->timer();
@@ -314,19 +293,42 @@ bool TokenCacheImpl::validate(TenantNameRef name, StringRef token) {
 	}
 	bool tenantFound = false;
 	for (auto const& t : entry->tenants) {
-		if (t == name) {
+		if (t == tenantId) {
 			tenantFound = true;
 			break;
 		}
 	}
 	if (!tenantFound) {
 		CODE_PROBE(true, "Valid token doesn't reference tenant");
-		TraceEvent(SevWarn, "TenantTokenMismatch").detail("From", peer).detail("Tenant", name.toString());
+		TraceEvent(SevWarn, "TenantTokenMismatch")
+		    .detail("From", peer)
+		    .detail("RequestedTenant", fmt::format("{:#x}", tenantId))
+		    .detail("TenantsInToken", fmt::format("{:#x}", fmt::join(entry->tenants, " ")));
 		return false;
 	}
 	// audit logging
-	usedTokens.insert(AuditEntry(peer, *cachedEntry.get()));
+	if (FLOW_KNOBS->AUDIT_LOGGING_ENABLED)
+		logTokenUsage(currentTime, AuditEntry(peer, tenantId, *cachedEntry.get()));
 	return true;
+}
+
+void TokenCacheImpl::logTokenUsage(double currentTime, AuditEntry&& entry) {
+	if (currentTime > lastResetTime + FLOW_KNOBS->AUDIT_TIME_WINDOW) {
+		// clear usage cache every AUDIT_TIME_WINDOW seconds
+		usedTokens.clear();
+		lastResetTime = currentTime;
+	}
+	auto [iter, inserted] = usedTokens.insert(std::move(entry));
+	if (inserted) {
+		// access in the context of this (client_ip, tenant, token_id) tuple hasn't been logged in current window. log
+		// usage.
+		CODE_PROBE(true, "Audit Logging Running");
+		TraceEvent("AuditTokenUsed")
+		    .detail("Client", iter->address)
+		    .detail("TenantId", fmt::format("{:#x}", iter->tenantId))
+		    .detail("TokenId", iter->tokenId)
+		    .log();
+	}
 }
 
 namespace authz::jwt {
@@ -375,9 +377,9 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 		},
 		{
 		    [](Arena& arena, IRandom&, authz::jwt::TokenRef& token) {
-		        StringRef* newTenants = new (arena) StringRef[1];
-		        *newTenants = token.tenants.get()[0].substr(1);
-		        token.tenants = VectorRef<StringRef>(newTenants, 1);
+		        TenantId* newTenants = new (arena) TenantId[1];
+		        *newTenants = token.tenants.get()[0] + 1;
+		        token.tenants = VectorRef<TenantId>(newTenants, 1);
 		    },
 		    "UnmatchedTenant",
 		},
@@ -406,7 +408,7 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 				if (TokenCache::instance().validate(validTokenSpec.tenants.get()[0], signedToken)) {
 					fmt::print("Unexpected successful validation at mutation {}, token spec: {}\n",
 					           mutationDesc,
-					           mutatedTokenSpec.toStringRef(tmpArena).toStringView());
+					           toStringRef(tmpArena, mutatedTokenSpec).toStringView());
 					ASSERT(false);
 				}
 			} else if (i == numBadMutations) {
@@ -443,15 +445,15 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 			}
 		}
 	}
-	if (TokenCache::instance().validate("TenantNameDontMatterHere"_sr, StringRef())) {
+	if (TokenCache::instance().validate(TenantInfo::INVALID_TENANT, StringRef())) {
 		fmt::print("Unexpected successful validation of ill-formed token (no signature part)\n");
 		ASSERT(false);
 	}
-	if (TokenCache::instance().validate("TenantNameDontMatterHere"_sr, "1111.22"_sr)) {
+	if (TokenCache::instance().validate(TenantInfo::INVALID_TENANT, "1111.22"_sr)) {
 		fmt::print("Unexpected successful validation of ill-formed token (no signature part)\n");
 		ASSERT(false);
 	}
-	if (TokenCache::instance().validate("TenantNameDontMatterHere2"_sr, "////.////.////"_sr)) {
+	if (TokenCache::instance().validate(TenantInfo::INVALID_TENANT, "////.////.////"_sr)) {
 		fmt::print("Unexpected successful validation of unparseable token\n");
 		ASSERT(false);
 	}
@@ -475,7 +477,7 @@ TEST_CASE("/fdbrpc/authz/TokenCache/GoodTokens") {
 	signedToken = authz::jwt::signToken(arena, tokenSpec, privateKey);
 	if (!TokenCache::instance().validate(tokenSpec.tenants.get()[0], signedToken)) {
 		fmt::print("Unexpected failed token validation, token spec: {}, now: {}\n",
-		           tokenSpec.toStringRef(arena).toStringView(),
+		           toStringRef(arena, tokenSpec).toStringView(),
 		           g_network->timer());
 		ASSERT(false);
 	}
@@ -483,7 +485,7 @@ TEST_CASE("/fdbrpc/authz/TokenCache/GoodTokens") {
 	if (TokenCache::instance().validate(tokenSpec.tenants.get()[0], signedToken)) {
 		fmt::print(
 		    "Unexpected successful token validation after supposedly expiring in cache, token spec: {}, now: {}\n",
-		    tokenSpec.toStringRef(arena).toStringView(),
+		    toStringRef(arena, tokenSpec).toStringView(),
 		    g_network->timer());
 		ASSERT(false);
 	}

@@ -28,7 +28,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/Subspace.h"
 #include "fdbclient/KeyBackedTypes.h"
 
@@ -274,6 +274,7 @@ public:
 	Database src;
 	Map<Key, Future<Reference<KeyRangeMap<Version>>>> key_version;
 
+	UID dbgid;
 	CounterCollection cc;
 
 	Counter dispatchSlotChecksStarted;
@@ -281,7 +282,6 @@ public:
 	Counter dispatchDoTasks;
 	Counter dispatchEmptyTasks;
 	Counter dispatchSlotChecksComplete;
-	UID dbgid;
 
 	double getTimeoutSeconds() const { return (double)timeout / CLIENT_KNOBS->CORE_VERSIONSPERSECOND; }
 

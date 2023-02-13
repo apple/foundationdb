@@ -26,6 +26,7 @@
 #include "flow/UnitTest.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "flow/Platform.h"
+#include "flow/IConnection.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace {
@@ -652,7 +653,9 @@ ACTOR Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> s
 	state Future<Void> deserializer = asyncDeserialize(serializedInfo, knownLeader);
 	loop {
 		choose {
-			when(wait(deserializer)) { UNSTOPPABLE_ASSERT(false); }
+			when(wait(deserializer)) {
+				UNSTOPPABLE_ASSERT(false);
+			}
 			when(wait(knownLeader->onChange())) {
 				if (knownLeader->get().present()) {
 					outKnownLeader->set(knownLeader->get().get().clientInterface);
@@ -842,7 +845,8 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
     Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
     MonitorLeaderInfo info,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
-    Key traceLogGroup) {
+    Key traceLogGroup,
+    IsInternal internal) {
 	state ClusterConnectionString cs = info.intermediateConnRecord->getConnectionString();
 	state int coordinatorsSize = cs.hostnames.size() + cs.coords.size();
 	state int index = 0;
@@ -876,6 +880,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 		req.knownClientInfoID = clientInfo->get().id;
 		req.supportedVersions = supportedVersions->get();
 		req.traceLogGroup = traceLogGroup;
+		req.internal = internal;
 
 		state ClusterConnectionString storedConnectionString;
 		if (connRecord) {
@@ -983,13 +988,14 @@ ACTOR Future<Void> monitorProxies(
     Reference<AsyncVar<ClientDBInfo>> clientInfo,
     Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
-    Key traceLogGroup) {
+    Key traceLogGroup,
+    IsInternal internal) {
 	state MonitorLeaderInfo info(connRecord->get());
 	loop {
 		ASSERT(connRecord->get().isValid());
 		choose {
 			when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(
-			         connRecord->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup))) {
+			         connRecord->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup, internal))) {
 				info = _info;
 			}
 			when(wait(connRecord->onChange())) {

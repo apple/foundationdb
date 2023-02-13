@@ -34,6 +34,8 @@
 #include "flow/Arena.h"
 #include "flow/PKey.h"
 
+class IConnection;
+
 enum { WLTOKEN_ENDPOINT_NOT_FOUND = 0, WLTOKEN_PING_PACKET, WLTOKEN_UNAUTHORIZED_ENDPOINT, WLTOKEN_FIRST_AVAILABLE };
 
 #pragma pack(push, 4)
@@ -90,6 +92,7 @@ public:
 	bool operator<(Endpoint const& r) const {
 		return addresses.address < r.addresses.address || (addresses.address == r.addresses.address && token < r.token);
 	}
+	bool operator>=(Endpoint const& r) const { return !(*this < r); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -150,6 +153,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	AsyncTrigger resetPing;
 	AsyncTrigger resetConnection;
 	bool compatible;
+	bool connected;
 	bool outgoingConnectionIdle; // We don't actually have a connection open and aren't trying to open one because we
 	                             // don't have anything to send
 	double lastConnectTime;

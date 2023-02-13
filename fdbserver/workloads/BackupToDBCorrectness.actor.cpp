@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -580,6 +582,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		state DatabaseBackupAgent restoreTool(self->extraDB);
 		state Future<Void> extraBackup;
 		state bool extraTasks = false;
+		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		TraceEvent("BARW_Arguments")
 		    .detail("BackupTag", printable(self->backupTag))
 		    .detail("BackupAfter", self->backupAfter)
@@ -670,7 +673,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				state Standalone<VectorRef<KeyRangeRef>> restoreRange;
 				state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
 				for (auto r : self->backupRanges) {
-					if (!SERVER_KNOBS->ENABLE_ENCRYPTION || !r.intersects(getSystemBackupRanges())) {
+					if (config.tenantMode != TenantMode::REQUIRED || !r.intersects(getSystemBackupRanges())) {
 						restoreRange.push_back_deep(
 						    restoreRange.arena(),
 						    KeyRangeRef(r.begin.withPrefix(self->backupPrefix), r.end.withPrefix(self->backupPrefix)));
