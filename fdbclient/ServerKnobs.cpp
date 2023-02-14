@@ -1046,6 +1046,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_WORKER_REJECT_WHEN_FULL_THRESHOLD,                0.9 );
 	init( BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY,                30.0 ); if ( randomize && BUGGIFY ) BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY = deterministicRandom()->randomInt(0, 10) - 1;
 	init( BLOB_WORKER_STORE_TYPE,                                  3 ); if ( randomize && BUGGIFY ) BLOB_WORKER_STORE_TYPE = 3;
+	init( BLOB_WORKER_REJOIN_TIME,                              10.0 ); if ( randomize && BUGGIFY ) BLOB_WORKER_STORE_TYPE = 10.0;
 
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN,                   0.1 );
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX,                   5.0 );

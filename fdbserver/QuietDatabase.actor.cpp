@@ -264,6 +264,35 @@ ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx,
 	}
 }
 
+ACTOR Future<std::vector<std::pair<UID, UID>>> getBlobWorkerAffinity(Database cx,
+                                                                     bool use_system_priority = false,
+                                                                     Version* grv = nullptr) {
+	state Transaction tr(cx);
+	loop {
+		if (use_system_priority) {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		}
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			RangeResult blobWorkerAffinity = wait(tr.getRange(blobWorkerAffinityKeys, CLIENT_KNOBS->TOO_MANY));
+
+			std::vector<std::pair<UID, UID>> affinities;
+			affinities.reserve(blobWorkerAffinity.size());
+			for (int i = 0; i < blobWorkerAffinity.size(); i++) {
+				affinities.push_back(std::make_pair(decodeBlobWorkerAffinityKey(blobWorkerAffinity[i].key),
+				                                    decodeBlobWorkerAffinityValue(blobWorkerAffinity[i].value)));
+			}
+			if (grv) {
+				*grv = tr.getReadVersion().get();
+			}
+			return affinities;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<std::vector<StorageServerInterface>> getStorageServers(Database cx, bool use_system_priority = false) {
 	state Transaction tr(cx);
 	loop {

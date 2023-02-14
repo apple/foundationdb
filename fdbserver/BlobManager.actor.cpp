@@ -363,6 +363,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	std::unordered_map<UID, BlobWorkerInfo> workerStats; // mapping between workerID -> workerStats
 	std::unordered_set<NetworkAddress> workerAddresses;
 	std::unordered_set<UID> deadWorkers;
+	std::unordered_map<UID, UID> workerAffinities;
 	KeyRangeMap<UID> workerAssignments;
 	KeyRangeActorMap assignsInProgress;
 	KeyRangeMap<BoundaryEvaluation> boundaryEvaluations;
@@ -2734,6 +2735,15 @@ ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 			rangesToMove.push_back(it.range());
 		}
 	}
+
+	Optional<UID> successor = bwId;
+	while (bmData->workerAffinities.count(successor.get())) {
+		successor = bmData->workerAffinities[successor.get()];
+	}
+	if (successor.get() == bwId) {
+		successor = Optional<UID>();
+	}
+
 	for (auto& it : rangesToMove) {
 		// Send revoke request
 		RangeAssignment raRevoke;
@@ -2745,7 +2755,7 @@ ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 		// Add range back into the stream of ranges to be assigned
 		RangeAssignment raAssign;
 		raAssign.isAssign = true;
-		raAssign.worker = Optional<UID>();
+		raAssign.worker = successor;
 		raAssign.keyRange = it;
 		raAssign.assign = RangeAssignmentData(); // not a continue
 		handleRangeAssign(bmData, raAssign);
@@ -3059,6 +3069,7 @@ ACTOR Future<Void> monitorBlobWorker(Reference<BlobManagerData> bmData, BlobWork
 
 		choose {
 			when(wait(waitFailure)) {
+				wait(delay(SERVER_KNOBS->BLOB_WORKER_REJOIN_TIME));
 				if (BM_DEBUG) {
 					fmt::print("BM {0} detected BW {1} is dead\n", bmData->epoch, bwInterf.id().toString());
 				}
@@ -3113,7 +3124,12 @@ ACTOR Future<Void> checkBlobWorkerList(Reference<BlobManagerData> bmData, Promis
 			// Get list of last known blob workers
 			// note: the list will include every blob worker that the old manager knew about,
 			// but it might also contain blob workers that died while the new manager was being recruited
-			std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db));
+			state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db));
+			std::vector<std::pair<UID, UID>> blobWorkerAffinities = wait(getBlobWorkerAffinity(bmData->db));
+			bmData->workerAffinities.clear();
+			for (auto& it : blobWorkerAffinities) {
+				bmData->workerAffinities[it.second] = it.first;
+			}
 			// add all blob workers to this new blob manager's records and start monitoring it
 			bool foundAnyNew = false;
 			for (auto& worker : blobWorkers) {
@@ -3755,6 +3771,9 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		// if worker id is already set to a known worker that replied with it in the mapping, range is already assigned
 		// there. If not, need to explicitly assign it to someone
 		if (workerId == UID() || epoch == 0 || !endingWorkers.count(workerId)) {
+			while (bmData->workerAffinities.count(workerId)) {
+				workerId = bmData->workerAffinities[workerId];
+			}
 			// prevent racing status updates from old owner from causing issues until this request gets sent out
 			// properly
 			bmData->boundaryEvaluations.insert(
