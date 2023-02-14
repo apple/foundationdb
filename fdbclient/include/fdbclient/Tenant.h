@@ -33,8 +33,12 @@
 FDB_DECLARE_BOOLEAN_PARAM(EnforceValidTenantId);
 
 namespace TenantAPI {
+KeyRef idToPrefix(Arena& p, int64_t id);
 Key idToPrefix(int64_t id);
 int64_t prefixToId(KeyRef prefix, EnforceValidTenantId = EnforceValidTenantId::True);
+
+// return true if begin and end has the same non-negative prefix id
+bool withinSingleTenant(KeyRangeRef const&);
 
 constexpr static int PREFIX_SIZE = sizeof(int64_t);
 } // namespace TenantAPI
@@ -173,7 +177,7 @@ struct TenantIdCodec {
 	static int64_t unpack(Standalone<StringRef> val) { return bigEndian64(*(int64_t*)val.begin()); }
 
 	static Optional<int64_t> lowerBound(Standalone<StringRef> val) {
-		if (val.startsWith("\xff"_sr)) {
+		if (val >= "\x80"_sr) {
 			return {};
 		}
 		if (val.size() == 8) {
