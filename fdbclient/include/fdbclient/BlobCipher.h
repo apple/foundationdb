@@ -174,6 +174,11 @@ struct BlobCipherDetails {
 	}
 	bool operator!=(const BlobCipherDetails& o) const { return !(*this == o); }
 
+	bool isValid() const {
+		return this->encryptDomainId != INVALID_ENCRYPT_DOMAIN_ID &&
+		       this->baseCipherId != INVALID_ENCRYPT_CIPHER_KEY_ID && this->salt != INVALID_ENCRYPT_RANDOM_SALT;
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, encryptDomainId, baseCipherId, salt);
@@ -333,6 +338,11 @@ struct AesCtrNoAuthV1 {
 	}
 };
 
+struct EncryptHeaderCipherDetails {
+	BlobCipherDetails textCipherDetails;
+	Optional<BlobCipherDetails> headerCipherDetails;
+};
+
 struct BlobCipherEncryptHeaderRef {
 	// Serializable fields
 
@@ -459,6 +469,9 @@ struct BlobCipherEncryptHeaderRef {
 			}
 		}
 	}
+
+	const uint8_t* getIV() const;
+	const EncryptHeaderCipherDetails getCipherDetails() const;
 
 	void validateEncryptionHeaderDetails(const BlobCipherDetails& textCipherDetails,
 	                                     const BlobCipherDetails& headerCipherDetails,
