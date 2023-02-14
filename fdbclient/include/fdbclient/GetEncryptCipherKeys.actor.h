@@ -318,7 +318,6 @@ ACTOR template <class T>
 Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
                                                      BlobCipherEncryptHeader header,
                                                      BlobCipherMetrics::UsageType usageType) {
-	ASSERT(header.cipherTextDetails.isValid());
 	std::unordered_set<BlobCipherDetails> cipherDetails{ header.cipherTextDetails };
 	if (header.cipherHeaderDetails.isValid()) {
 		cipherDetails.insert(header.cipherHeaderDetails);
