@@ -369,20 +369,20 @@ struct EncryptionOpsWorkload : TestWorkload {
 		uint8_t iv[AES_256_IV_LENGTH];
 		if (std::holds_alternative<AesCtrNoAuth>(headerRef.algoHeader)) {
 			AesCtrNoAuth noAuth = std::get<AesCtrNoAuth>(headerRef.algoHeader);
-			memcpy(&iv[0], &noAuth.iv[0], AES_256_IV_LENGTH);
-			textCipherDetails = noAuth.cipherTextDetails;
+			memcpy(&iv[0], &noAuth.v1.iv[0], AES_256_IV_LENGTH);
+			textCipherDetails = noAuth.v1.cipherTextDetails;
 			headerCipherDetails = BlobCipherDetails();
 		} else if (std::holds_alternative<AesCtrWithHmac>(headerRef.algoHeader)) {
 			AesCtrWithHmac hmacSha = std::get<AesCtrWithHmac>(headerRef.algoHeader);
-			memcpy(&iv[0], &hmacSha.iv[0], AES_256_IV_LENGTH);
-			textCipherDetails = hmacSha.cipherTextDetails;
-			headerCipherDetails = hmacSha.cipherHeaderDetails;
+			memcpy(&iv[0], &hmacSha.v1.iv[0], AES_256_IV_LENGTH);
+			textCipherDetails = hmacSha.v1.cipherTextDetails;
+			headerCipherDetails = hmacSha.v1.cipherHeaderDetails;
 		} else {
 			ASSERT(std::holds_alternative<AesCtrWithCmac>(headerRef.algoHeader));
 			AesCtrWithCmac aesCmac = std::get<AesCtrWithCmac>(headerRef.algoHeader);
-			memcpy(&iv[0], &aesCmac.iv[0], AES_256_IV_LENGTH);
-			textCipherDetails = aesCmac.cipherTextDetails;
-			headerCipherDetails = aesCmac.cipherHeaderDetails;
+			memcpy(&iv[0], &aesCmac.v1.iv[0], AES_256_IV_LENGTH);
+			textCipherDetails = aesCmac.v1.cipherTextDetails;
+			headerCipherDetails = aesCmac.v1.cipherHeaderDetails;
 		}
 		Reference<BlobCipherKey> cipherKey =
 		    getEncryptionKey(textCipherDetails.encryptDomainId, textCipherDetails.baseCipherId, textCipherDetails.salt);

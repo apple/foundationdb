@@ -262,13 +262,11 @@ struct BlobCipherEncryptHeaderFlagsV1 {
 // backup-files.
 
 template <class Params>
-struct AesCtrWithAuth {
-	using Self = AesCtrWithAuth<Params>;
+struct AesCtrWithAuthV1 {
+	using Self = AesCtrWithAuthV1<Params>;
 
 	// Serializable fields
 
-	// Algorithm header version
-	uint8_t version = 1;
 	// Text cipher encryption information
 	BlobCipherDetails cipherTextDetails;
 	// Header cipher encryption information
@@ -278,56 +276,82 @@ struct AesCtrWithAuth {
 	// Authentication token
 	uint8_t authToken[Params::authTokenSize];
 
-	AesCtrWithAuth() { ASSERT_EQ(Params::getDefaultHeaderVersion(), version); };
-	AesCtrWithAuth(const BlobCipherDetails& textDetails,
-	               const BlobCipherDetails& headerDetails,
-	               const uint8_t* ivBuf,
-	               const int ivLen,
-	               Arena& arena)
+	AesCtrWithAuthV1() = default;
+	AesCtrWithAuthV1(const BlobCipherDetails& textDetails,
+	                 const BlobCipherDetails& headerDetails,
+	                 const uint8_t* ivBuf,
+	                 const int ivLen)
 	  : cipherTextDetails(textDetails), cipherHeaderDetails(headerDetails) {
-		ASSERT_EQ(Params::getDefaultHeaderVersion(), version);
 		ASSERT_EQ(ivLen, AES_256_IV_LENGTH);
 		memcpy(&iv[0], ivBuf, ivLen);
 		memset(&authToken[0], 0, Params::authTokenSize);
 	}
 
 	bool operator==(const Self& o) const {
-		return version == o.version && cipherHeaderDetails == o.cipherHeaderDetails &&
-		       cipherTextDetails == o.cipherTextDetails && memcmp(&iv[0], &o.iv[0], AES_256_IV_LENGTH) == 0 &&
+		return cipherHeaderDetails == o.cipherHeaderDetails && cipherTextDetails == o.cipherTextDetails &&
+		       memcmp(&iv[0], &o.iv[0], AES_256_IV_LENGTH) == 0 &&
 		       memcmp(&authToken[0], &o.authToken[0], Params::authTokenSize) == 0;
 	}
 
-	static Standalone<StringRef> toStringRef(const Self& algoHeader, Arena& arena) {
-		BinaryWriter wr(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
-		wr.serializeBytes(&algoHeader, sizeof(Self));
-		return wr.toValue(arena);
+	static uint32_t getSize() { return BlobCipherDetails::getSize() * 2 + AES_256_IV_LENGTH + Params::authTokenSize; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, cipherTextDetails, cipherHeaderDetails);
+		ar.serializeBytes(iv, AES_256_IV_LENGTH);
+		ar.serializeBytes(authToken, Params::authTokenSize);
+	}
+};
+
+template <class Params>
+struct AesCtrWithAuth {
+	// Serializable fields
+
+	// Algorithm header version
+	uint8_t version = 1;
+	// List of supported versions.
+	union {
+		AesCtrWithAuthV1<Params> v1;
+	};
+
+	AesCtrWithAuth() {
+		// Only V1 is supported
+		ASSERT_EQ(1, Params::getDefaultHeaderVersion());
 	}
 
-	static uint32_t getSize() {
-		return sizeof(version) + BlobCipherDetails::getSize() * 2 + AES_256_IV_LENGTH + Params::authTokenSize;
+	AesCtrWithAuth(AesCtrWithAuthV1<Params>& v) : v1(v) {
+		// Only V1 is supported
+		ASSERT_EQ(1, Params::getDefaultHeaderVersion());
+	}
+
+	static uint32_t getSize() { return AesCtrWithAuthV1<Params>::getSize() + 1; }
+
+	static Standalone<StringRef> toStringRef(const AesCtrWithAuth<Params>& algoHeader) {
+		BinaryWriter wr(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		wr << algoHeader;
+		return wr.toValue();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version);
-		if (ar.isDeserializing) {
-			if (version != 1) {
-				TraceEvent(SevWarn, "BlobCipherEncryptHeaderUnsupportedAlgoHeaderVersion")
-				    .detail("HeaderType", "AesCtrWithAuth")
-				    .detail("Version", version);
-				throw not_implemented();
-			}
+		if (ar.isSerializing) {
+			ASSERT_EQ(1, version);
 		}
-		serializer(ar, cipherTextDetails, cipherHeaderDetails);
-		ar.serializeBytes(iv, AES_256_IV_LENGTH);
-		ar.serializeBytes(authToken, Params::authTokenSize);
-		ASSERT_EQ(1, version);
+		serializer(ar, version);
+		if (ar.isDeserializing && version != 1) {
+			TraceEvent(SevWarn, "BlobCipherEncryptHeaderUnsupportedAlgoHeaderVersion")
+			    .detail("HeaderType", "AesCtrWith" + Params::authAlgoName())
+			    .detail("Version", version);
+			throw not_implemented();
+		}
+		serializer(ar, v1);
 	}
 };
 
 struct AesCtrWithHmacParams {
 	static constexpr int authTokenSize = AUTH_TOKEN_HMAC_SHA_SIZE;
 
+	static std::string authAlgoName() { return "Hmac"; }
 	static uint8_t getDefaultHeaderVersion() { return CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION; }
 };
 using AesCtrWithHmac = AesCtrWithAuth<AesCtrWithHmacParams>;
@@ -335,55 +359,80 @@ using AesCtrWithHmac = AesCtrWithAuth<AesCtrWithHmacParams>;
 struct AesCtrWithCmacParams {
 	static constexpr int authTokenSize = AUTH_TOKEN_AES_CMAC_SIZE;
 
+	static std::string authAlgoName() { return "Cmac"; }
 	static uint8_t getDefaultHeaderVersion() { return CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION; }
 };
 using AesCtrWithCmac = AesCtrWithAuth<AesCtrWithCmacParams>;
+
+struct AesCtrNoAuthV1 {
+	// Serializable fields
+
+	// Text cipher encryption information
+	BlobCipherDetails cipherTextDetails;
+	// Initialization vector
+	uint8_t iv[AES_256_IV_LENGTH];
+
+	AesCtrNoAuthV1() = default;
+	AesCtrNoAuthV1(const BlobCipherDetails& textDetails, const uint8_t* ivBuf, const int ivLen)
+	  : cipherTextDetails(textDetails) {
+		ASSERT_EQ(ivLen, AES_256_IV_LENGTH);
+		memcpy(&iv[0], ivBuf, ivLen);
+	}
+
+	bool operator==(const AesCtrNoAuthV1& o) const {
+		return cipherTextDetails == o.cipherTextDetails && memcmp(&iv[0], &o.iv[0], AES_256_IV_LENGTH) == 0;
+	}
+
+	static uint32_t getSize() { return BlobCipherDetails::getSize() + AES_256_IV_LENGTH; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, cipherTextDetails);
+		ar.serializeBytes(iv, AES_256_IV_LENGTH);
+	}
+};
 
 struct AesCtrNoAuth {
 	// Serializable fields
 
 	// Algorithm header version
 	uint8_t version = 1;
-	// Text cipher encryption information
-	BlobCipherDetails cipherTextDetails;
-	// Initialization vector
-	uint8_t iv[AES_256_IV_LENGTH];
+	// List of supported versions.
+	union {
+		AesCtrNoAuthV1 v1;
+	};
 
-	AesCtrNoAuth() { ASSERT_EQ(version, CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION); };
-	AesCtrNoAuth(const BlobCipherDetails& textDetails, const uint8_t* ivBuf, const int ivLen, Arena& arena)
-	  : cipherTextDetails(textDetails) {
-		ASSERT_EQ(version, CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION);
-		ASSERT_EQ(ivLen, AES_256_IV_LENGTH);
-		memcpy(&iv[0], ivBuf, ivLen);
+	AesCtrNoAuth() {
+		// Only V1 is supported
+		ASSERT_EQ(1, CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION);
 	}
 
-	bool operator==(const AesCtrNoAuth& o) const {
-		return version == o.version && cipherTextDetails == o.cipherTextDetails &&
-		       memcmp(&iv[0], &o.iv[0], AES_256_IV_LENGTH) == 0;
+	AesCtrNoAuth(AesCtrNoAuthV1& v) : v1(v) {
+		// Only V1 is supported
+		ASSERT_EQ(1, CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION);
 	}
 
-	static Standalone<StringRef> toStringRef(const AesCtrNoAuth& algoHeader, Arena& arena) {
+	static uint32_t getSize() { return AesCtrNoAuthV1::getSize() + 1; }
+
+	static Standalone<StringRef> toStringRef(const AesCtrNoAuth& algoHeader) {
 		BinaryWriter wr(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
-		wr.serializeBytes(&algoHeader, sizeof(AesCtrNoAuth));
-		return wr.toValue(arena);
+		wr << algoHeader;
+		return wr.toValue();
 	}
-
-	static uint32_t getSize() { return sizeof(version) + BlobCipherDetails::getSize() + AES_256_IV_LENGTH; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version);
-		if (ar.isDeserializing) {
-			if (version != 1) {
-				TraceEvent(SevWarn, "BlobCipherEncryptHeaderUnsupportedAlgoHeaderVersion")
-				    .detail("HeaderType", "AesCtrNoAuth")
-				    .detail("Version", version);
-				throw not_implemented();
-			}
+		if (ar.isSerializing) {
+			ASSERT_EQ(1, version);
 		}
-		serializer(ar, cipherTextDetails);
-		ar.serializeBytes(iv, AES_256_IV_LENGTH);
-		ASSERT_EQ(1, version);
+		serializer(ar, version);
+		if (ar.isDeserializing && version != 1) {
+			TraceEvent(SevWarn, "BlobCipherEncryptHeaderUnsupportedAlgoHeaderVersion")
+			    .detail("HeaderType", "AesCtrNoAuth")
+			    .detail("Version", version);
+			throw not_implemented();
+		}
+		serializer(ar, v1);
 	}
 };
 
@@ -414,9 +463,7 @@ struct BlobCipherEncryptHeaderRef {
 	int flagsVersion() const { return flags.index() + 1; }
 
 	int algoHeaderVersion() const {
-		int version = 0;
-		std::visit([&](auto& h) { version = h.version; }, algoHeader);
-		return version;
+		return std::visit([&](auto& h) { return h.version; }, algoHeader);
 	}
 
 	template <class Ar>
@@ -829,22 +876,18 @@ public:
 private:
 	void init();
 
-	void updateEncryptHeader(const uint8_t*, const int, BlobCipherEncryptHeaderRef* headerRef, Arena& arena);
-	void updateEncryptHeaderFlagsV1(BlobCipherEncryptHeaderRef* headerRef,
-	                                BlobCipherEncryptHeaderFlagsV1* flags,
-	                                Arena& arena);
+	void updateEncryptHeader(const uint8_t*, const int, BlobCipherEncryptHeaderRef* headerRef);
+	void updateEncryptHeaderFlagsV1(BlobCipherEncryptHeaderRef* headerRef, BlobCipherEncryptHeaderFlagsV1* flags);
 	void setCipherAlgoHeaderV1(const uint8_t*,
 	                           const int,
 	                           const BlobCipherEncryptHeaderFlagsV1&,
-	                           BlobCipherEncryptHeaderRef*,
-	                           Arena&);
-	void setCipherAlgoHeaderNoAuthV1(const BlobCipherEncryptHeaderFlagsV1&, BlobCipherEncryptHeaderRef*, Arena&);
+	                           BlobCipherEncryptHeaderRef*);
+	void setCipherAlgoHeaderNoAuthV1(const BlobCipherEncryptHeaderFlagsV1&, BlobCipherEncryptHeaderRef*);
 	template <class Params>
 	void setCipherAlgoHeaderWithAuthV1(const uint8_t*,
 	                                   const int,
 	                                   const BlobCipherEncryptHeaderFlagsV1&,
-	                                   BlobCipherEncryptHeaderRef*,
-	                                   Arena&);
+	                                   BlobCipherEncryptHeaderRef*);
 
 	EVP_CIPHER_CTX* ctx;
 	Reference<BlobCipherKey> textCipherKey;
@@ -902,20 +945,11 @@ private:
 	                         const BlobCipherEncryptHeaderFlagsV1&,
 	                         const BlobCipherEncryptHeaderRef& header);
 
-	void validateHeaderSingleAuthToken(const uint8_t* ciphertext,
-	                                   const int ciphertextLen,
-	                                   const BlobCipherEncryptHeaderRef& header,
-	                                   Arena& arena);
-
 	void verifyEncryptHeaderMetadata(const BlobCipherEncryptHeader& header);
-	void verifyAuthTokens(const uint8_t* ciphertext,
-	                      const int ciphertextLen,
-	                      const BlobCipherEncryptHeader& header,
-	                      Arena& arena);
+	void verifyAuthTokens(const uint8_t* ciphertext, const int ciphertextLen, const BlobCipherEncryptHeader& header);
 	void verifyHeaderSingleAuthToken(const uint8_t* ciphertext,
 	                                 const int ciphertextLen,
-	                                 const BlobCipherEncryptHeader& header,
-	                                 Arena& arena);
+	                                 const BlobCipherEncryptHeader& header);
 };
 
 class HmacSha256DigestGen final : NonCopyable {
