@@ -67,7 +67,7 @@ int64_t extractTenantIdFromKeyRef(StringRef s) {
 	return TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
 }
 
-bool tenantMapChanging(MutationRef const& mutation, KeyRangeRef tenantMapRange) {
+bool tenantMapChanging(MutationRef const& mutation, KeyRangeRef const& tenantMapRange) {
 	if (isSingleKeyMutation((MutationRef::Type)mutation.type) && mutation.param1.startsWith(tenantMapRange.begin)) {
 		return true;
 	} else if (mutation.type == MutationRef::ClearRange &&

@@ -126,7 +126,7 @@ Future<Void> checkTenantMode(Transaction tr, ClusterType expectedClusterType) {
 TenantMode tenantModeForClusterType(ClusterType clusterType, TenantMode tenantMode);
 int64_t extractTenantIdFromMutation(MutationRef m);
 int64_t extractTenantIdFromKeyRef(StringRef s);
-bool tenantMapChanging(MutationRef const& mutation, KeyRangeRef tenantMapRange);
+bool tenantMapChanging(MutationRef const& mutation, KeyRangeRef const& tenantMapRange);
 bool nextTenantIdPrefixMatches(int64_t lastTenantId, int64_t nextTenantId);
 int64_t getMaxAllowableTenantId(int64_t curTenantId);
 int64_t getTenantIdPrefix(int64_t tenantId);
