@@ -77,6 +77,7 @@ public:
 	// Order of this enum has to match initializer of counterSets.
 	enum UsageType : int {
 		TLOG = 0,
+		TLOG_POST_RESOLUTION,
 		KV_MEMORY,
 		KV_REDWOOD,
 		BLOB_GRANULE,
@@ -179,6 +180,11 @@ struct BlobCipherDetails {
 	}
 	bool operator!=(const BlobCipherDetails& o) const { return !(*this == o); }
 
+	bool isValid() const {
+		return this->encryptDomainId != INVALID_ENCRYPT_DOMAIN_ID &&
+		       this->baseCipherId != INVALID_ENCRYPT_CIPHER_KEY_ID && this->salt != INVALID_ENCRYPT_RANDOM_SALT;
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, encryptDomainId, baseCipherId, salt);
@@ -198,6 +204,15 @@ struct hash<BlobCipherDetails> {
 	}
 };
 } // namespace std
+
+struct EncryptHeaderCipherDetails {
+	BlobCipherDetails textCipherDetails;
+	Optional<BlobCipherDetails> headerCipherDetails;
+
+	EncryptHeaderCipherDetails(const BlobCipherDetails& tCipherDetails) : textCipherDetails(tCipherDetails) {}
+	EncryptHeaderCipherDetails(const BlobCipherDetails& tCipherDetails, const BlobCipherDetails& hCipherDetails)
+	  : textCipherDetails(tCipherDetails), headerCipherDetails(hCipherDetails) {}
+};
 
 #pragma pack(push, 1) // exact fit - no padding
 
@@ -470,6 +485,9 @@ struct BlobCipherEncryptHeaderRef {
 	void serialize(Ar& ar) {
 		serializer(ar, flags, algoHeader);
 	}
+
+	const uint8_t* getIV() const;
+	const EncryptHeaderCipherDetails getCipherDetails() const;
 
 	void validateEncryptionHeaderDetails(const BlobCipherDetails& textCipherDetails,
 	                                     const BlobCipherDetails& headerCipherDetails,
