@@ -2245,7 +2245,7 @@ void validate(StorageServer* data, bool force = false) {
 					}
 					ASSERT(latest.lower_bound(s->begin()) == latest.lower_bound(s->end()));
 				}
-				if (shard->assigned()) {
+				if (shard->assigned() && data->shardAware) {
 					TraceEvent(SevDebug, "ValidateAssignedShard", data->thisServerID)
 					    .detail("Range", shard->keys)
 					    .detail("ShardID", format("%016llx", shard->shardId))
@@ -7758,7 +7758,7 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 			    e.code() == error_code_connection_failed || e.code() == error_code_broken_promise ||
 			    e.code() == error_code_timed_out) {
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::FetchKeys));
-			} else if (e.code() == error_code_checkpoint_not_found) {
+			} else if (e.code() == error_code_checkpoint_not_found && shard->getPhase() == MoveInPhase::Fetching) {
 				wait(fallBackToAddingShard(data, moveInShard));
 				return Void();
 			} else {
@@ -7775,13 +7775,13 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 	// for (const auto& record : records) {
 	// 	std::cout << record.toString() << std::endl;
 	// }
-	{
-		TraceEvent te(sevDm, "FetchShardCheckpointMetaData", data->thisServerID);
-		te.detail("MoveInShard", shard->toString());
-		for (int i = 0; i < records.size(); ++i) {
-			te.detail("CheckpointMetaData-" + std::to_string(i), records[i].second.toString());
-		}
-	}
+	// {
+	// 	TraceEvent te(sevDm, "FetchShardCheckpointMetaData", data->thisServerID);
+	// 	te.detail("MoveInShard", shard->toString());
+	// 	for (int i = 0; i < records.size(); ++i) {
+	// 		te.detail("CheckpointMetaData-" + std::to_string(i), records[i].second.toString());
+	// 	}
+	// }
 
 	wait(delay(0));
 	if (moveInShard->getPhase() == MoveInPhase::Fail) {
@@ -7878,15 +7878,16 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 
 	try {
 		wait(data->storage.restore(shard->destShardIdString(), shard->ranges, shard->checkpoints));
-		if (moveInShard->getPhase() == MoveInPhase::Fail) {
-			return Void();
-		}
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "FetchShardIngestedCheckpointError", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("MoveInShard", shard->toString())
 		    .detail("Checkpoints", describe(shard->checkpoints));
-		throw;
+	if (moveInShard->getPhase() != MoveInPhase::Fail) {
+		wait(fallBackToAddingShard(data, moveInShard));
+		return Void();
+	}
+
 	}
 
 	TraceEvent(sevDm, "FetchShardIngestedCheckpoint", data->thisServerID)
@@ -7898,8 +7899,10 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 		return Void();
 	}
 
+	for (const auto& range : moveInShard->ranges()) {
+		data->storage.persistRangeMapping(range, true);
+	}
 	shard->setPhase(MoveInPhase::ApplyingUpdates);
-
 	wait(updateMoveInShardMetaData(data, shard.get()));
 
 	// shard->fetchComplete.send(Void());
@@ -10209,6 +10212,9 @@ private:
 
 	// Registers a pending checkpoint request, it will be fullfilled when the desired version is durable.
 	void registerPendingCheckpoint(StorageServer* data, const MutationRef& m, Version ver) {
+		if (!data->shardAware) {
+			return;
+		}
 		CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
 		ASSERT(checkpoint.getState() == CheckpointMetaData::Pending);
 		const UID checkpointID = decodeCheckpointKey(m.param1.substr(1));
@@ -11768,22 +11774,22 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	wait(delay(0.0001));
 
 	// TODO: Clear the ranges iif it is moved by fetchKeys.
-	// {
-	// 	// Erase data which isn't available (it is from some fetch at a later version)
-	// 	// SOMEDAY: Keep track of keys that might be fetching, make sure we don't have any data elsewhere?
-	// 	for (auto it = data->newestAvailableVersion.ranges().begin(); it != data->newestAvailableVersion.ranges().end();
-	// 	     ++it) {
-	// 		if (it->value() == invalidVersion) {
-	// 			KeyRangeRef clearRange(it->begin(), it->end());
-	// 			++data->counters.kvSystemClearRanges;
-	// 			// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
-	// 			// DEBUG_KEY_RANGE("clearInvalidVersion", invalidVersion, clearRange);
-	// 			storage->clear(clearRange, &data->metrics);
-	// 			++data->counters.kvSystemClearRanges;
-	// 			data->byteSampleApplyClear(clearRange, invalidVersion);
-	// 		}
-	// 	}
-	// }
+	if (!data->shardAware) {
+		// Erase data which isn't available (it is from some fetch at a later version)
+		// SOMEDAY: Keep track of keys that might be fetching, make sure we don't have any data elsewhere?
+		for (auto it = data->newestAvailableVersion.ranges().begin(); it != data->newestAvailableVersion.ranges().end();
+		     ++it) {
+			if (it->value() == invalidVersion) {
+				KeyRangeRef clearRange(it->begin(), it->end());
+				++data->counters.kvSystemClearRanges;
+				// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
+				// DEBUG_KEY_RANGE("clearInvalidVersion", invalidVersion, clearRange);
+				storage->clear(clearRange, &data->metrics);
+				++data->counters.kvSystemClearRanges;
+				data->byteSampleApplyClear(clearRange, invalidVersion);
+			}
+		}
+	}
 
 	validate(data, true);
 	startByteSampleRestore.send(Void());

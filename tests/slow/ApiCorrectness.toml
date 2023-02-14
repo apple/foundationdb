@@ -1,3 +1,12 @@
+[configuration]
+storageEngineType = 5
+allowDefaultTenant = false
+disableTss = true
+
+[[knobs]]
+shard_encode_location_metadata = true
+# enable_dd_physical_shard = true
+
 [[test]]
 testTitle = 'ApiCorrectnessTest'
 clearAfterTest = true

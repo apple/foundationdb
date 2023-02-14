@@ -45,9 +45,9 @@
 FDB_DEFINE_BOOLEAN_PARAM(CheckpointAsKeyValues);
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
-// Enforcing rocksdb version to be 7.7.3.
-static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 7 && ROCKSDB_PATCH == 3),
-              "Unsupported rocksdb version. Update the rocksdb to 7.7.3 version");
+// Enforcing rocksdb version to be at 7.9.2.
+static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 9 && ROCKSDB_PATCH == 2),
+              "Unsupported rocksdb version. Update the rocksdb to 7.9.2 version");
 
 namespace {
 
@@ -883,7 +883,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 			loop {
 				FetchCheckpointKeyValuesStreamReply rep = waitNext(stream.getFuture());
 				for (int i = 0; i < rep.data.size(); ++i) {
-					TraceEvent(SevDebug, "FetchCheckpointRangeData", metaData->checkpointID)
+					TraceEvent(SevVerbose, "FetchCheckpointRangeData", metaData->checkpointID)
 					    .detail("Key", rep.data[i].key)
 					    .detail("Value", rep.data[i].value);
 					status = writer->Put(toSlice(rep.data[i].key), toSlice(rep.data[i].value));
@@ -1030,6 +1030,12 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 }
 
 ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
+	TraceEvent(SevInfo, "DeleteRocksCheckpointBegin", checkpoint.checkpointID)
+	    .detail("Checkpoint", checkpoint.toString());
+	if (checkpoint.getState() == CheckpointMetaData::Fail) {
+		return Void();
+	}
+
 	state CheckpointFormat format = checkpoint.getFormat();
 	state std::unordered_set<std::string> dirs;
 	if (format == DataMoveRocksCF) {
