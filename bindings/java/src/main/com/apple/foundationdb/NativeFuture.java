@@ -127,9 +127,7 @@ abstract class NativeFuture<T> extends CompletableFuture<T> implements AutoClose
 		//  the result must inherently have the read lock itself.
 		assert(rwl.getReadHoldCount() > 0);
 
-		if(cPtr == 0)
-			throw new IllegalStateException("Cannot access closed object");
-
+		if (cPtr == 0) throw new IllegalStateException("Cannot access closed object");
 		return cPtr;
 	}
 

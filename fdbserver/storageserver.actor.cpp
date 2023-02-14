@@ -26,6 +26,7 @@
 #include <unordered_map>
 
 #include "fdbclient/BlobCipher.h"
+#include "fdbclient/MappedRange.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbrpc/TenantInfo.h"
 #include "flow/ApiVersion.h"
@@ -153,6 +154,8 @@ bool canReplyWith(Error e) {
 	case error_code_key_not_tuple:
 	case error_code_value_not_tuple:
 	case error_code_mapper_not_tuple:
+	case error_code_get_mapped_range_version_not_support:
+	case error_code_get_mapped_range_parsing_error:
 		// case error_code_all_alternatives_failed:
 		return true;
 	default:
@@ -3725,12 +3728,14 @@ static inline void copyOptionalValue(Arena* a,
 		a->dependsOn(optionalValue.get().arena());
 	}
 }
-ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
-                                                    StringRef key,
-                                                    Version version,
-                                                    Arena* a,
-                                                    // To provide span context, tags, debug ID to underlying lookups.
-                                                    GetMappedKeyValuesRequest* pOriginalReq) {
+ACTOR template <class Req>
+Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
+                                              StringRef key,
+                                              Version version,
+                                              bool fetchLocalOnly,
+                                              Arena* a,
+                                              // To provide span context, tags, debug ID to underlying lookups.
+                                              Req* pOriginalReq) {
 	state GetValueReqAndResultRef getValue;
 	state double getValueStart = g_network->timer();
 	getValue.key = key;
@@ -3765,7 +3770,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 	// Otherwise fallback.
 
 	++data->counters.quickGetValueMiss;
-	if (SERVER_KNOBS->QUICK_GET_VALUE_FALLBACK) {
+	if (!fetchLocalOnly) {
 		Optional<Reference<Tenant>> tenant = pOriginalReq->tenantInfo.hasTenant()
 		                                         ? makeReference<Tenant>(pOriginalReq->tenantInfo.tenantId)
 		                                         : Optional<Reference<Tenant>>();
@@ -4384,13 +4389,14 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	return Void();
 }
 
-ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
-    StorageServer* data,
-    StringRef prefix,
-    Version version,
-    Arena* a,
-    // To provide span context, tags, debug ID to underlying lookups.
-    GetMappedKeyValuesRequest* pOriginalReq) {
+ACTOR template <class Req>
+Future<GetRangeReqAndResultRef> quickGetKeyValues(StorageServer* data,
+                                                  StringRef prefix,
+                                                  Version version,
+                                                  bool fetchLocalOnly,
+                                                  Arena* a,
+                                                  // To provide span context, tags, debug ID to underlying lookups.
+                                                  Req* pOriginalReq) {
 	state GetRangeReqAndResultRef getRange;
 	state double getValuesStart = g_network->timer();
 	getRange.begin = firstGreaterOrEqual(KeyRef(*a, prefix));
@@ -4442,7 +4448,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 	}
 
 	++data->counters.quickGetKeyValuesMiss;
-	if (SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK) {
+	if (!fetchLocalOnly) {
 		Optional<Reference<Tenant>> tenant = pOriginalReq->tenantInfo.hasTenant()
 		                                         ? makeReference<Tenant>(pOriginalReq->tenantInfo.tenantId)
 		                                         : Optional<Reference<Tenant>>();
@@ -5043,33 +5049,112 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 	return Void();
 }
 
+void fillReply(Arena* a, int getMappedRangeProtocolVersion, MappedKeyValueRef* kvm, int local) {
+	return;
+}
+
+void setLocal(Arena* a, int getMappedRangeProtocolVersion, MappedKeyValueRefV2* kvm, int local) {
+	uint8_t replyBytes[MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH_V2];
+	memset(replyBytes, 0, MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH_V2);
+	int localPos = versionToPosLocal[getMappedRangeProtocolVersion];
+	replyBytes[0] = getMappedRangeProtocolVersion;
+	replyBytes[localPos] = code_bool;
+	replyBytes[localPos + 1] = local;
+	kvm->responseBytes = StringRef(*a, replyBytes, MAPPED_KEY_VALUE_RESPONSE_BYTES_LENGTH_V2);
+}
+
+void fillReply(Arena* a, int getMappedRangeProtocolVersion, MappedKeyValueRefV2* kvm, int local) {
+	setLocal(a, getMappedRangeProtocolVersion, kvm, local);
+}
+
+// returns protocol version for getMappedRange
+int parseParams(GetMappedKeyValuesRequest* req, int* matchIndex, bool* fetchLocalOnly) {
+	*matchIndex = MATCH_INDEX_ALL;
+	*fetchLocalOnly = false;
+	return 0;
+}
+
+void parseMatchIndex(KeyRef paramsBytes, int* matchIndex, int version) {
+	int pos = versionToPosMatchIndex[version];
+	if (paramsBytes[pos] != code_uint8) {
+		TraceEvent("ErrorParsingMatchIndex").detail("Version", version);
+		throw get_mapped_range_parsing_error();
+	}
+	*matchIndex = (int)paramsBytes[pos + 1];
+}
+
+void parseFetchLocalOnly(KeyRef paramsBytes, bool* fetchLocalOnly, int version) {
+	int pos = versionToPosFetchLocalOnly[version];
+	if (paramsBytes[pos] != code_bool) {
+		TraceEvent("ErrorParsingFetchLocalOnly").detail("Version", version);
+		throw get_mapped_range_parsing_error();
+	}
+	*fetchLocalOnly = paramsBytes[pos + 1];
+}
+
+// returns protocol version for getMappedRange
+int parseParams(GetMappedKeyValuesRequestV2* req, int* matchIndex, bool* fetchLocalOnly) {
+	KeyRef paramsBytes = req->paramsBytes;
+	int v = paramsBytes[0];
+
+	if (v < *supportedVersions.begin() || v > *supportedVersions.rbegin()) {
+		TraceEvent("ErrorVersionNotSupport").detail("Version", v);
+		throw get_mapped_range_version_not_support();
+	}
+	parseMatchIndex(paramsBytes, matchIndex, v);
+	parseFetchLocalOnly(paramsBytes, fetchLocalOnly, v);
+	return v;
+}
+
 // Issues a secondary query (either range and point read) and fills results into "kvm".
-ACTOR Future<Void> mapSubquery(StorageServer* data,
-                               Version version,
-                               GetMappedKeyValuesRequest* pOriginalReq,
-                               Arena* pArena,
-                               int matchIndex,
-                               bool isRangeQuery,
-                               KeyValueRef* it,
-                               MappedKeyValueRef* kvm,
-                               Key mappedKey) {
+ACTOR template <class Req, class MappedKV>
+Future<Void> mapSubquery(StorageServer* data,
+                         Version version,
+                         Req* pOriginalReq,
+                         Arena* pArena,
+                         int matchIndex,
+                         bool fetchLocalOnly,
+                         bool isRangeQuery,
+                         KeyValueRef* it,
+                         MappedKV* kvm,
+                         Key mappedKey,
+                         int getMappedRangeProtocolVersion) {
 	if (isRangeQuery) {
 		// Use the mappedKey as the prefix of the range query.
-		GetRangeReqAndResultRef getRange = wait(quickGetKeyValues(data, mappedKey, version, pArena, pOriginalReq));
-		if ((!getRange.result.empty() && matchIndex == MATCH_INDEX_MATCHED_ONLY) ||
-		    (getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY) || matchIndex == MATCH_INDEX_ALL) {
-			kvm->key = it->key;
-			kvm->value = it->value;
+		// if MappedKV is MappedKeyValueRefV2, then set it
+		try {
+			GetRangeReqAndResultRef getRange =
+			    wait(quickGetKeyValues(data, mappedKey, version, fetchLocalOnly, pArena, pOriginalReq));
+			if ((!getRange.result.empty() && matchIndex == MATCH_INDEX_MATCHED_ONLY) ||
+			    (getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY) ||
+			    matchIndex == MATCH_INDEX_ALL || std::is_same<Req, GetMappedKeyValuesRequest>::value) {
+				kvm->key = it->key;
+				kvm->value = it->value;
+			}
+			kvm->reqAndResult = getRange;
+			fillReply(pArena, getMappedRangeProtocolVersion, kvm, true);
+		} catch (Error& e) {
+			if (e.code() == error_code_quick_get_key_values_miss) {
+				// for a local miss when remote fetch is disabled, catch the error and always add index KV
+				kvm->key = it->key;
+				kvm->value = it->value;
+				kvm->reqAndResult = GetRangeReqAndResultRef();
+				fillReply(pArena, getMappedRangeProtocolVersion, kvm, false);
+			} else {
+				// pop up other errors to client(e.g. transaction_too_old)
+				throw;
+			}
 		}
-		kvm->reqAndResult = getRange;
 	} else {
-		GetValueReqAndResultRef getValue = wait(quickGetValue(data, mappedKey, version, pArena, pOriginalReq));
+		GetValueReqAndResultRef getValue =
+		    wait(quickGetValue(data, mappedKey, version, fetchLocalOnly, pArena, pOriginalReq));
 		kvm->reqAndResult = getValue;
 	}
 	return Void();
 }
 
-int getMappedKeyValueSize(MappedKeyValueRef mappedKeyValue) {
+template <class MappedKV>
+int getMappedKeyValueSize(MappedKV mappedKeyValue) {
 	auto& reqAndResult = mappedKeyValue.reqAndResult;
 	int bytes = 0;
 	if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResult)) {
@@ -5084,18 +5169,17 @@ int getMappedKeyValueSize(MappedKeyValueRef mappedKeyValue) {
 	return bytes;
 }
 
-ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
-                                                   GetKeyValuesReply input,
-                                                   StringRef mapper,
-                                                   // To provide span context, tags, debug ID to underlying lookups.
-                                                   GetMappedKeyValuesRequest* pOriginalReq,
-                                                   int matchIndex,
-                                                   int* remainingLimitBytes) {
-	state GetMappedKeyValuesReply result;
+ACTOR template <class Req, class Reply, class MappedKV>
+Future<Reply> mapKeyValues(StorageServer* data,
+                           GetKeyValuesReply input,
+                           StringRef mapper,
+                           // To provide span context, tags, debug ID to underlying lookups.
+                           Req* pOriginalReq,
+                           int* remainingLimitBytes) {
+	state Reply result;
 	result.version = input.version;
 	result.cached = input.cached;
 	result.arena.dependsOn(input.arena);
-
 	result.data.reserve(result.arena, input.data.size());
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 		g_traceBatch.addEvent(
@@ -5110,11 +5194,14 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	}
 	state std::vector<Optional<Tuple>> vt;
 	state bool isRangeQuery = false;
+	state int matchIndex;
+	state bool fetchLocalOnly;
+	state int getMappedRangeProtocolVersion = parseParams(pOriginalReq, &matchIndex, &fetchLocalOnly);
 	preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 
 	state int sz = input.data.size();
 	const int k = std::min(sz, SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE);
-	state std::vector<MappedKeyValueRef> kvms(k);
+	state std::vector<MappedKV> kvms(k);
 	state std::vector<Future<Void>> subqueries;
 	state int offset = 0;
 	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
@@ -5126,7 +5213,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		// Divide into batches of MAX_PARALLEL_QUICK_GET_VALUE subqueries
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			KeyValueRef* it = &input.data[i + offset];
-			MappedKeyValueRef* kvm = &kvms[i];
+			MappedKV* kvm = &kvms[i];
 			// Clear key value to the default.
 			kvm->key = ""_sr;
 			kvm->value = ""_sr;
@@ -5136,9 +5223,17 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 
 			// std::cout << "key:" << printable(kvm->key) << ", value:" << printable(kvm->value)
 			//          << ", mappedKey:" << printable(mappedKey) << std::endl;
-
-			subqueries.push_back(mapSubquery(
-			    data, input.version, pOriginalReq, &result.arena, matchIndex, isRangeQuery, it, kvm, mappedKey));
+			subqueries.push_back(mapSubquery(data,
+			                                 input.version,
+			                                 pOriginalReq,
+			                                 &result.arena,
+			                                 matchIndex,
+			                                 fetchLocalOnly,
+			                                 isRangeQuery,
+			                                 it,
+			                                 kvm,
+			                                 mappedKey,
+			                                 getMappedRangeProtocolVersion));
 		}
 		wait(waitForAll(subqueries));
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
@@ -5157,8 +5252,8 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			}
 		}
 	}
-
 	int resultSize = result.data.size();
+
 	if (resultSize > 0) {
 		// keep index for boundary index entries, so that caller can use it as a continuation.
 		result.data[0].key = input.data[0].key;
@@ -5352,7 +5447,8 @@ TEST_CASE("/fdbserver/storageserver/randomRangeIntersectsAnyTenant") {
 
 // Most of the actor is copied from getKeyValuesQ. I tried to use templates but things become nearly impossible after
 // combining actor shenanigans with template shenanigans.
-ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRequest req)
+ACTOR template <class Req, class Reply, class MappedKV>
+Future<Void> getMappedKeyValuesQ(StorageServer* data, Req req)
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 // selector offset prevents all data from being read in one range read
 {
@@ -5468,7 +5564,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 				                      "storageserver.getMappedKeyValues.Send");
 			//.detail("Begin",begin).detail("End",end);
 
-			GetMappedKeyValuesReply none;
+			Reply none;
 			none.version = version;
 			none.more = false;
 			none.penalty = data->getPenalty();
@@ -5491,17 +5587,16 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			                                                     span.context,
 			                                                     req.options,
 			                                                     req.tenantInfo.prefix));
-
 			// Unlock read lock before the subqueries because each
 			// subquery will route back to getValueQ or getKeyValuesQ with a new request having the same
 			// read options which will each acquire the ssLock.
 			readLock.release();
 
-			state GetMappedKeyValuesReply r;
+			state Reply r;
 			try {
 				// Map the scanned range to another list of keys and look up.
-				GetMappedKeyValuesReply _r =
-				    wait(mapKeyValues(data, getKeyValuesReply, req.mapper, &req, req.matchIndex, &remainingLimitBytes));
+				Reply _r = wait(mapKeyValues<Req, Reply, MappedKV>(
+				    data, getKeyValuesReply, req.mapper, &req, &remainingLimitBytes));
 				r = _r;
 			} catch (Error& e) {
 				// catch txn_too_old here if prefetch runs for too long, and returns it back to client
@@ -10979,10 +11074,22 @@ ACTOR Future<Void> serveGetMappedKeyValuesRequests(StorageServer* self,
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyValues;
 	loop {
 		GetMappedKeyValuesRequest req = waitNext(getMappedKeyValues);
-
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
 		// before doing real work
-		self->actors.add(self->readGuard(req, getMappedKeyValuesQ));
+		self->actors.add(
+		    getMappedKeyValuesQ<GetMappedKeyValuesRequest, GetMappedKeyValuesReply, MappedKeyValueRef>(self, req));
+	}
+}
+
+ACTOR Future<Void> serveGetMappedKeyValuesRequestsV2(StorageServer* self,
+                                                     FutureStream<GetMappedKeyValuesRequestV2> getMappedKeyValuesV2) {
+	// TODO: Is it fine to keep TransactionLineage::Operation::GetKeyValues here?
+	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyValues;
+	loop {
+		GetMappedKeyValuesRequestV2 req = waitNext(getMappedKeyValuesV2);
+		self->actors.add(
+		    getMappedKeyValuesQ<GetMappedKeyValuesRequestV2, GetMappedKeyValuesReplyV2, MappedKeyValueRefV2>(self,
+		                                                                                                     req));
 	}
 }
 
@@ -11218,6 +11325,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(serveGetValueRequests(self, ssi.getValue.getFuture()));
 	self->actors.add(serveGetKeyValuesRequests(self, ssi.getKeyValues.getFuture()));
 	self->actors.add(serveGetMappedKeyValuesRequests(self, ssi.getMappedKeyValues.getFuture()));
+	self->actors.add(serveGetMappedKeyValuesRequestsV2(self, ssi.getMappedKeyValuesV2.getFuture()));
 	self->actors.add(serveGetKeyValuesStreamRequests(self, ssi.getKeyValuesStream.getFuture()));
 	self->actors.add(serveGetKeyRequests(self, ssi.getKey.getFuture()));
 	self->actors.add(serveWatchValueRequests(self, ssi.watchValue.getFuture()));

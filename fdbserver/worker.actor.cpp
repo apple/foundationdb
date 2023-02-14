@@ -2375,6 +2375,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.ssi.getKey);
 					DUMPTOKEN(recruited.ssi.getKeyValues);
 					DUMPTOKEN(recruited.ssi.getMappedKeyValues);
+					DUMPTOKEN(recruited.ssi.getMappedKeyValuesV2);
 					DUMPTOKEN(recruited.ssi.getShardState);
 					DUMPTOKEN(recruited.ssi.waitMetrics);
 					DUMPTOKEN(recruited.ssi.splitMetrics);

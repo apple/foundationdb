@@ -101,6 +101,7 @@ struct StorageServerInterface {
 	// selector offset prevents all data from being read in one range read
 	PublicRequestStream<struct GetKeyValuesRequest> getKeyValues;
 	PublicRequestStream<struct GetMappedKeyValuesRequest> getMappedKeyValues;
+	PublicRequestStream<struct GetMappedKeyValuesRequestV2> getMappedKeyValuesV2;
 
 	RequestStream<struct GetShardStateRequest> getShardState;
 	PublicRequestStream<struct WaitMetricsRequest> waitMetrics;
@@ -198,6 +199,8 @@ public:
 				    RequestStream<struct UpdateCommitCostRequest>(getValue.getEndpoint().getAdjustedEndpoint(22));
 				auditStorage =
 				    RequestStream<struct AuditStorageRequest>(getValue.getEndpoint().getAdjustedEndpoint(23));
+				getMappedKeyValuesV2 = PublicRequestStream<struct GetMappedKeyValuesRequestV2>(
+				    getValue.getEndpoint().getAdjustedEndpoint(24));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -250,6 +253,7 @@ public:
 		streams.push_back(fetchCheckpointKeyValues.getReceiver());
 		streams.push_back(updateCommitCostRequest.getReceiver());
 		streams.push_back(auditStorage.getReceiver());
+		streams.push_back(getMappedKeyValuesV2.getReceiver(TaskPriority::LoadBalancedEndpoint));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -444,6 +448,24 @@ struct GetMappedKeyValuesReply : public LoadBalancedReply {
 	}
 };
 
+struct GetMappedKeyValuesReplyV2 : public LoadBalancedReply {
+	constexpr static FileIdentifier file_identifier = 1783067;
+	Arena arena;
+	// MappedKeyValueRef is not string_serialized_traits, so we have to use FlatBuffers.
+	VectorRef<MappedKeyValueRefV2, VecSerStrategy::FlatBuffers> data;
+
+	Version version; // useful when latestVersion was requested
+	bool more;
+	bool cached = false;
+
+	GetMappedKeyValuesReplyV2() : version(invalidVersion), more(false), cached(false) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, cached, arena);
+	}
+};
+
 struct GetMappedKeyValuesRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 6795747;
 	SpanContext spanContext;
@@ -453,7 +475,6 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	KeyRef mapper;
 	Version version; // or latestVersion
 	int limit, limitBytes;
-	int matchIndex;
 	Optional<TagSet> tags;
 	Optional<ReadOptions> options;
 	ReplyPromise<GetMappedKeyValuesReply> reply;
@@ -480,7 +501,47 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 		           tenantInfo,
 		           options,
 		           ssLatestCommitVersions,
-		           matchIndex,
+		           arena);
+	}
+};
+
+struct GetMappedKeyValuesRequestV2 : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 6795747;
+	SpanContext spanContext;
+	Arena arena;
+	TenantInfo tenantInfo;
+	KeySelectorRef begin, end;
+	KeyRef mapper;
+	KeyRef paramsBytes;
+	Version version; // or latestVersion
+	int limit, limitBytes;
+	Optional<TagSet> tags;
+	Optional<ReadOptions> options;
+	ReplyPromise<GetMappedKeyValuesReplyV2> reply;
+	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
+	                                      // to this client, of all storage replicas that
+	                                      // serve the given key range
+
+	GetMappedKeyValuesRequestV2() {}
+
+	bool verify() const { return tenantInfo.isAuthorized(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar,
+		           begin,
+		           end,
+		           mapper,
+		           paramsBytes,
+		           version,
+		           limit,
+		           limitBytes,
+		           tags,
+		           reply,
+		           spanContext,
+		           tenantInfo,
+		           options,
+		           ssLatestCommitVersions,
 		           arena);
 	}
 };

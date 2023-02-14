@@ -206,8 +206,18 @@ bool TSS_doCompare(const GetMappedKeyValuesReply& src, const GetMappedKeyValuesR
 }
 
 template <>
+bool TSS_doCompare(const GetMappedKeyValuesReplyV2& src, const GetMappedKeyValuesReplyV2& tss) {
+	return src.more == tss.more && src.data == tss.data;
+}
+
+template <>
 const char* TSS_mismatchTraceName(const GetMappedKeyValuesRequest& req) {
 	return "TSSMismatchGetMappedKeyValues";
+}
+
+template <>
+const char* TSS_mismatchTraceName(const GetMappedKeyValuesRequestV2& req) {
+	return "TSSMismatchGetMappedKeyValuesV2";
 }
 
 template <>
@@ -215,6 +225,25 @@ void TSS_traceMismatch(TraceEvent& event,
                        const GetMappedKeyValuesRequest& req,
                        const GetMappedKeyValuesReply& src,
                        const GetMappedKeyValuesReply& tss) {
+	traceKeyValuesSummary(event,
+	                      req.begin,
+	                      req.end,
+	                      req.tenantInfo.tenantId,
+	                      req.version,
+	                      req.limit,
+	                      req.limitBytes,
+	                      src.data.size(),
+	                      src.more,
+	                      tss.data.size(),
+	                      tss.more);
+	// FIXME: trace details for TSS mismatch of mapped data
+}
+
+template <>
+void TSS_traceMismatch(TraceEvent& event,
+                       const GetMappedKeyValuesRequestV2& req,
+                       const GetMappedKeyValuesReplyV2& src,
+                       const GetMappedKeyValuesReplyV2& tss) {
 	traceKeyValuesSummary(event,
 	                      req.begin,
 	                      req.end,
@@ -425,6 +454,12 @@ void TSSMetrics::recordLatency(const GetKeyValuesRequest& req, double ssLatency,
 
 template <>
 void TSSMetrics::recordLatency(const GetMappedKeyValuesRequest& req, double ssLatency, double tssLatency) {
+	SSgetMappedKeyValuesLatency.addSample(ssLatency);
+	TSSgetMappedKeyValuesLatency.addSample(tssLatency);
+}
+
+template <>
+void TSSMetrics::recordLatency(const GetMappedKeyValuesRequestV2& req, double ssLatency, double tssLatency) {
 	SSgetMappedKeyValuesLatency.addSample(ssLatency);
 	TSSgetMappedKeyValuesLatency.addSample(tssLatency);
 }
