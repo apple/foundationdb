@@ -1764,8 +1764,7 @@ struct ConfigureTenantImpl {
 				auto& newClusterName = configItr->second;
 				TraceEvent("UpdateManagementCluster")
 				    .detail("OriginalAssignedCluster",
-				            tenantEntry.get().assignedCluster.present() ? tenantEntry.get().assignedCluster.get()
-				                                                        : "null"_sr)
+				            tenantEntry.get().assignedCluster)
 				    .detail("NewAssignedCluster", newClusterName.present() ? newClusterName.get() : "null"_sr);
 				throw invalid_tenant_configuration();
 			}
