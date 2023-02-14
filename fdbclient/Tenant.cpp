@@ -174,6 +174,10 @@ std::string TenantMapEntry::toJson() const {
 		tenantEntry["tenant_group"] = binaryToJson(tenantGroup.get());
 	}
 
+	if (tenantState == TenantState::ERROR && error.size()) {
+		tenantEntry["error"] = error;
+	}
+
 	return json_spirit::write_string(json_spirit::mValue(tenantEntry));
 }
 

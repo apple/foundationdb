@@ -275,6 +275,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	ACTOR static Future<Void> restoreCluster(MetaclusterManagementWorkload* self) {
 		state ClusterName clusterName = self->chooseClusterName();
 		state DataClusterData* dataDb = &self->dataDbs[clusterName];
+		state bool dryRun = deterministicRandom()->coinflip();
+		state bool forceJoin = deterministicRandom()->coinflip();
 
 		state std::vector<std::string> messages;
 		try {
@@ -284,6 +286,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				                                   clusterName,
 				                                   dataDb->db->getConnectionRecord()->getConnectionString(),
 				                                   ApplyManagementClusterUpdates::True,
+				                                   RestoreDryRun(dryRun),
+				                                   ForceJoinNewMetacluster(forceJoin),
 				                                   &messages);
 				Optional<Void> result = wait(timeout(restoreFuture, deterministicRandom()->randomInt(1, 30)));
 				if (result.present()) {
@@ -292,7 +296,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			}
 
 			ASSERT(dataDb->registered);
-			dataDb->detached = false;
+			if (!dryRun) {
+				dataDb->detached = false;
+			}
 		} catch (Error& e) {
 			if (e.code() == error_code_cluster_not_found) {
 				ASSERT(!dataDb->registered);

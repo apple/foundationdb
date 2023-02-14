@@ -238,6 +238,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	                                             Database dataDb,
 	                                             std::string backupUrl,
 	                                             bool addToMetacluster,
+	                                             ForceJoinNewMetacluster forceJoinNewMetacluster,
 	                                             MetaclusterRestoreWorkload* self) {
 		state FileBackupAgent backupAgent;
 		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
@@ -259,10 +260,27 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		state std::vector<std::string> messages;
 		if (addToMetacluster) {
 			TraceEvent("MetaclusterRestoreWorkloadAddClusterToMetacluster").detail("ClusterName", clusterName);
+			if (deterministicRandom()->coinflip()) {
+				TraceEvent("MetaclusterRestoreWorkloadAddClusterToMetaclusterDryRun")
+				    .detail("ClusterName", clusterName);
+				wait(MetaclusterAPI::restoreCluster(self->managementDb,
+				                                    clusterName,
+				                                    dataDb->getConnectionRecord()->getConnectionString(),
+				                                    ApplyManagementClusterUpdates::True,
+				                                    RestoreDryRun::True,
+				                                    forceJoinNewMetacluster,
+				                                    &messages));
+				TraceEvent("MetaclusterRestoreWorkloadAddClusterToMetaclusterDryRunDone")
+				    .detail("ClusterName", clusterName);
+				messages.clear();
+			}
+
 			wait(MetaclusterAPI::restoreCluster(self->managementDb,
 			                                    clusterName,
 			                                    dataDb->getConnectionRecord()->getConnectionString(),
 			                                    ApplyManagementClusterUpdates::True,
+			                                    RestoreDryRun::False,
+			                                    forceJoinNewMetacluster,
 			                                    &messages));
 			TraceEvent("MetaclusterRestoreWorkloadRestoreComplete").detail("ClusterName", clusterName);
 		}
@@ -497,11 +515,34 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 					    .detail("FromCluster", clusterItr->first)
 					    .detail("TenantCollisions", collisions.first.size());
 
+					if (deterministicRandom()->coinflip()) {
+						TraceEvent("MetaclusterRestoreWorkloadRestoreManagementClusterDryRun")
+						    .detail("FromCluster", clusterItr->first)
+						    .detail("TenantCollisions", collisions.first.size());
+
+						wait(MetaclusterAPI::restoreCluster(
+						    self->managementDb,
+						    clusterItr->first,
+						    clusterItr->second.db->getConnectionRecord()->getConnectionString(),
+						    ApplyManagementClusterUpdates::False,
+						    RestoreDryRun::True,
+						    ForceJoinNewMetacluster(deterministicRandom()->coinflip()),
+						    &messages));
+
+						TraceEvent("MetaclusterRestoreWorkloadRestoreManagementClusterDryRunDone")
+						    .detail("FromCluster", clusterItr->first)
+						    .detail("TenantCollisions", collisions.first.size());
+
+						messages.clear();
+					}
+
 					wait(MetaclusterAPI::restoreCluster(
 					    self->managementDb,
 					    clusterItr->first,
 					    clusterItr->second.db->getConnectionRecord()->getConnectionString(),
 					    ApplyManagementClusterUpdates::False,
+					    RestoreDryRun::False,
+					    ForceJoinNewMetacluster(deterministicRandom()->coinflip()),
 					    &messages));
 
 					ASSERT(collisions.first.empty() && collisions.second.empty());
@@ -842,14 +883,31 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 		std::vector<Future<Void>> restores;
 		for (auto [cluster, backupUrl] : backups) {
-			restores.push_back(restoreDataCluster(
-			    cluster, self->dataDbs[cluster].db, backupUrl.get(), !self->recoverManagementCluster, self));
+			restores.push_back(restoreDataCluster(cluster,
+			                                      self->dataDbs[cluster].db,
+			                                      backupUrl.get(),
+			                                      !self->recoverManagementCluster,
+			                                      ForceJoinNewMetacluster(deterministicRandom()->coinflip()),
+			                                      self));
 		}
 
 		wait(waitForAll(restores));
 
 		if (self->recoverManagementCluster) {
 			wait(restoreManagementCluster(self));
+
+			if (deterministicRandom()->coinflip()) {
+				std::vector<Future<Void>> secondRestores;
+				for (auto [cluster, backupUrl] : backups) {
+					secondRestores.push_back(restoreDataCluster(cluster,
+					                                            self->dataDbs[cluster].db,
+					                                            backupUrl.get(),
+					                                            true,
+					                                            ForceJoinNewMetacluster::True,
+					                                            self));
+				}
+				wait(waitForAll(secondRestores));
+			}
 		}
 
 		return Void();

@@ -270,6 +270,7 @@ ERROR( tenant_creation_permanently_failed, 2168, "The tenant creation did not co
 ERROR( cluster_removed, 2169, "The cluster is being removed from the metacluster" )
 ERROR( cluster_restoring, 2170, "The cluster is being restored to the metacluster" )
 ERROR( invalid_data_cluster, 2171, "The data cluster being restored has no record of its metacluster" )
+ERROR( metacluster_mismatch, 2172, "The cluster does not have the expected name or is associated with a different metacluster" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

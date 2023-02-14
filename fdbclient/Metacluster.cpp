@@ -27,6 +27,9 @@ FDB_DEFINE_BOOLEAN_PARAM(AssignClusterAutomatically);
 FDB_DEFINE_BOOLEAN_PARAM(GroupAlreadyExists);
 FDB_DEFINE_BOOLEAN_PARAM(IsRestoring);
 FDB_DEFINE_BOOLEAN_PARAM(RunOnDisconnectedCluster);
+FDB_DEFINE_BOOLEAN_PARAM(RunOnMismatchedCluster);
+FDB_DEFINE_BOOLEAN_PARAM(RestoreDryRun);
+FDB_DEFINE_BOOLEAN_PARAM(ForceJoinNewMetacluster);
 
 std::string clusterTypeToString(const ClusterType& clusterType) {
 	switch (clusterType) {
@@ -72,6 +75,7 @@ DataClusterState DataClusterEntry::stringToClusterState(std::string stateStr) {
 
 json_spirit::mObject DataClusterEntry::toJson() const {
 	json_spirit::mObject obj;
+	obj["id"] = id.toString();
 	obj["capacity"] = capacity.toJson();
 	obj["allocated"] = allocated.toJson();
 	obj["cluster_state"] = DataClusterEntry::clusterStateToString(clusterState);
