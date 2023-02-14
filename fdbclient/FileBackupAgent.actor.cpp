@@ -581,7 +581,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                                     Optional<BlobCipherDetails> headerCipherDetails,
 	                                     BlobCipherDetails textCipherDetails) {
 		// Validate encryption header 'cipherHeader' details
-		if (headerCipherKey.present() && headerCipherDetails.present() &&
+		if (headerCipherKey.present() && headerCipherKey.get().isValid() && headerCipherDetails.present() &&
 		    !(headerCipherDetails.get().baseCipherId == headerCipherKey.get()->getBaseCipherId() &&
 		      headerCipherDetails.get().encryptDomainId == headerCipherKey.get()->getDomainId() &&
 		      headerCipherDetails.get().salt == headerCipherKey.get()->getSalt())) {
@@ -632,7 +632,6 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		} else {
 			state BlobCipherEncryptHeader header = std::get<BlobCipherEncryptHeader>(headerVariant);
 			TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, header, BlobCipherMetrics::RESTORE));
-			ASSERT(cipherKeys.cipherHeaderKey.isValid() && cipherKeys.cipherTextKey.isValid());
 			validateEncryptionHeader(cipherKeys.cipherHeaderKey,
 			                         cipherKeys.cipherTextKey,
 			                         header.cipherHeaderDetails,
