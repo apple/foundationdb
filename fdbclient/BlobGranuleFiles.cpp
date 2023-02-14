@@ -257,12 +257,10 @@ void validateEncryptionHeaderDetails(const BlobGranuleFileEncryptionKeys& eKeys,
 void validateEncryptionHeaderDetails(const BlobGranuleFileEncryptionKeys& eKeys,
                                      const BlobCipherEncryptHeaderRef& headerRef,
                                      const StringRef& ivRef) {
-	headerRef.validateEncryptionHeaderDetails(BlobCipherDetails(eKeys.textCipherKey->getDomainId(),
-	                                                            eKeys.textCipherKey->getBaseCipherId(),
-	                                                            eKeys.textCipherKey->getSalt()),
-	                                          BlobCipherDetails(eKeys.headerCipherKey->getDomainId(),
-	                                                            eKeys.headerCipherKey->getBaseCipherId(),
-	                                                            eKeys.headerCipherKey->getSalt()),
+	ASSERT(eKeys.textCipherKey.isValid());
+	headerRef.validateEncryptionHeaderDetails(eKeys.textCipherKey->details(),
+	                                          eKeys.headerCipherKey.isValid() ? eKeys.headerCipherKey->details()
+	                                                                          : BlobCipherDetails(),
 	                                          ivRef);
 }
 

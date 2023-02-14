@@ -615,6 +615,8 @@ public:
 		return now() + INetwork::TIME_EPS >= expireAtTS ? true : false;
 	}
 
+	BlobCipherDetails details() const { return BlobCipherDetails{ encryptDomainId, baseCipherId, randomSalt }; }
+
 	void reset();
 
 private:
