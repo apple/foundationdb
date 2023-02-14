@@ -315,6 +315,24 @@ struct EncryptionOpsWorkload : TestWorkload {
 		auto end = std::chrono::high_resolution_clock::now();
 
 		// validate encrypted buffer size and contents (not matching with plaintext)
+		const uint8_t* headerIV = headerRef->getIV();
+		ASSERT_EQ(memcmp(&headerIV[0], &iv[0], AES_256_IV_LENGTH), 0);
+
+		EncryptHeaderCipherDetails validateDetails = headerRef->getCipherDetails();
+		ASSERT(validateDetails.textCipherDetails.isValid() &&
+		       validateDetails.textCipherDetails == BlobCipherDetails(textCipherKey->getDomainId(),
+		                                                              textCipherKey->getBaseCipherId(),
+		                                                              textCipherKey->getSalt()));
+		if (authMode == ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
+			ASSERT(!validateDetails.headerCipherDetails.present());
+		} else {
+			ASSERT(validateDetails.headerCipherDetails.present() &&
+			       validateDetails.headerCipherDetails.get().isValid() &&
+			       validateDetails.headerCipherDetails.get() == BlobCipherDetails(headerCipherKey->getDomainId(),
+			                                                                      headerCipherKey->getBaseCipherId(),
+			                                                                      headerCipherKey->getSalt()));
+		}
+
 		ASSERT_EQ(encrypted.size(), len);
 		ASSERT_EQ(headerRef->flagsVersion, CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
 		ASSERT_NE(memcmp(encrypted.begin(), payload, len), 0);
