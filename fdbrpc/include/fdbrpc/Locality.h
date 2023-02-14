@@ -49,8 +49,37 @@ struct ProcessClass {
 		BlobManagerClass,
 		BlobWorkerClass,
 		EncryptKeyProxyClass,
+		ConsistencyScanClass,
+		BlobMigratorClass,
 		InvalidClass = -1
 	};
+
+	// class is serialized by enum value, so it's important not to change the
+	// enum value of a class. New classes should only be added to the end.
+	static_assert(ProcessClass::UnsetClass == 0);
+	static_assert(ProcessClass::StorageClass == 1);
+	static_assert(ProcessClass::TransactionClass == 2);
+	static_assert(ProcessClass::ResolutionClass == 3);
+	static_assert(ProcessClass::TesterClass == 4);
+	static_assert(ProcessClass::CommitProxyClass == 5);
+	static_assert(ProcessClass::MasterClass == 6);
+	static_assert(ProcessClass::StatelessClass == 7);
+	static_assert(ProcessClass::LogClass == 8);
+	static_assert(ProcessClass::ClusterControllerClass == 9);
+	static_assert(ProcessClass::LogRouterClass == 10);
+	static_assert(ProcessClass::FastRestoreClass == 11);
+	static_assert(ProcessClass::DataDistributorClass == 12);
+	static_assert(ProcessClass::CoordinatorClass == 13);
+	static_assert(ProcessClass::RatekeeperClass == 14);
+	static_assert(ProcessClass::StorageCacheClass == 15);
+	static_assert(ProcessClass::BackupClass == 16);
+	static_assert(ProcessClass::GrvProxyClass == 17);
+	static_assert(ProcessClass::BlobManagerClass == 18);
+	static_assert(ProcessClass::BlobWorkerClass == 19);
+	static_assert(ProcessClass::EncryptKeyProxyClass == 20);
+	static_assert(ProcessClass::ConsistencyScanClass == 21);
+	static_assert(ProcessClass::BlobMigratorClass == 22);
+	static_assert(ProcessClass::InvalidClass == -1);
 
 	enum Fitness {
 		BestFit,
@@ -72,8 +101,10 @@ struct ProcessClass {
 		ClusterController,
 		DataDistributor,
 		Ratekeeper,
+		ConsistencyScan,
 		BlobManager,
 		BlobWorker,
+		BlobMigrator,
 		StorageCache,
 		Backup,
 		EncryptKeyProxy,
@@ -83,6 +114,12 @@ struct ProcessClass {
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };
 	int16_t _class;
 	int16_t _source;
+
+	// source is serialized by enum value, so it's important not to change the
+	// enum value of a source. New sources should only be added to the end.
+	static_assert(ProcessClass::CommandLineSource == 0);
+	static_assert(ProcessClass::AutoSource == 1);
+	static_assert(ProcessClass::DBSource == 2);
 
 public:
 	ProcessClass() : _class(UnsetClass), _source(CommandLineSource) {}
@@ -110,6 +147,7 @@ public:
 		else if (s=="data_distributor") _class = DataDistributorClass;
 		else if (s=="coordinator") _class = CoordinatorClass;
 		else if (s=="ratekeeper") _class = RatekeeperClass;
+		else if (s=="consistency_scan") _class = ConsistencyScanClass;
 		else if (s=="blob_manager") _class = BlobManagerClass;
 		else if (s=="blob_worker") _class = BlobWorkerClass;
 		else if (s=="storage_cache") _class = StorageCacheClass;
@@ -140,6 +178,7 @@ public:
 		else if (classStr=="data_distributor") _class = DataDistributorClass;
 		else if (classStr=="coordinator") _class = CoordinatorClass;
 		else if (classStr=="ratekeeper") _class = RatekeeperClass;
+		else if (classStr=="consistency_scan") _class = ConsistencyScanClass;
 		else if (classStr=="blob_manager") _class = BlobManagerClass;
 		else if (classStr=="blob_worker") _class = BlobWorkerClass;
 		else if (classStr=="storage_cache") _class = StorageCacheClass;
@@ -180,6 +219,7 @@ public:
 			case DataDistributorClass: return "data_distributor";
 			case CoordinatorClass: return "coordinator";
 			case RatekeeperClass: return "ratekeeper";
+			case ConsistencyScanClass: return "consistency_scan";
 			case BlobManagerClass: return "blob_manager";
 			case BlobWorkerClass: return "blob_worker";
 			case StorageCacheClass: return "storage_cache";

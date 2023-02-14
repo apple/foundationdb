@@ -191,11 +191,6 @@ public class FDB {
 		Select_API_version(version);
 		singleton = new FDB(version);
 
-		if (version < 720) {
-			TenantManagement.TENANT_MAP_PREFIX = ByteArrayUtil.join(new byte[] { (byte)255, (byte)255 },
-					"/management/tenant_map/".getBytes());
-		}
-
 		return singleton;
 	}
 

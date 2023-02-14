@@ -26,6 +26,7 @@
 #include "flow/IAsyncFile.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
 
 #include <assert.h>
@@ -168,7 +169,7 @@ static int asyncReadZeroCopy(sqlite3_file* pFile, void** data, int iAmt, sqlite_
 }
 static int asyncReleaseZeroCopy(sqlite3_file* pFile, void* data, int iAmt, sqlite_int64 iOfst) {
 	// printf("-asyncReleaseRef %p +%lld %d <= %p\n", pFile, iOfst, iAmt, data);
-	delete[](char*) data;
+	delete[] (char*)data;
 	return SQLITE_OK;
 }
 #endif
@@ -299,7 +300,7 @@ struct SharedMemoryInfo { // for a file
 	}
 	void cleanup() {
 		for (int i = 0; i < regions.size(); i++)
-			delete[](uint8_t*) regions[i];
+			delete[] (uint8_t*)regions[i];
 		table.erase(filename);
 	}
 
@@ -731,7 +732,7 @@ static int asyncSleep(sqlite3_vfs* pVfs, int microseconds) {
 	try {
 		Future<Void> simCancel = Never();
 		if (g_network->isSimulated())
-			simCancel = success(g_simulator.getCurrentProcess()->shutdownSignal.getFuture());
+			simCancel = success(g_simulator->getCurrentProcess()->shutdownSignal.getFuture());
 		if (simCancel.isReady()) {
 			waitFor(delay(FLOW_KNOBS->MAX_BUGGIFIED_DELAY));
 			return 0;

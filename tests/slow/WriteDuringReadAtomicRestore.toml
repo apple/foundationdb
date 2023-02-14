@@ -1,5 +1,6 @@
 [configuration]
 StderrSeverity = 30
+# Tenant lookups fail during the atomic restore because they aren't affected by locking
 allowDefaultTenant = false
 
 [[test]]

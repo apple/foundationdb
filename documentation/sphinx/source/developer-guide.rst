@@ -1,7 +1,6 @@
 .. default-domain:: py
 .. default-domain:: py
 .. highlight:: python
-.. module:: fdb
 
 .. Required substitutions for api-common.rst.inc
 
@@ -607,6 +606,8 @@ The following example illustrates both techniques. Together, they make a transac
         balanceKey = fdb.tuple.pack(('account', acctId))
         tr.add(balanceKey, amount)
 
+There is experimental support for preventing ``commit_unknown_result`` altogether using a transaction option. See :doc:`automatic-idempotency` for more details. Note: there are other errors which indicate an unknown commit status. See :ref:`non-retryable errors`.
+
 .. _conflict-ranges:
 
 Conflict ranges
@@ -954,6 +955,10 @@ The ``commit_unknown_result`` Error
 #. There was a FoundationDB failure - for example a commit proxy failed during the commit. In that case there is no way for the client know whether the transaction succeeded or not.
 
 However, there is one guarantee FoundationDB gives to the caller: at the point of time where you receive this error, the transaction either committed or not and if it didn't commit, it will never commit in the future. Or: it is guaranteed that the transaction is not in-flight anymore. This is an important guarantee as it means that if your transaction is idempotent you can simply retry. For more explanations see developer-guide-unknown-results_.
+
+There is experimental support for preventing ``commit_unknown_result`` altogether using a transaction option. See :doc:`automatic-idempotency` for more details. Note: there are other errors which indicate an unknown commit status. See :ref:`non-retryable errors`.
+
+.. _non-retryable errors:
 
 Non-Retryable Errors
 ~~~~~~~~~~~~~~~~~~~~

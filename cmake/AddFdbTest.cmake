@@ -56,7 +56,7 @@ endfunction()
 #   all these tests in serialized order and within the same directory. This is
 #   useful for restart tests
 function(add_fdb_test)
-  set(options UNIT IGNORE)
+  set(options UNIT IGNORE LONG_RUNNING)
   set(oneValueArgs TEST_NAME TIMEOUT)
   set(multiValueArgs TEST_FILES)
   cmake_parse_arguments(ADD_FDB_TEST "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
@@ -106,6 +106,9 @@ function(add_fdb_test)
   if(ADD_FDB_TEST_UNIT)
     message(STATUS
       "ADDING UNIT TEST ${assigned_id} ${test_name}")
+  elseif(ADD_FDB_TEST_LONG_RUNNING)
+    message(STATUS
+      "ADDING LONG RUNNING TEST ${assigned_id} ${test_name}")
   else()
     message(STATUS
       "ADDING SIMULATOR TEST ${assigned_id} ${test_name}")
@@ -150,9 +153,15 @@ function(add_fdb_test)
     endif()
   endif()
   # set variables used for generating test packages
-  set(TEST_NAMES ${TEST_NAMES} ${test_name} PARENT_SCOPE)
-  set(TEST_FILES_${test_name} ${ADD_FDB_TEST_TEST_FILES} PARENT_SCOPE)
-  set(TEST_TYPE_${test_name} ${test_type} PARENT_SCOPE)
+  if(ADD_FDB_TEST_LONG_RUNNING)
+    set(LONG_RUNNING_TEST_NAMES ${LONG_RUNNING_TEST_NAMES} ${test_name} PARENT_SCOPE)
+    set(LONG_RUNNING_TEST_FILES_${test_name} ${ADD_FDB_TEST_TEST_FILES} PARENT_SCOPE)
+    set(LONG_RUNNING_TEST_TYPE_${test_name} ${test_type} PARENT_SCOPE)
+  else()
+    set(TEST_NAMES ${TEST_NAMES} ${test_name} PARENT_SCOPE)
+    set(TEST_FILES_${test_name} ${ADD_FDB_TEST_TEST_FILES} PARENT_SCOPE)
+    set(TEST_TYPE_${test_name} ${test_type} PARENT_SCOPE)
+  endif()
 endfunction()
 
 if(NOT WIN32)
@@ -167,14 +176,21 @@ endif()
 # - OUT_DIR the directory where files will be staged
 # - CONTEXT the type of correctness package being built (e.g. 'valgrind correctness')
 function(stage_correctness_package)
+  set(options LONG_RUNNING)
   set(oneValueArgs OUT_DIR CONTEXT OUT_FILES)
-  cmake_parse_arguments(STAGE "" "${oneValueArgs}" "" "${ARGN}")
+  set(multiValueArgs TEST_LIST)
+  cmake_parse_arguments(STAGE "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
   file(MAKE_DIRECTORY ${STAGE_OUT_DIR}/bin)
-  string(LENGTH "${CMAKE_SOURCE_DIR}/tests/" base_length)
-  foreach(test IN LISTS TEST_NAMES)
+  foreach(test IN LISTS STAGE_TEST_LIST)
     if((${test} MATCHES ${TEST_PACKAGE_INCLUDE}) AND
         (NOT ${test} MATCHES ${TEST_PACKAGE_EXCLUDE}))
-      foreach(file IN LISTS TEST_FILES_${test})
+      string(LENGTH "${CMAKE_SOURCE_DIR}/tests/" base_length)
+      if(STAGE_LONG_RUNNING)
+        set(TEST_FILES_PREFIX "LONG_RUNNING_TEST_FILES")
+      else()
+        set(TEST_FILES_PREFIX "TEST_FILES")
+      endif()
+      foreach(file IN LISTS ${TEST_FILES_PREFIX}_${test})
         string(SUBSTRING ${file} ${base_length} -1 rel_out_file)
         set(out_file ${STAGE_OUT_DIR}/tests/${rel_out_file})
         list(APPEND test_files ${out_file})
@@ -265,7 +281,7 @@ function(create_correctness_package)
     return()
   endif()
   set(out_dir "${CMAKE_BINARY_DIR}/correctness")
-  stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "correctness" OUT_FILES package_files)
+  stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "correctness" OUT_FILES package_files TEST_LIST "${TEST_NAMES}")
   set(tar_file ${CMAKE_BINARY_DIR}/packages/correctness-${FDB_VERSION}.tar.gz)
   add_custom_command(
     OUTPUT ${tar_file}
@@ -294,13 +310,47 @@ function(create_correctness_package)
   add_dependencies(package_tests_u package_tests)
 endfunction()
 
+function(create_long_running_correctness_package)
+  if(WIN32)
+    return()
+  endif()
+  set(out_dir "${CMAKE_BINARY_DIR}/long_running_correctness")
+  stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "long running correctness" OUT_FILES package_files TEST_LIST "${LONG_RUNNING_TEST_NAMES}" LONG_RUNNING)
+  set(tar_file ${CMAKE_BINARY_DIR}/packages/long-running-correctness-${FDB_VERSION}.tar.gz)
+  add_custom_command(
+    OUTPUT ${tar_file}
+    DEPENDS ${package_files}
+            ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/longRunningCorrectnessTest.sh
+            ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/longRunningCorrectnessTimeout.sh
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/longRunningCorrectnessTest.sh
+                                    ${out_dir}/joshua_test
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/longRunningCorrectnessTimeout.sh
+                                    ${out_dir}/joshua_timeout
+    COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} ${package_files}
+                                                    ${out_dir}/joshua_test
+                                                    ${out_dir}/joshua_timeout
+    WORKING_DIRECTORY ${out_dir}
+    COMMENT "Package long running correctness archive"
+    )
+  add_custom_target(package_long_running_tests ALL DEPENDS ${tar_file})
+  add_dependencies(package_long_running_tests strip_only_fdbserver TestHarness)
+  set(unversioned_tar_file "${CMAKE_BINARY_DIR}/packages/long_running_correctness.tar.gz")
+  add_custom_command(
+    OUTPUT "${unversioned_tar_file}"
+    DEPENDS "${tar_file}"
+    COMMAND ${CMAKE_COMMAND} -E copy "${tar_file}" "${unversioned_tar_file}"
+    COMMENT "Copy long running correctness package to ${unversioned_tar_file}")
+  add_custom_target(package_long_running_tests_u DEPENDS "${unversioned_tar_file}")
+  add_dependencies(package_long_running_tests_u package_long_running_tests)
+endfunction()
+
 function(create_valgrind_correctness_package)
   if(WIN32)
     return()
   endif()
   if(USE_VALGRIND)
     set(out_dir "${CMAKE_BINARY_DIR}/valgrind_correctness")
-    stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "valgrind correctness" OUT_FILES package_files)
+    stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "valgrind correctness" OUT_FILES package_files TEST_LIST "${TEST_NAMES}")
     set(tar_file ${CMAKE_BINARY_DIR}/packages/valgrind-${FDB_VERSION}.tar.gz)
     add_custom_command(
       OUTPUT ${tar_file}
@@ -330,8 +380,127 @@ function(create_valgrind_correctness_package)
   endif()
 endfunction()
 
+function(prepare_binding_test_files build_directory target_name target_dependency)
+  add_custom_target(${target_name} DEPENDS ${target_dependency})
+  add_custom_command(
+    TARGET ${target_name}
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_flow_tester> ${build_directory}/tests/flow/bin/fdb_flow_tester
+    COMMENT "Copy Flow tester for bindingtester")
+
+  set(generated_binding_files python/fdb/fdboptions.py)
+  if(WITH_JAVA_BINDING)
+    if(NOT FDB_RELEASE)
+      set(not_fdb_release_string "-SNAPSHOT")
+    else()
+      set(not_fdb_release_string "")
+    endif()
+    add_custom_command(
+      TARGET ${target_name}
+      COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_BINARY_DIR}/packages/fdb-java-${FDB_VERSION}${not_fdb_release_string}.jar
+        ${build_directory}/tests/java/foundationdb-client.jar
+      COMMENT "Copy Java bindings for bindingtester")
+    add_dependencies(${target_name} fat-jar)
+    add_dependencies(${target_name} foundationdb-tests)
+    set(generated_binding_files ${generated_binding_files} java/foundationdb-tests.jar)
+  endif()
+
+  if(WITH_GO_BINDING)
+    add_dependencies(${target_name} fdb_go_tester fdb_go)
+    add_custom_command(
+      TARGET ${target_name}
+      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bindings/go/bin/_stacktester ${build_directory}/tests/go/build/bin/_stacktester
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${build_directory}/tests/go/src/fdb/
+      COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_BINARY_DIR}/bindings/go/src/github.com/apple/foundationdb/bindings/go/src/fdb/generated.go # SRC
+        ${build_directory}/tests/go/src/fdb/ # DEST
+      COMMENT "Copy generated.go for bindingtester")
+  endif()
+
+  foreach(generated IN LISTS generated_binding_files)
+    add_custom_command(
+      TARGET ${target_name}
+      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bindings/${generated} ${build_directory}/tests/${generated}
+      COMMENT "Copy ${generated} to bindingtester")
+  endforeach()
+endfunction(prepare_binding_test_files)
+
+function(package_bindingtester2)
+  if (WIN32 OR OPEN_FOR_IDE)
+    message(WARNING "Binding tester is not built (WIN32/OPEN_FOR_IDE)")
+    return()
+  endif()
+
+  set(fdbcName "libfdb_c.so")
+  if (APPLE)
+    set(fdbcName "libfdb_c.dylib")
+  endif ()
+
+  set(touch_file ${CMAKE_BINARY_DIR}/bindingtester2.touch)
+  set(build_directory ${CMAKE_BINARY_DIR}/bindingtester2)
+  set(tests_directory ${build_directory}/tests)
+  add_custom_command(
+    OUTPUT ${touch_file}
+    COMMAND ${CMAKE_COMMAND} -E remove_directory ${build_directory}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${build_directory}
+    COMMAND ${CMAKE_COMMAND} -E remove_directory ${tests_directory}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${tests_directory}
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/bindings ${tests_directory}
+    COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/bindingtester2.touch"
+    COMMENT "Setup scratch directory for bindingtester2")
+
+  set(joshua_directory ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts)
+  set(output_files
+   ${build_directory}/joshua_test
+   ${build_directory}/joshua_timeout
+   ${build_directory}/fdbcli
+   ${build_directory}/fdbserver
+   ${build_directory}/${fdbcName}
+  )
+
+  add_custom_command(
+    OUTPUT ${output_files}
+    DEPENDS strip_only_fdbcli
+            strip_only_fdbserver
+            strip_only_fdb_c
+            ${joshua_directory}/binding_test_start.sh
+            ${joshua_directory}/binding_test_timeout.sh
+            ${touch_file}
+    COMMAND ${CMAKE_COMMAND} -E copy
+            ${CMAKE_BINARY_DIR}/packages/bin/fdbcli
+            ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
+            ${CMAKE_BINARY_DIR}/packages/lib/${fdbcName}
+            ${build_directory}
+    COMMAND ${CMAKE_COMMAND} -E copy ${joshua_directory}/binding_test_start.sh ${build_directory}/joshua_test
+    COMMAND ${CMAKE_COMMAND} -E copy ${joshua_directory}/binding_test_timeout.sh ${build_directory}/joshua_timeout
+    COMMENT "Copy executables and scripts to bindingtester2 dir")
+
+  set(local_cluster_files ${build_directory}/local_cluster)
+  set(local_cluster_directory ${CMAKE_SOURCE_DIR}/contrib/local_cluster)
+  add_custom_command(
+    OUTPUT ${local_cluster_files}
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${local_cluster_directory}
+            ${build_directory}
+  )
+
+  prepare_binding_test_files(${build_directory} copy_bindingtester2_test_files ${touch_file})
+
+  set(tar_file ${CMAKE_BINARY_DIR}/packages/bindingtester2-${FDB_VERSION}.tar.gz)
+  add_custom_command(
+    OUTPUT ${tar_file}
+    DEPENDS ${touch_file} ${output_files} ${local_cluster_files} copy_bindingtester2_test_files
+    COMMAND ${CMAKE_COMMAND} -E tar czf ${tar_file} *
+    WORKING_DIRECTORY ${build_directory}
+    COMMENT "Pack bindingtester2"
+  )
+
+  add_custom_target(bindingtester2 ALL DEPENDS ${tar_file})
+endfunction(package_bindingtester2)
+
 function(package_bindingtester)
   if(WIN32 OR OPEN_FOR_IDE)
+    message(WARNING "Binding tester is not built (WIN32/OPEN_FOR_IDE)")
     return()
   elseif(APPLE)
     set(fdbcName "libfdb_c.dylib")
@@ -353,7 +522,6 @@ function(package_bindingtester)
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/localClusterStart.sh ${bdir}/localClusterStart.sh
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/bindingTestScript.sh ${bdir}/bindingTestScript.sh
     COMMENT "Copy executables and scripts to bindingtester dir")
-  file(GLOB_RECURSE test_files ${CMAKE_SOURCE_DIR}/bindings/*)
   add_custom_command(
     OUTPUT "${CMAKE_BINARY_DIR}/bindingtester.touch"
     COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/bindingtester/tests
@@ -362,59 +530,82 @@ function(package_bindingtester)
     COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/bindingtester.touch"
     COMMENT "Copy test files for bindingtester")
 
-  add_custom_target(copy_binding_output_files DEPENDS ${CMAKE_BINARY_DIR}/bindingtester.touch python_binding fdb_flow_tester)
-  add_custom_command(
-    TARGET copy_binding_output_files
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_flow_tester> ${bdir}/tests/flow/bin/fdb_flow_tester
-    COMMENT "Copy Flow tester for bindingtester")
-
-  set(generated_binding_files python/fdb/fdboptions.py)
-  if(WITH_JAVA_BINDING)
-    if(NOT FDB_RELEASE)
-      set(not_fdb_release_string "-SNAPSHOT")
-    else()
-      set(not_fdb_release_string "")
-    endif()
-    add_custom_command(
-      TARGET copy_binding_output_files
-      COMMAND ${CMAKE_COMMAND} -E copy
-        ${CMAKE_BINARY_DIR}/packages/fdb-java-${FDB_VERSION}${not_fdb_release_string}.jar
-        ${bdir}/tests/java/foundationdb-client.jar
-      COMMENT "Copy Java bindings for bindingtester")
-    add_dependencies(copy_binding_output_files fat-jar)
-    add_dependencies(copy_binding_output_files foundationdb-tests)
-    set(generated_binding_files ${generated_binding_files} java/foundationdb-tests.jar)
-  endif()
-
-  if(WITH_GO_BINDING AND NOT OPEN_FOR_IDE)
-    add_dependencies(copy_binding_output_files fdb_go_tester fdb_go)
-    add_custom_command(
-      TARGET copy_binding_output_files
-      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bindings/go/bin/_stacktester ${bdir}/tests/go/build/bin/_stacktester
-      COMMAND ${CMAKE_COMMAND} -E copy
-        ${CMAKE_BINARY_DIR}/bindings/go/src/github.com/apple/foundationdb/bindings/go/src/fdb/generated.go # SRC
-        ${bdir}/tests/go/src/fdb/ # DEST
-      COMMENT "Copy generated.go for bindingtester")
-  endif()
-
-  foreach(generated IN LISTS generated_binding_files)
-    add_custom_command(
-      TARGET copy_binding_output_files
-      COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bindings/${generated} ${bdir}/tests/${generated}
-      COMMENT "Copy ${generated} to bindingtester")
-  endforeach()
+  prepare_binding_test_files(${bdir} copy_binding_output_files ${CMAKE_BINARY_DIR}/bindingtester.touch)
 
   add_custom_target(copy_bindingtester_binaries
     DEPENDS ${outfiles} "${CMAKE_BINARY_DIR}/bindingtester.touch" copy_binding_output_files)
   add_dependencies(copy_bindingtester_binaries strip_only_fdbserver strip_only_fdbcli strip_only_fdb_c)
+
   set(tar_file ${CMAKE_BINARY_DIR}/packages/bindingtester-${FDB_VERSION}.tar.gz)
   add_custom_command(
     OUTPUT ${tar_file}
     COMMAND ${CMAKE_COMMAND} -E tar czf ${tar_file} *
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/bindingtester
     COMMENT "Pack bindingtester")
-  add_custom_target(bindingtester ALL DEPENDS ${tar_file})
-  add_dependencies(bindingtester copy_bindingtester_binaries)
+  add_custom_target(bindingtester ALL DEPENDS ${tar_file} copy_bindingtester_binaries)
+endfunction()
+
+# Test for setting up Python venv for client tests.
+# Adding this test as a fixture to another test allows the use of non-native Python packages within client test scripts
+# by installing dependencies from requirements.txt
+set(test_venv_dir ${CMAKE_BINARY_DIR}/tests/test_venv)
+if (WIN32)
+  set(shell_cmd "cmd" CACHE INTERNAL "")
+  set(shell_opt "/c" CACHE INTERNAL "")
+  set(test_venv_activate "${test_venv_dir}/Scripts/activate.bat" CACHE INTERNAL "")
+else()
+  set(shell_cmd "bash" CACHE INTERNAL "")
+  set(shell_opt "-c" CACHE INTERNAL "")
+  set(test_venv_activate ". ${test_venv_dir}/bin/activate" CACHE INTERNAL "")
+endif()
+set(test_venv_cmd "")
+string(APPEND test_venv_cmd "${Python3_EXECUTABLE} -m venv ${test_venv_dir} ")
+string(APPEND test_venv_cmd "&& ${test_venv_activate} ")
+string(APPEND test_venv_cmd "&& pip install --upgrade pip ")
+string(APPEND test_venv_cmd "&& pip install -r ${CMAKE_SOURCE_DIR}/tests/TestRunner/requirements.txt")
+add_test(
+  NAME test_venv_setup
+  COMMAND bash -c ${test_venv_cmd}
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(test_venv_setup PROPERTIES FIXTURES_SETUP test_virtual_env_setup TIMEOUT 120)
+set_tests_properties(test_venv_setup PROPERTIES RESOURCE_LOCK TEST_VENV_SETUP)
+
+# Run the test command under Python venv as a cmd (Windows) or bash (Linux/Apple) script, which allows && or || chaining.
+function(add_python_venv_test)
+  set(oneValueArgs NAME WORKING_DIRECTORY TEST_TIMEOUT)
+  set(multiValueArgs COMMAND)
+  cmake_parse_arguments(T "" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
+  if(OPEN_FOR_IDE)
+    return()
+  endif()
+  if(NOT T_NAME)
+    message(FATAL_ERROR "NAME is a required argument for add_fdbclient_test")
+  endif()
+  if(NOT T_COMMAND)
+    message(FATAL_ERROR "COMMAND is a required argument for add_fdbclient_test")
+  endif()
+  if(NOT T_WORKING_DIRECTORY)
+    set(T_WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+  endif()
+  if(NOT T_TEST_TIMEOUT)
+    if(USE_SANITIZER)
+      set(T_TEST_TIMEOUT 1200)
+    else()
+      set(T_TEST_TIMEOUT 300)
+    endif()
+  endif()
+  # expand list of command arguments to space-separated string so that we can pass to shell
+  string(REPLACE ";" " " T_COMMAND "${T_COMMAND}")
+  add_test(
+    NAME ${T_NAME}
+    WORKING_DIRECTORY ${T_WORKING_DIRECTORY}
+    COMMAND ${shell_cmd} ${shell_opt} "${test_venv_activate} && ${T_COMMAND}")
+  set_tests_properties(${T_NAME} PROPERTIES FIXTURES_REQUIRED test_virtual_env_setup TIMEOUT ${T_TEST_TIMEOUT})
+  set(test_env_vars "PYTHONPATH=${CMAKE_SOURCE_DIR}/tests/TestRunner:${CMAKE_BINARY_DIR}/tests/TestRunner")
+  if(USE_SANITIZER)
+    set(test_env_vars "${test_env_vars};${SANITIZER_OPTIONS}")
+  endif()
+  set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT "${test_env_vars}")
 endfunction()
 
 # Creates a single cluster before running the specified command (usually a ctest test)
@@ -438,8 +629,7 @@ function(add_fdbclient_test)
   if(NOT T_COMMAND)
     message(FATAL_ERROR "COMMAND is a required argument for add_fdbclient_test")
   endif()
-  set(TMP_CLUSTER_CMD ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
-                      --build-dir ${CMAKE_BINARY_DIR})
+  set(TMP_CLUSTER_CMD python ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py --build-dir ${CMAKE_BINARY_DIR})
   if(T_PROCESS_NUMBER)
     list(APPEND TMP_CLUSTER_CMD --process-number ${T_PROCESS_NUMBER})
   endif()
@@ -455,23 +645,21 @@ function(add_fdbclient_test)
   if(T_TLS_ENABLED)
     list(APPEND TMP_CLUSTER_CMD --tls-enabled)
   endif()
+  list(APPEND TMP_CLUSTER_CMD -- ${T_COMMAND})
   message(STATUS "Adding Client test ${T_NAME}")
-  add_test(NAME "${T_NAME}"
-    WORKING_DIRECTORY ${T_WORKING_DIRECTORY}
-    COMMAND ${Python3_EXECUTABLE} ${TMP_CLUSTER_CMD}
-            --
-            ${T_COMMAND})
-  if (T_TEST_TIMEOUT)
-    set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT ${T_TEST_TIMEOUT})
-  else()
+  if (NOT T_TEST_TIMEOUT)
     # default timeout
     if(USE_SANITIZER)
-      set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 1200)
+      set(T_TEST_TIMEOUT 1200)
     else()
-      set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 300)
+      set(T_TEST_TIMEOUT 300)
     endif()
   endif()
-  set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
+  add_python_venv_test(
+    NAME ${T_NAME}
+    WORKING_DIRECTORY ${T_WORKING_DIRECTORY}
+    COMMAND ${TMP_CLUSTER_CMD}
+    TEST_TIMEOUT ${T_TEST_TIMEOUT})
 endfunction()
 
 # Creates a cluster file for a nonexistent cluster before running the specified command
@@ -493,19 +681,16 @@ function(add_unavailable_fdbclient_test)
   if(NOT T_COMMAND)
     message(FATAL_ERROR "COMMAND is a required argument for add_unavailable_fdbclient_test")
   endif()
-  message(STATUS "Adding unavailable client test ${T_NAME}")
-  add_test(NAME "${T_NAME}"
-  COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/fake_cluster.py
-          --output-dir ${CMAKE_BINARY_DIR}
-          --
-          ${T_COMMAND})
-  if (T_TEST_TIMEOUT)
-    set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT ${T_TEST_TIMEOUT})
-  else()
+  if (NOT T_TEST_TIMEOUT)
     # default timeout
-    set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 60)
+    set(T_TEST_TIMEOUT 60)
   endif()
-  set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
+  message(STATUS "Adding unavailable client test ${T_NAME}")
+  add_python_venv_test(
+    NAME ${T_NAME}
+    COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/fake_cluster.py
+            --output-dir ${CMAKE_BINARY_DIR} -- ${T_COMMAND}
+    TEST_TIMEOUT ${T_TEST_TIMEOUT})
 endfunction()
 
 # Creates 3 distinct clusters before running the specified command.
@@ -529,13 +714,12 @@ function(add_multi_fdbclient_test)
     message(FATAL_ERROR "COMMAND is a required argument for add_multi_fdbclient_test")
   endif()
   message(STATUS "Adding Client test ${T_NAME}")
-  add_test(NAME "${T_NAME}"
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_multi_cluster.py
+  add_python_venv_test(
+    NAME ${T_NAME}
+    COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_multi_cluster.py
             --build-dir ${CMAKE_BINARY_DIR}
-            --clusters 3
-            --
-            ${T_COMMAND})
-  set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 60)
+            --clusters 3 -- ${T_COMMAND}
+    TEST_TIMEOUT 60)
 endfunction()
 
 function(add_java_test)

@@ -67,6 +67,9 @@ static const uint32_t PARTITIONED_MLOG_VERSION = 4110;
 // Snapshot file version written by FileBackupAgent
 static const uint32_t BACKUP_AGENT_SNAPSHOT_FILE_VERSION = 1001;
 
+// Encrypted Snapshot file version written by FileBackupAgent
+static const uint32_t BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION = 1002;
+
 struct LogFile {
 	Version beginVersion;
 	Version endVersion;
@@ -250,7 +253,7 @@ public:
 
 	// Returns the key ranges in the snapshot file. This is an expensive function
 	// and should only be used in simulation for sanity check.
-	virtual Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file) = 0;
+	virtual Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file, Database cx) = 0;
 
 	struct ExpireProgress {
 		std::string step;

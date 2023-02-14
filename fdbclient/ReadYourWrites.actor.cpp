@@ -356,16 +356,24 @@ public:
 	                                                                 Req req,
 	                                                                 Snapshot snapshot) {
 		choose {
-			when(typename Req::Result result = wait(readThrough(ryw, req, snapshot))) { return result; }
-			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
+			when(typename Req::Result result = wait(readThrough(ryw, req, snapshot))) {
+				return result;
+			}
+			when(wait(ryw->resetPromise.getFuture())) {
+				throw internal_error();
+			}
 		}
 	}
 	ACTOR template <class Req>
 	static Future<typename Req::Result> readWithConflictRangeSnapshot(ReadYourWritesTransaction* ryw, Req req) {
 		state SnapshotCache::iterator it(&ryw->cache, &ryw->writes);
 		choose {
-			when(typename Req::Result result = wait(read(ryw, req, &it))) { return result; }
-			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
+			when(typename Req::Result result = wait(read(ryw, req, &it))) {
+				return result;
+			}
+			when(wait(ryw->resetPromise.getFuture())) {
+				throw internal_error();
+			}
 		}
 	}
 	ACTOR template <class Req>
@@ -381,7 +389,9 @@ public:
 					addConflictRange(ryw, req, it.extractWriteMapIterator(), result);
 				return result;
 			}
-			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
+			when(wait(ryw->resetPromise.getFuture())) {
+				throw internal_error();
+			}
 		}
 	}
 	template <class Req>
@@ -459,7 +469,7 @@ public:
 
 		if (!it.is_unreadable() && !it.is_unknown_range() && key.offset > 1) {
 			*readThroughEnd = true;
-			key.setKey(maxKey); // maxKey is a KeyRef, but points to a LiteralStringRef. TODO: how can we ASSERT this?
+			key.setKey(maxKey); // maxKey is a KeyRef, but points to a literal. TODO: how can we ASSERT this?
 			key.offset = 1;
 			return;
 		}
@@ -1201,7 +1211,9 @@ public:
 				addConflictRangeAndMustUnmodified<backwards>(ryw, req, writes, result);
 				return result;
 			}
-			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
+			when(wait(ryw->resetPromise.getFuture())) {
+				throw internal_error();
+			}
 		}
 	}
 
@@ -1214,7 +1226,7 @@ public:
 		// isolation support. But it is not default and is rarely used. So we disallow it until we have thorough test
 		// coverage for it.)
 		if (snapshot) {
-			CODE_PROBE(true, "getMappedRange not supported for snapshot.");
+			CODE_PROBE(true, "getMappedRange not supported for snapshot.", probe::decoration::rare);
 			throw unsupported_operation();
 		}
 		// For now, getMappedRange requires read-your-writes being NOT disabled. But the support of RYW is limited
@@ -1223,7 +1235,7 @@ public:
 		// which returns the written value transparently. In another word, it makes sure not break RYW semantics without
 		// actually implementing reading from the writes.
 		if (ryw->options.readYourWritesDisabled) {
-			CODE_PROBE(true, "getMappedRange not supported for read-your-writes disabled.");
+			CODE_PROBE(true, "getMappedRange not supported for read-your-writes disabled.", probe::decoration::rare);
 			throw unsupported_operation();
 		}
 
@@ -1331,6 +1343,11 @@ public:
 	ACTOR static void simulateTimeoutInFlightCommit(ReadYourWritesTransaction* ryw_) {
 		state Reference<ReadYourWritesTransaction> ryw = Reference<ReadYourWritesTransaction>::addRef(ryw_);
 		ASSERT(ryw->options.timeoutInSeconds > 0);
+		// An actual in-flight commit (i.e. one that's past the point where cancelling the transaction would stop it)
+		// would already have a read version. We need to get a read version too, otherwise committing a conflicting
+		// transaction may not ensure this transaction is no longer in-flight, since this transaction could get a read
+		// version _after_.
+		wait(success(ryw->getReadVersion()));
 		if (!ryw->resetPromise.isSet())
 			ryw->resetPromise.sendError(transaction_timed_out());
 		wait(delay(deterministicRandom()->random01() * 5));
@@ -1447,15 +1464,19 @@ public:
 
 	ACTOR static Future<Version> getReadVersion(ReadYourWritesTransaction* ryw) {
 		choose {
-			when(Version v = wait(ryw->tr.getReadVersion())) { return v; }
+			when(Version v = wait(ryw->tr.getReadVersion())) {
+				return v;
+			}
 
-			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
+			when(wait(ryw->resetPromise.getFuture())) {
+				throw internal_error();
+			}
 		}
 	}
 };
 
-ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx, Optional<TenantName> tenantName)
-  : ISingleThreadTransaction(cx->deferredError), tr(cx, tenantName), cache(&arena), writes(&arena), retries(0),
+ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx, Optional<Reference<Tenant>> const& tenant)
+  : ISingleThreadTransaction(cx->deferredError), tr(cx, tenant), cache(&arena), writes(&arena), retries(0),
     approximateSize(0), creationTime(now()), commitStarted(false), versionStampFuture(tr.getVersionstamp()),
     specialKeySpaceWriteMap(std::make_pair(false, Optional<Value>()), specialKeys.end), options(tr) {
 	std::copy(
@@ -1464,11 +1485,11 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx, Optiona
 }
 
 void ReadYourWritesTransaction::construct(Database const& cx) {
-	*this = ReadYourWritesTransaction(cx, Optional<TenantName>());
+	*this = ReadYourWritesTransaction(cx);
 }
 
-void ReadYourWritesTransaction::construct(Database const& cx, TenantName const& tenantName) {
-	*this = ReadYourWritesTransaction(cx, tenantName);
+void ReadYourWritesTransaction::construct(Database const& cx, Reference<Tenant> const& tenant) {
+	*this = ReadYourWritesTransaction(cx, tenant);
 }
 
 ACTOR Future<Void> timebomb(double endTime, Promise<Void> resetPromise) {
@@ -1544,7 +1565,7 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 			return getDatabase()->specialKeySpace->get(this, key);
 		}
 	} else {
-		if (key == LiteralStringRef("\xff\xff/status/json")) {
+		if (key == "\xff\xff/status/json"_sr) {
 			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
 				++tr.getDatabase()->transactionStatusRequests;
 				return getJSON(tr.getDatabase());
@@ -1553,7 +1574,7 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 			}
 		}
 
-		if (key == LiteralStringRef("\xff\xff/cluster_file_path")) {
+		if (key == "\xff\xff/cluster_file_path"_sr) {
 			try {
 				if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
 					Optional<Value> output = StringRef(tr.getDatabase()->getConnectionRecord()->getLocation());
@@ -1565,7 +1586,7 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 			return Optional<Value>();
 		}
 
-		if (key == LiteralStringRef("\xff\xff/connection_string")) {
+		if (key == "\xff\xff/connection_string"_sr) {
 			try {
 				if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
 					Reference<IClusterConnectionRecord> f = tr.getDatabase()->getConnectionRecord();
@@ -1627,7 +1648,7 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 			return getDatabase()->specialKeySpace->getRange(this, begin, end, limits, reverse);
 		}
 	} else {
-		if (begin.getKey() == LiteralStringRef("\xff\xff/worker_interfaces")) {
+		if (begin.getKey() == "\xff\xff/worker_interfaces"_sr) {
 			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
 				return getWorkerInterfaces(tr.getDatabase()->getConnectionRecord());
 			} else {
@@ -1693,11 +1714,11 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
 		    end.getKey() <= specialKeys.end) {
-			CODE_PROBE(true, "Special key space get range (getMappedRange)");
+			CODE_PROBE(true, "Special key space get range (getMappedRange)", probe::decoration::rare);
 			throw client_invalid_operation(); // Not support special keys.
 		}
 	} else {
-		if (begin.getKey() == LiteralStringRef("\xff\xff/worker_interfaces")) {
+		if (begin.getKey() == "\xff\xff/worker_interfaces"_sr) {
 			throw client_invalid_operation(); // Not support special keys.
 		}
 	}
@@ -1715,7 +1736,7 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 
 	// This optimization prevents nullptr operations from being added to the conflict range
 	if (limits.isReached()) {
-		CODE_PROBE(true, "RYW range read limit 0 (getMappedRange)");
+		CODE_PROBE(true, "RYW range read limit 0 (getMappedRange)", probe::decoration::rare);
 		return MappedRangeResult();
 	}
 
@@ -1729,7 +1750,7 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 		end.removeOrEqual(end.arena());
 
 	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
-		CODE_PROBE(true, "RYW range inverted (getMappedRange)");
+		CODE_PROBE(true, "RYW range inverted (getMappedRange)", probe::decoration::rare);
 		return MappedRangeResult();
 	}
 
@@ -1765,7 +1786,10 @@ Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyR
 	if (resetPromise.isSet())
 		return resetPromise.getFuture().getError();
 
-	return map(waitOrError(tr.getDatabase()->getStorageMetrics(keys, -1), resetPromise.getFuture()),
+	// Pass in the TransactionState only if tenant is present
+	Optional<Reference<TransactionState>> trState =
+	    tr.trState->hasTenant() ? tr.trState : Optional<Reference<TransactionState>>();
+	return map(waitOrError(tr.getDatabase()->getStorageMetrics(keys, -1, trState), resetPromise.getFuture()),
 	           [](const StorageMetrics& m) { return m.bytes; });
 }
 
@@ -1804,7 +1828,6 @@ Future<Standalone<VectorRef<BlobGranuleChunkRef>>> ReadYourWritesTransaction::re
     Version begin,
     Optional<Version> readVersion,
     Version* readVersionOut) {
-
 	if (!options.readYourWritesDisabled) {
 		return blob_granule_no_ryw();
 	}
@@ -1827,7 +1850,6 @@ Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> ReadYourWritesTransaction::
     const KeyRange& range,
     Optional<Version> summaryVersion,
     int rangeLimit) {
-
 	if (checkUsedDuringCommit()) {
 		return used_during_commit();
 	}
@@ -1840,6 +1862,13 @@ Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> ReadYourWritesTransaction::
 		return key_outside_legal_range();
 
 	return waitOrError(tr.summarizeBlobGranules(range, summaryVersion, rangeLimit), resetPromise.getFuture());
+}
+
+void ReadYourWritesTransaction::addGranuleMaterializeStats(const GranuleMaterializeStats& stats) {
+	if (checkUsedDuringCommit()) {
+		throw used_during_commit();
+	}
+	tr.addGranuleMaterializeStats(stats);
 }
 
 void ReadYourWritesTransaction::addReadConflictRange(KeyRangeRef const& keys) {
@@ -2033,22 +2062,20 @@ RangeResult ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRange
 			if (kr.begin <= iter->begin() && iter->begin() < kr.end) {
 				result.push_back(result.arena(),
 				                 KeyValueRef(iter->begin().withPrefix(readConflictRangeKeysRange.begin, result.arena()),
-				                             iter->value() ? LiteralStringRef("1") : LiteralStringRef("0")));
+				                             iter->value() ? "1"_sr : "0"_sr));
 			}
 		}
 	} else {
-		CoalescedKeyRefRangeMap<ValueRef> readConflicts{ LiteralStringRef("0"), specialKeys.end };
+		CoalescedKeyRefRangeMap<ValueRef> readConflicts{ "0"_sr, specialKeys.end };
 		for (const auto& range : tr.readConflictRanges())
-			readConflicts.insert(range.withPrefix(readConflictRangeKeysRange.begin, result.arena()),
-			                     LiteralStringRef("1"));
+			readConflicts.insert(range.withPrefix(readConflictRangeKeysRange.begin, result.arena()), "1"_sr);
 		for (const auto& range : nativeReadRanges)
-			readConflicts.insert(range.withPrefix(readConflictRangeKeysRange.begin, result.arena()),
-			                     LiteralStringRef("1"));
+			readConflicts.insert(range.withPrefix(readConflictRangeKeysRange.begin, result.arena()), "1"_sr);
 		for (const auto& f : tr.getExtraReadConflictRanges()) {
 			if (f.isReady() && f.get().first < f.get().second)
 				readConflicts.insert(KeyRangeRef(f.get().first, f.get().second)
 				                         .withPrefix(readConflictRangeKeysRange.begin, result.arena()),
-				                     LiteralStringRef("1"));
+				                     "1"_sr);
 		}
 		auto beginIter = readConflicts.rangeContaining(kr.begin);
 		if (beginIter->begin() != kr.begin)
@@ -2066,7 +2093,7 @@ RangeResult ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRang
 	RangeResult result;
 
 	// Memory owned by result
-	CoalescedKeyRefRangeMap<ValueRef> writeConflicts{ LiteralStringRef("0"), specialKeys.end };
+	CoalescedKeyRefRangeMap<ValueRef> writeConflicts{ "0"_sr, specialKeys.end };
 
 	if (!options.readYourWritesDisabled) {
 		KeyRangeRef strippedWriteRangePrefix = kr.removePrefix(writeConflictRangeKeysRange.begin);
@@ -2079,15 +2106,13 @@ RangeResult ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRang
 				writeConflicts.insert(
 				    KeyRangeRef(it.beginKey().toArena(result.arena()), it.endKey().toArena(result.arena()))
 				        .withPrefix(writeConflictRangeKeysRange.begin, result.arena()),
-				    LiteralStringRef("1"));
+				    "1"_sr);
 		}
 	} else {
 		for (const auto& range : tr.writeConflictRanges())
-			writeConflicts.insert(range.withPrefix(writeConflictRangeKeysRange.begin, result.arena()),
-			                      LiteralStringRef("1"));
+			writeConflicts.insert(range.withPrefix(writeConflictRangeKeysRange.begin, result.arena()), "1"_sr);
 		for (const auto& range : nativeWriteRanges)
-			writeConflicts.insert(range.withPrefix(writeConflictRangeKeysRange.begin, result.arena()),
-			                      LiteralStringRef("1"));
+			writeConflicts.insert(range.withPrefix(writeConflictRangeKeysRange.begin, result.arena()), "1"_sr);
 	}
 
 	for (const auto& k : versionStampKeys) {
@@ -2107,8 +2132,7 @@ RangeResult ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRang
 		} else {
 			range = getVersionstampKeyRange(result.arena(), k, tr.getCachedReadVersion().orDefault(0), getMaxReadKey());
 		}
-		writeConflicts.insert(range.withPrefix(writeConflictRangeKeysRange.begin, result.arena()),
-		                      LiteralStringRef("1"));
+		writeConflicts.insert(range.withPrefix(writeConflictRangeKeysRange.begin, result.arena()), "1"_sr);
 	}
 
 	auto beginIter = writeConflicts.rangeContaining(kr.begin);
@@ -2154,13 +2178,13 @@ void ReadYourWritesTransaction::atomicOp(const KeyRef& key, const ValueRef& oper
 
 	KeyRef k;
 	if (!tr.apiVersionAtLeast(520) && operationType == MutationRef::SetVersionstampedKey) {
-		k = key.withSuffix(LiteralStringRef("\x00\x00"), arena);
+		k = key.withSuffix("\x00\x00"_sr, arena);
 	} else {
 		k = KeyRef(arena, key);
 	}
 	ValueRef v;
 	if (!tr.apiVersionAtLeast(520) && operationType == MutationRef::SetVersionstampedValue) {
-		v = operand.withSuffix(LiteralStringRef("\x00\x00\x00\x00"), arena);
+		v = operand.withSuffix("\x00\x00\x00\x00"_sr, arena);
 	} else {
 		v = ValueRef(arena, operand);
 	}
@@ -2212,17 +2236,17 @@ void ReadYourWritesTransaction::set(const KeyRef& key, const ValueRef& value) {
 		} else {
 			// These three special keys are deprecated in 7.0 and an alternative C API is added
 			// TODO : Rewrite related code using C api
-			if (key == LiteralStringRef("\xff\xff/reboot_worker")) {
+			if (key == "\xff\xff/reboot_worker"_sr) {
 				BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion())
 				    .reboot.send(RebootRequest());
 				return;
 			}
-			if (key == LiteralStringRef("\xff\xff/suspend_worker")) {
+			if (key == "\xff\xff/suspend_worker"_sr) {
 				BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion())
 				    .reboot.send(RebootRequest(false, false, options.timeoutInSeconds));
 				return;
 			}
-			if (key == LiteralStringRef("\xff\xff/reboot_and_check_worker")) {
+			if (key == "\xff\xff/reboot_and_check_worker"_sr) {
 				BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion())
 				    .reboot.send(RebootRequest(false, true));
 				return;
@@ -2436,7 +2460,7 @@ void ReadYourWritesTransaction::setOptionImpl(FDBTransactionOptions::Option opti
 	case FDBTransactionOptions::READ_YOUR_WRITES_DISABLE:
 		validateOptionValueNotPresent(value);
 
-		if (!reading.isReady() || !cache.empty() || !writes.empty())
+		if (reading.getFutureCount() > 0 || !cache.empty() || !writes.empty())
 			throw client_invalid_operation();
 
 		options.readYourWritesDisabled = true;

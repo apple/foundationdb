@@ -25,14 +25,14 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 struct TimeKeeperCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "TimeKeeperCorrectness";
+
 	double testDuration;
 	std::map<int64_t, Version> inMemTimeKeeper;
 
 	TimeKeeperCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 20.0);
+		testDuration = getOption(options, "testDuration"_sr, 20.0);
 	}
-
-	std::string description() const override { return "TimeKeeperCorrectness"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -122,4 +122,4 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 };
 
-WorkloadFactory<TimeKeeperCorrectnessWorkload> TimeKeeperCorrectnessWorkloadFactory("TimeKeeperCorrectness");
+WorkloadFactory<TimeKeeperCorrectnessWorkload> TimeKeeperCorrectnessWorkloadFactory;

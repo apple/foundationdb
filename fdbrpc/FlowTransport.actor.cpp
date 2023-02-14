@@ -49,9 +49,14 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/WatchFile.actor.h"
+#include "flow/IConnection.h"
 #define XXH_INLINE_ALL
 #include "flow/xxhash.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+void removeCachedDNS(const std::string& host, const std::string& service) {
+	INetworkConnections::net()->removeCachedDNS(host, service);
+}
 
 namespace {
 
@@ -299,12 +304,12 @@ public:
 	~TransportData();
 
 	void initMetrics() {
-		bytesSent.init(LiteralStringRef("Net2.BytesSent"));
-		countPacketsReceived.init(LiteralStringRef("Net2.CountPacketsReceived"));
-		countPacketsGenerated.init(LiteralStringRef("Net2.CountPacketsGenerated"));
-		countConnEstablished.init(LiteralStringRef("Net2.CountConnEstablished"));
-		countConnClosedWithError.init(LiteralStringRef("Net2.CountConnClosedWithError"));
-		countConnClosedWithoutError.init(LiteralStringRef("Net2.CountConnClosedWithoutError"));
+		bytesSent.init("Net2.BytesSent"_sr);
+		countPacketsReceived.init("Net2.CountPacketsReceived"_sr);
+		countPacketsGenerated.init("Net2.CountPacketsGenerated"_sr);
+		countConnEstablished.init("Net2.CountConnEstablished"_sr);
+		countConnClosedWithError.init("Net2.CountConnClosedWithError"_sr);
+		countConnClosedWithoutError.init("Net2.CountConnClosedWithoutError"_sr);
 	}
 
 	Reference<struct Peer> getPeer(NetworkAddress const& address);
@@ -321,7 +326,6 @@ public:
 	HealthMonitor healthMonitor;
 	std::set<NetworkAddress> orderedAddresses;
 	Reference<AsyncVar<bool>> degraded;
-	bool warnAlwaysForLargePacket;
 
 	EndpointMap endpoints;
 	EndpointNotFoundReceiver endpointNotFoundReceiver{ endpoints };
@@ -367,7 +371,8 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 				peer->lastLoggedTime = peer->lastConnectTime;
 			}
 
-			if (peer && peer->pingLatencies.getPopulationSize() >= 10) {
+			if (peer && (peer->pingLatencies.getPopulationSize() >= 10 || peer->connectFailedCount > 0 ||
+			             peer->timeoutCount > 0)) {
 				TraceEvent("PingLatency")
 				    .detail("Elapsed", now() - peer->lastLoggedTime)
 				    .detail("PeerAddr", lastAddress)
@@ -408,8 +413,8 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 }
 
 TransportData::TransportData(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList)
-  : warnAlwaysForLargePacket(true), endpoints(maxWellKnownEndpoints), endpointNotFoundReceiver(endpoints),
-    pingReceiver(endpoints), numIncompatibleConnections(0), lastIncompatibleMessage(0), transportId(transportId),
+  : endpoints(maxWellKnownEndpoints), endpointNotFoundReceiver(endpoints), pingReceiver(endpoints),
+    numIncompatibleConnections(0), lastIncompatibleMessage(0), transportId(transportId),
     allowList(allowList == nullptr ? IPAllowList() : *allowList) {
 	degraded = makeReference<AsyncVar<bool>>(false);
 	pingLogger = pingLatencyLogger(this);
@@ -572,7 +577,9 @@ ACTOR Future<Void> connectionMonitor(Reference<Peer> peer) {
 					}
 					break;
 				}
-				when(wait(peer->resetPing.onTrigger())) { break; }
+				when(wait(peer->resetPing.onTrigger())) {
+					break;
+				}
 			}
 		}
 	}
@@ -668,7 +675,9 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 
 					choose {
 						when(wait(self->dataToSend.onTrigger())) {}
-						when(wait(retryConnectF)) { break; }
+						when(wait(retryConnectF)) {
+							break;
+						}
 					}
 				}
 
@@ -717,7 +726,9 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 							self->prependConnectPacket();
 							reader = connectionReader(self->transport, conn, self, Promise<Reference<Peer>>());
 						}
-						when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) { throw connection_failed(); }
+						when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+							throw connection_failed();
+						}
 					}
 				} catch (Error& e) {
 					++self->connectFailedCount;
@@ -740,6 +751,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				self->transport->countConnEstablished++;
 				if (!delayedHealthUpdateF.isValid())
 					delayedHealthUpdateF = delayedHealthUpdate(self->destination, &tooManyConnectionsClosed);
+				self->connected = true;
 				wait(connectionWriter(self, conn) || reader || connectionMonitor(self) ||
 				     self->resetConnection.onTrigger());
 				TraceEvent("ConnectionReset", conn ? conn->getDebugID() : UID())
@@ -757,6 +769,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 				throw e;
 			}
 		} catch (Error& e) {
+			self->connected = false;
 			delayedHealthUpdateF.cancel();
 			if (now() - self->lastConnectTime > FLOW_KNOBS->RECONNECTION_RESET_TIME) {
 				self->reconnectionDelay = FLOW_KNOBS->INITIAL_RECONNECTION_TIME;
@@ -875,14 +888,14 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 }
 
 Peer::Peer(TransportData* transport, NetworkAddress const& destination)
-  : transport(transport), destination(destination), compatible(true), outgoingConnectionIdle(true),
+  : transport(transport), destination(destination), compatible(true), connected(false), outgoingConnectionIdle(true),
     lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), peerReferences(-1),
     bytesReceived(0), bytesSent(0), lastDataPacketSentTime(now()), outstandingReplies(0),
-    pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1), lastLoggedTime(0.0),
+    pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SKETCH_ACCURACY : 0.1), lastLoggedTime(0.0),
     lastLoggedBytesReceived(0), lastLoggedBytesSent(0), timeoutCount(0),
     protocolVersion(Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>())),
     connectOutgoingCount(0), connectIncomingCount(0), connectFailedCount(0),
-    connectLatencies(destination.isPublic() ? FLOW_KNOBS->NETWORK_CONNECT_SAMPLE_AMOUNT : 1) {
+    connectLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SKETCH_ACCURACY : 0.1) {
 	IFailureMonitor::failureMonitor().setStatus(destination, FailureStatus(false));
 }
 
@@ -1061,7 +1074,8 @@ ACTOR static void deliver(TransportData* self,
 		if (receiver) {
 			TraceEvent(SevWarnAlways, "AttemptedRPCToPrivatePrevented")
 			    .detail("From", peerAddress)
-			    .detail("Token", destination.token);
+			    .detail("Token", destination.token)
+			    .detail("Receiver", typeid(*receiver).name());
 			ASSERT(!self->isLocalAddress(destination.getPrimaryAddress()));
 			Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
 			sendPacket(self,
@@ -1131,14 +1145,26 @@ static void scanPackets(TransportData* transport,
 
 		if (e - p < packetLen)
 			break;
-		ASSERT(packetLen >= sizeof(UID));
+
+		if (packetLen < sizeof(UID)) {
+			if (g_network->isSimulated()) {
+				// Same as ASSERT(false), but prints packet length:
+				ASSERT_GE(packetLen, sizeof(UID));
+			} else {
+				TraceEvent(SevError, "PacketTooSmall")
+				    .detail("FromPeer", peerAddress.toString())
+				    .detail("Length", packetLen);
+				throw platform_error();
+			}
+		}
 
 		if (checksumEnabled) {
 			bool isBuggifyEnabled = false;
 			if (g_network->isSimulated() && !isStableConnection &&
-			    g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration &&
+			    g_network->now() - g_simulator->lastConnectionFailure >
+			        g_simulator->connectionFailuresDisableDuration &&
 			    BUGGIFY_WITH_PROB(0.0001)) {
-				g_simulator.lastConnectionFailure = g_network->now();
+				g_simulator->lastConnectionFailure = g_network->now();
 				isBuggifyEnabled = true;
 				TraceEvent(SevInfo, "BitsFlip").log();
 				int flipBits = 32 - (int)floor(log2(deterministicRandom()->randomUInt32()));
@@ -1191,14 +1217,11 @@ static void scanPackets(TransportData* transport,
 		++transport->countPacketsReceived;
 
 		if (packetLen > FLOW_KNOBS->PACKET_WARNING) {
-			TraceEvent(transport->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "LargePacketReceived")
+			TraceEvent(SevWarn, "LargePacketReceived")
 			    .suppressFor(1.0)
 			    .detail("FromPeer", peerAddress.toString())
 			    .detail("Length", (int)packetLen)
 			    .detail("Token", token);
-
-			if (g_network->isSimulated())
-				transport->warnAlwaysForLargePacket = false;
 		}
 
 		ASSERT(!reader.empty());
@@ -1453,7 +1476,9 @@ ACTOR static Future<Void> connectionIncoming(TransportData* self, Reference<ICon
 				ASSERT(false);
 				return Void();
 			}
-			when(Reference<Peer> p = wait(onConnected.getFuture())) { p->onIncomingConnection(p, conn, reader); }
+			when(Reference<Peer> p = wait(onConnected.getFuture())) {
+				p->onIncomingConnection(p, conn, reader);
+			}
 			when(wait(delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
 				CODE_PROBE(true, "Incoming connection timed out");
 				throw timed_out();
@@ -1588,7 +1613,7 @@ FlowTransport::FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IP
   : self(new TransportData(transportId, maxWellKnownEndpoints, allowList)) {
 	self->multiVersionCleanup = multiVersionCleanupWorker(self);
 	if (g_network->isSimulated()) {
-		for (auto const& p : g_simulator.authKeys) {
+		for (auto const& p : g_simulator->authKeys) {
 			self->publicKeys.emplace(p.first, p.second.toPublic());
 		}
 	}
@@ -1856,15 +1881,12 @@ static ReliablePacket* sendPacket(TransportData* self,
 		    .detail("Length", (int)len);
 		// throw platform_error();  // FIXME: How to recover from this situation?
 	} else if (len > FLOW_KNOBS->PACKET_WARNING) {
-		TraceEvent(self->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "LargePacketSent")
+		TraceEvent(SevWarn, "LargePacketSent")
 		    .suppressFor(1.0)
 		    .detail("ToPeer", destination.getPrimaryAddress())
 		    .detail("Length", (int)len)
 		    .detail("Token", destination.token)
 		    .backtrace();
-
-		if (g_network->isSimulated())
-			self->warnAlwaysForLargePacket = false;
 	}
 
 #if VALGRIND

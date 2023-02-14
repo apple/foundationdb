@@ -11,8 +11,12 @@ import sys
 from threading import Thread, Event
 import traceback
 import time
-from binary_download import FdbBinaryDownloader, SUPPORTED_VERSIONS, CURRENT_VERSION, FUTURE_VERSION
-from local_cluster import LocalCluster, random_secret_string
+from binary_download import FdbBinaryDownloader
+from fdb_version import CURRENT_VERSION, FUTURE_VERSION
+from local_cluster import LocalCluster
+from test_util import random_alphanum_string
+
+TENANT_API_VERSION = 720
 
 CLUSTER_ACTIONS = ["wiggle"]
 HEALTH_CHECK_TIMEOUT_SEC = 5
@@ -20,6 +24,7 @@ PROGRESS_CHECK_TIMEOUT_SEC = 30
 TESTER_STATS_INTERVAL_SEC = 5
 TRANSACTION_RETRY_LIMIT = 100
 RUN_WITH_GDB = False
+CLEANUP_ON_EXIT = True
 
 
 def version_from_str(ver_str):
@@ -52,9 +57,7 @@ class UpgradeTest:
         assert self.tester_bin.exists(), "{} does not exist".format(self.tester_bin)
         self.upgrade_path = args.upgrade_path
         self.used_versions = set(self.upgrade_path).difference(set(CLUSTER_ACTIONS))
-        for version in self.used_versions:
-            assert version in SUPPORTED_VERSIONS, "Unsupported version or cluster action {}".format(version)
-        self.tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
+        self.tmp_dir = self.build_dir.joinpath("tmp", random_alphanum_string(16))
         self.tmp_dir.mkdir(parents=True)
         self.downloader = FdbBinaryDownloader(args.build_dir)
         self.download_old_binaries()
@@ -79,8 +82,8 @@ class UpgradeTest:
         self.log = self.cluster.log
         self.etc = self.cluster.etc
         self.data = self.cluster.data
-        self.input_pipe_path = self.tmp_dir.joinpath("input.{}".format(random_secret_string(8)))
-        self.output_pipe_path = self.tmp_dir.joinpath("output.{}".format(random_secret_string(8)))
+        self.input_pipe_path = self.tmp_dir.joinpath("input.{}".format(random_alphanum_string(8)))
+        self.output_pipe_path = self.tmp_dir.joinpath("output.{}".format(random_alphanum_string(8)))
         os.mkfifo(self.input_pipe_path)
         os.mkfifo(self.output_pipe_path)
         self.progress_event = Event()
@@ -142,8 +145,9 @@ class UpgradeTest:
         self.cluster.fdbmonitor_binary = self.downloader.binary_path(version, "fdbmonitor")
         self.cluster.fdbserver_binary = self.downloader.binary_path(version, "fdbserver")
         self.cluster.fdbcli_binary = self.downloader.binary_path(version, "fdbcli")
-        self.cluster.set_env_var("LD_LIBRARY_PATH", "%s:%s" % (
-            self.downloader.lib_dir(version), os.getenv("LD_LIBRARY_PATH")))
+        self.cluster.set_env_var(
+            "LD_LIBRARY_PATH", "%s:%s" % (self.downloader.lib_dir(version), os.getenv("LD_LIBRARY_PATH"))
+        )
         self.cluster.use_legacy_conf_syntax = version_before(version, "7.1.0")
         self.cluster.use_future_protocol_version = version == FUTURE_VERSION
         self.cluster.save_config()
@@ -161,12 +165,14 @@ class UpgradeTest:
     def __enter__(self):
         print("Starting cluster version {}".format(self.cluster_version))
         self.cluster.start_cluster()
-        self.cluster.create_database(enable_tenants=(self.api_version >= 720))
+        self.cluster.create_database(enable_tenants=(self.api_version >= TENANT_API_VERSION))
         return self
 
     def __exit__(self, xc_type, exc_value, traceback):
         self.cluster.stop_cluster()
-        shutil.rmtree(self.tmp_dir)
+        self.cluster.release_ports()
+        if CLEANUP_ON_EXIT:
+            shutil.rmtree(self.tmp_dir)
 
     # Determine FDB API version matching the upgrade path
     def determine_api_version(self):
@@ -202,6 +208,7 @@ class UpgradeTest:
                 str(TRANSACTION_RETRY_LIMIT),
                 "--stats-interval",
                 str(TESTER_STATS_INTERVAL_SEC * 1000),
+                "--retain-client-lib-copies",
             ]
             if RUN_WITH_GDB:
                 cmd_args = ["gdb", "-ex", "run", "--args"] + cmd_args
@@ -275,11 +282,13 @@ class UpgradeTest:
             os.close(self.ctrl_pipe)
 
     # Kill the tester process if it is still alive
-    def kill_tester_if_alive(self, workload_thread):
+    def kill_tester_if_alive(self, workload_thread, dump_stacks):
         if not workload_thread.is_alive():
             return
         if self.tester_proc is not None:
             try:
+                if dump_stacks:
+                    os.system("pstack {}".format(self.tester_proc.pid))
                 print("Killing the tester process")
                 self.tester_proc.kill()
                 workload_thread.join(5)
@@ -305,11 +314,11 @@ class UpgradeTest:
         except Exception:
             print("Upgrade test failed")
             print(traceback.format_exc())
-            self.kill_tester_if_alive(workload_thread)
+            self.kill_tester_if_alive(workload_thread, False)
         finally:
             workload_thread.join(5)
             reader_thread.join(5)
-            self.kill_tester_if_alive(workload_thread)
+            self.kill_tester_if_alive(workload_thread, True)
             if test_retcode == 0:
                 test_retcode = self.tester_retcode
         return test_retcode
@@ -320,36 +329,6 @@ class UpgradeTest:
             .rstrip()
             .splitlines()
         )
-
-    # Check the cluster log for errors
-    def check_cluster_logs(self, error_limit=100):
-        sev40s = (
-            subprocess.getoutput("grep -r 'Severity=\"40\"' {}".format(self.cluster.log.as_posix()))
-            .rstrip()
-            .splitlines()
-        )
-
-        err_cnt = 0
-        for line in sev40s:
-            # When running ASAN we expect to see this message. Boost coroutine should be using the
-            # correct asan annotations so that it shouldn't produce any false positives.
-            if line.endswith(
-                "WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false "
-                "positives in some cases!"
-            ):
-                continue
-            if err_cnt < error_limit:
-                print(line)
-            err_cnt += 1
-
-        if err_cnt > 0:
-            print(
-                ">>>>>>>>>>>>>>>>>>>> Found {} severity 40 events - the test fails",
-                err_cnt,
-            )
-        else:
-            print("No errors found in logs")
-        return err_cnt == 0
 
     # Check the server and client logs for warnings and dump them
     def dump_warnings_in_logs(self, limit=100):
@@ -425,6 +404,11 @@ if __name__ == "__main__":
         help="Do not dump cluster log on error",
         action="store_true",
     )
+    parser.add_argument(
+        "--no-cleanup-on-error",
+        help="In case of an error do not remove any of the generated files",
+        action="store_true",
+    )
     parser.add_argument("--blob-granules-enabled", help="Enable blob granules", action="store_true")
     parser.add_argument("--run-with-gdb", help="Execute the tester binary from gdb", action="store_true")
     args = parser.parse_args()
@@ -433,7 +417,6 @@ if __name__ == "__main__":
         print("Testing with {} processes".format(args.process_number))
 
     assert len(args.upgrade_path) > 0, "Upgrade path must be specified"
-    assert args.upgrade_path[0] in SUPPORTED_VERSIONS, "Upgrade path begin with a valid version number"
 
     if args.run_with_gdb:
         RUN_WITH_GDB = True
@@ -445,10 +428,12 @@ if __name__ == "__main__":
         print("data-dir: {}".format(test.data))
         print("cluster-file: {}".format(test.etc.joinpath("fdb.cluster")))
         errcode = test.exec_test(args)
-        if not test.check_cluster_logs():
+        if not test.cluster.check_cluster_logs():
             errcode = 1 if errcode == 0 else errcode
         test.dump_warnings_in_logs()
         if errcode != 0 and not args.disable_log_dump:
             test.dump_cluster_logs()
+        if errcode != 0 and args.no_cleanup_on_error:
+            CLEANUP_ON_EXIT = False
 
     sys.exit(errcode)

@@ -18,12 +18,18 @@
  * limitations under the License.
  */
 
+#include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
+#include "flow/Knobs.h"
+
 #include "boost/algorithm/string/predicate.hpp"
+#include "flow/IConnection.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #undef state
 #include "fdbclient/SimpleIni.h"
@@ -33,6 +39,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct SaveAndKillWorkload : TestWorkload {
+	static constexpr auto NAME = "SaveAndKill";
 
 	std::string restartInfo;
 	double testDuration;
@@ -44,37 +51,46 @@ struct SaveAndKillWorkload : TestWorkload {
 		isRestoring = getOption(options, "isRestoring"_sr, 0);
 	}
 
-	std::string description() const override { return "SaveAndKillWorkload"; }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
 	Future<Void> setup(Database const& cx) override {
-		g_simulator.disableSwapsToAll();
+		g_simulator->disableSwapsToAll();
 		return Void();
 	}
-	Future<Void> start(Database const& cx) override { return _start(this); }
+	Future<Void> start(Database const& cx) override { return _start(this, cx); }
 
-	ACTOR Future<Void> _start(SaveAndKillWorkload* self) {
+	ACTOR Future<Void> _start(SaveAndKillWorkload* self, Database cx) {
 		state int i;
 		wait(delay(deterministicRandom()->random01() * self->testDuration));
+		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 
 		CSimpleIni ini;
 		ini.SetUnicode();
 		ini.LoadFile(self->restartInfo.c_str());
 
 		ini.SetValue("RESTORE", "isRestoring", format("%d", self->isRestoring).c_str());
-		ini.SetValue("META", "processesPerMachine", format("%d", g_simulator.processesPerMachine).c_str());
-		ini.SetValue("META", "listenersPerProcess", format("%d", g_simulator.listenersPerProcess).c_str());
-		ini.SetValue("META", "desiredCoordinators", format("%d", g_simulator.desiredCoordinators).c_str());
-		ini.SetValue("META", "connectionString", g_simulator.connectionString.c_str());
-		ini.SetValue("META", "testerCount", format("%d", g_simulator.testerCount).c_str());
-		ini.SetValue("META", "tssMode", format("%d", g_simulator.tssMode).c_str());
+		ini.SetValue("META", "processesPerMachine", format("%d", g_simulator->processesPerMachine).c_str());
+		ini.SetValue("META", "listenersPerProcess", format("%d", g_simulator->listenersPerProcess).c_str());
+		ini.SetValue("META", "desiredCoordinators", format("%d", g_simulator->desiredCoordinators).c_str());
+		ini.SetValue("META", "connectionString", g_simulator->connectionString.c_str());
+		ini.SetValue("META", "testerCount", format("%d", g_simulator->testerCount).c_str());
+		ini.SetValue("META", "tssMode", format("%d", g_simulator->tssMode).c_str());
 		ini.SetValue("META", "mockDNS", INetworkConnections::net()->convertMockDNSToString().c_str());
+		ini.SetValue("META", "tenantMode", config.tenantMode.toString().c_str());
+		if (cx->defaultTenant.present()) {
+			ini.SetValue("META", "defaultTenant", cx->defaultTenant.get().toString().c_str());
+		}
 
 		ini.SetBoolValue("META", "enableEncryption", SERVER_KNOBS->ENABLE_ENCRYPTION);
 		ini.SetBoolValue("META", "enableTLogEncryption", SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION);
 		ini.SetBoolValue("META", "enableStorageServerEncryption", SERVER_KNOBS->ENABLE_STORAGE_SERVER_ENCRYPTION);
 		ini.SetBoolValue("META", "enableBlobGranuleEncryption", SERVER_KNOBS->ENABLE_BLOB_GRANULE_ENCRYPTION);
 
-		std::vector<ISimulator::ProcessInfo*> processes = g_simulator.getAllProcesses();
-		std::map<NetworkAddress, ISimulator::ProcessInfo*> rebootingProcesses = g_simulator.currentlyRebootingProcesses;
+		ini.SetBoolValue("META", "encryptHeaderAuthTokenEnabled", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED);
+		ini.SetLongValue("META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO);
+
+		std::vector<ISimulator::ProcessInfo*> processes = g_simulator->getAllProcesses();
+		std::map<NetworkAddress, ISimulator::ProcessInfo*> rebootingProcesses =
+		    g_simulator->currentlyRebootingProcesses;
 		std::map<std::string, ISimulator::ProcessInfo*> allProcessesMap;
 		for (const auto& [_, process] : rebootingProcesses) {
 			if (allProcessesMap.find(process->dataFolder) == allProcessesMap.end() && !process->isSpawnedKVProcess()) {
@@ -139,14 +155,14 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SaveFile(self->restartInfo.c_str());
 
 		for (auto process = allProcessesMap.begin(); process != allProcessesMap.end(); process++) {
-			g_simulator.killProcess(process->second, ISimulator::Reboot);
+			g_simulator->killProcess(process->second, ISimulator::KillType::Reboot);
 		}
 
 		for (i = 0; i < 100; i++) {
 			wait(delay(0.0));
 		}
 
-		g_simulator.stop();
+		g_simulator->stop();
 
 		return Void();
 	}
@@ -155,4 +171,4 @@ struct SaveAndKillWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>&) override {}
 };
 
-WorkloadFactory<SaveAndKillWorkload> SaveAndKillWorkloadFactory("SaveAndKill");
+WorkloadFactory<SaveAndKillWorkload> SaveAndKillWorkloadFactory;

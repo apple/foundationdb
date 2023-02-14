@@ -44,20 +44,20 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 	if (tokens.size() < 2)
 		result = ConfigurationResult::NO_OPTIONS_PROVIDED;
 	else {
-		if (tokens[startToken] == LiteralStringRef("FORCE")) {
+		if (tokens[startToken] == "FORCE"_sr) {
 			force = true;
 			startToken = 2;
 		}
 
 		state Optional<ConfigureAutoResult> conf;
-		if (tokens[startToken] == LiteralStringRef("auto")) {
+		if (tokens[startToken] == "auto"_sr) {
 			// get cluster status
 			state Reference<ITransaction> tr = db->createTransaction();
 			if (!tr->isValid()) {
 				StatusObject _s = wait(StatusClient::statusFetcher(localDb));
 				s = _s;
 			} else {
-				state ThreadFuture<Optional<Value>> statusValueF = tr->get(LiteralStringRef("\xff\xff/status/json"));
+				state ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
 				Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
 				if (!statusValue.present()) {
 					fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
@@ -166,7 +166,7 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 	case ConfigurationResult::CONFLICTING_OPTIONS:
 	case ConfigurationResult::UNKNOWN_OPTION:
 	case ConfigurationResult::INCOMPLETE_CONFIGURATION:
-		printUsage(LiteralStringRef("configure"));
+		printUsage("configure"_sr);
 		ret = false;
 		break;
 	case ConfigurationResult::INVALID_CONFIGURATION:
@@ -259,7 +259,6 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		fprintf(stderr,
 		        "Type `configure perpetual_storage_wiggle=1' to enable the perpetual wiggle, or `configure "
 		        "storage_migration_type=gradual' to set the gradual migration type.\n");
-		ret = false;
 		break;
 	case ConfigurationResult::SUCCESS_WARN_ROCKSDB_EXPERIMENTAL:
 		printf("Configuration changed\n");
@@ -327,7 +326,7 @@ CommandFactory configureFactory(
         "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|perpetual_storage_wiggle_locality="
         "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|storage_migration_type={disabled|gradual|aggressive}"
         "|tenant_mode={disabled|optional_experimental|required_experimental}|blob_granules_enabled={0|1}"
-        "|encryption_at_rest_mode={disabled|aes_256_ctr}",
+        "|encryption_at_rest_mode={disabled|domain_aware|cluster_aware}",
         "change the database configuration",
         "The `new' option, if present, initializes a new database with the given configuration rather than changing "
         "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
@@ -361,7 +360,8 @@ CommandFactory configureFactory(
         "tenant_mode=<disabled|optional_experimental|required_experimental>: Sets the tenant mode for the cluster. If "
         "optional, then transactions can be run with or without specifying tenants. If required, all data must be "
         "accessed using tenants.\n\n"
-        "encryption_at_rest_mode=<disabled|aes_256_ctr>: Sets the cluster encryption data at-rest support for the "
+        "encryption_at_rest_mode=<disabled|domain_aware|cluster_aware>: Sets the cluster encryption data at-rest "
+        "support for the "
         "database. The configuration can be updated ONLY at the time of database creation and once set can't be "
         "updated for the lifetime of the database.\n\n"
 

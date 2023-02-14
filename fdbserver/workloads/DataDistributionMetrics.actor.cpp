@@ -27,9 +27,10 @@
 #include "flow/actorcompiler.h" // This must be the last include
 
 struct DataDistributionMetricsWorkload : KVWorkload {
+	static constexpr auto NAME = "DataDistributionMetrics";
 
 	int numShards, readPerTx, writePerTx;
-	int64_t avgBytes;
+	int64_t avgBytes, transactionTimeLimit;
 	double testDuration;
 	std::string keyPrefix;
 	PerfIntCounter commits, errors;
@@ -37,11 +38,13 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 
 	DataDistributionMetricsWorkload(WorkloadContext const& wcx)
 	  : KVWorkload(wcx), numShards(0), avgBytes(0), commits("Commits"), errors("Errors") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		keyPrefix = getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef("DDMetrics")).toString();
-		readPerTx = getOption(options, LiteralStringRef("readPerTransaction"), 1);
-		writePerTx = getOption(options, LiteralStringRef("writePerTransaction"), 5 * readPerTx);
-		delayPerLoop = getOption(options, LiteralStringRef("delayPerLoop"), 0.1); // throttling dd rpc calls
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		// transaction time out duration(ms)
+		transactionTimeLimit = getOption(options, "transactionTimeLimit"_sr, 10000);
+		keyPrefix = getOption(options, "keyPrefix"_sr, "DDMetrics"_sr).toString();
+		readPerTx = getOption(options, "readPerTransaction"_sr, 1);
+		writePerTx = getOption(options, "writePerTransaction"_sr, 5 * readPerTx);
+		delayPerLoop = getOption(options, "delayPerLoop"_sr, 0.1); // throttling dd rpc calls
 		ASSERT(nodeCount > 1);
 	}
 
@@ -73,6 +76,9 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 	ACTOR Future<Void> resultConsistencyCheckClient(Database cx, DataDistributionMetricsWorkload* self) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
+			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+			tr->setOption(FDBTransactionOptions::TIMEOUT,
+			              StringRef((uint8_t*)&self->transactionTimeLimit, sizeof(int64_t)));
 			try {
 				wait(delay(self->delayPerLoop));
 				int startIndex = deterministicRandom()->randomInt(0, self->nodeCount - 1);
@@ -88,7 +94,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 				// the range. If we didn't read through the end of the range, then the second last key
 				// in the result will be the last key less than endKey. (Condition #2)
 				state KeySelector end = KeySelectorRef(endKey.withPrefix(ddStatsRange.begin, endKey.arena()), false, 2);
-				RangeResult result = wait(tr->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->SHARD_COUNT_LIMIT)));
+				RangeResult result = wait(tr->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 				// Condition #1 and #2 can be broken if multiple rpc calls happened in one getRange
 				if (result.size() > 1) {
 					if (result[0].key > begin.getKey() || result[1].key <= begin.getKey()) {
@@ -100,13 +106,14 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 						    .detail("SecondKey", result[1].key)
 						    .detail("BeginKeySelector", begin);
 					}
-					if (result[result.size() - 1].key < end.getKey() || result[result.size() - 2].key >= end.getKey()) {
+					if (!result.readThroughEnd && (result[result.size() - 1].key < end.getKey() ||
+					                               result[result.size() - 2].key >= end.getKey())) {
 						++self->errors;
 						TraceEvent(SevError, "TestFailure")
 						    .detail("Reason", "Result mismatches the given end selector")
 						    .detail("Size", result.size())
-						    .detail("FirstKey", result[result.size() - 1].key)
-						    .detail("SecondKey", result[result.size() - 2].key)
+						    .detail("LastKey", result[result.size() - 1].key)
+						    .detail("SecondLastKey", result[result.size() - 2].key)
 						    .detail("EndKeySelector", end);
 					}
 					// Debugging traces
@@ -123,9 +130,10 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 				}
 			} catch (Error& e) {
 				// Ignore timed_out error and cross_module_read, the end key selector may read through the end
-				if (e.code() == error_code_timed_out || e.code() == error_code_special_keys_cross_module_read)
+				if (e.code() == error_code_timed_out || e.code() == error_code_transaction_timed_out) {
+					tr->reset();
 					continue;
-				TraceEvent(SevDebug, "FailedToRetrieveDDMetrics").error(e);
+				}
 				wait(tr->onError(e));
 			}
 		}
@@ -139,38 +147,45 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		// TODO : find why this not work
 		// wait(quietDatabase(cx, self->dbInfo, "PopulateTPCC"));
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-		try {
-			state RangeResult result = wait(tr->getRange(ddStatsRange, CLIENT_KNOBS->SHARD_COUNT_LIMIT));
-			ASSERT(!result.more);
-			self->numShards = result.size();
-			if (self->numShards < 1)
-				return false;
-			state int64_t totalBytes = 0;
-			auto schema = readJSONStrictly(JSONSchemas::dataDistributionStatsSchema.toString()).get_obj();
-			for (int i = 0; i < result.size(); ++i) {
-				ASSERT(result[i].key.startsWith(ddStatsRange.begin));
-				std::string errorStr;
-				auto valueObj = readJSONStrictly(result[i].value.toString()).get_obj();
-				CODE_PROBE(true, "data_distribution_stats schema validation");
-				if (!schemaMatch(schema, valueObj, errorStr, SevError, true)) {
-					TraceEvent(SevError, "DataDistributionStatsSchemaValidationFailed")
-					    .detail("ErrorStr", errorStr.c_str())
-					    .detail("JSON", json_spirit::write_string(json_spirit::mValue(result[i].value.toString())));
-					return false;
+		state int i;
+		state int retries = 0;
+		loop {
+			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+			tr->setOption(FDBTransactionOptions::TIMEOUT,
+			              StringRef((uint8_t*)&self->transactionTimeLimit, sizeof(int64_t)));
+			try {
+				state RangeResult result = wait(tr->getRange(ddStatsRange, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!result.more);
+				self->numShards = result.size();
+				// There's no guarantee that #shards <= CLIENT_KNOBS->SHARD_COUNT_LIMIT all the time
+				ASSERT(self->numShards >= 1);
+				state int64_t totalBytes = 0;
+				auto schema = readJSONStrictly(JSONSchemas::dataDistributionStatsSchema.toString()).get_obj();
+				for (i = 0; i < result.size(); ++i) {
+					ASSERT(result[i].key.startsWith(ddStatsRange.begin));
+					std::string errorStr;
+					auto valueObj = readJSONStrictly(result[i].value.toString()).get_obj();
+					CODE_PROBE(true, "data_distribution_stats schema validation");
+					if (!schemaMatch(schema, valueObj, errorStr, SevError, true)) {
+						TraceEvent(SevError, "DataDistributionStatsSchemaValidationFailed")
+						    .detail("ErrorStr", errorStr.c_str())
+						    .detail("JSON", json_spirit::write_string(json_spirit::mValue(result[i].value.toString())));
+						return false;
+					}
+					totalBytes += valueObj["shard_bytes"].get_int64();
 				}
-				totalBytes += valueObj["shard_bytes"].get_int64();
+				self->avgBytes = totalBytes / self->numShards;
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_timed_out || e.code() == error_code_transaction_timed_out) {
+					tr->reset();
+					// The RPC call may in some corner cases get no response
+					if (++retries > 10)
+						break;
+					continue;
+				}
+				wait(tr->onError(e));
 			}
-			self->avgBytes = totalBytes / self->numShards;
-			// fetch data-distribution stats for a smaller range
-			ASSERT(result.size());
-			state int idx = deterministicRandom()->randomInt(0, result.size());
-			RangeResult res = wait(tr->getRange(
-			    KeyRangeRef(result[idx].key, idx + 1 < result.size() ? result[idx + 1].key : ddStatsRange.end), 100));
-			ASSERT_WE_THINK(res.size() == 1 && res[0] == result[idx]); // It works good now. However, not sure in any
-			                                                           // case of data-distribution, the number changes
-		} catch (Error& e) {
-			TraceEvent(SevError, "FailedToRetrieveDDMetrics").detail("Error", e.what());
-			throw;
 		}
 		return true;
 	}
@@ -185,10 +200,14 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		return Void();
 	}
 
-	std::string description() const override { return "DataDistributionMetrics"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
-	Future<bool> check(Database const& cx) override { return _check(cx, this); }
+
+	Future<bool> check(Database const& cx) override {
+		if (clientId == 0)
+			return _check(cx, this);
+		return true;
+	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.emplace_back("NumShards", numShards, Averaged::True);
@@ -197,4 +216,4 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 	}
 };
 
-WorkloadFactory<DataDistributionMetricsWorkload> DataDistributionMetricsWorkloadFactory("DataDistributionMetrics");
+WorkloadFactory<DataDistributionMetricsWorkload> DataDistributionMetricsWorkloadFactory;

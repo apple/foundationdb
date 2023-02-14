@@ -78,7 +78,7 @@ struct FeedTestData : ReferenceCounted<FeedTestData>, NonCopyable {
 	NotifiedVersion checkVersion;
 
 	FeedTestData(Key key, bool doPops)
-	  : key(key), keyRange(KeyRangeRef(key, keyAfter(key))), feedID(key.withPrefix(LiteralStringRef("CF"))), nextVal(0),
+	  : key(key), keyRange(KeyRangeRef(key, keyAfter(key))), feedID(key.withPrefix("CF"_sr)), nextVal(0),
 	    lastCleared(false), poppingVersion(0), poppedVersion(0), destroying(false), destroyed(false), complete(false),
 	    checkVersion(0) {
 		if (doPops) {
@@ -372,6 +372,7 @@ enum Op {
 };
 
 struct ChangeFeedOperationsWorkload : TestWorkload {
+	static constexpr auto NAME = "ChangeFeedOperations";
 	// test settings
 	double testDuration;
 	int operationsPerSecond;
@@ -513,7 +514,6 @@ struct ChangeFeedOperationsWorkload : TestWorkload {
 		}
 	}
 
-	std::string description() const override { return "ChangeFeedOperationsWorkload"; }
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
 	ACTOR Future<Void> _setup(Database cx, ChangeFeedOperationsWorkload* self) {
@@ -772,4 +772,4 @@ struct ChangeFeedOperationsWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<ChangeFeedOperationsWorkload> ChangeFeedOperationsWorkloadFactory("ChangeFeedOperations");
+WorkloadFactory<ChangeFeedOperationsWorkload> ChangeFeedOperationsWorkloadFactory;

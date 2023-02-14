@@ -28,12 +28,14 @@
 #include "fdbclient/Schemas.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbserver/Knobs.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h"
 
 struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "SpecialKeySpaceCorrectness";
 
 	int actorCount, minKeysPerRange, maxKeysPerRange, rangeCount, keyBytes, valBytes, conflictRangeSizeFactor;
 	double testDuration, absoluteRandomProb, transactionsPerSecond;
@@ -46,28 +48,35 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	SpecialKeySpaceCorrectnessWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), wrongResults("Wrong Results"), keysCount("Number of generated keys") {
-		minKeysPerRange = getOption(options, LiteralStringRef("minKeysPerRange"), 1);
-		maxKeysPerRange = getOption(options, LiteralStringRef("maxKeysPerRange"), 100);
-		rangeCount = getOption(options, LiteralStringRef("rangeCount"), 10);
-		keyBytes = getOption(options, LiteralStringRef("keyBytes"), 16);
-		valBytes = getOption(options, LiteralStringRef("valueBytes"), 16);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 100.0);
-		actorCount = getOption(options, LiteralStringRef("actorCount"), 1);
-		absoluteRandomProb = getOption(options, LiteralStringRef("absoluteRandomProb"), 0.5);
+		minKeysPerRange = getOption(options, "minKeysPerRange"_sr, 1);
+		maxKeysPerRange = getOption(options, "maxKeysPerRange"_sr, 100);
+		rangeCount = getOption(options, "rangeCount"_sr, 10);
+		keyBytes = getOption(options, "keyBytes"_sr, 16);
+		valBytes = getOption(options, "valueBytes"_sr, 16);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 100.0);
+		actorCount = getOption(options, "actorCount"_sr, 1);
+		absoluteRandomProb = getOption(options, "absoluteRandomProb"_sr, 0.5);
 		// Controls the relative size of read/write conflict ranges and the number of random getranges
-		conflictRangeSizeFactor = getOption(options, LiteralStringRef("conflictRangeSizeFactor"), 10);
+		conflictRangeSizeFactor = getOption(options, "conflictRangeSizeFactor"_sr, 10);
 		ASSERT(conflictRangeSizeFactor >= 1);
 	}
 
-	std::string description() const override { return "SpecialKeySpaceCorrectness"; }
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	Future<bool> check(Database const& cx) override { return wrongResults.getValue() == 0; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
-
 	// disable the default timeout setting
 	double getCheckTimeout() const override { return std::numeric_limits<double>::max(); }
+
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		// Failure injection workloads like Rollback, Attrition and so on are interfering with the test.
+		// In particular, the test aims to test special keys' functions on monitoring and managing the cluster.
+		// It expects the FDB cluster is healthy and not doing unexpected configuration changes.
+		// All changes should come from special keys' operations' outcome.
+		// Consequently, we disable all failure injection workloads in backgroud for this test
+		out.insert("all");
+	}
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		cx->specialKeySpace = std::make_unique<SpecialKeySpace>();
@@ -83,7 +92,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			Key startKey(baseKey + "/");
 			Key endKey(baseKey + "/\xff");
 			self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
-			if (deterministicRandom()->random01() < 0.2) {
+			if (deterministicRandom()->random01() < 0.2 && !self->rwImpls.empty()) {
 				self->asyncReadImpls.push_back(std::make_shared<SKSCTestAsyncReadImpl>(KeyRangeRef(startKey, endKey)));
 				cx->specialKeySpace->registerKeyRange(SpecialKeySpace::MODULE::TESTONLY,
 				                                      SpecialKeySpace::IMPLTYPE::READONLY,
@@ -105,6 +114,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				               Value(deterministicRandom()->randomAlphaNumeric(self->valBytes)));
 			}
 		}
+		ASSERT(rwImpls.size() > 0);
+
 		return Void();
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
@@ -128,7 +139,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				// This test is not valid for API versions smaller than 630
 				return;
 			}
-			f = success(ryw.get(LiteralStringRef("\xff\xff/status/json")));
+			f = success(ryw.get("\xff\xff/status/json"_sr));
 			CODE_PROBE(!f.isReady(), "status json not ready");
 		}
 		ASSERT(f.isError());
@@ -249,6 +260,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	}
 
 	KeyRange randomRWKeyRange() {
+		ASSERT(rwImpls.size() > 0);
 		Key prefix = rwImpls[deterministicRandom()->randomInt(0, rwImpls.size())]->getKeyRange().begin;
 		Key rkey1 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, keyBytes)))
 		                .withPrefix(prefix);
@@ -288,24 +300,155 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	GetRangeLimits randomLimits() {
 		// TODO : fix knobs for row_unlimited
-		int rowLimits = deterministicRandom()->randomInt(1, keysCount.getValue() + 1);
+		int rowLimits = deterministicRandom()->randomInt(0, keysCount.getValue() + 1);
 		// The largest key's bytes is longest prefix bytes + 1(for '/') + generated key bytes
 		// 8 here refers to bytes of KeyValueRef
 		int byteLimits = deterministicRandom()->randomInt(
 		    1, keysCount.getValue() * (keyBytes + (rangeCount + 1) + valBytes + 8) + 1);
 
-		return GetRangeLimits(rowLimits, byteLimits);
+		auto limit = GetRangeLimits(rowLimits, byteLimits);
+		// minRows is always initilized to 1
+		if (limit.rows == 0)
+			limit.minRows = 0;
+		return limit;
 	}
 
 	ACTOR Future<Void> testSpecialKeySpaceErrors(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
-		Database cx = cx_->clone();
+		state Database cx = cx_->clone();
+		state int64_t tenantId;
+		try {
+			Optional<TenantMapEntry> entry = wait(TenantAPI::createTenant(cx.getReference(), TenantName("foo"_sr)));
+			ASSERT(entry.present());
+			tenantId = entry.get().id;
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_tenant_already_exists || e.code() == error_code_actor_cancelled);
+		}
 		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
+		state Reference<ReadYourWritesTransaction> tenantTx =
+		    makeReference<ReadYourWritesTransaction>(cx, makeReference<Tenant>(tenantId));
+		// Use new transactions that may use default tenant rather than re-use tx
+		// This is because tx will reject raw access for later tests if default tenant is set
+		state Reference<ReadYourWritesTransaction> defaultTx1 = makeReference<ReadYourWritesTransaction>(cx);
+		state Reference<ReadYourWritesTransaction> defaultTx2 = makeReference<ReadYourWritesTransaction>(cx);
+		state bool disableRyw = deterministicRandom()->coinflip();
+		// tenant transaction accessing modules that do not support tenants
+		// tenant getRange
+		try {
+			wait(success(tenantTx->getRange(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT),
+			                                CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			ASSERT(e.code() == error_code_illegal_tenant_access);
+			tenantTx->reset();
+		}
+		// tenant set + commit
+		try {
+			tenantTx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tenantTx->set(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck"), ValueRef());
+			wait(tenantTx->commit());
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			ASSERT(e.code() == error_code_illegal_tenant_access);
+			tenantTx->reset();
+		}
+		// tenant clear
+		try {
+			tenantTx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tenantTx->clear(SpecialKeySpace::getManagementApiCommandRange("exclude"));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			ASSERT(e.code() == error_code_illegal_tenant_access);
+			tenantTx->reset();
+		}
+		// tenant check that conflict ranges stay the same after commit
+		// and depending on if RYW is disabled
+		{
+			state RangeResult readresult1;
+			state RangeResult readresult2;
+			state RangeResult writeResult1;
+			state RangeResult writeResult2;
+			try {
+				if (disableRyw) {
+					defaultTx1->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+				}
+				defaultTx1->addReadConflictRange(singleKeyRange("testKeylll"_sr));
+				defaultTx1->addWriteConflictRange(singleKeyRange("testKeylll"_sr));
+				wait(store(readresult1, defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
+				wait(store(writeResult1, defaultTx1->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
+				wait(defaultTx1->commit());
+				CODE_PROBE(true, "conflict range tenant commit succeeded");
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled)
+					throw;
+				CODE_PROBE(true, "conflict range tenant commit error thrown");
+			}
+			wait(store(readresult2, defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
+			wait(store(writeResult2, defaultTx1->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(readresult1 == readresult2);
+			ASSERT(writeResult1 == writeResult2);
+			defaultTx1->reset();
+		}
+		// proper conflict ranges
+		loop {
+			try {
+				if (disableRyw) {
+					defaultTx1->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+					defaultTx2->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+				}
+				defaultTx1->setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
+				defaultTx2->setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
+				wait(success(defaultTx1->getReadVersion()));
+				wait(success(defaultTx2->getReadVersion()));
+				defaultTx1->addReadConflictRange(singleKeyRange("foo"_sr));
+				defaultTx1->addWriteConflictRange(singleKeyRange("foo"_sr));
+				defaultTx2->addWriteConflictRange(singleKeyRange("foo"_sr));
+				wait(defaultTx2->commit());
+				try {
+					wait(defaultTx1->commit());
+					ASSERT(false);
+				} catch (Error& e) {
+					state Error err = e;
+					if (err.code() != error_code_not_committed) {
+						wait(defaultTx1->onError(err));
+						wait(defaultTx2->onError(err));
+						continue;
+					}
+					// Read conflict ranges of defaultTx1 and check for "foo" with no tenant prefix
+					state RangeResult readConflictRange =
+					    wait(defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY));
+					state RangeResult writeConflictRange =
+					    wait(defaultTx1->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY));
+					state RangeResult conflictKeys =
+					    wait(defaultTx1->getRange(conflictingKeysRange, CLIENT_KNOBS->TOO_MANY));
+
+					// size is 2 because singleKeyRange includes the key after
+					ASSERT(readConflictRange.size() == 2 &&
+					       readConflictRange.begin()->key == readConflictRangeKeysRange.begin.withSuffix("foo"_sr));
+					ASSERT(writeConflictRange.size() == 2 &&
+					       writeConflictRange.begin()->key == writeConflictRangeKeysRange.begin.withSuffix("foo"_sr));
+					ASSERT(conflictKeys.size() == 2 &&
+					       conflictKeys.begin()->key == conflictingKeysRange.begin.withSuffix("foo"_sr));
+					defaultTx1->reset();
+					defaultTx2->reset();
+					break;
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled)
+					throw;
+				wait(defaultTx2->onError(e));
+			}
+		}
 		// begin key outside module range
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			wait(success(tx->getRange(
-			    KeyRangeRef(LiteralStringRef("\xff\xff/transactio"), LiteralStringRef("\xff\xff/transaction0")),
-			    CLIENT_KNOBS->TOO_MANY)));
+			wait(success(tx->getRange(KeyRangeRef("\xff\xff/transactio"_sr, "\xff\xff/transaction0"_sr),
+			                          CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
@@ -316,9 +459,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// end key outside module range
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			wait(success(tx->getRange(
-			    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction1")),
-			    CLIENT_KNOBS->TOO_MANY)));
+			wait(success(tx->getRange(KeyRangeRef("\xff\xff/transaction/"_sr, "\xff\xff/transaction1"_sr),
+			                          CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
@@ -329,9 +471,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// both begin and end outside module range
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			wait(success(tx->getRange(
-			    KeyRangeRef(LiteralStringRef("\xff\xff/transaction"), LiteralStringRef("\xff\xff/transaction1")),
-			    CLIENT_KNOBS->TOO_MANY)));
+			wait(success(tx->getRange(KeyRangeRef("\xff\xff/transaction"_sr, "\xff\xff/transaction1"_sr),
+			                          CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
@@ -342,9 +483,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// legal range read using the module range
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			wait(success(tx->getRange(
-			    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0")),
-			    CLIENT_KNOBS->TOO_MANY)));
+			wait(success(tx->getRange(KeyRangeRef("\xff\xff/transaction/"_sr, "\xff\xff/transaction0"_sr),
+			                          CLIENT_KNOBS->TOO_MANY)));
 			CODE_PROBE(true, "read transaction special keyrange");
 			tx->reset();
 		} catch (Error& e) {
@@ -354,8 +494,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
-			const KeyRef startKey = LiteralStringRef("\xff\xff/transactio");
-			const KeyRef endKey = LiteralStringRef("\xff\xff/transaction1");
+			const KeyRef startKey = "\xff\xff/transactio"_sr;
+			const KeyRef endKey = "\xff\xff/transaction1"_sr;
 			RangeResult result =
 			    wait(tx->getRange(KeyRangeRef(startKey, endKey), GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 			// The whole transaction module should be empty
@@ -367,9 +507,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// end keySelector inside module range, *** a tricky corner case ***
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			tx->addReadConflictRange(singleKeyRange(LiteralStringRef("testKey")));
+			tx->addReadConflictRange(singleKeyRange("testKey"_sr));
 			KeySelector begin = KeySelectorRef(readConflictRangeKeysRange.begin, false, 1);
-			KeySelector end = KeySelectorRef(LiteralStringRef("\xff\xff/transaction0"), false, 0);
+			KeySelector end = KeySelectorRef("\xff\xff/transaction0"_sr, false, 0);
 			wait(success(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY))));
 			CODE_PROBE(true, "end key selector inside module range");
 			tx->reset();
@@ -379,9 +519,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// No module found error case with keys
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			wait(success(tx->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/A_no_module_related_prefix"),
-			                                      LiteralStringRef("\xff\xff/I_am_also_not_in_any_module")),
-			                          CLIENT_KNOBS->TOO_MANY)));
+			wait(success(tx->getRange(
+			    KeyRangeRef("\xff\xff/A_no_module_related_prefix"_sr, "\xff\xff/I_am_also_not_in_any_module"_sr),
+			    CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
@@ -392,8 +532,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// No module found error with KeySelectors, *** a tricky corner case ***
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			KeySelector begin = KeySelectorRef(LiteralStringRef("\xff\xff/zzz_i_am_not_a_module"), false, 1);
-			KeySelector end = KeySelectorRef(LiteralStringRef("\xff\xff/zzz_to_be_the_final_one"), false, 2);
+			KeySelector begin = KeySelectorRef("\xff\xff/zzz_i_am_not_a_module"_sr, false, 1);
+			KeySelector end = KeySelectorRef("\xff\xff/zzz_to_be_the_final_one"_sr, false, 2);
 			wait(success(tx->getRange(begin, end, CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
@@ -405,7 +545,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// begin and end keySelectors clamp up to the boundary of the module
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			const KeyRef key = LiteralStringRef("\xff\xff/cluster_file_path");
+			const KeyRef key = "\xff\xff/cluster_file_path"_sr;
 			KeySelector begin = KeySelectorRef(key, false, 0);
 			KeySelector end = KeySelectorRef(keyAfter(key), false, 2);
 			RangeResult result = wait(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
@@ -416,8 +556,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		}
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			tx->addReadConflictRange(singleKeyRange(LiteralStringRef("readKey")));
-			const KeyRef key = LiteralStringRef("\xff\xff/transaction/a_to_be_the_first");
+			tx->addReadConflictRange(singleKeyRange("readKey"_sr));
+			const KeyRef key = "\xff\xff/transaction/a_to_be_the_first"_sr;
 			KeySelector begin = KeySelectorRef(key, false, 0);
 			KeySelector end = KeySelectorRef(key, false, 2);
 			RangeResult result = wait(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
@@ -430,7 +570,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// Writes are disabled by default
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			tx->set(LiteralStringRef("\xff\xff/I_am_not_a_range_can_be_written"), ValueRef());
+			tx->set("\xff\xff/I_am_not_a_range_can_be_written"_sr, ValueRef());
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;
@@ -441,7 +581,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			tx->set(LiteralStringRef("\xff\xff/I_am_not_a_range_can_be_written"), ValueRef());
+			tx->set("\xff\xff/I_am_not_a_range_can_be_written"_sr, ValueRef());
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
@@ -465,8 +605,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// base key of the end key selector not in (\xff\xff, \xff\xff\xff), throw key_outside_legal_range()
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			const KeySelector startKeySelector = KeySelectorRef(LiteralStringRef("\xff\xff/test"), true, -200);
-			const KeySelector endKeySelector = KeySelectorRef(LiteralStringRef("test"), true, -10);
+			const KeySelector startKeySelector = KeySelectorRef("\xff\xff/test"_sr, true, -200);
+			const KeySelector endKeySelector = KeySelectorRef("test"_sr, true, -10);
 			RangeResult result =
 			    wait(tx->getRange(startKeySelector, endKeySelector, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
@@ -479,9 +619,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// test case when registered range is the same as the underlying module
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			state RangeResult result = wait(tx->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-			                                                         LiteralStringRef("\xff\xff/worker_interfaces0")),
-			                                             CLIENT_KNOBS->TOO_MANY));
+			state RangeResult result =
+			    wait(tx->getRange(KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
+			                      CLIENT_KNOBS->TOO_MANY));
 			// Note: there's possibility we get zero workers
 			if (result.size()) {
 				state KeyValueRef entry = deterministicRandom()->randomChoice(result);
@@ -544,8 +684,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				tx->addWriteConflictRange(range);
 			}
 			// TODO test that fails if we don't wait on tx->pendingReads()
-			referenceTx->set(range.begin, LiteralStringRef("1"));
-			referenceTx->set(range.end, LiteralStringRef("0"));
+			referenceTx->set(range.begin, "1"_sr);
+			referenceTx->set(range.end, "0"_sr);
 		}
 		if (!read && deterministicRandom()->coinflip()) {
 			try {
@@ -558,7 +698,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			CODE_PROBE(true, "Read write conflict range of committed transaction");
 		}
 		try {
-			wait(success(tx->get(LiteralStringRef("\xff\xff/1314109/i_hope_this_isn't_registered"))));
+			wait(success(tx->get("\xff\xff/1314109/i_hope_this_isn't_registered"_sr)));
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
@@ -652,350 +792,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> managementApiCorrectnessActor(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
-		// All management api related tests
+		// All management api related tests that cannot run with failure injections
 		state Database cx = cx_->clone();
 		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
-		// test ordered option keys
-		{
-			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			for (const std::string& option : SpecialKeySpace::getManagementApiOptionsSet()) {
-				tx->set(
-				    "options/"_sr.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
-				        .withSuffix(option),
-				    ValueRef());
-			}
-			RangeResult result = wait(tx->getRange(
-			    KeyRangeRef(LiteralStringRef("options/"), LiteralStringRef("options0"))
-			        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin),
-			    CLIENT_KNOBS->TOO_MANY));
-			ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
-			ASSERT(result.size() == SpecialKeySpace::getManagementApiOptionsSet().size());
-			ASSERT(self->getRangeResultInOrder(result));
-			tx->reset();
-		}
-		// "exclude" error message shema check
-		try {
-			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			tx->set(LiteralStringRef("Invalid_Network_Address")
-			            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("exclude")),
-			        ValueRef());
-			wait(tx->commit());
-			ASSERT(false);
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled)
-				throw;
-			if (e.code() == error_code_special_keys_api_failure) {
-				Optional<Value> errorMsg =
-				    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
-				ASSERT(errorMsg.present());
-				std::string errorStr;
-				auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
-				auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
-				// special_key_space_management_api_error_msg schema validation
-				ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
-				ASSERT(valueObj["command"].get_str() == "exclude" && !valueObj["retriable"].get_bool());
-			} else {
-				TraceEvent(SevDebug, "UnexpectedError").error(e).detail("Command", "Exclude");
-				wait(tx->onError(e));
-			}
-			tx->reset();
-		}
-		// "setclass"
-		{
-			try {
-				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				// test getRange
-				state RangeResult result = wait(tx->getRange(
-				    KeyRangeRef(LiteralStringRef("process/class_type/"), LiteralStringRef("process/class_type0"))
-				        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin),
-				    CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
-				ASSERT(self->getRangeResultInOrder(result));
-				// check correctness of classType of each process
-				std::vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
-				if (workers.size()) {
-					for (const auto& worker : workers) {
-						Key addr =
-						    Key("process/class_type/" + formatIpPort(worker.address.ip, worker.address.port))
-						        .withPrefix(
-						            SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
-						bool found = false;
-						for (const auto& kv : result) {
-							if (kv.key == addr) {
-								ASSERT(kv.value.toString() == worker.processClass.toString());
-								found = true;
-								break;
-							}
-						}
-						// Each process should find its corresponding element
-						ASSERT(found);
-					}
-					state ProcessData worker = deterministicRandom()->randomChoice(workers);
-					state Key addr =
-					    Key("process/class_type/" + formatIpPort(worker.address.ip, worker.address.port))
-					        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
-					tx->set(addr, LiteralStringRef("InvalidProcessType"));
-					// test ryw
-					Optional<Value> processType = wait(tx->get(addr));
-					ASSERT(processType.present() && processType.get() == LiteralStringRef("InvalidProcessType"));
-					// test ryw disabled
-					tx->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
-					Optional<Value> originalProcessType = wait(tx->get(addr));
-					ASSERT(originalProcessType.present() &&
-					       originalProcessType.get() == worker.processClass.toString());
-					// test error handling (invalid value type)
-					wait(tx->commit());
-					ASSERT(false);
-				} else {
-					// If no worker process returned, skip the test
-					TraceEvent(SevDebug, "EmptyWorkerListInSetClassTest").log();
-				}
-			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled)
-					throw;
-				if (e.code() == error_code_special_keys_api_failure) {
-					Optional<Value> errorMsg =
-					    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
-					ASSERT(errorMsg.present());
-					std::string errorStr;
-					auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
-					auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
-					// special_key_space_management_api_error_msg schema validation
-					ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
-					ASSERT(valueObj["command"].get_str() == "setclass" && !valueObj["retriable"].get_bool());
-				} else {
-					TraceEvent(SevDebug, "UnexpectedError").error(e).detail("Command", "Setclass");
-					wait(tx->onError(e));
-				}
-				tx->reset();
-			}
-		}
-		// read class_source
-		{
-			try {
-				// test getRange
-				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-				state RangeResult class_source_result = wait(tx->getRange(
-				    KeyRangeRef(LiteralStringRef("process/class_source/"), LiteralStringRef("process/class_source0"))
-				        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin),
-				    CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!class_source_result.more && class_source_result.size() < CLIENT_KNOBS->TOO_MANY);
-				ASSERT(self->getRangeResultInOrder(class_source_result));
-				// check correctness of classType of each process
-				std::vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
-				if (workers.size()) {
-					for (const auto& worker : workers) {
-						Key addr =
-						    Key("process/class_source/" + formatIpPort(worker.address.ip, worker.address.port))
-						        .withPrefix(
-						            SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
-						bool found = false;
-						for (const auto& kv : class_source_result) {
-							if (kv.key == addr) {
-								ASSERT(kv.value.toString() == worker.processClass.sourceString());
-								// Default source string is command_line
-								ASSERT(kv.value == LiteralStringRef("command_line"));
-								found = true;
-								break;
-							}
-						}
-						// Each process should find its corresponding element
-						ASSERT(found);
-					}
-					ProcessData worker = deterministicRandom()->randomChoice(workers);
-					state std::string address = formatIpPort(worker.address.ip, worker.address.port);
-					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-					tx->set(
-					    Key("process/class_type/" + address)
-					        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin),
-					    Value(worker.processClass.toString())); // Set it as the same class type as before, thus only
-					                                            // class source will be changed
-					wait(tx->commit());
-					tx->reset();
-					tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-					Optional<Value> class_source = wait(tx->get(
-					    Key("process/class_source/" + address)
-					        .withPrefix(
-					            SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin)));
-					TraceEvent(SevDebug, "SetClassSourceDebug")
-					    .detail("Present", class_source.present())
-					    .detail("ClassSource", class_source.present() ? class_source.get().toString() : "__Nothing");
-					// Very rarely, we get an empty worker list, thus no class_source data
-					if (class_source.present())
-						ASSERT(class_source.get() == LiteralStringRef("set_class"));
-					tx->reset();
-				} else {
-					// If no worker process returned, skip the test
-					TraceEvent(SevDebug, "EmptyWorkerListInSetClassTest").log();
-				}
-			} catch (Error& e) {
-				wait(tx->onError(e));
-			}
-		}
-		// test lock and unlock
-		// maske sure we lock the database
-		loop {
-			try {
-				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				// lock the database
-				UID uid = deterministicRandom()->randomUniqueID();
-				tx->set(SpecialKeySpace::getManagementApiCommandPrefix("lock"), uid.toString());
-				// commit
-				wait(tx->commit());
-				break;
-			} catch (Error& e) {
-				TraceEvent(SevDebug, "DatabaseLockFailure").error(e);
-				// In case commit_unknown_result is thrown by buggify, we may try to lock more than once
-				// The second lock commit will throw special_keys_api_failure error
-				if (e.code() == error_code_special_keys_api_failure) {
-					Optional<Value> errorMsg =
-					    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
-					ASSERT(errorMsg.present());
-					std::string errorStr;
-					auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
-					auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
-					// special_key_space_management_api_error_msg schema validation
-					ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
-					ASSERT(valueObj["command"].get_str() == "lock" && !valueObj["retriable"].get_bool());
-					break;
-				} else if (e.code() == error_code_database_locked) {
-					// Database is already locked. This can happen if a previous attempt
-					// failed with unknown_result.
-					break;
-				} else {
-					wait(tx->onError(e));
-				}
-			}
-		}
-		TraceEvent(SevDebug, "DatabaseLocked").log();
-		// if database locked, fdb read should get database_locked error
-		tx->reset();
-		loop {
-			try {
-				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-				RangeResult res = wait(tx->getRange(normalKeys, 1));
-			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled)
-					throw;
-				if (e.code() == error_code_grv_proxy_memory_limit_exceeded ||
-				    e.code() == error_code_batch_transaction_throttled) {
-					wait(tx->onError(e));
-				} else {
-					ASSERT(e.code() == error_code_database_locked);
-					break;
-				}
-			}
-		}
-		// make sure we unlock the database
-		// unlock is idempotent, thus we can commit many times until successful
-		tx->reset();
-		loop {
-			try {
-				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				// unlock the database
-				tx->clear(SpecialKeySpace::getManagementApiCommandPrefix("lock"));
-				wait(tx->commit());
-				TraceEvent(SevDebug, "DatabaseUnlocked").log();
-				break;
-			} catch (Error& e) {
-				TraceEvent(SevDebug, "DatabaseUnlockFailure").error(e);
-				ASSERT(e.code() != error_code_database_locked);
-				wait(tx->onError(e));
-			}
-		}
-
-		tx->reset();
-		loop {
-			try {
-				// read should be successful
-				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-				RangeResult res = wait(tx->getRange(normalKeys, 1));
-				break;
-			} catch (Error& e) {
-				wait(tx->onError(e));
-			}
-		}
-
-		// test consistencycheck which only used by ConsistencyCheck Workload
-		// Note: we have exclusive ownership of fdbShouldConsistencyCheckBeSuspended,
-		// no existing workloads can modify the key
-		tx->reset();
-		{
-			try {
-				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				Optional<Value> val1 = wait(tx->get(fdbShouldConsistencyCheckBeSuspended));
-				state bool ccSuspendSetting =
-				    val1.present() ? BinaryReader::fromStringRef<bool>(val1.get(), Unversioned()) : false;
-				Optional<Value> val2 =
-				    wait(tx->get(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck")));
-				// Make sure the read result from special key consistency with the system key
-				ASSERT(ccSuspendSetting ? val2.present() : !val2.present());
-				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				// Make sure by default, consistencycheck is enabled
-				ASSERT(!ccSuspendSetting);
-				// Disable consistencycheck
-				tx->set(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck"), ValueRef());
-				wait(tx->commit());
-				tx->reset();
-				// Read system key to make sure it is disabled
-				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				Optional<Value> val3 = wait(tx->get(fdbShouldConsistencyCheckBeSuspended));
-				bool ccSuspendSetting2 =
-				    val3.present() ? BinaryReader::fromStringRef<bool>(val3.get(), Unversioned()) : false;
-				ASSERT(ccSuspendSetting2);
-				tx->reset();
-			} catch (Error& e) {
-				wait(tx->onError(e));
-			}
-		}
-		// make sure we enable consistencycheck by the end
-		{
-			loop {
-				try {
-					tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-					tx->clear(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck"));
-					wait(tx->commit());
-					tx->reset();
-					break;
-				} catch (Error& e) {
-					wait(tx->onError(e));
-				}
-			}
-		}
-		// coordinators
-		// test read, makes sure it's the same as reading from coordinatorsKey
-		loop {
-			try {
-				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				Optional<Value> res = wait(tx->get(coordinatorsKey));
-				ASSERT(res.present()); // Otherwise, database is in a bad state
-				state ClusterConnectionString cs(res.get().toString());
-				Optional<Value> coordinator_processes_key =
-				    wait(tx->get(LiteralStringRef("processes")
-				                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"))));
-				ASSERT(coordinator_processes_key.present());
-				state std::vector<std::string> process_addresses;
-				boost::split(
-				    process_addresses, coordinator_processes_key.get().toString(), [](char c) { return c == ','; });
-				ASSERT(process_addresses.size() == cs.coords.size() + cs.hostnames.size());
-				// compare the coordinator process network addresses one by one
-				std::vector<NetworkAddress> coordinators = wait(cs.tryResolveHostnames());
-				for (const auto& network_address : coordinators) {
-					ASSERT(std::find(process_addresses.begin(), process_addresses.end(), network_address.toString()) !=
-					       process_addresses.end());
-				}
-				tx->reset();
-				break;
-			} catch (Error& e) {
-				wait(tx->onError(e));
-			}
-		}
 		// test change coordinators and cluster description
 		// we randomly pick one process(not coordinator) and add it, in this case, it should always succeed
 		{
@@ -1004,8 +803,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			state std::vector<std::string> old_coordinators_processes;
 			state bool possible_to_add_coordinator;
 			state KeyRange coordinators_key_range =
-			    KeyRangeRef(LiteralStringRef("process/"), LiteralStringRef("process0"))
+			    KeyRangeRef("process/"_sr, "process0"_sr)
 			        .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"));
+			state unsigned retries = 0;
+			state bool changeCoordinatorsSucceeded = true;
 			loop {
 				try {
 					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -1017,9 +818,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					                              ? deterministicRandom()->randomAlphaNumeric(8)
 					                              : ccStr.clusterKeyName().toString();
 					// get current coordinators
-					Optional<Value> processes_key =
-					    wait(tx->get(LiteralStringRef("processes")
-					                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"))));
+					Optional<Value> processes_key = wait(tx->get(
+					    "processes"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"))));
 					ASSERT(processes_key.present());
 					boost::split(
 					    old_coordinators_processes, processes_key.get().toString(), [](char c) { return c == ','; });
@@ -1060,12 +860,12 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 						for (const auto& address : old_coordinators_processes) {
 							new_processes_key += "," + address;
 						}
-						tx->set(LiteralStringRef("processes")
-						            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
-						        Value(new_processes_key));
+						tx->set(
+						    "processes"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
+						    Value(new_processes_key));
 						// update cluster description
-						tx->set(LiteralStringRef("cluster_description")
-						            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
+						tx->set("cluster_description"_sr.withPrefix(
+						            SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
 						        Value(new_cluster_description));
 						wait(tx->commit());
 						ASSERT(false);
@@ -1086,11 +886,19 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 							    .detail("ErrorMessage", valueObj["message"].get_str());
 							ASSERT(valueObj["command"].get_str() == "coordinators");
 							if (valueObj["retriable"].get_bool()) { // coordinators not reachable, retry
+								if (++retries >= 10) {
+									CODE_PROBE(
+									    true, "ChangeCoordinators Exceeded retry limit", probe::decoration::rare);
+									changeCoordinatorsSucceeded = false;
+									tx->reset();
+									break;
+								}
 								tx->reset();
 							} else {
 								ASSERT(valueObj["message"].get_str() ==
 								       "No change (existing configuration satisfies request)");
 								tx->reset();
+								CODE_PROBE(true, "Successfully changed coordinators");
 								break;
 							}
 						} else {
@@ -1106,8 +914,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					ASSERT(res.present()); // Otherwise, database is in a bad state
 					ClusterConnectionString csNew(res.get().toString());
 					// verify the cluster decription
-					ASSERT(new_cluster_description == csNew.clusterKeyName().toString());
-					ASSERT(csNew.hostnames.size() + csNew.coords.size() == old_coordinators_processes.size() + 1);
+					ASSERT(!changeCoordinatorsSucceeded ||
+					       new_cluster_description == csNew.clusterKeyName().toString());
+					ASSERT(!changeCoordinatorsSucceeded ||
+					       csNew.hostnames.size() + csNew.coords.size() == old_coordinators_processes.size() + 1);
 					std::vector<NetworkAddress> newCoordinators = wait(csNew.tryResolveHostnames());
 					// verify the coordinators' addresses
 					for (const auto& network_address : newCoordinators) {
@@ -1123,7 +933,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 				}
 				// change back to original settings
-				loop {
+				while (changeCoordinatorsSucceeded) {
 					try {
 						std::string new_processes_key;
 						tx->setOption(FDBTransactionOptions::RAW_ACCESS);
@@ -1132,9 +942,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 							new_processes_key += new_processes_key.size() ? "," : "";
 							new_processes_key += address;
 						}
-						tx->set(LiteralStringRef("processes")
-						            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
-						        Value(new_processes_key));
+						tx->set(
+						    "processes"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
+						    Value(new_processes_key));
 						wait(tx->commit());
 						ASSERT(false);
 					} catch (Error& e) {
@@ -1170,35 +980,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				}
 			}
 		}
-		// advanceversion
-		try {
-			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			Version v1 = wait(tx->getReadVersion());
-			TraceEvent(SevDebug, "InitialReadVersion").detail("Version", v1);
-			state Version v2 = 2 * v1;
-			loop {
-				try {
-					// loop until the grv is larger than the set version
-					Version v3 = wait(tx->getReadVersion());
-					if (v3 > v2) {
-						TraceEvent(SevDebug, "AdvanceVersionSuccess").detail("Version", v3);
-						break;
-					}
-					tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-					// force the cluster to recover at v2
-					tx->set(SpecialKeySpace::getManagementApiCommandPrefix("advanceversion"), std::to_string(v2));
-					wait(tx->commit());
-					ASSERT(false); // Should fail with commit_unknown_result
-				} catch (Error& e) {
-					TraceEvent(SevDebug, "AdvanceVersionCommitFailure").error(e);
-					wait(tx->onError(e));
-				}
-			}
-			tx->reset();
-		} catch (Error& e) {
-			wait(tx->onError(e));
-		}
 		// data_distribution & maintenance get
 		loop {
 			try {
@@ -1212,8 +993,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				                                      CLIENT_KNOBS->TOO_MANY));
 				// By default, data_distribution/mode := "-1"
 				ASSERT(!ddKVs.more && ddKVs.size() == 1);
-				ASSERT(ddKVs[0].key == LiteralStringRef("mode").withPrefix(
-				                           SpecialKeySpace::getManagementApiCommandPrefix("datadistribution")));
+				ASSERT(ddKVs[0].key ==
+				       "mode"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("datadistribution")));
+				TraceEvent("DDKVsValue").detail("Value", ddKVs[0].value);
 				ASSERT(ddKVs[0].value == Value(boost::lexical_cast<std::string>(-1)));
 				tx->reset();
 				break;
@@ -1313,8 +1095,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 					KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
-					tx->set(LiteralStringRef("mode").withPrefix(ddPrefix), LiteralStringRef("0"));
-					tx->set(LiteralStringRef("rebalance_ignored").withPrefix(ddPrefix),
+					tx->set("mode"_sr.withPrefix(ddPrefix), "0"_sr);
+					tx->set("rebalance_ignored"_sr.withPrefix(ddPrefix),
 					        BinaryWriter::toValue(ddIgnoreValue, Unversioned()));
 					wait(tx->commit());
 					tx->reset();
@@ -1356,8 +1138,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					tx->clear(ignoreSSFailuresZoneString.withPrefix(
 					    SpecialKeySpace::getManagementApiCommandPrefix("maintenance")));
 					KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
-					tx->clear(LiteralStringRef("mode").withPrefix(ddPrefix));
-					tx->clear(LiteralStringRef("rebalance_ignored").withPrefix(ddPrefix));
+					tx->clear("mode"_sr.withPrefix(ddPrefix));
+					tx->clear("rebalance_ignored"_sr.withPrefix(ddPrefix));
 					wait(tx->commit());
 					tx->reset();
 					break;
@@ -1385,44 +1167,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				}
 			}
 		}
-		// make sure when we change dd related special keys, we grab the two system keys,
-		// i.e. moveKeysLockOwnerKey and moveKeysLockWriteKey
-		{
-			state Reference<ReadYourWritesTransaction> tr1(new ReadYourWritesTransaction(cx));
-			state Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(cx));
-			loop {
-				try {
-					tr1->setOption(FDBTransactionOptions::RAW_ACCESS);
-					tr1->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-					tr2->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-
-					Version readVersion = wait(tr1->getReadVersion());
-					tr2->setVersion(readVersion);
-					KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
-					tr1->set(LiteralStringRef("mode").withPrefix(ddPrefix), LiteralStringRef("1"));
-					wait(tr1->commit());
-					// randomly read the moveKeysLockOwnerKey/moveKeysLockWriteKey
-					// both of them should be grabbed when changing dd mode
-					wait(success(
-					    tr2->get(deterministicRandom()->coinflip() ? moveKeysLockOwnerKey : moveKeysLockWriteKey)));
-					// tr2 shoulde never succeed, just write to a key to make it not a read-only transaction
-					tr2->set(LiteralStringRef("unused_key"), LiteralStringRef(""));
-					wait(tr2->commit());
-					ASSERT(false); // commit should always fail due to conflict
-				} catch (Error& e) {
-					if (e.code() != error_code_not_committed) {
-						// when buggify is enabled, it's possible we get other retriable errors
-						wait(tr2->onError(e));
-						tr1->reset();
-					} else {
-						// loop until we get conflict error
-						break;
-					}
-				}
-			}
-		}
 		return Void();
 	}
 };
 
-WorkloadFactory<SpecialKeySpaceCorrectnessWorkload> SpecialKeySpaceCorrectnessFactory("SpecialKeySpaceCorrectness");
+WorkloadFactory<SpecialKeySpaceCorrectnessWorkload> SpecialKeySpaceCorrectnessFactory;

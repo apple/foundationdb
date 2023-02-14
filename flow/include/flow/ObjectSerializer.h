@@ -26,6 +26,7 @@
 
 #include <unordered_map>
 #include <any>
+#include <iostream>
 
 using ContextVariableMap = std::unordered_map<std::string_view, std::any>;
 
@@ -65,22 +66,6 @@ struct LoadContext {
 	std::enable_if_t<HasVariableMap<Archiver>, std::any&> variable(std::string_view name) {
 		return ar->variable(name);
 	}
-};
-
-template <class Ar, class Allocator>
-struct SaveContext {
-	Ar* ar;
-	Allocator allocator;
-
-	SaveContext(Ar* ar, const Allocator& allocator) : ar(ar), allocator(allocator) {}
-
-	ProtocolVersion protocolVersion() const { return ar->protocolVersion(); }
-
-	void addArena(Arena& arena) {}
-
-	uint8_t* allocate(size_t s) { return allocator(s); }
-
-	SaveContext& context() { return *this; }
 };
 
 template <class ReaderImpl>
@@ -199,38 +184,78 @@ class ObjectWriter {
 	}
 	ProtocolVersion mProtocolVersion;
 
+	class AllocateFunctor {
+	public:
+		explicit AllocateFunctor(ObjectWriter* pObjectWriter) : pObjectWriter(pObjectWriter), numAllocations(0) {}
+
+		uint8_t* operator()(const size_t size) {
+			++numAllocations;
+
+			pObjectWriter->size = size + (pObjectWriter->writeProtocolVersion ? sizeof(uint64_t) : 0);
+			if (pObjectWriter->customAllocator != nullptr) {
+				pObjectWriter->data =
+				    pObjectWriter->customAllocator(pObjectWriter->size, pObjectWriter->customAllocatorContext);
+			} else {
+				pObjectWriter->data = new (pObjectWriter->arena) uint8_t[pObjectWriter->size];
+			}
+			if (pObjectWriter->writeProtocolVersion) {
+				auto v = pObjectWriter->protocolVersion().versionWithFlags();
+				memcpy(pObjectWriter->data, &v, sizeof(uint64_t));
+				return pObjectWriter->data + sizeof(uint64_t);
+			}
+			return pObjectWriter->data;
+		}
+
+		int getNumAllocations() const { return numAllocations; }
+
+	private:
+		ObjectWriter* pObjectWriter = nullptr;
+		int numAllocations = 0;
+	};
+
+	friend class AllocateFunctor;
+
+	class SaveContext {
+	private:
+		ObjectWriter* ar;
+		AllocateFunctor& allocator;
+
+	public:
+		SaveContext(ObjectWriter* ar, AllocateFunctor& allocator) : ar(ar), allocator(allocator) {}
+
+		ProtocolVersion protocolVersion() const { return ar->protocolVersion(); }
+
+		void addArena(Arena& arena) {}
+
+		uint8_t* allocate(size_t s) { return allocator(s); }
+
+		SaveContext& context() { return *this; }
+	};
+
 public:
+	typedef uint8_t* (*CustomAllocatorFunc_t)(const size_t, void*);
+
 	template <class VersionOptions>
-	ObjectWriter(VersionOptions vo) {
+	explicit ObjectWriter(VersionOptions vo) : customAllocator(nullptr), customAllocatorContext(nullptr) {
 		vo.write(*this);
 	}
+
+	// NOTE: It is known that clang compiler will spend long time on instantiating std::function objects when there is
+	// capture. By downgrading it to a function pointer, the compile time can be reduced. The trade is an additional
+	// void* must be used to carry the captured environment.
 	template <class VersionOptions>
-	explicit ObjectWriter(std::function<uint8_t*(size_t)> customAllocator, VersionOptions vo)
-	  : customAllocator(customAllocator) {
+	explicit ObjectWriter(CustomAllocatorFunc_t customAllocator_, void* customAllocatorContext_, VersionOptions vo)
+	  : customAllocator(customAllocator_), customAllocatorContext(customAllocatorContext_) {
 		vo.write(*this);
 	}
+
 	template <class... Items>
 	void serialize(FileIdentifier file_identifier, Items const&... items) {
-		int allocations = 0;
-		auto allocator = [this, &allocations](size_t size_) {
-			++allocations;
-			this->size = writeProtocolVersion ? size_ + sizeof(uint64_t) : size_;
-			if (customAllocator) {
-				data = customAllocator(this->size);
-			} else {
-				data = new (arena) uint8_t[this->size];
-			}
-			if (writeProtocolVersion) {
-				auto v = protocolVersion().versionWithFlags();
-				memcpy(data, &v, sizeof(uint64_t));
-				return data + sizeof(uint64_t);
-			}
-			return data;
-		};
 		ASSERT(data == nullptr); // object serializer can only serialize one object
-		SaveContext<ObjectWriter, decltype(allocator)> context(this, allocator);
+		AllocateFunctor allocator(this);
+		SaveContext context(this, allocator);
 		save_members(context, file_identifier, items...);
-		ASSERT(allocations == 1);
+		ASSERT(allocator.getNumAllocations() == 1);
 	}
 
 	template <class Item>
@@ -260,7 +285,8 @@ public:
 
 private:
 	Arena arena;
-	std::function<uint8_t*(size_t)> customAllocator;
+	CustomAllocatorFunc_t customAllocator = nullptr;
+	void* customAllocatorContext = nullptr;
 	uint8_t* data = nullptr;
 	int size = 0;
 };

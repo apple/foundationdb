@@ -22,10 +22,10 @@
 #define FDBCLIENT_BLOBGRANULECOMMON_H
 #pragma once
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 
-#include "flow/BlobCipher.h"
 #include "flow/EncryptUtils.h"
 #include "flow/IRandom.h"
 #include "flow/serialize.h"
@@ -53,6 +53,38 @@ struct GranuleDeltas : VectorRef<MutationsAndVersionRef> {
 	void serialize(Ar& ar) {
 		serializer(ar, ((VectorRef<MutationsAndVersionRef>&)*this));
 	}
+};
+
+#pragma pack(push, 4)
+struct GranuleMutationRef {
+	MutationRef::Type type;
+	Version version;
+	StringRef param1;
+	StringRef param2;
+
+	GranuleMutationRef() {}
+	GranuleMutationRef(MutationRef::Type t, Version v, StringRef param1, StringRef param2)
+	  : type(t), version(v), param1(param1), param2(param2) {}
+	GranuleMutationRef(Arena& to, MutationRef::Type t, Version v, StringRef param1, StringRef param2)
+	  : type(t), version(v), param1(to, param1), param2(to, param2) {}
+	GranuleMutationRef(Arena& to, const GranuleMutationRef& from)
+	  : type(from.type), version(from.version), param1(to, from.param1), param2(to, from.param2) {}
+};
+#pragma pack(pop)
+
+struct GranuleMaterializeStats {
+	// file-level stats
+	int64_t inputBytes;
+	int64_t outputBytes;
+
+	// merge stats
+	int32_t snapshotRows;
+	int32_t rowsCleared;
+	int32_t rowsInserted;
+	int32_t rowsUpdated;
+
+	GranuleMaterializeStats()
+	  : inputBytes(0), outputBytes(0), snapshotRows(0), rowsCleared(0), rowsInserted(0), rowsUpdated(0) {}
 };
 
 struct BlobGranuleCipherKeysMeta {
@@ -273,6 +305,69 @@ struct BlobGranuleHistoryValue {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, granuleID, parentBoundaries, parentVersions);
+	}
+};
+
+struct GranuleHistory {
+	KeyRange range;
+	Version version;
+	Standalone<BlobGranuleHistoryValue> value;
+
+	GranuleHistory() {}
+
+	GranuleHistory(KeyRange range, Version version, Standalone<BlobGranuleHistoryValue> value)
+	  : range(range), version(version), value(value) {}
+};
+
+// A manifest to assist full fdb restore from blob granule files
+struct BlobManifestTailer {
+	constexpr static FileIdentifier file_identifier = 379431;
+	int64_t totalRows;
+	int64_t totalSegments;
+	int64_t totalBytes;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, totalRows, totalSegments, totalBytes);
+	}
+};
+
+// Defines blob restore status
+enum BlobRestorePhase {
+	INIT = 0,
+	STARTING_MIGRATOR = 1,
+	LOADING_MANIFEST = 2,
+	LOADED_MANIFEST = 3,
+	COPYING_DATA = 4,
+	APPLYING_MLOGS = 5,
+	DONE = 6,
+	ERROR = 7
+};
+struct BlobRestoreStatus {
+	constexpr static FileIdentifier file_identifier = 378657;
+	BlobRestorePhase phase;
+	int status;
+
+	BlobRestoreStatus() : phase(BlobRestorePhase::INIT){};
+	BlobRestoreStatus(BlobRestorePhase pha) : phase(pha), status(0){};
+	BlobRestoreStatus(BlobRestorePhase pha, int prog) : phase(pha), status(prog){};
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, phase, status);
+	}
+};
+
+struct BlobRestoreArg {
+	constexpr static FileIdentifier file_identifier = 947689;
+	Optional<Version> version;
+
+	BlobRestoreArg() {}
+	BlobRestoreArg(Optional<Version> v) : version(v){};
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version);
 	}
 };
 

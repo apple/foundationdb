@@ -44,9 +44,8 @@ class UnsentPacketQueue : NonCopyable {
 public:
 	UnsentPacketQueue()
 	  : unsent_first(0), unsent_last(0),
-	    sendQueueLatencyHistogram(Histogram::getHistogram(LiteralStringRef("UnsentPacketQueue"),
-	                                                      LiteralStringRef("QueueWait"),
-	                                                      Histogram::Unit::microseconds)) {}
+	    sendQueueLatencyHistogram(
+	        Histogram::getHistogram("UnsentPacketQueue"_sr, "QueueWait"_sr, Histogram::Unit::milliseconds)) {}
 
 	~UnsentPacketQueue() {
 		discardAll();

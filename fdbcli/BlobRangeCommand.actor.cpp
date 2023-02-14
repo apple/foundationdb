@@ -24,6 +24,7 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/BlobGranuleRequest.actor.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
@@ -88,6 +89,22 @@ ACTOR Future<Void> doBlobCheck(Database db, Key startKey, Key endKey, Optional<V
 	return Void();
 }
 
+ACTOR Future<Void> doBlobFlush(Database db, Key startKey, Key endKey, Optional<Version> version, bool compact) {
+	// TODO make DB function?
+	state Version flushVersion;
+	if (version.present()) {
+		flushVersion = version.get();
+	} else {
+		wait(store(flushVersion, getLatestReadVersion(db)));
+	}
+
+	KeyRange range(KeyRangeRef(startKey, endKey));
+	FlushGranuleRequest req(-1, range, flushVersion, compact);
+	wait(success(doBlobGranuleRequests(db, range, req, &BlobWorkerInterface::flushGranuleRequest)));
+
+	return Void();
+}
+
 } // namespace
 
 namespace fdb_cli {
@@ -112,7 +129,7 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 		end = tokens[3];
 	}
 
-	if (end > LiteralStringRef("\xff")) {
+	if (end > "\xff"_sr) {
 		// TODO is this something we want?
 		fmt::print("Cannot blobbify system keyspace! Problematic End Key: {0}\n", tokens[3].printable());
 		return false;
@@ -127,22 +144,28 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 			}
 			fmt::print("{0} blobbify range for [{1} - {2})\n",
 			           starting ? "Starting" : "Stopping",
-			           tokens[2].printable().c_str(),
-			           tokens[3].printable().c_str());
+			           tokens[2].printable(),
+			           tokens[3].printable());
 			state bool success = false;
 			if (starting) {
 				wait(store(success, localDb->blobbifyRange(KeyRangeRef(begin, end))));
 			} else {
 				wait(store(success, localDb->unblobbifyRange(KeyRangeRef(begin, end))));
 			}
-			if (!success) {
+			if (success) {
+				fmt::print("{0} updated blob range [{1} - {2}) succeeded\n",
+				           starting ? "Starting" : "Stopping",
+				           tokens[2].printable(),
+				           tokens[3].printable());
+			} else {
 				fmt::print("{0} blobbify range for [{1} - {2}) failed\n",
 				           starting ? "Starting" : "Stopping",
-				           tokens[2].printable().c_str(),
-				           tokens[3].printable().c_str());
+				           tokens[2].printable(),
+				           tokens[3].printable());
 			}
 			return success;
-		} else if (tokencmp(tokens[1], "purge") || tokencmp(tokens[1], "forcepurge") || tokencmp(tokens[1], "check")) {
+		} else if (tokencmp(tokens[1], "purge") || tokencmp(tokens[1], "forcepurge") || tokencmp(tokens[1], "check") ||
+		           tokencmp(tokens[1], "flush") || tokencmp(tokens[1], "compact")) {
 			bool purge = tokencmp(tokens[1], "purge") || tokencmp(tokens[1], "forcepurge");
 			bool forcePurge = tokencmp(tokens[1], "forcepurge");
 
@@ -170,7 +193,15 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 			if (purge) {
 				wait(doBlobPurge(localDb, begin, end, version, forcePurge));
 			} else {
-				wait(doBlobCheck(localDb, begin, end, version));
+				if (tokencmp(tokens[1], "check")) {
+					wait(doBlobCheck(localDb, begin, end, version));
+				} else if (tokencmp(tokens[1], "flush")) {
+					wait(doBlobFlush(localDb, begin, end, version, false));
+				} else if (tokencmp(tokens[1], "compact")) {
+					wait(doBlobFlush(localDb, begin, end, version, true));
+				} else {
+					ASSERT(false);
+				}
 			}
 		} else {
 			printUsage(tokens[0]);
@@ -182,5 +213,5 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 
 CommandFactory blobRangeFactory(
     "blobrange",
-    CommandHelp("blobrange <start|stop|check|purge|forcepurge> <startkey> <endkey> [version]", "", ""));
+    CommandHelp("blobrange <start|stop|check|purge|forcepurge|flush|compact> <startkey> <endkey> [version]", "", ""));
 } // namespace fdb_cli

@@ -21,13 +21,16 @@
 // This file implements the functions and actors used by the RestoreLoader role.
 // The RestoreLoader role starts with the restoreLoaderCore actor
 
+#include "fdbclient/BlobCipher.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
 #include "fdbserver/MutationTracking.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/StorageMetrics.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -44,17 +47,19 @@ void splitMutation(const KeyRangeMap<UID>& krMap,
                    VectorRef<MutationRef>& mvector,
                    Arena& nodeIDs_arena,
                    VectorRef<UID>& nodeIDs);
-void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
-                              std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
-                              SerializedMutationListMap* mutationMap,
-                              std::map<LoadingParam, SampledMutationsVec>::iterator samplesIter,
-                              LoaderCounters* cc,
-                              const RestoreAsset& asset);
+ACTOR Future<Void> _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
+                                            std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
+                                            SerializedMutationListMap* mutationMap,
+                                            std::map<LoadingParam, SampledMutationsVec>::iterator samplesIter,
+                                            LoaderCounters* cc,
+                                            RestoreAsset asset,
+                                            Database cx);
 
 void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<RestoreLoaderData> self);
-ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self);
+ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self, Database cx);
 ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequest req,
-                                              Reference<RestoreLoaderData> self);
+                                              Reference<RestoreLoaderData> self,
+                                              Database cx);
 ACTOR Future<Void> sendMutationsToApplier(
     std::priority_queue<RestoreLoaderSchedSendLoadParamRequest>* sendLoadParamQueue,
     std::map<int, int>* inflightSendLoadParamReqs,
@@ -64,7 +69,8 @@ ACTOR Future<Void> sendMutationsToApplier(
     RestoreAsset asset,
     bool isRangeFile,
     std::map<Key, UID>* pRangeToApplier,
-    std::map<UID, RestoreApplierInterface>* pApplierInterfaces);
+    std::map<UID, RestoreApplierInterface>* pApplierInterfaces,
+    Database cx);
 ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pProcessedFileOffset,
                                                            SerializedMutationListMap* mutationMap,
                                                            Reference<IBackupContainer> bc,
@@ -79,19 +85,20 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     LoaderCounters* cc,
     Reference<IBackupContainer> bc,
     Version version,
-    RestoreAsset asset);
+    RestoreAsset asset,
+    Database cx);
 ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreLoaderData> self);
 
 // Dispatch requests based on node's business (i.e, cpu usage for now) and requests' priorities
 // Requests for earlier version batches are preferred; which is equivalent to
 // sendMuttionsRequests are preferred than loadingFileRequests
-ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
+ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self, Database cx) {
 	try {
 		state int curVBInflightReqs = 0;
 		state int sendLoadParams = 0;
 		state int lastLoadReqs = 0;
 		loop {
-			TraceEvent(SevDebug, "FastRestoreLoaderDispatchRequests", self->id())
+			TraceEvent(SevVerbose, "FastRestoreLoaderDispatchRequests", self->id())
 			    .detail("SendingQueue", self->sendingQueue.size())
 			    .detail("LoadingQueue", self->loadingQueue.size())
 			    .detail("SendingLoadParamQueue", self->sendLoadParamQueue.size())
@@ -139,7 +146,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 				// Dispatch the request if it is the next version batch to process or if cpu usage is low
 				if (req.batchIndex - 1 == self->finishedSendingVB ||
 				    self->cpuUsage < SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) {
-					self->addActor.send(handleSendMutationsRequest(req, self));
+					self->addActor.send(handleSendMutationsRequest(req, self, cx));
 					self->sendingQueue.pop();
 				}
 			}
@@ -204,7 +211,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 					self->loadingQueue.pop();
 					ASSERT(false); // Check if this ever happens easily
 				} else {
-					self->addActor.send(handleLoadFileRequest(req, self));
+					self->addActor.send(handleLoadFileRequest(req, self, cx));
 					self->loadingQueue.pop();
 					lastLoadReqs++;
 				}
@@ -216,7 +223,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 			updateProcessStats(self);
 
 			if (self->loadingQueue.empty() && self->sendingQueue.empty() && self->sendLoadParamQueue.empty()) {
-				TraceEvent(SevDebug, "FastRestoreLoaderDispatchRequestsWaitOnRequests", self->id())
+				TraceEvent(SevVerbose, "FastRestoreLoaderDispatchRequestsWaitOnRequests", self->id())
 				    .detail("HasPendingRequests", self->hasPendingRequests->get());
 				self->hasPendingRequests->set(false);
 				wait(self->hasPendingRequests->onChange()); // CAREFUL:Improper req release may cause restore stuck here
@@ -244,7 +251,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
 	actors.add(updateProcessMetrics(self));
 	actors.add(traceProcessMetrics(self, "RestoreLoader"));
 
-	self->addActor.send(dispatchRequests(self));
+	self->addActor.send(dispatchRequests(self, cx));
 
 	loop {
 		state std::string requestTypeStr = "[Init]";
@@ -296,7 +303,9 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
 					TraceEvent("FastRestoreLoaderCoreExitRole", self->id());
 					break;
 				}
-				when(wait(error)) { TraceEvent("FastRestoreLoaderActorCollectionError", self->id()); }
+				when(wait(error)) {
+					TraceEvent("FastRestoreLoaderActorCollectionError", self->id());
+				}
 			}
 		} catch (Error& e) {
 			bool isError = e.code() != error_code_operation_cancelled; // == error_code_broken_promise
@@ -361,6 +370,18 @@ void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<Res
 	req.reply.send(RestoreCommonReply(self->id()));
 }
 
+ACTOR static Future<MutationRef> _decryptMutation(MutationRef mutation, Database cx, Arena* arena) {
+	ASSERT(mutation.isEncrypted());
+	Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
+	state const BlobCipherEncryptHeader* header = mutation.encryptionHeader();
+	std::unordered_set<BlobCipherDetails> cipherDetails;
+	cipherDetails.insert(header->cipherHeaderDetails);
+	cipherDetails.insert(header->cipherTextDetails);
+	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
+	    wait(getEncryptCipherKeys(dbInfo, cipherDetails, BlobCipherMetrics::BACKUP));
+	return mutation.decrypt(getCipherKeysResult, *arena, BlobCipherMetrics::BACKUP);
+}
+
 // Parse a data block in a partitioned mutation log file and store mutations
 // into "kvOpsIter" and samples into "samplesIter".
 ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
@@ -370,7 +391,8 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
     std::map<LoadingParam, SampledMutationsVec>::iterator samplesIter,
     LoaderCounters* cc,
     Reference<IBackupContainer> bc,
-    RestoreAsset asset) {
+    RestoreAsset asset,
+    Database cx) {
 	state Standalone<StringRef> buf = makeString(asset.len);
 	state Reference<IAsyncFile> file = wait(bc->readFile(asset.filename));
 	int rLen = wait(file->read(mutateString(buf), asset.len, asset.offset));
@@ -385,52 +407,52 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 	    .detail("Offset", asset.offset)
 	    .detail("Length", asset.len);
 
-	// Ensure data blocks in the same file are processed in order
-	wait(processedFileOffset->whenAtLeast(asset.offset));
-	ASSERT(processedFileOffset->get() == asset.offset);
-
-	Arena tempArena;
-	StringRefReader reader(buf, restore_corrupted_data());
+	state Arena tempArena;
+	state StringRefReader reader(buf, restore_corrupted_data());
 	try {
 		// Read block header
 		if (reader.consume<int32_t>() != PARTITIONED_MLOG_VERSION)
 			throw restore_unsupported_file_version();
 
-		VersionedMutationsMap& kvOps = kvOpsIter->second;
+		state VersionedMutationsMap* kvOps = &kvOpsIter->second;
 		while (1) {
 			// If eof reached or first key len bytes is 0xFF then end of block was reached.
 			if (reader.eof() || *reader.rptr == 0xFF)
 				break;
 
 			// Deserialize messages written in saveMutationsToFile().
-			LogMessageVersion msgVersion;
+			state LogMessageVersion msgVersion;
 			msgVersion.version = reader.consumeNetworkUInt64();
 			msgVersion.sub = reader.consumeNetworkUInt32();
-			int msgSize = reader.consumeNetworkInt32();
-			const uint8_t* message = reader.consume(msgSize);
+			state int msgSize = reader.consumeNetworkInt32();
+			state const uint8_t* message = reader.consume(msgSize);
 
 			// Skip mutations out of the version range
-			if (!asset.isInVersionRange(msgVersion.version))
+			if (!asset.isInVersionRange(msgVersion.version)) {
+				wait(yield()); // avoid potential stack overflows
 				continue;
+			}
 
-			VersionedMutationsMap::iterator it;
+			state VersionedMutationsMap::iterator it;
 			bool inserted;
-			std::tie(it, inserted) = kvOps.emplace(msgVersion, MutationsVec());
+			std::tie(it, inserted) = kvOps->emplace(msgVersion, MutationsVec());
 			// A clear mutation can be split into multiple mutations with the same (version, sub).
 			// See saveMutationsToFile(). Current tests only use one key range per backup, thus
 			// only one clear mutation is generated (i.e., always inserted).
 			ASSERT(inserted);
 
 			ArenaReader rd(buf.arena(), StringRef(message, msgSize), AssumeVersion(g_network->protocolVersion()));
-			MutationRef mutation;
+			state MutationRef mutation;
 			rd >> mutation;
 			if (mutation.isEncrypted()) {
-				throw encrypt_unsupported();
+				MutationRef decryptedMutation = wait(_decryptMutation(mutation, cx, &tempArena));
+				mutation = decryptedMutation;
 			}
 
 			// Skip mutation whose commitVesion < range kv's version
 			if (logMutationTooOld(pRangeVersions, mutation, msgVersion.version)) {
 				cc->oldLogMutations += 1;
+				wait(yield()); // avoid potential stack overflows
 				continue;
 			}
 
@@ -438,6 +460,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			if (mutation.param1 >= asset.range.end ||
 			    (isRangeMutation(mutation) && mutation.param2 < asset.range.begin) ||
 			    (!isRangeMutation(mutation) && mutation.param1 < asset.range.begin)) {
+				wait(yield()); // avoid potential stack overflows
 				continue;
 			}
 
@@ -488,7 +511,6 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 		    .detail("BlockLen", asset.len);
 		throw;
 	}
-	processedFileOffset->set(asset.offset + asset.len);
 	return Void();
 }
 
@@ -500,12 +522,24 @@ ACTOR static Future<Void> parsePartitionedLogFileOnLoader(
     std::map<LoadingParam, SampledMutationsVec>::iterator samplesIter,
     LoaderCounters* cc,
     Reference<IBackupContainer> bc,
-    RestoreAsset asset) {
+    RestoreAsset asset,
+    Database cx) {
 	state int readFileRetries = 0;
 	loop {
 		try {
+			// Ensure data blocks in the same file are processed in order
+			wait(processedFileOffset->whenAtLeast(asset.offset));
+			ASSERT(processedFileOffset->get() == asset.offset);
+
 			wait(_parsePartitionedLogFileOnLoader(
-			    pRangeVersions, processedFileOffset, kvOpsIter, samplesIter, cc, bc, asset));
+			    pRangeVersions, processedFileOffset, kvOpsIter, samplesIter, cc, bc, asset, cx));
+			processedFileOffset->set(asset.offset + asset.len);
+
+			TraceEvent("FastRestoreLoaderDecodingLogFileDone")
+			    .detail("BatchIndex", asset.batchIndex)
+			    .detail("Filename", asset.filename)
+			    .detail("Offset", asset.offset)
+			    .detail("Length", asset.len);
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_restore_bad_read || e.code() == error_code_restore_unsupported_file_version ||
@@ -532,7 +566,8 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions,
                                         LoadingParam param,
                                         Reference<LoaderBatchData> batchData,
                                         UID loaderID,
-                                        Reference<IBackupContainer> bc) {
+                                        Reference<IBackupContainer> bc,
+                                        Database cx) {
 	// Temporary data structure for parsing log files into (version, <K, V, mutationType>)
 	// Must use StandAlone to save mutations, otherwise, the mutationref memory will be corrupted
 	// mutationMap: Key is the unique identifier for a batch of mutation logs at the same version
@@ -562,7 +597,7 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions,
 		subAsset.len = std::min<int64_t>(param.blockSize, param.asset.len - j);
 		if (param.isRangeFile) {
 			fileParserFutures.push_back(_parseRangeFileToMutationsOnLoader(
-			    kvOpsPerLPIter, samplesIter, &batchData->counters, bc, param.rangeVersion.get(), subAsset));
+			    kvOpsPerLPIter, samplesIter, &batchData->counters, bc, param.rangeVersion.get(), subAsset, cx));
 		} else {
 			// TODO: Sanity check the log file's range is overlapped with the restored version range
 			if (param.isPartitionedLog()) {
@@ -572,7 +607,8 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions,
 				                                                            samplesIter,
 				                                                            &batchData->counters,
 				                                                            bc,
-				                                                            subAsset));
+				                                                            subAsset,
+				                                                            cx));
 			} else {
 				fileParserFutures.push_back(
 				    parseLogFileToMutationsOnLoader(&processedFileOffset, &mutationMap, bc, subAsset));
@@ -582,8 +618,8 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions,
 	wait(waitForAll(fileParserFutures));
 
 	if (!param.isRangeFile && !param.isPartitionedLog()) {
-		_parseSerializedMutation(
-		    pRangeVersions, kvOpsPerLPIter, &mutationMap, samplesIter, &batchData->counters, param.asset);
+		wait(_parseSerializedMutation(
+		    pRangeVersions, kvOpsPerLPIter, &mutationMap, samplesIter, &batchData->counters, param.asset, cx));
 	}
 
 	TraceEvent("FastRestoreLoaderProcessLoadingParamDone", loaderID)
@@ -594,7 +630,7 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions,
 }
 
 // A loader can process multiple RestoreLoadFileRequest in parallel.
-ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self) {
+ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self, Database cx) {
 	state Reference<LoaderBatchData> batchData = self->batch[req.batchIndex];
 	state bool isDuplicated = true;
 	state bool printTrace = false;
@@ -623,7 +659,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 		    .detail("ProcessLoadParam", req.param.toString());
 		ASSERT(batchData->sampleMutations.find(req.param) == batchData->sampleMutations.end());
 		batchData->processedFileParams[req.param] =
-		    _processLoadingParam(&self->rangeVersions, req.param, batchData, self->id(), self->bc);
+		    _processLoadingParam(&self->rangeVersions, req.param, batchData, self->id(), self->bc, cx);
 		self->inflightLoadingReqs++;
 		isDuplicated = false;
 	} else {
@@ -682,7 +718,8 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 // Send buffered mutations to appliers.
 // Do not need to block on low memory usage because this actor should not increase memory usage.
 ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequest req,
-                                              Reference<RestoreLoaderData> self) {
+                                              Reference<RestoreLoaderData> self,
+                                              Database cx) {
 	state Reference<LoaderBatchData> batchData;
 	state Reference<LoaderBatchStatus> batchStatus;
 	state bool isDuplicated = true;
@@ -759,7 +796,8 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 				                                                loadParam.asset,
 				                                                loadParam.isRangeFile,
 				                                                &batchData->rangeToApplier,
-				                                                &self->appliersInterf));
+				                                                &self->appliersInterf,
+				                                                cx));
 			}
 		}
 		wait(waitForAll(fSendMutations));
@@ -794,7 +832,7 @@ void buildApplierRangeMap(KeyRangeMap<UID>* krMap, std::map<Key, UID>* pRangeToA
 		endKey++;
 	}
 	if (beginKey != pRangeToApplier->end()) {
-		krMap->insert(KeyRangeRef(beginKey->first, normalKeys.end), beginKey->second);
+		krMap->insert(KeyRangeRef(beginKey->first, allKeys.end), beginKey->second);
 	}
 }
 
@@ -812,7 +850,8 @@ ACTOR Future<Void> sendMutationsToApplier(
     RestoreAsset asset,
     bool isRangeFile,
     std::map<Key, UID>* pRangeToApplier,
-    std::map<UID, RestoreApplierInterface>* pApplierInterfaces) {
+    std::map<UID, RestoreApplierInterface>* pApplierInterfaces,
+    Database cx) {
 	state VersionedMutationsMap& kvOps = *pkvOps;
 	state VersionedMutationsMap::iterator kvOp = kvOps.begin();
 	state int kvCount = 0;
@@ -820,6 +859,7 @@ ACTOR Future<Void> sendMutationsToApplier(
 	state Version msgIndex = 1; // Monotonically increased index for send message, must start at 1
 	state std::vector<UID> applierIDs = getApplierIDs(*pRangeToApplier);
 	state double msgSize = 0; // size of mutations in the message
+	state Arena arena;
 
 	// Wait for scheduler to kick it off
 	Promise<Void> toSched;
@@ -863,14 +903,18 @@ ACTOR Future<Void> sendMutationsToApplier(
 	for (auto& applierID : applierIDs) {
 		applierVersionedMutationsBuffer[applierID] = VersionedMutationsVec();
 	}
-	KeyRangeMap<UID> krMap;
+	state KeyRangeMap<UID> krMap;
 	buildApplierRangeMap(&krMap, pRangeToApplier);
 	for (kvOp = kvOps.begin(); kvOp != kvOps.end(); kvOp++) {
 		commitVersion = kvOp->first;
 		ASSERT(commitVersion.version >= asset.beginVersion);
 		ASSERT(commitVersion.version <= asset.endVersion); // endVersion is an empty commit to ensure progress
 		for (mIndex = 0; mIndex < kvOp->second.size(); mIndex++) {
-			MutationRef& kvm = kvOp->second[mIndex];
+			state MutationRef kvm = kvOp->second[mIndex];
+			if (kvm.isEncrypted()) {
+				MutationRef decryptedMutation = wait(_decryptMutation(kvm, cx, &arena));
+				kvm = decryptedMutation;
+			}
 			// Send the mutation to applier
 			if (isRangeMutation(kvm)) {
 				MutationsVec mvector;
@@ -997,7 +1041,7 @@ void splitMutation(const KeyRangeMap<UID>& krMap,
                    VectorRef<MutationRef>& mvector,
                    Arena& nodeIDs_arena,
                    VectorRef<UID>& nodeIDs) {
-	TraceEvent(SevDebug, "FastRestoreSplitMutation").detail("Mutation", m);
+	TraceEvent(SevVerbose, "FastRestoreSplitMutation").detail("Mutation", m);
 	ASSERT(mvector.empty());
 	ASSERT(nodeIDs.empty());
 	auto r = krMap.intersectingRanges(KeyRangeRef(m.param1, m.param2));
@@ -1082,31 +1126,35 @@ bool concatenateBackupMutationForLogFile(SerializedMutationListMap* pMutationMap
 // we may not get the entire mutation list for the version encoded_list_of_mutations:
 // [mutation1][mutation2]...[mutationk], where
 //	a mutation is encoded as [type:uint32_t][keyLength:uint32_t][valueLength:uint32_t][keyContent][valueContent]
-void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
-                              std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
-                              SerializedMutationListMap* pmutationMap,
-                              std::map<LoadingParam, SampledMutationsVec>::iterator samplesIter,
-                              LoaderCounters* cc,
-                              const RestoreAsset& asset) {
-	VersionedMutationsMap& kvOps = kvOpsIter->second;
-	SampledMutationsVec& samples = samplesIter->second;
-	SerializedMutationListMap& mutationMap = *pmutationMap;
+ACTOR Future<Void> _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
+                                            std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
+                                            SerializedMutationListMap* pmutationMap,
+                                            std::map<LoadingParam, SampledMutationsVec>::iterator samplesIter,
+                                            LoaderCounters* cc,
+                                            RestoreAsset asset,
+                                            Database cx) {
+	state VersionedMutationsMap* kvOps = &kvOpsIter->second;
+	state SampledMutationsVec* samples = &samplesIter->second;
+	state SerializedMutationListMap::iterator mutationMapIterator = pmutationMap->begin();
 
 	TraceEvent(SevFRMutationInfo, "FastRestoreLoaderParseSerializedLogMutation")
 	    .detail("BatchIndex", asset.batchIndex)
 	    .detail("RestoreAsset", asset.toString());
 
-	Arena tempArena;
-	for (auto& m : mutationMap) {
-		StringRef k = m.first.contents();
-		StringRef val = m.second.first.contents();
+	state Arena tempArena;
+	loop {
+		if (mutationMapIterator == pmutationMap->end()) {
+			break;
+		}
+		StringRef k = mutationMapIterator->first.contents();
+		state StringRef val = mutationMapIterator->second.first.contents();
 
 		StringRefReader kReader(k, restore_corrupted_data());
-		uint64_t commitVersion = kReader.consume<uint64_t>(); // Consume little Endian data
+		state uint64_t commitVersion = kReader.consume<uint64_t>(); // Consume little Endian data
 		// We have already filter the commit not in [beginVersion, endVersion) when we concatenate kv pair in log file
 		ASSERT_WE_THINK(asset.isInVersionRange(commitVersion));
 
-		StringRefReader vReader(val, restore_corrupted_data());
+		state StringRefReader vReader(val, restore_corrupted_data());
 		vReader.consume<uint64_t>(); // Consume the includeVersion
 		// TODO(xumengpanda): verify the protocol version is compatible and raise error if needed
 
@@ -1114,72 +1162,79 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 		uint32_t val_length_decoded = vReader.consume<uint32_t>();
 		ASSERT(val_length_decoded == val.size() - sizeof(uint64_t) - sizeof(uint32_t));
 
-		int sub = 0;
-		while (1) {
+		state int sub = 0;
+		loop {
 			// stop when reach the end of the string
 			if (vReader.eof()) { //|| *reader.rptr == 0xFF
 				break;
 			}
 
-			uint32_t type = vReader.consume<uint32_t>();
-			uint32_t kLen = vReader.consume<uint32_t>();
-			uint32_t vLen = vReader.consume<uint32_t>();
-			const uint8_t* k = vReader.consume(kLen);
-			const uint8_t* v = vReader.consume(vLen);
+			state uint32_t type = vReader.consume<uint32_t>();
+			state uint32_t kLen = vReader.consume<uint32_t>();
+			state uint32_t vLen = vReader.consume<uint32_t>();
+			state const uint8_t* k = vReader.consume(kLen);
+			state const uint8_t* v = vReader.consume(vLen);
 
-			MutationRef mutation((MutationRef::Type)type, KeyRef(k, kLen), KeyRef(v, vLen));
+			state MutationRef mutation((MutationRef::Type)type, KeyRef(k, kLen), KeyRef(v, vLen));
+			if (mutation.isEncrypted()) {
+				MutationRef decryptedMutation = wait(_decryptMutation(mutation, cx, &tempArena));
+				mutation = decryptedMutation;
+			}
 			// Should this mutation be skipped?
 			// Skip mutation whose commitVesion < range kv's version
 			if (logMutationTooOld(pRangeVersions, mutation, commitVersion)) {
 				cc->oldLogMutations += 1;
-				continue;
-			}
-
-			if (mutation.param1 >= asset.range.end ||
-			    (isRangeMutation(mutation) && mutation.param2 < asset.range.begin) ||
-			    (!isRangeMutation(mutation) && mutation.param1 < asset.range.begin)) {
-				continue;
-			}
-			// Only apply mutation within the asset.range and apply removePrefix and addPrefix
-			ASSERT(asset.removePrefix.size() == 0);
-			if (isRangeMutation(mutation)) {
-				mutation.param1 = mutation.param1 >= asset.range.begin ? mutation.param1 : asset.range.begin;
-				mutation.param2 = mutation.param2 < asset.range.end ? mutation.param2 : asset.range.end;
-				// Remove prefix or add prefix if we restore data to a new key space
-				if (asset.hasPrefix()) { // Avoid creating new Key
-					mutation.param1 =
-					    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
-					mutation.param2 =
-					    mutation.param2.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
-				}
 			} else {
-				if (asset.hasPrefix()) { // Avoid creating new Key
-					mutation.param1 =
-					    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+				if (mutation.param1 >= asset.range.end ||
+				    (isRangeMutation(mutation) && mutation.param2 < asset.range.begin) ||
+				    (!isRangeMutation(mutation) && mutation.param1 < asset.range.begin)) {
+				} else {
+					// Only apply mutation within the asset.range and apply removePrefix and addPrefix
+					ASSERT(asset.removePrefix.size() == 0);
+					if (isRangeMutation(mutation)) {
+						mutation.param1 = mutation.param1 >= asset.range.begin ? mutation.param1 : asset.range.begin;
+						mutation.param2 = mutation.param2 < asset.range.end ? mutation.param2 : asset.range.end;
+						// Remove prefix or add prefix if we restore data to a new key space
+						if (asset.hasPrefix()) { // Avoid creating new Key
+							mutation.param1 =
+							    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+							mutation.param2 =
+							    mutation.param2.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+						}
+					} else {
+						if (asset.hasPrefix()) { // Avoid creating new Key
+							mutation.param1 =
+							    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+						}
+					}
+
+					cc->loadedLogBytes += mutation.totalSize();
+
+					TraceEvent(SevFRMutationInfo, "FastRestoreDecodeLogFile")
+					    .detail("CommitVersion", commitVersion)
+					    .detail("ParsedMutation", mutation.toString());
+
+					auto it = kvOps->insert(std::make_pair(LogMessageVersion(commitVersion, sub++), MutationsVec()));
+					ASSERT(it.second); // inserted is true
+					ASSERT(sub <
+					       std::numeric_limits<int32_t>::max()); // range file mutation uses int32_max as subversion
+					it.first->second.push_back_deep(it.first->second.arena(), mutation);
+
+					// Sampling data similar to how SS sample bytes
+					ByteSampleInfo sampleInfo = isKeyValueInSample(KeyValueRef(mutation.param1, mutation.param2));
+					if (sampleInfo.inSample) {
+						cc->sampledLogBytes += sampleInfo.sampledSize;
+						samples->push_back_deep(samples->arena(),
+						                        SampledMutation(mutation.param1, sampleInfo.sampledSize));
+					}
+					ASSERT_WE_THINK(kLen >= 0 && kLen < val.size());
+					ASSERT_WE_THINK(vLen >= 0 && vLen < val.size());
 				}
 			}
-
-			cc->loadedLogBytes += mutation.totalSize();
-
-			TraceEvent(SevFRMutationInfo, "FastRestoreDecodeLogFile")
-			    .detail("CommitVersion", commitVersion)
-			    .detail("ParsedMutation", mutation.toString());
-
-			auto it = kvOps.insert(std::make_pair(LogMessageVersion(commitVersion, sub++), MutationsVec()));
-			ASSERT(it.second); // inserted is true
-			ASSERT(sub < std::numeric_limits<int32_t>::max()); // range file mutation uses int32_max as subversion
-			it.first->second.push_back_deep(it.first->second.arena(), mutation);
-
-			// Sampling data similar to how SS sample bytes
-			ByteSampleInfo sampleInfo = isKeyValueInSample(KeyValueRef(mutation.param1, mutation.param2));
-			if (sampleInfo.inSample) {
-				cc->sampledLogBytes += sampleInfo.sampledSize;
-				samples.push_back_deep(samples.arena(), SampledMutation(mutation.param1, sampleInfo.sampledSize));
-			}
-			ASSERT_WE_THINK(kLen >= 0 && kLen < val.size());
-			ASSERT_WE_THINK(vLen >= 0 && vLen < val.size());
 		}
+		mutationMapIterator++;
 	}
+	return Void();
 }
 
 // Parsing the data blocks in a range file
@@ -1194,7 +1249,8 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     LoaderCounters* cc,
     Reference<IBackupContainer> bc,
     Version version,
-    RestoreAsset asset) {
+    RestoreAsset asset,
+    Database cx) {
 	state VersionedMutationsMap& kvOps = kvOpsIter->second;
 	state SampledMutationsVec& sampleMutations = samplesIter->second;
 
@@ -1217,7 +1273,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 			// version
 			Reference<IAsyncFile> inFile = wait(bc->readFile(asset.filename));
 			Standalone<VectorRef<KeyValueRef>> kvs =
-			    wait(fileBackup::decodeRangeFileBlock(inFile, asset.offset, asset.len));
+			    wait(fileBackup::decodeRangeFileBlock(inFile, asset.offset, asset.len, cx));
 			TraceEvent("FastRestoreLoaderDecodedRangeFile")
 			    .detail("BatchIndex", asset.batchIndex)
 			    .detail("Filename", asset.filename)
@@ -1465,7 +1521,7 @@ void oldSplitMutation(std::map<Key, UID>* pRangeToApplier,
 		itApplier = itlow;
 		itlow++;
 		if (itlow == itup) {
-			ASSERT(m.param2 <= normalKeys.end);
+			ASSERT(m.param2 <= allKeys.end);
 			curm.param2 = m.param2;
 		} else if (m.param2 < itlow->first) {
 			UNREACHABLE();
@@ -1490,7 +1546,7 @@ TEST_CASE("/FastRestore/RestoreLoader/splitMutation") {
 	Standalone<VectorRef<UID>> nodeIDs;
 
 	// Prepare RangeToApplier
-	rangeToApplier.emplace(normalKeys.begin, deterministicRandom()->randomUniqueID());
+	rangeToApplier.emplace(allKeys.begin, deterministicRandom()->randomUniqueID());
 	int numAppliers = deterministicRandom()->randomInt(1, 50);
 	for (int i = 0; i < numAppliers; ++i) {
 		Key k = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 1000)));

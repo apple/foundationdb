@@ -48,7 +48,7 @@ TEST_CASE("/flow/actorcompiler/lineNumbers") {
 		}
 		break;
 	}
-	ASSERT(LiteralStringRef(__FILE__).endsWith(LiteralStringRef("FlowTests.actor.cpp")));
+	ASSERT(__FILE__sr.endsWith("FlowTests.actor.cpp"_sr));
 	return Void();
 }
 
@@ -69,7 +69,7 @@ TEST_CASE("/flow/buggifiedDelay") {
 		});
 		wait(f1 && f2);
 		if (last == 1) {
-			CODE_PROBE(true, "Delays can become ready out of order");
+			CODE_PROBE(true, "Delays can become ready out of order", probe::decoration::rare);
 			return Void();
 		}
 	}
@@ -142,6 +142,14 @@ Future<Void> g_cheese;
 ACTOR static Future<Void> cheeseWaitActor() {
 	wait(g_cheese);
 	return Void();
+}
+
+size_t cheeseWaitActorSize() {
+#ifndef OPEN_FOR_IDE
+	return sizeof(CheeseWaitActorActor);
+#else
+	return 0ul;
+#endif
 }
 
 ACTOR static void trivialVoidActor(int* result) {
@@ -353,7 +361,7 @@ TEST_CASE("/flow/flow/cancel2") {
 	return Void();
 }
 
-namespace {
+namespace flow_tests_details {
 // Simple message for flatbuffers unittests
 struct Int {
 	constexpr static FileIdentifier file_identifier = 12345;
@@ -365,7 +373,7 @@ struct Int {
 		serializer(ar, value);
 	}
 };
-} // namespace
+} // namespace flow_tests_details
 
 TEST_CASE("/flow/flow/nonserializable futures") {
 	// Types no longer need to be statically serializable to make futures, promises, actors
@@ -381,16 +389,16 @@ TEST_CASE("/flow/flow/nonserializable futures") {
 
 	// ReplyPromise can be used like a normal promise
 	{
-		ReplyPromise<Int> rpInt;
-		Future<Int> f = rpInt.getFuture();
+		ReplyPromise<flow_tests_details::Int> rpInt;
+		Future<flow_tests_details::Int> f = rpInt.getFuture();
 		ASSERT(!f.isReady());
 		rpInt.send(123);
 		ASSERT(f.get().value == 123);
 	}
 
 	{
-		RequestStream<Int> rsInt;
-		FutureStream<Int> f = rsInt.getFuture();
+		RequestStream<flow_tests_details::Int> rsInt;
+		FutureStream<flow_tests_details::Int> f = rsInt.getFuture();
 		rsInt.send(1);
 		rsInt.send(2);
 		ASSERT(f.pop().value == 1);
@@ -403,7 +411,7 @@ TEST_CASE("/flow/flow/nonserializable futures") {
 TEST_CASE("/flow/flow/networked futures") {
 	// RequestStream can be serialized
 	{
-		RequestStream<Int> locInt;
+		RequestStream<flow_tests_details::Int> locInt;
 		BinaryWriter wr(IncludeVersion());
 		wr << locInt;
 
@@ -411,7 +419,7 @@ TEST_CASE("/flow/flow/networked futures") {
 		       locInt.getEndpoint().getPrimaryAddress() == FlowTransport::transport().getLocalAddress());
 
 		BinaryReader rd(wr.toValue(), IncludeVersion());
-		RequestStream<Int> remoteInt;
+		RequestStream<flow_tests_details::Int> remoteInt;
 		rd >> remoteInt;
 
 		ASSERT(remoteInt.getEndpoint() == locInt.getEndpoint());
@@ -420,14 +428,14 @@ TEST_CASE("/flow/flow/networked futures") {
 	// ReplyPromise can be serialized
 	// TODO: This needs to fiddle with g_currentDeliveryPeerAddress
 	if (0) {
-		ReplyPromise<Int> locInt;
+		ReplyPromise<flow_tests_details::Int> locInt;
 		BinaryWriter wr(IncludeVersion());
 		wr << locInt;
 
 		ASSERT(locInt.getEndpoint().isValid() && locInt.getEndpoint().isLocal());
 
 		BinaryReader rd(wr.toValue(), IncludeVersion());
-		ReplyPromise<Int> remoteInt;
+		ReplyPromise<flow_tests_details::Int> remoteInt;
 		rd >> remoteInt;
 
 		ASSERT(remoteInt.getEndpoint() == locInt.getEndpoint());
@@ -1084,7 +1092,7 @@ TEST_CASE("#flow/flow/perf/actor patterns") {
 			ASSERT(out2[i].isReady());
 		}
 		printf("2xcheeseActor(chooseTwoActor(cheeseActor(fifo), never)): %0.2f M/sec\n", N / 1e6 / (timer() - start));
-		printf("sizeof(CheeseWaitActorActor) == %zu\n", sizeof(CheeseWaitActorActor));
+		printf("sizeof(CheeseWaitActorActor) == %zu\n", cheeseWaitActorSize());
 	}
 
 	{

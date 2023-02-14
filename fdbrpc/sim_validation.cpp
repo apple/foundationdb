@@ -51,13 +51,13 @@ void debug_advanceVersion(UID id, int64_t version, const char* suffix) {
 }
 
 void debug_advanceMinCommittedVersion(UID id, int64_t version) {
-	if (!g_network->isSimulated() || !g_simulator.extraDatabases.empty())
+	if (!g_network->isSimulated() || !g_simulator->extraDatabases.empty())
 		return;
 	debug_advanceVersion(id, version, "min");
 }
 
 void debug_advanceMaxCommittedVersion(UID id, int64_t version) {
-	if (!g_network->isSimulated() || !g_simulator.extraDatabases.empty())
+	if (!g_network->isSimulated() || !g_simulator->extraDatabases.empty())
 		return;
 	debug_advanceVersion(id, version, "max");
 }
@@ -67,7 +67,7 @@ bool debug_checkPartRestoredVersion(UID id,
                                     std::string context,
                                     std::string minormax,
                                     Severity sev = SevError) {
-	if (!g_network->isSimulated() || !g_simulator.extraDatabases.empty())
+	if (!g_network->isSimulated() || !g_simulator->extraDatabases.empty())
 		return false;
 	if (disabledMachines.count(id))
 		return false;
@@ -88,33 +88,33 @@ bool debug_checkPartRestoredVersion(UID id,
 }
 
 bool debug_checkRestoredVersion(UID id, int64_t version, std::string context, Severity sev) {
-	if (!g_network->isSimulated() || !g_simulator.extraDatabases.empty())
+	if (!g_network->isSimulated() || !g_simulator->extraDatabases.empty())
 		return false;
 	return debug_checkPartRestoredVersion(id, version, context, "min", sev) ||
 	       debug_checkPartRestoredVersion(id, version, context, "max", sev);
 }
 
 void debug_removeVersions(UID id) {
-	if (!g_network->isSimulated() || !g_simulator.extraDatabases.empty())
+	if (!g_network->isSimulated() || !g_simulator->extraDatabases.empty())
 		return;
 	validationData.erase(id.toString() + "min");
 	validationData.erase(id.toString() + "max");
 }
 
 bool debug_versionsExist(UID id) {
-	if (!g_network->isSimulated() || !g_simulator.extraDatabases.empty())
+	if (!g_network->isSimulated() || !g_simulator->extraDatabases.empty())
 		return false;
 	return validationData.count(id.toString() + "min") != 0 || validationData.count(id.toString() + "max") != 0;
 }
 
 bool debug_checkMinRestoredVersion(UID id, int64_t version, std::string context, Severity sev) {
-	if (!g_network->isSimulated() || !g_simulator.extraDatabases.empty())
+	if (!g_network->isSimulated() || !g_simulator->extraDatabases.empty())
 		return false;
 	return debug_checkPartRestoredVersion(id, version, context, "min", sev);
 }
 
 bool debug_checkMaxRestoredVersion(UID id, int64_t version, std::string context, Severity sev) {
-	if (!g_network->isSimulated() || !g_simulator.extraDatabases.empty())
+	if (!g_network->isSimulated() || !g_simulator->extraDatabases.empty())
 		return false;
 	return debug_checkPartRestoredVersion(id, version, context, "max", sev);
 }
@@ -129,13 +129,13 @@ void debug_setCheckRelocationDuration(bool check) {
 	checkRelocationDuration = check;
 }
 void debug_advanceVersionTimestamp(int64_t version, double t) {
-	if (!g_network->isSimulated() || !g_simulator.extraDatabases.empty())
+	if (!g_network->isSimulated() || !g_simulator->extraDatabases.empty())
 		return;
 	timedVersionsValidationData[version] = t;
 }
 
 bool debug_checkVersionTime(int64_t version, double t, std::string context, Severity sev) {
-	if (!g_network->isSimulated() || !g_simulator.extraDatabases.empty())
+	if (!g_network->isSimulated() || !g_simulator->extraDatabases.empty())
 		return false;
 	if (!timedVersionsValidationData.count(version)) {
 		TraceEvent(SevWarn, (context + "UnknownTime").c_str())

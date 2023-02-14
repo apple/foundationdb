@@ -20,7 +20,7 @@
 
 // Unit tests for API setup, network initialization functions from the FDB C API.
 
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 730
 #include <foundationdb/fdb_c.h>
 #include <iostream>
 #include <thread>
@@ -42,13 +42,13 @@ TEST_CASE("setup") {
 	CHECK(err);
 
 	// Select current API version
-	fdb_check(fdb_select_api_version(720));
+	fdb_check(fdb_select_api_version(FDB_API_VERSION));
 
 	// Error to call again after a successful return
-	err = fdb_select_api_version(720);
+	err = fdb_select_api_version(FDB_API_VERSION);
 	CHECK(err);
 
-	CHECK(fdb_get_max_api_version() >= 720);
+	CHECK(fdb_get_max_api_version() >= FDB_API_VERSION);
 
 	fdb_check(fdb_setup_network());
 	// Calling a second time should fail
@@ -66,7 +66,7 @@ TEST_CASE("setup") {
 	    },
 	    &context));
 
-	std::thread network_thread{ &fdb_run_network };
+	std::thread network_thread{ [] { fdb_check(fdb_run_network()); } };
 
 	CHECK(!context.called);
 	fdb_check(fdb_stop_network());

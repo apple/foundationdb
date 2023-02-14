@@ -24,6 +24,8 @@
 #include <sstream>
 
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
@@ -106,6 +108,7 @@ struct ExceptionContract {
 };
 
 struct FuzzApiCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "FuzzApiCorrectness";
 	static std::once_flag onceFlag;
 	static std::vector<std::function<
 	    Future<Void>(unsigned int const&, FuzzApiCorrectnessWorkload* const&, Reference<ITransaction> const&)>>
@@ -119,6 +122,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	int maxClearSize;
 	double initialKeyDensity;
 	bool useSystemKeys;
+	bool writeSystemKeys = false; // whether we really write to a system key in the workload
 	KeyRange conflictRange;
 	unsigned int operationId;
 	int64_t maximumTotalData;
@@ -133,6 +137,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	std::set<TenantName> createdTenants;
 	int numTenants;
 	int numTenantGroups;
+	int minTenantNum = -1;
+
+	bool illegalTenantAccess = false;
 
 	// Map from tenant number to key prefix
 	std::map<int, std::string> keyPrefixes;
@@ -140,11 +147,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	FuzzApiCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), operationId(0), success(true) {
 		std::call_once(onceFlag, [&]() { addTestCases(); });
 
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 60.0);
-		numOps = getOption(options, LiteralStringRef("numOps"), 21);
-		rarelyCommit = getOption(options, LiteralStringRef("rarelyCommit"), false);
-		maximumTotalData = getOption(options, LiteralStringRef("maximumTotalData"), 15e6);
-		minNode = getOption(options, LiteralStringRef("minNode"), 0);
+		testDuration = getOption(options, "testDuration"_sr, 60.0);
+		numOps = getOption(options, "numOps"_sr, 21);
+		rarelyCommit = getOption(options, "rarelyCommit"_sr, false);
+		maximumTotalData = getOption(options, "maximumTotalData"_sr, 15e6);
+		minNode = getOption(options, "minNode"_sr, 0);
 		adjacentKeys = deterministicRandom()->coinflip();
 		useSystemKeys = deterministicRandom()->coinflip();
 		initialKeyDensity = deterministicRandom()->random01(); // This fraction of keys are present before the first
@@ -178,10 +185,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		if (useSystemKeys && deterministicRandom()->coinflip()) {
 			keyPrefixes[-1] = "\xff\x01";
+			writeSystemKeys = true;
 		}
 
 		maxClearSize = 1 << deterministicRandom()->randomInt(0, 20);
-		conflictRange = KeyRangeRef(LiteralStringRef("\xfe"), LiteralStringRef("\xfe\x00"));
+		conflictRange = KeyRangeRef("\xfe"_sr, "\xfe\x00"_sr);
 		TraceEvent("FuzzApiCorrectnessConfiguration")
 		    .detail("Nodes", nodes)
 		    .detail("NumTenants", numTenants)
@@ -208,8 +216,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		    .detail("NewSeverity", SevInfo);
 	}
 
-	std::string description() const override { return "FuzzApiCorrectness"; }
-
 	static TenantName getTenant(int num) { return TenantNameRef(format("tenant_%d", num)); }
 	Optional<TenantGroupName> getTenantGroup(int num) {
 		int groupNum = num % (numTenantGroups + 1);
@@ -225,6 +231,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		if (clientId == 0) {
 			return _setup(cx, this);
 		}
+
 		return Void();
 	}
 
@@ -233,32 +240,45 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		self->db = db;
 
 		std::vector<Future<Void>> tenantFutures;
+		// The last tenant will not be created
+		for (int i = 0; i < self->numTenants; ++i) {
+			TenantName tenantName = getTenant(i);
+			TenantMapEntry entry;
+			entry.tenantGroup = self->getTenantGroup(i);
+			tenantFutures.push_back(::success(TenantAPI::createTenant(cx.getReference(), tenantName, entry)));
+			self->createdTenants.insert(tenantName);
+		}
+		wait(waitForAll(tenantFutures));
+
+		// Open one extra tenant to test the failure of using a tenant that doesn't exist
 		for (int i = 0; i < self->numTenants + 1; ++i) {
 			TenantName tenantName = getTenant(i);
 			self->tenants.push_back(self->db->openTenant(tenantName));
-
-			// The last tenant will not be created
-			if (i < self->numTenants) {
-				TenantMapEntry entry;
-				entry.tenantGroup = self->getTenantGroup(i);
-				entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
-				tenantFutures.push_back(::success(TenantAPI::createTenant(cx.getReference(), tenantName, entry)));
-				self->createdTenants.insert(tenantName);
-			}
 		}
 
-		wait(waitForAll(tenantFutures));
+		// When domain-aware encryption is enabled, writing random keys without specifying tenant may cause Redwood to
+		// create too many pages.
+		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+		if (config.encryptionAtRestMode.mode == EncryptionAtRestMode::DOMAIN_AWARE) {
+			self->minTenantNum = 0;
+		}
+
 		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0) {
-			return loadAndRun(this);
+			return loadAndRun(this, cx);
 		}
 		return Void();
 	}
 
-	Future<bool> check(Database const& cx) override { return success; }
+	Future<bool> check(Database const& cx) override {
+		if (!writeSystemKeys) { // there must be illegal access during data load
+			return illegalTenantAccess;
+		}
+		return success;
+	}
 
 	Key getKeyForIndex(int tenantNum, int idx) {
 		idx += minNode;
@@ -306,7 +326,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> loadAndRun(FuzzApiCorrectnessWorkload* self) {
+	ACTOR Future<Void> loadAndRun(FuzzApiCorrectnessWorkload* self, Database cx) {
 		state double startTime = now();
 		state int nodesPerTenant = std::max<int>(1, self->nodes / (self->numTenants + 1));
 		state int keysPerBatch =
@@ -315,7 +335,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		                              (self->getKeyForIndex(-1, nodesPerTenant).size() + self->valueSizeRange.second));
 		try {
 			loop {
-				state int tenantNum = -1;
+				state int tenantNum = self->minTenantNum;
 				for (; tenantNum < self->numTenants; ++tenantNum) {
 					state int i = 0;
 					wait(self->writeBarrier(self->db));
@@ -358,15 +378,26 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 								//TraceEvent("WDRInitBatch").detail("I", i).detail("CommittedVersion", tr->getCommittedVersion());
 								break;
 							} catch (Error& e) {
+								if (e.code() == error_code_illegal_tenant_access) {
+									ASSERT(!self->writeSystemKeys);
+									ASSERT_EQ(tenantNum, -1);
+									self->illegalTenantAccess = true;
+									break;
+								}
 								wait(unsafeThreadFutureToFuture(tr->onError(e)));
 							}
+						}
+
+						if (self->illegalTenantAccess) {
+							// no need to do the non-system writes
+							break;
 						}
 					}
 				}
 
 				loop {
 					try {
-						wait(self->randomTransaction(self) && delay(self->numOps * .001));
+						wait(self->randomTransaction(self, cx) && delay(self->numOps * .001));
 					} catch (Error& e) {
 						if (e.code() != error_code_not_committed)
 							throw e;
@@ -382,14 +413,14 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> randomTransaction(FuzzApiCorrectnessWorkload* self) {
+	ACTOR Future<Void> randomTransaction(FuzzApiCorrectnessWorkload* self, Database cx) {
 		state Reference<ITransaction> tr;
 		state bool readYourWritesDisabled = deterministicRandom()->coinflip();
 		state bool readAheadDisabled = deterministicRandom()->coinflip();
 		state std::vector<Future<Void>> operations;
 		state int waitLocation = 0;
 
-		state int tenantNum = deterministicRandom()->randomInt(-1, self->tenants.size());
+		state int tenantNum = deterministicRandom()->randomInt(self->minTenantNum, self->tenants.size());
 		if (tenantNum == -1) {
 			tr = self->db->createTransaction();
 		} else {
@@ -453,8 +484,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					wait(timeoutError(unsafeThreadFutureToFuture(tr->commit()), 30));
 				} catch (Error& e) {
 					if (e.code() == error_code_client_invalid_operation ||
-					    e.code() == error_code_transaction_too_large || e.code() == error_code_unknown_tenant ||
-					    e.code() == error_code_invalid_option) {
+					    e.code() == error_code_transaction_too_large || e.code() == error_code_invalid_option) {
 						throw not_committed();
 					}
 				}
@@ -465,7 +495,12 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 				if (e.code() == error_code_not_committed || e.code() == error_code_commit_unknown_result || cancelled) {
 					throw not_committed();
+				} else if (e.code() == error_code_illegal_tenant_access) {
+					ASSERT_EQ(tenantNum, -1);
+					ASSERT_EQ(cx->getTenantMode(), TenantMode::REQUIRED);
+					return Void();
 				}
+
 				try {
 					wait(unsafeThreadFutureToFuture(tr->onError(e)));
 				} catch (Error& e) {
@@ -737,18 +772,18 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				    error_code_special_keys_no_module_found,
 				    ExceptionContract::possibleIf(specialKeys.contains(key) && !workload->specialKeysRelaxed)),
 				// Read this particular special key may throw timed_out
-				std::make_pair(error_code_timed_out,
-				               ExceptionContract::possibleIf(key == LiteralStringRef("\xff\xff/status/json"))),
+				std::make_pair(error_code_timed_out, ExceptionContract::possibleIf(key == "\xff\xff/status/json"_sr)),
 				// Read this particular special key may throw special_keys_api_failure
 				std::make_pair(
 				    error_code_special_keys_api_failure,
 				    ExceptionContract::possibleIf(
-				        key ==
-				        LiteralStringRef("auto_coordinators")
-				            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin))),
+				        key == "auto_coordinators"_sr.withPrefix(
+				                   SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin))),
 				std::make_pair(error_code_tenant_not_found,
 				               ExceptionContract::possibleIf(!workload->canUseTenant(tr->getTenant()))),
 				std::make_pair(error_code_invalid_option,
+				               ExceptionContract::possibleIf(tr->getTenant().present() && specialKeys.contains(key))),
+				std::make_pair(error_code_illegal_tenant_access,
 				               ExceptionContract::possibleIf(tr->getTenant().present() && specialKeys.contains(key)))
 			};
 		}
@@ -829,6 +864,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				std::make_pair(error_code_tenant_not_found,
 				               ExceptionContract::possibleIf(!workload->canUseTenant(tr->getTenant()))),
 				std::make_pair(error_code_invalid_option,
+				               ExceptionContract::possibleIf(tr->getTenant().present() && isSpecialKeyRange)),
+				std::make_pair(error_code_illegal_tenant_access,
 				               ExceptionContract::possibleIf(tr->getTenant().present() && isSpecialKeyRange))
 			};
 		}
@@ -875,7 +912,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible),
 				std::make_pair(error_code_tenant_not_found,
 				               ExceptionContract::possibleIf(!workload->canUseTenant(tr->getTenant()))),
-				std::make_pair(error_code_invalid_option,
+				std::make_pair(error_code_illegal_tenant_access,
 				               ExceptionContract::possibleIf(tr->getTenant().present() && isSpecialKeyRange))
 			};
 		}
@@ -915,12 +952,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 			bool isSpecialKeyRange = specialKeys.contains(key1) && specialKeys.begin <= key2 && key2 <= specialKeys.end;
 			// Read this particular special key may throw special_keys_api_failure
-			Key autoCoordinatorSpecialKey =
-			    LiteralStringRef("auto_coordinators")
-			        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
+			Key autoCoordinatorSpecialKey = "auto_coordinators"_sr.withPrefix(
+			    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
 			KeyRangeRef actorLineageRange = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ACTORLINEAGE);
 			// Read this particular special key may throw timed_out
-			Key statusJsonSpecialKey = LiteralStringRef("\xff\xff/status/json");
+			Key statusJsonSpecialKey = "\xff\xff/status/json"_sr;
 
 			contract = {
 				std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
@@ -945,6 +981,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				std::make_pair(error_code_tenant_not_found,
 				               ExceptionContract::possibleIf(!workload->canUseTenant(tr->getTenant()))),
 				std::make_pair(error_code_invalid_option,
+				               ExceptionContract::possibleIf(tr->getTenant().present() && isSpecialKeyRange)),
+				std::make_pair(error_code_illegal_tenant_access,
 				               ExceptionContract::possibleIf(tr->getTenant().present() && isSpecialKeyRange))
 			};
 		}
@@ -972,11 +1010,10 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			limits = makeRangeLimits();
 
 			bool isSpecialKeyRange = specialKeys.contains(key1) && specialKeys.begin <= key2 && key2 <= specialKeys.end;
-			Key autoCoordinatorSpecialKey =
-			    LiteralStringRef("auto_coordinators")
-			        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
+			Key autoCoordinatorSpecialKey = "auto_coordinators"_sr.withPrefix(
+			    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
 			KeyRangeRef actorLineageRange = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ACTORLINEAGE);
-			Key statusJsonSpecialKey = LiteralStringRef("\xff\xff/status/json");
+			Key statusJsonSpecialKey = "\xff\xff/status/json"_sr;
 
 			contract = {
 				std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
@@ -1002,6 +1039,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				std::make_pair(error_code_tenant_not_found,
 				               ExceptionContract::possibleIf(!workload->canUseTenant(tr->getTenant()))),
 				std::make_pair(error_code_invalid_option,
+				               ExceptionContract::possibleIf(tr->getTenant().present() && isSpecialKeyRange)),
+				std::make_pair(error_code_illegal_tenant_access,
 				               ExceptionContract::possibleIf(tr->getTenant().present() && isSpecialKeyRange))
 			};
 		}
@@ -1471,4 +1510,4 @@ std::once_flag FuzzApiCorrectnessWorkload::onceFlag;
 std::vector<std::function<
     Future<Void>(unsigned int const&, FuzzApiCorrectnessWorkload* const&, Reference<ITransaction> const&)>>
     FuzzApiCorrectnessWorkload::testCases;
-WorkloadFactory<FuzzApiCorrectnessWorkload> FuzzApiCorrectnessWorkloadFactory("FuzzApiCorrectness");
+WorkloadFactory<FuzzApiCorrectnessWorkload> FuzzApiCorrectnessWorkloadFactory;

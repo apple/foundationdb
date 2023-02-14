@@ -26,6 +26,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct AsyncFileWriteWorkload : public AsyncFileWorkload {
+	static constexpr auto NAME = "AsyncFileWrite";
 	// Buffer used to store what is being written
 	Reference<AsyncFileBuffer> writeBuffer;
 
@@ -47,13 +48,11 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 
 	AsyncFileWriteWorkload(WorkloadContext const& wcx)
 	  : AsyncFileWorkload(wcx), writeBuffer(nullptr), bytesWritten("Bytes Written") {
-		numParallelWrites = getOption(options, LiteralStringRef("numParallelWrites"), 0);
-		writeSize = getOption(options, LiteralStringRef("writeSize"), _PAGE_SIZE);
-		fileSize = getOption(options, LiteralStringRef("fileSize"), 10002432);
-		sequential = getOption(options, LiteralStringRef("sequential"), true);
+		numParallelWrites = getOption(options, "numParallelWrites"_sr, 0);
+		writeSize = getOption(options, "writeSize"_sr, _PAGE_SIZE);
+		fileSize = getOption(options, "fileSize"_sr, 10002432);
+		sequential = getOption(options, "sequential"_sr, true);
 	}
-
-	std::string description() const override { return "AsyncFileWrite"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (enabled)
@@ -153,4 +152,4 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 	}
 };
 
-WorkloadFactory<AsyncFileWriteWorkload> AsyncFileWriteWorkloadFactory("AsyncFileWrite");
+WorkloadFactory<AsyncFileWriteWorkload> AsyncFileWriteWorkloadFactory;

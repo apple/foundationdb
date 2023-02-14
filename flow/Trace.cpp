@@ -25,6 +25,7 @@
 #include "flow/JsonTraceLogFormatter.h"
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
+#include <exception>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <cctype>
@@ -163,11 +164,11 @@ public:
 	bool logTraceEventMetrics;
 
 	void initMetrics() {
-		SevErrorNames.init(LiteralStringRef("TraceEvents.SevError"));
-		SevWarnAlwaysNames.init(LiteralStringRef("TraceEvents.SevWarnAlways"));
-		SevWarnNames.init(LiteralStringRef("TraceEvents.SevWarn"));
-		SevInfoNames.init(LiteralStringRef("TraceEvents.SevInfo"));
-		SevDebugNames.init(LiteralStringRef("TraceEvents.SevDebug"));
+		SevErrorNames.init("TraceEvents.SevError"_sr);
+		SevWarnAlwaysNames.init("TraceEvents.SevWarnAlways"_sr);
+		SevWarnNames.init("TraceEvents.SevWarn"_sr);
+		SevInfoNames.init("TraceEvents.SevInfo"_sr);
+		SevDebugNames.init("TraceEvents.SevDebug"_sr);
 		logTraceEventMetrics = true;
 	}
 
@@ -514,25 +515,29 @@ public:
 
 	void close() {
 		if (opened) {
-			MutexHolder hold(mutex);
+			try {
+				MutexHolder hold(mutex);
 
-			// Write remaining contents
-			auto a = new WriterThread::WriteBuffer(std::move(eventBuffer));
-			loggedLength += bufferLength;
-			eventBuffer = std::vector<TraceEventFields>();
-			bufferLength = 0;
-			writer->post(a);
+				// Write remaining contents
+				auto a = new WriterThread::WriteBuffer(std::move(eventBuffer));
+				loggedLength += bufferLength;
+				eventBuffer = std::vector<TraceEventFields>();
+				bufferLength = 0;
+				writer->post(a);
 
-			auto c = new WriterThread::Close();
-			writer->post(c);
+				auto c = new WriterThread::Close();
+				writer->post(c);
 
-			ThreadFuture<Void> f(new ThreadSingleAssignmentVar<Void>);
-			barriers->push(f);
-			writer->post(new WriterThread::Barrier);
+				ThreadFuture<Void> f(new ThreadSingleAssignmentVar<Void>);
+				barriers->push(f);
+				writer->post(new WriterThread::Barrier);
 
-			f.getBlocking();
+				f.getBlocking();
 
-			opened = false;
+				opened = false;
+			} catch (const std::exception& e) {
+				fprintf(stderr, "Error closing trace file: %s\n", e.what());
+			}
 		}
 	}
 
@@ -569,6 +574,11 @@ public:
 		universalFields[name] = value;
 	}
 
+	Optional<NetworkAddress> getLocalAddress() {
+		MutexHolder holder(mutex);
+		return this->localAddress;
+	}
+
 	void setLocalAddress(const NetworkAddress& addr) {
 		MutexHolder holder(mutex);
 		this->localAddress = addr;
@@ -600,7 +610,7 @@ public:
 NetworkAddress getAddressIndex() {
 	// ahm
 	//	if( g_network->isSimulated() )
-	//		return g_simulator.getCurrentProcess()->address;
+	//		return g_simulator->getCurrentProcess()->address;
 	//	else
 	return g_network->getLocalAddress();
 }
@@ -758,7 +768,7 @@ void flushTraceFileVoid() {
 	}
 }
 
-void openTraceFile(const NetworkAddress& na,
+void openTraceFile(const Optional<NetworkAddress>& na,
                    uint64_t rollsize,
                    uint64_t maxLogsSize,
                    std::string directory,
@@ -775,14 +785,23 @@ void openTraceFile(const NetworkAddress& na,
 	if (baseOfBase.empty())
 		baseOfBase = "trace";
 
-	std::string ip = na.ip.toString();
-	std::replace(ip.begin(), ip.end(), ':', '_'); // For IPv6, Windows doesn't accept ':' in filenames.
 	std::string baseName;
-	if (identifier.size() > 0) {
-		baseName = format("%s.%s.%s", baseOfBase.c_str(), ip.c_str(), identifier.c_str());
+	if (na.present()) {
+		std::string ip = na.get().ip.toString();
+		std::replace(ip.begin(), ip.end(), ':', '_'); // For IPv6, Windows doesn't accept ':' in filenames.
+
+		if (!identifier.empty()) {
+			baseName = format("%s.%s.%s", baseOfBase.c_str(), ip.c_str(), identifier.c_str());
+		} else {
+			baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.get().port);
+		}
+	} else if (!identifier.empty()) {
+		baseName = format("%s.0.0.0.0.%s", baseOfBase.c_str(), identifier.c_str());
 	} else {
-		baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.port);
+		// If neither network address nor identifier is provided, use PID for identification
+		baseName = format("%s.0.0.0.0.%d", baseOfBase.c_str(), ::getpid());
 	}
+
 	g_traceLog.open(directory,
 	                baseName,
 	                logGroup,
@@ -822,6 +841,10 @@ void setTraceLogGroup(const std::string& logGroup) {
 
 void addUniversalTraceField(const std::string& name, const std::string& value) {
 	g_traceLog.addUniversalTraceField(name, value);
+}
+
+bool isTraceLocalAddressSet() {
+	return g_traceLog.getLocalAddress().present();
 }
 
 void setTraceLocalAddress(const NetworkAddress& addr) {
@@ -1379,7 +1402,8 @@ void TraceBatch::addEvent(const char* name, uint64_t id, const char* location) {
 	if (FLOW_KNOBS->MIN_TRACE_SEVERITY > TRACE_BATCH_IMPLICIT_SEVERITY) {
 		return;
 	}
-	auto& eventInfo = eventBatch.emplace_back(EventInfo(TraceEvent::getCurrentTime(), name, id, location));
+	auto& eventInfo =
+	    eventBatch.emplace_back(EventInfo(TraceEvent::getCurrentTime(), ::timer_monotonic(), name, id, location));
 	if (dumpImmediately())
 		dump();
 	else
@@ -1448,9 +1472,16 @@ void TraceBatch::dump() {
 	buggifyBatch.clear();
 }
 
-TraceBatch::EventInfo::EventInfo(double time, const char* name, uint64_t id, const char* location) {
+TraceBatch::EventInfo::EventInfo(double time,
+                                 double monotonicTime,
+                                 const char* name,
+                                 uint64_t id,
+                                 const char* location) {
 	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
 	fields.addField("Time", format("%.6f", time));
+	// Include monotonic time for computing elapsed time between events on the same machine.
+	// The Time field is based on now(), which doesn't advance between wait()'s.
+	fields.addField("MonotonicTime", format("%.6f", monotonicTime));
 	if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
 		fields.addField("DateTime", TraceEvent::printRealTime(time));
 	}
@@ -1607,44 +1638,75 @@ void parseNumericValue(std::string const& s, uint64_t& outValue, bool permissive
 	throw attribute_not_found();
 }
 
-template <class T>
-T getNumericValue(TraceEventFields const& fields, std::string key, bool permissive) {
+template <class T, bool tryError>
+bool getNumericValue(TraceEventFields const& fields, std::string key, T& outValue, bool permissive) {
 	std::string field = fields.getValue(key);
 
 	try {
-		T value;
-		parseNumericValue(field, value, permissive);
-		return value;
+		parseNumericValue(field, outValue, permissive);
+		return true;
 	} catch (Error& e) {
-		std::string type;
+		if (tryError) {
+			std::string type;
 
-		TraceEvent ev(SevWarn, "ErrorParsingNumericTraceEventField");
-		ev.error(e);
-		if (fields.tryGetValue("Type", type)) {
-			ev.detail("Event", type);
+			TraceEvent ev(SevWarn, "ErrorParsingNumericTraceEventField");
+			ev.error(e);
+			if (fields.tryGetValue("Type", type)) {
+				ev.detail("Event", type);
+			}
+			ev.detail("FieldName", key);
+			ev.detail("FieldValue", field);
+
+			throw;
+		} else {
+			return false;
 		}
-		ev.detail("FieldName", key);
-		ev.detail("FieldValue", field);
-
-		throw;
 	}
 }
 } // namespace
 
+bool TraceEventFields::tryGetInt(std::string key, int& outVal, bool permissive) const {
+	bool success = getNumericValue<int, false>(*this, key, outVal, permissive);
+	return success;
+}
+
 int TraceEventFields::getInt(std::string key, bool permissive) const {
-	return getNumericValue<int>(*this, key, permissive);
+	int outVal;
+	getNumericValue<int, true>(*this, key, outVal, permissive);
+	return outVal;
+}
+
+bool TraceEventFields::tryGetInt64(std::string key, int64_t& outVal, bool permissive) const {
+	bool success = getNumericValue<int64_t, false>(*this, key, outVal, permissive);
+	return success;
 }
 
 int64_t TraceEventFields::getInt64(std::string key, bool permissive) const {
-	return getNumericValue<int64_t>(*this, key, permissive);
+	int64_t outVal;
+	getNumericValue<int64_t, true>(*this, key, outVal, permissive);
+	return outVal;
+}
+
+bool TraceEventFields::tryGetUint64(std::string key, uint64_t& outVal, bool permissive) const {
+	bool success = getNumericValue<uint64_t, false>(*this, key, outVal, permissive);
+	return success;
 }
 
 uint64_t TraceEventFields::getUint64(std::string key, bool permissive) const {
-	return getNumericValue<uint64_t>(*this, key, permissive);
+	uint64_t outVal;
+	getNumericValue<uint64_t, true>(*this, key, outVal, permissive);
+	return outVal;
+}
+
+bool TraceEventFields::tryGetDouble(std::string key, double& outVal, bool permissive) const {
+	bool success = getNumericValue<double, false>(*this, key, outVal, permissive);
+	return success;
 }
 
 double TraceEventFields::getDouble(std::string key, bool permissive) const {
-	return getNumericValue<double>(*this, key, permissive);
+	double outVal;
+	getNumericValue<double, true>(*this, key, outVal, permissive);
+	return outVal;
 }
 
 std::string TraceEventFields::toString() const {

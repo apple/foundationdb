@@ -47,10 +47,10 @@ public:
 	static ISingleThreadTransaction* allocateOnForeignThread(Type);
 
 	static Reference<ISingleThreadTransaction> create(Type, Database const&);
-	static Reference<ISingleThreadTransaction> create(Type, Database const&, TenantName const&);
+	static Reference<ISingleThreadTransaction> create(Type, Database const&, Reference<Tenant> const&);
 
 	virtual void construct(Database const&) = 0;
-	virtual void construct(Database const&, TenantName const&) {
+	virtual void construct(Database const&, Reference<Tenant> const&) {
 		// By default, a transaction implementation does not support tenants.
 		ASSERT(false);
 	}
@@ -88,6 +88,7 @@ public:
 	virtual Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(KeyRange const& range,
 	                                                                                   Optional<Version> summaryVersion,
 	                                                                                   int rangeLimit) = 0;
+	virtual void addGranuleMaterializeStats(const GranuleMaterializeStats& stats) = 0;
 	virtual void addReadConflictRange(KeyRangeRef const& keys) = 0;
 	virtual void makeSelfConflicting() = 0;
 	virtual void atomicOp(KeyRef const& key, ValueRef const& operand, uint32_t operationType) = 0;
@@ -100,6 +101,7 @@ public:
 	virtual Version getCommittedVersion() const = 0;
 	virtual VersionVector getVersionVector() const = 0;
 	virtual SpanContext getSpanContext() const = 0;
+	virtual int64_t getTotalCost() const = 0;
 	virtual int64_t getApproximateSize() const = 0;
 	virtual Future<Standalone<StringRef>> getVersionstamp() = 0;
 	virtual void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;

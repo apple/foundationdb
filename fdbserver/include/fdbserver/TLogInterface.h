@@ -328,10 +328,10 @@ struct TLogCommitRequest {
 		           minKnownCommittedVersion,
 		           messages,
 		           reply,
-		           arena,
 		           debugID,
 		           tLogCount,
-		           spanContext);
+		           spanContext,
+		           arena);
 	}
 };
 

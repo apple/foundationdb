@@ -1,3 +1,6 @@
+[configuration]
+tenantModes = ['optional', 'required']
+
 [[test]]
 testTitle = 'SpecialKeySpaceCorrectnessTest'
 

@@ -43,11 +43,13 @@ class SimpleConfigTransactionImpl {
 		state ConfigTransactionGetGenerationReply reply;
 		if (self->cti.hostname.present()) {
 			wait(store(reply,
-			           retryGetReplyFromHostname(ConfigTransactionGetGenerationRequest{},
+			           retryGetReplyFromHostname(ConfigTransactionGetGenerationRequest{ 0, Optional<Version>() },
 			                                     self->cti.hostname.get(),
 			                                     WLTOKEN_CONFIGTXN_GETGENERATION)));
 		} else {
-			wait(store(reply, retryBrokenPromise(self->cti.getGeneration, ConfigTransactionGetGenerationRequest{})));
+			wait(store(reply,
+			           retryBrokenPromise(self->cti.getGeneration,
+			                              ConfigTransactionGetGenerationRequest{ 0, Optional<Version>() })));
 		}
 		if (self->dID.present()) {
 			TraceEvent("SimpleConfigTransactionGotReadVersion", self->dID.get())
@@ -70,11 +72,12 @@ class SimpleConfigTransactionImpl {
 		state ConfigTransactionGetReply reply;
 		if (self->cti.hostname.present()) {
 			wait(store(reply,
-			           retryGetReplyFromHostname(ConfigTransactionGetRequest{ generation, configKey },
+			           retryGetReplyFromHostname(ConfigTransactionGetRequest{ 0, generation, configKey },
 			                                     self->cti.hostname.get(),
 			                                     WLTOKEN_CONFIGTXN_GET)));
 		} else {
-			wait(store(reply, retryBrokenPromise(self->cti.get, ConfigTransactionGetRequest{ generation, configKey })));
+			wait(store(reply,
+			           retryBrokenPromise(self->cti.get, ConfigTransactionGetRequest{ 0, generation, configKey })));
 		}
 		if (self->dID.present()) {
 			TraceEvent("SimpleConfigTransactionGotValue", self->dID.get())
@@ -95,13 +98,13 @@ class SimpleConfigTransactionImpl {
 		state ConfigTransactionGetConfigClassesReply reply;
 		if (self->cti.hostname.present()) {
 			wait(store(reply,
-			           retryGetReplyFromHostname(ConfigTransactionGetConfigClassesRequest{ generation },
+			           retryGetReplyFromHostname(ConfigTransactionGetConfigClassesRequest{ 0, generation },
 			                                     self->cti.hostname.get(),
 			                                     WLTOKEN_CONFIGTXN_GETCLASSES)));
 		} else {
 			wait(store(
 			    reply,
-			    retryBrokenPromise(self->cti.getClasses, ConfigTransactionGetConfigClassesRequest{ generation })));
+			    retryBrokenPromise(self->cti.getClasses, ConfigTransactionGetConfigClassesRequest{ 0, generation })));
 		}
 		RangeResult result;
 		for (const auto& configClass : reply.configClasses) {
@@ -118,13 +121,13 @@ class SimpleConfigTransactionImpl {
 		state ConfigTransactionGetKnobsReply reply;
 		if (self->cti.hostname.present()) {
 			wait(store(reply,
-			           retryGetReplyFromHostname(ConfigTransactionGetKnobsRequest{ generation, configClass },
+			           retryGetReplyFromHostname(ConfigTransactionGetKnobsRequest{ 0, generation, configClass },
 			                                     self->cti.hostname.get(),
 			                                     WLTOKEN_CONFIGTXN_GETKNOBS)));
 		} else {
-			wait(store(
-			    reply,
-			    retryBrokenPromise(self->cti.getKnobs, ConfigTransactionGetKnobsRequest{ generation, configClass })));
+			wait(store(reply,
+			           retryBrokenPromise(self->cti.getKnobs,
+			                              ConfigTransactionGetKnobsRequest{ 0, generation, configClass })));
 		}
 		RangeResult result;
 		for (const auto& knobName : reply.knobNames) {
@@ -137,6 +140,7 @@ class SimpleConfigTransactionImpl {
 		if (!self->getGenerationFuture.isValid()) {
 			self->getGenerationFuture = getGeneration(self);
 		}
+		self->toCommit.coordinatorsHash = 0;
 		wait(store(self->toCommit.generation, self->getGenerationFuture));
 		self->toCommit.annotation.timestamp = now();
 		if (self->cti.hostname.present()) {
@@ -290,6 +294,10 @@ Future<Void> SimpleConfigTransaction::commit() {
 
 Version SimpleConfigTransaction::getCommittedVersion() const {
 	return impl->getCommittedVersion();
+}
+
+int64_t SimpleConfigTransaction::getTotalCost() const {
+	return 0;
 }
 
 int64_t SimpleConfigTransaction::getApproximateSize() const {

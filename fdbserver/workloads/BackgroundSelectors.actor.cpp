@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -31,6 +30,7 @@ KeySelector randomizedSelector(const KeyRef& key, bool orEqual, int offset) {
 }
 
 struct BackgroundSelectorWorkload : TestWorkload {
+	static constexpr auto NAME = "BackgroundSelector";
 	int actorsPerClient, maxDiff, minDrift, maxDrift, resultLimit;
 	double testDuration, transactionsPerSecond;
 
@@ -39,17 +39,14 @@ struct BackgroundSelectorWorkload : TestWorkload {
 
 	BackgroundSelectorWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), operations("Operations"), checks("Checks"), retries("Retries") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		actorsPerClient = std::max(getOption(options, LiteralStringRef("actorsPerClient"), 1), 1);
-		maxDiff = std::max(getOption(options, LiteralStringRef("maxDiff"), 100), 2);
-		minDrift = getOption(options, LiteralStringRef("minDiff"), -10);
-		maxDrift = getOption(options, LiteralStringRef("minDiff"), 100);
-		transactionsPerSecond =
-		    getOption(options, LiteralStringRef("transactionsPerSecond"), 10.0) / (clientCount * actorsPerClient);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		actorsPerClient = std::max(getOption(options, "actorsPerClient"_sr, 1), 1);
+		maxDiff = std::max(getOption(options, "maxDiff"_sr, 100), 2);
+		minDrift = getOption(options, "minDiff"_sr, -10);
+		maxDrift = getOption(options, "minDiff"_sr, 100);
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 10.0) / (clientCount * actorsPerClient);
 		resultLimit = 10 * maxDiff;
 	}
-
-	std::string description() const override { return "BackgroundSelector"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -219,4 +216,4 @@ struct BackgroundSelectorWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<BackgroundSelectorWorkload> BackgroundSelectorWorkloadFactory("BackgroundSelector");
+WorkloadFactory<BackgroundSelectorWorkload> BackgroundSelectorWorkloadFactory;

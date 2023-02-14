@@ -32,6 +32,13 @@
 
 typedef Map<KeyRef, Reference<TCTenantInfo>> TenantMapByPrefix;
 
+struct Storage {
+	int64_t quota = std::numeric_limits<int64_t>::max();
+	int64_t usage = 0;
+	std::unordered_set<int64_t> tenants;
+};
+typedef std::unordered_map<TenantGroupName, Storage> TenantStorageMap;
+
 struct TenantCacheTenantCreated {
 	KeyRange keys;
 	Promise<bool> reply;
@@ -50,17 +57,24 @@ private:
 	uint64_t generation;
 	TenantMapByPrefix tenantCache;
 
+	// Map from tenant group names to the list of tenants, cumumlative storage used by
+	// all the tenants in the group, and its storage quota.
+	TenantStorageMap tenantStorageMap;
+
 	// mark the start of a new sweep of the tenant cache
 	void startRefresh();
 
-	void insert(TenantName& tenantName, TenantMapEntry& tenant);
-	void keep(TenantName& tenantName, TenantMapEntry& tenant);
+	void insert(TenantMapEntry& tenant);
+	void keep(TenantMapEntry& tenant);
 
 	// return true if a new tenant is inserted into the cache
-	bool update(TenantName& tenantName, TenantMapEntry& tenant);
+	bool update(TenantMapEntry& tenant);
 
 	// return count of tenants that were found to be stale and removed from the cache
 	int cleanup();
+
+	// return all the tenant IDs for all tenants stored in the cache
+	std::vector<int64_t> getTenantList() const;
 
 	UID id() const { return distributorID; }
 
@@ -77,9 +91,16 @@ public:
 
 	Future<Void> monitorTenantMap();
 
+	Future<Void> monitorStorageUsage();
+
+	Future<Void> monitorStorageQuota();
+
 	std::string desc() const;
 
 	bool isTenantKey(KeyRef key) const;
 
 	Optional<Reference<TCTenantInfo>> tenantOwning(KeyRef key) const;
+
+	// Get the list of tenants where the storage bytes currently used is greater than the quota allocated
+	std::unordered_set<int64_t> getTenantsOverQuota() const;
 };

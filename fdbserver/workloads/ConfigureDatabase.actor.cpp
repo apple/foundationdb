@@ -18,20 +18,18 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/QuietDatabase.h"
+#include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// "ssd" is an alias to the preferred type which skews the random distribution toward it but that's okay.
-static const char* storeTypes[] = {
-	"ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "memory-radixtree-beta"
-};
 static const char* storageMigrationTypes[] = { "perpetual_storage_wiggle=0 storage_migration_type=aggressive",
 	                                           "perpetual_storage_wiggle=1",
 	                                           "perpetual_storage_wiggle=1 storage_migration_type=gradual",
@@ -52,9 +50,9 @@ static const char* backupTypes[] = { "backup_worker_enabled:=0", "backup_worker_
 
 std::string generateRegions() {
 	std::string result;
-	if (g_simulator.physicalDatacenters == 1 ||
-	    (g_simulator.physicalDatacenters == 2 && deterministicRandom()->random01() < 0.25) ||
-	    g_simulator.physicalDatacenters == 3) {
+	if (g_simulator->physicalDatacenters == 1 ||
+	    (g_simulator->physicalDatacenters == 2 && deterministicRandom()->random01() < 0.25) ||
+	    g_simulator->physicalDatacenters == 3) {
 		return " usable_regions=1 regions=\"\"";
 	}
 
@@ -87,7 +85,7 @@ std::string generateRegions() {
 	StatusArray remoteDcArr;
 	remoteDcArr.push_back(remoteDcObj);
 
-	if (g_simulator.physicalDatacenters > 3 && deterministicRandom()->random01() < 0.5) {
+	if (g_simulator->physicalDatacenters > 3 && deterministicRandom()->random01() < 0.5) {
 		StatusObject primarySatelliteObj;
 		primarySatelliteObj["id"] = "2";
 		primarySatelliteObj["priority"] = 1;
@@ -104,7 +102,7 @@ std::string generateRegions() {
 			remoteSatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
 		remoteDcArr.push_back(remoteSatelliteObj);
 
-		if (g_simulator.physicalDatacenters > 5 && deterministicRandom()->random01() < 0.5) {
+		if (g_simulator->physicalDatacenters > 5 && deterministicRandom()->random01() < 0.5) {
 			StatusObject primarySatelliteObjB;
 			primarySatelliteObjB["id"] = "4";
 			primarySatelliteObjB["priority"] = 1;
@@ -224,6 +222,7 @@ std::string generateRegions() {
 }
 
 struct ConfigureDatabaseWorkload : TestWorkload {
+	static constexpr auto NAME = "ConfigureDatabase";
 	double testDuration;
 	int additionalDBs;
 	bool allowDescriptorChange;
@@ -231,22 +230,24 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	bool storageMigrationCompatibleConf; // only allow generating configuration suitable for storage migration test
 	bool waitStoreTypeCheck;
 	bool downgradeTest1; // if this is true, don't pick up downgrade incompatible config
+	std::vector<int> storageEngineExcludeTypes;
 	std::vector<Future<Void>> clients;
 	PerfIntCounter retries;
 
 	ConfigureDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), retries("Retries") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 200.0);
+		testDuration = getOption(options, "testDuration"_sr, 200.0);
 		allowDescriptorChange =
-		    getOption(options, LiteralStringRef("allowDescriptorChange"), SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
+		    getOption(options, "allowDescriptorChange"_sr, SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
 		allowTestStorageMigration =
-		    getOption(options, "allowTestStorageMigration"_sr, false) && g_simulator.allowStorageMigrationTypeChange;
+		    getOption(options, "allowTestStorageMigration"_sr, false) && g_simulator->allowStorageMigrationTypeChange;
 		storageMigrationCompatibleConf = getOption(options, "storageMigrationCompatibleConf"_sr, false);
 		waitStoreTypeCheck = getOption(options, "waitStoreTypeCheck"_sr, false);
 		downgradeTest1 = getOption(options, "downgradeTest1"_sr, false);
-		g_simulator.usableRegions = 1;
+		storageEngineExcludeTypes = getOption(options, "storageEngineExcludeTypes"_sr);
+		g_simulator->usableRegions = 1;
 	}
 
-	std::string description() const override { return "DestroyDatabaseWorkload"; }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
@@ -276,6 +277,13 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _start(ConfigureDatabaseWorkload* self, Database cx) {
+		// Redwood is the only storage engine type supporting encryption.
+		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+		TraceEvent("ConfigureDatabase_Config").detail("Config", config.toString());
+		if (config.encryptionAtRestMode.isEncryptionEnabled()) {
+			TraceEvent("ConfigureDatabase_EncryptionEnabled");
+			self->storageEngineExcludeTypes = { 0, 1, 2, 4, 5 };
+		}
 		if (self->clientId == 0) {
 			self->clients.push_back(timeout(self->singleDB(self, cx), self->testDuration, Void()));
 			wait(waitForAll(self->clients));
@@ -347,7 +355,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	ACTOR Future<Void> singleDB(ConfigureDatabaseWorkload* self, Database cx) {
 		state Transaction tr;
 		loop {
-			if (g_simulator.speedUpSimulation) {
+			if (g_simulator->speedUpSimulation) {
 				return Void();
 			}
 			state int randomChoice;
@@ -363,7 +371,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			if (randomChoice == 0) {
 				wait(success(
 				    runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
-					    return tr->get(LiteralStringRef("This read is only to ensure that the database recovered"));
+					    return tr->get("This read is only to ensure that the database recovered"_sr);
 				    })));
 				wait(delay(20 + 10 * deterministicRandom()->random01()));
 			} else if (randomChoice < 3) {
@@ -373,14 +381,14 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			} else if (randomChoice == 3) {
 				//TraceEvent("ConfigureTestConfigureBegin").detail("NewConfig", newConfig);
 				int maxRedundancies = sizeof(redundancies) / sizeof(redundancies[0]);
-				if (g_simulator.physicalDatacenters == 2 || g_simulator.physicalDatacenters > 3) {
+				if (g_simulator->physicalDatacenters == 2 || g_simulator->physicalDatacenters > 3) {
 					maxRedundancies--; // There are not enough machines for triple replication in fearless
 					                   // configurations
 				}
 				int redundancy = deterministicRandom()->randomInt(0, maxRedundancies);
 				std::string config = redundancies[redundancy];
 
-				if (config == "triple" && g_simulator.physicalDatacenters == 3) {
+				if (config == "triple" && g_simulator->physicalDatacenters == 3) {
 					config = "three_data_hall ";
 				}
 
@@ -417,10 +425,35 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				wait(success(changeQuorum(cx, ch)));
 				//TraceEvent("ConfigureTestConfigureEnd").detail("NewQuorum", s);
 			} else if (randomChoice == 5) {
-				wait(success(IssueConfigurationChange(
-				    cx,
-				    storeTypes[deterministicRandom()->randomInt(0, sizeof(storeTypes) / sizeof(storeTypes[0]))],
-				    true)));
+				int storeType = 0;
+				while (true) {
+					storeType = deterministicRandom()->randomInt(0, 4);
+					if (std::count(self->storageEngineExcludeTypes.begin(),
+					               self->storageEngineExcludeTypes.end(),
+					               storeType) == 0) {
+						break;
+					}
+				}
+				constexpr std::array ssdTypes{ "ssd", "ssd-1", "ssd-2" };
+				constexpr std::array memoryTypes{ "memory", "memory-1", "memory-2" };
+				const char* storeTypeStr = nullptr;
+				switch (storeType) {
+				case 0:
+					storeTypeStr = ssdTypes[deterministicRandom()->randomInt(0, 3)];
+					break;
+				case 1:
+					storeTypeStr = memoryTypes[deterministicRandom()->randomInt(0, 3)];
+					break;
+				case 2:
+					storeTypeStr = "memory-radixtree-beta";
+					break;
+				case 3:
+					storeTypeStr = "ssd-redwood-1-experimental";
+					break;
+				default:
+					ASSERT(false);
+				}
+				wait(success(IssueConfigurationChange(cx, storeTypeStr, true)));
 			} else if (randomChoice == 6) {
 				// Some configurations will be invalid, and that's fine.
 				int length = sizeof(logTypes) / sizeof(logTypes[0]);
@@ -474,4 +507,4 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<ConfigureDatabaseWorkload> DestroyDatabaseWorkloadFactory("ConfigureDatabase");
+WorkloadFactory<ConfigureDatabaseWorkload> DestroyDatabaseWorkloadFactory;

@@ -25,8 +25,6 @@
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-static constexpr int SAMPLE_SIZE = 10000;
-
 // If the log->storage propagation delay is longer than 1 second, then it's likely that our read
 // will see a `future_version` error from the storage server.  We need to retry the read until
 // a value is returned, or a different error is thrown.
@@ -48,15 +46,14 @@ ACTOR Future<double> latencyOfRead(Transaction* tr, Key k) {
 
 // Measure the latency of a storage server making a committed value available for reading.
 struct ReadAfterWriteWorkload : KVWorkload {
+	static constexpr auto NAME = "ReadAfterWrite";
 
 	double testDuration;
-	ContinuousSample<double> propagationLatency;
+	DDSketch<double> propagationLatency;
 
-	ReadAfterWriteWorkload(WorkloadContext const& wcx) : KVWorkload(wcx), propagationLatency(SAMPLE_SIZE) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
+	ReadAfterWriteWorkload(WorkloadContext const& wcx) : KVWorkload(wcx), propagationLatency() {
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
 	}
-
-	std::string description() const override { return "ReadAfterWriteWorkload"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -122,4 +119,4 @@ struct ReadAfterWriteWorkload : KVWorkload {
 	}
 };
 
-WorkloadFactory<ReadAfterWriteWorkload> ReadAfterWriteWorkloadFactory("ReadAfterWrite");
+WorkloadFactory<ReadAfterWriteWorkload> ReadAfterWriteWorkloadFactory;

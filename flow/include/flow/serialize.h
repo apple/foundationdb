@@ -91,6 +91,8 @@ inline typename Archive::READER& operator>>(Archive& ar, Item& item) {
 
 template <class Archive, class Item, class... Items>
 typename Archive::WRITER& serializer(Archive& ar, const Item& item, const Items&... items) {
+	static_assert(fb_appears_last_property(pack<Item, Items...>{}),
+	              "An argument to a serializer call that must appear last (Arena?) does not appear last");
 	save(ar, item);
 	if constexpr (sizeof...(Items) > 0) {
 		serializer(ar, items...);
@@ -100,6 +102,8 @@ typename Archive::WRITER& serializer(Archive& ar, const Item& item, const Items&
 
 template <class Archive, class Item, class... Items>
 typename Archive::READER& serializer(Archive& ar, Item& item, Items&... items) {
+	static_assert(fb_appears_last_property(pack<Item, Items...>{}),
+	              "An argument to a serializer call that must appear last (Arena?) does not appear last");
 	load(ar, item);
 	if constexpr (sizeof...(Items) > 0) {
 		serializer(ar, items...);
@@ -252,7 +256,7 @@ inline void load(Archive& ar, std::set<T>& value) {
 	T currentValue;
 	for (int i = 0; i < s; i++) {
 		ar >> currentValue;
-		value.insert(currentValue);
+		value.insert(value.end(), currentValue);
 	}
 	ASSERT(ar.protocolVersion().isValid());
 }
@@ -273,7 +277,7 @@ inline void load(Archive& ar, std::map<K, V>& value) {
 	for (int i = 0; i < s; ++i) {
 		std::pair<K, V> p;
 		ar >> p.first >> p.second;
-		value.emplace(p);
+		value.emplace_hint(value.end(), p);
 	}
 	ASSERT(ar.protocolVersion().isValid());
 }
@@ -449,17 +453,17 @@ public:
 	void serializeAsTuple(StringRef str) {
 		size_t last_pos = 0;
 
-		serializeBytes(LiteralStringRef("\x01"));
+		serializeBytes("\x01"_sr);
 
 		for (size_t pos = 0; pos < str.size(); ++pos) {
 			if (str[pos] == '\x00') {
 				serializeBytes(str.substr(last_pos, pos - last_pos));
-				serializeBytes(LiteralStringRef("\x00\xff"));
+				serializeBytes("\x00\xff"_sr);
 				last_pos = pos + 1;
 			}
 		}
 		serializeBytes(str.substr(last_pos, str.size() - last_pos));
-		serializeBytes(LiteralStringRef("\x00"));
+		serializeBytes("\x00"_sr);
 	}
 
 	void serializeAsTuple(bool t) {
@@ -864,6 +868,9 @@ struct PacketWriter {
 		return result;
 	}
 
+	// This is used by MakeSerializeSource::serializePacketWriter
+	static uint8_t* packetWriterAlloc(const size_t size, void* self);
+
 private:
 	void serializeBytesAcrossBoundary(const void* data, int bytes);
 	void nextBuffer(size_t size = 0 /* downstream it will default to at least 4k minus some padding */);
@@ -882,9 +889,12 @@ template <class T, class V>
 class MakeSerializeSource : public ISerializeSource {
 public:
 	using value_type = V;
-	void serializePacketWriter(PacketWriter& w) const override {
-		ObjectWriter writer([&](size_t size) { return w.writeBytes(size); }, AssumeVersion(w.protocolVersion()));
-		writer.serialize(get()); // Writes directly into buffer supplied by |w|
+	void serializePacketWriter(PacketWriter& packetWriter) const override {
+		ObjectWriter objectWriter(
+		    PacketWriter::packetWriterAlloc, &packetWriter, AssumeVersion(packetWriter.protocolVersion()));
+
+		// Writes directly into buffer supplied by packetWriter
+		objectWriter.serialize(get());
 	}
 	virtual value_type const& get() const = 0;
 };

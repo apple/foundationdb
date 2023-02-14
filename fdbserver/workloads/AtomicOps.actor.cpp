@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -26,10 +25,11 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-//#define SevAtomicOpDebug SevInfo
+// #define SevAtomicOpDebug SevInfo
 #define SevAtomicOpDebug SevVerbose
 
 struct AtomicOpsWorkload : TestWorkload {
+	static constexpr auto NAME = "AtomicOps";
 	int opNum, actorCount, nodeCount;
 	uint32_t opType;
 	bool apiVersion500 = false;
@@ -39,11 +39,11 @@ struct AtomicOpsWorkload : TestWorkload {
 	uint64_t lbsum, ubsum; // The lower bound and upper bound sum of operations when opType = AddValue
 
 	AtomicOpsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), opNum(0) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
-		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 5000.0) / clientCount;
-		actorCount = getOption(options, LiteralStringRef("actorsPerClient"), transactionsPerSecond / 5);
-		opType = getOption(options, LiteralStringRef("opType"), -1);
-		nodeCount = getOption(options, LiteralStringRef("nodeCount"), 1000);
+		testDuration = getOption(options, "testDuration"_sr, 600.0);
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
+		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
+		opType = getOption(options, "opType"_sr, -1);
+		nodeCount = getOption(options, "nodeCount"_sr, 1000);
 		// Atomic OPs Min and And have modified behavior from api version 510. Hence allowing testing for older version
 		// (500) with a 10% probability Actual change of api Version happens in setup
 		apiVersion500 = ((sharedRandomNumber % 10) == 0);
@@ -106,8 +106,6 @@ struct AtomicOpsWorkload : TestWorkload {
 		}
 		TraceEvent("AtomicWorkload").detail("OpType", opType);
 	}
-
-	std::string description() const override { return "AtomicOps"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (apiVersion500)
@@ -319,7 +317,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		for (auto& kv : log) {
 			uint64_t intValue = 0;
 			memcpy(&intValue, kv.value.begin(), kv.value.size());
-			logVal[kv.key.removePrefix(LiteralStringRef("log")).withPrefix(LiteralStringRef("debug"))] = intValue;
+			logVal[kv.key.removePrefix("log"_sr).withPrefix("debug"_sr)] = intValue;
 		}
 
 		// Get opsKeys and validate if it has correct value
@@ -372,12 +370,11 @@ struct AtomicOpsWorkload : TestWorkload {
 						RangeResult log_ = wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
 						log = log_;
 						uint64_t zeroValue = 0;
-						tr.set(LiteralStringRef("xlogResult"),
-						       StringRef((const uint8_t*)&zeroValue, sizeof(zeroValue)));
+						tr.set("xlogResult"_sr, StringRef((const uint8_t*)&zeroValue, sizeof(zeroValue)));
 						for (auto& kv : log) {
 							uint64_t intValue = 0;
 							memcpy(&intValue, kv.value.begin(), kv.value.size());
-							tr.atomicOp(LiteralStringRef("xlogResult"), kv.value, self->opType);
+							tr.atomicOp("xlogResult"_sr, kv.value, self->opType);
 						}
 					}
 
@@ -386,18 +383,16 @@ struct AtomicOpsWorkload : TestWorkload {
 						Key begin(format("ops%08x", g));
 						RangeResult ops = wait(tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY));
 						uint64_t zeroValue = 0;
-						tr.set(LiteralStringRef("xopsResult"),
-						       StringRef((const uint8_t*)&zeroValue, sizeof(zeroValue)));
+						tr.set("xopsResult"_sr, StringRef((const uint8_t*)&zeroValue, sizeof(zeroValue)));
 						for (auto& kv : ops) {
 							uint64_t intValue = 0;
 							memcpy(&intValue, kv.value.begin(), kv.value.size());
-							tr.atomicOp(LiteralStringRef("xopsResult"), kv.value, self->opType);
+							tr.atomicOp("xopsResult"_sr, kv.value, self->opType);
 						}
 
-						if (tr.get(LiteralStringRef("xlogResult")).get() !=
-						    tr.get(LiteralStringRef("xopsResult")).get()) {
-							Optional<Standalone<StringRef>> logResult = tr.get(LiteralStringRef("xlogResult")).get();
-							Optional<Standalone<StringRef>> opsResult = tr.get(LiteralStringRef("xopsResult")).get();
+						if (tr.get("xlogResult"_sr).get() != tr.get("xopsResult"_sr).get()) {
+							Optional<Standalone<StringRef>> logResult = tr.get("xlogResult"_sr).get();
+							Optional<Standalone<StringRef>> opsResult = tr.get("xopsResult"_sr).get();
 							ASSERT(logResult.present());
 							ASSERT(opsResult.present());
 							TraceEvent(SevError, "LogMismatch")
@@ -408,7 +403,7 @@ struct AtomicOpsWorkload : TestWorkload {
 
 						if (self->opType == MutationRef::AddValue) {
 							uint64_t opsResult = 0;
-							Key opsResultStr = tr.get(LiteralStringRef("xopsResult")).get().get();
+							Key opsResultStr = tr.get("xopsResult"_sr).get().get();
 							memcpy(&opsResult, opsResultStr.begin(), opsResultStr.size());
 							uint64_t logResult = 0;
 							for (auto& kv : log) {
@@ -441,4 +436,4 @@ struct AtomicOpsWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<AtomicOpsWorkload> AtomicOpsWorkloadFactory("AtomicOps");
+WorkloadFactory<AtomicOpsWorkload> AtomicOpsWorkloadFactory;

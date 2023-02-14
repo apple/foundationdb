@@ -53,7 +53,11 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
 		store->set(KeyValueRef(keyValue.key, pack(keyValue.value)), arena);
 	}
-	void clear(KeyRangeRef range, const Arena* arena = nullptr) override { store->clear(range, arena); }
+	void clear(KeyRangeRef range,
+	           const StorageServerMetrics* storageMetrics = nullptr,
+	           const Arena* arena = nullptr) override {
+		store->clear(range, storageMetrics, arena);
+	}
 	Future<Void> commit(bool sequential = false) override { return store->commit(sequential); }
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options) override {
@@ -75,6 +79,10 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 	                              int byteLimit,
 	                              Optional<ReadOptions> options = Optional<ReadOptions>()) override {
 		return doReadRange(store, keys, rowLimit, byteLimit, options);
+	}
+
+	Future<EncryptionAtRestMode> encryptionMode() override {
+		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
 	}
 
 private:
@@ -119,12 +127,12 @@ private:
 
 		// If the value starts with a 0-byte, then we don't compress it
 		if (c == 0)
-			return val.withPrefix(LiteralStringRef("\x00"));
+			return val.withPrefix("\x00"_sr);
 
 		for (int i = 1; i < val.size(); i++) {
 			if (val[i] != c) {
 				// The value is something other than a single repeated character, so not compressible :-)
-				return val.withPrefix(LiteralStringRef("\x00"));
+				return val.withPrefix("\x00"_sr);
 			}
 		}
 

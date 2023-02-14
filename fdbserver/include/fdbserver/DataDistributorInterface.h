@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/fdbrpc.h"
+#include <unordered_set>
 
 struct DataDistributorInterface {
 	constexpr static FileIdentifier file_identifier = 12383874;
@@ -37,6 +38,8 @@ struct DataDistributorInterface {
 	RequestStream<struct GetDataDistributorMetricsRequest> dataDistributorMetrics;
 	RequestStream<struct DistributorSplitRangeRequest> distributorSplitRange;
 	RequestStream<struct GetStorageWigglerStateRequest> storageWigglerState;
+	RequestStream<struct TriggerAuditRequest> triggerAudit;
+	RequestStream<struct TenantsOverStorageQuotaRequest> tenantsOverStorageQuota;
 
 	DataDistributorInterface() {}
 	explicit DataDistributorInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
@@ -58,7 +61,9 @@ struct DataDistributorInterface {
 		           distributorExclCheckReq,
 		           dataDistributorMetrics,
 		           distributorSplitRange,
-		           storageWigglerState);
+		           storageWigglerState,
+		           triggerAudit,
+		           tenantsOverStorageQuota);
 	}
 };
 
@@ -120,7 +125,7 @@ struct DistributorSnapRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, snapPayload, snapUID, reply, arena, debugID);
+		serializer(ar, snapPayload, snapUID, reply, debugID, arena);
 	}
 };
 
@@ -184,6 +189,31 @@ struct GetStorageWigglerStateRequest {
 	ReplyPromise<GetStorageWigglerStateReply> reply;
 
 	GetStorageWigglerStateRequest() {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+struct TenantsOverStorageQuotaReply {
+	constexpr static FileIdentifier file_identifier = 5952266;
+	std::unordered_set<int64_t> tenants;
+
+	TenantsOverStorageQuotaReply() {}
+	explicit TenantsOverStorageQuotaReply(std::unordered_set<int64_t> const& tenants) : tenants(tenants) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, tenants);
+	}
+};
+
+struct TenantsOverStorageQuotaRequest {
+	constexpr static FileIdentifier file_identifier = 84290;
+	ReplyPromise<TenantsOverStorageQuotaReply> reply;
+
+	TenantsOverStorageQuotaRequest() {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply);

@@ -56,6 +56,68 @@ public:
 	bool setDDEnabled(bool status, UID snapUID);
 };
 
+struct MoveKeysParams {
+	UID dataMoveId;
+
+	// Only one of `keys` and `ranges` can be set. `ranges` is created mainly for physical shard moves to move a full
+	// physical shard with multiple key ranges.
+	Optional<KeyRange> keys;
+	Optional<std::vector<KeyRange>> ranges;
+
+	std::vector<UID> destinationTeam, healthyDestinations;
+	MoveKeysLock lock;
+	Promise<Void> dataMovementComplete;
+	FlowLock* startMoveKeysParallelismLock = nullptr;
+	FlowLock* finishMoveKeysParallelismLock = nullptr;
+	bool hasRemote;
+	UID relocationIntervalId;
+	const DDEnabledState* ddEnabledState = nullptr;
+	CancelConflictingDataMoves cancelConflictingDataMoves = CancelConflictingDataMoves::False;
+
+	MoveKeysParams() {}
+
+	MoveKeysParams(UID dataMoveId,
+	               const KeyRange& keys,
+	               const std::vector<UID>& destinationTeam,
+	               const std::vector<UID>& healthyDestinations,
+	               const MoveKeysLock& lock,
+	               const Promise<Void>& dataMovementComplete,
+	               FlowLock* startMoveKeysParallelismLock,
+	               FlowLock* finishMoveKeysParallelismLock,
+	               bool hasRemote,
+	               UID relocationIntervalId,
+	               const DDEnabledState* ddEnabledState,
+	               CancelConflictingDataMoves cancelConflictingDataMoves)
+	  : dataMoveId(dataMoveId), keys(keys), destinationTeam(destinationTeam), healthyDestinations(healthyDestinations),
+	    lock(lock), dataMovementComplete(dataMovementComplete),
+	    startMoveKeysParallelismLock(startMoveKeysParallelismLock),
+	    finishMoveKeysParallelismLock(finishMoveKeysParallelismLock), hasRemote(hasRemote),
+	    relocationIntervalId(relocationIntervalId), ddEnabledState(ddEnabledState),
+	    cancelConflictingDataMoves(cancelConflictingDataMoves) {}
+
+	MoveKeysParams(UID dataMoveId,
+	               const std::vector<KeyRange>& ranges,
+	               const std::vector<UID>& destinationTeam,
+	               const std::vector<UID>& healthyDestinations,
+	               const MoveKeysLock& lock,
+	               const Promise<Void>& dataMovementComplete,
+	               FlowLock* startMoveKeysParallelismLock,
+	               FlowLock* finishMoveKeysParallelismLock,
+	               bool hasRemote,
+	               UID relocationIntervalId,
+	               const DDEnabledState* ddEnabledState,
+	               CancelConflictingDataMoves cancelConflictingDataMoves)
+	  : dataMoveId(dataMoveId), ranges(ranges), destinationTeam(destinationTeam),
+	    healthyDestinations(healthyDestinations), lock(lock), dataMovementComplete(dataMovementComplete),
+	    startMoveKeysParallelismLock(startMoveKeysParallelismLock),
+	    finishMoveKeysParallelismLock(finishMoveKeysParallelismLock), hasRemote(hasRemote),
+	    relocationIntervalId(relocationIntervalId), ddEnabledState(ddEnabledState),
+	    cancelConflictingDataMoves(cancelConflictingDataMoves) {}
+};
+
+// read the lock value in system keyspace but do not change anything
+ACTOR Future<MoveKeysLock> readMoveKeysLock(Database cx);
+
 // Calling moveKeys, etc with the return value of this actor ensures that no movekeys, etc
 // has been executed by a different locker since takeMoveKeysLock(), as calling
 // takeMoveKeysLock() updates "moveKeysLockOwnerKey" to a random UID.
@@ -69,24 +131,19 @@ void seedShardServers(Arena& trArena, CommitTransactionRef& tr, std::vector<Stor
 // Called by the master server to write the very first transaction to the database
 // establishing a set of shard servers and all invariants of the systemKeys.
 
+Future<Void> rawStartMovement(Database occ,
+                              const MoveKeysParams& params,
+                              std::map<UID, StorageServerInterface>& tssMapping);
+
+Future<Void> rawFinishMovement(Database occ,
+                               const MoveKeysParams& params,
+                               const std::map<UID, StorageServerInterface>& tssMapping);
 // Eventually moves the given keys to the given destination team
 // Caller is responsible for cancelling it before issuing an overlapping move,
 // for restarting the remainder, and for not otherwise cancelling it before
 // it returns (since it needs to execute the finishMoveKeys transaction).
 // When dataMoveId.isValid(), the keyrange will be moved to a shard designated as dataMoveId.
-ACTOR Future<Void> moveKeys(Database occ,
-                            UID dataMoveId,
-                            KeyRange keys,
-                            std::vector<UID> destinationTeam,
-                            std::vector<UID> healthyDestinations,
-                            MoveKeysLock lock,
-                            Promise<Void> dataMovementComplete,
-                            FlowLock* startMoveKeysParallelismLock,
-                            FlowLock* finishMoveKeysParallelismLock,
-                            bool hasRemote,
-                            UID relocationIntervalId, // for logging only
-                            const DDEnabledState* ddEnabledState,
-                            CancelConflictingDataMoves cancelConflictingDataMoves = CancelConflictingDataMoves::False);
+ACTOR Future<Void> moveKeys(Database occ, MoveKeysParams params);
 
 // Cancels a data move designated by dataMoveId.
 ACTOR Future<Void> cleanUpDataMove(Database occ,

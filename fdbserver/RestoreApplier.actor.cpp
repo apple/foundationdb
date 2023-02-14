@@ -284,12 +284,10 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 		    .detail("GetKeys", incompleteStagingKeys.size())
 		    .detail("DelayTime", delayTime);
 		ASSERT(!g_network->isSimulated());
-		int i = 0;
 		for (auto& key : incompleteStagingKeys) {
-			MutationRef m(MutationRef::SetValue, key.first, LiteralStringRef("0"));
+			MutationRef m(MutationRef::SetValue, key.first, "0"_sr);
 			key.second->second.add(m, LogMessageVersion(1));
 			key.second->second.precomputeResult("GetAndComputeStagingKeys", applierID, batchIndex);
-			i++;
 		}
 		return Void();
 	}

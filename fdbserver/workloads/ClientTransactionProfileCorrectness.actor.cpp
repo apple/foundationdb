@@ -22,12 +22,12 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/Tuple.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
-static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
+static const Key CLIENT_LATENCY_INFO_PREFIX = "client_latency/"_sr;
+static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = "client_latency_counter/"_sr;
 
 /*
 FF               - 2 bytes \xff\x02
@@ -37,8 +37,7 @@ NNNN             - 4 Bytes Chunk number (Big Endian)
 TTTT             - 4 Bytes Total number of chunks (Big Endian)
 XXXX             - Variable length user provided transaction identifier
 */
-StringRef sampleTrInfoKey =
-    LiteralStringRef("\xff\x02/fdbClientInfo/client_latency/SSSSSSSSSS/RRRRRRRRRRRRRRRR/NNNNTTTT/XXXX/");
+StringRef sampleTrInfoKey = "\xff\x02/fdbClientInfo/client_latency/SSSSSSSSSS/RRRRRRRRRRRRRRRR/NNNNTTTT/XXXX/"_sr;
 static const auto chunkNumStartIndex = sampleTrInfoKey.toString().find('N');
 static const auto numChunksStartIndex = sampleTrInfoKey.toString().find('T');
 static const int chunkFormatSize = 4;
@@ -198,23 +197,22 @@ bool checkTxInfoEntryFormat(BinaryReader& reader) {
 }
 
 struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "ClientTransactionProfileCorrectness";
 	double samplingProbability;
 	int64_t trInfoSizeLimit;
 
 	ClientTransactionProfileCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		samplingProbability = getOption(options,
-		                                LiteralStringRef("samplingProbability"),
+		                                "samplingProbability"_sr,
 		                                deterministicRandom()->random01() / 10); // rand range 0 - 0.1
 		trInfoSizeLimit = getOption(options,
-		                            LiteralStringRef("trInfoSizeLimit"),
+		                            "trInfoSizeLimit"_sr,
 		                            deterministicRandom()->randomInt(100 * 1024, 10 * 1024 * 1024)); // 100 KB - 10 MB
 		TraceEvent(SevInfo, "ClientTransactionProfilingSetup")
 		    .detail("ClientId", clientId)
 		    .detail("SamplingProbability", samplingProbability)
 		    .detail("TrInfoSizeLimit", trInfoSizeLimit);
 	}
-
-	std::string description() const override { return "ClientTransactionProfileCorrectness"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
@@ -293,6 +291,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 
 		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			Tuple rate = Tuple::makeTuple(sampleProbability);
 			Tuple size = Tuple::makeTuple(sizeLimit);
@@ -369,5 +368,4 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<ClientTransactionProfileCorrectnessWorkload> ClientTransactionProfileCorrectnessWorkloadFactory(
-    "ClientTransactionProfileCorrectness");
+WorkloadFactory<ClientTransactionProfileCorrectnessWorkload> ClientTransactionProfileCorrectnessWorkloadFactory;

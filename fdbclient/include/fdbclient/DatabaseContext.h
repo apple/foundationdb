@@ -42,8 +42,8 @@
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/EventTypes.actor.h"
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbrpc/Smoother.h"
+#include "fdbrpc/DDSketch.h"
 
 class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
 public:
@@ -149,13 +149,11 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 class WatchMetadata : public ReferenceCounted<WatchMetadata> {
 public:
 	Promise<Version> watchPromise;
-	Future<Version> watchFuture;
 	Future<Void> watchFutureSS;
 
 	Reference<const WatchParameters> parameters;
 
-	WatchMetadata(Reference<const WatchParameters> parameters)
-	  : watchFuture(watchPromise.getFuture()), parameters(parameters) {}
+	WatchMetadata(Reference<const WatchParameters> parameters) : parameters(parameters) {}
 };
 
 struct MutationAndVersionStream {
@@ -205,13 +203,11 @@ struct EndpointFailureInfo {
 };
 
 struct KeyRangeLocationInfo {
-	TenantMapEntry tenantEntry;
 	KeyRange range;
 	Reference<LocationInfo> locations;
 
 	KeyRangeLocationInfo() {}
-	KeyRangeLocationInfo(TenantMapEntry tenantEntry, KeyRange range, Reference<LocationInfo> locations)
-	  : tenantEntry(tenantEntry), range(range), locations(locations) {}
+	KeyRangeLocationInfo(KeyRange range, Reference<LocationInfo> locations) : range(range), locations(locations) {}
 };
 
 struct OverlappingChangeFeedsInfo {
@@ -262,22 +258,17 @@ public:
 		return cx;
 	}
 
-	Optional<KeyRangeLocationInfo> getCachedLocation(const Optional<TenantNameRef>& tenant,
+	Optional<KeyRangeLocationInfo> getCachedLocation(const TenantInfo& tenant,
 	                                                 const KeyRef&,
 	                                                 Reverse isBackward = Reverse::False);
-	bool getCachedLocations(const Optional<TenantNameRef>& tenant,
+	bool getCachedLocations(const TenantInfo& tenant,
 	                        const KeyRangeRef&,
 	                        std::vector<KeyRangeLocationInfo>&,
 	                        int limit,
 	                        Reverse reverse);
-	void cacheTenant(const TenantName& tenant, const TenantMapEntry& tenantEntry);
-	Reference<LocationInfo> setCachedLocation(const Optional<TenantNameRef>& tenant,
-	                                          const TenantMapEntry& tenantEntry,
-	                                          const KeyRangeRef&,
-	                                          const std::vector<struct StorageServerInterface>&);
-	void invalidateCachedTenant(const TenantNameRef& tenant);
-	void invalidateCache(const KeyRef& tenantPrefix, const KeyRef& key, Reverse isBackward = Reverse::False);
-	void invalidateCache(const KeyRef& tenantPrefix, const KeyRangeRef& keys);
+	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const std::vector<struct StorageServerInterface>&);
+	void invalidateCache(const Optional<KeyRef>& tenantPrefix, const KeyRef& key, Reverse isBackward = Reverse::False);
+	void invalidateCache(const Optional<KeyRef>& tenantPrefix, const KeyRangeRef& keys);
 
 	// Records that `endpoint` is failed on a healthy server.
 	void setFailedEndpointOnHealthyServer(const Endpoint& endpoint);
@@ -298,13 +289,19 @@ public:
 	Future<Void> onProxiesChanged() const;
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
-	Future<StorageMetrics> getStorageMetrics(KeyRange const& keys, int shardLimit);
-	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
-	                                                                    StorageMetrics const& min,
-	                                                                    StorageMetrics const& max,
-	                                                                    StorageMetrics const& permittedError,
-	                                                                    int shardLimit,
-	                                                                    int expectedShardCount);
+	// Pass a valid `trState` with `hasTenant() == true` to make the function tenant-aware.
+	Future<StorageMetrics> getStorageMetrics(
+	    KeyRange const& keys,
+	    int shardLimit,
+	    Optional<Reference<TransactionState>> trState = Optional<Reference<TransactionState>>());
+	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
+	    KeyRange const& keys,
+	    StorageMetrics const& min,
+	    StorageMetrics const& max,
+	    StorageMetrics const& permittedError,
+	    int shardLimit,
+	    int expectedShardCount,
+	    Optional<Reference<TransactionState>> trState = Optional<Reference<TransactionState>>());
 	Future<Void> splitStorageMetricsStream(PromiseStream<Key> const& resultsStream,
 	                                       KeyRange const& keys,
 	                                       StorageMetrics const& limit,
@@ -322,15 +319,32 @@ public:
 	// Note: this will never return if the server is running a protocol from FDB 5.0 or older
 	Future<ProtocolVersion> getClusterProtocol(Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>());
 
-	// Update the watch counter for the database
-	void addWatch();
-	void removeWatch();
+	// Increases the counter of the number of watches in this DatabaseContext by 1. If the number of watches is too
+	// many, throws too_many_watches.
+	void increaseWatchCounter();
+
+	// Decrease the counter of the number of watches in this DatabaseContext by 1
+	void decreaseWatchCounter();
 
 	// watch map operations
+
+	// Gets the watch metadata per tenant id and key
 	Reference<WatchMetadata> getWatchMetadata(int64_t tenantId, KeyRef key) const;
+
+	// Refreshes the watch metadata. If the same watch is used (this is determined by the tenant id and the key), the
+	// metadata will be updated.
 	void setWatchMetadata(Reference<WatchMetadata> metadata);
-	void deleteWatchMetadata(int64_t tenant, KeyRef key);
-	void clearWatchMetadata();
+
+	// Removes the watch metadata
+	// If removeReferenceCount is set to be true, the corresponding WatchRefCount record is removed, too.
+	void deleteWatchMetadata(int64_t tenant, KeyRef key, bool removeReferenceCount = false);
+
+	// Increases reference count to the given watch. Returns the number of references to the watch.
+	int32_t increaseWatchRefCount(const int64_t tenant, KeyRef key, const Version& version);
+
+	// Decreases reference count to the given watch. If the reference count is dropped to 0, the watch metadata will be
+	// removed. Returns the number of references to the watch.
+	int32_t decreaseWatchRefCount(const int64_t tenant, KeyRef key, const Version& version);
 
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
 
@@ -347,8 +361,9 @@ public:
 
 	int apiVersionAtLeast(int minVersion) const { return apiVersion.version() >= minVersion; }
 
-	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a
-	                            // leader. The cluster file therefore is valid, but the database might be unavailable.
+	Future<Void> onConnected()
+	    const; // Returns after a majority of coordination servers are available and have reported a
+	           // leader. The cluster file therefore is valid, but the database might be unavailable.
 	Reference<IClusterConnectionRecord> getConnectionRecord();
 
 	// Switch the database to use the new connection file, and recreate all pending watches for committed transactions.
@@ -376,7 +391,9 @@ public:
 	                                 Version end = std::numeric_limits<Version>::max(),
 	                                 KeyRange range = allKeys,
 	                                 int replyBufferSize = -1,
-	                                 bool canReadPopped = true);
+	                                 bool canReadPopped = true,
+	                                 ReadOptions readOptions = { ReadType::NORMAL, CacheResult::False },
+	                                 bool encrypted = false);
 
 	Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
@@ -384,14 +401,19 @@ public:
 	// BlobGranule API.
 	Future<Key> purgeBlobGranules(KeyRange keyRange,
 	                              Version purgeVersion,
-	                              Optional<TenantName> tenant,
+	                              Optional<Reference<Tenant>> tenant,
 	                              bool force = false);
 	Future<Void> waitPurgeGranulesComplete(Key purgeKey);
 
-	Future<bool> blobbifyRange(KeyRange range);
-	Future<bool> unblobbifyRange(KeyRange range);
-	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range, int rangeLimit);
-	Future<Version> verifyBlobRange(const KeyRange& range, Optional<Version> version);
+	Future<bool> blobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant = {});
+	Future<bool> unblobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant = {});
+	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range,
+	                                                                int rangeLimit,
+	                                                                Optional<Reference<Tenant>> tenant = {});
+	Future<Version> verifyBlobRange(const KeyRange& range,
+	                                Optional<Version> version,
+	                                Optional<Reference<Tenant>> tenant = {});
+	Future<bool> blobRestore(const KeyRange range, Optional<Version> version);
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
@@ -410,6 +432,8 @@ public:
 	explicit DatabaseContext(const Error& err);
 
 	void expireThrottles();
+
+	UID dbId;
 
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord;
@@ -466,10 +490,8 @@ public:
 
 	// Cache of location information
 	int locationCacheSize;
-	int tenantCacheSize;
 	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
 	std::unordered_map<Endpoint, EndpointFailureInfo> failedEndpointsOnHealthyServersInfo;
-	std::unordered_map<TenantName, TenantMapEntry> tenantCache;
 
 	std::map<UID, StorageServerInfo*> server_interf;
 	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
@@ -493,7 +515,6 @@ public:
 	// servers by their tags).
 	std::unordered_map<UID, Tag> ssidTagMapping;
 
-	UID dbId;
 	IsInternal internal; // Only contexts created through the C client and fdbcli are non-internal
 
 	PrioritizedTransactionTagMap<ClientTagThrottleData> throttledTags;
@@ -533,6 +554,8 @@ public:
 	Counter transactionKeyServerLocationRequests;
 	Counter transactionKeyServerLocationRequestsCompleted;
 	Counter transactionStatusRequests;
+	Counter transactionTenantLookupRequests;
+	Counter transactionTenantLookupRequestsCompleted;
 	Counter transactionsTooOld;
 	Counter transactionsFutureVersions;
 	Counter transactionsNotCommitted;
@@ -545,8 +568,28 @@ public:
 	Counter transactionGrvTimedOutBatches;
 	Counter transactionCommitVersionNotFoundForSS;
 
-	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
-	    bytesPerCommit, bgLatencies, bgGranulesPerRequest;
+	// Blob Granule Read metrics. Omit from logging if not used.
+	bool anyBGReads;
+	CounterCollection ccBG;
+	Counter bgReadInputBytes;
+	Counter bgReadOutputBytes;
+	Counter bgReadSnapshotRows;
+	Counter bgReadRowsCleared;
+	Counter bgReadRowsInserted;
+	Counter bgReadRowsUpdated;
+	DDSketch<double> bgLatencies, bgGranulesPerRequest;
+
+	// Change Feed metrics. Omit change feed metrics from logging if not used
+	bool usedAnyChangeFeeds;
+	CounterCollection ccFeed;
+	Counter feedStreamStarts;
+	Counter feedMergeStreamStarts;
+	Counter feedErrors;
+	Counter feedNonRetriableErrors;
+	Counter feedPops;
+	Counter feedPopsFallback;
+
+	DDSketch<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
 
 	int outstandingWatches;
 	int maxOutstandingWatches;
@@ -575,7 +618,6 @@ public:
 	bool transactionTracingSample;
 	double verifyCausalReadsProp = 0.0;
 	bool blobGranuleNoMaterialize = false;
-	bool anyBlobGranuleRequests = false;
 
 	Future<Void> logger;
 	Future<Void> throttleExpirer;
@@ -643,13 +685,28 @@ public:
 	// Adds or updates the specified (UID, Tag) pair in the tag mapping.
 	void addSSIdTagMapping(const UID& uid, const Tag& tag);
 
+	// Returns the latest commit version that mutated the specified storage server.
+	// @in ssid id of the storage server interface
+	// @out tag storage server's tag, if an entry exists for "ssid" in "ssidTagMapping"
+	// @out commitVersion latest commit version that mutated the storage server
+	void getLatestCommitVersionForSSID(const UID& ssid, Tag& tag, Version& commitVersion);
+
 	// Returns the latest commit versions that mutated the specified storage servers
 	/// @note returns the latest commit version for a storage server only if the latest
-	// commit version of that storage server is below the specified "readVersion".
+	// commit version of that storage server is below the transaction's readVersion.
 	void getLatestCommitVersions(const Reference<LocationInfo>& locationInfo,
-	                             Version readVersion,
 	                             Reference<TransactionState> info,
 	                             VersionVector& latestCommitVersions);
+
+	// Returns the latest commit version that mutated the specified storage server.
+	// @note this is a lightweight version of "getLatestCommitVersions()", to be used
+	// when the state ("TransactionState") of the transaction that fetched the read
+	// version is not available.
+	void getLatestCommitVersion(const StorageServerInterface& ssi,
+	                            Version readVersion,
+	                            VersionVector& latestCommitVersion);
+
+	TenantMode getTenantMode() const { return clientInfo->get().tenantMode; }
 
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;
@@ -658,9 +715,61 @@ public:
 	std::unique_ptr<GlobalConfig> globalConfig;
 	EventCacheHolder connectToDatabaseEventCacheHolder;
 
+	Future<int64_t> lookupTenant(TenantName tenant);
+
+	// Get client-side status information as a JSON string with the following schema:
+	// { "Healthy" : <overall health status: true or false>,
+	//   "ClusterID" : <UUID>,
+	//   "Coordinators" : [ <address>, ...  ],
+	//   "CurrentCoordinator" : <address>
+	//   "GrvProxies" : [ <address>, ...  ],
+	//   "CommitProxies" : [ <address>", ... ],
+	//   "StorageServers" : [ { "Address" : <address>, "SSID" : <Storage Server ID> }, ... ],
+	//   "Connections" : [
+	//     { "Address" : "<address>",
+	//       "Status" : <failed|connected|connecting|disconnected>,
+	//       "Compatible" : <is protocol version compatible with the client>,
+	//       "ConnectFailedCount" : <number of failed connection attempts>,
+	//       "LastConnectTime" : <elapsed time in seconds since the last connection attempt>,
+	//       "PingCount" : <total ping count>,
+	//       "PingTimeoutCount" : <number of ping timeouts>,
+	//       "BytesSampleTime" : <elapsed time of the reported the bytes received and sent values>,
+	//       "BytesReceived" : <bytes received>,
+	//       "BytesSent" : <bytes sent>,
+	//       "ProtocolVersion" : <protocol version of the server, missing if unknown>
+	//     },
+	//     ...
+	//   ]
+	// }
+	//
+	// The addresses in the Connections array match the addresses of Coordinators, GrvProxies,
+	// CommitProxies and StorageServers, there is one entry per different address
+	//
+	// If the database context is initialized with an error, the JSON contains just the error code
+	// { "InitializationError" : <error code> }
+	Standalone<StringRef> getClientStatus();
+
 private:
-	std::unordered_map<std::pair<int64_t, Key>, Reference<WatchMetadata>, boost::hash<std::pair<int64_t, Key>>>
-	    watchMap;
+	using WatchMapKey = std::pair<int64_t, Key>;
+	using WatchMapKeyHasher = boost::hash<WatchMapKey>;
+	using WatchMapValue = Reference<WatchMetadata>;
+	using WatchMap_t = std::unordered_map<WatchMapKey, WatchMapValue, WatchMapKeyHasher>;
+
+	WatchMap_t watchMap;
+
+	// The reason of using a multiset of Versions as counter instead of a simpler integer counter is due to the
+	// possible race condition:
+	//
+	//    1. A watch to key A is set, the watchValueMap ACTOR, noted as X, starts waiting.
+	//    2. All watches are cleared due to connection string change.
+	//    3. The watch to key A is restarted with watchValueMap ACTOR Y.
+	//    4. X receives the cancel exception, and tries to dereference the counter. This causes Y gets cancelled.
+	//
+	// By introducing versions, this race condition is solved.
+	using WatchCounterMapValue = std::multiset<Version>;
+	using WatchCounterMap_t = std::unordered_map<WatchMapKey, WatchCounterMapValue, WatchMapKeyHasher>;
+	// Maps the number of the WatchMapKey being used.
+	WatchCounterMap_t watchCounterMap;
 };
 
 // Similar to tr.onError(), but doesn't require a DatabaseContext.

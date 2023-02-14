@@ -34,6 +34,10 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// Instantiate MasterInterface related tempates
+template class ReplyPromise<MasterInterface>;
+template struct NetSAV<MasterInterface>;
+
 struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	UID dbgid;
 
@@ -102,19 +106,19 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	    versionVectorTagUpdates("VersionVectorTagUpdates",
 	                            dbgid,
 	                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                            SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    waitForPrevCommitRequests("WaitForPrevCommitRequests", cc),
 	    nonWaitForPrevCommitRequests("NonWaitForPrevCommitRequests", cc),
 	    versionVectorSizeOnCVReply("VersionVectorSizeOnCVReply",
 	                               dbgid,
 	                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                               SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                               SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    waitForPrevLatencies("WaitForPrevLatencies",
 	                         dbgid,
 	                         SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                         SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                         SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    addActor(addActor) {
-		logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
+		logger = cc.traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "MasterMetrics");
 		if (forceRecovery && !myInterface.locality.dcId().present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
 			forceRecovery = false;
@@ -160,7 +164,9 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		return Void();
 	}
 
-	CODE_PROBE(proxyItr->second.latestRequestNum.get() < req.requestNum - 1, "Commit version request queued up");
+	CODE_PROBE(proxyItr->second.latestRequestNum.get() < req.requestNum - 1,
+	           "Commit version request queued up",
+	           probe::decoration::rare);
 	wait(proxyItr->second.latestRequestNum.whenAtLeast(req.requestNum - 1));
 
 	auto itr = proxyItr->second.replies.find(req.requestNum);
@@ -169,7 +175,8 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		req.reply.send(itr->second);
 	} else if (req.requestNum <= proxyItr->second.latestRequestNum.get()) {
 		CODE_PROBE(true,
-		           "Old request for previously acknowledged sequence - may be impossible with current FlowTransport");
+		           "Old request for previously acknowledged sequence - may be impossible with current FlowTransport",
+		           probe::decoration::rare);
 		ASSERT(req.requestNum <
 		       proxyItr->second.latestRequestNum.get()); // The latest request can never be acknowledged
 		req.reply.send(Never());
@@ -400,8 +407,8 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 
 	state Future<Void> onDBChange = Void();
 	state PromiseStream<Future<Void>> addActor;
-	state Reference<MasterData> self(new MasterData(
-	    db, mi, coordinators, db->get().clusterInterface, LiteralStringRef(""), addActor, forceRecovery));
+	state Reference<MasterData> self(
+	    new MasterData(db, mi, coordinators, db->get().clusterInterface, ""_sr, addActor, forceRecovery));
 	state Future<Void> collection = actorCollection(addActor.getFuture());
 
 	addActor.send(traceRole(Role::MASTER, mi.id()));
@@ -442,11 +449,20 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 			addActor.getFuture().pop();
 		}
 
-		CODE_PROBE(err.code() == error_code_tlog_failed, "Master: terminated due to tLog failure");
-		CODE_PROBE(err.code() == error_code_commit_proxy_failed, "Master: terminated due to commit proxy failure");
-		CODE_PROBE(err.code() == error_code_grv_proxy_failed, "Master: terminated due to GRV proxy failure");
-		CODE_PROBE(err.code() == error_code_resolver_failed, "Master: terminated due to resolver failure");
-		CODE_PROBE(err.code() == error_code_backup_worker_failed, "Master: terminated due to backup worker failure");
+		CODE_PROBE(
+		    err.code() == error_code_tlog_failed, "Master: terminated due to tLog failure", probe::decoration::rare);
+		CODE_PROBE(err.code() == error_code_commit_proxy_failed,
+		           "Master: terminated due to commit proxy failure",
+		           probe::decoration::rare);
+		CODE_PROBE(err.code() == error_code_grv_proxy_failed,
+		           "Master: terminated due to GRV proxy failure",
+		           probe::decoration::rare);
+		CODE_PROBE(err.code() == error_code_resolver_failed,
+		           "Master: terminated due to resolver failure",
+		           probe::decoration::rare);
+		CODE_PROBE(err.code() == error_code_backup_worker_failed,
+		           "Master: terminated due to backup worker failure",
+		           probe::decoration::rare);
 
 		if (normalMasterErrors().count(err.code())) {
 			TraceEvent("MasterTerminated", mi.id()).error(err);

@@ -104,8 +104,5 @@ class HmacSha256StreamCipher final : NonCopyable, public ReferenceCounted<HmacSh
 
 public:
 	HmacSha256StreamCipher();
-	StringRef digest(unsigned char const* data, int len, Arena&);
 	StringRef finish(Arena&);
 };
-
-void applyHmacKeyDerivationFunc(StreamCipherKey* cipherKey, HmacSha256StreamCipher* hmacGenerator, Arena& arena);

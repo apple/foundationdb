@@ -29,6 +29,7 @@
 #include "fdbclient/GenericTransactionHelper.h"
 #include "fdbclient/Subspace.h"
 #include "flow/ObjectSerializer.h"
+#include "flow/Platform.h"
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
 
@@ -306,8 +307,21 @@ public:
 	}
 
 	template <class Transaction>
+	void setVersionstamp(Transaction tr, T const& val, int offset) {
+		tr->atomicOp(
+		    key,
+		    BinaryWriter::toValue<T>(val, Unversioned()).withSuffix(StringRef(reinterpret_cast<uint8_t*>(&offset), 4)),
+		    MutationRef::SetVersionstampedValue);
+	}
+
+	template <class Transaction>
 	void clear(Transaction tr) {
 		tr->clear(key);
+	}
+
+	template <class Transaction>
+	Future<Void> watch(Transaction tr) {
+		return tr->watch(key);
 	}
 
 	Key key;
@@ -685,4 +699,14 @@ public:
 	}
 
 	KeyRange subspace;
+};
+
+// all fields are under prefix, the schema is like prefix/"packed key"/"packed key2"
+class KeyBackedStruct {
+public:
+	KeyBackedStruct(StringRef prefix) : prefix(prefix), rootSpace(prefix) {}
+
+protected:
+	Key prefix;
+	Subspace rootSpace;
 };

@@ -18,15 +18,18 @@
  * limitations under the License.
  */
 
+#include "flow/Msgpack.h"
 #include "fdbclient/Tracing.h"
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 #include "flow/Knobs.h"
+#include "flow/IConnection.h"
 #include "fdbclient/IKnobCollection.h"
 #include "flow/network.h"
 #include <functional>
 #include <iomanip>
 #include <memory>
+#include "flow/IUDPSocket.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -77,41 +80,6 @@ struct LogfileTracer : ITracer {
 			}
 		}
 	}
-};
-
-struct TraceRequest {
-	std::unique_ptr<uint8_t[]> buffer;
-	// Amount of data in buffer (bytes).
-	std::size_t data_size;
-	// Size of buffer (bytes).
-	std::size_t buffer_size;
-
-	void write_byte(uint8_t byte) { write_bytes(&byte, 1); }
-
-	void write_bytes(const uint8_t* buf, std::size_t n) {
-		resize(n);
-		std::copy(buf, buf + n, buffer.get() + data_size);
-		data_size += n;
-	}
-
-	void resize(std::size_t n) {
-		if (data_size + n <= buffer_size) {
-			return;
-		}
-
-		std::size_t size = buffer_size;
-		while (size < data_size + n) {
-			size *= 2;
-		}
-
-		TraceEvent(SevInfo, "TracingSpanResizedBuffer").detail("OldSize", buffer_size).detail("NewSize", size);
-		auto new_buffer = std::make_unique<uint8_t[]>(size);
-		std::copy(buffer.get(), buffer.get() + data_size, new_buffer.get());
-		buffer = std::move(new_buffer);
-		buffer_size = size;
-	}
-
-	void reset() { data_size = 0; }
 };
 
 // A server listening for UDP trace messages, run only in simulation.
@@ -167,146 +135,89 @@ ACTOR Future<Void> traceLog(int* pendingMessages, bool* sendError) {
 struct UDPTracer : public ITracer {
 	// Serializes span fields as an array into the supplied TraceRequest
 	// buffer.
-	void serialize_span(const Span& span, TraceRequest& request) {
+	void serialize_span(const Span& span, MsgpackBuffer& buf) {
 		uint16_t size = 12;
-		request.write_byte(size | 0b10010000); // write as array
-		serialize_value(span.context.traceID.first(), request, 0xcf); // trace id
-		serialize_value(span.context.traceID.second(), request, 0xcf); // trace id
-		serialize_value(span.context.spanID, request, 0xcf); // spanid
+		buf.write_byte(size | 0b10010000); // write as array
+		serialize_value(span.context.traceID.first(), buf, 0xcf); // trace id
+		serialize_value(span.context.traceID.second(), buf, 0xcf); // trace id
+		serialize_value(span.context.spanID, buf, 0xcf); // spanid
 		// parent span id
-		serialize_value(span.parentContext.spanID, request, 0xcf); // spanId
+		serialize_value(span.parentContext.spanID, buf, 0xcf); // spanId
 		// Payload
-		serialize_string(span.location.name.toString(), request);
-		serialize_value(span.begin, request, 0xcb); // start time
-		serialize_value(span.end, request, 0xcb); // end
+		serialize_string(span.location.name.toString(), buf);
+		serialize_value(span.begin, buf, 0xcb); // start time
+		serialize_value(span.end, buf, 0xcb); // end
 		// Kind
-		serialize_value(span.kind, request, 0xcc);
+		serialize_value(span.kind, buf, 0xcc);
 		// Status
-		serialize_value(span.status, request, 0xcc);
+		serialize_value(span.status, buf, 0xcc);
 		// Links
-		serialize_vector(span.links, request);
+		serialize_vector(span.links, buf);
 		// Events
-		serialize_vector(span.events, request);
+		serialize_vector(span.events, buf);
 		// Attributes
-		serialize_map(span.attributes, request);
+		serialize_map(span.attributes, buf);
 	}
 
 private:
-	// Writes the given value in big-endian format to the request. Sets the
-	// first byte to msgpack_type.
-	template <typename T>
-	inline void serialize_value(const T& val, TraceRequest& request, uint8_t msgpack_type) {
-		request.write_byte(msgpack_type);
-
-		const uint8_t* p = reinterpret_cast<const uint8_t*>(std::addressof(val));
-		for (size_t i = 0; i < sizeof(T); ++i) {
-			request.write_byte(p[sizeof(T) - i - 1]);
-		}
-	}
-
-	// Writes the given string to the request as a sequence of bytes. Inserts a
-	// format byte at the beginning of the string according to the its length,
-	// as specified by the msgpack specification.
-	inline void serialize_string(const uint8_t* c, int length, TraceRequest& request) {
-		if (length <= 31) {
-			// A size 0 string is ok. We still need to write a byte
-			// identifiying the item as a string, but can set the size to 0.
-			request.write_byte(static_cast<uint8_t>(length) | 0b10100000);
-		} else if (length <= 255) {
-			request.write_byte(0xd9);
-			request.write_byte(static_cast<uint8_t>(length));
-		} else if (length <= 65535) {
-			request.write_byte(0xda);
-			request.write_byte(reinterpret_cast<const uint8_t*>(&length)[1]);
-			request.write_byte(reinterpret_cast<const uint8_t*>(&length)[0]);
-		} else {
-			TraceEvent(SevWarn, "TracingSpanSerializeString")
-			    .detail("Failed to MessagePack encode very large string", length);
-			ASSERT_WE_THINK(false);
-		}
-
-		request.write_bytes(c, length);
-	}
-
-	inline void serialize_string(const std::string& str, TraceRequest& request) {
-		serialize_string(reinterpret_cast<const uint8_t*>(str.data()), str.size(), request);
-	}
-
 	// Writes the given vector of linked SpanContext's to the request. If the vector is
 	// empty, the request is not modified.
-	inline void serialize_vector(const SmallVectorRef<SpanContext>& vec, TraceRequest& request) {
+	inline void serialize_vector(const SmallVectorRef<SpanContext>& vec, MsgpackBuffer& buf) {
 		int size = vec.size();
 		if (size <= 15) {
-			request.write_byte(static_cast<uint8_t>(size) | 0b10010000);
+			buf.write_byte(static_cast<uint8_t>(size) | 0b10010000);
 		} else if (size <= 65535) {
-			request.write_byte(0xdc);
-			request.write_byte(reinterpret_cast<const uint8_t*>(&size)[1]);
-			request.write_byte(reinterpret_cast<const uint8_t*>(&size)[0]);
+			buf.write_byte(0xdc);
+			buf.write_byte(reinterpret_cast<const uint8_t*>(&size)[1]);
+			buf.write_byte(reinterpret_cast<const uint8_t*>(&size)[0]);
 		} else {
 			TraceEvent(SevWarn, "TracingSpanSerializeVector").detail("Failed to MessagePack encode large vector", size);
 			ASSERT_WE_THINK(false);
 		}
 
 		for (const auto& link : vec) {
-			serialize_value(link.traceID.first(), request, 0xcf); // trace id
-			serialize_value(link.traceID.second(), request, 0xcf); // trace id
-			serialize_value(link.spanID, request, 0xcf); // spanid
+			serialize_value(link.traceID.first(), buf, 0xcf); // trace id
+			serialize_value(link.traceID.second(), buf, 0xcf); // trace id
+			serialize_value(link.spanID, buf, 0xcf); // spanid
 		}
 	}
 
-	// Writes the given vector of linked SpanContext's to the request. If the vector is
+	// Writes the given vector of linked SpanEventRef's to the request. If the vector is
 	// empty, the request is not modified.
-	inline void serialize_vector(const SmallVectorRef<SpanEventRef>& vec, TraceRequest& request) {
+	inline void serialize_vector(const SmallVectorRef<SpanEventRef>& vec, MsgpackBuffer& buf) {
 		int size = vec.size();
 		if (size <= 15) {
-			request.write_byte(static_cast<uint8_t>(size) | 0b10010000);
+			buf.write_byte(static_cast<uint8_t>(size) | 0b10010000);
 		} else if (size <= 65535) {
-			request.write_byte(0xdc);
-			request.write_byte(reinterpret_cast<const uint8_t*>(&size)[1]);
-			request.write_byte(reinterpret_cast<const uint8_t*>(&size)[0]);
+			buf.write_byte(0xdc);
+			buf.write_byte(reinterpret_cast<const uint8_t*>(&size)[1]);
+			buf.write_byte(reinterpret_cast<const uint8_t*>(&size)[0]);
 		} else {
 			TraceEvent(SevWarn, "TracingSpanSerializeVector").detail("Failed to MessagePack encode large vector", size);
 			ASSERT_WE_THINK(false);
 		}
 
 		for (const auto& event : vec) {
-			serialize_string(event.name.toString(), request); // event name
-			serialize_value(event.time, request, 0xcb); // event time
-			serialize_vector(event.attributes, request);
+			serialize_string(event.name.toString(), buf); // event name
+			serialize_value(event.time, buf, 0xcb); // event time
+			serialize_vector(event.attributes, buf);
 		}
 	}
 
-	inline void serialize_vector(const SmallVectorRef<KeyValueRef>& vals, TraceRequest& request) {
+	inline void serialize_vector(const SmallVectorRef<KeyValueRef>& vals, MsgpackBuffer& buf) {
 		int size = vals.size();
 		if (size <= 15) {
 			// N.B. We're actually writing this out as a fixmap here in messagepack format!
 			// fixmap	1000xxxx	0x80 - 0x8f
-			request.write_byte(static_cast<uint8_t>(size) | 0b10000000);
+			buf.write_byte(static_cast<uint8_t>(size) | 0b10000000);
 		} else {
 			TraceEvent(SevWarn, "TracingSpanSerializeVector").detail("Failed to MessagePack encode large vector", size);
 			ASSERT_WE_THINK(false);
 		}
 
 		for (const auto& kv : vals) {
-			serialize_string(kv.key.toString(), request);
-			serialize_string(kv.value.toString(), request);
-		}
-	}
-
-	template <class Map>
-	inline void serialize_map(const Map& map, TraceRequest& request) {
-		int size = map.size();
-
-		if (size <= 15) {
-			request.write_byte(static_cast<uint8_t>(size) | 0b10000000);
-		} else {
-			TraceEvent(SevWarn, "TracingSpanSerializeMap").detail("Failed to MessagePack encode large map", size);
-			ASSERT_WE_THINK(false);
-		}
-
-		for (const auto& [key, value] : map) {
-			serialize_string(key.begin(), key.size(), request);
-			serialize_string(value.begin(), value.size(), request);
+			serialize_string(kv.key.toString(), buf);
+			serialize_string(kv.value.toString(), buf);
 		}
 	}
 };
@@ -336,9 +247,9 @@ ACTOR Future<Void> fastTraceLogger(int* unreadyMessages, int* failedMessages, in
 struct FastUDPTracer : public UDPTracer {
 	FastUDPTracer()
 	  : unready_socket_messages_(0), failed_messages_(0), total_messages_(0), socket_fd_(-1), send_error_(false) {
-		request_ = TraceRequest{ .buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
-			                     .data_size = 0,
-			                     .buffer_size = kTraceBufferSize };
+		request_ = MsgpackBuffer{ .buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
+			                      .data_size = 0,
+			                      .buffer_size = kTraceBufferSize };
 	}
 
 	TracerType type() const override { return TracerType::NETWORK_LOSSY; }
@@ -394,7 +305,7 @@ struct FastUDPTracer : public UDPTracer {
 	}
 
 private:
-	TraceRequest request_;
+	MsgpackBuffer request_;
 
 	int unready_socket_messages_;
 	int failed_messages_;
@@ -446,21 +357,25 @@ Span& Span::operator=(Span&& o) {
 		g_tracer->trace(*this);
 	}
 	arena = std::move(o.arena);
-	context = o.context;
-	parentContext = o.parentContext;
-	begin = o.begin;
-	end = o.end;
-	location = o.location;
-	links = std::move(o.links);
-	events = std::move(o.events);
-	status = o.status;
-	kind = o.kind;
-	o.context = SpanContext();
-	o.parentContext = SpanContext();
-	o.kind = SpanKind::INTERNAL;
-	o.begin = 0.0;
-	o.end = 0.0;
-	o.status = SpanStatus::UNSET;
+	// All memory referenced in *Ref fields of Span is now (potentially)
+	// invalid, and o no longer has ownership of any memory referenced by *Ref
+	// fields of o. We must ensure that o no longer references any memory it no
+	// longer owns, and that *this no longer references any memory it no longer
+	// owns. Not every field references arena memory, but this std::exchange
+	// pattern provides a nice template for getting this right in a concise way
+	// should we add more fields to Span.
+
+	attributes = std::exchange(o.attributes, decltype(o.attributes)());
+	begin = std::exchange(o.begin, decltype(o.begin)());
+	context = std::exchange(o.context, decltype(o.context)());
+	end = std::exchange(o.end, decltype(o.end)());
+	events = std::exchange(o.events, decltype(o.events)());
+	kind = std::exchange(o.kind, decltype(o.kind)());
+	links = std::exchange(o.links, decltype(o.links)());
+	location = std::exchange(o.location, decltype(o.location)());
+	parentContext = std::exchange(o.parentContext, decltype(o.parentContext)());
+	status = std::exchange(o.status, decltype(o.status)());
+
 	return *this;
 }
 
@@ -497,7 +412,7 @@ TEST_CASE("/flow/Tracing/AddEvents") {
 	auto arena = span1.arena;
 	SmallVectorRef<KeyValueRef> attrs;
 	attrs.push_back(arena, KeyValueRef("foo"_sr, "bar"_sr));
-	span1.addEvent(LiteralStringRef("read_version"), 1.0, attrs);
+	span1.addEvent("read_version"_sr, 1.0, attrs);
 	ASSERT(span1.events[0].name.toString() == "read_version");
 	ASSERT(span1.events[0].time == 1.0);
 	ASSERT(span1.events[0].attributes.begin()->key.toString() == "foo");
@@ -505,7 +420,7 @@ TEST_CASE("/flow/Tracing/AddEvents") {
 
 	// Use helper method to add an OTELEventRef with no attributes to an OTELSpan
 	Span span2("span_with_event"_loc);
-	span2.addEvent(StringRef(span2.arena, LiteralStringRef("commit_succeed")), 1234567.100);
+	span2.addEvent(StringRef(span2.arena, "commit_succeed"_sr), 1234567.100);
 	ASSERT(span2.events[0].name.toString() == "commit_succeed");
 	ASSERT(span2.events[0].time == 1234567.100);
 	ASSERT(span2.events[0].attributes.size() == 0);
@@ -534,11 +449,9 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	           SpanContext(deterministicRandom()->randomUniqueID(),
 	                       deterministicRandom()->randomUInt64(),
 	                       TraceFlags::sampled));
-	IKnobCollection::getMutableGlobalKnobCollection().setKnob("tracing_span_attributes_enabled",
-	                                                          KnobValueRef::create(bool{ true }));
 	auto arena = span1.arena;
-	span1.addAttribute(StringRef(arena, LiteralStringRef("foo")), StringRef(arena, LiteralStringRef("bar")));
-	span1.addAttribute(StringRef(arena, LiteralStringRef("operation")), StringRef(arena, LiteralStringRef("grv")));
+	span1.addAttribute(StringRef(arena, "foo"_sr), StringRef(arena, "bar"_sr));
+	span1.addAttribute(StringRef(arena, "operation"_sr), StringRef(arena, "grv"_sr));
 	ASSERT_EQ(span1.attributes.size(), 3); // Includes default attribute of "address"
 	ASSERT(span1.attributes[1] == KeyValueRef("foo"_sr, "bar"_sr));
 	ASSERT(span1.attributes[2] == KeyValueRef("operation"_sr, "grv"_sr));
@@ -548,9 +461,9 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	                       deterministicRandom()->randomUInt64(),
 	                       TraceFlags::sampled));
 	auto s2Arena = span2.arena;
-	span2.addAttribute(StringRef(s2Arena, LiteralStringRef("a")), StringRef(s2Arena, LiteralStringRef("1")))
-	    .addAttribute(StringRef(s2Arena, LiteralStringRef("b")), LiteralStringRef("2"))
-	    .addAttribute(StringRef(s2Arena, LiteralStringRef("c")), LiteralStringRef("3"));
+	span2.addAttribute(StringRef(s2Arena, "a"_sr), StringRef(s2Arena, "1"_sr))
+	    .addAttribute(StringRef(s2Arena, "b"_sr), "2"_sr)
+	    .addAttribute(StringRef(s2Arena, "c"_sr), "3"_sr);
 
 	ASSERT_EQ(span2.attributes.size(), 4); // Includes default attribute of "address"
 	ASSERT(span2.attributes[1] == KeyValueRef("a"_sr, "1"_sr));
@@ -654,12 +567,10 @@ std::string readMPString(uint8_t* index) {
 // Windows doesn't like lack of header and declaration of constructor for FastUDPTracer
 #ifndef WIN32
 TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
-	IKnobCollection::getMutableGlobalKnobCollection().setKnob("tracing_span_attributes_enabled",
-	                                                          KnobValueRef::create(bool{ true }));
 	Span span1("encoded_span"_loc);
-	auto request = TraceRequest{ .buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
-		                         .data_size = 0,
-		                         .buffer_size = kTraceBufferSize };
+	auto request = MsgpackBuffer{ .buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
+		                          .data_size = 0,
+		                          .buffer_size = kTraceBufferSize };
 	auto tracer = FastUDPTracer();
 	tracer.serialize_span(span1, request);
 	auto data = request.buffer.get();
@@ -718,7 +629,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	attrs.push_back(s3Arena, KeyValueRef("foo"_sr, "bar"_sr));
 	span3.addAttribute("operation"_sr, "grv"_sr)
 	    .addLink(SpanContext(UID(300, 301), 400, TraceFlags::sampled))
-	    .addEvent(StringRef(s3Arena, LiteralStringRef("event1")), 100.101, attrs);
+	    .addEvent(StringRef(s3Arena, "event1"_sr), 100.101, attrs);
 	tracer.serialize_span(span3, request);
 	data = request.buffer.get();
 	ASSERT(data[0] == 0b10011100); // 12 element array.

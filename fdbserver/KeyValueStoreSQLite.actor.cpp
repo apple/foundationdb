@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
 #include "fmt/format.h"
 #include "crc32/crc32c.h"
@@ -38,6 +39,7 @@ u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 #include "fdbserver/VFSAsync.h"
 #include "fdbserver/template_fdb.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #if SQLITE_THREADSAFE == 0
@@ -149,7 +151,22 @@ struct PageChecksumCodec {
 		}
 
 		if (!silent) {
-			TraceEvent trEvent(SevError, "SQLitePageChecksumFailure");
+			auto severity = SevError;
+			if (g_network->isSimulated()) {
+				auto firstBlock = pageNumber == 1 ? 0 : ((pageNumber - 1) * pageLen) / 4096,
+				     lastBlock = (pageNumber * pageLen) / 4096;
+				auto iter = g_simulator->corruptedBlocks.lower_bound(std::make_pair(filename, firstBlock));
+				if (iter != g_simulator->corruptedBlocks.end() && iter->first == filename && iter->second < lastBlock) {
+					severity = SevWarnAlways;
+				}
+				TraceEvent("CheckCorruption")
+				    .detail("Filename", filename)
+				    .detail("NextFile", iter->first)
+				    .detail("FirstBlock", firstBlock)
+				    .detail("LastBlock", lastBlock)
+				    .detail("NextBlock", iter->second);
+			}
+			TraceEvent trEvent(severity, "SQLitePageChecksumFailure");
 			trEvent.error(checksum_failed())
 			    .detail("CodecPageSize", pageSize)
 			    .detail("CodecReserveSize", reserveSize)
@@ -309,7 +326,17 @@ struct SQLiteDB : NonCopyable {
 			    db, 0, restart ? SQLITE_CHECKPOINT_RESTART : SQLITE_CHECKPOINT_FULL, &logSize, &checkpointCount);
 			if (!rc)
 				break;
-			if ((sqlite3_errcode(db) & 0xff) == SQLITE_BUSY) {
+
+			// In simulation, if the process is shutting down then do not wait/retry on a busy result because the wait
+			// or the retry could take too long to complete such that the virtual process is forcibly destroyed first,
+			// leaking all outstanding actors and their related states which would include references to the SQLite
+			// data files which would remain open.  This would cause the replacement virtual process to fail an assert
+			// when opening the SQLite files as they would already be in use.
+			if (g_network->isSimulated() && g_simulator->getCurrentProcess()->shutdownSignal.isSet()) {
+				VFSAsyncFile::setInjectedError(rc);
+				checkError("checkpoint", rc);
+				ASSERT(false); // should never reach this point
+			} else if ((sqlite3_errcode(db) & 0xff) == SQLITE_BUSY) {
 				// printf("#");
 				// threadSleep(.010);
 				sqlite3_sleep(10);
@@ -696,7 +723,7 @@ struct IntKeyCursor {
 				db.checkError("BtreeCloseCursor", sqlite3BtreeCloseCursor(cursor));
 			} catch (...) {
 			}
-			delete[](char*) cursor;
+			delete[] (char*)cursor;
 		}
 	}
 };
@@ -734,7 +761,7 @@ struct RawCursor {
 			} catch (...) {
 				TraceEvent(SevError, "RawCursorDestructionError").log();
 			}
-			delete[](char*) cursor;
+			delete[] (char*)cursor;
 		}
 	}
 	void moveFirst() {
@@ -1333,7 +1360,7 @@ int SQLiteDB::checkAllPageChecksums() {
 	// then we could instead open a read cursor for the same effect, as currently tryReadEveryDbPage() requires it.
 	Statement* jm = new Statement(*this, "PRAGMA journal_mode");
 	ASSERT(jm->nextRow());
-	if (jm->column(0) != LiteralStringRef("wal")) {
+	if (jm->column(0) != "wal"_sr) {
 		TraceEvent(SevError, "JournalModeError").detail("Filename", filename).detail("Mode", jm->column(0));
 		ASSERT(false);
 	}
@@ -1502,7 +1529,7 @@ void SQLiteDB::open(bool writable) {
 
 	Statement jm(*this, "PRAGMA journal_mode");
 	ASSERT(jm.nextRow());
-	if (jm.column(0) != LiteralStringRef("wal")) {
+	if (jm.column(0) != "wal"_sr) {
 		TraceEvent(SevError, "JournalModeError").detail("Filename", filename).detail("Mode", jm.column(0));
 		ASSERT(false);
 	}
@@ -1586,7 +1613,9 @@ public:
 	StorageBytes getStorageBytes() const override;
 
 	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override;
-	void clear(KeyRangeRef range, const Arena* arena = nullptr) override;
+	void clear(KeyRangeRef range,
+	           const StorageServerMetrics* storageMetrics = nullptr,
+	           const Arena* arena = nullptr) override;
 	Future<Void> commit(bool sequential = false) override;
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> optionss) override;
@@ -1610,6 +1639,10 @@ public:
 
 	Future<SpringCleaningWorkPerformed> doClean();
 	void startReadThreads();
+
+	Future<EncryptionAtRestMode> encryptionMode() override {
+		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
+	}
 
 private:
 	KeyValueStoreType type;
@@ -1810,7 +1843,7 @@ private:
 			cursor->set(a.kv);
 			++setsThisCommit;
 			++writesComplete;
-			if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting)
+			if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting)
 				TraceEvent("SetActionFinished", dbgid).detail("Elapsed", now() - s);
 		}
 
@@ -1824,7 +1857,7 @@ private:
 			cursor->fastClear(a.range, freeTableEmpty);
 			cursor->clear(a.range); // TODO: at most one
 			++writesComplete;
-			if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting)
+			if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting)
 				TraceEvent("ClearActionFinished", dbgid).detail("Elapsed", now() - s);
 		}
 
@@ -1864,7 +1897,7 @@ private:
 
 			diskBytesUsed = waitForAndGet(conn.dbFile->size()) + waitForAndGet(conn.walFile->size());
 
-			if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting)
+			if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting)
 				TraceEvent("CommitActionFinished", dbgid).detail("Elapsed", now() - t1);
 		}
 
@@ -1885,14 +1918,11 @@ private:
 				readThreads[i].clear();
 		}
 		void checkFreePages() {
-			int iterations = 0;
-
 			int64_t freeListSize = freeListPages;
 			while (!freeTableEmpty && freeListSize < SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT) {
 				int deletedPages = cursor->lazyDelete(SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT);
 				freeTableEmpty = (deletedPages != SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT);
 				springCleaningStats.lazyDeletePages += deletedPages;
-				++iterations;
 
 				freeListSize = conn.freePages();
 			}
@@ -1987,7 +2017,7 @@ private:
 
 			a.result.send(workPerformed);
 			++writesComplete;
-			if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting)
+			if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting)
 				TraceEvent("SpringCleaningActionFinished", dbgid).detail("Elapsed", now() - s);
 		}
 	};
@@ -1996,7 +2026,7 @@ private:
 		state int64_t lastReadsComplete = 0;
 		state int64_t lastWritesComplete = 0;
 		loop {
-			wait(delay(FLOW_KNOBS->DISK_METRIC_LOGGING_INTERVAL));
+			wait(delay(FLOW_KNOBS->SQLITE_DISK_METRIC_LOGGING_INTERVAL));
 
 			int64_t rc = self->readsComplete, wc = self->writesComplete;
 			TraceEvent("DiskMetrics", self->logID)
@@ -2205,7 +2235,7 @@ void KeyValueStoreSQLite::set(KeyValueRef keyValue, const Arena* arena) {
 	++writesRequested;
 	writeThread->post(new Writer::SetAction(keyValue));
 }
-void KeyValueStoreSQLite::clear(KeyRangeRef range, const Arena* arena) {
+void KeyValueStoreSQLite::clear(KeyRangeRef range, const StorageServerMetrics* storageMetrics, const Arena* arena) {
 	++writesRequested;
 	writeThread->post(new Writer::ClearAction(range));
 }
@@ -2287,9 +2317,9 @@ ACTOR Future<Void> KVFileCheck(std::string filename, bool integrity) {
 
 	StringRef kvFile(filename);
 	KeyValueStoreType type = KeyValueStoreType::END;
-	if (kvFile.endsWith(LiteralStringRef(".fdb")))
+	if (kvFile.endsWith(".fdb"_sr))
 		type = KeyValueStoreType::SSD_BTREE_V1;
-	else if (kvFile.endsWith(LiteralStringRef(".sqlite")))
+	else if (kvFile.endsWith(".sqlite"_sr))
 		type = KeyValueStoreType::SSD_BTREE_V2;
 	ASSERT(type != KeyValueStoreType::END);
 

@@ -139,6 +139,9 @@ class Config:
         self.max_errors_args = {'short_name': 'E'}
         self.old_binaries_path: Path = Path('/app/deploy/global_data/oldBinaries/')
         self.old_binaries_path_args = {'help': 'Path to the directory containing the old fdb binaries'}
+        self.tls_plugin_path: Path = Path('/app/deploy/runtime/.tls_5_1/FDBLibTLS.so')
+        self.tls_plugin_path_args = {'help': 'Path to the tls plugin used for binaries < 5.2.0'}
+        self.disable_kaio: bool = False
         self.use_valgrind: bool = False
         self.use_valgrind_args = {'action': 'store_true'}
         self.buggify = BuggifyOption('random')
@@ -181,6 +184,8 @@ class Config:
         self.reproduce_prefix: str | None = None
         self.reproduce_prefix_args = {'type': str, 'required': False,
                                       'help': 'When printing the results, prepend this string to the command'}
+        self.long_running: bool = False
+        self.long_running_args = {'action': 'store_true'}
         self._env_names: Dict[str, str] = {}
         self._config_map = self._build_map()
         self._read_env()

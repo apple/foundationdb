@@ -131,12 +131,35 @@ The default is ``disabled``, which means changing the storage engine will not be
 ``aggressive`` tries to replace as many storages as it can at once, and will recruit a new storage server on the same process as the old one. This will be faster, but can potentially hit degraded performance or OOM with two storages on the same process. The main benefit over ``gradual`` is that this doesn't need to take one storage out of rotation, so it works for small or development clusters that have the same number of storage processes as the replication factor. Note that ``aggressive`` is not exclusive to running the perpetual wiggle.
 ``disabled`` means that if the storage engine is changed, fdb will not move the cluster over to the new storage engine. This will disable the perpetual wiggle from rewriting storage files.
 
+consistencyscan
+----------------
+
+This command controls a native data consistency scan role that is automatically recruited in the FDB cluster.  The consistency scan reads all replicas of each shard to verify data consistency.  It is useful for finding corrupt cold data by ensuring that all data is read periodically.  Any errors found will be logged as TraceEvents with Severity = 40.
+
+The syntax is
+
+``consistencyscan [ off | on [maxRate <RATE>] [targetInterval <INTERVAL>] [restart <RESTART>] ]``
+
+* ``off`` will disable the consistency scan
+
+* ``on`` will enable the scan and can be accompanied by additional options shown above
+
+  * ``RATE`` - sets the maximum read speed of the scan in bytes/s.
+
+  * ``INTERVAL`` - sets the target completion time, in seconds, for each full pass over all data in the cluster.  Scan speed will target this interval with a hard limit of RATE.
+
+  * ``RESTART`` - a 1 or 0 and controls whether the process should restart from the beginning of userspace on startup or not.  This should normally be set to 0 which will resume progress from the last time the scan was running.
+
+The consistency scan role publishes its configuration and metrics in Status JSON under the path ``.cluster.consistency_scan_info``.
+
 consistencycheck
 ----------------
 
-The ``consistencycheck`` command enables or disables consistency checking. Its syntax is ``consistencycheck [on|off]``. Calling it with ``on`` enables consistency checking, and ``off`` disables it. Calling it with no arguments displays whether consistency checking is currently enabled.
+Note: This command exists for backward compatibility, it is suggested to use the ``consistencyscan`` command to control FDB's internal consistency scan role instead.
 
-You must be running an ``fdbserver`` process with the ``consistencycheck`` role to perform consistency checking.
+This command controls a key which controls behavior of any externally configured consistency check roles.  You must be running an ``fdbserver`` process with the ``consistencycheck`` role to perform consistency checking.
+
+The ``consistencycheck`` command enables or disables consistency checking. Its syntax is ``consistencycheck [on|off]``. Calling it with ``on`` enables consistency checking, and ``off`` disables it. Calling it with no arguments displays whether consistency checking is currently enabled.
 
 coordinators
 ------------
@@ -153,26 +176,12 @@ If ``description=<DESC>`` is specified, the description field in the cluster fil
 
 For more information on setting the cluster description, see :ref:`configuration-setting-cluster-description`.
 
-createtenant
-------------
-
-The ``createtenant`` command is used to create new tenants in the cluster. Its syntax is ``createtenant <TENANT_NAME>``.
-
-The tenant name can be any byte string that does not begin with the ``\xff`` byte. If the tenant already exists, ``fdbcli`` will report an error.
-
 defaulttenant
 -------------
 
 The ``defaulttenant`` command configures ``fdbcli`` to run its commands without a tenant. This is the default behavior.
 
 The active tenant cannot be changed while a transaction (using ``begin``) is open.
-
-deletetenant
-------------
-
-The ``deletetenant`` command is used to delete tenants from the cluster. Its syntax is ``deletetenant <TENANT_NAME>``.
-
-In order to delete a tenant, it must be empty. To delete a tenant with data, first clear that data using the ``clear`` command. If the tenant does not exist, ``fdbcli`` will report an error.
 
 exclude
 -------
@@ -217,6 +226,13 @@ The ``get`` command fetches the value of a given key. Its syntax is ``get <KEY>`
 
 Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
 
+getknob
+-------
+
+The ``getknob`` command fetches the value of a given knob that has been populated by ``setknob``. Its syntax is ``getknob <KNOBNAME> [CONFIGCLASS]``. It displays the value of ``<KNOBNAME>`` if ``<KNOBNAME>`` is present in the database and ``not found`` otherwise.
+
+Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
+
 getrange
 --------
 
@@ -231,33 +247,8 @@ The ``getrangekeys`` command fetches keys in a range. Its syntax is ``getrangeke
 
 Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
 
-gettenant
----------
-
-The ``gettenant`` command fetches metadata for a given tenant and displays it. Its syntax is ``gettenant <TENANT_NAME> [JSON]``.
-
-Included in the output of this command are the ``id`` and ``prefix`` assigned to the tenant. If the tenant does not exist, ``fdbcli`` will report an error. If ``JSON`` is specified, then the output will be written as a JSON document::
-
-    {
-        "tenant": {
-            "id": 0,
-            "prefix": {
-              "base64": "AAAAAAAAAAU=",
-              "printable": "\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x05",
-            }
-        },
-        "type": "success"
-    }
-
-In the event of an error, the output will include an error message::
-
-    {
-        "error": "...",
-        "type": "error"
-    }
-
-    getversion
-    ----------
+getversion
+----------
 
 The ``getversion`` command fetches the current read version of the cluster or currently running transaction.
 
@@ -346,13 +337,6 @@ Attempts to kill all specified processes. Each address should include the IP and
 
 Attempts to kill all known processes in the cluster.
 
-listtenants
------------
-
-The ``listtenants`` command prints the names of tenants in the cluster. Its syntax is ``listtenants [BEGIN] [END] [LIMIT]``.
-
-By default, the ``listtenants`` command will print up to 100 entries from the entire range of tenants. A narrower sub-range can be printed using the optional ``[BEGIN]`` and ``[END]`` parameters, and the limit can be changed by specifying an integer ``[LIMIT]`` parameter.
-
 lock
 ----
 
@@ -417,13 +401,6 @@ heap
 
 Enables heap profiling for the specified process.
 
-renametenant
-------------
-
-The ``renametenant`` command can rename an existing tenant to a new name. Its syntax is ``renametenant <OLD_NAME> <NEW_NAME>``.
-
-This command requires that ``OLD_NAME`` is a tenant that already exists on the cluster, and that ``NEW_NAME`` is not already a name of a tenant in the cluster.
-
 reset
 -----
 
@@ -447,6 +424,13 @@ setclass
 The ``setclass`` command can be used to change the :ref:`process class <guidelines-process-class-config>` for a given process. Its syntax is ``setclass [<ADDRESS> <CLASS>]``. If no arguments are specified, then the process classes of all processes are listed. Setting the class to ``default`` to revert to the process class specified on the command line.
 
 The available process classes are ``unset``, ``storage``, ``transaction``, ``resolution``, ``grv_proxy``, ``commit_proxy``, ``master``, ``test``, ``unset``, ``stateless``, ``log``, ``router``, ``cluster_controller``, ``fast_restore``, ``data_distributor``, ``coordinator``, ``ratekeeper``, ``storage_cache``, ``backup``, and ``default``.
+
+setknob
+-------
+
+The ``setknob`` command can be used to set knobs dynamically. Its syntax is ``setknob <KNOBNAME> <KNOBVALUE> [CONFIGCLASS]``. If not present in a ``begin\commit`` block, the CLI will prompt for a description of the change. 
+
+Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
 
 sleep
 -----
@@ -483,6 +467,147 @@ status json
 ``status json`` will provide the cluster status in its JSON format. For a detailed description of this format, see :doc:`mr-status`.
 
 .. _cli-throttle:
+
+tenant
+------
+
+The ``tenant`` command is used to view and manage the tenants in a cluster. The ``tenant`` command has the following subcommands:
+
+create
+^^^^^^
+
+``tenant create <NAME> [tenant_group=<TENANT_GROUP>] [assigned_cluster=<CLUSTER_NAME>]``
+
+Creates a new tenant in the cluster.
+
+``NAME`` - The desired name of the tenant. The name can be any byte string that does not begin with the ``\xff`` byte. 
+
+``TENANT_GROUP`` - The tenant group the tenant will be placed in.
+
+``CLUSTER_NAME`` - The cluster the tenant will be placed in (metacluster only). If unspecified, the metacluster will choose the cluster.
+
+delete
+^^^^^^
+
+``tenant delete <NAME>``
+
+Deletes a tenant from the cluster. The tenant must be empty.
+
+``NAME`` - the name of the tenant to delete.
+
+list
+^^^^
+
+``tenant list [BEGIN] [END] [limit=LIMIT] [offset=OFFSET] [state=<STATE1>,<STATE2>,...]``
+
+Lists the tenants present in the cluster.
+
+``BEGIN`` - the first tenant to list. Defaults to the empty tenant name ``""``.
+
+``END`` - the exclusive end tenant to list. Defaults to ``\xff\xff``.
+
+``LIMIT`` - the number of tenants to list. Defaults to 100.
+
+``OFFSET`` - the number of items to skip over, starting from the beginning of the range. Defaults to 0.
+
+``STATE``` - TenantState(s) to filter the list with. Defaults to no filters.
+
+get
+^^^
+
+``tenant get <NAME> [JSON]``
+
+Prints the metadata for a tenant.
+
+``NAME`` - the name of the tenant to print.
+
+``JSON`` - if specified, the output of the command will be printed in the form of a JSON string::
+
+    {
+        "tenant": {
+            "id": 0,
+            "prefix": {
+              "base64": "AAAAAAAAAAU=",
+              "printable": "\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x05",
+            }
+        },
+        "type": "success"
+    }
+
+In the event of an error, the JSON output will include an error message::
+
+    {
+        "error": "...",
+        "type": "error"
+    }
+
+configure
+^^^^^^^^^
+
+``tenant configure <TENANT_NAME> <[unset] tenant_group[=GROUP_NAME]>``
+
+Changes the configuration of a tenant.
+
+``TENANT_NAME`` - the name of the tenant to reconfigure.
+
+The following tenant fields can be configured:
+
+``tenant_group`` - changes the tenant group a tenant is assigned to. If ``unset`` is specified, the tenant will be configured to not be in a group. Otherwise, ``GROUP_NAME`` must be specified to the new group that the tenant should be made a member of.
+
+rename
+^^^^^^
+
+``tenant rename <OLD_NAME> <NEW_NAME>``
+
+Changes the name of an existing tenant.
+
+``OLD_NAME`` - the name of the tenant being renamed.
+
+``NEW_NAME`` - the desired name of the tenant. This name must not already be in use.
+
+
+tenantgroup
+-----------
+
+The ``tenantgroup`` command is used to view details about the tenant groups in a cluster. The ``tenantgroup`` command has the following subcommands:
+
+list
+^^^^
+
+``tenantgroup list [BEGIN] [END] [LIMIT]``
+
+Lists the tenant groups present in the cluster.
+
+``BEGIN`` - the first tenant group to list. Defaults to the empty tenant group name ``""``.
+
+``END`` - the exclusive end tenant group to list. Defaults to ``\xff\xff``.
+
+``LIMIT`` - the number of tenant groups to list. Defaults to 100.
+
+get
+^^^
+
+``tenantgroup get <NAME> [JSON]``
+
+Prints the metadata for a tenant group.
+
+``NAME`` - the name of the tenant group to print.
+
+``JSON`` - if specified, the output of the command will be printed in the form of a JSON string::
+
+    {
+        "tenant_group": {
+            "assigned_cluster": "cluster1",
+        },
+        "type": "success"
+    }
+
+In the event of an error, the JSON output will include an error message::
+
+    {
+        "error": "...",
+        "type": "error"
+    }
 
 throttle
 --------

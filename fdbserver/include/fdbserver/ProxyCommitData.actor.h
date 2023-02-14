@@ -20,6 +20,7 @@
 
 #pragma once
 #include "fdbserver/EncryptionOpsUtils.h"
+#include <unordered_map>
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H)
 #define FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H
 #include "fdbserver/ProxyCommitData.actor.g.h"
@@ -63,6 +64,9 @@ struct ProxyStats {
 	Counter mutations;
 	Counter conflictRanges;
 	Counter keyServerLocationIn, keyServerLocationOut, keyServerLocationErrors;
+	Counter tenantIdRequestIn;
+	Counter tenantIdRequestOut;
+	Counter tenantIdRequestErrors;
 	Counter txnExpensiveClearCostEstCount;
 	Version lastCommitVersionAssigned;
 
@@ -106,7 +110,7 @@ struct ProxyStats {
 	                    NotifiedVersion* pVersion,
 	                    NotifiedVersion* pCommittedVersion,
 	                    int64_t* commitBatchesMemBytesCountPtr,
-	                    std::map<TenantName, TenantMapEntry>* pTenantMap)
+	                    std::map<int64_t, TenantName>* pTenantMap)
 	  : cc("ProxyStats", id.toString()), txnCommitIn("TxnCommitIn", cc),
 	    txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc),
 	    txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
@@ -115,47 +119,38 @@ struct ProxyStats {
 	    commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc),
 	    mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
 	    keyServerLocationIn("KeyServerLocationIn", cc), keyServerLocationOut("KeyServerLocationOut", cc),
-	    keyServerLocationErrors("KeyServerLocationErrors", cc),
+	    keyServerLocationErrors("KeyServerLocationErrors", cc), tenantIdRequestIn("TenantIdRequestIn", cc),
+	    tenantIdRequestOut("TenantIdRequestOut", cc), tenantIdRequestErrors("TenantIdRequestErrors", cc),
 	    txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), lastCommitVersionAssigned(0),
 	    commitLatencySample("CommitLatencyMetrics",
 	                        id,
 	                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    commitLatencyBands("CommitLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
 	    commitBatchingEmptyMessageRatio("CommitBatchingEmptyMessageRatio",
 	                                    id,
 	                                    SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                                    SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                                    SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    commitBatchingWindowSize("CommitBatchingWindowSize",
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                             SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    computeLatency("ComputeLatency",
 	                   id,
 	                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                   SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                   SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    maxComputeNS(0), minComputeNS(1e12),
-	    commitBatchQueuingDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
-	                                                   LiteralStringRef("CommitBatchQueuing"),
-	                                                   Histogram::Unit::microseconds)),
-	    getCommitVersionDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
-	                                                 LiteralStringRef("GetCommitVersion"),
-	                                                 Histogram::Unit::microseconds)),
-	    resolutionDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
-	                                           LiteralStringRef("Resolution"),
-	                                           Histogram::Unit::microseconds)),
-	    postResolutionDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
-	                                               LiteralStringRef("PostResolutionQueuing"),
-	                                               Histogram::Unit::microseconds)),
-	    processingMutationDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
-	                                                   LiteralStringRef("ProcessingMutation"),
-	                                                   Histogram::Unit::microseconds)),
-	    tlogLoggingDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
-	                                            LiteralStringRef("TlogLogging"),
-	                                            Histogram::Unit::microseconds)),
-	    replyCommitDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
-	                                            LiteralStringRef("ReplyCommit"),
-	                                            Histogram::Unit::microseconds)) {
+	    commitBatchQueuingDist(
+	        Histogram::getHistogram("CommitProxy"_sr, "CommitBatchQueuing"_sr, Histogram::Unit::milliseconds)),
+	    getCommitVersionDist(
+	        Histogram::getHistogram("CommitProxy"_sr, "GetCommitVersion"_sr, Histogram::Unit::milliseconds)),
+	    resolutionDist(Histogram::getHistogram("CommitProxy"_sr, "Resolution"_sr, Histogram::Unit::milliseconds)),
+	    postResolutionDist(
+	        Histogram::getHistogram("CommitProxy"_sr, "PostResolutionQueuing"_sr, Histogram::Unit::milliseconds)),
+	    processingMutationDist(
+	        Histogram::getHistogram("CommitProxy"_sr, "ProcessingMutation"_sr, Histogram::Unit::milliseconds)),
+	    tlogLoggingDist(Histogram::getHistogram("CommitProxy"_sr, "TlogLogging"_sr, Histogram::Unit::milliseconds)),
+	    replyCommitDist(Histogram::getHistogram("CommitProxy"_sr, "ReplyCommit"_sr, Histogram::Unit::milliseconds)) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this]() { return this->lastCommitVersionAssigned; });
 		specialCounter(cc, "Version", [pVersion]() { return pVersion->get(); });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion]() { return pCommittedVersion->get(); });
@@ -165,14 +160,26 @@ struct ProxyStats {
 		specialCounter(cc, "NumTenants", [pTenantMap]() { return pTenantMap ? pTenantMap->size() : 0; });
 		specialCounter(cc, "MaxCompute", [this]() { return this->getAndResetMaxCompute(); });
 		specialCounter(cc, "MinCompute", [this]() { return this->getAndResetMinCompute(); });
-		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
+		logger = cc.traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "ProxyMetrics");
 	}
+};
+
+struct ExpectedIdempotencyIdCountForKey {
+	Version commitVersion = invalidVersion;
+	int16_t idempotencyIdCount = 0;
+	uint8_t batchIndexHighByte = 0;
+
+	ExpectedIdempotencyIdCountForKey() {}
+	ExpectedIdempotencyIdCountForKey(Version commitVersion, int16_t idempotencyIdCount, uint8_t batchIndexHighByte)
+	  : commitVersion(commitVersion), idempotencyIdCount(idempotencyIdCount), batchIndexHighByte(batchIndexHighByte) {}
 };
 
 struct ProxyCommitData {
 	UID dbgid;
 	int64_t commitBatchesMemBytesCount;
-	std::map<TenantName, TenantMapEntry> tenantMap;
+	std::unordered_map<TenantName, int64_t> tenantNameIndex;
+	std::map<int64_t, TenantName> tenantMap;
+	std::unordered_set<int64_t> tenantsOverStorageQuota;
 	ProxyStats stats;
 	MasterInterface master;
 	std::vector<ResolverInterface> resolvers;
@@ -201,6 +208,7 @@ struct ProxyCommitData {
 	bool locked;
 	Optional<Value> metadataVersion;
 	double commitBatchInterval;
+	bool provisional;
 
 	int64_t localCommitBatchesStarted;
 	NotifiedVersion latestLocalCommitBatchResolving;
@@ -232,7 +240,12 @@ struct ProxyCommitData {
 	double lastResolverReset;
 	int localTLogCount = -1;
 
-	bool isEncryptionEnabled = false;
+	EncryptionAtRestMode encryptMode;
+
+	PromiseStream<ExpectedIdempotencyIdCountForKey> expectedIdempotencyIdCountForKey;
+	Standalone<VectorRef<MutationRef>> idempotencyClears;
+
+	AsyncVar<bool> triggerCommit;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to
@@ -256,6 +269,8 @@ struct ProxyCommitData {
 		}
 		return false;
 	}
+
+	TenantMode getTenantMode() const { return db->get().client.tenantMode; }
 
 	void updateLatencyBandConfig(Optional<LatencyBandConfig> newLatencyBandConfig) {
 		if (newLatencyBandConfig.present() != latencyBandConfig.present() ||
@@ -291,19 +306,20 @@ struct ProxyCommitData {
 	                Version recoveryTransactionVersion,
 	                PublicRequestStream<CommitTransactionRequest> commit,
 	                Reference<AsyncVar<ServerDBInfo> const> db,
-	                bool firstProxy)
+	                bool firstProxy,
+	                EncryptionAtRestMode encryptMode,
+	                bool provisional)
 	  : dbgid(dbgid), commitBatchesMemBytesCount(0),
 	    stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount, &tenantMap), master(master),
 	    logAdapter(nullptr), txnStateStore(nullptr), committedVersion(recoveryTransactionVersion),
 	    minKnownCommittedVersion(0), version(0), lastVersionTime(0), commitVersionRequestNumber(1),
-	    mostRecentProcessedRequestNumber(0), firstProxy(firstProxy), lastCoalesceTime(0), locked(false),
-	    commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN), localCommitBatchesStarted(0),
-	    getConsistentReadVersion(getConsistentReadVersion), commit(commit),
+	    mostRecentProcessedRequestNumber(0), firstProxy(firstProxy), encryptMode(encryptMode), provisional(provisional),
+	    lastCoalesceTime(0), locked(false), commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN),
+	    localCommitBatchesStarted(0), getConsistentReadVersion(getConsistentReadVersion), commit(commit),
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
-	    singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), lastTxsPop(0), popRemoteTxs(false),
-	    lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0),
-	    lastMasterReset(now()), lastResolverReset(now()),
-	    isEncryptionEnabled(isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, db->get().client)) {
+	    singleKeyMutationEvent("SingleKeyMutation"_sr), lastTxsPop(0), popRemoteTxs(false), lastStartCommit(0),
+	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0), lastMasterReset(now()),
+	    lastResolverReset(now()) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 };

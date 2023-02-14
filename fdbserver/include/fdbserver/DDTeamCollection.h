@@ -30,7 +30,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbrpc/Replication.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
@@ -146,6 +146,7 @@ public:
 	LocalityData locality;
 	ServerStatus()
 	  : isWiggling(false), isFailed(true), isUndesired(false), isWrongConfiguration(false), initialized(false) {}
+	ServerStatus(LocalityData const& locality) : ServerStatus(false, false, false, locality) {}
 	ServerStatus(bool isFailed, bool isUndesired, bool isWiggling, LocalityData const& locality)
 	  : isWiggling(isWiggling), isFailed(isFailed), isUndesired(isUndesired), isWrongConfiguration(false),
 	    initialized(true), locality(locality) {}
@@ -180,10 +181,31 @@ struct IDDTeamCollection {
 	virtual ~IDDTeamCollection() {}
 };
 
+struct DDTeamCollectionInitParams {
+	Reference<IDDTxnProcessor> db;
+	UID distributorId;
+	MoveKeysLock const& lock;
+	PromiseStream<RelocateShard> const& output;
+	Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure;
+	DatabaseConfiguration configuration;
+	std::vector<Optional<Key>> includedDCs;
+	Optional<std::vector<Optional<Key>>> otherTrackedDCs;
+	Future<Void> readyToStart;
+	Reference<AsyncVar<bool>> zeroHealthyTeams;
+	IsPrimary primary;
+	Reference<AsyncVar<bool>> processingUnhealthy;
+	Reference<AsyncVar<bool>> processingWiggle;
+	PromiseStream<GetMetricsRequest> getShardMetrics;
+	Promise<UID> removeFailedServer;
+	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
+	PromiseStream<Promise<int64_t>> getAverageShardBytes;
+};
+
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	friend class DDTeamCollectionImpl;
 	friend class DDTeamCollectionUnitTest;
 
+protected:
 	enum class Status { NONE = 0, WIGGLING = 1, EXCLUDED = 2, FAILED = 3 };
 
 	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
@@ -214,6 +236,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	Reference<AsyncVar<bool>> pauseWiggle;
 	Reference<AsyncVar<bool>> processingWiggle; // track whether wiggling relocation is being processed
 	PromiseStream<StorageWiggleValue> nextWiggleInfo;
+	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 
 	std::vector<Reference<TCTeamInfo>> badTeams;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
@@ -288,6 +311,10 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	// Randomly choose one machine team that has chosenServer and has the correct size
 	// When configuration is changed, we may have machine teams with old storageTeamSize
 	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(TCServerInfo const& chosenServer) const;
+
+	// Returns a server team from given "servers", empty team if not found.
+	// When "wantHealthy" is true, only return if the team is healthy.
+	Optional<Reference<IDataDistributionTeam>> findTeamFromServers(const std::vector<UID>& servers, bool wantHealthy);
 
 	Future<Void> logOnCompletion(Future<Void> signal);
 
@@ -424,8 +451,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	// Check the status of a storage server.
 	// Apply all requirements to the server and mark it as excluded if it fails to satisfies these requirements
-	Future<Void> storageServerTracker(Database cx,
-	                                  TCServerInfo* server,
+	Future<Void> storageServerTracker(TCServerInfo* server,
 	                                  Promise<Void> errorOut,
 	                                  Version addedVersion,
 	                                  DDEnabledState const& ddEnabledState,
@@ -439,12 +465,13 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	bool isCorrectDC(TCServerInfo const& server) const;
 
-	Future<Void> storageServerFailureTracker(TCServerInfo* server,
-	                                         Database cx,
-	                                         ServerStatus* status,
-	                                         Version addedVersion);
+	Future<Void> storageServerFailureTracker(TCServerInfo* server, ServerStatus* status, Version addedVersion);
 
-	Future<Void> waitForAllDataRemoved(Database cx, UID serverID, Version addedVersion) const;
+	Future<Void> waitForAllDataRemoved(UID serverID, Version addedVersion) const;
+
+	// calculate minLoadBytes / avgLoadBytes among servers. An unhealthy server's load is considered as 0. If the
+	// average load of each storage server is less than smallLoadThreshold, return 1 always.
+	double loadBytesBalanceRatio(int64_t smallLoadThreshold) const;
 
 	// Create a transaction updating `perpetualStorageWiggleIDPrefix` to the next serverID according to a sorted
 	// wiggle_pq maintained by the wiggler.
@@ -472,8 +499,6 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	                               bool recruitTss,
 	                               Reference<TSSPairState> tssState);
 
-	Future<UID> getClusterId();
-
 	// return the next ServerID in storageWiggler
 	Future<UID> getNextWigglingServerID();
 
@@ -482,12 +507,13 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	auto eraseStorageWiggleMap(KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())>* metadataMap,
 	                           UID id) {
-		return runRYWTransaction(cx, [metadataMap, id](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			metadataMap->erase(tr, id);
-			return Void();
-		});
+		return runRYWTransaction(dbContext(),
+		                         [metadataMap, id](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			                         tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			                         tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			                         metadataMap->erase(tr, id);
+			                         return Void();
+		                         });
 	}
 
 	// Read storage metadata from database, get the server's storeType, and do necessary updates. Error is caught by the
@@ -603,7 +629,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	int addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams);
 
 public:
-	Database cx;
+	Reference<IDDTxnProcessor> db;
 
 	DatabaseConfiguration configuration;
 
@@ -620,22 +646,7 @@ public:
 	AsyncTrigger printDetailedTeamsInfo;
 	Reference<LocalitySet> storageServerSet;
 
-	DDTeamCollection(Database const& cx,
-	                 UID distributorId,
-	                 MoveKeysLock const& lock,
-	                 PromiseStream<RelocateShard> const& output,
-	                 Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
-	                 DatabaseConfiguration configuration,
-	                 std::vector<Optional<Key>> includedDCs,
-	                 Optional<std::vector<Optional<Key>>> otherTrackedDCs,
-	                 Future<Void> readyToStart,
-	                 Reference<AsyncVar<bool>> zeroHealthyTeams,
-	                 IsPrimary primary,
-	                 Reference<AsyncVar<bool>> processingUnhealthy,
-	                 Reference<AsyncVar<bool>> processingWiggle,
-	                 PromiseStream<GetMetricsRequest> getShardMetrics,
-	                 Promise<UID> removeFailedServer,
-	                 PromiseStream<Promise<int>> getUnhealthyRelocationCount);
+	DDTeamCollection(DDTeamCollectionInitParams const& params);
 
 	~DDTeamCollection();
 
@@ -692,4 +703,6 @@ public:
 	// Take a snapshot of necessary data structures from `DDTeamCollection` and print them out with yields to avoid slow
 	// task on the run loop.
 	static Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self);
+
+	Database dbContext() const { return db->context(); }
 };

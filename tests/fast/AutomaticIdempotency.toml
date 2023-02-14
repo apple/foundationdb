@@ -1,0 +1,11 @@
+[[test]]
+testTitle = 'AutomaticIdempotency'
+
+    [[test.workload]]
+    testName = 'AutomaticIdempotencyCorrectness'
+    minMinAgeSeconds = 15
+    pollingInterval = 5.0
+
+    [[test.workload]]
+    testName='Attrition'
+    testDuration=10.0

@@ -25,6 +25,7 @@
 #include <cstddef>
 
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -33,7 +34,6 @@
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/ProxyCommitData.actor.h"
-#include "flow/BlobCipher.h"
 #include "flow/FastRef.h"
 
 // Resolver's data for applyMetadataMutations() calls.
@@ -95,20 +95,17 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             const VectorRef<MutationRef>& mutations,
                             LogPushData* pToCommit,
                             const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* pCipherKeys,
+                            EncryptionAtRestMode encryptMode,
                             bool& confChange,
                             Version version,
                             Version popVersion,
-                            bool initialCommit);
+                            bool initialCommit,
+                            bool provisionalCommitProxy);
 void applyMetadataMutations(SpanContext const& spanContext,
                             const UID& dbgid,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,
-                            IKeyValueStore* txnStateStore,
-                            Reference<AsyncVar<ServerDBInfo> const> dbInfo);
-
-inline bool isSystemKey(KeyRef key) {
-	return key.size() && key[0] == systemKeys.begin[0];
-}
+                            IKeyValueStore* txnStateStore);
 
 inline bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 	for (auto const& m : mutations) {
@@ -131,10 +128,10 @@ inline bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 			    (serverTagKeys.intersects(range)) || (serverTagHistoryKeys.intersects(range)) ||
 			    (range.intersects(applyMutationsEndRange)) || (range.intersects(applyMutationsKeyVersionMapRange)) ||
 			    (range.intersects(logRangesRange)) || (tssMappingKeys.intersects(range)) ||
-			    (tssQuarantineKeys.intersects(range)) || (range.contains(coordinatorsKey)) ||
-			    (range.contains(databaseLockedKey)) || (range.contains(metadataVersionKey)) ||
-			    (range.contains(mustContainSystemMutationsKey)) || (range.contains(writeRecoveryKey)) ||
-			    (range.intersects(testOnlyTxnStateStorePrefixRange))) {
+			    (tssQuarantineKeys.intersects(range)) || (range.contains(previousCoordinatorsKey)) ||
+			    (range.contains(coordinatorsKey)) || (range.contains(databaseLockedKey)) ||
+			    (range.contains(metadataVersionKey)) || (range.contains(mustContainSystemMutationsKey)) ||
+			    (range.contains(writeRecoveryKey)) || (range.intersects(testOnlyTxnStateStorePrefixRange))) {
 				return true;
 			}
 		}
@@ -146,6 +143,7 @@ inline bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 void applyMetadataMutations(SpanContext const& spanContext,
                             ResolverData& resolverData,
                             const VectorRef<MutationRef>& mutations,
-                            Reference<AsyncVar<ServerDBInfo> const> dbInfo);
+                            const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* pCipherKeys,
+                            EncryptionAtRestMode encryptMode);
 
 #endif

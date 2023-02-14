@@ -86,6 +86,8 @@ public:
 	std::vector<NetworkAddress> coords;
 	std::vector<Hostname> hostnames;
 
+	size_t getNumberOfCoordinators() const { return coords.size() + hostnames.size(); }
+
 	bool operator==(const ClusterConnectionString& other) const noexcept {
 		return key == other.key && keyDesc == other.keyDesc && coords == other.coords && hostnames == other.hostnames;
 	}
@@ -263,6 +265,7 @@ struct OpenDatabaseCoordRequest {
 	std::vector<Hostname> hostnames;
 	std::vector<NetworkAddress> coordinators;
 	ReplyPromise<CachedSerialization<struct ClientDBInfo>> reply;
+	bool internal{ true };
 
 	bool verify() const { return true; }
 
@@ -276,9 +279,12 @@ struct OpenDatabaseCoordRequest {
 		           clusterKey,
 		           coordinators,
 		           reply,
-		           hostnames);
+		           hostnames,
+		           internal);
 	}
 };
+
+extern template struct NetNotifiedQueue<OpenDatabaseCoordRequest, true>;
 
 class ClientCoordinators {
 public:
@@ -311,6 +317,9 @@ struct ProtocolInfoRequest {
 	constexpr static FileIdentifier file_identifier = 13261233;
 	ReplyPromise<ProtocolInfoReply> reply{ PeerCompatibilityPolicy{ RequirePeer::AtLeast,
 		                                                            ProtocolVersion::withStableInterfaces() } };
+
+	bool verify() const noexcept { return true; }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply);

@@ -28,7 +28,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/Subspace.h"
 #include "fdbclient/KeyBackedTypes.h"
 
@@ -115,7 +115,7 @@ public:
 };
 
 struct ReservedTaskParams {
-	static TaskParam<Version> scheduledVersion() { return LiteralStringRef(__FUNCTION__); }
+	static TaskParam<Version> scheduledVersion() { return __FUNCTION__sr; }
 };
 
 class FutureBucket;
@@ -274,6 +274,7 @@ public:
 	Database src;
 	Map<Key, Future<Reference<KeyRangeMap<Version>>>> key_version;
 
+	UID dbgid;
 	CounterCollection cc;
 
 	Counter dispatchSlotChecksStarted;
@@ -281,7 +282,6 @@ public:
 	Counter dispatchDoTasks;
 	Counter dispatchEmptyTasks;
 	Counter dispatchSlotChecksComplete;
-	UID dbgid;
 
 	double getTimeoutSeconds() const { return (double)timeout / CLIENT_KNOBS->CORE_VERSIONSPERSECOND; }
 
@@ -480,7 +480,8 @@ struct TaskFuncBase : IDispatched<TaskFuncBase, Standalone<StringRef>, std::func
 };
 #define REGISTER_TASKFUNC(TaskFunc) REGISTER_FACTORY(TaskFuncBase, TaskFunc, name)
 #define REGISTER_TASKFUNC_ALIAS(TaskFunc, Alias)                                                                       \
-	REGISTER_DISPATCHED_ALIAS(TaskFunc, Alias, TaskFunc::name, LiteralStringRef(#Alias))
+	REGISTER_DISPATCHED_ALIAS(                                                                                         \
+	    TaskFunc, Alias, TaskFunc::name, StringRef(reinterpret_cast<const uint8_t*>(#Alias), sizeof(#Alias) - 1))
 
 struct TaskCompletionKey {
 	Future<Key> get(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket);

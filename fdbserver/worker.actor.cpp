@@ -23,16 +23,19 @@
 #include <boost/lexical_cast.hpp>
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbserver/BlobMigratorInterface.h"
 #include "flow/ApiVersion.h"
 #include "flow/IAsyncFile.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ProcessInterface.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/versions.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
 #include "flow/FileIdentifier.h"
+#include "flow/Knobs.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
@@ -67,6 +70,8 @@
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/serialize.h"
+#include "flow/ChaosMetrics.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -94,6 +99,21 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #else
 #define KV_STORE(filename, uid) keyValueStoreMemory(filename, uid)
 #endif
+
+template class RequestStream<RecruitMasterRequest, false>;
+template struct NetNotifiedQueue<RecruitMasterRequest, false>;
+
+template class RequestStream<RegisterMasterRequest, false>;
+template struct NetNotifiedQueue<RegisterMasterRequest, false>;
+
+template class RequestStream<InitializeCommitProxyRequest, false>;
+template struct NetNotifiedQueue<InitializeCommitProxyRequest, false>;
+
+template class RequestStream<InitializeGrvProxyRequest, false>;
+template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
+
+template class RequestStream<GetServerDBInfoRequest, false>;
+template struct NetNotifiedQueue<GetServerDBInfoRequest, false>;
 
 namespace {
 RoleLineageCollector roleLineageCollector;
@@ -191,7 +211,7 @@ Error checkIOTimeout(Error const& e) {
 	// In simulation, have to check global timed out flag for both this process and the machine process on which IO is
 	// done
 	if (g_network->isSimulated() && !timeoutOccurred)
-		timeoutOccurred = g_pSimulator->getCurrentProcess()->machine->machineProcess->global(INetwork::enASIOTimedOut);
+		timeoutOccurred = g_simulator->getCurrentProcess()->machine->machineProcess->global(INetwork::enASIOTimedOut);
 
 	if (timeoutOccurred) {
 		CODE_PROBE(true, "Timeout occurred");
@@ -245,7 +265,7 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 				CODE_PROBE(true, "Worker terminated with file_not_found error");
 				return Void();
 			} else if (e.getError().code() == error_code_lock_file_failure) {
-				CODE_PROBE(true, "Unable to lock file");
+				CODE_PROBE(true, "Unable to lock file", probe::context::net2, probe::assert::noSim);
 				throw please_reboot_kv_store();
 			}
 			throw e.getError();
@@ -271,7 +291,9 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 
 			if (err.error.code() == error_code_please_reboot ||
 			    (err.role == Role::SHARED_TRANSACTION_LOG &&
-			     (err.error.code() == error_code_io_error || err.error.code() == error_code_io_timeout)))
+			     (err.error.code() == error_code_io_error || err.error.code() == error_code_io_timeout)) ||
+			    (SERVER_KNOBS->STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT && err.role == Role::STORAGE_SERVER &&
+			     err.error.code() == error_code_io_timeout))
 				throw err.error;
 		}
 	}
@@ -298,18 +320,18 @@ ACTOR Future<Void> loadedPonger(FutureStream<LoadedPingRequest> pings) {
 	loop {
 		LoadedPingRequest pong = waitNext(pings);
 		LoadedReply rep;
-		rep.payload = (pong.loadReply ? payloadBack : LiteralStringRef(""));
+		rep.payload = (pong.loadReply ? payloadBack : ""_sr);
 		rep.id = pong.id;
 		pong.reply.send(rep);
 	}
 }
 
-StringRef fileStoragePrefix = LiteralStringRef("storage-");
-StringRef testingStoragePrefix = LiteralStringRef("testingstorage-");
-StringRef fileLogDataPrefix = LiteralStringRef("log-");
-StringRef fileVersionedLogDataPrefix = LiteralStringRef("log2-");
-StringRef fileLogQueuePrefix = LiteralStringRef("logqueue-");
-StringRef tlogQueueExtension = LiteralStringRef("fdq");
+StringRef fileStoragePrefix = "storage-"_sr;
+StringRef testingStoragePrefix = "testingstorage-"_sr;
+StringRef fileLogDataPrefix = "log-"_sr;
+StringRef fileVersionedLogDataPrefix = "log2-"_sr;
+StringRef fileLogQueuePrefix = "logqueue-"_sr;
+StringRef tlogQueueExtension = "fdq"_sr;
 
 enum class FilesystemCheck {
 	FILES_ONLY,
@@ -386,12 +408,12 @@ struct TLogOptions {
 			if (key.size() != 0 && value.size() == 0)
 				return default_error_or();
 
-			if (key == LiteralStringRef("V")) {
+			if (key == "V"_sr) {
 				ErrorOr<TLogVersion> tLogVersion = TLogVersion::FromStringRef(value);
 				if (tLogVersion.isError())
 					return tLogVersion.getError();
 				options.version = tLogVersion.get();
-			} else if (key == LiteralStringRef("LS")) {
+			} else if (key == "LS"_sr) {
 				ErrorOr<TLogSpillType> tLogSpillType = TLogSpillType::FromStringRef(value);
 				if (tLogSpillType.isError())
 					return tLogSpillType.getError();
@@ -559,14 +581,18 @@ ACTOR Future<Void> registrationClient(
     Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
     Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
     Reference<AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>> const> bmInterf,
+    Reference<AsyncVar<Optional<BlobMigratorInterface>> const> blobMigratorInterf,
     Reference<AsyncVar<Optional<EncryptKeyProxyInterface>> const> ekpInterf,
+    Reference<AsyncVar<Optional<ConsistencyScanInterface>> const> csInterf,
     Reference<AsyncVar<bool> const> degraded,
     Reference<IClusterConnectionRecord> connRecord,
     Reference<AsyncVar<std::set<std::string>> const> issues,
     Reference<ConfigNode> configNode,
     Reference<LocalConfiguration> localConfig,
+    ConfigBroadcastInterface configBroadcastInterface,
     Reference<AsyncVar<ServerDBInfo>> dbInfo,
-    Promise<Void> recoveredDiskFiles) {
+    Promise<Void> recoveredDiskFiles,
+    Reference<AsyncVar<Optional<UID>>> clusterId) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply
 	// (requiring us to re-register) The registration request piggybacks optional distributor interface if it exists.
@@ -589,27 +615,31 @@ ACTOR Future<Void> registrationClient(
 			incorrectTime = Optional<double>();
 		}
 
-		RegisterWorkerRequest request(interf,
-		                              initialClass,
-		                              processClass,
-		                              asyncPriorityInfo->get(),
-		                              requestGeneration++,
-		                              ddInterf->get(),
-		                              rkInterf->get(),
-		                              bmInterf->get().present() ? bmInterf->get().get().second
-		                                                        : Optional<BlobManagerInterface>(),
-		                              ekpInterf->get(),
-		                              degraded->get(),
-		                              localConfig->lastSeenVersion(),
-		                              localConfig->configClassSet(),
-		                              recoveredDiskFiles.isSet());
+		RegisterWorkerRequest request(
+		    interf,
+		    initialClass,
+		    processClass,
+		    asyncPriorityInfo->get(),
+		    requestGeneration++,
+		    ddInterf->get(),
+		    rkInterf->get(),
+		    bmInterf->get().present() ? bmInterf->get().get().second : Optional<BlobManagerInterface>(),
+		    blobMigratorInterf->get(),
+		    ekpInterf->get(),
+		    csInterf->get(),
+		    degraded->get(),
+		    localConfig.isValid() ? localConfig->lastSeenVersion() : Optional<Version>(),
+		    localConfig.isValid() ? localConfig->configClassSet() : Optional<ConfigClassSet>(),
+		    recoveredDiskFiles.isSet(),
+		    configBroadcastInterface,
+		    clusterId->get());
 
 		for (auto const& i : issues->get()) {
 			request.issues.push_back_deep(request.issues.arena(), i);
 		}
 
 		if (!upToDate) {
-			request.issues.push_back_deep(request.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
+			request.issues.push_back_deep(request.issues.arena(), "incorrect_cluster_file_contents"_sr);
 			std::string connectionString = connRecord->getConnectionString().toString();
 			if (!incorrectTime.present()) {
 				incorrectTime = now();
@@ -642,7 +672,8 @@ ACTOR Future<Void> registrationClient(
 			TraceEvent("WorkerRegister")
 			    .detail("CCID", ccInterface->get().get().id())
 			    .detail("Generation", requestGeneration)
-			    .detail("RecoveredDiskFiles", recoveredDiskFiles.isSet());
+			    .detail("RecoveredDiskFiles", recoveredDiskFiles.isSet())
+			    .detail("ClusterId", clusterId->get());
 		}
 		state Future<RegisterWorkerReply> registrationReply =
 		    ccInterfacePresent ? brokenPromiseToNever(ccInterface->get().get().registerWorker.getReply(request))
@@ -663,15 +694,42 @@ ACTOR Future<Void> registrationClient(
 					TraceEvent(SevWarn, "WorkerRegisterTimeout").detail("WaitTime", now() - startTime);
 				}
 			}
-			when(wait(ccInterface->onChange())) { break; }
-			when(wait(ddInterf->onChange())) { break; }
-			when(wait(rkInterf->onChange())) { break; }
-			when(wait(bmInterf->onChange())) { break; }
-			when(wait(ekpInterf->onChange())) { break; }
-			when(wait(degraded->onChange())) { break; }
-			when(wait(FlowTransport::transport().onIncompatibleChanged())) { break; }
-			when(wait(issues->onChange())) { break; }
-			when(wait(recovered)) { break; }
+			when(wait(ccInterface->onChange())) {
+				break;
+			}
+			when(wait(ddInterf->onChange())) {
+				break;
+			}
+			when(wait(rkInterf->onChange())) {
+				break;
+			}
+			when(wait(csInterf->onChange())) {
+				break;
+			}
+			when(wait(bmInterf->onChange())) {
+				break;
+			}
+			when(wait(blobMigratorInterf->onChange())) {
+				break;
+			}
+			when(wait(ekpInterf->onChange())) {
+				break;
+			}
+			when(wait(degraded->onChange())) {
+				break;
+			}
+			when(wait(FlowTransport::transport().onIncompatibleChanged())) {
+				break;
+			}
+			when(wait(issues->onChange())) {
+				break;
+			}
+			when(wait(recovered)) {
+				break;
+			}
+			when(wait(clusterId->onChange())) {
+				break;
+			}
 		}
 	}
 }
@@ -692,7 +750,15 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 		return true;
 	}
 
+	if (dbi.consistencyScan.present() && dbi.consistencyScan.get().address() == address) {
+		return true;
+	}
+
 	if (dbi.blobManager.present() && dbi.blobManager.get().address() == address) {
+		return true;
+	}
+
+	if (dbi.blobMigrator.present() && dbi.blobMigrator.get().address() == address) {
 		return true;
 	}
 
@@ -752,7 +818,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	// Setup a ServerDBInfo for test.
 	ServerDBInfo testDbInfo;
 	LocalityData testLocal;
-	testLocal.set(LiteralStringRef("dcid"), StringRef(std::to_string(1)));
+	testLocal.set("dcid"_sr, StringRef(std::to_string(1)));
 	testDbInfo.master.locality = testLocal;
 
 	// Manually set up a master address.
@@ -768,7 +834,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	// Create a remote TLog. Although the remote TLog also uses the local address, it shouldn't be considered as
 	// in primary DC given the remote locality.
 	LocalityData fakeRemote;
-	fakeRemote.set(LiteralStringRef("dcid"), StringRef(std::to_string(2)));
+	fakeRemote.set("dcid"_sr, StringRef(std::to_string(2)));
 	TLogInterface remoteTlog(fakeRemote);
 	remoteTlog.initEndpoints();
 	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(remoteTlog));
@@ -833,7 +899,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimarySatelliteDc") {
 	// Setup a ServerDBInfo for test.
 	ServerDBInfo testDbInfo;
 	LocalityData testLocal;
-	testLocal.set(LiteralStringRef("dcid"), StringRef(std::to_string(1)));
+	testLocal.set("dcid"_sr, StringRef(std::to_string(1)));
 	testDbInfo.master.locality = testLocal;
 
 	// First, create an empty TLogInterface, and check that it shouldn't be considered as in satellite DC.
@@ -865,7 +931,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimarySatelliteDc") {
 	// Create a remote TLog, and it should be considered as in remote DC.
 	NetworkAddress remoteTLogAddress(IPAddress(0x37373737), 1);
 	LocalityData fakeRemote;
-	fakeRemote.set(LiteralStringRef("dcid"), StringRef(std::to_string(2)));
+	fakeRemote.set("dcid"_sr, StringRef(std::to_string(2)));
 	TLogInterface remoteTLog(fakeRemote);
 	remoteTLog.initEndpoints();
 	remoteTLog.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ remoteTLogAddress }, UID(1, 2)));
@@ -914,7 +980,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndRemoteDc") {
 	// Setup a ServerDBInfo for test.
 	ServerDBInfo testDbInfo;
 	LocalityData testLocal;
-	testLocal.set(LiteralStringRef("dcid"), StringRef(std::to_string(1)));
+	testLocal.set("dcid"_sr, StringRef(std::to_string(1)));
 	testDbInfo.master.locality = testLocal;
 
 	// First, create an empty TLogInterface, and check that it shouldn't be considered as in remote DC.
@@ -930,7 +996,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndRemoteDc") {
 
 	// Create a remote TLog, and it should be considered as in remote DC.
 	LocalityData fakeRemote;
-	fakeRemote.set(LiteralStringRef("dcid"), StringRef(std::to_string(2)));
+	fakeRemote.set("dcid"_sr, StringRef(std::to_string(2)));
 	TLogInterface remoteTlog(fakeRemote);
 	remoteTlog.initEndpoints();
 
@@ -996,48 +1062,78 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 						continue;
 					}
 					bool degradedPeer = false;
+					bool disconnectedPeer = false;
+
+					// If peer->lastLoggedTime == 0, we just started monitor this peer and haven't logged it once yet.
+					double lastLoggedTime = peer->lastLoggedTime <= 0.0 ? peer->lastConnectTime : peer->lastLoggedTime;
 					if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
 					    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo))) {
 						// Monitors intra DC latencies between servers that in the primary or remote DC's transaction
 						// systems. Note that currently we are not monitor storage servers, since lagging in storage
 						// servers today already can trigger server exclusion by data distributor.
 
-						if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT ||
-						    peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
-						        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD ||
-						    peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
-						        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
+						if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT) {
+							disconnectedPeer = true;
+						} else if (peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
+						               SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD ||
+						           peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
+						               SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
 							degradedPeer = true;
+						}
+						if (disconnectedPeer || degradedPeer) {
+							TraceEvent("HealthMonitorDetectDegradedPeer")
+							    .detail("Peer", address)
+							    .detail("Elapsed", now() - lastLoggedTime)
+							    .detail("Disconnected", disconnectedPeer)
+							    .detail("MinLatency", peer->pingLatencies.min())
+							    .detail("MaxLatency", peer->pingLatencies.max())
+							    .detail("MeanLatency", peer->pingLatencies.mean())
+							    .detail("MedianLatency", peer->pingLatencies.median())
+							    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
+							    .detail(
+							        "CheckedPercentileLatency",
+							        peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
+							    .detail("PingCount", peer->pingLatencies.getPopulationSize())
+							    .detail("PingTimeoutCount", peer->timeoutCount)
+							    .detail("ConnectionFailureCount", peer->connectFailedCount);
 						}
 					} else if (workerLocation == Primary && addressInDbAndPrimarySatelliteDc(address, dbInfo)) {
 						// Monitors inter DC latencies between servers in primary and primary satellite DC. Note that
 						// TLog workers in primary satellite DC are on the critical path of serving a commit.
-						if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT ||
-						    peer->pingLatencies.percentile(
-						        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE_SATELLITE) >
-						        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD_SATELLITE ||
-						    peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
-						        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
+						if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT) {
+							disconnectedPeer = true;
+						} else if (peer->pingLatencies.percentile(
+						               SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE_SATELLITE) >
+						               SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD_SATELLITE ||
+						           peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
+						               SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
 							degradedPeer = true;
+						}
+
+						if (disconnectedPeer || degradedPeer) {
+							TraceEvent("HealthMonitorDetectDegradedPeer")
+							    .detail("Peer", address)
+							    .detail("Satellite", true)
+							    .detail("Elapsed", now() - lastLoggedTime)
+							    .detail("Disconnected", disconnectedPeer)
+							    .detail("MinLatency", peer->pingLatencies.min())
+							    .detail("MaxLatency", peer->pingLatencies.max())
+							    .detail("MeanLatency", peer->pingLatencies.mean())
+							    .detail("MedianLatency", peer->pingLatencies.median())
+							    .detail("CheckedPercentile",
+							            SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE_SATELLITE)
+							    .detail("CheckedPercentileLatency",
+							            peer->pingLatencies.percentile(
+							                SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE_SATELLITE))
+							    .detail("PingCount", peer->pingLatencies.getPopulationSize())
+							    .detail("PingTimeoutCount", peer->timeoutCount)
+							    .detail("ConnectionFailureCount", peer->connectFailedCount);
 						}
 					}
 
-					if (degradedPeer) {
-						TraceEvent("HealthMonitorDetectDegradedPeer")
-						    .suppressFor(30)
-						    .detail("Peer", address)
-						    .detail("Elapsed", now() - peer->lastLoggedTime)
-						    .detail("MinLatency", peer->pingLatencies.min())
-						    .detail("MaxLatency", peer->pingLatencies.max())
-						    .detail("MeanLatency", peer->pingLatencies.mean())
-						    .detail("MedianLatency", peer->pingLatencies.median())
-						    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
-						    .detail("CheckedPercentileLatency",
-						            peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
-						    .detail("PingCount", peer->pingLatencies.getPopulationSize())
-						    .detail("PingTimeoutCount", peer->timeoutCount)
-						    .detail("ConnectionFailureCount", peer->connectFailedCount);
-
+					if (disconnectedPeer) {
+						req.disconnectedPeers.push_back(address);
+					} else if (degradedPeer) {
 						req.degradedPeers.push_back(address);
 					}
 				}
@@ -1058,13 +1154,13 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 						    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo)) ||
 						    (workerLocation == Primary && addressInDbAndPrimarySatelliteDc(address, dbInfo))) {
 							TraceEvent("HealthMonitorDetectRecentClosedPeer").suppressFor(30).detail("Peer", address);
-							req.degradedPeers.push_back(address);
+							req.disconnectedPeers.push_back(address);
 						}
 					}
 				}
 			}
 
-			if (!req.degradedPeers.empty()) {
+			if (!req.disconnectedPeers.empty() || !req.degradedPeers.empty()) {
 				req.address = FlowTransport::transport().getLocalAddress();
 				ccInterface->get().get().updateWorkerHealth.send(req);
 			}
@@ -1254,8 +1350,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
                                                  int64_t memoryLimit,
                                                  IKeyValueStore* store,
                                                  bool validateDataFiles,
-                                                 Promise<Void>* rebootKVStore,
-                                                 Reference<IEncryptionKeyProvider> encryptionKeyProvider) {
+                                                 Promise<Void>* rebootKVStore) {
 	state TrackRunningStorage _(id, storeType, runningStorages);
 	loop {
 		ErrorOr<Void> e = wait(errorOr(prevStorageServer));
@@ -1322,13 +1417,8 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		DUMPTOKEN(recruited.changeFeedPop);
 		DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
-		prevStorageServer = storageServer(store,
-		                                  recruited,
-		                                  db,
-		                                  folder,
-		                                  Promise<Void>(),
-		                                  Reference<IClusterConnectionRecord>(nullptr),
-		                                  encryptionKeyProvider);
+		prevStorageServer =
+		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<IClusterConnectionRecord>(nullptr));
 		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
 	}
 }
@@ -1409,10 +1499,10 @@ void startRole(const Role& role,
 
 	// Update roles map, log Roles metrics
 	g_roles.insert({ role.roleName, roleId.shortString() });
-	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
-	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
+	StringMetricHandle("Roles"_sr) = roleString(g_roles, false);
+	StringMetricHandle("RolesWithIDs"_sr) = roleString(g_roles, true);
 	if (g_network->isSimulated())
-		g_simulator.addRole(g_network->getLocalAddress(), role.roleName);
+		g_simulator->addRole(g_network->getLocalAddress(), role.roleName);
 }
 
 void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
@@ -1439,10 +1529,10 @@ void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
 
 	// Update roles map, log Roles metrics
 	g_roles.erase({ role.roleName, id.shortString() });
-	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
-	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
+	StringMetricHandle("Roles"_sr) = roleString(g_roles, false);
+	StringMetricHandle("RolesWithIDs"_sr) = roleString(g_roles, true);
 	if (g_network->isSimulated())
-		g_simulator.removeRole(g_network->getLocalAddress(), role.roleName);
+		g_simulator->removeRole(g_network->getLocalAddress(), role.roleName);
 
 	if (role.includeInTraceRoles) {
 		removeTraceRole(role.abbreviation);
@@ -1590,6 +1680,60 @@ ACTOR Future<Void> resetBlobManagerWhenDoneOrError(
 	return Void();
 }
 
+static const std::string clusterIdFilename = "clusterId";
+
+ACTOR Future<Void> createClusterIdFile(std::string folder, UID clusterId) {
+	state std::string clusterIdPath = joinPath(folder, clusterIdFilename);
+	if (fileExists(clusterIdPath)) {
+		return Void();
+	}
+	loop {
+		try {
+			state ErrorOr<Reference<IAsyncFile>> clusterIdFile =
+			    wait(errorOr(IAsyncFileSystem::filesystem(g_network)->open(
+			        clusterIdPath, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK, 0600)));
+
+			if (clusterIdFile.isError() && clusterIdFile.getError().code() == error_code_file_not_found &&
+			    !fileExists(clusterIdPath)) {
+				Reference<IAsyncFile> _clusterIdFile = wait(IAsyncFileSystem::filesystem()->open(
+				    clusterIdPath,
+				    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_LOCK |
+				        IAsyncFile::OPEN_READWRITE,
+				    0600));
+				clusterIdFile = _clusterIdFile;
+				BinaryWriter wr(IncludeVersion());
+				wr << clusterId;
+				wait(clusterIdFile.get()->write(wr.getData(), wr.getLength(), 0));
+				wait(clusterIdFile.get()->sync());
+				return Void();
+			} else {
+				throw clusterIdFile.getError();
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			if (!e.isInjectedFault()) {
+				fprintf(stderr,
+				        "ERROR: error creating or opening cluster id file `%s'.\n",
+				        joinPath(folder, clusterIdFilename).c_str());
+			}
+			TraceEvent(SevError, "OpenClusterIdError").error(e);
+			throw;
+		}
+	}
+}
+
+// Updates this processes cluster ID based off the cluster ID received in the
+// ServerDBInfo. Persists the cluster ID to disk if it does not already exist.
+ACTOR Future<Void> updateClusterId(UID ccClusterId, Reference<AsyncVar<Optional<UID>>> clusterId, std::string folder) {
+	if (!clusterId->get().present() && ccClusterId.isValid()) {
+		wait(createClusterIdFile(folder, ccClusterId));
+		clusterId->set(ccClusterId);
+	}
+	return Void();
+}
+
 ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 LocalityData locality,
@@ -1599,23 +1743,27 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 int64_t memoryLimit,
                                 std::string metricsConnFile,
                                 std::string metricsPrefix,
-                                Promise<Void> recoveredDiskFiles,
                                 int64_t memoryProfileThreshold,
                                 std::string _coordFolder,
                                 std::string whitelistBinPaths,
                                 Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                 ConfigBroadcastInterface configBroadcastInterface,
                                 Reference<ConfigNode> configNode,
-                                Reference<LocalConfiguration> localConfig) {
+                                Reference<LocalConfiguration> localConfig,
+                                Reference<AsyncVar<Optional<UID>>> clusterId) {
 	state PromiseStream<ErrorInfo> errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
 	    new AsyncVar<Optional<DataDistributorInterface>>());
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf(new AsyncVar<Optional<RatekeeperInterface>>());
 	state Reference<AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>>> bmEpochAndInterf(
 	    new AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>>());
+	state Reference<AsyncVar<Optional<BlobMigratorInterface>>> blobMigratorInterf(
+	    new AsyncVar<Optional<BlobMigratorInterface>>());
 	state UID lastBMRecruitRequestId;
 	state Reference<AsyncVar<Optional<EncryptKeyProxyInterface>>> ekpInterf(
 	    new AsyncVar<Optional<EncryptKeyProxyInterface>>());
+	state Reference<AsyncVar<Optional<ConsistencyScanInterface>>> csInterf(
+	    new AsyncVar<Optional<ConsistencyScanInterface>>());
 	state Future<Void> handleErrors = workerHandleErrors(errors.getFuture()); // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
@@ -1647,11 +1795,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state std::string coordFolder = abspath(_coordFolder);
 
 	state WorkerInterface interf(locality);
-	interf.configBroadcastInterface = configBroadcastInterface;
 	state std::set<std::pair<UID, KeyValueStoreType>> runningStorages;
 	interf.initEndpoints();
 
 	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
+
+	state Future<Void> updateClusterIdFuture;
 
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
 		TraceEvent(SevInfo, "ChaosFeaturesEnabled");
@@ -1676,6 +1825,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			metricsLogger = runMetrics(database, KeyRef(metricsPrefix));
 			database->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 		}
+	} else {
+		metricsLogger = runMetrics();
 	}
 
 	errorForwarders.add(resetAfter(degraded,
@@ -1692,8 +1843,13 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 	filesClosed.add(stopping.getFuture());
 
-	initializeSystemMonitorMachineState(SystemMonitorMachineState(
-	    folder, locality.dcId(), locality.zoneId(), locality.machineId(), g_network->getLocalAddress().ip));
+	initializeSystemMonitorMachineState(SystemMonitorMachineState(folder,
+	                                                              locality.dcId(),
+	                                                              locality.zoneId(),
+	                                                              locality.machineId(),
+	                                                              locality.dataHallId(),
+	                                                              g_network->getLocalAddress().ip,
+	                                                              FDB_VT_VERSION));
 
 	{
 		auto recruited = interf;
@@ -1725,8 +1881,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			if (s.storedComponent == DiskStore::Storage) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
-				Reference<IEncryptionKeyProvider> encryptionKeyProvider =
-				    makeReference<TenantAwareEncryptionKeyProvider>(dbInfo);
+
 				IKeyValueStore* kv = openKVStore(
 				    s.storeType,
 				    s.filename,
@@ -1740,7 +1895,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                s.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 				                deterministicRandom()->coinflip())
 				             : true),
-				    encryptionKeyProvider);
+				    dbInfo);
 				Future<Void> kvClosed =
 				    kv->onClosed() ||
 				    rebootKVSPromise.getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
@@ -1788,8 +1943,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
 				Promise<Void> recovery;
-				Future<Void> f =
-				    storageServer(kv, recruited, dbInfo, folder, recovery, connRecord, encryptionKeyProvider);
+				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connRecord);
 				recoveries.push_back(recovery.getFuture());
 				f = handleIOErrors(f, kv, s.storeID, kvClosed);
 				f = storageServerRollbackRebooter(&runningStorages,
@@ -1805,8 +1959,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                                  memoryLimit,
 				                                  kv,
 				                                  validateDataFiles,
-				                                  &rebootKVSPromise,
-				                                  encryptionKeyProvider);
+				                                  &rebootKVSPromise);
 				errorForwarders.add(forwardError(errors, ssRole, recruited.id(), f));
 			} else if (s.storedComponent == DiskStore::TLogData) {
 				LocalLineage _;
@@ -1912,24 +2065,18 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		// However, the worker server can still serve stateless roles, and if encryption is on, it is crucial to have
 		// some worker available to serve the EncryptKeyProxy role, before opening encrypted storage files.
 		//
-		// When encryption-at-rest is enabled, the follow code allows a worker to first register with the
-		// cluster controller to be recruited only as a stateless process i.e. it can't be recruited as a SS or TLog
-		// process; once the local disk recovery is complete (if applicable), the process re-registers with cluster
-		// controller as a stateful process role.
-		//
-		// TODO(yiwu): Unify behavior for encryption and non-encryption once the change is stable.
+		// To achieve it, registrationClient allows a worker to first register with the cluster controller to be
+		// recruited only as a stateless process i.e. it can't be recruited as a SS or TLog process; once the local disk
+		// recovery is complete (if applicable), the process re-registers with cluster controller as a stateful process
+		// role.
+		Promise<Void> recoveredDiskFiles;
 		Future<Void> recoverDiskFiles = trigger(
 		    [=]() {
-			    TraceEvent("RecoveriesComplete", interf.id());
+			    TraceEvent("DiskFileRecoveriesComplete", interf.id());
 			    recoveredDiskFiles.send(Void());
-			    return Void();
 		    },
 		    waitForAll(recoveries));
-		if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
-			wait(recoverDiskFiles);
-		} else {
-			errorForwarders.add(recoverDiskFiles);
-		}
+		errorForwarders.add(recoverDiskFiles);
 
 		errorForwarders.add(registrationClient(ccInterface,
 		                                       interf,
@@ -1938,17 +2085,21 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       ddInterf,
 		                                       rkInterf,
 		                                       bmEpochAndInterf,
+		                                       blobMigratorInterf,
 		                                       ekpInterf,
+		                                       csInterf,
 		                                       degraded,
 		                                       connRecord,
 		                                       issues,
 		                                       configNode,
 		                                       localConfig,
+		                                       configBroadcastInterface,
 		                                       dbInfo,
-		                                       recoveredDiskFiles));
+		                                       recoveredDiskFiles,
+		                                       clusterId));
 
 		if (configNode.isValid()) {
-			errorForwarders.add(localConfig->consume(interf.configBroadcastInterface));
+			errorForwarders.add(brokenPromiseToNever(localConfig->consume(configBroadcastInterface)));
 		}
 
 		if (SERVER_KNOBS->ENABLE_WORKER_HEALTH_MONITOR) {
@@ -1982,13 +2133,19 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						            localInfo.distributor.present() ? localInfo.distributor.get().id() : UID())
 						    .detail("BlobManagerID",
 						            localInfo.blobManager.present() ? localInfo.blobManager.get().id() : UID())
+						    .detail("BlobMigratorID",
+						            localInfo.blobMigrator.present() ? localInfo.blobMigrator.get().id() : UID())
 						    .detail("EncryptKeyProxyID",
 						            localInfo.encryptKeyProxy.present() ? localInfo.encryptKeyProxy.get().id() : UID());
-
 						dbInfo->set(localInfo);
 					}
 					errorForwarders.add(
 					    success(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, notUpdated, true)));
+
+					if (!updateClusterIdFuture.isValid() && !clusterId->get().present() &&
+					    localInfo.client.clusterId.isValid()) {
+						updateClusterIdFuture = updateClusterId(localInfo.client.clusterId, clusterId, folder);
+					}
 				}
 			}
 			when(RebootRequest req = waitNext(interf.clientInterface.reboot.getFuture())) {
@@ -2132,6 +2289,31 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
 				req.reply.send(recruited);
 			}
+			when(InitializeConsistencyScanRequest req = waitNext(interf.consistencyScan.getFuture())) {
+				LocalLineage _;
+				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::ConsistencyScan;
+				ConsistencyScanInterface recruited(locality, req.reqId);
+				recruited.initEndpoints();
+
+				if (csInterf->get().present()) {
+					recruited = csInterf->get().get();
+					CODE_PROBE(true, "Recovered while already a consistencyscan");
+				} else {
+					startRole(Role::CONSISTENCYSCAN, recruited.id(), interf.id());
+					DUMPTOKEN(recruited.waitFailure);
+					DUMPTOKEN(recruited.haltConsistencyScan);
+
+					Future<Void> consistencyScanProcess = consistencyScan(recruited, dbInfo);
+					errorForwarders.add(forwardError(
+					    errors,
+					    Role::CONSISTENCYSCAN,
+					    recruited.id(),
+					    setWhenDoneOrError(consistencyScanProcess, csInterf, Optional<ConsistencyScanInterface>())));
+					csInterf->set(Optional<ConsistencyScanInterface>(recruited));
+				}
+				TraceEvent("ConsistencyScanReceived", req.reqId).detail("ConsistencyScanId", recruited.id());
+				req.reply.send(recruited);
+			}
 			when(InitializeBlobManagerRequest req = waitNext(interf.blobManager.getFuture())) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobManager;
@@ -2149,7 +2331,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					// from the same reqId. To keep epoch safety between different managers, instead of restarting the
 					// same manager id at the same epoch, we should just tell it the original request succeeded, and let
 					// it realize this manager died via failure detection and start a new one.
-					CODE_PROBE(true, "Recruited while formerly the same blob manager.");
+					CODE_PROBE(true, "Recruited while formerly the same blob manager.", probe::decoration::rare);
 				} else {
 					// TODO: it'd be more optimal to halt the last manager if present here, but it will figure it out
 					// via the epoch check
@@ -2176,6 +2358,49 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				TraceEvent("BlobManagerReceived", req.reqId).detail("BlobManagerId", recruited.id());
 				req.reply.send(recruited);
 			}
+			when(InitializeBlobMigratorRequest req = waitNext(interf.blobMigrator.getFuture())) {
+				LocalLineage _;
+				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobMigrator;
+
+				BlobMigratorInterface recruited(locality, req.reqId);
+				recruited.initEndpoints();
+				if (blobMigratorInterf->get().present()) {
+					recruited = blobMigratorInterf->get().get();
+					CODE_PROBE(true, "Recruited while already a blob migrator.", probe::decoration::rare);
+				} else {
+					startRole(Role::BLOB_MIGRATOR, recruited.id(), interf.id());
+					DUMPTOKEN(recruited.haltBlobMigrator);
+					DUMPTOKEN(recruited.waitFailure);
+					DUMPTOKEN(recruited.ssi.getValue);
+					DUMPTOKEN(recruited.ssi.getKey);
+					DUMPTOKEN(recruited.ssi.getKeyValues);
+					DUMPTOKEN(recruited.ssi.getMappedKeyValues);
+					DUMPTOKEN(recruited.ssi.getShardState);
+					DUMPTOKEN(recruited.ssi.waitMetrics);
+					DUMPTOKEN(recruited.ssi.splitMetrics);
+					DUMPTOKEN(recruited.ssi.getReadHotRanges);
+					DUMPTOKEN(recruited.ssi.getRangeSplitPoints);
+					DUMPTOKEN(recruited.ssi.getStorageMetrics);
+					DUMPTOKEN(recruited.ssi.getQueuingMetrics);
+					DUMPTOKEN(recruited.ssi.getKeyValueStoreType);
+					DUMPTOKEN(recruited.ssi.watchValue);
+					DUMPTOKEN(recruited.ssi.getKeyValuesStream);
+					DUMPTOKEN(recruited.ssi.changeFeedStream);
+					DUMPTOKEN(recruited.ssi.changeFeedPop);
+					DUMPTOKEN(recruited.ssi.changeFeedVersionUpdate);
+
+					Future<Void> blobMigratorProcess = blobMigrator(recruited, dbInfo);
+					errorForwarders.add(forwardError(errors,
+					                                 Role::BLOB_MIGRATOR,
+					                                 recruited.id(),
+					                                 setWhenDoneOrError(blobMigratorProcess,
+					                                                    blobMigratorInterf,
+					                                                    Optional<BlobMigratorInterface>())));
+					blobMigratorInterf->set(Optional<BlobMigratorInterface>(recruited));
+				}
+				TraceEvent("BlobMigrator_InitRequest", req.reqId).detail("BlobMigratorId", recruited.id());
+				req.reply.send(recruited);
+			}
 			when(InitializeBackupRequest req = waitNext(interf.backup.getFuture())) {
 				if (!backupWorkerCache.exists(req.reqId)) {
 					LocalLineage _;
@@ -2189,7 +2414,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					ReplyPromise<InitializeBackupReply> backupReady = req.reply;
 					backupWorkerCache.set(req.reqId, backupReady.getFuture());
 					Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
-					backupProcess = storageCache.removeOnReady(req.reqId, backupProcess);
+					backupProcess = backupWorkerCache.removeOnReady(req.reqId, backupProcess);
 					errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
 					TraceEvent("BackupInitRequest", req.reqId).detail("BackupId", recruited.id());
 					InitializeBackupReply reply(recruited, req.backupEpoch);
@@ -2301,7 +2526,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                 runningStorages.end(),
 				                 [&req](const auto& p) { return p.second != req.storeType; }) ||
 				     req.seedTag != invalidTag)) {
-					ASSERT(req.clusterId.isValid());
 					ASSERT(req.initialClusterVersion >= 0);
 					LocalLineage _;
 					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
@@ -2341,8 +2565,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                   folder,
 					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
-					Reference<IEncryptionKeyProvider> encryptionKeyProvider =
-					    makeReference<TenantAwareEncryptionKeyProvider>(dbInfo);
 					IKeyValueStore* data = openKVStore(
 					    req.storeType,
 					    filename,
@@ -2356,7 +2578,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                req.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 					                deterministicRandom()->coinflip())
 					             : true),
-					    encryptionKeyProvider);
+					    dbInfo,
+					    req.encryptMode);
 
 					Future<Void> kvClosed =
 					    data->onClosed() ||
@@ -2368,13 +2591,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					Future<Void> s = storageServer(data,
 					                               recruited,
 					                               req.seedTag,
-					                               req.clusterId,
 					                               req.initialClusterVersion,
 					                               isTss ? req.tssPairIDAndVersion.get().second : 0,
 					                               storageReady,
 					                               dbInfo,
-					                               folder,
-					                               encryptionKeyProvider);
+					                               folder);
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(&runningStorages,
@@ -2390,8 +2611,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                                  memoryLimit,
 					                                  data,
 					                                  false,
-					                                  &rebootKVSPromise2,
-					                                  encryptionKeyProvider);
+					                                  &rebootKVSPromise2);
 					errorForwarders.add(forwardError(errors, ssRole, recruited.id(), s));
 				} else if (storageCache.exists(req.reqId)) {
 					forwardPromise(req.reply, storageCache.get(req.reqId));
@@ -2444,8 +2664,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.getStorageServerRejoinInfo);
 				DUMPTOKEN(recruited.waitFailure);
 				DUMPTOKEN(recruited.txnState);
+				DUMPTOKEN(recruited.getTenantId);
 
-				// printf("Recruited as commitProxyServer\n");
 				errorForwarders.add(zombie(recruited,
 				                           forwardError(errors,
 				                                        Role::COMMIT_PROXY,
@@ -2608,7 +2828,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			when(state WorkerSnapRequest snapReq = waitNext(interf.workerSnapReq.getFuture())) {
 				std::string snapReqKey = snapReq.snapUID.toString() + snapReq.role.toString();
 				if (snapReqResultMap.count(snapReqKey)) {
-					CODE_PROBE(true, "Worker received a duplicate finished snapshot request");
+					CODE_PROBE(true, "Worker received a duplicate finished snapshot request", probe::decoration::rare);
 					auto result = snapReqResultMap[snapReqKey];
 					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
 					TraceEvent("RetryFinishedWorkerSnapRequest")
@@ -2616,7 +2836,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    .detail("Role", snapReq.role)
 					    .detail("Result", result.isError() ? result.getError().code() : success().code());
 				} else if (snapReqMap.count(snapReqKey)) {
-					CODE_PROBE(true, "Worker received a duplicate ongoing snapshot request");
+					CODE_PROBE(true, "Worker received a duplicate ongoing snapshot request", probe::decoration::rare);
 					TraceEvent("RetryOngoingWorkerSnapRequest")
 					    .detail("SnapUID", snapReq.snapUID.toString())
 					    .detail("Role", snapReq.role);
@@ -2661,8 +2881,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			f.cancel();
 		state Error e = err;
 		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_actor_cancelled ||
-		          e.code() == error_code_please_reboot_delete;
-
+		          e.code() == error_code_please_reboot_delete || e.code() == error_code_local_config_changed ||
+		          e.code() == error_code_invalid_cluster_id;
 		endRole(Role::WORKER, interf.id(), "WorkerError", ok, e);
 		errorForwarders.clear(false);
 		sharedLogs.clear();
@@ -2698,6 +2918,8 @@ static std::set<int> const& normalWorkerErrors() {
 	if (s.empty()) {
 		s.insert(error_code_please_reboot);
 		s.insert(error_code_please_reboot_delete);
+		s.insert(error_code_local_config_changed);
+		s.insert(error_code_invalid_cluster_id);
 	}
 	return s;
 }
@@ -2958,34 +3180,45 @@ TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
 		return Void();
 	}
 
-	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                           ProtocolVersion::withTSS())));
-
-	ErrorOr<SWVersion> swversion = wait(errorOr(
-	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
-
-	if (!swversion.isError()) {
-		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
-
-		TraceEvent(SevInfo, "UT/swversion/runCompatibleOlder").detail("SWVersion", swversion.get());
+	{
+		ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                           ProtocolVersion::withTSS())));
 	}
 
-	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-	                                                           ProtocolVersion::withTSS(),
-	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                           ProtocolVersion::withTSS())));
+	{
+		ErrorOr<SWVersion> swversion = wait(errorOr(
+		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
 
-	ErrorOr<SWVersion> swversion = wait(errorOr(
-	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+		if (!swversion.isError()) {
+			ASSERT(swversion.get().newestProtocolVersion() ==
+			       ProtocolVersion::withStorageInterfaceReadiness().version());
+			ASSERT(swversion.get().lastRunProtocolVersion() ==
+			       ProtocolVersion::withStorageInterfaceReadiness().version());
+			ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
 
-	if (!swversion.isError()) {
-		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withTSS().version());
-		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+			TraceEvent(SevInfo, "UT/swversion/runCompatibleOlder").detail("SWVersion", swversion.get());
+		}
+	}
+
+	{
+		ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+		                                                           ProtocolVersion::withTSS(),
+		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                           ProtocolVersion::withTSS())));
+	}
+
+	{
+		ErrorOr<SWVersion> swversion = wait(errorOr(
+		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+		if (!swversion.isError()) {
+			ASSERT(swversion.get().newestProtocolVersion() ==
+			       ProtocolVersion::withStorageInterfaceReadiness().version());
+			ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withTSS().version());
+			ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+		}
 	}
 
 	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
@@ -2999,24 +3232,32 @@ TEST_CASE("/fdbserver/worker/swversion/runIncompatibleOlder") {
 		return Void();
 	}
 
-	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                           ProtocolVersion::withTSS())));
-
-	ErrorOr<SWVersion> swversion = wait(errorOr(
-	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
-
-	if (!swversion.isError()) {
-		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	{
+		ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                           ProtocolVersion::withTSS())));
 	}
 
-	ErrorOr<SWVersion> swversion =
-	    wait(errorOr(testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withCacheRole())));
+	{
+		ErrorOr<SWVersion> swversion = wait(errorOr(
+		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
 
-	ASSERT(swversion.isError() && swversion.getError().code() == error_code_incompatible_software_version);
+		if (!swversion.isError()) {
+			ASSERT(swversion.get().newestProtocolVersion() ==
+			       ProtocolVersion::withStorageInterfaceReadiness().version());
+			ASSERT(swversion.get().lastRunProtocolVersion() ==
+			       ProtocolVersion::withStorageInterfaceReadiness().version());
+			ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+		}
+	}
+
+	{
+		ErrorOr<SWVersion> swversion =
+		    wait(errorOr(testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withCacheRole())));
+
+		ASSERT(swversion.isError() && swversion.getError().code() == error_code_incompatible_software_version);
+	}
 
 	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
 
@@ -3029,32 +3270,42 @@ TEST_CASE("/fdbserver/worker/swversion/runNewer") {
 		return Void();
 	}
 
-	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-	                                                           ProtocolVersion::withTSS(),
-	                                                           ProtocolVersion::withTSS(),
-	                                                           ProtocolVersion::withCacheRole())));
-
-	ErrorOr<SWVersion> swversion = wait(errorOr(
-	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
-
-	if (!swversion.isError()) {
-		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withTSS().version());
-		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withTSS().version());
-		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withCacheRole().version());
+	{
+		ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+		                                                           ProtocolVersion::withTSS(),
+		                                                           ProtocolVersion::withTSS(),
+		                                                           ProtocolVersion::withCacheRole())));
 	}
 
-	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                           ProtocolVersion::withTSS())));
+	{
+		ErrorOr<SWVersion> swversion = wait(errorOr(
+		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
 
-	ErrorOr<SWVersion> swversion = wait(errorOr(
-	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+		if (!swversion.isError()) {
+			ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withTSS().version());
+			ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withTSS().version());
+			ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withCacheRole().version());
+		}
+	}
 
-	if (!swversion.isError()) {
-		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	{
+		ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                           ProtocolVersion::withTSS())));
+	}
+
+	{
+		ErrorOr<SWVersion> swversion = wait(errorOr(
+		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+		if (!swversion.isError()) {
+			ASSERT(swversion.get().newestProtocolVersion() ==
+			       ProtocolVersion::withStorageInterfaceReadiness().version());
+			ASSERT(swversion.get().lastRunProtocolVersion() ==
+			       ProtocolVersion::withStorageInterfaceReadiness().version());
+			ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+		}
 	}
 
 	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
@@ -3223,14 +3474,12 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
     Reference<IClusterConnectionRecord> connRecord,
     Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
     Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-    Future<Void> recoveredDiskFiles,
     LocalityData locality,
     Reference<AsyncVar<ServerDBInfo>> dbInfo,
-    ConfigDBType configDBType) {
+    ConfigDBType configDBType,
+    Reference<AsyncVar<Optional<UID>>> clusterId) {
 	state Future<Void> monitor = monitorLeaderWithDelayedCandidacyImpl(connRecord, currentCC);
 	state Future<Void> timeout;
-
-	wait(recoveredDiskFiles);
 
 	loop {
 		if (currentCC->get().present() && dbInfo->get().clusterInterface == currentCC->get().get() &&
@@ -3252,8 +3501,7 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
 			                                     : Never())) {}
 			when(wait(timeout.isValid() ? timeout : Never())) {
 				monitor.cancel();
-				wait(clusterController(
-				    connRecord, currentCC, asyncPriorityInfo, recoveredDiskFiles, locality, configDBType));
+				wait(clusterController(connRecord, currentCC, asyncPriorityInfo, locality, configDBType, clusterId));
 				return Void();
 			}
 		}
@@ -3263,7 +3511,7 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
 extern void setupStackSignal();
 
 ACTOR Future<Void> serveProtocolInfo() {
-	state RequestStream<ProtocolInfoRequest> protocolInfo(
+	state PublicRequestStream<ProtocolInfoRequest> protocolInfo(
 	    PeerCompatibilityPolicy{ RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() });
 	protocolInfo.makeWellKnownEndpoint(WLTOKEN_PROTOCOL_INFO, TaskPriority::DefaultEndpoint);
 	loop {
@@ -3303,6 +3551,17 @@ ACTOR Future<Void> serveProcess() {
 	}
 }
 
+Optional<UID> readClusterId(std::string filePath) {
+	if (!fileExists(filePath)) {
+		return Optional<UID>();
+	}
+	std::string contents(readFileBytes(filePath, 10000));
+	BinaryReader br(StringRef(contents), IncludeVersion());
+	UID clusterId;
+	br >> clusterId;
+	return clusterId;
+}
+
 ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
                         LocalityData localities,
                         ProcessClass processClass,
@@ -3317,10 +3576,12 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
                         std::map<std::string, std::string> manualKnobOverrides,
                         ConfigDBType configDBType) {
 	state std::vector<Future<Void>> actors;
-	state Promise<Void> recoveredDiskFiles;
 	state Reference<ConfigNode> configNode;
-	state Reference<LocalConfiguration> localConfig =
-	    makeReference<LocalConfiguration>(dataFolder, configPath, manualKnobOverrides);
+	state Reference<LocalConfiguration> localConfig;
+	if (configDBType != ConfigDBType::DISABLED) {
+		localConfig = makeReference<LocalConfiguration>(
+		    dataFolder, configPath, manualKnobOverrides, IsTest(g_network->isSimulated()));
+	}
 	// setupStackSignal();
 	getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::Worker;
 
@@ -3328,18 +3589,11 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		configNode = makeReference<ConfigNode>(dataFolder);
 	}
 
-	// FIXME: Initializing here causes simulation issues, these must be fixed
-	/*
-	if (configDBType != ConfigDBType::DISABLED) {
-	    wait(localConfig->initialize());
-	}
-	*/
-
 	actors.push_back(serveProtocolInfo());
 	actors.push_back(serveProcess());
 
 	try {
-		ServerCoordinators coordinators(connRecord);
+		ServerCoordinators coordinators(connRecord, configDBType);
 		if (g_network->isSimulated()) {
 			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
 		}
@@ -3348,7 +3602,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		    .detail("MachineId", localities.machineId())
 		    .detail("DiskPath", dataFolder)
 		    .detail("CoordPath", coordFolder)
-		    .detail("WhiteListBinPath", whitelistBinPaths);
+		    .detail("WhiteListBinPath", whitelistBinPaths)
+		    .detail("ConfigDBType", configDBType);
 
 		state ConfigBroadcastInterface configBroadcastInterface;
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
@@ -3367,15 +3622,20 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 
 		wait(testAndUpdateSoftwareVersionCompatibility(dataFolder, processIDUid));
 
+		if (configDBType != ConfigDBType::DISABLED) {
+			wait(localConfig->initialize());
+		}
+
 		std::string fitnessFilePath = joinPath(dataFolder, "fitness");
 		auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
 		auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
 		auto asyncPriorityInfo =
 		    makeReference<AsyncVar<ClusterControllerPriorityInfo>>(getCCPriorityInfo(fitnessFilePath, processClass));
 		auto serverDBInfo = ServerDBInfo();
-		serverDBInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 		serverDBInfo.myLocality = localities;
 		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>(serverDBInfo);
+		Reference<AsyncVar<Optional<UID>>> clusterId(
+		    new AsyncVar<Optional<UID>>(readClusterId(joinPath(dataFolder, clusterIdFilename))));
 		TraceEvent("MyLocality").detail("Locality", dbInfo->get().myLocality.toString());
 
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
@@ -3384,19 +3644,14 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 			actors.push_back(reportErrors(monitorLeader(connRecord, cc), "ClusterController"));
 		} else if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::WorstFit &&
 		           SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS > 0) {
-			actors.push_back(reportErrors(monitorLeaderWithDelayedCandidacy(connRecord,
-			                                                                cc,
-			                                                                asyncPriorityInfo,
-			                                                                recoveredDiskFiles.getFuture(),
-			                                                                localities,
-			                                                                dbInfo,
-			                                                                configDBType),
-			                              "ClusterController"));
+			actors.push_back(
+			    reportErrors(monitorLeaderWithDelayedCandidacy(
+			                     connRecord, cc, asyncPriorityInfo, localities, dbInfo, configDBType, clusterId),
+			                 "ClusterController"));
 		} else {
-			actors.push_back(reportErrors(
-			    clusterController(
-			        connRecord, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, configDBType),
-			    "ClusterController"));
+			actors.push_back(
+			    reportErrors(clusterController(connRecord, cc, asyncPriorityInfo, localities, configDBType, clusterId),
+			                 "ClusterController"));
 		}
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
 		actors.push_back(reportErrorsExcept(workerServer(connRecord,
@@ -3408,14 +3663,14 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		                                                 memoryLimit,
 		                                                 metricsConnFile,
 		                                                 metricsPrefix,
-		                                                 recoveredDiskFiles,
 		                                                 memoryProfileThreshold,
 		                                                 coordFolder,
 		                                                 whitelistBinPaths,
 		                                                 dbInfo,
 		                                                 configBroadcastInterface,
 		                                                 configNode,
-		                                                 localConfig),
+		                                                 localConfig,
+		                                                 clusterId),
 		                                    "WorkerServer",
 		                                    UID(),
 		                                    &normalWorkerErrors()));
@@ -3429,7 +3684,13 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		// Otherwise, these actors may get a broken promise error.
 		for (auto f : actors)
 			f.cancel();
-		Error err = checkIOTimeout(e);
+		state Error err = checkIOTimeout(e);
+		if (e.code() == error_code_invalid_cluster_id) {
+			// If this process tried to join an invalid cluster, become a
+			// zombie and wait for manual action by the operator.
+			TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "ZombieProcess").error(e);
+			wait(Never());
+		}
 		throw err;
 	}
 }
@@ -3450,7 +3711,9 @@ const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
 const Role Role::RATEKEEPER("Ratekeeper", "RK");
 const Role Role::BLOB_MANAGER("BlobManager", "BM");
 const Role Role::BLOB_WORKER("BlobWorker", "BW");
+const Role Role::BLOB_MIGRATOR("BlobMigrator", "MG");
 const Role Role::STORAGE_CACHE("StorageCache", "SC");
 const Role Role::COORDINATOR("Coordinator", "CD");
 const Role Role::BACKUP("Backup", "BK");
 const Role Role::ENCRYPT_KEY_PROXY("EncryptKeyProxy", "EP");
+const Role Role::CONSISTENCYSCAN("ConsistencyScan", "CS");

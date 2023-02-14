@@ -127,7 +127,10 @@ ACTOR Future<RangeResult> krmGetRangesUnaligned(Transaction* tr,
 
 	state GetRangeLimits limits(limit, limitBytes);
 	limits.minRows = 2;
-	RangeResult kv = wait(tr->getRange(lastLessOrEqual(withPrefix.begin), firstGreaterThan(withPrefix.end), limits));
+	// wait to include the next highest row >= keys.end in the result, so since end is exclusive, we need +2 and
+	// !orEqual
+	RangeResult kv =
+	    wait(tr->getRange(lastLessOrEqual(withPrefix.begin), KeySelectorRef(withPrefix.end, false, +2), limits));
 
 	return krmDecodeRanges(mapPrefix, keys, kv, false);
 }
@@ -142,7 +145,10 @@ ACTOR Future<RangeResult> krmGetRangesUnaligned(Reference<ReadYourWritesTransact
 
 	state GetRangeLimits limits(limit, limitBytes);
 	limits.minRows = 2;
-	RangeResult kv = wait(tr->getRange(lastLessOrEqual(withPrefix.begin), firstGreaterThan(withPrefix.end), limits));
+	// wait to include the next highest row >= keys.end in the result, so since end is exclusive, we need +2 and
+	// !orEqual
+	RangeResult kv =
+	    wait(tr->getRange(lastLessOrEqual(withPrefix.begin), KeySelectorRef(withPrefix.end, false, +2), limits));
 
 	return krmDecodeRanges(mapPrefix, keys, kv, false);
 }
@@ -240,7 +246,7 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 	// Determine how far to extend this range at the beginning
 	auto beginRange = keys[0].get();
 	bool hasBegin = beginRange.size() > 0 && beginRange[0].key.startsWith(mapPrefix);
-	Value beginValue = hasBegin ? beginRange[0].value : LiteralStringRef("");
+	Value beginValue = hasBegin ? beginRange[0].value : ""_sr;
 
 	state Key beginKey = withPrefix.begin;
 	if (beginValue == value) {
@@ -253,7 +259,7 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 	bool hasEnd = endRange.size() >= 1 && endRange[0].key.startsWith(mapPrefix) && endRange[0].key <= withPrefix.end;
 	bool hasNext = (endRange.size() == 2 && endRange[1].key.startsWith(mapPrefix)) ||
 	               (endRange.size() == 1 && withPrefix.end < endRange[0].key && endRange[0].key.startsWith(mapPrefix));
-	Value existingValue = hasEnd ? endRange[0].value : LiteralStringRef("");
+	Value existingValue = hasEnd ? endRange[0].value : ""_sr;
 	bool valueMatches = value == existingValue;
 
 	KeyRange conflictRange = KeyRangeRef(hasBegin ? beginRange[0].key : mapPrefix, withPrefix.begin);
@@ -311,29 +317,39 @@ Future<Void> krmSetRangeCoalescing(Reference<ReadYourWritesTransaction> const& t
 
 TEST_CASE("/keyrangemap/decoderange/aligned") {
 	Arena arena;
-	Key prefix = LiteralStringRef("/prefix/");
-	StringRef fullKeyA = StringRef(arena, LiteralStringRef("/prefix/a"));
-	StringRef fullKeyB = StringRef(arena, LiteralStringRef("/prefix/b"));
-	StringRef fullKeyC = StringRef(arena, LiteralStringRef("/prefix/c"));
-	StringRef fullKeyD = StringRef(arena, LiteralStringRef("/prefix/d"));
+	Key prefix = "/prefix/"_sr;
+	StringRef fullKeyA = StringRef(arena, "/prefix/a"_sr);
+	StringRef fullKeyB = StringRef(arena, "/prefix/b"_sr);
+	StringRef fullKeyC = StringRef(arena, "/prefix/c"_sr);
+	StringRef fullKeyD = StringRef(arena, "/prefix/d"_sr);
 
-	StringRef keyA = StringRef(arena, LiteralStringRef("a"));
-	StringRef keyB = StringRef(arena, LiteralStringRef("b"));
-	StringRef keyC = StringRef(arena, LiteralStringRef("c"));
-	StringRef keyD = StringRef(arena, LiteralStringRef("d"));
-	StringRef keyE = StringRef(arena, LiteralStringRef("e"));
-	StringRef keyAB = StringRef(arena, LiteralStringRef("ab"));
-	StringRef keyCD = StringRef(arena, LiteralStringRef("cd"));
+	StringRef keyA = StringRef(arena, "a"_sr);
+	StringRef keyB = StringRef(arena, "b"_sr);
+	StringRef keyC = StringRef(arena, "c"_sr);
+	StringRef keyD = StringRef(arena, "d"_sr);
+	StringRef keyE = StringRef(arena, "e"_sr);
+	StringRef keyAB = StringRef(arena, "ab"_sr);
+	StringRef keyAC = StringRef(arena, "ac"_sr);
+	StringRef keyCD = StringRef(arena, "cd"_sr);
 
 	// Fake getRange() call.
 	RangeResult kv;
 	kv.push_back(arena, KeyValueRef(fullKeyA, keyA));
 	kv.push_back(arena, KeyValueRef(fullKeyB, keyB));
+
+	// [A, AB(start), AC(start), B]
+	RangeResult decodedRanges = krmDecodeRanges(prefix, KeyRangeRef(keyAB, keyAC), kv);
+	ASSERT(decodedRanges.size() == 2);
+	ASSERT(decodedRanges.front().key == keyAB);
+	ASSERT(decodedRanges.front().value == keyA);
+	ASSERT(decodedRanges.back().key == keyAC);
+	ASSERT(decodedRanges.back().value == keyA);
+
 	kv.push_back(arena, KeyValueRef(fullKeyC, keyC));
 	kv.push_back(arena, KeyValueRef(fullKeyD, keyD));
 
 	// [A, AB(start), B, C, CD(end), D]
-	RangeResult decodedRanges = krmDecodeRanges(prefix, KeyRangeRef(keyAB, keyCD), kv);
+	decodedRanges = krmDecodeRanges(prefix, KeyRangeRef(keyAB, keyCD), kv);
 	ASSERT(decodedRanges.size() == 4);
 	ASSERT(decodedRanges.front().key == keyAB);
 	ASSERT(decodedRanges.front().value == keyA);
@@ -353,29 +369,39 @@ TEST_CASE("/keyrangemap/decoderange/aligned") {
 
 TEST_CASE("/keyrangemap/decoderange/unaligned") {
 	Arena arena;
-	Key prefix = LiteralStringRef("/prefix/");
-	StringRef fullKeyA = StringRef(arena, LiteralStringRef("/prefix/a"));
-	StringRef fullKeyB = StringRef(arena, LiteralStringRef("/prefix/b"));
-	StringRef fullKeyC = StringRef(arena, LiteralStringRef("/prefix/c"));
-	StringRef fullKeyD = StringRef(arena, LiteralStringRef("/prefix/d"));
+	Key prefix = "/prefix/"_sr;
+	StringRef fullKeyA = StringRef(arena, "/prefix/a"_sr);
+	StringRef fullKeyB = StringRef(arena, "/prefix/b"_sr);
+	StringRef fullKeyC = StringRef(arena, "/prefix/c"_sr);
+	StringRef fullKeyD = StringRef(arena, "/prefix/d"_sr);
 
-	StringRef keyA = StringRef(arena, LiteralStringRef("a"));
-	StringRef keyB = StringRef(arena, LiteralStringRef("b"));
-	StringRef keyC = StringRef(arena, LiteralStringRef("c"));
-	StringRef keyD = StringRef(arena, LiteralStringRef("d"));
-	StringRef keyE = StringRef(arena, LiteralStringRef("e"));
-	StringRef keyAB = StringRef(arena, LiteralStringRef("ab"));
-	StringRef keyCD = StringRef(arena, LiteralStringRef("cd"));
+	StringRef keyA = StringRef(arena, "a"_sr);
+	StringRef keyB = StringRef(arena, "b"_sr);
+	StringRef keyC = StringRef(arena, "c"_sr);
+	StringRef keyD = StringRef(arena, "d"_sr);
+	StringRef keyE = StringRef(arena, "e"_sr);
+	StringRef keyAB = StringRef(arena, "ab"_sr);
+	StringRef keyAC = StringRef(arena, "ac"_sr);
+	StringRef keyCD = StringRef(arena, "cd"_sr);
 
 	// Fake getRange() call.
 	RangeResult kv;
 	kv.push_back(arena, KeyValueRef(fullKeyA, keyA));
 	kv.push_back(arena, KeyValueRef(fullKeyB, keyB));
+
+	// [A, AB(start), AC(start), B]
+	RangeResult decodedRanges = krmDecodeRanges(prefix, KeyRangeRef(keyAB, keyAC), kv, false);
+	ASSERT(decodedRanges.size() == 2);
+	ASSERT(decodedRanges.front().key == keyA);
+	ASSERT(decodedRanges.front().value == keyA);
+	ASSERT(decodedRanges.back().key == keyB);
+	ASSERT(decodedRanges.back().value == keyB);
+
 	kv.push_back(arena, KeyValueRef(fullKeyC, keyC));
 	kv.push_back(arena, KeyValueRef(fullKeyD, keyD));
 
 	// [A, AB(start), B, C, CD(end), D]
-	RangeResult decodedRanges = krmDecodeRanges(prefix, KeyRangeRef(keyAB, keyCD), kv, false);
+	decodedRanges = krmDecodeRanges(prefix, KeyRangeRef(keyAB, keyCD), kv, false);
 	ASSERT(decodedRanges.size() == 4);
 	ASSERT(decodedRanges.front().key == keyA);
 	ASSERT(decodedRanges.front().value == keyA);

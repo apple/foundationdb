@@ -30,6 +30,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TargetedKillWorkload : TestWorkload {
+	static constexpr auto NAME = "TargetedKill";
+
 	std::string machineToKill;
 	bool enabled, killAllMachineProcesses;
 	int numKillStorages;
@@ -39,15 +41,14 @@ struct TargetedKillWorkload : TestWorkload {
 
 	TargetedKillWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		killAt = getOption(options, LiteralStringRef("killAt"), 5.0);
-		reboot = getOption(options, LiteralStringRef("reboot"), false);
-		suspendDuration = getOption(options, LiteralStringRef("suspendDuration"), 1.0);
-		machineToKill = getOption(options, LiteralStringRef("machineToKill"), LiteralStringRef("master")).toString();
-		killAllMachineProcesses = getOption(options, LiteralStringRef("killWholeMachine"), false);
-		numKillStorages = getOption(options, LiteralStringRef("numKillStorages"), 1);
+		killAt = getOption(options, "killAt"_sr, 5.0);
+		reboot = getOption(options, "reboot"_sr, false);
+		suspendDuration = getOption(options, "suspendDuration"_sr, 1.0);
+		machineToKill = getOption(options, "machineToKill"_sr, "master"_sr).toString();
+		killAllMachineProcesses = getOption(options, "killWholeMachine"_sr, false);
+		numKillStorages = getOption(options, "numKillStorages"_sr, 1);
 	}
 
-	std::string description() const override { return "TargetedKillWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (enabled)
@@ -61,8 +62,8 @@ struct TargetedKillWorkload : TestWorkload {
 	                          NetworkAddress address,
 	                          Database cx,
 	                          TargetedKillWorkload* self) {
-		if (&g_simulator == g_network) {
-			g_simulator.killInterface(address, ISimulator::KillInstantly);
+		if (g_simulator == g_network) {
+			g_simulator->killInterface(address, ISimulator::KillType::KillInstantly);
 			return Void();
 		}
 
@@ -162,4 +163,4 @@ struct TargetedKillWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<TargetedKillWorkload> TargetedKillWorkloadFactory("TargetedKill");
+WorkloadFactory<TargetedKillWorkload> TargetedKillWorkloadFactory;

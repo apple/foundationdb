@@ -21,78 +21,160 @@
 #include "flow/CompressionUtils.h"
 
 #include "flow/Arena.h"
+#include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 
-#include <boost/iostreams/copy.hpp>
-#ifdef ZLIB_LIB_SUPPORTED
-#include <boost/iostreams/filter/gzip.hpp>
+#ifdef ZSTD_LIB_SUPPORTED
+#define ZSTD_STATIC_LINKING_ONLY
+#include <zstd.h>
+static constexpr int ZSTD_COMPRESSION_LEVEL_1 = 1;
 #endif
-#include <boost/iostreams/filtering_streambuf.hpp>
-#include <sstream>
+
+namespace {
+std::unordered_set<CompressionFilter> getSupportedFilters() {
+	std::unordered_set<CompressionFilter> filters;
+
+	filters.insert(CompressionFilter::NONE);
+#ifdef ZSTD_LIB_SUPPORTED
+	filters.insert(CompressionFilter::ZSTD);
+#endif
+	ASSERT_GE(filters.size(), 1);
+	return filters;
+}
+} // namespace
+
+std::unordered_set<CompressionFilter> CompressionUtils::supportedFilters = getSupportedFilters();
 
 StringRef CompressionUtils::compress(const CompressionFilter filter, const StringRef& data, Arena& arena) {
+	checkFilterSupported(filter);
+
 	if (filter == CompressionFilter::NONE) {
 		return StringRef(arena, data);
 	}
-
-	namespace bio = boost::iostreams;
-#ifdef ZLIB_LIB_SUPPORTED
-	if (filter == CompressionFilter::GZIP) {
-		return CompressionUtils::compress(filter, data, bio::gzip::default_compression, arena);
+#ifdef ZSTD_LIB_SUPPORTED
+	if (filter == CompressionFilter::ZSTD) {
+		return CompressionUtils::compress(filter, data, ZSTD_COMPRESSION_LEVEL_1, arena);
 	}
 #endif
-	throw not_implemented();
+
+	throw internal_error(); // We should never get here
 }
 
 StringRef CompressionUtils::compress(const CompressionFilter filter, const StringRef& data, int level, Arena& arena) {
-	ASSERT(filter < CompressionFilter::LAST);
+	checkFilterSupported(filter);
 
 	if (filter == CompressionFilter::NONE) {
 		return StringRef(arena, data);
 	}
-
-	namespace bio = boost::iostreams;
-	std::stringstream compStream;
-	std::stringstream decomStream(data.toString());
-
-	bio::filtering_streambuf<bio::input> out;
-#ifdef ZLIB_LIB_SUPPORTED
-	if (filter == CompressionFilter::GZIP) {
-		out.push(bio::gzip_compressor(bio::gzip_params(level)));
+#ifdef ZSTD_LIB_SUPPORTED
+	if (filter == CompressionFilter::ZSTD) {
+		const char* src = reinterpret_cast<const char*>(data.begin());
+		size_t destSize = ZSTD_compressBound(data.size());
+		std::unique_ptr<uint8_t[]> dest = std::make_unique<uint8_t[]>(destSize);
+		size_t bytes = ZSTD_compress(dest.get(), destSize, src, data.size(), level);
+		if (ZSTD_isError(bytes)) {
+			throw internal_error();
+		}
+		return StringRef(arena, StringRef(dest.get(), bytes));
 	}
 #endif
-	out.push(decomStream);
-	bio::copy(out, compStream);
-
-	return StringRef(arena, compStream.str());
+	throw internal_error(); // We should never get here
 }
 
 StringRef CompressionUtils::decompress(const CompressionFilter filter, const StringRef& data, Arena& arena) {
-	ASSERT(filter < CompressionFilter::LAST);
+	checkFilterSupported(filter);
 
 	if (filter == CompressionFilter::NONE) {
 		return StringRef(arena, data);
 	}
-
-	namespace bio = boost::iostreams;
-	std::stringstream compStream(data.toString());
-	std::stringstream decompStream;
-
-	bio::filtering_streambuf<bio::input> out;
-#ifdef ZLIB_LIB_SUPPORTED
-	if (filter == CompressionFilter::GZIP) {
-		out.push(bio::gzip_decompressor());
+#ifdef ZSTD_LIB_SUPPORTED
+	if (filter == CompressionFilter::ZSTD) {
+		const char* src = reinterpret_cast<const char*>(data.begin());
+		size_t destSize = ZSTD_decompressBound(src, data.size());
+		std::unique_ptr<uint8_t[]> dest = std::make_unique<uint8_t[]>(destSize);
+		size_t bytes = ZSTD_decompress(dest.get(), destSize, src, data.size());
+		if (ZSTD_isError(bytes)) {
+			throw internal_error();
+		}
+		return StringRef(arena, StringRef(dest.get(), bytes));
 	}
 #endif
-	out.push(compStream);
-	bio::copy(out, decompStream);
+	throw internal_error(); // We should never get here
+}
 
-	return StringRef(arena, decompStream.str());
+int CompressionUtils::getDefaultCompressionLevel(CompressionFilter filter) {
+	checkFilterSupported(filter);
+
+	if (filter == CompressionFilter::NONE) {
+		return -1;
+	}
+
+#ifdef ZSTD_LIB_SUPPORTED
+	if (filter == CompressionFilter::ZSTD) {
+		// optimize for high speed compression, larger levels have a high cpu cost and not much compression ratio
+		// improvement, according to benchmarks
+		return ZSTD_COMPRESSION_LEVEL_1;
+	}
+#endif
+
+	throw internal_error(); // We should never get here
+}
+
+CompressionFilter CompressionUtils::getRandomFilter() {
+	ASSERT_GE(supportedFilters.size(), 1);
+	std::vector<CompressionFilter> filters;
+	filters.insert(filters.end(), CompressionUtils::supportedFilters.begin(), CompressionUtils::supportedFilters.end());
+
+	ASSERT_GE(filters.size(), 1);
+
+	CompressionFilter res;
+	if (filters.size() == 1) {
+		res = filters[0];
+	} else {
+		int idx = deterministicRandom()->randomInt(0, filters.size());
+		res = filters[idx];
+	}
+
+	ASSERT(supportedFilters.find(res) != supportedFilters.end());
+	return res;
 }
 
 // Only used to link unit tests
 void forceLinkCompressionUtilsTest() {}
+
+namespace {
+void testCompression(CompressionFilter filter) {
+	Arena arena;
+	const int size = deterministicRandom()->randomInt(512, 1024);
+	Standalone<StringRef> uncompressed = makeString(size);
+	deterministicRandom()->randomBytes(mutateString(uncompressed), size);
+
+	Standalone<StringRef> compressed = CompressionUtils::compress(filter, uncompressed, arena);
+	ASSERT_NE(compressed.compare(uncompressed), 0);
+
+	StringRef verify = CompressionUtils::decompress(filter, compressed, arena);
+	ASSERT_EQ(verify.compare(uncompressed), 0);
+}
+
+void testCompression2(CompressionFilter filter) {
+	Arena arena;
+	const int size = deterministicRandom()->randomInt(512, 1024);
+	std::string s(size, 'x');
+	Standalone<StringRef> uncompressed = Standalone<StringRef>(StringRef(s));
+	printf("Size before: %d\n", (int)uncompressed.size());
+
+	Standalone<StringRef> compressed = CompressionUtils::compress(filter, uncompressed, arena);
+	ASSERT_NE(compressed.compare(uncompressed), 0);
+	printf("Size after: %d\n", (int)compressed.size());
+	// Assert compressed size is less than half.
+	ASSERT(compressed.size() * 2 < uncompressed.size());
+
+	StringRef verify = CompressionUtils::decompress(filter, compressed, arena);
+	ASSERT_EQ(verify.compare(uncompressed), 0);
+}
+
+} // namespace
 
 TEST_CASE("/CompressionUtils/noCompression") {
 	Arena arena;
@@ -106,46 +188,21 @@ TEST_CASE("/CompressionUtils/noCompression") {
 	StringRef verify = CompressionUtils::decompress(CompressionFilter::NONE, compressed, arena);
 	ASSERT_EQ(verify.compare(uncompressed), 0);
 
-	TraceEvent("NoCompression_Done").log();
+	TraceEvent("NoCompressionDone");
+
+	return Void();
+}
+#ifdef ZSTD_LIB_SUPPORTED
+TEST_CASE("/CompressionUtils/zstdCompression") {
+	testCompression(CompressionFilter::ZSTD);
+	TraceEvent("ZstdCompressionDone");
 
 	return Void();
 }
 
-#ifdef ZLIB_LIB_SUPPORTED
-TEST_CASE("/CompressionUtils/gzipCompression") {
-	Arena arena;
-	const int size = deterministicRandom()->randomInt(512, 1024);
-	Standalone<StringRef> uncompressed = makeString(size);
-	deterministicRandom()->randomBytes(mutateString(uncompressed), size);
-
-	Standalone<StringRef> compressed = CompressionUtils::compress(CompressionFilter::GZIP, uncompressed, arena);
-	ASSERT_NE(compressed.compare(uncompressed), 0);
-
-	StringRef verify = CompressionUtils::decompress(CompressionFilter::GZIP, compressed, arena);
-	ASSERT_EQ(verify.compare(uncompressed), 0);
-
-	TraceEvent("GzipCompression_Done").log();
-
-	return Void();
-}
-
-TEST_CASE("/CompressionUtils/gzipCompression2") {
-	Arena arena;
-	const int size = deterministicRandom()->randomInt(512, 1024);
-	std::string s(size, 'x');
-	Standalone<StringRef> uncompressed = Standalone<StringRef>(StringRef(s));
-	printf("Size before: %d\n", (int)uncompressed.size());
-
-	Standalone<StringRef> compressed = CompressionUtils::compress(CompressionFilter::GZIP, uncompressed, arena);
-	ASSERT_NE(compressed.compare(uncompressed), 0);
-	printf("Size after: %d\n", (int)compressed.size());
-	// Assert compressed size is less than half.
-	ASSERT(compressed.size() * 2 < uncompressed.size());
-
-	StringRef verify = CompressionUtils::decompress(CompressionFilter::GZIP, compressed, arena);
-	ASSERT_EQ(verify.compare(uncompressed), 0);
-
-	TraceEvent("GzipCompression_Done").log();
+TEST_CASE("/CompressionUtils/zstdCompression2") {
+	testCompression2(CompressionFilter::ZSTD);
+	TraceEvent("ZstdCompression2Done");
 
 	return Void();
 }

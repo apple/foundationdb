@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BlobCipher.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
@@ -28,6 +30,7 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/RadixTree.h"
 #include "flow/ActorCollection.h"
+#include "flow/EncryptUtils.h"
 #include "flow/Knobs.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -128,7 +131,7 @@ public:
 		}
 	}
 
-	void clear(KeyRangeRef range, const Arena* arena) override {
+	void clear(KeyRangeRef range, const StorageServerMetrics* storageMetrics, const Arena* arena) override {
 		// A commit that occurs with no available space returns Never, so we can throw out all modifications
 		if (getAvailableSize() <= 0)
 			return;
@@ -285,6 +288,14 @@ public:
 	}
 
 	void enableSnapshot() override { disableSnapshot = false; }
+
+	int uncommittedBytes() { return queue.totalSize(); }
+
+	// KeyValueStoreMemory does not support encryption-at-rest in general, despite it supports encryption
+	// when being used as TxnStateStore backend.
+	Future<EncryptionAtRestMode> encryptionMode() override {
+		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
+	}
 
 private:
 	enum OpType {
@@ -489,7 +500,10 @@ private:
 			ASSERT(cipherKeys.cipherTextKey.isValid());
 			ASSERT(cipherKeys.cipherHeaderKey.isValid());
 			EncryptBlobCipherAes265Ctr cipher(
-			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+			    cipherKeys.cipherTextKey,
+			    cipherKeys.cipherHeaderKey,
+			    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+			    BlobCipherMetrics::KV_MEMORY);
 			BlobCipherEncryptHeader cipherHeader;
 			Arena arena;
 			StringRef ciphertext =
@@ -497,7 +511,7 @@ private:
 			log->push(StringRef((const uint8_t*)&cipherHeader, BlobCipherEncryptHeader::headerSize));
 			log->push(ciphertext);
 		}
-		return log->push(LiteralStringRef("\x01")); // Changes here should be reflected in OP_DISK_OVERHEAD
+		return log->push("\x01"_sr); // Changes here should be reflected in OP_DISK_OVERHEAD
 	}
 
 	// In case the op data is not encrypted, simply read the operands and the zero fill flag.
@@ -527,8 +541,10 @@ private:
 			return data;
 		}
 		state BlobCipherEncryptHeader cipherHeader = *(BlobCipherEncryptHeader*)data.begin();
-		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(self->db, cipherHeader));
-		DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, cipherHeader.iv);
+		TextAndHeaderCipherKeys cipherKeys =
+		    wait(getEncryptCipherKeys(self->db, cipherHeader, BlobCipherMetrics::KV_MEMORY));
+		DecryptBlobCipherAes256Ctr cipher(
+		    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, cipherHeader.iv, BlobCipherMetrics::KV_MEMORY);
 		Arena arena;
 		StringRef plaintext = cipher
 		                          .decrypt(data.begin() + BlobCipherEncryptHeader::headerSize,
@@ -574,7 +590,8 @@ private:
 						Standalone<StringRef> data = wait(self->log->readNext(sizeof(OpHeader)));
 						if (data.size() != sizeof(OpHeader)) {
 							if (data.size()) {
-								CODE_PROBE(true, "zero fill partial header in KeyValueStoreMemory");
+								CODE_PROBE(
+								    true, "zero fill partial header in KeyValueStoreMemory", probe::decoration::rare);
 								memset(&h, 0, sizeof(OpHeader));
 								memcpy(&h, data.begin(), data.size());
 								zeroFillSize = sizeof(OpHeader) - data.size() + h.len1 + h.len2 + 1;
@@ -724,12 +741,16 @@ private:
 				    .detail("Commits", dbgCommitCount)
 				    .detail("TimeTaken", now() - startt);
 
-				self->semiCommit();
-
-				// Make sure cipher keys are ready before recovery finishes.
+				// Make sure cipher keys are ready before recovery finishes. The semiCommit below also require cipher
+				// keys.
 				if (self->enableEncryption) {
 					wait(updateCipherKeys(self));
 				}
+
+				CODE_PROBE(self->enableEncryption && self->uncommittedBytes() > 0,
+				           "KeyValueStoreMemory recovered partial transaction while encryption-at-rest is enabled",
+				           probe::decoration::rare);
+				self->semiCommit();
 
 				return Void();
 			} catch (Error& e) {
@@ -824,14 +845,13 @@ private:
 					useDelta = false;
 
 					auto thisSnapshotEnd = self->log_op(OpSnapshotEnd, StringRef(), StringRef());
-					//TraceEvent("SnapshotEnd", self->id)
-					//	.detail("LastKey", lastKey.present() ? lastKey.get() : LiteralStringRef("<none>"))
-					//	.detail("CurrentSnapshotEndLoc", self->currentSnapshotEnd)
-					//	.detail("PreviousSnapshotEndLoc", self->previousSnapshotEnd)
-					//	.detail("ThisSnapshotEnd", thisSnapshotEnd)
-					//	.detail("Items", snapItems)
-					//	.detail("CommittedWrites", self->notifiedCommittedWriteBytes.get())
-					//	.detail("SnapshotSize", snapshotBytes);
+					DisabledTraceEvent("SnapshotEnd", self->id)
+					    .detail("CurrentSnapshotEndLoc", self->currentSnapshotEnd)
+					    .detail("PreviousSnapshotEndLoc", self->previousSnapshotEnd)
+					    .detail("ThisSnapshotEnd", thisSnapshotEnd)
+					    .detail("Items", snapItems)
+					    .detail("CommittedWrites", self->notifiedCommittedWriteBytes.get())
+					    .detail("SnapshotSize", snapshotBytes);
 
 					ASSERT(thisSnapshotEnd >= self->currentSnapshotEnd);
 					self->previousSnapshotEnd = self->currentSnapshotEnd;
@@ -961,7 +981,8 @@ private:
 	}
 
 	ACTOR static Future<Void> updateCipherKeys(KeyValueStoreMemory* self) {
-		TextAndHeaderCipherKeys cipherKeys = wait(getLatestSystemEncryptCipherKeys(self->db));
+		TextAndHeaderCipherKeys cipherKeys =
+		    wait(getLatestSystemEncryptCipherKeys(self->db, BlobCipherMetrics::KV_MEMORY));
 		self->cipherKeys = cipherKeys;
 		return Void();
 	}

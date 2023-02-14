@@ -973,19 +973,6 @@ public:
 				continue;
 
 			restorable.snapshot = snapshots[i];
-			// TODO: Reenable the sanity check after TooManyFiles error is resolved
-			if (false && g_network->isSimulated()) {
-				// Sanity check key ranges
-				state std::map<std::string, KeyRange>::iterator rit;
-				for (rit = restorable.keyRanges.begin(); rit != restorable.keyRanges.end(); rit++) {
-					auto it = std::find_if(restorable.ranges.begin(),
-					                       restorable.ranges.end(),
-					                       [file = rit->first](const RangeFile f) { return f.fileName == file; });
-					ASSERT(it != restorable.ranges.end());
-					KeyRange result = wait(bc->getSnapshotFileKeyRange(*it));
-					ASSERT(rit->second.begin <= result.begin && rit->second.end >= result.end);
-				}
-			}
 
 			// No logs needed if there is a complete filtered key space snapshot at the target version.
 			if (minKeyRangeVersion == maxKeyRangeVersion && maxKeyRangeVersion == restorable.targetVersion) {
@@ -1128,6 +1115,16 @@ public:
 			return true;
 		}
 		return false;
+	}
+
+	// fallback for using existing write api if the underlying blob store doesn't support efficient writeEntireFile
+	ACTOR static Future<Void> writeEntireFileFallback(Reference<BackupContainerFileSystem> bc,
+	                                                  std::string fileName,
+	                                                  std::string fileContents) {
+		state Reference<IBackupFile> objectFile = wait(bc->writeFile(fileName));
+		wait(objectFile->append(&fileContents[0], fileContents.size()));
+		wait(objectFile->finish());
+		return Void();
 	}
 
 	ACTOR static Future<Void> createTestEncryptionKeyFile(std::string filename) {
@@ -1349,7 +1346,9 @@ Future<Void> BackupContainerFileSystem::expireData(Version expireEndVersion,
 	    Reference<BackupContainerFileSystem>::addRef(this), expireEndVersion, force, progress, restorableBeginVersion);
 }
 
-ACTOR static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem> bc, RangeFile file) {
+ACTOR static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem> bc,
+                                                           RangeFile file,
+                                                           Database cx) {
 	state int readFileRetries = 0;
 	state bool beginKeySet = false;
 	state Key beginKey;
@@ -1361,7 +1360,8 @@ ACTOR static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupConta
 			state int64_t j = 0;
 			for (; j < file.fileSize; j += file.blockSize) {
 				int64_t len = std::min<int64_t>(file.blockSize, file.fileSize - j);
-				Standalone<VectorRef<KeyValueRef>> blockData = wait(fileBackup::decodeRangeFileBlock(inFile, j, len));
+				Standalone<VectorRef<KeyValueRef>> blockData =
+				    wait(fileBackup::decodeRangeFileBlock(inFile, j, len, cx));
 				if (!beginKeySet) {
 					beginKey = blockData.front().key;
 					beginKeySet = true;
@@ -1434,9 +1434,9 @@ ACTOR static Future<Optional<Version>> readVersionProperty(Reference<BackupConta
 	}
 }
 
-Future<KeyRange> BackupContainerFileSystem::getSnapshotFileKeyRange(const RangeFile& file) {
+Future<KeyRange> BackupContainerFileSystem::getSnapshotFileKeyRange(const RangeFile& file, Database cx) {
 	ASSERT(g_network->isSimulated());
-	return getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem>::addRef(this), file);
+	return getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem>::addRef(this), file, cx);
 }
 
 Future<Optional<RestorableFileSet>> BackupContainerFileSystem::getRestoreSet(Version targetVersion,
@@ -1477,6 +1477,12 @@ bool BackupContainerFileSystem::usesEncryption() const {
 }
 Future<Void> BackupContainerFileSystem::encryptionSetupComplete() const {
 	return encryptionSetupFuture;
+}
+
+Future<Void> BackupContainerFileSystem::writeEntireFileFallback(const std::string& fileName,
+                                                                const std::string& fileContents) {
+	return BackupContainerFileSystemImpl::writeEntireFileFallback(
+	    Reference<BackupContainerFileSystem>::addRef(this), fileName, fileContents);
 }
 
 void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& encryptionKeyFileName) {
@@ -1697,7 +1703,7 @@ ACTOR Future<Void> testBackupContainer(std::string url,
 
 	// List of sizes to use to test edge cases on underlying file implementations
 	state std::vector<int> fileSizes = { 0 };
-	if (StringRef(url).startsWith(LiteralStringRef("blob"))) {
+	if (StringRef(url).startsWith("blob"_sr)) {
 		fileSizes.push_back(CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE);
 		fileSizes.push_back(CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE + 10);
 	}
@@ -1705,8 +1711,8 @@ ACTOR Future<Void> testBackupContainer(std::string url,
 	loop {
 		state Version logStart = v;
 		state int kvfiles = deterministicRandom()->randomInt(0, 3);
-		state Key begin = LiteralStringRef("");
-		state Key end = LiteralStringRef("");
+		state Key begin = ""_sr;
+		state Key end = ""_sr;
 		state int blockSize = 3 * sizeof(uint32_t) + begin.size() + end.size() + 8;
 
 		while (kvfiles > 0) {

@@ -18,13 +18,14 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct BulkLoadWorkload : TestWorkload {
+	static constexpr auto NAME = "BulkLoad";
 	int clientCount, actorCount, writesPerTransaction, valueBytes;
 	double testDuration;
 	Value value;
@@ -33,22 +34,19 @@ struct BulkLoadWorkload : TestWorkload {
 
 	std::vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries;
-	ContinuousSample<double> latencies;
+	DDSketch<double> latencies;
 
 	BulkLoadWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), clientCount(wcx.clientCount), transactions("Transactions"), retries("Retries"),
-	    latencies(2000) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		actorCount = getOption(options, LiteralStringRef("actorCount"), 20);
-		writesPerTransaction = getOption(options, LiteralStringRef("writesPerTransaction"), 10);
-		valueBytes = std::max(getOption(options, LiteralStringRef("valueBytes"), 96), 16);
+	  : TestWorkload(wcx), clientCount(wcx.clientCount), transactions("Transactions"), retries("Retries"), latencies() {
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		actorCount = getOption(options, "actorCount"_sr, 20);
+		writesPerTransaction = getOption(options, "writesPerTransaction"_sr, 10);
+		valueBytes = std::max(getOption(options, "valueBytes"_sr, 96), 16);
 		value = Value(std::string(valueBytes, '.'));
-		targetBytes = getOption(options, LiteralStringRef("targetBytes"), std::numeric_limits<uint64_t>::max());
-		keyPrefix = getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef(""));
+		targetBytes = getOption(options, "targetBytes"_sr, std::numeric_limits<uint64_t>::max());
+		keyPrefix = getOption(options, "keyPrefix"_sr, ""_sr);
 		keyPrefix = unprintable(keyPrefix.toString());
 	}
-
-	std::string description() const override { return "BulkLoad"; }
 
 	Future<Void> start(Database const& cx) override {
 		for (int c = 0; c < actorCount; c++)
@@ -115,4 +113,4 @@ struct BulkLoadWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<BulkLoadWorkload> BulkLoadWorkloadFactory("BulkLoad");
+WorkloadFactory<BulkLoadWorkload> BulkLoadWorkloadFactory;

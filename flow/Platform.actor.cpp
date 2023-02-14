@@ -21,23 +21,9 @@
 #ifdef _WIN32
 // This has to come as the first include on Win32 for rand_s() to be found
 #define _CRT_RAND_S
-#include <stdlib.h>
-#include <math.h> // For _set_FMA3_enable workaround in platformInit
-#endif
+#endif // _WIN32
 
-#include <errno.h>
-#include "fmt/format.h"
 #include "flow/Platform.h"
-#include "flow/Platform.actor.h"
-#include "flow/Arena.h"
-
-#include "flow/StreamCipher.h"
-#include "flow/BlobCipher.h"
-#include "flow/ScopeExit.h"
-#include "flow/Trace.h"
-#include "flow/Error.h"
-
-#include "flow/Knobs.h"
 
 #include <algorithm>
 #include <iostream>
@@ -47,29 +33,53 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <time.h>
+
 #include <boost/format.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/operations.hpp>
 #include <boost/algorithm/string.hpp>
+#include <boost/asio.hpp>
 
-#include <sys/types.h>
-#include <time.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include "flow/UnitTest.h"
+#include "fmt/format.h"
+
+#include "flow/Arena.h"
+#include "flow/Error.h"
 #include "flow/FaultInjection.h"
+#include "flow/Knobs.h"
+#include "flow/Platform.actor.h"
+#include "flow/ScopeExit.h"
+#include "flow/StreamCipher.h"
+#include "flow/Trace.h"
+#include "flow/Trace.h"
+#include "flow/UnitTest.h"
+#include "flow/Util.h"
+
+// boost uses either std::array or boost::asio::detail::array to store the IPv6 Addresses.
+// Enforce the format of IPAddressStore, which is declared in IPAddress.h, is using the same type
+// to boost.
+static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<uint8_t, 16>>::value,
+              "IPAddressStore must be std::array<uint8_t, 16>");
 
 #ifdef _WIN32
-#include <windows.h>
-#include <winioctl.h>
-#include <io.h>
-#include <psapi.h>
-#include <stdio.h>
+
 #include <conio.h>
 #include <direct.h>
+#include <io.h>
+#include <math.h> // For _set_FMA3_enable workaround in platformInit
 #include <pdh.h>
 #include <pdhmsg.h>
 #include <processenv.h>
+#include <psapi.h>
+#include <stdlib.h>
+#include <windows.h>
+#include <winioctl.h>
+
 #pragma comment(lib, "pdh.lib")
 
 // for SHGetFolderPath
@@ -84,18 +94,17 @@
 #define CANONICAL_PATH_SEPARATOR '/'
 
 #include <dirent.h>
-#include <sys/time.h>
-#include <sys/mman.h>
-#include <unistd.h>
 #include <ftw.h>
 #include <pwd.h>
 #include <sched.h>
+#include <sys/mman.h>
+#include <sys/time.h>
+#include <unistd.h>
+#include <sys/statvfs.h> /* Needed for disk capacity */
+
 #if !defined(__aarch64__) && !defined(__powerpc64__)
 #include <cpuid.h>
 #endif
-
-/* Needed for disk capacity */
-#include <sys/statvfs.h>
 
 /* getifaddrs */
 #include <sys/socket.h>
@@ -117,7 +126,7 @@
 #include <signal.h>
 /* Needed for gnu_dev_{major,minor} */
 #include <sys/sysmacros.h>
-#endif
+#endif // __linux__
 
 #ifdef __FreeBSD__
 /* Needed for processor affinity */
@@ -150,32 +159,31 @@
 #include <devstat.h>
 #include <kvm.h>
 #include <libutil.h>
-#endif
+#endif // __FreeBSD__
 
 #ifdef __APPLE__
 /* Needed for cross-platform 'environ' */
 #include <crt_externs.h>
-
-#include <sys/uio.h>
-#include <sys/syslimits.h>
-#include <mach/mach.h>
 #include <mach-o/dyld.h>
-#include <sys/param.h>
-#include <sys/mount.h>
-#include <sys/sysctl.h>
-#include <netinet/in.h>
-#include <net/if.h>
+#include <mach/mach.h>
 #include <net/if_dl.h>
+#include <net/if.h>
 #include <net/route.h>
+#include <netinet/in.h>
+#include <sys/mount.h>
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#include <sys/syslimits.h>
+#include <sys/uio.h>
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
 #include <IOKit/storage/IOBlockStorageDriver.h>
 #include <IOKit/storage/IOMedia.h>
 #include <IOKit/IOBSD.h>
-#endif
+#endif // __APPLE_
 
-#endif
+#endif // __unixish__
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -409,25 +417,24 @@ uint64_t getMemoryUsage() {
 #endif
 }
 
-#if defined(__linux__)
+#ifdef __linux__
+namespace linux_os {
+
+namespace {
+
 void getMemoryInfo(std::map<StringRef, int64_t>& request, std::stringstream& memInfoStream) {
 	size_t count = request.size();
 	if (count == 0)
 		return;
 
-	while (count > 0 && !memInfoStream.eof()) {
-		std::string key;
-
-		memInfoStream >> key;
+	keyValueReader<std::string, int64_t>(memInfoStream, [&](const std::string& key, const int64_t& value) -> bool {
 		auto item = request.find(StringRef(key));
-		if (item != request.end()) {
-			int64_t value;
-			memInfoStream >> value;
+		if (item != std::end(request)) {
 			item->second = value;
-			count--;
+			--count;
 		}
-		memInfoStream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-	}
+		return count != 0;
+	});
 }
 
 int64_t getLowWatermark(std::stringstream& zoneInfoStream) {
@@ -447,10 +454,8 @@ int64_t getLowWatermark(std::stringstream& zoneInfoStream) {
 
 	return lowWatermark;
 }
-#endif
 
-void getMachineRAMInfo(MachineRAMInfo& memInfo) {
-#if defined(__linux__)
+void getMachineRAMInfoImpl(MachineRAMInfo& memInfo) {
 	std::ifstream zoneInfoFileStream("/proc/zoneinfo", std::ifstream::in);
 	int64_t lowWatermark = 0;
 	if (!zoneInfoFileStream.good()) {
@@ -468,24 +473,22 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 	}
 
 	std::map<StringRef, int64_t> request = {
-		{ LiteralStringRef("MemTotal:"), 0 },       { LiteralStringRef("MemFree:"), 0 },
-		{ LiteralStringRef("MemAvailable:"), -1 },  { LiteralStringRef("Active(file):"), 0 },
-		{ LiteralStringRef("Inactive(file):"), 0 }, { LiteralStringRef("SwapTotal:"), 0 },
-		{ LiteralStringRef("SwapFree:"), 0 },       { LiteralStringRef("SReclaimable:"), 0 },
+		{ "MemTotal:"_sr, 0 },       { "MemFree:"_sr, 0 },   { "MemAvailable:"_sr, -1 }, { "Active(file):"_sr, 0 },
+		{ "Inactive(file):"_sr, 0 }, { "SwapTotal:"_sr, 0 }, { "SwapFree:"_sr, 0 },      { "SReclaimable:"_sr, 0 },
 	};
 
 	std::stringstream memInfoStream;
 	memInfoStream << fileStream.rdbuf();
 	getMemoryInfo(request, memInfoStream);
 
-	int64_t memFree = request[LiteralStringRef("MemFree:")];
-	int64_t pageCache = request[LiteralStringRef("Active(file):")] + request[LiteralStringRef("Inactive(file):")];
-	int64_t slabReclaimable = request[LiteralStringRef("SReclaimable:")];
-	int64_t usedSwap = request[LiteralStringRef("SwapTotal:")] - request[LiteralStringRef("SwapFree:")];
+	int64_t memFree = request["MemFree:"_sr];
+	int64_t pageCache = request["Active(file):"_sr] + request["Inactive(file):"_sr];
+	int64_t slabReclaimable = request["SReclaimable:"_sr];
+	int64_t usedSwap = request["SwapTotal:"_sr] - request["SwapFree:"_sr];
 
-	memInfo.total = 1024 * request[LiteralStringRef("MemTotal:")];
-	if (request[LiteralStringRef("MemAvailable:")] != -1) {
-		memInfo.available = 1024 * (request[LiteralStringRef("MemAvailable:")] - usedSwap);
+	memInfo.total = 1024 * request["MemTotal:"_sr];
+	if (request["MemAvailable:"_sr] != -1) {
+		memInfo.available = 1024 * (request["MemAvailable:"_sr] - usedSwap);
 	} else {
 		memInfo.available =
 		    1024 * (std::max<int64_t>(0,
@@ -495,6 +498,35 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 	}
 
 	memInfo.committed = memInfo.total - memInfo.available;
+}
+
+} // anonymous namespace
+
+std::map<std::string, int64_t> reportCGroupCpuStat() {
+	// Default path to the cpu,cpuacct
+	// See manpages for cgroup
+	static const std::string PATH_TO_CPU_CPUACCT = "/sys/fs/cgroup/cpu,cpuacct/cpu.stat";
+
+	std::map<std::string, int64_t> result;
+	std::ifstream ifs(PATH_TO_CPU_CPUACCT);
+	if (!ifs.is_open()) {
+		return result;
+	}
+
+	keyValueReader<std::string, int64_t>(ifs, [&](const std::string& key, const int64_t& value) -> bool {
+		result[key] = value;
+		return true;
+	});
+
+	return result;
+}
+
+} // namespace linux_os
+#endif // #ifdef __linux__
+
+void getMachineRAMInfo(MachineRAMInfo& memInfo) {
+#if defined(__linux__)
+	linux_os::getMachineRAMInfoImpl(memInfo);
 #elif defined(__FreeBSD__)
 	int status;
 
@@ -2101,7 +2133,7 @@ static void mprotectSafe(void* p, size_t s, int prot) {
 }
 
 static void* mmapInternal(size_t length, int flags, bool guardPages) {
-	if (guardPages) {
+	if (guardPages && FLOW_KNOBS->FAST_ALLOC_ALLOW_GUARD_PAGES) {
 		static size_t pageSize = sysconf(_SC_PAGESIZE);
 		length = RightAlign(length, pageSize);
 		length += 2 * pageSize; // Map enough for the guard pages
@@ -2221,35 +2253,21 @@ namespace platform {
 int getRandomSeed() {
 	INJECT_FAULT(platform_error, "getRandomSeed"); // getting a random seed failed
 	int randomSeed;
-	int retryCount = 0;
 
 #ifdef _WIN32
-	do {
-		retryCount++;
-		if (rand_s((unsigned int*)&randomSeed) != 0) {
-			TraceEvent(SevError, "WindowsRandomSeedError").log();
-			throw platform_error();
-		}
-	} while (randomSeed == 0 &&
-	         retryCount <
-	             FLOW_KNOBS->RANDOMSEED_RETRY_LIMIT); // randomSeed cannot be 0 since we use mersenne twister in
-	                                                  // DeterministicRandom. Get a new one if randomSeed is 0.
+	if (rand_s((unsigned int*)&randomSeed) != 0) {
+		TraceEvent(SevError, "WindowsRandomSeedError").log();
+		throw platform_error();
+	}
 #else
 	int devRandom = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-	do {
-		retryCount++;
-		if (read(devRandom, &randomSeed, sizeof(randomSeed)) != sizeof(randomSeed)) {
-			TraceEvent(SevError, "OpenURandom").GetLastError();
-			throw platform_error();
-		}
-	} while (randomSeed == 0 && retryCount < FLOW_KNOBS->RANDOMSEED_RETRY_LIMIT);
+	if (read(devRandom, &randomSeed, sizeof(randomSeed)) != sizeof(randomSeed)) {
+		TraceEvent(SevError, "OpenURandom").GetLastError();
+		throw platform_error();
+	}
 	close(devRandom);
 #endif
 
-	if (randomSeed == 0) {
-		TraceEvent(SevError, "RandomSeedZeroError").log();
-		throw platform_error();
-	}
 	return randomSeed;
 }
 } // namespace platform
@@ -2493,7 +2511,7 @@ bool createDirectory(std::string const& directory) {
 
 const uint8_t separatorChar = CANONICAL_PATH_SEPARATOR;
 StringRef separator(&separatorChar, 1);
-StringRef dotdot = LiteralStringRef("..");
+StringRef dotdot = ".."_sr;
 
 std::string cleanPath(std::string const& path) {
 	std::vector<StringRef> finalParts;
@@ -3157,19 +3175,19 @@ void outOfMemory() {
 		char* demangled = abi::__cxa_demangle(i->first, nullptr, nullptr, nullptr);
 		if (demangled) {
 			s = demangled;
-			if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))
-				s = s.substr(LiteralStringRef("(anonymous namespace)::").size());
+			if (StringRef(s).startsWith("(anonymous namespace)::"_sr))
+				s = s.substr("(anonymous namespace)::"_sr.size());
 			free(demangled);
 		} else
 			s = i->first;
 #else
 		s = i->first;
-		if (StringRef(s).startsWith(LiteralStringRef("class `anonymous namespace'::")))
-			s = s.substr(LiteralStringRef("class `anonymous namespace'::").size());
-		else if (StringRef(s).startsWith(LiteralStringRef("class ")))
-			s = s.substr(LiteralStringRef("class ").size());
-		else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
-			s = s.substr(LiteralStringRef("struct ").size());
+		if (StringRef(s).startsWith("class `anonymous namespace'::"_sr))
+			s = s.substr("class `anonymous namespace'::"_sr.size());
+		else if (StringRef(s).startsWith("class "_sr))
+			s = s.substr("class "_sr.size());
+		else if (StringRef(s).startsWith("struct "_sr))
+			s = s.substr("struct "_sr.size());
 #endif
 		typeNames.emplace_back(s, i->first);
 	}
@@ -3249,10 +3267,10 @@ void outOfMemory() {
 }
 
 // Because the lambda used with nftw below cannot capture
-int __eraseDirectoryRecurseiveCount;
+int __eraseDirectoryRecursiveCount;
 
 int eraseDirectoryRecursive(std::string const& dir) {
-	__eraseDirectoryRecurseiveCount = 0;
+	__eraseDirectoryRecursiveCount = 0;
 #ifdef _WIN32
 	system(("rd /s /q \"" + dir + "\"").c_str());
 #elif defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
@@ -3261,7 +3279,7 @@ int eraseDirectoryRecursive(std::string const& dir) {
 	    [](const char* fpath, const struct stat* sb, int typeflag, struct FTW* ftwbuf) -> int {
 		    int r = remove(fpath);
 		    if (r == 0)
-			    ++__eraseDirectoryRecurseiveCount;
+			    ++__eraseDirectoryRecursiveCount;
 		    return r;
 	    },
 	    64,
@@ -3278,7 +3296,7 @@ int eraseDirectoryRecursive(std::string const& dir) {
 #error Port me!
 #endif
 	// INJECT_FAULT( platform_error, "eraseDirectoryRecursive" );
-	return __eraseDirectoryRecurseiveCount;
+	return __eraseDirectoryRecursiveCount;
 }
 
 TmpFile::TmpFile() : filename("") {
@@ -3623,6 +3641,12 @@ void platformInit() {
 #endif
 }
 
+std::vector<std::function<void()>> g_crashHandlerCallbacks;
+
+void registerCrashHandlerCallback(void (*f)()) {
+	g_crashHandlerCallbacks.push_back(f);
+}
+
 // The crashHandler function is registered to handle signals before the process terminates.
 // Basic information about the crash is printed/traced, and stdout and trace events are flushed.
 void crashHandler(int sig) {
@@ -3635,7 +3659,10 @@ void crashHandler(int sig) {
 
 	StreamCipherKey::cleanup();
 	StreamCipher::cleanup();
-	BlobCipherKeyCache::cleanup();
+
+	for (auto& f : g_crashHandlerCallbacks) {
+		f();
+	}
 
 	fprintf(error ? stderr : stdout, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
 	if (error) {
@@ -3694,7 +3721,15 @@ void registerCrashHandler() {
 	sigaction(SIGSEGV, &action, nullptr);
 	sigaction(SIGBUS, &action, nullptr);
 	sigaction(SIGUSR2, &action, nullptr);
+#ifdef USE_GCOV
+	// SIGTERM is the "graceful" way to end an fdbserver process, so we actually
+	// don't want to invoke crashHandler. crashHandler is not actually
+	// async-signal-safe, so we can only justify calling it if we were going to
+	// crash anyway. For USE_GCOV though we need to flush coverage info, which
+	// we do through crashHandler.
 	sigaction(SIGTERM, &action, nullptr);
+#endif
+	sigaction(SIGABRT, &action, nullptr);
 #else
 	// No crash handler for other platforms!
 #endif
@@ -3765,7 +3800,7 @@ void profileHandler(int sig) {
 	ps->timestamp = checkThreadTime.is_lock_free() ? checkThreadTime.load() : 0;
 
 	// SOMEDAY: should we limit the maximum number of frames from backtrace beyond just available space?
-	size_t size = platform::raw_backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
+	size_t size = backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
 
 	ps->length = size;
 
@@ -3990,21 +4025,19 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 	                        "VmallocUsed:      410576 kB\n";
 
 	std::map<StringRef, int64_t> request = {
-		{ LiteralStringRef("MemTotal:"), 0 },     { LiteralStringRef("MemFree:"), 0 },
-		{ LiteralStringRef("MemAvailable:"), 0 }, { LiteralStringRef("Buffers:"), 0 },
-		{ LiteralStringRef("Cached:"), 0 },       { LiteralStringRef("SwapTotal:"), 0 },
-		{ LiteralStringRef("SwapFree:"), 0 },
+		{ "MemTotal:"_sr, 0 }, { "MemFree:"_sr, 0 },   { "MemAvailable:"_sr, 0 }, { "Buffers:"_sr, 0 },
+		{ "Cached:"_sr, 0 },   { "SwapTotal:"_sr, 0 }, { "SwapFree:"_sr, 0 },
 	};
 
 	std::stringstream memInfoStream(memString);
-	getMemoryInfo(request, memInfoStream);
-	ASSERT(request[LiteralStringRef("MemTotal:")] == 24733228);
-	ASSERT(request[LiteralStringRef("MemFree:")] == 2077580);
-	ASSERT(request[LiteralStringRef("MemAvailable:")] == 0);
-	ASSERT(request[LiteralStringRef("Buffers:")] == 266940);
-	ASSERT(request[LiteralStringRef("Cached:")] == 16798292);
-	ASSERT(request[LiteralStringRef("SwapTotal:")] == 25165820);
-	ASSERT(request[LiteralStringRef("SwapFree:")] == 23680228);
+	linux_os::getMemoryInfo(request, memInfoStream);
+	ASSERT(request["MemTotal:"_sr] == 24733228);
+	ASSERT(request["MemFree:"_sr] == 2077580);
+	ASSERT(request["MemAvailable:"_sr] == 0);
+	ASSERT(request["Buffers:"_sr] == 266940);
+	ASSERT(request["Cached:"_sr] == 16798292);
+	ASSERT(request["SwapTotal:"_sr] == 25165820);
+	ASSERT(request["SwapFree:"_sr] == 23680228);
 	for (auto& item : request) {
 		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}
@@ -4048,14 +4081,14 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 	                         "AnonHugePages:   1275904 kB\n";
 
 	std::stringstream memInfoStream1(memString1);
-	getMemoryInfo(request, memInfoStream1);
-	ASSERT(request[LiteralStringRef("MemTotal:")] == 31856496);
-	ASSERT(request[LiteralStringRef("MemFree:")] == 25492716);
-	ASSERT(request[LiteralStringRef("MemAvailable:")] == 28470756);
-	ASSERT(request[LiteralStringRef("Buffers:")] == 313644);
-	ASSERT(request[LiteralStringRef("Cached:")] == 2956444);
-	ASSERT(request[LiteralStringRef("SwapTotal:")] == 0);
-	ASSERT(request[LiteralStringRef("SwapFree:")] == 0);
+	linux_os::getMemoryInfo(request, memInfoStream1);
+	ASSERT(request["MemTotal:"_sr] == 31856496);
+	ASSERT(request["MemFree:"_sr] == 25492716);
+	ASSERT(request["MemAvailable:"_sr] == 28470756);
+	ASSERT(request["Buffers:"_sr] == 313644);
+	ASSERT(request["Cached:"_sr] == 2956444);
+	ASSERT(request["SwapTotal:"_sr] == 0);
+	ASSERT(request["SwapFree:"_sr] == 0);
 	for (auto& item : request) {
 		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}

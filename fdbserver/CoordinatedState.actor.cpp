@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
+#include "fdbserver/ConfigBroadcaster.h"
 #include "fdbserver/CoordinatedState.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/Knobs.h"
@@ -301,7 +302,9 @@ struct MovableCoordinatedStateImpl {
 		ASSERT(self->lastValue.present() && self->lastCSValue.present());
 		TraceEvent("StartMove").detail("ConnectionString", nc.toString());
 		choose {
-			when(wait(creationTimeout)) { throw new_coordinators_timed_out(); }
+			when(wait(creationTimeout)) {
+				throw new_coordinators_timed_out();
+			}
 			when(Value ncInitialValue = wait(nccs.read())) {
 				ASSERT(!ncInitialValue.size()); // The new coordinators must be uninitialized!
 			}
@@ -309,7 +312,9 @@ struct MovableCoordinatedStateImpl {
 		TraceEvent("FinishedRead").detail("ConnectionString", nc.toString());
 
 		choose {
-			when(wait(creationTimeout)) { throw new_coordinators_timed_out(); }
+			when(wait(creationTimeout)) {
+				throw new_coordinators_timed_out();
+			}
 			when(wait(nccs.setExclusive(
 			    BinaryWriter::toValue(MovableValue(self->lastValue.get(),
 			                                       MovableValue::MovingFrom,
@@ -322,7 +327,8 @@ struct MovableCoordinatedStateImpl {
 
 		Value oldQuorumState = wait(cs.read());
 		if (oldQuorumState != self->lastCSValue.get()) {
-			CODE_PROBE(true, "Quorum change aborted by concurrent write to old coordination state");
+			CODE_PROBE(
+			    true, "Quorum change aborted by concurrent write to old coordination state", probe::decoration::rare);
 			TraceEvent("QuorumChangeAbortedByConcurrency").log();
 			throw coordinated_state_conflict();
 		}
@@ -346,7 +352,8 @@ struct MovableCoordinatedStateImpl {
 		// SOMEDAY: If we are worried about someone magically getting the new cluster ID and interfering, do a second
 		// cs.setExclusive( encode( ReallyTo, ... ) )
 		TraceEvent("ChangingQuorum").detail("ConnectionString", nc.toString());
-		wait(changeLeaderCoordinators(self->coordinators, StringRef(nc.toString())));
+		wait(ConfigBroadcaster::lockConfigNodes(self->coordinators) &&
+		     changeLeaderCoordinators(self->coordinators, StringRef(nc.toString())));
 		TraceEvent("ChangedQuorum").detail("ConnectionString", nc.toString());
 		throw coordinators_changed();
 	}

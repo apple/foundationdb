@@ -50,7 +50,9 @@ ACTOR Future<Void> allAlternativesFailedDelay(Future<Void> okFuture) {
 
 	choose {
 		when(wait(okFuture)) {}
-		when(wait(::delayJittered(delay))) { throw all_alternatives_failed(); }
+		when(wait(::delayJittered(delay))) {
+			throw all_alternatives_failed();
+		}
 	}
 	return Void();
 }

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -27,6 +27,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct ReadHotDetectionWorkload : TestWorkload {
+	static constexpr auto NAME = "ReadHotDetection";
+
 	int actorCount, keyCount;
 
 	double testDuration, transactionsPerSecond;
@@ -37,14 +39,12 @@ struct ReadHotDetectionWorkload : TestWorkload {
 	bool passed;
 
 	ReadHotDetectionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 120.0);
-		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 1000.0) / clientCount;
-		actorCount = getOption(options, LiteralStringRef("actorsPerClient"), transactionsPerSecond / 5);
-		keyCount = getOption(options, LiteralStringRef("keyCount"), 100);
+		testDuration = getOption(options, "testDuration"_sr, 120.0);
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 1000.0) / clientCount;
+		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
+		keyCount = getOption(options, "keyCount"_sr, 100);
 		readKey = StringRef(format("testkey%08x", deterministicRandom()->randomInt(0, keyCount)));
 	}
-
-	std::string description() const override { return "ReadHotDetection"; }
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
@@ -89,7 +89,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 				wait(tr.onError(e));
 			}
 		}
-		self->wholeRange = KeyRangeRef(LiteralStringRef(""), LiteralStringRef("\xff"));
+		self->wholeRange = KeyRangeRef(""_sr, "\xff"_sr);
 		// TraceEvent("RHDLog").detail("Phase", "DoneSetup");
 		return Void();
 	}
@@ -162,4 +162,4 @@ struct ReadHotDetectionWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<ReadHotDetectionWorkload> ReadHotDetectionWorkloadFactory("ReadHotDetection");
+WorkloadFactory<ReadHotDetectionWorkload> ReadHotDetectionWorkloadFactory;

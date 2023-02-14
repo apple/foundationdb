@@ -22,7 +22,7 @@
 #define MAKO_HPP
 
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 730
 #endif
 
 #include <array>
@@ -30,8 +30,11 @@
 #include <cassert>
 #include <chrono>
 #include <list>
-#include <vector>
+#include <map>
+#include <optional>
+#include <string>
 #include <string_view>
+#include <vector>
 #include <fdb_api.hpp>
 #include <pthread.h>
 #include <sys/types.h>
@@ -75,10 +78,19 @@ enum ArgKind {
 	ARG_STREAMING_MODE,
 	ARG_DISABLE_RYW,
 	ARG_CLIENT_THREADS_PER_VERSION,
+	ARG_DISABLE_CLIENT_BYPASS,
 	ARG_JSON_REPORT,
 	ARG_BG_FILE_PATH, // if blob granule files are stored locally, mako will read and materialize them if this is set
 	ARG_EXPORT_PATH,
-	ARG_DISTRIBUTED_TRACER_CLIENT
+	ARG_DISTRIBUTED_TRACER_CLIENT,
+	ARG_TLS_CERTIFICATE_FILE,
+	ARG_TLS_KEY_FILE,
+	ARG_TLS_CA_FILE,
+	ARG_AUTHORIZATION_KEYPAIR_ID,
+	ARG_AUTHORIZATION_PRIVATE_KEY_PEM_FILE,
+	ARG_ENABLE_TOKEN_BASED_AUTHORIZATION,
+	ARG_TRANSACTION_TIMEOUT_TX,
+	ARG_TRANSACTION_TIMEOUT_DB,
 };
 
 constexpr const int OP_COUNT = 0;
@@ -130,6 +142,18 @@ constexpr const int MAX_REPORT_FILES = 200;
 
 /* benchmark parameters */
 struct Arguments {
+	Arguments();
+	int validate();
+	void collectTenantIds();
+	bool isAuthorizationEnabled() const noexcept;
+	std::optional<std::vector<fdb::Tenant>> prepareTenants(fdb::Database db) const;
+	void generateAuthorizationTokens();
+
+	// Needs to be called once per fdb client process from a clean state:
+	// i.e. no FDB API called
+	int setGlobalOptions() const;
+	bool isAnyTimeoutEnabled() const;
+
 	int api_version;
 	int json;
 	int num_processes;
@@ -137,6 +161,7 @@ struct Arguments {
 	int async_xacts;
 	int mode;
 	int rows; /* is 2 billion enough? */
+	double load_factor;
 	int row_digits;
 	int seconds;
 	int iteration;
@@ -169,6 +194,7 @@ struct Arguments {
 	char txntagging_prefix[TAGPREFIXLENGTH_MAX];
 	FDBStreamingMode streaming_mode;
 	int64_t client_threads_per_version;
+	bool disable_client_bypass;
 	int disable_ryw;
 	char json_output_path[PATH_MAX];
 	bool bg_materialize_files;
@@ -177,7 +203,24 @@ struct Arguments {
 	char report_files[MAX_REPORT_FILES][PATH_MAX];
 	int num_report_files;
 	int distributed_tracer_client;
+	bool enable_token_based_authorization;
+	std::optional<std::string> tls_certificate_file;
+	std::optional<std::string> tls_key_file;
+	std::optional<std::string> tls_ca_file;
+	std::optional<std::string> keypair_id;
+	std::optional<std::string> private_key_pem;
+	std::map<std::string, std::string> authorization_tokens; // maps tenant name to token string
+	std::vector<int64_t> tenant_ids; // maps tenant index to tenant id for signing tokens
+	int transaction_timeout_db;
+	int transaction_timeout_tx;
 };
+
+// helper functions
+inline void setTransactionTimeoutIfEnabled(const Arguments& args, fdb::Transaction& tx) {
+	if (args.transaction_timeout_tx > 0) {
+		tx.setOption(FDB_TR_OPTION_TIMEOUT, args.transaction_timeout_tx);
+	}
+}
 
 } // namespace mako
 

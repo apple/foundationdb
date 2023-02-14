@@ -28,6 +28,7 @@
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/MasterInterface.h"
+#include "flow/ObjectSerializerTraits.h"
 
 class LogSet;
 struct OldLogData;
@@ -143,11 +144,13 @@ struct DBCoreState {
 	std::set<int8_t> pseudoLocalities;
 	ProtocolVersion newestProtocolVersion;
 	ProtocolVersion lowestCompatibleProtocolVersion;
+	EncryptionAtRestMode encryptionAtRestMode; // cluster encryption data at-rest mode
 
 	DBCoreState()
 	  : logRouterTags(0), txsTags(0), recoveryCount(0), logSystemType(LogSystemType::empty),
 	    newestProtocolVersion(ProtocolVersion::invalidProtocolVersion),
-	    lowestCompatibleProtocolVersion(ProtocolVersion::invalidProtocolVersion) {}
+	    lowestCompatibleProtocolVersion(ProtocolVersion::invalidProtocolVersion),
+	    encryptionAtRestMode(EncryptionAtRestMode()) {}
 
 	std::vector<UID> getPriorCommittedLogServers() {
 		std::vector<UID> priorCommittedLogServers;
@@ -169,7 +172,7 @@ struct DBCoreState {
 	bool isEqual(const DBCoreState& r) const {
 		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs &&
 		       oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags && txsTags == r.txsTags &&
-		       pseudoLocalities == r.pseudoLocalities;
+		       pseudoLocalities == r.pseudoLocalities && encryptionAtRestMode == r.encryptionAtRestMode;
 	}
 	bool operator==(const DBCoreState& rhs) const { return isEqual(rhs); }
 	bool operator!=(const DBCoreState& rhs) const { return !isEqual(rhs); }
@@ -187,6 +190,9 @@ struct DBCoreState {
 			}
 			if (ar.protocolVersion().hasSWVersionTracking()) {
 				serializer(ar, newestProtocolVersion, lowestCompatibleProtocolVersion);
+			}
+			if (ar.protocolVersion().hasEncryptionAtRest()) {
+				serializer(ar, encryptionAtRestMode);
 			}
 		} else if (ar.isDeserializing) {
 			tLogs.push_back(CoreTLogSet());

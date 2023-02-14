@@ -140,20 +140,19 @@ vexillographer_compile(TARGET fdb_java_options LANG java OUT ${GENERATED_JAVA_DI
   OUTPUT ${GENERATED_JAVA_FILES})
 
 set(SYSTEM_NAME "linux")
-if (APPLE)
+if(APPLE)
   set(SYSTEM_NAME "osx")
 endif()
 
 if(OPEN_FOR_IDE)
   add_library(fdb_java OBJECT fdbJNI.cpp)
-  add_library(java_workloads OBJECT JavaWorkload.cpp)
 else()
   add_library(fdb_java SHARED fdbJNI.cpp)
   add_library(java_workloads SHARED JavaWorkload.cpp)
   target_link_libraries(java_workloads PRIVATE fdb_java_native)
 endif()
 
-if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
+if(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
   target_link_options(java_workloads PRIVATE "LINKER:--version-script=${CMAKE_SOURCE_DIR}/bindings/c/external_workload.map,-z,nodelete")
 endif()
 
@@ -164,11 +163,13 @@ target_link_libraries(fdb_java PRIVATE fdb_java_native)
 if(APPLE)
   set_target_properties(fdb_java PROPERTIES SUFFIX ".jnilib")
 endif()
-set_target_properties(java_workloads PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/share/foundationdb")
-target_link_libraries(java_workloads PUBLIC fdb_c ${JNI_LIBRARIES})
-target_link_libraries(java_workloads PRIVATE flow) # mostly for boost
-target_include_directories(java_workloads PUBLIC ${JNI_INCLUDE_DIRS})
+if(NOT OPEN_FOR_IDE)
+  set_target_properties(java_workloads PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/share/foundationdb")
+  target_link_libraries(java_workloads PUBLIC fdb_c ${JNI_LIBRARIES})
+  target_link_libraries(java_workloads PRIVATE flow) # mostly for boost
+  target_include_directories(java_workloads PUBLIC ${JNI_INCLUDE_DIRS})
+endif()
 
 set(CMAKE_JAVA_COMPILE_FLAGS "-source" "1.8" "-target" "1.8" "-XDignore.symbol.file")
 set(CMAKE_JNI_TARGET TRUE)
@@ -240,18 +241,18 @@ if(NOT OPEN_FOR_IDE)
       set(lib_destination "osx/x86_64")
     endif()
   else()
-   if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-     set(lib_destination "linux/aarch64")
-   elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
-     set(lib_destination "linux/ppc64le")
-   else()
-     set(lib_destination "linux/amd64")
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+      set(lib_destination "linux/aarch64")
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
+      set(lib_destination "linux/ppc64le")
+    else()
+      set(lib_destination "linux/amd64")
     endif()
   endif()
-	set(lib_destination "${unpack_dir}/lib/${lib_destination}")
-	set(jni_package "${CMAKE_BINARY_DIR}/packages/lib")
+  set(lib_destination "${unpack_dir}/lib/${lib_destination}")
+  set(jni_package "${CMAKE_BINARY_DIR}/packages/lib")
   file(MAKE_DIRECTORY ${lib_destination})
-	file(MAKE_DIRECTORY ${jni_package})
+  file(MAKE_DIRECTORY ${jni_package})
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_java> ${lib_destination} &&
     ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_java> ${jni_package} &&
@@ -290,7 +291,7 @@ if(NOT OPEN_FOR_IDE)
   set(TEST_CP ${tests_jar} ${target_jar})
 
   if(RUN_JUNIT_TESTS OR RUN_JAVA_INTEGRATION_TESTS)
-    if (USE_SANITIZER)
+    if(USE_SANITIZER)
       message(WARNING "Cannot run java tests with sanitizer builds")
       return()
     endif()
@@ -299,7 +300,7 @@ if(NOT OPEN_FOR_IDE)
     file(DOWNLOAD "https://search.maven.org/remotecontent?filepath=org/junit/jupiter/junit-jupiter-engine/5.7.1/junit-jupiter-engine-5.7.1.jar"
       ${CMAKE_BINARY_DIR}/packages/junit-jupiter-engine-5.7.1.jar
       EXPECTED_HASH SHA256=56616c9350b3624f76cffef6b24ce7bb222915bfd5688f96d3cf4cef34f077cb)
-      # https://search.maven.org/remotecontent?filepath=org/junit/jupiter/junit-jupiter-api/5.7.1/junit-jupiter-api-5.7.1.jar
+    # https://search.maven.org/remotecontent?filepath=org/junit/jupiter/junit-jupiter-api/5.7.1/junit-jupiter-api-5.7.1.jar
     file(DOWNLOAD "https://search.maven.org/remotecontent?filepath=org/junit/jupiter/junit-jupiter-api/5.7.1/junit-jupiter-api-5.7.1.jar"
       ${CMAKE_BINARY_DIR}/packages/junit-jupiter-api-5.7.1.jar
       EXPECTED_HASH SHA256=ce7b985bc469e2625759a4ebc45533c70581a05a348278c1d6408e9b2e35e314)
@@ -350,20 +351,20 @@ if(NOT OPEN_FOR_IDE)
     # can be found at https://cmake.org/cmake/help/v3.19/manual/ctest.1.html)
 
     add_jar(fdb-junit SOURCES ${JAVA_JUNIT_TESTS} ${JUNIT_RESOURCES} INCLUDE_JARS fdb-java
-            ${CMAKE_BINARY_DIR}/packages/junit-jupiter-api-5.7.1.jar
-            ${CMAKE_BINARY_DIR}/packages/junit-jupiter-engine-5.7.1.jar
-            ${CMAKE_BINARY_DIR}/packages/junit-jupiter-params-5.7.1.jar
-            ${CMAKE_BINARY_DIR}/packages/opentest4j-1.2.0.jar
-            ${CMAKE_BINARY_DIR}/packages/apiguardian-api-1.1.1.jar
-    )
+      ${CMAKE_BINARY_DIR}/packages/junit-jupiter-api-5.7.1.jar
+      ${CMAKE_BINARY_DIR}/packages/junit-jupiter-engine-5.7.1.jar
+      ${CMAKE_BINARY_DIR}/packages/junit-jupiter-params-5.7.1.jar
+      ${CMAKE_BINARY_DIR}/packages/opentest4j-1.2.0.jar
+      ${CMAKE_BINARY_DIR}/packages/apiguardian-api-1.1.1.jar
+      )
     get_property(junit_jar_path TARGET fdb-junit PROPERTY JAR_FILE)
 
     add_test(NAME java-unit
       COMMAND ${Java_JAVA_EXECUTABLE}
-            -classpath "${target_jar}:${junit_jar_path}:${JUNIT_CLASSPATH}"
-            -Djava.library.path=${CMAKE_BINARY_DIR}/lib
-            org.junit.platform.console.ConsoleLauncher "--details=summary" "-class-path=${junit_jar_path}" "--scan-classpath" "--disable-banner"
-    )
+      -classpath "${target_jar}:${junit_jar_path}:${JUNIT_CLASSPATH}"
+      -Djava.library.path=${CMAKE_BINARY_DIR}/lib
+      org.junit.platform.console.ConsoleLauncher "--details=summary" "-class-path=${junit_jar_path}" "--scan-classpath" "--disable-banner"
+      )
 
   endif()
 
@@ -393,28 +394,28 @@ if(NOT OPEN_FOR_IDE)
     # the directory layer with a unique path, etc.)
     #
     add_jar(fdb-integration SOURCES ${JAVA_INTEGRATION_TESTS} ${JAVA_INTEGRATION_RESOURCES} INCLUDE_JARS fdb-java
-            ${CMAKE_BINARY_DIR}/packages/junit-jupiter-api-5.7.1.jar
-            ${CMAKE_BINARY_DIR}/packages/junit-jupiter-engine-5.7.1.jar
-            ${CMAKE_BINARY_DIR}/packages/junit-jupiter-params-5.7.1.jar
-            ${CMAKE_BINARY_DIR}/packages/opentest4j-1.2.0.jar
-            ${CMAKE_BINARY_DIR}/packages/apiguardian-api-1.1.1.jar)
+      ${CMAKE_BINARY_DIR}/packages/junit-jupiter-api-5.7.1.jar
+      ${CMAKE_BINARY_DIR}/packages/junit-jupiter-engine-5.7.1.jar
+      ${CMAKE_BINARY_DIR}/packages/junit-jupiter-params-5.7.1.jar
+      ${CMAKE_BINARY_DIR}/packages/opentest4j-1.2.0.jar
+      ${CMAKE_BINARY_DIR}/packages/apiguardian-api-1.1.1.jar)
     get_property(integration_jar_path TARGET fdb-integration PROPERTY JAR_FILE)
-
 
     # add_fdbclient_test will set FDB_CLUSTER_FILE if it's not set already
     add_fdbclient_test(NAME java-integration
-                    COMMAND ${Java_JAVA_EXECUTABLE}
-                      -classpath "${target_jar}:${integration_jar_path}:${JUNIT_CLASSPATH}"
-                      -Djava.library.path=${CMAKE_BINARY_DIR}/lib
-                      org.junit.platform.console.ConsoleLauncher "--details=summary" "--class-path=${integration_jar_path}" "--scan-classpath" "--disable-banner" "-T MultiClient"
-    )
+      API_TEST_BLOB_GRANULES_ENABLED
+      COMMAND ${Java_JAVA_EXECUTABLE}
+      -classpath "${target_jar}:${integration_jar_path}:${JUNIT_CLASSPATH}"
+      -Djava.library.path=${CMAKE_BINARY_DIR}/lib
+      org.junit.platform.console.ConsoleLauncher "--details=summary" "--class-path=${integration_jar_path}" "--scan-classpath" "--disable-banner" "-T MultiClient"
+      )
 
     add_multi_fdbclient_test(NAME java-multi-integration
-                    COMMAND ${Java_JAVA_EXECUTABLE}
-                    -classpath "${target_jar}:${integration_jar_path}:${JUNIT_CLASSPATH}"
-                    -Djava.library.path=${CMAKE_BINARY_DIR}/lib
-                    org.junit.platform.console.ConsoleLauncher "--details=summary" "--class-path=${integration_jar_path}" "--scan-classpath" "--disable-banner" "-t MultiClient"
-    )
+      COMMAND ${Java_JAVA_EXECUTABLE}
+      -classpath "${target_jar}:${integration_jar_path}:${JUNIT_CLASSPATH}"
+      -Djava.library.path=${CMAKE_BINARY_DIR}/lib
+      org.junit.platform.console.ConsoleLauncher "--details=summary" "--class-path=${integration_jar_path}" "--scan-classpath" "--disable-banner" "-t MultiClient"
+      )
 
   endif()
 endif()

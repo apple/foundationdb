@@ -20,7 +20,7 @@
 
 #ifndef FDBCLIENT_READYOURWRITES_H
 #define FDBCLIENT_READYOURWRITES_H
-#include "Status.h"
+#include "fdbclient/Status.h"
 #pragma once
 
 #include "fdbclient/NativeAPI.actor.h"
@@ -69,11 +69,12 @@ class ReadYourWritesTransaction final : NonCopyable,
                                         public ISingleThreadTransaction,
                                         public FastAllocated<ReadYourWritesTransaction> {
 public:
-	explicit ReadYourWritesTransaction(Database const& cx, Optional<TenantName> tenant = Optional<TenantName>());
+	explicit ReadYourWritesTransaction(Database const& cx,
+	                                   Optional<Reference<Tenant>> const& tenant = Optional<Reference<Tenant>>());
 	~ReadYourWritesTransaction();
 
 	void construct(Database const&) override;
-	void construct(Database const&, TenantName const& tenant) override;
+	void construct(Database const&, Reference<Tenant> const& tenant) override;
 	void setVersion(Version v) override { tr.setVersion(v); }
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override { return tr.getCachedReadVersion(); }
@@ -130,6 +131,7 @@ public:
 	Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRange& range,
 	                                                                           Optional<Version> summaryVersion,
 	                                                                           int rangeLimit) override;
+	void addGranuleMaterializeStats(const GranuleMaterializeStats& stats) override;
 
 	void addReadConflictRange(KeyRangeRef const& keys) override;
 	void makeSelfConflicting() override { tr.makeSelfConflicting(); }
@@ -148,6 +150,7 @@ public:
 	VersionVector getVersionVector() const override { return tr.getVersionVector(); }
 	SpanContext getSpanContext() const override { return tr.getSpanContext(); }
 
+	int64_t getTotalCost() const override { return tr.getTotalCost(); }
 	int64_t getApproximateSize() const override { return approximateSize; }
 	[[nodiscard]] Future<Standalone<StringRef>> getVersionstamp() override;
 
@@ -210,7 +213,7 @@ public:
 	}
 	Transaction& getTransaction() { return tr; }
 
-	Optional<TenantName> getTenant() { return tr.getTenant(); }
+	Optional<Reference<Tenant>> getTenant() { return tr.getTenant(); }
 	TagSet const& getTags() const { return tr.getTags(); }
 
 	// used in template functions as returned Future type

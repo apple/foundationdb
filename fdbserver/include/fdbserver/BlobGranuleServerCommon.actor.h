@@ -1,5 +1,5 @@
 /*
- * BlobGranuleServerCommon.h
+ * BlobGranuleServerCommon.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -33,20 +33,10 @@
 #include "fdbclient/Tenant.h"
 
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/Knobs.h"
 #include "flow/flow.h"
 
 #include "flow/actorcompiler.h" // has to be last include
-
-struct GranuleHistory {
-	KeyRange range;
-	Version version;
-	Standalone<BlobGranuleHistoryValue> value;
-
-	GranuleHistory() {}
-
-	GranuleHistory(KeyRange range, Version version, Standalone<BlobGranuleHistoryValue> value)
-	  : range(range), version(version), value(value) {}
-};
 
 // Stores info about a file in blob storage
 struct BlobFileIndex {
@@ -107,29 +97,33 @@ ACTOR Future<ForcedPurgeState> getForcePurgedState(Transaction* tr, KeyRange key
 
 // TODO: versioned like SS has?
 struct GranuleTenantData : NonCopyable, ReferenceCounted<GranuleTenantData> {
-	TenantName name;
 	TenantMapEntry entry;
 	Reference<BlobConnectionProvider> bstore;
 	Promise<Void> bstoreLoaded;
 
 	GranuleTenantData() {}
-	GranuleTenantData(TenantName name, TenantMapEntry entry) : name(name), entry(entry) {}
+	GranuleTenantData(TenantMapEntry entry) : entry(entry) {}
 
-	void setBStore(Reference<BlobConnectionProvider> bs) {
-		ASSERT(bstoreLoaded.canBeSet());
-		bstore = bs;
-		bstoreLoaded.send(Void());
+	void updateBStore(const BlobMetadataDetailsRef& metadata) {
+		if (bstoreLoaded.canBeSet()) {
+			// new
+			bstore = BlobConnectionProvider::newBlobConnectionProvider(metadata);
+			bstoreLoaded.send(Void());
+		} else {
+			// update existing
+			bstore->update(metadata);
+		}
 	}
 };
 
 // TODO: add refreshing
 struct BGTenantMap {
 public:
-	void addTenants(std::vector<std::pair<TenantName, TenantMapEntry>>);
+	void addTenants(std::vector<std::pair<int64_t, TenantMapEntry>>);
 	void removeTenants(std::vector<int64_t> tenantIds);
 
 	Optional<TenantMapEntry> getTenantById(int64_t id);
-	Reference<GranuleTenantData> getDataForGranule(const KeyRangeRef& keyRange);
+	Future<Reference<GranuleTenantData>> getDataForGranule(const KeyRangeRef& keyRange);
 
 	KeyRangeMap<Reference<GranuleTenantData>> tenantData;
 	std::unordered_map<int64_t, TenantMapEntry> tenantInfoById;
@@ -145,6 +139,38 @@ private:
 	Future<Void> collection;
 };
 
+// Defines granule info that interests full restore
+struct BlobGranuleRestoreVersion {
+	// Two constructors required by VectorRef
+	BlobGranuleRestoreVersion() {}
+	BlobGranuleRestoreVersion(Arena& a, const BlobGranuleRestoreVersion& copyFrom)
+	  : granuleID(copyFrom.granuleID), keyRange(a, copyFrom.keyRange), version(copyFrom.version),
+	    sizeInBytes(copyFrom.sizeInBytes) {}
+
+	UID granuleID;
+	KeyRangeRef keyRange;
+	Version version;
+	int64_t sizeInBytes;
+};
+
+// Defines a vector for BlobGranuleVersion
+typedef Standalone<VectorRef<BlobGranuleRestoreVersion>> BlobGranuleRestoreVersionVector;
+
+ACTOR Future<Void> dumpManifest(Database db, Reference<BlobConnectionProvider> blobConn, int64_t epoch, int64_t seqNo);
+ACTOR Future<Void> loadManifest(Database db, Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<Void> printRestoreSummary(Database db, Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<BlobGranuleRestoreVersionVector> listBlobGranules(Database db, Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<int64_t> lastBlobEpoc(Database db, Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<bool> isFullRestoreMode(Database db, KeyRangeRef range);
+ACTOR Future<Void> updateRestoreStatus(Database db,
+                                       KeyRangeRef range,
+                                       BlobRestoreStatus status,
+                                       Optional<BlobRestorePhase> expectedPhase);
+ACTOR Future<std::pair<KeyRange, BlobRestoreStatus>> getRestoreRangeStatus(Database db, KeyRangeRef keys);
+ACTOR Future<Optional<BlobRestoreStatus>> getRestoreStatus(Database db, KeyRangeRef range);
+ACTOR Future<Optional<BlobRestoreArg>> getRestoreArg(Database db, KeyRangeRef range);
+ACTOR Future<Version> getRestoreTargetVersion(Database db, KeyRangeRef range, Version defaultVersion);
+ACTOR Future<Version> getManifestVersion(Database db);
 #include "flow/unactorcompiler.h"
 
 #endif

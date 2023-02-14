@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <iomanip>
+#include <iostream>
 #include <unordered_set>
 #include <variant>
 
@@ -473,13 +474,13 @@ TEST_CASE("/flow/FlatBuffers/VectorRef") {
 				vec.push_back(arena, str);
 			}
 			ObjectWriter writer(Unversioned());
-			writer.serialize(FileIdentifierFor<decltype(vec)>::value, arena, vec);
+			writer.serialize(FileIdentifierFor<decltype(vec)>::value, vec);
 			serializedVector = StringRef(readerArena, writer.toStringRef());
 		}
 		ArenaObjectReader reader(readerArena, serializedVector, Unversioned());
-		// The VectorRef and Arena arguments are intentionally in a different order from the serialize call above.
+		// The Arena argument is intentionally missing from the serialize call above.
 		// Arenas need to get serialized after any Ref types whose memory they own. In order for schema evolution to be
-		// possible, it needs to be okay to reorder an Arena so that it appears after a newly added Ref type. For this
+		// possible, it needs to be okay to move/add an Arena so that it appears after a newly added Ref type. For this
 		// reason, Arenas are ignored by the wire protocol entirely. We test that behavior here.
 		reader.deserialize(FileIdentifierFor<decltype(outVec)>::value, outVec, vecArena);
 	}

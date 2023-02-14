@@ -28,9 +28,11 @@
 enum CheckpointFormat {
 	InvalidFormat = 0,
 	// For RocksDB, checkpoint generated via rocksdb::Checkpoint::ExportColumnFamily().
-	RocksDBColumnFamily = 1,
+	DataMoveRocksCF = 1,
 	// For RocksDB, checkpoint generated via rocksdb::Checkpoint::CreateCheckpoint().
 	RocksDB = 2,
+	// Checkpoint fetched as key-value pairs.
+	RocksDBKeyValues = 3,
 };
 
 // Metadata of a FDB checkpoint.
@@ -45,24 +47,32 @@ struct CheckpointMetaData {
 
 	constexpr static FileIdentifier file_identifier = 13804342;
 	Version version;
-	KeyRange range;
+	std::vector<KeyRange> ranges;
 	int16_t format; // CheckpointFormat.
-	UID ssID; // Storage server ID on which this checkpoint is created.
+	std::vector<UID> src; // Storage server(s) on which this checkpoint is created.
 	UID checkpointID; // A unique id for this checkpoint.
 	int16_t state; // CheckpointState.
-	int referenceCount; // A reference count on the checkpoint, it can only be deleted when this is 0.
-	int64_t gcTime; // Time to delete this checkpoint, a Unix timestamp in seconds.
 
 	// A serialized metadata associated with format, this data can be understood by the corresponding KVS.
 	Standalone<StringRef> serializedCheckpoint;
 
+	Optional<UID> actionId; // Unique ID defined by the application.
+
 	CheckpointMetaData() = default;
-	CheckpointMetaData(KeyRange const& range, CheckpointFormat format, UID const& ssID, UID const& checkpointID)
-	  : version(invalidVersion), range(range), format(format), ssID(ssID), checkpointID(checkpointID), state(Pending),
-	    referenceCount(0), gcTime(0) {}
-	CheckpointMetaData(Version version, KeyRange const& range, CheckpointFormat format, UID checkpointID)
-	  : version(version), range(range), format(format), ssID(UID()), checkpointID(checkpointID), state(Pending),
-	    referenceCount(0), gcTime(0) {}
+	CheckpointMetaData(const std::vector<KeyRange>& ranges,
+	                   CheckpointFormat format,
+	                   const std::vector<UID>& src,
+	                   UID const& checkpointID,
+	                   UID const& actionId)
+	  : version(invalidVersion), ranges(ranges), format(format), src(src), checkpointID(checkpointID), state(Pending),
+	    actionId(actionId) {}
+	CheckpointMetaData(const std::vector<KeyRange>& ranges,
+	                   Version version,
+	                   CheckpointFormat format,
+	                   UID const& checkpointID)
+	  : version(version), ranges(ranges), format(format), checkpointID(checkpointID), state(Pending) {}
+	CheckpointMetaData(Version version, CheckpointFormat format, UID checkpointID)
+	  : version(version), format(format), checkpointID(checkpointID), state(Pending) {}
 
 	CheckpointState getState() const { return static_cast<CheckpointState>(state); }
 
@@ -72,19 +82,49 @@ struct CheckpointMetaData {
 
 	void setFormat(CheckpointFormat format) { this->format = static_cast<int16_t>(format); }
 
+	bool hasRange(const KeyRangeRef range) const {
+		for (const auto& checkpointRange : ranges) {
+			if (checkpointRange.contains(range)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool hasRanges(const std::vector<KeyRange>& ranges) const {
+		for (const auto& range : ranges) {
+			if (!this->hasRange(range)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	bool operator==(const CheckpointMetaData& r) const { return checkpointID == r.checkpointID; }
+
 	std::string toString() const {
-		std::string res = "Checkpoint MetaData:\nRange: " + range.toString() + "\nVersion: " + std::to_string(version) +
-		                  "\nFormat: " + std::to_string(format) + "\nServer: " + ssID.toString() +
-		                  "\nID: " + checkpointID.toString() + "\nState: " + std::to_string(static_cast<int>(state)) +
-		                  "\n";
+		std::string res = "Checkpoint MetaData: [Ranges]: " + describe(ranges) +
+		                  " [Version]: " + std::to_string(version) + " [Format]: " + std::to_string(format) +
+		                  " [Server]: " + describe(src) + " [ID]: " + checkpointID.toString() +
+		                  " [State]: " + std::to_string(static_cast<int>(state)) +
+		                  (actionId.present() ? (" [Action ID]: " + actionId.get().toString()) : "");
+		;
 		return res;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, range, format, state, checkpointID, ssID, gcTime, serializedCheckpoint);
+		serializer(ar, version, ranges, format, state, checkpointID, src, serializedCheckpoint, actionId);
 	}
 };
+
+namespace std {
+template <>
+class hash<CheckpointMetaData> {
+public:
+	size_t operator()(CheckpointMetaData const& checkpoint) const { return checkpoint.checkpointID.hash(); }
+};
+} // namespace std
 
 // A DataMoveMetaData object corresponds to a single data move.
 struct DataMoveMetaData {
@@ -99,31 +139,36 @@ struct DataMoveMetaData {
 	constexpr static FileIdentifier file_identifier = 13804362;
 	UID id; // A unique id for this data move.
 	Version version;
-	KeyRange range;
+	std::vector<KeyRange> ranges;
 	int priority;
 	std::set<UID> src;
 	std::set<UID> dest;
+	std::set<UID> checkpoints;
 	int16_t phase; // DataMoveMetaData::Phase.
+	int8_t mode;
 
 	DataMoveMetaData() = default;
-	DataMoveMetaData(UID id, Version version, KeyRange range)
-	  : id(id), version(version), range(std::move(range)), priority(0) {}
-	DataMoveMetaData(UID id, KeyRange range) : id(id), version(invalidVersion), range(std::move(range)), priority(0) {}
+	DataMoveMetaData(UID id, Version version, KeyRange range) : id(id), version(version), priority(0), mode(0) {
+		this->ranges.push_back(range);
+	}
+	DataMoveMetaData(UID id, KeyRange range) : id(id), version(invalidVersion), priority(0), mode(0) {
+		this->ranges.push_back(range);
+	}
 
 	Phase getPhase() const { return static_cast<Phase>(phase); }
 
 	void setPhase(Phase phase) { this->phase = static_cast<int16_t>(phase); }
 
 	std::string toString() const {
-		std::string res = "DataMoveMetaData: [ID]: " + id.shortString() + " [Range]: " + range.toString() +
-		                  " [Phase]: " + std::to_string(static_cast<int>(phase)) +
-		                  " [Source Servers]: " + describe(src) + " [Destination Servers]: " + describe(dest);
+		std::string res = "DataMoveMetaData: [ID]: " + id.shortString() + ", [Range]: " + describe(ranges) +
+		                  ", [Phase]: " + std::to_string(static_cast<int>(phase)) +
+		                  ", [Source Servers]: " + describe(src) + ", [Destination Servers]: " + describe(dest);
 		return res;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, version, range, phase, src, dest);
+		serializer(ar, id, version, ranges, priority, src, dest, checkpoints, phase, mode);
 	}
 };
 

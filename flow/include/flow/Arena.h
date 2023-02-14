@@ -31,6 +31,7 @@
 #include "flow/Trace.h"
 #include "flow/ObjectSerializerTraits.h"
 #include "flow/FileIdentifier.h"
+#include "flow/Optional.h"
 #include <algorithm>
 #include <boost/functional/hash.hpp>
 #include <stdint.h>
@@ -100,6 +101,7 @@ FDB_DECLARE_BOOLEAN_PARAM(FastInaccurateEstimate);
 // memory is freed by deleting the entire Arena at once. See flow/README.md for details on using Arenas.
 class Arena {
 public:
+	constexpr static auto fb_must_appear_last = true;
 	Arena();
 	explicit Arena(size_t reservedSize);
 	//~Arena();
@@ -215,95 +217,6 @@ inline void save(Archive& ar, const Arena& p) {
 	// No action required
 }
 
-// Optional is a wrapper for std::optional. There
-// are two primary reasons to use this wrapper instead
-// of using std::optional directly:
-//
-// 1) Legacy: A lot of code was written using Optional before
-//    std::optional was available.
-// 2) When you call get but no value is present Optional gives an
-//    assertion failure. std::optional, on the other hand, would
-//    throw std::bad_optional_access. It is easier to debug assertion
-//    failures, and FDB generally does not handle std exceptions, so
-//    assertion failures are preferable. This is the main reason we
-//    don't intend to use std::optional directly.
-template <class T>
-class Optional : public ComposedIdentifier<T, 4> {
-public:
-	Optional() = default;
-
-	template <class U>
-	Optional(const U& t) : impl(std::in_place, t) {}
-	Optional(T&& t) : impl(std::in_place, std::move(t)) {}
-
-	/* This conversion constructor was nice, but combined with the prior constructor it means that Optional<int> can be
-	converted to Optional<Optional<int>> in the wrong way (a non-present Optional<int> converts to a non-present
-	Optional<Optional<int>>). Use .castTo<>() instead. template <class S> Optional(const Optional<S>& o) :
-	valid(o.present()) { if (valid) new (&value) T(o.get()); } */
-
-	Optional(Arena& a, const Optional<T>& o) {
-		if (o.present())
-			impl = std::make_optional<T>(a, o.get());
-	}
-	int expectedSize() const { return present() ? get().expectedSize() : 0; }
-
-	template <class R>
-	Optional<R> castTo() const {
-		return map<R>([](const T& v) { return (R)v; });
-	}
-
-	template <class R>
-	Optional<R> map(std::function<R(T)> f) const& {
-		return present() ? Optional<R>(f(get())) : Optional<R>();
-	}
-	template <class R>
-	Optional<R> map(std::function<R(T)> f) && {
-		return present() ? Optional<R>(f(std::move(*this).get())) : Optional<R>();
-	}
-
-	bool present() const { return impl.has_value(); }
-	T& get() & {
-		UNSTOPPABLE_ASSERT(impl.has_value());
-		return impl.value();
-	}
-	T const& get() const& {
-		UNSTOPPABLE_ASSERT(impl.has_value());
-		return impl.value();
-	}
-	T&& get() && {
-		UNSTOPPABLE_ASSERT(impl.has_value());
-		return std::move(impl.value());
-	}
-	template <class U>
-	T orDefault(U&& defaultValue) const& {
-		return impl.value_or(std::forward<U>(defaultValue));
-	}
-	template <class U>
-	T orDefault(U&& defaultValue) && {
-		return std::move(impl).value_or(std::forward<U>(defaultValue));
-	}
-
-	// Spaceship operator.  Treats not-present as less-than present.
-	int compare(Optional const& rhs) const {
-		if (present() == rhs.present()) {
-			return present() ? get().compare(rhs.get()) : 0;
-		}
-		return present() ? 1 : -1;
-	}
-
-	bool operator==(Optional const& o) const { return impl == o.impl; }
-	bool operator!=(Optional const& o) const { return !(*this == o); }
-	// Ordering: If T is ordered, then Optional() < Optional(t) and (Optional(u)<Optional(v))==(u<v)
-	bool operator<(Optional const& o) const { return impl < o.impl; }
-
-	void reset() { impl.reset(); }
-	size_t hash() const { return hashFunc(impl); }
-
-private:
-	static inline std::hash<std::optional<T>> hashFunc{};
-	std::optional<T> impl;
-};
-
 template <class Archive, class T>
 inline void load(Archive& ar, Optional<T>& value) {
 	bool valid;
@@ -358,12 +271,14 @@ struct union_like_traits<Optional<T>> : std::true_type {
 	}
 };
 
-//#define STANDALONE_ALWAYS_COPY
+// #define STANDALONE_ALWAYS_COPY
 
 template <class T>
 class Standalone : private Arena, public T {
 public:
 	using RefType = T;
+
+	constexpr static auto fb_must_appear_last = false;
 
 	// T must have no destructor
 	Arena& arena() { return *(Arena*)this; }
@@ -440,7 +355,7 @@ class StringRef {
 public:
 	constexpr static FileIdentifier file_identifier = 13300811;
 	StringRef() : data(0), length(0) {}
-	StringRef(Arena& p, const StringRef& toCopy) : data(new (p) uint8_t[toCopy.size()]), length(toCopy.size()) {
+	StringRef(Arena& p, const StringRef& toCopy) : data(new(p) uint8_t[toCopy.size()]), length(toCopy.size()) {
 		if (length > 0) {
 			memcpy((void*)data, toCopy.data, length);
 		}
@@ -451,7 +366,7 @@ public:
 		if (length)
 			memcpy((void*)data, &toCopy[0], length);
 	}
-	StringRef(Arena& p, const uint8_t* toCopy, int length) : data(new (p) uint8_t[length]), length(length) {
+	StringRef(Arena& p, const uint8_t* toCopy, int length) : data(new(p) uint8_t[length]), length(length) {
 		if (length > 0) {
 			memcpy((void*)data, toCopy, length);
 		}
@@ -636,6 +551,16 @@ public:
 		return eatAny(StringRef((const uint8_t*)sep, strlen(sep)), foundSeparator);
 	}
 
+	uint8_t back() {
+		UNSTOPPABLE_ASSERT(!empty());
+		return data[length - 1];
+	}
+
+	void popBack() {
+		UNSTOPPABLE_ASSERT(!empty());
+		--length;
+	}
+
 	// Copies string contents to dst and returns a pointer to the next byte after
 	uint8_t* copyTo(uint8_t* dst) const {
 		if (length > 0) {
@@ -728,15 +653,8 @@ struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::tru
 	static std::string toString(const Standalone<T>& value) { return Traceable<T>::toString(value); }
 };
 
-namespace literal_string_ref {
-template <class T, int Size>
-StringRef LiteralStringRefHelper(const char* str) {
-	static_assert(std::is_same_v<T, const char(&)[Size]> || std::is_same_v<T, const char[Size]>,
-	              "Argument to LiteralStringRef must be a literal string");
-	return StringRef(reinterpret_cast<const uint8_t*>(str), Size - 1);
-}
-} // namespace literal_string_ref
-#define LiteralStringRef(str) literal_string_ref::LiteralStringRefHelper<decltype(str), sizeof(str)>(str)
+#define __FILE__sr StringRef(reinterpret_cast<const uint8_t*>(__FILE__), sizeof(__FILE__) - 1)
+#define __FUNCTION__sr StringRef(reinterpret_cast<const uint8_t*>(__FUNCTION__), sizeof(__FUNCTION__) - 1)
 
 template <>
 struct fmt::formatter<StringRef> : formatter<std::string_view> {
@@ -826,6 +744,10 @@ inline bool operator==(const StringRef& lhs, const StringRef& rhs) {
 	}
 	ASSERT(lhs.size() >= 0);
 	return lhs.size() == rhs.size() && memcmp(lhs.begin(), rhs.begin(), static_cast<unsigned int>(lhs.size())) == 0;
+}
+template <int N>
+inline bool operator==(const StringRef& lhs, const char (&rhs)[N]) {
+	return lhs == StringRef(reinterpret_cast<const uint8_t*>(rhs), N - 1);
 }
 inline bool operator<(const StringRef& lhs, const StringRef& rhs) {
 	if (std::min(lhs.size(), rhs.size()) > 0) {
@@ -997,7 +919,7 @@ public:
 	// Arena constructor for non-Ref types, identified by !flow_ref
 	template <class T2 = T, VecSerStrategy S>
 	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<!flow_ref<T2>::value, int>::type = 0)
-	  : VPS(toCopy), data((T*)new (p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()),
+	  : VPS(toCopy), data((T*)new(p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()),
 	    m_capacity(toCopy.size()) {
 		if (m_size > 0) {
 			std::copy(toCopy.data, toCopy.data + m_size, data);
@@ -1007,7 +929,7 @@ public:
 	// Arena constructor for Ref types, which must have an Arena constructor
 	template <class T2 = T, VecSerStrategy S>
 	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<flow_ref<T2>::value, int>::type = 0)
-	  : VPS(), data((T*)new (p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()), m_capacity(toCopy.size()) {
+	  : VPS(), data((T*)new(p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()), m_capacity(toCopy.size()) {
 		for (int i = 0; i < m_size; i++) {
 			auto ptr = new (&data[i]) T(p, toCopy[i]);
 			VPS::add(*ptr);

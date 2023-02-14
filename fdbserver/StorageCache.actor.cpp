@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/OTELSpanContextMessage.h"
 #include "flow/Arena.h"
@@ -247,9 +248,9 @@ public:
 	    lastTLogVersion(0), lastVersionWithData(0), peekVersion(0), compactionInProgress(Void()),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES), debug_inApplyUpdate(false),
 	    debug_lastValidateTime(0), versionLag(0), behind(false), counters(this) {
-		version.initMetric(LiteralStringRef("StorageCacheData.Version"), counters.cc.id);
-		desiredOldestVersion.initMetric(LiteralStringRef("StorageCacheData.DesriedOldestVersion"), counters.cc.id);
-		oldestVersion.initMetric(LiteralStringRef("StorageCacheData.OldestVersion"), counters.cc.id);
+		version.initMetric("StorageCacheData.Version"_sr, counters.cc.getId());
+		desiredOldestVersion.initMetric("StorageCacheData.DesriedOldestVersion"_sr, counters.cc.getId());
+		oldestVersion.initMetric("StorageCacheData.OldestVersion"_sr, counters.cc.getId());
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
@@ -282,7 +283,7 @@ public:
 	void checkChangeCounter(uint64_t oldCacheRangeChangeCounter, KeyRef const& key) {
 		if (oldCacheRangeChangeCounter != cacheRangeChangeCounter &&
 		    cachedRangeMap[key]->changeCounter > oldCacheRangeChangeCounter) {
-			CODE_PROBE(true, "CacheRange change during getValueQ");
+			// CODE_PROBE(true, "CacheRange change during getValueQ");
 			// TODO: should we throw the cold_cache_server() error here instead?
 			throw wrong_shard_server();
 		}
@@ -293,8 +294,8 @@ public:
 			auto sh = cachedRangeMap.intersectingRanges(keys);
 			for (auto i = sh.begin(); i != sh.end(); ++i)
 				if (i->value()->changeCounter > oldCacheRangeChangeCounter) {
-					CODE_PROBE(true, "CacheRange change during range operation");
-					// TODO: should we throw the cold_cache_server() error here instead?
+					// CODE_PROBE(true, "CacheRange change during range operation");
+					//  TODO: should we throw the cold_cache_server() error here instead?
 					throw wrong_shard_server();
 				}
 		}
@@ -455,7 +456,9 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageCacheData* data, Version ver
 	if (version <= data->version.get())
 		return version;
 	choose {
-		when(wait(data->version.whenAtLeast(version))) { return version; }
+		when(wait(data->version.whenAtLeast(version))) {
+			return version;
+		}
 		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
 			if (deterministicRandom()->random01() < 0.001)
 				TraceEvent(SevWarn, "CacheServerFutureVersion1000x", data->thisServerID)
@@ -516,9 +519,9 @@ ACTOR Future<Void> getValueQ(StorageCacheData* data, GetValueRequest req) {
 		}
 
 		// DEBUG_MUTATION("CacheGetValue", version, MutationRef(MutationRef::DebugKey, req.key,
-		// v.present()?v.get():LiteralStringRef("<null>"))); DEBUG_MUTATION("CacheGetPath", version,
+		// v.present()?v.get():"<null>"_sr)); DEBUG_MUTATION("CacheGetPath", version,
 		// MutationRef(MutationRef::DebugKey, req.key,
-		// path==0?LiteralStringRef("0"):path==1?LiteralStringRef("1"):LiteralStringRef("2")));
+		// path==0?"0"_sr:path==1?"1"_sr:"2"_sr));
 
 		if (v.present()) {
 			++data->counters.rowsQueried;
@@ -663,7 +666,7 @@ Key findKey(StorageCacheData* data, KeySelectorRef sel, Version version, KeyRang
 	// If we get only one result in the reverse direction as a result of the data being too large, we could get stuck in
 	// a loop
 	if (more && !forward && rep.data.size() == 1) {
-		CODE_PROBE(true, "Reverse key selector returned only one result in range read");
+		// CODE_PROBE(true, "Reverse key selector returned only one result in range read");
 		maxBytes = std::numeric_limits<int>::max();
 		GetKeyValuesReply rep2 =
 		    readRange(data, version, KeyRangeRef(range.begin, keyAfter(sel.getKey())), -2, &maxBytes);
@@ -686,7 +689,7 @@ Key findKey(StorageCacheData* data, KeySelectorRef sel, Version version, KeyRang
 			*pOffset = -*pOffset;
 
 		if (more) {
-			CODE_PROBE(true, "Key selector read range had more results");
+			// CODE_PROBE(true, "Key selector read range had more results");
 
 			ASSERT(rep.data.size());
 			Key returnKey = forward ? keyAfter(rep.data.back().key) : rep.data.back().key;
@@ -780,11 +783,11 @@ ACTOR Future<Void> getKeyValues(StorageCacheData* data, GetKeyValuesRequest req)
 		// cachedKeyRange is the end the last actual key returned must be from this cachedKeyRange. A begin offset of 1
 		// is also OK because then either begin is past end or equal to end (so the result is definitely empty)
 		if ((offset1 && offset1 != 1) || (offset2 && offset2 != 1)) {
-			CODE_PROBE(true, "wrong_cache_server due to offset");
-			// We could detect when offset1 takes us off the beginning of the database or offset2 takes us off the end,
-			// and return a clipped range rather than an error (since that is what the NativeAPI.getRange will do anyway
-			// via its "slow path"), but we would have to add some flags to the response to encode whether we went off
-			// the beginning and the end, since it needs that information.
+			// CODE_PROBE(true, "wrong_cache_server due to offset");
+			//  We could detect when offset1 takes us off the beginning of the database or offset2 takes us off the end,
+			//  and return a clipped range rather than an error (since that is what the NativeAPI.getRange will do
+			//  anyway via its "slow path"), but we would have to add some flags to the response to encode whether we
+			//  went off the beginning and the end, since it needs that information.
 			//TraceEvent(SevDebug, "WrongCacheRangeServer2", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).
 			// detail("CacheRangeBegin", cachedKeyRange.begin).detail("CacheRangeEnd", cachedKeyRange.end).detail("In",
 			// "getKeyValues>checkOffsets"). detail("BeginKey", begin).detail("EndKey", end).detail("BeginOffset",
@@ -944,7 +947,7 @@ bool expandMutation(MutationRef& m, StorageCacheData::VersionedData const& data,
 		if (it != data.atLatest().end() && it->isValue() && it.key() == m.param1)
 			oldVal = it->getValue();
 		else if (it != data.atLatest().end() && it->isClearTo() && it->getEndKey() > m.param1) {
-			CODE_PROBE(true, "Atomic op right after a clear.");
+			// CODE_PROBE(true, "Atomic op right after a clear.");
 		}
 
 		switch (m.type) {
@@ -1074,7 +1077,7 @@ void splitMutation(StorageCacheData* data, KeyRangeMap<T>& map, MutationRef cons
 }
 
 void rollback(StorageCacheData* data, Version rollbackVersion, Version nextVersion) {
-	CODE_PROBE(true, "call to cacheRange rollback");
+	// CODE_PROBE(true, "call to cacheRange rollback");
 	// FIXME: enable when debugKeyRange is active
 	// debugKeyRange("Rollback", rollbackVersion, allKeys);
 
@@ -1187,7 +1190,7 @@ ACTOR Future<RangeResult> tryFetchRange(Database cx,
 	state RangeResult output;
 	state KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
 	state KeySelectorRef end = firstGreaterOrEqual(keys.end);
-	state ReadOptions options = ReadOptions(Optional<UID>(), ReadType::FETCH);
+	state ReadOptions options = ReadOptions(ReadType::FETCH, CacheResult::False);
 
 	if (*isTooOld)
 		throw transaction_too_old();
@@ -1282,7 +1285,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 			lastAvailable = std::max(lastAvailable, r->value());
 
 		if (lastAvailable != invalidVersion && lastAvailable >= data->oldestVersion.get()) {
-			CODE_PROBE(true, "wait for oldest version");
+			// CODE_PROBE(true, "wait for oldest version");
 			wait(data->oldestVersion.whenAtLeast(lastAvailable + 1));
 		}
 
@@ -1321,7 +1324,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 
 		loop {
 			try {
-				CODE_PROBE(true, "Fetching keys for transferred cacheRange");
+				// CODE_PROBE(true, "Fetching keys for transferred cacheRange");
 
 				state RangeResult this_block =
 				    wait(tryFetchRange(data->cx,
@@ -1385,7 +1388,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 				    .suppressFor(1.0)
 				    .detail("FKID", interval.pairID);
 				if (e.code() == error_code_transaction_too_old) {
-					CODE_PROBE(true, "A storage server has forgotten the history data we are fetching");
+					// CODE_PROBE(true, "A storage server has forgotten the history data we are fetching");
 					Version lastFV = fetchVersion;
 					fetchVersion = data->version.get();
 					isTooOld = false;
@@ -1412,9 +1415,9 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 						    .detail("E", data->version.get());
 					}
 				} else if (e.code() == error_code_future_version || e.code() == error_code_process_behind) {
-					CODE_PROBE(true,
-					           "fetchKeys got future_version or process_behind, so there must be a huge storage lag "
-					           "somewhere.  Keep trying.");
+					// CODE_PROBE(true,
+					//           "fetchKeys got future_version or process_behind, so there must be a huge storage lag "
+					//           "somewhere.  Keep trying.");
 				} else {
 					throw;
 				}
@@ -1474,7 +1477,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 		}
 
 		int startSize = batch->changes.size();
-		CODE_PROBE(startSize, "Adding fetch data to a batch which already has changes");
+		// CODE_PROBE(startSize, "Adding fetch data to a batch which already has changes");
 		batch->changes.resize(batch->changes.size() + cacheRange->updates.size());
 
 		// FIXME: pass the deque back rather than copy the data
@@ -1637,7 +1640,7 @@ void cacheWarmup(StorageCacheData* data, const KeyRangeRef& keys, bool nowAssign
 		else {
 			ASSERT(ranges[i].value->adding);
 			data->addCacheRange(CacheRangeInfo::newAdding(data, ranges[i]));
-			CODE_PROBE(true, "cacheWarmup reFetchKeys");
+			// CODE_PROBE(true, "cacheWarmup reFetchKeys");
 		}
 	}
 
@@ -1776,7 +1779,7 @@ private:
 			br >> rollbackVersion;
 
 			if (rollbackVersion < fromVersion && rollbackVersion > data->oldestVersion.get()) {
-				CODE_PROBE(true, "CacheRangeApplyPrivateData cacheRange rollback");
+				// CODE_PROBE(true, "CacheRangeApplyPrivateData cacheRange rollback");
 				TraceEvent(SevWarn, "Rollback", data->thisServerID)
 				    .detail("FromVersion", fromVersion)
 				    .detail("ToVersion", rollbackVersion)
@@ -1801,7 +1804,7 @@ ACTOR Future<Void> compactCache(StorageCacheData* data) {
 	loop {
 		// TODO understand this, should we add delay here?
 		// if (g_network->isSimulated()) {
-		//	double endTime = g_simulator.checkDisabled(format("%s/compactCache",
+		//	double endTime = g_simulator->checkDisabled(format("%s/compactCache",
 		// data->thisServerID.toString().c_str())); 	if(endTime > now()) { 		wait(delay(endTime - now(),
 		// TaskPriority::CompactCache));
 		//	}
@@ -1847,7 +1850,9 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 
 	loop {
 		loop choose {
-			when(wait(cursor ? cursor->getMore(TaskPriority::TLogCommit) : Never())) { break; }
+			when(wait(cursor ? cursor->getMore(TaskPriority::TLogCommit) : Never())) {
+				break;
+			}
 			when(wait(dbInfoChange)) {
 				dbInfoChange = data->db->onChange();
 				if (data->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
@@ -1925,7 +1930,7 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 								cipherDetails.insert(header->cipherHeaderDetails);
 								collectingCipherKeys = true;
 							} else {
-								msg = msg.decrypt(cipherKeys.get(), cloneReader.arena());
+								msg = msg.decrypt(cipherKeys.get(), cloneReader.arena(), BlobCipherMetrics::TLOG);
 							}
 						}
 						if (!collectingCipherKeys) {
@@ -1946,7 +1951,7 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 
 				if (collectingCipherKeys) {
 					std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> result =
-					    wait(getEncryptCipherKeys(data->db, cipherDetails));
+					    wait(getEncryptCipherKeys(data->db, cipherDetails, BlobCipherMetrics::TLOG));
 					cipherKeys = result;
 					collectingCipherKeys = false;
 				} else {
@@ -2014,14 +2019,14 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 					SpanContextMessage scm;
 					reader >> scm;
 				} else if (reader.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(reader)) {
-					CODE_PROBE(true, "StorageCache reading OTELSpanContextMessage");
+					// CODE_PROBE(true, "StorageCache reading OTELSpanContextMessage");
 					OTELSpanContextMessage oscm;
 					reader >> oscm;
 				} else {
 					MutationRef msg;
 					reader >> msg;
 					if (msg.isEncrypted()) {
-						msg = msg.decrypt(cipherKeys.get(), reader.arena());
+						msg = msg.decrypt(cipherKeys.get(), reader.arena(), BlobCipherMetrics::TLOG);
 					}
 
 					if (ver != invalidVersion) // This change belongs to a version < minVersion
@@ -2223,11 +2228,10 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
 	self.ck = cacheKeysPrefixFor(id).withPrefix(systemKeys.begin); // FFFF/02cacheKeys/[this server]/
 
 	actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
-	actors.add(traceCounters("CacheMetrics",
-	                         self.thisServerID,
-	                         SERVER_KNOBS->STORAGE_LOGGING_DELAY,
-	                         &self.counters.cc,
-	                         self.thisServerID.toString() + "/CacheMetrics"));
+	actors.add(self.counters.cc.traceCounters("CacheMetrics",
+	                                          self.thisServerID,
+	                                          SERVER_KNOBS->STORAGE_LOGGING_DELAY,
+	                                          self.thisServerID.toString() + "/CacheMetrics"));
 
 	// fetch already cached ranges from the database and apply them before proceeding
 	wait(storageCacheStartUpWarmup(&self));
@@ -2250,13 +2254,21 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
 				// actors.add(self->readGuard(req , getValueQ));
 				actors.add(getValueQ(&self, req));
 			}
-			when(WatchValueRequest req = waitNext(ssi.watchValue.getFuture())) { ASSERT(false); }
-			when(GetKeyRequest req = waitNext(ssi.getKey.getFuture())) { actors.add(getKey(&self, req)); }
+			when(WatchValueRequest req = waitNext(ssi.watchValue.getFuture())) {
+				ASSERT(false);
+			}
+			when(GetKeyRequest req = waitNext(ssi.getKey.getFuture())) {
+				actors.add(getKey(&self, req));
+			}
 			when(GetKeyValuesRequest req = waitNext(ssi.getKeyValues.getFuture())) {
 				actors.add(getKeyValues(&self, req));
 			}
-			when(GetShardStateRequest req = waitNext(ssi.getShardState.getFuture())) { ASSERT(false); }
-			when(StorageQueuingMetricsRequest req = waitNext(ssi.getQueuingMetrics.getFuture())) { ASSERT(false); }
+			when(GetShardStateRequest req = waitNext(ssi.getShardState.getFuture())) {
+				ASSERT(false);
+			}
+			when(StorageQueuingMetricsRequest req = waitNext(ssi.getQueuingMetrics.getFuture())) {
+				ASSERT(false);
+			}
 			// when( ReplyPromise<Version> reply = waitNext(ssi.getVersion.getFuture()) ) {
 			//	ASSERT(false);
 			//}
@@ -2264,21 +2276,39 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
 				ASSERT(false);
 			}
 
-			when(GetMappedKeyValuesRequest req = waitNext(ssi.getMappedKeyValues.getFuture())) { ASSERT(false); }
-			when(WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) { ASSERT(false); }
-			when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) { ASSERT(false); }
-			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) { ASSERT(false); }
-			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) { ASSERT(false); }
-			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) { ASSERT(false); }
-			when(GetKeyValuesStreamRequest req = waitNext(ssi.getKeyValuesStream.getFuture())) { ASSERT(false); }
-			when(ChangeFeedStreamRequest req = waitNext(ssi.changeFeedStream.getFuture())) { ASSERT(false); }
+			when(GetMappedKeyValuesRequest req = waitNext(ssi.getMappedKeyValues.getFuture())) {
+				ASSERT(false);
+			}
+			when(WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
+				ASSERT(false);
+			}
+			when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {
+				ASSERT(false);
+			}
+			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
+				ASSERT(false);
+			}
+			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
+				ASSERT(false);
+			}
+			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
+				ASSERT(false);
+			}
+			when(GetKeyValuesStreamRequest req = waitNext(ssi.getKeyValuesStream.getFuture())) {
+				ASSERT(false);
+			}
+			when(ChangeFeedStreamRequest req = waitNext(ssi.changeFeedStream.getFuture())) {
+				ASSERT(false);
+			}
 			when(OverlappingChangeFeedsRequest req = waitNext(ssi.overlappingChangeFeeds.getFuture())) {
 				// Simulate endpoint not found so that the requester will try another endpoint
 				// This is a workaround to the fact that storage servers do not have an easy way to enforce this
 				// request goes only to other storage servers, and in simulation we manage to trigger this behavior
 				req.reply.sendError(broken_promise());
 			}
-			when(ChangeFeedPopRequest req = waitNext(ssi.changeFeedPop.getFuture())) { ASSERT(false); }
+			when(ChangeFeedPopRequest req = waitNext(ssi.changeFeedPop.getFuture())) {
+				ASSERT(false);
+			}
 			when(ChangeFeedVersionUpdateRequest req = waitNext(ssi.changeFeedVersionUpdate.getFuture())) {
 				ASSERT(false);
 			}

@@ -21,7 +21,7 @@
 #include "fdbclient/Schemas.h"
 
 // NOTE: also change mr-status-json-schemas.rst.inc
-const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
+const KeyRef JSONSchemas::statusSchema = R"statusSchema(
 {
    "cluster":{
       "storage_wiggler": {
@@ -137,6 +137,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "blob_manager",
                         "blob_worker",
                         "encrypt_key_proxy",
+                        "consistency_scan",
                         "storage_cache",
                         "router",
                         "coordinator"
@@ -561,6 +562,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "unreachable_ratekeeper_worker",
                   "unreachable_blobManager_worker",
                   "unreachable_encryptKeyProxy_worker",
+                  "unreachable_consistencyScan_worker",
                   "unreadable_configuration",
                   "full_replication_timeout",
                   "client_issues",
@@ -580,7 +582,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "duplicate_mutation_fetch_timeout",
                   "primary_dc_missing",
                   "fetch_primary_dc_timeout",
-                  "fetch_storage_wiggler_stats_timeout"
+                  "fetch_storage_wiggler_stats_timeout",
+                  "fetch_consistency_scan_info_timeout"
                ]
             },
             "issues":[
@@ -599,8 +602,6 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "description":"abc"
          }
       ],
-)statusSchema"
-                                                          R"statusSchema(
       "recovery_state":{
          "seconds_since_last_recovered":1,
          "required_resolvers":1,
@@ -852,8 +853,22 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "encryption_at_rest_mode": {
              "$enum":[
              "disabled",
-             "aes_256_ctr"
+             "domain_aware",
+             "cluster_aware"
          ]}
+      },
+      "consistency_scan_info":{
+        "consistency_scan_enabled":false,
+        "restart":false,
+        "max_rate":0,
+        "target_interval":0,
+        "bytes_read_prev_round":0,
+        "last_round_start_datetime":"2022-04-20 00:05:05.123 +0000",
+        "last_round_finish_datetime":"1970-01-01 00:00:00.000 +0000",
+        "last_round_start_timestamp":1648857905.123,
+        "last_round_finish_timestamp":0,
+        "smoothed_round_seconds":1,
+        "finished_rounds":1
       },
       "data":{
          "least_operating_space_bytes_log_server":0,
@@ -947,8 +962,29 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             }
          }
       },
+      "metacluster" : {
+         "cluster_type" : "management",
+         "metacluster_name":"metacluster1",
+         "metacluster_id":12345,
+         "data_cluster_name" : "data_cluster1",
+         "data_cluster_id" : 12346,
+         "num_data_clusters":10
+      },
       "tenants":{
-         "num_tenants":0
+         "num_tenants":0,
+         "num_tenant_groups":10,
+         "tenant_group_capacity":20
+      },
+      "idempotency_ids":{
+         "size_bytes": 0,
+         "expired_version": 0,
+         "expired_age": 0,
+         "oldest_id_version": 0,
+         "oldest_id_age": 0
+      },
+      "version_epoch":{
+         "enabled": false,
+         "epoch": 0
       }
    },
    "client":{
@@ -990,9 +1026,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "up_to_date":true
       }
    }
-})statusSchema");
+})statusSchema"_sr;
 
-const KeyRef JSONSchemas::clusterConfigurationSchema = LiteralStringRef(R"configSchema(
+const KeyRef JSONSchemas::clusterConfigurationSchema = R"configSchema(
 {
     "create":{
     "$enum":[
@@ -1062,9 +1098,9 @@ const KeyRef JSONSchemas::clusterConfigurationSchema = LiteralStringRef(R"config
     "auto_logs":3,
     "commit_proxies":5,
     "grv_proxies":1
-})configSchema");
+})configSchema"_sr;
 
-const KeyRef JSONSchemas::latencyBandConfigurationSchema = LiteralStringRef(R"configSchema(
+const KeyRef JSONSchemas::latencyBandConfigurationSchema = R"configSchema(
 {
     "get_read_version":{
         "bands":[
@@ -1084,30 +1120,30 @@ const KeyRef JSONSchemas::latencyBandConfigurationSchema = LiteralStringRef(R"co
         ],
         "max_commit_bytes":0
     }
-})configSchema");
+})configSchema"_sr;
 
-const KeyRef JSONSchemas::dataDistributionStatsSchema = LiteralStringRef(R"""(
+const KeyRef JSONSchemas::dataDistributionStatsSchema = R"""(
 {
   "shard_bytes": 1947000
 }
-)""");
+)"""_sr;
 
-const KeyRef JSONSchemas::logHealthSchema = LiteralStringRef(R"""(
+const KeyRef JSONSchemas::logHealthSchema = R"""(
 {
   "log_queue": 156
 }
-)""");
+)"""_sr;
 
-const KeyRef JSONSchemas::storageHealthSchema = LiteralStringRef(R"""(
+const KeyRef JSONSchemas::storageHealthSchema = R"""(
 {
   "cpu_usage": 3.28629447047675,
   "disk_usage": 0.19997897369207954,
   "storage_durability_lag": 5050809,
   "storage_queue": 2030
 }
-)""");
+)"""_sr;
 
-const KeyRef JSONSchemas::aggregateHealthSchema = LiteralStringRef(R"""(
+const KeyRef JSONSchemas::aggregateHealthSchema = R"""(
 {
   "batch_limited": false,
   "limiting_storage_durability_lag": 5050809,
@@ -1117,12 +1153,12 @@ const KeyRef JSONSchemas::aggregateHealthSchema = LiteralStringRef(R"""(
   "worst_storage_queue": 2030,
   "worst_log_queue": 156
 }
-)""");
+)"""_sr;
 
-const KeyRef JSONSchemas::managementApiErrorSchema = LiteralStringRef(R"""(
+const KeyRef JSONSchemas::managementApiErrorSchema = R"""(
 {
    "retriable": false,
    "command": "exclude",
    "message": "The reason of the error"
 }
-)""");
+)"""_sr;

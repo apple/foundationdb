@@ -18,14 +18,13 @@
  * limitations under the License.
  */
 
-#include <cstring>
-
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/serialize.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/TokenSign.h"
+#include "fdbrpc/TenantInfo.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -41,12 +40,20 @@ template <>
 struct CycleMembers<true> {
 	Arena arena;
 	TenantName tenant;
-	authz::jwt::TokenRef token;
-	StringRef signedToken;
+	int64_t tenantId;
+	Standalone<StringRef> signedToken;
+	bool useToken;
 };
+
+template <bool>
+struct CycleWorkload;
+
+ACTOR Future<Void> prepareToken(Database cx, CycleWorkload<true>* self);
 
 template <bool MultiTenancy>
 struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
+	static constexpr auto NAME = MultiTenancy ? "TenantCycle" : "Cycle";
+	static constexpr auto TenantEnabled = MultiTenancy;
 	int actorCount, nodeCount;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
 	Key keyPrefix;
@@ -62,47 +69,25 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
 		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
 		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
-		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString());
+		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
 		traceParentProbability = getOption(options, "traceParentProbability"_sr, 0.01);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
 		if constexpr (MultiTenancy) {
 			ASSERT(g_network->isSimulated());
-			auto k = g_simulator.authKeys.begin();
+			this->useToken = getOption(options, "useToken"_sr, true);
 			this->tenant = getOption(options, "tenant"_sr, "CycleTenant"_sr);
-			// make it comfortably longer than the timeout of the workload
-			auto currentTime = uint64_t(lround(g_network->timer()));
-			this->token.algorithm = authz::Algorithm::ES256;
-			this->token.issuedAtUnixTime = currentTime;
-			this->token.expiresAtUnixTime =
-			    currentTime + uint64_t(std::lround(getCheckTimeout())) + uint64_t(std::lround(testDuration)) + 100;
-			this->token.keyId = k->first;
-			this->token.notBeforeUnixTime = currentTime - 10;
-			VectorRef<StringRef> tenants;
-			tenants.push_back_deep(this->arena, this->tenant);
-			this->token.tenants = tenants;
-			// we currently don't support this workload to be run outside of simulation
-			this->signedToken = authz::jwt::signToken(this->arena, this->token, k->second);
-		}
-	}
-
-	template <bool MT = MultiTenancy>
-	std::enable_if_t<MT, StringRef> getAuthToken() const {
-		return this->signedToken;
-	}
-
-	std::string description() const override {
-		if constexpr (MultiTenancy) {
-			return "TenantCycleWorkload";
-		} else {
-			return "CycleWorkload";
+			this->tenantId = TenantInfo::INVALID_TENANT;
 		}
 	}
 
 	Future<Void> setup(Database const& cx) override {
+		Future<Void> prepare;
 		if constexpr (MultiTenancy) {
-			cx->defaultTenant = this->tenant;
+			prepare = prepareToken(cx, this);
+		} else {
+			prepare = Void();
 		}
-		return bulkSetup(cx, this, nodeCount, Promise<double>());
+		return runAfter(prepare, [this, cx](Void) { return bulkSetup(cx, this, nodeCount, Promise<double>()); });
 	}
 	Future<Void> start(Database const& cx) override {
 		if constexpr (MultiTenancy) {
@@ -151,12 +136,13 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	}
 
 	template <bool B = MultiTenancy>
-	std::enable_if_t<B> setAuthToken(Transaction& tr) {
-		tr.setOption(FDBTransactionOptions::AUTHORIZATION_TOKEN, this->signedToken);
+	std::enable_if_t<B> setAuthToken(Transaction& tr) const {
+		if (this->useToken)
+			tr.setOption(FDBTransactionOptions::AUTHORIZATION_TOKEN, this->signedToken);
 	}
 
 	template <bool B = MultiTenancy>
-	std::enable_if_t<!B> setAuthToken(Transaction& tr) {}
+	std::enable_if_t<!B> setAuthToken(Transaction& tr) const {}
 
 	ACTOR Future<Void> cycleClient(Database cx, CycleWorkload* self, double delay) {
 		state double lastTime = now();
@@ -167,7 +153,6 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 				state double tstart = now();
 				state int r = deterministicRandom()->randomInt(0, self->nodeCount);
 				state Transaction tr(cx);
-				self->setAuthToken(tr);
 				if (deterministicRandom()->random01() <= self->traceParentProbability) {
 					state Span span("CycleClient"_loc);
 					TraceEvent("CycleTracingTransaction", span.context.traceID).log();
@@ -176,6 +161,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 				}
 				while (true) {
 					try {
+						self->setAuthToken(tr);
 						// Reverse next and next^2 node
 						Optional<Value> v = wait(tr.get(self->key(r)));
 						if (!v.present())
@@ -314,9 +300,9 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 			// One client checks the validity of the cycle
 			state Transaction tr(cx);
 			state int retryCount = 0;
-			self->setAuthToken(tr);
 			loop {
 				try {
+					self->setAuthToken(tr);
 					state Version v = wait(tr.getReadVersion());
 					RangeResult data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
 					                                    firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)),
@@ -329,7 +315,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 					if (g_network->isSimulated() && retryCount > 50) {
 						CODE_PROBE(true, "Cycle check enable speedUpSimulation because too many transaction_too_old()");
 						// try to make the read window back to normal size (5 * version_per_sec)
-						g_simulator.speedUpSimulation = true;
+						g_simulator->speedUpSimulation = true;
 					}
 					wait(tr.onError(e));
 				}
@@ -339,5 +325,17 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	}
 };
 
-WorkloadFactory<CycleWorkload<false>> CycleWorkloadFactory("Cycle", false);
-WorkloadFactory<CycleWorkload<true>> TenantCycleWorkloadFactory("TenantCycle", true);
+ACTOR Future<Void> prepareToken(Database cx, CycleWorkload<true>* self) {
+	cx->defaultTenant = self->tenant;
+	int64_t tenantId = wait(cx->lookupTenant(self->tenant));
+	self->tenantId = tenantId;
+	ASSERT_NE(self->tenantId, TenantInfo::INVALID_TENANT);
+	// make the lifetime comfortably longer than the timeout of the workload
+	self->signedToken = g_simulator->makeToken(self->tenantId,
+	                                           uint64_t(std::lround(self->getCheckTimeout())) +
+	                                               uint64_t(std::lround(self->testDuration)) + 100);
+	return Void();
+}
+
+WorkloadFactory<CycleWorkload<false>> CycleWorkloadFactory(UntrustedMode::False);
+WorkloadFactory<CycleWorkload<true>> TenantCycleWorkloadFactory(UntrustedMode::True);

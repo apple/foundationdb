@@ -98,8 +98,9 @@ struct ThreadCallback {
 	virtual void error(const Error&, int& userParam) = 0;
 	virtual ThreadCallback* addCallback(ThreadCallback* cb);
 
-	virtual void clearCallback(ThreadCallback* cb) {
+	virtual bool clearCallback(ThreadCallback* cb) {
 		// If this is the only registered callback this will be called with (possibly) arbitrary pointers
+		return false;
 	}
 
 	// Note that when a ThreadCallback is destroyed it must have no MultiCallbackHolders, but this can't be
@@ -187,10 +188,10 @@ public:
 		return (ThreadCallback*)this;
 	}
 
-	void clearCallback(ThreadCallback* callback) override {
+	bool clearCallback(ThreadCallback* callback) override {
 		MultiCallbackHolder* h = callback->getHolder(this);
 		if (h == nullptr) {
-			return;
+			return false;
 		}
 
 		UNSTOPPABLE_ASSERT(h->index < callbacks.size() && h->index >= 0);
@@ -204,6 +205,7 @@ public:
 
 		callbacks.pop_back();
 		callback->destroyHolder(h);
+		return true;
 	}
 
 	bool canFire(int notMadeActive) const override { return true; }
@@ -424,14 +426,16 @@ public:
 
 		// Only clear the callback if it belongs to the caller, because
 		// another actor could be waiting on it now!
-		if (callback == cb)
+		bool cleared = false;
+		if (callback == cb) {
 			callback = nullptr;
-		else if (callback != nullptr)
-			callback->clearCallback(cb);
+			cleared = true;
+		} else if (callback != nullptr) {
+			cleared = callback->clearCallback(cb);
+		}
 
 		this->mutex.leave();
-
-		return true;
+		return cleared;
 	}
 
 	void setCancel(Future<Void>&& cf) { cancelFuture = std::move(cf); }
@@ -602,6 +606,13 @@ public:
 	ThreadFuture(const T& presentValue) : sav(new ThreadSingleAssignmentVar<T>()) { sav->send(presentValue); }
 	ThreadFuture(Never) : sav(new ThreadSingleAssignmentVar<T>()) {}
 	ThreadFuture(const Error& error) : sav(new ThreadSingleAssignmentVar<T>()) { sav->sendError(error); }
+	ThreadFuture(const ErrorOr<T>& errorOr) : sav(new ThreadSingleAssignmentVar<T>()) {
+		if (errorOr.isError()) {
+			sav->sendError(errorOr.getError());
+		} else {
+			sav->send(errorOr.get());
+		}
+	}
 	~ThreadFuture() {
 		if (sav)
 			sav->delref();
@@ -732,7 +743,26 @@ Future<T> safeThreadFutureToFutureImpl(ThreadFuture<T> threadFuture) {
 	return threadFuture.get();
 }
 
-// The allow anonymous_future type is used to prevent misuse of ThreadFutures.
+// The removeArenaFromStandalone() actors simulate the behavior of DLApi. In this case,
+// the memory is not owned by the Standalone. If the `future` goes out of scope, subsequent
+// access to the memory via the returned standalone will be invalid.
+ACTOR template <typename T>
+Future<Standalone<T>> removeArenaFromStandalone(Future<Standalone<T>> future) {
+	Standalone<T> _ = wait(future);
+	return Standalone<T>(future.get(), Arena());
+}
+
+ACTOR template <typename T>
+Future<Optional<Standalone<T>>> removeArenaFromStandalone(Future<Optional<Standalone<T>>> future) {
+	Optional<Standalone<T>> val = wait(future);
+	if (val.present()) {
+		return Standalone<T>(future.get().get(), Arena());
+	} else {
+		return Optional<Standalone<T>>();
+	}
+}
+
+// The allow_anonymous_future type is used to prevent misuse of ThreadFutures.
 // For Standalone types, the memory in some cases is actually stored in the ThreadFuture object,
 // in which case we expect the caller to keep that ThreadFuture around until the result is no
 // longer needed.
@@ -757,7 +787,11 @@ typename std::enable_if<allow_anonymous_future<T>::value, Future<T>>::type safeT
 template <class T>
 typename std::enable_if<!allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
     ThreadFuture<T>& threadFuture) {
-	return safeThreadFutureToFutureImpl(threadFuture);
+	Future<T> f = safeThreadFutureToFutureImpl(threadFuture);
+	if (BUGGIFY) {
+		return removeArenaFromStandalone(f);
+	}
+	return f;
 }
 
 template <class T>
@@ -770,7 +804,9 @@ typename std::enable_if<allow_anonymous_future<T>::value, Future<T>>::type safeT
 template <class T>
 typename std::enable_if<!allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
     Future<T>& future) {
-	// Do nothing
+	if (BUGGIFY) {
+		return removeArenaFromStandalone(future);
+	}
 	return future;
 }
 

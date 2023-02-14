@@ -21,7 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class ClogSingleConnectionWorkload : public TestWorkload {
@@ -29,6 +29,7 @@ class ClogSingleConnectionWorkload : public TestWorkload {
 	Optional<double> clogDuration; // If empty, clog forever
 
 public:
+	static constexpr auto NAME = "ClogSingleConnection";
 	ClogSingleConnectionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		auto minDelay = getOption(options, "minDelay"_sr, 0.0);
 		auto maxDelay = getOption(options, "maxDelay"_sr, 10.0);
@@ -39,9 +40,6 @@ public:
 		}
 	}
 
-	std::string description() const override {
-		return g_network->isSimulated() ? "ClogSingleConnection" : "NoClogging";
-	}
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override {
@@ -60,12 +58,12 @@ public:
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	void clogRandomPair() {
-		auto m1 = deterministicRandom()->randomChoice(g_simulator.getAllProcesses());
-		auto m2 = deterministicRandom()->randomChoice(g_simulator.getAllProcesses());
+		auto m1 = deterministicRandom()->randomChoice(g_simulator->getAllProcesses());
+		auto m2 = deterministicRandom()->randomChoice(g_simulator->getAllProcesses());
 		if (m1->address.ip != m2->address.ip) {
-			g_simulator.clogPair(m1->address.ip, m2->address.ip, clogDuration.orDefault(10000));
+			g_simulator->clogPair(m1->address.ip, m2->address.ip, clogDuration.orDefault(10000));
 		}
 	}
 };
 
-WorkloadFactory<ClogSingleConnectionWorkload> ClogSingleConnectionWorkloadFactory("ClogSingleConnection");
+WorkloadFactory<ClogSingleConnectionWorkload> ClogSingleConnectionWorkloadFactory;

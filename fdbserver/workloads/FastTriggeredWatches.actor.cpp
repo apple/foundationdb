@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -27,6 +26,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct FastTriggeredWatchesWorkload : TestWorkload {
+	static constexpr auto NAME = "FastTriggeredWatches";
 	// Tests the time it takes for a watch to be fired after the value has changed in the storage server
 	int nodes, keyBytes;
 	double testDuration;
@@ -36,13 +36,17 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 
 	FastTriggeredWatchesWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), operations("Operations"), retries("Retries") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
-		nodes = getOption(options, LiteralStringRef("nodes"), 100);
+		testDuration = getOption(options, "testDuration"_sr, 600.0);
+		nodes = getOption(options, "nodes"_sr, 100);
 		defaultValue = StringRef(format("%010d", deterministicRandom()->randomInt(0, 1000)));
-		keyBytes = std::max(getOption(options, LiteralStringRef("keyBytes"), 16), 16);
+		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 16);
 	}
 
-	std::string description() const override { return "Watches"; }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		// This test asserts that watches fire within a certain version range. Attrition will make this assertion fail
+		// since it can cause recoveries which will bump the cluster version significantly
+		out.emplace("Attrition");
+	}
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0)
@@ -182,4 +186,4 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<FastTriggeredWatchesWorkload> FastTriggeredWatchesWorkloadFactory("FastTriggeredWatches");
+WorkloadFactory<FastTriggeredWatchesWorkload> FastTriggeredWatchesWorkloadFactory;

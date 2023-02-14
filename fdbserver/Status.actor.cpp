@@ -19,14 +19,18 @@
  */
 
 #include <cinttypes>
+#include "fdbclient/BlobGranuleCommon.h"
+#include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fmt/format.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyBackedTypes.h"
-#include "fdbserver/Status.h"
+#include "fdbserver/Status.actor.h"
 #include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/Metacluster.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -34,11 +38,13 @@
 #include "fdbserver/ClusterRecovery.actor.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbclient/ConsistencyScanInterface.actor.h"
 #include "flow/UnitTest.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/JsonBuilder.h"
+#include "fdbclient/StorageWiggleMetrics.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 const char* RecoveryStatus::names[] = { "reading_coordinated_state",
@@ -283,10 +289,29 @@ static JsonBuilderObject getError(const TraceEventFields& errorFields) {
 	return statusObj;
 }
 
-static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
-                                              std::vector<WorkerDetails> workers,
-                                              Optional<DatabaseConfiguration> configuration,
-                                              std::set<std::string>* incomplete_reasons) {
+namespace {
+
+void reportCgroupCpuStat(JsonBuilderObject& object, const TraceEventFields& eventFields) {
+	JsonBuilderObject cgroupCpuStatObj;
+	std::string val;
+	if (eventFields.tryGetValue("NrPeriods", val)) {
+		cgroupCpuStatObj.setKeyRawNumber("nr_periods", val);
+	}
+	if (eventFields.tryGetValue("NrThrottled", val)) {
+		cgroupCpuStatObj.setKeyRawNumber("nr_throttled", val);
+	}
+	if (eventFields.tryGetValue("ThrottledTime", val)) {
+		cgroupCpuStatObj.setKeyRawNumber("throttled_time", val);
+	}
+	if (!cgroupCpuStatObj.empty()) {
+		object["cgroup_cpu_stat"] = cgroupCpuStatObj;
+	}
+}
+
+JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
+                                       std::vector<WorkerDetails> workers,
+                                       Optional<DatabaseConfiguration> configuration,
+                                       std::set<std::string>* incomplete_reasons) {
 	JsonBuilderObject machineMap;
 	double metric;
 	int failed = 0;
@@ -294,7 +319,7 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 	// map from machine networkAddress to datacenter ID
 	std::map<NetworkAddress, std::string> dcIds;
 	std::map<NetworkAddress, LocalityData> locality;
-	std::map<std::string, bool> notExcludedMap;
+	std::map<std::string, bool> excludedMap;
 	std::map<std::string, int32_t> workerContribMap;
 	std::map<std::string, JsonBuilderObject> machineJsonMap;
 
@@ -338,6 +363,10 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 				memoryObj.setKeyRawNumber("free_bytes", event.getValue("AvailableMemory"));
 				statusObj["memory"] = memoryObj;
 
+#ifdef __linux__
+				reportCgroupCpuStat(statusObj, event);
+#endif // __linux__
+
 				JsonBuilderObject cpuObj;
 				double cpuSeconds = event.getDouble("CPUSeconds");
 				double elapsed = event.getDouble("Elapsed");
@@ -360,7 +389,7 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 				statusObj["network"] = networkObj;
 
 				if (configuration.present()) {
-					notExcludedMap[machineId] =
+					excludedMap[machineId] =
 					    true; // Will be set to false below if this or any later process is not excluded
 				}
 
@@ -368,18 +397,21 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 				machineJsonMap[machineId] = statusObj;
 			}
 
-			// FIXME: this will not catch if the secondary address of the process was excluded
 			NetworkAddressList tempList;
 			tempList.address = it->first;
-			bool excludedServer = false;
-			bool excludedLocality = false;
-			if (configuration.present() && configuration.get().isExcludedServer(tempList))
-				excludedServer = true;
+			bool excludedServer = true;
+			bool excludedLocality = true;
+			if (configuration.present() && !configuration.get().isExcludedServer(tempList))
+				excludedServer = false;
 			if (locality.count(it->first) && configuration.present() &&
-			    configuration.get().isMachineExcluded(locality[it->first]))
-				excludedLocality = true;
+			    !configuration.get().isMachineExcluded(locality[it->first]))
+				excludedLocality = false;
 
-			notExcludedMap[machineId] = excludedServer || excludedLocality;
+			// If any server is not excluded, set the overall exclusion status
+			// of the machine to false.
+			if (!excludedServer && !excludedLocality) {
+				excludedMap[machineId] = false;
+			}
 			workerContribMap[machineId]++;
 		} catch (Error&) {
 			++failed;
@@ -390,7 +422,7 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 	for (auto& mapPair : machineJsonMap) {
 		auto& machineId = mapPair.first;
 		auto& jsonItem = machineJsonMap[machineId];
-		jsonItem["excluded"] = notExcludedMap[machineId];
+		jsonItem["excluded"] = excludedMap[machineId];
 		jsonItem["contributing_workers"] = workerContribMap[machineId];
 		machineMap[machineId] = jsonItem;
 	}
@@ -400,6 +432,8 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 
 	return machineMap;
 }
+
+} // anonymous namespace
 
 JsonBuilderObject getLagObject(int64_t versions) {
 	JsonBuilderObject lag;
@@ -762,6 +796,9 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				// Map the address of the worker to the error message object
 				tracefileOpenErrorMap[traceFileErrorsItr->first.toString()] = msgObj;
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
 				incomplete_reasons->insert("file_open_error details could not be retrieved");
 			}
 		}
@@ -807,6 +844,14 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 	if (configuration.present() && configuration.get().blobGranulesEnabled && db->get().blobManager.present()) {
 		roles.addRole("blob_manager", db->get().blobManager.get());
+	}
+
+	if (configuration.present() && configuration.get().blobGranulesEnabled && db->get().blobMigrator.present()) {
+		roles.addRole("blob_migrator", db->get().blobMigrator.get());
+	}
+
+	if (db->get().consistencyScan.present()) {
+		roles.addRole("consistency_scan", db->get().consistencyScan.get());
 	}
 
 	if (SERVER_KNOBS->ENABLE_ENCRYPTION && db->get().encryptKeyProxy.present()) {
@@ -1068,6 +1113,9 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			}
 
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			// Something strange occurred, process list is incomplete but what was built so far, if anything, will be
 			// returned.
 			incomplete_reasons->insert("Cannot retrieve all process status information.");
@@ -1264,7 +1312,7 @@ ACTOR static Future<double> doReadProbe(Future<double> grvProbe, Transaction* tr
 	loop {
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
-			Optional<Standalone<StringRef>> _ = wait(tr->get(LiteralStringRef("\xff/StatusJsonTestKey62793")));
+			Optional<Standalone<StringRef>> _ = wait(tr->get("\xff/StatusJsonTestKey62793"_sr));
 			return g_network->timer_monotonic() - start;
 		} catch (Error& e) {
 			wait(tr->onError(e));
@@ -1383,10 +1431,44 @@ ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx,
 
 		wait(waitForAll(probes));
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		incomplete_reasons->insert(format("Unable to retrieve latency probe information (%s).", e.what()));
 	}
 
 	return statusObj;
+}
+
+ACTOR static Future<JsonBuilderObject> versionEpochStatusFetcher(Database cx,
+                                                                 std::set<std::string>* incomplete_reasons) {
+	state JsonBuilderObject message;
+	try {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				Optional<Value> versionEpochVal = wait(timeoutError(BUGGIFY ? Never() : tr.get(versionEpochKey), 5.0));
+				message["enabled"] = versionEpochVal.present();
+				if (!versionEpochVal.present()) {
+					break;
+				}
+				int64_t versionEpoch = BinaryReader::fromStringRef<int64_t>(versionEpochVal.get(), Unversioned());
+				message["epoch"] = std::to_string(versionEpoch);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		incomplete_reasons->insert(format("Unable to retrieve version epoch information (%s).", e.what()));
+	}
+	return message;
 }
 
 ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx,
@@ -1422,6 +1504,9 @@ ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx,
 			}
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		incomplete_reasons->insert(format("Unable to retrieve consistency check settings (%s).", e.what()));
 	}
 	return Void();
@@ -1476,11 +1561,15 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 					if (loggingRanges.count(LogRangeAndUID(range, logUid))) {
 						std::pair<Key, Key> rangePair = std::make_pair(range.begin, range.end);
 						if (existingRanges.count(rangePair)) {
+							std::string rangeDescription = (range == getDefaultBackupSharedRange())
+							                                   ? "the default backup set"
+							                                   : format("`%s` - `%s`",
+							                                            printable(range.begin).c_str(),
+							                                            printable(range.end).c_str());
 							messages->push_back(JsonString::makeMessage(
 							    "duplicate_mutation_streams",
-							    format("Backup and DR are not sharing the same stream of mutations for `%s` - `%s`",
-							           printable(range.begin).c_str(),
-							           printable(range.end).c_str())
+							    format("Backup and DR are not sharing the same stream of mutations for %s",
+							           rangeDescription.c_str())
 							        .c_str()));
 							break;
 						}
@@ -1509,6 +1598,9 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 			}
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		incomplete_reasons->insert(format("Unable to retrieve log ranges (%s).", e.what()));
 	}
 	return Void();
@@ -1682,7 +1774,10 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 		}
 		int count = coordinators.clientLeaderServers.size();
 		statusObj["coordinators_count"] = count;
-	} catch (Error&) {
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		incomplete_reasons->insert("Could not retrieve all configuration status information.");
 	}
 	return statusObj;
@@ -1697,17 +1792,16 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 		std::vector<Future<TraceEventFields>> futures;
 
 		// TODO:  Should this be serial?
-		futures.push_back(timeoutError(
-		    ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStarting"))), 1.0));
-		futures.push_back(timeoutError(
-		    ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStats"))), 1.0));
-		futures.push_back(timeoutError(
-		    ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MovingData"))), 1.0));
-		futures.push_back(timeoutError(
-		    ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlight"))), 1.0));
-		futures.push_back(timeoutError(
-		    ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlightRemote"))),
-		    1.0));
+		futures.push_back(
+		    timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("DDTrackerStarting"_sr)), 1.0));
+		futures.push_back(
+		    timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("DDTrackerStats"_sr)), 1.0));
+		futures.push_back(
+		    timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("MovingData"_sr)), 1.0));
+		futures.push_back(
+		    timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("TotalDataInFlight"_sr)), 1.0));
+		futures.push_back(
+		    timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("TotalDataInFlightRemote"_sr)), 1.0));
 
 		std::vector<TraceEventFields> dataInfo = wait(getAll(futures));
 
@@ -2079,8 +2173,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 			auto worker = getWorker(workersMap, p.address());
 			if (worker.present())
 				commitProxyStatFutures.push_back(timeoutError(
-				    worker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("ProxyMetrics"))),
-				    1.0));
+				    worker.get().interf.eventLogRequest.getReply(EventLogRequest("ProxyMetrics"_sr)), 1.0));
 			else
 				throw all_alternatives_failed(); // We need data from all proxies for this result to be trustworthy
 		}
@@ -2088,8 +2181,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 			auto worker = getWorker(workersMap, p.address());
 			if (worker.present())
 				grvProxyStatFutures.push_back(timeoutError(
-				    worker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("GrvProxyMetrics"))),
-				    1.0));
+				    worker.get().interf.eventLogRequest.getReply(EventLogRequest("GrvProxyMetrics"_sr)), 1.0));
 			else
 				throw all_alternatives_failed(); // We need data from all proxies for this result to be trustworthy
 		}
@@ -2156,9 +2248,9 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 	// Transactions
 	try {
 		state Future<TraceEventFields> f1 =
-		    timeoutError(rkWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("RkUpdate"))), 1.0);
-		state Future<TraceEventFields> f2 = timeoutError(
-		    rkWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("RkUpdateBatch"))), 1.0);
+		    timeoutError(rkWorker.interf.eventLogRequest.getReply(EventLogRequest("RkUpdate"_sr)), 1.0);
+		state Future<TraceEventFields> f2 =
+		    timeoutError(rkWorker.interf.eventLogRequest.getReply(EventLogRequest("RkUpdateBatch"_sr)), 1.0);
 		wait(success(f1) && success(f2));
 		TraceEventFields ratekeeper = f1.get();
 		TraceEventFields batchRatekeeper = f2.get();
@@ -2393,6 +2485,53 @@ ACTOR static Future<JsonBuilderObject> blobWorkerStatusFetcher(
 	return statusObj;
 }
 
+ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std::set<std::string>* incompleteReason) {
+
+	state JsonBuilderObject statusObj;
+	state std::vector<Future<Optional<TraceEventFields>>> futures;
+
+	try {
+		Optional<BlobRestoreStatus> status = wait(getRestoreStatus(db, normalKeys));
+		if (status.present()) {
+			switch (status.get().phase) {
+			case BlobRestorePhase::INIT:
+				statusObj["blob_full_restore_phase"] = "Initializing";
+				break;
+			case BlobRestorePhase::STARTING_MIGRATOR:
+				statusObj["blob_full_restore_phase"] = "Starting migrator";
+				break;
+			case BlobRestorePhase::LOADING_MANIFEST:
+				statusObj["blob_full_restore_phase"] = "Loading manifest";
+				break;
+			case BlobRestorePhase::LOADED_MANIFEST:
+				statusObj["blob_full_restore_phase"] = "Manifest is loaded";
+				break;
+			case BlobRestorePhase::COPYING_DATA:
+				statusObj["blob_full_restore_phase"] = "Copying data";
+				statusObj["blob_full_restore_progress"] = status.get().status;
+				break;
+			case BlobRestorePhase::APPLYING_MLOGS:
+				statusObj["blob_full_restore_phase"] = "Applying mutation logs";
+				break;
+			case BlobRestorePhase::DONE:
+				statusObj["blob_full_restore_phase"] = "Completed successfully";
+				break;
+			case BlobRestorePhase::ERROR:
+				statusObj["blob_full_restore_phase"] =
+				    "Completed with fatal error: " + std::string(Error(status.get().status).what());
+				break;
+			default:
+				statusObj["blob_full_restore_phase"] = "Unexpected phase";
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		incompleteReason->insert("Unable to query blob restore status");
+	}
+	return statusObj;
+}
+
 static JsonBuilderObject tlogFetcher(int* logFaultTolerance,
                                      const std::vector<TLogSet>& tLogs,
                                      std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
@@ -2539,7 +2678,7 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 
 	std::map<NetworkAddress, StringRef> workerZones;
 	for (const auto& worker : workers) {
-		workerZones[worker.interf.address()] = worker.interf.locality.zoneId().orDefault(LiteralStringRef(""));
+		workerZones[worker.interf.address()] = worker.interf.locality.zoneId().orDefault(""_sr);
 	}
 	std::map<StringRef, int> coordinatorZoneCounts;
 	for (const auto& coordinator : coordinatorAddresses) {
@@ -2707,6 +2846,9 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx,
 		}
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "LayerStatusError").error(e);
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		incomplete_reasons->insert(format("Unable to retrieve layer status (%s).", e.what()));
 		json.create("_error") = format("Unable to retrieve layer status (%s).", e.what());
 		json.create("_valid") = false;
@@ -2803,18 +2945,22 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 	}
 }
 
-ACTOR Future<std::pair<Optional<Value>, Optional<Value>>> readStorageWiggleMetrics(Database cx,
-                                                                                   bool use_system_priority) {
+ACTOR Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMetrics>>> readStorageWiggleMetrics(
+    Database cx,
+    bool use_system_priority) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state Optional<Value> primaryV;
-	state Optional<Value> remoteV;
+	state Optional<StorageWiggleMetrics> primaryV;
+	state Optional<StorageWiggleMetrics> remoteV;
+	state StorageWiggleData wiggleState;
 	loop {
 		try {
 			if (use_system_priority) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			}
-			wait(store(primaryV, StorageWiggleMetrics::runGetTransaction(tr, true)) &&
-			     store(remoteV, StorageWiggleMetrics::runGetTransaction(tr, false)));
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			wait(store(primaryV, wiggleState.storageWiggleMetrics(PrimaryRegion(true)).get(tr)) &&
+			     store(remoteV, wiggleState.storageWiggleMetrics(PrimaryRegion(false)).get(tr)));
 			return std::make_pair(primaryV, remoteV);
 		} catch (Error& e) {
 			wait(tr->onError(e));
@@ -2829,7 +2975,7 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribu
                                                            JsonBuilderArray* messages) {
 
 	state Future<GetStorageWigglerStateReply> stateFut;
-	state Future<std::pair<Optional<Value>, Optional<Value>>> wiggleMetricsFut =
+	state Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMetrics>>> wiggleMetricsFut =
 	    timeoutError(readStorageWiggleMetrics(cx, use_system_priority), 2.0);
 	state JsonBuilderObject res;
 	if (ddWorker.present()) {
@@ -2847,7 +2993,7 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribu
 		wait(success(wiggleMetricsFut) && success(stateFut));
 		auto [primaryV, remoteV] = wiggleMetricsFut.get();
 		if (primaryV.present()) {
-			auto obj = ObjectReader::fromStringRef<StorageWiggleMetrics>(primaryV.get(), IncludeVersion()).toJSON();
+			auto obj = primaryV.get().toJSON();
 			auto& reply = stateFut.get();
 			obj["state"] = StorageWiggler::getWiggleStateStr(static_cast<StorageWiggler::State>(reply.primary));
 			obj["last_state_change_timestamp"] = reply.lastStateChangePrimary;
@@ -2855,7 +3001,7 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribu
 			res["primary"] = obj;
 		}
 		if (conf.regions.size() > 1 && remoteV.present()) {
-			auto obj = ObjectReader::fromStringRef<StorageWiggleMetrics>(remoteV.get(), IncludeVersion()).toJSON();
+			auto obj = remoteV.get().toJSON();
 			auto& reply = stateFut.get();
 			obj["state"] = StorageWiggler::getWiggleStateStr(static_cast<StorageWiggler::State>(reply.remote));
 			obj["last_state_change_timestamp"] = reply.lastStateChangeRemote;
@@ -2871,6 +3017,26 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribu
 	}
 	return res;
 }
+
+// read consistencyScanInfo through Read-only tx
+ACTOR Future<Optional<Value>> consistencyScanInfoFetcher(Database cx) {
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	state Optional<Value> val;
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			wait(store(val, ConsistencyScanInfo::getInfo(tr)));
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+
+	TraceEvent("ConsistencyScanInfoFetcher").log();
+	return val;
+}
+
 // constructs the cluster section of the json status output
 ACTOR Future<StatusReply> clusterGetStatus(
     Reference<AsyncVar<ServerDBInfo>> db,
@@ -2881,7 +3047,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
     ServerCoordinators coordinators,
     std::vector<NetworkAddress> incompatibleConnections,
     Version datacenterVersionDifference,
-    ConfigBroadcaster const* configBroadcaster) {
+    ConfigBroadcaster const* configBroadcaster,
+    Optional<MetaclusterRegistrationEntry> metaclusterRegistration,
+    MetaclusterMetrics metaclusterMetrics) {
 	state double tStart = timer();
 
 	state JsonBuilderArray messages;
@@ -2890,6 +3058,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	state WorkerDetails ccWorker; // Cluster-Controller worker
 	state WorkerDetails ddWorker; // DataDistributor worker
 	state WorkerDetails rkWorker; // Ratekeeper worker
+	state WorkerDetails csWorker; // ConsistencyScan worker
 
 	try {
 		// Get the master Worker interface
@@ -2936,6 +3105,19 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			rkWorker = _rkWorker.get();
 		}
 
+		// Get the ConsistencyScan worker interface
+		Optional<WorkerDetails> _csWorker;
+		if (db->get().consistencyScan.present()) {
+			_csWorker = getWorker(workers, db->get().consistencyScan.get().address());
+		}
+
+		if (!db->get().consistencyScan.present() || !_csWorker.present()) {
+			messages.push_back(JsonString::makeMessage("unreachable_consistencyScan_worker",
+			                                           "Unable to locate the consistencyScan worker."));
+		} else {
+			csWorker = _csWorker.get();
+		}
+
 		// Get latest events for various event types from ALL workers
 		// WorkerEvents is a map of worker's NetworkAddress to its event string
 		// The pair represents worker responses and a set of worker NetworkAddress strings which did not respond.
@@ -2979,8 +3161,20 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		// construct status information for cluster subsections
 		state int statusCode = (int)RecoveryStatus::END;
-		state JsonBuilderObject recoveryStateStatus = wait(
-		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
+		state Future<JsonBuilderObject> recoveryStateStatusFuture =
+		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode);
+
+		state Future<JsonBuilderObject> idmpKeyStatusFuture = getIdmpKeyStatus(cx);
+
+		state Future<JsonBuilderObject> versionEpochStatusFuture =
+		    versionEpochStatusFetcher(cx, &status_incomplete_reasons);
+
+		wait(waitForAll<JsonBuilderObject>(
+		    { recoveryStateStatusFuture, idmpKeyStatusFuture, versionEpochStatusFuture }));
+
+		state JsonBuilderObject recoveryStateStatus = recoveryStateStatusFuture.get();
+		state JsonBuilderObject idmpKeyStatus = idmpKeyStatusFuture.get();
+		state JsonBuilderObject versionEpochStatus = versionEpochStatusFuture.get();
 
 		// machine metrics
 		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
@@ -3009,6 +3203,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state JsonBuilderObject qos;
 		state JsonBuilderObject dataOverlay;
 		state JsonBuilderObject tenants;
+		state JsonBuilderObject metacluster;
 		state JsonBuilderObject storageWiggler;
 		state std::unordered_set<UID> wiggleServers;
 
@@ -3191,8 +3386,29 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (!qos.empty())
 				statusObj["qos"] = qos;
 
+			// Metacluster metadata
+			if (metaclusterRegistration.present()) {
+				metacluster["cluster_type"] = clusterTypeToString(metaclusterRegistration.get().clusterType);
+				metacluster["metacluster_name"] = metaclusterRegistration.get().metaclusterName;
+				metacluster["metacluster_id"] = metaclusterRegistration.get().metaclusterId.toString();
+				if (metaclusterRegistration.get().clusterType == ClusterType::METACLUSTER_DATA) {
+					metacluster["data_cluster_name"] = metaclusterRegistration.get().name;
+					metacluster["data_cluster_id"] = metaclusterRegistration.get().id.toString();
+				} else { // clusterType == ClusterType::METACLUSTER_MANAGEMENT
+					metacluster["num_data_clusters"] = metaclusterMetrics.numDataClusters;
+					tenants["num_tenants"] = metaclusterMetrics.numTenants;
+					tenants["tenant_group_capacity"] = metaclusterMetrics.tenantGroupCapacity;
+					tenants["tenant_groups_allocated"] = metaclusterMetrics.tenantGroupsAllocated;
+				}
+			} else {
+				metacluster["cluster_type"] = clusterTypeToString(ClusterType::STANDALONE);
+			}
+			statusObj["metacluster"] = metacluster;
+
 			if (!tenants.empty())
 				statusObj["tenants"] = tenants;
+
+			statusObj["version_epoch"] = versionEpochStatus;
 
 			// Merge dataOverlay into data
 			JsonBuilderObject& clusterDataSection = workerStatuses[0];
@@ -3299,6 +3515,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			JsonBuilderObject blobGranuelsStatus =
 			    wait(blobWorkerStatusFetcher(blobWorkers, address_workers, &status_incomplete_reasons));
 			statusObj["blob_granules"] = blobGranuelsStatus;
+			JsonBuilderObject blobRestoreStatus = wait(blobRestoreStatusFetcher(cx, &status_incomplete_reasons));
+			statusObj["blob_restore"] = blobRestoreStatus;
 		}
 
 		JsonBuilderArray incompatibleConnectionsArray;
@@ -3341,6 +3559,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		if (!recoveryStateStatus.empty())
 			statusObj["recovery_state"] = recoveryStateStatus;
 
+		statusObj["idempotency_ids"] = idmpKeyStatus;
+
 		// cluster messages subsection;
 		JsonBuilderArray clientIssuesArr = getClientIssuesAsMessages(clientStatus);
 		if (clientIssuesArr.size() > 0) {
@@ -3348,6 +3568,22 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			    JsonBuilder::makeMessage("client_issues", "Some clients of this cluster have issues.");
 			clientIssueMessage["issues"] = clientIssuesArr;
 			messages.push_back(clientIssueMessage);
+		}
+
+		// Fetch Consistency Scan Information
+		try {
+			Optional<Value> val = wait(timeoutError(consistencyScanInfoFetcher(cx), 2.0));
+			if (val.present()) {
+				ConsistencyScanInfo consistencyScanInfo =
+				    ObjectReader::fromStringRef<ConsistencyScanInfo>(val.get(), IncludeVersion());
+				TraceEvent("StatusConsistencyScanGotVal").log();
+				statusObj["consistency_scan_info"] = consistencyScanInfo.toJSON();
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			messages.push_back(JsonString::makeMessage("fetch_consistency_scan_info_timeout",
+			                                           "Fetching consistency scan information timed out."));
 		}
 
 		// Create the status_incomplete message if there were any reasons that the status is incomplete.

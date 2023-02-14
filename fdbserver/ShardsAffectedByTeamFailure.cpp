@@ -40,8 +40,14 @@ int ShardsAffectedByTeamFailure::getNumberOfShards(UID ssID) const {
 }
 
 std::pair<std::vector<ShardsAffectedByTeamFailure::Team>, std::vector<ShardsAffectedByTeamFailure::Team>>
-ShardsAffectedByTeamFailure::getTeamsFor(KeyRangeRef keys) {
+ShardsAffectedByTeamFailure::getTeamsForFirstShard(KeyRangeRef keys) {
 	return shard_teams[keys.begin];
+}
+
+std::pair<std::vector<ShardsAffectedByTeamFailure::Team>, std::vector<ShardsAffectedByTeamFailure::Team>>
+
+ShardsAffectedByTeamFailure::getTeamsFor(KeyRef key) {
+	return shard_teams[key];
 }
 
 void ShardsAffectedByTeamFailure::erase(Team team, KeyRange const& range) {
@@ -101,7 +107,6 @@ void ShardsAffectedByTeamFailure::defineShard(KeyRangeRef keys) {
 	check();
 }
 
-// Move keys to destinationTeams by updating shard_teams
 void ShardsAffectedByTeamFailure::moveShard(KeyRangeRef keys, std::vector<Team> destinationTeams) {
 	/*TraceEvent("ShardsAffectedByTeamFailureMove")
 	    .detail("KeyBegin", keys.begin)
@@ -152,6 +157,25 @@ void ShardsAffectedByTeamFailure::moveShard(KeyRangeRef keys, std::vector<Team> 
 	check();
 }
 
+void ShardsAffectedByTeamFailure::rawMoveShard(KeyRangeRef keys,
+                                               const std::vector<Team>& srcTeams,
+                                               const std::vector<Team>& destinationTeams) {
+	auto it = shard_teams.rangeContaining(keys.begin);
+	std::vector<std::pair<std::pair<std::vector<Team>, std::vector<Team>>, KeyRange>> modifiedShards;
+	ASSERT(it->range() == keys);
+
+	// erase the many teams that were associated with this one shard
+	for (auto t = it->value().first.begin(); t != it->value().first.end(); ++t) {
+		erase(*t, it->range());
+	}
+	it.value() = std::make_pair(destinationTeams, srcTeams);
+	for (auto& team : destinationTeams) {
+		insert(team, keys);
+	}
+
+	check();
+}
+
 void ShardsAffectedByTeamFailure::finishMove(KeyRangeRef keys) {
 	auto ranges = shard_teams.containedRanges(keys);
 	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
@@ -194,4 +218,59 @@ void ShardsAffectedByTeamFailure::check() const {
 			}
 		}
 	}
+}
+
+size_t ShardsAffectedByTeamFailure::getNumberOfShards() const {
+	return shard_teams.size();
+}
+
+auto ShardsAffectedByTeamFailure::getAllRanges() const -> decltype(shard_teams)::ConstRanges {
+	return shard_teams.ranges();
+}
+
+void ShardsAffectedByTeamFailure::assignRangeToTeams(KeyRangeRef keys, const std::vector<Team>& destinationTeam) {
+	defineShard(keys);
+	moveShard(keys, destinationTeam);
+	finishMove(keys);
+}
+
+bool ShardsAffectedByTeamFailure::removeFailedServerForSingleRange(ShardsAffectedByTeamFailure::Team& team,
+                                                                   const UID& id,
+                                                                   KeyRangeRef keys) {
+	if (team.hasServer(id)) {
+		erase(team, keys);
+		team.removeServer(id);
+		insert(team, keys);
+		return true;
+	}
+	return false;
+}
+
+void ShardsAffectedByTeamFailure::removeFailedServerForRange(KeyRangeRef keys, const UID& serverID) {
+	auto rs = shard_teams.intersectingRanges(keys);
+	for (auto it = rs.begin(); it != rs.end(); ++it) {
+		// first team vector
+		for (std::vector<Team>::iterator t = it->value().first.begin(); t != it->value().first.end(); ++t) {
+			removeFailedServerForSingleRange(*t, serverID, it->range());
+		}
+		// second team vector
+		for (std::vector<Team>::iterator t = it->value().second.begin(); t != it->value().second.end(); ++t) {
+			removeFailedServerForSingleRange(*t, serverID, it->range());
+		}
+	}
+	check();
+}
+
+auto ShardsAffectedByTeamFailure::intersectingRanges(KeyRangeRef keyRange) const -> decltype(shard_teams)::ConstRanges {
+	return shard_teams.intersectingRanges(keyRange);
+}
+
+std::vector<UID> ShardsAffectedByTeamFailure::getSourceServerIdsFor(KeyRef key) {
+	auto teamPair = getTeamsFor(key);
+	std::set<UID> res;
+	auto& srcTeams = teamPair.second.empty() ? teamPair.first : teamPair.second;
+	for (auto& team : srcTeams) {
+		res.insert(team.servers.begin(), team.servers.end());
+	}
+	return std::vector<UID>(res.begin(), res.end());
 }

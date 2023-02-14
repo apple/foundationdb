@@ -18,8 +18,10 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -28,6 +30,7 @@
 
 // A workload which test the correctness of backup and restore process
 struct AtomicRestoreWorkload : TestWorkload {
+	static constexpr auto NAME = "AtomicRestore";
 	double startAfter, restoreAfter;
 	bool fastRestore; // true: use fast restore, false: use old style restore
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
@@ -37,15 +40,20 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 	AtomicRestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 
-		startAfter = getOption(options, LiteralStringRef("startAfter"), 10.0);
-		restoreAfter = getOption(options, LiteralStringRef("restoreAfter"), 20.0);
-		fastRestore = getOption(options, LiteralStringRef("fastRestore"), false);
-		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-		usePartitionedLogs.set(getOption(
-		    options, LiteralStringRef("usePartitionedLogs"), deterministicRandom()->random01() < 0.5 ? true : false));
+		startAfter = getOption(options, "startAfter"_sr, 10.0);
+		restoreAfter = getOption(options, "restoreAfter"_sr, 20.0);
+		fastRestore = getOption(options, "fastRestore"_sr, false);
+		if (!fastRestore) {
+			addDefaultBackupRanges(backupRanges);
+		} else {
+			// Fast restore doesn't support multiple ranges yet
+			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
+		}
+		usePartitionedLogs.set(
+		    getOption(options, "usePartitionedLogs"_sr, deterministicRandom()->random01() < 0.5 ? true : false));
 
-		addPrefix = getOption(options, LiteralStringRef("addPrefix"), LiteralStringRef(""));
-		removePrefix = getOption(options, LiteralStringRef("removePrefix"), LiteralStringRef(""));
+		addPrefix = getOption(options, "addPrefix"_sr, ""_sr);
+		removePrefix = getOption(options, "removePrefix"_sr, ""_sr);
 
 		// Correctness is not clean for addPrefix feature yet. Uncomment below to enable the test
 		// Generate addPrefix
@@ -67,8 +75,6 @@ struct AtomicRestoreWorkload : TestWorkload {
 		ASSERT(removePrefix.size() == 0);
 	}
 
-	std::string description() const override { return "AtomicRestore"; }
-
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override {
@@ -81,7 +87,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	bool hasPrefix() const { return addPrefix != LiteralStringRef("") || removePrefix != LiteralStringRef(""); }
+	bool hasPrefix() const { return addPrefix != ""_sr || removePrefix != ""_sr; }
 
 	ACTOR static Future<Void> _start(Database cx, AtomicRestoreWorkload* self) {
 		state FileBackupAgent backupAgent;
@@ -98,6 +104,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 			                              deterministicRandom()->randomInt(0, 100),
 			                              BackupAgentBase::getDefaultTagName(),
 			                              self->backupRanges,
+			                              true,
 			                              StopWhenDone::False,
 			                              self->usePartitionedLogs));
 		} catch (Error& e) {
@@ -117,17 +124,9 @@ struct AtomicRestoreWorkload : TestWorkload {
 			    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, self->addPrefix, self->removePrefix));
 		} else { // Old style restore
 			loop {
-				std::vector<Future<Version>> restores;
-				if (deterministicRandom()->random01() < 0.5) {
-					for (auto& range : self->backupRanges)
-						restores.push_back(backupAgent.atomicRestore(
-						    cx, BackupAgentBase::getDefaultTag(), range, StringRef(), StringRef()));
-				} else {
-					restores.push_back(backupAgent.atomicRestore(
-					    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()));
-				}
 				try {
-					wait(waitForAll(restores));
+					wait(success(backupAgent.atomicRestore(
+					    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef())));
 					break;
 				} catch (Error& e) {
 					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -138,8 +137,8 @@ struct AtomicRestoreWorkload : TestWorkload {
 		}
 
 		// SOMEDAY: Remove after backup agents can exist quiescently
-		if (g_simulator.backupAgents == ISimulator::BackupAgentType::BackupToFile) {
-			g_simulator.backupAgents = ISimulator::BackupAgentType::NoBackupAgents;
+		if (g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) {
+			g_simulator->backupAgents = ISimulator::BackupAgentType::NoBackupAgents;
 		}
 
 		TraceEvent("AtomicRestore_Done").log();
@@ -147,4 +146,4 @@ struct AtomicRestoreWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<AtomicRestoreWorkload> AtomicRestoreWorkloadFactory("AtomicRestore");
+WorkloadFactory<AtomicRestoreWorkload> AtomicRestoreWorkloadFactory;

@@ -22,21 +22,29 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
+#include "flow/IRandom.h"
+#include "flow/Trace.h"
+#include <cstddef>
 #if defined(NO_INTELLISENSE) && !defined(FLOW_TDMETRIC_ACTOR_G_H)
 #define FLOW_TDMETRIC_ACTOR_G_H
 #include "flow/TDMetric.actor.g.h"
 #elif !defined(FLOW_TDMETRIC_ACTOR_H)
 #define FLOW_TDMETRIC_ACTOR_H
-
+#include <string>
+#include <unordered_map>
 #include "flow/flow.h"
 #include "flow/network.h"
 #include "flow/Knobs.h"
 #include "flow/genericactors.actor.h"
 #include "flow/CompressedInt.h"
+#include "flow/OTELMetrics.h"
 #include <algorithm>
 #include <functional>
 #include <cmath>
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+enum MetricsDataModel { STATSD = 0, OTLP, NONE };
+MetricsDataModel knobToMetricModel(const std::string& knob);
 
 struct MetricNameRef {
 	MetricNameRef() {}
@@ -149,11 +157,11 @@ struct MetricKeyRef {
 	void writeMetricName(BinaryWriter& wr) const;
 };
 
-struct MetricUpdateBatch {
+struct FDBScope {
 	std::vector<KeyWithWriter> inserts;
 	std::vector<KeyWithWriter> appends;
 	std::vector<std::pair<Standalone<StringRef>, Standalone<StringRef>>> updates;
-	std::vector<std::function<Future<Void>(IMetricDB*, MetricUpdateBatch*)>> callbacks;
+	std::vector<std::function<Future<Void>(IMetricDB*, FDBScope*)>> callbacks;
 
 	void clear() {
 		inserts.clear();
@@ -161,6 +169,22 @@ struct MetricUpdateBatch {
 		updates.clear();
 		callbacks.clear();
 	}
+};
+
+struct MetricBatch {
+	FDBScope scope;
+
+	MetricBatch() {}
+
+	MetricBatch(FDBScope* in) {
+		assert(in != nullptr);
+		scope.inserts = std::move(in->inserts);
+		scope.appends = std::move(in->appends);
+		scope.updates = std::move(in->updates);
+		scope.callbacks = std::move(in->callbacks);
+	}
+
+	void clear() { scope.clear(); }
 };
 
 template <typename T>
@@ -171,15 +195,16 @@ inline StringRef metricTypeName() {
 #define MAKE_TYPENAME(T, S)                                                                                            \
 	template <>                                                                                                        \
 	inline StringRef metricTypeName<T>() {                                                                             \
-		return LiteralStringRef(S);                                                                                    \
+		return S;                                                                                                      \
 	}
-MAKE_TYPENAME(bool, "Bool")
-MAKE_TYPENAME(int64_t, "Int64")
-MAKE_TYPENAME(double, "Double")
-MAKE_TYPENAME(Standalone<StringRef>, "String")
+MAKE_TYPENAME(bool, "Bool"_sr)
+MAKE_TYPENAME(int64_t, "Int64"_sr)
+MAKE_TYPENAME(double, "Double"_sr)
+MAKE_TYPENAME(Standalone<StringRef>, "String"_sr)
 #undef MAKE_TYPENAME
 
 struct BaseMetric;
+class IMetric;
 
 // The collection of metrics that exist for a single process, at a single address.
 class TDMetricCollection {
@@ -222,6 +247,23 @@ public:
 
 	void checkRoll(uint64_t t, int64_t usedBytes);
 	bool canLog(int level) const;
+};
+
+class MetricCollection {
+public:
+	std::unordered_map<UID, IMetric*> map;
+	std::unordered_map<UID, OTEL::OTELSum> sumMap;
+	std::unordered_map<UID, OTEL::OTELHistogram> histMap;
+	std::unordered_map<UID, OTEL::OTELGauge> gaugeMap;
+	std::vector<std::string> statsd_message;
+
+	MetricCollection() {}
+
+	static MetricCollection* getMetricCollection() {
+		if (g_network == nullptr || knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL) == MetricsDataModel::NONE)
+			return nullptr;
+		return static_cast<MetricCollection*>((void*)g_network->global(INetwork::enMetrics));
+	}
 };
 
 struct MetricData {
@@ -358,7 +400,7 @@ struct Descriptor {
 	using fields = std::tuple<>;
 	typedef make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type field_indexes;
 
-	static StringRef typeName() { return LiteralStringRef(""); }
+	static StringRef typeName() { return ""_sr; }
 #endif
 };
 
@@ -430,9 +472,7 @@ struct FieldValueBlockEncoding<double> {
 
 template <>
 struct FieldValueBlockEncoding<bool> {
-	inline void write(BinaryWriter& w, bool v) {
-		w.serializeBytes(v ? LiteralStringRef("\x01") : LiteralStringRef("\x00"));
-	}
+	inline void write(BinaryWriter& w, bool v) { w.serializeBytes(v ? "\x01"_sr : "\x00"_sr); }
 	bool read(BinaryReader& r) {
 		uint8_t* v = (uint8_t*)r.readBytes(sizeof(uint8_t));
 		return *v != 0;
@@ -561,14 +601,14 @@ public:
 	}
 
 	// Flushes data blocks in metrics to batch, optionally patching headers if a header is given
-	void flushUpdates(MetricKeyRef const& mk, uint64_t rollTime, MetricUpdateBatch& batch) {
+	void flushUpdates(MetricKeyRef const& mk, uint64_t rollTime, MetricBatch& batch) {
 		while (metrics.size()) {
 			auto& data = metrics.front();
 
 			if (data.start != 0 && data.rollTime <= rollTime) {
 				// If this data is to be appended, write it to the batch now.
 				if (data.appendStart) {
-					batch.appends.push_back(KeyWithWriter(mk.packDataKey(data.appendStart), data.writer));
+					batch.scope.appends.push_back(KeyWithWriter(mk.packDataKey(data.appendStart), data.writer));
 				} else {
 					// Otherwise, insert but first, patch the header if this block is old enough
 					if (data.rollTime <= lastTimeRequiringHeaderPatch) {
@@ -576,7 +616,7 @@ public:
 						FieldLevel<T>::updateSerializedHeader(data.writer.toValue(), previousHeader.get());
 					}
 
-					batch.inserts.push_back(KeyWithWriter(mk.packDataKey(data.start), data.writer));
+					batch.scope.inserts.push_back(KeyWithWriter(mk.packDataKey(data.start), data.writer));
 				}
 
 				if (metrics.size() == 1) {
@@ -595,7 +635,7 @@ public:
 	                                               IMetricDB* db,
 	                                               Standalone<MetricKeyRef> mk,
 	                                               uint64_t rollTime,
-	                                               MetricUpdateBatch* batch) {
+	                                               FDBScope* scope) {
 
 		Optional<Standalone<StringRef>> block = wait(db->getLastBlock(mk.packDataKey(-1)));
 
@@ -624,14 +664,15 @@ public:
 
 		// Now flush the level data up to the rollTime argument and patch anything older than
 		// lastTimeRequiringHeaderPatch
-		self->flushUpdates(mk, rollTime, *batch);
+		MetricBatch batch{ scope };
+		self->flushUpdates(mk, rollTime, batch);
 
 		return Void();
 	}
 
 	// Flush this level's data to the output batch.
 	// This function must NOT be called again until any callbacks added to batch have been completed.
-	void flush(const MetricKeyRef& mk, uint64_t rollTime, MetricUpdateBatch& batch) {
+	void flush(const MetricKeyRef& mk, uint64_t rollTime, MetricBatch& batch) {
 		// Don't do anything if there is no data in the queue to flush.
 		if (metrics.empty() || metrics.front().start == 0)
 			return;
@@ -643,8 +684,8 @@ public:
 		Standalone<MetricKeyRef> mkCopy = mk;
 
 		// Previous header is not present so queue a callback which will update it
-		batch.callbacks.push_back([=](IMetricDB* db, MetricUpdateBatch* batch) mutable -> Future<Void> {
-			return updatePreviousHeader(this, db, mkCopy, rollTime, batch);
+		batch.scope.callbacks.push_back([=](IMetricDB* db, FDBScope* s) mutable -> Future<Void> {
+			return updatePreviousHeader(this, db, mkCopy, rollTime, s);
 		});
 	}
 };
@@ -694,7 +735,7 @@ struct EventField : public Descriptor {
 		}
 	}
 
-	void flushField(MetricKeyRef const& mk, uint64_t rollTime, MetricUpdateBatch& batch) {
+	void flushField(MetricKeyRef const& mk, uint64_t rollTime, MetricBatch& batch) {
 		MetricKeyRef fk = mk.withField(*this);
 		for (int j = 0; j < levels.size(); ++j) {
 			fk.level = j;
@@ -716,7 +757,7 @@ struct MakeEventField {
 };
 
 struct TimeDescriptor {
-	static StringRef name() { return LiteralStringRef("Time"); }
+	static StringRef name() { return "Time"_sr; }
 };
 
 struct BaseMetric {
@@ -730,7 +771,7 @@ struct BaseMetric {
 
 	virtual void rollMetric(uint64_t t) = 0;
 
-	virtual void flushData(const MetricKeyRef& mk, uint64_t rollTime, MetricUpdateBatch& batch) = 0;
+	virtual void flushData(const MetricKeyRef& mk, uint64_t rollTime, MetricBatch& batch) = 0;
 	virtual void registerFields(const MetricKeyRef& mk, std::vector<Standalone<StringRef>>& fieldKeys){};
 
 	// Set the metric's config.  An assert will fail if the metric is enabled before the metrics collection is
@@ -877,17 +918,17 @@ struct EventMetric final : E, ReferenceCounted<EventMetric<E>>, MetricUtil<Event
 #endif
 	}
 
-	void flushData(MetricKeyRef const& mk, uint64_t rollTime, MetricUpdateBatch& batch) override {
+	void flushData(MetricKeyRef const& mk, uint64_t rollTime, MetricBatch& batch) override {
 		time.flushField(mk, rollTime, batch);
 		flushFields(typename Descriptor<E>::field_indexes(), mk, rollTime, batch);
 		if (!latestRecorded) {
-			batch.updates.emplace_back(mk.packLatestKey(), StringRef());
+			batch.scope.updates.emplace_back(mk.packLatestKey(), StringRef());
 			latestRecorded = true;
 		}
 	}
 
 	template <size_t... Is>
-	void flushFields(index_sequence<Is...>, MetricKeyRef const& mk, uint64_t rollTime, MetricUpdateBatch& batch) {
+	void flushFields(index_sequence<Is...>, MetricKeyRef const& mk, uint64_t rollTime, MetricBatch& batch) {
 #ifdef NO_INTELLISENSE
 		auto _ = { (std::get<Is>(values).flushField(mk, rollTime, batch), Void())... };
 		(void)_;
@@ -947,7 +988,7 @@ struct DynamicFieldBase {
 	virtual void nextKey(uint64_t t, int level) = 0;
 	virtual void nextKeyAllLevels(uint64_t t) = 0;
 	virtual void rollMetric(uint64_t t) = 0;
-	virtual void flushField(MetricKeyRef const& mk, uint64_t rollTime, MetricUpdateBatch& batch) = 0;
+	virtual void flushField(MetricKeyRef const& mk, uint64_t rollTime, MetricBatch& batch) = 0;
 	virtual void registerField(MetricKeyRef const& mk, std::vector<Standalone<StringRef>>& fieldKeys) = 0;
 
 	// Set the current value of this field from the value of another
@@ -993,7 +1034,7 @@ struct DynamicField final : public DynamicFieldBase, EventField<T, DynamicDescri
 	void nextKey(uint64_t t, int level) override { return EventFieldType::nextKey(t, level); }
 	void nextKeyAllLevels(uint64_t t) override { return EventFieldType::nextKeyAllLevels(t); }
 	void rollMetric(uint64_t t) override { return EventFieldType::rollMetric(t); }
-	void flushField(MetricKeyRef const& mk, uint64_t rollTime, MetricUpdateBatch& batch) override {
+	void flushField(MetricKeyRef const& mk, uint64_t rollTime, MetricBatch& batch) override {
 		return EventFieldType::flushField(mk, rollTime, batch);
 	}
 	void registerField(MetricKeyRef const& mk, std::vector<Standalone<StringRef>>& fieldKeys) override {
@@ -1130,7 +1171,7 @@ public:
 	uint64_t log(uint64_t explicitTime = 0);
 
 	// Virtual function implementations
-	void flushData(MetricKeyRef const& mk, uint64_t rollTime, MetricUpdateBatch& batch) override;
+	void flushData(MetricKeyRef const& mk, uint64_t rollTime, MetricBatch& batch) override;
 	void rollMetric(uint64_t t) override;
 	void registerFields(MetricKeyRef const& mk, std::vector<Standalone<StringRef>>& fieldKeys) override;
 };
@@ -1247,9 +1288,9 @@ public:
 
 	T getValue() const { return tv.value; }
 
-	void flushData(const MetricKeyRef& mk, uint64_t rollTime, MetricUpdateBatch& batch) override {
+	void flushData(const MetricKeyRef& mk, uint64_t rollTime, MetricBatch& batch) override {
 		if (!recorded) {
-			batch.updates.emplace_back(mk.packLatestKey(), getLatestAsValue());
+			batch.scope.updates.emplace_back(mk.packLatestKey(), getLatestAsValue());
 			recorded = true;
 		}
 
@@ -1408,6 +1449,45 @@ typedef MetricHandle<DoubleMetric> DoubleMetricHandle;
 
 template <typename E>
 using EventMetricHandle = MetricHandle<EventMetric<E>>;
+
+enum StatsDMetric { GAUGE = 0, COUNTER };
+
+class IMetric {
+public:
+	const UID id;
+	const MetricsDataModel model;
+	IMetric(MetricsDataModel m) : id{ deterministicRandom()->randomUniqueID() }, model{ m } {
+		MetricCollection* metrics = MetricCollection::getMetricCollection();
+		if (metrics != nullptr) {
+			if (metrics->map.count(id) > 0) {
+				TraceEvent(SevError, "MetricCollection_NameCollision").detail("NameConflict", id.toString().c_str());
+				ASSERT(metrics->map.count(id) > 0);
+			}
+			metrics->map[id] = this;
+		}
+	}
+	~IMetric() {
+		MetricCollection* metrics = MetricCollection::getMetricCollection();
+		if (metrics != nullptr) {
+			metrics->map.erase(id);
+		}
+	}
+};
+
+std::string createStatsdMessage(const std::string& name,
+                                StatsDMetric type,
+                                const std::string& val,
+                                const std::vector<std::pair<std::string, std::string>>& tags);
+
+std::string createStatsdMessage(const std::string& name, StatsDMetric type, const std::string& val);
+
+std::vector<std::string> splitString(const std::string& str, const std::string& delimit);
+
+bool verifyStatsdMessage(const std::string& msg);
+
+void createOtelGauge(UID id, const std::string& name, double value);
+
+void createOtelGauge(UID id, const std::string& name, double value, const std::vector<OTEL::Attribute>&);
 
 #include "flow/unactorcompiler.h"
 

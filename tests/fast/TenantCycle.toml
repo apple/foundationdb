@@ -1,6 +1,10 @@
 [configuration]
 allowDefaultTenant = false
-allowDisablingTenants = false
+tenantModes = ['optional', 'required']
+
+[[knobs]]
+audit_logging_enabled = false
+max_trace_lines = 2000000
 
 [[test]]
 testTitle = 'TenantCreation'

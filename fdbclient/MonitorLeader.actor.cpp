@@ -26,6 +26,7 @@
 #include "flow/UnitTest.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "flow/Platform.h"
+#include "flow/IConnection.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace {
@@ -248,7 +249,7 @@ TEST_CASE("/fdbclient/MonitorLeader/ConnectionString/hostname") {
 		hostnames.push_back(Hostname::parse(hn1 + ":" + port1));
 		hostnames.push_back(Hostname::parse(hn2 + ":" + port2));
 
-		ClusterConnectionString cs(hostnames, LiteralStringRef("TestCluster:0"));
+		ClusterConnectionString cs(hostnames, "TestCluster:0"_sr);
 		ASSERT(cs.hostnames.size() == 2);
 		ASSERT(cs.coords.size() == 0);
 		ASSERT(cs.toString() == connectionString);
@@ -259,7 +260,7 @@ TEST_CASE("/fdbclient/MonitorLeader/ConnectionString/hostname") {
 		hostnames.push_back(Hostname::parse(hn1 + ":" + port1));
 		hostnames.push_back(Hostname::parse(hn1 + ":" + port1));
 		try {
-			ClusterConnectionString cs(hostnames, LiteralStringRef("TestCluster:0"));
+			ClusterConnectionString cs(hostnames, "TestCluster:0"_sr);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_connection_string_invalid);
 		}
@@ -367,7 +368,7 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 		auto c = connectionString.begin();
 		while (c != connectionString.end()) {
 			if (deterministicRandom()->random01() < 0.1) // Add whitespace character
-				output += deterministicRandom()->randomChoice(LiteralStringRef(" \t\n\r"));
+				output += deterministicRandom()->randomChoice(" \t\n\r"_sr);
 			if (deterministicRandom()->random01() < 0.5) { // Add one of the input characters
 				output += *c;
 				++c;
@@ -376,9 +377,9 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 				output += "#";
 				int charCount = deterministicRandom()->randomInt(0, 20);
 				for (int i = 0; i < charCount; i++) {
-					output += deterministicRandom()->randomChoice(LiteralStringRef("asdfzxcv123345:!@#$#$&()<\"\' \t"));
+					output += deterministicRandom()->randomChoice("asdfzxcv123345:!@#$#$&()<\"\' \t"_sr);
 				}
-				output += deterministicRandom()->randomChoice(LiteralStringRef("\n\r"));
+				output += deterministicRandom()->randomChoice("\n\r"_sr);
 			}
 		}
 
@@ -501,6 +502,7 @@ ACTOR Future<Void> monitorNominee(Key key,
                                   Optional<LeaderInfo>* info) {
 	loop {
 		state Optional<LeaderInfo> li;
+		wait(Future<Void>(Void())); // Make sure we weren't cancelled
 		if (coord.hostname.present()) {
 			wait(store(li,
 			           retryGetReplyFromHostname(GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
@@ -651,7 +653,9 @@ ACTOR Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> s
 	state Future<Void> deserializer = asyncDeserialize(serializedInfo, knownLeader);
 	loop {
 		choose {
-			when(wait(deserializer)) { UNSTOPPABLE_ASSERT(false); }
+			when(wait(deserializer)) {
+				UNSTOPPABLE_ASSERT(false);
+			}
 			when(wait(knownLeader->onChange())) {
 				if (knownLeader->get().present()) {
 					outKnownLeader->set(knownLeader->get().get().clientInterface);
@@ -841,7 +845,8 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
     Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
     MonitorLeaderInfo info,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
-    Key traceLogGroup) {
+    Key traceLogGroup,
+    IsInternal internal) {
 	state ClusterConnectionString cs = info.intermediateConnRecord->getConnectionString();
 	state int coordinatorsSize = cs.hostnames.size() + cs.coords.size();
 	state int index = 0;
@@ -861,6 +866,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 	for (const auto& c : cs.coords) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(c));
 	}
+	ASSERT(clientLeaderServers.size() > 0);
 
 	deterministicRandom()->randomShuffle(clientLeaderServers);
 
@@ -874,13 +880,14 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 		req.knownClientInfoID = clientInfo->get().id;
 		req.supportedVersions = supportedVersions->get();
 		req.traceLogGroup = traceLogGroup;
+		req.internal = internal;
 
 		state ClusterConnectionString storedConnectionString;
 		if (connRecord) {
 			bool upToDate = wait(connRecord->upToDate(storedConnectionString));
 			if (upToDate) {
 				incorrectTime = Optional<double>();
-			} else if (allConnectionsFailed) {
+			} else if (allConnectionsFailed && storedConnectionString.getNumberOfCoordinators() > 0) {
 				// Failed to connect to all coordinators from the current connection string,
 				// so it is not possible to get any new updates from the cluster. It can be that
 				// all the coordinators have changed, but the client missed that, because it had
@@ -894,7 +901,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 				info.intermediateConnRecord = connRecord;
 				return info;
 			} else {
-				req.issues.push_back_deep(req.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
+				req.issues.push_back_deep(req.issues.arena(), "incorrect_cluster_file_contents"_sr);
 				std::string connectionString = connRecord->getConnectionString().toString();
 				if (!incorrectTime.present()) {
 					incorrectTime = now();
@@ -938,6 +945,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 				    .detail("OldConnStr", info.intermediateConnRecord->getConnectionString().toString());
 				info.intermediateConnRecord = connRecord->makeIntermediateRecord(
 				    ClusterConnectionString(rep.get().read().forward.get().toString()));
+				ASSERT(info.intermediateConnRecord->getConnectionString().getNumberOfCoordinators() > 0);
 				return info;
 			}
 			if (connRecord != info.intermediateConnRecord) {
@@ -962,8 +970,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			allConnectionsFailed = false;
 		} else {
 			CODE_PROBE(rep.getError().code() == error_code_failed_to_progress,
-			           "Coordinator cant talk to cluster controller");
-			CODE_PROBE(rep.getError().code() == error_code_lookup_failed, "Coordinator hostname resolving failure");
+			           "Coordinator cannot talk to cluster controller");
 			TraceEvent("MonitorProxiesConnectFailed")
 			    .detail("Error", rep.getError().name())
 			    .detail("Coordinator", clientLeaderServer.getAddressString());
@@ -981,12 +988,14 @@ ACTOR Future<Void> monitorProxies(
     Reference<AsyncVar<ClientDBInfo>> clientInfo,
     Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
-    Key traceLogGroup) {
+    Key traceLogGroup,
+    IsInternal internal) {
 	state MonitorLeaderInfo info(connRecord->get());
 	loop {
+		ASSERT(connRecord->get().isValid());
 		choose {
 			when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(
-			         connRecord->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup))) {
+			         connRecord->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup, internal))) {
 				info = _info;
 			}
 			when(wait(connRecord->onChange())) {

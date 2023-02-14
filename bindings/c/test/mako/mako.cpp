@@ -29,6 +29,11 @@
 #include <fstream>
 #include <map>
 #include <new>
+#include <numeric>
+#include <optional>
+#if defined(__linux__)
+#include <pthread.h>
+#endif
 #include <string>
 #include <string_view>
 #include <thread>
@@ -49,6 +54,7 @@
 #include <unordered_map>
 #include "fdbclient/zipf.h"
 
+#include "admin_server.hpp"
 #include "async.hpp"
 #include "future.hpp"
 #include "logger.hpp"
@@ -58,14 +64,17 @@
 #include "utils.hpp"
 #include "shm.hpp"
 #include "stats.hpp"
+#include "tenant.hpp"
 #include "time.hpp"
+#include "rapidjson/document.h"
+#include "rapidjson/error/en.h"
 
 namespace mako {
 
 /* args for threads */
 struct alignas(64) ThreadArgs {
-	int worker_id;
-	int thread_id;
+	int process_idx;
+	int thread_idx;
 	int active_tenants;
 	int total_tenants;
 	pid_t parent_id;
@@ -81,42 +90,61 @@ using namespace mako;
 
 thread_local Logger logr = Logger(MainProcess{}, VERBOSE_DEFAULT);
 
-Transaction createNewTransaction(Database db, Arguments const& args, int id = -1, Tenant* tenants = nullptr) {
+std::pair<Transaction, std::optional<std::string> /*token*/>
+createNewTransaction(Database db, Arguments const& args, int id, std::optional<std::vector<Tenant>>& tenants) {
 	// No tenants specified
 	if (args.active_tenants <= 0) {
-		return db.createTransaction();
+		return { db.createTransaction(), {} };
 	}
 	// Create Tenant Transaction
 	int tenant_id = (id == -1) ? urand(0, args.active_tenants - 1) : id;
+	Transaction tr;
+	std::string tenant_name;
 	// If provided tenants array, use it
 	if (tenants) {
-		return tenants[tenant_id].createTransaction();
+		tr = (*tenants)[tenant_id].createTransaction();
+	} else {
+		tenant_name = getTenantNameByIndex(tenant_id);
+		Tenant t = db.openTenant(toBytesRef(tenant_name));
+		tr = t.createTransaction();
 	}
-	std::string tenantStr = "tenant" + std::to_string(tenant_id);
-	BytesRef tenant_name = toBytesRef(tenantStr);
-	Tenant t = db.openTenant(tenant_name);
-	return t.createTransaction();
-}
-
-uint64_t byteswapHelper(uint64_t input) {
-	uint64_t output = 0;
-	for (int i = 0; i < 8; ++i) {
-		output <<= 8;
-		output += input & 0xFF;
-		input >>= 8;
+	if (args.enable_token_based_authorization) {
+		assert(!args.authorization_tokens.empty());
+		// lookup token based on tenant name and, if found, set authz token to transaction
+		if (tenant_name.empty())
+			tenant_name = getTenantNameByIndex(tenant_id);
+		auto token_map_iter = args.authorization_tokens.find(tenant_name);
+		if (token_map_iter != args.authorization_tokens.end()) {
+			tr.setOption(FDB_TR_OPTION_AUTHORIZATION_TOKEN, token_map_iter->second);
+			return { tr, { token_map_iter->second } };
+		} else {
+			logr.error("could not find token for tenant '{}'", tenant_name);
+			_exit(1);
+		}
+	} else {
+		return { tr, {} };
 	}
-
-	return output;
 }
 
-void computeTenantPrefix(ByteString& s, uint64_t id) {
-	uint64_t swapped = byteswapHelper(id);
-	BytesRef temp = reinterpret_cast<const uint8_t*>(&swapped);
-	memcpy(&s[0], temp.data(), 8);
+int cleanupTenants(ipc::AdminServer& server, Arguments const& args, int db_id) {
+	for (auto tenant_id = 0; tenant_id < args.total_tenants;) {
+		const auto tenant_id_end = tenant_id + std::min(args.tenant_batch_size, args.total_tenants - tenant_id);
+		auto res = server.send(ipc::BatchDeleteTenantRequest{ args.cluster_files[db_id], tenant_id, tenant_id_end });
+		if (res.error_message) {
+			logr.error("{}", *res.error_message);
+			return -1;
+
+		} else {
+			logr.debug("deleted tenant [{}:{})", tenant_id, tenant_id_end);
+			tenant_id = tenant_id_end;
+		}
+	}
+	return 0;
 }
 
-/* cleanup database */
-int cleanup(Database db, Arguments const& args) {
+/* cleanup database (no tenant-awareness) */
+int cleanupNormalKeyspace(Database db, Arguments const& args) {
+	assert(args.total_tenants == 0 && args.active_tenants == 0);
 	const auto prefix_len = args.prefixpadding ? args.key_length - args.row_digits : intSize(KEY_PREFIX);
 	auto genprefix = [&args](ByteString& s) {
 		const auto padding_len = args.key_length - intSize(KEY_PREFIX) - args.row_digits;
@@ -136,103 +164,17 @@ int cleanup(Database db, Arguments const& args) {
 	auto watch = Stopwatch(StartAtCtor{});
 
 	Transaction tx = db.createTransaction();
-	if (args.total_tenants == 0) {
-		while (true) {
-			tx.clearRange(beginstr, endstr);
-			auto future_commit = tx.commit();
-			const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_CLEANUP");
-			if (rc == FutureRC::OK) {
-				break;
-			} else if (rc == FutureRC::RETRY || rc == FutureRC::CONFLICT) {
-				// tx already reset
-				continue;
-			} else {
-				return -1;
-			}
-		}
-	} else {
-		int batch_size = args.tenant_batch_size;
-		int batches = (args.total_tenants + batch_size - 1) / batch_size;
-		// First loop to clear all tenant key ranges
-		for (int batch = 0; batch < batches; ++batch) {
-			fdb::TypedFuture<fdb::future_var::ValueRef> tenantResults[batch_size];
-			// Issue all tenant reads first
-			Transaction getTx = db.createTransaction();
-			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-				std::string tenant_name = "tenant" + std::to_string(i);
-				tenantResults[i - (batch * batch_size)] = Tenant::getTenant(getTx, toBytesRef(tenant_name));
-			}
-			tx.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
-			tx.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
-			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-				std::string tenant_name = "tenant" + std::to_string(i);
-				while (true) {
-					const auto rc = waitAndHandleError(getTx, tenantResults[i - (batch * batch_size)], "GET_TENANT");
-					if (rc == FutureRC::OK) {
-						// Read the tenant metadata for the prefix and issue a range clear
-						if (tenantResults[i - (batch * batch_size)].get().has_value()) {
-							ByteString val(tenantResults[i - (batch * batch_size)].get().value());
-							rapidjson::Document doc;
-							const char* metadata = reinterpret_cast<const char*>(val.c_str());
-							doc.Parse(metadata);
-							if (!doc.HasParseError()) {
-								// rapidjson does not decode the prefix as the same byte string that
-								// was passed as input. This is because we use a non-standard encoding.
-								// The encoding will likely change in the future.
-								// For a workaround, we take the id and compute the prefix on our own
-								rapidjson::Value& docVal = doc["id"];
-								uint64_t id = docVal.GetUint64();
-								ByteString tenantPrefix(8, '\0');
-								computeTenantPrefix(tenantPrefix, id);
-								ByteString tenantPrefixEnd = strinc(tenantPrefix);
-								tx.clearRange(toBytesRef(tenantPrefix), toBytesRef(tenantPrefixEnd));
-							}
-						}
-						break;
-					} else if (rc == FutureRC::RETRY) {
-						continue;
-					} else {
-						// Abort
-						return -1;
-					}
-				}
-			}
-			auto future_commit = tx.commit();
-			const auto rc = waitAndHandleError(tx, future_commit, "TENANT_COMMIT_CLEANUP");
-			if (rc == FutureRC::OK) {
-				// Keep going with reset transaction if commit was successful
-				tx.reset();
-			} else if (rc == FutureRC::RETRY) {
-				// We want to retry this batch, so decrement the number
-				// and go back through the loop to get the same value
-				// Transaction is already reset
-				--batch;
-			} else {
-				// Abort
-				return -1;
-			}
-		}
-		// Second loop to delete the tenants
-		tx.reset();
-		for (int batch = 0; batch < batches; ++batch) {
-			for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-				std::string tenant_name = "tenant" + std::to_string(i);
-				Tenant::deleteTenant(tx, toBytesRef(tenant_name));
-			}
-			auto future_commit = tx.commit();
-			const auto rc = waitAndHandleError(tx, future_commit, "DELETE_TENANT");
-			if (rc == FutureRC::OK) {
-				// Keep going with reset transaction if commit was successful
-				tx.reset();
-			} else if (rc == FutureRC::RETRY) {
-				// We want to retry this batch, so decrement the number
-				// and go back through the loop to get the same value
-				// Transaction is already reset
-				--batch;
-			} else {
-				// Abort
-				return -1;
-			}
+	while (true) {
+		tx.clearRange(beginstr, endstr);
+		auto future_commit = tx.commit();
+		const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_CLEANUP");
+		if (rc == FutureRC::OK) {
+			break;
+		} else if (rc == FutureRC::RETRY) {
+			// tx already reset
+			continue;
+		} else {
+			return -1;
 		}
 	}
 
@@ -241,12 +183,10 @@ int cleanup(Database db, Arguments const& args) {
 }
 
 /* populate database */
-int populate(Database db,
-             Arguments const& args,
-             int worker_id,
-             int thread_id,
-             int thread_tps,
-             ThreadStatistics& stats) {
+int populate(Database db, const ThreadArgs& thread_args, int thread_tps, WorkflowStatistics& stats) {
+	Arguments const& args = *thread_args.args;
+	const auto process_idx = thread_args.process_idx;
+	const auto thread_idx = thread_args.thread_idx;
 	auto xacts = 0;
 	auto keystr = ByteString{};
 	auto valstr = ByteString{};
@@ -259,69 +199,25 @@ int populate(Database db,
 	auto watch_tx = Stopwatch(watch_total.getStart());
 	auto watch_trace = Stopwatch(watch_total.getStart());
 
-	if (args.total_tenants > 0) {
-		Transaction systemTx = db.createTransaction();
-		// Have one thread create all the tenants, then let the rest help with data population
-		if (worker_id == 0 && thread_id == 0) {
-			int batch_size = args.tenant_batch_size;
-			int batches = (args.total_tenants + batch_size - 1) / batch_size;
-			for (int batch = 0; batch < batches; ++batch) {
-				for (int i = batch * batch_size; i < args.total_tenants && i < (batch + 1) * batch_size; ++i) {
-					std::string tenant_name = "tenant" + std::to_string(i);
-					Tenant::createTenant(systemTx, toBytesRef(tenant_name));
-				}
-				auto future_commit = systemTx.commit();
-				const auto rc = waitAndHandleError(systemTx, future_commit, "CREATE_TENANT");
-				if (rc == FutureRC::OK) {
-					// Keep going with reset transaction if commit was successful
-					systemTx.reset();
-				} else if (rc == FutureRC::RETRY) {
-					// We want to retry this batch, so decrement the number
-					// and go back through the loop to get the same value
-					// Transaction is already reset
-					--batch;
-				} else {
-					// Abort
-					return -1;
-				}
-			}
-		} else {
-			std::string last_tenant_name = "tenant" + std::to_string(args.total_tenants - 1);
-			while (true) {
-				auto result = Tenant::getTenant(systemTx, toBytesRef(last_tenant_name));
-				const auto rc = waitAndHandleError(systemTx, result, "GET_TENANT");
-				if (rc == FutureRC::OK) {
-					// If we get valid tenant metadata, the main thread has finished
-					if (result.get().has_value()) {
-						break;
-					}
-					systemTx.reset();
-				} else if (rc == FutureRC::RETRY) {
-					continue;
-				} else {
-					// Abort
-					return -1;
-				}
-				usleep(1000);
-			}
-		}
-	}
-	// mimic typical tenant usage: keep tenants in memory
-	// and create transactions as needed
-	Tenant tenants[args.active_tenants];
-	for (int i = 0; i < args.active_tenants; ++i) {
-		std::string tenantStr = "tenant" + std::to_string(i);
-		BytesRef tenant_name = toBytesRef(tenantStr);
-		tenants[i] = db.openTenant(tenant_name);
-	}
+	// tenants are assumed to have been generated by populateTenants() at main process, pre-fork
+	std::optional<std::vector<Tenant>> tenants = args.prepareTenants(db);
 	int populate_iters = args.active_tenants > 0 ? args.active_tenants : 1;
 	// Each tenant should have the same range populated
 	for (auto t_id = 0; t_id < populate_iters; ++t_id) {
-		Transaction tx = createNewTransaction(db, args, t_id, args.active_tenants > 0 ? tenants : nullptr);
-		const auto key_begin = insertBegin(args.rows, worker_id, thread_id, args.num_processes, args.num_threads);
-		const auto key_end = insertEnd(args.rows, worker_id, thread_id, args.num_processes, args.num_threads);
+		auto [tx, token] = createNewTransaction(db, args, t_id, tenants);
+		const auto key_begin = insertBegin(args.rows, process_idx, thread_idx, args.num_processes, args.num_threads);
+		const auto key_end = insertEnd(args.rows, process_idx, thread_idx, args.num_processes, args.num_threads);
 		auto key_checkpoint = key_begin; // in case of commit failure, restart from this key
+		double required_keys = (key_end - key_begin + 1) * args.load_factor;
 		for (auto i = key_begin; i <= key_end; i++) {
+			// Choose required_keys out of (key_end -i + 1) randomly, so the probability is required_keys / (key_end - i
+			// + 1). Generate a random number in range [0, 1), if the generated number is smaller or equal to
+			// required_keys / (key_end - i + 1), then choose this key.
+			double r = rand() / (1.0 + RAND_MAX);
+			if (r > required_keys / (key_end - i + 1)) {
+				continue;
+			}
+			--required_keys;
 			/* sequential keys */
 			genKey(keystr.data(), KEY_PREFIX, args, i);
 			/* random values */
@@ -366,7 +262,7 @@ int populate(Database db,
 				auto tx_restarter = ExitGuard([&watch_tx]() { watch_tx.startFromStop(); });
 				if (rc == FutureRC::OK) {
 					key_checkpoint = i + 1; // restart on failures from next key
-					tx = createNewTransaction(db, args, t_id, args.active_tenants > 0 ? tenants : nullptr);
+					std::tie(tx, token) = createNewTransaction(db, args, t_id, tenants);
 				} else if (rc == FutureRC::ABORT) {
 					return -1;
 				} else {
@@ -396,10 +292,23 @@ int populate(Database db,
 	return 0;
 }
 
+void updateErrorStatsRunMode(WorkflowStatistics& stats, fdb::Error err, int op) {
+	if (err) {
+		if (err.is(1020 /*not_commited*/)) {
+			stats.incrConflictCount();
+		} else if (err.is(1031 /*timeout*/)) {
+			stats.incrTimeoutCount(op);
+		} else {
+			stats.incrErrorCount(op);
+		}
+	}
+}
+
 /* run one iteration of configured transaction */
 int runOneTransaction(Transaction& tx,
+                      std::optional<std::string> const& token,
                       Arguments const& args,
-                      ThreadStatistics& stats,
+                      WorkflowStatistics& stats,
                       ByteString& key1,
                       ByteString& key2,
                       ByteString& val) {
@@ -422,21 +331,17 @@ transaction_begin:
 		auto future_rc = FutureRC::OK;
 		if (f) {
 			if (step_kind != StepKind::ON_ERROR) {
-				future_rc = waitAndHandleError(tx, f, opTable[op].name());
+				future_rc = waitAndHandleError(tx, f, opTable[op].name(), args.isAnyTimeoutEnabled());
 			} else {
-				future_rc = waitAndHandleForOnError(tx, f, opTable[op].name());
+				future_rc = waitAndHandleForOnError(tx, f, opTable[op].name(), args.isAnyTimeoutEnabled());
 			}
+			updateErrorStatsRunMode(stats, f.error(), op);
 		}
 		if (auto postStepFn = opTable[op].postStepFunction(step))
 			postStepFn(f, tx, args, key1, key2, val);
 		watch_step.stop();
 		if (future_rc != FutureRC::OK) {
-			if (future_rc == FutureRC::CONFLICT) {
-				stats.incrConflictCount();
-			} else if (future_rc == FutureRC::RETRY) {
-				stats.incrErrorCount(op);
-			} else {
-				// abort
+			if (future_rc == FutureRC::ABORT) {
 				return -1;
 			}
 			// retry from first op
@@ -452,6 +357,8 @@ transaction_begin:
 				stats.addLatency(OP_COMMIT, step_latency);
 			}
 			tx.reset();
+			if (token)
+				tx.setOption(FDB_TR_OPTION_AUTHORIZATION_TOKEN, *token);
 			stats.incrOpCount(OP_COMMIT);
 			needs_commit = false;
 		}
@@ -474,9 +381,14 @@ transaction_begin:
 	if (needs_commit || args.commit_get) {
 		auto watch_commit = Stopwatch(StartAtCtor{});
 		auto f = tx.commit();
-		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END");
+		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END", args.isAnyTimeoutEnabled());
+		updateErrorStatsRunMode(stats, f.error(), OP_COMMIT);
 		watch_commit.stop();
-		auto tx_resetter = ExitGuard([&tx]() { tx.reset(); });
+		auto tx_resetter = ExitGuard([&tx, &token]() {
+			tx.reset();
+			if (token)
+				tx.setOption(FDB_TR_OPTION_AUTHORIZATION_TOKEN, *token);
+		});
 		if (rc == FutureRC::OK) {
 			if (do_sample) {
 				const auto commit_latency = watch_commit.diff();
@@ -484,10 +396,6 @@ transaction_begin:
 			}
 			stats.incrOpCount(OP_COMMIT);
 		} else {
-			if (rc == FutureRC::CONFLICT)
-				stats.incrConflictCount();
-			else
-				stats.incrErrorCount(OP_COMMIT);
 			if (rc == FutureRC::ABORT) {
 				return -1;
 			}
@@ -511,7 +419,7 @@ int runWorkload(Database db,
                 std::atomic<double> const& throttle_factor,
                 int const thread_iters,
                 std::atomic<int> const& signal,
-                ThreadStatistics& stats,
+                WorkflowStatistics& workflow_stats,
                 int const dotrace,
                 int const dotagging) {
 	auto traceid = std::string{};
@@ -543,73 +451,75 @@ int runWorkload(Database db,
 	auto val = ByteString{};
 	val.resize(args.value_length);
 
-	// mimic typical tenant usage: keep tenants in memory
-	// and create transactions as needed
-	Tenant tenants[args.active_tenants];
-	for (int i = 0; i < args.active_tenants; ++i) {
-		std::string tenantStr = "tenant" + std::to_string(i);
-		BytesRef tenant_name = toBytesRef(tenantStr);
-		tenants[i] = db.openTenant(tenant_name);
-	}
+	std::optional<std::vector<fdb::Tenant>> tenants = args.prepareTenants(db);
 
 	/* main transaction loop */
 	while (1) {
-		Transaction tx = createNewTransaction(db, args, -1, args.active_tenants > 0 ? tenants : nullptr);
-		while ((thread_tps > 0) && (xacts >= current_tps)) {
+		if ((thread_tps > 0 /* iff throttling on */) && (xacts >= current_tps)) {
 			/* throttle on */
-			const auto time_now = steady_clock::now();
-			if (toDoubleSeconds(time_now - time_prev) >= 1.0) {
-				/* more than 1 second passed, no need to throttle */
-				xacts = 0;
-				time_prev = time_now;
-
-				/* update throttle rate */
-				current_tps = static_cast<int>(thread_tps * throttle_factor.load());
-			} else {
+			auto time_now = steady_clock::now();
+			while (toDoubleSeconds(time_now - time_prev) < 1.0) {
 				usleep(1000);
+				time_now = steady_clock::now();
 			}
+
+			/* more than 1 second passed*/
+			xacts = 0;
+			time_prev = time_now;
+
+			/* update throttle rate */
+			current_tps = static_cast<int>(thread_tps * throttle_factor.load());
 		}
-		/* enable transaction trace */
-		if (dotrace) {
-			const auto time_now = steady_clock::now();
-			if (toIntegerSeconds(time_now - time_last_trace) >= 1) {
-				time_last_trace = time_now;
-				traceid.clear();
-				fmt::format_to(std::back_inserter(traceid), "makotrace{:0>19d}", total_xacts);
-				logr.debug("txn tracing {}", traceid);
-				auto err = Error{};
-				err = tx.setOptionNothrow(FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, toBytesRef(traceid));
+
+		if (current_tps > 0 || thread_tps == 0 /* throttling off */) {
+			auto [tx, token] = createNewTransaction(db, args, -1, tenants);
+			setTransactionTimeoutIfEnabled(args, tx);
+
+			/* enable transaction trace */
+			if (dotrace) {
+				const auto time_now = steady_clock::now();
+				if (toIntegerSeconds(time_now - time_last_trace) >= 1) {
+					time_last_trace = time_now;
+					traceid.clear();
+					fmt::format_to(std::back_inserter(traceid), "makotrace{:0>19d}", total_xacts);
+					logr.debug("txn tracing {}", traceid);
+					auto err = Error{};
+					err = tx.setOptionNothrow(FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, toBytesRef(traceid));
+					if (err) {
+						logr.error("TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: {}", err.what());
+					}
+					err = tx.setOptionNothrow(FDB_TR_OPTION_LOG_TRANSACTION, BytesRef());
+					if (err) {
+						logr.error("TR_OPTION_LOG_TRANSACTION: {}", err.what());
+					}
+				}
+			}
+
+			/* enable transaction tagging */
+			if (dotagging > 0) {
+				tagstr.clear();
+				fmt::format_to(std::back_inserter(tagstr),
+				               "{}{}{:0>3d}",
+				               KEY_PREFIX,
+				               args.txntagging_prefix,
+				               urand(0, args.txntagging - 1));
+				auto err = tx.setOptionNothrow(FDB_TR_OPTION_AUTO_THROTTLE_TAG, toBytesRef(tagstr));
 				if (err) {
 					logr.error("TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: {}", err.what());
 				}
-				err = tx.setOptionNothrow(FDB_TR_OPTION_LOG_TRANSACTION, BytesRef());
-				if (err) {
-					logr.error("TR_OPTION_LOG_TRANSACTION: {}", err.what());
-				}
 			}
-		}
 
-		/* enable transaction tagging */
-		if (dotagging > 0) {
-			tagstr.clear();
-			fmt::format_to(std::back_inserter(tagstr),
-			               "{}{}{:0>3d}",
-			               KEY_PREFIX,
-			               args.txntagging_prefix,
-			               urand(0, args.txntagging - 1));
-			auto err = tx.setOptionNothrow(FDB_TR_OPTION_AUTO_THROTTLE_TAG, toBytesRef(tagstr));
-			if (err) {
-				logr.error("TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: {}", err.what());
+			rc = runOneTransaction(tx, token, args, workflow_stats, key1, key2, val);
+			if (rc) {
+				logr.warn("runOneTransaction failed ({})", rc);
 			}
-		}
 
-		rc = runOneTransaction(tx, args, stats, key1, key2, val);
-		if (rc) {
-			logr.warn("runOneTransaction failed ({})", rc);
+			xacts++;
+			total_xacts++;
 		}
 
 		if (thread_iters != -1) {
-			if (thread_iters >= total_xacts) {
+			if (total_xacts >= thread_iters) {
 				/* xact limit reached */
 				break;
 			}
@@ -617,26 +527,24 @@ int runWorkload(Database db,
 			/* signal turned red, target duration reached */
 			break;
 		}
-		xacts++;
-		total_xacts++;
 	}
 	return rc;
 }
 
-std::string getStatsFilename(std::string_view dirname, int worker_id, int thread_id, int op) {
+std::string getStatsFilename(std::string_view dirname, int process_idx, int thread_id, int op) {
 
-	return fmt::format("{}/{}_{}_{}", dirname, worker_id + 1, thread_id + 1, opTable[op].name());
+	return fmt::format("{}/{}_{}_{}", dirname, process_idx + 1, thread_id + 1, opTable[op].name());
 }
 
-std::string getStatsFilename(std::string_view dirname, int worker_id, int thread_id) {
-	return fmt::format("{}/{}_{}", dirname, worker_id + 1, thread_id + 1);
+std::string getStatsFilename(std::string_view dirname, int process_idx, int thread_id) {
+	return fmt::format("{}/{}_{}", dirname, process_idx + 1, thread_id + 1);
 }
 
 void dumpThreadSamples(Arguments const& args,
                        pid_t parent_id,
-                       int worker_id,
+                       int process_idx,
                        int thread_id,
-                       const ThreadStatistics& stats,
+                       const WorkflowStatistics& stats,
                        bool overwrite = true) {
 	const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, parent_id);
 	const auto rc = mkdir(dirname.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
@@ -646,21 +554,21 @@ void dumpThreadSamples(Arguments const& args,
 	}
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			stats.writeToFile(getStatsFilename(dirname, worker_id, thread_id, op), op);
+			stats.writeToFile(getStatsFilename(dirname, process_idx, thread_id, op), op);
 		}
 	}
 }
 
 void runAsyncWorkload(Arguments const& args,
                       pid_t pid_main,
-                      int worker_id,
+                      int process_idx,
                       shared_memory::Access shm,
                       boost::asio::io_context& io_context,
                       std::vector<Database>& databases) {
-	auto dump_samples = [&args, pid_main, worker_id](auto&& states) {
+	auto dump_samples = [&args, pid_main, process_idx](auto&& states) {
 		auto overwrite = true; /* overwrite or append */
 		for (const auto& state : states) {
-			dumpThreadSamples(args, pid_main, worker_id, 0 /*thread_id*/, state->stats, overwrite);
+			dumpThreadSamples(args, pid_main, process_idx, 0 /*thread_id*/, state->stats, overwrite);
 			overwrite = false;
 		}
 	};
@@ -668,16 +576,16 @@ void runAsyncWorkload(Arguments const& args,
 	if (args.mode == MODE_BUILD) {
 		auto states = std::vector<PopulateStateHandle>(args.async_xacts);
 		for (auto i = 0; i < args.async_xacts; i++) {
-			const auto key_begin = insertBegin(args.rows, worker_id, i, args.num_processes, args.async_xacts);
-			const auto key_end = insertEnd(args.rows, worker_id, i, args.num_processes, args.async_xacts);
+			const auto key_begin = insertBegin(args.rows, process_idx, i, args.num_processes, args.async_xacts);
+			const auto key_end = insertEnd(args.rows, process_idx, i, args.num_processes, args.async_xacts);
 			auto db = databases[i % args.num_databases];
 			auto state =
-			    std::make_shared<ResumableStateForPopulate>(Logger(WorkerProcess{}, args.verbose, worker_id, i),
+			    std::make_shared<ResumableStateForPopulate>(Logger(WorkerProcess{}, args.verbose, process_idx, i),
 			                                                db,
-			                                                createNewTransaction(db, args),
+			                                                db.createTransaction(),
 			                                                io_context,
 			                                                args,
-			                                                shm.statsSlot(worker_id, i),
+			                                                shm.workerStatsSlot(process_idx, i),
 			                                                stopcount,
 			                                                key_begin,
 			                                                key_end);
@@ -700,14 +608,17 @@ void runAsyncWorkload(Arguments const& args,
 			const auto max_iters =
 			    args.iteration == 0
 			        ? -1
-			        : computeThreadIters(args.iteration, worker_id, i, args.num_processes, args.async_xacts);
+			        : computeThreadIters(args.iteration, process_idx, i, args.num_processes, args.async_xacts);
+			// argument validation should ensure max_iters > 0
+			assert(args.iteration == 0 || max_iters > 0);
+
 			auto state =
-			    std::make_shared<ResumableStateForRunWorkload>(Logger(WorkerProcess{}, args.verbose, worker_id, i),
+			    std::make_shared<ResumableStateForRunWorkload>(Logger(WorkerProcess{}, args.verbose, process_idx, i),
 			                                                   db,
-			                                                   createNewTransaction(db, args),
+			                                                   db.createTransaction(),
 			                                                   io_context,
 			                                                   args,
-			                                                   shm.statsSlot(worker_id, i),
+			                                                   shm.workerStatsSlot(process_idx, i),
 			                                                   stopcount,
 			                                                   shm.headerConst().signal,
 			                                                   max_iters,
@@ -728,31 +639,38 @@ void runAsyncWorkload(Arguments const& args,
 }
 
 /* mako worker thread */
-void workerThread(ThreadArgs& thread_args) {
+void workerThread(const ThreadArgs& thread_args) {
+
 	const auto& args = *thread_args.args;
 	const auto parent_id = thread_args.parent_id;
-	const auto worker_id = thread_args.worker_id;
-	const auto thread_id = thread_args.thread_id;
-	const auto dotrace = (worker_id == 0 && thread_id == 0 && args.txntrace) ? args.txntrace : 0;
+	const auto process_idx = thread_args.process_idx;
+	const auto thread_idx = thread_args.thread_idx;
+	const auto dotrace = (process_idx == 0 && thread_idx == 0 && args.txntrace) ? args.txntrace : 0;
 	auto database = thread_args.database;
 	const auto dotagging = args.txntagging;
 	const auto& signal = thread_args.shm.headerConst().signal;
 	const auto& throttle_factor = thread_args.shm.headerConst().throttle_factor;
 	auto& readycount = thread_args.shm.header().readycount;
 	auto& stopcount = thread_args.shm.header().stopcount;
-	auto& stats = thread_args.shm.statsSlot(worker_id, thread_id);
-	logr = Logger(WorkerProcess{}, args.verbose, worker_id, thread_id);
+	auto& workflow_stats = thread_args.shm.workerStatsSlot(process_idx, thread_idx);
+	auto& thread_stats = thread_args.shm.threadStatsSlot(process_idx, thread_idx);
+	logr = Logger(WorkerProcess{}, args.verbose, process_idx, thread_idx);
+	thread_stats.startThreadTimer();
 
 	logr.debug("started, tid: {}", reinterpret_cast<uint64_t>(pthread_self()));
 
 	const auto thread_tps =
 	    args.tpsmax == 0 ? 0
-	                     : computeThreadTps(args.tpsmax, worker_id, thread_id, args.num_processes, args.num_threads);
+	                     : computeThreadTps(args.tpsmax, process_idx, thread_idx, args.num_processes, args.num_threads);
+	// argument validation should ensure thread_tps > 0
+	assert(args.tpsmax == 0 || thread_tps > 0);
 
 	const auto thread_iters =
 	    args.iteration == 0
 	        ? -1
-	        : computeThreadIters(args.iteration, worker_id, thread_id, args.num_processes, args.num_threads);
+	        : computeThreadIters(args.iteration, process_idx, thread_idx, args.num_processes, args.num_threads);
+	// argument validation should ensure thread_iters > 0
+	assert(args.iteration == 0 || thread_iters > 0);
 
 	/* i'm ready */
 	readycount.fetch_add(1);
@@ -762,131 +680,75 @@ void workerThread(ThreadArgs& thread_args) {
 	}
 
 	if (args.mode == MODE_CLEAN) {
-		auto rc = cleanup(database, args);
+		auto rc = cleanupNormalKeyspace(database, args);
 		if (rc < 0) {
 			logr.error("cleanup failed");
 		}
 	} else if (args.mode == MODE_BUILD) {
-		auto rc = populate(database, args, worker_id, thread_id, thread_tps, stats);
+		auto rc = populate(database, thread_args, thread_tps, workflow_stats);
 		if (rc < 0) {
 			logr.error("populate failed");
 		}
 	} else if (args.mode == MODE_RUN) {
-		auto rc =
-		    runWorkload(database, args, thread_tps, throttle_factor, thread_iters, signal, stats, dotrace, dotagging);
+		auto rc = runWorkload(
+		    database, args, thread_tps, throttle_factor, thread_iters, signal, workflow_stats, dotrace, dotagging);
 		if (rc < 0) {
 			logr.error("runWorkload failed");
 		}
 	}
 
 	if (args.mode == MODE_BUILD || args.mode == MODE_RUN) {
-		dumpThreadSamples(args, parent_id, worker_id, thread_id, stats);
+		dumpThreadSamples(args, parent_id, process_idx, thread_idx, workflow_stats);
 	}
+
+	thread_stats.endThreadTimer();
 }
 
 /* mako worker process */
-int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Access shm, pid_t pid_main) {
+int workerProcessMain(Arguments const& args, int process_idx, shared_memory::Access shm, pid_t pid_main) {
 	logr.debug("started");
 
 	auto err = Error{};
 	/* Everything starts from here */
-
-	selectApiVersion(args.api_version);
-
-	/* enable distributed tracing */
-	switch (args.distributed_tracer_client) {
-	case DistributedTracerClient::NETWORK_LOSSY:
-		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("network_lossy")));
-		break;
-	case DistributedTracerClient::LOG_FILE:
-		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("log_file")));
-		break;
-	}
-	if (err) {
-		logr.error("network::setOption(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER): {}", err.what());
-	}
-
-	/* enable flatbuffers if specified */
-	if (args.flatbuffers) {
-#ifdef FDB_NET_OPTION_USE_FLATBUFFERS
-		logr.debug("Using flatbuffers");
-		err = network::setOptionNothrow(FDB_NET_OPTION_USE_FLATBUFFERS,
-		                                BytesRef(&args.flatbuffers, sizeof(args.flatbuffers)));
-		if (err) {
-			logr.error("network::setOption(USE_FLATBUFFERS): {}", err.what());
-		}
-#else
-		logr.info("flatbuffers is not supported in FDB API version {}", FDB_API_VERSION);
-#endif
-	}
-
-	/* Set client logr group */
-	if (args.log_group[0] != '\0') {
-		err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_LOG_GROUP, BytesRef(toBytePtr(args.log_group)));
-		if (err) {
-			logr.error("network::setOption(FDB_NET_OPTION_TRACE_LOG_GROUP): {}", err.what());
-		}
-	}
-
-	/* enable tracing if specified */
-	if (args.trace) {
-		logr.debug("Enable Tracing in {} ({})",
-		           (args.traceformat == 0) ? "XML" : "JSON",
-		           (args.tracepath[0] == '\0') ? "current directory" : args.tracepath);
-		err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_ENABLE, BytesRef(toBytePtr(args.tracepath)));
-		if (err) {
-			logr.error("network::setOption(TRACE_ENABLE): {}", err.what());
-		}
-		if (args.traceformat == 1) {
-			err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_FORMAT, BytesRef(toBytePtr("json")));
-			if (err) {
-				logr.error("network::setOption(FDB_NET_OPTION_TRACE_FORMAT): {}", err.what());
-			}
-		}
-	}
-
-	/* enable knobs if specified */
-	if (args.knobs[0] != '\0') {
-		auto knobs = std::string_view(args.knobs);
-		const auto delim = std::string_view(", ");
-		while (true) {
-			knobs.remove_prefix(std::min(knobs.find_first_not_of(delim), knobs.size()));
-			auto knob = knobs.substr(0, knobs.find_first_of(delim));
-			if (knob.empty())
-				break;
-			logr.debug("Setting client knob: {}", knob);
-			err = network::setOptionNothrow(FDB_NET_OPTION_KNOB, toBytesRef(knob));
-			if (err) {
-				logr.error("network::setOption({}): {}", knob, err.what());
-			}
-			knobs.remove_prefix(knob.size());
-		}
-	}
-
-	if (args.client_threads_per_version > 0) {
-		err = network::setOptionNothrow(FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, args.client_threads_per_version);
-		if (err) {
-			logr.error("network::setOption (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) ({}): {}",
-			           args.client_threads_per_version,
-			           err.what());
-			// let's exit here since we do not want to confuse users
-			// that mako is running with multi-threaded client enabled
-			return -1;
-		}
+	if (args.setGlobalOptions() < 0) {
+		return -1;
 	}
 
 	/* Network thread must be setup before doing anything */
 	logr.debug("network::setup()");
 	network::setup();
 
+	shm.processStatsSlot(process_idx).startProcessTimer();
+
 	/* Each worker process will have its own network thread */
 	logr.debug("creating network thread");
-	auto network_thread = std::thread([parent_logr = logr]() {
+	auto network_thread = std::thread([parent_logr = logr, process_idx, shm]() {
+		shm.processStatsSlot(process_idx).startFDBNetworkTimer();
+
 		logr = parent_logr;
 		logr.debug("network thread started");
 		if (auto err = network::run()) {
 			logr.error("network::run(): {}", err.what());
 		}
+
+		shm.processStatsSlot(process_idx).endFDBNetworkTimer();
+	});
+#if defined(__linux__)
+	pthread_setname_np(network_thread.native_handle(), "mako_network");
+#endif
+
+	// prevent any exception from unwinding stack without joining the network thread
+	auto network_thread_guard = ExitGuard([&network_thread]() {
+		/* stop the network thread */
+		logr.debug("network::stop()");
+		auto err = network::stop();
+		if (err) {
+			logr.error("network::stop(): {}", err.what());
+		}
+
+		/* wait for the network thread to join */
+		logr.debug("waiting for network thread to join");
+		network_thread.join();
 	});
 
 	/*** let's party! ***/
@@ -894,11 +756,14 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 	auto databases = std::vector<fdb::Database>(args.num_databases);
 	/* set up database for worker threads */
 	for (auto i = 0; i < args.num_databases; i++) {
-		size_t cluster_index = args.num_fdb_clusters <= 1 ? 0 : i % args.num_fdb_clusters;
+		int cluster_index = i % args.num_fdb_clusters;
 		databases[i] = Database(args.cluster_files[cluster_index]);
 		logr.debug("creating database at cluster {}", args.cluster_files[cluster_index]);
 		if (args.disable_ryw) {
 			databases[i].setOption(FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, BytesRef{});
+		}
+		if (args.transaction_timeout_db > 0 && args.mode == MODE_RUN) {
+			databases[i].setOption(FDB_DB_OPTION_TRANSACTION_TIMEOUT, args.transaction_timeout_db);
 		}
 	}
 
@@ -911,8 +776,8 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 
 		for (auto i = 0; i < args.num_threads; i++) {
 			auto& this_args = thread_args[i];
-			this_args.worker_id = worker_id;
-			this_args.thread_id = i;
+			this_args.process_idx = process_idx;
+			this_args.thread_idx = i;
 			this_args.parent_id = pid_main;
 			this_args.active_tenants = args.active_tenants;
 			this_args.total_tenants = args.total_tenants;
@@ -920,6 +785,10 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 			this_args.shm = shm;
 			this_args.database = databases[i % args.num_databases];
 			worker_threads[i] = std::thread(workerThread, std::ref(this_args));
+#if defined(__linux__)
+			const auto thread_name = "mako_worker_" + std::to_string(i);
+			pthread_setname_np(worker_threads[i].native_handle(), thread_name.c_str());
+#endif
 		}
 		/* wait for everyone to finish */
 		for (auto i = 0; i < args.num_threads; i++) {
@@ -933,85 +802,203 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 		auto wg = WorkGuard(ctx.get_executor());
 		auto worker_threads = std::vector<std::thread>(args.num_threads);
 		for (auto i = 0; i < args.num_threads; i++) {
-			worker_threads[i] = std::thread([&ctx, &args, worker_id, i]() {
-				logr = Logger(WorkerProcess{}, args.verbose, worker_id);
+			worker_threads[i] = std::thread([&ctx, &args, process_idx, i, shm]() {
+				shm.threadStatsSlot(process_idx, i).startThreadTimer();
+
+				logr = Logger(WorkerProcess{}, args.verbose, process_idx);
 				logr.debug("Async-mode worker thread {} started", i + 1);
 				ctx.run();
 				logr.debug("Async-mode worker thread {} finished", i + 1);
+
+				shm.threadStatsSlot(process_idx, i).endThreadTimer();
 			});
+#if defined(__linux__)
+			const auto thread_name = "mako_worker_" + std::to_string(i);
+			pthread_setname_np(worker_threads[i].native_handle(), thread_name.c_str());
+#endif
 		}
+
 		shm.header().readycount.fetch_add(args.num_threads);
-		runAsyncWorkload(args, pid_main, worker_id, shm, ctx, databases);
+		runAsyncWorkload(args, pid_main, process_idx, shm, ctx, databases);
 		wg.reset();
 		for (auto& thread : worker_threads)
 			thread.join();
 		shm.header().stopcount.fetch_add(args.num_threads);
 	}
 
-	/* stop the network thread */
-	logr.debug("network::stop()");
-	err = network::stop();
-	if (err) {
-		logr.error("network::stop(): {}", err.what());
-	}
-
-	/* wait for the network thread to join */
-	logr.debug("waiting for network thread to join");
-	network_thread.join();
-
+	shm.processStatsSlot(process_idx).endProcessTimer();
 	return 0;
 }
 
 /* initialize the parameters with default values */
-int initArguments(Arguments& args) {
-	memset(&args, 0, sizeof(Arguments)); /* zero-out everything */
-	args.num_fdb_clusters = 0;
-	args.num_databases = 1;
-	args.api_version = maxApiVersion();
-	args.json = 0;
-	args.num_processes = 1;
-	args.num_threads = 1;
-	args.async_xacts = 0;
-	args.mode = MODE_INVALID;
-	args.rows = 100000;
-	args.row_digits = digits(args.rows);
-	args.seconds = 30;
-	args.iteration = 0;
-	args.tpsmax = 0;
-	args.tpsmin = -1;
-	args.tpsinterval = 10;
-	args.tpschange = TPS_SIN;
-	args.sampling = 1000;
-	args.key_length = 32;
-	args.value_length = 16;
-	args.active_tenants = 0;
-	args.total_tenants = 0;
-	args.tenant_batch_size = 10000;
-	args.zipf = 0;
-	args.commit_get = 0;
-	args.verbose = 1;
-	args.flatbuffers = 0; /* internal */
-	args.knobs[0] = '\0';
-	args.log_group[0] = '\0';
-	args.prefixpadding = 0;
-	args.trace = 0;
-	args.tracepath[0] = '\0';
-	args.traceformat = 0; /* default to client's default (XML) */
-	args.streaming_mode = FDB_STREAMING_MODE_WANT_ALL;
-	args.txntrace = 0;
-	args.txntagging = 0;
-	memset(args.txntagging_prefix, 0, TAGPREFIXLENGTH_MAX);
+Arguments::Arguments() {
+	num_fdb_clusters = 0;
+	num_databases = 1;
+	api_version = maxApiVersion();
+	json = 0;
+	num_processes = 1;
+	num_threads = 1;
+	async_xacts = 0;
+	mode = MODE_INVALID;
+	rows = 100000;
+	load_factor = 1.0;
+	row_digits = digits(rows);
+	seconds = 0;
+	iteration = 0;
+	tpsmax = 0;
+	tpsmin = -1;
+	tpsinterval = 10;
+	tpschange = TPS_SIN;
+	sampling = 1000;
+	key_length = 32;
+	value_length = 16;
+	active_tenants = 0;
+	total_tenants = 0;
+	tenant_batch_size = 10000;
+	zipf = 0;
+	commit_get = 0;
+	verbose = 1;
+	flatbuffers = 0; /* internal */
+	knobs[0] = '\0';
+	log_group[0] = '\0';
+	prefixpadding = 0;
+	trace = 0;
+	tracepath[0] = '\0';
+	traceformat = 0; /* default to client's default (XML) */
+	streaming_mode = FDB_STREAMING_MODE_WANT_ALL;
+	txntrace = 0;
+	txntagging = 0;
+	memset(cluster_files, 0, sizeof(cluster_files));
+	memset(txntagging_prefix, 0, TAGPREFIXLENGTH_MAX);
+	enable_token_based_authorization = false;
 	for (auto i = 0; i < MAX_OP; i++) {
-		args.txnspec.ops[i][OP_COUNT] = 0;
+		txnspec.ops[i][OP_COUNT] = 0;
 	}
-	args.client_threads_per_version = 0;
-	args.disable_ryw = 0;
-	args.json_output_path[0] = '\0';
-	args.stats_export_path[0] = '\0';
-	args.bg_materialize_files = false;
-	args.bg_file_path[0] = '\0';
-	args.distributed_tracer_client = 0;
+	client_threads_per_version = 0;
+	disable_client_bypass = false;
+	disable_ryw = 0;
+	json_output_path[0] = '\0';
+	stats_export_path[0] = '\0';
+	bg_materialize_files = false;
+	bg_file_path[0] = '\0';
+	distributed_tracer_client = 0;
+	transaction_timeout_db = 0;
+	transaction_timeout_tx = 0;
+	num_report_files = 0;
+}
+
+int Arguments::setGlobalOptions() const {
+	selectApiVersion(api_version);
+	auto err = Error{};
+	/* enable distributed tracing */
+	switch (distributed_tracer_client) {
+	case DistributedTracerClient::NETWORK_LOSSY:
+		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("network_lossy")));
+		break;
+	case DistributedTracerClient::LOG_FILE:
+		err = network::setOptionNothrow(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, BytesRef(toBytePtr("log_file")));
+		break;
+	}
+	if (err) {
+		logr.error("network::setOption(FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER): {}", err.what());
+	}
+
+	if (tls_certificate_file.has_value() && (logr.isFor(ProcKind::ADMIN) || !isAuthorizationEnabled())) {
+		logr.debug("TLS certificate file: {}", tls_certificate_file.value());
+		network::setOption(FDB_NET_OPTION_TLS_CERT_PATH, tls_certificate_file.value());
+	}
+
+	if (tls_key_file.has_value() && (logr.isFor(ProcKind::ADMIN) || !isAuthorizationEnabled())) {
+		logr.debug("TLS key file: {}", tls_key_file.value());
+		network::setOption(FDB_NET_OPTION_TLS_KEY_PATH, tls_key_file.value());
+	}
+
+	if (tls_ca_file.has_value()) {
+		logr.debug("TLS CA file: {}", tls_ca_file.value());
+		network::setOption(FDB_NET_OPTION_TLS_CA_PATH, tls_ca_file.value());
+	}
+
+	/* enable flatbuffers if specified */
+	if (flatbuffers) {
+#ifdef FDB_NET_OPTION_USE_FLATBUFFERS
+		logr.debug("Using flatbuffers");
+		err = network::setOptionNothrow(FDB_NET_OPTION_USE_FLATBUFFERS, BytesRef(&flatbuffers, sizeof(flatbuffers)));
+		if (err) {
+			logr.error("network::setOption(USE_FLATBUFFERS): {}", err.what());
+		}
+#else
+		logr.info("flatbuffers is not supported in FDB API version {}", FDB_API_VERSION);
+#endif
+	}
+
+	/* Set client logr group */
+	if (log_group[0] != '\0') {
+		err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_LOG_GROUP, BytesRef(toBytePtr(log_group)));
+		if (err) {
+			logr.error("network::setOption(FDB_NET_OPTION_TRACE_LOG_GROUP): {}", err.what());
+		}
+	}
+
+	/* enable tracing if specified */
+	if (trace) {
+		logr.debug("Enable Tracing in {} ({})",
+		           (traceformat == 0) ? "XML" : "JSON",
+		           (tracepath[0] == '\0') ? "current directory" : tracepath);
+		err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_ENABLE, BytesRef(toBytePtr(tracepath)));
+		if (err) {
+			logr.error("network::setOption(TRACE_ENABLE): {}", err.what());
+		}
+		if (traceformat == 1) {
+			err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_FORMAT, BytesRef(toBytePtr("json")));
+			if (err) {
+				logr.error("network::setOption(FDB_NET_OPTION_TRACE_FORMAT): {}", err.what());
+			}
+		}
+	}
+
+	/* enable knobs if specified */
+	if (knobs[0] != '\0') {
+		auto k = std::string_view(knobs);
+		const auto delim = std::string_view(", ");
+		while (true) {
+			k.remove_prefix(std::min(k.find_first_not_of(delim), k.size()));
+			auto knob = k.substr(0, k.find_first_of(delim));
+			if (knob.empty())
+				break;
+			logr.debug("Setting client knob: {}", knob);
+			err = network::setOptionNothrow(FDB_NET_OPTION_KNOB, toBytesRef(knob));
+			if (err) {
+				logr.error("network::setOption({}): {}", knob, err.what());
+			}
+			k.remove_prefix(knob.size());
+		}
+	}
+
+	if (client_threads_per_version > 0) {
+		err = network::setOptionNothrow(FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, client_threads_per_version);
+		if (err) {
+			logr.error("network::setOption (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) ({}): {}",
+			           client_threads_per_version,
+			           err.what());
+			// let's exit here since we do not want to confuse users
+			// that mako is running with multi-threaded client enabled
+			return -1;
+		}
+	}
+
+	if (disable_client_bypass) {
+		err = network::setOptionNothrow(FDB_NET_OPTION_DISABLE_CLIENT_BYPASS);
+		if (err) {
+			logr.error(
+			    "network::setOption (FDB_NET_OPTION_DISABLE_CLIENT_BYPASS): {}", disable_client_bypass, err.what());
+			return -1;
+		}
+	}
 	return 0;
+}
+
+bool Arguments::isAnyTimeoutEnabled() const {
+	return (transaction_timeout_tx > 0 || transaction_timeout_db > 0);
 }
 
 /* parse transaction specification */
@@ -1155,6 +1142,7 @@ void usage() {
 	printf("%-24s %s\n", "-t, --threads=THREADS", "Specify number of worker threads");
 	printf("%-24s %s\n", "    --async_xacts", "Specify number of concurrent transactions to be run in async mode");
 	printf("%-24s %s\n", "-r, --rows=ROWS", "Specify number of records");
+	printf("%-24s %s\n", "-l, --load_factor=LOAD_FACTOR", "Specify load factor");
 	printf("%-24s %s\n", "-s, --seconds=SECONDS", "Specify the test duration in seconds\n");
 	printf("%-24s %s\n", "", "This option cannot be specified with --iteration.");
 	printf("%-24s %s\n", "-i, --iteration=ITERS", "Specify the number of iterations.\n");
@@ -1188,6 +1176,8 @@ void usage() {
 	printf("%-24s %s\n", "    --flatbuffers", "Use flatbuffers");
 	printf("%-24s %s\n", "    --streaming", "Streaming mode: all (default), iterator, small, medium, large, serial");
 	printf("%-24s %s\n", "    --disable_ryw", "Disable snapshot read-your-writes");
+	printf(
+	    "%-24s %s\n", "    --disable_client_bypass", "Disable client-bypass forcing mako to use multi-version client");
 	printf("%-24s %s\n", "    --json_report=PATH", "Output stats to the specified json file (Default: mako.json)");
 	printf("%-24s %s\n",
 	       "    --bg_file_path=PATH",
@@ -1197,6 +1187,24 @@ void usage() {
 	       "Write the serialized DDSketch data to file at PATH. Can be used in either run or build mode.");
 	printf(
 	    "%-24s %s\n", "    --distributed_tracer_client=CLIENT", "Specify client (disabled, network_lossy, log_file)");
+	printf("%-24s %s\n", "    --tls_key_file=PATH", "Location of TLS key file");
+	printf("%-24s %s\n", "    --tls_ca_file=PATH", "Location of TLS CA file");
+	printf("%-24s %s\n", "    --tls_certificate_file=PATH", "Location of TLS certificate file");
+	printf("%-24s %s\n",
+	       "    --enable_token_based_authorization",
+	       "Make worker thread connect to server as untrusted clients to access tenant data");
+	printf("%-24s %s\n",
+	       "    --authorization_keypair_id",
+	       "ID of the public key in the public key set which will verify the authorization tokens generated by Mako");
+	printf("%-24s %s\n",
+	       "    --authorization_private_key_pem",
+	       "PEM-encoded private key with which Mako will sign generated tokens");
+	printf("%-24s %s\n",
+	       "    --transaction_timeout_db=DURATION",
+	       "Duration in milliseconds after which a transaction times out in run mode. Set as database option.");
+	printf("%-24s %s\n",
+	       "    --transaction_timeout_tx=DURATION",
+	       "Duration in milliseconds after which a transaction times out in run mode. Set as transaction option");
 }
 
 /* parse benchmark paramters */
@@ -1208,13 +1216,15 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		const char* short_options = "a:c:d:p:t:r:s:i:x:v:m:hz";
 		static struct option long_options[] = {
 			/* name, has_arg, flag, val */
+			/* options requiring an argument */
 			{ "api_version", required_argument, NULL, 'a' },
 			{ "cluster", required_argument, NULL, 'c' },
-			{ "num_databases", optional_argument, NULL, 'd' },
+			{ "num_databases", required_argument, NULL, 'd' },
 			{ "procs", required_argument, NULL, 'p' },
 			{ "threads", required_argument, NULL, 't' },
 			{ "async_xacts", required_argument, NULL, ARG_ASYNC },
 			{ "rows", required_argument, NULL, 'r' },
+			{ "load_factor", required_argument, NULL, 'l' },
 			{ "seconds", required_argument, NULL, 's' },
 			{ "iteration", required_argument, NULL, 'i' },
 			{ "keylen", required_argument, NULL, ARG_KEYLEN },
@@ -1237,24 +1247,45 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "trace_format", required_argument, NULL, ARG_TRACEFORMAT },
 			{ "streaming", required_argument, NULL, ARG_STREAMING_MODE },
 			{ "txntrace", required_argument, NULL, ARG_TXNTRACE },
-			/* no args */
+			{ "txntagging", required_argument, NULL, ARG_TXNTAGGING },
+			{ "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
+			{ "client_threads_per_version", required_argument, NULL, ARG_CLIENT_THREADS_PER_VERSION },
+			{ "bg_file_path", required_argument, NULL, ARG_BG_FILE_PATH },
+			{ "distributed_tracer_client", required_argument, NULL, ARG_DISTRIBUTED_TRACER_CLIENT },
+			{ "tls_certificate_file", required_argument, NULL, ARG_TLS_CERTIFICATE_FILE },
+			{ "tls_key_file", required_argument, NULL, ARG_TLS_KEY_FILE },
+			{ "tls_ca_file", required_argument, NULL, ARG_TLS_CA_FILE },
+			{ "authorization_keypair_id", required_argument, NULL, ARG_AUTHORIZATION_KEYPAIR_ID },
+			{ "authorization_private_key_pem_file", required_argument, NULL, ARG_AUTHORIZATION_PRIVATE_KEY_PEM_FILE },
+			{ "transaction_timeout_tx", required_argument, NULL, ARG_TRANSACTION_TIMEOUT_TX },
+			{ "transaction_timeout_db", required_argument, NULL, ARG_TRANSACTION_TIMEOUT_DB },
+			/* options which may or may not have an argument */
+			{ "json_report", optional_argument, NULL, ARG_JSON_REPORT },
+			{ "stats_export_path", optional_argument, NULL, ARG_EXPORT_PATH },
+			/* options without an argument */
 			{ "help", no_argument, NULL, 'h' },
 			{ "zipf", no_argument, NULL, 'z' },
 			{ "commitget", no_argument, NULL, ARG_COMMITGET },
 			{ "flatbuffers", no_argument, NULL, ARG_FLATBUFFERS },
 			{ "prefix_padding", no_argument, NULL, ARG_PREFIXPADDING },
 			{ "trace", no_argument, NULL, ARG_TRACE },
-			{ "txntagging", required_argument, NULL, ARG_TXNTAGGING },
-			{ "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
 			{ "version", no_argument, NULL, ARG_VERSION },
-			{ "client_threads_per_version", required_argument, NULL, ARG_CLIENT_THREADS_PER_VERSION },
+			{ "disable_client_bypass", no_argument, NULL, ARG_DISABLE_CLIENT_BYPASS },
 			{ "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
-			{ "json_report", optional_argument, NULL, ARG_JSON_REPORT },
-			{ "bg_file_path", required_argument, NULL, ARG_BG_FILE_PATH },
-			{ "stats_export_path", optional_argument, NULL, ARG_EXPORT_PATH },
-			{ "distributed_tracer_client", required_argument, NULL, ARG_DISTRIBUTED_TRACER_CLIENT },
+			{ "enable_token_based_authorization", no_argument, NULL, ARG_ENABLE_TOKEN_BASED_AUTHORIZATION },
 			{ NULL, 0, NULL, 0 }
 		};
+
+/* For optional arguments, optarg is only set when the argument is passed as "--option=[ARGUMENT]" but not as
+ "--option [ARGUMENT]". This function sets optarg in the latter case. See
+ https://cfengine.com/blog/2021/optional-arguments-with-getopt-long/ for a more detailed explanation */
+#define SET_OPT_ARG_IF_PRESENT()                                                                                       \
+	{                                                                                                                  \
+		if (optarg == NULL && optind < argc && argv[optind][0] != '-') {                                               \
+			optarg = argv[optind++];                                                                                   \
+		}                                                                                                              \
+	}
+
 		idx = 0;
 		c = getopt_long(argc, argv, short_options, long_options, &idx);
 		if (c < 0) {
@@ -1289,6 +1320,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case 'r':
 			args.rows = atoi(optarg);
 			args.row_digits = digits(args.rows);
+			break;
+		case 'l':
+			args.load_factor = atof(optarg);
 			break;
 		case 's':
 			args.seconds = atoi(optarg);
@@ -1374,7 +1408,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			break;
 		case ARG_VERSION:
 			logr.error("Version: {}", FDB_API_VERSION);
-			exit(0);
+			_exit(0);
 			break;
 		case ARG_COMMITGET:
 			args.commit_get = 1;
@@ -1439,20 +1473,22 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case ARG_TXNTAGGINGPREFIX:
 			if (strlen(optarg) > TAGPREFIXLENGTH_MAX) {
 				logr.error("the length of txntagging_prefix is larger than {}", TAGPREFIXLENGTH_MAX);
-				exit(0);
+				_exit(0);
 			}
 			memcpy(args.txntagging_prefix, optarg, strlen(optarg));
 			break;
 		case ARG_CLIENT_THREADS_PER_VERSION:
 			args.client_threads_per_version = atoi(optarg);
 			break;
+		case ARG_DISABLE_CLIENT_BYPASS:
+			args.disable_client_bypass = true;
+			break;
 		case ARG_DISABLE_RYW:
 			args.disable_ryw = 1;
 			break;
 		case ARG_JSON_REPORT:
-			if (optarg == NULL && (argv[optind] == NULL || (argv[optind] != NULL && argv[optind][0] == '-'))) {
-				// if --report_json is the last option and no file is specified
-				// or --report_json is followed by another option
+			SET_OPT_ARG_IF_PRESENT();
+			if (!optarg) {
 				char default_file[] = "mako.json";
 				strncpy(args.json_output_path, default_file, sizeof(default_file));
 			} else {
@@ -1462,14 +1498,14 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case ARG_BG_FILE_PATH:
 			args.bg_materialize_files = true;
 			strncpy(args.bg_file_path, optarg, std::min(sizeof(args.bg_file_path), strlen(optarg) + 1));
+			break;
 		case ARG_EXPORT_PATH:
-			if (optarg == NULL && (argv[optind] == NULL || (argv[optind] != NULL && argv[optind][0] == '-'))) {
+			SET_OPT_ARG_IF_PRESENT();
+			if (!optarg) {
 				char default_file[] = "sketch_data.json";
 				strncpy(args.stats_export_path, default_file, sizeof(default_file));
 			} else {
-				strncpy(args.stats_export_path,
-				        argv[optind],
-				        std::min(sizeof(args.stats_export_path), strlen(argv[optind]) + 1));
+				strncpy(args.stats_export_path, optarg, std::min(sizeof(args.stats_export_path), strlen(optarg) + 1));
 			}
 			break;
 		case ARG_DISTRIBUTED_TRACER_CLIENT:
@@ -1483,6 +1519,34 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				args.distributed_tracer_client = -1;
 			}
 			break;
+		case ARG_TLS_CERTIFICATE_FILE:
+			args.tls_certificate_file = std::string(optarg);
+			break;
+		case ARG_TLS_KEY_FILE:
+			args.tls_key_file = std::string(optarg);
+			break;
+		case ARG_TLS_CA_FILE:
+			args.tls_ca_file = std::string(optarg);
+			break;
+		case ARG_AUTHORIZATION_KEYPAIR_ID:
+			args.keypair_id = optarg;
+			break;
+		case ARG_AUTHORIZATION_PRIVATE_KEY_PEM_FILE: {
+			std::string pem_filename(optarg);
+			std::ifstream ifs(pem_filename);
+			std::ostringstream oss;
+			oss << ifs.rdbuf();
+			args.private_key_pem = oss.str();
+		} break;
+		case ARG_TRANSACTION_TIMEOUT_TX:
+			args.transaction_timeout_tx = atoi(optarg);
+			break;
+		case ARG_TRANSACTION_TIMEOUT_DB:
+			args.transaction_timeout_db = atoi(optarg);
+			break;
+		case ARG_ENABLE_TOKEN_BASED_AUTHORIZATION:
+			args.enable_token_based_authorization = true;
+			break;
 		}
 	}
 
@@ -1493,101 +1557,208 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 	return 0;
 }
 
-int validateArguments(Arguments const& args) {
-	if (args.mode == MODE_INVALID) {
+int Arguments::validate() {
+	if (mode == MODE_INVALID) {
 		logr.error("--mode has to be set");
 		return -1;
 	}
-	if (args.verbose < VERBOSE_NONE || args.verbose > VERBOSE_DEBUG) {
+	if (verbose < VERBOSE_NONE || verbose > VERBOSE_DEBUG) {
 		logr.error("--verbose must be between 0 and 3");
 		return -1;
 	}
-	if (args.rows <= 0) {
+	if (rows <= 0) {
 		logr.error("--rows must be a positive integer");
 		return -1;
 	}
-	if (args.key_length < 0) {
+	if (load_factor <= 0 || load_factor > 1) {
+		logr.error("--load_factor must be in range (0, 1]");
+		return -1;
+	}
+	if (key_length < 0) {
 		logr.error("--keylen must be a positive integer");
 		return -1;
 	}
-	if (args.value_length < 0) {
+	if (value_length < 0) {
 		logr.error("--vallen must be a positive integer");
 		return -1;
 	}
-	if (args.num_fdb_clusters > NUM_CLUSTERS_MAX) {
+	if (num_fdb_clusters > NUM_CLUSTERS_MAX) {
 		logr.error("Mako is not supported to do work to more than {} clusters", NUM_CLUSTERS_MAX);
 		return -1;
 	}
-	if (args.num_databases > NUM_DATABASES_MAX) {
+	if (num_databases > NUM_DATABASES_MAX) {
 		logr.error("Mako is not supported to do work to more than {} databases", NUM_DATABASES_MAX);
 		return -1;
 	}
-	if (args.num_databases < args.num_fdb_clusters) {
-		logr.error("--num_databases ({}) must be >= number of clusters({})", args.num_databases, args.num_fdb_clusters);
+	if (num_databases < num_fdb_clusters) {
+		logr.error("--num_databases ({}) must be >= number of clusters({})", num_databases, num_fdb_clusters);
 		return -1;
 	}
-	if (args.num_threads < args.num_databases) {
-		logr.error("--threads ({}) must be >= number of databases ({})", args.num_threads, args.num_databases);
+	// In sync mode, threads, and in async mode, async states / workflows are assigned to databases. Having more
+	// databases than threads or async states / workflows leads to unused databases.
+	if (async_xacts == 0 && num_threads < num_databases) {
+		logr.error("--threads ({}) must be >= number of databases ({}) in sync mode", num_threads, num_databases);
 		return -1;
 	}
-	if (args.key_length < 4 /* "mako" */ + args.row_digits) {
+	if (async_xacts > 0 && async_xacts < num_databases) {
+		logr.error("--async_xacts ({}) must be >= number of databases ({}) in async mode", async_xacts, num_databases);
+		return -1;
+	}
+	// Having more threads than async workflows in the async mode does lead to unused threads.
+	if (async_xacts > 0 && num_threads > async_xacts) {
+		logr.error("--threads ({}) must be <= --async_xacts", num_threads);
+		return -1;
+	}
+	if (key_length < 4 /* "mako" */ + row_digits) {
 		logr.error("--keylen must be larger than {} to store \"mako\" prefix "
 		           "and maximum row number",
-		           4 + args.row_digits);
+		           4 + row_digits);
 		return -1;
 	}
-	if (args.active_tenants > args.total_tenants) {
+	if (active_tenants > total_tenants) {
 		logr.error("--active_tenants must be less than or equal to --total_tenants");
 		return -1;
 	}
-	if (args.tenant_batch_size < 1) {
+	if (tenant_batch_size < 1) {
 		logr.error("--tenant_batch_size must be at least 1");
 		return -1;
 	}
-	if (args.mode == MODE_RUN) {
-		if ((args.seconds > 0) && (args.iteration > 0)) {
+	if (mode == MODE_RUN) {
+		if ((seconds > 0) && (iteration > 0)) {
 			logr.error("Cannot specify seconds and iteration together");
 			return -1;
 		}
-		if ((args.seconds == 0) && (args.iteration == 0)) {
+		if ((seconds == 0) && (iteration == 0)) {
 			logr.error("Must specify either seconds or iteration");
 			return -1;
 		}
-		if (args.txntagging < 0) {
+		if (txntagging < 0) {
 			logr.error("--txntagging must be a non-negative integer");
+			return -1;
+		}
+		if (iteration > 0) {
+			if (async_xacts > 0 && async_xacts * num_processes > iteration) {
+				logr.error("--async_xacts * --num_processes must be <= --iteration");
+				return -1;
+			} else if (async_xacts == 0 && num_threads * num_processes > iteration) {
+				logr.error("--num_threads * --num_processes must be <= --iteration");
+				return -1;
+			}
+		}
+		if (transaction_timeout_db < 0 || transaction_timeout_tx < 0) {
+			logr.error("--transaction_timeout_[tx|db] must be a non-negative integer");
 			return -1;
 		}
 	}
 
-	// ensure that all of the files provided to mako are valid and exist
-	if (args.mode == MODE_REPORT) {
-		if (!args.num_report_files) {
-			logr.error("No files to merge");
-		}
-		for (int i = 0; i < args.num_report_files; i++) {
-			struct stat buffer;
-			if (stat(args.report_files[i], &buffer) != 0) {
-				logr.error("Couldn't open file {}", args.report_files[i]);
+	if (mode != MODE_RUN && (transaction_timeout_db != 0 || transaction_timeout_tx != 0)) {
+		logr.error("--transaction_timeout_[tx|db] only supported in run mode");
+		return -1;
+	}
+
+	if (mode == MODE_RUN || mode == MODE_BUILD) {
+		if (tpsmax > 0) {
+			if (async_xacts > 0) {
+				logr.error("--tpsmax|--tps must be 0 or unspecified because throttling is not supported in async mode");
+				return -1;
+			} else if (async_xacts == 0 && num_threads * num_processes > tpsmax) {
+				logr.error("--num_threads * --num_processes must be <= --tpsmax|--tps");
 				return -1;
 			}
 		}
 	}
-	if (args.distributed_tracer_client < 0) {
-		logr.error("--disibuted_tracer_client must specify either (disabled, network_lossy, log_file)");
+
+	// ensure that all of the files provided to mako are valid and exist
+	if (mode == MODE_REPORT) {
+		if (!num_report_files) {
+			logr.error("No files to merge");
+		}
+		for (int i = 0; i < num_report_files; i++) {
+			struct stat buffer;
+			if (stat(report_files[i], &buffer) != 0) {
+				logr.error("Couldn't open file {}", report_files[i]);
+				return -1;
+			}
+		}
+	}
+	if (distributed_tracer_client < 0) {
+		logr.error("--distributed_tracer_client must specify either (disabled, network_lossy, log_file)");
 		return -1;
+	}
+
+	if (enable_token_based_authorization) {
+		if (async_xacts > 0) {
+			logr.error("async mode does not support authorization yet");
+			return -1;
+		}
+		if (num_fdb_clusters > 1) {
+			logr.error("for simplicity, --enable_token_based_authorization must be used with exactly one fdb cluster");
+			return -1;
+		}
+		if (active_tenants <= 0 || total_tenants <= 0) {
+			logr.error("--enable_token_based_authorization must be used with at least one tenant");
+			return -1;
+		}
+		if (!private_key_pem.has_value() || !keypair_id.has_value()) {
+			logr.error("--enable_token_based_authorization must be used with --authorization_keypair_id and "
+			           "--authorization_private_key_pem_file");
+			return -1;
+		}
+		if (!tls_key_file.has_value() || !tls_certificate_file.has_value() || !tls_ca_file.has_value()) {
+			logr.error(
+			    "token-based authorization is enabled without explicit TLS parameter(s) (certificate, key, CA).");
+			return -1;
+		}
 	}
 	return 0;
 }
 
-void printStats(Arguments const& args, ThreadStatistics const* stats, double const duration_sec, FILE* fp) {
-	static ThreadStatistics prev;
+bool Arguments::isAuthorizationEnabled() const noexcept {
+	return mode != MODE_CLEAN && enable_token_based_authorization && active_tenants > 0 && tls_ca_file.has_value() &&
+	       private_key_pem.has_value();
+}
 
-	const auto num_effective_threads = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
-	auto current = ThreadStatistics{};
-	for (auto i = 0; i < args.num_processes; i++) {
-		for (auto j = 0; j < num_effective_threads; j++) {
-			current.combine(stats[(i * num_effective_threads) + j]);
+void Arguments::collectTenantIds() {
+	auto db = Database(cluster_files[0]);
+	tenant_ids.clear();
+	tenant_ids.reserve(active_tenants);
+}
+
+void Arguments::generateAuthorizationTokens() {
+	assert(active_tenants > 0);
+	assert(keypair_id.has_value());
+	assert(private_key_pem.has_value());
+	authorization_tokens.clear();
+	assert(num_fdb_clusters == 1);
+	assert(!tenant_ids.empty());
+	// assumes tenants have already been populated
+	logr.info("generating authorization tokens to be used by worker threads");
+	auto stopwatch = Stopwatch(StartAtCtor{});
+	authorization_tokens =
+	    generateAuthorizationTokenMap(active_tenants, keypair_id.value(), private_key_pem.value(), tenant_ids);
+	assert(authorization_tokens.size() == active_tenants);
+	logr.info("generated {} tokens in {:6.3f} seconds", active_tenants, toDoubleSeconds(stopwatch.stop().diff()));
+}
+
+std::optional<std::vector<fdb::Tenant>> Arguments::prepareTenants(fdb::Database db) const {
+	if (active_tenants > 0) {
+		std::vector<fdb::Tenant> tenants(active_tenants);
+		for (auto i = 0; i < active_tenants; i++) {
+			tenants[i] = db.openTenant(toBytesRef(getTenantNameByIndex(i)));
 		}
+		return tenants;
+	} else {
+		return {};
+	}
+}
+
+void printStats(Arguments const& args, WorkflowStatistics const* stats, double const duration_sec, FILE* fp) {
+	static WorkflowStatistics prev;
+
+	const auto num_workers = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
+	auto current = WorkflowStatistics{};
+	for (auto i = 0; i < args.num_processes * num_workers; i++) {
+		current.combine(stats[i]);
 	}
 
 	if (fp) {
@@ -1684,7 +1855,7 @@ void printStatsHeader(Arguments const& args, bool show_commit, bool is_first_hea
 	fmt::print("\n");
 }
 
-void printThreadStats(ThreadStatistics& final_stats, Arguments args, FILE* fp, bool is_report = false) {
+void printWorkerStats(WorkflowStatistics& final_stats, Arguments args, FILE* fp, bool is_report = false) {
 
 	if (is_report) {
 		for (auto op = 0; op < MAX_OP; op++) {
@@ -1927,19 +2098,65 @@ void loadSample(int pid_main, int op, std::vector<DDSketchMako>& data_points, in
 }
 
 void printReport(Arguments const& args,
-                 ThreadStatistics const* stats,
+                 WorkflowStatistics const* worker_stats,
+                 ThreadStatistics const* thread_stats,
+                 ProcessStatistics const* process_stats,
                  double const duration_sec,
                  pid_t pid_main,
                  FILE* fp) {
 
-	auto final_stats = ThreadStatistics{};
-	const auto num_effective_threads = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
-	for (auto i = 0; i < args.num_processes; i++) {
-		for (auto j = 0; j < num_effective_threads; j++) {
-			const auto idx = i * num_effective_threads + j;
-			final_stats.combine(stats[idx]);
-		}
+	auto final_worker_stats = WorkflowStatistics{};
+	const auto num_workers = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
+
+	for (auto i = 0; i < args.num_processes * num_workers; i++) {
+		final_worker_stats.combine(worker_stats[i]);
 	}
+
+	double cpu_time_worker_threads =
+	    std::accumulate(thread_stats,
+	                    thread_stats + args.num_processes * args.num_threads,
+	                    0.0,
+	                    [](double x, const ThreadStatistics& s) { return x + s.getCPUTime(); });
+	double total_duration_worker_threads =
+	    std::accumulate(thread_stats,
+	                    thread_stats + args.num_processes * args.num_threads,
+	                    0.0,
+	                    [](double x, const ThreadStatistics& s) { return x + s.getTotalDuration(); }) /
+	    (args.num_processes * args.num_threads); // average
+
+	double cpu_util_worker_threads = 100. * cpu_time_worker_threads / total_duration_worker_threads;
+
+	double cpu_time_worker_processes = std::accumulate(
+	    process_stats, process_stats + args.num_processes, 0.0, [](double x, const ProcessStatistics& s) {
+		    return x + s.getProcessCPUTime();
+	    });
+
+	double total_duration_worker_processes =
+	    std::accumulate(process_stats,
+	                    process_stats + args.num_processes,
+	                    0.0,
+	                    [](double x, const ProcessStatistics& s) { return x + s.getProcessTotalDuration(); }) /
+	    args.num_processes; // average
+
+	double cpu_util_worker_processes = 100. * cpu_time_worker_processes / total_duration_worker_processes;
+
+	double cpu_time_local_fdb_networks = std::accumulate(
+	    process_stats, process_stats + args.num_processes, 0.0, [](double x, const ProcessStatistics& s) {
+		    return x + s.getFDBNetworkCPUTime();
+	    });
+
+	double total_duration_local_fdb_networks =
+	    std::accumulate(process_stats,
+	                    process_stats + args.num_processes,
+	                    0.0,
+	                    [](double x, const ProcessStatistics& s) { return x + s.getProcessTotalDuration(); }) /
+	    args.num_processes; // average
+
+	double cpu_util_local_fdb_networks = 100. * cpu_time_local_fdb_networks / total_duration_local_fdb_networks;
+
+	double cpu_util_external_fdb_networks =
+	    100. * (cpu_time_worker_processes - cpu_time_worker_threads - cpu_time_local_fdb_networks) /
+	    (total_duration_local_fdb_networks); // assume that external networks have same total duration as local networks
 
 	/* overall stats */
 	fmt::printf("\n====== Total Duration %6.3f sec ======\n\n", duration_sec);
@@ -1965,12 +2182,18 @@ void printReport(Arguments const& args,
 			break;
 		}
 	}
-	const auto tps_f = final_stats.getOpCount(OP_TRANSACTION) / duration_sec;
+	const auto tps_f = final_worker_stats.getOpCount(OP_TRANSACTION) / duration_sec;
 	const auto tps_i = static_cast<uint64_t>(tps_f);
-	fmt::printf("Total Xacts:       %8lu\n", final_stats.getOpCount(OP_TRANSACTION));
-	fmt::printf("Total Conflicts:   %8lu\n", final_stats.getConflictCount());
-	fmt::printf("Total Errors:      %8lu\n", final_stats.getTotalErrorCount());
+
+	fmt::printf("Total Xacts:       %8lu\n", final_worker_stats.getOpCount(OP_TRANSACTION));
+	fmt::printf("Total Conflicts:   %8lu\n", final_worker_stats.getConflictCount());
+	fmt::printf("Total Errors:      %8lu\n", final_worker_stats.getTotalErrorCount());
+	fmt::printf("Total Timeouts:    %8lu\n", final_worker_stats.getTotalTimeoutCount());
 	fmt::printf("Overall TPS:       %8lu\n\n", tps_i);
+	fmt::printf("%%CPU Worker Processes:         %6.2f \n", cpu_util_worker_processes);
+	fmt::printf("%%CPU Worker Threads:           %6.2f \n", cpu_util_worker_threads);
+	fmt::printf("%%CPU Local Network Threads:    %6.2f \n", cpu_util_local_fdb_networks);
+	fmt::printf("%%CPU External Network Threads: %6.2f \n\n", cpu_util_external_fdb_networks);
 
 	if (fp) {
 		fmt::fprintf(fp, "\"results\": {");
@@ -1979,10 +2202,15 @@ void printReport(Arguments const& args,
 		fmt::fprintf(fp, "\"totalThreads\": %d,", args.num_threads);
 		fmt::fprintf(fp, "\"totalAsyncXacts\": %d,", args.async_xacts);
 		fmt::fprintf(fp, "\"targetTPS\": %d,", args.tpsmax);
-		fmt::fprintf(fp, "\"totalXacts\": %lu,", final_stats.getOpCount(OP_TRANSACTION));
-		fmt::fprintf(fp, "\"totalConflicts\": %lu,", final_stats.getConflictCount());
-		fmt::fprintf(fp, "\"totalErrors\": %lu,", final_stats.getTotalErrorCount());
+		fmt::fprintf(fp, "\"totalXacts\": %lu,", final_worker_stats.getOpCount(OP_TRANSACTION));
+		fmt::fprintf(fp, "\"totalConflicts\": %lu,", final_worker_stats.getConflictCount());
+		fmt::fprintf(fp, "\"totalErrors\": %lu,", final_worker_stats.getTotalErrorCount());
+		fmt::fprintf(fp, "\"totalTimeouts\": %lu,", final_worker_stats.getTotalTimeoutCount());
 		fmt::fprintf(fp, "\"overallTPS\": %lu,", tps_i);
+		fmt::fprintf(fp, "\"workerProcesseCPU\": %.8f,", cpu_util_worker_processes);
+		fmt::fprintf(fp, "\"workerThreadCPU\": %.8f,", cpu_util_worker_threads);
+		fmt::fprintf(fp, "\"localNetworkCPU\": %.8f,", cpu_util_local_fdb_networks);
+		fmt::fprintf(fp, "\"externalNetworkCPU\": %.8f,", cpu_util_external_fdb_networks);
 	}
 
 	/* per-op stats */
@@ -1996,24 +2224,24 @@ void printReport(Arguments const& args,
 	auto first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if ((args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) || op == OP_COMMIT) {
-			putField(final_stats.getOpCount(op));
+			putField(final_worker_stats.getOpCount(op));
 			if (fp) {
 				if (first_op) {
 					first_op = false;
 				} else {
 					fmt::fprintf(fp, ",");
 				}
-				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.getOpCount(op));
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_worker_stats.getOpCount(op));
 			}
 		}
 	}
 
 	/* TPS */
-	const auto tps = final_stats.getOpCount(OP_TRANSACTION) / duration_sec;
+	const auto tps = final_worker_stats.getOpCount(OP_TRANSACTION) / duration_sec;
 	putFieldFloat(tps, 2);
 
 	/* Conflicts */
-	const auto conflicts_rate = final_stats.getConflictCount() / duration_sec;
+	const auto conflicts_rate = final_worker_stats.getConflictCount() / duration_sec;
 	putFieldFloat(conflicts_rate, 2);
 	fmt::print("\n");
 
@@ -2025,18 +2253,40 @@ void printReport(Arguments const& args,
 	putTitle("Errors");
 	first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) {
-			putField(final_stats.getErrorCount(op));
+		if ((args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) || op == OP_COMMIT) {
+			putField(final_worker_stats.getErrorCount(op));
 			if (fp) {
 				if (first_op) {
 					first_op = false;
 				} else {
 					fmt::fprintf(fp, ",");
 				}
-				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.getErrorCount(op));
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_worker_stats.getErrorCount(op));
 			}
 		}
 	}
+	fmt::print("\n");
+
+	/* Timeouts */
+	if (fp) {
+		fmt::fprintf(fp, "}, \"timeouts\": {");
+	}
+	putTitle("Timeouts");
+	first_op = true;
+	for (auto op = 0; op < MAX_OP; op++) {
+		if ((args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) || op == OP_COMMIT) {
+			putField(final_worker_stats.getTimeoutCount(op));
+			if (fp) {
+				if (first_op) {
+					first_op = false;
+				} else {
+					fmt::fprintf(fp, ",");
+				}
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_worker_stats.getTimeoutCount(op));
+			}
+		}
+	}
+
 	if (fp) {
 		fmt::fprintf(fp, "}, \"numSamples\": {");
 	}
@@ -2057,14 +2307,14 @@ void printReport(Arguments const& args,
 			}
 		}
 	}
-	final_stats.updateLatencies(data_points);
+	final_worker_stats.updateLatencies(data_points);
 
-	printThreadStats(final_stats, args, fp);
+	printWorkerStats(final_worker_stats, args, fp);
 
 	// export the ddsketch if the flag was set
 	if (args.stats_export_path[0] != 0) {
 		std::ofstream f(args.stats_export_path);
-		f << final_stats;
+		f << final_worker_stats;
 	}
 
 	const auto command_remove = fmt::format("rm -rf {}{}", TEMP_DATA_STORE, pid_main);
@@ -2075,7 +2325,9 @@ void printReport(Arguments const& args,
 }
 
 int statsProcessMain(Arguments const& args,
-                     ThreadStatistics const* stats,
+                     WorkflowStatistics const* worker_stats,
+                     ThreadStatistics const* thread_stats,
+                     ProcessStatistics const* process_stats,
                      std::atomic<double>& throttle_factor,
                      std::atomic<int> const& signal,
                      std::atomic<int> const& stopcount,
@@ -2101,6 +2353,7 @@ int statsProcessMain(Arguments const& args,
 		fmt::fprintf(fp, "\"async_xacts\": %d,", args.async_xacts);
 		fmt::fprintf(fp, "\"mode\": %d,", args.mode);
 		fmt::fprintf(fp, "\"rows\": %d,", args.rows);
+		fmt::fprintf(fp, "\"load_factor\": %lf,", args.load_factor);
 		fmt::fprintf(fp, "\"seconds\": %d,", args.seconds);
 		fmt::fprintf(fp, "\"iteration\": %d,", args.iteration);
 		fmt::fprintf(fp, "\"tpsmax\": %d,", args.tpsmax);
@@ -2127,6 +2380,8 @@ int statsProcessMain(Arguments const& args,
 		fmt::fprintf(fp, "\"txntagging_prefix\": \"%s\",", args.txntagging_prefix);
 		fmt::fprintf(fp, "\"streaming_mode\": %d,", args.streaming_mode);
 		fmt::fprintf(fp, "\"disable_ryw\": %d,", args.disable_ryw);
+		fmt::fprintf(fp, "\"transaction_timeout_db\": %d,", args.transaction_timeout_db);
+		fmt::fprintf(fp, "\"transaction_timeout_tx\": %d,", args.transaction_timeout_tx);
 		fmt::fprintf(fp, "\"json_output_path\": \"%s\"", args.json_output_path);
 		fmt::fprintf(fp, "},\"samples\": [");
 	}
@@ -2181,7 +2436,7 @@ int statsProcessMain(Arguments const& args,
 					if (fp)
 						fmt::fprintf(fp, ",");
 				}
-				printStats(args, stats, toDoubleSeconds(time_now - time_prev), fp);
+				printStats(args, worker_stats, toDoubleSeconds(time_now - time_prev), fp);
 			}
 			time_prev = time_now;
 		}
@@ -2197,7 +2452,8 @@ int statsProcessMain(Arguments const& args,
 		while (stopcount.load() < args.num_threads * args.num_processes) {
 			usleep(10000); /* 10ms */
 		}
-		printReport(args, stats, toDoubleSeconds(time_now - time_start), pid_main, fp);
+		printReport(
+		    args, worker_stats, thread_stats, process_stats, toDoubleSeconds(time_now - time_start), pid_main, fp);
 	}
 
 	if (fp) {
@@ -2208,16 +2464,37 @@ int statsProcessMain(Arguments const& args,
 	return 0;
 }
 
-ThreadStatistics mergeSketchReport(Arguments& args) {
+WorkflowStatistics mergeSketchReport(Arguments& args) {
 
-	ThreadStatistics stats;
+	WorkflowStatistics stats;
 	for (int i = 0; i < args.num_report_files; i++) {
 		std::ifstream f{ args.report_files[i] };
-		ThreadStatistics tmp;
+		WorkflowStatistics tmp;
 		f >> tmp;
 		stats.combine(tmp);
 	}
 	return stats;
+}
+
+int populateTenants(ipc::AdminServer& admin, const Arguments& args) {
+	const auto num_dbs = std::min(args.num_fdb_clusters, args.num_databases);
+	logr.info("populating {} tenants for {} database(s)", args.total_tenants, num_dbs);
+	auto stopwatch = Stopwatch(StartAtCtor{});
+	for (auto i = 0; i < num_dbs; i++) {
+		for (auto tenant_id = 0; tenant_id < args.total_tenants;) {
+			const auto tenant_id_end = tenant_id + std::min(args.tenant_batch_size, args.total_tenants - tenant_id);
+			auto res = admin.send(ipc::BatchCreateTenantRequest{ args.cluster_files[i], tenant_id, tenant_id_end });
+			if (res.error_message) {
+				logr.error("cluster {}: {}", i + 1, *res.error_message);
+				return -1;
+			} else {
+				logr.debug("created tenants [{}:{}) for cluster {}", tenant_id, tenant_id_end, i + 1);
+				tenant_id = tenant_id_end;
+			}
+		}
+	}
+	logr.info("populated tenants in {:6.3f} seconds", toDoubleSeconds(stopwatch.stop().diff()));
+	return 0;
 }
 
 int main(int argc, char* argv[]) {
@@ -2225,11 +2502,6 @@ int main(int argc, char* argv[]) {
 
 	auto rc = int{};
 	auto args = Arguments{};
-	rc = initArguments(args);
-	if (rc < 0) {
-		logr.error("initArguments failed");
-		return -1;
-	}
 	rc = parseArguments(argc, argv, args);
 	if (rc < 0) {
 		/* usage printed */
@@ -2245,9 +2517,22 @@ int main(int argc, char* argv[]) {
 		args.total_tenants = args.active_tenants;
 	}
 
-	rc = validateArguments(args);
+	// set --seconds in case no ending condition has been set
+	if (args.seconds == 0 && args.iteration == 0) {
+		args.seconds = 30; // default value accodring to documentation
+	}
+
+	// if no cluster file is passed, fall back to default parameters
+	// (envvar, 'fdb.cluster' or platform-dependent path)
+	if (args.num_fdb_clusters == 0) {
+		args.num_fdb_clusters = 1;
+	}
+
+	rc = args.validate();
+
 	if (rc < 0)
 		return -1;
+
 	logr.setVerbosity(args.verbose);
 
 	if (args.mode == MODE_CLEAN) {
@@ -2263,9 +2548,64 @@ int main(int argc, char* argv[]) {
 	}
 
 	if (args.mode == MODE_REPORT) {
-		ThreadStatistics stats = mergeSketchReport(args);
-		printThreadStats(stats, args, NULL, true);
+		WorkflowStatistics stats = mergeSketchReport(args);
+		printWorkerStats(stats, args, NULL, true);
 		return 0;
+	}
+
+	if (args.total_tenants > 0 &&
+	    (args.isAuthorizationEnabled() || args.mode == MODE_BUILD || args.mode == MODE_CLEAN)) {
+
+		// below construction fork()s internally
+		auto server = ipc::AdminServer(args);
+
+		if (!server.isClient()) {
+			// admin server has finished running. exit immediately
+			return 0;
+		} else {
+			auto res = server.send(ipc::PingRequest{});
+			if (res.error_message) {
+				logr.error("admin server setup failed: {}", *res.error_message);
+				return -1;
+			} else {
+				logr.info("admin server ready");
+			}
+		}
+		// Use admin server as proxy to creating/deleting tenants or pre-fetching tenant IDs for token signing when
+		// authorization is enabled This is necessary when tenant authorization is enabled, in which case the worker
+		// threads connect to database as untrusted clients, as which they wouldn't be allowed to create/delete tenants
+		// on their own. Although it is possible to allow worker threads to create/delete tenants in a
+		// authorization-disabled mode, use the admin server anyway for simplicity.
+		if (args.mode == MODE_CLEAN) {
+			// short-circuit tenant cleanup
+			const auto num_dbs = std::min(args.num_fdb_clusters, args.num_databases);
+			for (auto db_id = 0; db_id < num_dbs; db_id++) {
+				if (cleanupTenants(server, args, db_id) < 0) {
+					return -1;
+				}
+			}
+			return 0;
+		} else if (args.mode == MODE_BUILD) {
+			// handle population of tenants before-fork
+			if (populateTenants(server, args) < 0) {
+				return -1;
+			}
+		}
+		if ((args.mode == MODE_BUILD || args.mode == MODE_RUN) && args.isAuthorizationEnabled()) {
+			assert(args.num_fdb_clusters == 1);
+			// need to fetch tenant IDs to pre-generate tokens
+			// fetch all IDs in one go
+			auto res = server.send(ipc::FetchTenantIdsRequest{ args.cluster_files[0], 0, args.active_tenants });
+			if (res.error_message) {
+				logr.error("tenant ID fetch failed: {}", *res.error_message);
+				return -1;
+			} else {
+				logr.info("Successfully prefetched {} tenant IDs", res.ids.size());
+				assert(res.ids.size() == args.active_tenants);
+				args.tenant_ids = std::move(res.ids);
+			}
+			args.generateAuthorizationTokens();
+		}
 	}
 
 	const auto pid_main = getpid();
@@ -2283,9 +2623,9 @@ int main(int argc, char* argv[]) {
 	});
 
 	const auto async_mode = args.async_xacts > 0;
-	const auto nthreads_for_shm = async_mode ? args.async_xacts : args.num_threads;
+	const auto num_workers = async_mode ? args.async_xacts : args.num_threads;
 	/* allocate */
-	const auto shmsize = shared_memory::storageSize(args.num_processes, nthreads_for_shm);
+	const auto shmsize = shared_memory::storageSize(args.num_processes, args.num_threads, num_workers);
 
 	auto shm = std::add_pointer_t<void>{};
 	if (ftruncate(shmfd, shmsize) < 0) {
@@ -2302,7 +2642,7 @@ int main(int argc, char* argv[]) {
 	}
 	auto munmap_guard = ExitGuard([=]() { munmap(shm, shmsize); });
 
-	auto shm_access = shared_memory::Access(shm, args.num_processes, nthreads_for_shm);
+	auto shm_access = shared_memory::Access(shm, args.num_processes, args.num_threads, num_workers);
 
 	/* initialize the shared memory */
 	shm_access.initMemory();
@@ -2318,7 +2658,7 @@ int main(int argc, char* argv[]) {
 	/* fork worker processes + 1 stats process */
 	auto worker_pids = std::vector<pid_t>(args.num_processes + 1);
 
-	auto worker_id = int{};
+	auto process_idx = int{};
 
 	/* forking (num_process + 1) children */
 	/* last process is the stats handler */
@@ -2335,7 +2675,7 @@ int main(int argc, char* argv[]) {
 				/* worker process */
 				logr = Logger(WorkerProcess{}, args.verbose, p);
 				proc_type = ProcKind::WORKER;
-				worker_id = p;
+				process_idx = p;
 			} else {
 				/* stats */
 				logr = Logger(StatsProcess{}, args.verbose);
@@ -2355,18 +2695,25 @@ int main(int argc, char* argv[]) {
 
 	if (proc_type == ProcKind::WORKER) {
 		/* worker process */
-		workerProcessMain(args, worker_id, shm_access, pid_main);
-		/* worker can exit here */
-		exit(0);
+
+		workerProcessMain(args, process_idx, shm_access, pid_main);
+
+		_exit(0);
 	} else if (proc_type == ProcKind::STATS) {
 		/* stats */
 		if (args.mode == MODE_CLEAN) {
 			/* no stats needed for clean mode */
-			exit(0);
+			_exit(0);
 		}
-		statsProcessMain(
-		    args, shm_access.statsConstArray(), shm_hdr.throttle_factor, shm_hdr.signal, shm_hdr.stopcount, pid_main);
-		exit(0);
+		statsProcessMain(args,
+		                 shm_access.workerStatsConstArray(),
+		                 shm_access.threadStatsConstArray(),
+		                 shm_access.processStatsConstArray(),
+		                 shm_hdr.throttle_factor,
+		                 shm_hdr.signal,
+		                 shm_hdr.stopcount,
+		                 pid_main);
+		_exit(0);
 	}
 
 	/* master */

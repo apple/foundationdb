@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -189,12 +189,11 @@ struct MeasureSinglePeriod : IMeasurer {
 	double delay, duration;
 	double startT;
 
-	ContinuousSample<double> totalLatency, grvLatency, rowReadLatency, commitLatency;
+	DDSketch<double> totalLatency, grvLatency, rowReadLatency, commitLatency;
 	ITransactor::Stats stats; // totalled over the period
 
 	MeasureSinglePeriod(double delay, double duration)
-	  : delay(delay), duration(duration), totalLatency(2000), grvLatency(2000), rowReadLatency(2000),
-	    commitLatency(2000) {}
+	  : delay(delay), duration(duration), totalLatency(), grvLatency(), rowReadLatency(), commitLatency() {}
 
 	Future<Void> start() override {
 		startT = now();
@@ -298,6 +297,8 @@ struct MeasureMulti : IMeasurer {
 };
 
 struct ThroughputWorkload : TestWorkload {
+	static constexpr auto NAME = "Throughput";
+
 	double targetLatency, testDuration, Pgain, Igain;
 	Reference<ITransactor> op;
 	Reference<IMeasurer> measurer;
@@ -310,58 +311,53 @@ struct ThroughputWorkload : TestWorkload {
 		auto multi = makeReference<MeasureMulti>();
 		measurer = multi;
 
-		targetLatency = getOption(options, LiteralStringRef("targetLatency"), 0.05);
+		targetLatency = getOption(options, "targetLatency"_sr, 0.05);
 
-		int keyCount = getOption(options, LiteralStringRef("nodeCount"), (uint64_t)100000);
-		int keyBytes = std::max(getOption(options, LiteralStringRef("keyBytes"), 16), 16);
-		int maxValueBytes = getOption(options, LiteralStringRef("valueBytes"), 100);
-		int minValueBytes = getOption(options, LiteralStringRef("minValueBytes"), maxValueBytes);
-		double sweepDuration = getOption(options, LiteralStringRef("sweepDuration"), 0);
-		double sweepDelay = getOption(options, LiteralStringRef("sweepDelay"), 0);
+		int keyCount = getOption(options, "nodeCount"_sr, (uint64_t)100000);
+		int keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 16);
+		int maxValueBytes = getOption(options, "valueBytes"_sr, 100);
+		int minValueBytes = getOption(options, "minValueBytes"_sr, maxValueBytes);
+		double sweepDuration = getOption(options, "sweepDuration"_sr, 0);
+		double sweepDelay = getOption(options, "sweepDelay"_sr, 0);
 
-		auto AType =
-		    Reference<ITransactor>(new RWTransactor(getOption(options, LiteralStringRef("readsPerTransactionA"), 10),
-		                                            getOption(options, LiteralStringRef("writesPerTransactionA"), 0),
-		                                            keyCount,
-		                                            keyBytes,
-		                                            minValueBytes,
-		                                            maxValueBytes));
-		auto BType =
-		    Reference<ITransactor>(new RWTransactor(getOption(options, LiteralStringRef("readsPerTransactionB"), 5),
-		                                            getOption(options, LiteralStringRef("writesPerTransactionB"), 5),
-		                                            keyCount,
-		                                            keyBytes,
-		                                            minValueBytes,
-		                                            maxValueBytes));
+		auto AType = Reference<ITransactor>(new RWTransactor(getOption(options, "readsPerTransactionA"_sr, 10),
+		                                                     getOption(options, "writesPerTransactionA"_sr, 0),
+		                                                     keyCount,
+		                                                     keyBytes,
+		                                                     minValueBytes,
+		                                                     maxValueBytes));
+		auto BType = Reference<ITransactor>(new RWTransactor(getOption(options, "readsPerTransactionB"_sr, 5),
+		                                                     getOption(options, "writesPerTransactionB"_sr, 5),
+		                                                     keyCount,
+		                                                     keyBytes,
+		                                                     minValueBytes,
+		                                                     maxValueBytes));
 
 		if (sweepDuration > 0) {
 			op = Reference<ITransactor>(new SweepTransactor(sweepDuration, sweepDelay, AType, BType));
 		} else {
-			op = Reference<ITransactor>(
-			    new ABTransactor(getOption(options, LiteralStringRef("alpha"), 0.1), AType, BType));
+			op = Reference<ITransactor>(new ABTransactor(getOption(options, "alpha"_sr, 0.1), AType, BType));
 		}
 
-		double measureDelay = getOption(options, LiteralStringRef("measureDelay"), 50.0);
-		double measureDuration = getOption(options, LiteralStringRef("measureDuration"), 10.0);
+		double measureDelay = getOption(options, "measureDelay"_sr, 50.0);
+		double measureDuration = getOption(options, "measureDuration"_sr, 10.0);
 		multi->ms.push_back(Reference<IMeasurer>(new MeasureSinglePeriod(measureDelay, measureDuration)));
 
-		double measurePeriod = getOption(options, LiteralStringRef("measurePeriod"), 0.0);
+		double measurePeriod = getOption(options, "measurePeriod"_sr, 0.0);
 		std::vector<std::string> periodicMetrics =
-		    getOption(options, LiteralStringRef("measurePeriodicMetrics"), std::vector<std::string>());
+		    getOption(options, "measurePeriodicMetrics"_sr, std::vector<std::string>());
 		if (measurePeriod) {
 			ASSERT(periodicMetrics.size() != 0);
 			multi->ms.push_back(Reference<IMeasurer>(new MeasurePeriodically(
 			    measurePeriod, std::set<std::string>(periodicMetrics.begin(), periodicMetrics.end()))));
 		}
 
-		Pgain = getOption(options, LiteralStringRef("ProportionalGain"), 0.1);
-		Igain = getOption(options, LiteralStringRef("IntegralGain"), 0.005);
+		Pgain = getOption(options, "ProportionalGain"_sr, 0.1);
+		Igain = getOption(options, "IntegralGain"_sr, 0.005);
 
 		testDuration = measureDelay + measureDuration;
-		// testDuration = getOption( options, LiteralStringRef("testDuration"), measureDelay + measureDuration );
+		// testDuration = getOption( options, "testDuration"_sr, measureDelay + measureDuration );
 	}
-
-	std::string description() const override { return "Throughput"; }
 
 	Future<Void> setup(Database const& cx) override {
 		return Void(); // No setup for now - use a separate workload to do setup
@@ -420,4 +416,4 @@ struct ThroughputWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override { measurer->getMetrics(m); }
 };
-WorkloadFactory<ThroughputWorkload> ThroughputWorkloadFactory("Throughput");
+WorkloadFactory<ThroughputWorkload> ThroughputWorkloadFactory;

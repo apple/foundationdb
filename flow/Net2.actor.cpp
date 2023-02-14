@@ -26,7 +26,9 @@
 #include "flow/Trace.h"
 #include <algorithm>
 #include <memory>
+#ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
+#endif
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #include <boost/asio.hpp>
@@ -42,8 +44,9 @@
 
 #include "flow/IAsyncFile.h"
 #include "flow/ActorCollection.h"
-#include "flow/ThreadSafeQueue.h"
+#include "flow/TaskQueue.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/ChaosMetrics.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/AsioReactor.h"
 #include "flow/Profiler.h"
@@ -55,6 +58,8 @@
 #include "flow/Util.h"
 #include "flow/UnitTest.h"
 #include "flow/ScopeExit.h"
+#include "flow/IUDPSocket.h"
+#include "flow/IConnection.h"
 
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
@@ -90,6 +95,10 @@ void initProfiling() {
 	net2backtraces = new volatile void*[net2backtraces_max];
 	other_backtraces = new volatile void*[net2backtraces_max];
 
+	// According to folk wisdom, calling this once before setting up the signal handler makes
+	// it async signal safe in practice :-/
+	backtrace(const_cast<void**>(other_backtraces), net2backtraces_max);
+
 	sigemptyset(&sigprof_set);
 	sigaddset(&sigprof_set, SIGPROF);
 }
@@ -110,27 +119,6 @@ class Connection;
 
 // Outlives main
 Net2* g_net2 = nullptr;
-
-class Task {
-public:
-	virtual void operator()() = 0;
-};
-
-struct OrderedTask {
-	int64_t priority;
-	TaskPriority taskID;
-	Task* task;
-	OrderedTask(int64_t priority, TaskPriority taskID, Task* task) : priority(priority), taskID(taskID), task(task) {}
-	bool operator<(OrderedTask const& rhs) const { return priority < rhs.priority; }
-};
-
-template <class T>
-class ReadyQueue : public std::priority_queue<T, std::vector<T>> {
-public:
-	typedef typename std::priority_queue<T, std::vector<T>>::size_type size_type;
-	ReadyQueue(size_type capacity = 0) { reserve(capacity); };
-	void reserve(size_type capacity) { this->c.reserve(capacity); }
-};
 
 thread_local INetwork* thread_network = 0;
 
@@ -248,8 +236,8 @@ public:
 	int64_t tscBegin, tscEnd;
 	double taskBegin;
 	TaskPriority currentTaskID;
-	uint64_t tasksIssued;
 	TDMetricCollection tdmetrics;
+	MetricCollection metrics;
 	ChaosMetrics chaosMetrics;
 	// we read now() from a different thread. On Intel, reading a double is atomic anyways, but on other platforms it's
 	// not. For portability this should be atomic
@@ -268,20 +256,21 @@ public:
 
 	NetworkMetrics::PriorityStats* lastPriorityStats;
 
-	ReadyQueue<OrderedTask> ready;
-	ThreadSafeQueue<OrderedTask> threadReady;
+	struct PromiseTask final : public FastAllocated<PromiseTask> {
+		Promise<Void> promise;
+		PromiseTask() {}
+		explicit PromiseTask(Promise<Void>&& promise) noexcept : promise(std::move(promise)) {}
 
-	struct DelayedTask : OrderedTask {
-		double at;
-		DelayedTask(double at, int64_t priority, TaskPriority taskID, Task* task)
-		  : OrderedTask(priority, taskID, task), at(at) {}
-		bool operator<(DelayedTask const& rhs) const { return at > rhs.at; } // Ordering is reversed for priority_queue
+		void operator()() {
+			promise.send(Void());
+			delete this;
+		}
 	};
-	std::priority_queue<DelayedTask, std::vector<DelayedTask>> timers;
+
+	TaskQueue<PromiseTask> taskQueue;
 
 	void checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, TaskPriority priority);
 	bool check_yield(TaskPriority taskId, int64_t tscNow);
-	void processThreadReady();
 	void trackAtPriority(TaskPriority priority, double now);
 	void stopImmediately() {
 #ifdef ADDRESS_SANITIZER
@@ -289,10 +278,7 @@ public:
 		__lsan_do_leak_check();
 #endif
 		stopped = true;
-		decltype(ready) _1;
-		ready.swap(_1);
-		decltype(timers) _2;
-		timers.swap(_2);
+		taskQueue.clear();
 	}
 
 	Future<Void> timeOffsetLogger;
@@ -308,9 +294,6 @@ public:
 	Int64MetricHandle countWrites;
 	Int64MetricHandle countUDPWrites;
 	Int64MetricHandle countRunLoop;
-	Int64MetricHandle countCantSleep;
-	Int64MetricHandle countWontSleep;
-	Int64MetricHandle countTimers;
 	Int64MetricHandle countTasks;
 	Int64MetricHandle countYields;
 	Int64MetricHandle countYieldBigStack;
@@ -364,7 +347,7 @@ public:
 	BindPromise(BindPromise const& r) : p(r.p), errContext(r.errContext), errID(r.errID) {}
 	BindPromise(BindPromise&& r) noexcept : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
 
-	Future<Void> getFuture() { return p.getFuture(); }
+	Future<Void> getFuture() const { return p.getFuture(); }
 
 	void operator()(const boost::system::error_code& error, size_t bytesWritten = 0) {
 		try {
@@ -542,6 +525,7 @@ private:
 		if (error)
 			TraceEvent(SevWarn, "N2_CloseError", id)
 			    .suppressFor(1.0)
+			    .detail("PeerAddr", peer_address)
 			    .detail("ErrorCode", error.value())
 			    .detail("Message", error.message());
 	}
@@ -549,6 +533,7 @@ private:
 	void onReadError(const boost::system::error_code& error) {
 		TraceEvent(SevWarn, "N2_ReadError", id)
 		    .suppressFor(1.0)
+		    .detail("PeerAddr", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
@@ -556,6 +541,7 @@ private:
 	void onWriteError(const boost::system::error_code& error) {
 		TraceEvent(SevWarn, "N2_WriteError", id)
 		    .suppressFor(1.0)
+		    .detail("PeerAddr", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
@@ -904,8 +890,8 @@ public:
 
 		try {
 			Future<Void> onHandshook;
-			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [this](bool verifyOk) {
-				self->has_trusted_peer = verifyOk;
+			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [conn = self.getPtr()](bool verifyOk) {
+				conn->has_trusted_peer = verifyOk;
 			});
 
 			// If the background handshakers are not all busy, use one
@@ -956,8 +942,12 @@ public:
 		doAcceptHandshake(self, connected);
 		try {
 			choose {
-				when(wait(connected.getFuture())) { return Void(); }
-				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) { throw connection_failed(); }
+				when(wait(connected.getFuture())) {
+					return Void();
+				}
+				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+					throw connection_failed();
+				}
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
@@ -982,8 +972,8 @@ public:
 
 		try {
 			Future<Void> onHandshook;
-			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [this](bool verifyOk) {
-				self->has_trusted_peer = verifyOk;
+			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [conn = self.getPtr()](bool verifyOk) {
+				conn->has_trusted_peer = verifyOk;
 			});
 
 			// If the background handshakers are not all busy, use one
@@ -1016,8 +1006,12 @@ public:
 		doConnectHandshake(self, connected);
 		try {
 			choose {
-				when(wait(connected.getFuture())) { return Void(); }
-				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) { throw connection_failed(); }
+				when(wait(connected.getFuture())) {
+					return Void();
+				}
+				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+					throw connection_failed();
+				}
 			}
 		} catch (Error& e) {
 			// Either the connection failed, or was cancelled by the caller
@@ -1154,6 +1148,7 @@ private:
 	void onReadError(const boost::system::error_code& error) {
 		TraceEvent(SevWarn, "N2_ReadError", id)
 		    .suppressFor(1.0)
+		    .detail("PeerAddr", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
@@ -1161,6 +1156,7 @@ private:
 	void onWriteError(const boost::system::error_code& error) {
 		TraceEvent(SevWarn, "N2_WriteError", id)
 		    .suppressFor(1.0)
+		    .detail("PeerAddr", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
@@ -1222,17 +1218,6 @@ private:
 	}
 };
 
-struct PromiseTask final : public Task, public FastAllocated<PromiseTask> {
-	Promise<Void> promise;
-	PromiseTask() {}
-	explicit PromiseTask(Promise<Void>&& promise) noexcept : promise(std::move(promise)) {}
-
-	void operator()() override {
-		promise.send(Void());
-		delete this;
-	}
-};
-
 // 5MB for loading files into memory
 
 Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
@@ -1241,8 +1226,8 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
         boost::asio::ssl::context(boost::asio::ssl::context::tls)) }),
     sslHandshakerThreadsStarted(0), sslPoolHandshakesInProgress(0), tlsConfig(tlsConfig),
     tlsInitializedState(ETLSInitState::NONE), network(this), tscBegin(0), tscEnd(0), taskBegin(0),
-    currentTaskID(TaskPriority::DefaultYield), tasksIssued(0), stopped(false), started(false), numYields(0),
-    lastPriorityStats(nullptr), ready(FLOW_KNOBS->READY_QUEUE_RESERVED_SIZE) {
+    currentTaskID(TaskPriority::DefaultYield), stopped(false), started(false), numYields(0),
+    lastPriorityStats(nullptr) {
 	// Until run() is called, yield() will always yield
 	TraceEvent("Net2Starting").log();
 
@@ -1253,6 +1238,7 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
 		setGlobal(INetwork::enChaosMetrics, (flowGlobalType)&chaosMetrics);
 	}
+	setGlobal(INetwork::enMetrics, (flowGlobalType)&metrics);
 	setGlobal(INetwork::enNetworkConnections, (flowGlobalType)network);
 	setGlobal(INetwork::enASIOService, (flowGlobalType)&reactor.ios);
 	setGlobal(INetwork::enBlobCredentialFiles, &blobCredentialFiles);
@@ -1389,29 +1375,27 @@ ACTOR Future<Void> Net2::logTimeOffset() {
 }
 
 void Net2::initMetrics() {
-	bytesReceived.init(LiteralStringRef("Net2.BytesReceived"));
-	countWriteProbes.init(LiteralStringRef("Net2.CountWriteProbes"));
-	countReadProbes.init(LiteralStringRef("Net2.CountReadProbes"));
-	countReads.init(LiteralStringRef("Net2.CountReads"));
-	countWouldBlock.init(LiteralStringRef("Net2.CountWouldBlock"));
-	countWrites.init(LiteralStringRef("Net2.CountWrites"));
-	countRunLoop.init(LiteralStringRef("Net2.CountRunLoop"));
-	countCantSleep.init(LiteralStringRef("Net2.CountCantSleep"));
-	countWontSleep.init(LiteralStringRef("Net2.CountWontSleep"));
-	countTimers.init(LiteralStringRef("Net2.CountTimers"));
-	countTasks.init(LiteralStringRef("Net2.CountTasks"));
-	countYields.init(LiteralStringRef("Net2.CountYields"));
-	countYieldBigStack.init(LiteralStringRef("Net2.CountYieldBigStack"));
-	countYieldCalls.init(LiteralStringRef("Net2.CountYieldCalls"));
-	countASIOEvents.init(LiteralStringRef("Net2.CountASIOEvents"));
-	countYieldCallsTrue.init(LiteralStringRef("Net2.CountYieldCallsTrue"));
-	countRunLoopProfilingSignals.init(LiteralStringRef("Net2.CountRunLoopProfilingSignals"));
-	countTLSPolicyFailures.init(LiteralStringRef("Net2.CountTLSPolicyFailures"));
-	priorityMetric.init(LiteralStringRef("Net2.Priority"));
-	awakeMetric.init(LiteralStringRef("Net2.Awake"));
-	slowTaskMetric.init(LiteralStringRef("Net2.SlowTask"));
-	countLaunchTime.init(LiteralStringRef("Net2.CountLaunchTime"));
-	countReactTime.init(LiteralStringRef("Net2.CountReactTime"));
+	bytesReceived.init("Net2.BytesReceived"_sr);
+	countWriteProbes.init("Net2.CountWriteProbes"_sr);
+	countReadProbes.init("Net2.CountReadProbes"_sr);
+	countReads.init("Net2.CountReads"_sr);
+	countWouldBlock.init("Net2.CountWouldBlock"_sr);
+	countWrites.init("Net2.CountWrites"_sr);
+	countRunLoop.init("Net2.CountRunLoop"_sr);
+	countTasks.init("Net2.CountTasks"_sr);
+	countYields.init("Net2.CountYields"_sr);
+	countYieldBigStack.init("Net2.CountYieldBigStack"_sr);
+	countYieldCalls.init("Net2.CountYieldCalls"_sr);
+	countASIOEvents.init("Net2.CountASIOEvents"_sr);
+	countYieldCallsTrue.init("Net2.CountYieldCallsTrue"_sr);
+	countRunLoopProfilingSignals.init("Net2.CountRunLoopProfilingSignals"_sr);
+	countTLSPolicyFailures.init("Net2.CountTLSPolicyFailures"_sr);
+	priorityMetric.init("Net2.Priority"_sr);
+	awakeMetric.init("Net2.Awake"_sr);
+	slowTaskMetric.init("Net2.SlowTask"_sr);
+	countLaunchTime.init("Net2.CountLaunchTime"_sr);
+	countReactTime.init("Net2.CountReactTime"_sr);
+	taskQueue.initMetrics();
 }
 
 bool Net2::checkRunnable() {
@@ -1469,19 +1453,10 @@ void Net2::run() {
 		}
 
 		double sleepTime = 0;
-		bool b = ready.empty();
-		if (b) {
-			b = threadReady.canSleep();
-			if (!b)
-				++countCantSleep;
-		} else
-			++countWontSleep;
-		if (b) {
+		if (taskQueue.canSleep()) {
 			sleepTime = 1e99;
 			double sleepStart = timer_monotonic();
-			if (!timers.empty()) {
-				sleepTime = timers.top().at - sleepStart; // + 500e-6?
-			}
+			sleepTime = taskQueue.getSleepTime(sleepStart);
 			if (sleepTime > 0) {
 #if defined(__linux__)
 				// notify the run loop monitoring thread that we have gone idle
@@ -1513,33 +1488,24 @@ void Net2::run() {
 		    nondeterministicRandom()->random01() < (now - nnow) * FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopTop").detail("Elapsed", now - nnow);
 
-		int numTimers = 0;
-		while (!timers.empty() && timers.top().at < now) {
-			++numTimers;
-			++countTimers;
-			ready.push(timers.top());
-			timers.pop();
-		}
-		// FIXME: Is this double counting?
-		countTimers += numTimers;
-		FDB_TRACE_PROBE(run_loop_ready_timers, numTimers);
+		taskQueue.processReadyTimers(now);
 
-		processThreadReady();
+		taskQueue.processThreadReady();
 
 		tscBegin = timestampCounter();
 		tscEnd = tscBegin + FLOW_KNOBS->TSC_YIELD_TIME;
 		taskBegin = timer_monotonic();
 		numYields = 0;
 		TaskPriority minTaskID = TaskPriority::Max;
-		[[maybe_unused]] int queueSize = ready.size();
+		[[maybe_unused]] int queueSize = taskQueue.getNumReadyTasks();
 
 		FDB_TRACE_PROBE(run_loop_tasks_start, queueSize);
-		while (!ready.empty()) {
+		while (taskQueue.hasReadyTask()) {
 			++countTasks;
-			currentTaskID = ready.top().taskID;
+			currentTaskID = taskQueue.getReadyTaskID();
 			priorityMetric = static_cast<int64_t>(currentTaskID);
-			Task* task = ready.top().task;
-			ready.pop();
+			PromiseTask* task = taskQueue.getReadyTask();
+			taskQueue.popReadyTask();
 
 			try {
 				++tasksSinceReact;
@@ -1580,7 +1546,7 @@ void Net2::run() {
 
 		trackAtPriority(TaskPriority::RunLoop, taskBegin);
 
-		queueSize = ready.size();
+		queueSize = taskQueue.getNumReadyTasks();
 		FDB_TRACE_PROBE(run_loop_done, queueSize);
 
 #if defined(__linux__)
@@ -1695,20 +1661,6 @@ void Net2::trackAtPriority(TaskPriority priority, double now) {
 	}
 }
 
-void Net2::processThreadReady() {
-	int numReady = 0;
-	while (true) {
-		Optional<OrderedTask> t = threadReady.pop();
-		if (!t.present())
-			break;
-		t.get().priority -= ++tasksIssued;
-		ASSERT(t.get().task != 0);
-		ready.push(t.get());
-		++numReady;
-	}
-	FDB_TRACE_PROBE(run_loop_thread_ready, numReady);
-}
-
 void Net2::checkForSlowTask(int64_t tscBegin, int64_t tscEnd, double duration, TaskPriority priority) {
 	int64_t elapsed = tscEnd - tscBegin;
 	if (elapsed > FLOW_KNOBS->TSC_YIELD_TIME && tscBegin > 0) {
@@ -1748,11 +1700,11 @@ bool Net2::check_yield(TaskPriority taskID, int64_t tscNow) {
 		return true;
 	}
 
-	processThreadReady();
+	taskQueue.processThreadReady();
 
 	if (taskID == TaskPriority::DefaultYield)
 		taskID = currentTaskID;
-	if (!ready.empty() && ready.top().priority > int64_t(taskID) << 32) {
+	if (taskQueue.hasReadyTask() && taskQueue.getReadyTaskPriority() > int64_t(taskID) << 32) {
 		return true;
 	}
 
@@ -1790,18 +1742,17 @@ Future<class Void> Net2::yield(TaskPriority taskID) {
 }
 
 Future<Void> Net2::delay(double seconds, TaskPriority taskId) {
-	if (seconds <= 0.) {
-		PromiseTask* t = new PromiseTask;
-		this->ready.push(OrderedTask((int64_t(taskId) << 32) - (++tasksIssued), taskId, t));
-		return t->promise.getFuture();
-	}
-	if (seconds >=
-	    4e12) // Intervals that overflow an int64_t in microseconds (more than 100,000 years) are treated as infinite
+	if (seconds >= 4e12) // Intervals that overflow an int64_t in microseconds (more than 100,000 years) are treated
+	                     // as infinite
 		return Never();
 
-	double at = now() + seconds;
 	PromiseTask* t = new PromiseTask;
-	this->timers.push(DelayedTask(at, (int64_t(taskId) << 32) - (++tasksIssued), taskId, t));
+	if (seconds <= 0.) {
+		taskQueue.addReady(taskId, t);
+	} else {
+		double at = now() + seconds;
+		taskQueue.addTimer(at, taskId, t);
+	}
 	return t->promise.getFuture();
 }
 
@@ -1814,14 +1765,8 @@ void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
 	if (stopped)
 		return;
 	PromiseTask* p = new PromiseTask(std::move(signal));
-	int64_t priority = int64_t(taskID) << 32;
-
-	if (thread_network == this) {
-		processThreadReady();
-		this->ready.push(OrderedTask(priority - (++tasksIssued), taskID, p));
-	} else {
-		if (threadReady.push(OrderedTask(priority, taskID, p)))
-			reactor.wake();
+	if (taskQueue.addReadyThreadSafe(isOnMainThread(), taskID, p)) {
+		reactor.wake();
 	}
 }
 
@@ -2141,7 +2086,7 @@ THREAD_HANDLE startThreadF(F&& func) {
 	return g_network->startThread(Thing::start, t);
 }
 
-TEST_CASE("/flow/Net2/ThreadSafeQueue/Interface") {
+TEST_CASE("flow/Net2/ThreadSafeQueue/Interface") {
 	ThreadSafeQueue<int> tq;
 	ASSERT(!tq.pop().present());
 	ASSERT(tq.canSleep());
@@ -2182,7 +2127,7 @@ struct QueueTestThreadState {
 	}
 };
 
-TEST_CASE("/flow/Net2/ThreadSafeQueue/Threaded") {
+TEST_CASE("flow/Net2/ThreadSafeQueue/Threaded") {
 	// Uses ThreadSafeQueue from multiple threads. Verifies that all pushed elements are popped, maintaining the
 	// ordering within a thread.
 	noUnseed = true; // multi-threading inherently non-deterministic
@@ -2242,8 +2187,6 @@ TEST_CASE("/flow/Net2/ThreadSafeQueue/Threaded") {
 	return Void();
 }
 
-// NB: This could be a test for any INetwork implementation, but Sim2 doesn't
-// satisfy this requirement yet.
 TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 	// Verifies that signals processed by onMainThread() are executed in order.
 	noUnseed = true; // multi-threading inherently non-deterministic
@@ -2306,7 +2249,7 @@ void net2_test(){
 	    reqs.resize(10000);
 	    for(int i=0; i<10000; i++) {
 	        TestGVR &req = reqs[i];
-	        req.key = LiteralStringRef("Foobar");
+	        req.key = "Foobar"_sr;
 
 	        SerializeSource<TestGVR> what(req);
 

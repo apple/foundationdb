@@ -24,6 +24,7 @@
 #include "libb64/encode.h"
 #include "flow/Knobs.h"
 #include <cctype>
+#include "flow/IConnection.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -100,14 +101,14 @@ PacketBuffer* writeRequestHeader(std::string const& verb,
 	writer.serializeBytes(verb);
 	writer.serializeBytes(" ", 1);
 	writer.serializeBytes(resource);
-	writer.serializeBytes(LiteralStringRef(" HTTP/1.1\r\n"));
+	writer.serializeBytes(" HTTP/1.1\r\n"_sr);
 	for (auto h : headers) {
 		writer.serializeBytes(h.first);
-		writer.serializeBytes(LiteralStringRef(": "));
+		writer.serializeBytes(": "_sr);
 		writer.serializeBytes(h.second);
-		writer.serializeBytes(LiteralStringRef("\r\n"));
+		writer.serializeBytes("\r\n"_sr);
 	}
-	writer.serializeBytes(LiteralStringRef("\r\n"));
+	writer.serializeBytes("\r\n"_sr);
 	return writer.finish();
 }
 
@@ -243,7 +244,7 @@ ACTOR Future<Void> read_http_response(Reference<HTTP::Response> r, Reference<ICo
 
 	auto i = r->headers.find("Content-Length");
 	if (i != r->headers.end())
-		r->contentLen = atoi(i->second.c_str());
+		r->contentLen = strtoll(i->second.c_str(), NULL, 10);
 	else
 		r->contentLen = -1; // Content length unknown
 
@@ -481,17 +482,18 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 		}
 
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 0) {
-			printf("[%s] HTTP %scode=%d early=%d, time=%fs %s %s contentLen=%d [%d out, response content len %d]\n",
-			       conn->getDebugID().toString().c_str(),
-			       (err.present() ? format("*ERROR*=%s ", err.get().name()).c_str() : ""),
-			       r->code,
-			       earlyResponse,
-			       elapsed,
-			       verb.c_str(),
-			       resource.c_str(),
-			       contentLen,
-			       total_sent,
-			       (int)r->contentLen);
+			fmt::print("[{0}] HTTP {1}code={2} early={3}, time={4} {5} {6} contentLen={7} [{8} out, response content "
+			           "len {9}]\n",
+			           conn->getDebugID().toString(),
+			           (err.present() ? format("*ERROR*=%s ", err.get().name()).c_str() : ""),
+			           r->code,
+			           earlyResponse,
+			           elapsed,
+			           verb,
+			           resource,
+			           contentLen,
+			           total_sent,
+			           r->contentLen);
 		}
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
 			printf("[%s] HTTP RESPONSE:  %s %s\n%s\n",

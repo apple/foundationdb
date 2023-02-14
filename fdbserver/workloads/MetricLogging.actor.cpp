@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "flow/TDMetric.actor.h"
@@ -26,6 +25,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MetricLoggingWorkload : TestWorkload {
+	static constexpr auto NAME = "MetricLogging";
 	int actorCount, metricCount;
 	double testDuration;
 	bool testBool, enabled;
@@ -36,22 +36,20 @@ struct MetricLoggingWorkload : TestWorkload {
 	std::vector<Int64MetricHandle> int64Metrics;
 
 	MetricLoggingWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), changes("Changes") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		actorCount = getOption(options, LiteralStringRef("actorCount"), 1);
-		metricCount = getOption(options, LiteralStringRef("metricCount"), 1);
-		testBool = getOption(options, LiteralStringRef("testBool"), true);
-		enabled = getOption(options, LiteralStringRef("enabled"), true);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		actorCount = getOption(options, "actorCount"_sr, 1);
+		metricCount = getOption(options, "metricCount"_sr, 1);
+		testBool = getOption(options, "testBool"_sr, true);
+		enabled = getOption(options, "enabled"_sr, true);
 
 		for (int i = 0; i < metricCount; i++) {
 			if (testBool) {
-				boolMetrics.push_back(BoolMetricHandle(LiteralStringRef("TestBool"), format("%d", i)));
+				boolMetrics.push_back(BoolMetricHandle("TestBool"_sr, format("%d", i)));
 			} else {
-				int64Metrics.push_back(Int64MetricHandle(LiteralStringRef("TestInt"), format("%d", i)));
+				int64Metrics.push_back(Int64MetricHandle("TestInt"_sr, format("%d", i)));
 			}
 		}
 	}
-
-	std::string description() const override { return "MetricLogging"; }
 
 	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
 
@@ -99,4 +97,4 @@ struct MetricLoggingWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<MetricLoggingWorkload> MetricLoggingWorkloadFactory("MetricLogging");
+WorkloadFactory<MetricLoggingWorkload> MetricLoggingWorkloadFactory;

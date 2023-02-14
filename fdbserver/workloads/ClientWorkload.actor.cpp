@@ -21,6 +21,7 @@
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #include <fmt/format.h>
 
@@ -37,11 +38,11 @@ class WorkloadProcessState {
 
 	~WorkloadProcessState() {
 		TraceEvent("ShutdownClientForWorkload", id).log();
-		g_simulator.destroyProcess(childProcess);
+		g_simulator->destroyProcess(childProcess);
 	}
 
 	ACTOR static Future<Void> initializationDone(WorkloadProcessState* self, ISimulator::ProcessInfo* parent) {
-		wait(g_simulator.onProcess(parent, TaskPriority::DefaultYield));
+		wait(g_simulator->onProcess(parent, TaskPriority::DefaultYield));
 		self->init.send(Void());
 		wait(Never());
 		ASSERT(false); // does not happen
@@ -49,7 +50,7 @@ class WorkloadProcessState {
 	}
 
 	ACTOR static Future<Void> processStart(WorkloadProcessState* self) {
-		state ISimulator::ProcessInfo* parent = g_simulator.getCurrentProcess();
+		state ISimulator::ProcessInfo* parent = g_simulator->getCurrentProcess();
 		state std::vector<Future<Void>> futures;
 		if (parent->address.isV6()) {
 			self->childAddress =
@@ -65,22 +66,23 @@ class WorkloadProcessState {
 		TraceEvent("StartingClientWorkloadProcess", self->id)
 		    .detail("Name", self->processName)
 		    .detail("Address", self->childAddress);
-		self->childProcess = g_simulator.newProcess(self->processName.c_str(),
-		                                            self->childAddress,
-		                                            1,
-		                                            parent->address.isTLS(),
-		                                            1,
-		                                            locality,
-		                                            ProcessClass(ProcessClass::TesterClass, ProcessClass::AutoSource),
-		                                            dataFolder.c_str(),
-		                                            parent->coordinationFolder.c_str(),
-		                                            parent->protocolVersion);
+		self->childProcess = g_simulator->newProcess(self->processName.c_str(),
+		                                             self->childAddress,
+		                                             1,
+		                                             parent->address.isTLS(),
+		                                             1,
+		                                             locality,
+		                                             ProcessClass(ProcessClass::TesterClass, ProcessClass::AutoSource),
+		                                             dataFolder.c_str(),
+		                                             parent->coordinationFolder.c_str(),
+		                                             parent->protocolVersion,
+		                                             false);
 		self->childProcess->excludeFromRestarts = true;
-		wait(g_simulator.onProcess(self->childProcess, TaskPriority::DefaultYield));
+		wait(g_simulator->onProcess(self->childProcess, TaskPriority::DefaultYield));
 		try {
 			FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
 			Sim2FileSystem::newFileSystem();
-			auto addr = g_simulator.getCurrentProcess()->address;
+			auto addr = g_simulator->getCurrentProcess()->address;
 			futures.push_back(FlowTransport::transport().bind(addr, addr));
 			futures.push_back(success((self->childProcess->onShutdown())));
 			TraceEvent("ClientWorkloadProcessInitialized", self->id).log();
@@ -143,18 +145,18 @@ struct WorkloadProcess {
 	ACTOR static Future<Void> openDatabase(WorkloadProcess* self,
 	                                       ClientWorkload::CreateWorkload childCreator,
 	                                       WorkloadContext wcx) {
-		state ISimulator::ProcessInfo* parent = g_simulator.getCurrentProcess();
+		state ISimulator::ProcessInfo* parent = g_simulator->getCurrentProcess();
 		state Optional<Error> err;
 		wcx.dbInfo = Reference<AsyncVar<struct ServerDBInfo> const>();
 		wait(self->processState->initialized());
-		wait(g_simulator.onProcess(self->childProcess(), TaskPriority::DefaultYield));
+		wait(g_simulator->onProcess(self->childProcess(), TaskPriority::DefaultYield));
 		try {
 			self->createDatabase(childCreator, wcx);
 		} catch (Error& e) {
 			ASSERT(e.code() != error_code_actor_cancelled);
 			err = e;
 		}
-		wait(g_simulator.onProcess(parent, TaskPriority::DefaultYield));
+		wait(g_simulator->onProcess(parent, TaskPriority::DefaultYield));
 		if (err.present()) {
 			throw err.get();
 		}
@@ -167,7 +169,7 @@ struct WorkloadProcess {
 
 	WorkloadProcess(ClientWorkload::CreateWorkload const& childCreator, WorkloadContext const& wcx)
 	  : processState(WorkloadProcessState::instance(wcx.clientId)) {
-		TraceEvent("StartingClinetWorkload", id).detail("OnClientProcess", processState->id);
+		TraceEvent("StartingClientWorkload", id).detail("OnClientProcess", processState->id);
 		childWorkloadContext.clientCount = wcx.clientCount;
 		childWorkloadContext.clientId = wcx.clientId;
 		childWorkloadContext.ccr = wcx.ccr;
@@ -177,11 +179,11 @@ struct WorkloadProcess {
 	}
 
 	ACTOR static void destroy(WorkloadProcess* self) {
-		state ISimulator::ProcessInfo* parent = g_simulator.getCurrentProcess();
-		wait(g_simulator.onProcess(self->childProcess(), TaskPriority::DefaultYield));
+		state ISimulator::ProcessInfo* parent = g_simulator->getCurrentProcess();
+		wait(g_simulator->onProcess(self->childProcess(), TaskPriority::DefaultYield));
 		TraceEvent("DeleteWorkloadProcess").backtrace();
 		delete self;
-		wait(g_simulator.onProcess(parent, TaskPriority::DefaultYield));
+		wait(g_simulator->onProcess(parent, TaskPriority::DefaultYield));
 	}
 
 	std::string description() { return desc; }
@@ -190,7 +192,7 @@ struct WorkloadProcess {
 	// count of `f` is 1, this will cause the future to be destroyed in the process `process`
 	ACTOR template <class T>
 	static void cancelChild(ISimulator::ProcessInfo* process, Future<T> f) {
-		wait(g_simulator.onProcess(process, TaskPriority::DefaultYield));
+		wait(g_simulator->onProcess(process, TaskPriority::DefaultYield));
 	}
 
 	ACTOR template <class Ret, class Fun>
@@ -198,9 +200,9 @@ struct WorkloadProcess {
 		state Optional<Error> err;
 		state Ret res;
 		state Future<Ret> fut;
-		state ISimulator::ProcessInfo* parent = g_simulator.getCurrentProcess();
+		state ISimulator::ProcessInfo* parent = g_simulator->getCurrentProcess();
 		wait(self->databaseOpened);
-		wait(g_simulator.onProcess(self->childProcess(), TaskPriority::DefaultYield));
+		wait(g_simulator->onProcess(self->childProcess(), TaskPriority::DefaultYield));
 		self->cx->defaultTenant = defaultTenant;
 		try {
 			fut = f(self->cx);
@@ -218,7 +220,7 @@ struct WorkloadProcess {
 			err = e;
 		}
 		fut = Future<Ret>();
-		wait(g_simulator.onProcess(parent, TaskPriority::DefaultYield));
+		wait(g_simulator->onProcess(parent, TaskPriority::DefaultYield));
 		if (err.present()) {
 			throw err.get();
 		}

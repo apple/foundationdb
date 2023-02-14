@@ -30,13 +30,13 @@ endif()
 
 add_custom_command(OUTPUT ${asm_file} ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h
   COMMAND $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/generate_asm.py ${os} ${cpu}
-      ${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.cpp
-      ${asm_file}
-      ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.cpp
+  ${asm_file}
+  ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/generate_asm.py ${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.cpp
   COMMENT "Generate C bindings")
 add_custom_target(fdb_c_generated DEPENDS ${asm_file}
-      ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h)
+  ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h)
 
 vexillographer_compile(TARGET fdb_c_options LANG c OUT ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h)
@@ -66,9 +66,9 @@ if(APPLE)
   set(symbols ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.symbols)
   add_custom_command(OUTPUT ${symbols}
     COMMAND $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/symbolify.py
-        ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c.h
-        ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c_internal.h
-        ${symbols}
+    ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c_internal.h
+    ${symbols}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/symbolify.py ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c.h ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c_internal.h
     COMMENT "Generate exported_symbols_list")
   add_custom_target(exported_symbols_list DEPENDS ${symbols})
@@ -76,7 +76,7 @@ if(APPLE)
   target_link_options(fdb_c PRIVATE "LINKER:-no_weak_exports,-exported_symbols_list,${symbols}")
 elseif(WIN32)
 else()
-  if (NOT USE_UBSAN)
+  if(NOT USE_UBSAN)
     # For ubsan we need to export type information for the vptr check to work.
     # Otherwise we only want to export fdb symbols in the fdb c api.
     target_link_options(fdb_c PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map")
@@ -95,6 +95,8 @@ endif()
 # The tests don't build on windows
 if(NOT WIN32)
   set(MAKO_SRCS
+    test/mako/admin_server.hpp
+    test/mako/admin_server.cpp
     test/mako/async.hpp
     test/mako/async.cpp
     test/mako/blob_granules.hpp
@@ -109,6 +111,8 @@ if(NOT WIN32)
     test/mako/process.hpp
     test/mako/shm.hpp
     test/mako/stats.hpp
+    test/mako/tenant.cpp
+    test/mako/tenant.hpp
     test/mako/time.hpp
     test/mako/utils.cpp
     test/mako/utils.hpp)
@@ -127,9 +131,9 @@ if(NOT WIN32)
     test/unit/fdb_api.hpp)
 
   add_library(fdb_cpp INTERFACE test/fdb_api.hpp)
-  target_sources(fdb_cpp INTERFACE )
+  target_sources(fdb_cpp INTERFACE)
   target_include_directories(fdb_cpp INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/test)
-  target_link_libraries(fdb_cpp INTERFACE fmt::fmt)
+  target_link_libraries(fdb_cpp INTERFACE fdb_c fmt::fmt)
 
   set(API_TESTER_SRCS
     test/apitester/fdb_c_api_tester.cpp
@@ -157,7 +161,7 @@ if(NOT WIN32)
     test/apitester/TesterWatchAndWaitWorkload.cpp
     test/apitester/TesterWorkload.cpp
     test/apitester/TesterWorkload.h
-  )
+    )
 
   add_library(fdb_c_unit_tests_impl OBJECT ${UNIT_TEST_SRCS})
   add_library(fdb_c_api_tester_impl OBJECT ${API_TESTER_SRCS})
@@ -172,6 +176,7 @@ if(NOT WIN32)
     add_library(fdb_c_unit_tests_version_510 OBJECT ${UNIT_TEST_VERSION_510_SRCS})
     add_library(trace_partial_file_suffix_test OBJECT ${TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS})
     add_library(disconnected_timeout_unit_tests OBJECT ${DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS})
+    add_library(fdb_c_client_config_tester OBJECT test/client_config_tester.cpp)
   else()
     add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
     add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
@@ -190,6 +195,7 @@ if(NOT WIN32)
     strip_debug_symbols(fdb_c_ryw_benchmark)
     strip_debug_symbols(fdb_c_txn_size_test)
     strip_debug_symbols(fdb_c_client_memory_test)
+    add_executable(fdb_c_client_config_tester test/client_config_tester.cpp)
   endif()
 
   target_link_libraries(fdb_c_performance_test PRIVATE fdb_c Threads::Threads)
@@ -199,6 +205,9 @@ if(NOT WIN32)
 
   target_include_directories(fdb_c_api_tester_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include ${CMAKE_BINARY_DIR}/flow/include)
   target_link_libraries(fdb_c_api_tester_impl PRIVATE fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target)
+  if(NOT APPLE)
+    target_link_libraries(fdb_c_api_tester_impl PRIVATE stdc++fs)
+  endif()
   target_link_libraries(fdb_c_api_tester_impl PRIVATE SimpleOpt)
 
   target_include_directories(fdb_c_unit_tests_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
@@ -208,16 +217,22 @@ if(NOT WIN32)
   target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads doctest)
   target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads flow doctest)
   target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads doctest)
+  target_link_libraries(fdb_c_client_config_tester PRIVATE SimpleOpt fdb_cpp fdb_c fdbclient Threads::Threads fmt::fmt)
+  target_include_directories(fdb_c_client_config_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
-  target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target rapidjson)
+  target_link_libraries(mako PRIVATE fdb_c tokensign fdbclient fmt::fmt Threads::Threads fdb_cpp boost_target rapidjson)
 
   if(NOT OPEN_FOR_IDE)
     # Make sure that fdb_c.h is compatible with c90
     add_executable(fdb_c90_test test/fdb_c90_test.c)
     set_property(TARGET fdb_c90_test PROPERTY C_STANDARD 90)
-    target_compile_options(fdb_c90_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+	if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+	  target_compile_options(fdb_c90_test PRIVATE -Wall -Wextra -Wpedantic -Wno-gnu-line-marker -Werror)
+	else ()
+	  target_compile_options(fdb_c90_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+	endif ()
     target_link_libraries(fdb_c90_test PRIVATE fdb_c)
   endif()
 
@@ -225,206 +240,153 @@ if(NOT WIN32)
     set(FDB_C_TARGET $<TARGET_OBJECTS:fdb_c>)
   else()
     set(FDB_C_TARGET $<TARGET_FILE:fdb_c>)
-  endif()
-  add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
-    COMMAND ${CMAKE_COMMAND} -E copy ${FDB_C_TARGET} ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
-    DEPENDS fdb_c
-    COMMENT "Copy libfdb_c to use as external client for test")
-  add_custom_target(external_client DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so)
-  add_dependencies(fdb_c_unit_tests_impl external_client)
-  add_dependencies(disconnected_timeout_unit_tests external_client)
-  add_dependencies(fdb_c_api_tester_impl external_client)
+    add_custom_command(
+      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+      COMMAND ${CMAKE_COMMAND} -E copy ${FDB_C_TARGET} ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+      DEPENDS fdb_c
+      COMMENT "Copy libfdb_c to use as external client for test")
+    add_custom_target(external_client DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so)
+    add_dependencies(fdb_c_unit_tests_impl external_client)
+    add_dependencies(disconnected_timeout_unit_tests external_client)
+    add_dependencies(fdb_c_api_tester_impl external_client)
 
-  add_fdbclient_test(
-    NAME fdb_c_setup_tests
-    COMMAND $<TARGET_FILE:fdb_c_setup_tests>)
-  add_fdbclient_test(
-    NAME fdb_c_unit_tests
-    COMMAND $<TARGET_FILE:fdb_c_unit_tests>
-            @CLUSTER_FILE@
-            fdb)
-  add_fdbclient_test(
-    NAME fdb_c_unit_tests_version_510
-    COMMAND $<TARGET_FILE:fdb_c_unit_tests_version_510>
-            @CLUSTER_FILE@
-            fdb)
-  add_fdbclient_test(
-    NAME trace_partial_file_suffix_test
-    COMMAND $<TARGET_FILE:trace_partial_file_suffix_test>
-            @CLUSTER_FILE@
-            fdb)
-  add_fdbclient_test(
-    NAME fdb_c_external_client_unit_tests
-    COMMAND $<TARGET_FILE:fdb_c_unit_tests>
-            @CLUSTER_FILE@
-            fdb
-            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
-            )
-  add_unavailable_fdbclient_test(
-    NAME disconnected_timeout_unit_tests
-    COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
-            @CLUSTER_FILE@
-            )
-  add_unavailable_fdbclient_test(
-    NAME disconnected_timeout_external_client_unit_tests
-    COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
-            @CLUSTER_FILE@
-            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
-            )
-  add_fdbclient_test(
-    NAME fdb_c_api_tests
-    DISABLE_LOG_DUMP
-    COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
-            --cluster-file
-            @CLUSTER_FILE@
-            --tester-binary
-            $<TARGET_FILE:fdb_c_api_tester>
-            --external-client-library
-            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
-            --test-dir
-            ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
-            --tmp-dir
-            @TMP_DIR@
-            --log-dir
-            @LOG_DIR@
-            )
+    add_fdbclient_test(
+      NAME fdb_c_setup_tests
+      COMMAND $<TARGET_FILE:fdb_c_setup_tests>)
+    add_fdbclient_test(
+      NAME fdb_c_unit_tests
+      COMMAND $<TARGET_FILE:fdb_c_unit_tests>
+      @CLUSTER_FILE@
+      fdb)
+    add_fdbclient_test(
+      NAME fdb_c_unit_tests_version_510
+      COMMAND $<TARGET_FILE:fdb_c_unit_tests_version_510>
+      @CLUSTER_FILE@
+      fdb)
+    add_fdbclient_test(
+      NAME trace_partial_file_suffix_test
+      COMMAND $<TARGET_FILE:trace_partial_file_suffix_test>
+      @CLUSTER_FILE@
+      fdb)
+    add_fdbclient_test(
+      NAME fdb_c_external_client_unit_tests
+      COMMAND $<TARGET_FILE:fdb_c_unit_tests>
+      @CLUSTER_FILE@
+      fdb
+      ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+    )
+    add_unavailable_fdbclient_test(
+      NAME disconnected_timeout_unit_tests
+      COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
+      @CLUSTER_FILE@
+    )
+    add_unavailable_fdbclient_test(
+      NAME disconnected_timeout_external_client_unit_tests
+      COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
+      @CLUSTER_FILE@
+      ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+    )
 
-  add_fdbclient_test(
-    NAME fdb_c_api_tests_blob_granule
-    DISABLE_LOG_DUMP
-    API_TEST_BLOB_GRANULES_ENABLED
-    COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
-            --cluster-file
-            @CLUSTER_FILE@
-            --tester-binary
-            $<TARGET_FILE:fdb_c_api_tester>
-            --external-client-library
-            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
-            --test-dir
-            ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/blobgranuletests
-            --blob-granule-local-file-path
-            @DATA_DIR@/fdbblob/
-            --tmp-dir
-            @TMP_DIR@
-            --log-dir
-            @LOG_DIR@
-            )
-
-  add_fdbclient_test(
-    NAME fdb_c_api_tests_with_tls
-    DISABLE_LOG_DUMP
-    TLS_ENABLED
-    COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
-            --cluster-file
-            @CLUSTER_FILE@
-            --tester-binary
-            $<TARGET_FILE:fdb_c_api_tester>
-            --external-client-library
-            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
-            --test-dir
-            ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
-            --tmp-dir
-            @TMP_DIR@
-            --log-dir
-            @LOG_DIR@
-            --tls-cert-file
-            @CLIENT_CERT_FILE@
-            --tls-key-file
-            @CLIENT_KEY_FILE@
-            --tls-ca-file
-            @SERVER_CA_FILE@
-            )
-
-  add_test(NAME fdb_c_upgrade_to_future_version
-    COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-        --build-dir ${CMAKE_BINARY_DIR}
-        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-        --upgrade-path "7.2.0" "7.3.0" "7.2.0"
-        --process-number 3
-      )
-  set_tests_properties("fdb_c_upgrade_to_future_version" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
-
-  add_test(NAME fdb_c_upgrade_to_future_version_blob_granules
-    COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-        --build-dir ${CMAKE_BINARY_DIR}
-        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/ApiBlobGranulesCorrectness.toml
-        --upgrade-path "7.2.0" "7.3.0" "7.2.0"
-        --blob-granules-enabled
-        --process-number 3
-      )
-
-  if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
-    add_test(NAME fdb_c_upgrade_single_threaded_630api
-      COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-            --build-dir ${CMAKE_BINARY_DIR}
-            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-            --upgrade-path "6.3.23" "7.0.0" "7.1.9" "7.2.0"
-            --process-number 1
-            )
-
-    add_test(NAME fdb_c_upgrade_single_threaded_700api
-      COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-            --build-dir ${CMAKE_BINARY_DIR}
-            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-            --upgrade-path "7.0.0" "7.1.9" "7.2.0"
-            --process-number 1
-            )
-
-    add_test(NAME fdb_c_upgrade_multi_threaded_630api
-        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-            --build-dir ${CMAKE_BINARY_DIR}
-            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "6.3.23" "7.0.0" "7.1.9" "7.2.0" "7.1.9"
-            --process-number 3
-          )
-
-    add_test(NAME fdb_c_upgrade_multi_threaded_700api
-        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-            --build-dir ${CMAKE_BINARY_DIR}
-            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "7.0.0" "7.1.9" "7.2.0" "7.1.9"
-            --process-number 3
-          )
-
-    add_test(NAME fdb_c_upgrade_multi_threaded_710api
-        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-            --build-dir ${CMAKE_BINARY_DIR}
-            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "7.1.9" "7.2.0" "7.1.9"
-            --process-number 3
-          )
-
-    add_test(NAME fdb_c_cluster_wiggle
-          COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-              --build-dir ${CMAKE_BINARY_DIR}
-              --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-              --upgrade-path "7.2.0" "wiggle"
-              --disable-log-dump
-              --process-number 3
-              --redundancy double
-            )
-
-    add_test(NAME fdb_c_wiggle_and_upgrade_latest
-      COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+    file(GLOB API_TEST_FILES "${CMAKE_CURRENT_SOURCE_DIR}/test/apitester/tests/*.toml")
+    foreach(test_file ${API_TEST_FILES})
+      get_filename_component(file_name "${test_file}" NAME_WE)
+      set(test_name "fdb_c_api_test_${file_name}")
+      add_python_venv_test(NAME "${test_name}"
+        COMMAND python ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
           --build-dir ${CMAKE_BINARY_DIR}
-          --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-          --upgrade-path "7.1.9" "wiggle" "7.2.0"
-          --disable-log-dump
-          --process-number 3
-          --redundancy double
+          --api-tester-bin $<TARGET_FILE:fdb_c_api_tester>
+          --external-client-library ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+          --test-file ${test_file}
+          --retain-client-lib-copies
+        TEST_TIMEOUT 300
+      )
+    endforeach()
+
+    add_python_venv_test(NAME fdb_c_upgrade_to_future_version
+      COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+      --build-dir ${CMAKE_BINARY_DIR}
+      --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+      --upgrade-path "${FDB_CURRENT_VERSION}" "${FDB_FUTURE_VERSION}" "${FDB_CURRENT_VERSION}"
+      --process-number 3
+      )
+
+    add_python_venv_test(NAME fdb_c_upgrade_to_future_version_blob_granules
+      COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+      --build-dir ${CMAKE_BINARY_DIR}
+      --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/ApiBlobGranulesCorrectness.toml
+      --upgrade-path "${FDB_CURRENT_VERSION}" "${FDB_FUTURE_VERSION}" "${FDB_CURRENT_VERSION}"
+      --blob-granules-enabled
+      --process-number 3
+      )
+
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
+      add_python_venv_test(NAME fdb_c_client_config_tests
+        COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_client_config_tests.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --client-config-tester-bin $<TARGET_FILE:fdb_c_client_config_tester>
         )
 
-      add_test(NAME fdb_c_wiggle_and_upgrade_63
-        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-            --build-dir ${CMAKE_BINARY_DIR}
-            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "6.3.24" "wiggle" "7.0.0"
-            --disable-log-dump
-            --process-number 3
-            --redundancy double
-          )
+      add_python_venv_test(NAME fdb_c_upgrade_from_prev3_gradual
+        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_PREV3_RELEASE_VERSION}" "${FDB_PREV2_RELEASE_VERSION}" "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
+        --process-number 3
+        )
 
+      add_python_venv_test(NAME fdb_c_upgrade_from_prev3_direct
+        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_PREV3_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
+        --process-number 3
+        )
+
+      add_python_venv_test(NAME fdb_c_upgrade_from_prev2_gradual
+        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_PREV2_RELEASE_VERSION}" "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
+        --process-number 3
+        )
+
+      add_python_venv_test(NAME fdb_c_upgrade_from_prev2_direct
+        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_PREV2_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
+        --process-number 3
+        )
+
+      add_python_venv_test(NAME fdb_c_upgrade_from_prev
+        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
+        --process-number 3
+        )
+
+      add_python_venv_test(NAME fdb_c_wiggle_only
+        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_CURRENT_VERSION}" "wiggle"
+        --disable-log-dump
+        --process-number 3
+        --redundancy double
+        )
+
+      add_python_venv_test(NAME fdb_c_wiggle_and_upgrade
+        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_PREV_RELEASE_VERSION}" "wiggle" "${FDB_CURRENT_VERSION}"
+        --disable-log-dump
+        --process-number 3
+        --redundancy double
+        )
+
+    endif()
   endif()
 
 endif()
@@ -443,12 +405,12 @@ set_target_properties(c_workloads PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/share/foundationdb")
 target_link_libraries(c_workloads PUBLIC fdb_c)
 
-if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
+if(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
   target_link_options(c_workloads PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/external_workload.map,-z,nodelete")
 endif()
 
 # Generate shim library in Linux builds
-if (OPEN_FOR_IDE)
+if(OPEN_FOR_IDE)
 
   add_library(fdb_c_shim OBJECT foundationdb/fdb_c_shim.h fdb_c_shim.cpp)
   target_link_libraries(fdb_c_shim PUBLIC dl)
@@ -461,18 +423,18 @@ if (OPEN_FOR_IDE)
   target_link_libraries(fdb_c_shim_lib_tester PRIVATE fdb_c_shim SimpleOpt fdb_cpp Threads::Threads)
   target_include_directories(fdb_c_shim_lib_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include)
 
-elseif(NOT WIN32 AND NOT APPLE AND NOT USE_SANITIZER) # Linux Only, non-santizer only
+elseif(NOT WIN32 AND NOT APPLE) # Linux Only
 
   set(SHIM_LIB_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
   set(SHIM_LIB_GEN_SRC
-    ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.init.c
+    ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.init.cpp
     ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.tramp.S)
 
   set(IMPLIBSO_SRC_DIR ${CMAKE_SOURCE_DIR}/contrib/Implib.so)
   set(IMPLIBSO_SRC
     ${IMPLIBSO_SRC_DIR}/implib-gen.py
-    ${IMPLIBSO_SRC_DIR}/arch/common/init.c.tpl
+    ${IMPLIBSO_SRC_DIR}/arch/common/init.cpp.tpl
     ${IMPLIBSO_SRC_DIR}/arch/${CMAKE_SYSTEM_PROCESSOR}/config.ini
     ${IMPLIBSO_SRC_DIR}/arch/${CMAKE_SYSTEM_PROCESSOR}/table.S.tpl
     ${IMPLIBSO_SRC_DIR}/arch/${CMAKE_SYSTEM_PROCESSOR}/trampoline.S.tpl
@@ -480,14 +442,15 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT USE_SANITIZER) # Linux Only, non-santizer
 
   add_custom_command(OUTPUT ${SHIM_LIB_GEN_SRC}
     COMMAND $<TARGET_FILE:Python3::Interpreter> ${IMPLIBSO_SRC_DIR}/implib-gen.py
-      --target ${CMAKE_SYSTEM_PROCESSOR}
-      --outdir ${SHIM_LIB_OUTPUT_DIR}
-      --dlopen-callback=fdb_shim_dlopen_callback
-      $<TARGET_FILE:fdb_c>
+    --target ${CMAKE_SYSTEM_PROCESSOR}
+    --outdir ${SHIM_LIB_OUTPUT_DIR}
+    --dlopen-callback=fdb_shim_dlopen_callback
+    --symbol-filter='^fdb_.*$$'
+    $<TARGET_FILE:fdb_c>
     DEPENDS ${IMPLIBSO_SRC} fdb_c
     COMMENT "Generating source code for C shim library")
 
-  add_library(fdb_c_shim STATIC ${SHIM_LIB_GEN_SRC} foundationdb/fdb_c_shim.h fdb_c_shim.cpp)
+  add_library(fdb_c_shim SHARED ${SHIM_LIB_GEN_SRC} foundationdb/fdb_c_shim.h fdb_c_shim.cpp)
   target_link_options(fdb_c_shim PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map,-z,nodelete,-z,noexecstack")
   target_link_libraries(fdb_c_shim PUBLIC dl)
   target_include_directories(fdb_c_shim PUBLIC
@@ -505,14 +468,20 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT USE_SANITIZER) # Linux Only, non-santizer
   target_link_libraries(fdb_c_shim_lib_tester PRIVATE fdb_c_shim SimpleOpt fdb_cpp Threads::Threads)
   target_include_directories(fdb_c_shim_lib_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include)
 
-  add_test(NAME fdb_c_shim_library_tests
-    COMMAND $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_shim_tests.py
-          --build-dir ${CMAKE_BINARY_DIR}
-          --unit-tests-bin $<TARGET_FILE:fdb_c_shim_unit_tests>
-          --api-tester-bin $<TARGET_FILE:fdb_c_shim_api_tester>
-          --shim-lib-tester-bin $<TARGET_FILE:fdb_c_shim_lib_tester>
-          --api-test-dir ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
-          )
+  set(SHIM_LIB_TEST_EXTRA_OPTIONS "")
+  if(NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" OR USE_SANITIZER)
+    list(APPEND SHIM_LIB_TEST_EXTRA_OPTIONS --disable-prev-version-tests)
+  endif()  
+
+  add_python_venv_test(NAME fdb_c_shim_library_tests
+    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_shim_tests.py
+    --build-dir ${CMAKE_BINARY_DIR}
+    --unit-tests-bin $<TARGET_FILE:fdb_c_shim_unit_tests>
+    --api-tester-bin $<TARGET_FILE:fdb_c_shim_api_tester>
+    --shim-lib-tester-bin $<TARGET_FILE:fdb_c_shim_lib_tester>
+    --api-test-dir ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
+    ${SHIM_LIB_TEST_EXTRA_OPTIONS}
+    )
 
 endif() # End Linux only, non-sanitizer only
 
@@ -561,16 +530,16 @@ fdb_install(
 
 if(NOT WIN32 AND NOT APPLE AND NOT USE_SANITIZER) # Linux Only, non-sanitizer only
 
-fdb_install(
-  FILES foundationdb/fdb_c_shim.h
-  DESTINATION include
-  DESTINATION_SUFFIX /foundationdb
-  COMPONENT clients)
+  fdb_install(
+    FILES foundationdb/fdb_c_shim.h
+    DESTINATION include
+    DESTINATION_SUFFIX /foundationdb
+    COMPONENT clients)
 
-fdb_install(
-  TARGETS fdb_c_shim
-  EXPORT ${targets_export_name}
-  DESTINATION lib
-  COMPONENT clients)
+  fdb_install(
+    TARGETS fdb_c_shim
+    EXPORT ${targets_export_name}
+    DESTINATION lib
+    COMPONENT clients)
 
 endif() # End Linux only, non-ubsan only

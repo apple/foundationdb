@@ -63,7 +63,9 @@ ACTOR Future<Void> simpleTimer() {
 ACTOR Future<Void> someFuture(Future<int> ready) {
 	// loop choose {} works as well here - the braces are optional
 	loop choose {
-		when(wait(delay(0.5))) { std::cout << "Still waiting...\n"; }
+		when(wait(delay(0.5))) {
+			std::cout << "Still waiting...\n";
+		}
 		when(int r = wait(ready)) {
 			std::cout << format("Ready %d\n", r);
 			wait(delay(double(r)));
@@ -84,8 +86,12 @@ ACTOR Future<Void> promiseDemo() {
 
 ACTOR Future<Void> eventLoop(AsyncTrigger* trigger) {
 	loop choose {
-		when(wait(delay(0.5))) { std::cout << "Still waiting...\n"; }
-		when(wait(trigger->onTrigger())) { std::cout << "Triggered!\n"; }
+		when(wait(delay(0.5))) {
+			std::cout << "Still waiting...\n";
+		}
+		when(wait(trigger->onTrigger())) {
+			std::cout << "Triggered!\n";
+		}
 	}
 }
 
@@ -185,7 +191,9 @@ ACTOR Future<Void> echoServer() {
 				when(GetInterfaceRequest req = waitNext(echoServer.getInterface.getFuture())) {
 					req.reply.send(echoServer);
 				}
-				when(EchoRequest req = waitNext(echoServer.echo.getFuture())) { req.reply.send(req.message); }
+				when(EchoRequest req = waitNext(echoServer.echo.getFuture())) {
+					req.reply.send(req.message);
+				}
 				when(ReverseRequest req = waitNext(echoServer.reverse.getFuture())) {
 					req.reply.send(std::string(req.message.rbegin(), req.message.rend()));
 				}
@@ -478,7 +486,7 @@ ACTOR Future<Void> fdbClient() {
 	state Transaction tx(db);
 	state std::string keyPrefix = "/tut/";
 	state Key startKey;
-	state KeyRef endKey = LiteralStringRef("/tut0");
+	state KeyRef endKey = "/tut0"_sr;
 	state int beginIdx = 0;
 	loop {
 		try {
@@ -494,7 +502,7 @@ ACTOR Future<Void> fdbClient() {
 			RangeResult range = wait(tx.getRange(KeyRangeRef(startKey, endKey), 100));
 			for (int i = 0; i < 10; ++i) {
 				Key k = Key(keyPrefix + std::to_string(beginIdx + deterministicRandom()->randomInt(0, 100)));
-				tx.set(k, LiteralStringRef("foo"));
+				tx.set(k, "foo"_sr);
 			}
 			wait(tx.commit());
 			std::cout << "Committed\n";

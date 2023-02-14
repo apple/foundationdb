@@ -43,6 +43,7 @@
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"
 #include "fdbclient/Schemas.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -206,10 +207,12 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			EncryptionAtRestMode mode;
 			if (value == "disabled") {
 				mode = EncryptionAtRestMode::DISABLED;
-			} else if (value == "aes_256_ctr") {
-				mode = EncryptionAtRestMode::AES_256_CTR;
+			} else if (value == "domain_aware") {
+				mode = EncryptionAtRestMode::DOMAIN_AWARE;
+			} else if (value == "cluster_aware") {
+				mode = EncryptionAtRestMode::CLUSTER_AWARE;
 			} else {
-				printf("Error: Only disabled|aes_256_ctr are valid for encryption_at_rest_mode.\n");
+				printf("Error: Only disabled|domain_aware|cluster_aware are valid for encryption_at_rest_mode.\n");
 				return out;
 			}
 			out[p + key] = format("%d", mode);
@@ -463,6 +466,168 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options) 
 	return options.count(p + "log_replicas") == 1 && options.count(p + "log_anti_quorum") == 1 &&
 	       options.count(p + "storage_replicas") == 1 && options.count(p + "log_engine") == 1 &&
 	       options.count(p + "storage_engine") == 1;
+}
+
+/*
+    - Validates encryption and tenant mode configurations
+    - During cluster creation (configure new) we allow the following:
+        - If encryption mode is disabled/cluster_aware then any tenant mode is allowed
+        - If the encryption mode is domain_aware then the only allowed tenant mode is required
+    - During cluster configuration changes the following is allowed:
+        - Encryption mode cannot be changed (can only be set during creation)
+        - If the encryption mode is disabled/cluster_aware then any tenant mode changes are allowed
+        - If the encryption mode is domain_aware then tenant mode changes are not allowed (as the only supported mode is
+          required)
+*/
+bool isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration> oldConfiguration,
+                                       std::map<std::string, std::string> newConfig,
+                                       bool creating) {
+	EncryptionAtRestMode encryptMode;
+	TenantMode tenantMode;
+	if (creating) {
+		if (newConfig.count(encryptionAtRestModeConfKey.toString()) != 0) {
+			encryptMode = EncryptionAtRestMode::fromValueRef(
+			    ValueRef(newConfig.find(encryptionAtRestModeConfKey.toString())->second));
+			// check if the tenant mode is being set during configure new (otherwise assume tenants are disabled)
+			if (newConfig.count(tenantModeConfKey.toString()) != 0) {
+				tenantMode = TenantMode::fromValue(ValueRef(newConfig.find(tenantModeConfKey.toString())->second));
+			}
+		}
+	} else {
+		ASSERT(oldConfiguration.present());
+		encryptMode = oldConfiguration.get().encryptionAtRestMode;
+		if (newConfig.count(tenantModeConfKey.toString()) != 0) {
+			tenantMode = TenantMode::fromValue(ValueRef(newConfig.find(tenantModeConfKey.toString())->second));
+		} else {
+			// Tenant mode and encryption mode didn't change
+			return true;
+		}
+	}
+	TraceEvent(SevDebug, "EncryptAndTenantModes")
+	    .detail("EncryptMode", encryptMode.toString())
+	    .detail("TenantMode", tenantMode.toString());
+
+	if (encryptMode.mode == EncryptionAtRestMode::DOMAIN_AWARE && tenantMode != TenantMode::REQUIRED) {
+		// For domain aware encryption only the required tenant mode is currently supported
+		TraceEvent(SevWarnAlways, "InvalidEncryptAndTenantConfiguration")
+		    .detail("EncryptMode", encryptMode.toString())
+		    .detail("TenantMode", tenantMode.toString());
+		return false;
+	}
+
+	return true;
+}
+
+bool isTenantModeModeConfigValid(DatabaseConfiguration oldConfiguration, DatabaseConfiguration newConfiguration) {
+	TenantMode oldTenantMode = oldConfiguration.tenantMode;
+	TenantMode newTenantMode = newConfiguration.tenantMode;
+	TraceEvent(SevDebug, "TenantModes")
+	    .detail("OldTenantMode", oldTenantMode.toString())
+	    .detail("NewTenantMode", newTenantMode.toString());
+	if (oldTenantMode != TenantMode::REQUIRED && newTenantMode == TenantMode::REQUIRED) {
+		// TODO: Changing from optional/disabled to required tenant mode should be allowed if there is no non-tenant
+		// data present
+		TraceEvent(SevWarnAlways, "InvalidTenantConfiguration")
+		    .detail("OldTenantMode", oldTenantMode.toString())
+		    .detail("NewTenantMode", newTenantMode.toString());
+		return false;
+	}
+	return true;
+}
+
+TEST_CASE("/ManagementAPI/ChangeConfig/TenantMode") {
+	DatabaseConfiguration oldConfig;
+	DatabaseConfiguration newConfig;
+	std::vector<TenantMode> tenantModes = { TenantMode::DISABLED, TenantMode::OPTIONAL_TENANT, TenantMode::REQUIRED };
+	// required tenant mode can change to any other tenant mode
+	oldConfig.tenantMode = TenantMode::REQUIRED;
+	newConfig.tenantMode = deterministicRandom()->randomChoice(tenantModes);
+	ASSERT(isTenantModeModeConfigValid(oldConfig, newConfig));
+	// optional/disabled tenant mode can switch to optional/disabled tenant mode
+	oldConfig.tenantMode = deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT;
+	newConfig.tenantMode = deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT;
+	ASSERT(isTenantModeModeConfigValid(oldConfig, newConfig));
+	// optional/disabled tenant mode CANNOT switch to required tenant mode
+	oldConfig.tenantMode = deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT;
+	newConfig.tenantMode = TenantMode::REQUIRED;
+	ASSERT(!isTenantModeModeConfigValid(oldConfig, newConfig));
+
+	return Void();
+}
+
+// unit test for changing encryption/tenant mode config options
+TEST_CASE("/ManagementAPI/ChangeConfig/TenantAndEncryptMode") {
+	std::map<std::string, std::string> newConfig;
+	std::string encryptModeKey = encryptionAtRestModeConfKey.toString();
+	std::string tenantModeKey = tenantModeConfKey.toString();
+	std::vector<TenantMode> tenantModes = { TenantMode::DISABLED, TenantMode::OPTIONAL_TENANT, TenantMode::REQUIRED };
+	std::vector<EncryptionAtRestMode> encryptionModes = { EncryptionAtRestMode::DISABLED,
+		                                                  EncryptionAtRestMode::CLUSTER_AWARE,
+		                                                  EncryptionAtRestMode::DOMAIN_AWARE };
+	// configure new test cases
+
+	// encryption disabled checks
+	newConfig[encryptModeKey] = std::to_string(EncryptionAtRestMode::DISABLED);
+	newConfig[tenantModeKey] = std::to_string(deterministicRandom()->randomChoice(tenantModes));
+	ASSERT(isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration>(), newConfig, true));
+
+	// cluster aware encryption checks
+	newConfig[encryptModeKey] = std::to_string(EncryptionAtRestMode::CLUSTER_AWARE);
+	newConfig[tenantModeKey] = std::to_string(deterministicRandom()->randomChoice(tenantModes));
+	ASSERT(isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration>(), newConfig, true));
+
+	// domain aware encryption checks
+	newConfig[encryptModeKey] = std::to_string(EncryptionAtRestMode::DOMAIN_AWARE);
+	newConfig[tenantModeKey] =
+	    std::to_string(deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT);
+	ASSERT(!isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration>(), newConfig, true));
+	newConfig[tenantModeKey] = std::to_string(TenantMode::REQUIRED);
+	ASSERT(isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration>(), newConfig, true));
+
+	// no encrypt mode present
+	newConfig.erase(encryptModeKey);
+	newConfig[tenantModeKey] = std::to_string(deterministicRandom()->randomChoice(tenantModes));
+	ASSERT(isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration>(), newConfig, true));
+
+	// no tenant mode present
+	newConfig.erase(tenantModeKey);
+	newConfig[encryptModeKey] = std::to_string(EncryptionAtRestMode::DOMAIN_AWARE);
+	ASSERT(!isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration>(), newConfig, true));
+	newConfig[encryptModeKey] = std::to_string(EncryptionAtRestMode::CLUSTER_AWARE);
+	ASSERT(isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration>(), newConfig, true));
+
+	// change config test cases
+	DatabaseConfiguration oldConfig;
+
+	// encryption disabled checks
+	oldConfig.encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
+	oldConfig.tenantMode = deterministicRandom()->randomChoice(tenantModes);
+	newConfig[tenantModeKey] = std::to_string(deterministicRandom()->randomChoice(tenantModes));
+	ASSERT(isEncryptionAtRestModeConfigValid(oldConfig, newConfig, false));
+
+	// domain aware encryption checks
+	oldConfig.encryptionAtRestMode = EncryptionAtRestMode::DOMAIN_AWARE;
+	oldConfig.tenantMode = TenantMode::REQUIRED;
+	newConfig[tenantModeKey] =
+	    std::to_string(deterministicRandom()->coinflip() ? TenantMode::DISABLED : TenantMode::OPTIONAL_TENANT);
+	ASSERT(!isEncryptionAtRestModeConfigValid(oldConfig, newConfig, false));
+	newConfig[tenantModeKey] = std::to_string(TenantMode::REQUIRED);
+	ASSERT(isEncryptionAtRestModeConfigValid(oldConfig, newConfig, false));
+
+	// cluster aware encryption checks
+	oldConfig.encryptionAtRestMode = EncryptionAtRestMode::CLUSTER_AWARE;
+	// required tenant mode can switch to any other tenant mode with cluster aware encryption
+	oldConfig.tenantMode = deterministicRandom()->randomChoice(tenantModes);
+	newConfig[tenantModeKey] = std::to_string(deterministicRandom()->randomChoice(tenantModes));
+	ASSERT(isEncryptionAtRestModeConfigValid(oldConfig, newConfig, false));
+
+	// no tenant mode present
+	newConfig.erase(tenantModeKey);
+	oldConfig.tenantMode = deterministicRandom()->randomChoice(tenantModes);
+	oldConfig.encryptionAtRestMode = deterministicRandom()->randomChoice(encryptionModes);
+	ASSERT(isEncryptionAtRestModeConfigValid(oldConfig, newConfig, false));
+
+	return Void();
 }
 
 ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr) {
@@ -844,7 +1009,7 @@ ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromSt
 			// equal to one of the previously issued requests, there is a bug
 			// and we are breaking the promises we make with
 			// commit_unknown_result (the transaction must no longer be in
-			// progress when receiving this error).
+			// progress when receiving commit_unknown_result).
 			int n = connectionStrings.size() > 0 ? connectionStrings.size() - 1 : 0; // avoid underflow
 			for (int i = 0; i < n; ++i) {
 				ASSERT(currentKey.get() != connectionStrings.at(i));
@@ -872,12 +1037,59 @@ ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromSt
 	}
 }
 
+ACTOR Future<Void> verifyConfigurationDatabaseAlive(Database cx) {
+	state Backoff backoff;
+	state Reference<ISingleThreadTransaction> configTr;
+	loop {
+		try {
+			// Attempt to read a random value from the configuration
+			// database to make sure it is online.
+			configTr = ISingleThreadTransaction::create(ISingleThreadTransaction::Type::PAXOS_CONFIG, cx);
+			Tuple tuple;
+			tuple.appendNull(); // config class
+			tuple << "test"_sr;
+			Optional<Value> serializedValue = wait(configTr->get(tuple.pack()));
+			TraceEvent("ChangeQuorumCheckerNewCoordinatorsOnline").log();
+			return Void();
+		} catch (Error& e) {
+			TraceEvent("ChangeQuorumCheckerNewCoordinatorsError").error(e);
+			if (e.code() == error_code_coordinators_changed) {
+				wait(backoff.onError());
+				configTr->reset();
+			} else {
+				wait(configTr->onError(e));
+			}
+		}
+	}
+}
+
+ACTOR Future<Void> resetPreviousCoordinatorsKey(Database cx) {
+	loop {
+		// When the change coordinators transaction succeeds, it uses the
+		// special key space error message to return a message to the client.
+		// This causes the underlying transaction to not be committed. In order
+		// to make sure we clear the previous coordinators key, we have to use
+		// a new transaction here.
+		state Reference<ISingleThreadTransaction> clearTr =
+		    ISingleThreadTransaction::create(ISingleThreadTransaction::Type::RYW, cx);
+		try {
+			clearTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			clearTr->clear(previousCoordinatorsKey);
+			wait(clearTr->commit());
+			return Void();
+		} catch (Error& e2) {
+			wait(clearTr->onError(e2));
+		}
+	}
+}
+
 } // namespace
 
 ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
                                                                ClusterConnectionString* conn,
-                                                               std::string newName) {
-
+                                                               std::string newName,
+                                                               bool disableConfigDB) {
+	TraceEvent("ChangeQuorumCheckerStart").detail("NewConnectionString", conn->toString());
 	state Optional<ClusterConnectionString> clusterConnectionStringOptional =
 	    wait(getClusterConnectionStringFromStorageServer(tr));
 
@@ -892,7 +1104,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		conn->hostnames = old.hostnames;
 		conn->coords = old.coords;
 	}
-	std::vector<NetworkAddress> desiredCoordinators = wait(conn->tryResolveHostnames());
+	state std::vector<NetworkAddress> desiredCoordinators = wait(conn->tryResolveHostnames());
 	if (desiredCoordinators.size() != conn->hostnames.size() + conn->coords.size()) {
 		TraceEvent("ChangeQuorumCheckerEarlyTermination")
 		    .detail("Reason", "One or more hostnames are unresolvable")
@@ -909,6 +1121,21 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	std::sort(old.coords.begin(), old.coords.end());
 	if (conn->hostnames == old.hostnames && conn->coords == old.coords && old.clusterKeyName() == newName) {
 		connectionStrings.clear();
+		if (g_network->isSimulated() && g_simulator->configDBType == ConfigDBType::DISABLED) {
+			disableConfigDB = true;
+		}
+		if (!disableConfigDB) {
+			wait(verifyConfigurationDatabaseAlive(tr->getDatabase()));
+		}
+		if (BUGGIFY_WITH_PROB(0.1)) {
+			// Introduce a random delay in simulation to allow processes to be
+			// killed before previousCoordinatorKeys has been reset. This will
+			// help test scenarios where the previous configuration database
+			// state has been transferred to the new coordinators but the
+			// broadcaster thinks it has not been transferred.
+			wait(delay(deterministicRandom()->random01() * 10));
+		}
+		wait(resetPreviousCoordinatorsKey(tr->getDatabase()));
 		return CoordinatorsResult::SAME_NETWORK_ADDRESSES;
 	}
 
@@ -919,7 +1146,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		int i = 0;
 		int protectedCount = 0;
 		while ((protectedCount < ((desiredCoordinators.size() / 2) + 1)) && (i < desiredCoordinators.size())) {
-			auto process = g_simulator.getProcessByAddress(desiredCoordinators[i]);
+			auto process = g_simulator->getProcessByAddress(desiredCoordinators[i]);
 			auto addresses = process->addresses;
 
 			if (!process->isReliable()) {
@@ -927,9 +1154,9 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 				continue;
 			}
 
-			g_simulator.protectedAddresses.insert(process->addresses.address);
+			g_simulator->protectedAddresses.insert(process->addresses.address);
 			if (addresses.secondaryAddress.present()) {
-				g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
+				g_simulator->protectedAddresses.insert(process->addresses.secondaryAddress.get());
 			}
 			TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
 			protectedCount++;
@@ -956,8 +1183,13 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 
 	choose {
 		when(wait(waitForAll(leaderServers))) {}
-		when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
+		when(wait(delay(5.0))) {
+			return CoordinatorsResult::COORDINATOR_UNREACHABLE;
+		}
 	}
+	TraceEvent("ChangeQuorumCheckerSetCoordinatorsKey")
+	    .detail("CurrentCoordinators", old.toString())
+	    .detail("NewCoordinators", conn->toString());
 	tr->set(coordinatorsKey, conn->toString());
 	return Optional<CoordinatorsResult>();
 }
@@ -1020,12 +1252,12 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 
 			if (g_network->isSimulated()) {
 				for (int i = 0; i < (desiredCoordinators.size() / 2) + 1; i++) {
-					auto process = g_simulator.getProcessByAddress(desiredCoordinators[i]);
+					auto process = g_simulator->getProcessByAddress(desiredCoordinators[i]);
 					ASSERT(process->isReliable() || process->rebooting);
 
-					g_simulator.protectedAddresses.insert(process->addresses.address);
+					g_simulator->protectedAddresses.insert(process->addresses.address);
 					if (process->addresses.secondaryAddress.present()) {
-						g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
+						g_simulator->protectedAddresses.insert(process->addresses.secondaryAddress.get());
 					}
 					TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
 				}
@@ -1055,7 +1287,9 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 				                                           TaskPriority::CoordinationReply));
 			choose {
 				when(wait(waitForAll(leaderServers))) {}
-				when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
+				when(wait(delay(5.0))) {
+					return CoordinatorsResult::COORDINATOR_UNREACHABLE;
+				}
 			}
 
 			tr.set(coordinatorsKey, newClusterConnectionString.toString());
@@ -1099,10 +1333,8 @@ struct AutoQuorumChange final : IQuorumChange {
 	}
 
 	ACTOR static Future<int> getRedundancy(AutoQuorumChange* self, Transaction* tr) {
-		state Future<Optional<Value>> fStorageReplicas =
-		    tr->get(LiteralStringRef("storage_replicas").withPrefix(configKeysPrefix));
-		state Future<Optional<Value>> fLogReplicas =
-		    tr->get(LiteralStringRef("log_replicas").withPrefix(configKeysPrefix));
+		state Future<Optional<Value>> fStorageReplicas = tr->get("storage_replicas"_sr.withPrefix(configKeysPrefix));
+		state Future<Optional<Value>> fLogReplicas = tr->get("log_replicas"_sr.withPrefix(configKeysPrefix));
 		wait(success(fStorageReplicas) && success(fLogReplicas));
 		int redundancy = std::min(atoi(fStorageReplicas.get().get().toString().c_str()),
 		                          atoi(fLogReplicas.get().get().toString().c_str()));
@@ -1264,10 +1496,7 @@ struct AutoQuorumChange final : IQuorumChange {
 		std::map<StringRef, std::map<StringRef, int>> currentCounts;
 		std::map<StringRef, int> hardLimits;
 
-		std::vector<StringRef> fields({ LiteralStringRef("dcid"),
-		                                LiteralStringRef("data_hall"),
-		                                LiteralStringRef("zoneid"),
-		                                LiteralStringRef("machineid") });
+		std::vector<StringRef> fields({ "dcid"_sr, "data_hall"_sr, "zoneid"_sr, "machineid"_sr });
 
 		for (auto field = fields.begin(); field != fields.end(); field++) {
 			if (field->toString() == "zoneid") {
@@ -1284,7 +1513,7 @@ struct AutoQuorumChange final : IQuorumChange {
 					continue;
 				}
 				// Exclude faulty node due to machine assassination
-				if (g_network->isSimulated() && !g_simulator.getProcessByAddress(worker->address)->isReliable()) {
+				if (g_network->isSimulated() && !g_simulator->getProcessByAddress(worker->address)->isReliable()) {
 					TraceEvent("AutoSelectCoordinators").detail("SkipUnreliableWorker", worker->address.toString());
 					continue;
 				}
@@ -1293,7 +1522,7 @@ struct AutoQuorumChange final : IQuorumChange {
 					if (maxCounts[*field] == 0) {
 						maxCounts[*field] = 1;
 					}
-					auto value = worker->locality.get(*field).orDefault(LiteralStringRef(""));
+					auto value = worker->locality.get(*field).orDefault(""_sr);
 					auto currentCount = currentCounts[*field][value];
 					if (currentCount >= maxCounts[*field]) {
 						valid = false;
@@ -1302,7 +1531,7 @@ struct AutoQuorumChange final : IQuorumChange {
 				}
 				if (valid) {
 					for (auto field = fields.begin(); field != fields.end(); field++) {
-						auto value = worker->locality.get(*field).orDefault(LiteralStringRef(""));
+						auto value = worker->locality.get(*field).orDefault(""_sr);
 						currentCounts[*field][value] += 1;
 					}
 					chosen.push_back(worker->address);
@@ -1355,6 +1584,7 @@ ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> ser
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				ryw.set(
 				    SpecialKeySpace::getManagementApiCommandOptionSpecialKey(failed ? "failed" : "excluded", "force"),
@@ -1417,6 +1647,7 @@ ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				ryw.set(SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
 				            failed ? "failed_locality" : "excluded_locality", "force"),
@@ -1459,6 +1690,7 @@ ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> ser
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				for (auto& s : servers) {
 					if (!s.isValid()) {
@@ -1481,8 +1713,7 @@ ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> ser
 						// This is why we now make two clears: first only of the ip
 						// address, the second will delete all ports.
 						if (s.isWholeMachine())
-							ryw.clear(KeyRangeRef(addr.withSuffix(LiteralStringRef(":")),
-							                      addr.withSuffix(LiteralStringRef(";"))));
+							ryw.clear(KeyRangeRef(addr.withSuffix(":"_sr), addr.withSuffix(";"_sr)));
 					}
 				}
 				TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
@@ -1562,6 +1793,7 @@ ACTOR Future<Void> includeLocalities(Database cx, std::vector<std::string> local
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				if (includeAll) {
 					if (failed) {
@@ -2061,9 +2293,7 @@ ACTOR Future<Void> lockDatabase(Transaction* tr, UID id) {
 	}
 
 	tr->atomicOp(databaseLockedKey,
-	             BinaryWriter::toValue(id, Unversioned())
-	                 .withPrefix(LiteralStringRef("0123456789"))
-	                 .withSuffix(LiteralStringRef("\x00\x00\x00\x00")),
+	             BinaryWriter::toValue(id, Unversioned()).withPrefix("0123456789"_sr).withSuffix("\x00\x00\x00\x00"_sr),
 	             MutationRef::SetVersionstampedValue);
 	tr->addWriteConflictRange(normalKeys);
 	return Void();
@@ -2084,9 +2314,7 @@ ACTOR Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id)
 	}
 
 	tr->atomicOp(databaseLockedKey,
-	             BinaryWriter::toValue(id, Unversioned())
-	                 .withPrefix(LiteralStringRef("0123456789"))
-	                 .withSuffix(LiteralStringRef("\x00\x00\x00\x00")),
+	             BinaryWriter::toValue(id, Unversioned()).withPrefix("0123456789"_sr).withSuffix("\x00\x00\x00\x00"_sr),
 	             MutationRef::SetVersionstampedValue);
 	tr->addWriteConflictRange(normalKeys);
 	return Void();
@@ -2094,6 +2322,9 @@ ACTOR Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id)
 
 ACTOR Future<Void> lockDatabase(Database cx, UID id) {
 	state Transaction tr(cx);
+	UID debugID = deterministicRandom()->randomUniqueID();
+	TraceEvent("LockDatabaseTransaction", debugID).log();
+	tr.debugTransaction(debugID);
 	loop {
 		try {
 			wait(lockDatabase(&tr, id));
@@ -2205,7 +2436,7 @@ ACTOR Future<Void> updateChangeFeed(Transaction* tr, Key rangeID, ChangeFeedStat
 	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 		if (val.present()) {
 			if (g_network->isSimulated()) {
-				g_simulator.validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
+				g_simulator->validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
 			}
 			tr->set(rangeIDKey,
 			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
@@ -2243,7 +2474,7 @@ ACTOR Future<Void> updateChangeFeed(Reference<ReadYourWritesTransaction> tr,
 	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 		if (val.present()) {
 			if (g_network->isSimulated()) {
-				g_simulator.validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
+				g_simulator->validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
 			}
 			tr->set(rangeIDKey,
 			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
@@ -2302,6 +2533,27 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 			}
 			when(wait(clusterInterface->onChange())) {}
 		}
+	}
+}
+
+ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
+                               KeyRange range,
+                               AuditType type,
+                               bool async) {
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+	TraceEvent(SevDebug, "ManagementAPIAuditStorageBegin");
+
+	loop {
+		while (!clusterInterface->get().present()) {
+			wait(clusterInterface->onChange());
+		}
+
+		TriggerAuditRequest req(type, range);
+		req.async = async;
+		UID auditId = wait(clusterInterface->get().get().triggerAudit.getReply(req));
+		TraceEvent(SevDebug, "ManagementAPIAuditStorageEnd").detail("AuditID", auditId);
+		return auditId;
 	}
 }
 
@@ -2493,21 +2745,6 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 	}
 }
 
-void setStorageQuota(Transaction& tr, StringRef tenantName, uint64_t quota) {
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	auto key = storageQuotaKey(tenantName);
-	tr.set(key, BinaryWriter::toValue<uint64_t>(quota, Unversioned()));
-}
-
-ACTOR Future<Optional<uint64_t>> getStorageQuota(Transaction* tr, StringRef tenantName) {
-	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	state Optional<Value> v = wait(tr->get(storageQuotaKey(tenantName)));
-	if (!v.present()) {
-		return Optional<uint64_t>();
-	}
-	return BinaryReader::fromStringRef<uint64_t>(v.get(), Unversioned());
-}
-
 std::string ManagementAPI::generateErrorMessage(const CoordinatorsResult& res) {
 	// Note: the error message here should not be changed if possible
 	// If you do change the message here,
@@ -2556,24 +2793,25 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 		auto dataHall = dataCenter + std::to_string(i / 2 % 2);
 		auto rack = dataHall + std::to_string(i % 2);
 		auto machineId = rack + std::to_string(i);
-		data.locality.set(LiteralStringRef("dcid"), StringRef(dataCenter));
-		data.locality.set(LiteralStringRef("data_hall"), StringRef(dataHall));
-		data.locality.set(LiteralStringRef("rack"), StringRef(rack));
-		data.locality.set(LiteralStringRef("zoneid"), StringRef(rack));
-		data.locality.set(LiteralStringRef("machineid"), StringRef(machineId));
+		data.locality.set("dcid"_sr, StringRef(dataCenter));
+		data.locality.set("data_hall"_sr, StringRef(dataHall));
+		data.locality.set("rack"_sr, StringRef(rack));
+		data.locality.set("zoneid"_sr, StringRef(rack));
+		data.locality.set("machineid"_sr, StringRef(machineId));
 		data.address.ip = IPAddress(i);
 
 		if (g_network->isSimulated()) {
-			g_simulator.newProcess("TestCoordinator",
-			                       data.address.ip,
-			                       data.address.port,
-			                       false,
-			                       1,
-			                       data.locality,
-			                       ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
-			                       "",
-			                       "",
-			                       currentProtocolVersion());
+			g_simulator->newProcess("TestCoordinator",
+			                        data.address.ip,
+			                        data.address.port,
+			                        false,
+			                        1,
+			                        data.locality,
+			                        ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
+			                        "",
+			                        "",
+			                        currentProtocolVersion(),
+			                        false);
 		}
 
 		workers.push_back(data);
@@ -2586,10 +2824,7 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 	std::map<StringRef, std::set<StringRef>> chosenValues;
 
 	ASSERT(chosen.size() == 5);
-	std::vector<StringRef> fields({ LiteralStringRef("dcid"),
-	                                LiteralStringRef("data_hall"),
-	                                LiteralStringRef("zoneid"),
-	                                LiteralStringRef("machineid") });
+	std::vector<StringRef> fields({ "dcid"_sr, "data_hall"_sr, "zoneid"_sr, "machineid"_sr });
 	for (auto worker = chosen.begin(); worker != chosen.end(); worker++) {
 		ASSERT(worker->ip.toV4() < workers.size());
 		LocalityData data = workers[worker->ip.toV4()].locality;
@@ -2598,10 +2833,10 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 		}
 	}
 
-	ASSERT(chosenValues[LiteralStringRef("dcid")].size() == 2);
-	ASSERT(chosenValues[LiteralStringRef("data_hall")].size() == 4);
-	ASSERT(chosenValues[LiteralStringRef("zoneid")].size() == 5);
-	ASSERT(chosenValues[LiteralStringRef("machineid")].size() == 5);
+	ASSERT(chosenValues["dcid"_sr].size() == 2);
+	ASSERT(chosenValues["data_hall"_sr].size() == 4);
+	ASSERT(chosenValues["zoneid"_sr].size() == 5);
+	ASSERT(chosenValues["machineid"_sr].size() == 5);
 	ASSERT(std::find(chosen.begin(), chosen.end(), workers[noAssignIndex].address) != chosen.end());
 
 	return Void();

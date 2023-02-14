@@ -247,6 +247,195 @@ public interface Tenant extends AutoCloseable, TransactionContext {
 	<T> CompletableFuture<T> runAsync(
 			Function<? super Transaction, ? extends CompletableFuture<T>> retryable, Executor e);
 
+
+	/**
+	 * Runs {@link #purgeBlobGranules(byte[] beginKey, byte[] endKey, boolean force)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param force if true delete all data, if not keep data &gt;= purgeVersion
+	 *
+	 * @return the key to watch for purge complete
+	 */
+	default CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, boolean force) {
+		return purgeBlobGranules(beginKey, endKey, -2, force, getExecutor());
+	}
+
+	/**
+	 * Runs {@link #purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion, boolean force)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param purgeVersion version to purge at
+	 * @param force if true delete all data, if not keep data &gt;= purgeVersion
+	 *
+	 * @return the key to watch for purge complete
+	 */
+	default CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion, boolean force) {
+		return purgeBlobGranules(beginKey, endKey, purgeVersion, force, getExecutor());
+	}
+
+	/**
+	 * Queues a purge of blob granules for specified key range of this tenant, at the specified version.
+     *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param purgeVersion version to purge at
+	 * @param force if true delete all data, if not keep data &gt;= purgeVersion
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return the key to watch for purge complete
+	 */
+	CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion, boolean force, Executor e);
+
+
+	/**
+	 * Runs {@link #waitPurgeGranulesComplete(byte[] purgeKey)} on the default executor.
+	 *
+	 * @param purgeKey key to watch
+
+	 * @return void
+	 */
+	default CompletableFuture<Void> waitPurgeGranulesComplete(byte[] purgeKey) {
+		return waitPurgeGranulesComplete(purgeKey, getExecutor());
+	}
+
+	/**
+	 * Wait for a previous call to purgeBlobGranules to complete.
+	 *
+	 * @param purgeKey key to watch
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return void
+	 */
+	CompletableFuture<Void> waitPurgeGranulesComplete(byte[] purgeKey, Executor e);
+
+	/**
+	 * Runs {@link #blobbifyRange(byte[] beginKey, byte[] endKey)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+
+	 * @return if the recording of the range was successful
+	 */
+	default CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey) {
+		return blobbifyRange(beginKey, endKey, getExecutor());
+	}
+
+	/**
+	 * Sets a range to be blobbified in this tenant. Must be a completely unblobbified range.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return if the recording of the range was successful
+	 */
+	CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey, Executor e);
+
+	/**
+	 * Runs {@link #unblobbifyRange(byte[] beginKey, byte[] endKey)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+
+	 * @return if the recording of the range was successful
+	 */
+	default CompletableFuture<Boolean> unblobbifyRange(byte[] beginKey, byte[] endKey) {
+		return unblobbifyRange(beginKey, endKey, getExecutor());
+	}
+
+	/**
+	 * Unsets a blobbified range in this tenant. The range must be aligned to known blob ranges.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return if the recording of the range was successful
+	 */
+	CompletableFuture<Boolean> unblobbifyRange(byte[] beginKey, byte[] endKey, Executor e);
+
+	/**
+	 * Runs {@link #listBlobbifiedRanges(byte[] beginKey, byte[] endKey, int rangeLimit)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param rangeLimit batch size
+
+	 * @return a future with the list of blobbified ranges: [lastLessThan(beginKey), firstGreaterThanOrEqual(endKey)]
+	 */
+	default CompletableFuture<KeyRangeArrayResult> listBlobbifiedRanges(byte[] beginKey, byte[] endKey, int rangeLimit) {
+		return listBlobbifiedRanges(beginKey, endKey, rangeLimit, getExecutor());
+	 }
+
+	/**
+	 * Lists blobbified ranges in this tenant. There may be more if result.size() == rangeLimit.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param rangeLimit batch size
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return a future with the list of blobbified ranges: [lastLessThan(beginKey), firstGreaterThanOrEqual(endKey)]
+	 */
+	 CompletableFuture<KeyRangeArrayResult> listBlobbifiedRanges(byte[] beginKey, byte[] endKey, int rangeLimit, Executor e);
+
+	/**
+	 * Runs {@link #verifyBlobRange(byte[] beginKey, byte[] endKey)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 *
+	 * @return a future with the version of the last blob granule.
+	 */
+	default CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey) {
+		return verifyBlobRange(beginKey, endKey, -2, getExecutor());
+	}
+
+	/**
+	 * Runs {@link #verifyBlobRange(byte[] beginKey, byte[] endKey, long version)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param version version to read at
+	 *
+	 * @return a future with the version of the last blob granule.
+	 */
+	default CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey, long version) {
+		return verifyBlobRange(beginKey, endKey, version, getExecutor());
+	}
+
+	/**
+	 * Checks if a blob range is blobbified in this tenant.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param version version to read at
+	 * @param e the executor
+	 *
+	 * @return a future with the version of the last blob granule.
+	 */
+	CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey, long version, Executor e);
+
+	/**
+	 * Runs {@link #getId()} on the default executor.
+	 *
+	 * @return a future with the tenant ID
+	 */
+	default CompletableFuture<Long> getId() {
+		return getId(getExecutor());
+	}
+
+	/**
+	 * Returns the tenant ID of this tenant.
+	 *
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+	 *
+	 * @return a future with the tenant ID
+	 */
+	CompletableFuture<Long> getId(Executor e);
+
 	/**
 	 * Close the {@code Tenant} object and release any associated resources. This must be called at
 	 *  least once after the {@code Tenant} object is no longer in use. This can be called multiple

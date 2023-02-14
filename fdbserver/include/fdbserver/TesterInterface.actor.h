@@ -66,6 +66,7 @@ struct WorkloadRequest {
 	double databasePingDelay;
 	int64_t sharedRandomNumber;
 	bool useDatabase;
+	bool runFailureWorkloads = true;
 	Optional<TenantNameRef> defaultTenant;
 
 	// The vector of option lists are to construct compound workloads.  If there
@@ -84,6 +85,7 @@ struct WorkloadRequest {
 	int clientId; // the "id" of the client receiving the request (0 indexed)
 	int clientCount; // the total number of test clients participating in the workload
 	ReplyPromise<struct WorkloadInterface> reply;
+	std::vector<std::string> disabledFailureInjectionWorkloads;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -98,6 +100,8 @@ struct WorkloadRequest {
 		           clientCount,
 		           reply,
 		           defaultTenant,
+		           runFailureWorkloads,
+		           disabledFailureInjectionWorkloads,
 		           arena);
 	}
 };
@@ -132,7 +136,8 @@ ACTOR Future<Void> runTests(
     LocalityData locality = LocalityData(),
     UnitTestParameters testOptions = UnitTestParameters(),
     Optional<TenantName> defaultTenant = Optional<TenantName>(),
-    Standalone<VectorRef<TenantNameRef>> tenantsToCreate = Standalone<VectorRef<TenantNameRef>>());
+    Standalone<VectorRef<TenantNameRef>> tenantsToCreate = Standalone<VectorRef<TenantNameRef>>(),
+    bool restartingTest = false);
 
 #include "flow/unactorcompiler.h"
 #endif

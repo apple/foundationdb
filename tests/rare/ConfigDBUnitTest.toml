@@ -1,0 +1,12 @@
+# This test can't run as part of RandomUnitTests.toml, so run it less frequently
+testPriority = '10'
+
+[[test]]
+testTitle = "ConfigDBUnitTest"
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ConfigDB/'

@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/DeterministicRandom.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -31,23 +32,32 @@
 // The workload first clogs network link between the chosen proxy and all tLogs but the unclogTlog;
 // While the network is still clogged, the workload kills the proxy and clogs the unclogged tlog's interface.
 // Note: The clogged network link's latency will become "clogDuration".
-struct RollbackWorkload : TestWorkload {
-	bool enableFailures, multiple, enabled;
-	double meanDelay, clogDuration, testDuration;
+struct RollbackWorkload : FailureInjectionWorkload {
+	static constexpr auto NAME = "Rollback";
 
-	RollbackWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	bool enableFailures = false, multiple = true, enabled;
+	double meanDelay = 20.0, clogDuration = clogDuration = 3.0, testDuration = 10.0;
+
+	RollbackWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {}
+
+	RollbackWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		meanDelay = getOption(options, LiteralStringRef("meanDelay"), 20.0); // Only matters if multiple==true
-		clogDuration = getOption(options, LiteralStringRef("clogDuration"), 3.0);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		enableFailures = getOption(options, LiteralStringRef("enableFailures"), false);
-		multiple = getOption(options, LiteralStringRef("multiple"), true);
+		meanDelay = getOption(options, "meanDelay"_sr, meanDelay); // Only matters if multiple==true
+		clogDuration = getOption(options, "clogDuration"_sr, clogDuration);
+		testDuration = getOption(options, "testDuration"_sr, testDuration);
+		enableFailures = getOption(options, "enableFailures"_sr, enableFailures);
+		multiple = getOption(options, "multiple"_sr, multiple);
 	}
 
-	std::string description() const override { return "RollbackWorkload"; }
+	void initFailureInjectionMode(DeterministicRandom& random) override {
+		enabled = clientId == 0;
+		multiple = random.coinflip();
+		enableFailures = random.random01() < 0.2;
+	}
+
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
-		if (&g_simulator == g_network && enabled)
+		if (g_simulator == g_network && enabled)
 			return timeout(reportErrors(rollbackFailureWorker(cx, this, meanDelay), "RollbackFailureWorkerError"),
 			               testDuration,
 			               Void());
@@ -83,8 +93,8 @@ struct RollbackWorkload : TestWorkload {
 
 		for (int t = 0; t < tlogs.size(); t++) {
 			if (t != utIndex) {
-				g_simulator.clogPair(proxy.address().ip, tlogs[t].address().ip, self->clogDuration);
-				// g_simulator.clogInterface( g_simulator.getProcess( system.tlogs[t].commit.getEndpoint() ),
+				g_simulator->clogPair(proxy.address().ip, tlogs[t].address().ip, self->clogDuration);
+				// g_simulator->clogInterface( g_simulator->getProcess( system.tlogs[t].commit.getEndpoint() ),
 				// self->clogDuration, ClogAll );
 			}
 		}
@@ -93,13 +103,14 @@ struct RollbackWorkload : TestWorkload {
 		wait(delay(self->clogDuration / 3));
 		system = self->dbInfo->get();
 
-		// Kill the proxy and clog the unclogged tlog
 		if (self->enableFailures) {
-			g_simulator.killProcess(g_simulator.getProcessByAddress(proxy.address()), ISimulator::KillInstantly);
-			g_simulator.clogInterface(uncloggedTLog.ip, self->clogDuration, ClogAll);
+			// Reboot the proxy and clog the unclogged tlog.
+			g_simulator->rebootProcess(g_simulator->getProcessByAddress(proxy.address()), ISimulator::KillType::Reboot);
+			g_simulator->clogInterface(uncloggedTLog.ip, self->clogDuration, ClogAll);
 		} else {
-			g_simulator.clogInterface(proxy.address().ip, self->clogDuration, ClogAll);
-			g_simulator.clogInterface(uncloggedTLog.ip, self->clogDuration, ClogAll);
+			// Alternatively, if we're not injecting machine failures, clog the proxy and the unclogged tlog.
+			g_simulator->clogInterface(proxy.address().ip, self->clogDuration, ClogAll);
+			g_simulator->clogInterface(uncloggedTLog.ip, self->clogDuration, ClogAll);
 		}
 		return Void();
 	}
@@ -121,4 +132,5 @@ struct RollbackWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<RollbackWorkload> RollbackWorkloadFactory("Rollback");
+WorkloadFactory<RollbackWorkload> RollbackWorkloadFactory;
+FailureInjectorFactory<RollbackWorkload> RollbackFailureInjectorFactory;

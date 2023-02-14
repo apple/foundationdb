@@ -26,6 +26,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/TimedRequest.h"
 #include "fdbclient/StorageServerInterface.h" // for TenantInfo - should we refactor that elsewhere?
 
 struct BlobWorkerInterface {
@@ -105,7 +106,7 @@ struct BlobGranuleFileReply {
 
 // TODO could do a reply promise stream of file mutations to bound memory requirements?
 // Have to load whole snapshot file into memory though so it doesn't actually matter too much
-struct BlobGranuleFileRequest {
+struct BlobGranuleFileRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 4150141;
 	Arena arena;
 	KeyRangeRef keyRange;
@@ -331,15 +332,19 @@ struct FlushGranuleRequest {
 	int64_t managerEpoch;
 	KeyRange granuleRange;
 	Version flushVersion;
+	bool compactAfter;
 	ReplyPromise<Void> reply;
 
-	FlushGranuleRequest() : managerEpoch(-1), flushVersion(invalidVersion) {}
-	explicit FlushGranuleRequest(int64_t managerEpoch, KeyRange granuleRange, Version flushVersion)
-	  : managerEpoch(managerEpoch), granuleRange(granuleRange), flushVersion(flushVersion) {}
+	FlushGranuleRequest() : managerEpoch(-1), flushVersion(invalidVersion), compactAfter(false) {}
+	explicit FlushGranuleRequest(int64_t managerEpoch, KeyRange granuleRange, Version flushVersion, bool compactAfter)
+	  : managerEpoch(managerEpoch), granuleRange(granuleRange), flushVersion(flushVersion), compactAfter(compactAfter) {
+	}
+
+	void setRange(const KeyRangeRef& range) { granuleRange = range; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, managerEpoch, granuleRange, flushVersion, reply);
+		serializer(ar, managerEpoch, granuleRange, flushVersion, compactAfter, reply);
 	}
 };
 

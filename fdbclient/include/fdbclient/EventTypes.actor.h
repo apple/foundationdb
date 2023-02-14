@@ -26,7 +26,7 @@
 #define FDBCLIENT_EVENTTYPES_ACTOR_G_H
 #include "fdbclient/EventTypes.actor.g.h"
 #elif !defined(FDBCLIENT_EVENTTYPES_ACTOR_H)
-#define FDBCLIENT_EVENTTYPESS_ACTOR_H
+#define FDBCLIENT_EVENTTYPES_ACTOR_H
 
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"

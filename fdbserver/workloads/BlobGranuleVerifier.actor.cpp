@@ -36,6 +36,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
+#include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -50,6 +51,7 @@
  * To catch availability issues with the blob worker, it does a request to each granule at the end of the test.
  */
 struct BlobGranuleVerifierWorkload : TestWorkload {
+	static constexpr auto NAME = "BlobGranuleVerifier";
 	bool doSetup;
 	double testDuration;
 	double timeTravelLimit;
@@ -70,6 +72,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	bool doForcePurge;
 	bool purgeAtLatest;
 	bool clearAndMergeCheck;
+	bool granuleSizeCheck;
+	bool doForceFlushing;
 
 	DatabaseConfiguration config;
 
@@ -83,41 +87,54 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	std::vector<std::tuple<KeyRange, Version, UID, Future<GranuleFiles>>> purgedDataToCheck;
 
 	Future<Void> summaryClient;
+	Future<Void> forceFlushingClient;
 	Promise<Void> triggerSummaryComplete;
 
 	BlobGranuleVerifierWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		doSetup = !clientId; // only do this on the "first" client
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 120.0);
-		timeTravelLimit = getOption(options, LiteralStringRef("timeTravelLimit"), testDuration);
-		timeTravelBufferSize = getOption(options, LiteralStringRef("timeTravelBufferSize"), 100000000);
-		threads = getOption(options, LiteralStringRef("threads"), 1);
+		testDuration = getOption(options, "testDuration"_sr, 120.0);
+		timeTravelLimit = getOption(options, "timeTravelLimit"_sr, testDuration);
+		timeTravelBufferSize = getOption(options, "timeTravelBufferSize"_sr, 100000000);
+		threads = getOption(options, "threads"_sr, 1);
 
-		enablePurging = getOption(options, LiteralStringRef("enablePurging"), sharedRandomNumber % 3 == 0);
+		enablePurging = getOption(options, "enablePurging"_sr, sharedRandomNumber % 3 == 0);
 		sharedRandomNumber /= 3;
 		// FIXME: re-enable this! There exist several bugs with purging active granules where a small amount of state
 		// won't be cleaned up.
-		strictPurgeChecking =
-		    getOption(options, LiteralStringRef("strictPurgeChecking"), false /*sharedRandomNumber % 2 == 0*/);
+		strictPurgeChecking = getOption(options, "strictPurgeChecking"_sr, false /*sharedRandomNumber % 2 == 0*/);
 		sharedRandomNumber /= 2;
 
-		doForcePurge = getOption(options, LiteralStringRef("doForcePurge"), sharedRandomNumber % 3 == 0);
+		doForcePurge = getOption(options, "doForcePurge"_sr, sharedRandomNumber % 3 == 0);
 		sharedRandomNumber /= 3;
 
-		purgeAtLatest = getOption(options, LiteralStringRef("purgeAtLatest"), sharedRandomNumber % 3 == 0);
+		purgeAtLatest = getOption(options, "purgeAtLatest"_sr, sharedRandomNumber % 3 == 0);
 		sharedRandomNumber /= 3;
 
 		// randomly some tests write data first and then turn on blob granules later, to test conversion of existing DB
-		initAtEnd = !enablePurging && sharedRandomNumber % 10 == 0;
+		initAtEnd = getOption(options, "initAtEnd"_sr, sharedRandomNumber % 10 == 0);
+		sharedRandomNumber /= 10;
+		// FIXME: enable and fix bugs!
+		// granuleSizeCheck = initAtEnd;
+		granuleSizeCheck = false;
+
+		clearAndMergeCheck = getOption(options, "clearAndMergeCheck"_sr, sharedRandomNumber % 10 == 0);
 		sharedRandomNumber /= 10;
 
-		clearAndMergeCheck = getOption(options, LiteralStringRef("clearAndMergeCheck"), sharedRandomNumber % 10 == 0);
-		sharedRandomNumber /= 10;
+		doForceFlushing = getOption(options, "doForceFlushing"_sr, sharedRandomNumber % 4 == 0);
+		sharedRandomNumber /= 4;
 
 		// don't do strictPurgeChecking or forcePurge if !enablePurging
 		if (!enablePurging) {
 			strictPurgeChecking = false;
 			doForcePurge = false;
 			purgeAtLatest = false;
+		} else {
+			// don't do force flushing if purging enabled
+			doForceFlushing = false;
+		}
+
+		if (initAtEnd) {
+			doForceFlushing = false;
 		}
 
 		if (doForcePurge) {
@@ -160,7 +177,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->set(blobRangeChangeKey, deterministicRandom()->randomUniqueID().toString());
-				wait(krmSetRange(tr, blobRangeKeys.begin, KeyRange(normalKeys), LiteralStringRef("1")));
+				wait(krmSetRange(tr, blobRangeKeys.begin, KeyRange(normalKeys), "1"_sr));
 				wait(tr->commit());
 				if (BGV_DEBUG) {
 					printf("Successfully set up blob granule range for normalKeys\n");
@@ -172,8 +189,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			}
 		}
 	}
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.emplace("Attrition"); }
 
-	std::string description() const override { return "BlobGranuleVerifier"; }
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
 	ACTOR Future<Void> _setup(Database cx, BlobGranuleVerifierWorkload* self) {
@@ -305,23 +322,27 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		state int64_t timeTravelChecksMemory = 0;
 		state Version prevPurgeVersion = -1;
 		state UID dbgId = debugRandom()->randomUniqueID();
+		state Version newPurgeVersion = 0;
+		// usually we want randomness to verify maximum data, but sometimes hotspotting a subset is good too
+		state bool pickGranuleUniform = deterministicRandom()->random01() < 0.1;
 
 		TraceEvent("BlobGranuleVerifierStart");
 		if (BGV_DEBUG) {
-			printf("BGV thread starting\n");
+			fmt::print("BGV {0}) thread starting\n", self->clientId);
 		}
 
 		// wait for first set of ranges to be loaded
 		wait(self->granuleRanges.onChange());
 
 		if (BGV_DEBUG) {
-			printf("BGV got ranges\n");
+			fmt::print("BGV {0}) got ranges\n", self->clientId);
 		}
 
 		loop {
 			try {
 				state double currentTime = now();
 				state std::map<double, OldRead>::iterator timeTravelIt = timeTravelChecks.begin();
+				newPurgeVersion = 0;
 				while (timeTravelIt != timeTravelChecks.end() && currentTime >= timeTravelIt->first) {
 					state OldRead oldRead = timeTravelIt->second;
 					timeTravelChecksMemory -= oldRead.oldResult.expectedSize();
@@ -332,7 +353,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					}
 
 					// before doing read, purge just before read version
-					state Version newPurgeVersion = 0;
 					state bool doPurging =
 					    allowPurging && !self->purgeAtLatest && deterministicRandom()->random01() < 0.5;
 					state bool forcePurge = doPurging && self->doForcePurge && deterministicRandom()->random01() < 0.25;
@@ -451,14 +471,20 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 									throw;
 								}
 								ASSERT(e.code() == error_code_blob_granule_transaction_too_old);
-								CODE_PROBE(true, "BGV verified too old after purge");
+								CODE_PROBE(true, "BGV verified too old after purge", probe::decoration::rare);
 							}
 						}
 					}
 				}
 
 				// pick a random range
-				int rIndex = deterministicRandom()->randomInt(0, self->granuleRanges.get().size());
+				size_t granuleCount = self->granuleRanges.get().size();
+				size_t rIndex;
+				if (pickGranuleUniform) {
+					rIndex = deterministicRandom()->randomInt(0, granuleCount);
+				} else {
+					rIndex = deterministicRandom()->randomSkewedUInt32(0, granuleCount);
+				}
 				state KeyRange range = self->granuleRanges.get()[rIndex];
 
 				state std::pair<RangeResult, Version> fdb = wait(readFromFDB(cx, range));
@@ -469,7 +495,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					try {
 						Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, fdb.second, {}, false));
 						if (BGV_DEBUG) {
-							fmt::print("BGV Purged Latest @ {0}, waiting\n", fdb.second);
+							fmt::print("BGV {0}) Purged Latest @ {1}, waiting\n", self->clientId, fdb.second);
 						}
 						wait(cx->waitPurgeGranulesComplete(purgeKey));
 					} catch (Error& e) {
@@ -507,7 +533,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					throw;
 				}
 				if (e.code() != error_code_blob_granule_transaction_too_old && BGV_DEBUG) {
-					printf("BGVerifier got unexpected error %s\n", e.name());
+					fmt::print("BGVerifier {0} got unexpected error {1}\n", self->clientId, e.name());
 				}
 				self->errors++;
 			}
@@ -531,6 +557,11 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			summaryClient = validateGranuleSummaries(cx, normalKeys, {}, triggerSummaryComplete);
 		} else {
 			summaryClient = Future<Void>(Void());
+		}
+		if (doForceFlushing) {
+			forceFlushingClient = validateForceFlushing(cx, normalKeys, testDuration, triggerSummaryComplete);
+		} else {
+			forceFlushingClient = Future<Void>(Void());
 		}
 		return delay(testDuration);
 	}
@@ -730,7 +761,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						if (!foundAnyHistoryForRange) {
 							// if range never existed in blob, and was doing the initial snapshot,  it could have a
 							// change feed but not a history entry/snapshot
-							CODE_PROBE(true, "not failing test for leaked feed with no history");
+							CODE_PROBE(
+							    true, "not failing test for leaked feed with no history", probe::decoration::rare);
 							fmt::print("Not failing test b/c feed never had history!\n");
 						}
 						return !foundAnyHistoryForRange;
@@ -988,7 +1020,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 
 		if (BGV_DEBUG) {
-			fmt::print("BGV Final data check complete, checked {0} rows\n", totalRows);
+			fmt::print("BGV {0}) Final data check complete, checked {1} rows\n", self->clientId, totalRows);
 		}
 
 		return true;
@@ -1011,12 +1043,14 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		} else if (self->enablePurging && self->purgeAtLatest && deterministicRandom()->coinflip()) {
 			Version latestPurgeVersion = wait(self->doGrv(&tr));
 			if (BGV_DEBUG) {
-				fmt::print("BGV Purging Latest @ {0} before final availability check\n", latestPurgeVersion);
+				fmt::print("BGV {0}) Purging Latest @ {1} before final availability check\n",
+				           self->clientId,
+				           latestPurgeVersion);
 			}
 			Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, latestPurgeVersion, {}, false));
 			wait(cx->waitPurgeGranulesComplete(purgeKey));
 			if (BGV_DEBUG) {
-				fmt::print("BGV Purged Latest before final availability check complete\n");
+				fmt::print("BGV {0}) Purged Latest before final availability check complete\n", self->clientId);
 			}
 			self->purges++;
 		}
@@ -1024,7 +1058,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		// check error counts, and do an availability check at the end
 
 		if (self->doSetup && self->initAtEnd) {
-			// FIXME: this doesn't check the data contents post-conversion, just that it finishes successfully
 			wait(self->setUpBlobRange(cx));
 		}
 
@@ -1064,10 +1097,13 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		rangeFetcher.cancel();
 
 		allRanges = self->granuleRanges.get();
+		state int64_t totalSnapshotSizes = 0;
+		state int64_t totalChunks = 0;
 		for (auto& range : allRanges) {
 			state KeyRange r = range;
 			if (BGV_DEBUG) {
-				fmt::print("Final availability check [{0} - {1}) @ {2}\n",
+				fmt::print("BGV {0}) Final availability check [{1} - {2}) @ {3}\n",
+				           self->clientId,
 				           r.begin.printable(),
 				           r.end.printable(),
 				           readVersion);
@@ -1081,6 +1117,12 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						ASSERT(chunks.size() > 0);
 						last = chunks.back().keyRange;
 						checks += chunks.size();
+
+						totalChunks += chunks.size();
+						for (auto& it : chunks) {
+							ASSERT(it.snapshotFile.present());
+							totalSnapshotSizes += it.snapshotFile.get().length;
+						}
 
 						break;
 					} catch (Error& e) {
@@ -1118,11 +1160,36 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				break;
 			}
 		}
+		// validate that snapshot files are (approximately) correctly sized on average
+		// Note that injectTooBig in the blob worker can trigger false positives of this check, which is why we increase
+		// the minimum total chunks required
+		if (self->granuleSizeCheck && totalSnapshotSizes >= 1000000 && totalChunks > 4) {
+			double ratio = (1.0 * totalSnapshotSizes) / (totalChunks * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES);
+			if (0.5 > ratio || ratio > 1.5) {
+				fmt::print("ERROR: Incorrect snapshot file size:\n  Chunks: {0}\n  Ratio: {1}\n  Avg File Size: "
+				           "{2}\n  Expected Size: {3}\n",
+				           totalChunks,
+				           ratio,
+				           totalSnapshotSizes / totalChunks,
+				           SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES);
+			}
+			ASSERT(0.5 <= ratio && ratio <= 1.5);
+		}
+
 		if (BGV_DEBUG && startReadVersion != readVersion) {
 			fmt::print("Availability check updated read version from {0} to {1}\n", startReadVersion, readVersion);
 		}
 
+		// start feed cleanup check after there's guaranteed to be data for each granule
+		state Future<Void> checkFeedCleanupFuture;
+		if (self->clientId == 0) {
+			checkFeedCleanupFuture = checkFeedCleanup(cx, BGV_DEBUG);
+		} else {
+			checkFeedCleanupFuture = Future<Void>(Void());
+		}
+
 		state bool dataPassed = wait(self->checkAllData(cx, self));
+		wait(checkFeedCleanupFuture);
 
 		state bool result =
 		    availabilityPassed && dataPassed && self->mismatches == 0 && (checks > 0) && (self->timeTravelTooOld == 0);
@@ -1160,12 +1227,14 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		} else if (self->enablePurging && self->purgeAtLatest && deterministicRandom()->coinflip()) {
 			Version latestPurgeVersion = wait(self->doGrv(&tr));
 			if (BGV_DEBUG) {
-				fmt::print("BGV Purging Latest @ {0} after final availability check, waiting\n", latestPurgeVersion);
+				fmt::print("BGV {0}) Purging Latest @ {1} after final availability check, waiting\n",
+				           self->clientId,
+				           latestPurgeVersion);
 			}
 			Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, latestPurgeVersion, {}, false));
 			wait(cx->waitPurgeGranulesComplete(purgeKey));
 			if (BGV_DEBUG) {
-				fmt::print("BGV Purged Latest after final availability check complete\n");
+				fmt::print("BGV {0}) Purged Latest after final availability check complete\n", self->clientId);
 			}
 		}
 
@@ -1176,36 +1245,46 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			if (self->enablePurging && self->purgeAtLatest && deterministicRandom()->coinflip()) {
 				Version latestPurgeVersion = wait(self->doGrv(&tr));
 				if (BGV_DEBUG) {
-					fmt::print("BGV Purging Latest @ {0} after clearAndAwaitMerge, waiting\n", latestPurgeVersion);
+					fmt::print("BGV {0}) Purging Latest @ {1} after clearAndAwaitMerge, waiting\n",
+					           self->clientId,
+					           latestPurgeVersion);
 				}
 				Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, latestPurgeVersion, {}, false));
 				wait(cx->waitPurgeGranulesComplete(purgeKey));
 				if (BGV_DEBUG) {
-					fmt::print("BGV Purged Latest after clearAndAwaitMerge complete\n");
+					fmt::print("BGV {0}) Purged Latest after clearAndAwaitMerge complete\n", self->clientId);
 				}
+			}
+
+			if (BGV_DEBUG) {
+				fmt::print("BGV {0}) Checking data after merge\n", self->clientId);
 			}
 
 			// read after merge to make sure it completed, granules are available, and data is empty
 			bool dataCheckAfterMerge = wait(self->checkAllData(cx, self));
 			ASSERT(dataCheckAfterMerge);
+
+			if (BGV_DEBUG) {
+				fmt::print("BGV {0}) Checked data after merge\n", self->clientId);
+			}
 		}
 
 		if (BGV_DEBUG) {
-			fmt::print("BGV check waiting on summarizer to complete\n");
+			fmt::print("BGV {0}) check waiting on summarizer to complete\n", self->clientId);
 		}
 
 		// validate that summary completes without error
-		wait(self->summaryClient);
+		wait(self->summaryClient && self->forceFlushingClient);
 
 		if (BGV_DEBUG) {
-			fmt::print("BGV check done\n");
+			fmt::print("BGV {0}) check done\n", self->clientId);
 		}
 
 		return result;
 	}
 
 	Future<bool> check(Database const& cx) override {
-		if (clientId == 0 || !doForcePurge) {
+		if (clientId == 0 || (!doForcePurge && !purgeAtLatest)) {
 			return _check(cx, this);
 		}
 		return true;
@@ -1213,4 +1292,4 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<BlobGranuleVerifierWorkload> BlobGranuleVerifierWorkloadFactory("BlobGranuleVerifier");
+WorkloadFactory<BlobGranuleVerifierWorkload> BlobGranuleVerifierWorkloadFactory;

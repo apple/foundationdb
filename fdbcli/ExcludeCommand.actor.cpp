@@ -227,22 +227,19 @@ ACTOR Future<Void> checkForCoordinators(Reference<IDatabase> db, std::vector<Add
 
 namespace fdb_cli {
 
-const KeyRangeRef excludedServersSpecialKeyRange(LiteralStringRef("\xff\xff/management/excluded/"),
-                                                 LiteralStringRef("\xff\xff/management/excluded0"));
-const KeyRangeRef failedServersSpecialKeyRange(LiteralStringRef("\xff\xff/management/failed/"),
-                                               LiteralStringRef("\xff\xff/management/failed0"));
-const KeyRangeRef excludedLocalitySpecialKeyRange(LiteralStringRef("\xff\xff/management/excluded_locality/"),
-                                                  LiteralStringRef("\xff\xff/management/excluded_locality0"));
-const KeyRangeRef failedLocalitySpecialKeyRange(LiteralStringRef("\xff\xff/management/failed_locality/"),
-                                                LiteralStringRef("\xff\xff/management/failed_locality0"));
-const KeyRef excludedForceOptionSpecialKey = LiteralStringRef("\xff\xff/management/options/excluded/force");
-const KeyRef failedForceOptionSpecialKey = LiteralStringRef("\xff\xff/management/options/failed/force");
-const KeyRef excludedLocalityForceOptionSpecialKey =
-    LiteralStringRef("\xff\xff/management/options/excluded_locality/force");
-const KeyRef failedLocalityForceOptionSpecialKey =
-    LiteralStringRef("\xff\xff/management/options/failed_locality/force");
-const KeyRangeRef exclusionInProgressSpecialKeyRange(LiteralStringRef("\xff\xff/management/in_progress_exclusion/"),
-                                                     LiteralStringRef("\xff\xff/management/in_progress_exclusion0"));
+const KeyRangeRef excludedServersSpecialKeyRange("\xff\xff/management/excluded/"_sr,
+                                                 "\xff\xff/management/excluded0"_sr);
+const KeyRangeRef failedServersSpecialKeyRange("\xff\xff/management/failed/"_sr, "\xff\xff/management/failed0"_sr);
+const KeyRangeRef excludedLocalitySpecialKeyRange("\xff\xff/management/excluded_locality/"_sr,
+                                                  "\xff\xff/management/excluded_locality0"_sr);
+const KeyRangeRef failedLocalitySpecialKeyRange("\xff\xff/management/failed_locality/"_sr,
+                                                "\xff\xff/management/failed_locality0"_sr);
+const KeyRef excludedForceOptionSpecialKey = "\xff\xff/management/options/excluded/force"_sr;
+const KeyRef failedForceOptionSpecialKey = "\xff\xff/management/options/failed/force"_sr;
+const KeyRef excludedLocalityForceOptionSpecialKey = "\xff\xff/management/options/excluded_locality/force"_sr;
+const KeyRef failedLocalityForceOptionSpecialKey = "\xff\xff/management/options/failed_locality/force"_sr;
+const KeyRangeRef exclusionInProgressSpecialKeyRange("\xff\xff/management/in_progress_exclusion/"_sr,
+                                                     "\xff\xff/management/in_progress_exclusion0"_sr);
 
 ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, Future<Void> warn) {
 	if (tokens.size() <= 1) {
@@ -281,11 +278,11 @@ ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<Stri
 		if (!result)
 			return false;
 		for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
-			if (*t == LiteralStringRef("FORCE")) {
+			if (*t == "FORCE"_sr) {
 				force = true;
-			} else if (*t == LiteralStringRef("no_wait")) {
+			} else if (*t == "no_wait"_sr) {
 				waitForAllExcluded = false;
-			} else if (*t == LiteralStringRef("failed")) {
+			} else if (*t == "failed"_sr) {
 				markFailed = true;
 			} else if (t->startsWith(LocalityData::ExcludeLocalityPrefix) &&
 			           t->toString().find(':') != std::string::npos) {

@@ -18,11 +18,6 @@
  * limitations under the License.
  */
 
-#include <iostream>
-#include <sstream>
-#include <cctype>
-
-#include "fdbrpc/simulator.h"
 #include "flow/UnitTest.h"
 #include "flow/Error.h"
 #include "fdbclient/Tuple.h"
@@ -71,7 +66,7 @@ struct SayHelloTaskFunc : TaskFuncBase {
 
 		state Key key = StringRef("Hello_" + deterministicRandom()->randomUniqueID().toString());
 		state Key value;
-		auto itor = task->params.find(LiteralStringRef("name"));
+		auto itor = task->params.find("name"_sr);
 		if (itor != task->params.end()) {
 			value = itor->value;
 			TraceEvent("TaskBucketCorrectnessSayHello").detail("SayHelloTaskFunc", printable(itor->value));
@@ -79,11 +74,11 @@ struct SayHelloTaskFunc : TaskFuncBase {
 			ASSERT(false);
 		}
 
-		if (!task->params[LiteralStringRef("chained")].compare(LiteralStringRef("false"))) {
+		if (!task->params["chained"_sr].compare("false"_sr)) {
 			wait(done->set(tr, taskBucket));
 		} else {
-			int subtaskCount = atoi(task->params[LiteralStringRef("subtaskCount")].toString().c_str());
-			int currTaskNumber = atoi(value.removePrefix(LiteralStringRef("task_")).toString().c_str());
+			int subtaskCount = atoi(task->params["subtaskCount"_sr].toString().c_str());
+			int currTaskNumber = atoi(value.removePrefix("task_"_sr).toString().c_str());
 			TraceEvent("TaskBucketCorrectnessSayHello")
 			    .detail("SubtaskCount", subtaskCount)
 			    .detail("CurrTaskNumber", currTaskNumber);
@@ -94,9 +89,9 @@ struct SayHelloTaskFunc : TaskFuncBase {
 				                                    SayHelloTaskFunc::version,
 				                                    StringRef(),
 				                                    deterministicRandom()->randomInt(0, 2));
-				new_task->params[LiteralStringRef("name")] = StringRef(format("task_%d", currTaskNumber + 1));
-				new_task->params[LiteralStringRef("chained")] = task->params[LiteralStringRef("chained")];
-				new_task->params[LiteralStringRef("subtaskCount")] = task->params[LiteralStringRef("subtaskCount")];
+				new_task->params["name"_sr] = StringRef(format("task_%d", currTaskNumber + 1));
+				new_task->params["chained"_sr] = task->params["chained"_sr];
+				new_task->params["subtaskCount"_sr] = task->params["subtaskCount"_sr];
 				Reference<TaskFuture> taskDone = futureBucket->future(tr);
 				new_task->params[Task::reservedTaskParamKeyDone] = taskDone->key;
 				taskBucket->addTask(tr, new_task);
@@ -112,7 +107,7 @@ struct SayHelloTaskFunc : TaskFuncBase {
 		return Void();
 	}
 };
-StringRef SayHelloTaskFunc::name = LiteralStringRef("SayHello");
+StringRef SayHelloTaskFunc::name = "SayHello"_sr;
 REGISTER_TASKFUNC(SayHelloTaskFunc);
 
 struct SayHelloToEveryoneTaskFunc : TaskFuncBase {
@@ -141,15 +136,15 @@ struct SayHelloToEveryoneTaskFunc : TaskFuncBase {
 		state std::vector<Reference<TaskFuture>> vectorFuture;
 
 		int subtaskCount = 1;
-		if (!task->params[LiteralStringRef("chained")].compare(LiteralStringRef("false"))) {
-			subtaskCount = atoi(task->params[LiteralStringRef("subtaskCount")].toString().c_str());
+		if (!task->params["chained"_sr].compare("false"_sr)) {
+			subtaskCount = atoi(task->params["subtaskCount"_sr].toString().c_str());
 		}
 		for (int i = 0; i < subtaskCount; ++i) {
 			auto new_task = makeReference<Task>(
 			    SayHelloTaskFunc::name, SayHelloTaskFunc::version, StringRef(), deterministicRandom()->randomInt(0, 2));
-			new_task->params[LiteralStringRef("name")] = StringRef(format("task_%d", i));
-			new_task->params[LiteralStringRef("chained")] = task->params[LiteralStringRef("chained")];
-			new_task->params[LiteralStringRef("subtaskCount")] = task->params[LiteralStringRef("subtaskCount")];
+			new_task->params["name"_sr] = StringRef(format("task_%d", i));
+			new_task->params["chained"_sr] = task->params["chained"_sr];
+			new_task->params["subtaskCount"_sr] = task->params["subtaskCount"_sr];
 			Reference<TaskFuture> taskDone = futureBucket->future(tr);
 			new_task->params[Task::reservedTaskParamKeyDone] = taskDone->key;
 			taskBucket->addTask(tr, new_task);
@@ -160,14 +155,14 @@ struct SayHelloToEveryoneTaskFunc : TaskFuncBase {
 		wait(taskBucket->finish(tr, task));
 
 		Key key = StringRef("Hello_" + deterministicRandom()->randomUniqueID().toString());
-		Value value = LiteralStringRef("Hello, Everyone!");
+		Value value = "Hello, Everyone!"_sr;
 		TraceEvent("TaskBucketCorrectnessSayHello").detail("SayHelloToEveryoneTaskFunc", printable(value));
 		tr->set(key, value);
 
 		return Void();
 	}
 };
-StringRef SayHelloToEveryoneTaskFunc::name = LiteralStringRef("SayHelloToEveryone");
+StringRef SayHelloToEveryoneTaskFunc::name = "SayHelloToEveryone"_sr;
 REGISTER_TASKFUNC(SayHelloToEveryoneTaskFunc);
 
 struct SaidHelloTaskFunc : TaskFuncBase {
@@ -195,27 +190,27 @@ struct SaidHelloTaskFunc : TaskFuncBase {
 		wait(taskBucket->finish(tr, task));
 
 		Key key = StringRef("Hello_" + deterministicRandom()->randomUniqueID().toString());
-		Value value = LiteralStringRef("Said hello to everyone!");
+		Value value = "Said hello to everyone!"_sr;
 		TraceEvent("TaskBucketCorrectnessSayHello").detail("SaidHelloTaskFunc", printable(value));
 		tr->set(key, value);
 
 		return Void();
 	}
 };
-StringRef SaidHelloTaskFunc::name = LiteralStringRef("SaidHello");
+StringRef SaidHelloTaskFunc::name = "SaidHello"_sr;
 REGISTER_TASKFUNC(SaidHelloTaskFunc);
 
 // A workload which test the correctness of TaskBucket
 struct TaskBucketCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "TaskBucketCorrectness";
+
 	bool chained;
 	int subtaskCount;
 
 	TaskBucketCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		chained = getOption(options, LiteralStringRef("chained"), false);
-		subtaskCount = getOption(options, LiteralStringRef("subtaskCount"), 20);
+		chained = getOption(options, "chained"_sr, false);
+		subtaskCount = getOption(options, "subtaskCount"_sr, 20);
 	}
-
-	std::string description() const override { return "TaskBucketCorrectness"; }
 
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
@@ -228,11 +223,11 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 	                                Reference<FutureBucket> futureBucket,
 	                                bool chained,
 	                                int subtaskCount) {
-		state Key addedInitKey(LiteralStringRef("addedInitTasks"));
+		state Key addedInitKey("addedInitTasks"_sr);
 		Optional<Standalone<StringRef>> res = wait(tr->get(addedInitKey));
 		if (res.present())
 			return Void();
-		tr->set(addedInitKey, LiteralStringRef("true"));
+		tr->set(addedInitKey, "true"_sr);
 
 		Reference<TaskFuture> allDone = futureBucket->future(tr);
 		auto task = makeReference<Task>(SayHelloToEveryoneTaskFunc::name,
@@ -240,8 +235,8 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		                                allDone->key,
 		                                deterministicRandom()->randomInt(0, 2));
 
-		task->params[LiteralStringRef("chained")] = chained ? LiteralStringRef("true") : LiteralStringRef("false");
-		task->params[LiteralStringRef("subtaskCount")] = StringRef(format("%d", subtaskCount));
+		task->params["chained"_sr] = chained ? "true"_sr : "false"_sr;
+		task->params["subtaskCount"_sr] = StringRef(format("%d", subtaskCount));
 		taskBucket->addTask(tr, task);
 		auto taskDone = makeReference<Task>(
 		    SaidHelloTaskFunc::name, SaidHelloTaskFunc::version, StringRef(), deterministicRandom()->randomInt(0, 2));
@@ -251,9 +246,9 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 
 	ACTOR Future<Void> _start(Database cx, TaskBucketCorrectnessWorkload* self) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-		state Subspace taskSubspace(LiteralStringRef("backup-agent"));
-		state Reference<TaskBucket> taskBucket(new TaskBucket(taskSubspace.get(LiteralStringRef("tasks"))));
-		state Reference<FutureBucket> futureBucket(new FutureBucket(taskSubspace.get(LiteralStringRef("futures"))));
+		state Subspace taskSubspace("backup-agent"_sr);
+		state Reference<TaskBucket> taskBucket(new TaskBucket(taskSubspace.get("tasks"_sr)));
+		state Reference<FutureBucket> futureBucket(new FutureBucket(taskSubspace.get("futures"_sr)));
 
 		try {
 			if (self->clientId == 0) {
@@ -319,8 +314,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 			data.insert(format("task_%d", i));
 		}
 
-		RangeResult values = wait(tr->getRange(
-		    KeyRangeRef(LiteralStringRef("Hello_\x00"), LiteralStringRef("Hello_\xff")), CLIENT_KNOBS->TOO_MANY));
+		RangeResult values = wait(tr->getRange(KeyRangeRef("Hello_\x00"_sr, "Hello_\xff"_sr), CLIENT_KNOBS->TOO_MANY));
 		if (values.size() != data.size()) {
 			TraceEvent(SevError, "CheckSayHello")
 			    .detail("CountNotMatchIs", values.size())
@@ -344,7 +338,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<TaskBucketCorrectnessWorkload> TaskBucketCorrectnessWorkloadFactory("TaskBucketCorrectness");
+WorkloadFactory<TaskBucketCorrectnessWorkload> TaskBucketCorrectnessWorkloadFactory;
 
 void print_subspace_key(const Subspace& subspace, int id) {
 	printf("%d==========%s===%d\n", id, printable(StringRef(subspace.key())).c_str(), subspace.key().size());
@@ -355,53 +349,53 @@ TEST_CASE("/fdbclient/TaskBucket/Subspace") {
 	print_subspace_key(subspace_test, 0);
 	ASSERT(subspace_test.key().toString() == "");
 
-	Subspace subspace_test1(LiteralStringRef("abc"));
+	Subspace subspace_test1("abc"_sr);
 	print_subspace_key(subspace_test1, 1);
-	ASSERT(subspace_test1.key() == LiteralStringRef("abc"));
+	ASSERT(subspace_test1.key() == "abc"_sr);
 
 	Tuple t = Tuple::makeTuple("user"_sr);
 	Subspace subspace_test2(t);
 	print_subspace_key(subspace_test2, 2);
-	ASSERT(subspace_test2.key() == LiteralStringRef("\x01user\x00"));
+	ASSERT(subspace_test2.key() == "\x01user\x00"_sr);
 
-	Subspace subspace_test3(t, LiteralStringRef("abc"));
+	Subspace subspace_test3(t, "abc"_sr);
 	print_subspace_key(subspace_test3, 3);
-	ASSERT(subspace_test3.key() == LiteralStringRef("abc\x01user\x00"));
+	ASSERT(subspace_test3.key() == "abc\x01user\x00"_sr);
 
 	Tuple t1 = Tuple::makeTuple(1);
 	Subspace subspace_test4(t1);
 	print_subspace_key(subspace_test4, 4);
-	ASSERT(subspace_test4.key() == LiteralStringRef("\x15\x01"));
+	ASSERT(subspace_test4.key() == "\x15\x01"_sr);
 
 	t.append(123);
-	Subspace subspace_test5(t, LiteralStringRef("abc"));
+	Subspace subspace_test5(t, "abc"_sr);
 	print_subspace_key(subspace_test5, 5);
-	ASSERT(subspace_test5.key() == LiteralStringRef("abc\x01user\x00\x15\x7b"));
+	ASSERT(subspace_test5.key() == "abc\x01user\x00\x15\x7b"_sr);
 
 	// Subspace pack
 	printf("%d==========%s===%d\n", 6, printable(subspace_test5.pack(t)).c_str(), subspace_test5.pack(t).size());
-	ASSERT(subspace_test5.pack(t) == LiteralStringRef("abc\x01user\x00\x15\x7b\x01user\x00\x15\x7b"));
+	ASSERT(subspace_test5.pack(t) == "abc\x01user\x00\x15\x7b\x01user\x00\x15\x7b"_sr);
 
 	printf("%d==========%s===%d\n", 7, printable(subspace_test5.pack(t1)).c_str(), subspace_test5.pack(t1).size());
-	ASSERT(subspace_test5.pack(t1) == LiteralStringRef("abc\x01user\x00\x15\x7b\x15\x01"));
+	ASSERT(subspace_test5.pack(t1) == "abc\x01user\x00\x15\x7b\x15\x01"_sr);
 
 	// Subspace getItem
 	Subspace subspace_test6(t);
-	Subspace subspace_test7 = subspace_test6.get(LiteralStringRef("subitem"));
+	Subspace subspace_test7 = subspace_test6.get("subitem"_sr);
 	print_subspace_key(subspace_test7, 8);
-	ASSERT(subspace_test7.key() == LiteralStringRef("\x01user\x00\x15\x7b\x01subitem\x00"));
+	ASSERT(subspace_test7.key() == "\x01user\x00\x15\x7b\x01subitem\x00"_sr);
 
 	// Subspace unpack
 	Tuple t2 = subspace_test6.unpack(subspace_test7.key());
 	Subspace subspace_test8(t2);
 	print_subspace_key(subspace_test8, 9);
-	ASSERT(subspace_test8.key() == LiteralStringRef("\x01subitem\x00"));
+	ASSERT(subspace_test8.key() == "\x01subitem\x00"_sr);
 
 	// pack
 	Tuple t3 = Tuple::makeTuple(""_sr);
 	printf("%d==========%s===%d\n", 10, printable(subspace_test5.pack(t3)).c_str(), subspace_test5.pack(t3).size());
 	ASSERT(subspace_test5.pack(t3) == subspace_test5.pack(StringRef()));
-	ASSERT(subspace_test5.pack(t3) == LiteralStringRef("abc\x01user\x00\x15\x7b\x01\x00"));
+	ASSERT(subspace_test5.pack(t3) == "abc\x01user\x00\x15\x7b\x01\x00"_sr);
 
 	printf("%d==========%s===%d\n",
 	       11,
@@ -414,14 +408,14 @@ TEST_CASE("/fdbclient/TaskBucket/Subspace") {
 	       subspace_test5.range(t3).end.size());
 	ASSERT(subspace_test5.range(t3).end == subspace_test5.get(StringRef()).range().end);
 
-	StringRef def = LiteralStringRef("def");
-	StringRef ghi = LiteralStringRef("ghi");
+	StringRef def = "def"_sr;
+	StringRef ghi = "ghi"_sr;
 	t3.append(def);
 	t3.append(ghi);
 	printf("%d==========%s===%d\n", 13, printable(subspace_test5.pack(t3)).c_str(), subspace_test5.pack(t3).size());
 	ASSERT(subspace_test5.pack(t3) == subspace_test5.get(StringRef()).get(def).pack(ghi));
-	ASSERT(subspace_test5.pack(t3) == LiteralStringRef("abc\x01user\x00\x15\x7b\x01\x00\x01"
-	                                                   "def\x00\x01ghi\x00"));
+	ASSERT(subspace_test5.pack(t3) == "abc\x01user\x00\x15\x7b\x01\x00\x01"
+	                                  "def\x00\x01ghi\x00"_sr);
 
 	printf("%d==========%s===%d\n",
 	       14,

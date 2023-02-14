@@ -22,12 +22,12 @@
 #define SIM_KMS_CONNECTOR_H
 #pragma once
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbserver/KmsConnector.h"
-#include "flow/BlobCipher.h"
 
 class SimKmsConnector : public KmsConnector {
 public:
-	SimKmsConnector() = default;
+	SimKmsConnector(const std::string& conStr) : KmsConnector(conStr) {}
 	Future<Void> connectorCore(KmsConnectorInterface interf);
 };
 

@@ -18,6 +18,16 @@
  * limitations under the License.
  */
 
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__INTEL_COMPILER)
+#ifndef BOOST_SYSTEM_NO_LIB
+#define BOOST_SYSTEM_NO_LIB
+#endif
+#define BOOST_DATE_TIME_NO_LIB
+#define BOOST_REGEX_NO_LIB
+#include <boost/process.hpp>
+#endif
+#include <boost/algorithm/string.hpp>
+
 #include "flow/TLSConfig.actor.h"
 #include "flow/Trace.h"
 #include "flow/Platform.h"
@@ -27,20 +37,13 @@
 #include "fdbrpc/FlowProcess.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbclient/versions.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RemoteIKeyValueStore.actor.h"
-
-#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__INTEL_COMPILER)
-#define BOOST_SYSTEM_NO_LIB
-#define BOOST_DATE_TIME_NO_LIB
-#define BOOST_REGEX_NO_LIB
-#include <boost/process.hpp>
-#endif
-#include <boost/algorithm/string.hpp>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -75,7 +78,7 @@ VectorRef<StringRef> ExecCmdValueString::getBinaryArgs() const {
 void ExecCmdValueString::parseCmdValue() {
 	StringRef param = this->cmdValueString;
 	// get the binary path
-	this->binaryPath = param.eat(LiteralStringRef(" "));
+	this->binaryPath = param.eat(" "_sr);
 
 	// no arguments provided
 	if (param == StringRef()) {
@@ -84,7 +87,7 @@ void ExecCmdValueString::parseCmdValue() {
 
 	// extract the arguments
 	while (param != StringRef()) {
-		StringRef token = param.eat(LiteralStringRef(" "));
+		StringRef token = param.eat(" "_sr);
 		this->binaryArgs.push_back(this->binaryArgs.arena(), token);
 	}
 	return;
@@ -108,7 +111,7 @@ ACTOR void destoryChildProcess(Future<Void> parentSSClosed, ISimulator::ProcessI
 	wait(parentSSClosed);
 	TraceEvent(SevDebug, message.c_str()).log();
 	// This one is root cause for most failures, make sure it's okay to destory
-	g_pSimulator->destroyProcess(childInfo);
+	g_simulator->destroyProcess(childInfo);
 	// Explicitly reset the connection with the child process in case re-spawn very quickly
 	FlowTransport::transport().resetConnection(childInfo->address);
 }
@@ -118,7 +121,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
                                  bool isSync,
                                  double maxSimDelayTime,
                                  IClosable* parent) {
-	state ISimulator::ProcessInfo* self = g_pSimulator->getCurrentProcess();
+	state ISimulator::ProcessInfo* self = g_simulator->getCurrentProcess();
 	state ISimulator::ProcessInfo* child;
 
 	state std::string role;
@@ -160,7 +163,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 		}
 	}
 	state int result = 0;
-	child = g_pSimulator->newProcess(
+	child = g_simulator->newProcess(
 	    "remote flow process",
 	    self->address.ip,
 	    0,
@@ -170,8 +173,9 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 	    ProcessClass(ProcessClass::UnsetClass, ProcessClass::AutoSource),
 	    self->dataFolder.c_str(),
 	    self->coordinationFolder.c_str(), // do we need to customize this coordination folder path?
-	    self->protocolVersion);
-	wait(g_pSimulator->onProcess(child));
+	    self->protocolVersion,
+	    false);
+	wait(g_simulator->onProcess(child));
 	state Future<ISimulator::KillType> onShutdown = child->onShutdown();
 	state Future<ISimulator::KillType> parentShutdown = self->onShutdown();
 	state Future<Void> flowProcessF;
@@ -199,7 +203,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 			choose {
 				when(wait(flowProcessF)) {
 					TraceEvent(SevDebug, "ChildProcessKilled").log();
-					wait(g_pSimulator->onProcess(self));
+					wait(g_simulator->onProcess(self));
 					TraceEvent(SevDebug, "BackOnParentProcess").detail("Result", std::to_string(result));
 					destoryChildProcess(parentSSClosed, child, "StorageServerReceivedClosedMessage");
 				}

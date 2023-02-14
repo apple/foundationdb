@@ -257,7 +257,9 @@ ACTOR template <int N, class X>
 ACTOR template <class A, class B>
 [[flow_allow_discard]] Future<Void> switchTest(FutureStream<A> as, Future<B> oneb) {
 	loop choose {
-		when(A a = waitNext(as)) { std::cout << "A " << a << std::endl; }
+		when(A a = waitNext(as)) {
+			std::cout << "A " << a << std::endl;
+		}
 		when(B b = wait(oneb)) {
 			std::cout << "B " << b << std::endl;
 			break;
@@ -283,7 +285,7 @@ public:
 #if !defined(__INTEL_COMPILER)
 	void operator delete(void* buf) {
 		std::cout << "Freeing buffer" << std::endl;
-		delete[](int*) buf;
+		delete[] (int*)buf;
 	}
 #endif
 
@@ -614,8 +616,12 @@ void returnCancelRaceTest() {
 
 ACTOR [[flow_allow_discard]] Future<int> chooseTest(Future<int> a, Future<int> b) {
 	choose {
-		when(int A = wait(a)) { return A; }
-		when(int B = wait(b)) { return B; }
+		when(int A = wait(a)) {
+			return A;
+		}
+		when(int B = wait(b)) {
+			return B;
+		}
 	}
 }
 
@@ -643,9 +649,9 @@ void arenaTest() {
 	{
 		Arena arena;
 		VectorRef<StringRef> test;
-		test.push_back(arena, StringRef(arena, LiteralStringRef("Hello")));
-		test.push_back(arena, StringRef(arena, LiteralStringRef(", ")));
-		test.push_back(arena, StringRef(arena, LiteralStringRef("World!")));
+		test.push_back(arena, StringRef(arena, "Hello"_sr));
+		test.push_back(arena, StringRef(arena, ", "_sr));
+		test.push_back(arena, StringRef(arena, "World!"_sr));
 
 		for (auto i = test.begin(); i != test.end(); ++i)
 			for (auto j = i->begin(); j != i->end(); ++j)
@@ -960,8 +966,12 @@ ACTOR [[flow_allow_discard]] Future<int> introAdd(Future<int> a, Future<int> b) 
 
 ACTOR [[flow_allow_discard]] Future<int> introFirst(Future<int> a, Future<int> b) {
 	choose {
-		when(int x = wait(a)) { return x; }
-		when(int x = wait(b)) { return x; }
+		when(int x = wait(a)) {
+			return x;
+		}
+		when(int x = wait(b)) {
+			return x;
+		}
 	}
 }
 
@@ -1200,8 +1210,8 @@ void dsltest() {
 	actorTest1(true);
 	actorTest2(true);
 	actorTest3(true);
-	// if (g_network == &g_simulator)
-	// g_simulator.run( actorTest4(true) );
+	// if (g_network == g_simulator)
+	// g_simulator->run( actorTest4(true) );
 	actorTest5();
 	actorTest6();
 	actorTest7();

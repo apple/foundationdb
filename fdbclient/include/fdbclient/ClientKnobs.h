@@ -79,6 +79,7 @@ public:
 	double CHANGE_FEED_POP_TIMEOUT;
 	int64_t CHANGE_FEED_STREAM_MIN_BYTES;
 	double CHANGE_FEED_START_INTERVAL;
+	bool CHANGE_FEED_COALESCE_LOCATIONS;
 
 	int MAX_BATCH_SIZE;
 	double GRV_BATCH_TIMEOUT;
@@ -90,8 +91,6 @@ public:
 	int LOCATION_CACHE_EVICTION_SIZE_SIM;
 	double LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD;
 	double LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL;
-	int TENANT_CACHE_EVICTION_SIZE;
-	int TENANT_CACHE_EVICTION_SIZE_SIM;
 
 	int GET_RANGE_SHARD_LIMIT;
 	int WARM_RANGE_SHARD_LIMIT;
@@ -234,11 +233,17 @@ public:
 	int BLOBSTORE_CONCURRENT_LISTS;
 	int BLOBSTORE_CONCURRENT_WRITES_PER_FILE;
 	int BLOBSTORE_CONCURRENT_READS_PER_FILE;
+	int BLOBSTORE_ENABLE_READ_CACHE;
 	int BLOBSTORE_READ_BLOCK_SIZE;
 	int BLOBSTORE_READ_AHEAD_BLOCKS;
 	int BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE;
 	int BLOBSTORE_MAX_SEND_BYTES_PER_SECOND;
 	int BLOBSTORE_MAX_RECV_BYTES_PER_SECOND;
+	bool BLOBSTORE_GLOBAL_CONNECTION_POOL;
+	bool BLOBSTORE_ENABLE_LOGGING;
+	double BLOBSTORE_STATS_LOGGING_INTERVAL;
+	double BLOBSTORE_LATENCY_LOGGING_INTERVAL;
+	double BLOBSTORE_LATENCY_LOGGING_ACCURACY;
 
 	int CONSISTENCY_CHECK_RATE_LIMIT_MAX;
 	int CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME;
@@ -254,12 +259,14 @@ public:
 	int MAX_TRANSACTION_TAG_LENGTH;
 	int MAX_TAGS_PER_TRANSACTION;
 	int COMMIT_SAMPLE_COST; // The expectation of sampling is every COMMIT_SAMPLE_COST sample once
-	int WRITE_COST_BYTE_FACTOR;
 	int INCOMPLETE_SHARD_PLUS; // The size of (possible) incomplete shard when estimate clear range
 	double READ_TAG_SAMPLE_RATE; // Communicated to clients from cluster
 	double TAG_THROTTLE_SMOOTHING_WINDOW;
 	double TAG_THROTTLE_RECHECK_INTERVAL;
 	double TAG_THROTTLE_EXPIRATION_INTERVAL;
+	int64_t TAG_THROTTLING_PAGE_SIZE; // Used to round up the cost of operations
+	// Cost multiplier for writes (because write operations are more expensive than reads):
+	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
 
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;
@@ -268,6 +275,7 @@ public:
 	// Blob Granules
 	int BG_MAX_GRANULE_PARALLELISM;
 	int BG_TOO_MANY_GRANULES;
+	int64_t BLOB_METADATA_REFRESH_INTERVAL;
 
 	// The coordinator key/value in storage server might be inconsistent to the value stored in the cluster file.
 	// This might happen when a recovery is happening together with a cluster controller coordinator key change.
@@ -285,6 +293,19 @@ public:
 	double METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY;
 	double METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT;
 	int TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantEntryCache is refreshed
+	bool CLIENT_ENABLE_USING_CLUSTER_ID_KEY;
+
+	// Encryption-at-rest
+	bool ENABLE_ENCRYPTION_CPU_TIME_LOGGING;
+	// This Knob will be a comma-delimited string (i.e 0,1,2,3) that specifies which tenants the the EKP should throw
+	// key_not_found errors for. If TenantInfo::INVALID_TENANT is contained within the list then no tenants will be
+	// dropped. This Knob should ONLY be used in simulation for testing purposes
+	std::string SIMULATION_EKP_TENANT_IDS_TO_DROP;
+	bool ENABLE_CONFIGURABLE_ENCRYPTION;
+	int ENCRYPT_HEADER_FLAGS_VERSION;
+	int ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION;
+	int ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION;
+	int ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

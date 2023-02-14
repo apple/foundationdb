@@ -22,8 +22,13 @@ else()
   cmake_minimum_required(VERSION 3.13)
 endif()
 
+# silence deprecation warnings in newer versions of cmake
+if(POLICY CMP0135)
+  cmake_policy(SET CMP0135 NEW)
+endif()
+
 project(foundationdb
-  VERSION 7.2.0
+  VERSION 7.3.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
   LANGUAGES C CXX ASM)
@@ -104,6 +109,12 @@ list(GET FDB_VERSION_LIST 2 FDB_PATCH)
 set(FDB_PACKAGE_NAME "${FDB_MAJOR}.${FDB_MINOR}")
 configure_file(${CMAKE_SOURCE_DIR}/versions.target.cmake ${CMAKE_CURRENT_BINARY_DIR}/versions.target)
 file(WRITE ${CMAKE_BINARY_DIR}/version.txt ${FDB_VERSION})
+
+set(FDB_CURRENT_VERSION ${PROJECT_VERSION})
+set(FDB_FUTURE_VERSION "7.4.0")
+set(FDB_PREV_RELEASE_VERSION "7.1.25")
+set(FDB_PREV2_RELEASE_VERSION "7.0.0")
+set(FDB_PREV3_RELEASE_VERSION "6.3.25")
 
 ################################################################################
 # Flow
