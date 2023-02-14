@@ -134,6 +134,7 @@ ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
 				    getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_RESULT_PREFIX, item.domainId.get(), itr->first), "");
 			}
 		} else {
+			TraceEvent("SimKmsEKLookupByIdsKeyNotFound").detail("DomId", item.domainId).detail("BaseCipherId", item.baseCipherId);
 			success = false;
 			break;
 		}

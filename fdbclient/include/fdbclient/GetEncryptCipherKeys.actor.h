@@ -329,5 +329,21 @@ Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const
 	return result;
 }
 
+ACTOR template <class T>
+Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
+                                                     BlobCipherEncryptHeaderRef header,
+                                                     BlobCipherMetrics::UsageType usageType) {
+	state std::tuple<BlobCipherDetails, BlobCipherDetails> details = header.getCipherDetails();
+	std::unordered_set<BlobCipherDetails> cipherDetails{ std::get<0>(details), std::get<1>(details) };
+	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys =
+	    wait(getEncryptCipherKeys(db, cipherDetails, usageType));
+	ASSERT(cipherKeys.count(std::get<0>(details)) > 0);
+	ASSERT(cipherKeys.count(std::get<1>(details)) > 0);
+	TextAndHeaderCipherKeys result{ cipherKeys.at(std::get<0>(details)), cipherKeys.at(std::get<1>(details)) };
+	ASSERT(result.cipherTextKey.isValid());
+	ASSERT(result.cipherHeaderKey.isValid());
+	return result;
+}
+
 #include "flow/unactorcompiler.h"
 #endif
