@@ -218,18 +218,18 @@ inline void* operator new[](size_t size, Arena& p) {
 }
 inline void operator delete[](void*, Arena& p) {}
 
-inline void* operator new(size_t size, Arena& p, WipeAfterUse) {
+inline void* operator new(size_t size, Arena& p, struct WipeAfterUse) {
 	UNSTOPPABLE_ASSERT(size < std::numeric_limits<int>::max());
 	return ArenaBlock::allocate(p.impl, (int)size, IsSecureMem::True);
 }
 
-inline void operator delete(void*, Arena& p, WipeAfterUse) {}
+inline void operator delete(void*, Arena& p, struct WipeAfterUse) {}
 
-inline void* operator new[](size_t size, Arena& p, WipeAfterUse) {
+inline void* operator new[](size_t size, Arena& p, struct WipeAfterUse) {
 	UNSTOPPABLE_ASSERT(size < std::numeric_limits<int>::max());
 	return ArenaBlock::allocate(p.impl, (int)size, IsSecureMem::True);
 }
-inline void operator delete[](void*, Arena& p, WipeAfterUse) {}
+inline void operator delete[](void*, Arena& p, struct WipeAfterUse) {}
 
 template <class Archive>
 inline void load(Archive& ar, Arena& p) {

@@ -1001,7 +1001,7 @@ TEST_CASE("/flow/Arena/Secure") {
 	// Note: Assumptions underlying this unit test are speculative.
 	//       Disable for a build configuration or entirely if deemed flaky.
 	auto& rng = *deterministicRandom();
-	auto sizes = std::vector<int>{1};
+	auto sizes = std::vector<int>{ 1 };
 	for (auto i = 2; i <= ArenaBlock::LARGE * 2; i *= 2) {
 		sizes.push_back(i);
 		// randomly select one value between this pow2 and the next
@@ -1032,7 +1032,8 @@ TEST_CASE("/flow/Arena/Secure") {
 					// but it is practically likely because of
 					//   a) how Arena uses (and malloc variants tend to use) thread-local freelists, and
 					//   b) the fact that we earlier allocated the memory blocks in some size sequence,
-					//      freed them in reverse order, and then allocated them again immediately in the same size sequence.
+					//      freed them in reverse order, and then allocated them again immediately in the same size
+					//      sequence.
 					// in the same vein, it is speculative but likely that if buf == newBuf,
 					// the memory backing the address is the same and remained untouched,
 					// because FDB servers are single-threaded

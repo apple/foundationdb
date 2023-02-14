@@ -32,6 +32,7 @@
 #include "flow/Histogram.h"
 #include "flow/ChaosMetrics.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/WipedString.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "flow/IAsyncFile.h"
@@ -346,7 +347,7 @@ public:
 	double checkDisabled(const std::string& desc) const;
 
 	// generate authz token for use in simulation environment
-	Standalone<StringRef> makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow);
+	WipedString makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow);
 
 	static thread_local ProcessInfo* currentProcess;
 
