@@ -24,6 +24,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Tuple.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace TenantAPI {
@@ -66,8 +67,7 @@ int64_t extractTenantIdFromKeyRef(StringRef s) {
 	return TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
 }
 
-bool tenantMapChanging(MutationRef const& mutation) {
-	const KeyRangeRef tenantMapRange = TenantMetadata::tenantMap().subspace;
+bool tenantMapChanging(MutationRef const& mutation, KeyRangeRef tenantMapRange) {
 	if (isSingleKeyMutation((MutationRef::Type)mutation.type) && mutation.param1.startsWith(tenantMapRange.begin)) {
 		return true;
 	} else if (mutation.type == MutationRef::ClearRange &&
@@ -75,6 +75,32 @@ bool tenantMapChanging(MutationRef const& mutation) {
 		return true;
 	}
 	return false;
+}
+
+// validates whether the lastTenantId and the nextTenantId share the same 2 byte prefix
+bool nextTenantIdPrefixMatches(int64_t lastTenantId, int64_t nextTenantId) {
+	if (getTenantIdPrefix(nextTenantId) != getTenantIdPrefix(lastTenantId)) {
+		TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "TenantIdPrefixMismatch")
+		    .detail("CurrentTenantId", lastTenantId)
+		    .detail("NewTenantId", nextTenantId)
+		    .detail("CurrentTenantIdPrefix", getTenantIdPrefix(lastTenantId))
+		    .detail("NewTenantIdPrefix", getTenantIdPrefix(nextTenantId));
+		return false;
+	}
+	return true;
+}
+
+// returns the maximum allowable tenant id in which the 2 byte prefix is not overriden
+int64_t getMaxAllowableTenantId(int64_t curTenantId) {
+	// The maximum tenant id allowed is 1 for the first 48 bits (6 bytes) with the first 16 bits (2 bytes) being the
+	// tenant prefix
+	int64_t maxTenantId = curTenantId | 0xFFFFFFFFFFFFLL;
+	ASSERT(maxTenantId > 0);
+	return maxTenantId;
+}
+
+int64_t getTenantIdPrefix(int64_t tenantId) {
+	return tenantId >> 48;
 }
 
 } // namespace TenantAPI

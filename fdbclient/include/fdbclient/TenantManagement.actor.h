@@ -20,8 +20,11 @@
 
 #pragma once
 #include "fdbclient/ClientBooleanParams.h"
+#include "fdbclient/Knobs.h"
+#include "fdbclient/Tenant.h"
 #include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
+#include <algorithm>
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_TENANT_MANAGEMENT_ACTOR_G_H)
 #define FDBCLIENT_TENANT_MANAGEMENT_ACTOR_G_H
 #include "fdbclient/TenantManagement.actor.g.h"
@@ -36,6 +39,9 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace TenantAPI {
+
+static const int TENANT_ID_PREFIX_MIN_VALUE = 0;
+static const int TENANT_ID_PREFIX_MAX_VALUE = 32767;
 
 template <class Transaction>
 Future<Optional<TenantMapEntry>> tryGetTenantTransaction(Transaction tr, int64_t tenantId) {
@@ -120,7 +126,10 @@ Future<Void> checkTenantMode(Transaction tr, ClusterType expectedClusterType) {
 TenantMode tenantModeForClusterType(ClusterType clusterType, TenantMode tenantMode);
 int64_t extractTenantIdFromMutation(MutationRef m);
 int64_t extractTenantIdFromKeyRef(StringRef s);
-bool tenantMapChanging(MutationRef const& mutation);
+bool tenantMapChanging(MutationRef const& mutation, KeyRangeRef tenantMapRange);
+bool nextTenantIdPrefixMatches(int64_t lastTenantId, int64_t nextTenantId);
+int64_t getMaxAllowableTenantId(int64_t curTenantId);
+int64_t getTenantIdPrefix(int64_t tenantId);
 
 // Returns true if the specified ID has already been deleted and false if not. If the ID is old enough
 // that we no longer keep tombstones for it, an error is thrown.
@@ -217,10 +226,19 @@ createTenantTransaction(Transaction tr, TenantMapEntry tenantEntry, ClusterType 
 
 ACTOR template <class Transaction>
 Future<int64_t> getNextTenantId(Transaction tr) {
-	Optional<int64_t> lastId = wait(TenantMetadata::lastTenantId().get(tr));
-	int64_t tenantId = lastId.orDefault(-1) + 1;
+	state Optional<int64_t> lastId = wait(TenantMetadata::lastTenantId().get(tr));
+	if (!lastId.present()) {
+		// If the last tenant id is not present fetch the tenantIdPrefix (if any) and initalize the lastId
+		int64_t tenantIdPrefix = wait(TenantMetadata::tenantIdPrefix().getD(tr, Snapshot::False, 0));
+		// Shift by 6 bytes to make the prefix the first two bytes of the tenant id
+		lastId = tenantIdPrefix << 48;
+	}
+	int64_t tenantId = lastId.get() + 1;
 	if (BUGGIFY) {
 		tenantId += deterministicRandom()->randomSkewedUInt32(1, 1e9);
+	}
+	if (!TenantAPI::nextTenantIdPrefixMatches(lastId.get(), tenantId)) {
+		throw cluster_no_capacity();
 	}
 	return tenantId;
 }

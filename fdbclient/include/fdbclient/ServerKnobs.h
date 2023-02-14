@@ -927,7 +927,14 @@ public:
 	int REDWOOD_DEFAULT_EXTENT_READ_SIZE; // Extent read size for Redwood files
 	int REDWOOD_EXTENT_CONCURRENT_READS; // Max number of simultaneous extent disk reads in progress.
 	bool REDWOOD_KVSTORE_RANGE_PREFETCH; // Whether to use range read prefetching
-	double REDWOOD_PAGE_REBUILD_MAX_SLACK; // When rebuilding pages, max slack to allow in page
+	double REDWOOD_PAGE_REBUILD_MAX_SLACK; // When rebuilding pages, max slack to allow in page before extending it
+	double REDWOOD_PAGE_REBUILD_SLACK_DISTRIBUTION; // When rebuilding pages, use this ratio of slack distribution
+	                                                // between the rightmost (new) page and the previous page. Defaults
+	                                                // to .5 (50%) so that slack is evenly distributed between the
+	                                                // pages. A value close to 0 indicates most slack to remain in the
+	                                                // old page, where a value close to 1 causes the new page to have
+	                                                // most of the slack. Immutable workloads with an increasing key
+	                                                // pattern benefit from setting this to a value close to 1.
 	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at
 	                                         // once
 	int REDWOOD_LAZY_CLEAR_MIN_PAGES; // Minimum number of pages to free before ending a lazy clear cycle, unless the
@@ -1030,6 +1037,8 @@ public:
 	std::string BLOB_RESTORE_MLOGS_URL;
 	int BLOB_MIGRATOR_ERROR_RETRIES;
 	std::string BLOB_RESTORE_MANIFEST_URL;
+	int BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE;
+	int BLOB_RESTORE_MANIFEST_RETENTION_MAX;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;

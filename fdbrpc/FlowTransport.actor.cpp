@@ -1074,7 +1074,8 @@ ACTOR static void deliver(TransportData* self,
 		if (receiver) {
 			TraceEvent(SevWarnAlways, "AttemptedRPCToPrivatePrevented")
 			    .detail("From", peerAddress)
-			    .detail("Token", destination.token);
+			    .detail("Token", destination.token)
+			    .detail("Receiver", typeid(*receiver).name());
 			ASSERT(!self->isLocalAddress(destination.getPrimaryAddress()));
 			Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
 			sendPacket(self,

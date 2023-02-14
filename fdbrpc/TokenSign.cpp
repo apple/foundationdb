@@ -52,11 +52,11 @@
 
 namespace {
 
-// test-only constants for generating random tenant/key names
+// test-only constants for generating random tenant ID and key names
 constexpr int MinIssuerNameLen = 16;
 constexpr int MaxIssuerNameLenPlus1 = 25;
-constexpr int MinTenantNameLen = 8;
-constexpr int MaxTenantNameLenPlus1 = 17;
+constexpr authz::TenantId MinTenantId = 1;
+constexpr authz::TenantId MaxTenantIdPlus1 = 0xffffffffll;
 constexpr int MinKeyNameLen = 10;
 constexpr int MaxKeyNameLenPlus1 = 21;
 
@@ -176,6 +176,14 @@ void appendField(fmt::memory_buffer& b, char const (&name)[NameLen], Optional<Fi
 			fmt::format_to(bi, fmt::runtime(f[i].toStringView()));
 		}
 		fmt::format_to(bi, "]");
+	} else if constexpr (std::is_same_v<FieldType, VectorRef<TenantId>>) {
+		fmt::format_to(bi, " {}=[", name);
+		for (auto i = 0; i < f.size(); i++) {
+			if (i)
+				fmt::format_to(bi, ",");
+			fmt::format_to(bi, "{:#x}", f[i]);
+		}
+		fmt::format_to(bi, "]");
 	} else if constexpr (std::is_same_v<FieldType, StringRef>) {
 		fmt::format_to(bi, " {}={}", name, f.toStringView());
 	} else {
@@ -202,33 +210,34 @@ StringRef toStringRef(Arena& arena, const TokenRef& tokenSpec) {
 	return StringRef(str, buf.size());
 }
 
-template <class FieldType, class Writer, bool MakeStringArrayBase64 = false>
-void putField(Optional<FieldType> const& field,
-              Writer& wr,
-              const char* fieldName,
-              std::bool_constant<MakeStringArrayBase64> _ = std::bool_constant<false>{}) {
+template <class FieldType, class Writer>
+void putField(Optional<FieldType> const& field, Writer& wr, const char* fieldName) {
 	if (!field.present())
 		return;
 	wr.Key(fieldName);
 	auto const& value = field.get();
 	static_assert(std::is_same_v<StringRef, FieldType> || std::is_same_v<FieldType, uint64_t> ||
-	              std::is_same_v<FieldType, VectorRef<StringRef>>);
+	              std::is_same_v<FieldType, VectorRef<StringRef>> || std::is_same_v<FieldType, VectorRef<TenantId>>);
 	if constexpr (std::is_same_v<StringRef, FieldType>) {
 		wr.String(reinterpret_cast<const char*>(value.begin()), value.size());
 	} else if constexpr (std::is_same_v<FieldType, uint64_t>) {
 		wr.Uint64(value);
+	} else if constexpr (std::is_same_v<FieldType, VectorRef<TenantId>>) {
+		// "tenants" array = array of base64-encoded tenant key prefix
+		// key prefix = bytestring representation of big-endian tenant ID (int64_t)
+		Arena arena;
+		wr.StartArray();
+		for (auto elem : value) {
+			auto const bigEndianId = bigEndian64(elem);
+			auto encodedElem =
+			    base64::encode(arena, StringRef(reinterpret_cast<const uint8_t*>(&bigEndianId), sizeof(bigEndianId)));
+			wr.String(reinterpret_cast<const char*>(encodedElem.begin()), encodedElem.size());
+		}
+		wr.EndArray();
 	} else {
 		wr.StartArray();
-		if constexpr (MakeStringArrayBase64) {
-			Arena arena;
-			for (auto elem : value) {
-				auto encodedElem = base64::encode(arena, elem);
-				wr.String(reinterpret_cast<const char*>(encodedElem.begin()), encodedElem.size());
-			}
-		} else {
-			for (auto elem : value) {
-				wr.String(reinterpret_cast<const char*>(elem.begin()), elem.size());
-			}
+		for (auto elem : value) {
+			wr.String(reinterpret_cast<const char*>(elem.begin()), elem.size());
 		}
 		wr.EndArray();
 	}
@@ -259,7 +268,7 @@ StringRef makeSignInput(Arena& arena, const TokenRef& tokenSpec) {
 	putField(tokenSpec.expiresAtUnixTime, payload, "exp");
 	putField(tokenSpec.notBeforeUnixTime, payload, "nbf");
 	putField(tokenSpec.tokenId, payload, "jti");
-	putField(tokenSpec.tenants, payload, "tenants", std::bool_constant<true>{} /* encode tenants in base64 */);
+	putField(tokenSpec.tenants, payload, "tenants");
 	payload.EndObject();
 	auto const headerPartLen = base64::url::encodedLength(headerBuffer.GetSize());
 	auto const payloadPartLen = base64::url::encodedLength(payloadBuffer.GetSize());
@@ -347,18 +356,17 @@ Optional<StringRef> parseHeaderPart(Arena& arena, TokenRef& token, StringRef b64
 	return {};
 }
 
-template <class FieldType, bool ExpectBase64StringArray = false>
+template <class FieldType>
 Optional<StringRef> parseField(Arena& arena,
                                Optional<FieldType>& out,
                                const rapidjson::Document& d,
-                               const char* fieldName,
-                               std::bool_constant<ExpectBase64StringArray> _ = std::bool_constant<false>{}) {
+                               const char* fieldName) {
 	auto fieldItr = d.FindMember(fieldName);
 	if (fieldItr == d.MemberEnd())
 		return {};
 	auto const& field = fieldItr->value;
 	static_assert(std::is_same_v<StringRef, FieldType> || std::is_same_v<FieldType, uint64_t> ||
-	              std::is_same_v<FieldType, VectorRef<StringRef>>);
+	              std::is_same_v<FieldType, VectorRef<StringRef>> || std::is_same_v<FieldType, VectorRef<TenantId>>);
 	if constexpr (std::is_same_v<FieldType, StringRef>) {
 		if (!field.IsString()) {
 			return StringRef(arena, fmt::format("'{}' is not a string", fieldName));
@@ -369,7 +377,7 @@ Optional<StringRef> parseField(Arena& arena,
 			return StringRef(arena, fmt::format("'{}' is not a number", fieldName));
 		}
 		out = static_cast<uint64_t>(field.GetDouble());
-	} else {
+	} else if constexpr (std::is_same_v<FieldType, VectorRef<StringRef>>) {
 		if (!field.IsArray()) {
 			return StringRef(arena, fmt::format("'{}' is not an array", fieldName));
 		}
@@ -379,25 +387,49 @@ Optional<StringRef> parseField(Arena& arena,
 				if (!field[i].IsString()) {
 					return StringRef(arena, fmt::format("{}th element of '{}' is not a string", i + 1, fieldName));
 				}
-				if constexpr (ExpectBase64StringArray) {
-					Optional<StringRef> decodedString = base64::decode(
-					    arena,
-					    StringRef(reinterpret_cast<const uint8_t*>(field[i].GetString()), field[i].GetStringLength()));
-					if (decodedString.present()) {
-						vector[i] = decodedString.get();
-					} else {
-						CODE_PROBE(true, "Base64 token field has failed to be parsed");
-						return StringRef(arena,
-						                 fmt::format("Failed to base64-decode {}th element of '{}'", i + 1, fieldName));
-					}
-				} else {
-					vector[i] = StringRef(
-					    arena, reinterpret_cast<const uint8_t*>(field[i].GetString()), field[i].GetStringLength());
-				}
+				vector[i] = StringRef(
+				    arena, reinterpret_cast<const uint8_t*>(field[i].GetString()), field[i].GetStringLength());
 			}
 			out = VectorRef<StringRef>(vector, field.Size());
 		} else {
 			out = VectorRef<StringRef>();
+		}
+	} else {
+		// tenant ids case: convert array of base64-encoded length-8 bytestring containing big-endian int64_t to
+		// local-endian int64_t
+		if (!field.IsArray()) {
+			return StringRef(arena, fmt::format("'{}' is not an array", fieldName));
+		}
+		if (field.Size() > 0) {
+			auto vector = new (arena) TenantId[field.Size()];
+			for (auto i = 0; i < field.Size(); i++) {
+				if (!field[i].IsString()) {
+					return StringRef(arena, fmt::format("{}th element of '{}' is not a string", i + 1, fieldName));
+				}
+				Optional<StringRef> decodedString = base64::decode(
+				    arena,
+				    StringRef(reinterpret_cast<const uint8_t*>(field[i].GetString()), field[i].GetStringLength()));
+				if (decodedString.present()) {
+					auto const tenantPrefix = decodedString.get();
+					if (tenantPrefix.size() != sizeof(TenantId)) {
+						CODE_PROBE(true, "Tenant prefix has an invalid length");
+						return StringRef(arena,
+						                 fmt::format("{}th element of '{}' has an invalid bytewise length of {}",
+						                             i + 1,
+						                             fieldName,
+						                             tenantPrefix.size()));
+					}
+					TenantId tenantId = *reinterpret_cast<const TenantId*>(tenantPrefix.begin());
+					vector[i] = fromBigEndian64(tenantId);
+				} else {
+					CODE_PROBE(true, "Tenant field has failed to be parsed");
+					return StringRef(arena,
+					                 fmt::format("Failed to base64-decode {}th element of '{}'", i + 1, fieldName));
+				}
+			}
+			out = VectorRef<TenantId>(vector, field.Size());
+		} else {
+			out = VectorRef<TenantId>();
 		}
 	}
 	return {};
@@ -431,12 +463,7 @@ Optional<StringRef> parsePayloadPart(Arena& arena, TokenRef& token, StringRef b6
 		return err;
 	if ((err = parseField(arena, token.notBeforeUnixTime, d, "nbf")).present())
 		return err;
-	if ((err = parseField(arena,
-	                      token.tenants,
-	                      d,
-	                      "tenants",
-	                      std::bool_constant<true>{} /* expect field elements encoded in base64 */))
-	        .present())
+	if ((err = parseField(arena, token.tenants, d, "tenants")).present())
 		return err;
 	return {};
 }
@@ -526,16 +553,16 @@ TokenRef makeRandomTokenSpec(Arena& arena, IRandom& rng, Algorithm alg) {
 	auto numAudience = rng.randomInt(1, 5);
 	auto aud = new (arena) StringRef[numAudience];
 	for (auto i = 0; i < numAudience; i++)
-		aud[i] = genRandomAlphanumStringRef(arena, rng, MinTenantNameLen, MaxTenantNameLenPlus1);
+		aud[i] = genRandomAlphanumStringRef(arena, rng, MinIssuerNameLen, MaxIssuerNameLenPlus1);
 	ret.audience = VectorRef<StringRef>(aud, numAudience);
 	ret.issuedAtUnixTime = g_network->timer();
 	ret.notBeforeUnixTime = ret.issuedAtUnixTime.get();
 	ret.expiresAtUnixTime = ret.issuedAtUnixTime.get() + rng.randomInt(360, 1080 + 1);
 	auto numTenants = rng.randomInt(1, 3);
-	auto tenants = new (arena) StringRef[numTenants];
+	auto tenants = new (arena) TenantId[numTenants];
 	for (auto i = 0; i < numTenants; i++)
-		tenants[i] = genRandomAlphanumStringRef(arena, rng, MinTenantNameLen, MaxTenantNameLenPlus1);
-	ret.tenants = VectorRef<StringRef>(tenants, numTenants);
+		tenants[i] = rng.randomInt64(MinTenantId, MaxTenantIdPlus1);
+	ret.tenants = VectorRef<TenantId>(tenants, numTenants);
 	return ret;
 }
 
@@ -584,8 +611,7 @@ TEST_CASE("/fdbrpc/TokenSign/JWT") {
 			ASSERT(verifyOk);
 		}
 		// try tampering with signed token by adding one more tenant
-		tokenSpec.tenants.get().push_back(
-		    arena, genRandomAlphanumStringRef(arena, rng, MinTenantNameLen, MaxTenantNameLenPlus1));
+		tokenSpec.tenants.get().push_back(arena, rng.randomInt64(MinTenantId, MaxTenantIdPlus1));
 		auto tamperedTokenPart = makeSignInput(arena, tokenSpec);
 		auto tamperedTokenString = fmt::format("{}.{}", tamperedTokenPart.toString(), signaturePart.toString());
 		std::tie(verifyOk, verifyErr) = authz::jwt::verifyToken(StringRef(tamperedTokenString), publicKey);
@@ -608,12 +634,12 @@ TEST_CASE("/fdbrpc/TokenSign/JWT/ToStringRef") {
 	t.notBeforeUnixTime = 789ul;
 	t.keyId = "keyId"_sr;
 	t.tokenId = "tokenId"_sr;
-	StringRef tenants[2]{ "tenant1"_sr, "tenant2"_sr };
-	t.tenants = VectorRef<StringRef>(tenants, 2);
+	authz::TenantId tenants[2]{ 0x1ll, 0xabcdefabcdefll };
+	t.tenants = VectorRef<authz::TenantId>(tenants, 2);
 	auto arena = Arena();
 	auto tokenStr = toStringRef(arena, t);
 	auto tokenStrExpected =
-	    "alg=ES256 kid=keyId iss=issuer sub=subject aud=[aud1,aud2,aud3] iat=123 exp=456 nbf=789 jti=tokenId tenants=[tenant1,tenant2]"_sr;
+	    "alg=ES256 kid=keyId iss=issuer sub=subject aud=[aud1,aud2,aud3] iat=123 exp=456 nbf=789 jti=tokenId tenants=[0x1,0xabcdefabcdef]"_sr;
 	if (tokenStr != tokenStrExpected) {
 		fmt::print("Expected: {}\nGot     : {}\n", tokenStrExpected.toStringView(), tokenStr.toStringView());
 		ASSERT(false);
