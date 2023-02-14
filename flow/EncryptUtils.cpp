@@ -26,10 +26,6 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/format.hpp>
 
-const EncryptCipherDomainName FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME = "FdbSystemKeyspaceEncryptDomain"_sr;
-const EncryptCipherDomainName FDB_DEFAULT_ENCRYPT_DOMAIN_NAME = "FdbDefaultEncryptDomain"_sr;
-const EncryptCipherDomainName FDB_ENCRYPT_HEADER_DOMAIN_NAME = "FdbEncryptHeaderDomain"_sr;
-
 EncryptCipherMode encryptModeFromString(const std::string& modeStr) {
 	if (modeStr == "NONE") {
 		return ENCRYPT_CIPHER_MODE_NONE;
@@ -43,35 +39,27 @@ EncryptCipherMode encryptModeFromString(const std::string& modeStr) {
 
 std::string getEncryptDbgTraceKey(std::string_view prefix,
                                   EncryptCipherDomainId domainId,
-                                  StringRef domainName,
                                   Optional<EncryptCipherBaseKeyId> baseCipherId) {
 	// Construct the TraceEvent field key ensuring its uniqueness and compliance to TraceEvent field validator and log
 	// parsing tools
-	std::string dName = domainName.toString();
-	// Underscores are invalid in trace event detail name.
-	boost::replace_all(dName, "_", "-");
 	if (baseCipherId.present()) {
-		boost::format fmter("%s.%lld.%s.%llu");
-		return boost::str(boost::format(fmter % prefix % domainId % dName % baseCipherId.get()));
+		boost::format fmter("%s.%lld.%llu");
+		return boost::str(boost::format(fmter % prefix % domainId % baseCipherId.get()));
 	} else {
 		boost::format fmter("%s.%lld.%s");
-		return boost::str(boost::format(fmter % prefix % domainId % dName));
+		return boost::str(boost::format(fmter % prefix % domainId));
 	}
 }
 
 std::string getEncryptDbgTraceKeyWithTS(std::string_view prefix,
                                         EncryptCipherDomainId domainId,
-                                        StringRef domainName,
                                         EncryptCipherBaseKeyId baseCipherId,
                                         int64_t refAfterTS,
                                         int64_t expAfterTS) {
 	// Construct the TraceEvent field key ensuring its uniqueness and compliance to TraceEvent field validator and log
 	// parsing tools
-	std::string dName = domainName.toString();
-	// Underscores are invalid in trace event detail name.
-	boost::replace_all(dName, "_", "-");
-	boost::format fmter("%s.%lld.%s.%llu.%lld.%lld");
-	return boost::str(boost::format(fmter % prefix % domainId % dName % baseCipherId % refAfterTS % expAfterTS));
+	boost::format fmter("%s.%lld.%llu.%lld.%lld");
+	return boost::str(boost::format(fmter % prefix % domainId % baseCipherId % refAfterTS % expAfterTS));
 }
 
 int getEncryptHeaderAuthTokenSize(int algo) {
@@ -128,10 +116,8 @@ EncryptAuthTokenAlgo getAuthTokenAlgoFromMode(const EncryptAuthTokenMode mode) {
 }
 
 EncryptAuthTokenMode getRandomAuthTokenMode() {
-	std::vector<EncryptAuthTokenMode> modes = { EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
-		                                        EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE };
-	int idx = deterministicRandom()->randomInt(0, modes.size());
-	return modes[idx];
+	return deterministicRandom()->coinflip() ? EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE
+	                                         : EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE;
 }
 
 EncryptAuthTokenAlgo getRandomAuthTokenAlgo() {
@@ -140,4 +126,9 @@ EncryptAuthTokenAlgo getRandomAuthTokenAlgo() {
 	                                : EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA;
 
 	return algo;
+}
+
+bool isReservedEncryptDomain(EncryptCipherDomainId domainId) {
+	return domainId == SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID || domainId == ENCRYPT_HEADER_DOMAIN_ID ||
+	       domainId == FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
 }

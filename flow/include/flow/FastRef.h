@@ -24,7 +24,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <utility>
 
 // The thread safety this class provides is that it's safe to call addref and
 // delref on the same object concurrently in different threads. Subclass does

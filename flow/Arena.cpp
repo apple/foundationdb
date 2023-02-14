@@ -297,12 +297,13 @@ void* ArenaBlock::make4kAlignedBuffer(uint32_t size) {
 }
 
 void ArenaBlock::dependOn(Reference<ArenaBlock>& self, ArenaBlock* other) {
-	ASSERT(self->getData() != other->getData());
 	other->addref();
-	if (!self || self->isTiny() || self->unused() < sizeof(ArenaBlockRef))
+	if (!self || self->isTiny() || self->unused() < sizeof(ArenaBlockRef)) {
 		create(SMALL, self)->makeReference(other);
-	else
+	} else {
+		ASSERT(self->getData() != other->getData());
 		self->makeReference(other);
+	}
 }
 
 void* ArenaBlock::dependOn4kAlignedBuffer(Reference<ArenaBlock>& self, uint32_t size) {
@@ -824,6 +825,152 @@ TEST_CASE("flow/StringRef/eat") {
 	ASSERT(!hasSep);
 	ASSERT(first == "testcase"_sr);
 	ASSERT(str == ""_sr);
+
+	return Void();
+}
+
+struct TestOptionalMapClass {
+	StringRef value;
+	Optional<StringRef> optionalValue;
+
+	const StringRef constValue;
+	const Optional<StringRef> constOptionalValue;
+
+	StringRef getValue() const { return value; }
+	Optional<StringRef> getOptionalValue() const { return optionalValue; }
+
+	StringRef const& getValueRef() const { return value; }
+	Optional<StringRef> const& getOptionalValueRef() const { return optionalValue; }
+
+	StringRef sub(int x) const { return value.substr(x); }
+	Optional<StringRef> optionalSub(int x) const { return optionalValue.map<StringRef>(&StringRef::substr, (int)x); }
+
+	TestOptionalMapClass(StringRef value, bool setOptional)
+	  : value(value), constValue(value),
+	    optionalValue(setOptional ? Optional<StringRef>(value) : Optional<StringRef>()),
+	    constOptionalValue(setOptional ? Optional<StringRef>(value) : Optional<StringRef>()) {}
+};
+
+struct TestOptionalMapClassRef : public TestOptionalMapClass, public ReferenceCounted<TestOptionalMapClassRef> {
+	TestOptionalMapClassRef(StringRef value, bool setOptional) : TestOptionalMapClass(value, setOptional) {}
+};
+
+void checkResults(std::vector<Optional<StringRef>> const& results,
+                  StringRef value,
+                  bool shouldBeEmpty,
+                  std::string context) {
+	if (shouldBeEmpty) {
+		for (int i = 0; i < results.size(); ++i) {
+			if (results[i].present()) {
+				fmt::print("Unexpected result {} at index {} in {}\n", results[i].get().printable(), i, context);
+				ASSERT(false);
+			}
+		}
+	} else {
+		for (int i = 0; i < results.size(); ++i) {
+			if (!results[i].present()) {
+				fmt::print("Missing result {} at index {} in {}\n", value.printable(), i, context);
+				ASSERT(false);
+			}
+
+			if (i < results.size() - 1) {
+				if (results[i].get() != value) {
+					fmt::print("Incorrect result {} at index {} in {}: expected {}\n",
+					           results[i].get().printable(),
+					           i,
+					           context,
+					           value.printable());
+					ASSERT(false);
+				}
+			} else {
+				if (results[i].get() != value.substr(5)) {
+					fmt::print("Incorrect result {} at index {} in {}: expected {}\n",
+					           results[i].get().printable(),
+					           i,
+					           context,
+					           value.substr(5).printable());
+					ASSERT(false);
+				}
+			}
+		}
+	}
+}
+
+template <bool IsRef, class T>
+void checkOptional(Optional<T> val) {
+	StringRef value;
+	bool isEmpty = !val.present();
+	bool isFlatMapEmpty = isEmpty;
+	std::vector<Optional<StringRef>> mapResults;
+	std::vector<Optional<StringRef>> flatMapResults;
+
+	if constexpr (IsRef) {
+		isEmpty = isFlatMapEmpty = isEmpty || !val.get();
+		if (!isEmpty) {
+			value = val.get()->value;
+			isFlatMapEmpty = !val.get()->optionalValue.present();
+		}
+		mapResults.push_back(val.mapRef(&TestOptionalMapClass::value));
+		mapResults.push_back(val.mapRef(&TestOptionalMapClass::constValue));
+		mapResults.push_back(val.mapRef(&TestOptionalMapClass::getValue));
+		mapResults.push_back(val.mapRef(&TestOptionalMapClass::getValueRef));
+		mapResults.push_back(val.mapRef(&TestOptionalMapClass::sub, 5));
+
+		flatMapResults.push_back(val.flatMap([](auto t) { return t ? t->optionalValue : Optional<StringRef>(); }));
+		flatMapResults.push_back(val.flatMapRef(&TestOptionalMapClass::optionalValue));
+		flatMapResults.push_back(val.flatMapRef(&TestOptionalMapClass::constOptionalValue));
+		flatMapResults.push_back(val.flatMapRef(&TestOptionalMapClass::getOptionalValue));
+		flatMapResults.push_back(val.flatMapRef(&TestOptionalMapClass::getOptionalValueRef));
+		flatMapResults.push_back(val.flatMapRef(&TestOptionalMapClass::optionalSub, 5));
+	} else {
+		if (!isEmpty) {
+			value = val.get().value;
+			isFlatMapEmpty = !val.get().optionalValue.present();
+		}
+		mapResults.push_back(val.map([](auto t) { return t.value; }));
+		mapResults.push_back(val.map(&TestOptionalMapClass::value));
+		mapResults.push_back(val.map(&TestOptionalMapClass::constValue));
+		mapResults.push_back(val.map(&TestOptionalMapClass::getValue));
+		mapResults.push_back(val.map(&TestOptionalMapClass::getValueRef));
+		mapResults.push_back(val.map(&TestOptionalMapClass::sub, 5));
+
+		flatMapResults.push_back(val.flatMap([](auto t) { return t.optionalValue; }));
+		flatMapResults.push_back(val.flatMap(&TestOptionalMapClass::optionalValue));
+		flatMapResults.push_back(val.flatMap(&TestOptionalMapClass::constOptionalValue));
+		flatMapResults.push_back(val.flatMap(&TestOptionalMapClass::getOptionalValue));
+		flatMapResults.push_back(val.flatMap(&TestOptionalMapClass::getOptionalValueRef));
+		flatMapResults.push_back(val.flatMap(&TestOptionalMapClass::optionalSub, 5));
+	}
+
+	checkResults(mapResults, value, isEmpty, IsRef ? "ref map" : "non-ref map");
+	checkResults(flatMapResults, value, isFlatMapEmpty, IsRef ? "ref flat map" : "non-ref flat map");
+}
+
+TEST_CASE("/flow/Arena/OptionalMap") {
+	// Optional<T>
+	checkOptional<false>(Optional<TestOptionalMapClass>());
+	checkOptional<false>(Optional<TestOptionalMapClass>(TestOptionalMapClass("test_string"_sr, false)));
+	checkOptional<false>(Optional<TestOptionalMapClass>(TestOptionalMapClass("test_string"_sr, true)));
+
+	// Optional<Reference<T>>
+	checkOptional<true>(Optional<Reference<TestOptionalMapClassRef>>());
+	checkOptional<true>(Optional<Reference<TestOptionalMapClassRef>>(Reference<TestOptionalMapClassRef>()));
+	checkOptional<true>(
+	    Optional<Reference<TestOptionalMapClassRef>>(makeReference<TestOptionalMapClassRef>("test_string"_sr, false)));
+	checkOptional<true>(
+	    Optional<Reference<TestOptionalMapClassRef>>(makeReference<TestOptionalMapClassRef>("test_string"_sr, true)));
+
+	// Optional<T*>
+	checkOptional<true>(Optional<TestOptionalMapClass*>());
+	checkOptional<true>(Optional<TestOptionalMapClass*>(nullptr));
+
+	auto ptr = new TestOptionalMapClass("test_string"_sr, false);
+	checkOptional<true>(Optional<TestOptionalMapClass*>(ptr));
+	delete ptr;
+
+	ptr = new TestOptionalMapClass("test_string"_sr, true);
+	checkOptional<true>(Optional<TestOptionalMapClass*>(ptr));
+	delete ptr;
 
 	return Void();
 }

@@ -20,6 +20,7 @@
 
 #ifndef FDBSERVER_IKEYVALUESTORE_H
 #define FDBSERVER_IKEYVALUESTORE_H
+#include "flow/Trace.h"
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -84,9 +85,6 @@ public:
 	// Persists key range and physical shard mapping.
 	virtual void persistRangeMapping(KeyRangeRef range, bool isAdd) {}
 
-	// Destroys the physical shards if they're empty.
-	virtual Future<Void> cleanUpShardsIfNeeded(const std::vector<std::string>& shardIds) { return Void(); };
-
 	// To debug MEMORY_RADIXTREE type ONLY
 	// Returns (1) how many key & value pairs have been inserted (2) how many nodes have been created (3) how many
 	// key size is less than 12 bytes
@@ -104,6 +102,14 @@ public:
 
 	// Restore from a checkpoint.
 	virtual Future<Void> restore(const std::vector<CheckpointMetaData>& checkpoints) { throw not_implemented(); }
+
+	// Same as above, with a target shardId, and a list of target ranges, ranges must be a subset of the checkpoint
+	// ranges.
+	virtual Future<Void> restore(const std::string& shardId,
+	                             const std::vector<KeyRange>& ranges,
+	                             const std::vector<CheckpointMetaData>& checkpoints) {
+		throw not_implemented();
+	}
 
 	// Delete a checkpoint.
 	virtual Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) { throw not_implemented(); }
@@ -128,6 +134,9 @@ public:
 	// of a rollback.
 	virtual Future<Void> init() { return Void(); }
 
+	// Obtain the encryption mode of the storage. The encryption mode needs to match the encryption mode of the cluster.
+	virtual Future<EncryptionAtRestMode> encryptionMode() = 0;
+
 protected:
 	virtual ~IKeyValueStore() {}
 };
@@ -139,7 +148,8 @@ extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
                                            bool checkIntegrity = false);
 extern IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                               UID logID,
-                                              Reference<IPageEncryptionKeyProvider> encryptionKeyProvider = {});
+                                              Reference<AsyncVar<ServerDBInfo> const> db = {},
+                                              Optional<EncryptionAtRestMode> encryptionMode = {});
 extern IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
                                             UID logID,
                                             KeyValueStoreType storeType,
@@ -178,7 +188,16 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                                    bool checkChecksums = false,
                                    bool checkIntegrity = false,
                                    bool openRemotely = false,
-                                   Reference<IPageEncryptionKeyProvider> encryptionKeyProvider = {}) {
+                                   Reference<AsyncVar<ServerDBInfo> const> db = {},
+                                   Optional<EncryptionAtRestMode> encryptionMode = {}) {
+	// Only Redwood support encryption currently.
+	if (encryptionMode.present() && encryptionMode.get().isEncryptionEnabled() &&
+	    storeType != KeyValueStoreType::SSD_REDWOOD_V1) {
+		TraceEvent(SevWarn, "KVStoreTypeNotSupportingEncryption")
+		    .detail("KVStoreType", storeType)
+		    .detail("EncryptionMode", encryptionMode);
+		throw encrypt_mode_mismatch();
+	}
 	if (openRemotely) {
 		return openRemoteKVStore(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity);
 	}
@@ -190,7 +209,7 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 	case KeyValueStoreType::MEMORY:
 		return keyValueStoreMemory(filename, logID, memoryLimit);
 	case KeyValueStoreType::SSD_REDWOOD_V1:
-		return keyValueStoreRedwoodV1(filename, logID, encryptionKeyProvider);
+		return keyValueStoreRedwoodV1(filename, logID, db, encryptionMode);
 	case KeyValueStoreType::SSD_ROCKSDB_V1:
 		return keyValueStoreRocksDB(filename, logID, storeType);
 	case KeyValueStoreType::SSD_SHARDED_ROCKSDB:

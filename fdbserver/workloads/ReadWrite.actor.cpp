@@ -23,7 +23,7 @@
 #include <vector>
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -200,7 +200,7 @@ struct ReadWriteCommonImpl {
 		}
 	}
 	ACTOR static Future<Void> logLatency(Future<Optional<Value>> f,
-	                                     ContinuousSample<double>* latencies,
+	                                     DDSketch<double>* latencies,
 	                                     double* totalLatency,
 	                                     int* latencyCount,
 	                                     EventMetricHandle<ReadMetric> readMetric,
@@ -220,7 +220,7 @@ struct ReadWriteCommonImpl {
 		return Void();
 	}
 	ACTOR static Future<Void> logLatency(Future<RangeResult> f,
-	                                     ContinuousSample<double>* latencies,
+	                                     DDSketch<double>* latencies,
 	                                     double* totalLatency,
 	                                     int* latencyCount,
 	                                     EventMetricHandle<ReadMetric> readMetric,
@@ -471,7 +471,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		}
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return timeout(_start(cx, this), testDuration, Void()); }
 
 	ACTOR template <class Trans>
 	static Future<Void> readOp(Trans* tr, std::vector<int64_t> keys, ReadWriteWorkload* self, bool shouldRecord) {

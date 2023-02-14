@@ -107,6 +107,11 @@ func (o NetworkOptions) SetTraceShareAmongClientThreads() error {
 	return o.setOpt(37, nil)
 }
 
+// Initialize trace files on network setup, determine the local IP later. Otherwise tracing is initialized when opening the first database.
+func (o NetworkOptions) SetTraceInitializeOnSetup() error {
+	return o.setOpt(38, nil)
+}
+
 // Set file suffix for partially written log files.
 //
 // Parameter: Append this suffix to partially written log files. When a log file is complete, it is renamed to remove the suffix. No separator is added between the file and the suffix. If you want to add a file extension, you should include the separator - e.g. '.tmp' instead of 'tmp' to add the 'tmp' extension.
@@ -261,6 +266,11 @@ func (o NetworkOptions) SetIgnoreExternalClientFailures() error {
 	return o.setOpt(68, nil)
 }
 
+// Fail with an error if there is no client matching the server version the client is connecting to
+func (o NetworkOptions) SetFailIncompatibleClient() error {
+	return o.setOpt(69, nil)
+}
+
 // Disables logging of client statistics, such as sampled transaction activity.
 func (o NetworkOptions) SetDisableClientStatisticsLogging() error {
 	return o.setOpt(70, nil)
@@ -402,6 +412,11 @@ func (o DatabaseOptions) SetTransactionIncludePortInAddress() error {
 	return o.setOpt(505, nil)
 }
 
+// Set a random idempotency id for all transactions. See the transaction option description for more information. This feature is in development and not ready for general use.
+func (o DatabaseOptions) SetTransactionAutomaticIdempotency() error {
+	return o.setOpt(506, nil)
+}
+
 // Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. This sets the ``bypass_unreadable`` option of each transaction created by this database. See the transaction option description for more information.
 func (o DatabaseOptions) SetTransactionBypassUnreadable() error {
 	return o.setOpt(700, nil)
@@ -412,9 +427,11 @@ func (o DatabaseOptions) SetUseConfigDatabase() error {
 	return o.setOpt(800, nil)
 }
 
-// An integer between 0 and 100 (default is 0) expressing the probability that a client will verify it can't read stale data whenever it detects a recovery.
-func (o DatabaseOptions) SetTestCausalReadRisky() error {
-	return o.setOpt(900, nil)
+// Enables verification of causal read risky by checking whether clients are able to read stale data when they detect a recovery, and logging an error if so.
+//
+// Parameter: integer between 0 and 100 expressing the probability a client will verify it can't read stale data
+func (o DatabaseOptions) SetTestCausalReadRisky(param int64) error {
+	return o.setOpt(900, int64ToBytes(param))
 }
 
 // The transaction, if not self-conflicting, may be committed a second time after commit succeeds, in the event of a fault
@@ -497,6 +514,11 @@ func (o TransactionOptions) SetRawAccess() error {
 	return o.setOpt(303, nil)
 }
 
+// Allows this transaction to bypass storage quota enforcement. Should only be used for transactions that directly or indirectly decrease the size of the tenant group's data.
+func (o TransactionOptions) SetBypassStorageQuota() error {
+	return o.setOpt(304, nil)
+}
+
 // Not yet implemented.
 func (o TransactionOptions) SetDebugRetryLogging(param string) error {
 	return o.setOpt(401, []byte(param))
@@ -559,6 +581,11 @@ func (o TransactionOptions) SetMaxRetryDelay(param int64) error {
 // Parameter: value in bytes
 func (o TransactionOptions) SetSizeLimit(param int64) error {
 	return o.setOpt(503, int64ToBytes(param))
+}
+
+// Automatically assign a random 16 byte idempotency id for this transaction. Prevents commits from failing with ``commit_unknown_result``. WARNING: If you are also using the multiversion client or transaction timeouts, if either cluster_version_changed or transaction_timed_out was thrown during a commit, then that commit may have already succeeded or may succeed in the future. This feature is in development and not ready for general use.
+func (o TransactionOptions) SetAutomaticIdempotency() error {
+	return o.setOpt(505, nil)
 }
 
 // Snapshot read operations will see the results of writes done in the same transaction. This is the default behavior.

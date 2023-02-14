@@ -697,6 +697,10 @@ struct DDQueue : public IDDRelocationQueue {
 		RemoteTeamIsFull,
 		RemoteTeamIsNotHealthy,
 		NoAvailablePhysicalShard,
+		UnknownForceNew,
+		NoAnyHealthy,
+		DstOverloaded,
+		RetryLimitReached,
 		NumberOfTypes,
 	};
 	std::vector<int> retryFindDstReasonCount;
@@ -1146,7 +1150,7 @@ struct DDQueue : public IDDRelocationQueue {
 	// canceled inflight relocateData. Launch the relocation for the rd.
 	void launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>> combined,
 	                      const DDEnabledState* ddEnabledState) {
-		int startedHere = 0;
+		[[maybe_unused]] int startedHere = 0;
 		double startTime = now();
 		// kick off relocators from items in the queue as need be
 		std::set<RelocateData, std::greater<RelocateData>>::iterator it = combined.begin();
@@ -1422,6 +1426,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> bestTeams;
 	state double startTime = now();
 	state std::vector<UID> destIds;
+	state WantTrueBest wantTrueBest(isValleyFillerPriority(rd.priority));
 	state uint64_t debugID = deterministicRandom()->randomUInt64();
 	state bool enableShardMove = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD;
 
@@ -1473,15 +1478,14 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 		state StorageMetrics metrics =
 		    wait(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(rd.keys))));
 
-		state uint64_t physicalShardIDCandidate = UID().first();
-		state bool forceToUseNewPhysicalShard = false;
+		state std::unordered_set<uint64_t> excludedDstPhysicalShards;
 
 		ASSERT(rd.src.size());
 		loop {
 			destOverloadedCount = 0;
 			stuckCount = 0;
-			state DDQueue::RetryFindDstReason retryFindDstReason = DDQueue::RetryFindDstReason::None;
-			// state int bestTeamStuckThreshold = 50;
+			state uint64_t physicalShardIDCandidate = UID().first();
+			state bool forceToUseNewPhysicalShard = false;
 			loop {
 				state int tciIndex = 0;
 				state bool foundTeams = true;
@@ -1507,13 +1511,14 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							    .detail("TeamCollectionIndex", tciIndex)
 							    .detail("RestoreDataMoveForDest",
 							            describe(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest));
-							retryFindDstReason = DDQueue::RetryFindDstReason::RemoteBestTeamNotReady;
+							self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteBestTeamNotReady]++;
 							foundTeams = false;
 							break;
 						}
 						if (!bestTeam.first.present() || !bestTeam.first.get()->isHealthy()) {
-							retryFindDstReason = tciIndex == 0 ? DDQueue::RetryFindDstReason::PrimaryNoHealthyTeam
-							                                   : DDQueue::RetryFindDstReason::RemoteNoHealthyTeam;
+							self->retryFindDstReasonCount[tciIndex == 0
+							                                  ? DDQueue::RetryFindDstReason::PrimaryNoHealthyTeam
+							                                  : DDQueue::RetryFindDstReason::RemoteNoHealthyTeam]++;
 							foundTeams = false;
 							break;
 						}
@@ -1530,7 +1535,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
 						auto req = GetTeamRequest(WantNewServers(rd.wantsNewServers),
-						                          WantTrueBest(isValleyFillerPriority(rd.priority)),
+						                          wantTrueBest,
 						                          PreferLowerDiskUtil::True,
 						                          TeamMustHaveShards::False,
 						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
@@ -1543,13 +1548,20 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						if (enableShardMove && tciIndex == 1) {
 							ASSERT(physicalShardIDCandidate != UID().first() &&
 							       physicalShardIDCandidate != anonymousShardId.first());
-							Optional<ShardsAffectedByTeamFailure::Team> remoteTeamWithPhysicalShard =
+							std::pair<Optional<ShardsAffectedByTeamFailure::Team>, bool> remoteTeamWithPhysicalShard =
 							    self->physicalShardCollection->tryGetAvailableRemoteTeamWith(
 							        physicalShardIDCandidate, metrics, debugID);
-							if (remoteTeamWithPhysicalShard.present()) {
+							if (!remoteTeamWithPhysicalShard.second) {
+								// Physical shard with `physicalShardIDCandidate` is not available. Retry selecting new
+								// dst physical shard.
+								self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::NoAvailablePhysicalShard]++;
+								foundTeams = false;
+								break;
+							}
+							if (remoteTeamWithPhysicalShard.first.present()) {
 								// Exists a remoteTeam in the mapping that has the physicalShardIDCandidate
 								// use the remoteTeam with the physicalShard as the bestTeam
-								req = GetTeamRequest(remoteTeamWithPhysicalShard.get().servers);
+								req = GetTeamRequest(remoteTeamWithPhysicalShard.first.get().servers);
 							}
 						}
 
@@ -1565,15 +1577,16 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							// getting the destination team or we could miss failure notifications for the storage
 							// servers in the destination team
 							TraceEvent("BestTeamNotReady");
-							retryFindDstReason = DDQueue::RetryFindDstReason::RemoteBestTeamNotReady;
+							self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteBestTeamNotReady]++;
 							foundTeams = false;
 							break;
 						}
 						// If a DC has no healthy team, we stop checking the other DCs until
 						// the unhealthy DC is healthy again or is excluded.
 						if (!bestTeam.first.present()) {
-							retryFindDstReason = tciIndex == 0 ? DDQueue::RetryFindDstReason::PrimaryNoHealthyTeam
-							                                   : DDQueue::RetryFindDstReason::RemoteNoHealthyTeam;
+							self->retryFindDstReasonCount[tciIndex == 0
+							                                  ? DDQueue::RetryFindDstReason::PrimaryNoHealthyTeam
+							                                  : DDQueue::RetryFindDstReason::RemoteNoHealthyTeam]++;
 							foundTeams = false;
 							break;
 						}
@@ -1597,7 +1610,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 								// use getTeam to select a remote team
 								bool minAvailableSpaceRatio = bestTeam.first.get()->getMinAvailableSpaceRatio(true);
 								if (minAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
-									retryFindDstReason = DDQueue::RetryFindDstReason::RemoteTeamIsFull;
+									self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteTeamIsFull]++;
 									foundTeams = false;
 									break;
 								}
@@ -1609,7 +1622,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 								// finishing team selection Then, forceToUseNewPhysicalShard is set, which enforce to
 								// use getTeam to select a remote team
 								if (!bestTeam.first.get()->isHealthy()) {
-									retryFindDstReason = DDQueue::RetryFindDstReason::RemoteTeamIsNotHealthy;
+									self->retryFindDstReasonCount
+									    [DDQueue::RetryFindDstReason::RemoteTeamIsNotHealthy]++;
 									foundTeams = false;
 									break;
 								}
@@ -1626,9 +1640,29 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 								ASSERT(foundTeams);
 								ShardsAffectedByTeamFailure::Team primaryTeam =
 								    ShardsAffectedByTeamFailure::Team(bestTeams[0].first->getServerIDs(), true);
-								physicalShardIDCandidate =
-								    self->physicalShardCollection->determinePhysicalShardIDGivenPrimaryTeam(
-								        primaryTeam, metrics, forceToUseNewPhysicalShard, debugID);
+
+								if (forceToUseNewPhysicalShard) {
+									physicalShardIDCandidate =
+									    self->physicalShardCollection->generateNewPhysicalShardID(debugID);
+								} else {
+									Optional<uint64_t> candidate =
+									    self->physicalShardCollection->trySelectAvailablePhysicalShardFor(
+									        primaryTeam, metrics, excludedDstPhysicalShards, debugID);
+									if (candidate.present()) {
+										physicalShardIDCandidate = candidate.get();
+									} else {
+										self->retryFindDstReasonCount
+										    [DDQueue::RetryFindDstReason::NoAvailablePhysicalShard]++;
+										if (wantTrueBest) {
+											// Next retry will likely get the same team, and we know that we can't reuse
+											// any existing physical shard in this team. So force to create new physical
+											// shard.
+											forceToUseNewPhysicalShard = true;
+										}
+										foundTeams = false;
+										break;
+									}
+								}
 								ASSERT(physicalShardIDCandidate != UID().first() &&
 								       physicalShardIDCandidate != anonymousShardId.first());
 							}
@@ -1646,6 +1680,14 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				if (foundTeams && anyHealthy && !anyDestOverloaded) {
 					ASSERT(rd.completeDests.empty());
 					break;
+				}
+
+				if (foundTeams) {
+					if (!anyHealthy) {
+						self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::NoAnyHealthy]++;
+					} else if (anyDestOverloaded) {
+						self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::DstOverloaded]++;
+					}
 				}
 
 				if (anyDestOverloaded) {
@@ -1684,7 +1726,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				// However, this may be failed
 				// Any retry triggers to use new physicalShard which enters the normal routine
 				if (enableShardMove) {
-					forceToUseNewPhysicalShard = true;
+					if (destOverloadedCount + stuckCount > 20) {
+						self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RetryLimitReached]++;
+						forceToUseNewPhysicalShard = true;
+					}
+					excludedDstPhysicalShards.insert(physicalShardIDCandidate);
 				}
 
 				// TODO different trace event + knob for overloaded? Could wait on an async var for done moves
@@ -1699,14 +1745,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						self->moveReusePhysicalShard++;
 					} else {
 						self->moveCreateNewPhysicalShard++;
-						if (retryFindDstReason == DDQueue::RetryFindDstReason::None) {
-							// When creating a new physical shard, but the reason is none, this can only happen when
-							// determinePhysicalShardIDGivenPrimaryTeam() finds that there is no available physical
-							// shard.
-							self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::NoAvailablePhysicalShard]++;
-						} else {
-							self->retryFindDstReasonCount[retryFindDstReason]++;
-						}
 					}
 					rd.dataMoveId = newShardId(physicalShardIDCandidate, AssignEmptyRange::False);
 					auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
@@ -1821,19 +1859,35 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			state Error error = success();
 			state Promise<Void> dataMovementComplete;
 			// Move keys from source to destination by changing the serverKeyList and keyServerList system keys
-			state Future<Void> doMoveKeys =
-			    self->txnProcessor->moveKeys(MoveKeysParams{ rd.dataMoveId,
-			                                                 rd.keys,
-			                                                 destIds,
-			                                                 healthyIds,
-			                                                 self->lock,
-			                                                 dataMovementComplete,
-			                                                 &self->startMoveKeysParallelismLock,
-			                                                 &self->finishMoveKeysParallelismLock,
-			                                                 self->teamCollections.size() > 1,
-			                                                 relocateShardInterval.pairID,
-			                                                 ddEnabledState,
-			                                                 CancelConflictingDataMoves::False });
+			std::unique_ptr<MoveKeysParams> params;
+			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+				params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
+				                                          std::vector<KeyRange>{ rd.keys },
+				                                          destIds,
+				                                          healthyIds,
+				                                          self->lock,
+				                                          dataMovementComplete,
+				                                          &self->startMoveKeysParallelismLock,
+				                                          &self->finishMoveKeysParallelismLock,
+				                                          self->teamCollections.size() > 1,
+				                                          relocateShardInterval.pairID,
+				                                          ddEnabledState,
+				                                          CancelConflictingDataMoves::False);
+			} else {
+				params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
+				                                          rd.keys,
+				                                          destIds,
+				                                          healthyIds,
+				                                          self->lock,
+				                                          dataMovementComplete,
+				                                          &self->startMoveKeysParallelismLock,
+				                                          &self->finishMoveKeysParallelismLock,
+				                                          self->teamCollections.size() > 1,
+				                                          relocateShardInterval.pairID,
+				                                          ddEnabledState,
+				                                          CancelConflictingDataMoves::False);
+			}
+			state Future<Void> doMoveKeys = self->txnProcessor->moveKeys(*params);
 			state Future<Void> pollHealth =
 			    signalledTransferComplete ? Never()
 			                              : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
@@ -1846,19 +1900,35 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 								healthyIds.insert(healthyIds.end(), extraIds.begin(), extraIds.end());
 								extraIds.clear();
 								ASSERT(totalIds == destIds.size()); // Sanity check the destIDs before we move keys
-								doMoveKeys =
-								    self->txnProcessor->moveKeys(MoveKeysParams{ rd.dataMoveId,
-								                                                 rd.keys,
-								                                                 destIds,
-								                                                 healthyIds,
-								                                                 self->lock,
-								                                                 Promise<Void>(),
-								                                                 &self->startMoveKeysParallelismLock,
-								                                                 &self->finishMoveKeysParallelismLock,
-								                                                 self->teamCollections.size() > 1,
-								                                                 relocateShardInterval.pairID,
-								                                                 ddEnabledState,
-								                                                 CancelConflictingDataMoves::False });
+								std::unique_ptr<MoveKeysParams> params;
+								if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+									params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
+									                                          std::vector<KeyRange>{ rd.keys },
+									                                          destIds,
+									                                          healthyIds,
+									                                          self->lock,
+									                                          Promise<Void>(),
+									                                          &self->startMoveKeysParallelismLock,
+									                                          &self->finishMoveKeysParallelismLock,
+									                                          self->teamCollections.size() > 1,
+									                                          relocateShardInterval.pairID,
+									                                          ddEnabledState,
+									                                          CancelConflictingDataMoves::False);
+								} else {
+									params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
+									                                          rd.keys,
+									                                          destIds,
+									                                          healthyIds,
+									                                          self->lock,
+									                                          Promise<Void>(),
+									                                          &self->startMoveKeysParallelismLock,
+									                                          &self->finishMoveKeysParallelismLock,
+									                                          self->teamCollections.size() > 1,
+									                                          relocateShardInterval.pairID,
+									                                          ddEnabledState,
+									                                          CancelConflictingDataMoves::False);
+								}
+								doMoveKeys = self->txnProcessor->moveKeys(*params);
 							} else {
 								self->fetchKeysComplete.insert(rd);
 								if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
@@ -2197,16 +2267,13 @@ ACTOR Future<SrcDestTeamPair> getSrcDestTeams(DDQueue* self,
 
 	state std::pair<Optional<ITeamRef>, bool> randomTeam =
 	    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(destReq)));
-	traceEvent->detail(
-	    "DestTeam", printable(randomTeam.first.map<std::string>([](const ITeamRef& team) { return team->getDesc(); })));
+	traceEvent->detail("DestTeam", printable(randomTeam.first.mapRef(&IDataDistributionTeam::getDesc)));
 
 	if (randomTeam.first.present()) {
 		state std::pair<Optional<ITeamRef>, bool> loadedTeam =
 		    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(srcReq)));
 
-		traceEvent->detail("SourceTeam", printable(loadedTeam.first.map<std::string>([](const ITeamRef& team) {
-			                   return team->getDesc();
-		                   })));
+		traceEvent->detail("SourceTeam", printable(loadedTeam.first.mapRef(&IDataDistributionTeam::getDesc)));
 
 		if (loadedTeam.first.present()) {
 			return std::make_pair(loadedTeam.first.get(), randomTeam.first.get());
@@ -2460,7 +2527,9 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 						debug_setCheckRelocationDuration(false);
 					}
 				}
-				when(KeyRange done = waitNext(rangesComplete.getFuture())) { keysToLaunchFrom = done; }
+				when(KeyRange done = waitNext(rangesComplete.getFuture())) {
+					keysToLaunchFrom = done;
+				}
 				when(wait(recordMetrics)) {
 					Promise<int64_t> req;
 					getAverageShardBytes.send(req);
@@ -2519,9 +2588,16 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 						            self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteTeamIsFull])
 						    .detail("RemoteTeamIsNotHealthy",
 						            self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteTeamIsNotHealthy])
-						    .detail(
-						        "NoAvailablePhysicalShard",
-						        self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::NoAvailablePhysicalShard]);
+						    .detail("UnknownForceNew",
+						            self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::UnknownForceNew])
+						    .detail("NoAnyHealthy",
+						            self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::NoAnyHealthy])
+						    .detail("DstOverloaded",
+						            self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::DstOverloaded])
+						    .detail("NoAvailablePhysicalShard",
+						            self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::NoAvailablePhysicalShard])
+						    .detail("RetryLimitReached",
+						            self.retryFindDstReasonCount[DDQueue::RetryFindDstReason::RetryLimitReached]);
 						self.moveCreateNewPhysicalShard = 0;
 						self.moveReusePhysicalShard = 0;
 						for (int i = 0; i < self.retryFindDstReasonCount.size(); ++i) {
@@ -2556,7 +2632,9 @@ TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
 	std::cout << "Start trace counter unit test for " << duration << "s ...\n";
 	loop choose {
 		when(wait(counterFuture)) {}
-		when(wait(finishFuture)) { break; }
+		when(wait(finishFuture)) {
+			break;
+		}
 		when(wait(delayJittered(2.0))) {
 			std::vector<UID> team(3);
 			for (int i = 0; i < team.size(); ++i) {

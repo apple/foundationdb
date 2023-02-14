@@ -19,6 +19,8 @@
  */
 
 #include <cinttypes>
+#include "fdbclient/BlobGranuleCommon.h"
+#include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
@@ -42,6 +44,7 @@
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/JsonBuilder.h"
+#include "fdbclient/StorageWiggleMetrics.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 const char* RecoveryStatus::names[] = { "reading_coordinated_state",
@@ -290,10 +293,19 @@ namespace {
 
 void reportCgroupCpuStat(JsonBuilderObject& object, const TraceEventFields& eventFields) {
 	JsonBuilderObject cgroupCpuStatObj;
-	cgroupCpuStatObj.setKeyRawNumber("nr_periods", eventFields.getValue("NrPeriods"));
-	cgroupCpuStatObj.setKeyRawNumber("nr_throttled", eventFields.getValue("NrThrottled"));
-	cgroupCpuStatObj.setKeyRawNumber("throttled_time", eventFields.getValue("ThrottledTime"));
-	object["cgroup_cpu_stat"] = cgroupCpuStatObj;
+	std::string val;
+	if (eventFields.tryGetValue("NrPeriods", val)) {
+		cgroupCpuStatObj.setKeyRawNumber("nr_periods", val);
+	}
+	if (eventFields.tryGetValue("NrThrottled", val)) {
+		cgroupCpuStatObj.setKeyRawNumber("nr_throttled", val);
+	}
+	if (eventFields.tryGetValue("ThrottledTime", val)) {
+		cgroupCpuStatObj.setKeyRawNumber("throttled_time", val);
+	}
+	if (!cgroupCpuStatObj.empty()) {
+		object["cgroup_cpu_stat"] = cgroupCpuStatObj;
+	}
 }
 
 JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
@@ -1428,6 +1440,37 @@ ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx,
 	return statusObj;
 }
 
+ACTOR static Future<JsonBuilderObject> versionEpochStatusFetcher(Database cx,
+                                                                 std::set<std::string>* incomplete_reasons) {
+	state JsonBuilderObject message;
+	try {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				Optional<Value> versionEpochVal = wait(timeoutError(BUGGIFY ? Never() : tr.get(versionEpochKey), 5.0));
+				message["enabled"] = versionEpochVal.present();
+				if (!versionEpochVal.present()) {
+					break;
+				}
+				int64_t versionEpoch = BinaryReader::fromStringRef<int64_t>(versionEpochVal.get(), Unversioned());
+				message["epoch"] = std::to_string(versionEpoch);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		incomplete_reasons->insert(format("Unable to retrieve version epoch information (%s).", e.what()));
+	}
+	return message;
+}
+
 ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx,
                                                         JsonBuilderArray* messages,
                                                         std::set<std::string>* incomplete_reasons) {
@@ -2442,6 +2485,53 @@ ACTOR static Future<JsonBuilderObject> blobWorkerStatusFetcher(
 	return statusObj;
 }
 
+ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std::set<std::string>* incompleteReason) {
+
+	state JsonBuilderObject statusObj;
+	state std::vector<Future<Optional<TraceEventFields>>> futures;
+
+	try {
+		Optional<BlobRestoreStatus> status = wait(getRestoreStatus(db, normalKeys));
+		if (status.present()) {
+			switch (status.get().phase) {
+			case BlobRestorePhase::INIT:
+				statusObj["blob_full_restore_phase"] = "Initializing";
+				break;
+			case BlobRestorePhase::STARTING_MIGRATOR:
+				statusObj["blob_full_restore_phase"] = "Starting migrator";
+				break;
+			case BlobRestorePhase::LOADING_MANIFEST:
+				statusObj["blob_full_restore_phase"] = "Loading manifest";
+				break;
+			case BlobRestorePhase::LOADED_MANIFEST:
+				statusObj["blob_full_restore_phase"] = "Manifest is loaded";
+				break;
+			case BlobRestorePhase::COPYING_DATA:
+				statusObj["blob_full_restore_phase"] = "Copying data";
+				statusObj["blob_full_restore_progress"] = status.get().status;
+				break;
+			case BlobRestorePhase::APPLYING_MLOGS:
+				statusObj["blob_full_restore_phase"] = "Applying mutation logs";
+				break;
+			case BlobRestorePhase::DONE:
+				statusObj["blob_full_restore_phase"] = "Completed successfully";
+				break;
+			case BlobRestorePhase::ERROR:
+				statusObj["blob_full_restore_phase"] =
+				    "Completed with fatal error: " + std::string(Error(status.get().status).what());
+				break;
+			default:
+				statusObj["blob_full_restore_phase"] = "Unexpected phase";
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		incompleteReason->insert("Unable to query blob restore status");
+	}
+	return statusObj;
+}
+
 static JsonBuilderObject tlogFetcher(int* logFaultTolerance,
                                      const std::vector<TLogSet>& tLogs,
                                      std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
@@ -2855,18 +2945,22 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 	}
 }
 
-ACTOR Future<std::pair<Optional<Value>, Optional<Value>>> readStorageWiggleMetrics(Database cx,
-                                                                                   bool use_system_priority) {
+ACTOR Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMetrics>>> readStorageWiggleMetrics(
+    Database cx,
+    bool use_system_priority) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state Optional<Value> primaryV;
-	state Optional<Value> remoteV;
+	state Optional<StorageWiggleMetrics> primaryV;
+	state Optional<StorageWiggleMetrics> remoteV;
+	state StorageWiggleData wiggleState;
 	loop {
 		try {
 			if (use_system_priority) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			}
-			wait(store(primaryV, StorageWiggleMetrics::runGetTransaction(tr, true)) &&
-			     store(remoteV, StorageWiggleMetrics::runGetTransaction(tr, false)));
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			wait(store(primaryV, wiggleState.storageWiggleMetrics(PrimaryRegion(true)).get(tr)) &&
+			     store(remoteV, wiggleState.storageWiggleMetrics(PrimaryRegion(false)).get(tr)));
 			return std::make_pair(primaryV, remoteV);
 		} catch (Error& e) {
 			wait(tr->onError(e));
@@ -2881,7 +2975,7 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribu
                                                            JsonBuilderArray* messages) {
 
 	state Future<GetStorageWigglerStateReply> stateFut;
-	state Future<std::pair<Optional<Value>, Optional<Value>>> wiggleMetricsFut =
+	state Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMetrics>>> wiggleMetricsFut =
 	    timeoutError(readStorageWiggleMetrics(cx, use_system_priority), 2.0);
 	state JsonBuilderObject res;
 	if (ddWorker.present()) {
@@ -2899,7 +2993,7 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribu
 		wait(success(wiggleMetricsFut) && success(stateFut));
 		auto [primaryV, remoteV] = wiggleMetricsFut.get();
 		if (primaryV.present()) {
-			auto obj = ObjectReader::fromStringRef<StorageWiggleMetrics>(primaryV.get(), IncludeVersion()).toJSON();
+			auto obj = primaryV.get().toJSON();
 			auto& reply = stateFut.get();
 			obj["state"] = StorageWiggler::getWiggleStateStr(static_cast<StorageWiggler::State>(reply.primary));
 			obj["last_state_change_timestamp"] = reply.lastStateChangePrimary;
@@ -2907,7 +3001,7 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribu
 			res["primary"] = obj;
 		}
 		if (conf.regions.size() > 1 && remoteV.present()) {
-			auto obj = ObjectReader::fromStringRef<StorageWiggleMetrics>(remoteV.get(), IncludeVersion()).toJSON();
+			auto obj = remoteV.get().toJSON();
 			auto& reply = stateFut.get();
 			obj["state"] = StorageWiggler::getWiggleStateStr(static_cast<StorageWiggler::State>(reply.remote));
 			obj["last_state_change_timestamp"] = reply.lastStateChangeRemote;
@@ -3067,8 +3161,20 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		// construct status information for cluster subsections
 		state int statusCode = (int)RecoveryStatus::END;
-		state JsonBuilderObject recoveryStateStatus = wait(
-		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
+		state Future<JsonBuilderObject> recoveryStateStatusFuture =
+		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode);
+
+		state Future<JsonBuilderObject> idmpKeyStatusFuture = getIdmpKeyStatus(cx);
+
+		state Future<JsonBuilderObject> versionEpochStatusFuture =
+		    versionEpochStatusFetcher(cx, &status_incomplete_reasons);
+
+		wait(waitForAll<JsonBuilderObject>(
+		    { recoveryStateStatusFuture, idmpKeyStatusFuture, versionEpochStatusFuture }));
+
+		state JsonBuilderObject recoveryStateStatus = recoveryStateStatusFuture.get();
+		state JsonBuilderObject idmpKeyStatus = idmpKeyStatusFuture.get();
+		state JsonBuilderObject versionEpochStatus = versionEpochStatusFuture.get();
 
 		// machine metrics
 		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
@@ -3302,6 +3408,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (!tenants.empty())
 				statusObj["tenants"] = tenants;
 
+			statusObj["version_epoch"] = versionEpochStatus;
+
 			// Merge dataOverlay into data
 			JsonBuilderObject& clusterDataSection = workerStatuses[0];
 
@@ -3407,6 +3515,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			JsonBuilderObject blobGranuelsStatus =
 			    wait(blobWorkerStatusFetcher(blobWorkers, address_workers, &status_incomplete_reasons));
 			statusObj["blob_granules"] = blobGranuelsStatus;
+			JsonBuilderObject blobRestoreStatus = wait(blobRestoreStatusFetcher(cx, &status_incomplete_reasons));
+			statusObj["blob_restore"] = blobRestoreStatus;
 		}
 
 		JsonBuilderArray incompatibleConnectionsArray;
@@ -3448,6 +3558,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		if (!recoveryStateStatus.empty())
 			statusObj["recovery_state"] = recoveryStateStatus;
+
+		statusObj["idempotency_ids"] = idmpKeyStatus;
 
 		// cluster messages subsection;
 		JsonBuilderArray clientIssuesArr = getClientIssuesAsMessages(clientStatus);

@@ -30,7 +30,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbrpc/Replication.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
@@ -181,10 +181,31 @@ struct IDDTeamCollection {
 	virtual ~IDDTeamCollection() {}
 };
 
+struct DDTeamCollectionInitParams {
+	Reference<IDDTxnProcessor> db;
+	UID distributorId;
+	MoveKeysLock const& lock;
+	PromiseStream<RelocateShard> const& output;
+	Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure;
+	DatabaseConfiguration configuration;
+	std::vector<Optional<Key>> includedDCs;
+	Optional<std::vector<Optional<Key>>> otherTrackedDCs;
+	Future<Void> readyToStart;
+	Reference<AsyncVar<bool>> zeroHealthyTeams;
+	IsPrimary primary;
+	Reference<AsyncVar<bool>> processingUnhealthy;
+	Reference<AsyncVar<bool>> processingWiggle;
+	PromiseStream<GetMetricsRequest> getShardMetrics;
+	Promise<UID> removeFailedServer;
+	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
+	PromiseStream<Promise<int64_t>> getAverageShardBytes;
+};
+
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	friend class DDTeamCollectionImpl;
 	friend class DDTeamCollectionUnitTest;
 
+protected:
 	enum class Status { NONE = 0, WIGGLING = 1, EXCLUDED = 2, FAILED = 3 };
 
 	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
@@ -215,6 +236,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	Reference<AsyncVar<bool>> pauseWiggle;
 	Reference<AsyncVar<bool>> processingWiggle; // track whether wiggling relocation is being processed
 	PromiseStream<StorageWiggleValue> nextWiggleInfo;
+	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 
 	std::vector<Reference<TCTeamInfo>> badTeams;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
@@ -289,6 +311,10 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	// Randomly choose one machine team that has chosenServer and has the correct size
 	// When configuration is changed, we may have machine teams with old storageTeamSize
 	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(TCServerInfo const& chosenServer) const;
+
+	// Returns a server team from given "servers", empty team if not found.
+	// When "wantHealthy" is true, only return if the team is healthy.
+	Optional<Reference<IDataDistributionTeam>> findTeamFromServers(const std::vector<UID>& servers, bool wantHealthy);
 
 	Future<Void> logOnCompletion(Future<Void> signal);
 
@@ -442,6 +468,10 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	Future<Void> storageServerFailureTracker(TCServerInfo* server, ServerStatus* status, Version addedVersion);
 
 	Future<Void> waitForAllDataRemoved(UID serverID, Version addedVersion) const;
+
+	// calculate minLoadBytes / avgLoadBytes among servers. An unhealthy server's load is considered as 0. If the
+	// average load of each storage server is less than smallLoadThreshold, return 1 always.
+	double loadBytesBalanceRatio(int64_t smallLoadThreshold) const;
 
 	// Create a transaction updating `perpetualStorageWiggleIDPrefix` to the next serverID according to a sorted
 	// wiggle_pq maintained by the wiggler.
@@ -616,22 +646,7 @@ public:
 	AsyncTrigger printDetailedTeamsInfo;
 	Reference<LocalitySet> storageServerSet;
 
-	DDTeamCollection(Reference<IDDTxnProcessor>& db,
-	                 UID distributorId,
-	                 MoveKeysLock const& lock,
-	                 PromiseStream<RelocateShard> const& output,
-	                 Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
-	                 DatabaseConfiguration configuration,
-	                 std::vector<Optional<Key>> includedDCs,
-	                 Optional<std::vector<Optional<Key>>> otherTrackedDCs,
-	                 Future<Void> readyToStart,
-	                 Reference<AsyncVar<bool>> zeroHealthyTeams,
-	                 IsPrimary primary,
-	                 Reference<AsyncVar<bool>> processingUnhealthy,
-	                 Reference<AsyncVar<bool>> processingWiggle,
-	                 PromiseStream<GetMetricsRequest> getShardMetrics,
-	                 Promise<UID> removeFailedServer,
-	                 PromiseStream<Promise<int>> getUnhealthyRelocationCount);
+	DDTeamCollection(DDTeamCollectionInitParams const& params);
 
 	~DDTeamCollection();
 

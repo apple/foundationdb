@@ -45,7 +45,7 @@
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/IKnobCollection.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/S3BlobStore.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
@@ -2383,7 +2383,7 @@ ACTOR Future<Void> runRestore(Database db,
 				fmt::print("Restored to version {}\n", restoredVersion);
 			}
 		} else {
-			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion, db, ranges));
+			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion, ranges));
 
 			if (!rset.present()) {
 				fmt::print(stderr,
@@ -2493,7 +2493,7 @@ ACTOR Future<Void> runFastRestoreTool(Database db,
 				restoreVersion = dbVersion;
 			}
 
-			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion, db));
+			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion));
 			if (!rset.present()) {
 				fmt::print(stderr, "Insufficient data to restore to version {}\n", restoreVersion);
 				throw restore_invalid_version();
@@ -2595,7 +2595,9 @@ ACTOR Future<Void> expireBackupData(const char* name,
 						lastProgress = p;
 					}
 				}
-				when(wait(expire)) { break; }
+				when(wait(expire)) {
+					break;
+				}
 			}
 		}
 
@@ -2638,7 +2640,9 @@ ACTOR Future<Void> deleteBackupContainer(const char* name,
 
 		loop {
 			choose {
-				when(wait(done)) { break; }
+				when(wait(done)) {
+					break;
+				}
 				when(wait(delay(5))) {
 					if (numDeleted != lastUpdate) {
 						printf("\r%d...", numDeleted);
@@ -2764,7 +2768,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 			                           format("the specified restorable version %lld is not valid", restoreVersion));
 			return Void();
 		}
-		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, cx, keyRangesFilter));
+		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, keyRangesFilter));
 		if (fileSet.present()) {
 			int64_t totalRangeFilesSize = 0, totalLogFilesSize = 0;
 			result["restore_version"] = fileSet.get().targetVersion;
@@ -3044,7 +3048,7 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 
 static void addKeyRange(std::string optionValue, Standalone<VectorRef<KeyRangeRef>>& keyRanges) {
 	bool err = false, partial = false;
-	int tokenArray = 0;
+	[[maybe_unused]] int tokenArray = 0;
 
 	auto parsed = parseLine(optionValue, err, partial);
 
@@ -3969,7 +3973,7 @@ int main(int argc, char* argv[]) {
 		// a cluster so they should use this instead.
 		auto initTraceFile = [&]() {
 			if (trace)
-				openTraceFile(NetworkAddress(), traceRollSize, traceMaxLogsSize, traceDir, "trace", traceLogGroup);
+				openTraceFile({}, traceRollSize, traceMaxLogsSize, traceDir, "trace", traceLogGroup);
 		};
 
 		auto initCluster = [&](bool quiet = false) {

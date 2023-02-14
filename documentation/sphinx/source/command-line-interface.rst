@@ -131,12 +131,35 @@ The default is ``disabled``, which means changing the storage engine will not be
 ``aggressive`` tries to replace as many storages as it can at once, and will recruit a new storage server on the same process as the old one. This will be faster, but can potentially hit degraded performance or OOM with two storages on the same process. The main benefit over ``gradual`` is that this doesn't need to take one storage out of rotation, so it works for small or development clusters that have the same number of storage processes as the replication factor. Note that ``aggressive`` is not exclusive to running the perpetual wiggle.
 ``disabled`` means that if the storage engine is changed, fdb will not move the cluster over to the new storage engine. This will disable the perpetual wiggle from rewriting storage files.
 
+consistencyscan
+----------------
+
+This command controls a native data consistency scan role that is automatically recruited in the FDB cluster.  The consistency scan reads all replicas of each shard to verify data consistency.  It is useful for finding corrupt cold data by ensuring that all data is read periodically.  Any errors found will be logged as TraceEvents with Severity = 40.
+
+The syntax is
+
+``consistencyscan [ off | on [maxRate <RATE>] [targetInterval <INTERVAL>] [restart <RESTART>] ]``
+
+* ``off`` will disable the consistency scan
+
+* ``on`` will enable the scan and can be accompanied by additional options shown above
+
+  * ``RATE`` - sets the maximum read speed of the scan in bytes/s.
+
+  * ``INTERVAL`` - sets the target completion time, in seconds, for each full pass over all data in the cluster.  Scan speed will target this interval with a hard limit of RATE.
+
+  * ``RESTART`` - a 1 or 0 and controls whether the process should restart from the beginning of userspace on startup or not.  This should normally be set to 0 which will resume progress from the last time the scan was running.
+
+The consistency scan role publishes its configuration and metrics in Status JSON under the path ``.cluster.consistency_scan_info``.
+
 consistencycheck
 ----------------
 
-The ``consistencycheck`` command enables or disables consistency checking. Its syntax is ``consistencycheck [on|off]``. Calling it with ``on`` enables consistency checking, and ``off`` disables it. Calling it with no arguments displays whether consistency checking is currently enabled.
+Note: This command exists for backward compatibility, it is suggested to use the ``consistencyscan`` command to control FDB's internal consistency scan role instead.
 
-You must be running an ``fdbserver`` process with the ``consistencycheck`` role to perform consistency checking.
+This command controls a key which controls behavior of any externally configured consistency check roles.  You must be running an ``fdbserver`` process with the ``consistencycheck`` role to perform consistency checking.
+
+The ``consistencycheck`` command enables or disables consistency checking. Its syntax is ``consistencycheck [on|off]``. Calling it with ``on`` enables consistency checking, and ``off`` disables it. Calling it with no arguments displays whether consistency checking is currently enabled.
 
 coordinators
 ------------
@@ -475,7 +498,7 @@ Deletes a tenant from the cluster. The tenant must be empty.
 list
 ^^^^
 
-``tenant list [BEGIN] [END] [LIMIT]``
+``tenant list [BEGIN] [END] [limit=LIMIT] [offset=OFFSET] [state=<STATE1>,<STATE2>,...]``
 
 Lists the tenants present in the cluster.
 
@@ -484,6 +507,10 @@ Lists the tenants present in the cluster.
 ``END`` - the exclusive end tenant to list. Defaults to ``\xff\xff``.
 
 ``LIMIT`` - the number of tenants to list. Defaults to 100.
+
+``OFFSET`` - the number of items to skip over, starting from the beginning of the range. Defaults to 0.
+
+``STATE``` - TenantState(s) to filter the list with. Defaults to no filters.
 
 get
 ^^^

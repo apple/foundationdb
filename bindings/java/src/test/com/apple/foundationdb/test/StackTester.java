@@ -450,10 +450,19 @@ public class StackTester {
 			}
 			else if (op == StackOperation.TENANT_SET_ACTIVE) {
 				byte[] tenantName = (byte[])inst.popParam().join();
-				inst.context.setTenant(Optional.of(tenantName));
+				inst.context.setTenant(Optional.of(tenantName)).join();
+				inst.push("SET_ACTIVE_TENANT".getBytes());
 			}
 			else if (op == StackOperation.TENANT_CLEAR_ACTIVE) {
 				inst.context.setTenant(Optional.empty());
+			}
+			else if (op == StackOperation.TENANT_GET_ID) {
+				if (inst.context.tenant.isPresent()) {
+					inst.context.tenant.get().getId().join();
+					inst.push("GOT_TENANT_ID".getBytes());
+				} else {
+					inst.push("NO_ACTIVE_TENANT".getBytes());
+				}
 			}
 			else if (op == StackOperation.UNIT_TESTS) {
 				try {

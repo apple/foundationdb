@@ -62,6 +62,7 @@ struct CommitProxyInterface {
 	RequestStream<struct ExclusionSafetyCheckRequest> exclusionSafetyCheckReq;
 	RequestStream<struct GetDDMetricsRequest> getDDMetrics;
 	PublicRequestStream<struct ExpireIdempotencyIdRequest> expireIdempotencyId;
+	PublicRequestStream<struct GetTenantIdRequest> getTenantId;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -90,6 +91,7 @@ struct CommitProxyInterface {
 			getDDMetrics = RequestStream<struct GetDDMetricsRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
 			expireIdempotencyId =
 			    PublicRequestStream<struct ExpireIdempotencyIdRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
+			getTenantId = PublicRequestStream<struct GetTenantIdRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
 		}
 	}
 
@@ -107,6 +109,7 @@ struct CommitProxyInterface {
 		streams.push_back(exclusionSafetyCheckReq.getReceiver());
 		streams.push_back(getDDMetrics.getReceiver());
 		streams.push_back(expireIdempotencyId.getReceiver());
+		streams.push_back(getTenantId.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -123,7 +126,6 @@ struct ClientDBInfo {
 	Optional<Value> forward;
 	std::vector<VersionHistory> history;
 	UID clusterId;
-	bool isEncryptionEnabled = false;
 	Optional<EncryptKeyProxyInterface> encryptKeyProxy;
 
 	TenantMode tenantMode;
@@ -147,13 +149,17 @@ struct ClientDBInfo {
 		           forward,
 		           history,
 		           tenantMode,
-		           isEncryptionEnabled,
 		           encryptKeyProxy,
 		           clusterId,
 		           clusterType,
 		           metaclusterName);
 	}
 };
+
+// Compile ReplyPromise<CachedSerialization<ClientDBInfo>> takes long time, extern template is used to fix this. The
+// corresponding instantiations are done in CommitProxyInterface.cpp
+extern template class ReplyPromise<struct ClientDBInfo>;
+extern template class ReplyPromise<class CachedSerialization<struct ClientDBInfo>>;
 
 struct ExpireIdempotencyIdRequest {
 	constexpr static FileIdentifier file_identifier = 1900933;
@@ -196,10 +202,11 @@ struct CommitID {
 
 struct CommitTransactionRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 93948;
-	enum { FLAG_IS_LOCK_AWARE = 0x1, FLAG_FIRST_IN_BATCH = 0x2 };
+	enum { FLAG_IS_LOCK_AWARE = 0x1, FLAG_FIRST_IN_BATCH = 0x2, FLAG_BYPASS_STORAGE_QUOTA = 0x4 };
 
 	bool isLockAware() const { return (flags & FLAG_IS_LOCK_AWARE) != 0; }
 	bool firstInBatch() const { return (flags & FLAG_FIRST_IN_BATCH) != 0; }
+	bool bypassStorageQuota() const { return (flags & FLAG_BYPASS_STORAGE_QUOTA) != 0; }
 
 	Arena arena;
 	SpanContext spanContext;
@@ -362,10 +369,45 @@ struct GetReadVersionRequest : TimedRequest {
 	}
 };
 
+struct GetTenantIdReply {
+	constexpr static FileIdentifier file_identifier = 11441284;
+	int64_t tenantId = TenantInfo::INVALID_TENANT;
+
+	GetTenantIdReply() {}
+	GetTenantIdReply(int64_t tenantId) : tenantId(tenantId) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, tenantId);
+	}
+};
+
+struct GetTenantIdRequest {
+	constexpr static FileIdentifier file_identifier = 11299717;
+	TenantName tenantName;
+	ReplyPromise<GetTenantIdReply> reply;
+
+	// This version is used to specify the minimum metadata version a proxy must have in order to declare that
+	// a tenant is not present. If the metadata version is lower, the proxy must wait in case the tenant gets
+	// created. If latestVersion is specified, then the proxy will wait until it is sure that it has received
+	// updates from other proxies before answering.
+	Version minTenantVersion;
+
+	GetTenantIdRequest() : minTenantVersion(latestVersion) {}
+	GetTenantIdRequest(TenantNameRef const& tenantName, Version minTenantVersion)
+	  : tenantName(tenantName), minTenantVersion(minTenantVersion) {}
+
+	bool verify() const { return true; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply, tenantName, minTenantVersion);
+	}
+};
+
 struct GetKeyServerLocationsReply {
 	constexpr static FileIdentifier file_identifier = 10636023;
 	Arena arena;
-	TenantMapEntry tenantEntry;
 	std::vector<std::pair<KeyRangeRef, std::vector<StorageServerInterface>>> results;
 
 	// if any storage servers in results have a TSS pair, that mapping is in here
@@ -380,9 +422,13 @@ struct GetKeyServerLocationsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, results, resultsTssMapping, tenantEntry, resultsTagMapping, arena);
+		serializer(ar, results, resultsTssMapping, resultsTagMapping, arena);
 	}
 };
+
+// Instantiated in CommitProxyInterface.cpp
+extern template class ReplyPromise<GetKeyServerLocationsReply>;
+extern template struct NetSAV<GetKeyServerLocationsReply>;
 
 struct GetKeyServerLocationsRequest {
 	constexpr static FileIdentifier file_identifier = 9144680;
@@ -466,10 +512,11 @@ struct GetStorageServerRejoinInfoReply {
 	Optional<Tag> newTag;
 	bool newLocality;
 	std::vector<std::pair<Version, Tag>> history;
+	EncryptionAtRestMode encryptMode;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, tag, newTag, newLocality, history);
+		serializer(ar, version, tag, newTag, newLocality, history, encryptMode);
 	}
 };
 
@@ -636,6 +683,8 @@ struct GlobalConfigRefreshRequest {
 
 	GlobalConfigRefreshRequest() {}
 	explicit GlobalConfigRefreshRequest(Version lastKnown) : lastKnown(lastKnown) {}
+
+	bool verify() const noexcept { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

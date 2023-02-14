@@ -55,6 +55,23 @@ struct GranuleDeltas : VectorRef<MutationsAndVersionRef> {
 	}
 };
 
+#pragma pack(push, 4)
+struct GranuleMutationRef {
+	MutationRef::Type type;
+	Version version;
+	StringRef param1;
+	StringRef param2;
+
+	GranuleMutationRef() {}
+	GranuleMutationRef(MutationRef::Type t, Version v, StringRef param1, StringRef param2)
+	  : type(t), version(v), param1(param1), param2(param2) {}
+	GranuleMutationRef(Arena& to, MutationRef::Type t, Version v, StringRef param1, StringRef param2)
+	  : type(t), version(v), param1(to, param1), param2(to, param2) {}
+	GranuleMutationRef(Arena& to, const GranuleMutationRef& from)
+	  : type(from.type), version(from.version), param1(to, from.param1), param2(to, from.param2) {}
+};
+#pragma pack(pop)
+
 struct GranuleMaterializeStats {
 	// file-level stats
 	int64_t inputBytes;
@@ -303,24 +320,54 @@ struct GranuleHistory {
 };
 
 // A manifest to assist full fdb restore from blob granule files
-struct BlobManifest {
-	constexpr static FileIdentifier file_identifier = 298872;
-	VectorRef<KeyValueRef> rows;
+struct BlobManifestTailer {
+	constexpr static FileIdentifier file_identifier = 379431;
+	int64_t totalRows;
+	int64_t totalSegments;
+	int64_t totalBytes;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rows);
+		serializer(ar, totalRows, totalSegments, totalBytes);
 	}
 };
 
 // Defines blob restore status
+enum BlobRestorePhase {
+	INIT = 0,
+	STARTING_MIGRATOR = 1,
+	LOADING_MANIFEST = 2,
+	LOADED_MANIFEST = 3,
+	COPYING_DATA = 4,
+	APPLYING_MLOGS = 5,
+	DONE = 6,
+	ERROR = 7
+};
 struct BlobRestoreStatus {
 	constexpr static FileIdentifier file_identifier = 378657;
-	int progress;
+	BlobRestorePhase phase;
+	int status;
+
+	BlobRestoreStatus() : phase(BlobRestorePhase::INIT){};
+	BlobRestoreStatus(BlobRestorePhase pha) : phase(pha), status(0){};
+	BlobRestoreStatus(BlobRestorePhase pha, int prog) : phase(pha), status(prog){};
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, progress);
+		serializer(ar, phase, status);
+	}
+};
+
+struct BlobRestoreArg {
+	constexpr static FileIdentifier file_identifier = 947689;
+	Optional<Version> version;
+
+	BlobRestoreArg() {}
+	BlobRestoreArg(Optional<Version> v) : version(v){};
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version);
 	}
 };
 

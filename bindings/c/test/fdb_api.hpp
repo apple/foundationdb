@@ -81,6 +81,61 @@ struct GranuleSummary {
 	}
 };
 
+struct GranuleFilePointer {
+	ByteString filename;
+	int64_t offset;
+	int64_t length;
+	int64_t fullFileLength;
+
+	GranuleFilePointer(const native::FDBBGFilePointer& nativePointer) {
+		filename = fdb::Key(nativePointer.filename_ptr, nativePointer.filename_length);
+		offset = nativePointer.file_offset;
+		length = nativePointer.file_length;
+		fullFileLength = nativePointer.full_file_length;
+	}
+};
+
+struct GranuleMutation {
+	native::FDBBGMutationType type;
+	int64_t version;
+	ByteString param1;
+	ByteString param2;
+
+	GranuleMutation(const native::FDBBGMutation& nativeMutation) {
+		type = static_cast<native::FDBBGMutationType>(nativeMutation.type);
+		version = nativeMutation.version;
+		param1 = ByteString(nativeMutation.param1_ptr, nativeMutation.param1_length);
+		param2 = ByteString(nativeMutation.param2_ptr, nativeMutation.param2_length);
+	}
+};
+
+struct GranuleDescription {
+	KeyRange keyRange;
+	std::optional<GranuleFilePointer> snapshotFile;
+	std::vector<GranuleFilePointer> deltaFiles;
+	std::vector<GranuleMutation> memoryMutations;
+
+	GranuleDescription(const native::FDBBGFileDescription& nativeDesc) {
+		keyRange.beginKey = fdb::Key(nativeDesc.key_range.begin_key, nativeDesc.key_range.begin_key_length);
+		keyRange.endKey = fdb::Key(nativeDesc.key_range.end_key, nativeDesc.key_range.end_key_length);
+		if (nativeDesc.snapshot_present) {
+			snapshotFile = GranuleFilePointer(nativeDesc.snapshot_file_pointer);
+		}
+		if (nativeDesc.delta_file_count > 0) {
+			deltaFiles.reserve(nativeDesc.delta_file_count);
+			for (int i = 0; i < nativeDesc.delta_file_count; i++) {
+				deltaFiles.emplace_back(nativeDesc.delta_files[i]);
+			}
+		}
+		if (nativeDesc.memory_mutation_count > 0) {
+			memoryMutations.reserve(nativeDesc.memory_mutation_count);
+			for (int i = 0; i < nativeDesc.memory_mutation_count; i++) {
+				memoryMutations.emplace_back(nativeDesc.memory_mutations[i]);
+			}
+		}
+	}
+};
+
 inline uint8_t const* toBytePtr(char const* ptr) noexcept {
 	return reinterpret_cast<uint8_t const*>(ptr);
 }
@@ -110,18 +165,18 @@ inline int intSize(BytesRef b) {
 }
 
 template <template <class...> class StringLike, class Char>
-ByteString strinc(const StringLike<Char>& s) {
-	int index;
+StringLike<Char> strinc(const StringLike<Char>& s) {
+	int index = -1;
 	for (index = s.size() - 1; index >= 0; index--)
-		if (s[index] != 255)
+		if (static_cast<uint8_t>(s[index]) != 255)
 			break;
 
-	// Must not be called with a string that consists only of zero or more '\xff' bytes.
+	// Must not be called with a string that is empty or only consists of '\xff' bytes.
 	assert(index >= 0);
 
-	ByteString byteResult(s.substr(0, index + 1));
-	byteResult[byteResult.size() - 1]++;
-	return byteResult;
+	auto ret = s.substr(0, index + 1);
+	ret.back()++;
+	return ret;
 }
 
 class Error {
@@ -246,6 +301,42 @@ struct GranuleSummaryRefArray {
 	}
 };
 
+// fdb_future_readbg_get_descriptions
+
+struct GranuleDescriptionRef : native::FDBBGFileDescription {
+	fdb::KeyRef beginKey() const noexcept {
+		return fdb::KeyRef(native::FDBBGFileDescription::key_range.begin_key,
+		                   native::FDBBGFileDescription::key_range.begin_key_length);
+	}
+	fdb::KeyRef endKey() const noexcept {
+		return fdb::KeyRef(native::FDBBGFileDescription::key_range.end_key,
+		                   native::FDBBGFileDescription::key_range.end_key_length);
+	}
+};
+
+struct GranuleDescriptionRefArray {
+	using Type = std::tuple<GranuleDescriptionRef*, int>;
+	static Error extract(native::FDBFuture* f, Type& out) noexcept {
+		auto& [out_desc, out_count] = out;
+		auto err = native::fdb_future_readbg_get_descriptions(
+		    f, reinterpret_cast<native::FDBBGFileDescription**>(&out_desc), &out_count);
+		return Error(err);
+	}
+};
+
+struct GranuleMutationRef : native::FDBBGMutation {
+	fdb::KeyRef param1() const noexcept {
+		return fdb::BytesRef(native::FDBBGMutation::param1_ptr, native::FDBBGMutation::param1_length);
+	}
+	fdb::KeyRef param2() const noexcept {
+		return fdb::BytesRef(native::FDBBGMutation::param2_ptr, native::FDBBGMutation::param2_length);
+	}
+};
+
+struct GranuleMutationRefArray {
+	using Type = std::tuple<GranuleMutationRef const*, int>;
+};
+
 } // namespace future_var
 
 [[noreturn]] inline void throwError(std::string_view preamble, Error err) {
@@ -335,6 +426,7 @@ class Result {
 
 public:
 	using KeyValueRefArray = future_var::KeyValueRefArray::Type;
+	using GranuleMutationRefArray = future_var::GranuleMutationRefArray::Type;
 
 	Error getKeyValueArrayNothrow(KeyValueRefArray& out) const noexcept {
 		auto out_more_native = native::fdb_bool_t{};
@@ -348,6 +440,20 @@ public:
 	KeyValueRefArray getKeyValueArray() const {
 		auto ret = KeyValueRefArray{};
 		if (auto err = getKeyValueArrayNothrow(ret))
+			throwError("ERROR: result_get_keyvalue_array(): ", err);
+		return ret;
+	}
+
+	Error getGranuleMutationArrayNothrow(GranuleMutationRefArray& out) const noexcept {
+		auto& [out_mutations, out_count] = out;
+		auto err_raw = native::fdb_result_get_bg_mutations_array(
+		    r.get(), reinterpret_cast<const native::FDBBGMutation**>(&out_mutations), &out_count);
+		return Error(err_raw);
+	}
+
+	GranuleMutationRefArray getGranuleMutationArray() const {
+		auto ret = GranuleMutationRefArray{};
+		if (auto err = getGranuleMutationArrayNothrow(ret))
 			throwError("ERROR: result_get_keyvalue_array(): ", err);
 		return ret;
 	}
@@ -640,6 +746,29 @@ public:
 		return native::fdb_transaction_watch(tr.get(), key.data(), intSize(key));
 	}
 
+	TypedFuture<future_var::GranuleDescriptionRefArray> readBlobGranulesDescription(KeyRef begin,
+	                                                                                KeyRef end,
+	                                                                                int64_t beginVersion,
+	                                                                                int64_t readVersion,
+	                                                                                int64_t* readVersionOut) {
+		return native::fdb_transaction_read_blob_granules_description(tr.get(),
+		                                                              begin.data(),
+		                                                              intSize(begin),
+		                                                              end.data(),
+		                                                              intSize(end),
+		                                                              beginVersion,
+		                                                              readVersion,
+		                                                              readVersionOut);
+	}
+
+	Result parseSnapshotFile(BytesRef fileData) {
+		return Result(native::fdb_readbg_parse_snapshot_file(fileData.data(), intSize(fileData)));
+	}
+
+	Result parseDeltaFile(BytesRef fileData) {
+		return Result(native::fdb_readbg_parse_delta_file(fileData.data(), intSize(fileData)));
+	}
+
 	TypedFuture<future_var::None> commit() { return native::fdb_transaction_commit(tr.get()); }
 
 	TypedFuture<future_var::None> onError(Error err) { return native::fdb_transaction_on_error(tr.get(), err.code()); }
@@ -779,6 +908,12 @@ public:
 		    tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end), version);
 	}
 
+	TypedFuture<future_var::Int64> getId() {
+		if (!tenant)
+			throw std::runtime_error("getId() from null tenant");
+		return native::fdb_tenant_get_id(tenant.get());
+	}
+
 	TypedFuture<future_var::KeyRef> purgeBlobGranules(KeyRef begin, KeyRef end, int64_t version, bool force) override {
 		if (!tenant)
 			throw std::runtime_error("purgeBlobGranules() from null tenant");
@@ -902,6 +1037,8 @@ public:
 			throw std::runtime_error("purgeBlobGranules from null database");
 		return native::fdb_database_wait_purge_granules_complete(db.get(), purgeKey.data(), intSize(purgeKey));
 	}
+
+	TypedFuture<future_var::KeyRef> getClientStatus() { return native::fdb_database_get_client_status(db.get()); }
 };
 
 inline Error selectApiVersionNothrow(int version) {

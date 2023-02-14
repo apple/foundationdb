@@ -33,15 +33,26 @@ ACTOR Future<bool> blobRestoreCommandActor(Database localDb, std::vector<StringR
 		return false;
 	}
 
+	Optional<Version> version;
+	if (tokens.size() > 1) {
+		Version v;
+		if (sscanf(tokens[1].toString().c_str(), "%" PRId64, &v) != 1) {
+			printUsage(tokens[0]);
+			return false;
+		}
+		version = v;
+	}
+
 	state bool success = false;
-	wait(store(success, localDb->blobRestore(normalKeys)));
+	wait(store(success, localDb->blobRestore(normalKeys, version)));
 	if (success) {
-		fmt::print("Started blob restore for the full cluster. Please use 'status' command to check progress.\n");
+		fmt::print(
+		    "Started blob restore for the full cluster. Please use 'status details' command to check progress.\n");
 	} else {
 		fmt::print("Fail to start a new blob restore while there is a pending one.\n");
 	}
 	return success;
 }
 
-CommandFactory blobRestoreFactory("blobrestore", CommandHelp("blobrestore", "", ""));
+CommandFactory blobRestoreFactory("blobrestore", CommandHelp("blobrestore [version]", "", ""));
 } // namespace fdb_cli

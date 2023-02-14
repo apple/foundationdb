@@ -295,7 +295,7 @@ private:
 				FastAllocator<128>::release(this);
 				INSTRUMENT_RELEASE("SkipListNode128");
 			} else {
-				delete[](char*) this;
+				delete[] (char*)this;
 				INSTRUMENT_RELEASE("SkipListNodeLarge");
 			}
 		}

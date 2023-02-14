@@ -137,6 +137,11 @@ def quota(logger):
     logger.debug(command + ' : ' + output)
     assert output == 'Successfully updated quota.'
 
+    command = 'quota set green storage 98765'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == 'Successfully updated quota.'
+
     command = 'quota get green total_throughput'
     output = run_fdbcli_command(command)
     logger.debug(command + ' : ' + output)
@@ -147,12 +152,22 @@ def quota(logger):
     logger.debug(command + ' : ' + output)
     assert output == '16384'
 
+    command = 'quota get green storage'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == '98765'
+
     command = 'quota clear green'
     output = run_fdbcli_command(command)
     logger.debug(command + ' : ' + output)
     assert output == 'Successfully cleared quota.'
 
     command = 'quota get green total_throughput'
+    output = run_fdbcli_command(command)
+    logger.debug(command + ' : ' + output)
+    assert output == '<empty>'
+
+    command = 'quota get green storage'
     output = run_fdbcli_command(command)
     logger.debug(command + ' : ' + output)
     assert output == '<empty>'
@@ -771,7 +786,7 @@ def tenant_list(logger):
     output = run_fdbcli_command('tenant list')
     assert output == '1. tenant\n  2. tenant2'
 
-    output = run_fdbcli_command('tenant list a z 1')
+    output = run_fdbcli_command('tenant list a z limit=1')
     assert output == '1. tenant'
 
     output = run_fdbcli_command('tenant list a tenant2')
@@ -786,8 +801,14 @@ def tenant_list(logger):
     output = run_fdbcli_command_and_get_error('tenant list b a')
     assert output == 'ERROR: end must be larger than begin'
 
-    output = run_fdbcli_command_and_get_error('tenant list a b 12x')
+    output = run_fdbcli_command_and_get_error('tenant list a b limit=12x')
     assert output == 'ERROR: invalid limit `12x\''
+
+    output = run_fdbcli_command_and_get_error('tenant list a b offset=13y')
+    assert output == 'ERROR: invalid offset `13y\''
+
+    output = run_fdbcli_command_and_get_error('tenant list a b state=14z')
+    assert output == 'ERROR: unrecognized tenant state(s) `14z\'.'
 
 @enable_logging()
 def tenant_get(logger):
@@ -807,7 +828,10 @@ def tenant_get(logger):
     assert(json_output['type'] == 'success')
     assert(len(json_output['tenant']) == 4)
     assert('id' in json_output['tenant'])
-    assert('encrypted' in json_output['tenant'])
+    assert('name' in json_output['tenant'])
+    assert(len(json_output['tenant']['name']) == 2)
+    assert('base64' in json_output['tenant']['name'])
+    assert('printable' in json_output['tenant']['name'])
     assert('prefix' in json_output['tenant'])
     assert(len(json_output['tenant']['prefix']) == 2)
     assert('base64' in json_output['tenant']['prefix'])
@@ -829,7 +853,10 @@ def tenant_get(logger):
     assert(json_output['type'] == 'success')
     assert(len(json_output['tenant']) == 5)
     assert('id' in json_output['tenant'])
-    assert('encrypted' in json_output['tenant'])
+    assert('name' in json_output['tenant'])
+    assert(len(json_output['tenant']['name']) == 2)
+    assert('base64' in json_output['tenant']['name'])
+    assert('printable' in json_output['tenant']['name'])
     assert('prefix' in json_output['tenant'])
     assert(json_output['tenant']['tenant_state'] == 'ready')
     assert('tenant_group' in json_output['tenant'])
@@ -1050,7 +1077,7 @@ if __name__ == '__main__':
                             description="""
     The test calls fdbcli commands through fdbcli --exec "<command>" interactively using subprocess.
     The outputs from fdbcli are returned and compared to predefined results.
-    Consequently, changing fdbcli outputs or breaking any commands will casue the test to fail.
+    Consequently, changing fdbcli outputs or breaking any commands will cause the test to fail.
     Commands that are easy to test will run against a single process cluster.
     For complex commands like exclude, they will run against a cluster with multiple(current set to 5) processes.
     If external_client_library is given, we will disable the local client and use the external client to run fdbcli.

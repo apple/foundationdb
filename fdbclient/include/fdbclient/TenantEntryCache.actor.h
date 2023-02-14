@@ -29,7 +29,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Knobs.h"
@@ -55,14 +55,13 @@ enum class TenantEntryCacheRefreshMode { PERIODIC_TASK = 1, WATCH = 2, NONE = 3 
 
 template <class T>
 struct TenantEntryCachePayload {
-	TenantName name;
 	TenantMapEntry entry;
 	// Custom client payload
 	T payload;
 };
 
 template <class T>
-using TenantEntryCachePayloadFunc = std::function<TenantEntryCachePayload<T>(const TenantName&, const TenantMapEntry&)>;
+using TenantEntryCachePayloadFunc = std::function<TenantEntryCachePayload<T>(const TenantMapEntry&)>;
 
 // In-memory cache for TenantEntryMap objects. It supports three indices:
 // 1. Lookup by 'TenantId'
@@ -97,13 +96,13 @@ private:
 	Counter numRefreshes;
 	Counter refreshByWatchTrigger;
 
-	ACTOR static Future<TenantNameEntryPairVec> getTenantList(Reference<ReadYourWritesTransaction> tr) {
+	ACTOR static Future<std::vector<std::pair<int64_t, TenantMapEntry>>> getTenantList(
+	    Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
-		KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantList =
-		    wait(TenantMetadata::tenantMap().getRange(
-		        tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
+		KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantList =
+		    wait(TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 		ASSERT(tenantList.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantList.more);
 
 		TraceEvent(SevDebug, "TenantEntryCacheGetTenantList").detail("Count", tenantList.results.size());
@@ -120,13 +119,10 @@ private:
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				state Optional<TenantName> name = wait(TenantMetadata::tenantIdIndex().get(tr, tenantId));
-				if (name.present()) {
-					Optional<TenantMapEntry> entry = wait(TenantMetadata::tenantMap().get(tr, name.get()));
-					if (entry.present()) {
-						cache->put(std::make_pair(name.get(), entry.get()));
-						updateCacheRefreshMetrics(cache, reason);
-					}
+				state Optional<TenantMapEntry> entry = wait(TenantMetadata::tenantMap().get(tr, tenantId));
+				if (entry.present()) {
+					cache->put(entry.get());
+					updateCacheRefreshMetrics(cache, reason);
 				}
 				break;
 			} catch (Error& e) {
@@ -147,10 +143,13 @@ private:
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				Optional<TenantMapEntry> entry = wait(TenantMetadata::tenantMap().get(tr, name));
-				if (entry.present()) {
-					cache->put(std::make_pair(name, entry.get()));
-					updateCacheRefreshMetrics(cache, reason);
+				state Optional<int64_t> tenantId = wait(TenantMetadata::tenantNameIndex().get(tr, name));
+				if (tenantId.present()) {
+					Optional<TenantMapEntry> entry = wait(TenantMetadata::tenantMap().get(tr, tenantId.get()));
+					if (entry.present()) {
+						cache->put(entry.get());
+						updateCacheRefreshMetrics(cache, reason);
+					}
 				}
 				break;
 			} catch (Error& e) {
@@ -221,7 +220,7 @@ private:
 			if (!cache->lastTenantId.present()) {
 				return false;
 			}
-			return cache->lastTenantId.get() > 0;
+			return cache->lastTenantId.get() >= 0;
 		}
 		return true;
 	}
@@ -277,12 +276,12 @@ private:
 		state Reference<ReadYourWritesTransaction> tr = cache->getDatabase()->createTransaction();
 		loop {
 			try {
-				state TenantNameEntryPairVec tenantList = wait(getTenantList(tr));
+				state std::vector<std::pair<int64_t, TenantMapEntry>> tenantList = wait(getTenantList(tr));
 
 				// Refresh cache entries reflecting the latest database state
 				cache->clear();
 				for (auto& tenant : tenantList) {
-					cache->put(tenant);
+					cache->put(tenant.second);
 				}
 
 				updateCacheRefreshMetrics(cache, reason);
@@ -378,9 +377,8 @@ private:
 
 	Future<Void> refresh(TenantEntryCacheRefreshReason reason) { return refreshImpl(this, reason); }
 
-	static TenantEntryCachePayload<Void> defaultCreatePayload(const TenantName& name, const TenantMapEntry& entry) {
+	static TenantEntryCachePayload<Void> defaultCreatePayload(const TenantMapEntry& entry) {
 		TenantEntryCachePayload<Void> payload;
-		payload.name = name;
 		payload.entry = entry;
 
 		return payload;
@@ -398,14 +396,14 @@ private:
 			ASSERT(tenantId.present() != tenantPrefix.present());
 			ASSERT(!tenantName.present());
 
-			int64_t tId = tenantId.present() ? tenantId.get() : TenantMapEntry::prefixToId(tenantPrefix.get());
+			int64_t tId = tenantId.present() ? tenantId.get() : TenantAPI::prefixToId(tenantPrefix.get());
 			TraceEvent("TenantEntryCacheRemoveEntry").detail("Id", tId);
 			itrId = mapByTenantId.find(tId);
 			if (itrId == mapByTenantId.end()) {
 				return Void();
 			}
 			// Ensure byId and byName cache are in-sync
-			itrName = mapByTenantName.find(itrId->value.name);
+			itrName = mapByTenantName.find(itrId->value.entry.tenantName);
 			ASSERT(itrName != mapByTenantName.end());
 		} else if (tenantName.present()) {
 			ASSERT(!tenantId.present() && !tenantPrefix.present());
@@ -538,11 +536,10 @@ public:
 		return removeEntryInt(Optional<int64_t>(), Optional<KeyRef>(), tenantName, refreshCache);
 	}
 
-	void put(const TenantNameEntryPair& pair) {
-		const auto& [name, entry] = pair;
-		TenantEntryCachePayload<T> payload = createPayloadFunc(name, entry);
+	void put(const TenantMapEntry& entry) {
+		TenantEntryCachePayload<T> payload = createPayloadFunc(entry);
 		auto idItr = mapByTenantId.find(entry.id);
-		auto nameItr = mapByTenantName.find(name);
+		auto nameItr = mapByTenantName.find(entry.tenantName);
 
 		Optional<TenantName> existingName;
 		Optional<int64_t> existingId;
@@ -550,7 +547,7 @@ public:
 			existingId = nameItr->value.entry.id;
 		}
 		if (idItr != mapByTenantId.end()) {
-			existingName = idItr->value.name;
+			existingName = idItr->value.entry.tenantName;
 		}
 		if (existingId.present()) {
 			mapByTenantId.erase(existingId.get());
@@ -560,14 +557,14 @@ public:
 		}
 
 		mapByTenantId[entry.id] = payload;
-		mapByTenantName[name] = payload;
+		mapByTenantName[entry.tenantName] = payload;
 
-		TraceEvent("TenantEntryCachePut")
-		    .detail("TenantName", name)
+		TraceEvent("TenantEntryCachePut", uid)
+		    .detail("TenantName", entry.tenantName)
 		    .detail("TenantNameExisting", existingName)
 		    .detail("TenantID", entry.id)
 		    .detail("TenantIDExisting", existingId)
-		    .detail("TenantPrefix", pair.second.prefix);
+		    .detail("TenantPrefix", entry.prefix);
 
 		CODE_PROBE(idItr == mapByTenantId.end() && nameItr == mapByTenantName.end(), "TenantCache new entry");
 		CODE_PROBE(idItr != mapByTenantId.end() && nameItr == mapByTenantName.end(), "TenantCache entry name updated");
@@ -578,7 +575,7 @@ public:
 
 	Future<Optional<TenantEntryCachePayload<T>>> getById(int64_t tenantId) { return getByIdImpl(this, tenantId); }
 	Future<Optional<TenantEntryCachePayload<T>>> getByPrefix(KeyRef prefix) {
-		int64_t id = TenantMapEntry::prefixToId(prefix);
+		int64_t id = TenantAPI::prefixToId(prefix);
 		return getByIdImpl(this, id);
 	}
 	Future<Optional<TenantEntryCachePayload<T>>> getByName(TenantName name) { return getByNameImpl(this, name); }

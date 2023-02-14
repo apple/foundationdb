@@ -21,6 +21,7 @@
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #include <fmt/format.h>
 
@@ -168,7 +169,7 @@ struct WorkloadProcess {
 
 	WorkloadProcess(ClientWorkload::CreateWorkload const& childCreator, WorkloadContext const& wcx)
 	  : processState(WorkloadProcessState::instance(wcx.clientId)) {
-		TraceEvent("StartingClinetWorkload", id).detail("OnClientProcess", processState->id);
+		TraceEvent("StartingClientWorkload", id).detail("OnClientProcess", processState->id);
 		childWorkloadContext.clientCount = wcx.clientCount;
 		childWorkloadContext.clientId = wcx.clientId;
 		childWorkloadContext.ccr = wcx.ccr;

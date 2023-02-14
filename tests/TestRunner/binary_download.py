@@ -7,11 +7,9 @@ import shutil
 import stat
 from urllib import request
 import hashlib
+from fdb_version import CURRENT_VERSION, FUTURE_VERSION
 
-from local_cluster import random_secret_string
-
-CURRENT_VERSION = "7.3.0"
-FUTURE_VERSION = "7.4.0"
+from test_util import random_alphanum_string
 
 SUPPORTED_PLATFORMS = ["x86_64", "aarch64"]
 FDB_DOWNLOAD_ROOT = "https://github.com/apple/foundationdb/releases/download/"
@@ -52,8 +50,6 @@ class FdbBinaryDownloader:
         assert self.build_dir.is_dir(), "{} is not a directory".format(build_dir)
         self.platform = platform.machine()
         assert self.platform in SUPPORTED_PLATFORMS, "Unsupported platform {}".format(self.platform)
-        self.tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
-        self.tmp_dir.mkdir(parents=True)
         self.download_dir = self.build_dir.joinpath("tmp", "old_binaries")
         self.local_binary_repo = Path(LOCAL_OLD_BINARY_REPO)
         if not self.local_binary_repo.exists():
@@ -89,7 +85,7 @@ class FdbBinaryDownloader:
         # Download to a temporary file and then replace the target file atomically
         # to avoid consistency errors in case of multiple tests are downloading the
         # same file in parallel
-        local_file_tmp = Path("{}.{}".format(str(local_file), random_secret_string(8)))
+        local_file_tmp = Path("{}.{}".format(str(local_file), random_alphanum_string(8)))
         self.download_dir.joinpath(version).mkdir(parents=True, exist_ok=True)
         remote_file = "{}{}/{}".format(FDB_DOWNLOAD_ROOT, version, remote_bin_name)
         remote_sha256 = "{}.sha256".format(remote_file)
@@ -110,7 +106,7 @@ class FdbBinaryDownloader:
 
             assert local_file_tmp.exists(), "{} does not exist".format(local_file_tmp)
             assert local_sha256.exists(), "{} does not exist".format(local_sha256)
-            expected_checksum = read_to_str(local_sha256)
+            expected_checksum = read_to_str(local_sha256)[0:64]
             actual_checkum = compute_sha256(local_file_tmp)
             if expected_checksum == actual_checkum:
                 print("Checksum OK")
@@ -131,7 +127,7 @@ class FdbBinaryDownloader:
             return
         # Avoid race conditions in case of parallel test execution by first copying to a temporary file
         # and then renaming it atomically
-        dest_file_tmp = Path("{}.{}".format(str(dest_lib_file), random_secret_string(8)))
+        dest_file_tmp = Path("{}.{}".format(str(dest_lib_file), random_alphanum_string(8)))
         src_lib_file = self.local_binary_repo.joinpath(version, "lib", "libfdb_c-{}.so".format(version))
         assert src_lib_file.exists(), "Missing file {} in the local old binaries repository".format(src_lib_file)
         self.download_dir.joinpath(version).mkdir(parents=True, exist_ok=True)

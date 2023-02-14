@@ -57,11 +57,12 @@ std::string clusterTypeToString(const ClusterType& clusterType);
 
 // Represents the various states that a data cluster could be in.
 //
+// REGISTERING - the data cluster is being registered with the metacluster
 // READY - the data cluster is active
 // REMOVING - the data cluster is being removed and cannot have its configuration changed or any tenants created
 // RESTORING - the data cluster is being restored and cannot have its configuration changed or any tenants
 //             created/updated/deleted.
-enum class DataClusterState { READY, REMOVING, RESTORING };
+enum class DataClusterState { REGISTERING, READY, REMOVING, RESTORING };
 
 struct DataClusterEntry {
 	constexpr static FileIdentifier file_identifier = 929511;
@@ -81,9 +82,7 @@ struct DataClusterEntry {
 	  : id(id), capacity(capacity), allocated(allocated) {}
 
 	// Returns true if all configurable properties match
-	bool matchesConfiguration(DataClusterEntry const& other) const {
-		return id == other.id && capacity == other.capacity;
-	}
+	bool matchesConfiguration(DataClusterEntry const& other) const { return capacity == other.capacity; }
 
 	bool hasCapacity() const { return allocated < capacity; }
 
@@ -158,8 +157,7 @@ struct MetaclusterRegistrationEntry {
 		return ObjectReader::fromStringRef<MetaclusterRegistrationEntry>(value, IncludeVersion());
 	}
 	static Optional<MetaclusterRegistrationEntry> decode(Optional<Value> value) {
-		return value.map<MetaclusterRegistrationEntry>(
-		    [](ValueRef const& v) { return MetaclusterRegistrationEntry::decode(v); });
+		return value.map([](ValueRef const& v) { return MetaclusterRegistrationEntry::decode(v); });
 	}
 
 	std::string toString() const {
@@ -189,6 +187,7 @@ struct Traceable<MetaclusterRegistrationEntry> : std::true_type {
 struct MetaclusterMetadata {
 	// Registration information for a metacluster, stored on both management and data clusters
 	static KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>& metaclusterRegistration();
+	static KeyBackedSet<UID>& registrationTombstones();
 };
 
 #endif

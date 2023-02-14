@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
 #include "fmt/format.h"
 #include "crc32/crc32c.h"
@@ -38,6 +39,7 @@ u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 #include "fdbserver/VFSAsync.h"
 #include "fdbserver/template_fdb.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #if SQLITE_THREADSAFE == 0
@@ -149,7 +151,22 @@ struct PageChecksumCodec {
 		}
 
 		if (!silent) {
-			TraceEvent trEvent(SevError, "SQLitePageChecksumFailure");
+			auto severity = SevError;
+			if (g_network->isSimulated()) {
+				auto firstBlock = pageNumber == 1 ? 0 : ((pageNumber - 1) * pageLen) / 4096,
+				     lastBlock = (pageNumber * pageLen) / 4096;
+				auto iter = g_simulator->corruptedBlocks.lower_bound(std::make_pair(filename, firstBlock));
+				if (iter != g_simulator->corruptedBlocks.end() && iter->first == filename && iter->second < lastBlock) {
+					severity = SevWarnAlways;
+				}
+				TraceEvent("CheckCorruption")
+				    .detail("Filename", filename)
+				    .detail("NextFile", iter->first)
+				    .detail("FirstBlock", firstBlock)
+				    .detail("LastBlock", lastBlock)
+				    .detail("NextBlock", iter->second);
+			}
+			TraceEvent trEvent(severity, "SQLitePageChecksumFailure");
 			trEvent.error(checksum_failed())
 			    .detail("CodecPageSize", pageSize)
 			    .detail("CodecReserveSize", reserveSize)
@@ -706,7 +723,7 @@ struct IntKeyCursor {
 				db.checkError("BtreeCloseCursor", sqlite3BtreeCloseCursor(cursor));
 			} catch (...) {
 			}
-			delete[](char*) cursor;
+			delete[] (char*)cursor;
 		}
 	}
 };
@@ -744,7 +761,7 @@ struct RawCursor {
 			} catch (...) {
 				TraceEvent(SevError, "RawCursorDestructionError").log();
 			}
-			delete[](char*) cursor;
+			delete[] (char*)cursor;
 		}
 	}
 	void moveFirst() {
@@ -1623,6 +1640,10 @@ public:
 	Future<SpringCleaningWorkPerformed> doClean();
 	void startReadThreads();
 
+	Future<EncryptionAtRestMode> encryptionMode() override {
+		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
+	}
+
 private:
 	KeyValueStoreType type;
 	UID logID;
@@ -1897,14 +1918,11 @@ private:
 				readThreads[i].clear();
 		}
 		void checkFreePages() {
-			int iterations = 0;
-
 			int64_t freeListSize = freeListPages;
 			while (!freeTableEmpty && freeListSize < SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT) {
 				int deletedPages = cursor->lazyDelete(SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT);
 				freeTableEmpty = (deletedPages != SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT);
 				springCleaningStats.lazyDeletePages += deletedPages;
-				++iterations;
 
 				freeListSize = conn.freePages();
 			}

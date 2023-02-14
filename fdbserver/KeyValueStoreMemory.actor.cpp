@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/BlobCipher.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
@@ -289,6 +290,12 @@ public:
 	void enableSnapshot() override { disableSnapshot = false; }
 
 	int uncommittedBytes() { return queue.totalSize(); }
+
+	// KeyValueStoreMemory does not support encryption-at-rest in general, despite it supports encryption
+	// when being used as TxnStateStore backend.
+	Future<EncryptionAtRestMode> encryptionMode() override {
+		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
+	}
 
 private:
 	enum OpType {
@@ -583,7 +590,8 @@ private:
 						Standalone<StringRef> data = wait(self->log->readNext(sizeof(OpHeader)));
 						if (data.size() != sizeof(OpHeader)) {
 							if (data.size()) {
-								CODE_PROBE(true, "zero fill partial header in KeyValueStoreMemory");
+								CODE_PROBE(
+								    true, "zero fill partial header in KeyValueStoreMemory", probe::decoration::rare);
 								memset(&h, 0, sizeof(OpHeader));
 								memcpy(&h, data.begin(), data.size());
 								zeroFillSize = sizeof(OpHeader) - data.size() + h.len1 + h.len2 + 1;
@@ -740,7 +748,8 @@ private:
 				}
 
 				CODE_PROBE(self->enableEncryption && self->uncommittedBytes() > 0,
-				           "KeyValueStoreMemory recovered partial transaction while encryption-at-rest is enabled");
+				           "KeyValueStoreMemory recovered partial transaction while encryption-at-rest is enabled",
+				           probe::decoration::rare);
 				self->semiCommit();
 
 				return Void();

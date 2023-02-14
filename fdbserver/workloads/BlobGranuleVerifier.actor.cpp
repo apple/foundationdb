@@ -36,6 +36,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
+#include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -71,6 +72,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	bool doForcePurge;
 	bool purgeAtLatest;
 	bool clearAndMergeCheck;
+	bool granuleSizeCheck;
+	bool doForceFlushing;
 
 	DatabaseConfiguration config;
 
@@ -84,6 +87,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	std::vector<std::tuple<KeyRange, Version, UID, Future<GranuleFiles>>> purgedDataToCheck;
 
 	Future<Void> summaryClient;
+	Future<Void> forceFlushingClient;
 	Promise<Void> triggerSummaryComplete;
 
 	BlobGranuleVerifierWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -107,17 +111,30 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		sharedRandomNumber /= 3;
 
 		// randomly some tests write data first and then turn on blob granules later, to test conversion of existing DB
-		initAtEnd = !enablePurging && sharedRandomNumber % 10 == 0;
+		initAtEnd = getOption(options, "initAtEnd"_sr, sharedRandomNumber % 10 == 0);
 		sharedRandomNumber /= 10;
+		// FIXME: enable and fix bugs!
+		// granuleSizeCheck = initAtEnd;
+		granuleSizeCheck = false;
 
 		clearAndMergeCheck = getOption(options, "clearAndMergeCheck"_sr, sharedRandomNumber % 10 == 0);
 		sharedRandomNumber /= 10;
+
+		doForceFlushing = getOption(options, "doForceFlushing"_sr, sharedRandomNumber % 4 == 0);
+		sharedRandomNumber /= 4;
 
 		// don't do strictPurgeChecking or forcePurge if !enablePurging
 		if (!enablePurging) {
 			strictPurgeChecking = false;
 			doForcePurge = false;
 			purgeAtLatest = false;
+		} else {
+			// don't do force flushing if purging enabled
+			doForceFlushing = false;
+		}
+
+		if (initAtEnd) {
+			doForceFlushing = false;
 		}
 
 		if (doForcePurge) {
@@ -172,6 +189,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			}
 		}
 	}
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.emplace("Attrition"); }
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
@@ -539,6 +557,11 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			summaryClient = validateGranuleSummaries(cx, normalKeys, {}, triggerSummaryComplete);
 		} else {
 			summaryClient = Future<Void>(Void());
+		}
+		if (doForceFlushing) {
+			forceFlushingClient = validateForceFlushing(cx, normalKeys, testDuration, triggerSummaryComplete);
+		} else {
+			forceFlushingClient = Future<Void>(Void());
 		}
 		return delay(testDuration);
 	}
@@ -1038,13 +1061,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			wait(self->setUpBlobRange(cx));
 		}
 
-		state Future<Void> checkFeedCleanupFuture;
-		if (self->clientId == 0) {
-			checkFeedCleanupFuture = checkFeedCleanup(cx, BGV_DEBUG);
-		} else {
-			checkFeedCleanupFuture = Future<Void>(Void());
-		}
-
 		state Version readVersion = wait(self->doGrv(&tr));
 		state Version startReadVersion = readVersion;
 		state int checks = 0;
@@ -1081,6 +1097,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		rangeFetcher.cancel();
 
 		allRanges = self->granuleRanges.get();
+		state int64_t totalSnapshotSizes = 0;
+		state int64_t totalChunks = 0;
 		for (auto& range : allRanges) {
 			state KeyRange r = range;
 			if (BGV_DEBUG) {
@@ -1099,6 +1117,12 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						ASSERT(chunks.size() > 0);
 						last = chunks.back().keyRange;
 						checks += chunks.size();
+
+						totalChunks += chunks.size();
+						for (auto& it : chunks) {
+							ASSERT(it.snapshotFile.present());
+							totalSnapshotSizes += it.snapshotFile.get().length;
+						}
 
 						break;
 					} catch (Error& e) {
@@ -1136,8 +1160,32 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				break;
 			}
 		}
+		// validate that snapshot files are (approximately) correctly sized on average
+		// Note that injectTooBig in the blob worker can trigger false positives of this check, which is why we increase
+		// the minimum total chunks required
+		if (self->granuleSizeCheck && totalSnapshotSizes >= 1000000 && totalChunks > 4) {
+			double ratio = (1.0 * totalSnapshotSizes) / (totalChunks * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES);
+			if (0.5 > ratio || ratio > 1.5) {
+				fmt::print("ERROR: Incorrect snapshot file size:\n  Chunks: {0}\n  Ratio: {1}\n  Avg File Size: "
+				           "{2}\n  Expected Size: {3}\n",
+				           totalChunks,
+				           ratio,
+				           totalSnapshotSizes / totalChunks,
+				           SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES);
+			}
+			ASSERT(0.5 <= ratio && ratio <= 1.5);
+		}
+
 		if (BGV_DEBUG && startReadVersion != readVersion) {
 			fmt::print("Availability check updated read version from {0} to {1}\n", startReadVersion, readVersion);
+		}
+
+		// start feed cleanup check after there's guaranteed to be data for each granule
+		state Future<Void> checkFeedCleanupFuture;
+		if (self->clientId == 0) {
+			checkFeedCleanupFuture = checkFeedCleanup(cx, BGV_DEBUG);
+		} else {
+			checkFeedCleanupFuture = Future<Void>(Void());
 		}
 
 		state bool dataPassed = wait(self->checkAllData(cx, self));
@@ -1226,7 +1274,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 
 		// validate that summary completes without error
-		wait(self->summaryClient);
+		wait(self->summaryClient && self->forceFlushingClient);
 
 		if (BGV_DEBUG) {
 			fmt::print("BGV {0}) check done\n", self->clientId);

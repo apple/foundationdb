@@ -193,16 +193,17 @@ class JsonParser(Parser):
 
 
 class Coverage:
-    def __init__(self, file: str, line: str | int, comment: str | None = None):
+    def __init__(self, file: str, line: str | int, comment: str | None = None, rare: bool = False):
         self.file = file
         self.line = int(line)
         self.comment = comment
+        self.rare = rare
 
     def to_tuple(self) -> Tuple[str, int, str | None]:
-        return self.file, self.line, self.comment
+        return self.file, self.line, self.comment, self.rare
 
     def __eq__(self, other) -> bool:
-        if isinstance(other, tuple) and len(other) == 3:
+        if isinstance(other, tuple) and len(other) == 4:
             return self.to_tuple() == other
         elif isinstance(other, Coverage):
             return self.to_tuple() == other.to_tuple()
@@ -210,7 +211,7 @@ class Coverage:
             return False
 
     def __lt__(self, other) -> bool:
-        if isinstance(other, tuple) and len(other) == 3:
+        if isinstance(other, tuple) and len(other) == 4:
             return self.to_tuple() < other
         elif isinstance(other, Coverage):
             return self.to_tuple() < other.to_tuple()
@@ -218,7 +219,7 @@ class Coverage:
             return False
 
     def __le__(self, other) -> bool:
-        if isinstance(other, tuple) and len(other) == 3:
+        if isinstance(other, tuple) and len(other) == 4:
             return self.to_tuple() <= other
         elif isinstance(other, Coverage):
             return self.to_tuple() <= other.to_tuple()
@@ -226,7 +227,7 @@ class Coverage:
             return False
 
     def __gt__(self, other: Coverage) -> bool:
-        if isinstance(other, tuple) and len(other) == 3:
+        if isinstance(other, tuple) and len(other) == 4:
             return self.to_tuple() > other
         elif isinstance(other, Coverage):
             return self.to_tuple() > other.to_tuple()
@@ -234,7 +235,7 @@ class Coverage:
             return False
 
     def __ge__(self, other):
-        if isinstance(other, tuple) and len(other) == 3:
+        if isinstance(other, tuple) and len(other) == 4:
             return self.to_tuple() >= other
         elif isinstance(other, Coverage):
             return self.to_tuple() >= other.to_tuple()
@@ -242,7 +243,7 @@ class Coverage:
             return False
 
     def __hash__(self):
-        return hash((self.file, self.line, self.comment))
+        return hash((self.file, self.line, self.comment, self.rare))
 
 
 class TraceFiles:
@@ -378,6 +379,7 @@ class Summary:
                 child = SummaryTree('CodeCoverage')
                 child.attributes['File'] = k.file
                 child.attributes['Line'] = str(k.line)
+                child.attributes['Rare'] = k.rare
                 if not v:
                     child.attributes['Covered'] = '0'
                 if k.comment is not None and len(k.comment):
@@ -595,7 +597,10 @@ class Summary:
             comment = ''
             if 'Comment' in attrs:
                 comment = attrs['Comment']
-            c = Coverage(attrs['File'], attrs['Line'], comment)
+            rare = False
+            if 'Rare' in attrs:
+                rare = bool(int(attrs['Rare']))
+            c = Coverage(attrs['File'], attrs['Line'], comment, rare)
             if covered or c not in self.coverage:
                 self.coverage[c] = covered
 
