@@ -1496,9 +1496,6 @@ struct TenantManagementWorkload : TestWorkload {
 		state std::map<Standalone<StringRef>, Optional<Value>> configuration;
 		state Optional<TenantGroupName> newTenantGroup;
 
-		// If true, the options generated may include an unknown option
-		state bool hasInvalidOption = deterministicRandom()->random01() < 0.1;
-
 		// True if any tenant group name starts with \xff
 		state bool hasSystemTenantGroup = false;
 
@@ -1507,7 +1504,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 		// Generate a tenant group. Sometimes do this at the same time that we include an invalid option to ensure
 		// that the configure function still fails
-		if (!hasInvalidOption || deterministicRandom()->coinflip()) {
+		if (deterministicRandom()->coinflip()) {
 			newTenantGroup = self->chooseTenantGroup(true);
 			hasSystemTenantGroup = hasSystemTenantGroup || newTenantGroup.orDefault(""_sr).startsWith("\xff"_sr);
 			configuration["tenant_group"_sr] = newTenantGroup;
@@ -1515,7 +1512,7 @@ struct TenantManagementWorkload : TestWorkload {
 		// Configuring 'assignedCluster' requires reading existing tenant entry which is handled in
 		// `updateManagementCluster`.
 		state bool assignToDifferentCluster = false;
-		if (operationType == OperationType::METACLUSTER && (!hasInvalidOption || deterministicRandom()->coinflip())) {
+		if (operationType == OperationType::METACLUSTER && deterministicRandom()->coinflip()) {
 			Standalone<StringRef> newClusterName = "newcluster"_sr;
 			if (deterministicRandom()->coinflip()) {
 				newClusterName = self->dataClusterName;
@@ -1524,8 +1521,12 @@ struct TenantManagementWorkload : TestWorkload {
 			}
 			configuration["assigned_cluster"_sr] = newClusterName;
 		}
-		if (hasInvalidOption) {
+
+		// If true, the options generated may include an unknown option
+		state bool hasInvalidOption = false;
+		if (configuration.empty() || deterministicRandom()->coinflip()) {
 			configuration["invalid_option"_sr] = ""_sr;
+			hasInvalidOption = true;
 		}
 
 		state Version originalReadVersion = wait(self->getLatestReadVersion(self, operationType));

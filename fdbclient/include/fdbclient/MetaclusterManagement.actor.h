@@ -1762,7 +1762,7 @@ struct ConfigureTenantImpl {
 			} else if (configItr->first == "assigned_cluster"_sr &&
 			           configItr->second != tenantEntry.get().assignedCluster) {
 				auto& newClusterName = configItr->second;
-				TraceEvent("UpdateManagementCluster")
+				TraceEvent(SevWarn, "CannotChangeAssignedCluster")
 				    .detail("TenantName", tenantEntry.get().tenantName)
 				    .detail("OriginalAssignedCluster", tenantEntry.get().assignedCluster)
 				    .detail("NewAssignedCluster", newClusterName);
