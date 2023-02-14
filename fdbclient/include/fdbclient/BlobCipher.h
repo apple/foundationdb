@@ -170,8 +170,6 @@ struct BlobCipherDetails {
 	                  const EncryptCipherRandomSalt& random)
 	  : encryptDomainId(dId), baseCipherId(bId), salt(random) {}
 
-	bool isValid() const { return encryptDomainId != INVALID_ENCRYPT_DOMAIN_ID; }
-
 	bool operator==(const BlobCipherDetails& o) const {
 		return encryptDomainId == o.encryptDomainId && baseCipherId == o.baseCipherId && salt == o.salt;
 	}
