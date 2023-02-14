@@ -9605,8 +9605,8 @@ ACTOR Future<Void> createSstFileForCheckPointMetadata(StorageServer* data,
 		try {
 			ASSERT(metaData.ranges.size() > 0);
 			state std::string localFile = dir + "/metadata_bytes.sst";
-			state IRocksDBSstFileWriter* sstWriter = nullptr;
-			sstWriter = beginRocksDBSstFileWriter(localFile);
+			state std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
+			sstWriter->open(localFile);
 			if (sstWriter == nullptr) {
 				return Void();
 			}
@@ -9647,7 +9647,7 @@ ACTOR Future<Void> createSstFileForCheckPointMetadata(StorageServer* data,
 				}
 				iter++;
 			}
-			endRocksDBSstFileWriter(sstWriter);
+			sstWriter->finish();
 			TraceEvent("DumpCheckPointMetaData", data->thisServerID)
 			    .detail("NumSampledKeys", numSampledKeys)
 			    .detail("NumGetRangeQueries", numGetRangeQueries)

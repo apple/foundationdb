@@ -296,9 +296,7 @@ ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoi
                                               const CheckpointAsKeyValues checkpointAsKeyValues,
                                               UID logID);
 
-IRocksDBSstFileWriter* beginRocksDBSstFileWriter(std::string localFile);
-
-void endRocksDBSstFileWriter(IRocksDBSstFileWriter* sstWriter);
+std::unique_ptr<IRocksDBSstFileWriter> newRocksDBSstFileWriter();
 
 RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint);
 

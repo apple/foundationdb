@@ -1098,19 +1098,12 @@ ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoi
 	return nullptr;
 }
 
-IRocksDBSstFileWriter* beginRocksDBSstFileWriter(std::string localFile) {
+std::unique_ptr<IRocksDBSstFileWriter> newRocksDBSstFileWriter() {
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
-	IRocksDBSstFileWriter* sstWriter = new RocksDBSstFileWriter();
-	sstWriter->open(localFile);
+	std::unique_ptr<IRocksDBSstFileWriter> sstWriter = std::make_unique<RocksDBSstFileWriter>();
 	return sstWriter;
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 	return nullptr;
-}
-
-void endRocksDBSstFileWriter(IRocksDBSstFileWriter* sstWriter) {
-	ASSERT(sstWriter != nullptr);
-	sstWriter->finish();
-	delete sstWriter;
 }
 
 RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint) {

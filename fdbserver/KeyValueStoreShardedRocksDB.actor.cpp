@@ -3717,12 +3717,12 @@ TEST_CASE("noSim/ShardedRocksDB/RocksDBSstFileWriter") {
 	                                  { "e"_sr, "5"_sr },
 	                                  { "h"_sr, "8"_sr },
 	                                  { "ha"_sr, "81"_sr } });
-	state IRocksDBSstFileWriter* sstWriter = nullptr;
-	sstWriter = beginRocksDBSstFileWriter(localFile);
+	state std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
+	sstWriter->open(localFile);
 	for (const auto& [key, value] : kvs1) {
 		sstWriter->write(key, value);
 	}
-	endRocksDBSstFileWriter(sstWriter);
+	sstWriter->finish();
 	// Write kvs2 to the same sst file where kvs2 keys are different from kvs1
 	state std::map<Key, Value> kvs2({ { "fa"_sr, "61"_sr },
 	                                  { "fab"_sr, "612"_sr },
@@ -3734,11 +3734,11 @@ TEST_CASE("noSim/ShardedRocksDB/RocksDBSstFileWriter") {
 	                                  { "fe"_sr, "65"_sr },
 	                                  { "fh"_sr, "68"_sr },
 	                                  { "fha"_sr, "681"_sr } });
-	sstWriter = beginRocksDBSstFileWriter(localFile);
+	sstWriter->open(localFile);
 	for (const auto& [key, value] : kvs2) {
 		sstWriter->write(key, value);
 	}
-	endRocksDBSstFileWriter(sstWriter);
+	sstWriter->finish();
 	// Write kvs3 to the same sst file where kvs3 modifies values of kvs2
 	state std::map<Key, Value> kvs3({ { "fa"_sr, "1"_sr },
 	                                  { "fab"_sr, "12"_sr },
@@ -3750,11 +3750,11 @@ TEST_CASE("noSim/ShardedRocksDB/RocksDBSstFileWriter") {
 	                                  { "fe"_sr, "5"_sr },
 	                                  { "fh"_sr, "8"_sr },
 	                                  { "fha"_sr, "81"_sr } });
-	sstWriter = beginRocksDBSstFileWriter(localFile);
+	sstWriter->open(localFile);
 	for (const auto& [key, value] : kvs3) {
 		sstWriter->write(key, value);
 	}
-	endRocksDBSstFileWriter(sstWriter);
+	sstWriter->finish();
 	// Check: sst only contains kv of kvs3
 	rocksdb::Status status;
 	rocksdb::IngestExternalFileOptions ingestOptions;
