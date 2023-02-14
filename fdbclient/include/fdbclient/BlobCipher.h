@@ -76,6 +76,7 @@ public:
 	// Order of this enum has to match initializer of counterSets.
 	enum UsageType : int {
 		TLOG = 0,
+		TLOG_POST_RESOLUTION,
 		KV_MEMORY,
 		KV_REDWOOD,
 		BLOB_GRANULE,
@@ -169,6 +170,8 @@ struct BlobCipherDetails {
 	                  const EncryptCipherBaseKeyId& bId,
 	                  const EncryptCipherRandomSalt& random)
 	  : encryptDomainId(dId), baseCipherId(bId), salt(random) {}
+
+	bool isValid() const { return encryptDomainId != INVALID_ENCRYPT_DOMAIN_ID; }
 
 	bool operator==(const BlobCipherDetails& o) const {
 		return encryptDomainId == o.encryptDomainId && baseCipherId == o.baseCipherId && salt == o.salt;
@@ -621,6 +624,8 @@ public:
 		}
 		return now() + INetwork::TIME_EPS >= expireAtTS ? true : false;
 	}
+
+	BlobCipherDetails details() const { return BlobCipherDetails{ encryptDomainId, baseCipherId, randomSalt }; }
 
 	void reset();
 

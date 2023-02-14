@@ -169,17 +169,23 @@ struct MutationRef {
 	                    Arena& arena,
 	                    BlobCipherMetrics::UsageType usageType) const {
 		ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
-		auto textCipherItr = cipherKeys.find(domainId);
-		auto headerCipherItr = cipherKeys.find(ENCRYPT_HEADER_DOMAIN_ID);
-		ASSERT(textCipherItr != cipherKeys.end() && textCipherItr->second.isValid());
-		ASSERT(headerCipherItr != cipherKeys.end() && headerCipherItr->second.isValid());
+		auto getCipherKey = [&](const EncryptCipherDomainId& domainId) {
+			auto iter = cipherKeys.find(domainId);
+			ASSERT(iter != cipherKeys.end() && iter->second.isValid());
+			return iter->second;
+		};
+		Reference<BlobCipherKey> textCipherKey = getCipherKey(domainId);
+		Reference<BlobCipherKey> headerCipherKey;
+		if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+			headerCipherKey = getCipherKey(ENCRYPT_HEADER_DOMAIN_ID);
+		}
 		uint8_t iv[AES_256_IV_LENGTH] = { 0 };
 		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
 		BinaryWriter bw(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 		bw << *this;
 		EncryptBlobCipherAes265Ctr cipher(
-		    textCipherItr->second,
-		    headerCipherItr->second,
+		    textCipherKey,
+		    headerCipherKey,
 		    iv,
 		    AES_256_IV_LENGTH,
 		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
@@ -217,27 +223,24 @@ struct MutationRef {
 	                    Arena& arena,
 	                    BlobCipherMetrics::UsageType usageType,
 	                    StringRef* buf = nullptr) const {
-		const BlobCipherEncryptHeader* header = encryptionHeader();
-		auto textCipherItr = cipherKeys.find(header->cipherTextDetails);
-		auto headerCipherItr = cipherKeys.find(header->cipherHeaderDetails);
-		ASSERT(textCipherItr != cipherKeys.end() && textCipherItr->second.isValid());
-		ASSERT(headerCipherItr != cipherKeys.end() && headerCipherItr->second.isValid());
-		TextAndHeaderCipherKeys textAndHeaderKeys;
-		textAndHeaderKeys.cipherHeaderKey = headerCipherItr->second;
-		textAndHeaderKeys.cipherTextKey = textCipherItr->second;
+		TextAndHeaderCipherKeys textAndHeaderKeys = getCipherKeys(cipherKeys);
 		return decrypt(textAndHeaderKeys, arena, usageType, buf);
 	}
 
 	TextAndHeaderCipherKeys getCipherKeys(
-	    const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys) {
+	    const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys) const {
 		const BlobCipherEncryptHeader* header = encryptionHeader();
-		auto textCipherItr = cipherKeys.find(header->cipherTextDetails);
-		auto headerCipherItr = cipherKeys.find(header->cipherHeaderDetails);
-		ASSERT(textCipherItr != cipherKeys.end() && textCipherItr->second.isValid());
-		ASSERT(headerCipherItr != cipherKeys.end() && headerCipherItr->second.isValid());
+		auto getCipherKey = [&](const BlobCipherDetails& details) -> Reference<BlobCipherKey> {
+			if (!details.isValid()) {
+				return {};
+			}
+			auto iter = cipherKeys.find(details);
+			ASSERT(iter != cipherKeys.end() && iter->second.isValid());
+			return iter->second;
+		};
 		TextAndHeaderCipherKeys textAndHeaderKeys;
-		textAndHeaderKeys.cipherHeaderKey = headerCipherItr->second;
-		textAndHeaderKeys.cipherTextKey = textCipherItr->second;
+		textAndHeaderKeys.cipherHeaderKey = getCipherKey(header->cipherHeaderDetails);
+		textAndHeaderKeys.cipherTextKey = getCipherKey(header->cipherTextDetails);
 		return textAndHeaderKeys;
 	}
 

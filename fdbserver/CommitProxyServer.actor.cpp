@@ -999,10 +999,11 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	// Fetch cipher keys if needed.
 	state Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getCipherKeys;
 	if (pProxyCommitData->encryptMode.isEncryptionEnabled()) {
-		static const std::unordered_set<EncryptCipherDomainId> defaultDomainIds = { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
-			                                                                        ENCRYPT_HEADER_DOMAIN_ID,
-			                                                                        FDB_DEFAULT_ENCRYPT_DOMAIN_ID };
-		std::unordered_set<EncryptCipherDomainId> encryptDomainIds = defaultDomainIds;
+		std::unordered_set<EncryptCipherDomainId> encryptDomainIds = { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
+			                                                           FDB_DEFAULT_ENCRYPT_DOMAIN_ID };
+		if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+			encryptDomainIds.insert(ENCRYPT_HEADER_DOMAIN_ID);
+		}
 		// For cluster aware encryption only the default domain id is needed
 		if (pProxyCommitData->encryptMode.mode == EncryptionAtRestMode::DOMAIN_AWARE) {
 			for (int t = 0; t < trs.size(); t++) {
@@ -1010,18 +1011,6 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 				int64_t tenantId = tenantInfo.tenantId;
 				if (tenantId != TenantInfo::INVALID_TENANT) {
 					encryptDomainIds.emplace(tenantId);
-				} else {
-					// Optimization: avoid enumerating mutations if cluster only serves default encryption domains
-					if (pProxyCommitData->tenantMap.size() > 0) {
-						for (auto m : trs[t].transaction.mutations) {
-							EncryptCipherDomainId domainId = getEncryptDetailsFromMutationRef(pProxyCommitData, m);
-							encryptDomainIds.emplace(domainId);
-						}
-					} else {
-						// Ensure default encryption domain-ids are present.
-						ASSERT_EQ(encryptDomainIds.count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID), 1);
-						ASSERT_EQ(encryptDomainIds.count(FDB_DEFAULT_ENCRYPT_DOMAIN_ID), 1);
-					}
 				}
 			}
 		}
@@ -1151,10 +1140,14 @@ TEST_CASE("/CommitProxy/SplitRange/LowerBoundTenantId") {
 // t1_end), ... [tn_begin, b); The references are allocated on arena;
 std::vector<MutationRef> splitClearRangeByTenant(Arena& arena,
                                                  const MutationRef& mutation,
-                                                 const std::map<int64_t, TenantName>& tenantMap) {
+                                                 const std::map<int64_t, TenantName>& tenantMap,
+                                                 std::vector<int64_t>* tenantIds = nullptr) {
 	std::vector<MutationRef> results;
 	auto it = lowerBoundTenantId(mutation.param1, tenantMap);
 	while (it != tenantMap.end()) {
+		if (tenantIds != nullptr) {
+			tenantIds->push_back(it->first);
+		}
 		KeyRef tPrefix = TenantAPI::idToPrefix(arena, it->first);
 		if (tPrefix >= mutation.param2) {
 			break;
@@ -1298,8 +1291,9 @@ size_t processClearRangeMutation(Arena& arena,
                                  MutationRef& mutation,
                                  int mutationIdx,
                                  int& newMutationSize,
-                                 std::vector<std::pair<int, std::vector<MutationRef>>>& idxSplitMutations) {
-	std::vector<MutationRef> newClears = splitClearRangeByTenant(arena, mutation, tenantMap);
+                                 std::vector<std::pair<int, std::vector<MutationRef>>>& idxSplitMutations,
+                                 std::vector<int64_t>* tenantIds = nullptr) {
+	std::vector<MutationRef> newClears = splitClearRangeByTenant(arena, mutation, tenantMap, tenantIds);
 	if (newClears.size() == 1) {
 		mutation = newClears[0];
 	} else if (newClears.size() > 1) {
@@ -1377,10 +1371,12 @@ TEST_CASE("/CommitProxy/SplitRange/replaceRawClearRanges") {
 Error validateAndProcessTenantAccess(Arena& arena,
                                      VectorRef<MutationRef>& mutations,
                                      ProxyCommitData* const pProxyCommitData,
+                                     std::unordered_set<int64_t>& rawAccessTenantIds,
                                      Optional<UID> debugId = Optional<UID>(),
                                      const char* context = "") {
 	bool changeTenant = false;
 	bool writeNormalKey = false;
+	std::vector<int64_t> tids; // tenant ids accessed by the raw access transaction
 
 	std::vector<std::pair<int, std::vector<MutationRef>>> idxSplitMutations;
 	int newMutationSize = mutations.size();
@@ -1392,7 +1388,7 @@ Error validateAndProcessTenantAccess(Arena& arena,
 
 		if (mutation.type == MutationRef::ClearRange) {
 			int newClearSize = processClearRangeMutation(
-			    arena, pProxyCommitData->tenantMap, mutation, i, newMutationSize, idxSplitMutations);
+			    arena, pProxyCommitData->tenantMap, mutation, i, newMutationSize, idxSplitMutations, &tids);
 
 			if (debugId.present()) {
 				DisabledTraceEvent(SevDebug, "SplitTenantClearRange", pProxyCommitData->dbgid)
@@ -1435,13 +1431,21 @@ Error validateAndProcessTenantAccess(Arena& arena,
 			    .detail("Reason", "Tenant change and normal key write in same transaction");
 			return illegal_tenant_access();
 		}
+		if (tenantId.present()) {
+			ASSERT(tenantId.get() != TenantInfo::INVALID_TENANT);
+			tids.push_back(tenantId.get());
+		}
 	}
+	rawAccessTenantIds.insert(tids.begin(), tids.end());
 
 	replaceRawClearRanges(arena, mutations, idxSplitMutations, newMutationSize);
 	return success();
 }
 
-Error validateAndProcessTenantAccess(CommitTransactionRequest& tr, ProxyCommitData* const pProxyCommitData) {
+// If the validation success, return the list of tenant Ids refered by the transaction via tenantIds.
+Error validateAndProcessTenantAccess(CommitTransactionRequest& tr,
+                                     ProxyCommitData* const pProxyCommitData,
+                                     std::unordered_set<int64_t>& rawAccessTenantIds) {
 	bool isValid = checkTenantNoWait(pProxyCommitData, tr.tenantInfo.tenantId, "Commit", true);
 	if (!isValid) {
 		return tenant_not_found();
@@ -1449,11 +1453,18 @@ Error validateAndProcessTenantAccess(CommitTransactionRequest& tr, ProxyCommitDa
 
 	// only do the mutation check when the transaction use raw_access option and the tenant mode is required
 	if (pProxyCommitData->getTenantMode() != TenantMode::REQUIRED || tr.tenantInfo.hasTenant()) {
+		if (tr.tenantInfo.hasTenant()) {
+			rawAccessTenantIds.insert(tr.tenantInfo.tenantId);
+		}
 		return success();
 	}
 
-	return validateAndProcessTenantAccess(
-	    tr.arena, tr.transaction.mutations, pProxyCommitData, tr.debugID, "validateAndProcessTenantAccess");
+	return validateAndProcessTenantAccess(tr.arena,
+	                                      tr.transaction.mutations,
+	                                      pProxyCommitData,
+	                                      rawAccessTenantIds,
+	                                      tr.debugID,
+	                                      "validateAndProcessTenantAccess");
 }
 
 // Compute and apply "metadata" effects of each other proxy's most recent batch
@@ -1587,13 +1598,14 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 // This first pass through committed transactions deals with "metadata" effects (modifications of txnStateStore, changes
 // to storage servers' responsibilities)
 ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self) {
-	auto pProxyCommitData = self->pProxyCommitData;
+	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+	state std::unordered_set<int64_t> rawAccessTenantIds;
 	auto& trs = self->trs;
 
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
-			Error e = validateAndProcessTenantAccess(trs[t], pProxyCommitData);
+			Error e = validateAndProcessTenantAccess(trs[t], pProxyCommitData, rawAccessTenantIds);
 			if (e.code() != error_code_success) {
 				trs[t].reply.sendError(e);
 				self->committed[t] = ConflictBatch::TransactionTenantFailure;
@@ -1605,8 +1617,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 				                       pProxyCommitData->logSystem,
 				                       trs[t].transaction.mutations,
 				                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
-				                       pProxyCommitData->encryptMode.isEncryptionEnabled() ? &self->cipherKeys
-				                                                                           : nullptr,
+				                       &self->cipherKeys,
 				                       pProxyCommitData->encryptMode,
 				                       self->forceRecovery,
 				                       self->commitVersion,
@@ -1660,6 +1671,23 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		ASSERT(false); // ChangeCoordinatorsRequest should always throw
 	}
 
+	// If there are raw access requests or cross-tenant boundary clear ranges in the batch, tenant ids for those
+	// requests are availalbe only after resolution. We need to fetch additional cipher keys for these requests.
+	if (pProxyCommitData->encryptMode == EncryptionAtRestMode::DOMAIN_AWARE && !rawAccessTenantIds.empty()) {
+		std::unordered_set<EncryptCipherDomainId> extraDomainIds;
+		for (auto tenantId : rawAccessTenantIds) {
+			if (self->cipherKeys.count(tenantId) == 0) {
+				extraDomainIds.insert(tenantId);
+			}
+		}
+		if (!extraDomainIds.empty()) {
+			std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> extraCipherKeys =
+			    wait(getLatestEncryptCipherKeys(
+			        pProxyCommitData->db, extraDomainIds, BlobCipherMetrics::TLOG_POST_RESOLUTION));
+			self->cipherKeys.insert(extraCipherKeys.begin(), extraCipherKeys.end());
+		}
+	}
+
 	return Void();
 }
 
@@ -1686,30 +1714,6 @@ ACTOR Future<WriteMutationRefVar> writeMutationEncryptedMutation(CommitBatchCont
 	ASSERT(decryptedMutation.param2 == mutation->param2);
 
 	CODE_PROBE(true, "encrypting non-metadata mutations");
-	self->toCommit.writeTypedMessage(encryptedMutation);
-	return encryptedMutation;
-}
-
-ACTOR Future<WriteMutationRefVar> writeMutationFetchEncryptKey(CommitBatchContext* self,
-                                                               int64_t tenantId,
-                                                               const MutationRef* mutation,
-                                                               Arena* arena) {
-
-	state EncryptCipherDomainId domainId = tenantId;
-	state MutationRef encryptedMutation;
-
-	static_assert(TenantInfo::INVALID_TENANT == INVALID_ENCRYPT_DOMAIN_ID);
-	ASSERT(self->pProxyCommitData->encryptMode.isEncryptionEnabled());
-	ASSERT_NE((MutationRef::Type)mutation->type, MutationRef::Type::ClearRange);
-
-	domainId = getEncryptDetailsFromMutationRef(self->pProxyCommitData, *mutation);
-	Reference<BlobCipherKey> cipherKey =
-	    wait(getLatestEncryptCipherKey(self->pProxyCommitData->db, domainId, BlobCipherMetrics::TLOG));
-	self->cipherKeys[domainId] = cipherKey;
-
-	CODE_PROBE(true, "Raw access mutation encryption", probe::decoration::rare);
-	ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
-	encryptedMutation = mutation->encrypt(self->cipherKeys, domainId, *arena, BlobCipherMetrics::TLOG);
 	self->toCommit.writeTypedMessage(encryptedMutation);
 	return encryptedMutation;
 }
@@ -1753,14 +1757,10 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 		} else {
 			if (domainId == INVALID_ENCRYPT_DOMAIN_ID) {
 				domainId = getEncryptDetailsFromMutationRef(self->pProxyCommitData, *mutation);
-				if (self->cipherKeys.find(domainId) == self->cipherKeys.end()) {
-					return writeMutationFetchEncryptKey(self, domainId, mutation, arena);
-				}
-
 				CODE_PROBE(true, "Raw access mutation encryption");
 			}
-
 			ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
+			ASSERT(self->cipherKeys.count(domainId) > 0);
 			encryptedMutation = mutation->encrypt(self->cipherKeys, domainId, *arena, BlobCipherMetrics::TLOG);
 		}
 		ASSERT(encryptedMutation.isEncrypted());
@@ -3219,13 +3219,11 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		tag_uid[decodeServerTagValue(kv.value)] = decodeServerTagKey(kv.key);
 	}
 
-	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
+	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> systemCipherKeys;
 	if (pContext->pCommitData->encryptMode.isEncryptionEnabled()) {
-		static const std::unordered_set<EncryptCipherDomainId> metadataDomainIds = { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
-			                                                                         ENCRYPT_HEADER_DOMAIN_ID };
-		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
-		    wait(getLatestEncryptCipherKeys(pContext->pCommitData->db, metadataDomainIds, BlobCipherMetrics::TLOG));
-		cipherKeys = cks;
+		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks = wait(getLatestEncryptCipherKeys(
+		    pContext->pCommitData->db, ENCRYPT_CIPHER_SYSTEM_DOMAINS, BlobCipherMetrics::TLOG));
+		systemCipherKeys = cks;
 	}
 
 	loop {
@@ -3294,7 +3292,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		                       Reference<ILogSystem>(),
 		                       mutations,
 		                       /* pToCommit= */ nullptr,
-		                       pContext->pCommitData->encryptMode.isEncryptionEnabled() ? &cipherKeys : nullptr,
+		                       &systemCipherKeys,
 		                       pContext->pCommitData->encryptMode,
 		                       confChanges,
 		                       /* version= */ 0,

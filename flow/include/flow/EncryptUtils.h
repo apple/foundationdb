@@ -28,6 +28,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 
 constexpr const int AUTH_TOKEN_HMAC_SHA_SIZE = 32;
 constexpr const int AUTH_TOKEN_AES_CMAC_SIZE = 16;
@@ -45,6 +46,17 @@ constexpr const EncryptCipherDomainId FDB_DEFAULT_ENCRYPT_DOMAIN_ID = -4;
 constexpr const EncryptCipherBaseKeyId INVALID_ENCRYPT_CIPHER_KEY_ID = 0;
 
 constexpr const EncryptCipherRandomSalt INVALID_ENCRYPT_RANDOM_SALT = 0;
+
+static const std::unordered_set<EncryptCipherDomainId> ENCRYPT_CIPHER_SYSTEM_DOMAINS = {
+	SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
+	ENCRYPT_HEADER_DOMAIN_ID
+};
+
+static const std::unordered_set<EncryptCipherDomainId> ENCRYPT_CIPHER_DETAULT_DOMAINS = {
+	SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
+	ENCRYPT_HEADER_DOMAIN_ID,
+	FDB_DEFAULT_ENCRYPT_DOMAIN_ID,
+};
 
 typedef enum {
 	ENCRYPT_CIPHER_MODE_NONE = 0,
