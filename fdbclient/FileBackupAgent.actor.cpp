@@ -617,25 +617,17 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	    int64_t dataLen,
 	    Arena* arena) {
 		Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
-		// TraceEvent("Nim::decr1").detail("Tpe", std::holds_alternative<BlobCipherEncryptHeaderRef>(headerVariant));
 		if (std::holds_alternative<BlobCipherEncryptHeaderRef>(headerVariant)) { // configurable encryption
-			// TraceEvent("Nim::decr1.5");
 			state BlobCipherEncryptHeaderRef headerRef = std::get<BlobCipherEncryptHeaderRef>(headerVariant);
-			// TraceEvent("Nim::decr2.5")
-			// .detail("HD", std::get<0>(cipherDetails).encryptDomainId)
-			// .detail("TD", std::get<0>(cipherDetails).encryptDomainId);
 			TextAndHeaderCipherKeysOpt cipherKeys =
 			    wait(getEncryptCipherKeys(dbInfo, headerRef, BlobCipherMetrics::RESTORE));
 			EncryptHeaderCipherDetails cipherDetails = headerRef.getCipherDetails();
-			// TraceEvent("Nim::decr2");
 			validateEncryptionHeader(cipherKeys.cipherHeaderKey,
 			                         cipherKeys.cipherTextKey,
 			                         cipherDetails.headerCipherDetails,
 			                         cipherDetails.textCipherDetails);
-			// TraceEvent("Nim::decr5");
 			DecryptBlobCipherAes256Ctr decryptor(
 			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, headerRef.getIV(), BlobCipherMetrics::RESTORE);
-			TraceEvent("Nim::decr6");
 			return decryptor.decrypt(dataP, dataLen, headerRef, *arena);
 		} else {
 			state BlobCipherEncryptHeader header = std::get<BlobCipherEncryptHeader>(headerVariant);
@@ -688,7 +680,6 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		    BlobCipherMetrics::BACKUP);
 		int64_t payloadSize = self->wPtr - self->dataPayloadStart;
 		StringRef encryptedData;
-		// TraceEvent("Nim::enc1").detail("HS", self->headerSize);
 		if (self->options.configurableEncryptionEnabled) {
 			BlobCipherEncryptHeaderRef headerRef;
 			encryptedData = encryptor.encrypt(self->dataPayloadStart, payloadSize, &headerRef, *self->arena);
@@ -701,9 +692,6 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 			    encryptor.encrypt(self->dataPayloadStart, payloadSize, &header, *self->arena)->toStringRef();
 			StringRef encryptHeaderStringRef = BlobCipherEncryptHeader::toStringRef(header, *self->arena);
 			std::memcpy(self->encryptHeader, encryptHeaderStringRef.begin(), self->headerSize);
-			// TraceEvent("Nim::enc2")
-			// .detail("HS", encryptHeaderStringRef.size())
-			// .detail("DID", header.cipherTextDetails.encryptDomainId);
 		}
 
 		// re-write encrypted data to buffer
@@ -796,7 +784,6 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 			// write buffer to file since block is finished
 			ASSERT(currentBufferSize(self) == self->blockSize);
 			wait(encrypt(self));
-			// TraceEvent("Nim::encFin").detail("Head", self->headerSize);
 			wait(self->file->append(self->buffer.begin(), self->blockSize));
 
 			// reset write pointer to beginning of StringRef
@@ -834,7 +821,6 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 			                                              authTokenAlgo);
 		}
 		// write header size to buffer
-		// TraceEvent("Nim::encNB").detail("HS", self->headerSize);
 		copyToBuffer(self, (uint8_t*)&self->headerSize, sizeof(self->headerSize));
 		// leave space for encryption header
 		self->encryptHeader = self->wPtr;
@@ -959,7 +945,6 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		// Write any outstanding bytes to the file
 		if (currentBufferSize(self) > 0) {
 			wait(encrypt(self));
-			// TraceEvent("Nim::encFin").detail("Head", self->headerSize);
 			wait(self->file->append(self->buffer.begin(), currentBufferSize(self)));
 		}
 		return Void();
@@ -1130,7 +1115,6 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 		// Read a key.
 		kLen = reader->consumeNetworkUInt32();
 		k = reader->consume(kLen);
-		// TraceEvent("Nim::decode1").detail("KV", KeyRef(k, kLen)).detail("BDID", blockDomainId);
 
 		// make sure that all keys in a block belong to exactly one tenant,
 		// unless its the last key in which case it can be a truncated (different) tenant prefix
@@ -1153,7 +1137,6 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 			}
 			// make sure that all keys (except possibly the last key) in a block are encrypted using the correct key
 			if (!prevKey.empty()) {
-				// TraceEvent("Nim::checkErr").detail("PDID", prevDomainId.get()).detail("BDID", blockDomainId.get());
 				ASSERT(prevDomainId.get() == blockDomainId.get());
 			}
 			prevKey = curKey;
@@ -1229,20 +1212,16 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 			CODE_PROBE(true, "decoding encrypted block");
 			// decode options struct
-			// TraceEvent("Nim::here1").detail("FileVersion", file_version);
 			state uint32_t optionsLen = reader.consumeNetworkUInt32();
 			const uint8_t* o = reader.consume(optionsLen);
 			StringRef optionsStringRef = StringRef(o, optionsLen);
 			EncryptedRangeFileWriter::Options options =
 			    ObjectReader::fromStringRef<EncryptedRangeFileWriter::Options>(optionsStringRef, IncludeVersion());
-			// TraceEvent("Nim::here2").detail("ConfigEnc", options.configurableEncryptionEnabled);
 			// read header size
 			state uint32_t headerLen = reader.consume<uint32_t>();
-			// TraceEvent("Nim::here2.5").detail("HeadLen", headerLen);
 			// read the encryption header
 			state const uint8_t* headerStart = reader.consume(headerLen);
 			StringRef headerS = StringRef(headerStart, headerLen);
-			// TraceEvent("Nim::here3").detail("ConfigEnc", options.configurableEncryptionEnabled);
 			state std::variant<BlobCipherEncryptHeaderRef, BlobCipherEncryptHeader> encryptHeader;
 			if (options.configurableEncryptionEnabled) {
 				encryptHeader = BlobCipherEncryptHeaderRef::fromStringRef(headerS);
@@ -1254,7 +1233,6 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 				blockDomainId = std::get<BlobCipherEncryptHeader>(encryptHeader).cipherTextDetails.encryptDomainId;
 			}
 
-			// TraceEvent("Nim::here5").detail("DID", blockDomainId);
 			if (config.tenantMode == TenantMode::REQUIRED && !isReservedEncryptDomain(blockDomainId)) {
 				ASSERT(tenantCache.present());
 				Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache.get()->getById(blockDomainId));
@@ -1262,7 +1240,6 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 					throw tenant_not_found();
 				}
 			}
-			// TraceEvent("Nim::here6").detail("DID", blockDomainId);
 			const uint8_t* dataPayloadStart = headerStart + headerLen;
 			// calculate the total bytes read up to (and including) the header
 			int64_t bytesRead = sizeof(int32_t) + sizeof(uint32_t) + sizeof(uint32_t) + optionsLen + headerLen;
@@ -1271,7 +1248,6 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			StringRef decryptedData =
 			    wait(EncryptedRangeFileWriter::decrypt(cx, encryptHeader, dataPayloadStart, dataLen, &results.arena()));
 			reader = StringRefReader(decryptedData, restore_corrupted_data());
-			// TraceEvent("Nim::here6.5").detail("DID", blockDomainId);
 			wait(decodeKVPairs(&reader, &results, true, encryptMode, blockDomainId, tenantCache));
 		} else {
 			throw restore_unsupported_file_version();
