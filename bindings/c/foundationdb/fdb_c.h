@@ -223,7 +223,7 @@ typedef struct bgtenantprefix {
 	FDBKey prefix;
 } FDBBGTenantPrefix;
 
-// encryption structs correspond to similar ones in BlobGranuleCommon.h
+/* encryption structs correspond to similar ones in BlobGranuleCommon.h */
 typedef struct bgencryptionkey {
 	int64_t domain_id;
 	uint64_t base_key_id;
