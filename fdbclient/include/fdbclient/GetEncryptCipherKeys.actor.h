@@ -292,6 +292,11 @@ struct TextAndHeaderCipherKeys {
 	Reference<BlobCipherKey> cipherHeaderKey;
 };
 
+struct TextAndHeaderCipherKeysOpt {
+	Reference<BlobCipherKey> cipherTextKey;
+	Optional<Reference<BlobCipherKey>> cipherHeaderKey;
+};
+
 ACTOR template <class T>
 Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(Reference<AsyncVar<T> const> db,
                                                                     EncryptCipherDomainId domainId,
@@ -330,18 +335,25 @@ Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const
 }
 
 ACTOR template <class T>
-Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
-                                                     BlobCipherEncryptHeaderRef header,
-                                                     BlobCipherMetrics::UsageType usageType) {
-	state std::tuple<BlobCipherDetails, BlobCipherDetails> details = header.getCipherDetails();
-	std::unordered_set<BlobCipherDetails> cipherDetails{ std::get<0>(details), std::get<1>(details) };
+Future<TextAndHeaderCipherKeysOpt> getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
+                                                        BlobCipherEncryptHeaderRef header,
+                                                        BlobCipherMetrics::UsageType usageType) {
+	state EncryptHeaderCipherDetails details = header.getCipherDetails();
+	std::unordered_set<BlobCipherDetails> cipherDetails{ details.textCipherDetails };
+	if (details.headerCipherDetails.present()) {
+		cipherDetails.emplace(details.headerCipherDetails.get());
+	}
 	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys =
 	    wait(getEncryptCipherKeys(db, cipherDetails, usageType));
-	ASSERT(cipherKeys.count(std::get<0>(details)) > 0);
-	ASSERT(cipherKeys.count(std::get<1>(details)) > 0);
-	TextAndHeaderCipherKeys result{ cipherKeys.at(std::get<0>(details)), cipherKeys.at(std::get<1>(details)) };
+	ASSERT(cipherKeys.count(details.textCipherDetails) > 0);
+	ASSERT(!details.headerCipherDetails.present() || cipherKeys.count(details.headerCipherDetails.get()) > 0);
+	TextAndHeaderCipherKeysOpt result;
+	result.cipherTextKey = cipherKeys.at(details.textCipherDetails);
+	if (details.headerCipherDetails.present()) {
+		result.cipherHeaderKey = cipherKeys.at(details.headerCipherDetails.get());
+		ASSERT(result.cipherHeaderKey.get().isValid());
+	}
 	ASSERT(result.cipherTextKey.isValid());
-	ASSERT(result.cipherHeaderKey.isValid());
 	return result;
 }
 

@@ -734,7 +734,6 @@ std::vector<Reference<BlobCipherKey>> BlobCipherKeyCache::getAllCiphers(const En
 	return keyIdCache->getAllCipherKeys();
 }
 
-namespace {
 int getEncryptAlgoHeaderVersion(const EncryptAuthTokenMode mode, const EncryptAuthTokenAlgo algo) {
 	if (mode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
 		return CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION;
@@ -748,7 +747,6 @@ int getEncryptAlgoHeaderVersion(const EncryptAuthTokenMode mode, const EncryptAu
 		}
 	}
 }
-} // namespace
 
 // EncryptBlobCipherAes265Ctr class methods
 
@@ -1078,7 +1076,7 @@ EncryptBlobCipherAes265Ctr::~EncryptBlobCipherAes265Ctr() {
 // DecryptBlobCipherAes256Ctr class methods
 
 DecryptBlobCipherAes256Ctr::DecryptBlobCipherAes256Ctr(Reference<BlobCipherKey> tCipherKey,
-                                                       Reference<BlobCipherKey> hCipherKey,
+                                                       Optional<Reference<BlobCipherKey>> hCipherKey,
                                                        const uint8_t* iv,
                                                        BlobCipherMetrics::UsageType usageType)
   : ctx(EVP_CIPHER_CTX_new()), usageType(usageType), textCipherKey(tCipherKey), headerCipherKey(hCipherKey),
@@ -1118,8 +1116,9 @@ void DecryptBlobCipherAes256Ctr::validateAuthTokenV1(const uint8_t* ciphertext,
 
 	headerRefCopy.algoHeader = algoHeaderCopy;
 	Standalone<StringRef> serializedHeader = BlobCipherEncryptHeaderRef::toStringRef(headerRefCopy);
+	ASSERT(headerCipherKey.present());
 	computeAuthToken({ { ciphertext, ciphertextLen }, { serializedHeader.begin(), serializedHeader.size() } },
-	                 headerCipherKey->rawCipher(),
+	                 headerCipherKey.get()->rawCipher(),
 	                 AES_256_KEY_LENGTH,
 	                 &computed[0],
 	                 (EncryptAuthTokenAlgo)flags.authTokenAlgo,
@@ -1282,9 +1281,10 @@ void DecryptBlobCipherAes256Ctr::verifyHeaderSingleAuthToken(const uint8_t* ciph
 	       sizeof(BlobCipherEncryptHeader));
 	memset(reinterpret_cast<uint8_t*>(&headerCopy.singleAuthToken), 0, AUTH_TOKEN_MAX_SIZE);
 	uint8_t computed[AUTH_TOKEN_MAX_SIZE];
+	ASSERT(headerCipherKey.present());
 	computeAuthToken({ { ciphertext, ciphertextLen },
 	                   { reinterpret_cast<const uint8_t*>(&headerCopy), sizeof(BlobCipherEncryptHeader) } },
-	                 headerCipherKey->rawCipher(),
+	                 headerCipherKey.get()->rawCipher(),
 	                 AES_256_KEY_LENGTH,
 	                 &computed[0],
 	                 (EncryptAuthTokenAlgo)header.flags.authTokenAlgo,
@@ -1349,7 +1349,7 @@ Reference<EncryptBuf> DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphert
 	verifyEncryptHeaderMetadata(header);
 
 	if (header.flags.authTokenMode != EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE &&
-	    !headerCipherKey.isValid()) {
+	    (!headerCipherKey.present() || !headerCipherKey.get().isValid())) {
 		TraceEvent(SevWarn, "BlobCipherDecryptInvalidHeaderCipherKey")
 		    .detail("AuthTokenMode", header.flags.authTokenMode);
 		throw encrypt_ops_error();

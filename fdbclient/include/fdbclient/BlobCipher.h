@@ -119,6 +119,7 @@ public:
 };
 
 std::string toString(BlobCipherMetrics::UsageType type);
+int getEncryptAlgoHeaderVersion(const EncryptAuthTokenMode mode, const EncryptAuthTokenAlgo algo);
 
 // Encryption operations buffer management
 // Approach limits number of copies needed during encryption or decryption operations.
@@ -914,7 +915,7 @@ private:
 class DecryptBlobCipherAes256Ctr final : NonCopyable, public ReferenceCounted<DecryptBlobCipherAes256Ctr> {
 public:
 	DecryptBlobCipherAes256Ctr(Reference<BlobCipherKey> tCipherKey,
-	                           Reference<BlobCipherKey> hCipherKey,
+	                           Optional<Reference<BlobCipherKey>> hCipherKey,
 	                           const uint8_t* iv,
 	                           BlobCipherMetrics::UsageType usageType);
 	~DecryptBlobCipherAes256Ctr();
@@ -932,7 +933,7 @@ private:
 	EVP_CIPHER_CTX* ctx;
 	BlobCipherMetrics::UsageType usageType;
 	Reference<BlobCipherKey> textCipherKey;
-	Reference<BlobCipherKey> headerCipherKey;
+	Optional<Reference<BlobCipherKey>> headerCipherKey;
 	bool authTokensValidationDone;
 
 	void validateEncryptHeader(const uint8_t*,

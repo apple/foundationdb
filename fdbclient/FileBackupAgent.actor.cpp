@@ -576,21 +576,22 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		wPtr = mutateString(buffer);
 	}
 
-	static void validateEncryptionHeader(Reference<BlobCipherKey> headerCipherKey,
+	static void validateEncryptionHeader(Optional<Reference<BlobCipherKey>> headerCipherKey,
 	                                     Reference<BlobCipherKey> textCipherKey,
-	                                     BlobCipherDetails headerCipherDetails,
+	                                     Optional<BlobCipherDetails> headerCipherDetails,
 	                                     BlobCipherDetails textCipherDetails) {
 		// Validate encryption header 'cipherHeader' details
-		if (!(headerCipherDetails.baseCipherId == headerCipherKey->getBaseCipherId() &&
-		      headerCipherDetails.encryptDomainId == headerCipherKey->getDomainId() &&
-		      headerCipherDetails.salt == headerCipherKey->getSalt())) {
+		if (headerCipherKey.present() && headerCipherDetails.present() &&
+		    !(headerCipherDetails.get().baseCipherId == headerCipherKey.get()->getBaseCipherId() &&
+		      headerCipherDetails.get().encryptDomainId == headerCipherKey.get()->getDomainId() &&
+		      headerCipherDetails.get().salt == headerCipherKey.get()->getSalt())) {
 			TraceEvent(SevWarn, "EncryptionHeader_CipherHeaderMismatch")
-			    .detail("HeaderDomainId", headerCipherKey->getDomainId())
-			    .detail("ExpectedHeaderDomainId", headerCipherDetails.encryptDomainId)
-			    .detail("HeaderBaseCipherId", headerCipherKey->getBaseCipherId())
-			    .detail("ExpectedHeaderBaseCipherId", headerCipherDetails.baseCipherId)
-			    .detail("HeaderSalt", headerCipherKey->getSalt())
-			    .detail("ExpectedHeaderSalt", headerCipherDetails.salt);
+			    .detail("HeaderDomainId", headerCipherKey.get()->getDomainId())
+			    .detail("ExpectedHeaderDomainId", headerCipherDetails.get().encryptDomainId)
+			    .detail("HeaderBaseCipherId", headerCipherKey.get()->getBaseCipherId())
+			    .detail("ExpectedHeaderBaseCipherId", headerCipherDetails.get().baseCipherId)
+			    .detail("HeaderSalt", headerCipherKey.get()->getSalt())
+			    .detail("ExpectedHeaderSalt", headerCipherDetails.get().salt);
 			throw encrypt_header_metadata_mismatch();
 		}
 
@@ -620,23 +621,21 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (std::holds_alternative<BlobCipherEncryptHeaderRef>(headerVariant)) { // configurable encryption
 			// TraceEvent("Nim::decr1.5");
 			state BlobCipherEncryptHeaderRef headerRef = std::get<BlobCipherEncryptHeaderRef>(headerVariant);
-			state std::tuple<BlobCipherDetails, BlobCipherDetails> cipherDetails = headerRef.getCipherDetails();
 			// TraceEvent("Nim::decr2.5")
 			// .detail("HD", std::get<0>(cipherDetails).encryptDomainId)
 			// .detail("TD", std::get<0>(cipherDetails).encryptDomainId);
-			TextAndHeaderCipherKeys cipherKeys =
+			TextAndHeaderCipherKeysOpt cipherKeys =
 			    wait(getEncryptCipherKeys(dbInfo, headerRef, BlobCipherMetrics::RESTORE));
+			EncryptHeaderCipherDetails cipherDetails = headerRef.getCipherDetails();
 			// TraceEvent("Nim::decr2");
-			ASSERT(cipherKeys.cipherHeaderKey.isValid() && cipherKeys.cipherTextKey.isValid());
-			// TraceEvent("Nim::decr4");
 			validateEncryptionHeader(cipherKeys.cipherHeaderKey,
 			                         cipherKeys.cipherTextKey,
-			                         std::get<1>(cipherDetails),
-			                         std::get<0>(cipherDetails));
+			                         cipherDetails.headerCipherDetails,
+			                         cipherDetails.textCipherDetails);
 			// TraceEvent("Nim::decr5");
 			DecryptBlobCipherAes256Ctr decryptor(
-			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, headerRef, BlobCipherMetrics::RESTORE);
-			// TraceEvent("Nim::decr6");
+			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, headerRef.getIV(), BlobCipherMetrics::RESTORE);
+			TraceEvent("Nim::decr6");
 			return decryptor.decrypt(dataP, dataLen, headerRef, *arena);
 		} else {
 			state BlobCipherEncryptHeader header = std::get<BlobCipherEncryptHeader>(headerVariant);
@@ -1247,8 +1246,9 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			state std::variant<BlobCipherEncryptHeaderRef, BlobCipherEncryptHeader> encryptHeader;
 			if (options.configurableEncryptionEnabled) {
 				encryptHeader = BlobCipherEncryptHeaderRef::fromStringRef(headerS);
-				blockDomainId =
-				    std::get<0>(std::get<BlobCipherEncryptHeaderRef>(encryptHeader).getCipherDetails()).encryptDomainId;
+				blockDomainId = std::get<BlobCipherEncryptHeaderRef>(encryptHeader)
+				                    .getCipherDetails()
+				                    .textCipherDetails.encryptDomainId;
 			} else {
 				encryptHeader = BlobCipherEncryptHeader::fromStringRef(headerS);
 				blockDomainId = std::get<BlobCipherEncryptHeader>(encryptHeader).cipherTextDetails.encryptDomainId;
