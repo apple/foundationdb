@@ -1514,10 +1514,13 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 		// Configuring 'assignedCluster' requires reading existing tenant entry which is handled in
 		// `updateManagementCluster`.
+		state bool assignToDifferentCluster = false;
 		if (operationType == OperationType::METACLUSTER && (!hasInvalidOption || deterministicRandom()->coinflip())) {
 			Standalone<StringRef> newClusterName = "newcluster"_sr;
 			if (deterministicRandom()->coinflip()) {
 				newClusterName = self->dataClusterName;
+			} else {
+				assignToDifferentCluster = true;
 			}
 			configuration["assigned_cluster"_sr] = newClusterName;
 		}
@@ -1534,6 +1537,7 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(!hasInvalidOption);
 				ASSERT(!hasSystemTenantGroup);
 				ASSERT(!specialKeysUseInvalidTuple);
+				ASSERT(!assignToDifferentCluster);
 				Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
 				ASSERT_GT(currentVersionstamp.version, originalReadVersion);
 
@@ -1559,7 +1563,7 @@ struct TenantManagementWorkload : TestWorkload {
 					ASSERT(hasInvalidOption || specialKeysUseInvalidTuple);
 					return Void();
 				} else if (e.code() == error_code_invalid_tenant_configuration) {
-					ASSERT(hasInvalidOption || configuration["assigned_cluster"_sr] == "newcluster"_sr);
+					ASSERT(hasInvalidOption || assignToDifferentCluster);
 					return Void();
 				} else if (e.code() == error_code_invalid_metacluster_operation) {
 					ASSERT(operationType == OperationType::METACLUSTER != self->useMetacluster);

@@ -1763,8 +1763,8 @@ struct ConfigureTenantImpl {
 			           configItr->second != tenantEntry.get().assignedCluster) {
 				auto& newClusterName = configItr->second;
 				TraceEvent("UpdateManagementCluster")
-				    .detail("OriginalAssignedCluster",
-				            tenantEntry.get().assignedCluster)
+				    .detail("TenantName", tenantEntry.get().tenantName)
+				    .detail("OriginalAssignedCluster", tenantEntry.get().assignedCluster)
 				    .detail("NewAssignedCluster", newClusterName);
 				throw invalid_tenant_configuration();
 			}
