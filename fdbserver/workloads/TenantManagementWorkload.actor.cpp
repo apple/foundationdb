@@ -800,6 +800,7 @@ struct TenantManagementWorkload : TestWorkload {
 		if (!endTenant.present()) {
 			tenants[beginTenant] = anyExists ? itr->second.tenant->id() : TenantInfo::INVALID_TENANT;
 		} else if (endTenant.present()) {
+			anyExists = false;
 			for (auto itr = self->createdTenants.lower_bound(beginTenant);
 			     itr != self->createdTenants.end() && itr->first < endTenant.get();
 			     ++itr) {

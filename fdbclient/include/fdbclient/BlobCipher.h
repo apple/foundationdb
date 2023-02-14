@@ -76,6 +76,7 @@ public:
 	// Order of this enum has to match initializer of counterSets.
 	enum UsageType : int {
 		TLOG = 0,
+		TLOG_POST_RESOLUTION,
 		KV_MEMORY,
 		KV_REDWOOD,
 		BLOB_GRANULE,
@@ -169,10 +170,17 @@ struct BlobCipherDetails {
 	                  const EncryptCipherRandomSalt& random)
 	  : encryptDomainId(dId), baseCipherId(bId), salt(random) {}
 
+	bool isValid() const { return encryptDomainId != INVALID_ENCRYPT_DOMAIN_ID; }
+
 	bool operator==(const BlobCipherDetails& o) const {
 		return encryptDomainId == o.encryptDomainId && baseCipherId == o.baseCipherId && salt == o.salt;
 	}
 	bool operator!=(const BlobCipherDetails& o) const { return !(*this == o); }
+
+	bool isValid() const {
+		return this->encryptDomainId != INVALID_ENCRYPT_DOMAIN_ID &&
+		       this->baseCipherId != INVALID_ENCRYPT_CIPHER_KEY_ID && this->salt != INVALID_ENCRYPT_RANDOM_SALT;
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -333,6 +341,15 @@ struct AesCtrNoAuthV1 {
 	}
 };
 
+struct EncryptHeaderCipherDetails {
+	BlobCipherDetails textCipherDetails;
+	Optional<BlobCipherDetails> headerCipherDetails;
+
+	EncryptHeaderCipherDetails(const BlobCipherDetails& tCipherDetails) : textCipherDetails(tCipherDetails) {}
+	EncryptHeaderCipherDetails(const BlobCipherDetails& tCipherDetails, const BlobCipherDetails& hCipherDetails)
+	  : textCipherDetails(tCipherDetails), headerCipherDetails(hCipherDetails) {}
+};
+
 struct BlobCipherEncryptHeaderRef {
 	// Serializable fields
 
@@ -459,6 +476,9 @@ struct BlobCipherEncryptHeaderRef {
 			}
 		}
 	}
+
+	const uint8_t* getIV() const;
+	const EncryptHeaderCipherDetails getCipherDetails() const;
 
 	void validateEncryptionHeaderDetails(const BlobCipherDetails& textCipherDetails,
 	                                     const BlobCipherDetails& headerCipherDetails,
@@ -603,6 +623,8 @@ public:
 		}
 		return now() + INetwork::TIME_EPS >= expireAtTS ? true : false;
 	}
+
+	BlobCipherDetails details() const { return BlobCipherDetails{ encryptDomainId, baseCipherId, randomSalt }; }
 
 	void reset();
 
