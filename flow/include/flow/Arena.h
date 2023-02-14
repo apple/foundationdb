@@ -95,6 +95,9 @@ protected:
 
 FDB_DECLARE_BOOLEAN_PARAM(FastInaccurateEstimate);
 
+// Tag struct to indicate that the block containing allocated memory needs to be zero-ed out after use
+struct WipeAfterUse {};
+
 // An Arena is a custom allocator that consists of a set of ArenaBlocks.  Allocation is performed by bumping a pointer
 // on the most recent ArenaBlock until the block is unable to service the next allocation request.  When the current
 // ArenaBlock is full, a new (larger) one is added to the Arena.  Deallocation is not directly supported.  Instead,
@@ -124,6 +127,8 @@ public:
 
 	friend void* operator new(size_t size, Arena& p);
 	friend void* operator new[](size_t size, Arena& p);
+	friend void* operator new(size_t size, Arena& p, struct WipeAfterUse);
+	friend void* operator new[](size_t size, Arena& p, struct WipeAfterUse);
 
 	bool sameArena(const Arena& other) const { return impl.getPtr() == other.impl.getPtr(); }
 
@@ -157,16 +162,19 @@ struct ArenaBlockRef {
 	uint32_t nextBlockOffset;
 };
 
+FDB_DECLARE_BOOLEAN_PARAM(IsSecureMem);
+
 struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 	enum {
 		SMALL = 64,
 		LARGE = 8193 // If size == used == LARGE, then use hugeSize, hugeUsed
 	};
 
-	enum { NOT_TINY = 255, TINY_HEADER = 6 };
+	enum { NOT_TINY = 127, TINY_HEADER = 6 };
 
 	// int32_t referenceCount;	  // 4 bytes (in ThreadSafeReferenceCounted)
-	uint8_t tinySize, tinyUsed; // If these == NOT_TINY, use bigSize, bigUsed instead
+	bool secure : 1; // If this is set, block is zero-ed out after use
+	uint8_t tinySize : 7, tinyUsed; // If these == NOT_TINY, use bigSize, bigUsed instead
 	// if tinySize != NOT_TINY, following variables aren't used
 	uint32_t bigSize, bigUsed; // include block header
 	uint32_t nextBlockOffset;
@@ -174,6 +182,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 
 	void addref();
 	void delref();
+	bool isSecure() const;
 	bool isTiny() const;
 	int size() const;
 	int used() const;
@@ -182,6 +191,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 	const void* getNextData() const;
 	size_t totalSize() const;
 	size_t estimatedTotalSize() const;
+	void wipeUsed();
 	// just for debugging:
 	void getUniqueBlocks(std::set<ArenaBlock*>& a);
 	int addUsed(int bytes);
@@ -189,7 +199,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 	void* make4kAlignedBuffer(uint32_t size);
 	static void dependOn(Reference<ArenaBlock>& self, ArenaBlock* other);
 	static void* dependOn4kAlignedBuffer(Reference<ArenaBlock>& self, uint32_t size);
-	static void* allocate(Reference<ArenaBlock>& self, int bytes);
+	static void* allocate(Reference<ArenaBlock>& self, int bytes, IsSecureMem isSecure = IsSecureMem::False);
 	// Return an appropriately-sized ArenaBlock to store the given data
 	static ArenaBlock* create(int dataSize, Reference<ArenaBlock>& next);
 	void destroy();
@@ -207,6 +217,19 @@ inline void* operator new[](size_t size, Arena& p) {
 	return ArenaBlock::allocate(p.impl, (int)size);
 }
 inline void operator delete[](void*, Arena& p) {}
+
+inline void* operator new(size_t size, Arena& p, WipeAfterUse) {
+	UNSTOPPABLE_ASSERT(size < std::numeric_limits<int>::max());
+	return ArenaBlock::allocate(p.impl, (int)size, IsSecureMem::True);
+}
+
+inline void operator delete(void*, Arena& p, WipeAfterUse) {}
+
+inline void* operator new[](size_t size, Arena& p, WipeAfterUse) {
+	UNSTOPPABLE_ASSERT(size < std::numeric_limits<int>::max());
+	return ArenaBlock::allocate(p.impl, (int)size, IsSecureMem::True);
+}
+inline void operator delete[](void*, Arena& p, WipeAfterUse) {}
 
 template <class Archive>
 inline void load(Archive& ar, Arena& p) {
