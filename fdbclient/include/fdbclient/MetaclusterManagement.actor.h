@@ -1757,21 +1757,25 @@ struct RestoreClusterImpl {
 			// tenant)
 			if (self->dataClusterTenantMap.find(tenantId) == self->dataClusterTenantMap.end() &&
 			    managementTenant.tenantState != TenantState::REGISTERING &&
-			    managementTenant.tenantState != TenantState::REMOVING &&
-			    managementTenant.tenantState != TenantState::ERROR) {
+			    managementTenant.tenantState != TenantState::REMOVING) {
 				if (self->restoreDryRun) {
 					self->messages.push_back(fmt::format("The tenant `{}' with ID {} is missing on the data cluster",
 					                                     printable(managementTenant.tenantName),
 					                                     tenantId));
 				} else {
-					missingTenants.push_back(tenantId);
+					// Tenants in an error state that aren't on the data cluster count as missing tenants. This will
+					// include tenants we previously marked as missing, and as new errors are added it could include
+					// other tenants
 					++missingTenantCount;
-					if (missingTenants.size() == CLIENT_KNOBS->METACLUSTER_RESTORE_BATCH_SIZE) {
-						wait(self->ctx.runManagementTransaction(
-						    [self = self, missingTenants = missingTenants](Reference<typename DB::TransactionT> tr) {
-							    return markManagementTenantsAsError(self, tr, missingTenants);
-						    }));
-						missingTenants.clear();
+					if (managementTenant.tenantState != TenantState::ERROR) {
+						missingTenants.push_back(tenantId);
+						if (missingTenants.size() == CLIENT_KNOBS->METACLUSTER_RESTORE_BATCH_SIZE) {
+							wait(self->ctx.runManagementTransaction([self = self, missingTenants = missingTenants](
+							                                            Reference<typename DB::TransactionT> tr) {
+								return markManagementTenantsAsError(self, tr, missingTenants);
+							}));
+							missingTenants.clear();
+						}
 					}
 				}
 			}
@@ -1785,9 +1789,6 @@ struct RestoreClusterImpl {
 			    }));
 		}
 
-		// This is a best effort attempt to communicate the number of missing tenants. If a restore needs to be run
-		// twice and is interrupted in the middle of the first attempt to process missing tenants, we may not report
-		// a full count.
 		if (missingTenantCount > 0) {
 			self->messages.push_back(fmt::format(
 			    "The metacluster has {} tenants that are missing in the restored data cluster", missingTenantCount));
