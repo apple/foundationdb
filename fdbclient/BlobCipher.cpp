@@ -157,21 +157,11 @@ const uint8_t* BlobCipherEncryptHeaderRef::getIV() const {
 	                                       algoHeaderVersion);
 	ASSERT_EQ(algoHeaderVersion, 1);
 
-	if (flags.authTokenMode == ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
-		return &std::get<AesCtrNoAuthV1>(this->algoHeader).iv[0];
-	} else {
-		ASSERT_EQ(flags.encryptMode, ENCRYPT_CIPHER_MODE_AES_256_CTR);
-
-		if (flags.authTokenAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA) {
-			return &std::get<AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>>(this->algoHeader).iv[0];
-		} else if (flags.authTokenAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC) {
-			return &std::get<AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>(this->algoHeader).iv[0];
-		} else {
-			// We should never get here
-			throw not_implemented();
-		}
-	}
+	return std::visit([](auto& h) { return h.iv; }, algoHeader);
 }
+
+template <class>
+inline constexpr bool always_false_v = false;
 
 const EncryptHeaderCipherDetails BlobCipherEncryptHeaderRef::getCipherDetails() const {
 	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
@@ -187,31 +177,20 @@ const EncryptHeaderCipherDetails BlobCipherEncryptHeaderRef::getCipherDetails() 
 	                                       algoHeaderVersion);
 	ASSERT_EQ(algoHeaderVersion, 1);
 
-	EncryptHeaderCipherDetails details;
-	if (flags.authTokenMode == ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
-		details.textCipherDetails = std::get<AesCtrNoAuthV1>(this->algoHeader).cipherTextDetails;
-	} else {
-		ASSERT_EQ(flags.authTokenMode, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
-
-		if (flags.authTokenAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA) {
-			AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE> hmacSha =
-			    std::get<AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>>(this->algoHeader);
-			details.textCipherDetails = hmacSha.cipherTextDetails;
-			details.headerCipherDetails = hmacSha.cipherHeaderDetails;
-		} else if (flags.authTokenAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC) {
-			AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE> aesCmac =
-			    std::get<AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>(this->algoHeader);
-			details.textCipherDetails = aesCmac.cipherTextDetails;
-			details.headerCipherDetails = aesCmac.cipherHeaderDetails;
-		} else {
-			// We should never get here
-			throw not_implemented();
-		}
-	}
-
-	ASSERT(details.textCipherDetails.isValid());
-	ASSERT(flags.authTokenMode == ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE || details.headerCipherDetails.present());
-	return details;
+	// TODO: Replace with "Overload visitor pattern" someday.
+	return std::visit(
+	    [](auto&& h) {
+		    using T = std::decay_t<decltype(h)>;
+		    if constexpr (std::is_same_v<T, AesCtrNoAuthV1>) {
+			    return EncryptHeaderCipherDetails(h.cipherTextDetails);
+		    } else if constexpr (std::is_same_v<T, AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>> ||
+		                         std::is_same_v<T, AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>) {
+			    return EncryptHeaderCipherDetails(h.cipherTextDetails, h.cipherHeaderDetails);
+		    } else {
+			    static_assert(always_false_v<T>, "Unknown encryption authentication");
+		    }
+	    },
+	    algoHeader);
 }
 
 void BlobCipherEncryptHeaderRef::validateEncryptionHeaderDetails(const BlobCipherDetails& textCipherDetails,
@@ -234,27 +213,23 @@ void BlobCipherEncryptHeaderRef::validateEncryptionHeaderDetails(const BlobCiphe
 	BlobCipherDetails persistedHeaderCipherDetails;
 	uint8_t* persistedIV = nullptr;
 
-	if (flags.authTokenMode == ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
-		persistedTextCipherDetails = std::get<AesCtrNoAuthV1>(this->algoHeader).cipherTextDetails;
-		persistedIV = (uint8_t*)(&std::get<AesCtrNoAuthV1>(this->algoHeader).iv[0]);
-	} else {
-		if (flags.authTokenAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA) {
-			persistedTextCipherDetails =
-			    std::get<AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>>(this->algoHeader).cipherTextDetails;
-			persistedHeaderCipherDetails =
-			    std::get<AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>>(this->algoHeader).cipherHeaderDetails;
-			persistedIV = (uint8_t*)(&std::get<AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>>(this->algoHeader).iv[0]);
-		} else if (flags.authTokenAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC) {
-			persistedTextCipherDetails =
-			    std::get<AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>(this->algoHeader).cipherTextDetails;
-			persistedHeaderCipherDetails =
-			    std::get<AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>(this->algoHeader).cipherHeaderDetails;
-			persistedIV = (uint8_t*)(&std::get<AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>(this->algoHeader).iv[0]);
-		} else {
-			// We should never get here
-			throw not_implemented();
-		}
-	}
+	// TODO: Replace with "Overload visitor pattern" someday.
+	return std::visit(
+	    [&persistedTextCipherDetails, &persistedHeaderCipherDetails, &persistedIV](auto&& h) {
+		    using T = std::decay_t<decltype(h)>;
+		    if constexpr (std::is_same_v<T, AesCtrNoAuthV1>) {
+			    persistedTextCipherDetails = h.cipherTextDetails;
+			    persistedIV = (uint8_t*)&h.iv[0];
+		    } else if constexpr (std::is_same_v<T, AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>> ||
+		                         std::is_same_v<T, AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>) {
+			    persistedTextCipherDetails = h.cipherTextDetails;
+			    persistedHeaderCipherDetails = h.cipherHeaderDetails;
+			    persistedIV = (uint8_t*)&h.iv[0];
+		    } else {
+			    static_assert(always_false_v<T>, "Unknown encryption authentication");
+		    }
+	    },
+	    algoHeader);
 
 	// Validate encryption header 'cipherHeader' details sanity
 	if (flags.authTokenMode != ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE &&

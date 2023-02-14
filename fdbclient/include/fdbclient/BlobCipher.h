@@ -341,6 +341,10 @@ struct AesCtrNoAuthV1 {
 struct EncryptHeaderCipherDetails {
 	BlobCipherDetails textCipherDetails;
 	Optional<BlobCipherDetails> headerCipherDetails;
+
+	EncryptHeaderCipherDetails(const BlobCipherDetails& tCipherDetails) : textCipherDetails(tCipherDetails) {}
+	EncryptHeaderCipherDetails(const BlobCipherDetails& tCipherDetails, const BlobCipherDetails& hCipherDetails)
+	  : textCipherDetails(tCipherDetails), headerCipherDetails(hCipherDetails) {}
 };
 
 struct BlobCipherEncryptHeaderRef {
