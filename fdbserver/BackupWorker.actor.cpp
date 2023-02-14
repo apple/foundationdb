@@ -107,7 +107,9 @@ struct VersionedMessage {
 			reader >> m;
 			const BlobCipherEncryptHeader* header = m.encryptionHeader();
 			cipherDetails.insert(header->cipherTextDetails);
-			cipherDetails.insert(header->cipherHeaderDetails);
+			if (header->cipherHeaderDetails.isValid()) {
+				cipherDetails.insert(header->cipherHeaderDetails);
+			}
 		}
 	}
 };
