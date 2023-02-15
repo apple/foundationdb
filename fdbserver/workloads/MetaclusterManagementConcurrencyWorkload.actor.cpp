@@ -142,7 +142,8 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 			loop {
 				TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRemovingCluster", debugId)
 				    .detail("ClusterName", clusterName);
-				Future<bool> removeFuture = MetaclusterAPI::removeCluster(self->managementDb, clusterName, false);
+				Future<bool> removeFuture = MetaclusterAPI::removeCluster(
+				    self->managementDb, clusterName, ClusterType::METACLUSTER_MANAGEMENT, false);
 				Optional<bool> result = wait(timeout(removeFuture, deterministicRandom()->randomInt(1, 30)));
 				if (result.present()) {
 					ASSERT(result.get());

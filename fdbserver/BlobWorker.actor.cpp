@@ -476,6 +476,7 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 
 	TextAndHeaderCipherKeys systemCipherKeys =
 	    wait(getLatestSystemEncryptCipherKeys(bwData->dbInfo, BlobCipherMetrics::BLOB_GRANULE));
+	ASSERT(systemCipherKeys.cipherHeaderKey.isValid());
 	cipherKeysCtx.headerCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(systemCipherKeys.cipherHeaderKey, *arena);
 
 	cipherKeysCtx.ivRef = makeString(AES_256_IV_LENGTH, *arena);
