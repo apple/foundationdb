@@ -192,13 +192,14 @@ def test_predicates():
 
 def test_get_client_status(db):
     @fdb.transactional
-    def simple_txt(tr):
+    def simple_txn(tr):
         tr.get_read_version().wait()
 
     # Execute a simple transaction
     # to make sure the database is initialized
-    simple_txt(db)
-    # Get the client status and check if is healthy
+    simple_txn(db)
+    # Here we just check if a meaningful client report status is returned
+    # Different report attributes and error cases are covered by C API tests
     status_str = db.get_client_status().wait()
     status = json.loads(status_str)
     assert "Healthy" in status

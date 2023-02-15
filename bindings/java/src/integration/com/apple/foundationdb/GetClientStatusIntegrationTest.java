@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2023 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,7 +38,8 @@ class GetClientStatusIntegrationTest {
 				return tr.getReadVersion();
 			});
 
-			// The database must be in a healthy state now
+			// Here we just check if a meaningful client report status is returned
+			// Different report attributes and error cases are covered by C API tests
 			String statusStr = new String(db.getClientStatus().join());
 			Assertions.assertTrue(statusStr.contains("\"Healthy\":true"),
 				String.format("Healthy:true not found in client status: %s", statusStr));
