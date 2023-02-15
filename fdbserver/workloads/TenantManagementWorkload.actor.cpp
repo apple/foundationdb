@@ -664,6 +664,7 @@ struct TenantManagementWorkload : TestWorkload {
 		if (!endTenant.present()) {
 			tenants.push_back(beginTenant);
 		} else if (endTenant.present()) {
+			anyExists = false;
 			for (auto itr = self->createdTenants.lower_bound(beginTenant);
 			     itr != self->createdTenants.end() && itr->first < endTenant.get();
 			     ++itr) {
