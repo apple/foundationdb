@@ -188,6 +188,7 @@ struct MetaclusterMetadata {
 	// Registration information for a metacluster, stored on both management and data clusters
 	static KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>& metaclusterRegistration();
 	static KeyBackedSet<UID>& registrationTombstones();
+	static KeyBackedMap<ClusterName, UID>& activeRestoreIds();
 };
 
 #endif
