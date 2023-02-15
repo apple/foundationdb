@@ -87,7 +87,15 @@ public:
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
 	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
 	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), initialCommit(initialCommit_),
-	    provisionalCommitProxy(provisionalCommitProxy_) {}
+	    provisionalCommitProxy(provisionalCommitProxy_) {
+		if (encryptMode.isEncryptionEnabled()) {
+			ASSERT(cipherKeys != nullptr);
+			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
+			if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+				ASSERT(cipherKeys->count(ENCRYPT_HEADER_DOMAIN_ID));
+			}
+		}
+	}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           ResolverData& resolverData_,
@@ -98,7 +106,15 @@ public:
 	    cipherKeys(cipherKeys_), encryptMode(encryptMode), txnStateStore(resolverData_.txnStateStore),
 	    toCommit(resolverData_.toCommit), confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem),
 	    popVersion(resolverData_.popVersion), keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
-	    initialCommit(resolverData_.initialCommit), forResolver(true) {}
+	    initialCommit(resolverData_.initialCommit), forResolver(true) {
+		if (encryptMode.isEncryptionEnabled()) {
+			ASSERT(cipherKeys != nullptr);
+			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
+			if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+				ASSERT(cipherKeys->count(ENCRYPT_HEADER_DOMAIN_ID));
+			}
+		}
+	}
 
 private:
 	// The following variables are incoming parameters

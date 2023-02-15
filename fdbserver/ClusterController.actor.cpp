@@ -2391,7 +2391,9 @@ ACTOR Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
 						}
 					} else {
 						TraceEvent("SkipBlobRestoreInitCommand", self->id).log();
-						wait(updateRestoreStatus(self->cx, normalKeys, BlobRestoreStatus(BlobRestorePhase::ERROR), {}));
+						BlobRestoreStatus error(BlobRestorePhase::ERROR, error_code_restore_error);
+						Value value = blobRestoreCommandValueFor(error);
+						tr->set(blobRestoreCommandKey, value);
 					}
 				}
 				self->db.blobRestoreEnabled.set(status.phase < BlobRestorePhase::DONE);
