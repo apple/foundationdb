@@ -973,9 +973,9 @@ ACTOR Future<bool> checkExclusion(Database db,
 	}
 	StatusObject status = wait(StatusClient::statusFetcher(db));
 	state std::string errorString =
-	    "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
+	    "ERROR: Could not calculate the impact of this exclude on the total available space in the cluster.\n"
 	    "Please try the exclude again in 30 seconds.\n"
-	    "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without checking free "
+	    "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without checking available "
 	    "space.\n";
 
 	StatusObjectReader statusObj(status);
@@ -996,7 +996,7 @@ ACTOR Future<bool> checkExclusion(Database db,
 	state int ssExcludedCount = 0;
 
 	state std::unordered_set<std::string> diskLocalities;
-	state int64_t totalKvStoreFreeBytes = 0;
+	state int64_t totalKvStoreAvailableBytes = 0;
 	state int64_t totalKvStoreUsedBytes = 0;
 	state int64_t totalKvStoreUsedBytesNonExcluded = 0;
 	try {
@@ -1029,8 +1029,8 @@ ACTOR Future<bool> checkExclusion(Database db,
 						return false;
 					}
 
-					int64_t free_bytes;
-					if (!role.get("kvstore_free_bytes", free_bytes)) {
+					int64_t available_bytes;
+					if (!role.get("kvstore_available_bytes", available_bytes)) {
 						*msg = ManagementAPIError::toJsonString(
 						    false, markFailed ? "exclude failed" : "exclude", errorString);
 						return false;
@@ -1042,7 +1042,7 @@ ACTOR Future<bool> checkExclusion(Database db,
 						totalKvStoreUsedBytesNonExcluded += used_bytes;
 
 						if (disk_id.empty() || diskLocalities.find(disk_id) == diskLocalities.end()) {
-							totalKvStoreFreeBytes += free_bytes;
+							totalKvStoreAvailableBytes += available_bytes;
 							if (!disk_id.empty()) {
 								diskLocalities.insert(disk_id);
 							}
@@ -1061,11 +1061,12 @@ ACTOR Future<bool> checkExclusion(Database db,
 		return false;
 	}
 
-	double finalFreeRatio = 1 - (totalKvStoreUsedBytes / (totalKvStoreUsedBytesNonExcluded + totalKvStoreFreeBytes));
-	if (ssExcludedCount == ssTotalCount || finalFreeRatio <= 0.1) {
-		std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.\n"
+	double finalAvailableRatio =
+	    1 - (totalKvStoreUsedBytes / (totalKvStoreUsedBytesNonExcluded + totalKvStoreAvailableBytes));
+	if (ssExcludedCount == ssTotalCount || finalAvailableRatio <= 0.1) {
+		std::string temp = "ERROR: This exclude may cause the total available space in the cluster to drop below 10%.\n"
 		                   "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without "
-		                   "checking free space.\n";
+		                   "checking available space.\n";
 		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
 		return false;
 	}
