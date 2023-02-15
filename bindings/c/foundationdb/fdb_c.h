@@ -214,18 +214,40 @@ typedef struct readgranulecontext {
 	int granuleParallelism;
 } FDBReadBlobGranuleContext;
 
+typedef enum { FDB_BG_MUTATION_TYPE_SET_VALUE = 0, FDB_BG_MUTATION_TYPE_CLEAR_RANGE = 1 } FDBBGMutationType;
+
+#pragma pack(push, 4)
+
+typedef struct bgtenantprefix {
+	fdb_bool_t present;
+	FDBKey prefix;
+} FDBBGTenantPrefix;
+
+/* encryption structs correspond to similar ones in BlobGranuleCommon.h */
+typedef struct bgencryptionkey {
+	int64_t domain_id;
+	uint64_t base_key_id;
+	uint64_t random_salt;
+	FDBKey base_key;
+} FDBBGEncryptionKey;
+
+typedef struct bgencryptionctx {
+	fdb_bool_t present;
+	FDBBGEncryptionKey textKey;
+	FDBBGEncryptionKey headerKey;
+	FDBKey iv;
+} FDBBGEncryptionCtx;
+
 typedef struct bgfilepointer {
 	const uint8_t* filename_ptr;
 	int filename_length;
 	int64_t file_offset;
 	int64_t file_length;
 	int64_t full_file_length;
-	/* TODO: encryption keys would go here */
+	int64_t file_version;
+	FDBBGEncryptionCtx encryption_ctx;
 } FDBBGFilePointer;
 
-typedef enum { FDB_BG_MUTATION_TYPE_SET_VALUE = 0, FDB_BG_MUTATION_TYPE_CLEAR_RANGE = 1 } FDBBGMutationType;
-
-#pragma pack(push, 4)
 typedef struct bgmutation {
 	/* FDBBGMutationType */ uint8_t type;
 	int64_t version;
@@ -243,7 +265,7 @@ typedef struct bgfiledescription {
 	FDBBGFilePointer* delta_files;
 	int memory_mutation_count;
 	FDBBGMutation* memory_mutations;
-	/* TODO: tenant info would go here */
+	FDBBGTenantPrefix tenant_prefix;
 } FDBBGFileDescription;
 #pragma pack(pop)
 
@@ -313,9 +335,15 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_readbg_get_descriptions(FDBF
                                                                             FDBBGFileDescription** out,
                                                                             int* desc_count);
 
-DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_readbg_parse_snapshot_file(const uint8_t* file_data, int file_len);
+DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_readbg_parse_snapshot_file(const uint8_t* file_data,
+                                                                       int file_len,
+                                                                       FDBBGTenantPrefix const* tenant_prefix,
+                                                                       FDBBGEncryptionCtx const* encryption_ctx);
 
-DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_readbg_parse_delta_file(const uint8_t* file_data, int file_len);
+DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_readbg_parse_delta_file(const uint8_t* file_data,
+                                                                    int file_len,
+                                                                    FDBBGTenantPrefix const* tenant_prefix,
+                                                                    FDBBGEncryptionCtx const* encryption_ctx);
 
 /* FDBResult is a synchronous computation result, as opposed to a future that is asynchronous. */
 DLLEXPORT void fdb_result_destroy(FDBResult* r);
