@@ -682,6 +682,15 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR Future<Void> blobbifyWaitUnit(Database cx, BlobGranuleRangesWorkload* self, KeyRange range) {
+		bool setSuccess = wait(cx->blobbifyRange(range, true, self->tenant));
+		ASSERT(setSuccess);
+		bool verifySuccess = wait(self->isRangeActive(cx, range, self->tenant));
+		ASSERT(verifySuccess);
+
+		return Void();
+	}
+
 	enum UnitTestTypes {
 		VERIFY_RANGE_UNIT,
 		VERIFY_RANGE_GAP_UNIT,
@@ -689,7 +698,8 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		BLOBBIFY_IDEMPOTENT,
 		RE_BLOBBIFY,
 		ADJACENT_PURGE,
-		OP_COUNT = 6 /* keep this last */
+		BLOBBIFY_WAIT_UNIT,
+		OP_COUNT = 7 /* keep this last */
 	};
 
 	ACTOR Future<Void> blobGranuleRangesUnitTests(Database cx, BlobGranuleRangesWorkload* self) {
@@ -733,6 +743,8 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 				wait(self->reBlobbifyUnit(cx, self, range));
 			} else if (op == ADJACENT_PURGE) {
 				wait(self->adjacentPurge(cx, self, range));
+			} else if (op == BLOBBIFY_WAIT_UNIT) {
+				wait(self->blobbifyWaitUnit(cx, self, range));
 			} else {
 				ASSERT(false);
 			}
