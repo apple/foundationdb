@@ -548,7 +548,7 @@ ACTOR Future<Void> RocksDBCheckpointReader::doClose(RocksDBCheckpointReader* sel
 class RocksDBSstFileWriter : public IRocksDBSstFileWriter {
 public:
 	RocksDBSstFileWriter()
-	  : writer(std::make_shared<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options())), hasData(false){};
+	  : writer(std::make_unique<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options())), hasData(false){};
 
 	void open(const std::string localFile) override;
 
@@ -557,51 +557,47 @@ public:
 	void finish() override;
 
 private:
-	std::shared_ptr<rocksdb::SstFileWriter> writer;
+	std::unique_ptr<rocksdb::SstFileWriter> writer;
 	std::string localFile;
 	bool hasData;
 };
 
 void RocksDBSstFileWriter::open(const std::string localFile) {
-	rocksdb::Status status;
 	this->localFile = localFile;
-	status = this->writer->Open(this->localFile);
+	rocksdb::Status status = this->writer->Open(this->localFile);
 	if (!status.ok()) {
-		Error e = statusToError(status);
 		TraceEvent(SevError, "RocksDBSstFileWriterWrapperOpenFileError")
 		    .detail("LocalFile", this->localFile)
 		    .detail("Status", status.ToString());
-		throw e;
+		throw failed_to_create_checkpoint_shard_metadata();
 	}
 }
 
 void RocksDBSstFileWriter::write(const KeyRef key, const ValueRef value) {
-	rocksdb::Status status;
-	status = this->writer->Put(toSlice(key), toSlice(value));
+	rocksdb::Status status = this->writer->Put(toSlice(key), toSlice(value));
 	if (!status.ok()) {
-		Error e = statusToError(status);
 		TraceEvent(SevError, "RocksDBSstFileWriterWrapperWriteError")
 		    .detail("LocalFile", this->localFile)
 		    .detail("Key", key)
 		    .detail("Value", value)
 		    .detail("Status", status.ToString());
-		throw e;
+		throw failed_to_create_checkpoint_shard_metadata();
 	}
 	this->hasData = true;
 }
 
 void RocksDBSstFileWriter::finish() {
 	if (!this->hasData) {
+		// writer->finish() cannot create sst file with no entries
+		// So, we have to check whether any data set to be written to sst file before writer->finish()
 		return;
 	}
-	rocksdb::Status status;
-	status = this->writer->Finish();
+	rocksdb::Status status = this->writer->Finish();
 	if (!status.ok()) {
-		Error e = statusToError(status);
 		TraceEvent(SevError, "RocksDBSstFileWriterWrapperCloseError")
 		    .detail("LocalFile", this->localFile)
 		    .detail("Status", status.ToString());
-		throw e;
+		throw failed_to_create_checkpoint_shard_metadata();
 	}
 }
 
