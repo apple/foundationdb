@@ -33,6 +33,7 @@
 #include "flow/EncryptUtils.h"
 #include "flow/Knobs.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include <cstring>
 
 #define OP_DISK_OVERHEAD (sizeof(OpHeader) + 1)
 
@@ -462,19 +463,19 @@ private:
 		return total;
 	}
 
-	// Data format for normal operation:
+	// Data format for normal operation (1 byte padding at the end):
 	// +-------------+-------------+-------------+--------+--------+
 	// | opType      | len1        | len2        | param2 | param2 |
 	// | sizeof(int) | sizeof(int) | sizeof(int) | len1   | len2   |
 	// +-------------+-------------+-------------+--------+--------+
 	//
-	// However, if the operation is encrypted:
-	// +-------------+-------------+-------------+---------------------------------+-------------+--------+--------+
-	// | OpEncrypted | len1        | len2        | BlobCipherEncryptHeader         | opType      | param1 | param2 |
-	// | sizeof(int) | sizeof(int) | sizeof(int) | sizeof(BlobCipherEncryptHeader) | sizeof(int) | len1   | len2   |
-	// +-------------+-------------+-------------+---------------------------------+-------------+--------+--------+
-	// |                                plaintext                                  |           encrypted           |
-	// +-----------------------------------------------------------------------------------------------------------+
+	// However, if the operation is encrypted (1 byte padding at the end):
+	// +-------------+-------------+-------------+---------------------------------------------+-------------+---
+	// | OpEncrypted | len1   | len2   | headerSize |BlobCipherEncryptHeader    | opType      | param1 | param2 |
+	// | s(int)      | s(int) | s(int) | s(uint16)  |s(BlobCipherEncryptHeader) | sizeof(int) | len1   | len2   |
+	// +-------------+-------------+-------------+------------ +-------------+--------+--------------------------
+	// |                                plaintext                               |           encrypted           |
+	// +---------------------------------------------------------------------------------------------------------
 	//
 	IDiskQueue::location log_op(OpType op, StringRef v1, StringRef v2) {
 		// Metadata op types to be excluded from encryption.
@@ -504,12 +505,27 @@ private:
 			    cipherKeys.cipherHeaderKey,
 			    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 			    BlobCipherMetrics::KV_MEMORY);
-			BlobCipherEncryptHeader cipherHeader;
+			uint16_t headerSize;
 			Arena arena;
-			StringRef ciphertext =
-			    cipher.encrypt(plaintext, sizeof(int) + v1.size() + v2.size(), &cipherHeader, arena)->toStringRef();
-			log->push(StringRef((const uint8_t*)&cipherHeader, BlobCipherEncryptHeader::headerSize));
-			log->push(ciphertext);
+			if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+				BlobCipherEncryptHeaderRef headerRef;
+				StringRef cipherText =
+				    cipher.encrypt(plaintext, sizeof(int) + v1.size() + v2.size(), &headerRef, arena);
+				headerSize = BlobCipherEncryptHeaderRef::toStringRef(headerRef).size();
+				ASSERT(headerSize > 0);
+				log->push(StringRef((const uint8_t*)&headerSize, sizeof(headerSize)));
+				log->push(BlobCipherEncryptHeaderRef::toStringRef(headerRef));
+				log->push(cipherText);
+			} else {
+				BlobCipherEncryptHeader cipherHeader;
+				StringRef ciphertext =
+				    cipher.encrypt(plaintext, sizeof(int) + v1.size() + v2.size(), &cipherHeader, arena)->toStringRef();
+				headerSize = BlobCipherEncryptHeader::headerSize;
+				ASSERT(headerSize > 0);
+				log->push(StringRef((const uint8_t*)&headerSize, sizeof(headerSize)));
+				log->push(StringRef((const uint8_t*)&cipherHeader, headerSize));
+				log->push(ciphertext);
+			}
 		}
 		return log->push("\x01"_sr); // Changes here should be reflected in OP_DISK_OVERHEAD
 	}
@@ -526,10 +542,27 @@ private:
 			// It is not supported to open an encrypted store as unencrypted, or vice-versa.
 			ASSERT_EQ(h->op == OpEncrypted, self->enableEncryption);
 		}
+		// if encrypted op read the header size
+		state uint16_t headerSize = 0;
+		if (h->op == OpEncrypted) {
+			state Standalone<StringRef> headerSizeStr = wait(self->log->readNext(sizeof(headerSize)));
+			ASSERT(headerSizeStr.size() <= sizeof(headerSize));
+			// Partial read on the header size
+			memset(&headerSize, 0, sizeof(headerSize));
+			memcpy(&headerSize, headerSizeStr.begin(), headerSizeStr.size());
+			if (headerSizeStr.size() < sizeof(headerSize)) {
+				CODE_PROBE(true, "zero fill partial encryption header size", probe::decoration::rare);
+				*zeroFillSize =
+				    (sizeof(headerSize) - headerSizeStr.size()) + headerSize + sizeof(int) + h->len1 + h->len2 + 1;
+			}
+			if (*zeroFillSize > 0) {
+				return headerSizeStr;
+			}
+		}
 		state int remainingBytes = h->len1 + h->len2 + 1;
 		if (h->op == OpEncrypted) {
 			// encryption header, plus the real (encrypted) op type
-			remainingBytes += BlobCipherEncryptHeader::headerSize + sizeof(int);
+			remainingBytes += headerSize + sizeof(int);
 		}
 		state Standalone<StringRef> data = wait(self->log->readNext(remainingBytes));
 		ASSERT(data.size() <= remainingBytes);
@@ -540,18 +573,28 @@ private:
 		if (h->op != OpEncrypted || *zeroFillSize > 0 || *isZeroFilled) {
 			return data;
 		}
-		state BlobCipherEncryptHeader cipherHeader = *(BlobCipherEncryptHeader*)data.begin();
-		TextAndHeaderCipherKeys cipherKeys =
-		    wait(getEncryptCipherKeys(self->db, cipherHeader, BlobCipherMetrics::KV_MEMORY));
-		DecryptBlobCipherAes256Ctr cipher(
-		    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, cipherHeader.iv, BlobCipherMetrics::KV_MEMORY);
-		Arena arena;
-		StringRef plaintext = cipher
-		                          .decrypt(data.begin() + BlobCipherEncryptHeader::headerSize,
-		                                   sizeof(int) + h->len1 + h->len2,
-		                                   cipherHeader,
-		                                   arena)
-		                          ->toStringRef();
+		state Arena arena;
+		state StringRef plaintext;
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			state BlobCipherEncryptHeaderRef cipherHeaderRef =
+			    BlobCipherEncryptHeaderRef::fromStringRef(StringRef(data.begin(), headerSize));
+			TextAndHeaderCipherKeysOpt cipherKeys =
+			    wait(getEncryptCipherKeys(self->db, cipherHeaderRef, BlobCipherMetrics::KV_MEMORY));
+			DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey,
+			                                  cipherKeys.cipherHeaderKey,
+			                                  cipherHeaderRef.getIV(),
+			                                  BlobCipherMetrics::KV_MEMORY);
+			plaintext =
+			    cipher.decrypt(data.begin() + headerSize, sizeof(int) + h->len1 + h->len2, cipherHeaderRef, arena);
+		} else {
+			state BlobCipherEncryptHeader cipherHeader = *(BlobCipherEncryptHeader*)data.begin();
+			TextAndHeaderCipherKeys cipherKeys =
+			    wait(getEncryptCipherKeys(self->db, cipherHeader, BlobCipherMetrics::KV_MEMORY));
+			DecryptBlobCipherAes256Ctr cipher(
+			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, cipherHeader.iv, BlobCipherMetrics::KV_MEMORY);
+			plaintext = cipher.decrypt(data.begin() + headerSize, sizeof(int) + h->len1 + h->len2, cipherHeader, arena)
+			                ->toStringRef();
+		}
 		h->op = *(int*)plaintext.begin();
 		return Standalone<StringRef>(plaintext.substr(sizeof(int)), arena);
 	}
@@ -596,8 +639,10 @@ private:
 								memcpy(&h, data.begin(), data.size());
 								zeroFillSize = sizeof(OpHeader) - data.size() + h.len1 + h.len2 + 1;
 								if (h.op == OpEncrypted) {
-									// encryption header, plus the real (encrypted) op type
-									zeroFillSize += BlobCipherEncryptHeader::headerSize + sizeof(int);
+									// encrypt header size + encryption header, plus the real (encrypted) op type
+									// If it's a partial header we assume the header size is 0 (this is fine since we
+									// don't read the header in this case)
+									zeroFillSize += 0 + sizeof(uint16_t) + sizeof(int);
 								}
 							}
 							TraceEvent("KVSMemRecoveryComplete", self->id)
