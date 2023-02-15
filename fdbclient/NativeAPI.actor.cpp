@@ -10918,6 +10918,9 @@ ACTOR Future<bool> blobbifyRangeActor(Reference<DatabaseContext> cx,
                                       KeyRange range,
                                       bool doWait,
                                       Optional<Reference<Tenant>> tenant) {
+	if (BG_REQUEST_DEBUG) {
+		fmt::print("BlobbifyRange [{0} - {1}) ({2})\n", range.begin.printable(), range.end.printable(), doWait);
+	}
 	state bool result = wait(setBlobRangeActor(cx, range, true, tenant));
 	if (!doWait || !result) {
 		return result;
@@ -10926,6 +10929,9 @@ ACTOR Future<bool> blobbifyRangeActor(Reference<DatabaseContext> cx,
 	loop {
 		Version verifyVersion = wait(cx->verifyBlobRange(range, latestVersion, tenant));
 		if (verifyVersion != invalidVersion) {
+			if (BG_REQUEST_DEBUG) {
+				fmt::print("BlobbifyRange [{0} - {1}) got complete @ {2}\n", range.begin.printable(), range.end.printable(), verifyVersion);
+			}
 			return result;
 		}
 		wait(delay(0.1));

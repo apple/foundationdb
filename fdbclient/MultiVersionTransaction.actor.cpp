@@ -796,8 +796,8 @@ ThreadFuture<bool> DLDatabase::blobbifyRangeV2(const KeyRangeRef& keyRange, bool
 		return unsupported_operation();
 	}
 
-	FdbCApi::FDBFuture* f = api->databaseBlobbifyRange(
-	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
+	FdbCApi::FDBFuture* f = api->databaseBlobbifyRangeV2(
+	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), wait);
 
 	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		FdbCApi::fdb_bool_t ret = false;
