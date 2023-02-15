@@ -3035,7 +3035,9 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 					if (m.isEncrypted()) {
 						const BlobCipherEncryptHeader* header = m.encryptionHeader();
 						cipherDetails.insert(header->cipherTextDetails);
-						cipherDetails.insert(header->cipherHeaderDetails);
+						if (header->cipherHeaderDetails.isValid()) {
+							cipherDetails.insert(header->cipherHeaderDetails);
+						}
 					}
 				}
 			}
@@ -9273,7 +9275,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 						if (!cipherKeys.present()) {
 							const BlobCipherEncryptHeader* header = msg.encryptionHeader();
 							cipherDetails.insert(header->cipherTextDetails);
-							cipherDetails.insert(header->cipherHeaderDetails);
+							if (header->cipherHeaderDetails.isValid()) {
+								cipherDetails.insert(header->cipherHeaderDetails);
+							}
 							collectingCipherKeys = true;
 						} else {
 							msg = msg.decrypt(cipherKeys.get(), eager.arena, BlobCipherMetrics::TLOG);
