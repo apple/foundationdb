@@ -243,7 +243,7 @@ public:
 	// Encryption key used to encrypt a page. Different encoding types may use different structs to represent
 	// an encryption key, and EncryptionKey is a union of these structs.
 	struct EncryptionKey {
-		TextAndHeaderCipherKeysOpt aesKey; // For AESEncryption and AESEncryptionWithAuth
+		TextAndHeaderCipherKeys aesKey; // For AESEncryption and AESEncryptionWithAuth
 		uint8_t xorKey; // For XOREncryption_TestOnly
 		uint8_t xorWith; // For XOREncryption_TestOnly
 	};
@@ -405,7 +405,7 @@ public:
 		                                         AESEncryptionWithAuthEncodingHeader>::type;
 
 		static void encode(void* header,
-		                   const TextAndHeaderCipherKeysOpt& cipherKeys,
+		                   const TextAndHeaderCipherKeys& cipherKeys,
 		                   uint8_t* payload,
 		                   int len,
 		                   PhysicalPageID seed) {
@@ -424,7 +424,7 @@ public:
 		}
 
 		static void decode(void* header,
-		                   const TextAndHeaderCipherKeysOpt& cipherKeys,
+		                   const TextAndHeaderCipherKeys& cipherKeys,
 		                   uint8_t* payload,
 		                   int len,
 		                   PhysicalPageID seed) {
@@ -496,7 +496,9 @@ public:
 	}
 
 	// Get the logical page buffer as a StringRef
-	Standalone<StringRef> asStringRef() const { return Standalone<StringRef>(StringRef(buffer, logicalSize)); }
+	Standalone<StringRef> asStringRef() const {
+		return Standalone<StringRef>(StringRef(buffer, logicalSize));
+	}
 
 	// Get a new ArenaPage that contains a copy of this page's data.
 	// extra is not copied to the returned page
@@ -624,10 +626,14 @@ public:
 		}
 	}
 
-	const Arena& getArena() const { return arena; }
+	const Arena& getArena() const {
+		return arena;
+	}
 
 	// Returns true if the page's encoding type employs encryption
-	bool isEncrypted() const { return isEncodingTypeEncrypted(getEncodingType()); }
+	bool isEncrypted() const {
+		return isEncodingTypeEncrypted(getEncodingType());
+	}
 
 	// Return encryption domain id used. This method only use information from the encryptionKey.
 	// Caller should make sure encryption domain is in use.
@@ -641,7 +647,9 @@ public:
 	}
 
 	// Return pointer to encoding header.
-	const void* getEncodingHeader() const { return encodingHeaderAvailable ? page->getEncodingHeader() : nullptr; }
+	const void* getEncodingHeader() const {
+		return encodingHeaderAvailable ? page->getEncodingHeader() : nullptr;
+	}
 
 private:
 	Arena arena;
@@ -668,7 +676,9 @@ private:
 	int payloadSize;
 
 public:
-	EncodingType getEncodingType() const { return page->encodingType; }
+	EncodingType getEncodingType() const {
+		return page->encodingType;
+	}
 
 	PhysicalPageID getPhysicalPageID() const {
 		if (page->headerVersion == 1) {

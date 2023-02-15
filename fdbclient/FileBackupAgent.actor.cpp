@@ -610,7 +610,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                                           int64_t dataLen,
 	                                           Arena* arena) {
 		Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
-		TextAndHeaderCipherKeysOpt cipherKeys = wait(getEncryptCipherKeys(dbInfo, header, BlobCipherMetrics::RESTORE));
+		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, header, BlobCipherMetrics::RESTORE));
 		validateEncryptionHeader(cipherKeys.cipherHeaderKey, cipherKeys.cipherTextKey, header);
 		DecryptBlobCipherAes256Ctr decryptor(
 		    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.iv, BlobCipherMetrics::BACKUP);
@@ -628,7 +628,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	ACTOR static Future<Reference<BlobCipherKey>> refreshKey(EncryptedRangeFileWriter* self,
 	                                                         EncryptCipherDomainId domainId) {
 		Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
-		TextAndHeaderCipherKeysOpt cipherKeys =
+		TextAndHeaderCipherKeys cipherKeys =
 		    wait(getLatestEncryptCipherKeysForDomain(dbInfo, domainId, BlobCipherMetrics::BACKUP));
 		return cipherKeys.cipherTextKey;
 	}
@@ -670,7 +670,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 
 		// Get text and header cipher key
-		TextAndHeaderCipherKeysOpt textAndHeaderCipherKeys =
+		TextAndHeaderCipherKeys textAndHeaderCipherKeys =
 		    wait(getLatestEncryptCipherKeysForDomain(dbInfo, curDomainId, BlobCipherMetrics::BACKUP));
 		self->cipherKeys.textCipherKey = textAndHeaderCipherKeys.cipherTextKey;
 		self->cipherKeys.headerCipherKey = textAndHeaderCipherKeys.cipherHeaderKey;

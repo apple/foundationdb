@@ -366,7 +366,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 				state EncryptCipherDomainId domainId = logValue.encryptionHeader()->cipherTextDetails.encryptDomainId;
 				Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
 				try {
-					TextAndHeaderCipherKeysOpt cipherKeys =
+					TextAndHeaderCipherKeys cipherKeys =
 					    wait(getEncryptCipherKeys(dbInfo, *logValue.encryptionHeader(), BlobCipherMetrics::RESTORE));
 					logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::BACKUP);
 				} catch (Error& e) {

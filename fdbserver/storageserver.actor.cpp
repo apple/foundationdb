@@ -3046,7 +3046,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			Version version, knownCommittedVersion;
 			Standalone<VectorRef<MutationRef>> mutations;
 			Standalone<VectorRef<MutationRef>> encryptedMutations;
-			std::vector<TextAndHeaderCipherKeysOpt> cipherKeys;
+			std::vector<TextAndHeaderCipherKeys> cipherKeys;
 			std::tie(id, version) = decodeChangeFeedDurableKey(res[i].key);
 			std::tie(encryptedMutations, knownCommittedVersion) = decodedMutations[i];
 			mutations = encryptedMutations;
@@ -6197,7 +6197,7 @@ void applyChangeFeedMutation(StorageServer* self,
 					it->mutations.back().cipherKeys.push_back(encryptedMutation.cipherKeys);
 				} else if (it->mutations.back().encrypted.present()) {
 					it->mutations.back().encrypted.get().push_back_deep(it->mutations.back().arena(), m);
-					it->mutations.back().cipherKeys.push_back(TextAndHeaderCipherKeysOpt());
+					it->mutations.back().cipherKeys.push_back(TextAndHeaderCipherKeys());
 				}
 				it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
 
@@ -6264,7 +6264,7 @@ void applyChangeFeedMutation(StorageServer* self,
 						it->mutations.back().cipherKeys.push_back(encryptedMutation.cipherKeys);
 					} else if (it->mutations.back().encrypted.present()) {
 						it->mutations.back().encrypted.get().push_back_deep(it->mutations.back().arena(), m);
-						it->mutations.back().cipherKeys.push_back(TextAndHeaderCipherKeysOpt());
+						it->mutations.back().cipherKeys.push_back(TextAndHeaderCipherKeys());
 					}
 
 					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), clearMutation);
