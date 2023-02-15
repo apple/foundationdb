@@ -143,7 +143,7 @@ struct MutationRef {
 		return reinterpret_cast<const BlobCipherEncryptHeader*>(param1.begin());
 	}
 
-	MutationRef encrypt(TextAndHeaderCipherKeys cipherKeys,
+	MutationRef encrypt(TextAndHeaderCipherKeysOpt cipherKeys,
 	                    Arena& arena,
 	                    BlobCipherMetrics::UsageType usageType) const {
 		uint8_t iv[AES_256_IV_LENGTH] = { 0 };
@@ -203,7 +203,7 @@ struct MutationRef {
 		return encrypt(cipherKeys, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, arena, usageType);
 	}
 
-	MutationRef decrypt(TextAndHeaderCipherKeys cipherKeys,
+	MutationRef decrypt(TextAndHeaderCipherKeysOpt cipherKeys,
 	                    Arena& arena,
 	                    BlobCipherMetrics::UsageType usageType,
 	                    StringRef* buf = nullptr) const {
@@ -223,11 +223,11 @@ struct MutationRef {
 	                    Arena& arena,
 	                    BlobCipherMetrics::UsageType usageType,
 	                    StringRef* buf = nullptr) const {
-		TextAndHeaderCipherKeys textAndHeaderKeys = getCipherKeys(cipherKeys);
+		TextAndHeaderCipherKeysOpt textAndHeaderKeys = getCipherKeys(cipherKeys);
 		return decrypt(textAndHeaderKeys, arena, usageType, buf);
 	}
 
-	TextAndHeaderCipherKeys getCipherKeys(
+	TextAndHeaderCipherKeysOpt getCipherKeys(
 	    const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys) const {
 		const BlobCipherEncryptHeader* header = encryptionHeader();
 		auto getCipherKey = [&](const BlobCipherDetails& details) -> Reference<BlobCipherKey> {
@@ -238,7 +238,7 @@ struct MutationRef {
 			ASSERT(iter != cipherKeys.end() && iter->second.isValid());
 			return iter->second;
 		};
-		TextAndHeaderCipherKeys textAndHeaderKeys;
+		TextAndHeaderCipherKeysOpt textAndHeaderKeys;
 		textAndHeaderKeys.cipherHeaderKey = getCipherKey(header->cipherHeaderDetails);
 		textAndHeaderKeys.cipherTextKey = getCipherKey(header->cipherTextDetails);
 		return textAndHeaderKeys;
@@ -402,13 +402,13 @@ struct MutationsAndVersionRef {
 
 struct MutationRefAndCipherKeys {
 	MutationRef mutation;
-	TextAndHeaderCipherKeys cipherKeys;
+	TextAndHeaderCipherKeysOpt cipherKeys;
 };
 
 struct EncryptedMutationsAndVersionRef {
 	VectorRef<MutationRef> mutations;
 	Optional<VectorRef<MutationRef>> encrypted;
-	std::vector<TextAndHeaderCipherKeys> cipherKeys;
+	std::vector<TextAndHeaderCipherKeysOpt> cipherKeys;
 	Version version = invalidVersion;
 	Version knownCommittedVersion = invalidVersion;
 
@@ -417,7 +417,7 @@ struct EncryptedMutationsAndVersionRef {
 	  : version(version), knownCommittedVersion(knownCommittedVersion) {}
 	EncryptedMutationsAndVersionRef(VectorRef<MutationRef> mutations,
 	                                VectorRef<MutationRef> encrypted,
-	                                const std::vector<TextAndHeaderCipherKeys>& cipherKeys,
+	                                const std::vector<TextAndHeaderCipherKeysOpt>& cipherKeys,
 	                                Version version,
 	                                Version knownCommittedVersion)
 	  : mutations(mutations), encrypted(encrypted), cipherKeys(cipherKeys), version(version),
@@ -425,7 +425,7 @@ struct EncryptedMutationsAndVersionRef {
 	EncryptedMutationsAndVersionRef(Arena& to,
 	                                VectorRef<MutationRef> mutations,
 	                                Optional<VectorRef<MutationRef>> encrypt,
-	                                const std::vector<TextAndHeaderCipherKeys>& cipherKeys,
+	                                const std::vector<TextAndHeaderCipherKeysOpt>& cipherKeys,
 	                                Version version,
 	                                Version knownCommittedVersion)
 	  : mutations(to, mutations), cipherKeys(cipherKeys), version(version),

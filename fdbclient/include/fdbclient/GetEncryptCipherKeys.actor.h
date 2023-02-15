@@ -34,6 +34,7 @@
 #include "flow/Knobs.h"
 #include "flow/IRandom.h"
 
+#include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -287,54 +288,65 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncry
 	return cipherKeys;
 }
 
-struct TextAndHeaderCipherKeys {
+struct TextAndHeaderCipherKeysOpt {
 	Reference<BlobCipherKey> cipherTextKey;
-	Reference<BlobCipherKey> cipherHeaderKey;
+	Optional<Reference<BlobCipherKey>> cipherHeaderKey;
 };
 
 ACTOR template <class T>
-Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(Reference<AsyncVar<T> const> db,
-                                                                    EncryptCipherDomainId domainId,
-                                                                    BlobCipherMetrics::UsageType usageType) {
+Future<TextAndHeaderCipherKeysOpt> getLatestEncryptCipherKeysForDomain(Reference<AsyncVar<T> const> db,
+                                                                       EncryptCipherDomainId domainId,
+                                                                       BlobCipherMetrics::UsageType usageType) {
 	// TODO: Do not fetch header cipher key if authentication is diabled.
 	std::unordered_set<EncryptCipherDomainId> domainIds = { domainId, ENCRYPT_HEADER_DOMAIN_ID };
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys =
 	    wait(getLatestEncryptCipherKeys(db, domainIds, usageType));
 	ASSERT(cipherKeys.count(domainId) > 0);
 	ASSERT(cipherKeys.count(ENCRYPT_HEADER_DOMAIN_ID) > 0);
-	TextAndHeaderCipherKeys result{ cipherKeys.at(domainId), cipherKeys.at(ENCRYPT_HEADER_DOMAIN_ID) };
+	TextAndHeaderCipherKeysOpt result{ cipherKeys.at(domainId), cipherKeys.at(ENCRYPT_HEADER_DOMAIN_ID) };
 	ASSERT(result.cipherTextKey.isValid());
-	ASSERT(result.cipherHeaderKey.isValid());
+	ASSERT(result.cipherHeaderKey.present() && result.cipherHeaderKey.get().isValid());
 	return result;
 }
 
 template <class T>
-Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(const Reference<AsyncVar<T> const>& db,
-                                                                 BlobCipherMetrics::UsageType usageType) {
+Future<TextAndHeaderCipherKeysOpt> getLatestSystemEncryptCipherKeys(const Reference<AsyncVar<T> const>& db,
+                                                                    BlobCipherMetrics::UsageType usageType) {
 	return getLatestEncryptCipherKeysForDomain(db, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, usageType);
 }
 
 ACTOR template <class T>
-Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
-                                                     BlobCipherEncryptHeader header,
-                                                     BlobCipherMetrics::UsageType usageType) {
+Future<TextAndHeaderCipherKeysOpt> getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
+                                                        BlobCipherEncryptHeader header,
+                                                        BlobCipherMetrics::UsageType usageType) {
 	std::unordered_set<BlobCipherDetails> cipherDetails{ header.cipherTextDetails };
+
+	state bool isHeaderCipherNotPresent = header.flags.authTokenMode == ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE;
+	ASSERT(header.cipherTextDetails.isValid());
 	if (header.cipherHeaderDetails.isValid()) {
 		cipherDetails.insert(header.cipherHeaderDetails);
+	} else {
+		// No encryption authentication
+		ASSERT(isHeaderCipherNotPresent);
 	}
 	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys =
 	    wait(getEncryptCipherKeys(db, cipherDetails, usageType));
-	TextAndHeaderCipherKeys result;
-	auto setCipherKey = [&](const BlobCipherDetails& details, Reference<BlobCipherKey>& cipherKey) {
+	TextAndHeaderCipherKeysOpt result;
+
+	auto setCipherKey = [&](const BlobCipherDetails& details, TextAndHeaderCipherKeysOpt& result) {
 		if (!details.isValid()) {
 			return;
 		}
 		auto iter = cipherKeys.find(details);
 		ASSERT(iter != cipherKeys.end() && iter->second.isValid());
-		cipherKey = iter->second;
+		isEncryptHeaderDomain(details.encryptDomainId) ? result.cipherHeaderKey = iter->second
+		                                               : result.cipherTextKey = iter->second;
 	};
-	setCipherKey(header.cipherTextDetails, result.cipherTextKey);
-	setCipherKey(header.cipherHeaderDetails, result.cipherHeaderKey);
+	setCipherKey(header.cipherTextDetails, result);
+	setCipherKey(header.cipherHeaderDetails, result);
+	ASSERT(result.cipherTextKey.isValid() &&
+	       (isHeaderCipherNotPresent || (result.cipherHeaderKey.present() && result.cipherHeaderKey.get().isValid())));
+
 	return result;
 }
 

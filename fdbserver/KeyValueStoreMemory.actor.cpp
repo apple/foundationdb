@@ -409,7 +409,7 @@ private:
 	std::vector<std::pair<KeyValueMapPair, uint64_t>> dataSets;
 
 	bool enableEncryption;
-	TextAndHeaderCipherKeys cipherKeys;
+	TextAndHeaderCipherKeysOpt cipherKeys;
 	Future<Void> refreshCipherKeysActor;
 
 	int64_t commit_queue(OpQueue& ops, bool log, bool sequential = false) {
@@ -498,7 +498,7 @@ private:
 			}
 
 			ASSERT(cipherKeys.cipherTextKey.isValid());
-			ASSERT(cipherKeys.cipherHeaderKey.isValid());
+			ASSERT(cipherKeys.cipherHeaderKey.present() && cipherKeys.cipherHeaderKey.get().isValid());
 			EncryptBlobCipherAes265Ctr cipher(
 			    cipherKeys.cipherTextKey,
 			    cipherKeys.cipherHeaderKey,
@@ -541,7 +541,7 @@ private:
 			return data;
 		}
 		state BlobCipherEncryptHeader cipherHeader = *(BlobCipherEncryptHeader*)data.begin();
-		TextAndHeaderCipherKeys cipherKeys =
+		TextAndHeaderCipherKeysOpt cipherKeys =
 		    wait(getEncryptCipherKeys(self->db, cipherHeader, BlobCipherMetrics::KV_MEMORY));
 		DecryptBlobCipherAes256Ctr cipher(
 		    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, cipherHeader.iv, BlobCipherMetrics::KV_MEMORY);
@@ -981,7 +981,7 @@ private:
 	}
 
 	ACTOR static Future<Void> updateCipherKeys(KeyValueStoreMemory* self) {
-		TextAndHeaderCipherKeys cipherKeys =
+		TextAndHeaderCipherKeysOpt cipherKeys =
 		    wait(getLatestSystemEncryptCipherKeys(self->db, BlobCipherMetrics::KV_MEMORY));
 		self->cipherKeys = cipherKeys;
 		return Void();

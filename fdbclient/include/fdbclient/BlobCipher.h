@@ -170,8 +170,6 @@ struct BlobCipherDetails {
 	                  const EncryptCipherRandomSalt& random)
 	  : encryptDomainId(dId), baseCipherId(bId), salt(random) {}
 
-	bool isValid() const { return encryptDomainId != INVALID_ENCRYPT_DOMAIN_ID; }
-
 	bool operator==(const BlobCipherDetails& o) const {
 		return encryptDomainId == o.encryptDomainId && baseCipherId == o.baseCipherId && salt == o.salt;
 	}
@@ -855,24 +853,24 @@ public:
 	static constexpr uint8_t ENCRYPT_HEADER_VERSION = 1;
 
 	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
-	                           Reference<BlobCipherKey> hCipherKey,
+	                           Optional<Reference<BlobCipherKey>> hCipherKey,
 	                           const uint8_t* iv,
 	                           const int ivLen,
 	                           const EncryptAuthTokenMode mode,
 	                           BlobCipherMetrics::UsageType usageType);
 	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
-	                           Reference<BlobCipherKey> hCipherKey,
+	                           Optional<Reference<BlobCipherKey>> hCipherKey,
 	                           const uint8_t* iv,
 	                           const int ivLen,
 	                           const EncryptAuthTokenMode mode,
 	                           const EncryptAuthTokenAlgo algo,
 	                           BlobCipherMetrics::UsageType usageType);
 	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
-	                           Reference<BlobCipherKey> hCipherKey,
+	                           Optional<Reference<BlobCipherKey>> hCipherKey,
 	                           const EncryptAuthTokenMode mode,
 	                           BlobCipherMetrics::UsageType usageType);
 	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
-	                           Reference<BlobCipherKey> hCipherKey,
+	                           Optional<Reference<BlobCipherKey>> hCipherKey,
 	                           const EncryptAuthTokenMode mode,
 	                           const EncryptAuthTokenAlgo algo,
 	                           BlobCipherMetrics::UsageType usageType);
@@ -906,7 +904,7 @@ private:
 
 	EVP_CIPHER_CTX* ctx;
 	Reference<BlobCipherKey> textCipherKey;
-	Reference<BlobCipherKey> headerCipherKey;
+	Optional<Reference<BlobCipherKey>> headerCipherKeyOpt;
 	EncryptAuthTokenMode authTokenMode;
 	uint8_t iv[AES_256_IV_LENGTH];
 	BlobCipherMetrics::UsageType usageType;
@@ -919,7 +917,7 @@ private:
 class DecryptBlobCipherAes256Ctr final : NonCopyable, public ReferenceCounted<DecryptBlobCipherAes256Ctr> {
 public:
 	DecryptBlobCipherAes256Ctr(Reference<BlobCipherKey> tCipherKey,
-	                           Reference<BlobCipherKey> hCipherKey,
+	                           Optional<Reference<BlobCipherKey>> hCipherKey,
 	                           const uint8_t* iv,
 	                           BlobCipherMetrics::UsageType usageType);
 	~DecryptBlobCipherAes256Ctr();
@@ -937,7 +935,7 @@ private:
 	EVP_CIPHER_CTX* ctx;
 	BlobCipherMetrics::UsageType usageType;
 	Reference<BlobCipherKey> textCipherKey;
-	Reference<BlobCipherKey> headerCipherKey;
+	Optional<Reference<BlobCipherKey>> headerCipherKeyOpt;
 	bool authTokensValidationDone;
 
 	void validateEncryptHeader(const uint8_t*,

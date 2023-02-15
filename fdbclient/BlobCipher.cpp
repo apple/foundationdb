@@ -756,12 +756,12 @@ int getEncryptAlgoHeaderVersion(const EncryptAuthTokenMode mode, const EncryptAu
 // EncryptBlobCipherAes265Ctr class methods
 
 EncryptBlobCipherAes265Ctr::EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
-                                                       Reference<BlobCipherKey> hCipherKey,
+                                                       Optional<Reference<BlobCipherKey>> hCipherKeyOpt,
                                                        const uint8_t* cipherIV,
                                                        const int ivLen,
                                                        const EncryptAuthTokenMode mode,
                                                        BlobCipherMetrics::UsageType usageType)
-  : ctx(EVP_CIPHER_CTX_new()), textCipherKey(tCipherKey), headerCipherKey(hCipherKey), authTokenMode(mode),
+  : ctx(EVP_CIPHER_CTX_new()), textCipherKey(tCipherKey), headerCipherKeyOpt(hCipherKeyOpt), authTokenMode(mode),
     usageType(usageType) {
 	ASSERT_EQ(ivLen, AES_256_IV_LENGTH);
 	authTokenAlgo = getAuthTokenAlgoFromMode(authTokenMode);
@@ -770,13 +770,13 @@ EncryptBlobCipherAes265Ctr::EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> 
 }
 
 EncryptBlobCipherAes265Ctr::EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
-                                                       Reference<BlobCipherKey> hCipherKey,
+                                                       Optional<Reference<BlobCipherKey>> hCipherKeyOpt,
                                                        const uint8_t* cipherIV,
                                                        const int ivLen,
                                                        const EncryptAuthTokenMode mode,
                                                        const EncryptAuthTokenAlgo algo,
                                                        BlobCipherMetrics::UsageType usageType)
-  : ctx(EVP_CIPHER_CTX_new()), textCipherKey(tCipherKey), headerCipherKey(hCipherKey), authTokenMode(mode),
+  : ctx(EVP_CIPHER_CTX_new()), textCipherKey(tCipherKey), headerCipherKeyOpt(hCipherKeyOpt), authTokenMode(mode),
     authTokenAlgo(algo), usageType(usageType) {
 	ASSERT_EQ(ivLen, AES_256_IV_LENGTH);
 	memcpy(&iv[0], cipherIV, ivLen);
@@ -784,10 +784,10 @@ EncryptBlobCipherAes265Ctr::EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> 
 }
 
 EncryptBlobCipherAes265Ctr::EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
-                                                       Reference<BlobCipherKey> hCipherKey,
+                                                       Optional<Reference<BlobCipherKey>> hCipherKeyOpt,
                                                        const EncryptAuthTokenMode mode,
                                                        BlobCipherMetrics::UsageType usageType)
-  : ctx(EVP_CIPHER_CTX_new()), textCipherKey(tCipherKey), headerCipherKey(hCipherKey), authTokenMode(mode),
+  : ctx(EVP_CIPHER_CTX_new()), textCipherKey(tCipherKey), headerCipherKeyOpt(hCipherKeyOpt), authTokenMode(mode),
     usageType(usageType) {
 	authTokenAlgo = getAuthTokenAlgoFromMode(authTokenMode);
 	deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
@@ -795,11 +795,11 @@ EncryptBlobCipherAes265Ctr::EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> 
 }
 
 EncryptBlobCipherAes265Ctr::EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
-                                                       Reference<BlobCipherKey> hCipherKey,
+                                                       Optional<Reference<BlobCipherKey>> hCipherKeyOpt,
                                                        const EncryptAuthTokenMode mode,
                                                        const EncryptAuthTokenAlgo algo,
                                                        BlobCipherMetrics::UsageType usageType)
-  : ctx(EVP_CIPHER_CTX_new()), textCipherKey(tCipherKey), headerCipherKey(hCipherKey), authTokenMode(mode),
+  : ctx(EVP_CIPHER_CTX_new()), textCipherKey(tCipherKey), headerCipherKeyOpt(hCipherKeyOpt), authTokenMode(mode),
     authTokenAlgo(algo), usageType(usageType) {
 	deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
 	init();
@@ -808,7 +808,7 @@ EncryptBlobCipherAes265Ctr::EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> 
 void EncryptBlobCipherAes265Ctr::init() {
 	ASSERT(textCipherKey.isValid());
 	if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
-		ASSERT(headerCipherKey.isValid());
+		ASSERT(headerCipherKeyOpt.present() && headerCipherKeyOpt.get().isValid());
 	}
 
 	if (!isEncryptHeaderAuthTokenDetailsValid(authTokenMode, authTokenAlgo)) {
@@ -835,12 +835,15 @@ void EncryptBlobCipherAes265Ctr::setCipherAlgoHeaderWithAuthV1(const uint8_t* ci
                                                                const BlobCipherEncryptHeaderFlagsV1& flags,
                                                                BlobCipherEncryptHeaderRef* headerRef,
                                                                Arena& arena) {
+	ASSERT(headerCipherKeyOpt.present() && headerCipherKeyOpt.get().isValid());
+
 	// Construct algorithm specific details except 'authToken', serialize the details into 'headerRef' to allow
 	// authToken generation
 	AesCtrWithAuthV1<AuthTokenSize> algoHeader(
 	    BlobCipherDetails(textCipherKey->getDomainId(), textCipherKey->getBaseCipherId(), textCipherKey->getSalt()),
-	    BlobCipherDetails(
-	        headerCipherKey->getDomainId(), headerCipherKey->getBaseCipherId(), headerCipherKey->getSalt()),
+	    BlobCipherDetails(headerCipherKeyOpt.get()->getDomainId(),
+	                      headerCipherKeyOpt.get()->getBaseCipherId(),
+	                      headerCipherKeyOpt.get()->getSalt()),
 	    iv,
 	    AES_256_IV_LENGTH,
 	    arena);
@@ -849,7 +852,7 @@ void EncryptBlobCipherAes265Ctr::setCipherAlgoHeaderWithAuthV1(const uint8_t* ci
 	Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(*headerRef);
 	uint8_t computed[AuthTokenSize];
 	computeAuthToken({ { ciphertext, ciphertextLen }, { serialized.begin(), serialized.size() } },
-	                 headerCipherKey->rawCipher(),
+	                 headerCipherKeyOpt.get()->rawCipher(),
 	                 AES_256_KEY_LENGTH,
 	                 &computed[0],
 	                 (EncryptAuthTokenAlgo)flags.authTokenAlgo,
@@ -1031,7 +1034,7 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 	header->cipherTextDetails = textCipherKey->details();
 	// Populate header encryption-key details
 	if (authTokenMode != ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
-		header->cipherHeaderDetails = headerCipherKey->details();
+		header->cipherHeaderDetails = headerCipherKeyOpt.get()->details();
 	} else {
 		header->cipherHeaderDetails.encryptDomainId = INVALID_ENCRYPT_DOMAIN_ID;
 		header->cipherHeaderDetails.baseCipherId = INVALID_ENCRYPT_CIPHER_KEY_ID;
@@ -1051,7 +1054,7 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 
 		computeAuthToken({ { ciphertext, bytes + finalBytes },
 		                   { reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader) } },
-		                 headerCipherKey->rawCipher(),
+		                 headerCipherKeyOpt.get()->rawCipher(),
 		                 AES_256_KEY_LENGTH,
 		                 &header->singleAuthToken.authToken[0],
 		                 (EncryptAuthTokenAlgo)header->flags.authTokenAlgo,
@@ -1084,10 +1087,10 @@ EncryptBlobCipherAes265Ctr::~EncryptBlobCipherAes265Ctr() {
 // DecryptBlobCipherAes256Ctr class methods
 
 DecryptBlobCipherAes256Ctr::DecryptBlobCipherAes256Ctr(Reference<BlobCipherKey> tCipherKey,
-                                                       Reference<BlobCipherKey> hCipherKey,
+                                                       Optional<Reference<BlobCipherKey>> hCipherKeyOpt,
                                                        const uint8_t* iv,
                                                        BlobCipherMetrics::UsageType usageType)
-  : ctx(EVP_CIPHER_CTX_new()), usageType(usageType), textCipherKey(tCipherKey), headerCipherKey(hCipherKey),
+  : ctx(EVP_CIPHER_CTX_new()), usageType(usageType), textCipherKey(tCipherKey), headerCipherKeyOpt(hCipherKeyOpt),
     authTokensValidationDone(false) {
 	if (ctx == nullptr) {
 		throw encrypt_ops_error();
@@ -1107,6 +1110,7 @@ void DecryptBlobCipherAes256Ctr::validateAuthTokenV1(const uint8_t* ciphertext,
                                                      const BlobCipherEncryptHeaderRef& headerRef) {
 	ASSERT_EQ(flags.encryptMode, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
 	ASSERT_LE(AuthTokenSize, AUTH_TOKEN_MAX_SIZE);
+	ASSERT(headerCipherKeyOpt.present() && headerCipherKeyOpt.get().isValid());
 
 	Arena tmpArena;
 	uint8_t persited[AuthTokenSize];
@@ -1125,7 +1129,7 @@ void DecryptBlobCipherAes256Ctr::validateAuthTokenV1(const uint8_t* ciphertext,
 	headerRefCopy.algoHeader = algoHeaderCopy;
 	Standalone<StringRef> serializedHeader = BlobCipherEncryptHeaderRef::toStringRef(headerRefCopy);
 	computeAuthToken({ { ciphertext, ciphertextLen }, { serializedHeader.begin(), serializedHeader.size() } },
-	                 headerCipherKey->rawCipher(),
+	                 headerCipherKeyOpt.get()->rawCipher(),
 	                 AES_256_KEY_LENGTH,
 	                 &computed[0],
 	                 (EncryptAuthTokenAlgo)flags.authTokenAlgo,
@@ -1280,6 +1284,8 @@ void DecryptBlobCipherAes256Ctr::verifyHeaderSingleAuthToken(const uint8_t* ciph
                                                              const int ciphertextLen,
                                                              const BlobCipherEncryptHeader& header,
                                                              Arena& arena) {
+	ASSERT(headerCipherKeyOpt.present() && headerCipherKeyOpt.get().isValid());
+
 	// prepare the payload {cipherText + encryptionHeader}
 	// ensure the 'authToken' is reset before computing the 'authentication token'
 	BlobCipherEncryptHeader headerCopy;
@@ -1290,7 +1296,7 @@ void DecryptBlobCipherAes256Ctr::verifyHeaderSingleAuthToken(const uint8_t* ciph
 	uint8_t computed[AUTH_TOKEN_MAX_SIZE];
 	computeAuthToken({ { ciphertext, ciphertextLen },
 	                   { reinterpret_cast<const uint8_t*>(&headerCopy), sizeof(BlobCipherEncryptHeader) } },
-	                 headerCipherKey->rawCipher(),
+	                 headerCipherKeyOpt.get()->rawCipher(),
 	                 AES_256_KEY_LENGTH,
 	                 &computed[0],
 	                 (EncryptAuthTokenAlgo)header.flags.authTokenAlgo,
@@ -1355,7 +1361,7 @@ Reference<EncryptBuf> DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphert
 	verifyEncryptHeaderMetadata(header);
 
 	if (header.flags.authTokenMode != EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE &&
-	    !headerCipherKey.isValid()) {
+	    (!headerCipherKeyOpt.present() || !headerCipherKeyOpt.get().isValid())) {
 		TraceEvent(SevWarn, "BlobCipherDecryptInvalidHeaderCipherKey")
 		    .detail("AuthTokenMode", header.flags.authTokenMode);
 		throw encrypt_ops_error();

@@ -474,9 +474,11 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 	ASSERT(domainKeyItr != domainKeyMap.end());
 	cipherKeysCtx.textCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(domainKeyItr->second, *arena);
 
-	TextAndHeaderCipherKeys systemCipherKeys =
+	TextAndHeaderCipherKeysOpt systemCipherKeys =
 	    wait(getLatestSystemEncryptCipherKeys(bwData->dbInfo, BlobCipherMetrics::BLOB_GRANULE));
-	cipherKeysCtx.headerCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(systemCipherKeys.cipherHeaderKey, *arena);
+	ASSERT(systemCipherKeys.cipherHeaderKey.present() && systemCipherKeys.cipherHeaderKey.get().isValid());
+	cipherKeysCtx.headerCipherKey =
+	    BlobGranuleCipherKey::fromBlobCipherKey(systemCipherKeys.cipherHeaderKey.get(), *arena);
 
 	cipherKeysCtx.ivRef = makeString(AES_256_IV_LENGTH, *arena);
 	deterministicRandom()->randomBytes(mutateString(cipherKeysCtx.ivRef), AES_256_IV_LENGTH);
