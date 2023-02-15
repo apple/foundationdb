@@ -160,6 +160,22 @@ public:
 	uint8_t xorWith;
 };
 
+namespace {
+template <EncodingType encodingType>
+int64_t getEncryptionDomainIdFromAesEncryptionHeader(const void* encodingHeader) {
+	using Encoder = typename ArenaPage::AESEncryptionEncoder<encodingType>;
+	using EncodingHeader = typename Encoder::Header;
+	ASSERT(encodingHeader != nullptr);
+	if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+		BlobCipherEncryptHeaderRef headerRef = Encoder::getEncryptionHeaderRef(encodingHeader);
+		return headerRef.getCipherDetails().textCipherDetails.encryptDomainId;
+	} else {
+		const BlobCipherEncryptHeader& header = reinterpret_cast<const EncodingHeader*>(encodingHeader)->encryption;
+		return header.cipherTextDetails.encryptDomainId;
+	}
+}
+} // anonymous namespace
+
 // Key provider to provider cipher keys randomly from a pre-generated pool. It does not maintain encryption domains.
 // Use for testing.
 template <EncodingType encodingType,
@@ -238,15 +254,7 @@ public:
 	}
 
 	int64_t getEncryptionDomainIdFromHeader(const void* encodingHeader) override {
-		ASSERT(encodingHeader != nullptr);
-		using Encoder = typename ArenaPage::AESEncryptionEncoder<encodingType>;
-		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
-			const BlobCipherEncryptHeaderRef headerRef = Encoder::getEncryptionHeaderRef(encodingHeader);
-			return headerRef.getCipherDetails().textCipherDetails.encryptDomainId;
-		} else {
-			const typename Encoder::Header* h = reinterpret_cast<const typename Encoder::Header*>(encodingHeader);
-			return h->encryption.cipherTextDetails.encryptDomainId;
-		}
+		return getEncryptionDomainIdFromAesEncryptionHeader<encodingType>(encodingHeader);
 	}
 
 private:
@@ -386,14 +394,7 @@ public:
 	}
 
 	int64_t getEncryptionDomainIdFromHeader(const void* encodingHeader) override {
-		ASSERT(encodingHeader != nullptr);
-		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
-			BlobCipherEncryptHeaderRef headerRef = Encoder::getEncryptionHeaderRef(encodingHeader);
-			return headerRef.getCipherDetails().textCipherDetails.encryptDomainId;
-		} else {
-			const BlobCipherEncryptHeader& header = reinterpret_cast<const EncodingHeader*>(encodingHeader)->encryption;
-			return header.cipherTextDetails.encryptDomainId;
-		}
+		return getEncryptionDomainIdFromAesEncryptionHeader<encodingType>(encodingHeader);
 	}
 
 private:
