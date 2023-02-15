@@ -132,3 +132,7 @@ bool isReservedEncryptDomain(EncryptCipherDomainId domainId) {
 	return domainId == SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID || domainId == ENCRYPT_HEADER_DOMAIN_ID ||
 	       domainId == FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
 }
+
+bool isEncryptHeaderDomain(EncryptCipherDomainId domainId) {
+	return domainId == ENCRYPT_HEADER_DOMAIN_ID;
+}

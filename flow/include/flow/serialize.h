@@ -303,6 +303,37 @@ inline void load(Archive& ar, boost::container::flat_map<K, V>& value) {
 	ASSERT(ar.protocolVersion().isValid());
 }
 
+template <class Archive, class... Variants>
+inline void save(Archive& ar, const std::variant<Variants...> value) {
+	ar << (uint8_t)value.index();
+	std::visit([&](auto& inner) { ar << inner; }, value);
+	ASSERT(ar.protocolVersion().isValid());
+}
+
+namespace {
+template <class Archive, class Value, class Variant, class... Variants>
+inline void loadVariant(Archive& ar, uint8_t index, Value& value) {
+	if (index == 0) {
+		Variant v;
+		ar >> v;
+		value = v;
+	} else if constexpr (sizeof...(Variants) > 0) {
+		loadVariant<Archive, Value, Variants...>(ar, index - 1, value);
+	} else {
+		ASSERT(false);
+	}
+}
+} // anonymous namespace
+
+template <class Archive, class... Variants>
+inline void load(Archive& ar, std::variant<Variants...>& value) {
+	uint8_t index;
+	ar >> index;
+	ASSERT(index < sizeof...(Variants));
+	loadVariant<Archive, std::variant<Variants...>, Variants...>(ar, index, value);
+	ASSERT(ar.protocolVersion().isValid());
+}
+
 #ifdef _MSC_VER
 #pragma intrinsic(memcpy)
 #endif

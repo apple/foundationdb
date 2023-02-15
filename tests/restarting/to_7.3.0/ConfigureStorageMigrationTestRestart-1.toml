@@ -5,10 +5,6 @@ disableHostname=true
 storageEngineExcludeTypes=[4]
 tenantModes=['disabled']
 
-[[knobs]]
-# This can be removed once the lower bound of this downgrade test is a version that understands the new protocol
-shard_encode_location_metadata = false
-
 [[test]]
 testTitle = 'CloggedConfigureDatabaseTest'
 clearAfterTest = false

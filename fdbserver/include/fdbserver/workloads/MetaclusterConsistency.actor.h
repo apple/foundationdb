@@ -219,7 +219,6 @@ private:
 		std::set<TenantGroupName> processedTenantGroups;
 		for (auto [tenantId, entry] : managementMetadata.tenantMap) {
 			ASSERT(entry.assignedCluster.present());
-			ASSERT(TenantAPI::getTenantIdPrefix(tenantId) == managementMetadata.tenantIdPrefix.get());
 
 			// Each tenant should be assigned to the same cluster where it is stored in the cluster tenant index
 			auto clusterItr = managementMetadata.clusterTenantMap.find(entry.assignedCluster.get());
@@ -311,7 +310,7 @@ private:
 
 		auto& expectedTenants = self->managementMetadata.clusterTenantMap[clusterName];
 
-		std::map<TenantGroupName, int> groupExpectedTenantCounts;
+		std::set<TenantGroupName> tenantGroupsWithCompletedTenants;
 		if (!self->allowPartialMetaclusterOperations) {
 			ASSERT_EQ(dataClusterTenantMap.size(), expectedTenants.size());
 		} else {
@@ -319,13 +318,11 @@ private:
 			for (auto tenantName : expectedTenants) {
 				TenantMapEntry const& metaclusterEntry = self->managementMetadata.tenantMap[tenantName];
 				if (!dataClusterTenantMap.count(tenantName)) {
-					if (metaclusterEntry.tenantGroup.present()) {
-						groupExpectedTenantCounts.try_emplace(metaclusterEntry.tenantGroup.get(), 0);
-					}
 					ASSERT(metaclusterEntry.tenantState == TenantState::REGISTERING ||
-					       metaclusterEntry.tenantState == TenantState::REMOVING);
+					       metaclusterEntry.tenantState == TenantState::REMOVING ||
+					       metaclusterEntry.tenantState == TenantState::ERROR);
 				} else if (metaclusterEntry.tenantGroup.present()) {
-					++groupExpectedTenantCounts[metaclusterEntry.tenantGroup.get()];
+					tenantGroupsWithCompletedTenants.insert(metaclusterEntry.tenantGroup.get());
 				}
 			}
 		}
@@ -335,7 +332,6 @@ private:
 			TenantMapEntry const& metaclusterEntry = self->managementMetadata.tenantMap[tenantId];
 			ASSERT(!entry.assignedCluster.present());
 			ASSERT_EQ(entry.id, metaclusterEntry.id);
-			ASSERT(TenantAPI::getTenantIdPrefix(entry.id) == self->managementMetadata.tenantIdPrefix.get());
 			ASSERT(entry.tenantName == metaclusterEntry.tenantName);
 
 			ASSERT_EQ(entry.tenantState, TenantState::READY);
@@ -361,15 +357,19 @@ private:
 			ASSERT_LE(dataClusterTenantGroupMap.size(), expectedTenantGroups.size());
 			for (auto const& name : expectedTenantGroups) {
 				if (!dataClusterTenantGroupMap.count(name)) {
-					auto itr = groupExpectedTenantCounts.find(name);
-					ASSERT(itr != groupExpectedTenantCounts.end());
-					ASSERT_EQ(itr->second, 0);
+					auto itr = tenantGroupsWithCompletedTenants.find(name);
+					ASSERT(itr == tenantGroupsWithCompletedTenants.end());
 				}
 			}
 		}
 		for (auto const& [name, entry] : dataClusterTenantGroupMap) {
 			ASSERT(expectedTenantGroups.count(name));
 			ASSERT(!entry.assignedCluster.present());
+			expectedTenantGroups.erase(name);
+		}
+
+		for (auto name : expectedTenantGroups) {
+			ASSERT(tenantGroupsWithCompletedTenants.count(name) == 0);
 		}
 
 		return Void();

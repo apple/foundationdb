@@ -1044,6 +1044,20 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1verify
 	return (jlong)f;
 }
 
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1getClientStatus(JNIEnv* jenv,
+                                                                                          jobject,
+                                                                                          jlong dbPtr) {
+	if (!dbPtr) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+
+	FDBDatabase* database = (FDBDatabase*)dbPtr;
+
+	FDBFuture* f = fdb_database_get_client_status(database);
+	return (jlong)f;
+}
+
 JNIEXPORT jboolean JNICALL Java_com_apple_foundationdb_FDB_Error_1predicate(JNIEnv* jenv,
                                                                             jobject,
                                                                             jint predicate,

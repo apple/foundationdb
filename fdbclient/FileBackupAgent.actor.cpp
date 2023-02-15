@@ -506,7 +506,7 @@ public:
 
 struct SnapshotFileBackupEncryptionKeys {
 	Reference<BlobCipherKey> textCipherKey;
-	Reference<BlobCipherKey> headerCipherKey;
+	Optional<Reference<BlobCipherKey>> headerCipherKey;
 	StringRef ivRef;
 };
 
@@ -576,21 +576,21 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		wPtr = mutateString(buffer);
 	}
 
-	static void validateEncryptionHeader(Optional<Reference<BlobCipherKey>> headerCipherKey,
+	static void validateEncryptionHeader(Reference<BlobCipherKey> headerCipherKey,
 	                                     Reference<BlobCipherKey> textCipherKey,
 	                                     Optional<BlobCipherDetails> headerCipherDetails,
 	                                     BlobCipherDetails textCipherDetails) {
 		// Validate encryption header 'cipherHeader' details
-		if (headerCipherKey.present() && headerCipherKey.get().isValid() && headerCipherDetails.present() &&
-		    !(headerCipherDetails.get().baseCipherId == headerCipherKey.get()->getBaseCipherId() &&
-		      headerCipherDetails.get().encryptDomainId == headerCipherKey.get()->getDomainId() &&
-		      headerCipherDetails.get().salt == headerCipherKey.get()->getSalt())) {
+		if (headerCipherKey.isValid() && headerCipherDetails.present() &&
+		    !(headerCipherDetails.get().baseCipherId == headerCipherKey->getBaseCipherId() &&
+		      headerCipherDetails.get().encryptDomainId == headerCipherKey->getDomainId() &&
+		      headerCipherDetails.get().salt == headerCipherKey->getSalt())) {
 			TraceEvent(SevWarn, "EncryptionHeader_CipherHeaderMismatch")
-			    .detail("HeaderDomainId", headerCipherKey.get()->getDomainId())
+			    .detail("HeaderDomainId", headerCipherKey->getDomainId())
 			    .detail("ExpectedHeaderDomainId", headerCipherDetails.get().encryptDomainId)
-			    .detail("HeaderBaseCipherId", headerCipherKey.get()->getBaseCipherId())
+			    .detail("HeaderBaseCipherId", headerCipherKey->getBaseCipherId())
 			    .detail("ExpectedHeaderBaseCipherId", headerCipherDetails.get().baseCipherId)
-			    .detail("HeaderSalt", headerCipherKey.get()->getSalt())
+			    .detail("HeaderSalt", headerCipherKey->getSalt())
 			    .detail("ExpectedHeaderSalt", headerCipherDetails.get().salt);
 			throw encrypt_header_metadata_mismatch();
 		}
@@ -619,7 +619,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
 		if (std::holds_alternative<BlobCipherEncryptHeaderRef>(headerVariant)) { // configurable encryption
 			state BlobCipherEncryptHeaderRef headerRef = std::get<BlobCipherEncryptHeaderRef>(headerVariant);
-			TextAndHeaderCipherKeysOpt cipherKeys =
+			TextAndHeaderCipherKeys cipherKeys =
 			    wait(getEncryptCipherKeys(dbInfo, headerRef, BlobCipherMetrics::RESTORE));
 			EncryptHeaderCipherDetails cipherDetails = headerRef.getCipherDetails();
 			validateEncryptionHeader(cipherKeys.cipherHeaderKey,
@@ -659,11 +659,14 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	}
 
 	ACTOR static Future<Void> encrypt(EncryptedRangeFileWriter* self) {
-		ASSERT(self->cipherKeys.headerCipherKey.isValid() && self->cipherKeys.textCipherKey.isValid());
+		// TODO: HeaderCipher key not needed for 'no authentication encryption'
+		ASSERT(self->cipherKeys.headerCipherKey.present() && self->cipherKeys.headerCipherKey.get().isValid() &&
+		       self->cipherKeys.textCipherKey.isValid());
 		// Ensure that the keys we got are still valid before flushing the block
-		if (self->cipherKeys.headerCipherKey->isExpired() || self->cipherKeys.headerCipherKey->needsRefresh()) {
+		if (self->cipherKeys.headerCipherKey.get()->isExpired() ||
+		    self->cipherKeys.headerCipherKey.get()->needsRefresh()) {
 			Reference<BlobCipherKey> cipherKey =
-			    wait(refreshKey(self, self->cipherKeys.headerCipherKey->getDomainId()));
+			    wait(refreshKey(self, self->cipherKeys.headerCipherKey.get()->getDomainId()));
 			self->cipherKeys.headerCipherKey = cipherKey;
 		}
 		if (self->cipherKeys.textCipherKey->isExpired() || self->cipherKeys.textCipherKey->needsRefresh()) {
@@ -901,7 +904,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	// Start a new block if needed, then write the key and value
 	ACTOR static Future<Void> writeKV_impl(EncryptedRangeFileWriter* self, Key k, Value v) {
-		if (!self->cipherKeys.headerCipherKey.isValid() || !self->cipherKeys.textCipherKey.isValid()) {
+		if (!self->cipherKeys.headerCipherKey.present() || !self->cipherKeys.headerCipherKey.get().isValid() ||
+		    !self->cipherKeys.textCipherKey.isValid()) {
 			wait(updateEncryptionKeysCtx(self, k));
 		}
 		state int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
@@ -923,7 +927,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	ACTOR static Future<Void> writeKey_impl(EncryptedRangeFileWriter* self, Key k) {
 		// TODO (Nim): Is it possible to write empty begin and end keys?
 		if (k.size() > 0 &&
-		    (!self->cipherKeys.headerCipherKey.isValid() || !self->cipherKeys.textCipherKey.isValid())) {
+		    (!self->cipherKeys.headerCipherKey.present() || !self->cipherKeys.headerCipherKey.get().isValid() ||
+		     !self->cipherKeys.textCipherKey.isValid())) {
 			wait(updateEncryptionKeysCtx(self, k));
 		}
 		// Need to account for extra "empty" value being written in the case of crossing tenant boundaries
@@ -1118,7 +1123,8 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 		// make sure that all keys in a block belong to exactly one tenant,
 		// unless its the last key in which case it can be a truncated (different) tenant prefix
 		ASSERT(!encryptedBlock || blockDomainId.present());
-		if (encryptedBlock && g_network && g_network->isSimulated() && !isReservedEncryptDomain(blockDomainId.get())) {
+		if (CLIENT_KNOBS->SIMULATION_ENABLE_SNAPSHOT_ENCRYPTION_CHECKS && encryptedBlock && g_network &&
+		    g_network->isSimulated() && !isReservedEncryptDomain(blockDomainId.get())) {
 			state KeyRef curKey = KeyRef(k, kLen);
 			if (!prevDomainId.present()) {
 				EncryptCipherDomainId domainId =
