@@ -232,7 +232,7 @@ private:
 		}
 		execOperation(
 		    [begin, end](auto ctx) {
-			    fdb::Future f = ctx->db().blobbifyRange(begin, end, false).eraseType();
+			    fdb::Future f = ctx->db().blobbifyRange(begin, end, Random::get().randomBool(0.5)).eraseType();
 			    ctx->done();
 		    },
 		    [this, cont]() { schedule(cont); });
