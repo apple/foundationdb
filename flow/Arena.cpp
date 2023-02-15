@@ -998,8 +998,10 @@ TEST_CASE("/flow/Arena/OptionalMap") {
 }
 
 TEST_CASE("/flow/Arena/Secure") {
+#ifndef ADDRESS_SANITIZER
 	// Note: Assumptions underlying this unit test are speculative.
 	//       Disable for a build configuration or entirely if deemed flaky.
+	//       As of writing, below equivalency of (buf == newBuf) holds except for ASAN builds.
 	auto& rng = *deterministicRandom();
 	auto sizes = std::vector<int>{ 1 };
 	for (auto i = 2; i <= ArenaBlock::LARGE * 2; i *= 2) {
@@ -1026,23 +1028,22 @@ TEST_CASE("/flow/Arena/Secure") {
 				} else {
 					newBuf = new (arena) uint8_t[len];
 				}
-				if (newBuf == buf) {
-					// there's no hard guarantees about the above equality and the result could vary by platform,
-					// malloc implementation, and tooling instrumentation (e.g. ASAN, valgrind)
-					// but it is practically likely because of
-					//   a) how Arena uses (and malloc variants tend to use) thread-local freelists, and
-					//   b) the fact that we earlier allocated the memory blocks in some size sequence,
-					//      freed them in reverse order, and then allocated them again immediately in the same size
-					//      sequence.
-					// in the same vein, it is speculative but likely that if buf == newBuf,
-					// the memory backing the address is the same and remained untouched,
-					// because FDB servers are single-threaded
-					samePtrCount++;
-					for (auto i = 0; i < len; i++) {
-						if (newBuf[i] != 0) {
-							fmt::print("Non-zero byte found at iter {} size {} offset {}\n", iter + 1, len, i);
-							ASSERT(false);
-						}
+				ASSERT_EQ(newBuf, buf);
+				// there's no hard guarantee about the above equality and the result could vary by platform,
+				// malloc implementation, and tooling instrumentation (e.g. ASAN, valgrind)
+				// but it is practically likely because of
+				//   a) how Arena uses (and malloc variants tend to use) thread-local freelists, and
+				//   b) the fact that we earlier allocated the memory blocks in some size sequence,
+				//      freed them in reverse order, and then allocated them again immediately in the same size
+				//      sequence.
+				// in the same vein, it is speculative but likely that if buf == newBuf,
+				// the memory backing the address is the same and remained untouched,
+				// because FDB servers are single-threaded
+				samePtrCount++;
+				for (auto i = 0; i < len; i++) {
+					if (newBuf[i] != 0) {
+						fmt::print("Non-zero byte found at iter {} size {} offset {}\n", iter + 1, len, i);
+						ASSERT(false);
 					}
 				}
 			}
@@ -1050,5 +1051,6 @@ TEST_CASE("/flow/Arena/Secure") {
 		}
 	}
 	fmt::print("Total iterations: {}, # of times check passed: {}\n", totalIters, samePtrCount);
+#endif // ADDRESS_SANITIZER
 	return Void();
 }
