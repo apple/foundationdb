@@ -449,6 +449,7 @@ Future<Void> configureTenantTransaction(Transaction tr,
                                         TenantMapEntry originalEntry,
                                         TenantMapEntry updatedTenantEntry) {
 	ASSERT(updatedTenantEntry.id == originalEntry.id);
+	ASSERT(!updatedTenantEntry.assignedCluster.present());
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	TenantMetadata::tenantMap().set(tr, updatedTenantEntry.id, updatedTenantEntry);
@@ -585,7 +586,7 @@ Future<Void> renameTenantTransaction(Transaction tr,
 	}
 
 	if (configureSequenceNum.present()) {
-		if (entry.configurationSequenceNum >= configureSequenceNum.get()) {
+		if (entry.configurationSequenceNum > configureSequenceNum.get()) {
 			return Void();
 		}
 		entry.configurationSequenceNum = configureSequenceNum.get();
