@@ -674,13 +674,15 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
 			    .detail("PrimaryDead", primaryDead);
 			g_simulator->usableRegions = 1;
 
-			state std::vector<AddressExclusion> servers = g_simulator->getAllAddressesInDCToExclude(
-			    primaryDead ? g_simulator->primaryDcId : g_simulator->remoteDcId);
-			wait(excludeServers(cx, servers, false));
-			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration")
-			    .detail("Location", context)
-			    .detail("Stage", "ServerExcluded")
-			    .detail("Servers", describe(servers));
+			if (remoteDead) {
+				state std::vector<AddressExclusion> servers =
+				    g_simulator->getAllAddressesInDCToExclude(g_simulator->remoteDcId);
+				wait(excludeServers(cx, servers, false));
+				TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration")
+				    .detail("Location", context)
+				    .detail("Stage", "ServerExcluded")
+				    .detail("Servers", describe(servers));
+			}
 
 			wait(success(ManagementAPI::changeConfig(
 			    cx.getReference(),
