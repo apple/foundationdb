@@ -36,7 +36,7 @@ import fdb.tuple
 from directory_extension import DirectoryExtension
 from fdb import six
 from fdb.impl import strinc
-from fdb_python_unit_tests import run_unit_tests
+from unit_tests import run_unit_tests
 
 random.seed(0)
 

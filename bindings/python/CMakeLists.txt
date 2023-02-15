@@ -78,7 +78,7 @@ add_dependencies(packages python_package)
 
 add_fdbclient_test(
   NAME python_unit_tests
-  COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/tests/fdb_python_unit_tests.py
+  COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/tests/unit_tests.py
           --cluster-file @CLUSTER_FILE@ --verbose
   DISABLE_LOG_DUMP
 )
