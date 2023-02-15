@@ -46,8 +46,6 @@ struct ClusterUsage {
 	}
 };
 
-json_spirit::mObject binaryToJson(StringRef bytes);
-
 template <>
 struct Traceable<ClusterUsage> : std::true_type {
 	static std::string toString(const ClusterUsage& value) {
@@ -128,10 +126,7 @@ struct MetaclusterTenantMapEntry {
 	void setId(int64_t id);
 	std::string toJson() const;
 
-	// On retries, configurations need to be compared, but it may be possible in the early
-	// stages of creation that the assignedCluster is unset.
-	// matchAssigned flag should be false to account for this case
-	bool matchesConfiguration(MetaclusterTenantMapEntry const& other, bool matchAssigned = true) const;
+	bool matchesConfiguration(MetaclusterTenantMapEntry const& other) const;
 	void configure(Standalone<StringRef> parameter, Optional<Value> value);
 
 	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }

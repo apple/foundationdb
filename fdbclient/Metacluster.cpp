@@ -133,9 +133,8 @@ std::string MetaclusterTenantMapEntry::toJson() const {
 	return json_spirit::write_string(json_spirit::mValue(tenantEntry));
 }
 
-bool MetaclusterTenantMapEntry::matchesConfiguration(MetaclusterTenantMapEntry const& other, bool matchAssigned) const {
-	return tenantName == other.tenantName && tenantLockState == other.tenantLockState &&
-	       tenantGroup == other.tenantGroup && (!matchAssigned || assignedCluster == other.assignedCluster);
+bool MetaclusterTenantMapEntry::matchesConfiguration(MetaclusterTenantMapEntry const& other) const {
+	return tenantGroup == other.tenantGroup;
 }
 
 void MetaclusterTenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> value) {

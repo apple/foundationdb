@@ -1120,7 +1120,7 @@ struct CreateTenantImpl {
 		state Optional<MetaclusterTenantMapEntry> existingEntry =
 		    wait(tryGetTenantTransaction(tr, self->tenantEntry.tenantName));
 		if (existingEntry.present()) {
-			if (!existingEntry.get().matchesConfiguration(self->tenantEntry, false) ||
+			if (!existingEntry.get().matchesConfiguration(self->tenantEntry) ||
 			    existingEntry.get().tenantState != TenantAPI::TenantState::REGISTERING) {
 				// The tenant already exists and is either completely created or has a different
 				// configuration

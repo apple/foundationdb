@@ -77,6 +77,7 @@ private:
 
 		loop {
 			try {
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				wait(
 				    store(tenantList, tenantMetadata->tenantMap.getRange(tr, {}, {}, metaclusterMaxTenants)) &&
 				    store(tenantNameIndexList,

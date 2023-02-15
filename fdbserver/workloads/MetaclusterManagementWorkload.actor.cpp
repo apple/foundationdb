@@ -749,7 +749,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 					retried = true;
 					wait(verifyListFilter(self, tenant));
-					wait(verifyListFilter(self, newTenantName));
 				} catch (Error& e) {
 					// If we retry the rename after it had succeeded, we will get an error that we should ignore
 					if (e.code() == error_code_tenant_not_found && exists && !newTenantExists && retried) {
@@ -758,6 +757,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 					throw e;
 				}
 			}
+			wait(verifyListFilter(self, newTenantName));
 
 			ASSERT(exists);
 			ASSERT(!newTenantExists);

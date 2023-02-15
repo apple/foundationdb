@@ -71,6 +71,8 @@ std::string tenantLockStateToString(TenantLockState tenantState);
 TenantLockState stringToTenantLockState(std::string stateStr);
 } // namespace TenantAPI
 
+json_spirit::mObject binaryToJson(StringRef bytes);
+
 struct MetaclusterTenantMapEntry;
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 7054389;
