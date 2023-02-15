@@ -174,6 +174,10 @@ std::string TenantMapEntry::toJson() const {
 		tenantEntry["tenant_group"] = binaryToJson(tenantGroup.get());
 	}
 
+	if (tenantState == TenantState::ERROR && error.size()) {
+		tenantEntry["error"] = error;
+	}
+
 	return json_spirit::write_string(json_spirit::mValue(tenantEntry));
 }
 
@@ -190,6 +194,13 @@ void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> 
 		TraceEvent(SevWarnAlways, "UnknownTenantConfigurationParameter").detail("Parameter", parameter);
 		throw invalid_tenant_configuration();
 	}
+}
+
+bool TenantMapEntry::operator==(TenantMapEntry const& other) const {
+	return id == other.id && tenantName == other.tenantName && tenantState == other.tenantState &&
+	       tenantLockState == other.tenantLockState && tenantGroup == other.tenantGroup &&
+	       assignedCluster == other.assignedCluster && configurationSequenceNum == other.configurationSequenceNum &&
+	       renameDestination == other.renameDestination && error == other.error;
 }
 
 json_spirit::mObject TenantGroupEntry::toJson() const {
