@@ -578,7 +578,7 @@ private:
 		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 			state BlobCipherEncryptHeaderRef cipherHeaderRef =
 			    BlobCipherEncryptHeaderRef::fromStringRef(StringRef(data.begin(), headerSize));
-			TextAndHeaderCipherKeysOpt cipherKeys =
+			TextAndHeaderCipherKeys cipherKeys =
 			    wait(getEncryptCipherKeys(self->db, cipherHeaderRef, BlobCipherMetrics::KV_MEMORY));
 			DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey,
 			                                  cipherKeys.cipherHeaderKey,
