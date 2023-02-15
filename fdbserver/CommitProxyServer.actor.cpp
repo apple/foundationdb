@@ -1070,17 +1070,6 @@ bool validTenantAccess(MutationRef m, std::map<int64_t, TenantName> const& tenan
 	return true;
 }
 
-inline bool tenantMapChanging(MutationRef const& mutation) {
-	const KeyRangeRef tenantMapRange = TenantMetadata::tenantMap().subspace;
-	if (isSingleKeyMutation((MutationRef::Type)mutation.type) && mutation.param1.startsWith(tenantMapRange.begin)) {
-		return true;
-	} else if (mutation.type == MutationRef::ClearRange &&
-	           tenantMapRange.intersects(KeyRangeRef(mutation.param1, mutation.param2))) {
-		return true;
-	}
-	return false;
-}
-
 // return an iterator to the first tenantId whose idToPrefix(id) >= prefix[0..8] in lexicographic order. If no such id,
 // return tenantMap.end()
 inline auto lowerBoundTenantId(const StringRef& prefix, const std::map<int64_t, TenantName>& tenantMap) {
@@ -1380,11 +1369,12 @@ Error validateAndProcessTenantAccess(Arena& arena,
 
 	std::vector<std::pair<int, std::vector<MutationRef>>> idxSplitMutations;
 	int newMutationSize = mutations.size();
+	KeyRangeRef tenantMapRange = TenantMetadata::tenantMap().subspace;
 	for (int i = 0; i < mutations.size(); ++i) {
 		auto& mutation = mutations[i];
 		Optional<int64_t> tenantId;
 		bool validAccess = true;
-		changeTenant = changeTenant || tenantMapChanging(mutation);
+		changeTenant = changeTenant || TenantAPI::tenantMapChanging(mutation, tenantMapRange);
 
 		if (mutation.type == MutationRef::ClearRange) {
 			int newClearSize = processClearRangeMutation(
@@ -1471,6 +1461,7 @@ Error validateAndProcessTenantAccess(CommitTransactionRequest& tr,
 void applyMetadataEffect(CommitBatchContext* self) {
 	bool initialState = self->isMyFirstBatch;
 	self->firstStateMutations = self->isMyFirstBatch;
+	KeyRangeRef tenantMapRange = TenantMetadata::tenantMap().subspace;
 	for (int versionIndex = 0; versionIndex < self->resolution[0].stateMutations.size(); versionIndex++) {
 		// pProxyCommitData->logAdapter->setNextVersion( ??? );  << Ideally we would be telling the log adapter that the
 		// pushes in this commit will be in the version at which these state mutations were committed by another proxy,
@@ -1492,7 +1483,9 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				// fail transaction if it contain both of tenant changes and normal key writing
 				auto& mutations = self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations;
 				committed =
-				    tenantIds.get().empty() || std::none_of(mutations.begin(), mutations.end(), tenantMapChanging);
+				    tenantIds.get().empty() || std::none_of(mutations.begin(), mutations.end(), [&](MutationRef m) {
+					    return TenantAPI::tenantMapChanging(m, tenantMapRange);
+				    });
 
 				// check if all tenant ids are valid if committed == true
 				committed = committed &&
