@@ -51,5 +51,20 @@ Future<decltype(std::declval<Function>()(Reference<typename DB::TransactionT>())
 	}
 }
 
+ACTOR template <class Function, class DB>
+Future<Void> runTransactionVoid(Reference<DB> db, Function func) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	loop {
+		try {
+			// func should be idempotent; otherwise, retry will get undefined result
+			wait(func(tr));
+			wait(safeThreadFutureToFuture(tr->commit()));
+			return Void();
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
 #include "flow/unactorcompiler.h"
 #endif

@@ -3,7 +3,7 @@ extraMachineCountDC = 2
 maxTLogVersion=6
 disableHostname=true
 disableEncryption=true
-storageEngineExcludeTypes=[3, 4]
+storageEngineExcludeTypes=[3, 4, 5]
 tenantModes=['disabled']
 
 [[knobs]]

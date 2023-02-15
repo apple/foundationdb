@@ -296,6 +296,7 @@ ACTOR template <class T>
 Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(Reference<AsyncVar<T> const> db,
                                                                     EncryptCipherDomainId domainId,
                                                                     BlobCipherMetrics::UsageType usageType) {
+	// TODO: Do not fetch header cipher key if authentication is diabled.
 	std::unordered_set<EncryptCipherDomainId> domainIds = { domainId, ENCRYPT_HEADER_DOMAIN_ID };
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys =
 	    wait(getLatestEncryptCipherKeys(db, domainIds, usageType));
@@ -317,15 +318,23 @@ ACTOR template <class T>
 Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
                                                      BlobCipherEncryptHeader header,
                                                      BlobCipherMetrics::UsageType usageType) {
-	std::unordered_set<BlobCipherDetails> cipherDetails{ header.cipherTextDetails, header.cipherHeaderDetails };
+	std::unordered_set<BlobCipherDetails> cipherDetails{ header.cipherTextDetails };
+	if (header.cipherHeaderDetails.isValid()) {
+		cipherDetails.insert(header.cipherHeaderDetails);
+	}
 	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys =
 	    wait(getEncryptCipherKeys(db, cipherDetails, usageType));
-	ASSERT(cipherKeys.count(header.cipherTextDetails) > 0);
-	ASSERT(cipherKeys.count(header.cipherHeaderDetails) > 0);
-	TextAndHeaderCipherKeys result{ cipherKeys.at(header.cipherTextDetails),
-		                            cipherKeys.at(header.cipherHeaderDetails) };
-	ASSERT(result.cipherTextKey.isValid());
-	ASSERT(result.cipherHeaderKey.isValid());
+	TextAndHeaderCipherKeys result;
+	auto setCipherKey = [&](const BlobCipherDetails& details, Reference<BlobCipherKey>& cipherKey) {
+		if (!details.isValid()) {
+			return;
+		}
+		auto iter = cipherKeys.find(details);
+		ASSERT(iter != cipherKeys.end() && iter->second.isValid());
+		cipherKey = iter->second;
+	};
+	setCipherKey(header.cipherTextDetails, result.cipherTextKey);
+	setCipherKey(header.cipherHeaderDetails, result.cipherHeaderKey);
 	return result;
 }
 
