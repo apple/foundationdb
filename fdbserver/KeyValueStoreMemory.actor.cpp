@@ -33,7 +33,6 @@
 #include "flow/EncryptUtils.h"
 #include "flow/Knobs.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include <cstring>
 
 #define OP_DISK_OVERHEAD (sizeof(OpHeader) + 1)
 
@@ -511,10 +510,11 @@ private:
 				BlobCipherEncryptHeaderRef headerRef;
 				StringRef cipherText =
 				    cipher.encrypt(plaintext, sizeof(int) + v1.size() + v2.size(), &headerRef, arena);
-				headerSize = BlobCipherEncryptHeaderRef::toStringRef(headerRef).size();
+				StringRef headerRefs = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
+				headerSize = headerRefs.size();
 				ASSERT(headerSize > 0);
 				log->push(StringRef((const uint8_t*)&headerSize, sizeof(headerSize)));
-				log->push(BlobCipherEncryptHeaderRef::toStringRef(headerRef));
+				log->push(headerRefs);
 				log->push(cipherText);
 			} else {
 				BlobCipherEncryptHeader cipherHeader;
