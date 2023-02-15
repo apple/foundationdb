@@ -1711,30 +1711,41 @@ struct RestoreClusterImpl {
 		}
 	}
 
-	ACTOR static Future<Void> reconcileTenants(RestoreClusterImpl* self) {
-		state std::unordered_map<TenantName, TenantMapEntry> partiallyRenamedTenants;
-		state std::unordered_map<int64_t, TenantMapEntry>::iterator itr = self->dataClusterTenantMap.begin();
-		while (itr != self->dataClusterTenantMap.end()) {
-			Optional<std::pair<TenantName, TenantMapEntry>> result = wait(reconcileTenant(self, itr->second));
-			if (result.present() && result.get().first.startsWith(metaclusterTemporaryRenamePrefix)) {
-				partiallyRenamedTenants[result.get().first] = result.get().second;
+	Future<Void> renameTenantBatch(std::vector<std::pair<TenantName, TenantMapEntry>> tenantsToRename) {
+		return ctx.runDataClusterTransaction([this, tenantsToRename](Reference<ITransaction> tr) {
+			std::vector<Future<Void>> renameFutures;
+			for (auto t : tenantsToRename) {
+				renameFutures.push_back(renameTenant(
+				    this, tr, t.second.id, t.first, t.second.tenantName, t.second.configurationSequenceNum));
 			}
-			++itr;
+			return waitForAll(renameFutures);
+		});
+	}
+
+	ACTOR static Future<Void> reconcileTenants(RestoreClusterImpl* self) {
+		state std::vector<Future<Optional<std::pair<TenantName, TenantMapEntry>>>> reconcileFutures;
+		for (auto itr = self->dataClusterTenantMap.begin(); itr != self->dataClusterTenantMap.end(); ++itr) {
+			reconcileFutures.push_back(reconcileTenant(self, itr->second));
 		}
 
+		wait(waitForAll(reconcileFutures));
+
 		if (!self->restoreDryRun) {
-			state std::unordered_map<TenantName, TenantMapEntry>::iterator renameItr = partiallyRenamedTenants.begin();
-			while (renameItr != partiallyRenamedTenants.end()) {
-				wait(self->ctx.runDataClusterTransaction(
-				    [self = self, renameItr = renameItr](Reference<ITransaction> tr) {
-					    return renameTenant(self,
-					                        tr,
-					                        renameItr->second.id,
-					                        renameItr->first,
-					                        renameItr->first.removePrefix(metaclusterTemporaryRenamePrefix),
-					                        renameItr->second.configurationSequenceNum);
-				    }));
-				++renameItr;
+			state int reconcileIndex;
+			state std::vector<std::pair<TenantName, TenantMapEntry>> tenantsToRename;
+			for (reconcileIndex = 0; reconcileIndex < reconcileFutures.size(); ++reconcileIndex) {
+				Optional<std::pair<TenantName, TenantMapEntry>> const& result = reconcileFutures[reconcileIndex].get();
+				if (result.present() && result.get().first.startsWith(metaclusterTemporaryRenamePrefix) &&
+				    result.get().first != result.get().second.tenantName) {
+					tenantsToRename.push_back(result.get());
+					if (tenantsToRename.size() >= CLIENT_KNOBS->METACLUSTER_RESTORE_BATCH_SIZE) {
+						wait(self->renameTenantBatch(tenantsToRename));
+					}
+				}
+			}
+
+			if (!tenantsToRename.empty()) {
+				wait(self->renameTenantBatch(tenantsToRename));
 			}
 		}
 
