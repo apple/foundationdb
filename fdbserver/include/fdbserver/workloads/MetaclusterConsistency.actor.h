@@ -24,6 +24,8 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/Tenant.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "flow/BooleanParam.h"
 #if defined(NO_INTELLISENSE) && !defined(WORKLOADS_METACLUSTER_CONSISTENCY_ACTOR_G_H)
 #define WORKLOADS_METACLUSTER_CONSISTENCY_ACTOR_G_H
@@ -60,6 +62,8 @@ private:
 
 		int64_t tenantCount;
 		RangeResult systemTenantSubspaceKeys;
+		Optional<int64_t> tenantIdPrefix;
+		Optional<int64_t> lastTenantId;
 	};
 
 	ManagementClusterData managementMetadata;
@@ -76,36 +80,41 @@ private:
 			try {
 				managementTr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				state typename transaction_future_type<typename DB::TransactionT, RangeResult>::type
-				    systemTenantSubspaceKeysFuture = managementTr->getRange(prefixRange(TenantMetadata::subspace()), 1);
+				    systemTenantSubspaceKeysFuture = managementTr->getRange(prefixRange(TenantMetadata::subspace()), 2);
 
-				wait(store(self->managementMetadata.metaclusterRegistration,
-				           MetaclusterMetadata::metaclusterRegistration().get(managementTr)) &&
-				     store(self->managementMetadata.dataClusters,
-				           MetaclusterAPI::listClustersTransaction(
-				               managementTr, ""_sr, "\xff\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS + 1)) &&
-				     store(self->managementMetadata.clusterCapacityTuples,
-				           MetaclusterAPI::ManagementClusterMetadata::clusterCapacityIndex.getRange(
-				               managementTr, {}, {}, CLIENT_KNOBS->MAX_DATA_CLUSTERS)) &&
-				     store(self->managementMetadata.clusterTenantCounts,
-				           MetaclusterAPI::ManagementClusterMetadata::clusterTenantCount.getRange(
-				               managementTr, {}, {}, CLIENT_KNOBS->MAX_DATA_CLUSTERS)) &&
-				     store(self->managementMetadata.clusterTenantTuples,
-				           MetaclusterAPI::ManagementClusterMetadata::clusterTenantIndex.getRange(
-				               managementTr, {}, {}, metaclusterMaxTenants)) &&
-				     store(self->managementMetadata.clusterTenantGroupTuples,
-				           MetaclusterAPI::ManagementClusterMetadata::clusterTenantGroupIndex.getRange(
-				               managementTr, {}, {}, metaclusterMaxTenants)) &&
-				     store(self->managementMetadata.tenantCount,
-				           MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantCount.getD(
-				               managementTr, Snapshot::False, 0)) &&
-				     store(tenantList,
-				           MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(
-				               managementTr, {}, {}, metaclusterMaxTenants)) &&
-				     store(self->managementMetadata.tenantGroups,
-				           MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantGroupMap.getRange(
-				               managementTr, {}, {}, metaclusterMaxTenants)) &&
-				     store(self->managementMetadata.systemTenantSubspaceKeys,
-				           safeThreadFutureToFuture(systemTenantSubspaceKeysFuture)));
+				wait(
+				    store(self->managementMetadata.tenantIdPrefix,
+				          TenantMetadata::tenantIdPrefix().get(managementTr)) &&
+				    store(self->managementMetadata.lastTenantId,
+				          MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().lastTenantId.get(managementTr)) &&
+				    store(self->managementMetadata.metaclusterRegistration,
+				          MetaclusterMetadata::metaclusterRegistration().get(managementTr)) &&
+				    store(self->managementMetadata.dataClusters,
+				          MetaclusterAPI::listClustersTransaction(
+				              managementTr, ""_sr, "\xff\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS + 1)) &&
+				    store(self->managementMetadata.clusterCapacityTuples,
+				          MetaclusterAPI::ManagementClusterMetadata::clusterCapacityIndex.getRange(
+				              managementTr, {}, {}, CLIENT_KNOBS->MAX_DATA_CLUSTERS)) &&
+				    store(self->managementMetadata.clusterTenantCounts,
+				          MetaclusterAPI::ManagementClusterMetadata::clusterTenantCount.getRange(
+				              managementTr, {}, {}, CLIENT_KNOBS->MAX_DATA_CLUSTERS)) &&
+				    store(self->managementMetadata.clusterTenantTuples,
+				          MetaclusterAPI::ManagementClusterMetadata::clusterTenantIndex.getRange(
+				              managementTr, {}, {}, metaclusterMaxTenants)) &&
+				    store(self->managementMetadata.clusterTenantGroupTuples,
+				          MetaclusterAPI::ManagementClusterMetadata::clusterTenantGroupIndex.getRange(
+				              managementTr, {}, {}, metaclusterMaxTenants)) &&
+				    store(self->managementMetadata.tenantCount,
+				          MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantCount.getD(
+				              managementTr, Snapshot::False, 0)) &&
+				    store(tenantList,
+				          MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(
+				              managementTr, {}, {}, metaclusterMaxTenants)) &&
+				    store(self->managementMetadata.tenantGroups,
+				          MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantGroupMap.getRange(
+				              managementTr, {}, {}, metaclusterMaxTenants)) &&
+				    store(self->managementMetadata.systemTenantSubspaceKeys,
+				          safeThreadFutureToFuture(systemTenantSubspaceKeysFuture)));
 
 				break;
 			} catch (Error& e) {
@@ -155,6 +164,12 @@ private:
 		       !managementMetadata.tenantGroups.more);
 		ASSERT_EQ(managementMetadata.clusterTenantGroupTuples.results.size(),
 		          managementMetadata.tenantGroups.results.size());
+		ASSERT(managementMetadata.tenantIdPrefix.present());
+
+		if (managementMetadata.lastTenantId.present()) {
+			ASSERT(TenantAPI::getTenantIdPrefix(managementMetadata.lastTenantId.get()) ==
+			       managementMetadata.tenantIdPrefix.get());
+		}
 
 		// Parse the cluster capacity index. Check that no cluster is represented in the index more than once.
 		std::map<ClusterName, int64_t> clusterAllocatedMap;
@@ -174,6 +189,7 @@ private:
 			if (!clusterMetadata.entry.hasCapacity()) {
 				ASSERT(allocatedItr == clusterAllocatedMap.end());
 			} else {
+				ASSERT(allocatedItr != clusterAllocatedMap.end());
 				ASSERT_EQ(allocatedItr->second, clusterMetadata.entry.allocated.numTenantGroups);
 				++numFoundInAllocatedMap;
 			}
@@ -241,8 +257,8 @@ private:
 			ASSERT(clusterItr->second.count(name));
 		}
 
-		// We should not be storing any data in the `\xff` tenant subspace.
-		ASSERT(managementMetadata.systemTenantSubspaceKeys.empty());
+		// The only key in the `\xff` tenant subspace should be the tenant id prefix
+		ASSERT(managementMetadata.systemTenantSubspaceKeys.size() == 1);
 	}
 
 	ACTOR static Future<Void> validateDataCluster(MetaclusterConsistencyCheck* self,
@@ -257,11 +273,13 @@ private:
 
 		state TenantConsistencyCheck<IDatabase> tenantConsistencyCheck(dataDb);
 		wait(tenantConsistencyCheck.run());
+		state Optional<int64_t> lastTenantId;
 
 		loop {
 			try {
 				dataTr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				wait(store(dataClusterRegistration, MetaclusterMetadata::metaclusterRegistration().get(dataTr)) &&
+				wait(store(lastTenantId, TenantMetadata::lastTenantId().get(dataTr)) &&
+				     store(dataClusterRegistration, MetaclusterMetadata::metaclusterRegistration().get(dataTr)) &&
 				     store(dataClusterTenantList,
 				           TenantMetadata::tenantMap().getRange(
 				               dataTr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)) &&
@@ -273,6 +291,10 @@ private:
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(dataTr->onError(e)));
 			}
+		}
+
+		if (lastTenantId.present()) {
+			ASSERT(TenantAPI::getTenantIdPrefix(lastTenantId.get()) == self->managementMetadata.tenantIdPrefix.get());
 		}
 
 		state std::map<int64_t, TenantMapEntry> dataClusterTenantMap(dataClusterTenantList.results.begin(),
@@ -288,7 +310,7 @@ private:
 
 		auto& expectedTenants = self->managementMetadata.clusterTenantMap[clusterName];
 
-		std::map<TenantGroupName, int> groupExpectedTenantCounts;
+		std::set<TenantGroupName> tenantGroupsWithCompletedTenants;
 		if (!self->allowPartialMetaclusterOperations) {
 			ASSERT_EQ(dataClusterTenantMap.size(), expectedTenants.size());
 		} else {
@@ -296,13 +318,11 @@ private:
 			for (auto tenantName : expectedTenants) {
 				TenantMapEntry const& metaclusterEntry = self->managementMetadata.tenantMap[tenantName];
 				if (!dataClusterTenantMap.count(tenantName)) {
-					if (metaclusterEntry.tenantGroup.present()) {
-						groupExpectedTenantCounts.try_emplace(metaclusterEntry.tenantGroup.get(), 0);
-					}
 					ASSERT(metaclusterEntry.tenantState == TenantState::REGISTERING ||
-					       metaclusterEntry.tenantState == TenantState::REMOVING);
+					       metaclusterEntry.tenantState == TenantState::REMOVING ||
+					       metaclusterEntry.tenantState == TenantState::ERROR);
 				} else if (metaclusterEntry.tenantGroup.present()) {
-					++groupExpectedTenantCounts[metaclusterEntry.tenantGroup.get()];
+					tenantGroupsWithCompletedTenants.insert(metaclusterEntry.tenantGroup.get());
 				}
 			}
 		}
@@ -337,15 +357,19 @@ private:
 			ASSERT_LE(dataClusterTenantGroupMap.size(), expectedTenantGroups.size());
 			for (auto const& name : expectedTenantGroups) {
 				if (!dataClusterTenantGroupMap.count(name)) {
-					auto itr = groupExpectedTenantCounts.find(name);
-					ASSERT(itr != groupExpectedTenantCounts.end());
-					ASSERT_EQ(itr->second, 0);
+					auto itr = tenantGroupsWithCompletedTenants.find(name);
+					ASSERT(itr == tenantGroupsWithCompletedTenants.end());
 				}
 			}
 		}
 		for (auto const& [name, entry] : dataClusterTenantGroupMap) {
 			ASSERT(expectedTenantGroups.count(name));
 			ASSERT(!entry.assignedCluster.present());
+			expectedTenantGroups.erase(name);
+		}
+
+		for (auto name : expectedTenantGroups) {
+			ASSERT(tenantGroupsWithCompletedTenants.count(name) == 0);
 		}
 
 		return Void();

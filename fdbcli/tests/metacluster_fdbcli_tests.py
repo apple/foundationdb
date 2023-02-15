@@ -3,8 +3,8 @@ import argparse
 import functools
 import logging
 import os
+import random
 import subprocess
-
 from argparse import RawDescriptionHelpFormatter
 
 
@@ -59,6 +59,7 @@ def run_fdbcli_command(cluster_file, *args):
     except subprocess.TimeoutExpired:
         raise Exception('The fdbcli command is stuck, database is unavailable')
 
+
 def run_fdbcli_command_and_get_error(cluster_file, *args):
     """run the fdbcli statement: fdbcli --exec '<arg1> <arg2> ... <argN>'.
 
@@ -73,14 +74,15 @@ def run_fdbcli_command_and_get_error(cluster_file, *args):
     except subprocess.TimeoutExpired:
         raise Exception('The fdbcli command is stuck, database is unavailable')
 
+
 def get_cluster_connection_str(cluster_file_path):
     with open(cluster_file_path, 'r') as f:
         conn_str = f.readline().strip()
         return conn_str
 
 
-def metacluster_create(cluster_file, name):
-    return run_fdbcli_command(cluster_file, "metacluster create_experimental", name)
+def metacluster_create(cluster_file, name, tenant_id_prefix):
+    return run_fdbcli_command(cluster_file, "metacluster create_experimental", name, str(tenant_id_prefix))
 
 
 def metacluster_register(management_cluster_file, data_cluster_file, name):
@@ -93,7 +95,8 @@ def metacluster_register(management_cluster_file, data_cluster_file, name):
 def setup_metacluster(logger, management_cluster, data_clusters):
     management_cluster_file = management_cluster[0]
     management_cluster_name = management_cluster[1]
-    output = metacluster_create(management_cluster_file, management_cluster_name)
+    tenant_id_prefix = random.randint(0, 32767)
+    output = metacluster_create(management_cluster_file, management_cluster_name, tenant_id_prefix)
     logger.debug(output)
     for (cf, name) in data_clusters:
         output = metacluster_register(management_cluster_file, cf, name)
@@ -110,6 +113,7 @@ def setup_tenants(management_cluster_file, data_cluster_files, tenants):
         expected_output = 'The tenant `{}\' has been created'.format(tenant)
         assert output == expected_output
 
+
 def configure_tenant(management_cluster_file, data_cluster_files, tenant, tenant_group=None, assigned_cluster=None):
     command = 'tenant configure {}'.format(tenant)
     if tenant_group:
@@ -119,6 +123,7 @@ def configure_tenant(management_cluster_file, data_cluster_files, tenant, tenant
 
     output, err = run_fdbcli_command_and_get_error(management_cluster_file, command)
     return output, err
+
 
 @enable_logging()
 def clear_database_and_tenants(logger, management_cluster_file, data_cluster_files):

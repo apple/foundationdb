@@ -715,10 +715,10 @@ struct WaitMetricsRequest {
 	// Send a reversed range for min, max to receive an immediate report
 	constexpr static FileIdentifier file_identifier = 1795961;
 	Arena arena;
-	// Setting the tenantInfo makes the request tenant-aware. Need to set `minVersion` to a version where
-	// the tenant info was read.
+	// Setting the tenantInfo makes the request tenant-aware.
 	TenantInfo tenantInfo;
-	Version minVersion;
+	// Set `minVersion` to a version where the tenant info was read. Not needed for non-tenant-aware request.
+	Version minVersion = 0;
 	KeyRangeRef keys;
 	StorageMetrics min, max;
 	ReplyPromise<StorageMetrics> reply;

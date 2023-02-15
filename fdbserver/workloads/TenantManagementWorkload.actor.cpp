@@ -103,6 +103,7 @@ struct TenantManagementWorkload : TestWorkload {
 	Reference<IDatabase> mvDb;
 	Database dataDb;
 	bool hasNoTenantKey = false; // whether this workload has non-tenant key
+	int64_t tenantIdPrefix = 0;
 
 	// This test exercises multiple different ways to work with tenants
 	enum class OperationType {
@@ -236,7 +237,8 @@ struct TenantManagementWorkload : TestWorkload {
 		if (self->useMetacluster) {
 			fmt::print("Create metacluster and register data cluster ... \n");
 			// Configure the metacluster (this changes the tenant mode)
-			wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
+			wait(success(
+			    MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix)));
 
 			DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;
@@ -549,6 +551,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 					ASSERT(entry.present());
 					ASSERT(entry.get().id > self->maxId);
+					ASSERT(TenantAPI::getTenantIdPrefix(entry.get().id) == self->tenantIdPrefix);
 					ASSERT(entry.get().tenantGroup == tenantItr->second.tenantGroup);
 					ASSERT(entry.get().tenantState == TenantState::READY);
 
@@ -561,6 +564,7 @@ struct TenantManagementWorkload : TestWorkload {
 						    wait(TenantAPI::tryGetTenant(self->dataDb.getReference(), tenantItr->first));
 						ASSERT(dataEntry.present());
 						ASSERT(dataEntry.get().id == entry.get().id);
+						ASSERT(TenantAPI::getTenantIdPrefix(dataEntry.get().id) == self->tenantIdPrefix);
 						ASSERT(dataEntry.get().tenantGroup == entry.get().tenantGroup);
 						ASSERT(dataEntry.get().tenantState == TenantState::READY);
 					}
@@ -796,6 +800,7 @@ struct TenantManagementWorkload : TestWorkload {
 		if (!endTenant.present()) {
 			tenants[beginTenant] = anyExists ? itr->second.tenant->id() : TenantInfo::INVALID_TENANT;
 		} else if (endTenant.present()) {
+			anyExists = false;
 			for (auto itr = self->createdTenants.lower_bound(beginTenant);
 			     itr != self->createdTenants.end() && itr->first < endTenant.get();
 			     ++itr) {
@@ -1502,12 +1507,19 @@ struct TenantManagementWorkload : TestWorkload {
 		state bool specialKeysUseInvalidTuple =
 		    operationType == OperationType::SPECIAL_KEYS && deterministicRandom()->random01() < 0.1;
 
+		// True if any selected options would change the tenant's configuration and we would expect an update to be
+		// written
+		state bool configurationChanging = false;
+
 		// Generate a tenant group. Sometimes do this at the same time that we include an invalid option to ensure
 		// that the configure function still fails
 		if (deterministicRandom()->coinflip()) {
 			newTenantGroup = self->chooseTenantGroup(true);
 			hasSystemTenantGroup = hasSystemTenantGroup || newTenantGroup.orDefault(""_sr).startsWith("\xff"_sr);
 			configuration["tenant_group"_sr] = newTenantGroup;
+			if (exists && itr->second.tenantGroup != newTenantGroup) {
+				configurationChanging = true;
+			}
 		}
 		// Configuring 'assignedCluster' requires reading existing tenant entry which is handled in
 		// `updateManagementCluster`.
@@ -1540,7 +1552,9 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(!specialKeysUseInvalidTuple);
 				ASSERT(!assignToDifferentCluster);
 				Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
-				ASSERT_GT(currentVersionstamp.version, originalReadVersion);
+				if (configurationChanging) {
+					ASSERT_GT(currentVersionstamp.version, originalReadVersion);
+				}
 
 				auto itr = self->createdTenants.find(tenant);
 				if (itr->second.tenantGroup.present()) {
