@@ -54,12 +54,19 @@ struct TenantManagementWorkload : TestWorkload {
 		Reference<Tenant> tenant;
 		Optional<TenantGroupName> tenantGroup;
 		bool empty;
+		Optional<ClusterName> assignedCluster;
 
 		TenantData() : empty(true) {}
-		TenantData(int64_t id, Optional<TenantGroupName> tenantGroup, bool empty)
-		  : tenant(makeReference<Tenant>(id)), tenantGroup(tenantGroup), empty(empty) {}
-		TenantData(int64_t id, Optional<TenantName> tName, Optional<TenantGroupName> tenantGroup, bool empty)
-		  : tenant(makeReference<Tenant>(id, tName)), tenantGroup(tenantGroup), empty(empty) {}
+		TenantData(int64_t id, Optional<TenantGroupName> tenantGroup, bool empty, Optional<ClusterName> assignedCluster)
+		  : tenant(makeReference<Tenant>(id)), tenantGroup(tenantGroup), empty(empty),
+		    assignedCluster(assignedCluster) {}
+		TenantData(int64_t id,
+		           Optional<TenantName> tName,
+		           Optional<TenantGroupName> tenantGroup,
+		           bool empty,
+		           Optional<ClusterName> assignedCluster)
+		  : tenant(makeReference<Tenant>(id, tName)), tenantGroup(tenantGroup), empty(empty),
+		    assignedCluster(assignedCluster) {}
 	};
 
 	struct TenantGroupData {
@@ -400,10 +407,8 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(waitForAll(createFutures));
 			wait(tr->commit());
 		} else {
+			ASSERT(OperationType::METACLUSTER == operationType);
 			ASSERT(tenantsToCreate.size() == 1);
-			if (deterministicRandom()->coinflip()) {
-				tenantsToCreate.begin()->second.assignedCluster = self->dataClusterName;
-			}
 			wait(MetaclusterAPI::createTenant(
 			    self->mvDb, tenantsToCreate.begin()->second, AssignClusterAutomatically::True));
 		}
@@ -441,6 +446,9 @@ struct TenantManagementWorkload : TestWorkload {
 			TenantMapEntry entry;
 			entry.tenantName = tenant;
 			entry.tenantGroup = self->chooseTenantGroup(true);
+			if (OperationType::METACLUSTER == operationType && deterministicRandom()->coinflip()) {
+				entry.assignedCluster = self->dataClusterName;
+			}
 
 			if (self->createdTenants.count(tenant)) {
 				alreadyExists = true;
@@ -571,8 +579,11 @@ struct TenantManagementWorkload : TestWorkload {
 
 					// Update our local tenant state to include the newly created one
 					self->maxId = entry.get().id;
-					TenantData tData =
-					    TenantData(entry.get().id, tenantItr->first, tenantItr->second.tenantGroup, true);
+					TenantData tData = TenantData(entry.get().id,
+					                              tenantItr->first,
+					                              tenantItr->second.tenantGroup,
+					                              true,
+					                              entry.get().assignedCluster);
 					self->createdTenants[tenantItr->first] = tData;
 					self->allTestTenants.push_back(tData.tenant);
 
@@ -1085,6 +1096,7 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 
 		TenantMapEntry entry(id, TenantNameRef(name), TenantMapEntry::stringToTenantState(tenantStateStr), tenantGroup);
+		entry.assignedCluster = assignedCluster;
 		ASSERT(entry.prefix == prefix);
 		return entry;
 	}
@@ -1524,14 +1536,16 @@ struct TenantManagementWorkload : TestWorkload {
 		// Configuring 'assignedCluster' requires reading existing tenant entry which is handled in
 		// `updateManagementCluster`.
 		state bool assignToDifferentCluster = false;
-		if (operationType == OperationType::METACLUSTER && deterministicRandom()->coinflip()) {
-			Standalone<StringRef> newClusterName = "newcluster"_sr;
+		if (configuration.empty() && operationType == OperationType::METACLUSTER && deterministicRandom()->coinflip()) {
+			ClusterName newClusterName = "newcluster"_sr;
 			if (deterministicRandom()->coinflip()) {
 				newClusterName = self->dataClusterName;
-			} else {
-				assignToDifferentCluster = true;
 			}
 			configuration["assigned_cluster"_sr] = newClusterName;
+			if (exists &&
+			    (!itr->second.assignedCluster.present() || itr->second.assignedCluster.get() != newClusterName)) {
+				assignToDifferentCluster = true;
+			}
 		}
 
 		// If true, the options generated may include an unknown option
@@ -1556,18 +1570,20 @@ struct TenantManagementWorkload : TestWorkload {
 					ASSERT_GT(currentVersionstamp.version, originalReadVersion);
 				}
 
-				auto itr = self->createdTenants.find(tenant);
-				if (itr->second.tenantGroup.present()) {
-					auto tenantGroupItr = self->createdTenantGroups.find(itr->second.tenantGroup.get());
-					ASSERT(tenantGroupItr != self->createdTenantGroups.end());
-					if (--tenantGroupItr->second.tenantCount == 0) {
-						self->createdTenantGroups.erase(tenantGroupItr);
+				if (configurationChanging) {
+					auto itr = self->createdTenants.find(tenant);
+					if (itr->second.tenantGroup.present()) {
+						auto tenantGroupItr = self->createdTenantGroups.find(itr->second.tenantGroup.get());
+						ASSERT(tenantGroupItr != self->createdTenantGroups.end());
+						if (--tenantGroupItr->second.tenantCount == 0) {
+							self->createdTenantGroups.erase(tenantGroupItr);
+						}
 					}
+					if (newTenantGroup.present()) {
+						self->createdTenantGroups[newTenantGroup.get()].tenantCount++;
+					}
+					itr->second.tenantGroup = newTenantGroup;
 				}
-				if (newTenantGroup.present()) {
-					self->createdTenantGroups[newTenantGroup.get()].tenantCount++;
-				}
-				itr->second.tenantGroup = newTenantGroup;
 				return Void();
 			} catch (Error& e) {
 				state Error error = e;
