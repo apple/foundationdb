@@ -230,6 +230,7 @@ struct MutationRef {
 	TextAndHeaderCipherKeys getCipherKeys(
 	    const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys) const {
 		const BlobCipherEncryptHeader* header = encryptionHeader();
+		ASSERT(header->cipherTextDetails.isValid());
 		auto getCipherKey = [&](const BlobCipherDetails& details) -> Reference<BlobCipherKey> {
 			if (!details.isValid()) {
 				return {};

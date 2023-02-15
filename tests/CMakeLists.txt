@@ -333,15 +333,16 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/from_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.2.0_until_7.3.0/DrUpgradeRestart-1.toml
+      restarting/from_7.2.0_until_7.3.0/DrUpgradeRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.2.0_until_7.3.0/VersionVectorDisableRestart-1.toml
     restarting/from_7.2.0_until_7.3.0/VersionVectorDisableRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.2.0_until_7.3.0/VersionVectorEnableRestart-1.toml
     restarting/from_7.2.0_until_7.3.0/VersionVectorEnableRestart-2.toml)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.2.0/DrUpgradeRestart-1.toml
-    restarting/from_7.2.0/DrUpgradeRestart-2.toml)
+
   add_fdb_test(
     TEST_FILES restarting/from_7.2.4_until_7.3.0/UpgradeAndBackupRestore-1.toml
     restarting/from_7.2.4_until_7.3.0/UpgradeAndBackupRestore-2.toml)
@@ -351,6 +352,9 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/from_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
+    add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/DrUpgradeRestart-1.toml
+    restarting/from_7.3.0/DrUpgradeRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.0/UpgradeAndBackupRestore-1.toml
     restarting/from_7.3.0/UpgradeAndBackupRestore-2.toml)

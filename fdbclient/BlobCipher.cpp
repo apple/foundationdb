@@ -40,7 +40,6 @@
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/xxhash.h"
-#include "include/fdbclient/BlobCipher.h"
 
 #include <chrono>
 #include <cstring>
@@ -1043,9 +1042,10 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 	if (authTokenMode != ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
 		header->cipherHeaderDetails = headerCipherKeyOpt.get()->details();
 	} else {
-		header->cipherHeaderDetails.encryptDomainId = INVALID_ENCRYPT_DOMAIN_ID;
-		header->cipherHeaderDetails.baseCipherId = INVALID_ENCRYPT_CIPHER_KEY_ID;
-		header->cipherHeaderDetails.salt = INVALID_ENCRYPT_RANDOM_SALT;
+		header->cipherHeaderDetails = BlobCipherDetails();
+		ASSERT_EQ(INVALID_ENCRYPT_DOMAIN_ID, header->cipherHeaderDetails.encryptDomainId);
+		ASSERT_EQ(INVALID_ENCRYPT_CIPHER_KEY_ID, header->cipherHeaderDetails.baseCipherId);
+		ASSERT_EQ(INVALID_ENCRYPT_RANDOM_SALT, header->cipherHeaderDetails.salt);
 	}
 
 	memcpy(&header->iv[0], &iv[0], AES_256_IV_LENGTH);

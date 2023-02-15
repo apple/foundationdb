@@ -37,7 +37,6 @@
 #include "fdbclient/Notified.h"
 
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
-#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MutationTracking.h"

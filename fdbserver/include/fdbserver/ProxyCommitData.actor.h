@@ -19,8 +19,6 @@
  */
 
 #pragma once
-#include "fdbserver/EncryptionOpsUtils.h"
-#include <unordered_map>
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H)
 #define FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H
 #include "fdbserver/ProxyCommitData.actor.g.h"
@@ -36,6 +34,8 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/ResolverInterface.h"
 #include "flow/IRandom.h"
+
+#include <unordered_map>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
