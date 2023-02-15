@@ -1,5 +1,5 @@
 [configuration]
-storageEngineExcludeTypes = [3]
+storageEngineExcludeTypes = [3, 5]
 maxTLogVersion = 6
 disableTss = true
 disableHostname = true

@@ -507,4 +507,21 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 */
 	@Override
 	void close();
+
+	/**
+	 * Returns client-side status information
+	 *
+	 * @return a {@code CompletableFuture} containing a JSON string with client status health information
+	 */
+	default CompletableFuture<byte[]> getClientStatus() {
+		return getClientStatus(getExecutor());
+	}
+
+	/**
+	 * Returns client-side status information
+	 *
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+	 * @return a {@code CompletableFuture} containing a JSON string with client status health information
+	 */
+	CompletableFuture<byte[]> getClientStatus(Executor e);
 }

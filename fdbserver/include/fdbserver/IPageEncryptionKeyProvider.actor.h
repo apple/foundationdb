@@ -195,19 +195,14 @@ public:
 		EncryptionKey s;
 		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 			const BlobCipherEncryptHeaderRef headerRef = Encoder::getEncryptionHeaderRef(encodingHeader);
-			std::visit(
-			    [&](auto& algoHeader) {
-				    s.aesKey.cipherTextKey = getCipherKey(algoHeader.cipherTextDetails.encryptDomainId,
-				                                          algoHeader.cipherTextDetails.baseCipherId);
-				    using Algo = std::decay_t<decltype(algoHeader)>;
-				    if constexpr (std::is_same_v<Algo, AesCtrWithAuthV1<AUTH_TOKEN_HMAC_SHA_SIZE>> ||
-				                  std::is_same_v<Algo, AesCtrWithAuthV1<AUTH_TOKEN_AES_CMAC_SIZE>>) {
-					    ASSERT(algoHeader.cipherHeaderDetails.isValid());
-					    s.aesKey.cipherHeaderKey = getCipherKey(algoHeader.cipherHeaderDetails.encryptDomainId,
-					                                            algoHeader.cipherHeaderDetails.baseCipherId);
-				    }
-			    },
-			    headerRef.algoHeader);
+			EncryptHeaderCipherDetails details = headerRef.getCipherDetails();
+			s.aesKey.cipherTextKey =
+			    getCipherKey(details.textCipherDetails.encryptDomainId, details.textCipherDetails.baseCipherId);
+			if (details.headerCipherDetails.present()) {
+				ASSERT(details.headerCipherDetails.get().isValid());
+				s.aesKey.cipherHeaderKey = getCipherKey(details.headerCipherDetails.get().encryptDomainId,
+				                                        details.headerCipherDetails.get().baseCipherId);
+			}
 		} else {
 			const typename Encoder::Header* h = reinterpret_cast<const typename Encoder::Header*>(encodingHeader);
 			s.aesKey.cipherTextKey = getCipherKey(h->encryption.cipherTextDetails.encryptDomainId,
@@ -247,10 +242,7 @@ public:
 		using Encoder = typename ArenaPage::AESEncryptionEncoder<encodingType>;
 		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 			const BlobCipherEncryptHeaderRef headerRef = Encoder::getEncryptionHeaderRef(encodingHeader);
-			int64_t domainId = INVALID_ENCRYPT_DOMAIN_ID;
-			std::visit([&](auto& algoHeader) { domainId = algoHeader.cipherTextDetails.encryptDomainId; },
-			           headerRef.algoHeader);
-			return domainId;
+			return headerRef.getCipherDetails().textCipherDetails.encryptDomainId;
 		} else {
 			const typename Encoder::Header* h = reinterpret_cast<const typename Encoder::Header*>(encodingHeader);
 			return h->encryption.cipherTextDetails.encryptDomainId;
@@ -397,10 +389,7 @@ public:
 		ASSERT(encodingHeader != nullptr);
 		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 			BlobCipherEncryptHeaderRef headerRef = Encoder::getEncryptionHeaderRef(encodingHeader);
-			int64_t domainId = INVALID_ENCRYPT_DOMAIN_ID;
-			std::visit([&](auto& algoHeader) { domainId = algoHeader.cipherTextDetails.encryptDomainId; },
-			           headerRef.algoHeader);
-			return domainId;
+			return headerRef.getCipherDetails().textCipherDetails.encryptDomainId;
 		} else {
 			const BlobCipherEncryptHeader& header = reinterpret_cast<const EncodingHeader*>(encodingHeader)->encryption;
 			return header.cipherTextDetails.encryptDomainId;

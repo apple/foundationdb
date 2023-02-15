@@ -239,8 +239,8 @@ private:
 
 		for (int i = 1; i < results->size(); i++) {
 			// ranges contain entire requested key range
-			if ((*results)[i].beginKey != (*results)[i].endKey) {
-				error(fmt::format("ValidateRanges: [{0} - {1}): Non-covereed range [{2} - {3})",
+			if ((*results)[i].beginKey != (*results)[i - 1].endKey) {
+				error(fmt::format("ValidateRanges: [{0} - {1}): Non-covered range [{2} - {3})",
 				                  fdb::toCharsRef(keyRange.beginKey),
 				                  fdb::toCharsRef(keyRange.endKey),
 				                  fdb::toCharsRef((*results)[i - 1].endKey),
@@ -250,7 +250,6 @@ private:
 		}
 	}
 
-	// TODO: tenant support
 	void randomGetBlobRangesOp(TTaskFct cont, std::optional<int> tenantId) {
 		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 
@@ -276,7 +275,6 @@ private:
 		    /* failOnError = */ false);
 	}
 
-	// TODO: tenant support
 	void randomVerifyOp(TTaskFct cont, std::optional<int> tenantId) {
 		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 
@@ -304,7 +302,8 @@ private:
 	void validateSnapshotData(std::shared_ptr<ITransactionContext> ctx,
 	                          fdb::native::FDBReadBlobGranuleContext& bgCtx,
 	                          fdb::GranuleFilePointer snapshotFile,
-	                          fdb::KeyRange keyRange) {
+	                          fdb::KeyRange keyRange,
+	                          fdb::native::FDBBGTenantPrefix const* tenantPrefix) {
 		if (validatedFiles.contains(snapshotFile.filename)) {
 			return;
 		}
@@ -317,7 +316,7 @@ private:
 		                                            snapshotFile.fullFileLength,
 		                                            bgCtx.userContext);
 		fdb::BytesRef snapshotData(bgCtx.get_load_f(snapshotLoadId, bgCtx.userContext), snapshotFile.length);
-		fdb::Result snapshotRes = ctx->tx().parseSnapshotFile(snapshotData);
+		fdb::Result snapshotRes = ctx->tx().parseSnapshotFile(snapshotData, tenantPrefix, &snapshotFile.encryptionCtx);
 		auto out = fdb::Result::KeyValueRefArray{};
 		fdb::Error err = snapshotRes.getKeyValueArrayNothrow(out);
 		ASSERT(err.code() == error_code_success);
@@ -339,10 +338,12 @@ private:
 	                       fdb::native::FDBReadBlobGranuleContext& bgCtx,
 	                       fdb::GranuleFilePointer deltaFile,
 	                       fdb::KeyRange keyRange,
+	                       fdb::native::FDBBGTenantPrefix const* tenantPrefix,
 	                       int64_t& lastDFMaxVersion) {
 		if (validatedFiles.contains(deltaFile.filename)) {
 			return;
 		}
+
 		validatedFiles.insert(deltaFile.filename);
 		int64_t deltaLoadId = bgCtx.start_load_f((const char*)(deltaFile.filename.data()),
 		                                         deltaFile.filename.size(),
@@ -353,7 +354,7 @@ private:
 
 		fdb::BytesRef deltaData(bgCtx.get_load_f(deltaLoadId, bgCtx.userContext), deltaFile.length);
 
-		fdb::Result deltaRes = ctx->tx().parseDeltaFile(deltaData);
+		fdb::Result deltaRes = ctx->tx().parseDeltaFile(deltaData, tenantPrefix, &deltaFile.encryptionCtx);
 		auto out = fdb::Result::GranuleMutationRefArray{};
 		fdb::Error err = deltaRes.getGranuleMutationArrayNothrow(out);
 		ASSERT(err.code() == error_code_success);
@@ -386,8 +387,10 @@ private:
 	                               fdb::native::FDBReadBlobGranuleContext& bgCtx,
 	                               fdb::GranuleDescription desc,
 	                               fdb::KeyRange keyRange,
+	                               std::optional<int> tenantId,
 	                               int64_t readVersion) {
 		ASSERT(desc.keyRange.beginKey < desc.keyRange.endKey);
+		ASSERT(tenantId.has_value() == desc.tenantPrefix.present);
 		// beginVersion of zero means snapshot present
 
 		// validate snapshot file
@@ -395,12 +398,12 @@ private:
 		if (BG_API_DEBUG_VERBOSE) {
 			info(fmt::format("Loading snapshot file {0}\n", fdb::toCharsRef(desc.snapshotFile->filename)));
 		}
-		validateSnapshotData(ctx, bgCtx, *desc.snapshotFile, desc.keyRange);
+		validateSnapshotData(ctx, bgCtx, *desc.snapshotFile, desc.keyRange, &desc.tenantPrefix);
 
 		// validate delta files
 		int64_t lastDFMaxVersion = 0;
 		for (int i = 0; i < desc.deltaFiles.size(); i++) {
-			validateDeltaData(ctx, bgCtx, desc.deltaFiles[i], desc.keyRange, lastDFMaxVersion);
+			validateDeltaData(ctx, bgCtx, desc.deltaFiles[i], desc.keyRange, &desc.tenantPrefix, lastDFMaxVersion);
 		}
 
 		// validate memory mutations
@@ -433,13 +436,18 @@ private:
 	                                     std::optional<int> tenantId,
 	                                     int64_t readVersion) {
 		ASSERT(!results.empty());
-
 		if (tenantId) {
-			// FIXME: support tenants!!
-			info("Skipping validation because of tenant.");
-			return;
+			// all should have the same tenant prefix
+			for (int i = 0; i < results.size(); i++) {
+				ASSERT(results[i].tenantPrefix.present);
+			}
+			fdb::ByteString tenantPrefix =
+			    fdb::ByteString(results[0].tenantPrefix.prefix.key, results[0].tenantPrefix.prefix.key_length);
+			for (int i = 1; i < results.size(); i++) {
+				ASSERT(fdb::ByteString(results[0].tenantPrefix.prefix.key, results[0].tenantPrefix.prefix.key_length) ==
+				       tenantPrefix);
+			}
 		}
-
 		ASSERT(results.front().keyRange.beginKey <= keyRange.beginKey);
 		ASSERT(keyRange.endKey <= results.back().keyRange.endKey);
 		for (int i = 0; i < results.size() - 1; i++) {
@@ -449,7 +457,7 @@ private:
 		TesterGranuleContext testerContext(ctx->getBGBasePath());
 		fdb::native::FDBReadBlobGranuleContext bgCtx = createGranuleContext(&testerContext);
 		for (int i = 0; i < results.size(); i++) {
-			validateBGDescriptionData(ctx, bgCtx, results[i], keyRange, readVersion);
+			validateBGDescriptionData(ctx, bgCtx, results[i], keyRange, tenantId, readVersion);
 		}
 	}
 

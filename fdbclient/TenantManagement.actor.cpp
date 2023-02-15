@@ -67,6 +67,16 @@ int64_t extractTenantIdFromKeyRef(StringRef s) {
 	return TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
 }
 
+bool tenantMapChanging(MutationRef const& mutation, KeyRangeRef const& tenantMapRange) {
+	if (isSingleKeyMutation((MutationRef::Type)mutation.type) && mutation.param1.startsWith(tenantMapRange.begin)) {
+		return true;
+	} else if (mutation.type == MutationRef::ClearRange &&
+	           tenantMapRange.intersects(KeyRangeRef(mutation.param1, mutation.param2))) {
+		return true;
+	}
+	return false;
+}
+
 // validates whether the lastTenantId and the nextTenantId share the same 2 byte prefix
 bool nextTenantIdPrefixMatches(int64_t lastTenantId, int64_t nextTenantId) {
 	if (getTenantIdPrefix(nextTenantId) != getTenantIdPrefix(lastTenantId)) {

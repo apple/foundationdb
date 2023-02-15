@@ -475,9 +475,10 @@ public:
 			StringRef plaintext;
 			if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 				BlobCipherEncryptHeaderRef headerRef = getEncryptionHeaderRef(header);
-				const uint8_t* iv = std::visit([&](auto& algoHeader) { return algoHeader.iv; }, headerRef.algoHeader);
-				DecryptBlobCipherAes256Ctr cipher(
-				    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, iv, BlobCipherMetrics::KV_REDWOOD);
+				DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey,
+				                                  cipherKeys.cipherHeaderKey,
+				                                  headerRef.getIV(),
+				                                  BlobCipherMetrics::KV_REDWOOD);
 				plaintext = cipher.decrypt(payload, len, headerRef, arena);
 			} else {
 				DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey,
