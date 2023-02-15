@@ -488,6 +488,7 @@ struct BlobCipherEncryptHeaderRef {
 
 	const uint8_t* getIV() const;
 	const EncryptHeaderCipherDetails getCipherDetails() const;
+	EncryptAuthTokenMode getAuthTokenMode() const;
 
 	void validateEncryptionHeaderDetails(const BlobCipherDetails& textCipherDetails,
 	                                     const BlobCipherDetails& headerCipherDetails,

@@ -197,6 +197,20 @@ const EncryptHeaderCipherDetails BlobCipherEncryptHeaderRef::getCipherDetails() 
 	    algoHeader);
 }
 
+EncryptAuthTokenMode BlobCipherEncryptHeaderRef::getAuthTokenMode() const {
+	// TODO: Replace with "Overload visitor pattern" someday.
+	return std::visit(
+	    [](auto&& f) {
+		    using T = std::decay_t<decltype(f)>;
+		    if constexpr (std::is_same_v<T, BlobCipherEncryptHeaderFlagsV1>) {
+			    return (EncryptAuthTokenMode)f.authTokenMode;
+		    } else {
+			    static_assert(always_false_v<T>, "Unknown encryption flag header");
+		    }
+	    },
+	    flags);
+}
+
 void BlobCipherEncryptHeaderRef::validateEncryptionHeaderDetails(const BlobCipherDetails& textCipherDetails,
                                                                  const BlobCipherDetails& headerCipherDetails,
                                                                  const StringRef& ivRef) const {
@@ -1881,7 +1895,9 @@ void testConfigurableEncryptionHeaderNoAuthMode(const int minDomainId) {
 	BlobCipherEncryptHeaderRef headerRef;
 	encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 
+	ASSERT_EQ(headerRef.flagsVersion(), 1);
 	BlobCipherEncryptHeaderFlagsV1 flags = std::get<BlobCipherEncryptHeaderFlagsV1>(headerRef.flags);
+	ASSERT_EQ(flags.authTokenMode, headerRef.getAuthTokenMode());
 	AesCtrNoAuth noAuth = std::get<AesCtrNoAuth>(headerRef.algoHeader);
 
 	const uint8_t* headerIV = headerRef.getIV();
@@ -2161,7 +2177,9 @@ void testConfigurableEncryptionHeaderSingleAuthMode(int minDomainId) {
 	BlobCipherEncryptHeaderRef headerRef;
 	encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 
+	ASSERT_EQ(headerRef.flagsVersion(), 1);
 	BlobCipherEncryptHeaderFlagsV1 flags = std::get<BlobCipherEncryptHeaderFlagsV1>(headerRef.flags);
+	ASSERT_EQ(flags.authTokenMode, headerRef.getAuthTokenMode());
 	AesCtrWithAuth<Params> algoHeader = std::get<AesCtrWithAuth<Params>>(headerRef.algoHeader);
 
 	const uint8_t* headerIV = headerRef.getIV();

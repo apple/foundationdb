@@ -319,32 +319,70 @@ ACTOR template <class T>
 Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
                                                      BlobCipherEncryptHeader header,
                                                      BlobCipherMetrics::UsageType usageType) {
-	std::unordered_set<BlobCipherDetails> cipherDetails{ header.cipherTextDetails };
+	state bool authenticatedEncryption = header.flags.authTokenMode != ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE;
 
-	state bool isHeaderCipherNotPresent = header.flags.authTokenMode == ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE;
 	ASSERT(header.cipherTextDetails.isValid());
-	if (header.cipherHeaderDetails.isValid()) {
+	ASSERT(!authenticatedEncryption || header.cipherHeaderDetails.isValid());
+
+	std::unordered_set<BlobCipherDetails> cipherDetails{ header.cipherTextDetails };
+	if (authenticatedEncryption) {
 		cipherDetails.insert(header.cipherHeaderDetails);
-	} else {
-		// No encryption authentication
-		ASSERT(isHeaderCipherNotPresent);
 	}
+
 	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys =
 	    wait(getEncryptCipherKeys(db, cipherDetails, usageType));
-	TextAndHeaderCipherKeys result;
 
+	TextAndHeaderCipherKeys result;
 	auto setCipherKey = [&](const BlobCipherDetails& details, TextAndHeaderCipherKeys& result) {
-		if (!details.isValid()) {
-			return;
-		}
+		ASSERT(details.isValid());
 		auto iter = cipherKeys.find(details);
 		ASSERT(iter != cipherKeys.end() && iter->second.isValid());
 		isEncryptHeaderDomain(details.encryptDomainId) ? result.cipherHeaderKey = iter->second
 		                                               : result.cipherTextKey = iter->second;
 	};
 	setCipherKey(header.cipherTextDetails, result);
-	setCipherKey(header.cipherHeaderDetails, result);
-	ASSERT(result.cipherTextKey.isValid() && (isHeaderCipherNotPresent || result.cipherHeaderKey.isValid()));
+	if (authenticatedEncryption) {
+		setCipherKey(header.cipherHeaderDetails, result);
+	}
+	ASSERT(result.cipherTextKey.isValid() && (!authenticatedEncryption || result.cipherHeaderKey.isValid()));
+
+	return result;
+}
+
+ACTOR template <class T>
+Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
+                                                     BlobCipherEncryptHeaderRef header,
+                                                     BlobCipherMetrics::UsageType usageType) {
+	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
+
+	state bool authenticatedEncryption = header.getAuthTokenMode() != ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE;
+	state EncryptHeaderCipherDetails details = header.getCipherDetails();
+
+	ASSERT(details.textCipherDetails.isValid());
+	ASSERT(!authenticatedEncryption ||
+	       (details.headerCipherDetails.present() && details.headerCipherDetails.get().isValid()));
+
+	std::unordered_set<BlobCipherDetails> cipherDetails{ details.textCipherDetails };
+	if (authenticatedEncryption) {
+		cipherDetails.insert(details.headerCipherDetails.get());
+	}
+
+	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys =
+	    wait(getEncryptCipherKeys(db, cipherDetails, usageType));
+	TextAndHeaderCipherKeys result;
+
+	auto setCipherKey = [&](const BlobCipherDetails& details, TextAndHeaderCipherKeys& result) {
+		ASSERT(details.isValid());
+		auto iter = cipherKeys.find(details);
+		ASSERT(iter != cipherKeys.end() && iter->second.isValid());
+		isEncryptHeaderDomain(details.encryptDomainId) ? result.cipherHeaderKey = iter->second
+		                                               : result.cipherTextKey = iter->second;
+	};
+	setCipherKey(details.textCipherDetails, result);
+	if (authenticatedEncryption) {
+		setCipherKey(details.headerCipherDetails.get(), result);
+	}
+	ASSERT(result.cipherTextKey.isValid() && (!authenticatedEncryption || result.cipherHeaderKey.isValid()));
 
 	return result;
 }
