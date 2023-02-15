@@ -3706,6 +3706,10 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
 
 TEST_CASE("noSim/ShardedRocksDB/RocksDBSstFileWriter") {
 	state std::string localFile = "rocksdb-sst-file-dump.sst";
+	state std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
+	// Write nothing to sst file
+	sstWriter->open(localFile);
+	sstWriter->finish();
 	// Write kvs1 to sst file
 	state std::map<Key, Value> kvs1({ { "a"_sr, "1"_sr },
 	                                  { "ab"_sr, "12"_sr },
@@ -3717,7 +3721,6 @@ TEST_CASE("noSim/ShardedRocksDB/RocksDBSstFileWriter") {
 	                                  { "e"_sr, "5"_sr },
 	                                  { "h"_sr, "8"_sr },
 	                                  { "ha"_sr, "81"_sr } });
-	state std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
 	sstWriter->open(localFile);
 	for (const auto& [key, value] : kvs1) {
 		sstWriter->write(key, value);
@@ -3755,6 +3758,7 @@ TEST_CASE("noSim/ShardedRocksDB/RocksDBSstFileWriter") {
 		sstWriter->write(key, value);
 	}
 	sstWriter->finish();
+	std::cout << "second done\n";
 	// Check: sst only contains kv of kvs3
 	rocksdb::Status status;
 	rocksdb::IngestExternalFileOptions ingestOptions;
