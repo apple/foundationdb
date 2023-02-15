@@ -3,10 +3,6 @@ maxTLogVersion = 6
 disableTss = true
 disableHostname = true
 
-[[knobs]]
-# This can be removed once the lower bound of this downgrade test is a version that understands the new protocol
-shard_encode_location_metadata = false
-
 [[test]]
 testTitle = 'Clogged'
 clearAfterTest = false
