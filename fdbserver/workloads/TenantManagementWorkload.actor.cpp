@@ -388,12 +388,15 @@ struct TenantManagementWorkload : TestWorkload {
 		} else {
 			ASSERT(tenantsToCreate.size() == 1);
 			TenantMapEntryImpl tEntry = tenantsToCreate.begin()->second;
-			MetaclusterTenantMapEntry modifiedEntry(
-			    tEntry.id, tEntry.tenantName, TenantAPI::TenantState::REGISTERING, tEntry.tenantGroup);
+			MetaclusterTenantMapEntry modifiedEntry;
+			modifiedEntry.tenantName = tEntry.tenantName;
+			modifiedEntry.tenantGroup = tEntry.tenantGroup;
+			auto assign = AssignClusterAutomatically::True;
 			if (deterministicRandom()->coinflip()) {
 				modifiedEntry.assignedCluster = self->dataClusterName;
+				assign = AssignClusterAutomatically::False;
 			}
-			wait(MetaclusterAPI::createTenant(self->mvDb, modifiedEntry, AssignClusterAutomatically::True));
+			wait(MetaclusterAPI::createTenant(self->mvDb, modifiedEntry, assign));
 		}
 
 		return Void();
@@ -1103,11 +1106,6 @@ struct TenantManagementWorkload : TestWorkload {
 			tenantGroup = TenantGroupNameRef(tenantGroupStr);
 		}
 
-		Optional<ClusterName> assignedCluster;
-		if (jsonDoc.tryGet("assigned_cluster", assignedClusterStr)) {
-			assignedCluster = ClusterNameRef(assignedClusterStr);
-		}
-
 		TenantMapEntry entry(id, TenantNameRef(name), tenantGroup);
 		ASSERT(entry.prefix == prefix);
 		return entry;
@@ -1224,15 +1222,25 @@ struct TenantManagementWorkload : TestWorkload {
 		return tenants;
 	}
 
-	ACTOR static Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenantsImplMeta(
-	    Reference<ReadYourWritesTransaction> tr,
-	    TenantName beginTenant,
-	    TenantName endTenant,
-	    int limit,
-	    TenantManagementWorkload* self) {
-		state std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenants;
-		wait(store(tenants, MetaclusterAPI::listTenantMetadata(self->mvDb, beginTenant, endTenant, limit)));
-		return tenants;
+	template <class TenantMapEntryImpl>
+	static Future<Void> verifyTenantList(TenantManagementWorkload* self,
+	                                     std::vector<std::pair<TenantName, TenantMapEntryImpl>> tenants,
+	                                     int limit,
+	                                     TenantName beginTenant,
+	                                     TenantName endTenant) {
+		ASSERT(tenants.size() <= limit);
+
+		// Compare the resulting tenant list to the list we expected to get
+		auto localItr = self->createdTenants.lower_bound(beginTenant);
+		auto tenantMapItr = tenants.begin();
+		for (; tenantMapItr != tenants.end(); ++tenantMapItr, ++localItr) {
+			ASSERT(localItr != self->createdTenants.end());
+			ASSERT(localItr->first == tenantMapItr->first);
+		}
+
+		// Make sure the list terminated at the right spot
+		ASSERT(tenants.size() == limit || localItr == self->createdTenants.end() || localItr->first >= endTenant);
+		return Void();
 	}
 
 	ACTOR static Future<Void> listTenants(TenantManagementWorkload* self) {
@@ -1240,7 +1248,8 @@ struct TenantManagementWorkload : TestWorkload {
 		state TenantName endTenant = self->chooseTenantName(false);
 		state int limit = std::min(CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1,
 		                           deterministicRandom()->randomInt(1, self->maxTenants * 2));
-		state OperationType operationType = self->randomOperationType();
+		state OperationType operationType =
+		    self->useMetacluster ? OperationType::METACLUSTER : self->randomOperationType();
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb);
 
 		if (beginTenant > endTenant) {
@@ -1249,40 +1258,27 @@ struct TenantManagementWorkload : TestWorkload {
 
 		loop {
 			try {
-				// Attempt to read the chosen list of tenants
-				state std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
-				    wait(listTenantsImpl(tr, beginTenant, endTenant, limit, operationType, self));
-				state std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenants2 =
-				    wait(listTenantsImplMeta(tr, beginTenant, endTenant, limit, self));
-
-				// Attempting to read the list of tenants using the metacluster API in a non-metacluster should
-				// return nothing in this test
-				if (operationType == OperationType::METACLUSTER && !self->useMetacluster) {
-					ASSERT(tenants.size() == 0);
-					return Void();
+				if (self->useMetacluster) {
+					state std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> metaTenants =
+					    wait(MetaclusterAPI::listTenantMetadata(self->mvDb, beginTenant, endTenant, limit));
+					verifyTenantList<MetaclusterTenantMapEntry>(self, metaTenants, limit, beginTenant, endTenant);
+				} else {
+					state std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
+					    wait(listTenantsImpl(tr, beginTenant, endTenant, limit, operationType, self));
+					if (operationType == OperationType::METACLUSTER) {
+						ASSERT_EQ(tenants.size(), 0);
+						return Void();
+					}
+					verifyTenantList<TenantMapEntry>(self, tenants, limit, beginTenant, endTenant);
 				}
-
-				ASSERT(tenants.size() <= limit);
-
-				// Compare the resulting tenant list to the list we expected to get
-				auto localItr = self->createdTenants.lower_bound(beginTenant);
-				auto tenantMapItr = tenants.begin();
-				for (; tenantMapItr != tenants.end(); ++tenantMapItr, ++localItr) {
-					ASSERT(localItr != self->createdTenants.end());
-					ASSERT(localItr->first == tenantMapItr->first);
-				}
-
-				// Make sure the list terminated at the right spot
-				ASSERT(tenants.size() == limit || localItr == self->createdTenants.end() ||
-				       localItr->first >= endTenant);
 				return Void();
 			} catch (Error& e) {
 				state bool retry = false;
 				state Error error = e;
 
 				// Transaction-based operations need to be retried
-				if (operationType == OperationType::MANAGEMENT_TRANSACTION ||
-				    operationType == OperationType::SPECIAL_KEYS) {
+				if (!self->useMetacluster && (operationType == OperationType::MANAGEMENT_TRANSACTION ||
+				                              operationType == OperationType::SPECIAL_KEYS)) {
 					try {
 						retry = true;
 						wait(tr->onError(e));

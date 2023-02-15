@@ -82,7 +82,9 @@ json_spirit::mObject ClusterUsage::toJson() const {
 TenantMapEntry::TenantMapEntry(MetaclusterTenantMapEntry metaclusterEntry)
   : tenantName(metaclusterEntry.tenantName), tenantLockState(metaclusterEntry.tenantLockState),
     tenantGroup(metaclusterEntry.tenantGroup), configurationSequenceNum(metaclusterEntry.configurationSequenceNum) {
-	setId(metaclusterEntry.id);
+	if (metaclusterEntry.id >= 0) {
+		setId(metaclusterEntry.id);
+	}
 }
 
 MetaclusterTenantMapEntry::MetaclusterTenantMapEntry() {}
@@ -131,9 +133,9 @@ std::string MetaclusterTenantMapEntry::toJson() const {
 	return json_spirit::write_string(json_spirit::mValue(tenantEntry));
 }
 
-bool MetaclusterTenantMapEntry::matchesConfiguration(MetaclusterTenantMapEntry const& other) const {
+bool MetaclusterTenantMapEntry::matchesConfiguration(MetaclusterTenantMapEntry const& other, bool matchAssigned) const {
 	return tenantName == other.tenantName && tenantLockState == other.tenantLockState &&
-	       tenantGroup == other.tenantGroup && assignedCluster == other.assignedCluster;
+	       tenantGroup == other.tenantGroup && (!matchAssigned || assignedCluster == other.assignedCluster);
 }
 
 void MetaclusterTenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> value) {
