@@ -2085,7 +2085,7 @@ struct RestoreClusterImpl {
 			// set restored cluster to ready state
 			wait(self->ctx.runManagementTransaction(
 			    [self = self](Reference<typename DB::TransactionT> tr) { return self->markClusterAsReady(tr); }));
-			TraceEvent("MarkedDataClusterReady").detail("Name", self->clusterName);
+			TraceEvent("MetaclusterRepopulatedFromDataCluster").detail("Name", self->clusterName);
 		}
 
 		return Void();
@@ -2137,7 +2137,7 @@ struct RestoreClusterImpl {
 			// set restored cluster to ready state
 			wait(self->ctx.runManagementTransaction(
 			    [self = self](Reference<typename DB::TransactionT> tr) { return self->markClusterAsReady(tr); }));
-			TraceEvent("MarkedDataClusterReady").detail("Name", self->clusterName);
+			TraceEvent("DataClusterRestoredToMetacluster").detail("Name", self->clusterName);
 		}
 
 		return Void();
