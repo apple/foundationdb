@@ -3862,7 +3862,14 @@ public:
 		} else {
 			g_network->getDiskBytes(parentDirectory(filename), free, total);
 		}
-		int64_t pagerSize = header.pageCount * physicalPageSize;
+
+		// Size of redwood data file.  Note that filePageCountPending is used here instead of filePageCount.  This is
+		// because it is always >= filePageCount and accounts for file size changes which will complete soon.
+		int64_t pagerPhysicalSize = filePageCountPending * physicalPageSize;
+
+		// Size of the pager, which can be less than the data file size.  All pages within this size are either in use
+		// in a data structure or accounted for in one of the pager's free page lists.
+		int64_t pagerLogicalSize = header.pageCount * physicalPageSize;
 
 		// It is not exactly known how many pages on the delayed free list are usable as of right now.  It could be
 		// known, if each commit delayed entries that were freeable were shuffled from the delayed free queue to the
@@ -3873,12 +3880,17 @@ public:
 		// Amount of space taken up by the free list queues themselves, as if we were to pop and use
 		// items on the free lists the space the items are stored in would also become usable
 		int64_t reusableQueueSpace = (freeList.numPages + delayedFreeList.numPages) * physicalPageSize;
-		int64_t reusable = reusablePageSpace + reusableQueueSpace;
+
+		// Pager slack is the space at the end of the pager's logical size until the end of the pager file's size.
+		// These pages will be used if needed without growing the file size.
+		int64_t reusablePagerSlackSpace = pagerPhysicalSize - pagerLogicalSize;
+
+		int64_t reusable = reusablePageSpace + reusableQueueSpace + reusablePagerSlackSpace;
 
 		// Space currently in used by old page versions have have not yet been freed due to the remap cleanup window.
 		int64_t temp = remapQueue.numEntries * physicalPageSize;
 
-		return StorageBytes(free, total, pagerSize - reusable, free + reusable, temp);
+		return StorageBytes(free, total, pagerPhysicalSize, free + reusable, temp);
 	}
 
 	int64_t getPageCacheCount() override { return pageCache.getCount(); }
