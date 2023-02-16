@@ -1586,18 +1586,21 @@ void SimulationConfig::setTenantMode(const TestConfig& testConfig) {
 }
 
 void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
-	// Enable encryption with higher probability than disabling it in simulation. Given encryption is an add-on style
-	// feature, enabling it still provide good test coverage for the rest of the code.
-	static const double probability[EncryptionAtRestMode::END] = { 0.25, 0.5, 0.25 };
 	std::vector<bool> available;
+	std::vector<double> probability;
 	if (!testConfig.encryptModes.empty()) {
+		// If encryptModes are specified explicitly, give them equal probability to be chosen.
 		available = std::vector<bool>(EncryptionAtRestMode::END, false);
+		probability = std::vector<double>(EncryptionAtRestMode::END, 0);
 		for (auto& mode : testConfig.encryptModes) {
-			printf("enabling mode %s\n", EncryptionAtRestMode::fromString(mode).toString().c_str());
 			available[EncryptionAtRestMode::fromString(mode).mode] = true;
+			probability[EncryptionAtRestMode::fromString(mode).mode] = 1.0 / testConfig.encryptModes.size();
 		}
 	} else {
+		// If encryptModes are not specified, give encryption higher chance to be enabled.
+		// The good thing is testing with encryption on doesn't loss test coverage for most of the other features.
 		available = std::vector<bool>(EncryptionAtRestMode::END, true);
+		probability = { 0.25, 0.5, 0.25 };
 		// Only Redwood support encryption. Disable encryption if Redwood is not available.
 		if (!(testConfig.storageEngineType.present() && testConfig.storageEngineType != 3) &&
 		    !testConfig.excludedStorageEngineType(3)) {
@@ -1606,7 +1609,7 @@ void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
 		}
 	}
 	// domain_aware mode is supported only with required tenant mode.
-	if (db.tenantMode == TenantMode::DISABLED || db.tenantMode == TenantMode::OPTIONAL_TENANT) {
+	if (db.tenantMode != TenantMode::REQUIRED) {
 		available[(int)EncryptionAtRestMode::DOMAIN_AWARE] = false;
 	}
 	int lastAvailableMode = EncryptionAtRestMode::END;
