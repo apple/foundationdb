@@ -1531,6 +1531,7 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
                                    GranuleMaterializeStats& stats) {
 	// TODO REMOVE with early replying
 	ASSERT(readVersion == chunk.includedVersion);
+	Version lastFileVersion = 0;
 
 	// Arena to hold all allocations for applying deltas. Most of it, and the arenas produced by reading the files,
 	// will likely be tossed if there are a significant number of mutations, so we copy at the end instead of doing a
@@ -1569,6 +1570,8 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 			arena.dependsOn(streams.back().arena());
 			stats.snapshotRows += snapshotRows.size();
 		}
+		ASSERT_WE_THINK(lastFileVersion < chunk.snapshotFile.get().fileVersion);
+		lastFileVersion = chunk.snapshotFile.get().fileVersion;
 	} else {
 		ASSERT(!chunk.snapshotFile.present());
 	}
@@ -1593,6 +1596,9 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 			arena.dependsOn(streams.back().arena());
 		}
 		arena.dependsOn(deltaRows.arena());
+
+		ASSERT_WE_THINK(lastFileVersion < chunk.deltaFiles[deltaIdx].fileVersion);
+		lastFileVersion = chunk.deltaFiles[deltaIdx].fileVersion;
 	}
 	if (BG_READ_DEBUG) {
 		fmt::print("Applying {} memory deltas\n", chunk.newDeltas.size());
@@ -1600,6 +1606,7 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 	if (!chunk.newDeltas.empty()) {
 		stats.inputBytes += chunk.newDeltas.expectedSize();
 		// TODO REMOVE validation
+		ASSERT_WE_THINK(lastFileVersion < chunk.newDeltas.front().version);
 		ASSERT(beginVersion <= chunk.newDeltas.front().version);
 		ASSERT(readVersion >= chunk.newDeltas.back().version);
 		auto memoryRows = sortMemoryDeltas(chunk.newDeltas, chunk.keyRange, requestRange, beginVersion, readVersion);
@@ -2188,7 +2195,8 @@ struct KeyValueGen {
 	int targetMutationsPerDelta;
 	KeyRange allRange;
 
-	Version version = 0;
+	// start at higher version to allow snapshot files to have version 1
+	Version version = 10;
 
 	// encryption/compression settings
 	// TODO: possibly different cipher keys or meta context per file?
@@ -2551,7 +2559,7 @@ void checkDeltaRead(const KeyValueGen& kvGen,
 	    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUniqueID(), readVersion, ".delta");
 	Standalone<BlobGranuleChunkRef> chunk;
 	chunk.deltaFiles.emplace_back_deep(
-	    chunk.arena(), filename, 0, serialized[0].size(), serialized[0].size(), kvGen.cipherKeys);
+	    chunk.arena(), filename, 0, serialized[0].size(), serialized[0].size(), 1, kvGen.cipherKeys);
 	chunk.keyRange = kvGen.allRange;
 	chunk.includedVersion = readVersion;
 	chunk.snapshotVersion = invalidVersion;
@@ -2672,8 +2680,13 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 	if (beginVersion == 0) {
 		std::string snapshotFilename = randomBGFilename(
 		    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUniqueID(), 0, ".snapshot");
-		chunk.snapshotFile = BlobFilePointerRef(
-		    chunk.arena(), snapshotFilename, 0, serializedSnapshot.size(), serializedSnapshot.size(), kvGen.cipherKeys);
+		chunk.snapshotFile = BlobFilePointerRef(chunk.arena(),
+		                                        snapshotFilename,
+		                                        0,
+		                                        serializedSnapshot.size(),
+		                                        serializedSnapshot.size(),
+		                                        1,
+		                                        kvGen.cipherKeys);
 	}
 	int deltaIdx = 0;
 	while (deltaIdx < serializedDeltas.size() && serializedDeltas[deltaIdx].first < beginVersion) {
@@ -2684,7 +2697,8 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 		std::string deltaFilename = randomBGFilename(
 		    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUniqueID(), readVersion, ".delta");
 		size_t fsize = serializedDeltas[deltaIdx].second.size();
-		chunk.deltaFiles.emplace_back_deep(chunk.arena(), deltaFilename, 0, fsize, fsize, kvGen.cipherKeys);
+		chunk.deltaFiles.emplace_back_deep(
+		    chunk.arena(), deltaFilename, 0, fsize, fsize, serializedDeltas[deltaIdx].first, kvGen.cipherKeys);
 		deltaPtrsVector.push_back(serializedDeltas[deltaIdx].second);
 
 		if (serializedDeltas[deltaIdx].first >= readVersion) {
@@ -3207,12 +3221,12 @@ void chunkFromFileSet(const FileSet& fileSet,
                       int numDeltaFiles) {
 	size_t snapshotSize = std::get<3>(fileSet.snapshotFile).size();
 	chunk.snapshotFile =
-	    BlobFilePointerRef(chunk.arena(), std::get<0>(fileSet.snapshotFile), 0, snapshotSize, snapshotSize, keys);
+	    BlobFilePointerRef(chunk.arena(), std::get<0>(fileSet.snapshotFile), 0, snapshotSize, snapshotSize, 1, keys);
 
 	for (int i = 0; i < numDeltaFiles; i++) {
 		size_t deltaSize = std::get<3>(fileSet.deltaFiles[i]).size();
 		chunk.deltaFiles.emplace_back_deep(
-		    chunk.arena(), std::get<0>(fileSet.deltaFiles[i]), 0, deltaSize, deltaSize, keys);
+		    chunk.arena(), std::get<0>(fileSet.deltaFiles[i]), 0, deltaSize, deltaSize, 2 + i, keys);
 		deltaPtrs[i] = std::get<2>(fileSet.deltaFiles[i]);
 	}
 

@@ -154,6 +154,8 @@ private:
 	uint8_t* buffer;
 };
 
+class BlobCipherKey;
+
 #pragma pack(push, 1) // exact fit - no padding
 struct BlobCipherDetails {
 	constexpr static FileIdentifier file_identifier = 1945731;
@@ -174,6 +176,8 @@ struct BlobCipherDetails {
 	                  const EncryptCipherBaseKeyId& bId,
 	                  const EncryptCipherRandomSalt& random)
 	  : encryptDomainId(dId), baseCipherId(bId), salt(random) {}
+
+	void validateCipherDetailsWithCipherKey(Reference<BlobCipherKey> headerCipherKey);
 
 	bool operator==(const BlobCipherDetails& o) const {
 		return encryptDomainId == o.encryptDomainId && baseCipherId == o.baseCipherId && salt == o.salt;
@@ -1006,5 +1010,6 @@ void computeAuthToken(const std::vector<std::pair<const uint8_t*, size_t>>& payl
                       unsigned int digestMaxBufSz);
 
 EncryptAuthTokenMode getEncryptAuthTokenMode(const EncryptAuthTokenMode mode);
+int getEncryptCurrentAlgoHeaderVersion(const EncryptAuthTokenMode mode, const EncryptAuthTokenAlgo algo);
 
 #endif // FDBCLIENT_BLOB_CIPHER_H

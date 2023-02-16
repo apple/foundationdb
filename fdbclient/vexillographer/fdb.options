@@ -332,7 +332,7 @@ description is not currently required but encouraged.
     <Option name="authorization_token" code="2000"
             description="Attach given authorization token to the transaction such that subsequent tenant-aware requests are authorized"
             paramType="String" paramDescription="A JSON Web Token authorized to access data belonging to one or more tenants, indicated by 'tenants' claim of the token's payload."
-            persistent="true"/>
+            persistent="true" sensitive="true"/>
   </Scope>
 
   <!-- The enumeration values matter - do not change them without
