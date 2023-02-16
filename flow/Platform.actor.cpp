@@ -651,7 +651,11 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 #endif
 
 	free = std::min((uint64_t)std::numeric_limits<int64_t>::max(), buf.f_bavail * blockSize);
-	total = std::min((uint64_t)std::numeric_limits<int64_t>::max(), buf.f_blocks * blockSize);
+
+	// f_blocks is the total fs space but (f_bfree - f_bavail) is space only available to privileged users
+	// so that amount will be subtracted from the reported total since FDB can't use it.
+	total = std::min((uint64_t)std::numeric_limits<int64_t>::max(),
+	                 buf.f_blocks - (buf.f_bfree - buf.f_bavail) * blockSize);
 
 #elif defined(_WIN32)
 	std::string fullPath = abspath(directory);
