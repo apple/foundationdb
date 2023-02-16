@@ -6969,7 +6969,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 
 	case FDBTransactionOptions::AUTHORIZATION_TOKEN:
 		if (value.present())
-			trState->authToken = Standalone<StringRef>(value.get());
+			trState->authToken = WipedString(value.get());
 		else
 			trState->authToken.reset();
 		break;
