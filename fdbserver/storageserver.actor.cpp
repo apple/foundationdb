@@ -9597,42 +9597,56 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	}
 }
 
-ACTOR Future<Void> createSstFileForCheckPointMetadata(StorageServer* data,
-                                                      CheckpointMetaData metaData,
-                                                      std::string dir) {
+ACTOR Future<Void> createSstFileForCheckpointShardBytesSample(StorageServer* data, CheckpointMetaData metaData) {
 	state int failureCount = 0;
+	state std::unique_ptr<IRocksDBSstFileWriter> sstWriter;
+	state int64_t numGetRangeQueries;
+	state int64_t numSampledKeys;
+	state std::vector<KeyRange>::iterator metaDataRangesIter;
+	state Key readBegin;
+	state Key readEnd;
+
 	loop {
 		try {
-			ASSERT(metaData.ranges.size() > 0);
-			state std::string localFile = dir + "/metadata_bytes.sst";
-			state std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
-			sstWriter->open(localFile);
+			sstWriter = newRocksDBSstFileWriter();
+			sstWriter->open(metaData.bytesSampeFile);
 			if (sstWriter == nullptr) {
-				return Void();
+				break;
 			}
-			state std::vector<KeyRange>::iterator iter = metaData.ranges.begin();
+			ASSERT(metaData.ranges.size() > 0);
+			metaDataRangesIter = metaData.ranges.begin();
 			std::sort(metaData.ranges.begin(), metaData.ranges.end(), [](KeyRange a, KeyRange b) {
-				return a.begin > b.begin;
-			}); // inplacement sorting acceptable?
-			state int64_t numGetRangeQueries = 0;
-			state int64_t numSampledKeys = 0;
-			while (iter != metaData.ranges.end()) {
-				state KeyRange range = *iter;
-				state Key readBegin = range.begin.withPrefix(persistByteSampleKeys.begin);
-				state Key readEnd = range.end.withPrefix(persistByteSampleKeys.begin);
+				// Make sure no overlapping between compared two ranges
+				if (a.begin < b.begin) {
+					ASSERT(a.end <= b.begin);
+				} else if (a.begin > b.begin) {
+					ASSERT(a.end >= b.begin);
+				} else {
+					ASSERT(a.begin == a.end || b.begin == b.end);
+				}
+				// metaData.ranges must be in ascending order
+				// sstWriter requires written keys are in ascending order
+				return a.begin < b.begin;
+			});
+			numGetRangeQueries = 0;
+			numSampledKeys = 0;
+			while (metaDataRangesIter != metaData.ranges.end()) {
+				KeyRange range = *metaDataRangesIter;
+				readBegin = range.begin.withPrefix(persistByteSampleKeys.begin);
+				readEnd = range.end.withPrefix(persistByteSampleKeys.begin);
 				loop {
 					try {
-						state RangeResult result = wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd),
-						                                                        SERVER_KNOBS->STORAGE_LIMIT_BYTES,
-						                                                        SERVER_KNOBS->STORAGE_LIMIT_BYTES));
+						RangeResult readResult = wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd),
+						                                                      SERVER_KNOBS->STORAGE_LIMIT_BYTES,
+						                                                      SERVER_KNOBS->STORAGE_LIMIT_BYTES));
 						numGetRangeQueries++;
-						for (int i = 0; i < result.size(); i++) {
+						for (int i = 0; i < readResult.size(); i++) {
+							sstWriter->write(readResult[i].key, readResult[i].value);
 							numSampledKeys++;
-							sstWriter->write(result[i].key, result[i].value);
 						}
-						if (result.more) {
-							ASSERT(result.readThrough.present());
-							readBegin = keyAfter(result.readThrough.get());
+						if (readResult.more) {
+							ASSERT(readResult.readThrough.present());
+							readBegin = keyAfter(readResult.readThrough.get());
 						} else {
 							break;
 						}
@@ -9645,13 +9659,15 @@ ACTOR Future<Void> createSstFileForCheckPointMetadata(StorageServer* data,
 						}
 					}
 				}
-				iter++;
+				metaDataRangesIter++;
 			}
-			sstWriter->finish();
+			bool anyFileCreated = sstWriter->finish();
+			ASSERT((numSampledKeys > 0 && anyFileCreated) || (numSampledKeys == 0 && !anyFileCreated));
 			TraceEvent("DumpCheckPointMetaData", data->thisServerID)
 			    .detail("NumSampledKeys", numSampledKeys)
 			    .detail("NumGetRangeQueries", numGetRangeQueries)
-			    .detail("CheckpointID", metaData.checkpointID);
+			    .detail("CheckpointID", metaData.checkpointID)
+			    .detail("BytesSampeFile", anyFileCreated ? metaData.bytesSampeFile : "noFileCreated");
 			break;
 
 		} catch (Error& e) {
@@ -9666,6 +9682,7 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 	ASSERT(std::find(metaData.src.begin(), metaData.src.end(), data->thisServerID) != metaData.src.end() &&
 	       !metaData.ranges.empty());
 	state std::string dir = data->folder + rocksdbCheckpointDirPrefix + metaData.checkpointID.toString();
+	metaData.bytesSampeFile = dir + "/" + checkpointBytesSampleFileName;
 	const CheckpointRequest req(
 	    metaData.version, metaData.ranges, static_cast<CheckpointFormat>(metaData.format), metaData.checkpointID, dir);
 	state CheckpointMetaData checkpointResult;
@@ -9686,12 +9703,12 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 
 	// Dump the checkpoint meta data to the sst file of metadata.
 	try {
-		wait(createSstFileForCheckPointMetadata(data, metaData, dir));
+		wait(createSstFileForCheckpointShardBytesSample(data, metaData));
 		TraceEvent("StorageCreateCheckpointMetaDataSstFileDumped", data->thisServerID)
 		    .detail("Checkpoint", checkpointResult.toString());
 	} catch (Error& e) {
 		// If the checkpoint meta data is not dumped successfully, remove the checkpoint.
-		TraceEvent(SevWarn, "StorageCreateCheckpointMetaDataSstFileDumped", data->thisServerID)
+		TraceEvent(SevWarn, "StorageCreateCheckpointMetaDataSstFileDumpedFailure", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("Checkpoint", checkpointResult.toString());
 		data->checkpoints[checkpointResult.checkpointID].setState(CheckpointMetaData::Deleting);

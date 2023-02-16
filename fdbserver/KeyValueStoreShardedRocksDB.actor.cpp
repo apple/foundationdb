@@ -3709,7 +3709,8 @@ TEST_CASE("noSim/ShardedRocksDB/RocksDBSstFileWriter") {
 	state std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
 	// Write nothing to sst file
 	sstWriter->open(localFile);
-	sstWriter->finish();
+	bool anyFileCreated = sstWriter->finish();
+	ASSERT(!anyFileCreated);
 	// Write kvs1 to sst file
 	state std::map<Key, Value> kvs1({ { "a"_sr, "1"_sr },
 	                                  { "ab"_sr, "12"_sr },
@@ -3721,11 +3722,13 @@ TEST_CASE("noSim/ShardedRocksDB/RocksDBSstFileWriter") {
 	                                  { "e"_sr, "5"_sr },
 	                                  { "h"_sr, "8"_sr },
 	                                  { "ha"_sr, "81"_sr } });
+	sstWriter = newRocksDBSstFileWriter();
 	sstWriter->open(localFile);
 	for (const auto& [key, value] : kvs1) {
 		sstWriter->write(key, value);
 	}
-	sstWriter->finish();
+	anyFileCreated = sstWriter->finish();
+	ASSERT(anyFileCreated);
 	// Write kvs2 to the same sst file where kvs2 keys are different from kvs1
 	state std::map<Key, Value> kvs2({ { "fa"_sr, "61"_sr },
 	                                  { "fab"_sr, "612"_sr },
@@ -3741,7 +3744,8 @@ TEST_CASE("noSim/ShardedRocksDB/RocksDBSstFileWriter") {
 	for (const auto& [key, value] : kvs2) {
 		sstWriter->write(key, value);
 	}
-	sstWriter->finish();
+	anyFileCreated = sstWriter->finish();
+	ASSERT(anyFileCreated);
 	// Write kvs3 to the same sst file where kvs3 modifies values of kvs2
 	state std::map<Key, Value> kvs3({ { "fa"_sr, "1"_sr },
 	                                  { "fab"_sr, "12"_sr },
@@ -3757,8 +3761,8 @@ TEST_CASE("noSim/ShardedRocksDB/RocksDBSstFileWriter") {
 	for (const auto& [key, value] : kvs3) {
 		sstWriter->write(key, value);
 	}
-	sstWriter->finish();
-	std::cout << "second done\n";
+	anyFileCreated = sstWriter->finish();
+	ASSERT(anyFileCreated);
 	// Check: sst only contains kv of kvs3
 	rocksdb::Status status;
 	rocksdb::IngestExternalFileOptions ingestOptions;
