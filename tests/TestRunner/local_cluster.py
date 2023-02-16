@@ -261,7 +261,6 @@ logdir = {logdir}
             if self.blob_granules_enabled:
                 bg_knob_line = "knob_bg_url=file://" + str(self.data) + "/fdbblob/"
             if self.enable_encryption_at_rest:
-                encrypt_knob_line1 = "knob_enable_encryption=true"
                 encrypt_knob_line2 = "knob_kms_connector_type=FDBPerfKmsConnector"
             f.write(
                 conf_template.format(
