@@ -65,7 +65,7 @@ class BlobGranuleIntegrationTest {
 
         Range blobRange = Range.startsWith(key);
         try (Database db = fdb.open()) {
-            boolean blobbifySuccess = db.blobbifyRange(blobRange.begin, blobRange.end, true).join();
+            boolean blobbifySuccess = db.blobbifyRangeBlocking(blobRange.begin, blobRange.end).join();
             Assertions.assertTrue(blobbifySuccess);
 
             Long verifyVersion = db.verifyBlobRange(blobRange.begin, blobRange.end).join();

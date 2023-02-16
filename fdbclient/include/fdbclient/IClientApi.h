@@ -153,7 +153,7 @@ public:
 	virtual ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) = 0;
 
 	virtual ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) = 0;
-	virtual ThreadFuture<bool> blobbifyRangeV2(const KeyRangeRef& keyRange, bool wait) = 0;
+	virtual ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) = 0;
 	virtual ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                              int rangeLimit) = 0;
@@ -201,7 +201,7 @@ public:
 	virtual ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) = 0;
 
 	virtual ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) = 0;
-	virtual ThreadFuture<bool> blobbifyRangeV2(const KeyRangeRef& keyRange, bool wait) = 0;
+	virtual ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) = 0;
 	virtual ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                              int rangeLimit) = 0;

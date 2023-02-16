@@ -168,10 +168,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 	}
 
-	// FIXME: run the actual FDBCLI command instead of copy/pasting its implementation
 	// Sets the whole user keyspace to be blobified
 	ACTOR Future<Void> setUpBlobRange(Database cx) {
-		bool success = wait(cx->blobbifyRange(normalKeys, false));
+		bool success = wait(cx->blobbifyRange(normalKeys));
 		ASSERT(success);
 		return Void();
 	}

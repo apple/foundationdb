@@ -405,7 +405,8 @@ public:
 	                              bool force = false);
 	Future<Void> waitPurgeGranulesComplete(Key purgeKey);
 
-	Future<bool> blobbifyRange(KeyRange range, bool doWait = false, Optional<Reference<Tenant>> tenant = {});
+	Future<bool> blobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant = {});
+	Future<bool> blobbifyRangeBlocking(KeyRange range, Optional<Reference<Tenant>> tenant = {});
 	Future<bool> unblobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant = {});
 	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range,
 	                                                                int rangeLimit,

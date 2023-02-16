@@ -159,15 +159,20 @@ ThreadFuture<Void> ThreadSafeDatabase::waitPurgeGranulesComplete(const KeyRef& p
 }
 
 ThreadFuture<bool> ThreadSafeDatabase::blobbifyRange(const KeyRangeRef& keyRange) {
-	return blobbifyRangeV2(keyRange, false);
-}
-
-ThreadFuture<bool> ThreadSafeDatabase::blobbifyRangeV2(const KeyRangeRef& keyRange, bool wait) {
 	DatabaseContext* db = this->db;
 	KeyRange range = keyRange;
 	return onMainThread([=]() -> Future<bool> {
 		db->checkDeferredError();
-		return db->blobbifyRange(range, wait);
+		return db->blobbifyRange(range);
+	});
+}
+
+ThreadFuture<bool> ThreadSafeDatabase::blobbifyRangeBlocking(const KeyRangeRef& keyRange) {
+	DatabaseContext* db = this->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		return db->blobbifyRangeBlocking(range);
 	});
 }
 
@@ -272,16 +277,22 @@ ThreadFuture<Void> ThreadSafeTenant::waitPurgeGranulesComplete(const KeyRef& pur
 }
 
 ThreadFuture<bool> ThreadSafeTenant::blobbifyRange(const KeyRangeRef& keyRange) {
-	return blobbifyRangeV2(keyRange, false);
-}
-
-ThreadFuture<bool> ThreadSafeTenant::blobbifyRangeV2(const KeyRangeRef& keyRange, bool wait) {
 	DatabaseContext* db = this->db->db;
 	KeyRange range = keyRange;
 	return onMainThread([=]() -> Future<bool> {
 		db->checkDeferredError();
 		db->addref();
-		return db->blobbifyRange(range, wait, Reference<Tenant>::addRef(tenant));
+		return db->blobbifyRange(range, Reference<Tenant>::addRef(tenant));
+	});
+}
+
+ThreadFuture<bool> ThreadSafeTenant::blobbifyRangeBlocking(const KeyRangeRef& keyRange) {
+	DatabaseContext* db = this->db->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		db->addref();
+		return db->blobbifyRangeBlocking(range, Reference<Tenant>::addRef(tenant));
 	});
 }
 

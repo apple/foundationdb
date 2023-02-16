@@ -549,17 +549,13 @@ ThreadFuture<bool> DLTenant::blobbifyRange(const KeyRangeRef& keyRange) {
 	});
 }
 
-ThreadFuture<bool> DLTenant::blobbifyRangeV2(const KeyRangeRef& keyRange, bool wait) {
-	if (!api->tenantBlobbifyRangeV2) {
-		// in case a client called the new version of this function with an old external client
-		if (api->tenantBlobbifyRange && !wait) {
-			return blobbifyRange(keyRange);
-		}
+ThreadFuture<bool> DLTenant::blobbifyRangeBlocking(const KeyRangeRef& keyRange) {
+	if (!api->tenantBlobbifyRangeBlocking) {
 		return unsupported_operation();
 	}
 
-	FdbCApi::FDBFuture* f = api->tenantBlobbifyRangeV2(
-	    tenant, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), wait);
+	FdbCApi::FDBFuture* f = api->tenantBlobbifyRangeBlocking(
+	    tenant, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
 
 	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		FdbCApi::fdb_bool_t ret = false;
@@ -787,17 +783,13 @@ ThreadFuture<bool> DLDatabase::blobbifyRange(const KeyRangeRef& keyRange) {
 	});
 }
 
-ThreadFuture<bool> DLDatabase::blobbifyRangeV2(const KeyRangeRef& keyRange, bool wait) {
-	if (!api->databaseBlobbifyRangeV2) {
-		// in case a client called the new version of this function with an old external client
-		if (api->databaseBlobbifyRange && !wait) {
-			return blobbifyRange(keyRange);
-		}
+ThreadFuture<bool> DLDatabase::blobbifyRangeBlocking(const KeyRangeRef& keyRange) {
+	if (!api->databaseBlobbifyRangeBlocking) {
 		return unsupported_operation();
 	}
 
-	FdbCApi::FDBFuture* f = api->databaseBlobbifyRangeV2(
-	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), wait);
+	FdbCApi::FDBFuture* f = api->databaseBlobbifyRangeBlocking(
+	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
 
 	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		FdbCApi::fdb_bool_t ret = false;
@@ -969,10 +961,10 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_database_blobbify_range",
 	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
-	loadClientFunction(&api->databaseBlobbifyRangeV2,
+	loadClientFunction(&api->databaseBlobbifyRangeBlocking,
 	                   lib,
 	                   fdbCPath,
-	                   "fdb_database_blobbify_range_v2",
+	                   "fdb_database_blobbify_range_blocking",
 	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
 	loadClientFunction(&api->databaseUnblobbifyRange,
 	                   lib,
@@ -1011,10 +1003,10 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_tenant_blobbify_range",
 	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
-	loadClientFunction(&api->tenantBlobbifyRangeV2,
+	loadClientFunction(&api->tenantBlobbifyRangeBlocking,
 	                   lib,
 	                   fdbCPath,
-	                   "fdb_tenant_blobbify_range_v2",
+	                   "fdb_tenant_blobbify_range_blocking",
 	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
 	loadClientFunction(&api->tenantUnblobbifyRange,
 	                   lib,
@@ -1876,8 +1868,8 @@ ThreadFuture<bool> MultiVersionTenant::blobbifyRange(const KeyRangeRef& keyRange
 	return executeOperation(&ITenant::blobbifyRange, keyRange);
 }
 
-ThreadFuture<bool> MultiVersionTenant::blobbifyRangeV2(const KeyRangeRef& keyRange, bool wait) {
-	return executeOperation(&ITenant::blobbifyRangeV2, keyRange, std::forward<bool>(wait));
+ThreadFuture<bool> MultiVersionTenant::blobbifyRangeBlocking(const KeyRangeRef& keyRange) {
+	return executeOperation(&ITenant::blobbifyRangeBlocking, keyRange);
 }
 
 ThreadFuture<bool> MultiVersionTenant::unblobbifyRange(const KeyRangeRef& keyRange) {
@@ -2114,8 +2106,8 @@ ThreadFuture<bool> MultiVersionDatabase::blobbifyRange(const KeyRangeRef& keyRan
 	return executeOperation(&IDatabase::blobbifyRange, keyRange);
 }
 
-ThreadFuture<bool> MultiVersionDatabase::blobbifyRangeV2(const KeyRangeRef& keyRange, bool wait) {
-	return executeOperation(&IDatabase::blobbifyRangeV2, keyRange, std::forward<bool>(wait));
+ThreadFuture<bool> MultiVersionDatabase::blobbifyRangeBlocking(const KeyRangeRef& keyRange) {
+	return executeOperation(&IDatabase::blobbifyRangeBlocking, keyRange);
 }
 
 ThreadFuture<bool> MultiVersionDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {

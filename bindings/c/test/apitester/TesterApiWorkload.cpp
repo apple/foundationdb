@@ -388,7 +388,7 @@ void ApiWorkload::blobbifyTenant(std::optional<int> tenantId,
 		    info(fmt::format("setup: blobbifying {}: [\\x00 - \\xff)\n", debugTenantStr(tenantId)));
 
 		    // wait for blobbification before returning
-		    fdb::Future f = ctx->dbOps()->blobbifyRange(begin, end, true).eraseType();
+		    fdb::Future f = ctx->dbOps()->blobbifyRangeBlocking(begin, end).eraseType();
 		    ctx->continueAfter(f, [ctx, f]() {
 			    bool success = f.get<fdb::future_var::Bool>();
 			    ASSERT(success);

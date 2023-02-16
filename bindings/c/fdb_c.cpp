@@ -625,16 +625,14 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_blobbify_range(FDBDatabase* db,
 	                        .extractPtr());
 }
 
-extern "C" DLLEXPORT FDBFuture* fdb_database_blobbify_range_v2(FDBDatabase* db,
-                                                               uint8_t const* begin_key_name,
-                                                               int begin_key_name_length,
-                                                               uint8_t const* end_key_name,
-                                                               int end_key_name_length,
-                                                               fdb_bool_t wait) {
+extern "C" DLLEXPORT FDBFuture* fdb_database_blobbify_range_blocking(FDBDatabase* db,
+                                                                     uint8_t const* begin_key_name,
+                                                                     int begin_key_name_length,
+                                                                     uint8_t const* end_key_name,
+                                                                     int end_key_name_length) {
 	return (FDBFuture*)(DB(db)
-	                        ->blobbifyRangeV2(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
-	                                                      StringRef(end_key_name, end_key_name_length)),
-	                                          wait)
+	                        ->blobbifyRangeBlocking(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                            StringRef(end_key_name, end_key_name_length)))
 	                        .extractPtr());
 }
 
@@ -720,16 +718,14 @@ extern "C" DLLEXPORT FDBFuture* fdb_tenant_blobbify_range(FDBTenant* tenant,
 	                        .extractPtr());
 }
 
-extern "C" DLLEXPORT FDBFuture* fdb_tenant_blobbify_range_v2(FDBTenant* tenant,
-                                                             uint8_t const* begin_key_name,
-                                                             int begin_key_name_length,
-                                                             uint8_t const* end_key_name,
-                                                             int end_key_name_length,
-                                                             fdb_bool_t wait) {
+extern "C" DLLEXPORT FDBFuture* fdb_tenant_blobbify_range_blocking(FDBTenant* tenant,
+                                                                   uint8_t const* begin_key_name,
+                                                                   int begin_key_name_length,
+                                                                   uint8_t const* end_key_name,
+                                                                   int end_key_name_length) {
 	return (FDBFuture*)(TENANT(tenant)
-	                        ->blobbifyRangeV2(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
-	                                                      StringRef(end_key_name, end_key_name_length)),
-	                                          wait)
+	                        ->blobbifyRangeBlocking(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                            StringRef(end_key_name, end_key_name_length)))
 	                        .extractPtr());
 }
 

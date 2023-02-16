@@ -10941,8 +10941,12 @@ ACTOR Future<bool> blobbifyRangeActor(Reference<DatabaseContext> cx,
 	}
 }
 
-Future<bool> DatabaseContext::blobbifyRange(KeyRange range, bool doWait, Optional<Reference<Tenant>> tenant) {
-	return blobbifyRangeActor(Reference<DatabaseContext>::addRef(this), range, doWait, tenant);
+Future<bool> DatabaseContext::blobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant) {
+	return blobbifyRangeActor(Reference<DatabaseContext>::addRef(this), range, false, tenant);
+}
+
+Future<bool> DatabaseContext::blobbifyRangeBlocking(KeyRange range, Optional<Reference<Tenant>> tenant) {
+	return blobbifyRangeActor(Reference<DatabaseContext>::addRef(this), range, true, tenant);
 }
 
 Future<bool> DatabaseContext::unblobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant) {

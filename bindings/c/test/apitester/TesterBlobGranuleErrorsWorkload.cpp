@@ -152,7 +152,7 @@ private:
 		auto success = std::make_shared<bool>(false);
 		execOperation(
 		    [begin, end, blobbify, success](auto ctx) {
-			    fdb::Future f = blobbify ? ctx->db().blobbifyRange(begin, end, false).eraseType()
+			    fdb::Future f = blobbify ? ctx->db().blobbifyRange(begin, end).eraseType()
 			                             : ctx->db().unblobbifyRange(begin, end).eraseType();
 			    ctx->continueAfter(
 			        f,
@@ -232,7 +232,12 @@ private:
 		}
 		execOperation(
 		    [begin, end](auto ctx) {
-			    fdb::Future f = ctx->db().blobbifyRange(begin, end, Random::get().randomBool(0.5)).eraseType();
+			    fdb::Future f;
+			    if (Random::get().randomBool(0.5)) {
+				    f = ctx->db().blobbifyRange(begin, end).eraseType();
+			    } else {
+				    f = ctx->db().blobbifyRangeBlocking(begin, end).eraseType();
+			    }
 			    ctx->done();
 		    },
 		    [this, cont]() { schedule(cont); });

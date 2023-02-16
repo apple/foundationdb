@@ -231,7 +231,6 @@ public interface Database extends AutoCloseable, TransactionContext {
 
 	 * @return if the recording of the range was successful
 	 */
-	@Deprecated
 	default CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey) {
 		return blobbifyRange(beginKey, endKey, getExecutor());
 	}
@@ -245,10 +244,7 @@ public interface Database extends AutoCloseable, TransactionContext {
 
 	 * @return if the recording of the range was successful
 	 */
-	@Deprecated
-	default CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey, Executor e) {
-		return blobbifyRange(beginKey, endKey, false, e);
-	}
+	CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey, Executor e);
 
 	/**
 	 * Runs {@link #blobbifyRange(byte[] beginKey, byte[] endKey, boolean wait)} on the default executor.
@@ -259,8 +255,8 @@ public interface Database extends AutoCloseable, TransactionContext {
 
 	 * @return if the recording of the range was successful
 	 */
-	default CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey, boolean wait) {
-		return blobbifyRange(beginKey, endKey, wait, getExecutor());
+	default CompletableFuture<Boolean> blobbifyRangeBlocking(byte[] beginKey, byte[] endKey) {
+		return blobbifyRangeBlocking(beginKey, endKey, getExecutor());
 	}
 
 	/**
@@ -273,7 +269,7 @@ public interface Database extends AutoCloseable, TransactionContext {
 
 	 * @return if the recording of the range was successful
 	 */
-	CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey, boolean wait, Executor e);
+	CompletableFuture<Boolean> blobbifyRangeBlocking(byte[] beginKey, byte[] endKey, Executor e);
 
 	/**
 	 * Runs {@link #unblobbifyRange(byte[] beginKey, byte[] endKey)} on the default executor.
