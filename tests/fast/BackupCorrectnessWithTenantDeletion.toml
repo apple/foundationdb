@@ -3,6 +3,9 @@ allowDefaultTenant = false
 tenantModes = ['required']
 allowCreatingTenants = false
 
+[[knobs]]
+simulation_enable_snapshot_encryption_checks = false
+
 [[test]]
 testTitle = 'BackupAndRestoreWithTenantDeletion'
 clearAfterTest = false
