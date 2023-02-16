@@ -54,19 +54,12 @@ struct TenantManagementWorkload : TestWorkload {
 		Reference<Tenant> tenant;
 		Optional<TenantGroupName> tenantGroup;
 		bool empty;
-		Optional<ClusterName> assignedCluster;
 
 		TenantData() : empty(true) {}
-		TenantData(int64_t id, Optional<TenantGroupName> tenantGroup, bool empty, Optional<ClusterName> assignedCluster)
-		  : tenant(makeReference<Tenant>(id)), tenantGroup(tenantGroup), empty(empty),
-		    assignedCluster(assignedCluster) {}
-		TenantData(int64_t id,
-		           Optional<TenantName> tName,
-		           Optional<TenantGroupName> tenantGroup,
-		           bool empty,
-		           Optional<ClusterName> assignedCluster)
-		  : tenant(makeReference<Tenant>(id, tName)), tenantGroup(tenantGroup), empty(empty),
-		    assignedCluster(assignedCluster) {}
+		TenantData(int64_t id, Optional<TenantGroupName> tenantGroup, bool empty)
+		  : tenant(makeReference<Tenant>(id)), tenantGroup(tenantGroup), empty(empty) {}
+		TenantData(int64_t id, Optional<TenantName> tName, Optional<TenantGroupName> tenantGroup, bool empty)
+		  : tenant(makeReference<Tenant>(id, tName)), tenantGroup(tenantGroup), empty(empty) {}
 	};
 
 	struct TenantGroupData {
@@ -579,11 +572,8 @@ struct TenantManagementWorkload : TestWorkload {
 
 					// Update our local tenant state to include the newly created one
 					self->maxId = entry.get().id;
-					TenantData tData = TenantData(entry.get().id,
-					                              tenantItr->first,
-					                              tenantItr->second.tenantGroup,
-					                              true,
-					                              entry.get().assignedCluster);
+					TenantData tData =
+					    TenantData(entry.get().id, tenantItr->first, tenantItr->second.tenantGroup, true);
 					self->createdTenants[tenantItr->first] = tData;
 					self->allTestTenants.push_back(tData.tenant);
 
@@ -1541,10 +1531,12 @@ struct TenantManagementWorkload : TestWorkload {
 				newClusterName = self->dataClusterName;
 			}
 			configuration["assigned_cluster"_sr] = newClusterName;
-			if (exists && (itr->second.assignedCluster != newClusterName)) {
-				assignToDifferentCluster = true;
-			}
+			assignToDifferentCluster = (newClusterName != self->dataClusterName);
 		}
+
+		// In the future after we enable tenant movement, this may be
+		// state bool configurationChanging = tenangGroupCanging || assignToDifferentCluster.
+		state bool configurationChanging = tenantGroupChanging;
 
 		// If true, the options generated may include an unknown option
 		state bool hasInvalidOption = false;
@@ -1564,9 +1556,11 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(!specialKeysUseInvalidTuple);
 				ASSERT(!assignToDifferentCluster);
 				Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
+				if (configurationChanging) {
+					ASSERT_GT(currentVersionstamp.version, originalReadVersion);
+				}
 				if (tenantGroupChanging) {
 					ASSERT(configuration.count("tenant_group"_sr) > 0);
-					ASSERT_GT(currentVersionstamp.version, originalReadVersion);
 					auto itr = self->createdTenants.find(tenant);
 					if (itr->second.tenantGroup.present()) {
 						auto tenantGroupItr = self->createdTenantGroups.find(itr->second.tenantGroup.get());
