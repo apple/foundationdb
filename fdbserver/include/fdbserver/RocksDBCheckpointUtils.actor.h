@@ -31,13 +31,15 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+const std::string checkpointBytesSampleFileName = "metadata_bytes.sst";
+
 class IRocksDBSstFileWriter {
 public:
 	virtual void open(const std::string localFile) = 0;
 
 	virtual void write(const KeyRef key, const ValueRef value) = 0;
 
-	virtual void finish() = 0;
+	virtual bool finish() = 0;
 
 	virtual ~IRocksDBSstFileWriter() {}
 };

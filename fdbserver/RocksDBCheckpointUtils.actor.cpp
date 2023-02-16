@@ -554,7 +554,7 @@ public:
 
 	void write(const KeyRef key, const ValueRef value) override;
 
-	void finish() override;
+	bool finish() override;
 
 private:
 	std::unique_ptr<rocksdb::SstFileWriter> writer;
@@ -586,11 +586,11 @@ void RocksDBSstFileWriter::write(const KeyRef key, const ValueRef value) {
 	this->hasData = true;
 }
 
-void RocksDBSstFileWriter::finish() {
+bool RocksDBSstFileWriter::finish() {
 	if (!this->hasData) {
 		// writer->finish() cannot create sst file with no entries
 		// So, we have to check whether any data set to be written to sst file before writer->finish()
-		return;
+		return false;
 	}
 	rocksdb::Status status = this->writer->Finish();
 	if (!status.ok()) {
@@ -599,6 +599,7 @@ void RocksDBSstFileWriter::finish() {
 		    .detail("Status", status.ToString());
 		throw failed_to_create_checkpoint_shard_metadata();
 	}
+	return true;
 }
 
 // RocksDBCFCheckpointReader reads an exported RocksDB Column Family checkpoint, and returns the serialized

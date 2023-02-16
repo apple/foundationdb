@@ -52,6 +52,7 @@ struct CheckpointMetaData {
 	std::vector<UID> src; // Storage server(s) on which this checkpoint is created.
 	UID checkpointID; // A unique id for this checkpoint.
 	int16_t state; // CheckpointState.
+	std::string bytesSampeFile;
 
 	// A serialized metadata associated with format, this data can be understood by the corresponding KVS.
 	Standalone<StringRef> serializedCheckpoint;
