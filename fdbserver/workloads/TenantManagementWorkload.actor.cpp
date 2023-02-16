@@ -1541,8 +1541,7 @@ struct TenantManagementWorkload : TestWorkload {
 				newClusterName = self->dataClusterName;
 			}
 			configuration["assigned_cluster"_sr] = newClusterName;
-			if (exists &&
-			    (!itr->second.assignedCluster.present() || itr->second.assignedCluster.get() != newClusterName)) {
+			if (exists && (itr->second.assignedCluster != newClusterName)) {
 				assignToDifferentCluster = true;
 			}
 		}
