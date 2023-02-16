@@ -2862,6 +2862,14 @@ struct ConfigureTenantImpl {
 		     ++configItr) {
 			if (configItr->first == "tenant_group"_sr) {
 				wait(updateTenantGroup(self, tr, self->updatedEntry, configItr->second));
+			} else if (configItr->first == "assigned_cluster"_sr &&
+			           configItr->second != tenantEntry.get().assignedCluster) {
+				auto& newClusterName = configItr->second;
+				TraceEvent(SevWarn, "CannotChangeAssignedCluster")
+				    .detail("TenantName", tenantEntry.get().tenantName)
+				    .detail("OriginalAssignedCluster", tenantEntry.get().assignedCluster)
+				    .detail("NewAssignedCluster", newClusterName);
+				throw invalid_tenant_configuration();
 			}
 			self->updatedEntry.configure(configItr->first, configItr->second);
 		}
