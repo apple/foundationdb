@@ -50,7 +50,7 @@ def run_fdbcli_command(cluster_file, *args):
         raise Exception('The fdbcli command is stuck, database is unavailable')
 
 
-def run_fdbcli_command_and_get_error(cluster_file, *args):
+def run_fdbcli_command_and_reap(cluster_file, *args):
     """run the fdbcli statement: fdbcli --exec '<arg1> <arg2> ... <argN>'.
 
     Returns:
@@ -112,7 +112,7 @@ def configure_tenant(management_cluster_file, data_cluster_files, tenant, tenant
     if assigned_cluster:
         command = command + ' assigned_cluster={}'.format(assigned_cluster)
 
-    output, err = run_fdbcli_command_and_get_error(management_cluster_file, command)
+    output, err = run_fdbcli_command_and_reap(management_cluster_file, command)
     return output, err
 
 
