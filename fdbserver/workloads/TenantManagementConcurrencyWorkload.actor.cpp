@@ -181,7 +181,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 	ACTOR static Future<Void> createTenant(TenantManagementConcurrencyWorkload* self) {
 		state TenantName tenant = self->chooseTenantName();
-		state TenantMapEntry entry;
+		state MetaclusterTenantMapEntry entry;
 
 		state UID debugId = deterministicRandom()->randomUniqueID();
 

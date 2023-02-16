@@ -172,7 +172,7 @@ std::string TenantMapEntry::toJson() const {
 }
 
 bool TenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const {
-	return tenantGroup == other.tenantGroup && tenantLockState == other.tenantLockState;
+	return tenantGroup == other.tenantGroup;
 }
 
 void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> value) {
@@ -185,10 +185,8 @@ void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> 
 }
 
 bool TenantMapEntry::operator==(TenantMapEntry const& other) const {
-	return id == other.id && tenantName == other.tenantName && tenantState == other.tenantState &&
-	       tenantLockState == other.tenantLockState && tenantGroup == other.tenantGroup &&
-	       assignedCluster == other.assignedCluster && configurationSequenceNum == other.configurationSequenceNum &&
-	       renameDestination == other.renameDestination && error == other.error;
+	return id == other.id && tenantName == other.tenantName && tenantLockState == other.tenantLockState &&
+	       tenantGroup == other.tenantGroup && configurationSequenceNum == other.configurationSequenceNum;
 }
 
 json_spirit::mObject TenantGroupEntry::toJson() const {

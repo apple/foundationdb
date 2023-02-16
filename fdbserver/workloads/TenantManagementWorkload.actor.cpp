@@ -395,9 +395,7 @@ struct TenantManagementWorkload : TestWorkload {
 		} else {
 			ASSERT(tenantsToCreate.size() == 1);
 			TenantMapEntryImpl tEntry = tenantsToCreate.begin()->second;
-			MetaclusterTenantMapEntry modifiedEntry;
-			modifiedEntry.tenantName = tEntry.tenantName;
-			modifiedEntry.tenantGroup = tEntry.tenantGroup;
+			MetaclusterTenantMapEntry modifiedEntry(tEntry);
 			auto assign = AssignClusterAutomatically::True;
 			if (deterministicRandom()->coinflip()) {
 				modifiedEntry.assignedCluster = self->dataClusterName;

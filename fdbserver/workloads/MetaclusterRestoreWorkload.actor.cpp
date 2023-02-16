@@ -81,7 +81,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	std::map<TenantGroupName, TenantGroupData> tenantGroups;
 
 	std::set<int64_t> deletedTenants;
-	std::vector<std::pair<int64_t, TenantMapEntry>> managementTenantsBeforeRestore;
+	std::vector<std::pair<int64_t, MetaclusterTenantMapEntry>> managementTenantsBeforeRestore;
 
 	int initialTenants;
 	int maxTenants;
@@ -337,10 +337,11 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		return waitForAll(deleteFutures);
 	}
 
-	ACTOR template <class Transaction>
-	static Future<std::unordered_set<int64_t>> getTenantsInGroup(Transaction tr,
-	                                                             TenantMetadataSpecification tenantMetadata,
-	                                                             TenantGroupName tenantGroup) {
+	ACTOR template <class Transaction, class TenantMapEntryImpl>
+	static Future<std::unordered_set<int64_t>> getTenantsInGroup(
+	    Transaction tr,
+	    TenantMetadataSpecification<TenantMapEntryImpl> tenantMetadata,
+	    TenantGroupName tenantGroup) {
 		KeyBackedRangeResult<Tuple> groupTenants =
 		    wait(tenantMetadata.tenantGroupTenantIndex.getRange(tr,
 		                                                        Tuple::makeTuple(tenantGroup),
@@ -632,23 +633,24 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 		loop {
 			try {
-				TenantMapEntry tenantEntry;
+				MetaclusterTenantMapEntry tenantEntry;
 				tenantEntry.tenantName = tenantName;
 				tenantEntry.tenantGroup = self->chooseTenantGroup();
 				wait(MetaclusterAPI::createTenant(self->managementDb, tenantEntry, AssignClusterAutomatically::True));
-				TenantMapEntry createdEntry = wait(MetaclusterAPI::getTenant(self->managementDb, tenantName));
+				MetaclusterTenantMapEntry createdEntry =
+				    wait(MetaclusterAPI::getTenant(self->managementDb, tenantName));
 				TraceEvent(SevDebug, "MetaclusterRestoreWorkloadCreatedTenant")
 				    .detail("Tenant", tenantName)
 				    .detail("TenantId", createdEntry.id)
 				    .detail("AccessTime", createTime);
 				self->createdTenants[createdEntry.id] =
-				    TenantData(tenantName, createdEntry.assignedCluster.get(), createdEntry.tenantGroup, createTime);
+				    TenantData(tenantName, createdEntry.assignedCluster, createdEntry.tenantGroup, createTime);
 				self->tenantNameIndex[tenantName] = createdEntry.id;
-				auto& dataDb = self->dataDbs[createdEntry.assignedCluster.get()];
+				auto& dataDb = self->dataDbs[createdEntry.assignedCluster];
 				dataDb.tenants.insert(createdEntry.id);
 				if (createdEntry.tenantGroup.present()) {
 					auto& tenantGroupData = self->tenantGroups[createdEntry.tenantGroup.get()];
-					tenantGroupData.cluster = createdEntry.assignedCluster.get();
+					tenantGroupData.cluster = createdEntry.assignedCluster;
 					tenantGroupData.tenants.insert(createdEntry.id);
 					dataDb.tenantGroups.insert(createdEntry.tenantGroup.get());
 				}
@@ -872,7 +874,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		if (self->recoverManagementCluster) {
 			wait(resetManagementCluster(self));
 		} else {
-			KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants =
+			KeyBackedRangeResult<std::pair<int64_t, MetaclusterTenantMapEntry>> tenants =
 			    wait(runTransaction(self->managementDb, [](Reference<ITransaction> tr) {
 				    return MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(
 				        tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1);
@@ -989,14 +991,14 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> checkTenants(MetaclusterRestoreWorkload* self) {
-		state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants =
+		state KeyBackedRangeResult<std::pair<int64_t, MetaclusterTenantMapEntry>> tenants =
 		    wait(runTransaction(self->managementDb, [](Reference<ITransaction> tr) {
 			    return MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(
 			        tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1);
 		    }));
 
 		ASSERT_LE(tenants.results.size(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
-		std::map<int64_t, TenantMapEntry> tenantMap(tenants.results.begin(), tenants.results.end());
+		std::map<int64_t, MetaclusterTenantMapEntry> tenantMap(tenants.results.begin(), tenants.results.end());
 
 		// If we did not restore the management cluster, then every tenant present in the management cluster before the
 		// restore should be present after the restore. All tenants in the management cluster should be unchanged except
@@ -1006,9 +1008,9 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			auto itr = tenantMap.find(tenantId);
 			ASSERT(itr != tenantMap.end());
 
-			TenantMapEntry postRecoveryEntry = itr->second;
-			if (postRecoveryEntry.tenantState == TenantState::ERROR) {
-				ASSERT(self->dataDbs[itr->second.assignedCluster.get()].restored);
+			MetaclusterTenantMapEntry postRecoveryEntry = itr->second;
+			if (postRecoveryEntry.tenantState == TenantAPI::TenantState::ERROR) {
+				ASSERT(self->dataDbs[itr->second.assignedCluster].restored);
 				postRecoveryEntry.tenantState = tenantEntry.tenantState;
 				postRecoveryEntry.error.clear();
 			}
@@ -1030,14 +1032,14 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			} else {
 				if (tenantData.createTime != TenantData::AccessTime::BEFORE_BACKUP &&
 				    self->dataDbs[tenantData.cluster].restored) {
-					ASSERT(tenantItr->second.tenantState == TenantState::ERROR ||
-					       (tenantItr->second.tenantState == TenantState::READY &&
+					ASSERT(tenantItr->second.tenantState == TenantAPI::TenantState::ERROR ||
+					       (tenantItr->second.tenantState == TenantAPI::TenantState::READY &&
 					        tenantData.createTime == TenantData::AccessTime::DURING_BACKUP));
-					if (tenantItr->second.tenantState == TenantState::ERROR) {
+					if (tenantItr->second.tenantState == TenantAPI::TenantState::ERROR) {
 						ASSERT(self->dataDbs[tenantData.cluster].restoreHasMessages);
 					}
 				} else {
-					ASSERT_EQ(tenantItr->second.tenantState, TenantState::READY);
+					ASSERT_EQ(tenantItr->second.tenantState, TenantAPI::TenantState::READY);
 				}
 			}
 		}

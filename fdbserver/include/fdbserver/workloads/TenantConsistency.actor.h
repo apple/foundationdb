@@ -188,6 +188,8 @@ private:
 			} else {
 				ASSERT_NE(tenantMapEntry.tenantState, TenantAPI::TenantState::RENAMING);
 			}
+			// An error string should be set if and only if the tenant state is an error
+			ASSERT((tenantMapEntry.tenantState == TenantAPI::TenantState::ERROR) != tenantMapEntry.error.empty());
 		}
 
 		ASSERT_EQ(tenantMap.size() + renameCount, metadata.tenantNameIndex.size());
@@ -209,9 +211,6 @@ private:
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
-
-			// An error string should be set if and only if the tenant state is an error
-			ASSERT((tenantMapEntry.tenantState == TenantState::ERROR) != tenantMapEntry.error.empty());
 		}
 		if (self->metadata.clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 			std::map<int64_t, MetaclusterTenantMapEntry> tenantMap =

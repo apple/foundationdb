@@ -121,17 +121,21 @@ struct MetaclusterTenantMapEntry {
 	                          TenantName tenantName,
 	                          TenantAPI::TenantState tenantState,
 	                          Optional<TenantGroupName> tenantGroup);
+	MetaclusterTenantMapEntry(TenantMapEntry tenantEntry);
 
 	void setId(int64_t id);
 	std::string toJson() const;
 
 	bool matchesConfiguration(MetaclusterTenantMapEntry const& other) const;
+	bool matchesConfiguration(TenantMapEntry const& other) const;
 	void configure(Standalone<StringRef> parameter, Optional<Value> value);
 
 	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
 	static MetaclusterTenantMapEntry decode(ValueRef const& value) {
 		return ObjectReader::fromStringRef<MetaclusterTenantMapEntry>(value, IncludeVersion());
 	}
+
+	bool operator==(MetaclusterTenantMapEntry const& other) const;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

@@ -98,6 +98,14 @@ TenantMapEntry::TenantMapEntry(MetaclusterTenantMapEntry metaclusterEntry)
 	}
 }
 
+MetaclusterTenantMapEntry::MetaclusterTenantMapEntry(TenantMapEntry tenantEntry)
+  : tenantName(tenantEntry.tenantName), tenantLockState(tenantEntry.tenantLockState),
+    tenantGroup(tenantEntry.tenantGroup), configurationSequenceNum(tenantEntry.configurationSequenceNum) {
+	if (tenantEntry.id >= 0) {
+		setId(tenantEntry.id);
+	}
+}
+
 MetaclusterTenantMapEntry::MetaclusterTenantMapEntry() {}
 MetaclusterTenantMapEntry::MetaclusterTenantMapEntry(int64_t id,
                                                      TenantName tenantName,
@@ -148,6 +156,10 @@ bool MetaclusterTenantMapEntry::matchesConfiguration(MetaclusterTenantMapEntry c
 	return tenantGroup == other.tenantGroup;
 }
 
+bool MetaclusterTenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const {
+	return tenantGroup == other.tenantGroup;
+}
+
 void MetaclusterTenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> value) {
 	if (parameter == "tenant_group"_sr) {
 		tenantGroup = value;
@@ -157,6 +169,13 @@ void MetaclusterTenantMapEntry::configure(Standalone<StringRef> parameter, Optio
 		TraceEvent(SevWarnAlways, "UnknownTenantConfigurationParameter").detail("Parameter", parameter);
 		throw invalid_tenant_configuration();
 	}
+}
+
+bool MetaclusterTenantMapEntry::operator==(MetaclusterTenantMapEntry const& other) const {
+	return id == other.id && tenantName == other.tenantName && tenantState == other.tenantState &&
+	       tenantLockState == other.tenantLockState && tenantGroup == other.tenantGroup &&
+	       assignedCluster == other.assignedCluster && configurationSequenceNum == other.configurationSequenceNum &&
+	       renameDestination == other.renameDestination && error == other.error;
 }
 
 KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>&

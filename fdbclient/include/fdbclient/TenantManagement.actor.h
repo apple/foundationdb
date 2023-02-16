@@ -446,7 +446,6 @@ Future<Void> configureTenantTransaction(Transaction tr,
                                         TenantMapEntry originalEntry,
                                         TenantMapEntry updatedTenantEntry) {
 	ASSERT(updatedTenantEntry.id == originalEntry.id);
-	ASSERT(!updatedTenantEntry.assignedCluster.present());
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	TenantMetadata::tenantMap().set(tr, updatedTenantEntry.id, updatedTenantEntry);
