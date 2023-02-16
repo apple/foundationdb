@@ -865,7 +865,9 @@ void EncryptBlobCipherAes265Ctr::setCipherAlgoHeaderWithAuthV1(const uint8_t* ci
 	headerRef->algoHeader = AesCtrWithAuth(algoHeader);
 	// compute the authentication token
 	Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(*headerRef);
-	uint8_t computed[Params::authTokenSize];
+	uint8_t computed[Params::authTokenSize]{
+		0,
+	};
 	computeAuthToken({ { ciphertext, ciphertextLen }, { serialized.begin(), serialized.size() } },
 	                 headerCipherKeyOpt.get()->rawCipher(),
 	                 AES_256_KEY_LENGTH,
@@ -1120,8 +1122,10 @@ void DecryptBlobCipherAes256Ctr::validateAuthTokenV1(const uint8_t* ciphertext,
 	ASSERT(headerCipherKeyOpt.present() && headerCipherKeyOpt.get().isValid());
 
 	Arena tmpArena;
-	uint8_t persited[Params::authTokenSize];
-	uint8_t computed[Params::authTokenSize];
+	uint8_t persisted[Params::authTokenSize];
+	uint8_t computed[Params::authTokenSize]{
+		0,
+	};
 
 	// prepare the payload {cipherText + encryptionHeader}
 	// ensure the 'authToken' is reset before computing the 'authentication token'
@@ -1129,7 +1133,7 @@ void DecryptBlobCipherAes256Ctr::validateAuthTokenV1(const uint8_t* ciphertext,
 
 	AesCtrWithAuth<Params> algoHeaderCopy = std::get<AesCtrWithAuth<Params>>(headerRefCopy.algoHeader);
 	// preserve the 'persisted' token for future validation before reseting the field
-	memcpy(&persited[0], &algoHeaderCopy.v1.authToken[0], Params::authTokenSize);
+	memcpy(&persisted[0], &algoHeaderCopy.v1.authToken[0], Params::authTokenSize);
 	memset(&algoHeaderCopy.v1.authToken[0], 0, Params::authTokenSize);
 
 	headerRefCopy.algoHeader = algoHeaderCopy;
@@ -1141,11 +1145,11 @@ void DecryptBlobCipherAes256Ctr::validateAuthTokenV1(const uint8_t* ciphertext,
 	                 (EncryptAuthTokenAlgo)flags.authTokenAlgo,
 	                 AUTH_TOKEN_MAX_SIZE);
 
-	if (memcmp(&persited[0], &computed[0], Params::authTokenSize) != 0) {
+	if (memcmp(&persisted[0], &computed[0], Params::authTokenSize) != 0) {
 		TraceEvent(SevWarn, "BlobCipherVerifyEncryptBlobHeaderAuthTokenMismatch")
 		    .detail("HeaderFlagsVersion", headerRef.flagsVersion())
 		    .detail("HeaderMode", flags.encryptMode)
-		    .detail("SingleAuthToken", StringRef(tmpArena, persited, Params::authTokenSize))
+		    .detail("SingleAuthToken", StringRef(tmpArena, persisted, Params::authTokenSize))
 		    .detail("ComputedSingleAuthToken", StringRef(tmpArena, computed, Params::authTokenSize));
 
 		CODE_PROBE(flags.authTokenAlgo == ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
@@ -1297,7 +1301,9 @@ void DecryptBlobCipherAes256Ctr::verifyHeaderSingleAuthToken(const uint8_t* ciph
 	       reinterpret_cast<const uint8_t*>(&header),
 	       sizeof(BlobCipherEncryptHeader));
 	memset(reinterpret_cast<uint8_t*>(&headerCopy.singleAuthToken), 0, AUTH_TOKEN_MAX_SIZE);
-	uint8_t computed[AUTH_TOKEN_MAX_SIZE];
+	uint8_t computed[AUTH_TOKEN_MAX_SIZE]{
+		0,
+	};
 	computeAuthToken({ { ciphertext, ciphertextLen },
 	                   { reinterpret_cast<const uint8_t*>(&headerCopy), sizeof(BlobCipherEncryptHeader) } },
 	                 headerCipherKeyOpt.get()->rawCipher(),
@@ -1772,6 +1778,7 @@ void testNoAuthMode(const int minDomainId) {
 	try {
 		encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
 		uint8_t temp[bufLen];
+		deterministicRandom()->randomBytes(&temp[0], bufLen);
 		memcpy(encrypted->begin(), &temp[0], bufLen);
 		int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
 		temp[tIdx] += 1;
@@ -1999,6 +2006,7 @@ void testConfigurableEncryptionNoAuthMode(const int minDomainId) {
 	try {
 		encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 		uint8_t temp[bufLen];
+		deterministicRandom()->randomBytes(&temp[0], bufLen);
 		memcpy((void*)encryptedBuf.begin(), &temp[0], bufLen);
 		int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
 		temp[tIdx] += 1;
@@ -2132,6 +2140,7 @@ void testSingleAuthMode(const int minDomainId) {
 	try {
 		encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
 		uint8_t temp[bufLen];
+		deterministicRandom()->randomBytes(temp, bufLen);
 		memcpy(encrypted->begin(), &temp[0], bufLen);
 		int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
 		temp[tIdx] += 1;
@@ -2320,6 +2329,7 @@ void testConfigurableEncryptionSingleAuthMode(const int minDomainId) {
 	try {
 		encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
 		uint8_t temp[bufLen];
+		deterministicRandom()->randomBytes(temp, bufLen);
 		memcpy((void*)encryptedBuf.begin(), &temp[0], bufLen);
 		int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
 		temp[tIdx] += 1;

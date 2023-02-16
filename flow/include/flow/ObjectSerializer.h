@@ -72,12 +72,10 @@ template <class ReaderImpl>
 class _ObjectReader {
 protected:
 	Optional<ProtocolVersion> mProtocolVersion;
-	std::shared_ptr<ContextVariableMap> variables;
 
 public:
 	ProtocolVersion protocolVersion() const { return mProtocolVersion.get(); }
 	void setProtocolVersion(ProtocolVersion v) { mProtocolVersion = v; }
-	void setContextVariableMap(std::shared_ptr<ContextVariableMap> const& cvm) { variables = cvm; }
 
 	template <class... Items>
 	void deserialize(FileIdentifier file_identifier, Items&... items) {
@@ -106,10 +104,6 @@ public:
 	void deserialize(Item& item) {
 		deserialize(FileIdentifierFor<Item>::value, item);
 	}
-
-	std::any& variable(std::string_view name) { return variables->at(name); }
-
-	std::any const& variable(std::string_view name) const { return variables->at(name); }
 };
 
 class ObjectReader : public _ObjectReader<ObjectReader> {

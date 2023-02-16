@@ -99,3 +99,8 @@ KeyBackedSet<UID>& MetaclusterMetadata::registrationTombstones() {
 	static KeyBackedSet<UID> instance("\xff/metacluster/registrationTombstones"_sr);
 	return instance;
 }
+
+KeyBackedMap<ClusterName, UID>& MetaclusterMetadata::activeRestoreIds() {
+	static KeyBackedMap<ClusterName, UID> instance("\xff/metacluster/activeRestoreIds"_sr);
+	return instance;
+}
