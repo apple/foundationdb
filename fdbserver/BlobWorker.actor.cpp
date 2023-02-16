@@ -4812,8 +4812,19 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 			}
 		}
 
+		if (isSelfReassign && e.code() == error_code_granule_assignment_conflict) {
+			// can happen because another granule owns it, or the range is force purged. Either way, we have a revoke
+			// incoming and should drop it
+			TraceEvent(SevWarn, "BlobWorkerConflictOnReassign")
+			    .detail("Range", req.keyRange)
+			    .detail("ManagerEpoch", req.managerEpoch)
+			    .detail("SeqNo", req.managerSeqno);
+			return Void();
+		}
+
 		TraceEvent(SevError, "BlobWorkerUnexpectedErrorRangeAssign", bwData->id)
 		    .error(e)
+		    .detail("IsSelfReassign", isSelfReassign)
 		    .detail("Range", req.keyRange)
 		    .detail("ManagerEpoch", req.managerEpoch)
 		    .detail("SeqNo", req.managerSeqno);
