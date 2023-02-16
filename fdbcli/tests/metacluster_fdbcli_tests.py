@@ -38,16 +38,6 @@ def enable_logging(level=logging.DEBUG):
     return func_decorator
 
 
-def run_command(*args):
-    commands = ["{}".format(args)]
-    print(commands)
-    try:
-        process = subprocess.run(commands, stdout=subprocess.PIPE, env=fdbcli_env, timeout=20)
-        return process.stdout.decode('utf-8').strip()
-    except subprocess.TimeoutExpired:
-        raise Exception('the command is stuck')
-
-
 def run_fdbcli_command(cluster_file, *args):
     command_template = [fdbcli_bin, '-C', "{}".format(cluster_file), '--exec']
     commands = command_template + ["{}".format(' '.join(args))]
