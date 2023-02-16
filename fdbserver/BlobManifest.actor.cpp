@@ -97,7 +97,7 @@ struct BlobManifestFile {
 			BlobManifestFile file(path);
 			return file.epoch > 0 && file.seqNo > 0 && file.segmentNo > 0;
 		};
-		BackupContainerFileSystem::FilesAndSizesT filesAndSizes = wait(reader->listFiles("/", filter));
+		BackupContainerFileSystem::FilesAndSizesT filesAndSizes = wait(reader->listFiles("", filter));
 
 		std::vector<BlobManifestFile> result;
 		for (auto& f : filesAndSizes) {
@@ -425,7 +425,7 @@ private:
 	ACTOR static Future<Void> cleanup(Reference<BlobManifestDumper> self) {
 		state Reference<BackupContainerFileSystem> writer;
 		state std::string fullPath;
-		std::tie(writer, fullPath) = self->blobConn_->createForWrite(MANIFEST);
+		std::tie(writer, fullPath) = self->blobConn_->createForWrite("");
 
 		loop {
 			state std::vector<BlobManifestFile> allFiles = wait(BlobManifestFile::listAll(writer));
@@ -537,7 +537,7 @@ public:
 
 	// Return max epoch from all manifest files
 	ACTOR static Future<int64_t> lastBlobEpoc(Reference<BlobManifestLoader> self) {
-		state Reference<BackupContainerFileSystem> container = self->blobConn_->getForRead(MANIFEST);
+		state Reference<BackupContainerFileSystem> container = self->blobConn_->getForRead("");
 		std::vector<BlobManifestFile> files = wait(BlobManifestFile::listAll(container));
 		ASSERT(!files.empty());
 		return files.front().epoch;
@@ -546,7 +546,7 @@ public:
 private:
 	// Load latest manifest to system space
 	ACTOR static Future<Void> load(Reference<BlobManifestLoader> self) {
-		state Reference<BackupContainerFileSystem> container = self->blobConn_->getForRead(MANIFEST);
+		state Reference<BackupContainerFileSystem> container = self->blobConn_->getForRead("");
 		std::vector<BlobManifestFile> files = wait(BlobManifestFile::listAll(container));
 
 		// Load tailer
@@ -601,7 +601,7 @@ private:
 		*totalBytes += data.size();
 
 		Standalone<StringRef> fileName;
-		state RangeResult rows = bgReadSnapshotFile(data, allKeys);
+		state RangeResult rows = bgReadSnapshotFile(data, {}, {}, allKeys);
 		wait(writeSystemKeys(self, rows));
 		*totalRows += rows.size();
 		return Void();

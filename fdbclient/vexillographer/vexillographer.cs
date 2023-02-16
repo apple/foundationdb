@@ -55,6 +55,7 @@ namespace vexillographer
         public int code { get; set; }
         public bool hidden { get; set; }
         public bool persistent { get; set; }
+        public bool sensitive { get; set; }
         public int defaultFor { get; set; }
         private string _comment;
         public string comment {
@@ -135,6 +136,7 @@ namespace vexillographer
                         ParamType p = paramTypeStr == null ? ParamType.None : (ParamType)Enum.Parse(typeof(ParamType), paramTypeStr);
                         bool hidden = oDoc.AttributeOrNull("hidden") == "true";
                         bool persistent = oDoc.AttributeOrNull("persistent") == "true";
+                        bool sensitive = oDoc.AttributeOrNull("sensitive") == "true";
                         String defaultForString = oDoc.AttributeOrNull("defaultFor");
                         int defaultFor = defaultForString == null ? -1 : int.Parse(defaultForString);
                         string disableOn = oDoc.AttributeOrNull("disableOn");
@@ -157,6 +159,7 @@ namespace vexillographer
                                 comment = oDoc.AttributeOrNull("description"),
                                 hidden = hidden,
                                 persistent = persistent,
+                                sensitive = sensitive,
                                 defaultFor = defaultFor
                             });
                         }

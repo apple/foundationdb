@@ -1,13 +1,15 @@
 [[test]]
-title = 'Blob Granule API Tenant Encryption Correctness Multi Threaded'
+title = 'Blob Granule API Encryption Correctness Multi Threaded'
 multiThreaded = true
 buggify = true
 minFdbThreads = 2
 maxFdbThreads = 8
-minClients = 1
+minDatabases = 2
+maxDatabases = 8
+minClientThreads = 2
+maxClientThreads = 8
+minClients = 2
 maxClients = 8
-minTenants = 1
-maxTenants = 5
 
 [[server]]
 blob_granules_enabled = true
