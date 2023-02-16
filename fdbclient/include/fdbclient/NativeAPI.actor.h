@@ -29,6 +29,7 @@
 
 #include "flow/BooleanParam.h"
 #include "flow/flow.h"
+#include "flow/WipedString.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitProxyInterface.h"
@@ -271,7 +272,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
 	Future<Version> readVersionFuture;
 	Promise<Optional<Value>> metadataVersion;
-	Optional<Standalone<StringRef>> authToken;
+	Optional<WipedString> authToken;
 	Reference<TransactionLogInfo> trLogInfo;
 	TransactionOptions options;
 	Optional<ReadOptions> readOptions;
