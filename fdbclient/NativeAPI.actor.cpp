@@ -10930,7 +10930,10 @@ ACTOR Future<bool> blobbifyRangeActor(Reference<DatabaseContext> cx,
 		Version verifyVersion = wait(cx->verifyBlobRange(range, latestVersion, tenant));
 		if (verifyVersion != invalidVersion) {
 			if (BG_REQUEST_DEBUG) {
-				fmt::print("BlobbifyRange [{0} - {1}) got complete @ {2}\n", range.begin.printable(), range.end.printable(), verifyVersion);
+				fmt::print("BlobbifyRange [{0} - {1}) got complete @ {2}\n",
+				           range.begin.printable(),
+				           range.end.printable(),
+				           verifyVersion);
 			}
 			return result;
 		}
