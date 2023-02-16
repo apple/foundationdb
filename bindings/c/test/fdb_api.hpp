@@ -885,8 +885,7 @@ public:
 	TypedFuture<future_var::Bool> blobbifyRange(KeyRef begin, KeyRef end) override {
 		if (!tenant)
 			throw std::runtime_error("blobbifyRange() from null tenant");
-		return native::fdb_tenant_blobbify_range(
-		    tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end));
+		return native::fdb_tenant_blobbify_range(tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end));
 	}
 
 	TypedFuture<future_var::Bool> blobbifyRangeBlocking(KeyRef begin, KeyRef end) override {
@@ -1024,10 +1023,8 @@ public:
 	TypedFuture<future_var::Bool> blobbifyRange(KeyRef begin, KeyRef end) override {
 		if (!db)
 			throw std::runtime_error("blobbifyRange from null database");
-		return native::fdb_database_blobbify_range(
-		    db.get(), begin.data(), intSize(begin), end.data(), intSize(end));
+		return native::fdb_database_blobbify_range(db.get(), begin.data(), intSize(begin), end.data(), intSize(end));
 	}
-
 
 	TypedFuture<future_var::Bool> blobbifyRangeBlocking(KeyRef begin, KeyRef end) override {
 		if (!db)
