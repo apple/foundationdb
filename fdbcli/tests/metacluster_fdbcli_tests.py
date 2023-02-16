@@ -45,7 +45,6 @@ def run_fdbcli_command(cluster_file, *args):
     try:
         # if the fdbcli command is stuck for more than 20 seconds, the database is definitely unavailable
         process = subprocess.run(commands, stdout=subprocess.PIPE, env=fdbcli_env, timeout=20)
-        return process.stdout.decode('utf-8').strip()
     except subprocess.TimeoutExpired:
         raise Exception('The fdbcli command is stuck, database is unavailable')
 
@@ -60,7 +59,10 @@ def run_fdbcli_command_and_reap(cluster_file, *args):
     commands = command_template + ["{}".format(' '.join(args))]
     try:
         process = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env, timeout=20)
-        return process.stdout.decode('utf-8').strip(), process.stderr.decode('utf-8').strip()
+        rc = process.returncode
+        out = process.stdout.decode('utf-8').strip()
+        err = process.stderr.decode('utf-8').strip()
+        return [rc, out, err]
     except subprocess.TimeoutExpired:
         raise Exception('The fdbcli command is stuck, database is unavailable')
 
@@ -72,13 +74,16 @@ def get_cluster_connection_str(cluster_file_path):
 
 
 def metacluster_create(cluster_file, name, tenant_id_prefix):
-    return run_fdbcli_command(cluster_file, "metacluster create_experimental", name, str(tenant_id_prefix))
+    run_fdbcli_command(cluster_file, "metacluster create_experimental", name, str(tenant_id_prefix))
 
 
 def metacluster_register(management_cluster_file, data_cluster_file, name, max_tenant_groups):
     conn_str = get_cluster_connection_str(data_cluster_file)
-    return run_fdbcli_command(management_cluster_file, "metacluster register", name, "connection_string={}".format(
-        conn_str), 'max_tenant_groups={}'.format(max_tenant_groups))
+    run_fdbcli_command(management_cluster_file,
+                       "metacluster register",
+                       name,
+                       "connection_string={}".format(conn_str),
+                       'max_tenant_groups={}'.format(max_tenant_groups))
 
 
 @enable_logging()
@@ -86,21 +91,19 @@ def setup_metacluster(logger, management_cluster, data_clusters, max_tenant_grou
     management_cluster_file = management_cluster[0]
     management_cluster_name = management_cluster[1]
     tenant_id_prefix = random.randint(0, 32767)
-    output = metacluster_create(management_cluster_file, management_cluster_name, tenant_id_prefix)
-    logger.debug(output)
+    metacluster_create(management_cluster_file, management_cluster_name, tenant_id_prefix)
     for (cf, name) in data_clusters:
-        output = metacluster_register(management_cluster_file, cf, name,
-                                      max_tenant_groups=max_tenant_groups_per_cluster)
-        logger.debug(output)
+        metacluster_register(management_cluster_file, cf, name, max_tenant_groups=max_tenant_groups_per_cluster)
 
 
 def metacluster_status(cluster_file):
-    return run_fdbcli_command(cluster_file, "metacluster status")
+    [_, out, _] = run_fdbcli_command_and_reap(cluster_file, "metacluster status")
+    return out
 
 
 def setup_tenants(management_cluster_file, data_cluster_files, tenants):
     for tenant in tenants:
-        output = run_fdbcli_command(management_cluster_file, 'tenant create', tenant)
+        [_, output, _] = run_fdbcli_command_and_reap(management_cluster_file, 'tenant create', tenant)
         expected_output = 'The tenant `{}\' has been created'.format(tenant)
         assert output == expected_output
 
@@ -112,7 +115,7 @@ def configure_tenant(management_cluster_file, data_cluster_files, tenant, tenant
     if assigned_cluster:
         command = command + ' assigned_cluster={}'.format(assigned_cluster)
 
-    output, err = run_fdbcli_command_and_reap(management_cluster_file, command)
+    _, output, err = run_fdbcli_command_and_reap(management_cluster_file, command)
     return output, err
 
 
@@ -122,7 +125,7 @@ def clear_database_and_tenants(logger, management_cluster_file, data_cluster_fil
     subcmd2 = 'option on SPECIAL_KEY_SPACE_ENABLE_WRITES'
     subcmd3 = 'clearrange ' '"" \\xff'
     subcmd4 = 'clearrange \\xff\\xff/management/tenant/map/ \\xff\\xff/management/tenant/map0'
-    output = run_fdbcli_command(management_cluster_file, subcmd1, subcmd2, subcmd3, subcmd4)
+    _, output, _ = run_fdbcli_command_and_reap(management_cluster_file, subcmd1, subcmd2, subcmd3, subcmd4)
     logger.debug(output)
 
 
@@ -170,6 +173,15 @@ def configure_tenants_test_disableClusterAssignment(logger, cluster_files):
     clear_database_and_tenants(cluster_files[0], cluster_files[1:])
 
 
+@enable_logging()
+def test_main(logger):
+    # This must be the first test to run, since it sets up the metacluster that
+    # will be used throughout the test
+    clusters_status_test(cluster_files, max_tenant_groups_per_cluster=5)
+
+    configure_tenants_test_disableClusterAssignment(cluster_files)
+
+
 if __name__ == "__main__":
     print("metacluster_fdbcli_tests")
     script_desc = """
@@ -189,8 +201,4 @@ if __name__ == "__main__":
 
     fdbcli_bin = args.build_dir + '/bin/fdbcli'
 
-    # This must be the first test to run, since it sets up the metacluster that
-    # will be used throughout the test
-    clusters_status_test(cluster_files, max_tenant_groups_per_cluster=5)
-
-    configure_tenants_test_disableClusterAssignment(cluster_files)
+    test_main()
