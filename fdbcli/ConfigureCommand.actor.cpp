@@ -326,7 +326,8 @@ CommandFactory configureFactory(
         "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|perpetual_storage_wiggle_locality="
         "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|storage_migration_type={disabled|gradual|aggressive}"
         "|tenant_mode={disabled|optional_experimental|required_experimental}|blob_granules_enabled={0|1}"
-        "|encryption_at_rest_mode={disabled|domain_aware|cluster_aware}",
+        "|encryption_at_rest_mode={disabled|domain_aware|cluster_aware}"
+        "|exclude=<ADDRESS...>",
         "change the database configuration",
         "The `new' option, if present, initializes a new database with the given configuration rather than changing "
         "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
@@ -364,6 +365,9 @@ CommandFactory configureFactory(
         "support for the "
         "database. The configuration can be updated ONLY at the time of database creation and once set can't be "
         "updated for the lifetime of the database.\n\n"
+        "exclude=<ADDRESS...>: Sets the addresses in the format of IP:port pair to be excluded during recruitment. "
+        "Note this should be only used the database is unavailable because of the faulty processes that are blocking "
+        "the recovery from completion. The number of addresses should be less than the replica factor.\n\n"
 
         "See the FoundationDB Administration Guide for more information."),
     &configureGenerator);
