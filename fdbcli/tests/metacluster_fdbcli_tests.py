@@ -85,21 +85,22 @@ def metacluster_create(cluster_file, name, tenant_id_prefix):
     return run_fdbcli_command(cluster_file, "metacluster create_experimental", name, str(tenant_id_prefix))
 
 
-def metacluster_register(management_cluster_file, data_cluster_file, name):
+def metacluster_register(management_cluster_file, data_cluster_file, name, max_tenant_groups):
     conn_str = get_cluster_connection_str(data_cluster_file)
     return run_fdbcli_command(management_cluster_file, "metacluster register", name, "connection_string={}".format(
-        conn_str), 'max_tenant_groups=6')
+        conn_str), 'max_tenant_groups={}'.format(max_tenant_groups))
 
 
 @enable_logging()
-def setup_metacluster(logger, management_cluster, data_clusters):
+def setup_metacluster(logger, management_cluster, data_clusters, max_tenant_groups_per_cluster):
     management_cluster_file = management_cluster[0]
     management_cluster_name = management_cluster[1]
     tenant_id_prefix = random.randint(0, 32767)
     output = metacluster_create(management_cluster_file, management_cluster_name, tenant_id_prefix)
     logger.debug(output)
     for (cf, name) in data_clusters:
-        output = metacluster_register(management_cluster_file, cf, name)
+        output = metacluster_register(management_cluster_file, cf, name,
+                                      max_tenant_groups=max_tenant_groups_per_cluster)
         logger.debug(output)
 
 
@@ -141,7 +142,7 @@ def run_tenant_test(management_cluster_file, data_cluster_files, test_func):
 
 
 @enable_logging()
-def clusters_status_test(logger, cluster_files):
+def clusters_status_test(logger, cluster_files, max_tenant_groups_per_cluster):
     for cf in cluster_files:
         output = metacluster_status(cf)
         assert output == "This cluster is not part of a metacluster"
@@ -149,14 +150,15 @@ def clusters_status_test(logger, cluster_files):
     num_clusters = len(cluster_files)
     names = ['meta_mgmt']
     names.extend(['data{}'.format(i) for i in range(1, num_clusters)])
-    setup_metacluster([cluster_files[0], names[0]], zip(cluster_files[1:], names[1:]))
+    setup_metacluster([cluster_files[0], names[0]], zip(cluster_files[1:], names[1:]),
+                      max_tenant_groups_per_cluster=max_tenant_groups_per_cluster)
 
     expected = """
 number of data clusters: {}
   tenant group capacity: {}
   allocated tenant groups: 0
 """
-    expected = expected.format(num_clusters - 1, 12).strip()
+    expected = expected.format(num_clusters - 1, (num_clusters - 1) * max_tenant_groups_per_cluster).strip()
     output = metacluster_status(cluster_files[0])
     assert expected == output
 
@@ -199,6 +201,6 @@ if __name__ == "__main__":
 
     # This must be the first test to run, since it sets up the metacluster that
     # will be used throughout the test
-    clusters_status_test(cluster_files)
+    clusters_status_test(cluster_files, max_tenant_groups_per_cluster=5)
 
     configure_tenants_test_disableClusterAssignment(cluster_files)
