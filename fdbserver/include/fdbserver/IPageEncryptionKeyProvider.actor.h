@@ -212,6 +212,7 @@ public:
 		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 			const BlobCipherEncryptHeaderRef headerRef = Encoder::getEncryptionHeaderRef(encodingHeader);
 			EncryptHeaderCipherDetails details = headerRef.getCipherDetails();
+			ASSERT(details.textCipherDetails.isValid());
 			s.aesKey.cipherTextKey =
 			    getCipherKey(details.textCipherDetails.encryptDomainId, details.textCipherDetails.baseCipherId);
 			if (details.headerCipherDetails.present()) {

@@ -2815,7 +2815,13 @@ public:
 					wait(self->keyProviderInitialized.getFuture());
 					ASSERT(self->keyProvider.isValid());
 				}
-				ASSERT_EQ(self->keyProvider->expectedEncodingType(), page->getEncodingType());
+				if (self->keyProvider->expectedEncodingType() != page->getEncodingType()) {
+					TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
+					    .detail("PhysicalPageID", page->getPhysicalPageID())
+					    .detail("EncodingTypeFound", page->getEncodingType())
+					    .detail("EncodingTypeExpected", self->keyProvider->expectedEncodingType());
+					throw unexpected_encoding_type();
+				}
 				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
 				page->encryptionKey = k;
 			}
@@ -2888,7 +2894,13 @@ public:
 					wait(self->keyProviderInitialized.getFuture());
 					ASSERT(self->keyProvider.isValid());
 				}
-				ASSERT_EQ(self->keyProvider->expectedEncodingType(), page->getEncodingType());
+				if (self->keyProvider->expectedEncodingType() != page->getEncodingType()) {
+					TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
+					    .detail("PhysicalPageID", page->getPhysicalPageID())
+					    .detail("EncodingTypeFound", page->getEncodingType())
+					    .detail("EncodingTypeExpected", self->keyProvider->expectedEncodingType());
+					throw unexpected_encoding_type();
+				}
 				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
 				page->encryptionKey = k;
 			}
