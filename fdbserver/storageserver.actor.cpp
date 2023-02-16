@@ -27,7 +27,6 @@
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleCommon.h"
-#include "fdbclient/Knobs.h"
 #include "fdbrpc/TenantInfo.h"
 #include "flow/ApiVersion.h"
 #include "fmt/format.h"

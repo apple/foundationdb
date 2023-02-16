@@ -212,19 +212,7 @@ EncryptAuthTokenMode BlobCipherEncryptHeaderRef::getAuthTokenMode() const {
 }
 
 EncryptCipherDomainId BlobCipherEncryptHeaderRef::getDomainId() const {
-	// TODO: Replace with "Overload visitor pattern" someday.
-	return std::visit(
-	    [](auto&& h) {
-		    using T = std::decay_t<decltype(h)>;
-		    if constexpr (std::is_same_v<T, AesCtrNoAuth>) {
-			    return (EncryptCipherDomainId)h.v1.cipherTextDetails.encryptDomainId;
-		    } else if constexpr (std::is_same_v<T, AesCtrWithHmac> || std::is_same_v<T, AesCtrWithCmac>) {
-			    return (EncryptCipherDomainId)h.v1.cipherTextDetails.encryptDomainId;
-		    } else {
-			    static_assert(always_false_v<T>, "Unknown encryption authentication");
-		    }
-	    },
-	    algoHeader);
+	return std::visit([](auto& h) { return h.v1.cipherTextDetails.encryptDomainId; }, algoHeader);
 }
 
 void BlobCipherEncryptHeaderRef::validateEncryptionHeaderDetails(const BlobCipherDetails& textCipherDetails,
