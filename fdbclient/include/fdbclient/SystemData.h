@@ -97,21 +97,15 @@ extern const KeyRangeRef auditKeys;
 extern const KeyRef auditPrefix;
 extern const KeyRangeRef auditRanges;
 extern const KeyRef auditRangePrefix;
-<<<<<<< HEAD
 extern const KeyRangeRef auditMetaItems;
 extern const KeyRef auditMetaItemsPrefix;
-=======
->>>>>>> de670b7129c75a604783f56919a7f2530a7bb55f
 
 const Key auditKey(const AuditType type, const UID& auditId);
 const KeyRange auditKeyRange(const AuditType type);
 const Key auditRangeKey(const UID& auditId, const KeyRef& key);
 const Key auditRangePrefixFor(const UID& auditId);
-<<<<<<< HEAD
 const Key auditMetaItemKey(const UID& auditId, const UID& auditorId);
 const KeyRange auditMetaItemsRangeFor(const UID& auditId);
-=======
->>>>>>> de670b7129c75a604783f56919a7f2530a7bb55f
 
 const Value auditStorageStateValue(const AuditStorageState& auditStorageState);
 AuditStorageState decodeAuditStorageState(const ValueRef& value);

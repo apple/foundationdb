@@ -4667,11 +4667,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 				wait(persistAuditStateMap(data->cx, auditState));
 			}
 		} catch (Error& e) {
-<<<<<<< HEAD
 			TraceEvent(SevWarn, "ValidateRangeAgainstServerFailed", data->thisServerID)
-=======
-			TraceEvent(SevWarn, "ValidateRangeAgainstServerError", data->thisServerID)
->>>>>>> de670b7129c75a604783f56919a7f2530a7bb55f
 			    .errorUnsuppressed(e)
 			    .detail("RemoteServer", remoteServer.toString())
 			    .detail("Range", range)

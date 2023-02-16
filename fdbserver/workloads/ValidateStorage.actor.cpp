@@ -113,8 +113,6 @@ struct ValidateStorage : TestWorkload {
 				}
 			} catch (Error& e) {
 				TraceEvent("WaitAuditStorageError").errorUnsuppressed(e).detail("AuditID", auditId);
-<<<<<<< HEAD
-=======
 				wait(delay(1));
 			}
 		}
@@ -130,7 +128,6 @@ struct ValidateStorage : TestWorkload {
 				break;
 			} catch (Error& e) {
 				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
->>>>>>> de670b7129c75a604783f56919a7f2530a7bb55f
 				wait(delay(1));
 			}
 		}

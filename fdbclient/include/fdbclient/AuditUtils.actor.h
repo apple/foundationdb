@@ -36,14 +36,6 @@ ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState
 ACTOR Future<Void> persistAuditState(Database cx, AuditStorageState auditState);
 ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID id);
 ACTOR Future<std::vector<AuditStorageState>> getLatestAuditStates(Database cx, AuditType type, int num);
-<<<<<<< HEAD
-=======
-
-ACTOR Future<Void> persistAuditStateMap(Database cx, AuditStorageState auditState);
-ACTOR Future<std::vector<AuditStorageState>> getAuditStateForRange(Database cx, UID id, KeyRange range);
-
-StringRef auditTypeToString(const AuditType type);
->>>>>>> de670b7129c75a604783f56919a7f2530a7bb55f
 
 ACTOR Future<Void> persistAuditStateMap(Database cx, AuditStorageState auditState);
 ACTOR Future<std::vector<AuditStorageState>> getAuditStateForRange(Database cx, UID id, KeyRange range);
