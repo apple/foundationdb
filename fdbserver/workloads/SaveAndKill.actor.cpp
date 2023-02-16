@@ -85,6 +85,7 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SetBoolValue("META", "enableStorageServerEncryption", SERVER_KNOBS->ENABLE_STORAGE_SERVER_ENCRYPTION);
 		ini.SetBoolValue("META", "enableBlobGranuleEncryption", SERVER_KNOBS->ENABLE_BLOB_GRANULE_ENCRYPTION);
 		ini.SetBoolValue("META", "enableShardEncodeLocationMetadata", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+		ini.SetBoolValue("META", "enableConfigurableEncryption", CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
 
 		ini.SetBoolValue("META", "encryptHeaderAuthTokenEnabled", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED);
 		ini.SetLongValue("META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO);

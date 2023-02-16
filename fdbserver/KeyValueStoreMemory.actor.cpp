@@ -464,7 +464,7 @@ private:
 
 	// Data format for normal operation:
 	// +-------------+-------------+-------------+--------+--------+
-	// | opType      | len1        | len2        | param2 | param2 |
+	// | opType      | len1        | len2        | param1 | param2 |
 	// | sizeof(int) | sizeof(int) | sizeof(int) | len1   | len2   |
 	// +-------------+-------------+-------------+--------+--------+
 	//

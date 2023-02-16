@@ -24,6 +24,7 @@
 #include "fdbclient/Tenant.h"
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
+#include "flow/flow.h"
 
 #define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
 
@@ -303,7 +304,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,       false );
 	init( SIMULATION_EKP_TENANT_IDS_TO_DROP,         "-1" );
-	init( ENABLE_CONFIGURABLE_ENCRYPTION,           false );
+	init( ENABLE_CONFIGURABLE_ENCRYPTION,            true ); if ( randomize && BUGGIFY ) ENABLE_CONFIGURABLE_ENCRYPTION = !ENABLE_CONFIGURABLE_ENCRYPTION;
 	init( ENCRYPT_HEADER_FLAGS_VERSION,                 1 );
 	init( ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION,       1 );
 	init( ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION, 1 );

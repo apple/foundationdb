@@ -209,6 +209,7 @@ struct EncryptHeaderCipherDetails {
 	BlobCipherDetails textCipherDetails;
 	Optional<BlobCipherDetails> headerCipherDetails;
 
+	EncryptHeaderCipherDetails() = default;
 	EncryptHeaderCipherDetails(const BlobCipherDetails& tCipherDetails) : textCipherDetails(tCipherDetails) {}
 	EncryptHeaderCipherDetails(const BlobCipherDetails& tCipherDetails, const BlobCipherDetails& hCipherDetails)
 	  : textCipherDetails(tCipherDetails), headerCipherDetails(hCipherDetails) {}
@@ -489,6 +490,7 @@ struct BlobCipherEncryptHeaderRef {
 	const uint8_t* getIV() const;
 	const EncryptHeaderCipherDetails getCipherDetails() const;
 	EncryptAuthTokenMode getAuthTokenMode() const;
+	EncryptCipherDomainId getDomainId() const;
 
 	void validateEncryptionHeaderDetails(const BlobCipherDetails& textCipherDetails,
 	                                     const BlobCipherDetails& headerCipherDetails,

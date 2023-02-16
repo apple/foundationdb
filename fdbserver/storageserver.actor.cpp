@@ -27,6 +27,7 @@
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/Knobs.h"
 #include "fdbrpc/TenantInfo.h"
 #include "flow/ApiVersion.h"
 #include "fmt/format.h"
@@ -159,6 +160,7 @@ bool canReplyWith(Error e) {
 		return false;
 	}
 }
+
 } // namespace
 
 #define PERSIST_PREFIX "\xff\xff"
@@ -3020,11 +3022,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			if (doFilterMutations || !req.encrypted) {
 				for (auto& m : decodedMutations.back().first) {
 					if (m.isEncrypted()) {
-						const BlobCipherEncryptHeader* header = m.encryptionHeader();
-						cipherDetails.insert(header->cipherTextDetails);
-						if (header->cipherHeaderDetails.isValid()) {
-							cipherDetails.insert(header->cipherHeaderDetails);
-						}
+						m.updateEncryptCipherDetails(cipherDetails);
 					}
 				}
 			}
@@ -9257,11 +9255,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					}
 					if (msg.isEncrypted()) {
 						if (!cipherKeys.present()) {
-							const BlobCipherEncryptHeader* header = msg.encryptionHeader();
-							cipherDetails.insert(header->cipherTextDetails);
-							if (header->cipherHeaderDetails.isValid()) {
-								cipherDetails.insert(header->cipherHeaderDetails);
-							}
+							msg.updateEncryptCipherDetails(cipherDetails);
 							collectingCipherKeys = true;
 						} else {
 							msg = msg.decrypt(cipherKeys.get(), eager.arena, BlobCipherMetrics::TLOG);
