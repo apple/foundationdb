@@ -36,6 +36,7 @@
 
 #define OP_DISK_OVERHEAD (sizeof(OpHeader) + 1)
 #define ENCRYPTION_ENABLED_BIT 31
+static_assert(sizeof(uint32_t) == 4);
 
 template <typename Container>
 class KeyValueStoreMemory final : public IKeyValueStore, NonCopyable {
@@ -308,7 +309,8 @@ private:
 		OpSnapshotAbort, // terminate an in progress snapshot in order to start a full snapshot
 		OpCommit, // only in log, not in queue
 		OpRollback, // only in log, not in queue
-		OpSnapshotItemDelta
+		OpSnapshotItemDelta,
+		OpEncrypted_Deprecated // deprecated since we now store the encryption status in the first bit of the opType
 	};
 
 	struct OpRef {
@@ -472,22 +474,22 @@ private:
 		}
 	}
 
-	// NOTE: The first byte of opType indicates whether the entry is encrypted or not. This is fine for backwards
-	// compatability since the first byte was never used previously
+	// NOTE: The first bit of opType indicates whether the entry is encrypted or not. This is fine for backwards
+	// compatability since the first bit was never used previously
 	//
-	// Unencrypted data format (1 byte padding at the end):
-	// +-------------+-------------+-------------+--------+--------+
-	// | opType      | len1        | len2        | param2 | param2 |
-	// | sizeof(int) | sizeof(int) | sizeof(int) | len1   | len2   |
-	// +-------------+-------------+-------------+--------+--------+
+	// Unencrypted data format:
+	// +-------------+-------------+-------------+--------+--------+-----------+
+	// | opType      | len1        | len2        | param2 | param2 |   \x01    |
+	// | sizeof(int) | sizeof(int) | sizeof(int) | len1   | len2   |  1 byte   |
+	// +-------------+-------------+-------------+--------+--------+-----------+
 	//
-	// Encrypted data format (1 byte padding at the end):
-	// +-------------+-------------+-------------+----------------+-----------------------------+----
-	// |   opType    |len1   | len2    | headerSize | BlobCipherEncryptHeader     | param1 | param2 |
-	// |  s(uint32)  | s(int)| s(int)  | s(uint16)  |  s(BlobCipherEncryptHeader) | len1   | len2   |
-	// +-------------+-------------+-------------+------------ +-------------+--------+--------------
-	// |                                plaintext                                 |    encrypted    |
-	// +---------------------------------------------------------------------------------------------
+	// Encrypted data format:
+	// +-------------+-------+---------+------------+-----------------------------+--------+--------+------------+
+	// |   opType    |len1   | len2    | headerSize | BlobCipherEncryptHeader     | param1 | param2 |    \x01    |
+	// |  s(uint32)  | s(int)| s(int)  | s(uint16)  |  s(BlobCipherEncryptHeader) | len1   | len2   |   1 byte   |
+	// +-------------+-------+---------+------------+-----------------------------+--------+--------+------------+
+	// |                                plaintext                                 |    encrypted    |            |
+	// +--------------------------------------------------------------------------+-----------------+------------+
 	//
 	IDiskQueue::location log_op(OpType op, StringRef v1, StringRef v2) {
 		// Metadata op types to be excluded from encryption.
@@ -522,6 +524,7 @@ private:
 			    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 			    BlobCipherMetrics::KV_MEMORY);
 			uint16_t encryptHeaderSize;
+			// TODO: If possible we want to avoid memcpy to the disk log by using the same arena used by IDiskQueue
 			Arena arena;
 			if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 				BlobCipherEncryptHeaderRef headerRef;
@@ -553,6 +556,7 @@ private:
 	                                                      bool* isZeroFilled,
 	                                                      int* zeroFillSize,
 	                                                      bool encryptedOp) {
+		ASSERT(!isOpEncrypted(&h));
 		// Metadata op types to be excluded from encryption.
 		static std::unordered_set<OpType> metaOps = { OpSnapshotEnd, OpSnapshotAbort, OpCommit, OpRollback };
 		if (metaOps.count((OpType)h.op) == 0) {
@@ -673,6 +677,7 @@ private:
 						encryptedOp = isOpEncrypted(&h);
 						// Reset the first bit to 0 so the op can be read properly
 						setEncryptFlag(&h, false);
+						ASSERT(h.op != OpEncrypted_Deprecated);
 					}
 					state Standalone<StringRef> data =
 					    wait(readOpData(self, h, &isZeroFilled, &zeroFillSize, encryptedOp));
