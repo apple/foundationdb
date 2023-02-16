@@ -23,9 +23,15 @@
 #include "libb64/decode.h"
 #include "libb64/encode.h"
 
-FDB_DEFINE_BOOLEAN_PARAM(AddNewTenants);
+FDB_DEFINE_BOOLEAN_PARAM(ApplyManagementClusterUpdates);
 FDB_DEFINE_BOOLEAN_PARAM(RemoveMissingTenants);
 FDB_DEFINE_BOOLEAN_PARAM(AssignClusterAutomatically);
+FDB_DEFINE_BOOLEAN_PARAM(GroupAlreadyExists);
+FDB_DEFINE_BOOLEAN_PARAM(IsRestoring);
+FDB_DEFINE_BOOLEAN_PARAM(RunOnDisconnectedCluster);
+FDB_DEFINE_BOOLEAN_PARAM(RunOnMismatchedCluster);
+FDB_DEFINE_BOOLEAN_PARAM(RestoreDryRun);
+FDB_DEFINE_BOOLEAN_PARAM(ForceJoinNewMetacluster);
 
 std::string clusterTypeToString(const ClusterType& clusterType) {
 	switch (clusterType) {
@@ -42,6 +48,8 @@ std::string clusterTypeToString(const ClusterType& clusterType) {
 
 std::string DataClusterEntry::clusterStateToString(DataClusterState clusterState) {
 	switch (clusterState) {
+	case DataClusterState::REGISTERING:
+		return "registering";
 	case DataClusterState::READY:
 		return "ready";
 	case DataClusterState::REMOVING:
@@ -54,7 +62,9 @@ std::string DataClusterEntry::clusterStateToString(DataClusterState clusterState
 }
 
 DataClusterState DataClusterEntry::stringToClusterState(std::string stateStr) {
-	if (stateStr == "ready") {
+	if (stateStr == "registering") {
+		return DataClusterState::REGISTERING;
+	} else if (stateStr == "ready") {
 		return DataClusterState::READY;
 	} else if (stateStr == "removing") {
 		return DataClusterState::REMOVING;
@@ -67,6 +77,7 @@ DataClusterState DataClusterEntry::stringToClusterState(std::string stateStr) {
 
 json_spirit::mObject DataClusterEntry::toJson() const {
 	json_spirit::mObject obj;
+	obj["id"] = id.toString();
 	obj["capacity"] = capacity.toJson();
 	obj["allocated"] = allocated.toJson();
 	obj["cluster_state"] = DataClusterEntry::clusterStateToString(clusterState);
@@ -152,5 +163,15 @@ KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())
 MetaclusterMetadata::metaclusterRegistration() {
 	static KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())> instance(
 	    "\xff/metacluster/clusterRegistration"_sr, IncludeVersion());
+	return instance;
+}
+
+KeyBackedSet<UID>& MetaclusterMetadata::registrationTombstones() {
+	static KeyBackedSet<UID> instance("\xff/metacluster/registrationTombstones"_sr);
+	return instance;
+}
+
+KeyBackedMap<ClusterName, UID>& MetaclusterMetadata::activeRestoreIds() {
+	static KeyBackedMap<ClusterName, UID> instance("\xff/metacluster/activeRestoreIds"_sr);
 	return instance;
 }

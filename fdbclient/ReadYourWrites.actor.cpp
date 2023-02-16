@@ -2449,9 +2449,12 @@ Future<Standalone<StringRef>> ReadYourWritesTransaction::getVersionstamp() {
 
 void ReadYourWritesTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
 	setOptionImpl(option, value);
-
-	if (FDBTransactionOptions::optionInfo.getMustExist(option).persistent) {
-		persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
+	auto const& opt = FDBTransactionOptions::optionInfo.getMustExist(option);
+	if (opt.persistent) {
+		if (opt.sensitive)
+			sensitivePersistentOptions.emplace_back(option, value.castTo<WipedString>());
+		else
+			persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
 	}
 }
 
@@ -2564,6 +2567,7 @@ void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) noexcep
 	cache.arena = &arena;
 	writes.arena = &arena;
 	persistentOptions = std::move(r.persistentOptions);
+	sensitivePersistentOptions = std::move(r.sensitivePersistentOptions);
 	nativeReadRanges = std::move(r.nativeReadRanges);
 	nativeWriteRanges = std::move(r.nativeWriteRanges);
 	versionStampKeys = std::move(r.versionStampKeys);
@@ -2583,6 +2587,7 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&&
 	watchMap = std::move(r.watchMap);
 	r.resetPromise = Promise<Void>();
 	persistentOptions = std::move(r.persistentOptions);
+	sensitivePersistentOptions = std::move(r.sensitivePersistentOptions);
 	nativeReadRanges = std::move(r.nativeReadRanges);
 	nativeWriteRanges = std::move(r.nativeWriteRanges);
 	versionStampKeys = std::move(r.versionStampKeys);
@@ -2595,12 +2600,15 @@ Future<Void> ReadYourWritesTransaction::onError(Error const& e) {
 
 void ReadYourWritesTransaction::applyPersistentOptions() {
 	Optional<StringRef> timeout;
-	for (auto option : persistentOptions) {
+	for (auto const& option : persistentOptions) {
 		if (option.first == FDBTransactionOptions::TIMEOUT) {
 			timeout = option.second.castTo<StringRef>();
 		} else {
 			setOptionImpl(option.first, option.second.castTo<StringRef>());
 		}
+	}
+	for (auto const& option : sensitivePersistentOptions) {
+		setOptionImpl(option.first, option.second.castTo<StringRef>());
 	}
 
 	// Setting a timeout can immediately cause a transaction to fail. The only timeout
@@ -2653,6 +2661,7 @@ void ReadYourWritesTransaction::reset() {
 	creationTime = now();
 	timeoutActor.cancel();
 	persistentOptions.clear();
+	sensitivePersistentOptions.clear();
 	options.reset(tr);
 	transactionDebugInfo.clear();
 	tr.fullReset();

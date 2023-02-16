@@ -2745,27 +2745,6 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 	}
 }
 
-void setStorageQuota(Transaction& tr, StringRef tenantGroupName, int64_t quota) {
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	auto key = storageQuotaKey(tenantGroupName);
-	tr.set(key, BinaryWriter::toValue<int64_t>(quota, Unversioned()));
-}
-
-void clearStorageQuota(Transaction& tr, StringRef tenantGroupName) {
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	auto key = storageQuotaKey(tenantGroupName);
-	tr.clear(key);
-}
-
-ACTOR Future<Optional<int64_t>> getStorageQuota(Transaction* tr, StringRef tenantGroupName) {
-	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	state Optional<Value> v = wait(tr->get(storageQuotaKey(tenantGroupName)));
-	if (!v.present()) {
-		return Optional<int64_t>();
-	}
-	return BinaryReader::fromStringRef<int64_t>(v.get(), Unversioned());
-}
-
 std::string ManagementAPI::generateErrorMessage(const CoordinatorsResult& res) {
 	// Note: the error message here should not be changed if possible
 	// If you do change the message here,

@@ -116,10 +116,8 @@ EncryptAuthTokenAlgo getAuthTokenAlgoFromMode(const EncryptAuthTokenMode mode) {
 }
 
 EncryptAuthTokenMode getRandomAuthTokenMode() {
-	std::vector<EncryptAuthTokenMode> modes = { EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
-		                                        EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE };
-	int idx = deterministicRandom()->randomInt(0, modes.size());
-	return modes[idx];
+	return deterministicRandom()->coinflip() ? EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE
+	                                         : EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE;
 }
 
 EncryptAuthTokenAlgo getRandomAuthTokenAlgo() {
@@ -133,4 +131,8 @@ EncryptAuthTokenAlgo getRandomAuthTokenAlgo() {
 bool isReservedEncryptDomain(EncryptCipherDomainId domainId) {
 	return domainId == SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID || domainId == ENCRYPT_HEADER_DOMAIN_ID ||
 	       domainId == FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
+}
+
+bool isEncryptHeaderDomain(EncryptCipherDomainId domainId) {
+	return domainId == ENCRYPT_HEADER_DOMAIN_ID;
 }

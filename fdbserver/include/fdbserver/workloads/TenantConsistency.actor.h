@@ -140,7 +140,9 @@ private:
 			// For Metacluster, the lastTenantId field is updated for MetaclusterMetadata
 			// and not TenantMetadata
 			if (metadata.clusterType != ClusterType::METACLUSTER_DATA) {
-				ASSERT_LE(tenantId, metadata.lastTenantId);
+				if (TenantAPI::getTenantIdPrefix(tenantId) == TenantAPI::getTenantIdPrefix(metadata.lastTenantId)) {
+					ASSERT_LE(tenantId, metadata.lastTenantId);
+				}
 			}
 			ASSERT_EQ(metadata.tenantNameIndex[tenantMapEntry.tenantName], tenantId);
 
@@ -207,6 +209,9 @@ private:
 			} catch (Error& e) {
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
+
+			// An error string should be set if and only if the tenant state is an error
+			ASSERT((tenantMapEntry.tenantState == TenantState::ERROR) != tenantMapEntry.error.empty());
 		}
 		if (self->metadata.clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 			std::map<int64_t, MetaclusterTenantMapEntry> tenantMap =

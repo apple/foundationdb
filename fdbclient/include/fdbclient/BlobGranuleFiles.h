@@ -24,13 +24,15 @@
 // This file contains functions for readers who want to materialize blob granules from the underlying files
 
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/SystemData.h"
 #include "flow/CompressionUtils.h"
 
 Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
                                const Standalone<GranuleSnapshot>& snapshot,
                                int chunkSize,
                                Optional<CompressionFilter> compressFilter,
-                               Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = {});
+                               Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = {},
+                               bool isSnapshotSorted = true);
 
 Value serializeChunkedDeltaFile(const Standalone<StringRef>& fileNameRef,
                                 const Standalone<GranuleDeltas>& deltas,
@@ -60,7 +62,12 @@ std::string randomBGFilename(UID blobWorkerID, UID granuleID, Version version, s
 void sortDeltasByKey(const Standalone<GranuleDeltas>& deltasByVersion, const KeyRangeRef& fileRange);
 
 // just for client passthrough. reads all key-value pairs from a snapshot file, and all mutations from a delta file
-RangeResult bgReadSnapshotFile(const StringRef& data);
-Standalone<VectorRef<GranuleMutationRef>> bgReadDeltaFile(const StringRef& data);
+RangeResult bgReadSnapshotFile(const StringRef& data,
+                               Optional<KeyRef> tenantPrefix,
+                               Optional<BlobGranuleCipherKeysCtx> encryptionCtx,
+                               const KeyRangeRef& keys = normalKeys);
+Standalone<VectorRef<GranuleMutationRef>> bgReadDeltaFile(const StringRef& data,
+                                                          Optional<KeyRef> tenantPrefix,
+                                                          Optional<BlobGranuleCipherKeysCtx> encryptionCtx);
 
 #endif

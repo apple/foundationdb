@@ -23,6 +23,7 @@
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/simulator.h"
+#include "flow/EncryptUtils.h"
 #include "flow/FastRef.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
@@ -504,7 +505,7 @@ public:
 
 struct SnapshotFileBackupEncryptionKeys {
 	Reference<BlobCipherKey> textCipherKey;
-	Reference<BlobCipherKey> headerCipherKey;
+	Optional<Reference<BlobCipherKey>> headerCipherKey;
 	StringRef ivRef;
 };
 
@@ -564,36 +565,34 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	EncryptedRangeFileWriter(Database cx,
 	                         Arena* arena,
 	                         EncryptionAtRestMode encryptMode,
+	                         Optional<Reference<TenantEntryCache<Void>>> tenantCache,
 	                         Reference<IBackupFile> file = Reference<IBackupFile>(),
 	                         int blockSize = 0,
 	                         Options options = Options())
-	  : cx(cx), arena(arena), file(file), encryptMode(encryptMode), blockSize(blockSize), blockEnd(0),
-	    fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION), options(options) {
+	  : cx(cx), arena(arena), file(file), encryptMode(encryptMode), tenantCache(tenantCache), blockSize(blockSize),
+	    blockEnd(0), fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION), options(options) {
 		buffer = makeString(blockSize);
 		wPtr = mutateString(buffer);
 	}
 
-	static void validateEncryptionHeader(Reference<BlobCipherKey> headerCipherKey,
+	static void validateEncryptionHeader(Optional<Reference<BlobCipherKey>> headerCipherKey,
 	                                     Reference<BlobCipherKey> textCipherKey,
 	                                     BlobCipherEncryptHeader& header) {
 		// Validate encryption header 'cipherHeader' details
-		if (!(header.cipherHeaderDetails.baseCipherId == headerCipherKey->getBaseCipherId() &&
-		      header.cipherHeaderDetails.encryptDomainId == headerCipherKey->getDomainId() &&
-		      header.cipherHeaderDetails.salt == headerCipherKey->getSalt())) {
+		if (header.cipherHeaderDetails.isValid() &&
+		    (!headerCipherKey.present() || header.cipherHeaderDetails != headerCipherKey.get()->details())) {
 			TraceEvent(SevWarn, "EncryptionHeader_CipherHeaderMismatch")
-			    .detail("HeaderDomainId", headerCipherKey->getDomainId())
+			    .detail("HeaderDomainId", headerCipherKey.get()->getDomainId())
 			    .detail("ExpectedHeaderDomainId", header.cipherHeaderDetails.encryptDomainId)
-			    .detail("HeaderBaseCipherId", headerCipherKey->getBaseCipherId())
+			    .detail("HeaderBaseCipherId", headerCipherKey.get()->getBaseCipherId())
 			    .detail("ExpectedHeaderBaseCipherId", header.cipherHeaderDetails.baseCipherId)
-			    .detail("HeaderSalt", headerCipherKey->getSalt())
+			    .detail("HeaderSalt", headerCipherKey.get()->getSalt())
 			    .detail("ExpectedHeaderSalt", header.cipherHeaderDetails.salt);
 			throw encrypt_header_metadata_mismatch();
 		}
 
 		// Validate encryption text 'cipherText' details sanity
-		if (!(header.cipherTextDetails.baseCipherId == textCipherKey->getBaseCipherId() &&
-		      header.cipherTextDetails.encryptDomainId == textCipherKey->getDomainId() &&
-		      header.cipherTextDetails.salt == textCipherKey->getSalt())) {
+		if (!header.cipherTextDetails.isValid() || header.cipherTextDetails != textCipherKey->details()) {
 			TraceEvent(SevWarn, "EncryptionHeader_CipherTextMismatch")
 			    .detail("TextDomainId", textCipherKey->getDomainId())
 			    .detail("ExpectedTextDomainId", header.cipherTextDetails.encryptDomainId)
@@ -612,7 +611,6 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                                           Arena* arena) {
 		Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
 		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, header, BlobCipherMetrics::RESTORE));
-		ASSERT(cipherKeys.cipherHeaderKey.isValid() && cipherKeys.cipherTextKey.isValid());
 		validateEncryptionHeader(cipherKeys.cipherHeaderKey, cipherKeys.cipherTextKey, header);
 		DecryptBlobCipherAes256Ctr decryptor(
 		    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.iv, BlobCipherMetrics::BACKUP);
@@ -636,11 +634,14 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	}
 
 	ACTOR static Future<Void> encrypt(EncryptedRangeFileWriter* self) {
-		ASSERT(self->cipherKeys.headerCipherKey.isValid() && self->cipherKeys.textCipherKey.isValid());
+		// TODO: HeaderCipher key not needed for 'no authentication encryption'
+		ASSERT(self->cipherKeys.headerCipherKey.present() && self->cipherKeys.headerCipherKey.get().isValid() &&
+		       self->cipherKeys.textCipherKey.isValid());
 		// Ensure that the keys we got are still valid before flushing the block
-		if (self->cipherKeys.headerCipherKey->isExpired() || self->cipherKeys.headerCipherKey->needsRefresh()) {
+		if (self->cipherKeys.headerCipherKey.get()->isExpired() ||
+		    self->cipherKeys.headerCipherKey.get()->needsRefresh()) {
 			Reference<BlobCipherKey> cipherKey =
-			    wait(refreshKey(self, self->cipherKeys.headerCipherKey->getDomainId()));
+			    wait(refreshKey(self, self->cipherKeys.headerCipherKey.get()->getDomainId()));
 			self->cipherKeys.headerCipherKey = cipherKey;
 		}
 		if (self->cipherKeys.textCipherKey->isExpired() || self->cipherKeys.textCipherKey->needsRefresh()) {
@@ -664,7 +665,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	}
 
 	ACTOR static Future<Void> updateEncryptionKeysCtx(EncryptedRangeFileWriter* self, KeyRef key) {
-		state EncryptCipherDomainId curDomainId = getEncryptionDomainDetails(key, self->encryptMode);
+		state EncryptCipherDomainId curDomainId =
+		    wait(getEncryptionDomainDetails(key, self->encryptMode, self->tenantCache));
 		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 
 		// Get text and header cipher key
@@ -703,7 +705,10 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		copyToBuffer(self, s->begin(), s->size());
 	}
 
-	static EncryptCipherDomainId getEncryptionDomainDetails(KeyRef key, EncryptionAtRestMode encryptMode) {
+	ACTOR static Future<EncryptCipherDomainId> getEncryptionDomainDetails(
+	    KeyRef key,
+	    EncryptionAtRestMode encryptMode,
+	    Optional<Reference<TenantEntryCache<Void>>> tenantCache) {
 		if (isSystemKey(key)) {
 			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 		}
@@ -712,7 +717,17 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		}
 		// dealing with domain aware encryption so all keys should belong to a tenant
 		KeyRef tenantPrefix = KeyRef(key.begin(), TenantAPI::PREFIX_SIZE);
-		return TenantAPI::prefixToId(tenantPrefix);
+		state int64_t tenantId = TenantAPI::prefixToId(tenantPrefix);
+		// It's possible for the first and last key in a block (when writeKey is called) to not have a valid tenant
+		// prefix, since they mark the start and end of a range, in that case we denote them as having a default encrypt
+		// domain for the purpose of encrypting the block
+		if (tenantCache.present()) {
+			Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache.get()->getById(tenantId));
+			if (!payload.present()) {
+				return FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
+			}
+		}
+		return tenantId;
 	}
 
 	// Handles the first block and internal blocks.  Ends current block if needed.
@@ -822,8 +837,10 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (self->lastKey.size() == 0 || k.size() == 0) {
 			return false;
 		}
-		state EncryptCipherDomainId curKeyDomainId = getEncryptionDomainDetails(k, self->encryptMode);
-		state EncryptCipherDomainId prevKeyDomainId = getEncryptionDomainDetails(self->lastKey, self->encryptMode);
+		state EncryptCipherDomainId curKeyDomainId =
+		    wait(getEncryptionDomainDetails(k, self->encryptMode, self->tenantCache));
+		state EncryptCipherDomainId prevKeyDomainId =
+		    wait(getEncryptionDomainDetails(self->lastKey, self->encryptMode, self->tenantCache));
 		if (curKeyDomainId != prevKeyDomainId) {
 			CODE_PROBE(true, "crossed tenant boundaries");
 			wait(handleTenantBondary(self, k, v, writeValue, curKeyDomainId));
@@ -834,7 +851,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	// Start a new block if needed, then write the key and value
 	ACTOR static Future<Void> writeKV_impl(EncryptedRangeFileWriter* self, Key k, Value v) {
-		if (!self->cipherKeys.headerCipherKey.isValid() || !self->cipherKeys.textCipherKey.isValid()) {
+		if (!self->cipherKeys.headerCipherKey.present() || !self->cipherKeys.headerCipherKey.get().isValid() ||
+		    !self->cipherKeys.textCipherKey.isValid()) {
 			wait(updateEncryptionKeysCtx(self, k));
 		}
 		state int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
@@ -856,10 +874,10 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	ACTOR static Future<Void> writeKey_impl(EncryptedRangeFileWriter* self, Key k) {
 		// TODO (Nim): Is it possible to write empty begin and end keys?
 		if (k.size() > 0 &&
-		    (!self->cipherKeys.headerCipherKey.isValid() || !self->cipherKeys.textCipherKey.isValid())) {
+		    (!self->cipherKeys.headerCipherKey.present() || !self->cipherKeys.headerCipherKey.get().isValid() ||
+		     !self->cipherKeys.textCipherKey.isValid())) {
 			wait(updateEncryptionKeysCtx(self, k));
 		}
-
 		// Need to account for extra "empty" value being written in the case of crossing tenant boundaries
 		int toWrite = sizeof(uint32_t) + k.size() + sizeof(uint32_t);
 		wait(newBlockIfNeeded(self, toWrite));
@@ -889,6 +907,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	Arena* arena;
 	EncryptionAtRestMode encryptMode;
 	Reference<IBackupFile> file;
+	Optional<Reference<TenantEntryCache<Void>>> tenantCache;
 	int blockSize;
 
 private:
@@ -1049,16 +1068,17 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 
 		// make sure that all keys in a block belong to exactly one tenant,
 		// unless its the last key in which case it can be a truncated (different) tenant prefix
-		if (encryptedBlock && g_network && g_network->isSimulated()) {
+		if (encryptedBlock && g_network && g_network->isSimulated() &&
+		    !isReservedEncryptDomain(encryptHeader.get().cipherTextDetails.encryptDomainId)) {
 			ASSERT(encryptHeader.present());
 			state KeyRef curKey = KeyRef(k, kLen);
 			if (!prevDomainId.present()) {
 				EncryptCipherDomainId domainId =
-				    EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, encryptMode);
+				    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, encryptMode, tenantCache));
 				prevDomainId = domainId;
 			}
 			EncryptCipherDomainId curDomainId =
-			    EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, encryptMode);
+			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, encryptMode, tenantCache));
 			if (!curKey.empty() && !prevKey.empty() && prevDomainId.get() != curDomainId) {
 				ASSERT(!done);
 				if (curDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && curDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
@@ -1762,6 +1782,14 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		state BackupConfig backup(task);
 		state Arena arena;
 
+		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+		state EncryptionAtRestMode encryptMode = config.encryptionAtRestMode;
+		state Optional<Reference<TenantEntryCache<Void>>> tenantCache;
+		if (encryptMode.mode == EncryptionAtRestMode::DOMAIN_AWARE) {
+			tenantCache = makeReference<TenantEntryCache<Void>>(cx, TenantEntryCacheRefreshMode::WATCH);
+			wait(tenantCache.get()->init());
+		}
+
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but
 		// if bc is false then clearly the backup is no longer in progress
 		state Reference<IBackupContainer> bc = wait(backup.backupContainer().getD(cx.getReference()));
@@ -1829,8 +1857,6 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				state Version snapshotBeginVersion;
 				state int64_t snapshotRangeFileCount;
 
-				DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
-				state EncryptionAtRestMode encryptMode = config.encryptionAtRestMode;
 				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 				loop {
 					try {
@@ -1859,7 +1885,8 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				// Initialize range file writer and write begin key
 				if (encryptMode.mode != EncryptionAtRestMode::DISABLED) {
 					CODE_PROBE(true, "using encrypted snapshot file writer");
-					rangeFile = std::make_unique<EncryptedRangeFileWriter>(cx, &arena, encryptMode, outFile, blockSize);
+					rangeFile = std::make_unique<EncryptedRangeFileWriter>(
+					    cx, &arena, encryptMode, tenantCache, outFile, blockSize);
 				} else {
 					rangeFile = std::make_unique<RangeFileWriter>(outFile, blockSize);
 				}

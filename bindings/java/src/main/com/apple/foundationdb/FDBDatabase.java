@@ -27,7 +27,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 import com.apple.foundationdb.async.AsyncUtil;
-import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.tuple.Tuple;
 
 class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsumer {
@@ -270,6 +269,16 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 		Database_dispose(cPtr);
 	}
 
+	@Override
+	public CompletableFuture<byte[]> getClientStatus(Executor e) {
+		pointerReadLock.lock();
+		try {
+			return new FutureKey(Database_getClientStatus(getPtr()), e, eventKeeper);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
 	private native long Database_openTenant(long cPtr, byte[] tenantName);
 	private native long Database_createTransaction(long cPtr);
 	private native void Database_dispose(long cPtr);
@@ -281,4 +290,5 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	private native long Database_unblobbifyRange(long cPtr, byte[] beginKey, byte[] endKey);
 	private native long Database_listBlobbifiedRanges(long cPtr, byte[] beginKey, byte[] endKey, int rangeLimit);
 	private native long Database_verifyBlobRange(long cPtr, byte[] beginKey, byte[] endKey, long version);
+	private native long Database_getClientStatus(long cPtr);
 }

@@ -21,6 +21,7 @@
 #ifndef TOKENCACHE_H_
 #define TOKENCACHE_H_
 #include "fdbrpc/TenantName.h"
+#include "fdbrpc/TokenSpec.h"
 #include "flow/Arena.h"
 
 class TokenCache : NonCopyable {
@@ -31,7 +32,7 @@ public:
 	~TokenCache();
 	static void createInstance();
 	static TokenCache& instance();
-	bool validate(TenantNameRef tenant, StringRef token);
+	bool validate(authz::TenantId tenant, StringRef token);
 };
 
 #endif // TOKENCACHE_H_

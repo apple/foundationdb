@@ -113,6 +113,8 @@ struct BlobGranuleCipherKeysMeta {
 	}
 };
 
+// When updating this struct with new fields, you must update and add new api versioning for corresponding struct in
+// fdb_c.h!
 struct BlobGranuleCipherKey {
 	constexpr static FileIdentifier file_identifier = 7274734;
 	EncryptCipherDomainId encryptDomainId;
@@ -137,6 +139,8 @@ struct BlobGranuleCipherKey {
 	}
 };
 
+// When updating this struct with new fields, you must update and add new api versioning for corresponding struct in
+// fdb_c.h!
 struct BlobGranuleCipherKeysCtx {
 	constexpr static FileIdentifier file_identifier = 1278718;
 	BlobGranuleCipherKey textCipherKey;
@@ -320,13 +324,15 @@ struct GranuleHistory {
 };
 
 // A manifest to assist full fdb restore from blob granule files
-struct BlobManifest {
-	constexpr static FileIdentifier file_identifier = 298872;
-	VectorRef<KeyValueRef> rows;
+struct BlobManifestTailer {
+	constexpr static FileIdentifier file_identifier = 379431;
+	int64_t totalRows;
+	int64_t totalSegments;
+	int64_t totalBytes;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rows);
+		serializer(ar, totalRows, totalSegments, totalBytes);
 	}
 };
 

@@ -2,6 +2,7 @@
 import argparse
 import os
 import subprocess
+import random
 
 from argparse import RawDescriptionHelpFormatter
 
@@ -34,8 +35,8 @@ def get_cluster_connection_str(cluster_file_path):
         return conn_str
 
 
-def metacluster_create(cluster_file, name):
-    return run_fdbcli_command(cluster_file, "metacluster create_experimental", name)
+def metacluster_create(cluster_file, name, tenant_id_prefix):
+    return run_fdbcli_command(cluster_file, "metacluster create_experimental", name, str(tenant_id_prefix))
 
 
 def metacluster_register(management_cluster_file, data_cluster_file, name):
@@ -75,7 +76,8 @@ if __name__ == "__main__":
     names = ['meta_mgmt']
     names.extend(['data{}'.format(i) for i in range(1, num_clusters)])
 
-    metacluster_create(cluster_files[0], names[0])
+    tenant_id_prefix = random.randint(0, 32767)
+    metacluster_create(cluster_files[0], names[0], tenant_id_prefix)
     for (cf, name) in zip(cluster_files[1:], names[1:]):
         output = metacluster_register(cluster_files[0], cf, name)
 
