@@ -1519,9 +1519,8 @@ struct TenantManagementWorkload : TestWorkload {
 		state bool specialKeysUseInvalidTuple =
 		    operationType == OperationType::SPECIAL_KEYS && deterministicRandom()->random01() < 0.1;
 
-		// True if any selected options would change the tenant's configuration and we would expect an update to be
-		// written
-		state bool configurationChanging = false;
+		// True if the tenant's tenant group will change, and we would expect an update to be written.
+		state bool tenantGroupChanging = false;
 
 		// Generate a tenant group. Sometimes do this at the same time that we include an invalid option to ensure
 		// that the configure function still fails
@@ -1530,13 +1529,13 @@ struct TenantManagementWorkload : TestWorkload {
 			hasSystemTenantGroup = hasSystemTenantGroup || newTenantGroup.orDefault(""_sr).startsWith("\xff"_sr);
 			configuration["tenant_group"_sr] = newTenantGroup;
 			if (exists && itr->second.tenantGroup != newTenantGroup) {
-				configurationChanging = true;
+				tenantGroupChanging = true;
 			}
 		}
-		// Configuring 'assignedCluster' requires reading existing tenant entry which is handled in
-		// `updateManagementCluster`.
+		// Configuring 'assignedCluster' requires reading existing tenant entry. It is relevant only in
+		// the case of metacluster.
 		state bool assignToDifferentCluster = false;
-		if (configuration.empty() && operationType == OperationType::METACLUSTER && deterministicRandom()->coinflip()) {
+		if (operationType == OperationType::METACLUSTER && deterministicRandom()->coinflip()) {
 			ClusterName newClusterName = "newcluster"_sr;
 			if (deterministicRandom()->coinflip()) {
 				newClusterName = self->dataClusterName;
@@ -1566,11 +1565,9 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(!specialKeysUseInvalidTuple);
 				ASSERT(!assignToDifferentCluster);
 				Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
-				if (configurationChanging) {
+				if (tenantGroupChanging) {
+					ASSERT(configuration.count("tenant_group"_sr) > 0);
 					ASSERT_GT(currentVersionstamp.version, originalReadVersion);
-				}
-
-				if (configurationChanging) {
 					auto itr = self->createdTenants.find(tenant);
 					if (itr->second.tenantGroup.present()) {
 						auto tenantGroupItr = self->createdTenantGroups.find(itr->second.tenantGroup.get());
