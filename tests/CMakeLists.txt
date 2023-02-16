@@ -342,7 +342,6 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.2.0_until_7.3.0/VersionVectorEnableRestart-1.toml
     restarting/from_7.2.0_until_7.3.0/VersionVectorEnableRestart-2.toml)
-
   add_fdb_test(
     TEST_FILES restarting/from_7.2.4_until_7.3.0/UpgradeAndBackupRestore-1.toml
     restarting/from_7.2.4_until_7.3.0/UpgradeAndBackupRestore-2.toml)
