@@ -754,7 +754,7 @@ std::vector<Reference<BlobCipherKey>> BlobCipherKeyCache::getAllCiphers(const En
 	return keyIdCache->getAllCipherKeys();
 }
 
-int getEncryptAlgoHeaderVersion(const EncryptAuthTokenMode mode, const EncryptAuthTokenAlgo algo) {
+int getEncryptCurrentAlgoHeaderVersion(const EncryptAuthTokenMode mode, const EncryptAuthTokenAlgo algo) {
 	if (mode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
 		return CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION;
 	} else {
@@ -765,6 +765,20 @@ int getEncryptAlgoHeaderVersion(const EncryptAuthTokenMode mode, const EncryptAu
 			ASSERT_EQ(algo, ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA);
 			return CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION;
 		}
+	}
+}
+
+void BlobCipherDetails::validateCipherDetailsWithCipherKey(Reference<BlobCipherKey> cipherKey) {
+	if (!(baseCipherId == cipherKey->getBaseCipherId() && encryptDomainId == cipherKey->getDomainId() &&
+	      salt == cipherKey->getSalt())) {
+		TraceEvent(SevWarn, "EncryptionHeaderCipherMismatch")
+		    .detail("TextDomainId", cipherKey->getDomainId())
+		    .detail("ExpectedTextDomainId", encryptDomainId)
+		    .detail("TextBaseCipherId", cipherKey->getBaseCipherId())
+		    .detail("ExpectedTextBaseCipherId", baseCipherId)
+		    .detail("TextSalt", cipherKey->getSalt())
+		    .detail("ExpectedTextSalt", salt);
+		throw encrypt_header_metadata_mismatch();
 	}
 }
 
@@ -892,8 +906,8 @@ void EncryptBlobCipherAes265Ctr::setCipherAlgoHeaderV1(const uint8_t* ciphertext
                                                        const BlobCipherEncryptHeaderFlagsV1& flags,
                                                        BlobCipherEncryptHeaderRef* headerRef) {
 	ASSERT_EQ(1,
-	          getEncryptAlgoHeaderVersion((EncryptAuthTokenMode)flags.authTokenMode,
-	                                      (EncryptAuthTokenAlgo)flags.authTokenAlgo));
+	          getEncryptCurrentAlgoHeaderVersion((EncryptAuthTokenMode)flags.authTokenMode,
+	                                             (EncryptAuthTokenAlgo)flags.authTokenAlgo));
 
 	if (flags.authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
 		setCipherAlgoHeaderNoAuthV1(flags, headerRef);
@@ -926,7 +940,7 @@ void EncryptBlobCipherAes265Ctr::updateEncryptHeader(const uint8_t* ciphertext,
 	updateEncryptHeaderFlagsV1(headerRef, &flags);
 
 	// update cipher algo header
-	int algoHeaderVersion = getEncryptAlgoHeaderVersion(authTokenMode, authTokenAlgo);
+	int algoHeaderVersion = getEncryptCurrentAlgoHeaderVersion(authTokenMode, authTokenAlgo);
 	ASSERT_EQ(algoHeaderVersion, 1);
 	setCipherAlgoHeaderV1(ciphertext, ciphertextLen, flags, headerRef);
 }

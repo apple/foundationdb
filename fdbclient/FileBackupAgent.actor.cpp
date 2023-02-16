@@ -552,7 +552,6 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	struct Options {
 		constexpr static FileIdentifier file_identifier = 3152016;
 
-		// TODO: Compression is not currently supported so this should always be false
 		bool configurableEncryptionEnabled = false;
 
 		Options() {}
@@ -576,40 +575,6 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		wPtr = mutateString(buffer);
 	}
 
-	static void validateEncryptionHeader(Reference<BlobCipherKey> headerCipherKey,
-	                                     Reference<BlobCipherKey> textCipherKey,
-	                                     Optional<BlobCipherDetails> headerCipherDetails,
-	                                     BlobCipherDetails textCipherDetails) {
-		// Validate encryption header 'cipherHeader' details
-		if (headerCipherKey.isValid() && headerCipherDetails.present() &&
-		    !(headerCipherDetails.get().baseCipherId == headerCipherKey->getBaseCipherId() &&
-		      headerCipherDetails.get().encryptDomainId == headerCipherKey->getDomainId() &&
-		      headerCipherDetails.get().salt == headerCipherKey->getSalt())) {
-			TraceEvent(SevWarn, "EncryptionHeader_CipherHeaderMismatch")
-			    .detail("HeaderDomainId", headerCipherKey->getDomainId())
-			    .detail("ExpectedHeaderDomainId", headerCipherDetails.get().encryptDomainId)
-			    .detail("HeaderBaseCipherId", headerCipherKey->getBaseCipherId())
-			    .detail("ExpectedHeaderBaseCipherId", headerCipherDetails.get().baseCipherId)
-			    .detail("HeaderSalt", headerCipherKey->getSalt())
-			    .detail("ExpectedHeaderSalt", headerCipherDetails.get().salt);
-			throw encrypt_header_metadata_mismatch();
-		}
-
-		// Validate encryption text 'cipherText' details sanity
-		if (!(textCipherDetails.baseCipherId == textCipherKey->getBaseCipherId() &&
-		      textCipherDetails.encryptDomainId == textCipherKey->getDomainId() &&
-		      textCipherDetails.salt == textCipherKey->getSalt())) {
-			TraceEvent(SevWarn, "EncryptionHeader_CipherTextMismatch")
-			    .detail("TextDomainId", textCipherKey->getDomainId())
-			    .detail("ExpectedTextDomainId", textCipherDetails.encryptDomainId)
-			    .detail("TextBaseCipherId", textCipherKey->getBaseCipherId())
-			    .detail("ExpectedTextBaseCipherId", textCipherDetails.baseCipherId)
-			    .detail("TextSalt", textCipherKey->getSalt())
-			    .detail("ExpectedTextSalt", textCipherDetails.salt);
-			throw encrypt_header_metadata_mismatch();
-		}
-	}
-
 	ACTOR static Future<StringRef> decryptImpl(
 	    Database cx,
 	    std::variant<BlobCipherEncryptHeaderRef, BlobCipherEncryptHeader> headerVariant,
@@ -622,20 +587,20 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 			TextAndHeaderCipherKeys cipherKeys =
 			    wait(getEncryptCipherKeys(dbInfo, headerRef, BlobCipherMetrics::RESTORE));
 			EncryptHeaderCipherDetails cipherDetails = headerRef.getCipherDetails();
-			validateEncryptionHeader(cipherKeys.cipherHeaderKey,
-			                         cipherKeys.cipherTextKey,
-			                         cipherDetails.headerCipherDetails,
-			                         cipherDetails.textCipherDetails);
+			cipherDetails.textCipherDetails.validateCipherDetailsWithCipherKey(cipherKeys.cipherTextKey);
+			if (cipherDetails.headerCipherDetails.present()) {
+				cipherDetails.headerCipherDetails.get().validateCipherDetailsWithCipherKey(cipherKeys.cipherHeaderKey);
+			}
 			DecryptBlobCipherAes256Ctr decryptor(
 			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, headerRef.getIV(), BlobCipherMetrics::RESTORE);
 			return decryptor.decrypt(dataP, dataLen, headerRef, *arena);
 		} else {
 			state BlobCipherEncryptHeader header = std::get<BlobCipherEncryptHeader>(headerVariant);
 			TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, header, BlobCipherMetrics::RESTORE));
-			validateEncryptionHeader(cipherKeys.cipherHeaderKey,
-			                         cipherKeys.cipherTextKey,
-			                         header.cipherHeaderDetails,
-			                         header.cipherTextDetails);
+			header.cipherTextDetails.validateCipherDetailsWithCipherKey(cipherKeys.cipherTextKey);
+			if (header.cipherHeaderDetails.isValid()) {
+				header.cipherHeaderDetails.validateCipherDetailsWithCipherKey(cipherKeys.cipherHeaderKey);
+			}
 			DecryptBlobCipherAes256Ctr decryptor(
 			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.iv, BlobCipherMetrics::RESTORE);
 			return decryptor.decrypt(dataP, dataLen, header, *arena)->toStringRef();
@@ -687,13 +652,15 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 			encryptedData = encryptor.encrypt(self->dataPayloadStart, payloadSize, &headerRef, *self->arena);
 			Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
 			self->arena->dependsOn(serialized.arena());
-			std::memcpy(self->encryptHeader, serialized.begin(), self->headerSize);
+			ASSERT(serialized.size() == self->encryptHeader.size());
+			std::memcpy(mutateString(self->encryptHeader), serialized.begin(), self->encryptHeader.size());
 		} else {
 			BlobCipherEncryptHeader header;
 			encryptedData =
 			    encryptor.encrypt(self->dataPayloadStart, payloadSize, &header, *self->arena)->toStringRef();
 			StringRef encryptHeaderStringRef = BlobCipherEncryptHeader::toStringRef(header, *self->arena);
-			std::memcpy(self->encryptHeader, encryptHeaderStringRef.begin(), self->headerSize);
+			ASSERT(encryptHeaderStringRef.size() == self->encryptHeader.size());
+			std::memcpy(mutateString(self->encryptHeader), encryptHeaderStringRef.begin(), self->encryptHeader.size());
 		}
 
 		// re-write encrypted data to buffer
@@ -810,23 +777,26 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		appendStringRefWithLenToBuffer(self, &serialized);
 
 		// calculate encryption header size
-		self->headerSize = BlobCipherEncryptHeader::headerSize;
+		uint32_t headerSize = 0;
 		if (self->options.configurableEncryptionEnabled) {
 			EncryptAuthTokenMode authTokenMode =
 			    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
 			EncryptAuthTokenAlgo authTokenAlgo = getAuthTokenAlgoFromMode(authTokenMode);
-			self->headerSize =
-			    BlobCipherEncryptHeaderRef::getHeaderSize(CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION,
-			                                              getEncryptAlgoHeaderVersion(authTokenMode, authTokenAlgo),
-			                                              ENCRYPT_CIPHER_MODE_AES_256_CTR,
-			                                              authTokenMode,
-			                                              authTokenAlgo);
+			headerSize = BlobCipherEncryptHeaderRef::getHeaderSize(
+			    CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION,
+			    getEncryptCurrentAlgoHeaderVersion(authTokenMode, authTokenAlgo),
+			    ENCRYPT_CIPHER_MODE_AES_256_CTR,
+			    authTokenMode,
+			    authTokenAlgo);
+		} else {
+			headerSize = BlobCipherEncryptHeader::headerSize;
 		}
+		ASSERT(headerSize > 0);
 		// write header size to buffer
-		copyToBuffer(self, (uint8_t*)&self->headerSize, sizeof(self->headerSize));
+		copyToBuffer(self, (uint8_t*)&headerSize, sizeof(headerSize));
 		// leave space for encryption header
-		self->encryptHeader = self->wPtr;
-		self->wPtr += self->headerSize;
+		self->encryptHeader = StringRef(self->wPtr, headerSize);
+		self->wPtr += headerSize;
 		self->dataPayloadStart = self->wPtr;
 
 		// If this is NOT the first block then write duplicate stuff needed from last block
@@ -966,11 +936,10 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 private:
 	Standalone<StringRef> buffer;
 	uint8_t* wPtr;
-	uint8_t* encryptHeader;
+	StringRef encryptHeader;
 	uint8_t* dataPayloadStart;
 	int64_t blockEnd;
 	uint32_t fileVersion;
-	uint32_t headerSize;
 	Options options;
 	Key lastKey;
 	Key lastValue;
