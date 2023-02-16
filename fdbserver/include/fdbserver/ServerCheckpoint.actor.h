@@ -87,6 +87,10 @@ ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(
     std::vector<KeyRange> ranges,
     std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
 
+std::string generateCheckpointDir(const std::string& base, const UID& id);
+
+std::string generateFetchedCheckpointDir(const std::string& base, const UID& id);
+
 #include "flow/unactorcompiler.h"
 
 #endif

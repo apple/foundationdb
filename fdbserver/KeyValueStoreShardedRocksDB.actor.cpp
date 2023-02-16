@@ -51,6 +51,7 @@ const std::string rocksDataFolderSuffix = "-data";
 const std::string METADATA_SHARD_ID = "kvs-metadata";
 const std::string DEFAULT_CF_NAME = "default"; // `specialKeys` is stored in this culoumn family.
 const KeyRef shardMappingPrefix("\xff\xff/ShardMapping/"_sr);
+const KeyRef restoreCompleteKey("\xff\xff/Restored"_sr);
 // TODO: move constants to a header file.
 const KeyRef persistVersion = "\xff\xffVersion"_sr;
 const StringRef ROCKSDBSTORAGE_HISTOGRAM_GROUP = "RocksDBStorage"_sr;
@@ -2191,7 +2192,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				logRocksDBError(s, "Commit");
 				return s;
 			}
-			TraceEvent(SevDebug, "ShardedRocksCommitDone", logId);
+			TraceEvent(SevVerbose, "ShardedRocksCommitDone", logId);
 			return s;
 		}
 
@@ -2329,15 +2330,15 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				// s = a.shardManager->getDb()->Flush(rocksdb::FlushOptions(),
 				//                                    a.shardManager->getColumnFamilies());
 
-				ASSERT(
-				    a.shardManager->getDb()->Flush(rocksdb::FlushOptions(), a.shardManager->getColumnFamilies()).ok());
-				ASSERT(a.shardManager->getDb()->FlushWAL(true).ok());
+				// ASSERT(
+				//     a.shardManager->getDb()->Flush(rocksdb::FlushOptions(), a.shardManager->getColumnFamilies()).ok());
+				// ASSERT(a.shardManager->getDb()->FlushWAL(true).ok());
 				// for (const auto& range : a.request.ranges) {
 				// rocksdb::Slice begin = toSlice(range.begin);
 				// rocksdb::Slice end = toSlice(range.end);
-				ASSERT(a.shardManager->getDb()
-				           ->CompactRange(rocksdb::CompactRangeOptions(), ps->cf, nullptr, nullptr)
-				           .ok());
+				// ASSERT(a.shardManager->getDb()
+				//            ->CompactRange(rocksdb::CompactRangeOptions(), ps->cf, nullptr, nullptr)
+				//            .ok());
 				// }
 
 				s = rocksdb::Checkpoint::Create(a.shardManager->getDb(), &checkpoint);
@@ -2601,15 +2602,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				std::vector<RocksDBCheckpointKeyValues> rkvs;
 				for (const auto& checkpoint : a.checkpoints) {
 					rkvs.push_back(getRocksKeyValuesCheckpoint(checkpoint));
-					if (rkvs.back().fetchedFiles.empty()) {
-						for (const auto& range : checkpoint.ranges) {
-							auto intersectRanges = intersectingRanges(range, intendedRanges);
-							fetchedRanges.insert(fetchedRanges.end(), intersectRanges.begin(), intersectRanges.end());
-						}
-					} else {
-						for (const auto& file : rkvs.back().fetchedFiles) {
-							fetchedRanges.push_back(file.range);
-						}
+					ASSERT(!rkvs.back().fetchedFiles.empty());
+					for (const auto& file : rkvs.back().fetchedFiles) {
+						fetchedRanges.push_back(file.range);
 					}
 				}
 				// Verify that the collective fetchedRanges is the same as the collective intendedRanges.
@@ -2687,7 +2682,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 						    .detail("PhysicalShard", ps->toString())
 						    .detail("RestoreRanges", describe(a.ranges));
 					}
-					a.done.sendError(statusToError(status));
+					a.done.sendError(failed_to_restore_checkpoint());
 					return;
 				}
 			} else if (format == RocksDB) {

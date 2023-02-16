@@ -1753,8 +1753,10 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				releaser.release();
 
 				for (int s = 0; s < serverListValues.size(); s++) {
-					ASSERT(serverListValues[s]
-					           .present()); // There should always be server list entries for servers in keyServers
+					// TODO: if the server is removed,
+					if (!serverListValues[s].present()) {
+						throw retry();
+					}
 					auto si = decodeServerListValue(serverListValues[s].get());
 					ASSERT(si.id() == newDestinations[s]);
 					storageServerInterfaces.push_back(si);
@@ -1835,17 +1837,21 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				TraceEvent(SevWarn, "TryFinishMoveShardsError", relocationIntervalId)
 				    .errorUnsuppressed(error)
 				    .detail("DataMoveID", dataMoveId);
-				if (error.code() == error_code_actor_cancelled)
-					throw;
-				state Error err = error;
-				wait(tr.onError(error));
-				retries++;
-				if (retries % 10 == 0) {
-					TraceEvent(retries == 20 ? SevWarnAlways : SevWarn,
-					           "RelocateShard_FinishMoveKeysRetrying",
-					           relocationIntervalId)
-					    .error(err)
-					    .detail("DataMoveID", dataMoveId);
+				if (error.code() == error_code_retry) {
+					wait(delay(1));
+				} else {
+					if (error.code() == error_code_actor_cancelled)
+						throw;
+					state Error err = error;
+					wait(tr.onError(error));
+					retries++;
+					if (retries % 10 == 0) {
+						TraceEvent(retries == 20 ? SevWarnAlways : SevWarn,
+						           "RelocateShard_FinishMoveKeysRetrying",
+						           relocationIntervalId)
+						    .error(err)
+						    .detail("DataMoveID", dataMoveId);
+					}
 				}
 			}
 		}

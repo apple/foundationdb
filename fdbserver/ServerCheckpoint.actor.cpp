@@ -85,6 +85,7 @@ ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(Database cx,
 		}
 		initialState.setFormat(RocksDBKeyValues);
 		initialState.serializedCheckpoint = ObjectWriter::toValue(RocksDBCheckpointKeyValues(ranges), IncludeVersion());
+		initialState.ranges = ranges;
 	}
 
 	wait(store(result, fetchRocksDBCheckpoint(cx, initialState, dir, cFun)));
@@ -93,4 +94,12 @@ ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(Database cx,
 	    .detail("CheckpointMetaData", result.toString())
 	    .detail("Ranges", describe(ranges));
 	return result;
+}
+
+std::string generateCheckpointDir(const std::string& base, const UID& id) {
+	return base + "/checkpoints_" + id.toString();
+}
+
+std::string generateFetchedCheckpointDir(const std::string& base, const UID& id) {
+	return base + "/fetchedCheckpoints_" + id.toString();
 }

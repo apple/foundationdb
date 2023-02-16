@@ -110,6 +110,13 @@ public:
 		throw not_implemented();
 	}
 
+	virtual Future<Void> restore(const std::string& shardId,
+	                             const std::vector<KeyRange>& ranges,
+	                             const std::vector<CheckpointMetaData>& checkpoints,
+	                             Standalone<VectorRef<MutationRef>> mutations) {
+		throw not_implemented();
+	}
+
 	// Delete a checkpoint.
 	virtual Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) { throw not_implemented(); }
 
