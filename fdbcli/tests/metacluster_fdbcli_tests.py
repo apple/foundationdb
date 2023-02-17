@@ -127,14 +127,16 @@ def clear_database_and_tenants(management_cluster_file, data_cluster_files):
 
 @enable_logging()
 def clusters_status_test(logger, cluster_files, max_tenant_groups_per_cluster):
-    logger.debug('Start')
+    logger.debug('Verifying no cluster is part of a metacluster')
     for cf in cluster_files:
         output = metacluster_status(cf)
         assert output == "This cluster is not part of a metacluster"
 
+    logger.debug('Verified')
     num_clusters = len(cluster_files)
     names = ['meta_mgmt']
     names.extend(['data{}'.format(i) for i in range(1, num_clusters)])
+    logger.debug('Setting up a metacluster')
     setup_metacluster([cluster_files[0], names[0]], list(zip(cluster_files[1:], names[1:])),
                       max_tenant_groups_per_cluster=max_tenant_groups_per_cluster)
 
@@ -146,6 +148,8 @@ number of data clusters: {}
     expected = expected.format(num_clusters - 1, (num_clusters - 1) * max_tenant_groups_per_cluster).strip()
     output = metacluster_status(cluster_files[0])
     assert expected == output
+
+    logger.debug('Metacluster setup correctly')
 
     for (cf, name) in zip(cluster_files[1:], names[1:]):
         output = metacluster_status(cf)
