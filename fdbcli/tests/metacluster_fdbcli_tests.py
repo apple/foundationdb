@@ -62,23 +62,33 @@ def get_cluster_connection_str(cluster_file_path):
         return conn_str
 
 
-def metacluster_create(cluster_file, name, tenant_id_prefix):
-    run_fdbcli_command(cluster_file, "metacluster create_experimental", name, str(tenant_id_prefix))
+@enable_logging()
+def metacluster_create(logger, cluster_file, name, tenant_id_prefix):
+    rc, out, err = run_fdbcli_command(cluster_file, "metacluster create_experimental", name, str(tenant_id_prefix))
+    if rc != 0:
+        raise Exception(err)
+    logger.debug(out)
+    logger.debug('Metacluster {} created'.format(name))
 
 
 def metacluster_register(management_cluster_file, data_cluster_file, name, max_tenant_groups):
     conn_str = get_cluster_connection_str(data_cluster_file)
-    run_fdbcli_command(management_cluster_file,
+    rc, out, err = run_fdbcli_command(management_cluster_file,
                        "metacluster register",
                        name,
                        "connection_string={}".format(conn_str),
                        'max_tenant_groups={}'.format(max_tenant_groups))
+    if rc != 0:
+        raise Exception(err)
 
 
-def setup_metacluster(management_cluster, data_clusters, max_tenant_groups_per_cluster):
+@enable_logging()
+def setup_metacluster(logger, management_cluster, data_clusters, max_tenant_groups_per_cluster):
     management_cluster_file = management_cluster[0]
     management_cluster_name = management_cluster[1]
     tenant_id_prefix = random.randint(0, 32767)
+    logger.debug('management cluster: {}'.format(management_cluster_name))
+    logger.debug('data clusters: {}'.format([name for (cf, name) in data_clusters]))
     metacluster_create(management_cluster_file, management_cluster_name, tenant_id_prefix)
     for (cf, name) in data_clusters:
         metacluster_register(management_cluster_file, cf, name, max_tenant_groups=max_tenant_groups_per_cluster)
@@ -115,7 +125,9 @@ def clear_database_and_tenants(management_cluster_file, data_cluster_files):
     run_fdbcli_command(management_cluster_file, subcmd1, subcmd2, subcmd3, subcmd4)
 
 
-def clusters_status_test(cluster_files, max_tenant_groups_per_cluster):
+@enable_logging()
+def clusters_status_test(logger, cluster_files, max_tenant_groups_per_cluster):
+    logger.debug('Start')
     for cf in cluster_files:
         output = metacluster_status(cf)
         assert output == "This cluster is not part of a metacluster"
@@ -123,7 +135,7 @@ def clusters_status_test(cluster_files, max_tenant_groups_per_cluster):
     num_clusters = len(cluster_files)
     names = ['meta_mgmt']
     names.extend(['data{}'.format(i) for i in range(1, num_clusters)])
-    setup_metacluster([cluster_files[0], names[0]], zip(cluster_files[1:], names[1:]),
+    setup_metacluster([cluster_files[0], names[0]], list(zip(cluster_files[1:], names[1:])),
                       max_tenant_groups_per_cluster=max_tenant_groups_per_cluster)
 
     expected = """
@@ -141,21 +153,30 @@ number of data clusters: {}
         assert expected == output
 
 
-def configure_tenants_test_disableClusterAssignment(cluster_files):
+@enable_logging()
+def configure_tenants_test_disableClusterAssignment(logger, cluster_files):
     tenants = ['tenant1', 'tenant2']
+    logger.debug('Tenants to create: {}'.format(tenants))
     setup_tenants(cluster_files[0], cluster_files[1:], tenants)
+    # Once we reach here, the tenants have been created successfully
+    logger.debug('Tenants created: {}'.format(tenants))
     for tenant in tenants:
         out, err = configure_tenant(cluster_files[0], cluster_files[1:], tenant, assigned_cluster='cluster')
         assert err == 'ERROR: Tenant configuration is invalid (2140)'
+    logger.debug('Tenants configured')
     clear_database_and_tenants(cluster_files[0], cluster_files[1:])
+    logger.debug('Tenants cleared')
 
 
-def test_main():
+@enable_logging()
+def test_main(logger):
+    logger.debug('Tests start')
     # This must be the first test to run, since it sets up the metacluster that
     # will be used throughout the test
     clusters_status_test(cluster_files, max_tenant_groups_per_cluster=5)
 
     configure_tenants_test_disableClusterAssignment(cluster_files)
+    logger.debug('Tests complete')
 
 
 if __name__ == "__main__":
