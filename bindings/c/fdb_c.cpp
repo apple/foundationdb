@@ -386,8 +386,7 @@ void setBlobFilePointer(FDBBGFilePointer* dest, const BlobFilePointerRef& source
 	dest->file_offset = source.offset;
 	dest->file_length = source.length;
 	dest->full_file_length = source.fullFileLength;
-	// FIXME: add version info to each source file pointer
-	dest->file_version = 0;
+	dest->file_version = source.fileVersion;
 
 	// handle encryption
 	if (source.cipherKeysCtx.present()) {

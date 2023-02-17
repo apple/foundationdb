@@ -400,10 +400,8 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(waitForAll(createFutures));
 			wait(tr->commit());
 		} else {
+			ASSERT(OperationType::METACLUSTER == operationType);
 			ASSERT(tenantsToCreate.size() == 1);
-			if (deterministicRandom()->coinflip()) {
-				tenantsToCreate.begin()->second.assignedCluster = self->dataClusterName;
-			}
 			wait(MetaclusterAPI::createTenant(
 			    self->mvDb, tenantsToCreate.begin()->second, AssignClusterAutomatically::True));
 		}
@@ -441,6 +439,9 @@ struct TenantManagementWorkload : TestWorkload {
 			TenantMapEntry entry;
 			entry.tenantName = tenant;
 			entry.tenantGroup = self->chooseTenantGroup(true);
+			if (OperationType::METACLUSTER == operationType && deterministicRandom()->coinflip()) {
+				entry.assignedCluster = self->dataClusterName;
+			}
 
 			if (self->createdTenants.count(tenant)) {
 				alreadyExists = true;
@@ -1085,6 +1086,7 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 
 		TenantMapEntry entry(id, TenantNameRef(name), TenantMapEntry::stringToTenantState(tenantStateStr), tenantGroup);
+		entry.assignedCluster = assignedCluster;
 		ASSERT(entry.prefix == prefix);
 		return entry;
 	}
@@ -1501,31 +1503,46 @@ struct TenantManagementWorkload : TestWorkload {
 		state std::map<Standalone<StringRef>, Optional<Value>> configuration;
 		state Optional<TenantGroupName> newTenantGroup;
 
-		// If true, the options generated may include an unknown option
-		state bool hasInvalidOption = deterministicRandom()->random01() < 0.1;
-
 		// True if any tenant group name starts with \xff
 		state bool hasSystemTenantGroup = false;
 
 		state bool specialKeysUseInvalidTuple =
 		    operationType == OperationType::SPECIAL_KEYS && deterministicRandom()->random01() < 0.1;
 
-		// True if any selected options would change the tenant's configuration and we would expect an update to be
-		// written
-		state bool configurationChanging = false;
+		// True if the tenant's tenant group will change, and we would expect an update to be written.
+		state bool tenantGroupChanging = false;
 
 		// Generate a tenant group. Sometimes do this at the same time that we include an invalid option to ensure
 		// that the configure function still fails
-		if (!hasInvalidOption || deterministicRandom()->coinflip()) {
+		if (deterministicRandom()->coinflip()) {
 			newTenantGroup = self->chooseTenantGroup(true);
 			hasSystemTenantGroup = hasSystemTenantGroup || newTenantGroup.orDefault(""_sr).startsWith("\xff"_sr);
 			configuration["tenant_group"_sr] = newTenantGroup;
 			if (exists && itr->second.tenantGroup != newTenantGroup) {
-				configurationChanging = true;
+				tenantGroupChanging = true;
 			}
 		}
-		if (hasInvalidOption) {
+		// Configuring 'assignedCluster' requires reading existing tenant entry. It is relevant only in
+		// the case of metacluster.
+		state bool assignToDifferentCluster = false;
+		if (operationType == OperationType::METACLUSTER && deterministicRandom()->coinflip()) {
+			ClusterName newClusterName = "newcluster"_sr;
+			if (deterministicRandom()->coinflip()) {
+				newClusterName = self->dataClusterName;
+			}
+			configuration["assigned_cluster"_sr] = newClusterName;
+			assignToDifferentCluster = (newClusterName != self->dataClusterName);
+		}
+
+		// In the future after we enable tenant movement, this may be
+		// state bool configurationChanging = tenangGroupCanging || assignToDifferentCluster.
+		state bool configurationChanging = tenantGroupChanging;
+
+		// If true, the options generated may include an unknown option
+		state bool hasInvalidOption = false;
+		if (configuration.empty() || deterministicRandom()->coinflip()) {
 			configuration["invalid_option"_sr] = ""_sr;
+			hasInvalidOption = true;
 		}
 
 		state Version originalReadVersion = wait(self->getLatestReadVersion(self, operationType));
@@ -1537,23 +1554,26 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(!hasInvalidOption);
 				ASSERT(!hasSystemTenantGroup);
 				ASSERT(!specialKeysUseInvalidTuple);
+				ASSERT(!assignToDifferentCluster);
 				Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
 				if (configurationChanging) {
 					ASSERT_GT(currentVersionstamp.version, originalReadVersion);
 				}
-
-				auto itr = self->createdTenants.find(tenant);
-				if (itr->second.tenantGroup.present()) {
-					auto tenantGroupItr = self->createdTenantGroups.find(itr->second.tenantGroup.get());
-					ASSERT(tenantGroupItr != self->createdTenantGroups.end());
-					if (--tenantGroupItr->second.tenantCount == 0) {
-						self->createdTenantGroups.erase(tenantGroupItr);
+				if (tenantGroupChanging) {
+					ASSERT(configuration.count("tenant_group"_sr) > 0);
+					auto itr = self->createdTenants.find(tenant);
+					if (itr->second.tenantGroup.present()) {
+						auto tenantGroupItr = self->createdTenantGroups.find(itr->second.tenantGroup.get());
+						ASSERT(tenantGroupItr != self->createdTenantGroups.end());
+						if (--tenantGroupItr->second.tenantCount == 0) {
+							self->createdTenantGroups.erase(tenantGroupItr);
+						}
 					}
+					if (newTenantGroup.present()) {
+						self->createdTenantGroups[newTenantGroup.get()].tenantCount++;
+					}
+					itr->second.tenantGroup = newTenantGroup;
 				}
-				if (newTenantGroup.present()) {
-					self->createdTenantGroups[newTenantGroup.get()].tenantCount++;
-				}
-				itr->second.tenantGroup = newTenantGroup;
 				return Void();
 			} catch (Error& e) {
 				state Error error = e;
@@ -1564,7 +1584,7 @@ struct TenantManagementWorkload : TestWorkload {
 					ASSERT(hasInvalidOption || specialKeysUseInvalidTuple);
 					return Void();
 				} else if (e.code() == error_code_invalid_tenant_configuration) {
-					ASSERT(hasInvalidOption);
+					ASSERT(hasInvalidOption || assignToDifferentCluster);
 					return Void();
 				} else if (e.code() == error_code_invalid_metacluster_operation) {
 					ASSERT(operationType == OperationType::METACLUSTER != self->useMetacluster);
