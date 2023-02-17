@@ -396,7 +396,7 @@ void ApiWorkload::blobbifyTenant(std::optional<int> tenantId,
 		    });
 	    },
 	    [=]() {
-			info(fmt::format("setup: blobbify done {}: [\\x00 - \\xff)\n", debugTenantStr(tenantId)));
+		    info(fmt::format("setup: blobbify done {}: [\\x00 - \\xff)\n", debugTenantStr(tenantId)));
 		    if (blobbifiedCount->fetch_sub(1) == 1) {
 			    schedule(cont);
 		    }
