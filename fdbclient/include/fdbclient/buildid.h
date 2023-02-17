@@ -23,18 +23,22 @@
  */
 
 #define _GNU_SOURCE
-#include <link.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <link.h>
 struct build_id_note;
 
-const struct build_id_note *
-build_id_find_nhdr_by_name(const char *name);
+const struct build_id_note* build_id_find_nhdr_by_name(const char* name);
 
-const struct build_id_note *
-build_id_find_nhdr_by_symbol(const void *symbol);
+const struct build_id_note* build_id_find_nhdr_by_symbol(const void* symbol);
 
-ElfW(Word)
-build_id_length(const struct build_id_note *note);
+ElfW(Word) build_id_length(const struct build_id_note* note);
 
-const uint8_t *
-build_id_data(const struct build_id_note *note);
+const uint8_t* build_id_data(const struct build_id_note* note);
+
+#ifdef __cplusplus
+}
+#endif
