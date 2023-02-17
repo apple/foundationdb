@@ -266,11 +266,13 @@ ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vecto
 
 	state std::vector<std::string> messages;
 	state bool success = true;
+	state UID restoreId = deterministicRandom()->randomUniqueID();
 
 	try {
 		if (restoreType == "restore_known_data_cluster"_sr) {
 			wait(MetaclusterAPI::restoreCluster(db,
 			                                    clusterName,
+			                                    restoreId,
 			                                    config.get().first.get(),
 			                                    ApplyManagementClusterUpdates::True,
 			                                    RestoreDryRun(dryRun),
@@ -279,6 +281,7 @@ ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vecto
 		} else if (restoreType == "repopulate_from_data_cluster"_sr) {
 			wait(MetaclusterAPI::restoreCluster(db,
 			                                    clusterName,
+			                                    restoreId,
 			                                    config.get().first.get(),
 			                                    ApplyManagementClusterUpdates::False,
 			                                    RestoreDryRun(dryRun),

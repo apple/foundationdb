@@ -277,6 +277,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		state DataClusterData* dataDb = &self->dataDbs[clusterName];
 		state bool dryRun = deterministicRandom()->coinflip();
 		state bool forceJoin = deterministicRandom()->coinflip();
+		state UID restoreId = deterministicRandom()->randomUniqueID();
 
 		state std::vector<std::string> messages;
 		try {
@@ -286,6 +287,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 					Future<Void> restoreFuture =
 					    MetaclusterAPI::restoreCluster(self->managementDb,
 					                                   clusterName,
+					                                   restoreId,
 					                                   dataDb->db->getConnectionRecord()->getConnectionString(),
 					                                   ApplyManagementClusterUpdates::True,
 					                                   RestoreDryRun(dryRun),
@@ -299,7 +301,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				} catch (Error& e) {
 					if (e.code() == error_code_conflicting_restore) {
 						ASSERT(retried);
-						CODE_PROBE(true, "MetaclusterRestore: 2 restores on the same cluster simultaneously");
+						CODE_PROBE(true,
+						           "MetaclusterManagementWorkload: timed out restore conflicts with retried restore");
 						continue;
 					}
 					throw;

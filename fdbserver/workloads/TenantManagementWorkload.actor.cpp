@@ -1351,13 +1351,12 @@ struct TenantManagementWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> renameTenantImpl(Reference<ReadYourWritesTransaction> tr,
+	ACTOR static Future<Void> renameTenantImpl(TenantManagementWorkload* self,
+	                                           Reference<ReadYourWritesTransaction> tr,
 	                                           OperationType operationType,
 	                                           std::map<TenantName, TenantName> tenantRenames,
 	                                           bool tenantNotFound,
-	                                           bool tenantExists,
-	                                           bool tenantOverlap,
-	                                           TenantManagementWorkload* self) {
+	                                           bool tenantExists) {
 		if (operationType == OperationType::SPECIAL_KEYS) {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			for (auto& iter : tenantRenames) {
@@ -1409,10 +1408,10 @@ struct TenantManagementWorkload : TestWorkload {
 			TenantName newTenant = self->chooseTenantName(false);
 			bool checkOverlap =
 			    oldTenant == newTenant || allTenantNames.count(oldTenant) || allTenantNames.count(newTenant);
-			// renameTenantTransaction does not handle rename collisions:
-			// reject the rename here if it has overlap and we are doing a transaction operation
-			// and then pick another combination
-			if (checkOverlap && operationType == OperationType::MANAGEMENT_TRANSACTION) {
+			// These operation types do not handle rename collisions
+			// reject the rename here if it has overlap
+			if (checkOverlap && (operationType == OperationType::MANAGEMENT_TRANSACTION ||
+			                     operationType == OperationType::MANAGEMENT_DATABASE)) {
 				--i;
 				continue;
 			}
@@ -1431,8 +1430,7 @@ struct TenantManagementWorkload : TestWorkload {
 		state Version originalReadVersion = wait(self->getLatestReadVersion(self, operationType));
 		loop {
 			try {
-				wait(renameTenantImpl(
-				    tr, operationType, tenantRenames, tenantNotFound, tenantExists, tenantOverlap, self));
+				wait(renameTenantImpl(self, tr, operationType, tenantRenames, tenantNotFound, tenantExists));
 				wait(verifyTenantRenames(self, tenantRenames));
 				Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
 				ASSERT_GT(currentVersionstamp.version, originalReadVersion);

@@ -1330,7 +1330,7 @@ struct RestoreClusterImpl {
 	std::vector<std::string>& messages;
 
 	// Unique ID generated for this restore. Used to avoid concurrent restores
-	UID restoreId = deterministicRandom()->randomUniqueID();
+	UID restoreId;
 
 	// Loaded from the data cluster
 	UID dataClusterId;
@@ -1343,12 +1343,13 @@ struct RestoreClusterImpl {
 
 	RestoreClusterImpl(Reference<DB> managementDb,
 	                   ClusterName clusterName,
+	                   UID restoreId,
 	                   ClusterConnectionString connectionString,
 	                   ApplyManagementClusterUpdates applyManagementClusterUpdates,
 	                   RestoreDryRun restoreDryRun,
 	                   ForceJoinNewMetacluster forceJoinNewMetacluster,
 	                   std::vector<std::string>& messages)
-	  : ctx(managementDb, {}, { DataClusterState::RESTORING }), clusterName(clusterName),
+	  : ctx(managementDb, {}, { DataClusterState::RESTORING }), clusterName(clusterName), restoreId(restoreId),
 	    connectionString(connectionString), applyManagementClusterUpdates(applyManagementClusterUpdates),
 	    restoreDryRun(restoreDryRun), forceJoinNewMetacluster(forceJoinNewMetacluster), messages(messages) {}
 
@@ -2153,13 +2154,20 @@ struct RestoreClusterImpl {
 ACTOR template <class DB>
 Future<Void> restoreCluster(Reference<DB> db,
                             ClusterName name,
+                            UID restoreId,
                             ClusterConnectionString connectionString,
                             ApplyManagementClusterUpdates applyManagementClusterUpdates,
                             RestoreDryRun restoreDryRun,
                             ForceJoinNewMetacluster forceJoinNewMetacluster,
                             std::vector<std::string>* messages) {
-	state RestoreClusterImpl<DB> impl(
-	    db, name, connectionString, applyManagementClusterUpdates, restoreDryRun, forceJoinNewMetacluster, *messages);
+	state RestoreClusterImpl<DB> impl(db,
+	                                  name,
+	                                  restoreId,
+	                                  connectionString,
+	                                  applyManagementClusterUpdates,
+	                                  restoreDryRun,
+	                                  forceJoinNewMetacluster,
+	                                  *messages);
 	wait(impl.run());
 	return Void();
 }
