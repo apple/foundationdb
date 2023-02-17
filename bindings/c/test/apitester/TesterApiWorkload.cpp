@@ -392,11 +392,11 @@ void ApiWorkload::blobbifyTenant(std::optional<int> tenantId,
 		    ctx->continueAfter(f, [ctx, f]() {
 			    bool success = f.get<fdb::future_var::Bool>();
 			    ASSERT(success);
-			    info(fmt::format("setup: blobbify done {}: [\\x00 - \\xff)\n", debugTenantStr(tenantId)));
 			    ctx->done();
 		    });
 	    },
 	    [=]() {
+			info(fmt::format("setup: blobbify done {}: [\\x00 - \\xff)\n", debugTenantStr(tenantId)));
 		    if (blobbifiedCount->fetch_sub(1) == 1) {
 			    schedule(cont);
 		    }

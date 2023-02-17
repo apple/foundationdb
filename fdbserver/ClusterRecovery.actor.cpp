@@ -921,6 +921,10 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 		         waitNext(parent->provisionalCommitProxies[0].getKeyServersLocations.getFuture())) {
 			req.reply.send(Never());
 		}
+		when(GetBlobGranuleLocationsRequest req =
+		         waitNext(parent->provisionalCommitProxies[0].getBlobGranuleLocations.getFuture())) {
+			req.reply.send(Never());
+		}
 		when(wait(waitCommitProxyFailure)) {
 			throw worker_removed();
 		}
