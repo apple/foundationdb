@@ -3595,7 +3595,7 @@ public:
 
 		// The next section explicitly cancels all pending operations held in the pager
 		debug_printf("DWALPager(%s) shutdown kill ioLock\n", self->filename.c_str());
-		self->ioLock->kill();
+		self->ioLock->halt();
 
 		debug_printf("DWALPager(%s) shutdown cancel recovery\n", self->filename.c_str());
 		self->recoverFuture.cancel();
