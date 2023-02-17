@@ -1330,7 +1330,7 @@ struct RestoreClusterImpl {
 	std::vector<std::string>& messages;
 
 	// Unique ID generated for this restore. Used to avoid concurrent restores
-	UID restoreId;
+	UID restoreId = deterministicRandom()->randomUniqueID();
 
 	// Loaded from the data cluster
 	UID dataClusterId;

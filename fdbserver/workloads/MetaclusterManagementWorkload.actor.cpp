@@ -280,18 +280,29 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 		state std::vector<std::string> messages;
 		try {
+			state bool retried = false;
 			loop {
-				Future<Void> restoreFuture =
-				    MetaclusterAPI::restoreCluster(self->managementDb,
-				                                   clusterName,
-				                                   dataDb->db->getConnectionRecord()->getConnectionString(),
-				                                   ApplyManagementClusterUpdates::True,
-				                                   RestoreDryRun(dryRun),
-				                                   ForceJoinNewMetacluster(forceJoin),
-				                                   &messages);
-				Optional<Void> result = wait(timeout(restoreFuture, deterministicRandom()->randomInt(1, 30)));
-				if (result.present()) {
-					break;
+				try {
+					Future<Void> restoreFuture =
+					    MetaclusterAPI::restoreCluster(self->managementDb,
+					                                   clusterName,
+					                                   dataDb->db->getConnectionRecord()->getConnectionString(),
+					                                   ApplyManagementClusterUpdates::True,
+					                                   RestoreDryRun(dryRun),
+					                                   ForceJoinNewMetacluster(forceJoin),
+					                                   &messages);
+					Optional<Void> result = wait(timeout(restoreFuture, deterministicRandom()->randomInt(1, 30)));
+					if (result.present()) {
+						break;
+					}
+					retried = true;
+				} catch (Error& e) {
+					if (e.code() == error_code_conflicting_restore) {
+						ASSERT(retried);
+						CODE_PROBE(true, "MetaclusterRestore: 2 restores on the same cluster simultaneously");
+						continue;
+					}
+					throw;
 				}
 			}
 
