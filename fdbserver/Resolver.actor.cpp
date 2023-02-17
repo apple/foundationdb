@@ -170,7 +170,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 	Counter splitRequests;
 	int numLogs;
 
-	// Distribution of end-to-end latency of resolver requests.
+	// Distribution of end-to-end server latency of resolver requests.
 	LatencySample resolverLatency;
 
 	Future<Void> logger;

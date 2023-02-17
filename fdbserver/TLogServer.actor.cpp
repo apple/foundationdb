@@ -548,6 +548,9 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	std::map<Tag, LatencySample> blockingPeekLatencies;
 	std::map<Tag, LatencySample> peekVersionCounts;
 
+	// Distribution of end-to-end server latency of tlog commit requests.
+	LatencySample tlogCommitLatency;
+
 	UID logId;
 	ProtocolVersion protocolVersion;
 	Version newPersistentDataVersion;
@@ -634,13 +637,16 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	    unpoppedRecoveredTagCount(0), cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc),
 	    bytesDurable("BytesDurable", cc), blockingPeeks("BlockingPeeks", cc),
 	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), emptyPeeks("EmptyPeeks", cc),
-	    nonEmptyPeeks("NonEmptyPeeks", cc), logId(interf.id()), protocolVersion(protocolVersion),
-	    newPersistentDataVersion(invalidVersion), tLogData(tLogData), unrecoveredBefore(1), recoveredAt(1),
-	    recoveryTxnVersion(1), logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag),
-	    isPrimary(isPrimary), logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0),
-	    locality(tagLocalityInvalid), recruitmentID(recruitmentID), logSpillType(logSpillType),
-	    allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false),
-	    txsTags(txsTags) {
+	    nonEmptyPeeks("NonEmptyPeeks", cc), tlogCommitLatency("TLogCommitLatencyMetrics",
+	                                                          interf.id(),
+	                                                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                                                          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    logId(interf.id()), protocolVersion(protocolVersion), newPersistentDataVersion(invalidVersion),
+	    tLogData(tLogData), unrecoveredBefore(1), recoveredAt(1), recoveryTxnVersion(1),
+	    logSystem(new AsyncVar<Reference<ILogSystem>>()), remoteTag(remoteTag), isPrimary(isPrimary),
+	    logRouterTags(logRouterTags), logRouterPoppedVersion(0), logRouterPopToVersion(0), locality(tagLocalityInvalid),
+	    recruitmentID(recruitmentID), logSpillType(logSpillType), allTags(tags.begin(), tags.end()),
+	    terminated(tLogData->terminated.getFuture()), execOpCommitInProgress(false), txsTags(txsTags) {
 		startRole(Role::TRANSACTION_LOG,
 		          interf.id(),
 		          tLogData->workerID,
@@ -2329,7 +2335,7 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		return Void();
 	}
 
-	state double beforeCommitT = now();
+	state double beforeCommitT = g_network->timer();
 
 	// Not a duplicate (check relies on critical section between here self->version.set() below!)
 	state bool isNotDuplicate = (logData->version.get() == req.prevVersion);
@@ -2378,8 +2384,13 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		return Void();
 	}
 
+	// Measure server-side RPC latency from the time a request was
+	// received to time the response was sent.
+	const double endTime = g_network->timer();
+
 	if (isNotDuplicate) {
-		self->commitLatencyDist->sampleSeconds(now() - beforeCommitT);
+		self->commitLatencyDist->sampleSeconds(endTime - beforeCommitT);
+		logData->tlogCommitLatency.addMeasurement(endTime - req.requestTime());
 	}
 
 	if (req.debugID.present())
