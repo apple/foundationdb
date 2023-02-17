@@ -24,6 +24,7 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/EncryptionOpsUtils.h"
@@ -169,6 +170,9 @@ struct Resolver : ReferenceCounted<Resolver> {
 	Counter splitRequests;
 	int numLogs;
 
+	// Distribution of end-to-end latency of resolver requests.
+	LatencySample resolverLatency;
+
 	Future<Void> logger;
 
 	EncryptionAtRestMode encryptMode;
@@ -185,7 +189,10 @@ struct Resolver : ReferenceCounted<Resolver> {
 	    resolvedStateTransactions("ResolvedStateTransactions", cc),
 	    resolvedStateMutations("ResolvedStateMutations", cc), resolvedStateBytes("ResolvedStateBytes", cc),
 	    resolveBatchOut("ResolveBatchOut", cc), metricsRequests("MetricsRequests", cc),
-	    splitRequests("SplitRequests", cc) {
+	    splitRequests("SplitRequests", cc), resolverLatency("ResolverLatencyNetrics",
+	                                                        dbgid,
+	                                                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                                                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {
 		specialCounter(cc, "Version", [this]() { return this->version.get(); });
 		specialCounter(cc, "NeededVersion", [this]() { return this->neededVersion.get(); });
 		specialCounter(cc, "TotalStateBytes", [this]() { return this->totalStateBytes.get(); });
@@ -471,6 +478,10 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		//TraceEvent("DupResolveBatchReq", self->dbgid).detail("From", proxyAddress);
 	}
 
+	// Measure server-side RPC latency from the time a request was
+	// received to time the response was sent.
+	const double endTime = g_network->timer();
+
 	auto proxyInfoItr = self->proxyInfoMap.find(proxyAddress);
 
 	if (proxyInfoItr != self->proxyInfoMap.end()) {
@@ -488,6 +499,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		req.reply.send(Never());
 	}
 
+	self->resolverLatency.addMeasurement(endTime - req.requestTime());
 	++self->resolveBatchOut;
 
 	return Void();
