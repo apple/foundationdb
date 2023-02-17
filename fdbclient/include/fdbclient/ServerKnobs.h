@@ -395,6 +395,10 @@ public:
 	double REPORT_TRANSACTION_COST_ESTIMATION_DELAY;
 	bool PROXY_REJECT_BATCH_QUEUED_TOO_LONG;
 	bool PROXY_USE_RESOLVER_PRIVATE_MUTATIONS;
+	bool BURSTINESS_METRICS_ENABLED;
+	// Interval on which to emit burstiness metrics on the commit proxy (in
+	// seconds).
+	double BURSTINESS_METRICS_LOG_INTERVAL;
 
 	int RESET_MASTER_BATCHES;
 	int RESET_RESOLVER_BATCHES;
