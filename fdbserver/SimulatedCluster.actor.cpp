@@ -1602,8 +1602,8 @@ void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
 		available = std::vector<bool>(EncryptionAtRestMode::END, true);
 		probability = { 0.25, 0.5, 0.25 };
 		// Only Redwood support encryption. Disable encryption if Redwood is not available.
-		if (!(testConfig.storageEngineType.present() && testConfig.storageEngineType != 3) &&
-		    !testConfig.excludedStorageEngineType(3)) {
+		if ((testConfig.storageEngineType.present() && testConfig.storageEngineType != 3) ||
+		    testConfig.excludedStorageEngineType(3)) {
 			available[(int)EncryptionAtRestMode::DOMAIN_AWARE] = false;
 			available[(int)EncryptionAtRestMode::CLUSTER_AWARE] = false;
 		}
