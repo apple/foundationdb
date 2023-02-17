@@ -310,9 +310,10 @@ CommandFactory configureFactory(
         "tenant_mode=<disabled|optional_experimental|required_experimental>: Sets the tenant mode for the cluster. If "
         "optional, then transactions can be run with or without specifying tenants. If required, all data must be "
         "accessed using tenants.\n\n"
-        "exclude=<ADDRESS...>: Sets the addresses in the format of IP:port pair to be excluded during recruitment. "
-        "Note this should be only used the database is unavailable because of the faulty processes that are blocking "
-        "the recovery from completion. The number of addresses should be less than the replica factor.\n\n"
+        "exclude=<ADDRESS...>: Sets the addresses in the format of IP1:port1,IP2:port2 pairs to be excluded during "
+        "recruitment. Note this should be only used when the database is unavailable because of the faulty processes "
+        "that are blocking the recovery from completion. The number of addresses should be less than the replication "
+        "factor to avoid data loss.\n\n"
 
         "See the FoundationDB Administration Guide for more information."));
 
