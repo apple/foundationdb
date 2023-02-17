@@ -258,7 +258,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		wait(success(backupAgent.restore(dataDb, dataDb, clusterName, StringRef(backupUrl), {}, backupRanges)));
 
 		state std::vector<std::string> messages;
-		state UID restoreId = deterministicRandom()->randomUniqueID();
 		if (addToMetacluster) {
 			TraceEvent("MetaclusterRestoreWorkloadAddClusterToMetacluster").detail("ClusterName", clusterName);
 			if (deterministicRandom()->coinflip()) {
@@ -266,7 +265,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				    .detail("ClusterName", clusterName);
 				wait(MetaclusterAPI::restoreCluster(self->managementDb,
 				                                    clusterName,
-				                                    restoreId,
 				                                    dataDb->getConnectionRecord()->getConnectionString(),
 				                                    ApplyManagementClusterUpdates::True,
 				                                    RestoreDryRun::True,
@@ -279,7 +277,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 			wait(MetaclusterAPI::restoreCluster(self->managementDb,
 			                                    clusterName,
-			                                    restoreId,
 			                                    dataDb->getConnectionRecord()->getConnectionString(),
 			                                    ApplyManagementClusterUpdates::True,
 			                                    RestoreDryRun::False,
@@ -510,7 +507,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 			state std::vector<std::string> messages;
 			state bool completed = false;
-			state UID restoreId = deterministicRandom()->randomUniqueID();
 			while (!completed) {
 				state std::vector<std::pair<int64_t, TenantMapEntry>> dataTenantsBeforeRestore =
 				    wait(getDataClusterTenants(clusterItr->second.db));
@@ -528,7 +524,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 						wait(MetaclusterAPI::restoreCluster(
 						    self->managementDb,
 						    clusterItr->first,
-						    restoreId,
 						    clusterItr->second.db->getConnectionRecord()->getConnectionString(),
 						    ApplyManagementClusterUpdates::False,
 						    RestoreDryRun::True,
@@ -545,7 +540,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 					wait(MetaclusterAPI::restoreCluster(
 					    self->managementDb,
 					    clusterItr->first,
-					    restoreId,
 					    clusterItr->second.db->getConnectionRecord()->getConnectionString(),
 					    ApplyManagementClusterUpdates::False,
 					    RestoreDryRun::False,
