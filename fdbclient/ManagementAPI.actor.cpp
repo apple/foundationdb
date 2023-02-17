@@ -219,12 +219,20 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 		}
 
 		if (key == "exclude") {
-			AddressExclusion addr = AddressExclusion::parse(value);
-			if (!addr.isValid()) {
-				printf("Error: invalid address format: %s\n", value.c_str());
-				return out;
+			int p = 0;
+			while (p < value.size()) {
+				int end = value.find_first_of(',', p);
+				if (end == value.npos)
+					end = value.size();
+				auto addrRef = StringRef(value).substr(p, end - p);
+				AddressExclusion addr = AddressExclusion::parse(addrRef);
+				if (addr.isValid()) {
+					out[encodeExcludedServersKey(addr)] = "";
+				} else {
+					printf("Error: invalid address format: %s\n", addrRef.toString().c_str());
+				}
+				p = end + 1;
 			}
-			out[encodeExcludedServersKey(addr)] = "";
 		}
 		return out;
 	}
