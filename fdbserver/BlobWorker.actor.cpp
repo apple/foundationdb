@@ -269,6 +269,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	// back-pointers to earlier granules
 	// FIXME: expire from map after a delay when granule is revoked and the history is no longer needed
 	KeyRangeMap<Reference<GranuleHistoryEntry>> granuleHistory;
+	Reference<GranuleMetadata> topMemoryUsingGranule;
 
 	PromiseStream<AssignBlobRangeRequest> granuleUpdateErrors;
 
@@ -277,6 +278,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	Promise<Void> fatalError;
 	Promise<Void> simInjectFailure;
 	Promise<Void> doReadDrivenCompaction;
+	Promise<Void> memoryFull;
 
 	Reference<FlowLock> initialSnapshotLock;
 	Reference<FlowLock> resnapshotBudget;
@@ -2538,6 +2540,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						}
 						nextForceFlush = metadata->forceFlushVersion.whenAtLeast(lastForceFlushVersion + 1);
 					}
+					when(wait(bwData->memoryFull.getFuture())) {
+						// todo check anything to add here
+						//  bwData->memoryFull.reset();
+					}
 					when(wait(metadata->runRDC.getFuture())) {
 						// return control flow back to the triggering actor before continuing
 						wait(delay(0));
@@ -2788,15 +2794,31 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			}
 			justDidRollback = false;
 
-			// Write a new delta file IF we have enough bytes OR force flush.
+			// xch: Write a new delta file IF we have enough bytes OR force flush.
 			// The force flush contract is a version cannot be put in forceFlushVersion unless the change feed
 			// is already whenAtLeast that version
 			// FIXME: with non-uniform delta file sizes, we could potentially over-shoot target write amp
 			bool forceFlush = !forceFlushVersions.empty() && forceFlushVersions.back() > metadata->pendingDeltaVersion;
+			bool topMemoryFlush = bwData->isFull() && metadata == bwData->topMemoryUsingGranule;
 			bool doEarlyFlush = !metadata->currentDeltas.empty() && metadata->doEarlyReSnapshot();
 			CODE_PROBE(forceFlush, "Force flushing granule");
+			// how we find the metadata here? should try to change metadata to bwdata ans: I think keyrange is always
+			// this
+
+			CODE_PROBE(topMemoryFlush, "Flush the granule using the most memory");
+
+			// this is not correct, just a demo
+			if (metadata->bufferedDeltaBytes >= bwData->topMemoryUsingGranule->bufferedDeltaBytes) {
+				bwData->topMemoryUsingGranule = metadata;
+			}
+
+			if (bwData->isFull()) {
+				bwData->memoryFull.send(Void());
+			}
+
+			// todo add the limit in writeAmpTarget?
 			if ((processedAnyMutations && metadata->bufferedDeltaBytes >= writeAmpTarget.getDeltaFileBytes()) ||
-			    forceFlush || doEarlyFlush) {
+			    topMemoryFlush || forceFlush || doEarlyFlush) {
 				TraceEvent(SevDebug, "BlobGranuleDeltaFile", bwData->id)
 				    .detail("Granule", metadata->keyRange)
 				    .detail("Version", lastDeltaVersion);
@@ -4535,7 +4557,6 @@ ACTOR Future<Void> start(Reference<BlobWorkerData> bwData, GranuleRangeMetadata*
 	wait(success(meta->assignFuture));
 	return Void();
 }
-
 namespace {
 GranuleRangeMetadata constructActiveBlobRange(Reference<BlobWorkerData> bwData,
                                               KeyRange keyRange,
