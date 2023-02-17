@@ -167,6 +167,15 @@ ThreadFuture<bool> ThreadSafeDatabase::blobbifyRange(const KeyRangeRef& keyRange
 	});
 }
 
+ThreadFuture<bool> ThreadSafeDatabase::blobbifyRangeBlocking(const KeyRangeRef& keyRange) {
+	DatabaseContext* db = this->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		return db->blobbifyRangeBlocking(range);
+	});
+}
+
 ThreadFuture<bool> ThreadSafeDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {
 	DatabaseContext* db = this->db;
 	KeyRange range = keyRange;
@@ -274,6 +283,16 @@ ThreadFuture<bool> ThreadSafeTenant::blobbifyRange(const KeyRangeRef& keyRange) 
 		db->checkDeferredError();
 		db->addref();
 		return db->blobbifyRange(range, Reference<Tenant>::addRef(tenant));
+	});
+}
+
+ThreadFuture<bool> ThreadSafeTenant::blobbifyRangeBlocking(const KeyRangeRef& keyRange) {
+	DatabaseContext* db = this->db->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		db->addref();
+		return db->blobbifyRangeBlocking(range, Reference<Tenant>::addRef(tenant));
 	});
 }
 

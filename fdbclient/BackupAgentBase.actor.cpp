@@ -262,7 +262,7 @@ bool validTenantAccess(std::map<int64_t, TenantName>* tenantMap,
 	}
 	int64_t tenantId = TenantInfo::INVALID_TENANT;
 	if (m.isEncrypted()) {
-		tenantId = m.encryptionHeader()->cipherTextDetails.encryptDomainId;
+		tenantId = m.encryptDomainId();
 	} else {
 		tenantId = TenantAPI::extractTenantIdFromMutation(m);
 	}
@@ -383,12 +383,18 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			// Decrypt mutation ref if encrypted
 			if (logValue.isEncrypted()) {
 				encryptedLogValue = logValue;
-				state EncryptCipherDomainId domainId = logValue.encryptionHeader()->cipherTextDetails.encryptDomainId;
+				state EncryptCipherDomainId domainId = logValue.encryptDomainId();
 				Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
 				try {
-					TextAndHeaderCipherKeys cipherKeys =
-					    wait(getEncryptCipherKeys(dbInfo, *logValue.encryptionHeader(), BlobCipherMetrics::RESTORE));
-					logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::BACKUP);
+					if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+						TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(
+						    dbInfo, logValue.configurableEncryptionHeader(), BlobCipherMetrics::RESTORE));
+						logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::RESTORE);
+					} else {
+						TextAndHeaderCipherKeys cipherKeys = wait(
+						    getEncryptCipherKeys(dbInfo, *logValue.encryptionHeader(), BlobCipherMetrics::RESTORE));
+						logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::RESTORE);
+					}
 				} catch (Error& e) {
 					// It's possible a tenant was deleted and the encrypt key fetch failed
 					TraceEvent(SevWarnAlways, "MutationLogRestoreEncryptKeyFetchFailed")

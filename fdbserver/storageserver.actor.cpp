@@ -159,6 +159,7 @@ bool canReplyWith(Error e) {
 		return false;
 	}
 }
+
 } // namespace
 
 #define PERSIST_PREFIX "\xff\xff"
@@ -3020,11 +3021,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			if (doFilterMutations || !req.encrypted) {
 				for (auto& m : decodedMutations.back().first) {
 					if (m.isEncrypted()) {
-						const BlobCipherEncryptHeader* header = m.encryptionHeader();
-						cipherDetails.insert(header->cipherTextDetails);
-						if (header->cipherHeaderDetails.isValid()) {
-							cipherDetails.insert(header->cipherHeaderDetails);
-						}
+						m.updateEncryptCipherDetails(cipherDetails);
 					}
 				}
 			}
@@ -9257,11 +9254,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					}
 					if (msg.isEncrypted()) {
 						if (!cipherKeys.present()) {
-							const BlobCipherEncryptHeader* header = msg.encryptionHeader();
-							cipherDetails.insert(header->cipherTextDetails);
-							if (header->cipherHeaderDetails.isValid()) {
-								cipherDetails.insert(header->cipherHeaderDetails);
-							}
+							msg.updateEncryptCipherDetails(cipherDetails);
 							collectingCipherKeys = true;
 						} else {
 							msg = msg.decrypt(cipherKeys.get(), eager.arena, BlobCipherMetrics::TLOG);
@@ -11711,7 +11704,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		// If the storage server dies while something that uses self is still on the stack,
 		// we want that actor to complete before we terminate and that memory goes out of scope
 
-		self.ssLock->kill();
+		self.ssLock->halt();
 
 		state Error err = e;
 		if (storageServerTerminated(self, persistentData, err)) {
@@ -11804,7 +11797,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		throw internal_error();
 	} catch (Error& e) {
 
-		self.ssLock->kill();
+		self.ssLock->halt();
 
 		if (self.byteSampleRecovery.isValid()) {
 			self.byteSampleRecovery.cancel();

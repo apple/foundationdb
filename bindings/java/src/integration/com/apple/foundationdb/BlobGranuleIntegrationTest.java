@@ -50,20 +50,6 @@ class BlobGranuleIntegrationTest {
         }
     }
 
-    void waitForVerify(Database db, Range blobRange) throws InterruptedException {
-        System.out.println("Verifying");
-        while (true) {
-            Long verifyVersion = db.verifyBlobRange(blobRange.begin, blobRange.end).join();
-            if (verifyVersion != null && verifyVersion > 0) {
-                System.out.println("Verify succeeded @ " + verifyVersion);
-                return;
-            } else {
-                System.out.println("Verify failed, sleeping");
-                Thread.sleep(100);
-            }
-        }
-    }
-
     @Test
     void blobManagementFunctionsTest() throws Exception {
         /*
@@ -79,9 +65,12 @@ class BlobGranuleIntegrationTest {
 
         Range blobRange = Range.startsWith(key);
         try (Database db = fdb.open()) {
-            db.blobbifyRange(blobRange.begin, blobRange.end).join();
+            boolean blobbifySuccess = db.blobbifyRangeBlocking(blobRange.begin, blobRange.end).join();
+            Assertions.assertTrue(blobbifySuccess);
 
-            waitForVerify(db, blobRange);
+            Long verifyVersion = db.verifyBlobRange(blobRange.begin, blobRange.end).join();
+
+            Assertions.assertTrue(verifyVersion >= 0);
 
             // list blob ranges
             KeyRangeArrayResult blobRanges = db.listBlobbifiedRanges(blobRange.begin, blobRange.end, 2).join();
@@ -94,18 +83,21 @@ class BlobGranuleIntegrationTest {
             db.waitPurgeGranulesComplete(purgeKey).join();
 
             // verify again
-            waitForVerify(db, blobRange);
+            Long verifyVersionAfterPurge = db.verifyBlobRange(blobRange.begin, blobRange.end).join();
+            Assertions.assertTrue(verifyVersionAfterPurge >= 0);
+            Assertions.assertTrue(verifyVersionAfterPurge >= verifyVersion);
 
             // force purge/wait
             byte[] forcePurgeKey = db.purgeBlobGranules(blobRange.begin, blobRange.end, -2, true).join();
             db.waitPurgeGranulesComplete(forcePurgeKey).join();
 
             // check verify fails
-            Long verifyVersion = db.verifyBlobRange(blobRange.begin, blobRange.end).join();
-            Assertions.assertEquals(-1, verifyVersion);
+            Long verifyVersionLast = db.verifyBlobRange(blobRange.begin, blobRange.end).join();
+            Assertions.assertEquals(-1, verifyVersionLast);
 
             // unblobbify
-            db.unblobbifyRange(blobRange.begin, blobRange.end).join();
+            boolean unblobbifySuccess = db.unblobbifyRange(blobRange.begin, blobRange.end).join();
+            Assertions.assertTrue(unblobbifySuccess);
 
             System.out.println("Blob granule management tests complete!");
         }

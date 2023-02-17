@@ -80,6 +80,7 @@ struct SaveAndKillWorkload : TestWorkload {
 			ini.SetValue("META", "defaultTenant", cx->defaultTenant.get().toString().c_str());
 		}
 		ini.SetBoolValue("META", "enableShardEncodeLocationMetadata", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+		ini.SetBoolValue("META", "enableConfigurableEncryption", CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
 		ini.SetBoolValue("META", "encryptHeaderAuthTokenEnabled", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED);
 		ini.SetLongValue("META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO);
 

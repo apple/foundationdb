@@ -417,6 +417,12 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_blobbify_range(FDBDatabase*
                                                                     uint8_t const* end_key_name,
                                                                     int end_key_name_length);
 
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_blobbify_range_blocking(FDBDatabase* db,
+                                                                             uint8_t const* begin_key_name,
+                                                                             int begin_key_name_length,
+                                                                             uint8_t const* end_key_name,
+                                                                             int end_key_name_length);
+
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_unblobbify_range(FDBDatabase* db,
                                                                       uint8_t const* begin_key_name,
                                                                       int begin_key_name_length,
@@ -459,6 +465,12 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_blobbify_range(FDBTenant* ten
                                                                   int begin_key_name_length,
                                                                   uint8_t const* end_key_name,
                                                                   int end_key_name_length);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_blobbify_range_blocking(FDBTenant* tenant,
+                                                                           uint8_t const* begin_key_name,
+                                                                           int begin_key_name_length,
+                                                                           uint8_t const* end_key_name,
+                                                                           int end_key_name_length);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_unblobbify_range(FDBTenant* tenant,
                                                                     uint8_t const* begin_key_name,

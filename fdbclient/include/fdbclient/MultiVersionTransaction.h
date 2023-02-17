@@ -187,6 +187,12 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                    uint8_t const* end_key_name,
 	                                    int end_key_name_length);
 
+	FDBFuture* (*databaseBlobbifyRangeBlocking)(FDBDatabase* db,
+	                                            uint8_t const* begin_key_name,
+	                                            int begin_key_name_length,
+	                                            uint8_t const* end_key_name,
+	                                            int end_key_name_length);
+
 	FDBFuture* (*databaseUnblobbifyRange)(FDBDatabase* db,
 	                                      uint8_t const* begin_key_name,
 	                                      int begin_key_name_length,
@@ -229,6 +235,12 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                  int begin_key_name_length,
 	                                  uint8_t const* end_key_name,
 	                                  int end_key_name_length);
+
+	FDBFuture* (*tenantBlobbifyRangeBlocking)(FDBTenant* tenant,
+	                                          uint8_t const* begin_key_name,
+	                                          int begin_key_name_length,
+	                                          uint8_t const* end_key_name,
+	                                          int end_key_name_length);
 
 	FDBFuture* (*tenantUnblobbifyRange)(FDBTenant* tenant,
 	                                    uint8_t const* begin_key_name,
@@ -547,6 +559,7 @@ public:
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
 	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) override;
 	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
@@ -597,6 +610,7 @@ public:
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
 	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) override;
 	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
@@ -866,6 +880,7 @@ public:
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
 	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) override;
 	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
@@ -994,6 +1009,7 @@ public:
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
 	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) override;
 	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;

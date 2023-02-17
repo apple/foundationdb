@@ -210,6 +210,10 @@ EncryptAuthTokenMode BlobCipherEncryptHeaderRef::getAuthTokenMode() const {
 	    flags);
 }
 
+EncryptCipherDomainId BlobCipherEncryptHeaderRef::getDomainId() const {
+	return std::visit([](auto& h) { return h.v1.cipherTextDetails.encryptDomainId; }, algoHeader);
+}
+
 void BlobCipherEncryptHeaderRef::validateEncryptionHeaderDetails(const BlobCipherDetails& textCipherDetails,
                                                                  const BlobCipherDetails& headerCipherDetails,
                                                                  const StringRef& ivRef) const {
