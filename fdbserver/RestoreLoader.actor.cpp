@@ -372,13 +372,10 @@ void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<Res
 
 ACTOR static Future<MutationRef> _decryptMutation(MutationRef mutation, Database cx, Arena* arena) {
 	ASSERT(mutation.isEncrypted());
+
 	Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
-	state const BlobCipherEncryptHeader* header = mutation.encryptionHeader();
 	std::unordered_set<BlobCipherDetails> cipherDetails;
-	cipherDetails.insert(header->cipherTextDetails);
-	if (header->cipherHeaderDetails.isValid()) {
-		cipherDetails.insert(header->cipherHeaderDetails);
-	}
+	mutation.updateEncryptCipherDetails(cipherDetails);
 	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
 	    wait(getEncryptCipherKeys(dbInfo, cipherDetails, BlobCipherMetrics::BACKUP));
 	return mutation.decrypt(getCipherKeysResult, *arena, BlobCipherMetrics::BACKUP);

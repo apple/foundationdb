@@ -1691,6 +1691,8 @@ ACTOR Future<WriteMutationRefVar> writeMutationEncryptedMutation(CommitBatchCont
                                                                  Arena* arena) {
 	state MutationRef encryptedMutation = encryptedMutationOpt->get();
 	state const BlobCipherEncryptHeader* header;
+	state BlobCipherEncryptHeaderRef headerRef;
+	state MutationRef decryptedMutation;
 
 	static_assert(TenantInfo::INVALID_TENANT == INVALID_ENCRYPT_DOMAIN_ID);
 	ASSERT(self->pProxyCommitData->encryptMode.isEncryptionEnabled());
@@ -1698,9 +1700,15 @@ ACTOR Future<WriteMutationRefVar> writeMutationEncryptedMutation(CommitBatchCont
 
 	ASSERT(encryptedMutation.isEncrypted());
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo = self->pProxyCommitData->db;
-	header = encryptedMutation.encryptionHeader();
-	TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, *header, BlobCipherMetrics::TLOG));
-	MutationRef decryptedMutation = encryptedMutation.decrypt(cipherKeys, *arena, BlobCipherMetrics::TLOG);
+	if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+		headerRef = encryptedMutation.configurableEncryptionHeader();
+		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, headerRef, BlobCipherMetrics::TLOG));
+		decryptedMutation = encryptedMutation.decrypt(cipherKeys, *arena, BlobCipherMetrics::TLOG);
+	} else {
+		header = encryptedMutation.encryptionHeader();
+		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, *header, BlobCipherMetrics::TLOG));
+		decryptedMutation = encryptedMutation.decrypt(cipherKeys, *arena, BlobCipherMetrics::TLOG);
+	}
 
 	ASSERT(decryptedMutation.type == mutation->type);
 	ASSERT(decryptedMutation.param1 == mutation->param1);
