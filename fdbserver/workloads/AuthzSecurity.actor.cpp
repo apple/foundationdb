@@ -24,6 +24,7 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
+#include "flow/WipedString.h"
 #include "flow/serialize.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/CommitTransaction.h"
@@ -49,8 +50,8 @@ struct AuthzSecurityWorkload : TestWorkload {
 	Reference<Tenant> anotherTenant;
 	TenantName tenantName;
 	TenantName anotherTenantName;
-	Standalone<StringRef> signedToken;
-	Standalone<StringRef> signedTokenAnotherTenant;
+	WipedString signedToken;
+	WipedString signedTokenAnotherTenant;
 	Standalone<StringRef> tLogConfigKey;
 	PerfIntCounter crossTenantGetPositive, crossTenantGetNegative, crossTenantCommitPositive, crossTenantCommitNegative,
 	    publicNonTenantRequestPositive, tLogReadNegative;
@@ -119,14 +120,14 @@ struct AuthzSecurityWorkload : TestWorkload {
 		m.push_back(tLogReadNegative.getMetric());
 	}
 
-	void setAuthToken(Transaction& tr, Standalone<StringRef> token) {
+	void setAuthToken(Transaction& tr, StringRef token) {
 		tr.setOption(FDBTransactionOptions::AUTHORIZATION_TOKEN, token);
 	}
 
 	ACTOR static Future<Version> setAndCommitKeyValueAndGetVersion(AuthzSecurityWorkload* self,
 	                                                               Database cx,
 	                                                               Reference<Tenant> tenant,
-	                                                               Standalone<StringRef> token,
+	                                                               WipedString token,
 	                                                               StringRef key,
 	                                                               StringRef value) {
 		state Transaction tr(cx, tenant);
@@ -145,7 +146,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 	ACTOR static Future<KeyRangeLocationInfo> refreshAndGetCachedLocation(AuthzSecurityWorkload* self,
 	                                                                      Database cx,
 	                                                                      Reference<Tenant> tenant,
-	                                                                      Standalone<StringRef> token,
+	                                                                      WipedString token,
 	                                                                      StringRef key) {
 		state Transaction tr(cx, tenant);
 		loop {
@@ -176,7 +177,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 	                                                 Version committedVersion,
 	                                                 Standalone<StringRef> key,
 	                                                 Optional<Standalone<StringRef>> expectedValue,
-	                                                 Standalone<StringRef> token,
+	                                                 WipedString token,
 	                                                 Database cx,
 	                                                 KeyRangeLocationInfo loc) {
 		loop {
@@ -262,7 +263,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 
 	ACTOR static Future<Optional<Error>> tryCommit(AuthzSecurityWorkload* self,
 	                                               Reference<Tenant> tenant,
-	                                               Standalone<StringRef> token,
+	                                               WipedString token,
 	                                               Key key,
 	                                               Value newValue,
 	                                               Version readVersion,

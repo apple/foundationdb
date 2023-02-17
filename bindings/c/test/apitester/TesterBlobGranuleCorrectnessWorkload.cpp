@@ -303,7 +303,10 @@ private:
 	                          fdb::native::FDBReadBlobGranuleContext& bgCtx,
 	                          fdb::GranuleFilePointer snapshotFile,
 	                          fdb::KeyRange keyRange,
-	                          fdb::native::FDBBGTenantPrefix const* tenantPrefix) {
+	                          fdb::native::FDBBGTenantPrefix const* tenantPrefix,
+	                          int64_t& prevFileVersion) {
+		ASSERT(snapshotFile.fileVersion > prevFileVersion);
+		prevFileVersion = snapshotFile.fileVersion;
 		if (validatedFiles.contains(snapshotFile.filename)) {
 			return;
 		}
@@ -339,7 +342,10 @@ private:
 	                       fdb::GranuleFilePointer deltaFile,
 	                       fdb::KeyRange keyRange,
 	                       fdb::native::FDBBGTenantPrefix const* tenantPrefix,
-	                       int64_t& lastDFMaxVersion) {
+	                       int64_t& lastDFMaxVersion,
+	                       int64_t& prevFileVersion) {
+		ASSERT(deltaFile.fileVersion > prevFileVersion);
+		prevFileVersion = deltaFile.fileVersion;
 		if (validatedFiles.contains(deltaFile.filename)) {
 			return;
 		}
@@ -380,6 +386,9 @@ private:
 		}
 		lastDFMaxVersion = std::max(lastDFMaxVersion, thisDFMaxVersion);
 
+		// can be higher due to empty versions but must not be lower
+		ASSERT(lastDFMaxVersion <= prevFileVersion);
+
 		// TODO have delta mutations update map
 	}
 
@@ -392,22 +401,28 @@ private:
 		ASSERT(desc.keyRange.beginKey < desc.keyRange.endKey);
 		ASSERT(tenantId.has_value() == desc.tenantPrefix.present);
 		// beginVersion of zero means snapshot present
+		int64_t prevFileVersion = 0;
 
 		// validate snapshot file
 		ASSERT(desc.snapshotFile.has_value());
 		if (BG_API_DEBUG_VERBOSE) {
 			info(fmt::format("Loading snapshot file {0}\n", fdb::toCharsRef(desc.snapshotFile->filename)));
 		}
-		validateSnapshotData(ctx, bgCtx, *desc.snapshotFile, desc.keyRange, &desc.tenantPrefix);
+		validateSnapshotData(ctx, bgCtx, *desc.snapshotFile, desc.keyRange, &desc.tenantPrefix, prevFileVersion);
 
 		// validate delta files
 		int64_t lastDFMaxVersion = 0;
 		for (int i = 0; i < desc.deltaFiles.size(); i++) {
-			validateDeltaData(ctx, bgCtx, desc.deltaFiles[i], desc.keyRange, &desc.tenantPrefix, lastDFMaxVersion);
+			validateDeltaData(
+			    ctx, bgCtx, desc.deltaFiles[i], desc.keyRange, &desc.tenantPrefix, lastDFMaxVersion, prevFileVersion);
 		}
 
 		// validate memory mutations
-		int64_t lastVersion = 0;
+		if (desc.memoryMutations.size()) {
+			ASSERT(desc.memoryMutations.front().version > lastDFMaxVersion);
+			ASSERT(desc.memoryMutations.front().version > prevFileVersion);
+		}
+		int64_t lastVersion = prevFileVersion;
 		for (int i = 0; i < desc.memoryMutations.size(); i++) {
 			fdb::GranuleMutation& m = desc.memoryMutations[i];
 			ASSERT(m.type == 0 || m.type == 1);
