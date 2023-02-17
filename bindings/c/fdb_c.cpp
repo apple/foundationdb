@@ -768,6 +768,25 @@ extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_verify_blob_rang
 	                        .extractPtr());
 }
 
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_flush_blob_range(FDBDatabase* db,
+                                                                                 uint8_t const* begin_key_name,
+                                                                                 int begin_key_name_length,
+                                                                                 uint8_t const* end_key_name,
+                                                                                 int end_key_name_length,
+                                                                                 fdb_bool_t compact,
+                                                                                 int64_t version) {
+	Optional<Version> rv;
+	if (version != latestVersion) {
+		rv = version;
+	}
+	return (FDBFuture*)(DB(db)
+	                        ->flushBlobRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                     StringRef(end_key_name, end_key_name_length)),
+	                                         compact,
+	                                         rv)
+	                        .extractPtr());
+}
+
 extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_client_status(FDBDatabase* db) {
 	return (FDBFuture*)(DB(db)->getClientStatus().extractPtr());
 }
@@ -858,6 +877,25 @@ extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_verify_blob_range(
 	                        ->verifyBlobRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
 	                                                      StringRef(end_key_name, end_key_name_length)),
 	                                          rv)
+	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_flush_blob_range(FDBTenant* tenant,
+                                                                               uint8_t const* begin_key_name,
+                                                                               int begin_key_name_length,
+                                                                               uint8_t const* end_key_name,
+                                                                               int end_key_name_length,
+                                                                               fdb_bool_t compact,
+                                                                               int64_t version) {
+	Optional<Version> rv;
+	if (version != latestVersion) {
+		rv = version;
+	}
+	return (FDBFuture*)(TENANT(tenant)
+	                        ->flushBlobRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                     StringRef(end_key_name, end_key_name_length)),
+	                                         compact,
+	                                         rv)
 	                        .extractPtr());
 }
 
