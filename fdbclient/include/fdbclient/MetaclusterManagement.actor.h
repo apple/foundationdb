@@ -1494,13 +1494,12 @@ struct RestoreClusterImpl {
 	}
 
 	void markClusterRestoring(Reference<typename DB::TransactionT> tr) {
+		MetaclusterMetadata::activeRestoreIds().set(tr, clusterName, restoreId);
 		if (ctx.dataClusterMetadata.get().entry.clusterState != DataClusterState::RESTORING) {
 			DataClusterEntry updatedEntry = ctx.dataClusterMetadata.get().entry;
 			updatedEntry.clusterState = DataClusterState::RESTORING;
 
 			updateClusterMetadata(tr, clusterName, ctx.dataClusterMetadata.get(), connectionString, updatedEntry);
-			MetaclusterMetadata::activeRestoreIds().set(tr, clusterName, restoreId);
-
 			// Remove this cluster from the cluster capacity index, but leave its configured capacity intact in the
 			// cluster entry. This allows us to retain the configured capacity while preventing the cluster from
 			// being used to allocate new tenant groups.
