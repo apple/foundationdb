@@ -6531,9 +6531,10 @@ private:
 		                     bool updating,
 		                     ParentInfo* parentInfo,
 		                     Reference<IPageEncryptionKeyProvider> keyProvider,
-		                     Optional<int64_t> pageDomainId)
+		                     Optional<int64_t> pageDomainId,
+		                     int maxHeightAllowed)
 		  : updating(updating), page(p), clonedPage(alreadyCloned), changesMade(false), parentInfo(parentInfo),
-		    keyProvider(keyProvider), pageDomainId(pageDomainId) {}
+		    keyProvider(keyProvider), pageDomainId(pageDomainId), maxHeightAllowed(maxHeightAllowed) {}
 
 		// Whether updating the existing page is allowed
 		bool updating;
@@ -6550,6 +6551,8 @@ private:
 
 		Reference<IPageEncryptionKeyProvider> keyProvider;
 		Optional<int64_t> pageDomainId;
+
+		int maxHeightAllowed;
 
 		BTreePage* btPage() const { return (BTreePage*)page->mutateData(); }
 
@@ -6590,7 +6593,7 @@ private:
 						canInsert = keyProvider->keyFitsInDomain(pageDomainId.get(), rec.key, true);
 					}
 					if (canInsert) {
-						canInsert = end.insert(rec);
+						canInsert = end.insert(rec, 0, maxHeightAllowed);
 					}
 
 					if (!canInsert) {
@@ -6791,6 +6794,8 @@ private:
 			}
 		}
 
+		state int maxHeightAllowed = btPage->tree()->initialHeight + SERVER_KNOBS->REDWOOD_NODE_MAX_UNBALANCE;
+
 		// Leaf Page
 		if (btPage->isLeaf()) {
 			// When true, we are modifying the existing DeltaTree
@@ -6816,7 +6821,6 @@ private:
 
 			// Now, process each mutation range and merge changes with existing data.
 			bool firstMutationBoundary = true;
-			constexpr int maxHeightAllowed = 8;
 
 			while (mBegin != mEnd) {
 				// Apply the change to the mutation buffer start boundary key only if
@@ -7297,7 +7301,7 @@ private:
 			// If pageCopy is already set it was initialized to page above so the modifier doesn't need
 			// to copy it
 			state InternalPageModifier modifier(
-			    page, pageCopy.isValid(), tryToUpdate, parentInfo, self->m_keyProvider, pageDomainId);
+			    page, pageCopy.isValid(), tryToUpdate, parentInfo, self->m_keyProvider, pageDomainId, maxHeightAllowed);
 
 			// Apply the possible changes for each subtree range recursed to, except the last one.
 			// For each range, the expected next record, if any, is checked against the first boundary

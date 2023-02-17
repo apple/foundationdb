@@ -950,6 +950,7 @@ public:
 	double REDWOOD_HISTOGRAM_INTERVAL;
 	bool REDWOOD_EVICT_UPDATED_PAGES; // Whether to prioritize eviction of updated pages from cache.
 	int REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT; // Minimum height for which to keep and reuse page decode caches
+	int REDWOOD_NODE_MAX_UNBALANCE; // Maximum imbalance in a node before it should be rebuilt instead of updated
 
 	std::string REDWOOD_IO_PRIORITIES;
 
