@@ -419,6 +419,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 					}
 
 					++commitData->stats.txnCommitIn;
+					commitData->stats.uniqueClients.insert(req.reply.getEndpoint().getPrimaryAddress());
 
 					if (req.debugID.present()) {
 						g_traceBatch.addEvent("CommitDebug", req.debugID.get().first(), "CommitProxyServer.batcher");
@@ -3525,6 +3526,66 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 
 } // anonymous namespace
 
+//
+// Metrics related to the commit proxy are logged on a five second interval in
+// the `ProxyMetrics` trace. However, it can be hard to determine workload
+// burstiness when looking at such a large time range. This function adds much
+// more frequent logging for certain metrics to provide fine-grained insight
+// into workload patterns. The metrics logged by this function break down into
+// two categories:
+//
+//   * existing counters reported by `ProxyMetrics`
+//   * new counters that are only reported by this function
+//
+// Neither is implemented optimally, but the data collected should be helpful
+// in identifying workload patterns on the server.
+//
+// Metrics reporting by this function can be disabled by setting the
+// `BURSTINESS_METRICS_ENABLED` knob to false. The reporting interval can be
+// adjusted by modifying the knob `BURSTINESS_METRICS_LOG_INTERVAL`.
+//
+ACTOR Future<Void> logDetailedMetrics(ProxyCommitData* commitData) {
+	state double startTime = 0;
+	state int64_t commitBatchInBaseline = 0;
+	state int64_t txnCommitInBaseline = 0;
+	state int64_t mutationsBaseline = 0;
+	state int64_t mutationBytesBaseline = 0;
+
+	loop {
+		if (!SERVER_KNOBS->BURSTINESS_METRICS_ENABLED) {
+			return Void();
+		}
+
+		startTime = now();
+		commitBatchInBaseline = commitData->stats.commitBatchIn.getValue();
+		txnCommitInBaseline = commitData->stats.txnCommitIn.getValue();
+		mutationsBaseline = commitData->stats.mutations.getValue();
+		mutationBytesBaseline = commitData->stats.mutationBytes.getValue();
+
+		wait(delay(SERVER_KNOBS->BURSTINESS_METRICS_LOG_INTERVAL));
+
+		int64_t commitBatchInReal = commitData->stats.commitBatchIn.getValue();
+		int64_t txnCommitInReal = commitData->stats.txnCommitIn.getValue();
+		int64_t mutationsReal = commitData->stats.mutations.getValue();
+		int64_t mutationBytesReal = commitData->stats.mutationBytes.getValue();
+
+		// Don't log anything if any of the counters got reset during the wait
+		// interval. Assume that typically all the counters get reset at once.
+		if (commitBatchInReal < commitBatchInBaseline || txnCommitInReal < txnCommitInBaseline ||
+		    mutationsReal < mutationsBaseline || mutationBytesReal < mutationBytesBaseline) {
+			continue;
+		}
+
+		TraceEvent("ProxyDetailedMetrics")
+		    .detail("Elapsed", now() - startTime)
+		    .detail("CommitBatchIn", commitBatchInReal - commitBatchInBaseline)
+		    .detail("TxnCommitIn", txnCommitInReal - txnCommitInBaseline)
+		    .detail("Mutations", mutationsReal - mutationsBaseline)
+		    .detail("MutationBytes", mutationBytesReal - mutationBytesBaseline)
+		    .detail("UniqueClients", commitData->stats.getSizeAndResetUniqueClients());
+	}
+}
+
 ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
                                          MasterInterface master,
                                          LifetimeToken masterLifetime,
@@ -3616,6 +3677,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(ddMetricsRequestServer(proxy, db));
 	addActor.send(reportTxnTagCommitCost(proxy.id(), db, &commitData.ssTrTagCommitCost));
+	addActor.send(logDetailedMetrics(&commitData));
 
 	auto openDb = openDBOnServer(db);
 
