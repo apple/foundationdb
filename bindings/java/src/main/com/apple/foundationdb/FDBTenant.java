@@ -171,6 +171,16 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 	}
 
 	@Override
+	public CompletableFuture<Boolean> blobbifyRangeBlocking(byte[] beginKey, byte[] endKey, Executor e) {
+		pointerReadLock.lock();
+		try {
+			return new FutureBool(Tenant_blobbifyRangeBlocking(getPtr(), beginKey, endKey), e);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
 	public CompletableFuture<Boolean> unblobbifyRange(byte[] beginKey, byte[] endKey, Executor e) {
 		pointerReadLock.lock();
 		try {
@@ -233,6 +243,7 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 	private native long Tenant_purgeBlobGranules(long cPtr, byte[] beginKey, byte[] endKey, long purgeVersion, boolean force);
 	private native long Tenant_waitPurgeGranulesComplete(long cPtr, byte[] purgeKey);
 	private native long Tenant_blobbifyRange(long cPtr, byte[] beginKey, byte[] endKey);
+	private native long Tenant_blobbifyRangeBlocking(long cPtr, byte[] beginKey, byte[] endKey);
 	private native long Tenant_unblobbifyRange(long cPtr, byte[] beginKey, byte[] endKey);
 	private native long Tenant_listBlobbifiedRanges(long cPtr, byte[] beginKey, byte[] endKey, int rangeLimit);
 	private native long Tenant_verifyBlobRange(long cPtr, byte[] beginKey, byte[] endKey, long version);
