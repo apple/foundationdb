@@ -1376,6 +1376,10 @@ static RangeResult mergeDeltaStreams(const BlobGranuleChunkRef& chunk,
 	ASSERT(streams.size() < std::numeric_limits<int16_t>::max());
 	ASSERT(startClears.size() == streams.size());
 
+	if (streams.empty()) {
+		return RangeResult{};
+	}
+
 	int prefixLen = commonPrefixLength(chunk.keyRange.begin, chunk.keyRange.end);
 
 	// next element for each stream
