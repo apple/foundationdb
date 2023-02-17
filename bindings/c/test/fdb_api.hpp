@@ -86,6 +86,7 @@ struct GranuleFilePointer {
 	int64_t offset;
 	int64_t length;
 	int64_t fullFileLength;
+	int64_t fileVersion;
 
 	// just keep raw data structures to pass to callbacks
 	native::FDBBGEncryptionCtx encryptionCtx;
@@ -95,6 +96,7 @@ struct GranuleFilePointer {
 		offset = nativePointer.file_offset;
 		length = nativePointer.file_length;
 		fullFileLength = nativePointer.full_file_length;
+		fileVersion = nativePointer.file_version;
 		encryptionCtx = nativePointer.encryption_ctx;
 	}
 };

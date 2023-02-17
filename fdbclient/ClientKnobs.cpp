@@ -303,6 +303,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CLIENT_ENABLE_USING_CLUSTER_ID_KEY,     false );
 
 	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,       false );
+	init( SIMULATION_ENABLE_SNAPSHOT_ENCRYPTION_CHECKS,        true );
 	init( SIMULATION_EKP_TENANT_IDS_TO_DROP,         "-1" );
 	init( ENABLE_CONFIGURABLE_ENCRYPTION,            true );
 	init( ENCRYPT_HEADER_FLAGS_VERSION,                 1 );
