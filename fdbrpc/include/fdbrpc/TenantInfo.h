@@ -27,6 +27,7 @@
 #include "fdbrpc/FlowTransport.h"
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
+#include "flow/WipedString.h"
 
 struct TenantInfo {
 	static constexpr const int64_t INVALID_TENANT = -1;
@@ -34,7 +35,7 @@ struct TenantInfo {
 	Arena arena;
 	int64_t tenantId;
 	Optional<StringRef> prefix;
-	Optional<StringRef> token;
+	Optional<WipedString> token;
 	// this field is not serialized and instead set by FlowTransport during
 	// deserialization. This field indicates whether the client is trusted.
 	// Untrusted clients are generally expected to set a tenant ID
@@ -52,11 +53,7 @@ struct TenantInfo {
 	bool hasTenant() const { return tenantId != INVALID_TENANT; }
 
 	TenantInfo() : tenantId(INVALID_TENANT) {}
-	TenantInfo(int64_t tenantId, Optional<Standalone<StringRef>> const& token) : tenantId(tenantId) {
-		if (token.present()) {
-			arena.dependsOn(token.get().arena());
-			this->token = token.get();
-		}
+	TenantInfo(int64_t tenantId, Optional<WipedString> const& token) : tenantId(tenantId), token(token) {
 		if (tenantId != INVALID_TENANT) {
 			prefix = idToPrefix(tenantId, arena);
 		}
@@ -76,9 +73,7 @@ struct serializable_traits<TenantInfo> : std::true_type {
 		if constexpr (Archiver::isDeserializing) {
 			bool tenantAuthorized = FLOW_KNOBS->ALLOW_TOKENLESS_TENANT_ACCESS;
 			if (!tenantAuthorized && v.tenantId != TenantInfo::INVALID_TENANT && v.token.present()) {
-				// TODO: update tokens to be ID based
-				// tenantAuthorized = TokenCache::instance().validate(v.tenantId, v.token.get());
-				tenantAuthorized = true;
+				tenantAuthorized = TokenCache::instance().validate(v.tenantId, v.token.get());
 			}
 			v.trusted = FlowTransport::transport().currentDeliveryPeerIsTrusted();
 			v.tenantAuthorized = tenantAuthorized;

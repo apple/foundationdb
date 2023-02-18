@@ -20,13 +20,15 @@
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"
-#include "flow/IRandom.h"
-#include "fdbserver/workloads/workloads.actor.h"
 #include "flow/flow.h"
+#include "flow/IRandom.h"
 #include "flow/ITrace.h"
+#include "flow/serialize.h"
 #include "flow/Trace.h"
 
 #include <chrono>
@@ -34,6 +36,7 @@
 #include <limits>
 #include <memory>
 #include <random>
+#include <variant>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -295,6 +298,49 @@ struct EncryptionOpsWorkload : TestWorkload {
 		return encrypted;
 	}
 
+	StringRef doEncryption(Reference<BlobCipherKey> textCipherKey,
+	                       Reference<BlobCipherKey> headerCipherKey,
+	                       uint8_t* payload,
+	                       int len,
+	                       const EncryptAuthTokenMode authMode,
+	                       const EncryptAuthTokenAlgo authAlgo,
+	                       BlobCipherEncryptHeaderRef* headerRef) {
+		uint8_t iv[AES_256_IV_LENGTH];
+		deterministicRandom()->randomBytes(&iv[0], AES_256_IV_LENGTH);
+		EncryptBlobCipherAes265Ctr encryptor(
+		    textCipherKey, headerCipherKey, &iv[0], AES_256_IV_LENGTH, authMode, authAlgo, BlobCipherMetrics::TEST);
+
+		auto start = std::chrono::high_resolution_clock::now();
+		StringRef encrypted = encryptor.encrypt(payload, len, headerRef, arena);
+		auto end = std::chrono::high_resolution_clock::now();
+
+		// validate encrypted buffer size and contents (not matching with plaintext)
+		const uint8_t* headerIV = headerRef->getIV();
+		ASSERT_EQ(memcmp(&headerIV[0], &iv[0], AES_256_IV_LENGTH), 0);
+
+		EncryptHeaderCipherDetails validateDetails = headerRef->getCipherDetails();
+		ASSERT(validateDetails.textCipherDetails.isValid() &&
+		       validateDetails.textCipherDetails == BlobCipherDetails(textCipherKey->getDomainId(),
+		                                                              textCipherKey->getBaseCipherId(),
+		                                                              textCipherKey->getSalt()));
+		if (authMode == ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
+			ASSERT(!validateDetails.headerCipherDetails.present());
+		} else {
+			ASSERT(validateDetails.headerCipherDetails.present() &&
+			       validateDetails.headerCipherDetails.get().isValid() &&
+			       validateDetails.headerCipherDetails.get() == BlobCipherDetails(headerCipherKey->getDomainId(),
+			                                                                      headerCipherKey->getBaseCipherId(),
+			                                                                      headerCipherKey->getSalt()));
+		}
+
+		ASSERT_EQ(encrypted.size(), len);
+		ASSERT_EQ(headerRef->flagsVersion(), CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
+		ASSERT_NE(memcmp(encrypted.begin(), payload, len), 0);
+
+		metrics->updateEncryptionTime(std::chrono::duration<double, std::nano>(end - start).count());
+		return encrypted;
+	}
+
 	void doDecryption(Reference<EncryptBuf> encrypted,
 	                  int len,
 	                  const BlobCipherEncryptHeader& header,
@@ -306,9 +352,12 @@ struct EncryptionOpsWorkload : TestWorkload {
 		Reference<BlobCipherKey> cipherKey = getEncryptionKey(header.cipherTextDetails.encryptDomainId,
 		                                                      header.cipherTextDetails.baseCipherId,
 		                                                      header.cipherTextDetails.salt);
-		Reference<BlobCipherKey> headerCipherKey = getEncryptionKey(header.cipherHeaderDetails.encryptDomainId,
-		                                                            header.cipherHeaderDetails.baseCipherId,
-		                                                            header.cipherHeaderDetails.salt);
+		Reference<BlobCipherKey> headerCipherKey;
+		if (header.flags.authTokenMode != EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
+			headerCipherKey = getEncryptionKey(header.cipherHeaderDetails.encryptDomainId,
+			                                   header.cipherHeaderDetails.baseCipherId,
+			                                   header.cipherHeaderDetails.salt);
+		}
 		ASSERT(cipherKey.isValid());
 		ASSERT(cipherKey->isEqual(orgCipherKey));
 		ASSERT(headerCipherKey.isValid() ||
@@ -319,12 +368,63 @@ struct EncryptionOpsWorkload : TestWorkload {
 		auto start = std::chrono::high_resolution_clock::now();
 		Reference<EncryptBuf> decrypted = decryptor.decrypt(encrypted->begin(), len, header, arena);
 		auto end = std::chrono::high_resolution_clock::now();
+		metrics->updateDecryptionTime(std::chrono::duration<double, std::nano>(end - start).count());
 
 		// validate decrypted buffer size and contents (matching with original plaintext)
 		ASSERT_EQ(decrypted->getLogicalSize(), len);
 		ASSERT_EQ(memcmp(decrypted->begin(), originalPayload, len), 0);
+	}
 
+	void doDecryption(StringRef encrypted,
+	                  int len,
+	                  const Standalone<StringRef>& headerStr,
+	                  uint8_t* originalPayload,
+	                  Reference<BlobCipherKey> orgCipherKey) {
+		BlobCipherEncryptHeaderRef headerRef = BlobCipherEncryptHeaderRef::fromStringRef(headerStr);
+
+		ASSERT_EQ(headerRef.flagsVersion(), CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
+
+		// validate flags
+		BlobCipherDetails textCipherDetails;
+		BlobCipherDetails headerCipherDetails;
+		uint8_t iv[AES_256_IV_LENGTH];
+		if (std::holds_alternative<AesCtrNoAuth>(headerRef.algoHeader)) {
+			AesCtrNoAuth noAuth = std::get<AesCtrNoAuth>(headerRef.algoHeader);
+			memcpy(&iv[0], &noAuth.v1.iv[0], AES_256_IV_LENGTH);
+			textCipherDetails = noAuth.v1.cipherTextDetails;
+			headerCipherDetails = BlobCipherDetails();
+		} else if (std::holds_alternative<AesCtrWithHmac>(headerRef.algoHeader)) {
+			AesCtrWithHmac hmacSha = std::get<AesCtrWithHmac>(headerRef.algoHeader);
+			memcpy(&iv[0], &hmacSha.v1.iv[0], AES_256_IV_LENGTH);
+			textCipherDetails = hmacSha.v1.cipherTextDetails;
+			headerCipherDetails = hmacSha.v1.cipherHeaderDetails;
+		} else {
+			ASSERT(std::holds_alternative<AesCtrWithCmac>(headerRef.algoHeader));
+			AesCtrWithCmac aesCmac = std::get<AesCtrWithCmac>(headerRef.algoHeader);
+			memcpy(&iv[0], &aesCmac.v1.iv[0], AES_256_IV_LENGTH);
+			textCipherDetails = aesCmac.v1.cipherTextDetails;
+			headerCipherDetails = aesCmac.v1.cipherHeaderDetails;
+		}
+		Reference<BlobCipherKey> cipherKey =
+		    getEncryptionKey(textCipherDetails.encryptDomainId, textCipherDetails.baseCipherId, textCipherDetails.salt);
+		Reference<BlobCipherKey> headerCipherKey =
+		    !headerCipherDetails.isValid()
+		        ? Reference<BlobCipherKey>() // no authentication mode cipher header-key is not needed
+		        : getEncryptionKey(
+		              headerCipherDetails.encryptDomainId, headerCipherDetails.baseCipherId, headerCipherDetails.salt);
+		ASSERT(cipherKey.isValid());
+		ASSERT(cipherKey->isEqual(orgCipherKey));
+
+		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, &iv[0], BlobCipherMetrics::TEST);
+
+		auto start = std::chrono::high_resolution_clock::now();
+		StringRef decrypted = decryptor.decrypt(encrypted.begin(), len, headerRef, arena);
+		auto end = std::chrono::high_resolution_clock::now();
 		metrics->updateDecryptionTime(std::chrono::duration<double, std::nano>(end - start).count());
+
+		// validate decrypted buffer size and contents (matching with original plaintext)
+		ASSERT_EQ(decrypted.size(), len);
+		ASSERT_EQ(memcmp(decrypted.begin(), originalPayload, len), 0);
 	}
 
 	void testBlobCipherKeyCacheOps() {
@@ -375,19 +475,31 @@ struct EncryptionOpsWorkload : TestWorkload {
 			deterministicRandom()->randomBytes(buff.get(), dataLen);
 
 			// Encrypt the payload - generates BlobCipherEncryptHeader to assist decryption later
-			BlobCipherEncryptHeader header;
 			const EncryptAuthTokenMode authMode = getRandomAuthTokenMode();
 			const EncryptAuthTokenAlgo authAlgo = authMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE
 			                                          ? EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE
 			                                          : getRandomAuthTokenAlgo();
 
 			try {
+				BlobCipherEncryptHeader header;
 				Reference<EncryptBuf> encrypted =
 				    doEncryption(cipherKey, headerCipherKey, buff.get(), dataLen, authMode, authAlgo, &header);
 
 				// Decrypt the payload - parses the BlobCipherEncryptHeader, fetch corresponding cipherKey and
 				// decrypt
 				doDecryption(encrypted, dataLen, header, buff.get(), cipherKey);
+
+				if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+					BlobCipherEncryptHeaderRef headerRef;
+					StringRef encrypted =
+					    doEncryption(cipherKey, headerCipherKey, buff.get(), dataLen, authMode, authAlgo, &headerRef);
+					// simulate 'header' on-disk read, serialize buffer and deserialize on decryption
+					Standalone<StringRef> serHeader = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
+
+					// Decrypt the payload - parses the BlobCipherEncryptHeader, fetch corresponding cipherKey and
+					// decrypt
+					doDecryption(encrypted, dataLen, serHeader, buff.get(), cipherKey);
+				}
 			} catch (Error& e) {
 				TraceEvent("Failed")
 				    .detail("DomainId", encryptDomainId)

@@ -27,6 +27,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/RYWIterator.h"
 #include "fdbclient/ISingleThreadTransaction.h"
+#include "flow/WipedString.h"
 #include <list>
 
 // SOMEDAY: Optimize getKey to avoid using getRange
@@ -270,6 +271,7 @@ private:
 	void applyPersistentOptions();
 
 	std::vector<std::pair<FDBTransactionOptions::Option, Optional<Standalone<StringRef>>>> persistentOptions;
+	std::vector<std::pair<FDBTransactionOptions::Option, Optional<WipedString>>> sensitivePersistentOptions;
 	ReadYourWritesTransactionOptions options;
 };
 

@@ -159,6 +159,7 @@ bool canReplyWith(Error e) {
 		return false;
 	}
 }
+
 } // namespace
 
 #define PERSIST_PREFIX "\xff\xff"
@@ -1179,9 +1180,13 @@ public:
 	struct Counters {
 		CounterCollection cc;
 		Counter allQueries, systemKeyQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeSystemKeyQueries,
-		    getMappedRangeQueries, getRangeStreamQueries, finishedQueries, lowPriorityQueries, rowsQueried,
-		    bytesQueried, watchQueries, emptyQueries, feedRowsQueried, feedBytesQueried, feedStreamQueries,
-		    rejectedFeedStreamQueries, feedVersionQueries;
+		    getRangeStreamQueries, finishedQueries, lowPriorityQueries, rowsQueried, bytesQueried, watchQueries,
+		    emptyQueries, feedRowsQueried, feedBytesQueried, feedStreamQueries, rejectedFeedStreamQueries,
+		    feedVersionQueries;
+
+		// counters related to getMappedRange queries
+		Counter getMappedRangeBytesQueried, finishedGetMappedRangeSecondaryQueries, getMappedRangeQueries,
+		    finishedGetMappedRangeQueries;
 
 		// Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
 		// and cleared from the memory, we do not subtract it but add it to bytesDurable.
@@ -1291,6 +1296,9 @@ public:
 		    quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc), kvScanBytes("KVScanBytes", cc),
 		    kvGetBytes("KVGetBytes", cc), eagerReadsKeys("EagerReadsKeys", cc), kvGets("KVGets", cc),
 		    kvScans("KVScans", cc), kvCommits("KVCommits", cc), changeFeedDiskReads("ChangeFeedDiskReads", cc),
+		    getMappedRangeBytesQueried("GetMappedRangeBytesQueried", cc),
+		    finishedGetMappedRangeQueries("FinishedGetMappedRangeQueries", cc),
+		    finishedGetMappedRangeSecondaryQueries("FinishedGetMappedRangeSecondaryQueries", cc),
 		    readLatencySample("ReadLatencyMetrics",
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -2030,6 +2038,30 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 		version = std::max(Version(1), data->version.get());
 	if (version <= data->version.get())
 		return version;
+	choose {
+		when(wait(data->version.whenAtLeast(version))) {
+			return version;
+		}
+		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
+			if (deterministicRandom()->random01() < 0.001)
+				TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
+				    .detail("Version", version)
+				    .detail("MyVersion", data->version.get())
+				    .detail("ServerID", data->thisServerID);
+			throw future_version();
+		}
+	}
+}
+
+ACTOR Future<Version> waitForMinVersion(StorageServer* data, Version version) {
+	// This could become an Actor transparently, but for now it just does the lookup
+	if (version == latestVersion)
+		version = std::max(Version(1), data->version.get());
+	if (version < data->oldestVersion.get() || version <= 0) {
+		return data->oldestVersion.get();
+	} else if (version <= data->version.get()) {
+		return version;
+	}
 	choose {
 		when(wait(data->version.whenAtLeast(version))) {
 			return version;
@@ -2989,9 +3021,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			if (doFilterMutations || !req.encrypted) {
 				for (auto& m : decodedMutations.back().first) {
 					if (m.isEncrypted()) {
-						const BlobCipherEncryptHeader* header = m.encryptionHeader();
-						cipherDetails.insert(header->cipherTextDetails);
-						cipherDetails.insert(header->cipherHeaderDetails);
+						m.updateEncryptCipherDetails(cipherDetails);
 					}
 				}
 			}
@@ -5492,25 +5522,12 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 				//                ASSERT(r.data.size() <= std::abs(req.limit));
 			}
 
-			// For performance concerns, the cost of a range read is billed to the start key and end key of the range.
-			int64_t totalByteSize = 0;
-			for (int i = 0; i < r.data.size(); i++) {
-				totalByteSize += r.data[i].expectedSize();
-			}
-			if (totalByteSize > 0 && SERVER_KNOBS->READ_SAMPLING_ENABLED) {
-				int64_t bytesReadPerKSecond = std::max(totalByteSize, SERVER_KNOBS->EMPTY_READ_PENALTY) / 2;
-				data->metrics.notifyBytesReadPerKSecond(addPrefix(r.data[0].key, req.tenantInfo.prefix, req.arena),
-				                                        bytesReadPerKSecond);
-				data->metrics.notifyBytesReadPerKSecond(
-				    addPrefix(r.data[r.data.size() - 1].key, req.tenantInfo.prefix, req.arena), bytesReadPerKSecond);
-			}
-
 			r.penalty = data->getPenalty();
 			req.reply.send(r);
 
 			resultSize = req.limitBytes - remainingLimitBytes;
-			data->counters.bytesQueried += resultSize;
-			data->counters.rowsQueried += r.data.size();
+			data->counters.getMappedRangeBytesQueried += resultSize;
+			data->counters.finishedGetMappedRangeSecondaryQueries += r.data.size();
 			if (r.data.size() == 0) {
 				++data->counters.emptyQueries;
 			}
@@ -5522,7 +5539,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	}
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
-	++data->counters.finishedQueries;
+	++data->counters.finishedGetMappedRangeQueries;
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
@@ -9237,9 +9254,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					}
 					if (msg.isEncrypted()) {
 						if (!cipherKeys.present()) {
-							const BlobCipherEncryptHeader* header = msg.encryptionHeader();
-							cipherDetails.insert(header->cipherTextDetails);
-							cipherDetails.insert(header->cipherHeaderDetails);
+							msg.updateEncryptCipherDetails(cipherDetails);
 							collectingCipherKeys = true;
 						} else {
 							msg = msg.decrypt(cipherKeys.get(), eager.arena, BlobCipherMetrics::TLOG);
@@ -10813,12 +10828,13 @@ Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Vo
 ACTOR Future<Void> waitMetricsTenantAware_internal(StorageServer* self, WaitMetricsRequest req) {
 	if (req.tenantInfo.hasTenant()) {
 		try {
-			// The call to `waitForVersionNoTooOld()` can throw `future_version()`. Since we're requesting
-			// `latestVersion`, this can only happen if the version at the storage server is currently `0`.
+			// The call to `waitForMinVersion()` can throw `future_version()`.
 			// It is okay for the caller to retry after a delay to give the server some time to catch up.
-			state Version version = wait(waitForVersionNoTooOld(self, latestVersion));
+			state Version version = wait(waitForMinVersion(self, req.minVersion));
 			self->checkTenantEntry(version, req.tenantInfo);
 		} catch (Error& e) {
+			if (!canReplyWith(e))
+				throw;
 			self->sendErrorWithPenalty(req.reply, e, self->getPenalty());
 			return Void();
 		}

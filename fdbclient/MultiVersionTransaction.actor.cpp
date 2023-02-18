@@ -1289,10 +1289,15 @@ void MultiVersionTransaction::updateTransaction(bool setPersistentOptions) {
 	// need to set it.
 	if (setPersistentOptions || !newTr.transaction) {
 		Optional<StringRef> timeout;
-		for (auto option : persistentOptions) {
+		for (auto const& option : persistentOptions) {
 			if (option.first == FDBTransactionOptions::TIMEOUT) {
 				timeout = option.second.castTo<StringRef>();
 			} else if (newTr.transaction) {
+				newTr.transaction->setOption(option.first, option.second.castTo<StringRef>());
+			}
+		}
+		if (newTr.transaction) {
+			for (auto const& option : sensitivePersistentOptions) {
 				newTr.transaction->setOption(option.first, option.second.castTo<StringRef>());
 			}
 		}
@@ -1616,7 +1621,10 @@ void MultiVersionTransaction::setOption(FDBTransactionOptions::Option option, Op
 	}
 
 	if (MultiVersionApi::api->getApiVersion().hasPersistentOptions() && itr->second.persistent) {
-		persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
+		if (itr->second.sensitive)
+			sensitivePersistentOptions.emplace_back(option, value.castTo<WipedString>());
+		else
+			persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
 	}
 
 	auto tr = getTransaction();
@@ -1771,6 +1779,7 @@ ThreadResult<T> MultiVersionTransaction::abortableTimeoutResult(ThreadFuture<Voi
 
 void MultiVersionTransaction::reset() {
 	persistentOptions.clear();
+	sensitivePersistentOptions.clear();
 
 	// Reset the timeout state
 	Reference<ThreadSingleAssignmentVar<Void>> prevTimeoutTsav;

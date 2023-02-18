@@ -30,6 +30,7 @@
 #include "flow/ApiVersion.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/WipedString.h"
 
 // FdbCApi is used as a wrapper around the FoundationDB C API that gets loaded from an external client library.
 // All of the required functions loaded from that external library are stored in function pointers in this struct.
@@ -813,6 +814,7 @@ private:
 	ThreadFuture<T> executeOperation(ThreadFuture<T> (ITransaction::*func)(Args...), Args&&... args);
 
 	std::vector<std::pair<FDBTransactionOptions::Option, Optional<Standalone<StringRef>>>> persistentOptions;
+	std::vector<std::pair<FDBTransactionOptions::Option, Optional<WipedString>>> sensitivePersistentOptions;
 };
 
 struct ClientDesc {

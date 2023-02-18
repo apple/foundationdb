@@ -898,6 +898,13 @@ def tenant_configure(logger):
     output = run_fdbcli_command_and_get_error('tenant configure tenant3 tenant_group=tenant_group1')
     assert output == 'ERROR: Tenant does not exist (2131)'
 
+    expected_output = """
+ERROR: assigned_cluster is only valid in metacluster configuration.
+ERROR: Tenant configuration is invalid (2140)
+    """.strip()
+    output = run_fdbcli_command_and_get_error('tenant configure tenant assigned_cluster=nonexist')
+    assert output == expected_output
+
 @enable_logging()
 def tenant_rename(logger):
     setup_tenants(['tenant', 'tenant2'])

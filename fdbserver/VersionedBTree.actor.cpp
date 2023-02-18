@@ -3657,7 +3657,14 @@ public:
 		} else {
 			g_network->getDiskBytes(parentDirectory(filename), free, total);
 		}
-		int64_t pagerSize = header.pageCount * physicalPageSize;
+
+		// Size of redwood data file.  Note that filePageCountPending is used here instead of filePageCount.  This is
+		// because it is always >= filePageCount and accounts for file size changes which will complete soon.
+		int64_t pagerPhysicalSize = filePageCountPending * physicalPageSize;
+
+		// Size of the pager, which can be less than the data file size.  All pages within this size are either in use
+		// in a data structure or accounted for in one of the pager's free page lists.
+		int64_t pagerLogicalSize = header.pageCount * physicalPageSize;
 
 		// It is not exactly known how many pages on the delayed free list are usable as of right now.  It could be
 		// known, if each commit delayed entries that were freeable were shuffled from the delayed free queue to the
@@ -3668,12 +3675,17 @@ public:
 		// Amount of space taken up by the free list queues themselves, as if we were to pop and use
 		// items on the free lists the space the items are stored in would also become usable
 		int64_t reusableQueueSpace = (freeList.numPages + delayedFreeList.numPages) * physicalPageSize;
-		int64_t reusable = reusablePageSpace + reusableQueueSpace;
+
+		// Pager slack is the space at the end of the pager's logical size until the end of the pager file's size.
+		// These pages will be used if needed without growing the file size.
+		int64_t reusablePagerSlackSpace = pagerPhysicalSize - pagerLogicalSize;
+
+		int64_t reusable = reusablePageSpace + reusableQueueSpace + reusablePagerSlackSpace;
 
 		// Space currently in used by old page versions have have not yet been freed due to the remap cleanup window.
 		int64_t temp = remapQueue.numEntries * physicalPageSize;
 
-		return StorageBytes(free, total, pagerSize - reusable, free + reusable, temp);
+		return StorageBytes(free, total, pagerPhysicalSize, free + reusable, temp);
 	}
 
 	int64_t getPageCacheCount() override { return pageCache.getCount(); }
@@ -4970,13 +4982,14 @@ public:
 	// VersionedBTree takes ownership of pager
 	VersionedBTree(IPager2* pager,
 	               std::string name,
+	               UID logID,
 	               Reference<AsyncVar<ServerDBInfo> const> db,
 	               Optional<EncryptionAtRestMode> expectedEncryptionMode,
 	               EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE,
 	               Reference<IPageEncryptionKeyProvider> keyProvider = {})
 	  : m_pager(pager), m_db(db), m_expectedEncryptionMode(expectedEncryptionMode), m_encodingType(encodingType),
 	    m_enforceEncodingType(false), m_keyProvider(keyProvider), m_pBuffer(nullptr), m_mutationCount(0), m_name(name),
-	    m_pBoundaryVerifier(DecodeBoundaryVerifier::getVerifier(name)) {
+	    m_logID(logID), m_pBoundaryVerifier(DecodeBoundaryVerifier::getVerifier(name)) {
 		m_pDecodeCacheMemory = m_pager->getPageCachePenaltySource();
 		m_lazyClearActor = 0;
 		m_init = init_impl(this);
@@ -5121,7 +5134,7 @@ public:
 		// default encoding is expected.
 		if (encodingType == EncodingType::MAX_ENCODING_TYPE) {
 			encodingType = expectedEncodingType;
-			if (encodingType == EncodingType::XXHash64 && g_network->isSimulated() && BUGGIFY) {
+			if (encodingType == EncodingType::XXHash64 && g_network->isSimulated() && m_logID.hash() % 2 == 0) {
 				encodingType = EncodingType::XOREncryption_TestOnly;
 			}
 		} else if (encodingType != expectedEncodingType) {
@@ -5592,6 +5605,7 @@ private:
 	Future<Void> m_latestCommit;
 	Future<Void> m_init;
 	std::string m_name;
+	UID m_logID;
 	int m_blockSize;
 	ParentInfoMapT childUpdateTracker;
 
@@ -5812,6 +5826,7 @@ private:
 		// Leaves can have just one record if it's large, but internal pages should have at least 4
 		int minRecords = height == 1 ? 1 : 4;
 		double maxSlack = SERVER_KNOBS->REDWOOD_PAGE_REBUILD_MAX_SLACK;
+		double maxNewSlack = SERVER_KNOBS->REDWOOD_PAGE_REBUILD_SLACK_DISTRIBUTION;
 		std::vector<PageToBuild> pages;
 
 		// Whether encryption is used and we need to set encryption domain for a page.
@@ -5885,7 +5900,7 @@ private:
 				// While the last page page has too much slack and the second to last page
 				// has more than the minimum record count, shift a record from the second
 				// to last page to the last page.
-				while (b.slackFraction() > maxSlack && a.count > minRecords) {
+				while (b.slackFraction() > maxNewSlack && a.count > minRecords) {
 					int i = a.lastIndex();
 					if (!PageToBuild::shiftItem(a, b, deltaSizes[i], records[i].kvBytes())) {
 						break;
@@ -7965,7 +7980,7 @@ public:
 		                               SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
 		                               false,
 		                               m_error);
-		m_tree = new VersionedBTree(pager, filename, db, encryptionMode, encodingType, keyProvider);
+		m_tree = new VersionedBTree(pager, filename, logID, db, encryptionMode, encodingType, keyProvider);
 		m_init = catchError(init_impl(this));
 	}
 
@@ -10126,7 +10141,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	printf("Initializing...\n");
 	pager = new DWALPager(
 	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, pagerMemoryOnly);
-	state VersionedBTree* btree = new VersionedBTree(pager, file, {}, encryptionMode, encodingType, keyProvider);
+	state VersionedBTree* btree = new VersionedBTree(pager, file, UID(), {}, encryptionMode, encodingType, keyProvider);
 	wait(btree->init());
 
 	state DecodeBoundaryVerifier* pBoundaries = DecodeBoundaryVerifier::getVerifier(file);
@@ -10365,7 +10380,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 				printf("Reopening btree from disk.\n");
 				IPager2* pager = new DWALPager(
 				    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, false);
-				btree = new VersionedBTree(pager, file, {}, encryptionMode, encodingType, keyProvider);
+				btree = new VersionedBTree(pager, file, UID(), {}, encryptionMode, encodingType, keyProvider);
 
 				wait(btree->init());
 
@@ -10402,7 +10417,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	wait(verifyTask);
 
 	// Sometimes close and reopen before destructive sanity check
-	if (deterministicRandom()->coinflip()) {
+	if (!pagerMemoryOnly && deterministicRandom()->coinflip()) {
 		Future<Void> closedFuture = btree->onClosed();
 		btree->close();
 		wait(closedFuture);
@@ -10414,6 +10429,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 		                                         concurrentExtentReads,
 		                                         pagerMemoryOnly),
 		                           file,
+		                           UID(),
 		                           {},
 		                           {},
 		                           encodingType,
@@ -10750,8 +10766,8 @@ TEST_CASE(":/redwood/performance/set") {
 
 	DWALPager* pager = new DWALPager(
 	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, pagerMemoryOnly);
-	state VersionedBTree* btree =
-	    new VersionedBTree(pager, file, {}, {}, EncodingType::XXHash64, makeReference<NullEncryptionKeyProvider>());
+	state VersionedBTree* btree = new VersionedBTree(
+	    pager, file, UID(), {}, {}, EncodingType::XXHash64, makeReference<NullEncryptionKeyProvider>());
 	wait(btree->init());
 	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 

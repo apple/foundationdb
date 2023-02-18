@@ -1309,6 +1309,13 @@ inline Future<Void> operator||(Future<Void> const& lhs, Future<Void> const& rhs)
 	return chooseActor(lhs, rhs);
 }
 
+ACTOR template <class T>
+Future<T> joinWith(Future<T> f, Future<Void> other) {
+	wait(other);
+	T t = wait(f);
+	return t;
+}
+
 // wait <interval> then call what() in a loop forever
 ACTOR template <class Func>
 Future<Void> recurring(Func what, double interval, TaskPriority taskID = TaskPriority::DefaultDelay) {
