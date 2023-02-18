@@ -260,6 +260,7 @@ public:
 		self->segmentNo_ = 1;
 		self->totalRows_ = 0;
 		self->logicalSize_ = 0;
+		self->totalBytes_ = 0;
 		wait(waitForAll(self->pendingFutures_));
 		self->pendingFutures_.clear();
 		self->deleteSegmentFiles();
@@ -997,5 +998,18 @@ ACTOR Future<Version> getManifestVersion(Database db) {
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
+	}
+}
+
+ACTOR Future<std::string> getMutationLogUrl() {
+	state std::string baseUrl = SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL;
+	if (baseUrl.starts_with("file://")) {
+		state std::vector<std::string> containers = wait(IBackupContainer::listContainers(baseUrl, {}));
+		if (containers.size() == 0) {
+			throw blob_restore_missing_logs();
+		}
+		return containers.back();
+	} else {
+		return baseUrl;
 	}
 }
