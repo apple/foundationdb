@@ -279,8 +279,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		state bool forceJoin = deterministicRandom()->coinflip();
 
 		state std::vector<std::string> messages;
-		try {
-			loop {
+		state bool retried = false;
+		loop {
+			try {
 				Future<Void> restoreFuture =
 				    MetaclusterAPI::restoreCluster(self->managementDb,
 				                                   clusterName,
@@ -293,19 +294,20 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				if (result.present()) {
 					break;
 				}
-			}
+				retried = true;
+			} catch (Error& e) {
+				if (e.code() == error_code_conflicting_restore) {
+					ASSERT(retried);
+					CODE_PROBE(true, "MetaclusterManagementWorkload: timed out restore conflicts with retried restore");
+					continue;
+				} else if (e.code() == error_code_cluster_not_found) {
+					ASSERT(!dataDb->registered);
+					return Void();
+				}
 
-			ASSERT(dataDb->registered);
-			if (!dryRun) {
-				dataDb->detached = false;
+				TraceEvent(SevError, "RestoreClusterFailure").error(e).detail("ClusterName", clusterName);
+				ASSERT(false);
 			}
-		} catch (Error& e) {
-			if (e.code() == error_code_cluster_not_found) {
-				ASSERT(!dataDb->registered);
-				return Void();
-			}
-			TraceEvent(SevError, "RestoreClusterFailure").error(e).detail("ClusterName", clusterName);
-			ASSERT(false);
 		}
 
 		return Void();
