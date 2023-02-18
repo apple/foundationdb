@@ -2,7 +2,7 @@
 maxTLogVersion = 6
 disableTss = true
 disableHostname = true
-disableEncryption = true
+encryptModes = ['disabled']
 tenantModes=['disabled']
 
 [[test]]

@@ -2255,14 +2255,6 @@ int main(int argc, char* argv[]) {
 						}
 					}
 				}
-				g_knobs.setKnob("enable_encryption",
-				                KnobValue::create(ini.GetBoolValue("META", "enableEncryption", false)));
-				g_knobs.setKnob("enable_tlog_encryption",
-				                KnobValue::create(ini.GetBoolValue("META", "enableTLogEncryption", false)));
-				g_knobs.setKnob("enable_storage_server_encryption",
-				                KnobValue::create(ini.GetBoolValue("META", "enableStorageServerEncryption", false)));
-				g_knobs.setKnob("enable_blob_granule_encryption",
-				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
 				g_knobs.setKnob("enable_blob_granule_compression",
 				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
 				g_knobs.setKnob("encrypt_header_auth_token_enabled",
