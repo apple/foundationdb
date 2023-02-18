@@ -81,6 +81,7 @@ struct TenantMapEntry {
 	}
 
 	bool operator==(TenantMapEntry const& other) const;
+	bool operator!=(TenantMapEntry const& other) const;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -108,6 +109,9 @@ struct TenantGroupEntry {
 		return ObjectReader::fromStringRef<TenantGroupEntry>(value, IncludeVersion());
 	}
 
+	bool operator==(TenantGroupEntry const& other) const;
+	bool operator!=(TenantGroupEntry const& other) const;
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, assignedCluster);
@@ -126,6 +130,9 @@ struct TenantTombstoneCleanupData {
 
 	// When we reach the nextTombstoneEraseVersion, we will erase tombstones up through this ID.
 	int64_t nextTombstoneEraseId = -1;
+
+	bool operator==(TenantTombstoneCleanupData const& other) const;
+	bool operator!=(TenantTombstoneCleanupData const& other) const;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

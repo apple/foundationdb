@@ -168,6 +168,9 @@ template <typename ResultType>
 struct KeyBackedRangeResult {
 	std::vector<ResultType> results;
 	bool more;
+
+	bool operator==(KeyBackedRangeResult const& other) const { return results == other.results && more == other.more; }
+	bool operator!=(KeyBackedRangeResult const& other) const { return !(*this == other); }
 };
 
 // Convenient read/write access to a single value of type T stored at key
