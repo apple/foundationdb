@@ -30,6 +30,7 @@
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/MetaclusterConsistency.actor.h"
+#include "fdbserver/workloads/MetaclusterData.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Error.h"
@@ -239,6 +240,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	                                             std::string backupUrl,
 	                                             bool addToMetacluster,
 	                                             ForceJoinNewMetacluster forceJoinNewMetacluster,
+	                                             int simultaneousRestoreCount,
 	                                             MetaclusterRestoreWorkload* self) {
 		state FileBackupAgent backupAgent;
 		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
@@ -263,6 +265,10 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			if (deterministicRandom()->coinflip()) {
 				TraceEvent("MetaclusterRestoreWorkloadAddClusterToMetaclusterDryRun")
 				    .detail("ClusterName", clusterName);
+
+				state MetaclusterData<IDatabase> preDryRunMetaclusterData(self->managementDb);
+				wait(preDryRunMetaclusterData.load());
+
 				wait(MetaclusterAPI::restoreCluster(self->managementDb,
 				                                    clusterName,
 				                                    dataDb->getConnectionRecord()->getConnectionString(),
@@ -270,6 +276,18 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				                                    RestoreDryRun::True,
 				                                    forceJoinNewMetacluster,
 				                                    &messages));
+
+				state MetaclusterData<IDatabase> postDryRunMetaclusterData(self->managementDb);
+				wait(postDryRunMetaclusterData.load());
+
+				// A dry-run shouldn't change anything
+				if (simultaneousRestoreCount == 1) {
+					preDryRunMetaclusterData.assertEquals(postDryRunMetaclusterData);
+				} else {
+					preDryRunMetaclusterData.dataClusterMetadata[clusterName].assertEquals(
+					    postDryRunMetaclusterData.dataClusterMetadata[clusterName]);
+				}
+
 				TraceEvent("MetaclusterRestoreWorkloadAddClusterToMetaclusterDryRunDone")
 				    .detail("ClusterName", clusterName);
 				messages.clear();
@@ -520,6 +538,15 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 						    .detail("FromCluster", clusterItr->first)
 						    .detail("TenantCollisions", collisions.first.size());
 
+						state MetaclusterData<IDatabase> preDryRunMetaclusterData(self->managementDb);
+						wait(preDryRunMetaclusterData.load());
+						std::vector<Future<Void>> preDataClusterLoadFutures;
+						for (auto const& [name, data] : self->dataDbs) {
+							preDataClusterLoadFutures.push_back(preDryRunMetaclusterData.loadDataCluster(
+							    name, data.db->getConnectionRecord()->getConnectionString()));
+						}
+						wait(waitForAll(preDataClusterLoadFutures));
+
 						wait(MetaclusterAPI::restoreCluster(
 						    self->managementDb,
 						    clusterItr->first,
@@ -528,6 +555,18 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 						    RestoreDryRun::True,
 						    ForceJoinNewMetacluster(deterministicRandom()->coinflip()),
 						    &messages));
+
+						state MetaclusterData<IDatabase> postDryRunMetaclusterData(self->managementDb);
+						wait(postDryRunMetaclusterData.load());
+						std::vector<Future<Void>> postDataClusterLoadFutures;
+						for (auto const& [name, data] : self->dataDbs) {
+							postDataClusterLoadFutures.push_back(postDryRunMetaclusterData.loadDataCluster(
+							    name, data.db->getConnectionRecord()->getConnectionString()));
+						}
+						wait(waitForAll(postDataClusterLoadFutures));
+
+						// A dry-run shouldn't change anything
+						preDryRunMetaclusterData.assertEquals(postDryRunMetaclusterData);
 
 						TraceEvent("MetaclusterRestoreWorkloadRestoreManagementClusterDryRunDone")
 						    .detail("FromCluster", clusterItr->first)
@@ -888,6 +927,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			                                      backupUrl.get(),
 			                                      !self->recoverManagementCluster,
 			                                      ForceJoinNewMetacluster(deterministicRandom()->coinflip()),
+			                                      backups.size(),
 			                                      self));
 		}
 
@@ -904,6 +944,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 					                                            backupUrl.get(),
 					                                            true,
 					                                            ForceJoinNewMetacluster::True,
+					                                            backups.size(),
 					                                            self));
 				}
 				wait(waitForAll(secondRestores));

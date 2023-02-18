@@ -93,6 +93,13 @@ struct DataClusterEntry {
 
 	json_spirit::mObject toJson() const;
 
+	bool operator==(DataClusterEntry const& other) const {
+		return id == other.id && capacity == other.capacity && allocated == other.allocated &&
+		       clusterState == other.clusterState;
+	}
+
+	bool operator!=(DataClusterEntry const& other) const { return !(*this == other); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, id, capacity, allocated, clusterState);
@@ -172,6 +179,13 @@ struct MetaclusterRegistrationEntry {
 			                   id.shortString());
 		}
 	}
+
+	bool operator==(MetaclusterRegistrationEntry const& other) const {
+		return clusterType == other.clusterType && metaclusterName == other.metaclusterName && name == other.name &&
+		       metaclusterId == other.metaclusterId && id == other.id;
+	}
+
+	bool operator!=(MetaclusterRegistrationEntry const& other) const { return !(*this == other); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
