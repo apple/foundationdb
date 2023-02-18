@@ -2103,7 +2103,9 @@ struct RestoreClusterImpl {
 
 		// Record the data cluster in the management cluster
 		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
-			MetaclusterMetadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
+			if (!self->restoreDryRun) {
+				MetaclusterMetadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
+			}
 
 			DataClusterEntry entry;
 			entry.id = self->dataClusterId;
