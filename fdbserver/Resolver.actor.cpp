@@ -170,8 +170,14 @@ struct Resolver : ReferenceCounted<Resolver> {
 	Counter splitRequests;
 	int numLogs;
 
-	// Distribution of end-to-end server latency of resolver requests.
+	// End-to-end server latency of resolver requests.
 	LatencySample resolverLatency;
+
+	// Queue wait times.
+	LatencySample queueWaitLatency;
+
+	// Actual work.
+	LatencySample computeLatency;
 
 	Future<Void> logger;
 
@@ -192,7 +198,15 @@ struct Resolver : ReferenceCounted<Resolver> {
 	    splitRequests("SplitRequests", cc), resolverLatency("ResolverLatencyNetrics",
 	                                                        dbgid,
 	                                                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                                                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {
+	                                                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    queueWaitLatency("ResolverQueueWaitMetrics",
+	                     dbgid,
+	                     SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                     SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    computeLatency("ResolverComputeTimeMetrics",
+	                   dbgid,
+	                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                   SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {
 		specialCounter(cc, "Version", [this]() { return this->version.get(); });
 		specialCounter(cc, "NeededVersion", [this]() { return this->neededVersion.get(); });
 		specialCounter(cc, "TotalStateBytes", [this]() { return this->totalStateBytes.get(); });
@@ -272,8 +286,16 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		g_network->setCurrentTask(TaskPriority::DefaultEndpoint);
 	}
 
+	// Time until now has been spent waiting in the queue to do actual work.
+	double queueWaitEndTime = g_network->timer();
+	self->queueWaitLatency.addMeasurement(queueWaitEndTime - req.requestTime());
+
 	if (self->version.get() ==
 	    req.prevVersion) { // Not a duplicate (check relies on no waiting between here and self->version.set() below!)
+		// This is the beginning of the compute phase of the
+		// resolver. There's no wait before it's done.
+		const double beginComputeTime = g_network->timer();
+
 		++self->resolveBatchStart;
 		self->resolvedTransactions += req.transactions.size();
 		self->resolvedBytes += req.transactions.expectedSize();
@@ -471,16 +493,16 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 			self->checkNeededVersion.trigger();
 		}
 
+		// Measure the time spent doing actual work in the resolver.
+		const double endComputeTime = g_network->timer();
+		self->computeLatency.addMeasurement(endComputeTime - beginComputeTime);
+
 		if (req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.After");
 	} else {
 		CODE_PROBE(true, "Duplicate resolve batch request");
 		//TraceEvent("DupResolveBatchReq", self->dbgid).detail("From", proxyAddress);
 	}
-
-	// Measure server-side RPC latency from the time a request was
-	// received to time the response was sent.
-	const double endTime = g_network->timer();
 
 	auto proxyInfoItr = self->proxyInfoMap.find(proxyAddress);
 
@@ -499,7 +521,11 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		req.reply.send(Never());
 	}
 
+	// Measure server-side RPC latency from the time a request was
+	// received to time the response was sent.
+	const double endTime = g_network->timer();
 	self->resolverLatency.addMeasurement(endTime - req.requestTime());
+
 	++self->resolveBatchOut;
 
 	return Void();
