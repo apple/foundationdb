@@ -19,14 +19,20 @@
  */
 
 #include <algorithm>
+#include <ctime>
 #include <limits>
 #include <sstream>
 #include <queue>
 #include <vector>
 #include <unordered_map>
 
+#include "fdbclient/BackupContainer.h"
+#include "fdbclient/ClientBooleanParams.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/ServerKnobs.h"
 #include "fdbrpc/simulator.h"
+#include "flow/CodeProbe.h"
+#include "flow/serialize.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BlobGranuleCommon.h"
@@ -38,6 +44,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tuple.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/BlobGranuleValidation.actor.h"
@@ -5243,6 +5250,91 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 	}
 }
 
+ACTOR Future<Void> updateLastFlushTs(Database db) {
+	state Transaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			KeyBackedProperty<int64_t> lastFlushTs(blobGranulesLastFlushKey);
+			int64_t epochs = (int64_t)now();
+			lastFlushTs.set(&tr, epochs);
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			fmt::print("updateLastFlushTs {} \n", e.what());
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<int64_t> getLastFlushTs(Database db) {
+	state Transaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			KeyBackedProperty<int64_t> lastFlushTs(blobGranulesLastFlushKey);
+			state int64_t ret;
+			wait(store(ret, lastFlushTs.getD(&tr, Snapshot::False, 0)));
+			return ret;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<Void> maybeFlushAndTruncateMutationLogs(Reference<BlobManagerData> bmData) {
+	try {
+		int64_t lastFlushTs = wait(getLastFlushTs(bmData->db));
+		bool shouldFlush = (now() - lastFlushTs) > SERVER_KNOBS->BLOB_RESTORE_MLOGS_RETENTION_SECS;
+		if (!shouldFlush) {
+			TraceEvent("SkipBlobGranulesFlush").detail("LastFlushTs", lastFlushTs);
+			return Void();
+		}
+
+		state std::string mlogsUrl = wait(getMutationLogUrl());
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
+		state BackupDescription desc = wait(bc->describeBackup(true));
+		if (!desc.contiguousLogEnd.present()) {
+			TraceEvent("SkipBlobGranulesFlush").detail("LogUrl", mlogsUrl);
+			return Void(); // skip truncation if no valid backup for mutation logs
+		}
+
+		state Version logEndVersion = desc.contiguousLogEnd.get();
+		// Force flush in-memory data of all blob workers until end of log
+		FlushGranuleRequest req(bmData->epoch, normalKeys, logEndVersion, false);
+		wait(success(doBlobGranuleRequests(bmData->db, normalKeys, req, &BlobWorkerInterface::flushGranuleRequest)));
+		wait(updateLastFlushTs(bmData->db));
+
+		// Truncate mutation logs to max retention period
+		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(bmData->db));
+		Optional<int64_t> logEndEpochs = wait(timeKeeperEpochsFromVersion(logEndVersion, tr));
+		if (!logEndEpochs.present()) {
+			TraceEvent("SkipMutationLogTruncation").detail("LogEndVersion", logEndVersion);
+			return Void(); // skip truncation if no timestamp about log end
+		}
+
+		// Find timestamp and version to truncate
+		int64_t epochs = logEndEpochs.get() - SERVER_KNOBS->BLOB_RESTORE_MLOGS_RETENTION_SECS;
+		if (epochs <= 0) {
+			TraceEvent("SkipMutationLogTruncation").detail("Epochs", epochs);
+			return Void();
+		}
+		state std::string timestamp = BackupAgentBase::formatTime(epochs);
+		state Version truncVersion = wait(timeKeeperVersionFromDatetime(timestamp, bmData->db));
+
+		wait(bc->expireData(truncVersion, true));
+		TraceEvent("TruncateMutationLogs").detail("Version", truncVersion).detail("Timestamp", timestamp);
+		CODE_PROBE(true, "Flush blob granules and truncate mutation logs");
+	} catch (Error& e) {
+		TraceEvent("TruncateMutationLogsError").error(e); // skip and retry next time
+	}
+	return Void();
+}
+
 ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 	bmData->initBStore();
 
@@ -5256,8 +5348,9 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 				break;
 			}
 		}
-		if (activeRanges) {
+		if (activeRanges && SERVER_KNOBS->BLOB_MANIFEST_BACKUP) {
 			if (bmData->manifestStore.isValid()) {
+				wait(maybeFlushAndTruncateMutationLogs(bmData));
 				wait(dumpManifest(bmData->db, bmData->manifestStore, bmData->epoch, bmData->manifestDumperSeqNo));
 				bmData->manifestDumperSeqNo++;
 			} else {
