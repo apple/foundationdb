@@ -223,15 +223,29 @@ class TestPicker:
         return res
 
     def choose_test(self) -> List[Path]:
-        min_runtime: float | None = None
         candidates: List[TestDescription] = []
-        for _, v in self.tests.items():
-            this_time = v.total_runtime * v.priority
-            if min_runtime is None or this_time < min_runtime:
-                min_runtime = this_time
-                candidates = [v]
-            elif this_time == min_runtime:
-                candidates.append(v)
+
+        if config.random.random() < 0.99:
+            # 99% of the time, select a test with the least runtime
+            min_runtime: float | None = None
+            for _, v in self.tests.items():
+                this_time = v.total_runtime * v.priority
+                if min_runtime is None or this_time < min_runtime:
+                    min_runtime = this_time
+                    candidates = [v]
+                elif this_time == min_runtime:
+                    candidates.append(v)
+        else:
+            # 1% of the time, select the test with the fewest runs, rather than the test
+            # with the least runtime. This is to improve coverage for long-running tests
+            min_runs: int | None = None
+            for _, v in self.tests.items():
+                if min_runs is None or v.num_runs < min_runs:
+                    min_runs = v.num_runs
+                    candidates = [v]
+                elif v.num_runs == min_runs:
+                    candidates.append(v)
+
         candidates.sort()
         choice = config.random.randint(0, len(candidates) - 1)
         test = candidates[choice]
