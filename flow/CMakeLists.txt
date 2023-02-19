@@ -52,6 +52,11 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
     set(IS_ARM_MAC YES)
 endif()
 
+if(USE_JEMALLOC)
+  target_link_libraries(flow PRIVATE jemalloc)
+  target_link_libraries(flow_sampling PRIVATE jemalloc)
+endif()
+
 foreach(ft flow flow_sampling flowlinktest)
     target_include_directories(${ft} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
     if (FLOW_USE_ZSTD)
