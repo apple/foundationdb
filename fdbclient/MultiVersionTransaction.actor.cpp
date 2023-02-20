@@ -19,6 +19,7 @@
  */
 
 #include <cstddef>
+#include <filesystem>
 #ifdef __unixish__
 #include <fcntl.h>
 #endif
@@ -56,6 +57,10 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #include "fdbclient/buildid.h"
+
+int symbol_func() {
+	return 1;
+}
 
 #ifdef FDBCLIENT_NATIVEAPI_ACTOR_H
 #error "MVC should not depend on the Native API"
@@ -2829,6 +2834,18 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 	// Copy library for each thread configured per version
 	std::vector<std::pair<std::string, bool>> paths;
 
+	const struct build_id_note* note_by_symbol = build_id_find_nhdr_by_symbol((const void*)symbol_func);
+	ElfW(Word) len = build_id_length(note_by_symbol);
+	const uint8_t* build_id = build_id_data(note_by_symbol);
+
+	// https://gist.github.com/miguelmota/4fc9b46cf21111af5fa613555c14de92
+	std::ostringstream ss;
+	ss << std::hex << std::setfill('0');
+	for (ElfW(Word) i = 0; i < len; i++) {
+		ss << std::hex << std::setw(2) << static_cast<int>(build_id[i]);
+	}
+	std::cout << "Build ID " << ss.str().c_str() << "\n";
+
 	if (threadCount == 1) {
 		paths.push_back({ path, false });
 	} else {
@@ -2841,49 +2858,56 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 
 			constexpr int MAX_TMP_NAME_LENGTH = PATH_MAX + 12;
 			char tempName[MAX_TMP_NAME_LENGTH];
-			snprintf(tempName, MAX_TMP_NAME_LENGTH, "%s/%s-XXXXXX", tmpDir.c_str(), filename.c_str());
-			int tempFd = mkstemp(tempName);
-			int fd;
+			snprintf(
+			    tempName, MAX_TMP_NAME_LENGTH, "%s/%s-%d-%s", tmpDir.c_str(), filename.c_str(), ii, ss.str().c_str());
 
-			if ((fd = open(path.c_str(), O_RDONLY)) == -1) {
-				TraceEvent("ExternalClientNotFound").detail("LibraryPath", path);
-				throw file_not_found();
-			}
+			if (!(std::filesystem::exists(tempName))) {
+				std::cout << tempName << "does not exists \n";
 
-			TraceEvent("CopyingExternalClient")
-			    .detail("FileName", filename)
-			    .detail("LibraryPath", path)
-			    .detail("TempPath", tempName);
+				int tempFd = open(tempName, O_RDWR | O_CREAT);
+				std::cout << tempName << "opened \n";
+				int fd;
 
-			constexpr size_t buf_sz = 4096;
-			char buf[buf_sz];
-			while (1) {
-				ssize_t readCount = read(fd, buf, buf_sz);
-				if (readCount == 0) {
-					// eof
-					break;
+				if ((fd = open(path.c_str(), O_RDONLY)) == -1) {
+					TraceEvent("ExternalClientNotFound").detail("LibraryPath", path);
+					throw file_not_found();
 				}
-				if (readCount == -1) {
-					TraceEvent(SevError, "ExternalClientCopyFailedReadError")
-					    .GetLastError()
-					    .detail("LibraryPath", path);
-					throw platform_error();
-				}
-				ssize_t written = 0;
-				while (written != readCount) {
-					ssize_t writeCount = write(tempFd, buf + written, readCount - written);
-					if (writeCount == -1) {
-						TraceEvent(SevError, "ExternalClientCopyFailedWriteError")
+
+				TraceEvent("CopyingExternalClient")
+				    .detail("FileName", filename)
+				    .detail("LibraryPath", path)
+				    .detail("TempPath", tempName);
+
+				constexpr size_t buf_sz = 4096;
+				char buf[buf_sz];
+				while (1) {
+					ssize_t readCount = read(fd, buf, buf_sz);
+					if (readCount == 0) {
+						// eof
+						break;
+					}
+					if (readCount == -1) {
+						TraceEvent(SevError, "ExternalClientCopyFailedReadError")
 						    .GetLastError()
 						    .detail("LibraryPath", path);
 						throw platform_error();
 					}
-					written += writeCount;
+					ssize_t written = 0;
+					while (written != readCount) {
+						ssize_t writeCount = write(tempFd, buf + written, readCount - written);
+						if (writeCount == -1) {
+							TraceEvent(SevError, "ExternalClientCopyFailedWriteError")
+							    .GetLastError()
+							    .detail("LibraryPath", path);
+							throw platform_error();
+						}
+						written += writeCount;
+					}
 				}
-			}
 
-			close(fd);
-			close(tempFd);
+				close(fd);
+				close(tempFd);
+			}
 
 			paths.push_back({ tempName, true }); // use + delete temporary copies of the library.
 		}
@@ -3043,30 +3067,71 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 // extern char build_id_start;
 // extern char build_id_end;
 
-const char __attribute__((section(".TEST"))) build_id =
-    '!'; // Clang:  with static, it compiles but result is all 0z, without
+// const char __attribute__((section(".TEST"))) build_id =
+//     '!'; // Clang:  with static, it compiles but result is all 0z, without
 
 // GlobalVariable* build_id = new llvm::GlobalVariable();
 // build_id->setSection(".TEST");
 
 void MultiVersionApi::setupNetwork() {
 
-	const char* s;
+	// const struct build_id_note* note = build_id_find_nhdr_by_name("");
+	// if (!note)
+	//	std::cout << "note is null\n";
 
-	s = &build_id;
+	// auto start = std::chrono::steady_clock::now();
 
-	// section data is 20 bytes in size
-	s -= 20;
+	// const struct build_id_note* note_by_symbol = build_id_find_nhdr_by_symbol((const void*)symbol_func);
+	//  if (note != note_by_symbol)
+	//		std::cout << "note_by_symbol is not note\n";
 
-	// std::cout << "Address is at " << static_cast<const void*>(s) << std::endl;
-	//  sha1 data continues for 20 bytes
-	printf("  > Build ID: ");
-	int x;
-	for (x = 0; x < 20; x++) {
-		printf("%02hhx", s[x]);
-	}
+	// auto middle = std::chrono::steady_clock::now();
+	// ElfW(Word) len = build_id_length(note_by_symbol);
+	//
+	// const uint8_t* build_id = build_id_data(note_by_symbol);
+	//
+	// auto end = std::chrono::steady_clock::now();
+	//
+	// auto d1 = std::chrono::duration_cast<std::chrono::microseconds>((middle - start));
+	// auto d2 = std::chrono::duration_cast<std::chrono::microseconds>((end - middle));
+	//
+	// std::cout << "d1 " << d1.count() << " us\n";
+	// std::cout << "d2 " << d2.count() << " us \n";
+	//
+	// printf("Build ID: ");
+	// for (ElfW(Word) i = 0; i < len; i++) {
+	//	printf("%02x", build_id[i]);
+	//}
+	// printf("\n");
 
-	printf(" <\n");
+	// const build_id_note* note = build_id_find_nhdr_by_name("libfdb_c.so");
+	// if (!note)
+	//	std::cout << "not is null\n";
+	//
+	// const uint8_t* build_id = build_id_data(note);
+	//
+	// printf("Build ID: ");
+	// for (ElfW(Word) i = 0; i < 20; i++) {
+	//	printf("%02x", build_id[i]);
+	//}
+	// printf("\n");
+
+	//	const char* s;
+	//
+	//	s = &build_id;
+	//
+	//	// section data is 20 bytes in size
+	//	s -= 20;
+	//
+	//	// std::cout << "Address is at " << static_cast<const void*>(s) << std::endl;
+	//	//  sha1 data continues for 20 bytes
+	//	printf("  > Build ID: ");
+	//	int x;
+	//	for (x = 0; x < 20; x++) {
+	//		printf("%02hhx", s[x]);
+	//	}
+	//
+	//	printf(" <\n");
 
 	// printf("build_id_find_nhdr_by_name\n");
 	// const struct build_id_note* note = build_id_find_nhdr_by_name("./libfdb_c.so");
@@ -3141,12 +3206,9 @@ void MultiVersionApi::setupNetwork() {
 					externalClients[filename] = {};
 					auto libCopies = copyExternalLibraryPerThread(path);
 					for (int idx = 0; idx < libCopies.size(); ++idx) {
-						bool unlinkOnLoad = libCopies[idx].second && !retainClientLibCopies;
-						externalClients[filename].push_back(Reference<ClientInfo>(
-						    new ClientInfo(new DLApi(libCopies[idx].first, unlinkOnLoad /*unlink on load*/),
-						                   path,
-						                   useFutureVersion,
-						                   idx)));
+						// bool unlinkOnLoad = libCopies[idx].second && !retainClientLibCopies;
+						externalClients[filename].push_back(Reference<ClientInfo>(new ClientInfo(
+						    new DLApi(libCopies[idx].first, false /*unlink on load*/), path, useFutureVersion, idx)));
 					}
 				}
 			}

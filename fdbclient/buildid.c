@@ -28,7 +28,7 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "build-id.h"
+#include "fdbclient/buildid.h"
 
 #ifndef NT_GNU_BUILD_ID
 #define NT_GNU_BUILD_ID 3
