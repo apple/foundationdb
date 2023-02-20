@@ -168,7 +168,10 @@ class ApiTest(Test):
         if len(self.allocated_tenants) == 0 or random.random() < new_tenant_probability:
             return self.random.random_string(random.randint(0, 30))
         else:
-            return random.choice(list(self.allocated_tenants))
+            tenant_list = list(self.allocated_tenants)
+            # sort to ensure deterministic selection of a tenant
+            tenant_list.sort()
+            return random.choice(tenant_list)
 
     def generate(self, args, thread_number):
         instructions = InstructionSet()

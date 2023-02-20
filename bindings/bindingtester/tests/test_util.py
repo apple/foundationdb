@@ -90,7 +90,7 @@ class RandomGenerator(object):
             elif choice == "string":
                 tup.append(self.random_unicode_str(random.randint(0, 100)))
             elif choice == "uuid":
-                tup.append(uuid.uuid4())
+                tup.append(uuid.UUID(int=random.getrandbits(128)))
             elif choice == "bool":
                 b = random.random() < 0.5
                 if self.api_version < 500:
