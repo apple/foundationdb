@@ -348,7 +348,10 @@ struct MoveInUpdates {
 	MoveInUpdates(UID id, Version version, struct StorageServer* data, IKeyValueStore* store)
 	  : id(id), oldestVersion(version), data(data), store(store), range(persistUpdatesKeyRange(id)), fail(false) {}
 
-	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
+	void addMutation(Version version,
+	                 bool fromFetch,
+	                 MutationRef const& mutation,
+	                 MutationRefAndCipherKeys const& encryptedMutation);
 
 	bool hasNext() const;
 
@@ -473,7 +476,10 @@ struct MoveInShard {
 	bool isDataTransferred() const { return meta->getPhase() >= MoveInPhase::ApplyingUpdates; }
 	bool isDataAndCFTransferred() const { throw not_implemented(); }
 
-	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
+	void addMutation(Version version,
+	                 bool fromFetch,
+	                 MutationRef const& mutation,
+	                 MutationRefAndCipherKeys const& encryptedMutation);
 
 	KeyRangeRef getAffectedRange(const MutationRef& mutation) const {
 		ASSERT(meta != nullptr);
@@ -8362,7 +8368,10 @@ Key MoveInUpdates::getPersistKey(const Version version, const int idx) {
 // 	}
 // }
 
-void MoveInUpdates::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
+void MoveInUpdates::addMutation(Version version,
+                                bool fromFetch,
+                                MutationRef const& mutation,
+                                MutationRefAndCipherKeys const& encryptedMutation) {
 	// Create a new VerUpdateRef in updates queue if it is a new version.
 	// TraceEvent("MoveInUpdatesAddMutation", id).detail("Version", version).detail("Mutation", mutation);
 	if (version <= oldestVersion)
@@ -8476,7 +8485,10 @@ void MoveInShard::cancel() {
 	    mLV, MutationRef(MutationRef::SetValue, persistMoveInShardKey(this->id()), moveInShardValue(*this->meta)));
 }
 
-void MoveInShard::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
+void MoveInShard::addMutation(Version version,
+                              bool fromFetch,
+                              MutationRef const& mutation,
+                              MutationRefAndCipherKeys const& encryptedMutation) {
 	DEBUG_MUTATION("MoveInShardAddMutation", version, mutation, this->id());
 	server->counters.logicalBytesMoveInOverhead += mutation.expectedSize();
 	const KeyRangeRef range = this->getAffectedRange(mutation);
@@ -8487,7 +8499,7 @@ void MoveInShard::addMutation(Version version, bool fromFetch, MutationRef const
 	}
 
 	if (this->getPhase() < MoveInPhase::ReadWritePending && version > this->meta->highWatermark) {
-		updates->addMutation(version, fromFetch, mutation);
+		updates->addMutation(version, fromFetch, mutation, encryptedMutation);
 		// TraceEvent("MoveInShardRegisterUpdates", this->meta->id).detail("Version", version);
 		// server->pendingMoveInUpdates.insert(&updates);
 		// Create a new VerUpdateRef in updates queue if it is a new version.
@@ -8505,7 +8517,7 @@ void MoveInShard::addMutation(Version version, bool fromFetch, MutationRef const
 
 	} else if (getPhase() == MoveInPhase::ReadWritePending || getPhase() == MoveInPhase::Complete) {
 		// updates.addMutation(version, fromFetch, mutation);
-		server->addMutation(version, fromFetch, mutation, range, server->updateEagerReads);
+		server->addMutation(version, fromFetch, mutation,  encryptedMutation, range, server->updateEagerReads);
 	}
 }
 
@@ -9262,7 +9274,7 @@ void ShardInfo::addMutation(Version version,
 	if (adding) {
 		adding->addMutation(version, fromFetch, mutation, encryptedMutation);
 	} else if (moveInShard) {
-		moveInShard->addMutation(version, fromFetch, mutation);
+		moveInShard->addMutation(version, fromFetch, mutation, encryptedMutation);
 	} else if (readWrite) {
 		readWrite->addMutation(
 		    version, fromFetch, mutation, encryptedMutation, this->keys, readWrite->updateEagerReads);
