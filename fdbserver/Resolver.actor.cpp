@@ -26,7 +26,6 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
-#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
@@ -352,7 +351,8 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 			stateTransactions.push_back_deep(
 			    stateTransactions.arena(),
 			    StateTransactionRef(reply.committed[t] == ConflictBatch::TransactionCommitted,
-			                        req.transactions[t].mutations));
+			                        req.transactions[t].mutations,
+			                        req.transactions[t].tenantIds));
 
 			// for (const auto& m : req.transactions[t].mutations)
 			//	DEBUG_MUTATION("Resolver", req.version, m, self->dbgid);

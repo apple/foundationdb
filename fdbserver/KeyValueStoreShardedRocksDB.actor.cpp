@@ -1,3 +1,4 @@
+#include "fdbclient/FDBTypes.h"
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
 #include "fdbclient/KeyRangeMap.h"
@@ -3611,6 +3612,10 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	// Used for debugging shard mapping issue.
 	std::vector<std::pair<KeyRange, std::string>> getDataMapping() { return shardManager.getDataMapping(); }
+
+	Future<EncryptionAtRestMode> encryptionMode() override {
+		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
+	}
 
 	std::shared_ptr<ShardedRocksDBState> rState;
 	rocksdb::Options dbOptions;

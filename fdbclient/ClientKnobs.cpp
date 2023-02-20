@@ -24,6 +24,7 @@
 #include "fdbclient/Tenant.h"
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
+#include "flow/flow.h"
 
 #define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
 
@@ -224,6 +225,11 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE,      2 );
 	init( BLOBSTORE_MULTIPART_MAX_PART_SIZE,  20000000 );
 	init( BLOBSTORE_MULTIPART_MIN_PART_SIZE,   5242880 );
+	init( BLOBSTORE_GLOBAL_CONNECTION_POOL,       true );
+	init( BLOBSTORE_ENABLE_LOGGING,               true );
+	init( BLOBSTORE_STATS_LOGGING_INTERVAL,       10.0 );
+	init( BLOBSTORE_LATENCY_LOGGING_INTERVAL,    120.0 );
+	init( BLOBSTORE_LATENCY_LOGGING_ACCURACY,     0.01 );
 
 	// These are basically unlimited by default but can be used to reduce blob IO if needed
 	init( BLOBSTORE_REQUESTS_PER_SECOND,            200 );
@@ -234,8 +240,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BLOBSTORE_WRITE_REQUESTS_PER_SECOND,       50 );
 	init( BLOBSTORE_READ_REQUESTS_PER_SECOND,       100 );
 	init( BLOBSTORE_DELETE_REQUESTS_PER_SECOND,     200 );
-
-	init( BGR_READ_BLOCK_SIZE,             20*1024*1024 ); if( randomize && BUGGIFY ) BGR_READ_BLOCK_SIZE = 64 * 1024 * deterministicRandom()->randomInt(1, 100);
 
 	// Dynamic Knobs
 	init( COMMIT_QUORUM_TIMEOUT,                    3.0 );
@@ -264,7 +268,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	// transaction tags
 	init( MAX_TAGS_PER_TRANSACTION,                   5 );
-	init( MAX_TRANSACTION_TAG_LENGTH,                16 );
+	init( MAX_TRANSACTION_TAG_LENGTH,               255 );
 	init( COMMIT_SAMPLE_COST,                       100 ); if( randomize && BUGGIFY ) COMMIT_SAMPLE_COST = 10;
 	init( INCOMPLETE_SHARD_PLUS,                   4096 );
 	init( READ_TAG_SAMPLE_RATE,                    0.01 ); if( randomize && BUGGIFY ) READ_TAG_SAMPLE_RATE = 1.0; // Communicated to clients from cluster
@@ -280,7 +284,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	// Blob granules
 	init( BG_MAX_GRANULE_PARALLELISM,                10 );
-	init( BG_TOO_MANY_GRANULES,                   10000 );
+	init( BG_TOO_MANY_GRANULES,                   20000 );
 	init( BLOB_METADATA_REFRESH_INTERVAL,          3600 ); if ( randomize && BUGGIFY ) { BLOB_METADATA_REFRESH_INTERVAL = deterministicRandom()->randomInt(5, 120); }
 
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_TIMES,        3 );
@@ -294,10 +298,19 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK,   5 ); if ( randomize && BUGGIFY ) METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK = 1;
 	init( METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY, 1.0 ); if ( randomize && BUGGIFY ) METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY = deterministicRandom()->random01() * 60;
 	init( METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT, 10.0 ); if ( randomize && BUGGIFY ) METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT = 1 + deterministicRandom()->random01() * 59;
-	init( TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL,  2 ); if( randomize && BUGGIFY ) TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL = deterministicRandom()->randomInt(1, 10);
+	init( METACLUSTER_RESTORE_BATCH_SIZE,          1000 ); if ( randomize && BUGGIFY ) METACLUSTER_RESTORE_BATCH_SIZE = 1 + deterministicRandom()->randomInt(0, 3);
+	init( TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL,   2 ); if( randomize && BUGGIFY ) TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL = deterministicRandom()->randomInt(1, 10);
 	init( CLIENT_ENABLE_USING_CLUSTER_ID_KEY,     false );
 
-	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,     false );
+	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,       false );
+	init( SIMULATION_ENABLE_SNAPSHOT_ENCRYPTION_CHECKS,        true );
+	init( SIMULATION_EKP_TENANT_IDS_TO_DROP,         "-1" );
+	init( ENABLE_CONFIGURABLE_ENCRYPTION,            true );
+	init( ENCRYPT_HEADER_FLAGS_VERSION,                 1 );
+	init( ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION,       1 );
+	init( ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION, 1 );
+	init( ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION, 1 );
+
 	// clang-format on
 }
 

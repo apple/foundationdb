@@ -290,6 +290,10 @@ struct RegisterMasterRequest {
 	}
 };
 
+// Instantiated in worker.actor.cpp
+extern template class RequestStream<RegisterMasterRequest, false>;
+extern template struct NetNotifiedQueue<RegisterMasterRequest, false>;
+
 struct RecruitFromConfigurationReply {
 	constexpr static FileIdentifier file_identifier = 2224085;
 	std::vector<WorkerInterface> backupWorkers;
@@ -862,10 +866,12 @@ struct InitializeStorageRequest {
 	    tssPairIDAndVersion; // Only set if recruiting a tss. Will be the UID and Version of its SS pair.
 	Version initialClusterVersion;
 	ReplyPromise<InitializeStorageReply> reply;
+	EncryptionAtRestMode encryptMode;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, initialClusterVersion);
+		serializer(
+		    ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, initialClusterVersion, encryptMode);
 	}
 };
 
@@ -1182,7 +1188,6 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei, Reference<
 class IKeyValueStore;
 class ServerCoordinators;
 class IDiskQueue;
-class IPageEncryptionKeyProvider;
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
@@ -1190,8 +1195,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder,
-                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider);
+                                 std::string folder);
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,
@@ -1199,8 +1203,7 @@ ACTOR Future<Void> storageServer(
     std::string folder,
     Promise<Void> recovered,
     Reference<IClusterConnectionRecord>
-        connRecord, // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
-    Reference<IPageEncryptionKeyProvider> encryptionKeyProvider);
+        connRecord); // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
@@ -1297,6 +1300,8 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 
 typedef decltype(&tLog) TLogFn;
 
+extern bool isSimulatorProcessReliable();
+
 ACTOR template <class T>
 Future<T> ioTimeoutError(Future<T> what, double time, const char* context = nullptr) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
@@ -1311,7 +1316,7 @@ Future<T> ioTimeoutError(Future<T> what, double time, const char* context = null
 		}
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable()) {
+			if (!isSimulatorProcessReliable()) {
 				err = err.asInjectedFault();
 			}
 			TraceEvent e(SevError, "IoTimeoutError");
@@ -1360,7 +1365,7 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 		}
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable()) {
+			if (!isSimulatorProcessReliable()) {
 				err = err.asInjectedFault();
 			}
 			TraceEvent e(SevError, "IoTimeoutError");

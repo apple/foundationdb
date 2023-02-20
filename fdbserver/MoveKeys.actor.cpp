@@ -803,13 +803,16 @@ ACTOR Future<Void> waitForShardReady(StorageServerInterface server,
 		try {
 			GetShardStateReply rep =
 			    wait(server.getShardState.getReply(GetShardStateRequest(keys, mode), TaskPriority::MoveKeys));
-			TraceEvent("GetShardStateReadyDD").detail("RepVersion", rep.first).detail("MinVersion", rep.second).log();
+			TraceEvent("GetShardStateReadyDD", server.id())
+			    .detail("RepVersion", rep.first)
+			    .detail("MinVersion", rep.second)
+			    .log();
 			if (rep.first >= minVersion) {
 				return Void();
 			}
 			wait(delayJittered(SERVER_KNOBS->SHARD_READY_DELAY, TaskPriority::MoveKeys));
 		} catch (Error& e) {
-			TraceEvent("GetShardStateReadyError").error(e).log();
+			TraceEvent("GetShardStateReadyError", server.id()).error(e).log();
 			if (e.code() != error_code_timed_out) {
 				if (e.code() != error_code_broken_promise)
 					throw e;
@@ -1175,7 +1178,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						tssCount += tssReady[s].isReady() && !tssReady[s].isError();
 
 					TraceEvent readyServersEv(SevDebug, waitInterval.end(), relocationIntervalId);
-					readyServersEv.detail("ReadyServers", count);
+					readyServersEv.detail("ReadyServers", count).detail("Dests", dest.size());
 					if (tssReady.size()) {
 						readyServersEv.detail("ReadyTSS", tssCount);
 					}

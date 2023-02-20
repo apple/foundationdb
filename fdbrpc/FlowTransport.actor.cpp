@@ -49,9 +49,14 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/WatchFile.actor.h"
+#include "flow/IConnection.h"
 #define XXH_INLINE_ALL
 #include "flow/xxhash.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+void removeCachedDNS(const std::string& host, const std::string& service) {
+	INetworkConnections::net()->removeCachedDNS(host, service);
+}
 
 namespace {
 
@@ -1069,7 +1074,8 @@ ACTOR static void deliver(TransportData* self,
 		if (receiver) {
 			TraceEvent(SevWarnAlways, "AttemptedRPCToPrivatePrevented")
 			    .detail("From", peerAddress)
-			    .detail("Token", destination.token);
+			    .detail("Token", destination.token)
+			    .detail("Receiver", typeid(*receiver).name());
 			ASSERT(!self->isLocalAddress(destination.getPrimaryAddress()));
 			Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
 			sendPacket(self,

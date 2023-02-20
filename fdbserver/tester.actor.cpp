@@ -26,7 +26,13 @@
 #include <toml.hpp>
 
 #include "flow/ActorCollection.h"
+#include "flow/ChaosMetrics.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/Histogram.h"
+#include "flow/IAsyncFile.h"
+#include "flow/TDMetric.actor.h"
+#include "fdbrpc/Locality.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/Audit.h"
@@ -46,6 +52,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "flow/Platform.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 FDB_DEFINE_BOOLEAN_PARAM(UntrustedMode);
@@ -253,6 +260,23 @@ std::vector<std::string> getOption(VectorRef<KeyValueRef> options, Key key, std:
 	return defaultValue;
 }
 
+std::vector<int> getOption(VectorRef<KeyValueRef> options, Key key, std::vector<int> defaultValue) {
+	for (int i = 0; i < options.size(); i++)
+		if (options[i].key == key) {
+			std::vector<int> v;
+			int begin = 0;
+			for (int c = 0; c < options[i].value.size(); c++)
+				if (options[i].value[c] == ',') {
+					v.push_back(atoi((char*)options[i].value.begin() + begin));
+					begin = c + 1;
+				}
+			v.push_back(atoi((char*)options[i].value.begin() + begin));
+			options[i].value = ""_sr;
+			return v;
+		}
+	return defaultValue;
+}
+
 bool hasOption(VectorRef<KeyValueRef> options, Key key) {
 	for (const auto& option : options) {
 		if (option.key == key) {
@@ -403,8 +427,18 @@ void CompoundWorkload::addFailureInjection(WorkloadRequest& work) {
 		if (disabledWorkloads.count(workload->description()) > 0) {
 			continue;
 		}
+		if (std::count(work.disabledFailureInjectionWorkloads.begin(),
+		               work.disabledFailureInjectionWorkloads.end(),
+		               workload->description()) > 0) {
+			continue;
+		}
 		while (shouldInjectFailure(random, work, workload)) {
 			workload->initFailureInjectionMode(random);
+			TraceEvent("AddFailureInjectionWorkload")
+			    .detail("Name", workload->description())
+			    .detail("ClientID", work.clientId)
+			    .detail("ClientCount", clientCount)
+			    .detail("Title", work.title);
 			failureInjection.push_back(workload);
 			workload = factory->create(*this);
 		}
@@ -837,7 +871,7 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 	}
 }
 
-ACTOR Future<Void> clearData(Database cx) {
+ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 	state Transaction tr(cx);
 	state UID debugID = debugRandom()->randomUniqueID();
 	tr.debugTransaction(debugID);
@@ -859,6 +893,43 @@ ACTOR Future<Void> clearData(Database cx) {
 			wait(tr.onError(e));
 			debugID = debugRandom()->randomUniqueID();
 			tr.debugTransaction(debugID);
+		}
+	}
+
+	tr = Transaction(cx);
+	loop {
+		try {
+			TraceEvent("TesterClearingTenantsStart", debugID);
+			state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants =
+			    wait(TenantMetadata::tenantMap().getRange(&tr, {}, {}, 1000));
+
+			TraceEvent("TesterClearingTenantsDeletingBatch", debugID)
+			    .detail("FirstTenant", tenants.results.empty() ? "<none>"_sr : tenants.results[0].second.tenantName)
+			    .detail("BatchSize", tenants.results.size());
+
+			std::vector<Future<Void>> deleteFutures;
+			for (auto const& [id, entry] : tenants.results) {
+				if (entry.tenantName != defaultTenant) {
+					deleteFutures.push_back(TenantAPI::deleteTenantTransaction(&tr, id));
+				}
+			}
+
+			wait(waitForAll(deleteFutures));
+			wait(tr.commit());
+
+			TraceEvent("TesterClearingTenantsDeletedBatch", debugID)
+			    .detail("FirstTenant", tenants.results.empty() ? "<none>"_sr : tenants.results[0].second.tenantName)
+			    .detail("BatchSize", tenants.results.size());
+
+			if (!tenants.more) {
+				TraceEvent("TesterClearingTenantsComplete", debugID).detail("AtVersion", tr.getCommittedVersion());
+				break;
+			}
+
+			tr.reset();
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "TesterClearingTenantsError", debugID).error(e);
+			wait(tr.onError(e));
 		}
 	}
 
@@ -987,6 +1058,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx,
 		req.clientCount = testers.size();
 		req.sharedRandomNumber = sharedRandom;
 		req.defaultTenant = defaultTenant.castTo<TenantNameRef>();
+		req.disabledFailureInjectionWorkloads = spec.disabledFailureInjectionWorkloads;
 		workRequests.push_back(testers[i].recruitments.getReply(req));
 	}
 
@@ -1265,7 +1337,7 @@ ACTOR Future<bool> runTest(Database cx,
 	if (spec.useDB && spec.clearAfterTest) {
 		try {
 			TraceEvent("TesterClearingDatabase").log();
-			wait(timeoutError(clearData(cx), 1000.0));
+			wait(timeoutError(clearData(cx, defaultTenant), 1000.0));
 		} catch (Error& e) {
 			TraceEvent(SevError, "ErrorClearingDatabaseAfterTest").error(e);
 			throw; // If we didn't do this, we don't want any later tests to run on this DB
@@ -1317,8 +1389,6 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableHostname", ""); } },
 	{ "disableRemoteKVS",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } },
-	{ "disableEncryption",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedEncryption", ""); } },
 	{ "allowDefaultTenant",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDefaultTenant", ""); } }
 };
@@ -1455,6 +1525,21 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  } },
 	{ "runFailureWorkloads",
 	  [](const std::string& value, TestSpec* spec) { spec->runFailureWorkloads = (value == "true"); } },
+	{ "disabledFailureInjectionWorkloads",
+	  [](const std::string& value, TestSpec* spec) {
+	      // Expects a comma separated list of workload names in "value".
+	      // This custom encoding is needed because both text and toml files need to be supported
+	      // and "value" is passed in as a string.
+	      std::stringstream ss(value);
+	      while (ss.good()) {
+		      std::string substr;
+		      getline(ss, substr, ',');
+		      substr = removeWhitespace(substr);
+		      if (!substr.empty()) {
+			      spec->disabledFailureInjectionWorkloads.push_back(substr);
+		      }
+	      }
+	  } },
 };
 
 std::vector<TestSpec> readTests(std::ifstream& ifs) {

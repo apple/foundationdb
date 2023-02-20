@@ -153,11 +153,13 @@ public:
 	virtual ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) = 0;
 
 	virtual ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) = 0;
+	virtual ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) = 0;
 	virtual ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                              int rangeLimit) = 0;
 
 	virtual ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) = 0;
+	virtual ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) = 0;
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -200,11 +202,13 @@ public:
 	virtual ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) = 0;
 
 	virtual ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) = 0;
+	virtual ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) = 0;
 	virtual ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                              int rangeLimit) = 0;
 
 	virtual ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) = 0;
+	virtual ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) = 0;
 
 	// Interface to manage shared state across multiple connections to the same Database
 	virtual ThreadFuture<DatabaseSharedState*> createSharedState() = 0;

@@ -24,7 +24,6 @@
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupProgress.actor.h"
 #include "fdbserver/ClusterRecovery.actor.h"
-#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
@@ -363,6 +362,7 @@ ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
 		isr.initialClusterVersion = self->recoveryTransactionVersion;
+		isr.encryptMode = self->configuration.encryptionAtRestMode;
 
 		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
 

@@ -140,10 +140,11 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	//Authorization
 	init( ALLOW_TOKENLESS_TENANT_ACCESS,                     false );
+	init( AUDIT_LOGGING_ENABLED,                              true );
 	init( PUBLIC_KEY_FILE_MAX_SIZE,                    1024 * 1024 );
 	init( PUBLIC_KEY_FILE_REFRESH_INTERVAL_SECONDS,             30 );
-	init( MAX_CACHED_EXPIRED_TOKENS,                          1024 );
 	init( AUDIT_TIME_WINDOW,                                   5.0 );
+	init( TOKEN_CACHE_SIZE,                                   2000 );
 
 	//AsyncFileCached
 	init( PAGE_CACHE_4K,                                   2LL<<30 );
@@ -307,13 +308,11 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	if ( randomize && BUGGIFY) { ENCRYPT_CIPHER_KEY_CACHE_TTL = deterministicRandom()->randomInt(2, 10) * 60; }
 	init( ENCRYPT_KEY_REFRESH_INTERVAL,   isSimulated ? 60 : 8 * 60 );
 	if ( randomize && BUGGIFY) { ENCRYPT_KEY_REFRESH_INTERVAL = deterministicRandom()->randomInt(2, 10); }
-	init( TOKEN_CACHE_SIZE,                                    100 );
 	init( ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,                  5.0 );
 	init( ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY,          0.01 );
 	// Refer to EncryptUtil::EncryptAuthTokenAlgo for more details
 	init( ENCRYPT_HEADER_AUTH_TOKEN_ENABLED,                 false ); if ( randomize && BUGGIFY ) { ENCRYPT_HEADER_AUTH_TOKEN_ENABLED = !ENCRYPT_HEADER_AUTH_TOKEN_ENABLED; }
 	init( ENCRYPT_HEADER_AUTH_TOKEN_ALGO,                        0 ); if ( randomize && ENCRYPT_HEADER_AUTH_TOKEN_ENABLED ) { ENCRYPT_HEADER_AUTH_TOKEN_ALGO = getRandomAuthTokenAlgo(); }
-
 
 	// REST Client
 	init( RESTCLIENT_MAX_CONNECTIONPOOL_SIZE,                   10 );

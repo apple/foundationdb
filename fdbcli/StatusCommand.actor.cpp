@@ -1037,7 +1037,7 @@ void printStatus(StatusObjectReader statusObj,
 
 						try {
 							double tx = -1, rx = -1, mCPUUtil = -1;
-							int64_t processTotalSize;
+							int64_t processRSS;
 
 							// Get the machine for this process
 							// StatusObjectReader mach = machinesMap[procObj["machine_id"].get_str()];
@@ -1056,7 +1056,7 @@ void printStatus(StatusObjectReader statusObj,
 								}
 							}
 
-							procObj.get("memory.used_bytes", processTotalSize);
+							procObj.get("memory.rss_bytes", processRSS);
 
 							StatusObjectReader procCPUObj;
 							procObj.get("cpu", procCPUObj);
@@ -1074,9 +1074,7 @@ void printStatus(StatusObjectReader statusObj,
 							if (procObj.get("disk.busy", diskBusy))
 								line += format("%3.0f%% disk IO;", 100.0 * diskBusy);
 
-							line += processTotalSize != -1
-							            ? format("%4.1f GB", processTotalSize / (1024.0 * 1024 * 1024))
-							            : "";
+							line += processRSS != -1 ? format("%4.1f GB", processRSS / (1024.0 * 1024 * 1024)) : "";
 
 							double availableBytes;
 							if (procObj.get("memory.available_bytes", availableBytes))
@@ -1127,12 +1125,14 @@ void printStatus(StatusObjectReader statusObj,
 					outputString += "\n  Number of Key Ranges   - " + format("%d", numKeyRanges);
 					if (statusObjCluster.has("blob_restore")) {
 						StatusObjectReader statusObjBlobRestore = statusObjCluster["blob_restore"];
-						std::string restoreStatus = statusObjBlobRestore["blob_full_restore_phase"].get_str();
-						if (statusObjBlobRestore.has("blob_full_restore_progress")) {
-							auto progress = statusObjBlobRestore["blob_full_restore_progress"].get_int();
-							restoreStatus += " " + format("%d%%", progress);
+						if (statusObjBlobRestore.has("blob_full_restore_phase")) {
+							std::string restoreStatus = statusObjBlobRestore["blob_full_restore_phase"].get_str();
+							if (statusObjBlobRestore.has("blob_full_restore_progress")) {
+								auto progress = statusObjBlobRestore["blob_full_restore_progress"].get_int();
+								restoreStatus += " " + format("%d%%", progress);
+							}
+							outputString += "\n  Full Restore           - " + restoreStatus;
 						}
-						outputString += "\n  Full Restore           - " + restoreStatus;
 					}
 				}
 			}

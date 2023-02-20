@@ -29,6 +29,7 @@
 
 #include "flow/BooleanParam.h"
 #include "flow/flow.h"
+#include "flow/WipedString.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitProxyInterface.h"
@@ -71,6 +72,7 @@ struct NetworkOptions {
 	std::string traceClockSource;
 	std::string traceFileIdentifier;
 	std::string tracePartialFileSuffix;
+	bool traceInitializeOnSetup;
 	Optional<bool> logClientInfo;
 	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
 	bool runLoopProfilingEnabled;
@@ -247,6 +249,7 @@ public:
 
 	Future<Void> ready() const { return success(idFuture); }
 	int64_t id() const;
+	Future<int64_t> getIdFuture() const;
 	KeyRef prefix() const;
 	std::string description() const;
 
@@ -269,7 +272,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
 	Future<Version> readVersionFuture;
 	Promise<Optional<Value>> metadataVersion;
-	Optional<Standalone<StringRef>> authToken;
+	Optional<WipedString> authToken;
 	Reference<TransactionLogInfo> trLogInfo;
 	TransactionOptions options;
 	Optional<ReadOptions> readOptions;
@@ -648,6 +651,7 @@ struct KeyRangeLocationInfo;
 // Return the aggregated StorageMetrics of range keys to the caller. The locations tell which interface should
 // serve the request. The final result is within (min-permittedError/2, max + permittedError/2) if valid.
 ACTOR Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(TenantInfo tenantInfo,
+                                                                      Version version,
                                                                       KeyRange keys,
                                                                       std::vector<KeyRangeLocationInfo> locations,
                                                                       StorageMetrics min,

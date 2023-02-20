@@ -23,6 +23,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
+#include "fdbclient/Metacluster.h"
 #include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/Schemas.h"
 
@@ -30,16 +31,20 @@
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include <string>
 
 namespace fdb_cli {
 
-Optional<std::pair<Optional<ClusterConnectionString>, Optional<DataClusterEntry>>>
-parseClusterConfiguration(std::vector<StringRef> const& tokens, DataClusterEntry const& defaults, int startIndex) {
+Optional<std::pair<Optional<ClusterConnectionString>, Optional<DataClusterEntry>>> parseClusterConfiguration(
+    std::vector<StringRef> const& tokens,
+    DataClusterEntry const& defaults,
+    int startIndex,
+    int endIndex) {
 	Optional<DataClusterEntry> entry;
 	Optional<ClusterConnectionString> connectionString;
 
 	std::set<std::string> usedParams;
-	for (int tokenNum = startIndex; tokenNum < tokens.size(); ++tokenNum) {
+	for (int tokenNum = startIndex; tokenNum < endIndex; ++tokenNum) {
 		StringRef token = tokens[tokenNum];
 		bool foundEquals;
 		StringRef param = token.eat("=", &foundEquals);
@@ -83,14 +88,23 @@ void printMetaclusterConfigureOptionsUsage() {
 
 // metacluster create command
 ACTOR Future<bool> metaclusterCreateCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() != 3) {
-		fmt::print("Usage: metacluster create_experimental <NAME>\n\n");
+	if (tokens.size() != 4) {
+		fmt::print("Usage: metacluster create_experimental <NAME> <TENANT_ID_PREFIX>\n\n");
 		fmt::print("Configures the cluster to be a management cluster in a metacluster.\n");
 		fmt::print("NAME is an identifier used to distinguish this metacluster from other metaclusters.\n");
+		fmt::print("TENANT_ID_PREFIX is an integer in the range [0,32767] inclusive which is prepended to all tenant "
+		           "ids in the metacluster.\n");
 		return false;
 	}
 
-	Optional<std::string> errorStr = wait(MetaclusterAPI::createMetacluster(db, tokens[2]));
+	int64_t tenantIdPrefix = std::stoi(tokens[3].toString());
+	if (tenantIdPrefix < TenantAPI::TENANT_ID_PREFIX_MIN_VALUE ||
+	    tenantIdPrefix > TenantAPI::TENANT_ID_PREFIX_MAX_VALUE) {
+		fmt::print("TENANT_ID_PREFIX must be in the range [0,32767] inclusive\n");
+		return false;
+	}
+
+	Optional<std::string> errorStr = wait(MetaclusterAPI::createMetacluster(db, tokens[2], tenantIdPrefix));
 	if (errorStr.present()) {
 		fmt::print("ERROR: {}.\n", errorStr.get());
 	} else {
@@ -126,7 +140,7 @@ ACTOR Future<bool> metaclusterRegisterCommand(Reference<IDatabase> db, std::vect
 	}
 
 	DataClusterEntry defaultEntry;
-	auto config = parseClusterConfiguration(tokens, defaultEntry, 3);
+	auto config = parseClusterConfiguration(tokens, defaultEntry, 3, tokens.size());
 	if (!config.present()) {
 		return false;
 	} else if (!config.get().first.present()) {
@@ -148,14 +162,158 @@ ACTOR Future<bool> metaclusterRemoveCommand(Reference<IDatabase> db, std::vector
 		fmt::print("Removes the specified data cluster from a metacluster.\n");
 		fmt::print("If FORCE is specified, then the cluster will be detached even if it has\n"
 		           "tenants assigned to it.\n");
+		fmt::print("If run on a data cluster, the data cluster will remove its association\n"
+		           "with the metacluster without modifying the management cluster. Doing so\n"
+		           "requires the FORCE option to be set. Use of this mode is required to\n"
+		           "repopulate a management cluster from a data cluster using the\n"
+		           "`metacluster restore' command.\n");
 		return false;
 	}
 
 	state ClusterNameRef clusterName = tokens[tokens.size() - 1];
-	wait(MetaclusterAPI::removeCluster(db, clusterName, tokens.size() == 4));
+	state bool force = tokens.size() == 4;
 
-	fmt::print("The cluster `{}' has been removed\n", printable(clusterName).c_str());
+	state ClusterType clusterType = wait(runTransaction(db, [](Reference<ITransaction> tr) {
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		return TenantAPI::getClusterType(tr);
+	}));
+
+	if (clusterType == ClusterType::METACLUSTER_DATA && !force) {
+		if (tokens[2] == "FORCE"_sr) {
+			fmt::print("ERROR: a cluster name must be specified.\n");
+		} else {
+			fmt::print("ERROR: cannot remove a data cluster directly. To remove a data cluster,\n"
+			           "use the `remove' command on the management cluster. To force a data cluster\n"
+			           "to forget its metacluster association without fully removing it, use FORCE.\n");
+		}
+
+		return false;
+	}
+
+	bool updatedDataCluster =
+	    wait(MetaclusterAPI::removeCluster(db, clusterName, clusterType, tokens.size() == 4, 15.0));
+
+	if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
+		fmt::print("The cluster `{}' has been removed\n", printable(clusterName).c_str());
+		if (!updatedDataCluster) {
+			fmt::print("WARNING: the data cluster could not be updated and may still contains its\n"
+			           "metacluster registration info. To finish removing it, FORCE remove the\n"
+			           "data cluster directly.\n");
+		}
+	} else {
+		ASSERT(updatedDataCluster);
+		fmt::print("The cluster `{}' has removed its association with its metacluster.\n"
+		           "The metacluster has not been modified.\n",
+		           printable(clusterName).c_str());
+	}
 	return true;
+}
+
+void printRestoreUsage() {
+	fmt::print("Usage: metacluster restore <NAME> [dryrun] connection_string=<CONNECTION_STRING>\n"
+	           "<restore_known_data_cluster|repopulate_from_data_cluster> [force_join_new_metacluster]\n\n");
+
+	fmt::print("Add a restored data cluster back to a metacluster.\n\n");
+
+	fmt::print("Use `dryrun' to report what changes a restore would make and whether any\n");
+	fmt::print("failures would occur. Without `dryrun', the restore will modify the metacluster\n");
+	fmt::print("with the changes required to perform the restore.\n\n");
+
+	fmt::print("Use `restore_known_data_cluster' to add back a restored copy of a data cluster\n");
+	fmt::print("that the metacluster is already tracking. This mode should be used if only data\n");
+	fmt::print("clusters are being restored, and any discrepancies between the management and\n");
+	fmt::print("data clusters will be resolved using the management cluster metadata.\n");
+	fmt::print("If `force_join_new_metacluster' is specified, the cluster will try to restore\n");
+	fmt::print("to a different metacluster than it was originally registered to.\n\n");
+
+	fmt::print("Use `repopulate_from_data_cluster' to rebuild a lost management cluster from the\n");
+	fmt::print("data clusters in a metacluster. This mode should be used if the management\n");
+	fmt::print("cluster is being restored. If any data clusters are also being restored, the\n");
+	fmt::print("oldest data clusters should be added first before any non-recovered data\n");
+	fmt::print("clusters. Any conflicts arising between the added data cluster and existing data\n");
+	fmt::print("will cause the restore to fail. Before repopulating a metacluster from a data\n");
+	fmt::print("cluster, that data cluster needs to be detached from its prior metacluster using\n");
+	fmt::print("the `metacluster remove' command.\n");
+}
+
+// metacluster restore command
+ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	if (tokens.size() < 5 || tokens.size() > 7) {
+		printRestoreUsage();
+		return false;
+	}
+
+	state bool dryRun = tokens[3] == "dryrun"_sr;
+	state bool forceJoin = tokens[tokens.size() - 1] == "force_join_new_metacluster"_sr;
+
+	if (tokens.size() < 5 + (int)dryRun + (int)forceJoin) {
+		printRestoreUsage();
+		return false;
+	}
+
+	state ClusterName clusterName = tokens[2];
+	state StringRef restoreType = tokens[tokens.size() - 1 - (int)forceJoin];
+
+	// connection string
+	DataClusterEntry defaultEntry;
+	auto config = parseClusterConfiguration(tokens, defaultEntry, 3 + (int)dryRun, 3 + (int)dryRun + 1);
+	if (!config.present()) {
+		return false;
+	} else if (!config.get().first.present()) {
+		fmt::print(stderr, "ERROR: connection_string must be configured when registering a cluster.\n");
+		return false;
+	}
+
+	state std::vector<std::string> messages;
+	state bool success = true;
+
+	try {
+		if (restoreType == "restore_known_data_cluster"_sr) {
+			wait(MetaclusterAPI::restoreCluster(db,
+			                                    clusterName,
+			                                    config.get().first.get(),
+			                                    ApplyManagementClusterUpdates::True,
+			                                    RestoreDryRun(dryRun),
+			                                    ForceJoinNewMetacluster(forceJoin),
+			                                    &messages));
+		} else if (restoreType == "repopulate_from_data_cluster"_sr) {
+			wait(MetaclusterAPI::restoreCluster(db,
+			                                    clusterName,
+			                                    config.get().first.get(),
+			                                    ApplyManagementClusterUpdates::False,
+			                                    RestoreDryRun(dryRun),
+			                                    ForceJoinNewMetacluster(forceJoin),
+			                                    &messages));
+		} else {
+			fmt::print(stderr, "ERROR: unrecognized restore mode `{}'\n", printable(restoreType));
+			success = false;
+		}
+	} catch (Error& e) {
+		success = false;
+		fmt::print(stderr, "ERROR: {} ({})\n", e.what(), e.code());
+	}
+
+	if (!messages.empty()) {
+		fmt::print(success ? stdout : stderr, "\nThe restore reported the following messages:\n\n");
+		for (int i = 0; i < messages.size(); ++i) {
+			fmt::print(success ? stdout : stderr, "  {}. {}\n", i + 1, messages[i]);
+		}
+
+		if (success) {
+			fmt::print("\n");
+		}
+	}
+
+	if (success) {
+		if (dryRun) {
+			fmt::print("The restore dry run completed successfully. To perform the restore, run the same command\n");
+			fmt::print("without the `dryrun' argument.\n");
+		} else {
+			fmt::print("The cluster `{}' has been restored\n", printable(clusterName).c_str());
+		}
+	}
+
+	return success;
 }
 
 // metacluster configure command
@@ -179,7 +337,7 @@ ACTOR Future<bool> metaclusterConfigureCommand(Reference<IDatabase> db, std::vec
 				throw cluster_not_found();
 			}
 
-			auto config = parseClusterConfiguration(tokens, metadata.get().entry, 3);
+			auto config = parseClusterConfiguration(tokens, metadata.get().entry, 3, tokens.size());
 			if (!config.present()) {
 				return false;
 			}
@@ -252,10 +410,11 @@ ACTOR Future<bool> metaclusterGetCommand(Reference<IDatabase> db, std::vector<St
 
 		if (useJson) {
 			json_spirit::mObject obj;
-			obj["type"] = "success";
-			obj["cluster"] = metadata.toJson();
+			obj[msgTypeKey] = "success";
+			obj[msgClusterKey] = metadata.toJson();
 			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
 		} else {
+			fmt::print("  id: {}\n", metadata.entry.id.toString().c_str());
 			fmt::print("  connection string: {}\n", metadata.connectionString.toString().c_str());
 			fmt::print("  cluster state: {}\n", DataClusterEntry::clusterStateToString(metadata.entry.clusterState));
 			fmt::print("  tenant group capacity: {}\n", metadata.entry.capacity.numTenantGroups);
@@ -264,8 +423,8 @@ ACTOR Future<bool> metaclusterGetCommand(Reference<IDatabase> db, std::vector<St
 	} catch (Error& e) {
 		if (useJson) {
 			json_spirit::mObject obj;
-			obj["type"] = "error";
-			obj["error"] = e.what();
+			obj[msgTypeKey] = "error";
+			obj[msgErrorKey] = e.what();
 			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
 			return false;
 		} else {
@@ -287,39 +446,85 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 
 	state bool useJson = tokens.size() == 3;
 
-	try {
-		std::map<ClusterName, DataClusterMetadata> clusters =
-		    wait(MetaclusterAPI::listClusters(db, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
+	state Optional<std::string> metaclusterName;
 
-		auto capacityNumbers = MetaclusterAPI::metaclusterCapacity(clusters);
+	state Reference<ITransaction> tr = db->createTransaction();
 
-		if (useJson) {
-			json_spirit::mObject obj;
-			obj["type"] = "success";
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			Optional<MetaclusterRegistrationEntry> registrationEntry =
+			    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
+			const ClusterType clusterType =
+			    !registrationEntry.present() ? ClusterType::STANDALONE : registrationEntry.get().clusterType;
+			if (ClusterType::STANDALONE == clusterType) {
+				if (useJson) {
+					json_spirit::mObject obj;
+					obj[msgTypeKey] = "success";
+					obj[msgClusterTypeKey] = clusterTypeToString(clusterType);
+					fmt::print("{}\n",
+					           json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+				} else {
+					fmt::print("This cluster is not part of a metacluster\n");
+				}
+				return true;
+			} else if (ClusterType::METACLUSTER_DATA == clusterType) {
+				ASSERT(registrationEntry.present());
+				metaclusterName = registrationEntry.get().metaclusterName.toString();
+				if (useJson) {
+					json_spirit::mObject obj;
+					obj[msgTypeKey] = "success";
+					obj[msgClusterTypeKey] = clusterTypeToString(clusterType);
+					json_spirit::mObject metaclusterObj;
+					metaclusterObj[msgMetaclusterName] = metaclusterName.get();
+					obj[msgMetaclusterKey] = metaclusterObj;
+					fmt::print("{}\n",
+					           json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+				} else {
+					fmt::print("This cluster \"{}\" is a data cluster within the metacluster named \"{}\"\n",
+					           registrationEntry.get().name.toString().c_str(),
+					           metaclusterName.get().c_str());
+				}
+				return true;
+			}
 
-			json_spirit::mObject metaclusterObj;
-			metaclusterObj["data_clusters"] = (int)clusters.size();
-			metaclusterObj["capacity"] = capacityNumbers.first.toJson();
-			metaclusterObj["allocated"] = capacityNumbers.second.toJson();
+			metaclusterName = registrationEntry.get().metaclusterName.toString();
 
-			obj["metacluster"] = metaclusterObj;
-			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
-		} else {
-			fmt::print("  number of data clusters: {}\n", clusters.size());
-			fmt::print("  tenant group capacity: {}\n", capacityNumbers.first.numTenantGroups);
-			fmt::print("  allocated tenant groups: {}\n", capacityNumbers.second.numTenantGroups);
-		}
+			ASSERT(ClusterType::METACLUSTER_MANAGEMENT == clusterType);
+			std::map<ClusterName, DataClusterMetadata> clusters =
+			    wait(MetaclusterAPI::listClustersTransaction(tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
+			auto capacityNumbers = MetaclusterAPI::metaclusterCapacity(clusters);
+			if (useJson) {
+				json_spirit::mObject obj;
+				obj[msgTypeKey] = "success";
+				obj[msgClusterTypeKey] = clusterTypeToString(ClusterType::METACLUSTER_MANAGEMENT);
 
-		return true;
-	} catch (Error& e) {
-		if (useJson) {
-			json_spirit::mObject obj;
-			obj["type"] = "error";
-			obj["error"] = e.what();
-			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
-			return false;
-		} else {
-			throw;
+				json_spirit::mObject metaclusterObj;
+				metaclusterObj[msgMetaclusterName] = metaclusterName.get();
+				metaclusterObj[msgDataClustersKey] = static_cast<int>(clusters.size());
+				metaclusterObj[msgCapacityKey] = capacityNumbers.first.toJson();
+				metaclusterObj[msgAllocatedKey] = capacityNumbers.second.toJson();
+
+				obj[msgMetaclusterKey] = metaclusterObj;
+				fmt::print("{}\n",
+				           json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+			} else {
+				fmt::print("  number of data clusters: {}\n", clusters.size());
+				fmt::print("  tenant group capacity: {}\n", capacityNumbers.first.numTenantGroups);
+				fmt::print("  allocated tenant groups: {}\n", capacityNumbers.second.numTenantGroups);
+			}
+			return true;
+		} catch (Error& e) {
+			if (useJson) {
+				json_spirit::mObject obj;
+				obj[msgTypeKey] = "error";
+				obj[msgErrorKey] = e.what();
+				fmt::print("{}\n",
+				           json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
+				return false;
+			} else {
+				throw;
+			}
 		}
 	}
 }
@@ -337,6 +542,8 @@ Future<bool> metaclusterCommand(Reference<IDatabase> db, std::vector<StringRef> 
 		return metaclusterRegisterCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "remove")) {
 		return metaclusterRemoveCommand(db, tokens);
+	} else if (tokencmp(tokens[1], "restore")) {
+		return metaclusterRestoreCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "configure")) {
 		return metaclusterConfigureCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "list")) {
@@ -356,9 +563,8 @@ void metaclusterGenerator(const char* text,
                           std::vector<std::string>& lc,
                           std::vector<StringRef> const& tokens) {
 	if (tokens.size() == 1) {
-		const char* opts[] = {
-			"create_experimental", "decommission", "register", "remove", "configure", "list", "get", "status", nullptr
-		};
+		const char* opts[] = { "create_experimental", "decommission", "register", "remove", "restore",
+			                   "configure",           "list",         "get",      "status", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokens.size() > 1 && (tokencmp(tokens[1], "register") || tokencmp(tokens[1], "configure"))) {
 		const char* opts[] = { "max_tenant_groups=", "connection_string=", nullptr };
@@ -367,14 +573,35 @@ void metaclusterGenerator(const char* text,
 	           (tokens.size() == 3 && tokencmp(tokens[1], "get"))) {
 		const char* opts[] = { "JSON", nullptr };
 		arrayGenerator(text, line, opts, lc);
+	} else if (tokens.size() == 2 && tokencmp(tokens[1], "remove")) {
+		const char* opts[] = { "FORCE", nullptr };
+		arrayGenerator(text, line, opts, lc);
+	} else if (tokens.size() > 1 && tokencmp(tokens[1], "restore")) {
+		if (tokens.size() == 3) {
+			const char* opts[] = { "dryrun", "connection_string=", nullptr };
+			arrayGenerator(text, line, opts, lc);
+		} else {
+			bool dryrun = tokens[3] == "dryrun"_sr;
+			if (tokens.size() == 3 + (int)dryrun) {
+				const char* opts[] = { "connection_string=", nullptr };
+				arrayGenerator(text, line, opts, lc);
+			} else if (tokens.size() == 4 + (int)dryrun) {
+				const char* opts[] = { "restore_known_data_cluster", "repopulate_from_data_cluster", nullptr };
+				arrayGenerator(text, line, opts, lc);
+			} else if (tokens.size() == 5 + (int)dryrun) {
+				const char* opts[] = { "force_join_new_metacluster", nullptr };
+				arrayGenerator(text, line, opts, lc);
+			}
+		}
 	}
 }
 
 std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& tokens, bool inArgument) {
 	if (tokens.size() == 1) {
-		return { "<create_experimental|decommission|register|remove|configure|list|get|status>", "[ARGS]" };
-	} else if (tokencmp(tokens[1], "create_experimental")) {
-		return { "<NAME>" };
+		return { "<create_experimental|decommission|register|remove|restore|configure|list|get|status>", "[ARGS]" };
+	} else if (tokencmp(tokens[1], "create_experimental") && tokens.size() < 4) {
+		static std::vector<const char*> opts = { "<NAME>", "<TENANT_ID_PREFIX>" };
+		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "decommission")) {
 		return {};
 	} else if (tokencmp(tokens[1], "register") && tokens.size() < 5) {
@@ -389,6 +616,19 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 		} else if (tokens.size() == 3 && (inArgument || tokens[2].size() == "FORCE"_sr.size()) &&
 		           "FORCE"_sr.startsWith(tokens[2])) {
 			return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+		} else {
+			return {};
+		}
+	} else if (tokencmp(tokens[1], "restore") && tokens.size() < 7) {
+		static std::vector<const char*> opts = { "<NAME>",
+			                                     "[dryrun]",
+			                                     "connection_string=<CONNECTION_STRING>",
+			                                     "<restore_known_data_cluster|repopulate_from_data_cluster>",
+			                                     "[force_join_new_metacluster]" };
+		if (tokens.size() < 4 || (tokens[3].size() <= 6 && "dryrun"_sr.startsWith(tokens[3]))) {
+			return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+		} else if (tokens.size() < 6) {
+			return std::vector<const char*>(opts.begin() + tokens.size() - 1, opts.end());
 		} else {
 			return {};
 		}
@@ -412,14 +652,16 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 
 CommandFactory metaclusterRegisterFactory(
     "metacluster",
-    CommandHelp("metacluster <create_experimental|decommission|register|remove|configure|list|get|status> [ARGS]",
-                "view and manage a metacluster",
-                "`create_experimental' and `decommission' set up or deconfigure a metacluster.\n"
-                "`register' and `remove' add and remove data clusters from the metacluster.\n"
-                "`configure' updates the configuration of a data cluster.\n"
-                "`list' prints a list of data clusters in the metacluster.\n"
-                "`get' prints the metadata for a particular data cluster.\n"
-                "`status' prints metacluster metadata.\n"),
+    CommandHelp(
+        "metacluster <create_experimental|decommission|register|remove|restore|configure|list|get|status> [ARGS]",
+        "view and manage a metacluster",
+        "`create_experimental' and `decommission' set up or deconfigure a metacluster.\n"
+        "`register' and `remove' add and remove data clusters from the metacluster.\n"
+        "`configure' updates the configuration of a data cluster.\n"
+        "`restore' is used to recover from lost management or data clusters.\n"
+        "`list' prints a list of data clusters in the metacluster.\n"
+        "`get' prints the metadata for a particular data cluster.\n"
+        "`status' prints metacluster metadata.\n"),
     &metaclusterGenerator,
     &metaclusterHintGenerator);
 

@@ -153,7 +153,9 @@ private:
 		for (auto [tenantId, tenantMapEntry] : metadata.tenantMap) {
 			ASSERT_EQ(tenantId, tenantMapEntry.id);
 			if (metadata.clusterType != ClusterType::METACLUSTER_DATA) {
-				ASSERT_LE(tenantId, metadata.lastTenantId);
+				if (TenantAPI::getTenantIdPrefix(tenantId) == TenantAPI::getTenantIdPrefix(metadata.lastTenantId)) {
+					ASSERT_LE(tenantId, metadata.lastTenantId);
+				}
 			}
 			ASSERT_EQ(metadata.tenantNameIndex[tenantMapEntry.tenantName], tenantId);
 
@@ -184,6 +186,9 @@ private:
 				ASSERT(!tenantMapEntry.assignedCluster.present());
 				ASSERT(!tenantMapEntry.renameDestination.present());
 			}
+
+			// An error string should be set if and only if the tenant state is an error
+			ASSERT((tenantMapEntry.tenantState == TenantState::ERROR) != tenantMapEntry.error.empty());
 		}
 
 		ASSERT_EQ(metadata.tenantMap.size() + renameCount, metadata.tenantNameIndex.size());

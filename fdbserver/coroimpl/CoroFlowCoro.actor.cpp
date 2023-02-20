@@ -23,6 +23,7 @@
 #include "Coro.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 // Old libcoroutine based implementation. Used on Windows until CI has

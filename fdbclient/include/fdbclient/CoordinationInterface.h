@@ -265,6 +265,7 @@ struct OpenDatabaseCoordRequest {
 	std::vector<Hostname> hostnames;
 	std::vector<NetworkAddress> coordinators;
 	ReplyPromise<CachedSerialization<struct ClientDBInfo>> reply;
+	bool internal{ true };
 
 	bool verify() const { return true; }
 
@@ -278,7 +279,8 @@ struct OpenDatabaseCoordRequest {
 		           clusterKey,
 		           coordinators,
 		           reply,
-		           hostnames);
+		           hostnames,
+		           internal);
 	}
 };
 
@@ -315,6 +317,9 @@ struct ProtocolInfoRequest {
 	constexpr static FileIdentifier file_identifier = 13261233;
 	ReplyPromise<ProtocolInfoReply> reply{ PeerCompatibilityPolicy{ RequirePeer::AtLeast,
 		                                                            ProtocolVersion::withStableInterfaces() } };
+
+	bool verify() const noexcept { return true; }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply);
