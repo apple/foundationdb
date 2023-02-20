@@ -443,6 +443,14 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_verify_blob_range(FDBDataba
                                                                        int end_key_name_length,
                                                                        int64_t version);
 
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_flush_blob_range(FDBDatabase* db,
+                                                                      uint8_t const* begin_key_name,
+                                                                      int begin_key_name_length,
+                                                                      uint8_t const* end_key_name,
+                                                                      int end_key_name_length,
+                                                                      fdb_bool_t compact,
+                                                                      int64_t version);
+
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_client_status(FDBDatabase* db);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant,
@@ -498,6 +506,14 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_verify_blob_range(FDBTenant* 
                                                                      uint8_t const* end_key_name,
                                                                      int end_key_name_length,
                                                                      int64_t version);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_flush_blob_range(FDBTenant* tenant,
+                                                                    uint8_t const* begin_key_name,
+                                                                    int begin_key_name_length,
+                                                                    uint8_t const* end_key_name,
+                                                                    int end_key_name_length,
+                                                                    fdb_bool_t compact,
+                                                                    int64_t version);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_get_id(FDBTenant* tenant);
 

@@ -616,6 +616,28 @@ ThreadFuture<Version> DLTenant::verifyBlobRange(const KeyRangeRef& keyRange, Opt
 	});
 }
 
+ThreadFuture<bool> DLTenant::flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) {
+	if (!api->tenantFlushBlobRange) {
+		return unsupported_operation();
+	}
+
+	Version readVersion = version.present() ? version.get() : latestVersion;
+
+	FdbCApi::FDBFuture* f = api->tenantFlushBlobRange(tenant,
+	                                                  keyRange.begin.begin(),
+	                                                  keyRange.begin.size(),
+	                                                  keyRange.end.begin(),
+	                                                  keyRange.end.size(),
+	                                                  compact,
+	                                                  readVersion);
+
+	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		FdbCApi::fdb_bool_t ret = false;
+		ASSERT(!api->futureGetBool(f, &ret));
+		return ret;
+	});
+}
+
 // DLDatabase
 DLDatabase::DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase*> dbFuture) : api(api), db(nullptr) {
 	addref();
@@ -850,6 +872,28 @@ ThreadFuture<Version> DLDatabase::verifyBlobRange(const KeyRangeRef& keyRange, O
 	});
 }
 
+ThreadFuture<bool> DLDatabase::flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) {
+	if (!api->databaseFlushBlobRange) {
+		return unsupported_operation();
+	}
+
+	Version readVersion = version.present() ? version.get() : latestVersion;
+
+	FdbCApi::FDBFuture* f = api->databaseFlushBlobRange(db,
+	                                                    keyRange.begin.begin(),
+	                                                    keyRange.begin.size(),
+	                                                    keyRange.end.begin(),
+	                                                    keyRange.end.size(),
+	                                                    compact,
+	                                                    readVersion);
+
+	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		FdbCApi::fdb_bool_t ret = false;
+		ASSERT(!api->futureGetBool(f, &ret));
+		return ret;
+	});
+}
+
 ThreadFuture<Standalone<StringRef>> DLDatabase::getClientStatus() {
 	if (!api->databaseGetClientStatus) {
 		return unsupported_operation();
@@ -981,6 +1025,11 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_database_verify_blob_range",
 	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
+	loadClientFunction(&api->databaseFlushBlobRange,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_database_flush_blob_range",
+	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
 	loadClientFunction(&api->databaseGetClientStatus,
 	                   lib,
 	                   fdbCPath,
@@ -1022,6 +1071,11 @@ void DLApi::init() {
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_tenant_verify_blob_range",
+	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
+	loadClientFunction(&api->tenantFlushBlobRange,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_tenant_flush_blob_range",
 	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
 	loadClientFunction(&api->tenantGetId, lib, fdbCPath, "fdb_tenant_get_id", headerVersion >= 730);
 	loadClientFunction(&api->tenantDestroy, lib, fdbCPath, "fdb_tenant_destroy", headerVersion >= 710);
@@ -1894,6 +1948,13 @@ ThreadFuture<Version> MultiVersionTenant::verifyBlobRange(const KeyRangeRef& key
 	return executeOperation(&ITenant::verifyBlobRange, keyRange, std::forward<Optional<Version>>(version));
 }
 
+ThreadFuture<bool> MultiVersionTenant::flushBlobRange(const KeyRangeRef& keyRange,
+                                                      bool compact,
+                                                      Optional<Version> version) {
+	return executeOperation(
+	    &ITenant::flushBlobRange, keyRange, std::forward<bool>(compact), std::forward<Optional<Version>>(version));
+}
+
 MultiVersionTenant::TenantState::TenantState(Reference<MultiVersionDatabase> db, TenantNameRef tenantName)
   : tenantVar(new ThreadSafeAsyncVar<Reference<ITenant>>(Reference<ITenant>(nullptr))), tenantName(tenantName), db(db),
     closed(false) {
@@ -2130,6 +2191,13 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> MultiVersionDatabase::listBlobb
 
 ThreadFuture<Version> MultiVersionDatabase::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
 	return executeOperation(&IDatabase::verifyBlobRange, keyRange, std::forward<Optional<Version>>(version));
+}
+
+ThreadFuture<bool> MultiVersionDatabase::flushBlobRange(const KeyRangeRef& keyRange,
+                                                        bool compact,
+                                                        Optional<Version> version) {
+	return executeOperation(
+	    &IDatabase::flushBlobRange, keyRange, std::forward<bool>(compact), std::forward<Optional<Version>>(version));
 }
 
 // Returns the protocol version reported by the coordinator this client is connected to

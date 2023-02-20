@@ -78,6 +78,21 @@ class BlobGranuleIntegrationTest {
             Assertions.assertArrayEquals(blobRange.begin, blobRanges.getKeyRanges().get(0).begin);
             Assertions.assertArrayEquals(blobRange.end, blobRanges.getKeyRanges().get(0).end);
 
+            boolean flushSuccess = db.flushBlobRange(blobRange.begin, blobRange.end, false).join();
+            Assertions.assertTrue(flushSuccess);
+
+            // verify after flush
+            Long verifyVersionAfterFlush = db.verifyBlobRange(blobRange.begin, blobRange.end).join();
+            Assertions.assertTrue(verifyVersionAfterFlush >= 0);
+            Assertions.assertTrue(verifyVersionAfterFlush >= verifyVersion);
+
+            boolean compactSuccess = db.flushBlobRange(blobRange.begin, blobRange.end, true).join();
+            Assertions.assertTrue(compactSuccess);
+
+            Long verifyVersionAfterCompact = db.verifyBlobRange(blobRange.begin, blobRange.end).join();
+            Assertions.assertTrue(verifyVersionAfterCompact >= 0);
+            Assertions.assertTrue(verifyVersionAfterCompact >= verifyVersionAfterFlush);
+
             // purge/wait
             byte[] purgeKey = db.purgeBlobGranules(blobRange.begin, blobRange.end, -2, false).join();
             db.waitPurgeGranulesComplete(purgeKey).join();
@@ -85,7 +100,7 @@ class BlobGranuleIntegrationTest {
             // verify again
             Long verifyVersionAfterPurge = db.verifyBlobRange(blobRange.begin, blobRange.end).join();
             Assertions.assertTrue(verifyVersionAfterPurge >= 0);
-            Assertions.assertTrue(verifyVersionAfterPurge >= verifyVersion);
+            Assertions.assertTrue(verifyVersionAfterPurge >= verifyVersionAfterCompact);
 
             // force purge/wait
             byte[] forcePurgeKey = db.purgeBlobGranules(blobRange.begin, blobRange.end, -2, true).join();

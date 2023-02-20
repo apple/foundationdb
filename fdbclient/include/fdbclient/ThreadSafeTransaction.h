@@ -70,6 +70,7 @@ public:
 	                                                                      int rangeLimit) override;
 
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+	ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
@@ -108,6 +109,7 @@ public:
 	                                                                      int rangeLimit) override;
 
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+	ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) override;
 
 	void addref() override { ThreadSafeReferenceCounted<ThreadSafeTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<ThreadSafeTenant>::delref(); }
