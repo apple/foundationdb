@@ -68,9 +68,9 @@
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
-// Enforcing rocksdb version to be at 7.9.2.
-static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 9 && ROCKSDB_PATCH == 2),
-              "Unsupported rocksdb version. Update the rocksdb to 7.9.2 version");
+// Enforcing rocksdb version to be at 7.7.3.
+static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 7 && ROCKSDB_PATCH == 3),
+              "Unsupported rocksdb version. Update the rocksdb to 7.7.3 version");
 
 namespace {
 using rocksdb::BackgroundErrorReason;
@@ -382,10 +382,10 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 	return metaData;
 }
 
-void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImportFilesMetaData& metaData) {
+void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImportFilesMetaData* metaData) {
 	RocksDBColumnFamilyCheckpoint rocksCF;
-	rocksCF.dbComparatorName = metaData.db_comparator_name;
-	for (const rocksdb::LiveFileMetaData& fileMetaData : metaData.files) {
+	rocksCF.dbComparatorName = metaData->db_comparator_name;
+	for (const rocksdb::LiveFileMetaData& fileMetaData : metaData->files) {
 		LiveFileMetaData liveFileMetaData;
 		liveFileMetaData.size = fileMetaData.size;
 		liveFileMetaData.name = fileMetaData.name;
@@ -2348,7 +2348,7 @@ void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 			return;
 		}
 
-		populateMetaData(&res, *pMetadata);
+		populateMetaData(&res, pMetadata);
 		delete pMetadata;
 		TraceEvent("RocksDBServeCheckpointSuccess", id)
 		    .detail("CheckpointMetaData", res.toString())

@@ -43,10 +43,11 @@
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
-// Enforcing rocksdb version to be at 7.9.2.
-static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 9 && ROCKSDB_PATCH == 2),
-              "Unsupported rocksdb version. Update the rocksdb to 7.9.2 version");
+// Enforcing rocksdb version to be at 7.7.3.
+static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 7 && ROCKSDB_PATCH == 3),
+              "Unsupported rocksdb version. Update the rocksdb to 7.7.3 version");
 
+const Severity SHARDED_ROCKS_DEBUG = SevDebug;
 const std::string rocksDataFolderSuffix = "-data";
 const std::string METADATA_SHARD_ID = "kvs-metadata";
 const std::string DEFAULT_CF_NAME = "default"; // `specialKeys` is stored in this culoumn family.
@@ -167,56 +168,56 @@ struct ShardedRocksDBState {
 
 std::shared_ptr<rocksdb::Cache> rocksdb_block_cache = nullptr;
 
-rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
-	rocksdb::ExportImportFilesMetaData metaData;
-	if (checkpoint.getFormat() != DataMoveRocksCF) {
-		return metaData;
-	}
+// rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
+// 	rocksdb::ExportImportFilesMetaData metaData;
+// 	if (checkpoint.getFormat() != DataMoveRocksCF) {
+// 		return metaData;
+// 	}
 
-	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
-	TraceEvent(SevInfo, "RocksDBCF").detail("RocksDBCF", rocksCF.toString());
-	metaData.db_comparator_name = rocksCF.dbComparatorName;
+// 	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
+// 	TraceEvent(SevInfo, "RocksDBCF").detail("RocksDBCF", rocksCF.toString());
+// 	metaData.db_comparator_name = rocksCF.dbComparatorName;
 
-	for (const LiveFileMetaData& fileMetaData : rocksCF.sstFiles) {
-		rocksdb::LiveFileMetaData liveFileMetaData;
-		if (!fileMetaData.name.empty()) {
-			if (fileMetaData.name[0] == '/') {
-				liveFileMetaData.relative_filename = fileMetaData.name.substr(1);
-				liveFileMetaData.name = fileMetaData.name;
-			} else {
-				liveFileMetaData.relative_filename = fileMetaData.name;
-				liveFileMetaData.name = std::string("/") + fileMetaData.name;
-			}
-			ASSERT(liveFileMetaData.relative_filename.size() + 1 == liveFileMetaData.name.size());
-			ASSERT(liveFileMetaData.relative_filename[0] != '/');
-			ASSERT(liveFileMetaData.name[0] == '/');
-		}
-		liveFileMetaData.file_type = rocksdb::kTableFile;
-		liveFileMetaData.size = fileMetaData.size;
-		liveFileMetaData.file_number = fileMetaData.file_number;
-		liveFileMetaData.db_path = fileMetaData.db_path;
-		liveFileMetaData.directory = fileMetaData.db_path;
-		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
-		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
-		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
-		liveFileMetaData.largestkey = fileMetaData.largestkey;
-		liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
-		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
-		liveFileMetaData.num_entries = fileMetaData.num_entries;
-		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
-		liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
-		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
-		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
-		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
-		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
-		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
-		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
-		liveFileMetaData.level = fileMetaData.level;
-		metaData.files.push_back(liveFileMetaData);
-	}
+// 	for (const LiveFileMetaData& fileMetaData : rocksCF.sstFiles) {
+// 		rocksdb::LiveFileMetaData liveFileMetaData;
+// 		if (!fileMetaData.name.empty()) {
+// 			if (fileMetaData.name[0] == '/') {
+// 				liveFileMetaData.relative_filename = fileMetaData.name.substr(1);
+// 				liveFileMetaData.name = fileMetaData.name;
+// 			} else {
+// 				liveFileMetaData.relative_filename = fileMetaData.name;
+// 				liveFileMetaData.name = std::string("/") + fileMetaData.name;
+// 			}
+// 			ASSERT(liveFileMetaData.relative_filename.size() + 1 == liveFileMetaData.name.size());
+// 			ASSERT(liveFileMetaData.relative_filename[0] != '/');
+// 			ASSERT(liveFileMetaData.name[0] == '/');
+// 		}
+// 		liveFileMetaData.file_type = rocksdb::kTableFile;
+// 		liveFileMetaData.size = fileMetaData.size;
+// 		liveFileMetaData.file_number = fileMetaData.file_number;
+// 		liveFileMetaData.db_path = fileMetaData.db_path;
+// 		liveFileMetaData.directory = fileMetaData.db_path;
+// 		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
+// 		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
+// 		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
+// 		liveFileMetaData.largestkey = fileMetaData.largestkey;
+// 		liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
+// 		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
+// 		liveFileMetaData.num_entries = fileMetaData.num_entries;
+// 		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
+// 		liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
+// 		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
+// 		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
+// 		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
+// 		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
+// 		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+// 		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
+// 		liveFileMetaData.level = fileMetaData.level;
+// 		metaData.files.push_back(liveFileMetaData);
+// 	}
 
-	return metaData;
-}
+// 	return metaData;
+// }
 // rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
 // 	rocksdb::ExportImportFilesMetaData metaData;
 // 	if (checkpoint.getFormat() != DataMoveRocksCF) {
@@ -253,27 +254,54 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 
 // 	return metaData;
 // }
+rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
+	rocksdb::ExportImportFilesMetaData metaData;
+	if (checkpoint.getFormat() != DataMoveRocksCF) {
+		return metaData;
+	}
+
+	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
+	metaData.db_comparator_name = rocksCF.dbComparatorName;
+
+	for (const LiveFileMetaData& fileMetaData : rocksCF.sstFiles) {
+		rocksdb::LiveFileMetaData liveFileMetaData;
+		liveFileMetaData.size = fileMetaData.size;
+		liveFileMetaData.name = fileMetaData.name;
+		liveFileMetaData.file_number = fileMetaData.file_number;
+		liveFileMetaData.db_path = fileMetaData.db_path;
+		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
+		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
+		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
+		liveFileMetaData.largestkey = fileMetaData.largestkey;
+		liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
+		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
+		liveFileMetaData.num_entries = fileMetaData.num_entries;
+		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
+		liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
+		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
+		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
+		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
+		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
+		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
+		liveFileMetaData.level = fileMetaData.level;
+		metaData.files.push_back(liveFileMetaData);
+	}
+
+	return metaData;
+}
 
 void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImportFilesMetaData* metaData) {
 	RocksDBColumnFamilyCheckpoint rocksCF;
+
 	if (metaData != nullptr) {
 		rocksCF.dbComparatorName = metaData->db_comparator_name;
 		for (const rocksdb::LiveFileMetaData& fileMetaData : metaData->files) {
 			LiveFileMetaData liveFileMetaData;
 			liveFileMetaData.size = fileMetaData.size;
-			if (fileMetaData.relative_filename.empty()) {
-				liveFileMetaData.name = fileMetaData.name;
-			} else {
-				liveFileMetaData.name = fileMetaData.relative_filename;
-				TraceEvent(SevDebug, "PopulateMetaDataUseRelativeFileName");
-			}
+			liveFileMetaData.name = fileMetaData.name;
 			liveFileMetaData.file_number = fileMetaData.file_number;
-			if (fileMetaData.directory.empty()) {
-				liveFileMetaData.db_path = fileMetaData.db_path;
-			} else {
-				liveFileMetaData.db_path = fileMetaData.directory;
-				TraceEvent(SevDebug, "PopulateMetaDataUseDirectory");
-			}
+			liveFileMetaData.db_path = fileMetaData.db_path;
 			liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
 			liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
 			liveFileMetaData.smallestkey = fileMetaData.smallestkey;
@@ -295,8 +323,51 @@ void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImpor
 	}
 	checkpoint->setFormat(DataMoveRocksCF);
 	checkpoint->serializedCheckpoint = ObjectWriter::toValue(rocksCF, IncludeVersion());
-	TraceEvent(SevDebug, "PopulateMetaDataResult").detail("RocksDBCF", rocksCF.toString());
 }
+
+// void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImportFilesMetaData* metaData) {
+// 	RocksDBColumnFamilyCheckpoint rocksCF;
+// 	if (metaData != nullptr) {
+// 		rocksCF.dbComparatorName = metaData->db_comparator_name;
+// 		for (const rocksdb::LiveFileMetaData& fileMetaData : metaData->files) {
+// 			LiveFileMetaData liveFileMetaData;
+// 			liveFileMetaData.size = fileMetaData.size;
+// 			if (fileMetaData.relative_filename.empty()) {
+// 				liveFileMetaData.name = fileMetaData.name;
+// 			} else {
+// 				liveFileMetaData.name = fileMetaData.relative_filename;
+// 				TraceEvent(SevDebug, "PopulateMetaDataUseRelativeFileName");
+// 			}
+// 			liveFileMetaData.file_number = fileMetaData.file_number;
+// 			if (fileMetaData.directory.empty()) {
+// 				liveFileMetaData.db_path = fileMetaData.db_path;
+// 			} else {
+// 				liveFileMetaData.db_path = fileMetaData.directory;
+// 				TraceEvent(SevDebug, "PopulateMetaDataUseDirectory");
+// 			}
+// 			liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
+// 			liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
+// 			liveFileMetaData.smallestkey = fileMetaData.smallestkey;
+// 			liveFileMetaData.largestkey = fileMetaData.largestkey;
+// 			liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
+// 			liveFileMetaData.being_compacted = fileMetaData.being_compacted;
+// 			liveFileMetaData.num_entries = fileMetaData.num_entries;
+// 			liveFileMetaData.num_deletions = fileMetaData.num_deletions;
+// 			liveFileMetaData.temperature = static_cast<uint8_t>(fileMetaData.temperature);
+// 			liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
+// 			liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
+// 			liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
+// 			liveFileMetaData.file_checksum = fileMetaData.file_checksum;
+// 			liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+// 			liveFileMetaData.column_family_name = fileMetaData.column_family_name;
+// 			liveFileMetaData.level = fileMetaData.level;
+// 			rocksCF.sstFiles.push_back(liveFileMetaData);
+// 		}
+// 	}
+// 	checkpoint->setFormat(DataMoveRocksCF);
+// 	checkpoint->serializedCheckpoint = ObjectWriter::toValue(rocksCF, IncludeVersion());
+// 	TraceEvent(SevDebug, "PopulateMetaDataResult").detail("RocksDBCF", rocksCF.toString());
+// }
 
 const rocksdb::Slice toSlice(StringRef s) {
 	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
@@ -424,7 +495,7 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 
 rocksdb::Options getOptions() {
 	rocksdb::Options options({}, getCFOptions());
-	// options.atomic_flush = true;
+	options.atomic_flush = true;
 	// options.allow_2pc = true;
 	options.avoid_unnecessary_blocking_io = true;
 	options.create_if_missing = true;
@@ -616,6 +687,7 @@ struct PhysicalShard {
 			logRocksDBError(status, "AddCF");
 			return status;
 		}
+		TraceEvent(SHARDED_ROCKS_DEBUG, "ShardedRocksTraceCreatedCF").detail("ColumnFamilyName", id);
 		readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
 		this->isInitialized.store(true);
 		return status;
@@ -654,7 +726,7 @@ struct PhysicalShard {
 				ASSERT(cf != nullptr);
 				rocksdb::IngestExternalFileOptions ingestOptions;
 				ingestOptions.move_files = true;
-				ingestOptions.write_global_seqno = false;
+				// ingestOptions.write_global_seqno = false;
 				ingestOptions.verify_checksums_before_ingest = true;
 				status = db->IngestExternalFile(cf, sstFiles, ingestOptions);
 				// if (!status.ok()) {
@@ -1234,6 +1306,10 @@ public:
 		ASSERT(writeBatch != nullptr);
 		ASSERT(dirtyShards != nullptr);
 		writeBatch->Put(it.value()->physicalShard->cf, toSlice(key), toSlice(value));
+		TraceEvent(SHARDED_ROCKS_DEBUG, "ShardedRocksTracePut", this->logId)
+		    .detail("WriteKey", key)
+		    .detail("Value", value)
+		    .detail("ColumnFamily", it.value()->physicalShard->cf->GetName());
 		dirtyShards->insert(it.value()->physicalShard);
 		TraceEvent(SevVerbose, "ShardedRocksShardManagerPutEnd", this->logId)
 		    .detail("WriteKey", key)
@@ -1246,6 +1322,9 @@ public:
 			return;
 		}
 		writeBatch->Delete(it.value()->physicalShard->cf, toSlice(key));
+		TraceEvent(SHARDED_ROCKS_DEBUG, "ShardedRocksTraceDelete", this->logId)
+		    .detail("WriteKey", key)
+		    .detail("ColumnFamily", it.value()->physicalShard->cf->GetName());
 		dirtyShards->insert(it.value()->physicalShard);
 	}
 
@@ -1263,6 +1342,9 @@ public:
 			    .detail("CFName", it.value()->physicalShard->cf->GetName());
 			const KeyRange clearRange = range & it->value()->range;
 			writeBatch->DeleteRange(it.value()->physicalShard->cf, toSlice(clearRange.begin), toSlice(clearRange.end));
+			TraceEvent(SHARDED_ROCKS_DEBUG, "ShardedRocksTraceDeleteRange", this->logId)
+			    .detail("Range", range)
+			    .detail("ColumnFamily", it.value()->physicalShard->cf->GetName());
 			dirtyShards->insert(it.value()->physicalShard);
 		}
 	}
@@ -1278,6 +1360,10 @@ public:
 		                        getShardMappingKey(range.begin, shardMappingPrefix),
 		                        getShardMappingKey(range.end, shardMappingPrefix));
 
+		TraceEvent(SHARDED_ROCKS_DEBUG, "ShardedRocksTraceDeleteRange", this->logId)
+		    .detail("Begin", getShardMappingKey(range.begin, shardMappingPrefix))
+		    .detail("End", getShardMappingKey(range.end, shardMappingPrefix))
+		    .detail("ColumnFamily", metadataShard->cf->GetName());
 		KeyRef lastKey = range.end;
 		if (isAdd) {
 			auto ranges = dataShardMap.intersectingRanges(range);
@@ -1288,6 +1374,10 @@ public:
 					writeBatch->Put(metadataShard->cf,
 					                getShardMappingKey(it.range().begin, shardMappingPrefix),
 					                it.value()->physicalShard->id);
+					TraceEvent(SHARDED_ROCKS_DEBUG, "ShardedRocksTracePut", this->logId)
+					    .detail("WriteKey", getShardMappingKey(it.range().begin, shardMappingPrefix))
+					    .detail("Value", it.value()->physicalShard->id)
+					    .detail("ColumnFamily", metadataShard->cf->GetName());
 					TraceEvent(SevDebug, "ShardedRocksDB", this->logId)
 					    .detail("Action", "PersistRangeMapping")
 					    .detail("BeginKey", it.range().begin)
@@ -1297,6 +1387,10 @@ public:
 				} else {
 					// Empty range.
 					writeBatch->Put(metadataShard->cf, getShardMappingKey(it.range().begin, shardMappingPrefix), "");
+					TraceEvent(SHARDED_ROCKS_DEBUG, "ShardedRocksTracePut", this->logId)
+					    .detail("WriteKey", getShardMappingKey(it.range().begin, shardMappingPrefix))
+					    .detail("Value", "")
+					    .detail("ColumnFamily", metadataShard->cf->GetName());
 					TraceEvent(SevDebug, "ShardedRocksDB", this->logId)
 					    .detail("Action", "PersistRangeMapping")
 					    .detail("BeginKey", it.range().begin)
@@ -1307,6 +1401,10 @@ public:
 			}
 		} else {
 			writeBatch->Put(metadataShard->cf, getShardMappingKey(range.begin, shardMappingPrefix), "");
+			TraceEvent(SHARDED_ROCKS_DEBUG, "ShardedRocksTracePut", this->logId)
+			    .detail("WriteKey", getShardMappingKey(range.begin, shardMappingPrefix))
+			    .detail("Value", "")
+			    .detail("ColumnFamily", metadataShard->cf->GetName());
 			TraceEvent(SevDebug, "ShardedRocksDB", this->logId)
 			    .detail("Action", "PersistRangeMapping")
 			    .detail("RemoveRange", "True")
@@ -1321,6 +1419,10 @@ public:
 		writeBatch->Put(metadataShard->cf,
 		                getShardMappingKey(lastKey, shardMappingPrefix),
 		                nextShard == nullptr ? "" : nextShard->physicalShard->id);
+		TraceEvent(SHARDED_ROCKS_DEBUG, "ShardedRocksTracePut", this->logId)
+		    .detail("WriteKey", getShardMappingKey(lastKey, shardMappingPrefix))
+		    .detail("Value", nextShard == nullptr ? "" : nextShard->physicalShard->id)
+		    .detail("ColumnFamily", metadataShard->cf->GetName());
 		TraceEvent(SevDebug, "ShardedRocksDB", this->logId)
 		    .detail("Action", "PersistRangeMappingEnd")
 		    .detail("NextShardKey", lastKey)
@@ -2185,6 +2287,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			double writeBeginTime = sample ? timer_monotonic() : 0;
 			rocksdb::Status s = db->Write(options, batch);
+			TraceEvent(SHARDED_ROCKS_DEBUG, "ShardedRocksTraceCommit", logId);
 			if (sample) {
 				rocksDBMetrics->getWriteHistogram()->sampleSeconds(timer_monotonic() - writeBeginTime);
 			}
@@ -2330,15 +2433,23 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				// s = a.shardManager->getDb()->Flush(rocksdb::FlushOptions(),
 				//                                    a.shardManager->getColumnFamilies());
 
-				// ASSERT(
-				//     a.shardManager->getDb()->Flush(rocksdb::FlushOptions(), a.shardManager->getColumnFamilies()).ok());
-				// ASSERT(a.shardManager->getDb()->FlushWAL(true).ok());
+				ASSERT(a.shardManager->getDb()->SyncWAL().ok());
+				ASSERT(a.shardManager->getDb()->FlushWAL(true).ok());
+				rocksdb::FlushOptions flushOptions;
+				flushOptions.wait = true;
+				flushOptions.allow_write_stall = true;
+				ASSERT(a.shardManager->getDb()->Flush(flushOptions, a.shardManager->getColumnFamilies()).ok());
 				// for (const auto& range : a.request.ranges) {
 				// rocksdb::Slice begin = toSlice(range.begin);
 				// rocksdb::Slice end = toSlice(range.end);
-				// ASSERT(a.shardManager->getDb()
-				//            ->CompactRange(rocksdb::CompactRangeOptions(), ps->cf, nullptr, nullptr)
-				//            .ok());
+				rocksdb::CompactRangeOptions compactOpts;
+				compactOpts.change_level = true;
+				compactOpts.target_level = 6;
+				compactOpts.allow_write_stall = true;
+
+				ASSERT(a.shardManager->getDb()
+				           ->CompactRange(rocksdb::CompactRangeOptions(), ps->cf, nullptr, nullptr)
+				           .ok());
 				// }
 
 				s = rocksdb::Checkpoint::Create(a.shardManager->getDb(), &checkpoint);
@@ -2347,8 +2458,116 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					break;
 				}
 
-				CheckpointMetaData res(ps->getAllRanges(), version, a.request.format, a.request.checkpointID);
 				const std::string& checkpointDir = abspath(a.request.checkpointDir);
+				// rocksdb::Checkpoint* tcp = nullptr;
+				rocksdb::ColumnFamilyHandle* tmh = nullptr;
+				rocksdb::DB* tmpDb;
+				if (false) {
+					// const std::string tmpCheckpointDir = "/root/checkpoint/" + a.request.checkpointID.toString();
+					const std::string tmpCheckpointDir = checkpointDir + "-tmp";
+					platform::eraseDirectoryRecursive(tmpCheckpointDir);
+					uint64_t debugCheckpointSeq = -1;
+					s = checkpoint->CreateCheckpoint(tmpCheckpointDir, /*log_size_for_flush=*/0, &debugCheckpointSeq);
+					ASSERT(s.ok());
+
+					TraceEvent(SevInfo, "ShardedRocksCreatedTmpCheckpoint", logId).detail("DataPath", tmpCheckpointDir);
+					std::vector<std::string> columnFamilies;
+					rocksdb::Options dbOptions(getOptions());
+					rocksdb::Status status =
+					    rocksdb::DB::ListColumnFamilies(dbOptions, tmpCheckpointDir, &columnFamilies);
+
+					std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
+					for (const auto& name : columnFamilies) {
+						descriptors.push_back(
+						    rocksdb::ColumnFamilyDescriptor{ name, rocksdb::ColumnFamilyOptions(dbOptions) });
+					}
+
+					std::vector<rocksdb::ColumnFamilyHandle*> handles;
+					s = rocksdb::DB::Open(dbOptions, tmpCheckpointDir, descriptors, &handles, &tmpDb);
+					TraceEvent(SevInfo, "ShardedRocksOpendTem", logId).detail("Status", s.ToString());
+					ASSERT(s.ok());
+					TraceEvent(SevInfo, "ShardedRocksOpendTem", logId).detail("DataPath", tmpCheckpointDir);
+					for (auto* handle : handles) {
+						if (handle->GetName() == ps->cf->GetName()) {
+							tmh = handle;
+							break;
+						}
+					}
+
+					auto options = getReadOptions();
+					rocksdb::Iterator* oriIter = a.shardManager->getDb()->NewIterator(options, ps->cf);
+					// rocksdb::Iterator* resIter = a.shardManager->getDb()->NewIterator(options, handle);
+					rocksdb::Iterator* resIter = tmpDb->NewIterator(options, tmh);
+					oriIter->SeekToFirst();
+					resIter->SeekToFirst();
+					while (oriIter->Valid() && resIter->Valid()) {
+						if (oriIter->key().compare(resIter->key()) != 0 ||
+						    oriIter->value().compare(resIter->value()) != 0) {
+							TraceEvent(SevError, "RocksValidateCheckpointError", logId)
+							    .detail("KeyInDB", toStringRef(oriIter->key()))
+							    .detail("ValueInDB", toStringRef(oriIter->value()))
+							    .detail("KeyInCheckpoint", toStringRef(resIter->key()))
+							    .detail("ValueInCheckpoint", toStringRef(resIter->value()));
+							s = rocksdb::Status::Corruption();
+							break;
+						}
+						oriIter->Next();
+						resIter->Next();
+					}
+					if (oriIter->Valid() || resIter->Valid()) {
+						s = rocksdb::Status::Corruption();
+					}
+					delete oriIter;
+					delete resIter;
+
+					TraceEvent(SevInfo, "ShardedRocksValidatedTmp", logId).detail("DataPath", tmpCheckpointDir);
+
+					for (auto* handle : handles) {
+						ASSERT(tmpDb->DestroyColumnFamilyHandle(handle).ok());
+					}
+
+					ASSERT(tmpDb->Close().ok());
+					delete tmpDb;
+					// ASSERT(rocksdb::Checkpoint::Create(tmpDb, &tcp).ok());
+				}
+				// {
+				// 	const std::string tmpCheckpointDir = checkpointDir + "-tmp";
+				// 	platform::eraseDirectoryRecursive(tmpCheckpointDir);
+				// 	uint64_t debugCheckpointSeq = -1;
+				// 	s = checkpoint->CreateCheckpoint(tmpCheckpointDir, /*log_size_for_flush=*/0, &debugCheckpointSeq);
+				// 	ASSERT(s.ok());
+
+				// 	TraceEvent(SevInfo, "ShardedRocksCreatedTmpCheckpoint", logId).detail("DataPath", tmpCheckpointDir);
+				// 	std::vector<std::string> columnFamilies;
+				// 	rocksdb::Options dbOptions(getOptions());
+				// 	rocksdb::Status status = rocksdb::DB::ListColumnFamilies(dbOptions, tmpCheckpointDir,
+				// &columnFamilies);
+
+				// 	std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
+				// 	for (const auto& name : columnFamilies) {
+				// 		descriptors.push_back(
+				// 		    rocksdb::ColumnFamilyDescriptor{ name, rocksdb::ColumnFamilyOptions(dbOptions) });
+				// 	}
+
+				// 	std::vector<rocksdb::ColumnFamilyHandle*> handles;
+				// 	s = rocksdb::DB::Open(dbOptions, tmpCheckpointDir, descriptors, &handles, &tmpDb);
+				// 	ASSERT(s.ok());
+				// 	TraceEvent(SevInfo, "ShardedRocksOpendTem", logId).detail("DataPath", tmpCheckpointDir);
+				// 	for (auto* handle : handles) {
+				// 		if (handle->GetName() == ps->cf->GetName()) {
+				// 			tmh = handle;
+				// 			break;
+				// 		}
+				// 	}
+
+				// 	ASSERT(rocksdb::Checkpoint::Create(tmpDb, &tcp).ok());
+				// }
+
+				// ASSERT(tcp != nullptr);
+				// ASSERT(tmh != nullptr);
+				// ASSERT(tmpDb != nullptr);
+
+				CheckpointMetaData res(ps->getAllRanges(), version, a.request.format, a.request.checkpointID);
 				platform::eraseDirectoryRecursive(checkpointDir);
 
 				if (a.request.format == DataMoveRocksCF) {
@@ -2370,7 +2589,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 						}
 						for (const auto& file : pMetadata->files) {
 							TraceEvent(SevDebug, "CheckpointFile", logId)
-							    .detail("Name", file.relative_filename)
+							    .detail("Name", file.name)
 							    .detail("SmallestKey", file.smallestkey)
 							    .detail("LargestKey", file.largestkey)
 							    .detail("Size", file.size);
@@ -2386,9 +2605,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 							rocksdb::ColumnFamilyHandle* handle;
 							const std::string cfName = deterministicRandom()->randomAlphaNumeric(8);
 							s = a.shardManager->getDb()->CreateColumnFamilyWithImport(
-							    rocksdb::ColumnFamilyOptions(), cfName, importOptions, metadata, &handle);
+							    // rocksdb::ColumnFamilyOptions(), cfName, importOptions, metadata, &handle);
+							    getCFOptions(),
+							    cfName,
+							    importOptions,
+							    metadata,
+							    &handle);
 							if (!s.ok()) {
-								TraceEvent(SevWarnAlways, "ShardedRocksValidateCheckpointError", logId)
+								TraceEvent(SevWarnAlways, "ShardedRocksValidateCheckpointImportError", logId)
 								    .detail("Status", s.ToString())
 								    .detail("CheckpointID", a.request.checkpointID)
 								    .detail("Ranges", describe(a.request.ranges))
@@ -2422,12 +2646,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 							auto options = getReadOptions();
 							rocksdb::Iterator* oriIter = a.shardManager->getDb()->NewIterator(options, ps->cf);
 							rocksdb::Iterator* resIter = a.shardManager->getDb()->NewIterator(options, handle);
+							// rocksdb::Iterator* resIter = tmpDb->NewIterator(options, tmh);
 							oriIter->SeekToFirst();
 							resIter->SeekToFirst();
 							while (oriIter->Valid() && resIter->Valid()) {
 								if (oriIter->key().compare(resIter->key()) != 0 ||
 								    oriIter->value().compare(resIter->value()) != 0) {
-									TraceEvent(SevWarnAlways, "RocksValidateCheckpointError", logId)
+									TraceEvent(SevError, "RocksValidateCheckpointError", logId)
 									    .detail("KeyInDB", toStringRef(oriIter->key()))
 									    .detail("ValueInDB", toStringRef(oriIter->value()))
 									    .detail("KeyInCheckpoint", toStringRef(resIter->key()))
@@ -2593,6 +2818,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 						    .detail("RestoreRanges", describe(a.ranges))
 						    .detail("ClearExtraRange", cRange);
 						writeBatch.DeleteRange(ps->cf, toSlice(cRange.begin), toSlice(cRange.end));
+						status = a.shardManager->getDb()->Write(options, &writeBatch);
+						if (!status.ok()) {
+							logRocksDBError(status, "RestorePersistMetaData");
+							a.done.sendError(statusToError(status));
+							return;
+						}
 					}
 				}
 			} else if (format == RocksDBKeyValues) {
@@ -2695,17 +2926,21 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			// 	a.shardManager->populateRangeMappingMutations(&writeBatch, range, /*isAdd=*/true);
 			// }
 
-			status = a.shardManager->getDb()->Write(options, &writeBatch);
-			if (!status.ok()) {
-				logRocksDBError(status, "RestorePersistMetaData");
-				a.done.sendError(statusToError(status));
-				return;
-			}
+			// status = a.shardManager->getDb()->Write(options, &writeBatch);
+			// if (!status.ok()) {
+			// 	logRocksDBError(status, "RestorePersistMetaData");
+			// 	a.done.sendError(statusToError(status));
+			// 	return;
+			// }
 			TraceEvent(SevDebug, "ShardedRocksRestoreMetaDataPersisted", logId)
 			    .detail("Path", a.path)
 			    .detail("Checkpoints", describe(a.checkpoints));
 			a.shardManager->getMetaDataShard()->refreshReadIteratorPool();
 			a.done.send(Void());
+			TraceEvent(SHARDED_ROCKS_DEBUG, "ShardedRocksTraceRestore", logId)
+			    .detail("ColumnFamily", ps->cf->GetName())
+			    .detail("Ranges", a.ranges)
+			    .detail("Checkpoints", describe(a.checkpoints));
 			TraceEvent(SevInfo, "ShardedRocksDBRestoreEnd", logId)
 			    .detail("Path", a.path)
 			    .detail("Checkpoints", describe(a.checkpoints));
@@ -4061,6 +4296,111 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointRestore") {
 
 	return Void();
 }
+
+// TEST_CASE("noSim/ShardedRocksDB/ManualCheckpoint") {
+// 	const std::string path = "/root/checkpoint/d0ab243aefc665919efc87e884de3e29";
+// 	// const std::string path = "/root/checkpoint/d0ab243aefc665919efc87e884de3e29";
+// 	const std::string cfName = "726d19ab67035956";
+
+// 	const UID logId = deterministicRandom()->randomUniqueID();
+
+// 	rocksdb::Options dbOptions(getOptions());
+// 	dbOptions.disable_auto_compactions = true;
+// 	std::vector<std::string> columnFamilies;
+// 	rocksdb::Status s = rocksdb::DB::ListColumnFamilies(dbOptions, path, &columnFamilies);
+
+// 	std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
+// 	for (const auto& name : columnFamilies) {
+// 		descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, rocksdb::ColumnFamilyOptions(dbOptions) });
+// 	}
+
+// 	rocksdb::DB* db = nullptr;
+// 	std::vector<rocksdb::ColumnFamilyHandle*> handles;
+// 	s = rocksdb::DB::Open(dbOptions, path, descriptors, &handles, &db);
+// 	ASSERT(s.ok());
+
+// 	rocksdb::ColumnFamilyHandle* cf;
+// 	for (auto* handle : handles) {
+// 		if (handle->GetName() == cfName) {
+// 			cf = handle;
+// 			break;
+// 		}
+// 	}
+// 	ASSERT(cf != nullptr);
+
+// 	rocksdb::Checkpoint* checkpoint = nullptr;
+// 	s = rocksdb::Checkpoint::Create(db, &checkpoint);
+// 	ASSERT(s.ok());
+
+// 	const std::string checkpointDir = "sharded-rocks-checkpoint";
+// 	platform::eraseDirectoryRecursive(checkpointDir);
+// 	rocksdb::ExportImportFilesMetaData* pMetadata = nullptr;
+// 	s = checkpoint->ExportColumnFamily(cf, checkpointDir, &pMetadata);
+// 	ASSERT(s.ok());
+// 	for (const auto& file : pMetadata->files) {
+// 		TraceEvent(SevDebug, "CheckpointFile", logId)
+// 		    .detail("Name", file.name)
+// 		    .detail("SmallestKey", file.smallestkey)
+// 		    .detail("LargestKey", file.largestkey)
+// 		    .detail("Size", file.size);
+// 	}
+
+// 	rocksdb::ExportImportFilesMetaData metadata = *pMetadata;
+// 	delete pMetadata;
+
+// 	{
+// 		rocksdb::ImportColumnFamilyOptions importOptions;
+// 		importOptions.move_files = false;
+// 		rocksdb::ColumnFamilyHandle* handle;
+// 		const std::string name = deterministicRandom()->randomAlphaNumeric(8);
+// 		s = db->CreateColumnFamilyWithImport(
+// 		    // rocksdb::ColumnFamilyOptions(), cfName, importOptions, metadata, &handle);
+// 		    getCFOptions(),
+// 		    name,
+// 		    importOptions,
+// 		    metadata,
+// 		    &handle);
+// 		ASSERT(s.ok());
+// 		handles.push_back(handle);
+
+// 		auto options = getReadOptions();
+// 		rocksdb::Iterator* oriIter = db->NewIterator(options, cf);
+// 		rocksdb::Iterator* resIter = db->NewIterator(options, handle);
+// 		oriIter->SeekToFirst();
+// 		resIter->SeekToFirst();
+// 		while (oriIter->Valid() && resIter->Valid()) {
+// 			TraceEvent(SevInfo, "RocksTestValidateCheckpoint", logId)
+// 			    .detail("KeyInDB", toStringRef(oriIter->key()))
+// 			    .detail("ValueInDB", toStringRef(oriIter->value()))
+// 			    .detail("KeyInCheckpoint", toStringRef(resIter->key()))
+// 			    .detail("ValueInCheckpoint", toStringRef(resIter->value()));
+// 			if (oriIter->key().compare(resIter->key()) != 0 || oriIter->value().compare(resIter->value()) != 0) {
+// 				TraceEvent(SevError, "RocksValidateCheckpointError", logId)
+// 				    .detail("KeyInDB", toStringRef(oriIter->key()))
+// 				    .detail("ValueInDB", toStringRef(oriIter->value()))
+// 				    .detail("KeyInCheckpoint", toStringRef(resIter->key()))
+// 				    .detail("ValueInCheckpoint", toStringRef(resIter->value()));
+// 				break;
+// 			}
+// 			oriIter->Next();
+// 			resIter->Next();
+// 		}
+// 		if (oriIter->Valid() || resIter->Valid()) {
+// 			s = rocksdb::Status::Corruption();
+// 		}
+// 		delete oriIter;
+// 		delete resIter;
+// 	}
+// 	for (auto* handle : handles) {
+// 		ASSERT(db->DestroyColumnFamilyHandle(handle).ok());
+// 	}
+
+// 	ASSERT(db->Close().ok());
+// 	delete db;
+// 	// ASSERT(rocksdb::DestroyDB(path, dbOptions).ok());
+
+// 	return Void();
+// }
 } // namespace
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL

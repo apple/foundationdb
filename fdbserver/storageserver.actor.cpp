@@ -682,7 +682,8 @@ public:
 			} else if (phase == MoveInPhase::Complete) {
 				st = StorageServerShard::ReadWrite;
 			} else if (phase == MoveInPhase::Fail) {
-				st = StorageServerShard::Error;
+				// st = StorageServerShard::Error;
+				st = StorageServerShard::MovingIn;
 			} else {
 				st = StorageServerShard::MovingIn;
 			}

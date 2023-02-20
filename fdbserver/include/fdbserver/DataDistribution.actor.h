@@ -57,6 +57,7 @@ public:
 		SIZE_SPLIT,
 		WRITE_SPLIT,
 		TENANT_SPLIT,
+		TEAM_HEALTH,
 		__COUNT
 	};
 	RelocateReason(Value v) : value(v) { ASSERT(value != __COUNT); }
@@ -77,6 +78,8 @@ public:
 			return "WriteSplit";
 		case TENANT_SPLIT:
 			return "TenantSplit";
+		case TEAM_HEALTH:
+			return "TeamHealth";
 		case __COUNT:
 			ASSERT(false);
 		}

@@ -18,7 +18,7 @@ Release Notes
 * Fixed an interger overflow bug that causes fetching backup files to fail. `(PR #8996) <https://github.com/apple/foundationdb/pull/8996>`_
 * Fixed a log router race condition that blocks remote tlogs forever. `(PR #8966) <https://github.com/apple/foundationdb/pull/8966>`_
 * Fixed a backup worker assertion failure. `(PR #8887) <https://github.com/apple/foundationdb/pull/8887>`_
-* Upgraded RocksDB to 7.9.2 version. `(PR #8880) <https://github.com/apple/foundationdb/pull/8880>`_
+* Upgraded RocksDB to 7.7.3 version. `(PR #8880) <https://github.com/apple/foundationdb/pull/8880>`_
 * Added byte limit for index prefetch. `(PR #8802) <https://github.com/apple/foundationdb/pull/8802>`_
 * Added storage server read range bytes metrics. `(PR #8724) <https://github.com/apple/foundationdb/pull/8724>`_
 * Added counters for single key clear requests. `(PR #8792) <https://github.com/apple/foundationdb/pull/8792>`_
