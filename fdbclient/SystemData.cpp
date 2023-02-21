@@ -1686,14 +1686,15 @@ const KeyRangeRef blobWorkerAffinityKeys("\xff\x02/bwa/"_sr, "\xff\x02/bwa0"_sr)
 
 const Key blobWorkerAffinityKeyFor(UID workerID) {
 	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
-	wr.serializeBytes(blobWorkerListKeys.begin);
+	wr.serializeBytes(blobWorkerAffinityKeys.begin);
 	wr << workerID;
 	return wr.toValue();
 }
 
 UID decodeBlobWorkerAffinityKey(KeyRef const& key) {
 	UID workerID;
-	BinaryReader reader(key.removePrefix(blobWorkerListKeys.begin), AssumeVersion(ProtocolVersion::withBlobGranule()));
+	BinaryReader reader(key.removePrefix(blobWorkerAffinityKeys.begin),
+	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
 	reader >> workerID;
 	return workerID;
 }

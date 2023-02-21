@@ -2740,7 +2740,7 @@ ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 	while (bmData->workerAffinities.count(successor.get())) {
 		successor = bmData->workerAffinities[successor.get()];
 	}
-	if (successor.get() == bwId) {
+	if (successor.get() == bwId || !bmData->workersById.count(successor.get())) {
 		successor = Optional<UID>();
 	}
 
@@ -3169,13 +3169,13 @@ ACTOR Future<Void> checkBlobWorkerList(Reference<BlobManagerData> bmData, Promis
 // Resolves these conflicts by comparing the epoch + seqno for the range
 // Special epoch/seqnos:
 //   (0,0): range is not mapped
-static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
+static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t, UID>>& map,
                           const KeyRangeRef& newRange,
                           UID newId,
                           int64_t newEpoch,
                           int64_t newSeqno,
                           std::vector<std::pair<UID, KeyRange>>& outOfDate) {
-	std::vector<std::pair<KeyRange, std::tuple<UID, int64_t, int64_t>>> newer;
+	std::vector<std::pair<KeyRange, std::tuple<UID, int64_t, int64_t, UID>>> newer;
 	auto intersecting = map.intersectingRanges(newRange);
 	bool allExistingNewer = true;
 	bool anyConflicts = false;
@@ -3183,8 +3183,9 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 		UID oldWorker = std::get<0>(old.value());
 		int64_t oldEpoch = std::get<1>(old.value());
 		int64_t oldSeqno = std::get<2>(old.value());
+		UID oldAffinity = std::get<3>(old.value());
 		if (oldEpoch > newEpoch || (oldEpoch == newEpoch && oldSeqno > newSeqno)) {
-			newer.push_back(std::pair(old.range(), std::tuple(oldWorker, oldEpoch, oldSeqno)));
+			newer.push_back(std::pair(old.range(), std::tuple(oldWorker, oldEpoch, oldSeqno, oldAffinity)));
 			if (old.range() != newRange) {
 				CODE_PROBE(true, "BM Recovery: BWs disagree on range boundaries", probe::decoration::rare);
 				anyConflicts = true;
@@ -3230,7 +3231,7 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 
 	if (!allExistingNewer) {
 		// if this range supercedes an old range insert it over that
-		map.insert(newRange, std::tuple(anyConflicts ? UID() : newId, newEpoch, newSeqno));
+		map.insert(newRange, std::tuple(anyConflicts ? UID() : newId, newEpoch, newSeqno, newId));
 
 		// then, if there were any ranges superceded by this one, insert them over this one
 		if (newer.size()) {
@@ -3460,6 +3461,7 @@ ACTOR Future<Void> updateEpoch(Reference<BlobManagerData> bmData, int64_t epoch)
 ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	state double recoveryStartTime = now();
 	state Promise<Void> workerListReady;
+	state Future<Void> blobWorkerRejoin = delay(SERVER_KNOBS->BLOB_WORKER_REJOIN_TIME);
 	bmData->addActor.send(checkBlobWorkerList(bmData, workerListReady));
 	wait(workerListReady.getFuture());
 
@@ -3555,8 +3557,8 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	//    If the worker already had the range, this is a no-op. If the worker didn't have it, it will
 	//    begin persisting it. The worker that had the same range before will now be at a lower seqno.
 
-	state KeyRangeMap<std::tuple<UID, int64_t, int64_t>> workerAssignments;
-	workerAssignments.insert(normalKeys, std::tuple(UID(), 0, 0));
+	state KeyRangeMap<std::tuple<UID, int64_t, int64_t, UID>> workerAssignments;
+	workerAssignments.insert(normalKeys, std::tuple(UID(), 0, 0, UID()));
 
 	// FIXME: use range stream instead
 	state int rowLimit = BUGGIFY ? deterministicRandom()->randomInt(2, 10) : 10000;
@@ -3719,6 +3721,9 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		throw blob_manager_replaced();
 	}
 
+	// Allow time for the worker affinity map to be loaded
+	wait(blobWorkerRejoin);
+
 	// Get set of workers again. Some could have died after reporting assignments
 	std::unordered_set<UID> endingWorkers;
 	for (auto& it : bmData->workersById) {
@@ -3759,6 +3764,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		totalGranules++;
 
 		UID workerId = std::get<0>(range.value());
+		UID workerAffinity = std::get<3>(range.value());
 		bmData->workerAssignments.insert(range.range(), workerId);
 
 		if (BM_DEBUG) {
@@ -3771,6 +3777,9 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		// if worker id is already set to a known worker that replied with it in the mapping, range is already assigned
 		// there. If not, need to explicitly assign it to someone
 		if (workerId == UID() || epoch == 0 || !endingWorkers.count(workerId)) {
+			if (workerId == UID()) {
+				workerId = workerAffinity;
+			}
 			while (bmData->workerAffinities.count(workerId)) {
 				workerId = bmData->workerAffinities[workerId];
 			}
@@ -3781,7 +3790,9 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 			RangeAssignment raAssign;
 			raAssign.isAssign = true;
-			raAssign.worker = workerId;
+			if (bmData->workersById.count(workerId)) {
+				raAssign.worker = workerId;
+			}
 			raAssign.keyRange = range.range();
 			raAssign.assign = RangeAssignmentData(AssignRequestType::Normal);
 			handleRangeAssign(bmData, raAssign);
