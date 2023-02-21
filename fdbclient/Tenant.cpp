@@ -55,6 +55,17 @@ int64_t prefixToId(KeyRef prefix, EnforceValidTenantId enforceValidTenantId) {
 	return id;
 }
 
+KeyRangeRef clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenantInfo, Arena& arena) {
+	if (tenantInfo.hasTenant()) {
+		return KeyRangeRef(range.begin.startsWith(tenantInfo.prefix.get()) ? range.begin : tenantInfo.prefix.get(),
+		                   range.end.startsWith(tenantInfo.prefix.get())
+		                       ? range.end
+		                       : allKeys.end.withPrefix(tenantInfo.prefix.get(), arena));
+	} else {
+		return range;
+	}
+}
+
 bool withinSingleTenant(KeyRangeRef const& range) {
 	if (range.begin >= "\x80"_sr || range.begin.size() < TenantAPI::PREFIX_SIZE) {
 		return false;
@@ -63,7 +74,7 @@ bool withinSingleTenant(KeyRangeRef const& range) {
 	return tRange.contains(range);
 }
 
-}; // namespace TenantAPI
+} // namespace TenantAPI
 
 std::string TenantAPI::tenantStateToString(TenantState tenantState) {
 	switch (tenantState) {

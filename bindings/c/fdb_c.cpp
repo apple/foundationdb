@@ -386,8 +386,7 @@ void setBlobFilePointer(FDBBGFilePointer* dest, const BlobFilePointerRef& source
 	dest->file_offset = source.offset;
 	dest->file_length = source.length;
 	dest->full_file_length = source.fullFileLength;
-	// FIXME: add version info to each source file pointer
-	dest->file_version = 0;
+	dest->file_version = source.fileVersion;
 
 	// handle encryption
 	if (source.cipherKeysCtx.present()) {
@@ -717,6 +716,17 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_blobbify_range(FDBDatabase* db,
 	                        .extractPtr());
 }
 
+extern "C" DLLEXPORT FDBFuture* fdb_database_blobbify_range_blocking(FDBDatabase* db,
+                                                                     uint8_t const* begin_key_name,
+                                                                     int begin_key_name_length,
+                                                                     uint8_t const* end_key_name,
+                                                                     int end_key_name_length) {
+	return (FDBFuture*)(DB(db)
+	                        ->blobbifyRangeBlocking(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                            StringRef(end_key_name, end_key_name_length)))
+	                        .extractPtr());
+}
+
 extern "C" DLLEXPORT FDBFuture* fdb_database_unblobbify_range(FDBDatabase* db,
                                                               uint8_t const* begin_key_name,
                                                               int begin_key_name_length,
@@ -755,6 +765,25 @@ extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_verify_blob_rang
 	                        ->verifyBlobRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
 	                                                      StringRef(end_key_name, end_key_name_length)),
 	                                          rv)
+	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_flush_blob_range(FDBDatabase* db,
+                                                                                 uint8_t const* begin_key_name,
+                                                                                 int begin_key_name_length,
+                                                                                 uint8_t const* end_key_name,
+                                                                                 int end_key_name_length,
+                                                                                 fdb_bool_t compact,
+                                                                                 int64_t version) {
+	Optional<Version> rv;
+	if (version != latestVersion) {
+		rv = version;
+	}
+	return (FDBFuture*)(DB(db)
+	                        ->flushBlobRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                     StringRef(end_key_name, end_key_name_length)),
+	                                         compact,
+	                                         rv)
 	                        .extractPtr());
 }
 
@@ -799,6 +828,17 @@ extern "C" DLLEXPORT FDBFuture* fdb_tenant_blobbify_range(FDBTenant* tenant,
 	                        .extractPtr());
 }
 
+extern "C" DLLEXPORT FDBFuture* fdb_tenant_blobbify_range_blocking(FDBTenant* tenant,
+                                                                   uint8_t const* begin_key_name,
+                                                                   int begin_key_name_length,
+                                                                   uint8_t const* end_key_name,
+                                                                   int end_key_name_length) {
+	return (FDBFuture*)(TENANT(tenant)
+	                        ->blobbifyRangeBlocking(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                            StringRef(end_key_name, end_key_name_length)))
+	                        .extractPtr());
+}
+
 extern "C" DLLEXPORT FDBFuture* fdb_tenant_unblobbify_range(FDBTenant* tenant,
                                                             uint8_t const* begin_key_name,
                                                             int begin_key_name_length,
@@ -837,6 +877,25 @@ extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_verify_blob_range(
 	                        ->verifyBlobRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
 	                                                      StringRef(end_key_name, end_key_name_length)),
 	                                          rv)
+	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_flush_blob_range(FDBTenant* tenant,
+                                                                               uint8_t const* begin_key_name,
+                                                                               int begin_key_name_length,
+                                                                               uint8_t const* end_key_name,
+                                                                               int end_key_name_length,
+                                                                               fdb_bool_t compact,
+                                                                               int64_t version) {
+	Optional<Version> rv;
+	if (version != latestVersion) {
+		rv = version;
+	}
+	return (FDBFuture*)(TENANT(tenant)
+	                        ->flushBlobRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                     StringRef(end_key_name, end_key_name_length)),
+	                                         compact,
+	                                         rv)
 	                        .extractPtr());
 }
 

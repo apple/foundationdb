@@ -37,7 +37,6 @@
 #include "fdbclient/Notified.h"
 
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
-#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MutationTracking.h"
@@ -1401,6 +1400,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		                                        snapshotF.offset,
 		                                        snapshotF.length,
 		                                        snapshotF.fullFileLength,
+		                                        snapshotF.version,
 		                                        snapCipherKeysCtx);
 
 		compactBytesRead += snapshotF.length;
@@ -1432,6 +1432,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 			                                   deltaF.offset,
 			                                   deltaF.length,
 			                                   deltaF.fullFileLength,
+			                                   deltaF.version,
 			                                   deltaCipherKeysCtx);
 			compactBytesRead += deltaF.length;
 			lastDeltaVersion = files.deltaFiles[deltaIdx].version;

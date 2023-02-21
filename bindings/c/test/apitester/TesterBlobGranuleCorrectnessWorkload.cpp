@@ -37,6 +37,9 @@ public:
 		if (Random::get().randomInt(0, 1) == 0) {
 			excludedOpTypes.push_back(OP_CLEAR_RANGE);
 		}
+		if (Random::get().randomInt(0, 1) == 0) {
+			excludedOpTypes.push_back(OP_FLUSH);
+		}
 	}
 
 private:
@@ -51,7 +54,8 @@ private:
 		OP_GET_BLOB_RANGES,
 		OP_VERIFY,
 		OP_READ_DESC,
-		OP_LAST = OP_READ_DESC
+		OP_FLUSH,
+		OP_LAST = OP_FLUSH
 	};
 	std::vector<OpType> excludedOpTypes;
 
@@ -303,7 +307,10 @@ private:
 	                          fdb::native::FDBReadBlobGranuleContext& bgCtx,
 	                          fdb::GranuleFilePointer snapshotFile,
 	                          fdb::KeyRange keyRange,
-	                          fdb::native::FDBBGTenantPrefix const* tenantPrefix) {
+	                          fdb::native::FDBBGTenantPrefix const* tenantPrefix,
+	                          int64_t& prevFileVersion) {
+		ASSERT(snapshotFile.fileVersion > prevFileVersion);
+		prevFileVersion = snapshotFile.fileVersion;
 		if (validatedFiles.contains(snapshotFile.filename)) {
 			return;
 		}
@@ -339,7 +346,10 @@ private:
 	                       fdb::GranuleFilePointer deltaFile,
 	                       fdb::KeyRange keyRange,
 	                       fdb::native::FDBBGTenantPrefix const* tenantPrefix,
-	                       int64_t& lastDFMaxVersion) {
+	                       int64_t& lastDFMaxVersion,
+	                       int64_t& prevFileVersion) {
+		ASSERT(deltaFile.fileVersion > prevFileVersion);
+		prevFileVersion = deltaFile.fileVersion;
 		if (validatedFiles.contains(deltaFile.filename)) {
 			return;
 		}
@@ -380,6 +390,9 @@ private:
 		}
 		lastDFMaxVersion = std::max(lastDFMaxVersion, thisDFMaxVersion);
 
+		// can be higher due to empty versions but must not be lower
+		ASSERT(lastDFMaxVersion <= prevFileVersion);
+
 		// TODO have delta mutations update map
 	}
 
@@ -392,22 +405,28 @@ private:
 		ASSERT(desc.keyRange.beginKey < desc.keyRange.endKey);
 		ASSERT(tenantId.has_value() == desc.tenantPrefix.present);
 		// beginVersion of zero means snapshot present
+		int64_t prevFileVersion = 0;
 
 		// validate snapshot file
 		ASSERT(desc.snapshotFile.has_value());
 		if (BG_API_DEBUG_VERBOSE) {
 			info(fmt::format("Loading snapshot file {0}\n", fdb::toCharsRef(desc.snapshotFile->filename)));
 		}
-		validateSnapshotData(ctx, bgCtx, *desc.snapshotFile, desc.keyRange, &desc.tenantPrefix);
+		validateSnapshotData(ctx, bgCtx, *desc.snapshotFile, desc.keyRange, &desc.tenantPrefix, prevFileVersion);
 
 		// validate delta files
 		int64_t lastDFMaxVersion = 0;
 		for (int i = 0; i < desc.deltaFiles.size(); i++) {
-			validateDeltaData(ctx, bgCtx, desc.deltaFiles[i], desc.keyRange, &desc.tenantPrefix, lastDFMaxVersion);
+			validateDeltaData(
+			    ctx, bgCtx, desc.deltaFiles[i], desc.keyRange, &desc.tenantPrefix, lastDFMaxVersion, prevFileVersion);
 		}
 
 		// validate memory mutations
-		int64_t lastVersion = 0;
+		if (desc.memoryMutations.size()) {
+			ASSERT(desc.memoryMutations.front().version > lastDFMaxVersion);
+			ASSERT(desc.memoryMutations.front().version > prevFileVersion);
+		}
+		int64_t lastVersion = prevFileVersion;
 		for (int i = 0; i < desc.memoryMutations.size(); i++) {
 			fdb::GranuleMutation& m = desc.memoryMutations[i];
 			ASSERT(m.type == 0 || m.type == 1);
@@ -494,6 +513,33 @@ private:
 		    getTenant(tenantId));
 	}
 
+	void randomFlushOp(TTaskFct cont, std::optional<int> tenantId) {
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
+		fdb::native::fdb_bool_t compact = Random::get().randomBool(0.5);
+
+		auto result = std::make_shared<bool>(false);
+
+		debugOp(compact ? "Flush" : "Compact", keyRange, tenantId, "starting");
+		execOperation(
+		    [keyRange, compact, result](auto ctx) {
+			    fdb::Future f =
+			        ctx->dbOps()
+			            ->flushBlobRange(keyRange.beginKey, keyRange.endKey, compact, -2 /* latest version*/)
+			            .eraseType();
+			    ctx->continueAfter(f, [ctx, result, f]() {
+				    *result = f.get<fdb::future_var::Bool>();
+				    ctx->done();
+			    });
+		    },
+		    [this, keyRange, compact, result, tenantId, cont]() {
+			    ASSERT(*result);
+			    debugOp(compact ? "Flush " : "Compact ", keyRange, tenantId, "Complete");
+			    schedule(cont);
+		    },
+		    getTenant(tenantId),
+		    /* failOnError = */ false);
+	}
+
 	void randomOperation(TTaskFct cont) override {
 		std::optional<int> tenantId = randomTenant();
 
@@ -529,6 +575,13 @@ private:
 			break;
 		case OP_READ_DESC:
 			randomReadDescription(cont, tenantId);
+			break;
+		case OP_FLUSH:
+			randomFlushOp(cont, tenantId);
+			// don't do too many flushes because they're expensive
+			if (Random::get().randomInt(0, 1) == 0) {
+				excludedOpTypes.push_back(OP_FLUSH);
+			}
 			break;
 		}
 	}

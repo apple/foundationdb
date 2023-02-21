@@ -40,7 +40,6 @@
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/xxhash.h"
-#include "include/fdbclient/BlobCipher.h"
 
 #include <chrono>
 #include <cstring>
@@ -209,6 +208,10 @@ EncryptAuthTokenMode BlobCipherEncryptHeaderRef::getAuthTokenMode() const {
 		    }
 	    },
 	    flags);
+}
+
+EncryptCipherDomainId BlobCipherEncryptHeaderRef::getDomainId() const {
+	return std::visit([](auto& h) { return h.v1.cipherTextDetails.encryptDomainId; }, algoHeader);
 }
 
 void BlobCipherEncryptHeaderRef::validateEncryptionHeaderDetails(const BlobCipherDetails& textCipherDetails,
@@ -754,8 +757,7 @@ std::vector<Reference<BlobCipherKey>> BlobCipherKeyCache::getAllCiphers(const En
 	return keyIdCache->getAllCipherKeys();
 }
 
-namespace {
-int getEncryptAlgoHeaderVersion(const EncryptAuthTokenMode mode, const EncryptAuthTokenAlgo algo) {
+int getEncryptCurrentAlgoHeaderVersion(const EncryptAuthTokenMode mode, const EncryptAuthTokenAlgo algo) {
 	if (mode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
 		return CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION;
 	} else {
@@ -768,7 +770,20 @@ int getEncryptAlgoHeaderVersion(const EncryptAuthTokenMode mode, const EncryptAu
 		}
 	}
 }
-} // namespace
+
+void BlobCipherDetails::validateCipherDetailsWithCipherKey(Reference<BlobCipherKey> cipherKey) {
+	if (!(baseCipherId == cipherKey->getBaseCipherId() && encryptDomainId == cipherKey->getDomainId() &&
+	      salt == cipherKey->getSalt())) {
+		TraceEvent(SevWarn, "EncryptionHeaderCipherMismatch")
+		    .detail("TextDomainId", cipherKey->getDomainId())
+		    .detail("ExpectedTextDomainId", encryptDomainId)
+		    .detail("TextBaseCipherId", cipherKey->getBaseCipherId())
+		    .detail("ExpectedTextBaseCipherId", baseCipherId)
+		    .detail("TextSalt", cipherKey->getSalt())
+		    .detail("ExpectedTextSalt", salt);
+		throw encrypt_header_metadata_mismatch();
+	}
+}
 
 // EncryptBlobCipherAes265Ctr class methods
 
@@ -896,8 +911,8 @@ void EncryptBlobCipherAes265Ctr::setCipherAlgoHeaderV1(const uint8_t* ciphertext
                                                        const BlobCipherEncryptHeaderFlagsV1& flags,
                                                        BlobCipherEncryptHeaderRef* headerRef) {
 	ASSERT_EQ(1,
-	          getEncryptAlgoHeaderVersion((EncryptAuthTokenMode)flags.authTokenMode,
-	                                      (EncryptAuthTokenAlgo)flags.authTokenAlgo));
+	          getEncryptCurrentAlgoHeaderVersion((EncryptAuthTokenMode)flags.authTokenMode,
+	                                             (EncryptAuthTokenAlgo)flags.authTokenAlgo));
 
 	if (flags.authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
 		setCipherAlgoHeaderNoAuthV1(flags, headerRef);
@@ -930,7 +945,7 @@ void EncryptBlobCipherAes265Ctr::updateEncryptHeader(const uint8_t* ciphertext,
 	updateEncryptHeaderFlagsV1(headerRef, &flags);
 
 	// update cipher algo header
-	int algoHeaderVersion = getEncryptAlgoHeaderVersion(authTokenMode, authTokenAlgo);
+	int algoHeaderVersion = getEncryptCurrentAlgoHeaderVersion(authTokenMode, authTokenAlgo);
 	ASSERT_EQ(algoHeaderVersion, 1);
 	setCipherAlgoHeaderV1(ciphertext, ciphertextLen, flags, headerRef);
 }
@@ -1045,9 +1060,10 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 	if (authTokenMode != ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
 		header->cipherHeaderDetails = headerCipherKeyOpt.get()->details();
 	} else {
-		header->cipherHeaderDetails.encryptDomainId = INVALID_ENCRYPT_DOMAIN_ID;
-		header->cipherHeaderDetails.baseCipherId = INVALID_ENCRYPT_CIPHER_KEY_ID;
-		header->cipherHeaderDetails.salt = INVALID_ENCRYPT_RANDOM_SALT;
+		header->cipherHeaderDetails = BlobCipherDetails();
+		ASSERT_EQ(INVALID_ENCRYPT_DOMAIN_ID, header->cipherHeaderDetails.encryptDomainId);
+		ASSERT_EQ(INVALID_ENCRYPT_CIPHER_KEY_ID, header->cipherHeaderDetails.baseCipherId);
+		ASSERT_EQ(INVALID_ENCRYPT_RANDOM_SALT, header->cipherHeaderDetails.salt);
 	}
 
 	memcpy(&header->iv[0], &iv[0], AES_256_IV_LENGTH);

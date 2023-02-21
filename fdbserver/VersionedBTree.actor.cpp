@@ -2815,6 +2815,13 @@ public:
 					wait(self->keyProviderInitialized.getFuture());
 					ASSERT(self->keyProvider.isValid());
 				}
+				if (self->keyProvider->expectedEncodingType() != page->getEncodingType()) {
+					TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
+					    .detail("PhysicalPageID", page->getPhysicalPageID())
+					    .detail("EncodingTypeFound", page->getEncodingType())
+					    .detail("EncodingTypeExpected", self->keyProvider->expectedEncodingType());
+					throw unexpected_encoding_type();
+				}
 				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
 				page->encryptionKey = k;
 			}
@@ -2883,6 +2890,17 @@ public:
 		try {
 			page->postReadHeader(pageIDs.front());
 			if (page->isEncrypted()) {
+				if (!self->keyProvider.isValid()) {
+					wait(self->keyProviderInitialized.getFuture());
+					ASSERT(self->keyProvider.isValid());
+				}
+				if (self->keyProvider->expectedEncodingType() != page->getEncodingType()) {
+					TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
+					    .detail("PhysicalPageID", page->getPhysicalPageID())
+					    .detail("EncodingTypeFound", page->getEncodingType())
+					    .detail("EncodingTypeExpected", self->keyProvider->expectedEncodingType());
+					throw unexpected_encoding_type();
+				}
 				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
 				page->encryptionKey = k;
 			}
@@ -3595,7 +3613,7 @@ public:
 
 		// The next section explicitly cancels all pending operations held in the pager
 		debug_printf("DWALPager(%s) shutdown kill ioLock\n", self->filename.c_str());
-		self->ioLock->kill();
+		self->ioLock->halt();
 
 		debug_printf("DWALPager(%s) shutdown cancel recovery\n", self->filename.c_str());
 		self->recoverFuture.cancel();
@@ -3657,7 +3675,14 @@ public:
 		} else {
 			g_network->getDiskBytes(parentDirectory(filename), free, total);
 		}
-		int64_t pagerSize = header.pageCount * physicalPageSize;
+
+		// Size of redwood data file.  Note that filePageCountPending is used here instead of filePageCount.  This is
+		// because it is always >= filePageCount and accounts for file size changes which will complete soon.
+		int64_t pagerPhysicalSize = filePageCountPending * physicalPageSize;
+
+		// Size of the pager, which can be less than the data file size.  All pages within this size are either in use
+		// in a data structure or accounted for in one of the pager's free page lists.
+		int64_t pagerLogicalSize = header.pageCount * physicalPageSize;
 
 		// It is not exactly known how many pages on the delayed free list are usable as of right now.  It could be
 		// known, if each commit delayed entries that were freeable were shuffled from the delayed free queue to the
@@ -3668,12 +3693,17 @@ public:
 		// Amount of space taken up by the free list queues themselves, as if we were to pop and use
 		// items on the free lists the space the items are stored in would also become usable
 		int64_t reusableQueueSpace = (freeList.numPages + delayedFreeList.numPages) * physicalPageSize;
-		int64_t reusable = reusablePageSpace + reusableQueueSpace;
+
+		// Pager slack is the space at the end of the pager's logical size until the end of the pager file's size.
+		// These pages will be used if needed without growing the file size.
+		int64_t reusablePagerSlackSpace = pagerPhysicalSize - pagerLogicalSize;
+
+		int64_t reusable = reusablePageSpace + reusableQueueSpace + reusablePagerSlackSpace;
 
 		// Space currently in used by old page versions have have not yet been freed due to the remap cleanup window.
 		int64_t temp = remapQueue.numEntries * physicalPageSize;
 
-		return StorageBytes(free, total, pagerSize - reusable, free + reusable, temp);
+		return StorageBytes(free, total, pagerPhysicalSize, free + reusable, temp);
 	}
 
 	int64_t getPageCacheCount() override { return pageCache.getCount(); }
@@ -5255,6 +5285,7 @@ public:
 				    .detail("InstanceName", self->m_pager->getName())
 				    .detail("UsingEncodingType", self->m_encodingType)
 				    .detail("ExistingEncodingType", self->m_header.encodingType);
+				throw unexpected_encoding_type();
 			}
 			// Verify if encryption mode and encoding type in the header are consistent.
 			// This check can also fail in case of authentication mode mismatch.
@@ -6230,18 +6261,6 @@ private:
 		auto& metrics = g_redwoodMetrics.level(btPage->height).metrics;
 		metrics.pageRead += 1;
 		metrics.pageReadExt += (id.size() - 1);
-
-		// If BTree encryption is enabled, pages read must be encrypted using the desired encryption type
-		if (self->m_enforceEncodingType && (page->getEncodingType() != self->m_encodingType)) {
-			Error e = unexpected_encoding_type();
-			TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
-			    .error(e)
-			    .detail("PhysicalPageID", page->getPhysicalPageID())
-			    .detail("IsEncrypted", page->isEncrypted())
-			    .detail("EncodingTypeFound", page->getEncodingType())
-			    .detail("EncodingTypeExpected", self->m_encodingType);
-			throw e;
-		}
 
 		return std::move(page);
 	}
@@ -11448,8 +11467,8 @@ TEST_CASE("/redwood/correctness/EnforceEncodingType") {
 		                               {}, // encryptionMode
 		                               reopenEncodingType,
 		                               encryptionKeyProviders.at(reopenEncodingType));
-		wait(kvs->init());
 		try {
+			wait(kvs->init());
 			Optional<Value> v = wait(kvs->readValue("foo"_sr));
 			UNREACHABLE();
 		} catch (Error& e) {

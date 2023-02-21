@@ -299,22 +299,18 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				} catch (Error& e) {
 					if (e.code() == error_code_conflicting_restore) {
 						ASSERT(retried);
-						CODE_PROBE(true, "MetaclusterRestore: 2 restores on the same cluster simultaneously");
+						CODE_PROBE(true, "MetaclusterManagementWorkload: timed out restore conflicts with retried restore");
 						continue;
 					}
 					throw;
 				}
-			}
-
-			ASSERT(dataDb->registered);
-			if (!dryRun) {
-				dataDb->detached = false;
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_cluster_not_found) {
 				ASSERT(!dataDb->registered);
 				return Void();
 			}
+
 			TraceEvent(SevError, "RestoreClusterFailure").error(e).detail("ClusterName", clusterName);
 			ASSERT(false);
 		}

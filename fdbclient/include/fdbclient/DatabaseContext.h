@@ -406,6 +406,7 @@ public:
 	Future<Void> waitPurgeGranulesComplete(Key purgeKey);
 
 	Future<bool> blobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant = {});
+	Future<bool> blobbifyRangeBlocking(KeyRange range, Optional<Reference<Tenant>> tenant = {});
 	Future<bool> unblobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant = {});
 	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range,
 	                                                                int rangeLimit,
@@ -413,6 +414,10 @@ public:
 	Future<Version> verifyBlobRange(const KeyRange& range,
 	                                Optional<Version> version,
 	                                Optional<Reference<Tenant>> tenant = {});
+	Future<bool> flushBlobRange(const KeyRange& range,
+	                            bool compact,
+	                            Optional<Version> version,
+	                            Optional<Reference<Tenant>> tenant = {});
 	Future<bool> blobRestore(const KeyRange range, Optional<Version> version);
 
 	// private:
