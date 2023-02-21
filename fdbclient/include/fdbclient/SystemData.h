@@ -343,6 +343,8 @@ std::string encodeFailedLocalityKey(std::string const&);
 // storage engine parameters keys prefix
 // \xff/conf/storage_engine_params/<param> := <val>
 extern const KeyRef storageEngineParamsPrefix;
+extern const KeyRef storageEngineParamsVersionKey;
+extern const KeyRangeRef storageEngineParamsKeys;
 
 //   "\xff/globalConfig/[[option]]" := "value"
 //	 An umbrella prefix for global configuration data synchronized to all nodes.
