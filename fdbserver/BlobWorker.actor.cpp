@@ -3453,13 +3453,13 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				// FIXME - better way. Wait on retry here, or just have better model for tenant metadata?
 				// Just throw wrong_shard_server and make the client retry and assume we load it later
 				TraceEvent(SevDebug, "BlobWorkerRequestUnknownTenant", bwData->id)
-					.suppressFor(5.0)
-					.detail("TenantName", req.tenantInfo.name.get())
-					.detail("TenantId", req.tenantInfo.tenantId);
+				    .suppressFor(5.0)
+				    .detail("TenantName", req.tenantInfo.name.get())
+				    .detail("TenantId", req.tenantInfo.tenantId);
 				throw unknown_tenant();
 			}
 			req.keyRange = KeyRangeRef(req.keyRange.begin.withPrefix(tenantPrefix.get(), req.arena),
-									req.keyRange.end.withPrefix(tenantPrefix.get(), req.arena));
+			                           req.keyRange.end.withPrefix(tenantPrefix.get(), req.arena));
 		}
 
 		// TODO remove requirement for canCollapseBegin once we implement early replying
