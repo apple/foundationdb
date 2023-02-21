@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include <memory>
 
 #include "fdbclient/NativeAPI.actor.h"
@@ -173,15 +174,24 @@ struct Resolver : ReferenceCounted<Resolver> {
 	// End-to-end server latency of resolver requests.
 	LatencySample resolverLatency;
 
-	// Queue wait times.
+	// Queue wait times, per request.
 	LatencySample queueWaitLatency;
 
-	// Actual work.
+	// Actual work, per req request.
 	LatencySample computeLatency;
+
+	// Maximum number of waiters in queue during metrics interval.
+	int64_t maxQueueDepth;
 
 	Future<Void> logger;
 
 	EncryptionAtRestMode encryptMode;
+
+	int64_t getAndResetMaxQueueDepth() {
+		int64_t ret = maxQueueDepth;
+		maxQueueDepth = version.numWaiting();
+		return ret;
+	}
 
 	Resolver(UID dbgid, int commitProxyCount, int resolverCount, EncryptionAtRestMode encryptMode)
 	  : dbgid(dbgid), commitProxyCount(commitProxyCount), resolverCount(resolverCount), encryptMode(encryptMode),
@@ -206,10 +216,12 @@ struct Resolver : ReferenceCounted<Resolver> {
 	    computeLatency("ResolverComputeTimeMetrics",
 	                   dbgid,
 	                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                   SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {
+	                   SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    maxQueueDepth(0) {
 		specialCounter(cc, "Version", [this]() { return this->version.get(); });
 		specialCounter(cc, "NeededVersion", [this]() { return this->neededVersion.get(); });
 		specialCounter(cc, "TotalStateBytes", [this]() { return this->totalStateBytes.get(); });
+		specialCounter(cc, "MaxQueueDepth", [this]() { return this->getAndResetMaxQueueDepth(); });
 
 		logger = cc.traceCounters("ResolverMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "ResolverMetrics");
 	}
@@ -272,6 +284,13 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		    proxyInfo.lastVersion <= self->recentStateTransactionsInfo.firstVersion()) {
 			self->neededVersion.set(std::max(self->neededVersion.get(), req.prevVersion));
 		}
+
+		// Update queue depth metric. Check if we're going to be one of the waiters or not.
+		int waiters = self->version.numWaiting();
+		if (self->version.get() < req.prevVersion) {
+			waiters++;
+		}
+		self->maxQueueDepth = std::max<int64_t>(self->maxQueueDepth, waiters);
 
 		choose {
 			when(wait(self->version.whenAtLeast(req.prevVersion))) {
