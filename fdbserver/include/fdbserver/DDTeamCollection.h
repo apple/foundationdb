@@ -553,6 +553,11 @@ protected:
 	// `perpetualStorageWiggleIterator` and `perpetualStorageWiggler`. Otherwise, it sends stop signal to them.
 	Future<Void> monitorPerpetualStorageWiggle();
 
+	// The actor monitors the storage engine params' change and send requests to storage servers
+	Future<Void> monitorStorageEngineParamsChange();
+	// Update the storage engine parameters if requested
+	Future<Void> storageParamsUpdater(std::map<std::string, std::string> newParams);
+
 	Future<Void> waitHealthyZoneChange();
 
 	int64_t getDebugTotalDataInFlight() const;
@@ -699,6 +704,9 @@ public:
 	// Take a snapshot of necessary data structures from `DDTeamCollection` and print them out with yields to avoid slow
 	// task on the run loop.
 	static Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self);
+
+	// considering always check before return
+	Future<std::map<std::string, std::string>> getStorageEngineParams();
 
 	Database dbContext() const { return db->context(); }
 };

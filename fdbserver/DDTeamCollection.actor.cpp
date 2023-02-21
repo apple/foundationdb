@@ -136,9 +136,7 @@ public:
 
 		loop {
 			choose {
-				when(wait(self->buildTeams())) {
-					return Void();
-				}
+				when(wait(self->buildTeams())) { return Void(); }
 				when(wait(self->restartTeamBuilder.onTrigger())) {}
 			}
 		}
@@ -528,9 +526,7 @@ public:
 		while (self->pauseWiggle && !self->pauseWiggle->get() && self->waitUntilRecruited.get()) {
 			choose {
 				when(wait(self->waitUntilRecruited.onChange() || self->pauseWiggle->onChange())) {}
-				when(wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY, g_network->getCurrentTask()))) {
-					break;
-				}
+				when(wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY, g_network->getCurrentTask()))) { break; }
 			}
 		}
 
@@ -1379,9 +1375,7 @@ public:
 						    .detail("ConfigStoreType", self->configuration.storageServerStoreType)
 						    .detail("WrongStoreTypeRemoved", server->wrongStoreTypeToRemove.get());
 					}
-					when(wait(server->wakeUpTracker.getFuture())) {
-						server->wakeUpTracker = Promise<Void>();
-					}
+					when(wait(server->wakeUpTracker.getFuture())) { server->wakeUpTracker = Promise<Void>(); }
 					when(wait(storageMetadataTracker)) {}
 					when(wait(server->ssVersionTooFarBehind.onChange())) {}
 					when(wait(self->disableFailingLaggingServers.onChange())) {}
@@ -2130,9 +2124,7 @@ public:
 							    .detail("ExtraHealthyTeamCount", extraTeamCount)
 							    .detail("HealthyTeamCount", self->healthyTeamCount);
 						}
-						when(wait(pauseChanged)) {
-							continue;
-						}
+						when(wait(pauseChanged)) { continue; }
 					}
 				}
 			}
@@ -2230,6 +2222,102 @@ public:
 				}
 			}
 		}
+	}
+
+	ACTOR static Future<Void> monitorStorageEngineParamsChange(DDTeamCollection* self) {
+		state SignalableActorCollection collection;
+		state std::map<std::string, std::string> newParams;
+		loop {
+			state ReadYourWritesTransaction tr(self->dbContext());
+			newParams.clear();
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				RangeResult paramsF = wait(tr.getRange(storageEngineParamsKeys, CLIENT_KNOBS->TOO_MANY));
+				for (const auto& [k, v] : paramsF) {
+					TraceEvent("MonitorStorageEngineParamsChange")
+						.detail("Param", k)
+						.detail("Value", v);
+					// params[k.removePrefix(storageEngineParamsPrefix).toString()] = v.toString();
+					auto paramK = k.removePrefix(storageEngineParamsPrefix).toString();
+					ASSERT(self->configuration.storageEngineParams.present());
+					ASSERT(self->configuration.storageEngineParams.get().contains(paramK));
+					auto oldV = self->configuration.storageEngineParams.get().at(paramK);
+					if (v.toString() != oldV) {
+						TraceEvent("NewStorageEngineParamsChange")
+						    .detail("Param", paramK)
+						    .detail("OldV", oldV)
+						    .detail("NewV", v);
+						newParams[paramK] = v.toString();
+					}
+					if (newParams.size()) {
+						collection.add(self->storageParamsUpdater(newParams));
+					}
+				}
+
+				state Future<Void> watchFuture = tr.watch(storageEngineParamsVersionKey);
+				wait(tr.commit());
+
+				wait(watchFuture);
+				TraceEvent("StorageEngineParamsWatchAfter").log();
+				tr.reset();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> storageParamsUpdater(DDTeamCollection* self,
+	                                               std::map<std::string, std::string> newParams) {
+		// get all storages interfaces
+		// send the change requests
+		// runtime/reboot/replacement
+		state std::vector<Future<ErrorOr<SetStorageEngineParamsReply>>> fs;
+		for (const auto& [_, ss] : self->server_info) {
+			StorageServerInterface si = ss->getLastKnownInterface();
+			fs.push_back(si.setStorageEngineParams.tryGetReply(SetStorageEngineParamsRequest(newParams)));
+		}
+		wait(waitForAll(fs));
+		for (Future<ErrorOr<SetStorageEngineParamsReply>>& f : fs) {
+			ASSERT(f.isReady() && !f.get().isError());
+			SetStorageEngineParamsReply reply = f.get().get();
+			// TODO: handle the needreboot and needreplacement parameters
+			for (const auto& k : reply.result.applied) {
+				self->configuration.storageEngineParams.get()[k] = newParams[k];
+			}
+		}
+
+		TraceEvent("DDStorageParamsUpdater").detail("NewParams", describe(newParams));
+		return Void();
+	}
+
+	ACTOR static Future<std::map<std::string, std::string>> getStorageEngineParams(DDTeamCollection* self) {
+		// TODO : should wait for any pending changes for storages to apply and return
+		state std::vector<Future<ErrorOr<GetStorageEngineParamsReply>>> fs;
+		for (const auto& [_, ss] : self->server_info) {
+			StorageServerInterface si = ss->getLastKnownInterface();
+			fs.push_back(si.getStorageEngineParams.tryGetReply(GetStorageEngineParamsRequest()));
+		}
+		wait(waitForAll(fs));
+		int index = 0;
+		std::map<std::string, std::string> result;
+		for (const auto& [_, ss] : self->server_info) {
+			Future<ErrorOr<GetStorageEngineParamsReply>> f = fs[index++];
+			ASSERT(f.isReady() && !f.get().isError());
+			GetStorageEngineParamsReply reply = f.get().get();
+			json_spirit::mObject paramsObj;
+			for (const auto& [k, v] : reply.params) {
+				paramsObj[k] = v;
+			}
+			const std::string params_json_str =
+			    json_spirit::write_string(json_spirit::mValue(paramsObj));
+			const std::string addr = ss->getLastKnownInterface().address().toString();
+			result[addr] = params_json_str;
+			TraceEvent("GetStorageParamsPerProcess")
+			    .detail("Process", addr)
+			    .detail("Params", params_json_str);
+		}
+		return result;
 	}
 
 	ACTOR static Future<Void> waitHealthyZoneChange(DDTeamCollection* self) {
@@ -2355,7 +2443,7 @@ public:
 			isr.seedTag = invalidTag;
 			isr.reqId = deterministicRandom()->randomUniqueID();
 			isr.interfaceId = interfaceId;
-			if(self->configuration.storageEngineParams.present())
+			if (self->configuration.storageEngineParams.present())
 				isr.storageEngineParams = self->configuration.storageEngineParams.get();
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
@@ -2650,9 +2738,7 @@ public:
 							}
 						}
 					}
-					when(wait(recruitStorage->onChange())) {
-						fCandidateWorker = Future<RecruitStorageReply>();
-					}
+					when(wait(recruitStorage->onChange())) { fCandidateWorker = Future<RecruitStorageReply>(); }
 					when(wait(self->zeroHealthyTeams->onChange())) {
 						if (!pendingTSSCheck && self->zeroHealthyTeams->get() &&
 						    (self->isTssRecruiting || self->tss_info_by_pair.size() > 0)) {
@@ -2986,6 +3072,7 @@ public:
 				self->addActor.send(self->trackExcludedServers());
 				self->addActor.send(self->waitHealthyZoneChange());
 				self->addActor.send(self->monitorPerpetualStorageWiggle());
+				self->addActor.send(self->monitorStorageEngineParamsChange());
 			}
 			// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 
@@ -3539,6 +3626,19 @@ Future<Void> DDTeamCollection::perpetualStorageWiggler(AsyncVar<bool>& stopSigna
 Future<Void> DDTeamCollection::monitorPerpetualStorageWiggle() {
 	ASSERT(!db->isMocked());
 	return DDTeamCollectionImpl::monitorPerpetualStorageWiggle(this);
+}
+
+Future<Void> DDTeamCollection::monitorStorageEngineParamsChange() {
+	ASSERT(!db->isMocked());
+	return DDTeamCollectionImpl::monitorStorageEngineParamsChange(this);
+}
+
+Future<Void> DDTeamCollection::storageParamsUpdater(std::map<std::string, std::string> newParams) {
+	return DDTeamCollectionImpl::storageParamsUpdater(this, newParams);
+}
+
+Future<std::map<std::string, std::string>> DDTeamCollection::getStorageEngineParams() {
+	return DDTeamCollectionImpl::getStorageEngineParams(this);
 }
 
 Future<Void> DDTeamCollection::waitServerListChange(FutureStream<Void> serverRemoved,
