@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbrpc/Locality.h"
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -33,7 +34,7 @@ struct ClogTlogWorkload : TestWorkload {
 	bool enabled;
 	double testDuration;
 	bool processClassUpdated = false;
-	Optional<IPAddress> tlog;
+	Optional<IPAddress> tlog; // the tlog to be clogged with all other processes except the CC
 
 	ClogTlogWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
@@ -102,20 +103,24 @@ struct ClogTlogWorkload : TestWorkload {
 	// Clog a random tlog with all proxies so that this triggers a recovery
 	// and the recovery will become stuck.
 	ACTOR static Future<Void> clogTlog(ClogTlogWorkload* self, Database cx, double seconds) {
-		ASSERT(self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS);
-		wait(updateSatelliteProcessClass(self, cx));
+		ASSERT(self->dbInfo->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION);
+		// wait(updateSatelliteProcessClass(self, cx));
 
 		IPAddress cc = self->dbInfo->get().clusterInterface.address().ip;
-		std::vector<IPAddress> proxies;
-		for (const auto& proxy : self->dbInfo->get().client.commitProxies) {
-			const auto& ip = proxy.address().ip;
+		std::vector<IPAddress> ips;
+		std::set<IPAddress> candidates;
+		for (const auto& process : g_simulator.getAllProcesses()) {
+			const auto& ip = process->address.ip;
 			if (cc == ip) {
 				TraceEvent("ClogTlogSkipCC").detail("IP", ip);
 			} else {
-				proxies.push_back(ip);
+				if (process->startingClass == ProcessClass::LogClass) {
+					candidates.insert(ip);
+				}
+				ips.push_back(ip);
 			}
 		}
-		ASSERT(proxies.size() > 0);
+		ASSERT(ips.size() > 0);
 
 		// Find all primary tlogs
 		std::vector<IPAddress> logs;
@@ -139,13 +144,22 @@ struct ClogTlogWorkload : TestWorkload {
 		}
 		ASSERT(logs.size() > 0);
 
-		// Clog all proxies and one satellite tlogs
-		self->tlog = found ? self->tlog : logs[0];
-		for (const auto& proxy : proxies) {
+		// Clog all proxies and one tlogs
+		if (!found) {
+			// Choose a tlog, preferring the one of "log" class
+			self->tlog.reset();
+			for (const auto& log : logs) {
+				if (candidates.find(log) != candidates.end()) {
+					self->tlog = log;
+					break;
+				}
+			}
+			if (!self->tlog.present()) {
+				self->tlog = logs[0];
+			}
+		}
+		for (const auto& proxy : ips) {
 			g_simulator.clogPair(proxy, self->tlog.get(), seconds);
-			/*for (const auto& log : logs) {
-			    g_simulator.clogPair(proxy, log, seconds);
-			}*/
 		}
 		return Void();
 	}
@@ -155,14 +169,14 @@ struct ClogTlogWorkload : TestWorkload {
 		state double workloadEnd = now() + self->testDuration;
 		TraceEvent("ClogTlog").detail("StartTime", startTime).detail("EndTime", workloadEnd);
 		loop {
-			while (self->dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			while (self->dbInfo->get().recoveryState < RecoveryState::RECOVERY_TRANSACTION) {
 				wait(self->dbInfo->onChange());
 			}
 
 			wait(clogTlog(self, cx, workloadEnd - now()));
 			loop choose {
 				when(wait(self->dbInfo->onChange())) {
-					if (self->dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+					if (self->dbInfo->get().recoveryState < RecoveryState::RECOVERY_TRANSACTION) {
 						break;
 					}
 				}
