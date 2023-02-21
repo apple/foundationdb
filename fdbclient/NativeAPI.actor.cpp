@@ -8235,19 +8235,11 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		if (granule.end <= keyRange.begin) {
 			continue;
 		}
-<<<<<<< HEAD
-		workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
-
-		// prune first/last granules to requested range
-		if (keyRange.begin > granuleStartKey) {
-			granuleStartKey = keyRange.begin;
-=======
 		if (BG_REQUEST_DEBUG) {
 			fmt::print("Blob granule request mapping [{0} - {1})={2}\n",
 			           granule.begin.printable(),
 			           granule.end.printable(),
 			           bwInterf.id().toString().substr(0, 5));
->>>>>>> main
 		}
 		// prune first/last granules to requested range
 		if (keyRange.begin > granule.begin) {
