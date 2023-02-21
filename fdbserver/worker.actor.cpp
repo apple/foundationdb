@@ -224,6 +224,9 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 		when(state ErrorOr<Void> e = wait(errorOr(actor))) {
 			if (e.isError() && e.getError().code() == error_code_please_reboot) {
 				// no need to wait.
+			}
+			if (e.isError() && e.getError().code() == error_code_please_reboot_kv_store) {
+				store->close();
 			} else {
 				wait(onClosed);
 			}
@@ -677,42 +680,18 @@ ACTOR Future<Void> registrationClient(
 					TraceEvent(SevWarn, "WorkerRegisterTimeout").detail("WaitTime", now() - startTime);
 				}
 			}
-			when(wait(ccInterface->onChange())) {
-				break;
-			}
-			when(wait(ddInterf->onChange())) {
-				break;
-			}
-			when(wait(rkInterf->onChange())) {
-				break;
-			}
-			when(wait(csInterf->onChange())) {
-				break;
-			}
-			when(wait(bmInterf->onChange())) {
-				break;
-			}
-			when(wait(blobMigratorInterf->onChange())) {
-				break;
-			}
-			when(wait(ekpInterf->onChange())) {
-				break;
-			}
-			when(wait(degraded->onChange())) {
-				break;
-			}
-			when(wait(FlowTransport::transport().onIncompatibleChanged())) {
-				break;
-			}
-			when(wait(issues->onChange())) {
-				break;
-			}
-			when(wait(recovered)) {
-				break;
-			}
-			when(wait(clusterId->onChange())) {
-				break;
-			}
+			when(wait(ccInterface->onChange())) { break; }
+			when(wait(ddInterf->onChange())) { break; }
+			when(wait(rkInterf->onChange())) { break; }
+			when(wait(csInterf->onChange())) { break; }
+			when(wait(bmInterf->onChange())) { break; }
+			when(wait(blobMigratorInterf->onChange())) { break; }
+			when(wait(ekpInterf->onChange())) { break; }
+			when(wait(degraded->onChange())) { break; }
+			when(wait(FlowTransport::transport().onIncompatibleChanged())) { break; }
+			when(wait(issues->onChange())) { break; }
+			when(wait(recovered)) { break; }
+			when(wait(clusterId->onChange())) { break; }
 		}
 	}
 }
@@ -1320,21 +1299,23 @@ struct TrackRunningStorage {
 	~TrackRunningStorage() { runningStorages->erase(std::make_pair(self, storeType)); };
 };
 
-ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValueStoreType>>* runningStorages,
-                                                 Future<Void> prevStorageServer,
-                                                 KeyValueStoreType storeType,
-                                                 std::string filename,
-                                                 UID id,
-                                                 LocalityData locality,
-                                                 bool isTss,
-                                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                                 std::string folder,
-                                                 ActorCollection* filesClosed,
-                                                 int64_t memoryLimit,
-                                                 IKeyValueStore* store,
-                                                 bool validateDataFiles,
-                                                 Promise<Void>* rebootKVStore,
-                                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider) {
+ACTOR Future<Void> storageServerRollbackRebooter(
+    std::set<std::pair<UID, KeyValueStoreType>>* runningStorages,
+    Future<Void> prevStorageServer,
+    KeyValueStoreType storeType,
+    std::string filename,
+    UID id,
+    LocalityData locality,
+    bool isTss,
+    Reference<AsyncVar<ServerDBInfo> const> db,
+    std::string folder,
+    ActorCollection* filesClosed,
+    int64_t memoryLimit,
+    IKeyValueStore* store,
+    bool validateDataFiles,
+    Promise<Void>* rebootKVStore,
+    Reference<IPageEncryptionKeyProvider> encryptionKeyProvider,
+    std::shared_ptr<std::map<std::string, std::string>> storageEngineParams) {
 	state TrackRunningStorage _(id, storeType, runningStorages);
 	loop {
 		ErrorOr<Void> e = wait(errorOr(prevStorageServer));
@@ -1352,6 +1333,9 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 			// Add the to actorcollection to make sure filesClosed not return
 			filesClosed->add(rebootKVStore->getFuture());
 			wait(delay(SERVER_KNOBS->REBOOT_KV_STORE_DELAY));
+			// use the up-to-date storage engine paras
+			// TODO : fix this condition
+			Optional<std::map<std::string, std::string>> params(*storageEngineParams);
 			// reopen KV store
 			store = openKVStore(
 			    storeType,
@@ -1366,7 +1350,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 			                deterministicRandom()->coinflip())
 			             : true),
 			    encryptionKeyProvider,
-			    Optional<std::map<std::string, std::string>>(StorageEngineParamsFactory::getParams(storeType)));
+			    params);
 			Promise<Void> nextRebootKVStorePromise;
 			filesClosed->add(store->onClosed() ||
 			                 nextRebootKVStorePromise
@@ -1409,7 +1393,8 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		                                  folder,
 		                                  Promise<Void>(),
 		                                  Reference<IClusterConnectionRecord>(nullptr),
-		                                  encryptionKeyProvider);
+		                                  encryptionKeyProvider,
+		                                  storageEngineParams);
 		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
 	}
 }
@@ -1941,10 +1926,14 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.changeFeedStream);
 				DUMPTOKEN(recruited.changeFeedPop);
 				DUMPTOKEN(recruited.changeFeedVersionUpdate);
+				// TODO : add for the new interface
 
+				std::shared_ptr<std::map<std::string, std::string>> paramsPtr =
+				    std::make_shared<std::map<std::string, std::string>>(
+				        StorageEngineParamsFactory::getParams(s.storeType));
 				Promise<Void> recovery;
-				Future<Void> f =
-				    storageServer(kv, recruited, dbInfo, folder, recovery, connRecord, encryptionKeyProvider);
+				Future<Void> f = storageServer(
+				    kv, recruited, dbInfo, folder, recovery, connRecord, encryptionKeyProvider, paramsPtr);
 				recoveries.push_back(recovery.getFuture());
 				f = handleIOErrors(f, kv, s.storeID, kvClosed);
 				f = storageServerRollbackRebooter(&runningStorages,
@@ -1961,7 +1950,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                                  kv,
 				                                  validateDataFiles,
 				                                  &rebootKVSPromise,
-				                                  encryptionKeyProvider);
+				                                  encryptionKeyProvider,
+				                                  paramsPtr);
 				errorForwarders.add(forwardError(errors, ssRole, recruited.id(), f));
 			} else if (s.storedComponent == DiskStore::TLogData) {
 				LocalLineage _;
@@ -2599,6 +2589,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					filesClosed.add(kvClosed);
 					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
 					storageCache.set(req.reqId, storageReady.getFuture());
+					std::shared_ptr<std::map<std::string, std::string>> paramsPtr =
+					    req.storageEngineParams.present()
+					        ? std::make_shared<std::map<std::string, std::string>>(req.storageEngineParams.get())
+					        : std::make_shared<std::map<std::string, std::string>>();
 					Future<Void> s = storageServer(data,
 					                               recruited,
 					                               req.seedTag,
@@ -2608,7 +2602,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                               dbInfo,
 					                               folder,
 					                               encryptionKeyProvider,
-					                               req.storageEngineParams);
+					                               paramsPtr);
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(&runningStorages,
@@ -2625,7 +2619,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                                  data,
 					                                  false,
 					                                  &rebootKVSPromise2,
-					                                  encryptionKeyProvider);
+					                                  encryptionKeyProvider,
+					                                  paramsPtr);
 					errorForwarders.add(forwardError(errors, ssRole, recruited.id(), s));
 				} else if (storageCache.exists(req.reqId)) {
 					forwardPromise(req.reply, storageCache.get(req.reqId));
