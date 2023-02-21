@@ -3051,6 +3051,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		// Free last change feed data
 		metadata->activeCFData.set(Reference<ChangeFeedData>());
 
+		// clear out buffered data
+		bwData->stats.mutationBytesBuffered -= metadata->bufferedDeltaBytes;
+
 		if (e.code() == error_code_operation_cancelled) {
 			throw;
 		}
