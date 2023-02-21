@@ -21,6 +21,7 @@
 #include <cinttypes>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "flow/MkCert.h"
 #include "fmt/format.h"
@@ -213,7 +214,11 @@ struct SimClogging {
 		if (!g_simulator->speedUpSimulation && !stableConnection && clogPairUntil.count(pair))
 			t = std::max(t, clogPairUntil[pair]);
 
-		if (!g_simulator->speedUpSimulation && !stableConnection && clogRecvUntil.count(to.ip))
+		auto p = std::make_pair(from, to);
+		if (!g_simulator.speedUpSimulation && !stableConnection && clogProcessPairUntil.count(p))
+			t = std::max(t, clogProcessPairUntil[p]);
+
+		if (!g_simulator.speedUpSimulation && !stableConnection && clogRecvUntil.count(to.ip))
 			t = std::max(t, clogRecvUntil[to.ip]);
 
 		return t - tnow;
@@ -223,6 +228,14 @@ struct SimClogging {
 		auto& u = clogPairUntil[std::make_pair(from, to)];
 		u = std::max(u, now() + t);
 	}
+
+	// Clog a pair of processes until a time. This is more fine-grained than
+	// the IPAddress based one.
+	void clogPairFor(const NetworkAddress& from, const NetworkAddress& to, double t) {
+		auto& u = clogProcessPairUntil[std::make_pair(from, to)];
+		u = std::max(u, now() + t);
+	}
+
 	void clogSendFor(const IPAddress& from, double t) {
 		auto& u = clogSendUntil[from];
 		u = std::max(u, now() + t);
@@ -242,6 +255,7 @@ private:
 	std::map<IPAddress, double> clogSendUntil, clogRecvUntil;
 	std::map<std::pair<IPAddress, IPAddress>, double> clogPairUntil;
 	std::map<std::pair<IPAddress, IPAddress>, double> clogPairLatency;
+	std::map<std::pair<NetworkAddress, NetworkAddress>, double> clogProcessPairUntil;
 	double halfLatency() const {
 		double a = deterministicRandom()->random01();
 		const double pFast = 0.999;
