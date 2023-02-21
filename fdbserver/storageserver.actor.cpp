@@ -9614,22 +9614,23 @@ ACTOR Future<Void> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 				break;
 			}
 			ASSERT(metaData.ranges.size() > 0);
-			metaDataRangesIter = metaData.ranges.begin();
 			std::sort(metaData.ranges.begin(), metaData.ranges.end(), [](KeyRange a, KeyRange b) {
 				// Make sure no overlapping between compared two ranges
 				if (a.begin < b.begin) {
-					ASSERT(a.end <= b.begin);
+					ASSERT(a.end < b.begin);
 				} else if (a.begin > b.begin) {
-					ASSERT(a.end >= b.begin);
+					ASSERT(a.end > b.begin);
 				} else {
-					ASSERT(a.begin == a.end || b.begin == b.end);
+					ASSERT(false);
 				}
 				// metaData.ranges must be in ascending order
-				// sstWriter requires written keys are in ascending order
+				// sstWriter requires written keys to be in ascending order
 				return a.begin < b.begin;
 			});
+
 			numGetRangeQueries = 0;
 			numSampledKeys = 0;
+			metaDataRangesIter = metaData.ranges.begin();
 			while (metaDataRangesIter != metaData.ranges.end()) {
 				KeyRange range = *metaDataRangesIter;
 				readBegin = range.begin.withPrefix(persistByteSampleKeys.begin);
@@ -9710,9 +9711,8 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		// If the checkpoint meta data is not dumped successfully, remove the checkpoint.
 		TraceEvent(SevWarn, "StorageCreateCheckpointMetaDataSstFileDumpedFailure", data->thisServerID)
 		    .errorUnsuppressed(e)
-		    .detail("Checkpoint", checkpointResult.toString());
-		data->checkpoints[checkpointResult.checkpointID].setState(CheckpointMetaData::Deleting);
-		data->actors.add(deleteCheckpointQ(data, metaData.version, checkpointResult));
+		    .detail("PendingCheckpoint", checkpointResult.toString());
+		data->checkpoints[checkpointResult.checkpointID].setState(CheckpointMetaData::Fail);
 	}
 
 	// Persist the checkpoint meta data.
