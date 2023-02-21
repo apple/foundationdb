@@ -123,7 +123,7 @@ bool parseTenantListOptions(std::vector<StringRef> const& tokens,
 			auto filterStrings = value.get().splitAny(","_sr);
 			try {
 				for (auto sref : filterStrings) {
-					filters.push_back(TenantAPI::stringToTenantState(sref.toString()));
+					filters.push_back(MetaclusterAPI::stringToTenantState(sref.toString()));
 				}
 			} catch (Error& e) {
 				fmt::print(stderr, "ERROR: unrecognized tenant state(s) `{}'.\n", value.get().toString());

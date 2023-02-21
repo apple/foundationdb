@@ -175,7 +175,7 @@ std::string MetaclusterTenantMapEntry::toJson() const {
 	tenantEntry["name"] = binaryToJson(tenantName);
 	tenantEntry["prefix"] = binaryToJson(prefix);
 
-	tenantEntry["tenant_state"] = MetaclusterAPI::TenantStateToString(tenantState);
+	tenantEntry["tenant_state"] = MetaclusterAPI::tenantStateToString(tenantState);
 	tenantEntry["assigned_cluster"] = binaryToJson(assignedCluster);
 
 	if (tenantGroup.present()) {
