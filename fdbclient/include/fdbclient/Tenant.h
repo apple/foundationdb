@@ -43,34 +43,9 @@ bool withinSingleTenant(KeyRangeRef const&);
 
 constexpr static int PREFIX_SIZE = sizeof(int64_t);
 
-// Represents the various states that a tenant could be in.
-// In a standalone cluster, a tenant should only ever be in the READY state.
-// In a metacluster, a tenant on the management cluster could be in the other states while changes are applied to the
-// data cluster.
-//
-// REGISTERING - the tenant has been created on the management cluster and is being created on the data cluster
-// READY - the tenant has been created on both clusters, is active, and is consistent between the two clusters
-// REMOVING - the tenant has been marked for removal and is being removed on the data cluster
-// UPDATING_CONFIGURATION - the tenant configuration has changed on the management cluster and is being applied to the
-//                          data cluster
-// RENAMING - the tenant is in the process of being renamed
-// ERROR - the tenant is in an error state
-//
-// A tenant in any configuration is allowed to be removed. Only tenants in the READY or UPDATING_CONFIGURATION phases
-// can have their configuration updated. A tenant must not exist or be in the REGISTERING phase to be created. To be
-// renamed, a tenant must be in the READY or RENAMING state. In the latter case, the rename destination must match
-// the original rename attempt.
-//
-// If an operation fails and the tenant is left in a non-ready state, re-running the same operation is legal. If
-// successful, the tenant will return to the READY state.
-enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, RENAMING, ERROR };
-
 // Represents the lock state the tenant could be in.
 // Can be used in conjunction with the other tenant states above.
 enum class TenantLockState : uint8_t { UNLOCKED, READ_ONLY, LOCKED };
-
-std::string tenantStateToString(TenantState tenantState);
-TenantState stringToTenantState(std::string stateStr);
 
 std::string tenantLockStateToString(TenantLockState tenantState);
 TenantLockState stringToTenantLockState(std::string stateStr);

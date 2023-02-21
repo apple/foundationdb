@@ -558,13 +558,16 @@ struct TenantManagementWorkload : TestWorkload {
 								ASSERT(resultEntry.get().tenantState == TenantAPI::TenantState::REGISTERING);
 							}
 						} else {
-							CODE_PROBE(true, "Created tenant (metacluster) is not present and may have been removed.");
+							CODE_PROBE(true, "Tenant creation (metacluster) aborted before writing data.");
 						}
 					} else {
 						Optional<TenantMapEntry> tenantEntry =
 						    wait(TenantAPI::tryGetTenant(self->dataDb.getReference(), tenantsToCreate.begin()->first));
+						if (tenantEntry.present()) {
+							alreadyExists = true;
+						}
 						CODE_PROBE(!tenantEntry.present(),
-						           "Created tenant (non-metacluster) is not present and may have been removed.");
+						           "Tenant creation (non-metacluster) aborted before writing data.");
 					}
 				}
 

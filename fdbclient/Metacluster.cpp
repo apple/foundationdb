@@ -33,6 +33,47 @@ FDB_DEFINE_BOOLEAN_PARAM(RunOnMismatchedCluster);
 FDB_DEFINE_BOOLEAN_PARAM(RestoreDryRun);
 FDB_DEFINE_BOOLEAN_PARAM(ForceJoinNewMetacluster);
 
+namespace TenantAPI {
+
+std::string tenantStateToString(TenantState tenantState) {
+	switch (tenantState) {
+	case TenantState::REGISTERING:
+		return "registering";
+	case TenantState::READY:
+		return "ready";
+	case TenantState::REMOVING:
+		return "removing";
+	case TenantState::UPDATING_CONFIGURATION:
+		return "updating configuration";
+	case TenantState::RENAMING:
+		return "renaming";
+	case TenantState::ERROR:
+		return "error";
+	default:
+		UNREACHABLE();
+	}
+}
+
+TenantState stringToTenantState(std::string stateStr) {
+	std::transform(stateStr.begin(), stateStr.end(), stateStr.begin(), [](unsigned char c) { return std::tolower(c); });
+	if (stateStr == "registering") {
+		return TenantState::REGISTERING;
+	} else if (stateStr == "ready") {
+		return TenantState::READY;
+	} else if (stateStr == "removing") {
+		return TenantState::REMOVING;
+	} else if (stateStr == "updating configuration") {
+		return TenantState::UPDATING_CONFIGURATION;
+	} else if (stateStr == "renaming") {
+		return TenantState::RENAMING;
+	} else if (stateStr == "error") {
+		return TenantState::ERROR;
+	}
+
+	throw invalid_option();
+}
+} // namespace TenantAPI
+
 std::string clusterTypeToString(const ClusterType& clusterType) {
 	switch (clusterType) {
 	case ClusterType::STANDALONE:
@@ -176,6 +217,10 @@ bool MetaclusterTenantMapEntry::operator==(MetaclusterTenantMapEntry const& othe
 	       tenantLockState == other.tenantLockState && tenantGroup == other.tenantGroup &&
 	       assignedCluster == other.assignedCluster && configurationSequenceNum == other.configurationSequenceNum &&
 	       renameDestination == other.renameDestination && error == other.error;
+}
+
+bool MetaclusterTenantMapEntry::operator!=(MetaclusterTenantMapEntry const& other) const {
+	return !(*this == other);
 }
 
 KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>&

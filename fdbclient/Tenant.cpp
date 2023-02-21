@@ -74,47 +74,7 @@ bool withinSingleTenant(KeyRangeRef const& range) {
 	return tRange.contains(range);
 }
 
-} // namespace TenantAPI
-
-std::string TenantAPI::tenantStateToString(TenantState tenantState) {
-	switch (tenantState) {
-	case TenantState::REGISTERING:
-		return "registering";
-	case TenantState::READY:
-		return "ready";
-	case TenantState::REMOVING:
-		return "removing";
-	case TenantState::UPDATING_CONFIGURATION:
-		return "updating configuration";
-	case TenantState::RENAMING:
-		return "renaming";
-	case TenantState::ERROR:
-		return "error";
-	default:
-		UNREACHABLE();
-	}
-}
-
-TenantAPI::TenantState TenantAPI::stringToTenantState(std::string stateStr) {
-	std::transform(stateStr.begin(), stateStr.end(), stateStr.begin(), [](unsigned char c) { return std::tolower(c); });
-	if (stateStr == "registering") {
-		return TenantState::REGISTERING;
-	} else if (stateStr == "ready") {
-		return TenantState::READY;
-	} else if (stateStr == "removing") {
-		return TenantState::REMOVING;
-	} else if (stateStr == "updating configuration") {
-		return TenantState::UPDATING_CONFIGURATION;
-	} else if (stateStr == "renaming") {
-		return TenantState::RENAMING;
-	} else if (stateStr == "error") {
-		return TenantState::ERROR;
-	}
-
-	throw invalid_option();
-}
-
-std::string TenantAPI::tenantLockStateToString(TenantLockState tenantState) {
+std::string tenantLockStateToString(TenantLockState tenantState) {
 	switch (tenantState) {
 	case TenantLockState::UNLOCKED:
 		return "unlocked";
@@ -127,7 +87,7 @@ std::string TenantAPI::tenantLockStateToString(TenantLockState tenantState) {
 	}
 }
 
-TenantAPI::TenantLockState TenantAPI::stringToTenantLockState(std::string stateStr) {
+TenantLockState stringToTenantLockState(std::string stateStr) {
 	std::transform(stateStr.begin(), stateStr.end(), stateStr.begin(), [](unsigned char c) { return std::tolower(c); });
 	if (stateStr == "unlocked") {
 		return TenantLockState::UNLOCKED;
@@ -139,6 +99,7 @@ TenantAPI::TenantLockState TenantAPI::stringToTenantLockState(std::string stateS
 
 	UNREACHABLE();
 }
+} // namespace TenantAPI
 
 json_spirit::mObject binaryToJson(StringRef bytes) {
 	json_spirit::mObject obj;
