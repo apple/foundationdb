@@ -35,6 +35,7 @@ FDB_DECLARE_BOOLEAN_PARAM(EnforceValidTenantId);
 namespace TenantAPI {
 Key idToPrefix(int64_t id);
 int64_t prefixToId(KeyRef prefix, EnforceValidTenantId = EnforceValidTenantId::True);
+KeyRangeRef clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenantInfo, Arena& arena);
 
 constexpr static int PREFIX_SIZE = sizeof(int64_t);
 } // namespace TenantAPI

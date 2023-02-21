@@ -2346,7 +2346,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 			ssis.push_back(it->interf);
 			maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 		}
-		rep.results.emplace_back(r.range(), ssis);
+		rep.results.emplace_back(TenantAPI::clampRangeToTenant(r.range(), req.tenant, req.arena), ssis);
 	} else if (!req.reverse) {
 		int count = 0;
 		for (auto r = commitData->keyInfo.rangeContaining(req.begin);
@@ -2358,7 +2358,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 				ssis.push_back(it->interf);
 				maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 			}
-			rep.results.emplace_back(r.range(), ssis);
+			rep.results.emplace_back(TenantAPI::clampRangeToTenant(r.range(), req.tenant, req.arena), ssis);
 			count++;
 		}
 	} else {
@@ -2371,7 +2371,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 				ssis.push_back(it->interf);
 				maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 			}
-			rep.results.emplace_back(r.range(), ssis);
+			rep.results.emplace_back(TenantAPI::clampRangeToTenant(r.range(), req.tenant, req.arena), ssis);
 			if (r == commitData->keyInfo.ranges().begin()) {
 				break;
 			}

@@ -53,14 +53,15 @@ struct AuthzSecurityWorkload : TestWorkload {
 	Standalone<StringRef> signedTokenAnotherTenant;
 	Standalone<StringRef> tLogConfigKey;
 	PerfIntCounter crossTenantGetPositive, crossTenantGetNegative, crossTenantCommitPositive, crossTenantCommitNegative,
-	    publicNonTenantRequestPositive, tLogReadNegative;
+	    publicNonTenantRequestPositive, tLogReadNegative, keyLocationLeakNegative;
 	std::vector<std::function<Future<Void>(Database cx)>> testFunctions;
 
 	AuthzSecurityWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), crossTenantGetPositive("CrossTenantGetPositive"),
 	    crossTenantGetNegative("CrossTenantGetNegative"), crossTenantCommitPositive("CrossTenantCommitPositive"),
 	    crossTenantCommitNegative("CrossTenantCommitNegative"),
-	    publicNonTenantRequestPositive("PublicNonTenantRequestPositive"), tLogReadNegative("TLogReadNegative") {
+	    publicNonTenantRequestPositive("PublicNonTenantRequestPositive"), tLogReadNegative("TLogReadNegative"),
+	    keyLocationLeakNegative("KeyLocationLeakNegative") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 500.0) / clientCount;
 		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
@@ -80,6 +81,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 		testFunctions.push_back(
 		    [this](Database cx) { return testPublicNonTenantRequestsAllowedWithoutTokens(this, cx); });
 		testFunctions.push_back([this](Database cx) { return testTLogReadDisallowed(this, cx); });
+		testFunctions.push_back([this](Database cx) { return testKeyLocationLeakDisallowed(this, cx); });
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -107,7 +109,8 @@ struct AuthzSecurityWorkload : TestWorkload {
 		clients.clear();
 		return errors == 0 && crossTenantGetPositive.getValue() > 0 && crossTenantGetNegative.getValue() > 0 &&
 		       crossTenantCommitPositive.getValue() > 0 && crossTenantCommitNegative.getValue() > 0 &&
-		       publicNonTenantRequestPositive.getValue() > 0 && tLogReadNegative.getValue() > 0;
+		       publicNonTenantRequestPositive.getValue() > 0 && tLogReadNegative.getValue() > 0 &&
+		       keyLocationLeakNegative.getValue() > 0;
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
@@ -117,6 +120,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 		m.push_back(crossTenantCommitNegative.getMetric());
 		m.push_back(publicNonTenantRequestPositive.getMetric());
 		m.push_back(tLogReadNegative.getMetric());
+		m.push_back(keyLocationLeakNegative.getMetric());
 	}
 
 	void setAuthToken(Transaction& tr, Standalone<StringRef> token) {
@@ -396,6 +400,68 @@ struct AuthzSecurityWorkload : TestWorkload {
 				TraceEvent(SevError, "AuthzSecurityUnexpectedError").detail("Error", reply.getError().name()).log();
 			}
 		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> testKeyLocationLeakDisallowed(AuthzSecurityWorkload* self, Database cx) {
+		state Key key = self->randomString();
+		state Value value = self->randomString();
+		state Version v1 =
+		    wait(setAndCommitKeyValueAndGetVersion(self, cx, self->tenant, self->signedToken, key, value));
+		state Version v2 = wait(setAndCommitKeyValueAndGetVersion(
+		    self, cx, self->anotherTenant, self->signedTokenAnotherTenant, key, value));
+
+		{
+			GetKeyServerLocationsReply rep =
+			    wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
+			                          &CommitProxyInterface::getKeyServersLocations,
+			                          GetKeyServerLocationsRequest(SpanContext(),
+			                                                       TenantInfo(self->tenant->id(), self->signedToken),
+			                                                       key,
+			                                                       Optional<KeyRef>(),
+			                                                       100,
+			                                                       false,
+			                                                       v2,
+			                                                       Arena())));
+			for (auto const& [range, ssIfaces] : rep.results) {
+				if (!range.begin.startsWith(self->tenant->prefix())) {
+					TraceEvent(SevError, "AuthzSecurityKeyRangeLeak")
+					    .detail("TenantId", self->tenant->id())
+					    .detail("LeakingRangeBegin", range.begin.printable());
+				}
+				if (!range.end.startsWith(self->tenant->prefix())) {
+					TraceEvent(SevError, "AuthzSecurityKeyRangeLeak")
+					    .detail("TenantId", self->tenant->id())
+					    .detail("LeakingRangeEnd", range.end.printable());
+				}
+			}
+		}
+		{
+			GetKeyServerLocationsReply rep = wait(basicLoadBalance(
+			    cx->getCommitProxies(UseProvisionalProxies::False),
+			    &CommitProxyInterface::getKeyServersLocations,
+			    GetKeyServerLocationsRequest(SpanContext(),
+			                                 TenantInfo(self->anotherTenant->id(), self->signedTokenAnotherTenant),
+			                                 key,
+			                                 Optional<KeyRef>(),
+			                                 100,
+			                                 false,
+			                                 v2,
+			                                 Arena())));
+			for (auto const& [range, ssIfaces] : rep.results) {
+				if (!range.begin.startsWith(self->anotherTenant->prefix())) {
+					TraceEvent(SevError, "AuthzSecurityKeyRangeLeak")
+					    .detail("TenantId", self->anotherTenant->id())
+					    .detail("LeakingRangeBegin", range.begin.printable());
+				}
+				if (!range.end.startsWith(self->anotherTenant->prefix())) {
+					TraceEvent(SevError, "AuthzSecurityKeyRangeLeak")
+					    .detail("TenantId", self->anotherTenant->id())
+					    .detail("LeakingRangeEnd", range.end.printable());
+				}
+			}
+		}
+		++self->keyLocationLeakNegative;
 		return Void();
 	}
 
