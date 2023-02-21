@@ -831,11 +831,13 @@ public:
 	virtual Transaction createTransaction() = 0;
 
 	virtual TypedFuture<future_var::Bool> blobbifyRange(KeyRef begin, KeyRef end) = 0;
+	virtual TypedFuture<future_var::Bool> blobbifyRangeBlocking(KeyRef begin, KeyRef end) = 0;
 	virtual TypedFuture<future_var::Bool> unblobbifyRange(KeyRef begin, KeyRef end) = 0;
 	virtual TypedFuture<future_var::KeyRangeRefArray> listBlobbifiedRanges(KeyRef begin,
 	                                                                       KeyRef end,
 	                                                                       int rangeLimit) = 0;
 	virtual TypedFuture<future_var::Int64> verifyBlobRange(KeyRef begin, KeyRef end, int64_t version) = 0;
+	virtual TypedFuture<future_var::Bool> flushBlobRange(KeyRef begin, KeyRef end, bool compact, int64_t version) = 0;
 	virtual TypedFuture<future_var::KeyRef> purgeBlobGranules(KeyRef begin,
 	                                                          KeyRef end,
 	                                                          int64_t version,
@@ -903,6 +905,13 @@ public:
 		return native::fdb_tenant_blobbify_range(tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end));
 	}
 
+	TypedFuture<future_var::Bool> blobbifyRangeBlocking(KeyRef begin, KeyRef end) override {
+		if (!tenant)
+			throw std::runtime_error("blobbifyRangeBlocking() from null tenant");
+		return native::fdb_tenant_blobbify_range_blocking(
+		    tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end));
+	}
+
 	TypedFuture<future_var::Bool> unblobbifyRange(KeyRef begin, KeyRef end) override {
 		if (!tenant)
 			throw std::runtime_error("unblobbifyRange() from null tenant");
@@ -922,6 +931,13 @@ public:
 			throw std::runtime_error("verifyBlobRange() from null tenant");
 		return native::fdb_tenant_verify_blob_range(
 		    tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end), version);
+	}
+
+	TypedFuture<future_var::Bool> flushBlobRange(KeyRef begin, KeyRef end, bool compact, int64_t version) override {
+		if (!tenant)
+			throw std::runtime_error("flushBlobRange() from null tenant");
+		return native::fdb_tenant_flush_blob_range(
+		    tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end), compact, version);
 	}
 
 	TypedFuture<future_var::Int64> getId() {
@@ -1028,10 +1044,24 @@ public:
 		    db.get(), begin.data(), intSize(begin), end.data(), intSize(end), version);
 	}
 
+	TypedFuture<future_var::Bool> flushBlobRange(KeyRef begin, KeyRef end, bool compact, int64_t version) override {
+		if (!db)
+			throw std::runtime_error("flushBlobRange from null database");
+		return native::fdb_database_flush_blob_range(
+		    db.get(), begin.data(), intSize(begin), end.data(), intSize(end), compact, version);
+	}
+
 	TypedFuture<future_var::Bool> blobbifyRange(KeyRef begin, KeyRef end) override {
 		if (!db)
 			throw std::runtime_error("blobbifyRange from null database");
 		return native::fdb_database_blobbify_range(db.get(), begin.data(), intSize(begin), end.data(), intSize(end));
+	}
+
+	TypedFuture<future_var::Bool> blobbifyRangeBlocking(KeyRef begin, KeyRef end) override {
+		if (!db)
+			throw std::runtime_error("blobbifyRangeBlocking from null database");
+		return native::fdb_database_blobbify_range_blocking(
+		    db.get(), begin.data(), intSize(begin), end.data(), intSize(end));
 	}
 
 	TypedFuture<future_var::Bool> unblobbifyRange(KeyRef begin, KeyRef end) override {

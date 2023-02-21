@@ -37,6 +37,9 @@ public:
 		if (Random::get().randomInt(0, 1) == 0) {
 			excludedOpTypes.push_back(OP_CLEAR_RANGE);
 		}
+		if (Random::get().randomInt(0, 1) == 0) {
+			excludedOpTypes.push_back(OP_FLUSH);
+		}
 	}
 
 private:
@@ -51,7 +54,8 @@ private:
 		OP_GET_BLOB_RANGES,
 		OP_VERIFY,
 		OP_READ_DESC,
-		OP_LAST = OP_READ_DESC
+		OP_FLUSH,
+		OP_LAST = OP_FLUSH
 	};
 	std::vector<OpType> excludedOpTypes;
 
@@ -509,6 +513,33 @@ private:
 		    getTenant(tenantId));
 	}
 
+	void randomFlushOp(TTaskFct cont, std::optional<int> tenantId) {
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
+		fdb::native::fdb_bool_t compact = Random::get().randomBool(0.5);
+
+		auto result = std::make_shared<bool>(false);
+
+		debugOp(compact ? "Flush" : "Compact", keyRange, tenantId, "starting");
+		execOperation(
+		    [keyRange, compact, result](auto ctx) {
+			    fdb::Future f =
+			        ctx->dbOps()
+			            ->flushBlobRange(keyRange.beginKey, keyRange.endKey, compact, -2 /* latest version*/)
+			            .eraseType();
+			    ctx->continueAfter(f, [ctx, result, f]() {
+				    *result = f.get<fdb::future_var::Bool>();
+				    ctx->done();
+			    });
+		    },
+		    [this, keyRange, compact, result, tenantId, cont]() {
+			    ASSERT(*result);
+			    debugOp(compact ? "Flush " : "Compact ", keyRange, tenantId, "Complete");
+			    schedule(cont);
+		    },
+		    getTenant(tenantId),
+		    /* failOnError = */ false);
+	}
+
 	void randomOperation(TTaskFct cont) override {
 		std::optional<int> tenantId = randomTenant();
 
@@ -544,6 +575,13 @@ private:
 			break;
 		case OP_READ_DESC:
 			randomReadDescription(cont, tenantId);
+			break;
+		case OP_FLUSH:
+			randomFlushOp(cont, tenantId);
+			// don't do too many flushes because they're expensive
+			if (Random::get().randomInt(0, 1) == 0) {
+				excludedOpTypes.push_back(OP_FLUSH);
+			}
 			break;
 		}
 	}

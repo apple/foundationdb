@@ -47,6 +47,7 @@
 #include "fdbclient/AnnotateActor.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/BlobGranuleRequest.actor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -8534,6 +8535,41 @@ Future<Version> DatabaseContext::verifyBlobRange(const KeyRange& range,
 	return verifyBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, version, tenant);
 }
 
+ACTOR Future<bool> flushBlobRangeActor(Reference<DatabaseContext> cx,
+                                       KeyRange range,
+                                       bool compact,
+                                       Optional<Version> version,
+                                       Optional<Reference<Tenant>> tenant) {
+	if (tenant.present()) {
+		wait(tenant.get()->ready());
+		range = range.withPrefix(tenant.get()->prefix());
+	}
+	state Database db(cx);
+	if (!version.present()) {
+		state Transaction tr(db);
+		Version _v = wait(tr.getReadVersion());
+		version = _v;
+	}
+	FlushGranuleRequest req(-1, range, version.get(), compact);
+	try {
+		wait(success(doBlobGranuleRequests(db, range, req, &BlobWorkerInterface::flushGranuleRequest)));
+		return true;
+	} catch (Error& e) {
+		if (e.code() == error_code_blob_granule_transaction_too_old) {
+			// can't flush data at this version, because no granules
+			return false;
+		}
+		throw e;
+	}
+}
+
+Future<bool> DatabaseContext::flushBlobRange(const KeyRange& range,
+                                             bool compact,
+                                             Optional<Version> version,
+                                             Optional<Reference<Tenant>> tenant) {
+	return flushBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, compact, version, tenant);
+}
+
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
                                                                                       bool primary,
                                                                                       bool use_system_priority) {
@@ -10936,8 +10972,39 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
 	}
 }
 
+ACTOR Future<bool> blobbifyRangeActor(Reference<DatabaseContext> cx,
+                                      KeyRange range,
+                                      bool doWait,
+                                      Optional<Reference<Tenant>> tenant) {
+	if (BG_REQUEST_DEBUG) {
+		fmt::print("BlobbifyRange [{0} - {1}) ({2})\n", range.begin.printable(), range.end.printable(), doWait);
+	}
+	state bool result = wait(setBlobRangeActor(cx, range, true, tenant));
+	if (!doWait || !result) {
+		return result;
+	}
+	// FIXME: add blob worker verifyRange rpc call that just waits for granule to become readable at any version
+	loop {
+		Version verifyVersion = wait(cx->verifyBlobRange(range, latestVersion, tenant));
+		if (verifyVersion != invalidVersion) {
+			if (BG_REQUEST_DEBUG) {
+				fmt::print("BlobbifyRange [{0} - {1}) got complete @ {2}\n",
+				           range.begin.printable(),
+				           range.end.printable(),
+				           verifyVersion);
+			}
+			return result;
+		}
+		wait(delay(0.1));
+	}
+}
+
 Future<bool> DatabaseContext::blobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant) {
-	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, true, tenant);
+	return blobbifyRangeActor(Reference<DatabaseContext>::addRef(this), range, false, tenant);
+}
+
+Future<bool> DatabaseContext::blobbifyRangeBlocking(KeyRange range, Optional<Reference<Tenant>> tenant) {
+	return blobbifyRangeActor(Reference<DatabaseContext>::addRef(this), range, true, tenant);
 }
 
 Future<bool> DatabaseContext::unblobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant) {
