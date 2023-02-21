@@ -565,9 +565,9 @@ struct TenantManagementWorkload : TestWorkload {
 						    wait(TenantAPI::tryGetTenant(self->dataDb.getReference(), tenantsToCreate.begin()->first));
 						if (tenantEntry.present()) {
 							alreadyExists = true;
+						} else {
+							CODE_PROBE(true, "Tenant creation (non-metacluster) aborted before writing data.");
 						}
-						CODE_PROBE(!tenantEntry.present(),
-						           "Tenant creation (non-metacluster) aborted before writing data.");
 					}
 				}
 
