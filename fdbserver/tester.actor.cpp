@@ -871,7 +871,7 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 	}
 }
 
-ACTOR Future<Void> clearData(Database cx) {
+ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 	state Transaction tr(cx);
 	state UID debugID = debugRandom()->randomUniqueID();
 	tr.debugTransaction(debugID);
@@ -893,6 +893,43 @@ ACTOR Future<Void> clearData(Database cx) {
 			wait(tr.onError(e));
 			debugID = debugRandom()->randomUniqueID();
 			tr.debugTransaction(debugID);
+		}
+	}
+
+	tr = Transaction(cx);
+	loop {
+		try {
+			TraceEvent("TesterClearingTenantsStart", debugID);
+			state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants =
+			    wait(TenantMetadata::tenantMap().getRange(&tr, {}, {}, 1000));
+
+			TraceEvent("TesterClearingTenantsDeletingBatch", debugID)
+			    .detail("FirstTenant", tenants.results.empty() ? "<none>"_sr : tenants.results[0].second.tenantName)
+			    .detail("BatchSize", tenants.results.size());
+
+			std::vector<Future<Void>> deleteFutures;
+			for (auto const& [id, entry] : tenants.results) {
+				if (entry.tenantName != defaultTenant) {
+					deleteFutures.push_back(TenantAPI::deleteTenantTransaction(&tr, id));
+				}
+			}
+
+			wait(waitForAll(deleteFutures));
+			wait(tr.commit());
+
+			TraceEvent("TesterClearingTenantsDeletedBatch", debugID)
+			    .detail("FirstTenant", tenants.results.empty() ? "<none>"_sr : tenants.results[0].second.tenantName)
+			    .detail("BatchSize", tenants.results.size());
+
+			if (!tenants.more) {
+				TraceEvent("TesterClearingTenantsComplete", debugID).detail("AtVersion", tr.getCommittedVersion());
+				break;
+			}
+
+			tr.reset();
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "TesterClearingTenantsError", debugID).error(e);
+			wait(tr.onError(e));
 		}
 	}
 
@@ -1300,7 +1337,7 @@ ACTOR Future<bool> runTest(Database cx,
 	if (spec.useDB && spec.clearAfterTest) {
 		try {
 			TraceEvent("TesterClearingDatabase").log();
-			wait(timeoutError(clearData(cx), 1000.0));
+			wait(timeoutError(clearData(cx, defaultTenant), 1000.0));
 		} catch (Error& e) {
 			TraceEvent(SevError, "ErrorClearingDatabaseAfterTest").error(e);
 			throw; // If we didn't do this, we don't want any later tests to run on this DB
@@ -1352,8 +1389,6 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableHostname", ""); } },
 	{ "disableRemoteKVS",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } },
-	{ "disableEncryption",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedEncryption", ""); } },
 	{ "allowDefaultTenant",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDefaultTenant", ""); } }
 };

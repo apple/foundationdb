@@ -167,6 +167,15 @@ ThreadFuture<bool> ThreadSafeDatabase::blobbifyRange(const KeyRangeRef& keyRange
 	});
 }
 
+ThreadFuture<bool> ThreadSafeDatabase::blobbifyRangeBlocking(const KeyRangeRef& keyRange) {
+	DatabaseContext* db = this->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		return db->blobbifyRangeBlocking(range);
+	});
+}
+
 ThreadFuture<bool> ThreadSafeDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {
 	DatabaseContext* db = this->db;
 	KeyRange range = keyRange;
@@ -192,6 +201,17 @@ ThreadFuture<Version> ThreadSafeDatabase::verifyBlobRange(const KeyRangeRef& key
 	return onMainThread([=]() -> Future<Version> {
 		db->checkDeferredError();
 		return db->verifyBlobRange(range, version);
+	});
+}
+
+ThreadFuture<bool> ThreadSafeDatabase::flushBlobRange(const KeyRangeRef& keyRange,
+                                                      bool compact,
+                                                      Optional<Version> version) {
+	DatabaseContext* db = this->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		return db->flushBlobRange(range, compact, version);
 	});
 }
 
@@ -277,6 +297,16 @@ ThreadFuture<bool> ThreadSafeTenant::blobbifyRange(const KeyRangeRef& keyRange) 
 	});
 }
 
+ThreadFuture<bool> ThreadSafeTenant::blobbifyRangeBlocking(const KeyRangeRef& keyRange) {
+	DatabaseContext* db = this->db->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		db->addref();
+		return db->blobbifyRangeBlocking(range, Reference<Tenant>::addRef(tenant));
+	});
+}
+
 ThreadFuture<bool> ThreadSafeTenant::unblobbifyRange(const KeyRangeRef& keyRange) {
 	DatabaseContext* db = this->db->db;
 	KeyRange range = keyRange;
@@ -305,6 +335,18 @@ ThreadFuture<Version> ThreadSafeTenant::verifyBlobRange(const KeyRangeRef& keyRa
 		db->checkDeferredError();
 		db->addref();
 		return db->verifyBlobRange(range, version, Reference<Tenant>::addRef(tenant));
+	});
+}
+
+ThreadFuture<bool> ThreadSafeTenant::flushBlobRange(const KeyRangeRef& keyRange,
+                                                    bool compact,
+                                                    Optional<Version> version) {
+	DatabaseContext* db = this->db->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		db->addref();
+		return db->flushBlobRange(range, compact, version, Reference<Tenant>::addRef(tenant));
 	});
 }
 
@@ -651,6 +693,14 @@ ThreadFuture<SpanContext> ThreadSafeTransaction::getSpanContext() {
 	return onMainThread([tr]() -> Future<SpanContext> {
 		tr->checkDeferredError();
 		return tr->getSpanContext();
+	});
+}
+
+ThreadFuture<double> ThreadSafeTransaction::getTagThrottledDuration() {
+	ISingleThreadTransaction* tr = this->tr;
+	return onMainThread([tr]() -> Future<double> {
+		tr->checkDeferredError();
+		return tr->getTagThrottledDuration();
 	});
 }
 

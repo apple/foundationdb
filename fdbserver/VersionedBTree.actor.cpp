@@ -2815,6 +2815,13 @@ public:
 					wait(self->keyProviderInitialized.getFuture());
 					ASSERT(self->keyProvider.isValid());
 				}
+				if (self->keyProvider->expectedEncodingType() != page->getEncodingType()) {
+					TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
+					    .detail("PhysicalPageID", page->getPhysicalPageID())
+					    .detail("EncodingTypeFound", page->getEncodingType())
+					    .detail("EncodingTypeExpected", self->keyProvider->expectedEncodingType());
+					throw unexpected_encoding_type();
+				}
 				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
 				page->encryptionKey = k;
 			}
@@ -2883,6 +2890,17 @@ public:
 		try {
 			page->postReadHeader(pageIDs.front());
 			if (page->isEncrypted()) {
+				if (!self->keyProvider.isValid()) {
+					wait(self->keyProviderInitialized.getFuture());
+					ASSERT(self->keyProvider.isValid());
+				}
+				if (self->keyProvider->expectedEncodingType() != page->getEncodingType()) {
+					TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
+					    .detail("PhysicalPageID", page->getPhysicalPageID())
+					    .detail("EncodingTypeFound", page->getEncodingType())
+					    .detail("EncodingTypeExpected", self->keyProvider->expectedEncodingType());
+					throw unexpected_encoding_type();
+				}
 				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
 				page->encryptionKey = k;
 			}
@@ -3595,7 +3613,7 @@ public:
 
 		// The next section explicitly cancels all pending operations held in the pager
 		debug_printf("DWALPager(%s) shutdown kill ioLock\n", self->filename.c_str());
-		self->ioLock->kill();
+		self->ioLock->halt();
 
 		debug_printf("DWALPager(%s) shutdown cancel recovery\n", self->filename.c_str());
 		self->recoverFuture.cancel();
@@ -3657,7 +3675,14 @@ public:
 		} else {
 			g_network->getDiskBytes(parentDirectory(filename), free, total);
 		}
-		int64_t pagerSize = header.pageCount * physicalPageSize;
+
+		// Size of redwood data file.  Note that filePageCountPending is used here instead of filePageCount.  This is
+		// because it is always >= filePageCount and accounts for file size changes which will complete soon.
+		int64_t pagerPhysicalSize = filePageCountPending * physicalPageSize;
+
+		// Size of the pager, which can be less than the data file size.  All pages within this size are either in use
+		// in a data structure or accounted for in one of the pager's free page lists.
+		int64_t pagerLogicalSize = header.pageCount * physicalPageSize;
 
 		// It is not exactly known how many pages on the delayed free list are usable as of right now.  It could be
 		// known, if each commit delayed entries that were freeable were shuffled from the delayed free queue to the
@@ -3668,12 +3693,17 @@ public:
 		// Amount of space taken up by the free list queues themselves, as if we were to pop and use
 		// items on the free lists the space the items are stored in would also become usable
 		int64_t reusableQueueSpace = (freeList.numPages + delayedFreeList.numPages) * physicalPageSize;
-		int64_t reusable = reusablePageSpace + reusableQueueSpace;
+
+		// Pager slack is the space at the end of the pager's logical size until the end of the pager file's size.
+		// These pages will be used if needed without growing the file size.
+		int64_t reusablePagerSlackSpace = pagerPhysicalSize - pagerLogicalSize;
+
+		int64_t reusable = reusablePageSpace + reusableQueueSpace + reusablePagerSlackSpace;
 
 		// Space currently in used by old page versions have have not yet been freed due to the remap cleanup window.
 		int64_t temp = remapQueue.numEntries * physicalPageSize;
 
-		return StorageBytes(free, total, pagerSize - reusable, free + reusable, temp);
+		return StorageBytes(free, total, pagerPhysicalSize, free + reusable, temp);
 	}
 
 	int64_t getPageCacheCount() override { return pageCache.getCount(); }
@@ -4970,13 +5000,14 @@ public:
 	// VersionedBTree takes ownership of pager
 	VersionedBTree(IPager2* pager,
 	               std::string name,
+	               UID logID,
 	               Reference<AsyncVar<ServerDBInfo> const> db,
 	               Optional<EncryptionAtRestMode> expectedEncryptionMode,
 	               EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE,
 	               Reference<IPageEncryptionKeyProvider> keyProvider = {})
 	  : m_pager(pager), m_db(db), m_expectedEncryptionMode(expectedEncryptionMode), m_encodingType(encodingType),
 	    m_enforceEncodingType(false), m_keyProvider(keyProvider), m_pBuffer(nullptr), m_mutationCount(0), m_name(name),
-	    m_pBoundaryVerifier(DecodeBoundaryVerifier::getVerifier(name)) {
+	    m_logID(logID), m_pBoundaryVerifier(DecodeBoundaryVerifier::getVerifier(name)) {
 		m_pDecodeCacheMemory = m_pager->getPageCachePenaltySource();
 		m_lazyClearActor = 0;
 		m_init = init_impl(this);
@@ -5121,7 +5152,7 @@ public:
 		// default encoding is expected.
 		if (encodingType == EncodingType::MAX_ENCODING_TYPE) {
 			encodingType = expectedEncodingType;
-			if (encodingType == EncodingType::XXHash64 && g_network->isSimulated() && BUGGIFY) {
+			if (encodingType == EncodingType::XXHash64 && g_network->isSimulated() && m_logID.hash() % 2 == 0) {
 				encodingType = EncodingType::XOREncryption_TestOnly;
 			}
 		} else if (encodingType != expectedEncodingType) {
@@ -5254,6 +5285,7 @@ public:
 				    .detail("InstanceName", self->m_pager->getName())
 				    .detail("UsingEncodingType", self->m_encodingType)
 				    .detail("ExistingEncodingType", self->m_header.encodingType);
+				throw unexpected_encoding_type();
 			}
 			// Verify if encryption mode and encoding type in the header are consistent.
 			// This check can also fail in case of authentication mode mismatch.
@@ -5592,6 +5624,7 @@ private:
 	Future<Void> m_latestCommit;
 	Future<Void> m_init;
 	std::string m_name;
+	UID m_logID;
 	int m_blockSize;
 	ParentInfoMapT childUpdateTracker;
 
@@ -6228,18 +6261,6 @@ private:
 		auto& metrics = g_redwoodMetrics.level(btPage->height).metrics;
 		metrics.pageRead += 1;
 		metrics.pageReadExt += (id.size() - 1);
-
-		// If BTree encryption is enabled, pages read must be encrypted using the desired encryption type
-		if (self->m_enforceEncodingType && (page->getEncodingType() != self->m_encodingType)) {
-			Error e = unexpected_encoding_type();
-			TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
-			    .error(e)
-			    .detail("PhysicalPageID", page->getPhysicalPageID())
-			    .detail("IsEncrypted", page->isEncrypted())
-			    .detail("EncodingTypeFound", page->getEncodingType())
-			    .detail("EncodingTypeExpected", self->m_encodingType);
-			throw e;
-		}
 
 		return std::move(page);
 	}
@@ -7966,7 +7987,7 @@ public:
 		                               SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
 		                               false,
 		                               m_error);
-		m_tree = new VersionedBTree(pager, filename, db, encryptionMode, encodingType, keyProvider);
+		m_tree = new VersionedBTree(pager, filename, logID, db, encryptionMode, encodingType, keyProvider);
 		m_init = catchError(init_impl(this));
 	}
 
@@ -10127,7 +10148,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	printf("Initializing...\n");
 	pager = new DWALPager(
 	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, pagerMemoryOnly);
-	state VersionedBTree* btree = new VersionedBTree(pager, file, {}, encryptionMode, encodingType, keyProvider);
+	state VersionedBTree* btree = new VersionedBTree(pager, file, UID(), {}, encryptionMode, encodingType, keyProvider);
 	wait(btree->init());
 
 	state DecodeBoundaryVerifier* pBoundaries = DecodeBoundaryVerifier::getVerifier(file);
@@ -10366,7 +10387,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 				printf("Reopening btree from disk.\n");
 				IPager2* pager = new DWALPager(
 				    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, false);
-				btree = new VersionedBTree(pager, file, {}, encryptionMode, encodingType, keyProvider);
+				btree = new VersionedBTree(pager, file, UID(), {}, encryptionMode, encodingType, keyProvider);
 
 				wait(btree->init());
 
@@ -10415,6 +10436,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 		                                         concurrentExtentReads,
 		                                         pagerMemoryOnly),
 		                           file,
+		                           UID(),
 		                           {},
 		                           {},
 		                           encodingType,
@@ -10751,8 +10773,8 @@ TEST_CASE(":/redwood/performance/set") {
 
 	DWALPager* pager = new DWALPager(
 	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, pagerMemoryOnly);
-	state VersionedBTree* btree =
-	    new VersionedBTree(pager, file, {}, {}, EncodingType::XXHash64, makeReference<NullEncryptionKeyProvider>());
+	state VersionedBTree* btree = new VersionedBTree(
+	    pager, file, UID(), {}, {}, EncodingType::XXHash64, makeReference<NullEncryptionKeyProvider>());
 	wait(btree->init());
 	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 
@@ -11445,8 +11467,8 @@ TEST_CASE("/redwood/correctness/EnforceEncodingType") {
 		                               {}, // encryptionMode
 		                               reopenEncodingType,
 		                               encryptionKeyProviders.at(reopenEncodingType));
-		wait(kvs->init());
 		try {
+			wait(kvs->init());
 			Optional<Value> v = wait(kvs->readValue("foo"_sr));
 			UNREACHABLE();
 		} catch (Error& e) {

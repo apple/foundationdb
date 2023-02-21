@@ -55,6 +55,17 @@ int64_t prefixToId(KeyRef prefix, EnforceValidTenantId enforceValidTenantId) {
 	return id;
 }
 
+KeyRangeRef clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenantInfo, Arena& arena) {
+	if (tenantInfo.hasTenant()) {
+		return KeyRangeRef(range.begin.startsWith(tenantInfo.prefix.get()) ? range.begin : tenantInfo.prefix.get(),
+		                   range.end.startsWith(tenantInfo.prefix.get())
+		                       ? range.end
+		                       : allKeys.end.withPrefix(tenantInfo.prefix.get(), arena));
+	} else {
+		return range;
+	}
+}
+
 bool withinSingleTenant(KeyRangeRef const& range) {
 	if (range.begin >= "\x80"_sr || range.begin.size() < TenantAPI::PREFIX_SIZE) {
 		return false;
@@ -63,7 +74,7 @@ bool withinSingleTenant(KeyRangeRef const& range) {
 	return tRange.contains(range);
 }
 
-}; // namespace TenantAPI
+} // namespace TenantAPI
 
 std::string TenantMapEntry::tenantStateToString(TenantState tenantState) {
 	switch (tenantState) {
@@ -174,6 +185,10 @@ std::string TenantMapEntry::toJson() const {
 		tenantEntry["tenant_group"] = binaryToJson(tenantGroup.get());
 	}
 
+	if (tenantState == TenantState::ERROR && error.size()) {
+		tenantEntry["error"] = error;
+	}
+
 	return json_spirit::write_string(json_spirit::mValue(tenantEntry));
 }
 
@@ -190,6 +205,13 @@ void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> 
 		TraceEvent(SevWarnAlways, "UnknownTenantConfigurationParameter").detail("Parameter", parameter);
 		throw invalid_tenant_configuration();
 	}
+}
+
+bool TenantMapEntry::operator==(TenantMapEntry const& other) const {
+	return id == other.id && tenantName == other.tenantName && tenantState == other.tenantState &&
+	       tenantLockState == other.tenantLockState && tenantGroup == other.tenantGroup &&
+	       assignedCluster == other.assignedCluster && configurationSequenceNum == other.configurationSequenceNum &&
+	       renameDestination == other.renameDestination && error == other.error;
 }
 
 json_spirit::mObject TenantGroupEntry::toJson() const {

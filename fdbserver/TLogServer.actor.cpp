@@ -2437,15 +2437,7 @@ ACTOR Future<EncryptionAtRestMode> getEncryptionAtRestMode(TLogData* self) {
 				when(GetEncryptionAtRestModeResponse resp = wait(brokenPromiseToNever(
 				         self->dbInfo->get().clusterInterface.getEncryptionAtRestMode.getReply(req)))) {
 					TraceEvent("GetEncryptionAtRestMode", self->dbgid).detail("Mode", resp.mode);
-
-					// TODO: TLOG_ENCTYPTION KNOB shall be removed and db-config check should be sufficient to
-					// determine tlog (and cluster) encryption status
-					if ((EncryptionAtRestMode::Mode)resp.mode != EncryptionAtRestMode::Mode::DISABLED &&
-					    SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION) {
-						return EncryptionAtRestMode((EncryptionAtRestMode::Mode)resp.mode);
-					} else {
-						return EncryptionAtRestMode();
-					}
+					return (EncryptionAtRestMode::Mode)resp.mode;
 				}
 			}
 		} catch (Error& e) {
