@@ -151,6 +151,7 @@ public:
 	VersionVector getVersionVector() const override { return tr.getVersionVector(); }
 	SpanContext getSpanContext() const override { return tr.getSpanContext(); }
 
+	double getTagThrottledDuration() const override { return tr.getTagThrottledDuration(); }
 	int64_t getTotalCost() const override { return tr.getTotalCost(); }
 	int64_t getApproximateSize() const override { return approximateSize; }
 	[[nodiscard]] Future<Standalone<StringRef>> getVersionstamp() override;
