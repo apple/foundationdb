@@ -6,6 +6,10 @@ commitProxyCount = 4
 config = 'triple'
 desiredTLogCount = 6
 
+[[knobs]]
+enable_worker_health_monitor = true
+cc_enable_worker_health_monitor = true
+
 [[test]]
 testTitle = 'ClogTlog'
 
