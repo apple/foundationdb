@@ -51,6 +51,10 @@ inline int getStorageEngineParamInt(std::map<std::string, std::string> const& pa
 	return std::stoi(params.at(name));
 };
 
+inline int getStorageEngineParamDouble(std::map<std::string, std::string> const& params, std::string const& name) {
+	return std::stod(params.at(name));
+};
+
 inline bool getStorageEngineParamBoolean(std::map<std::string, std::string> const& params, std::string const& name) {
 	return params.at(name) == "true";
 }
@@ -123,7 +127,7 @@ public:
 	virtual Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) { throw not_implemented(); }
 
 	// storage engine parameters interface
-	virtual std::map<std::string, std::string> getParameters() { throw not_implemented(); }
+	virtual std::map<std::string, std::string> getParameters() const { throw not_implemented(); }
 	virtual StorageEngineParamResult setParameters(std::map<std::string, std::string> const& params) {
 		throw not_implemented();
 	}
