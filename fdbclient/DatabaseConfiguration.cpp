@@ -27,7 +27,9 @@
 #include "flow/UnitTest.h"
 
 StorageEngineParamsFactory redwoodFactory(KeyValueStoreType::SSD_REDWOOD_V1,
-                                          { { "default_page_size", "8192" }, { "kvstore_range_prefetch", "true" } });
+                                          { { "default_page_size", "8192" },
+                                            { "kvstore_range_prefetch", "true" },
+                                            { "metrics_interval", "5.0" } });
 
 DatabaseConfiguration::DatabaseConfiguration() {
 	resetInternal();
