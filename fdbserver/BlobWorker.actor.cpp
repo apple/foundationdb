@@ -280,7 +280,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 		// FIXME: buggify an extra multiplication factor for short periods of time to hopefully trigger this logic more
 		// often? estimate slack in bytes buffered as max(0, assignments * (delta file size / 2) - bytesBuffered)
 		// FIXME: this doesn't take increased delta file size for heavy write amp cases into account
-		int64_t expectedExtraBytesBuffered = std::max(
+		int64_t expectedExtraBytesBuffered = std::max<int64_t>(
 		    0, stats.numRangesAssigned * (SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 2) - stats.mutationBytesBuffered);
 		// estimate slack in potential pending resnapshot
 		int64_t totalExtra =
@@ -3440,28 +3440,28 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 
 	state Optional<Key> tenantPrefix;
 	state Arena arena;
-	if (req.tenantInfo.name.present()) {
-		ASSERT(req.tenantInfo.tenantId != TenantInfo::INVALID_TENANT);
-		Optional<TenantMapEntry> tenantEntry = bwData->tenantData.getTenantById(req.tenantInfo.tenantId);
-		if (tenantEntry.present()) {
-			ASSERT(tenantEntry.get().id == req.tenantInfo.tenantId);
-			tenantPrefix = tenantEntry.get().prefix;
-		} else {
-			CODE_PROBE(true, "Blob worker unknown tenant");
-			// FIXME - better way. Wait on retry here, or just have better model for tenant metadata?
-			// Just throw wrong_shard_server and make the client retry and assume we load it later
-			TraceEvent(SevDebug, "BlobWorkerRequestUnknownTenant", bwData->id)
-			    .suppressFor(5.0)
-			    .detail("TenantName", req.tenantInfo.name.get())
-			    .detail("TenantId", req.tenantInfo.tenantId);
-			throw unknown_tenant();
-		}
-		req.keyRange = KeyRangeRef(req.keyRange.begin.withPrefix(tenantPrefix.get(), req.arena),
-		                           req.keyRange.end.withPrefix(tenantPrefix.get(), req.arena));
-	}
-
 	state bool didCollapse = false;
 	try {
+		if (req.tenantInfo.name.present()) {
+			ASSERT(req.tenantInfo.tenantId != TenantInfo::INVALID_TENANT);
+			Optional<TenantMapEntry> tenantEntry = bwData->tenantData.getTenantById(req.tenantInfo.tenantId);
+			if (tenantEntry.present()) {
+				ASSERT(tenantEntry.get().id == req.tenantInfo.tenantId);
+				tenantPrefix = tenantEntry.get().prefix;
+			} else {
+				CODE_PROBE(true, "Blob worker unknown tenant");
+				// FIXME - better way. Wait on retry here, or just have better model for tenant metadata?
+				// Just throw wrong_shard_server and make the client retry and assume we load it later
+				TraceEvent(SevDebug, "BlobWorkerRequestUnknownTenant", bwData->id)
+					.suppressFor(5.0)
+					.detail("TenantName", req.tenantInfo.name.get())
+					.detail("TenantId", req.tenantInfo.tenantId);
+				throw unknown_tenant();
+			}
+			req.keyRange = KeyRangeRef(req.keyRange.begin.withPrefix(tenantPrefix.get(), req.arena),
+									req.keyRange.end.withPrefix(tenantPrefix.get(), req.arena));
+		}
+
 		// TODO remove requirement for canCollapseBegin once we implement early replying
 		ASSERT(req.beginVersion == 0 || req.canCollapseBegin);
 		if (req.beginVersion != 0) {
@@ -3812,6 +3812,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		req.reply.send(rep);
 		--bwData->stats.activeReadRequests;
 	} catch (Error& e) {
+		--bwData->stats.activeReadRequests;
 		if (e.code() == error_code_operation_cancelled) {
 			req.reply.sendError(wrong_shard_server());
 			throw;
@@ -3820,7 +3821,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		if (e.code() == error_code_wrong_shard_server) {
 			++bwData->stats.wrongShardServer;
 		}
-		--bwData->stats.activeReadRequests;
+
 		if (canReplyWith(e)) {
 			req.reply.sendError(e);
 		} else {
