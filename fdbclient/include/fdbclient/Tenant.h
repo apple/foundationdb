@@ -36,6 +36,7 @@ namespace TenantAPI {
 KeyRef idToPrefix(Arena& p, int64_t id);
 Key idToPrefix(int64_t id);
 int64_t prefixToId(KeyRef prefix, EnforceValidTenantId = EnforceValidTenantId::True);
+KeyRangeRef clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenantInfo, Arena& arena);
 
 // return true if begin and end has the same non-negative prefix id
 bool withinSingleTenant(KeyRangeRef const&);
