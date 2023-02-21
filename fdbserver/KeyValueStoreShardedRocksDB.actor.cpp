@@ -3843,7 +3843,6 @@ TEST_CASE("noSim/ShardedRocksDB/RocksDBSstFileWriter") {
 		ASSERT(value != targetValue.toString());
 	}
 	for (const auto& [key, targetValue] : kvs3) {
-		std::string value;
 		status = db->Get(rocksdb::ReadOptions(), key.toString(), &value);
 		ASSERT(status.ok());
 		ASSERT(value == targetValue.toString());
