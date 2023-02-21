@@ -59,10 +59,13 @@
 
 #include "fdb_c_options.g.h"
 #include "fdb_c_types.h"
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+DLLEXPORT void fdb_retrieve_build_id(const unsigned char** build_id);
 
 DLLEXPORT const char* fdb_get_error(fdb_error_t code);
 
@@ -165,8 +168,8 @@ Total 112 bytes
 typedef struct mappedkeyvalue {
 	FDBKey key;
 	FDBKey value;
-	/* It's complicated to map a std::variant to C. For now we assume the underlying requests are always getRange and
-	 * take the shortcut. */
+	/* It's complicated to map a std::variant to C. For now we assume the underlying requests are always getRange
+	 * and take the shortcut. */
 	FDBGetRangeReqAndResult getRange;
 	unsigned char buffer[32];
 } FDBMappedKeyValue;
@@ -734,6 +737,7 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_selector(FDBTr
                                                                            fdb_bool_t end_or_equal,
                                                                            int end_offset,
                                                                            int limit);
+
 #else
 #define fdb_transaction_get_range_selector(tr, bkn, bknl, boe, bo, ekn, eknl, eoe, eo, lim) FDB_REMOVED_FUNCTION
 #endif

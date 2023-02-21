@@ -18,8 +18,11 @@
  * limitations under the License.
  */
 
+#include <chrono>
 #include <cstddef>
+#include <dlfcn.h>
 #include <filesystem>
+#include <sstream>
 #ifdef __unixish__
 #include <fcntl.h>
 #endif
@@ -2828,23 +2831,56 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 	}
 }
 
+#define TIMED(description, code)                                                                                       \
+	start = std::chrono::steady_clock::now();                                                                          \
+	code;                                                                                                              \
+	end = std::chrono::steady_clock::now();                                                                            \
+	std::cout << #description << " took "                                                                              \
+	          << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << " us.\n"
+
 #if defined(__unixish__)
 std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
+	auto start = std::chrono::steady_clock::now();
+	auto end = std::chrono::steady_clock::now();
+
 	ASSERT_GE(threadCount, 1);
 	// Copy library for each thread configured per version
 	std::vector<std::pair<std::string, bool>> paths;
 
-	const struct build_id_note* note_by_symbol = build_id_find_nhdr_by_symbol((const void*)symbol_func);
-	ElfW(Word) len = build_id_length(note_by_symbol);
-	const uint8_t* build_id = build_id_data(note_by_symbol);
+	TIMED("loading library", void* lib = loadLibrary(path.c_str())); // dlopen(path.c_str(), RTLD_LAZY);
+	void (*retreiveBuildID)(uint8_t**) = nullptr;
+	TIMED("loading client func", loadClientFunction(&retreiveBuildID, lib, path, "fdb_retrieve_build_id", true));
+
+	//// loadClientFunction(build_id_find_nhdr_by_symbol, handle, "", "build_id_find_nhdr_by_symbol", true);
+	//// loadClientFunction(build_id_length, handle, "", "build_id_length", true);
+	// loadClientFunction(build_id_data, handle, "", "build_id_data", true);
+	//
+	// std::cout << "Loaded functions " << std::endl;
+
+	// const struct build_id_note* (*build_id_find_nhdr_by_name)(const char* name) =
+	//     (const struct build_id_note* (*)(const char* name))dlsym(handle, "build_id_find_nhdr_by_name");
+	// const struct build_id_note* (*build_id_find_nhdr_by_symbol)(const void* symbol) =
+	//     (const struct build_id_note* (*)(const void* symbol))dlsym(handle, "build_id_find_nhdr_by_symbol");
+	//// reinterpret_cast<ElfW(Word) (*build_id_length)(const struct build_id_note* note)()> =
+	////     (ElfW(Word)(*)(const struct build_id_note*))dlsym(handle, "build_id_length");
+	// void* tmp = dlsym(handle, "build_id_data");
+	// typedef const uint8_t* (*build_id_data)(const struct build_id_note* note);
+	// build_id_data my_build_id_data = reinterpret_cast<build_id_data>(reinterpret_cast<long>(tmp));
+
+	// const struct build_id_note* note_by_symbol = build_id_find_nhdr_by_name(path.c_str());
+	// std::cout << "Note by symbol " << note_by_symbol << std::endl;
+	// ElfW(Word) len = 20;
+	// const uint8_t* build_id = build_id_data(note_by_symbol);
 
 	// https://gist.github.com/miguelmota/4fc9b46cf21111af5fa613555c14de92
-	std::ostringstream ss;
-	ss << std::hex << std::setfill('0');
-	for (ElfW(Word) i = 0; i < len; i++) {
-		ss << std::hex << std::setw(2) << static_cast<int>(build_id[i]);
-	}
-	std::cout << "Build ID " << ss.str().c_str() << "\n";
+	constexpr int BUILD_ID_LENGTH = 20; // hardcoded for now, can also be retrieved inside api func
+	uint8_t* build_id = nullptr;
+	TIMED("retrieving build id ", retreiveBuildID(&build_id));
+
+	TIMED(
+	    "filling string stream ", std::ostringstream ss_build_id; ss_build_id << std::hex << std::setfill('0');
+	    for (ElfW(Word) i = 0; i < BUILD_ID_LENGTH;
+	         i++) { ss_build_id << std::hex << std::setw(2) << static_cast<int>(build_id[i]); });
 
 	if (threadCount == 1) {
 		paths.push_back({ path, false });
@@ -2858,14 +2894,17 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 
 			constexpr int MAX_TMP_NAME_LENGTH = PATH_MAX + 12;
 			char tempName[MAX_TMP_NAME_LENGTH];
-			snprintf(
-			    tempName, MAX_TMP_NAME_LENGTH, "%s/%s-%d-%s", tmpDir.c_str(), filename.c_str(), ii, ss.str().c_str());
+			snprintf(tempName,
+			         MAX_TMP_NAME_LENGTH,
+			         "%s/%s-%d-%s",
+			         tmpDir.c_str(),
+			         filename.c_str(),
+			         ii,
+			         ss_build_id.str().c_str());
 
 			if (!(std::filesystem::exists(tempName))) {
-				std::cout << tempName << "does not exists \n";
 
-				int tempFd = open(tempName, O_RDWR | O_CREAT);
-				std::cout << tempName << "opened \n";
+				int tempFd = open(tempName, O_RDWR | O_CREAT, 0755);
 				int fd;
 
 				if ((fd = open(path.c_str(), O_RDONLY)) == -1) {
@@ -2913,6 +2952,7 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 		}
 	}
 
+	closeLibrary(lib);
 	return paths;
 }
 #else // if defined (__unixish__)
@@ -3074,6 +3114,7 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 // build_id->setSection(".TEST");
 
 void MultiVersionApi::setupNetwork() {
+	auto start = std::chrono::steady_clock::now();
 
 	// const struct build_id_note* note = build_id_find_nhdr_by_name("");
 	// if (!note)
@@ -3204,7 +3245,12 @@ void MultiVersionApi::setupNetwork() {
 				// Copy external lib for each thread
 				if (externalClients.count(filename) == 0) {
 					externalClients[filename] = {};
+					auto start = std::chrono::steady_clock::now();
 					auto libCopies = copyExternalLibraryPerThread(path);
+					auto end = std::chrono::steady_clock::now();
+					std::cout << "copyExternalLibraryPerThread() took "
+					          << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << " us.\n";
+
 					for (int idx = 0; idx < libCopies.size(); ++idx) {
 						// bool unlinkOnLoad = libCopies[idx].second && !retainClientLibCopies;
 						externalClients[filename].push_back(Reference<ClientInfo>(new ClientInfo(
@@ -3272,6 +3318,9 @@ void MultiVersionApi::setupNetwork() {
 		flushTraceFileVoid();
 		throw e;
 	}
+	auto end = std::chrono::steady_clock::now();
+	std::cout << "setupNetwork() took " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()
+	          << " us.\n";
 }
 
 THREAD_FUNC_RETURN runNetworkThread(void* param) {

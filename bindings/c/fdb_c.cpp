@@ -30,6 +30,7 @@
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "foundationdb/fdb_c.h"
 #include "foundationdb/fdb_c_internal.h"
+#include "fdbclient/buildid.h"
 
 int g_api_version = 0;
 
@@ -497,6 +498,15 @@ FDBFuture* fdb_cluster_create_database_v609(FDBCluster* c, uint8_t const* db_nam
 	}
 
 	return (FDBFuture*)ThreadFuture<Reference<IDatabase>>(Reference<IDatabase>(DB(db))).extractPtr();
+}
+
+int dummy_func() {
+	return 1 + 1;
+}
+
+extern "C" DLLEXPORT void fdb_retrieve_build_id(const unsigned char** build_id) {
+	const struct build_id_note* note_by_symbol = build_id_find_nhdr_by_symbol((const void*)dummy_func);
+	*build_id = build_id_data(note_by_symbol);
 }
 
 extern "C" DLLEXPORT fdb_error_t fdb_create_database(const char* cluster_file_path, FDBDatabase** out_database) {
