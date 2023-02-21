@@ -46,7 +46,10 @@
 	do {                                                                                                               \
 		if (ENABLE_VERBOSE_DEBUG) {                                                                                    \
 			const std::string urlStr = url.toString();                                                                 \
-			TraceEvent("RESTClientOp").detail("Op", #opName).detail("Url", urlStr).detail("IsSecure", secure);         \
+			TraceEvent(SevDebug, "RESTClientOp")                                                                       \
+			    .detail("Op", #opName)                                                                                 \
+			    .detail("Url", urlStr)                                                                                 \
+			    .detail("IsSecure", secure);                                                                           \
 		}                                                                                                              \
 	} while (0);
 
