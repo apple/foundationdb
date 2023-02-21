@@ -91,7 +91,7 @@ bool parseTenantListOptions(std::vector<StringRef> const& tokens,
                             int startIndex,
                             int& limit,
                             int& offset,
-                            std::vector<TenantAPI::TenantState>& filters) {
+                            std::vector<MetaclusterAPI::TenantState>& filters) {
 	for (int tokenNum = startIndex; tokenNum < tokens.size(); ++tokenNum) {
 		Optional<Value> value;
 		StringRef token = tokens[tokenNum];
@@ -337,7 +337,7 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 	state StringRef endTenant = "\xff\xff"_sr;
 	state int limit = 100;
 	state int offset = 0;
-	state std::vector<TenantAPI::TenantState> filters;
+	state std::vector<MetaclusterAPI::TenantState> filters;
 
 	if (tokens.size() >= 3) {
 		beginTenant = tokens[2];

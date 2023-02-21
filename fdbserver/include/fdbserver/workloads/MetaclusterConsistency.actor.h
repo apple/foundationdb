@@ -316,9 +316,9 @@ private:
 			for (auto tenantName : expectedTenants) {
 				MetaclusterTenantMapEntry const& metaclusterEntry = self->managementMetadata.tenantMap[tenantName];
 				if (!dataClusterTenantMap.count(tenantName)) {
-					ASSERT(metaclusterEntry.tenantState == TenantAPI::TenantState::REGISTERING ||
-					       metaclusterEntry.tenantState == TenantAPI::TenantState::REMOVING ||
-					       metaclusterEntry.tenantState == TenantAPI::TenantState::ERROR);
+					ASSERT(metaclusterEntry.tenantState == MetaclusterAPI::TenantState::REGISTERING ||
+					       metaclusterEntry.tenantState == MetaclusterAPI::TenantState::REMOVING ||
+					       metaclusterEntry.tenantState == MetaclusterAPI::TenantState::ERROR);
 				} else if (metaclusterEntry.tenantGroup.present()) {
 					tenantGroupsWithCompletedTenants.insert(metaclusterEntry.tenantGroup.get());
 				}
@@ -332,10 +332,10 @@ private:
 			ASSERT(entry.tenantName == metaclusterEntry.tenantName);
 
 			if (!self->allowPartialMetaclusterOperations) {
-				ASSERT_EQ(metaclusterEntry.tenantState, TenantAPI::TenantState::READY);
+				ASSERT_EQ(metaclusterEntry.tenantState, MetaclusterAPI::TenantState::READY);
 			}
-			if (metaclusterEntry.tenantState != TenantAPI::TenantState::UPDATING_CONFIGURATION &&
-			    metaclusterEntry.tenantState != TenantAPI::TenantState::REMOVING) {
+			if (metaclusterEntry.tenantState != MetaclusterAPI::TenantState::UPDATING_CONFIGURATION &&
+			    metaclusterEntry.tenantState != MetaclusterAPI::TenantState::REMOVING) {
 				ASSERT_EQ(entry.configurationSequenceNum, metaclusterEntry.configurationSequenceNum);
 			} else {
 				ASSERT_LE(entry.configurationSequenceNum, metaclusterEntry.configurationSequenceNum);

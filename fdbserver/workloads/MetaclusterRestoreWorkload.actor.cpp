@@ -1009,7 +1009,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			ASSERT(itr != tenantMap.end());
 
 			MetaclusterTenantMapEntry postRecoveryEntry = itr->second;
-			if (postRecoveryEntry.tenantState == TenantAPI::TenantState::ERROR) {
+			if (postRecoveryEntry.tenantState == MetaclusterAPI::TenantState::ERROR) {
 				ASSERT(self->dataDbs[itr->second.assignedCluster].restored);
 				postRecoveryEntry.tenantState = tenantEntry.tenantState;
 				postRecoveryEntry.error.clear();
@@ -1032,14 +1032,14 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			} else {
 				if (tenantData.createTime != TenantData::AccessTime::BEFORE_BACKUP &&
 				    self->dataDbs[tenantData.cluster].restored) {
-					ASSERT(tenantItr->second.tenantState == TenantAPI::TenantState::ERROR ||
-					       (tenantItr->second.tenantState == TenantAPI::TenantState::READY &&
+					ASSERT(tenantItr->second.tenantState == MetaclusterAPI::TenantState::ERROR ||
+					       (tenantItr->second.tenantState == MetaclusterAPI::TenantState::READY &&
 					        tenantData.createTime == TenantData::AccessTime::DURING_BACKUP));
-					if (tenantItr->second.tenantState == TenantAPI::TenantState::ERROR) {
+					if (tenantItr->second.tenantState == MetaclusterAPI::TenantState::ERROR) {
 						ASSERT(self->dataDbs[tenantData.cluster].restoreHasMessages);
 					}
 				} else {
-					ASSERT_EQ(tenantItr->second.tenantState, TenantAPI::TenantState::READY);
+					ASSERT_EQ(tenantItr->second.tenantState, MetaclusterAPI::TenantState::READY);
 				}
 			}
 		}

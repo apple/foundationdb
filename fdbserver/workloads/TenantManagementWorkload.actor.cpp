@@ -549,13 +549,13 @@ struct TenantManagementWorkload : TestWorkload {
 						Optional<MetaclusterTenantMapEntry> resultEntry =
 						    wait(MetaclusterAPI::tryGetTenant(self->mvDb, tenantsToCreate.begin()->first));
 						if (resultEntry.present()) {
-							if (resultEntry.get().tenantState == TenantAPI::TenantState::READY) {
+							if (resultEntry.get().tenantState == MetaclusterAPI::TenantState::READY) {
 								// The tenant now exists, so we will retry and expect the creation to react accordingly
 								alreadyExists = true;
 							} else {
 								// Only a metacluster tenant creation can end up in a partially created state
 								// We should be able to retry and pick up where we left off
-								ASSERT(resultEntry.get().tenantState == TenantAPI::TenantState::REGISTERING);
+								ASSERT(resultEntry.get().tenantState == MetaclusterAPI::TenantState::REGISTERING);
 							}
 						} else {
 							CODE_PROBE(true, "Tenant creation (metacluster) aborted before writing data.");
@@ -598,7 +598,7 @@ struct TenantManagementWorkload : TestWorkload {
 						    wait(MetaclusterAPI::tryGetTenant(self->mvDb, tenantItr->first));
 						wait(verifyTenantCreate<MetaclusterTenantMapEntry>(
 						    self, metaEntry, tenantItr->first, tenantItr->second.tenantGroup));
-						ASSERT(metaEntry.get().tenantState == TenantAPI::TenantState::READY);
+						ASSERT(metaEntry.get().tenantState == MetaclusterAPI::TenantState::READY);
 						tPrefix = metaEntry.get().prefix;
 					} else {
 						state Optional<TenantMapEntry> normalEntry =
@@ -936,8 +936,8 @@ struct TenantManagementWorkload : TestWorkload {
 							if (!resultEntry.present()) {
 								alreadyExists = false;
 							} else {
-								ASSERT(resultEntry.get().tenantState == TenantAPI::TenantState::READY ||
-								       resultEntry.get().tenantState == TenantAPI::TenantState::REMOVING);
+								ASSERT(resultEntry.get().tenantState == MetaclusterAPI::TenantState::READY ||
+								       resultEntry.get().tenantState == MetaclusterAPI::TenantState::REMOVING);
 							}
 						} else {
 							Optional<TenantMapEntry> tenantEntry =

@@ -279,41 +279,35 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		state bool forceJoin = deterministicRandom()->coinflip();
 
 		state std::vector<std::string> messages;
-		try {
-			state bool retried = false;
-			loop {
-				try {
-					Future<Void> restoreFuture =
-					    MetaclusterAPI::restoreCluster(self->managementDb,
-					                                   clusterName,
-					                                   dataDb->db->getConnectionRecord()->getConnectionString(),
-					                                   ApplyManagementClusterUpdates::True,
-					                                   RestoreDryRun(dryRun),
-					                                   ForceJoinNewMetacluster(forceJoin),
-					                                   &messages);
-					Optional<Void> result = wait(timeout(restoreFuture, deterministicRandom()->randomInt(1, 30)));
-					if (result.present()) {
-						break;
-					}
-					retried = true;
-				} catch (Error& e) {
-					if (e.code() == error_code_conflicting_restore) {
-						ASSERT(retried);
-						CODE_PROBE(true,
-						           "MetaclusterManagementWorkload: timed out restore conflicts with retried restore");
-						continue;
-					}
-					throw;
+		state bool retried = false;
+		loop {
+			try {
+				Future<Void> restoreFuture =
+				    MetaclusterAPI::restoreCluster(self->managementDb,
+				                                   clusterName,
+				                                   dataDb->db->getConnectionRecord()->getConnectionString(),
+				                                   ApplyManagementClusterUpdates::True,
+				                                   RestoreDryRun(dryRun),
+				                                   ForceJoinNewMetacluster(forceJoin),
+				                                   &messages);
+				Optional<Void> result = wait(timeout(restoreFuture, deterministicRandom()->randomInt(1, 30)));
+				if (result.present()) {
+					break;
 				}
-			}
-		} catch (Error& e) {
-			if (e.code() == error_code_cluster_not_found) {
-				ASSERT(!dataDb->registered);
-				return Void();
-			}
+				retried = true;
+			} catch (Error& e) {
+				if (e.code() == error_code_conflicting_restore) {
+					ASSERT(retried);
+					CODE_PROBE(true, "MetaclusterManagementWorkload: timed out restore conflicts with retried restore");
+					continue;
+				} else if (e.code() == error_code_cluster_not_found) {
+					ASSERT(!dataDb->registered);
+					return Void();
+				}
 
-			TraceEvent(SevError, "RestoreClusterFailure").error(e).detail("ClusterName", clusterName);
-			ASSERT(false);
+				TraceEvent(SevError, "RestoreClusterFailure").error(e).detail("ClusterName", clusterName);
+				ASSERT(false);
+			}
 		}
 
 		return Void();
@@ -461,8 +455,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	                                           const char* context) {
 		try {
 			state MetaclusterTenantMapEntry checkEntry = wait(MetaclusterAPI::getTenant(self->managementDb, tenant));
-			state TenantAPI::TenantState checkState = checkEntry.tenantState;
-			state std::vector<TenantAPI::TenantState> filters;
+			state MetaclusterAPI::TenantState checkState = checkEntry.tenantState;
+			state std::vector<MetaclusterAPI::TenantState> filters;
 			filters.push_back(checkState);
 
 			state std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenantList =

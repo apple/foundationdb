@@ -33,7 +33,7 @@ FDB_DEFINE_BOOLEAN_PARAM(RunOnMismatchedCluster);
 FDB_DEFINE_BOOLEAN_PARAM(RestoreDryRun);
 FDB_DEFINE_BOOLEAN_PARAM(ForceJoinNewMetacluster);
 
-namespace TenantAPI {
+namespace MetaclusterAPI {
 
 std::string tenantStateToString(TenantState tenantState) {
 	switch (tenantState) {
@@ -72,7 +72,7 @@ TenantState stringToTenantState(std::string stateStr) {
 
 	throw invalid_option();
 }
-} // namespace TenantAPI
+} // namespace MetaclusterAPI
 
 std::string clusterTypeToString(const ClusterType& clusterType) {
 	switch (clusterType) {
@@ -150,13 +150,13 @@ MetaclusterTenantMapEntry::MetaclusterTenantMapEntry(TenantMapEntry tenantEntry)
 MetaclusterTenantMapEntry::MetaclusterTenantMapEntry() {}
 MetaclusterTenantMapEntry::MetaclusterTenantMapEntry(int64_t id,
                                                      TenantName tenantName,
-                                                     TenantAPI::TenantState tenantState)
+                                                     MetaclusterAPI::TenantState tenantState)
   : tenantName(tenantName), tenantState(tenantState) {
 	setId(id);
 }
 MetaclusterTenantMapEntry::MetaclusterTenantMapEntry(int64_t id,
                                                      TenantName tenantName,
-                                                     TenantAPI::TenantState tenantState,
+                                                     MetaclusterAPI::TenantState tenantState,
                                                      Optional<TenantGroupName> tenantGroup)
   : tenantName(tenantName), tenantState(tenantState), tenantGroup(tenantGroup) {
 	setId(id);
@@ -175,7 +175,7 @@ std::string MetaclusterTenantMapEntry::toJson() const {
 	tenantEntry["name"] = binaryToJson(tenantName);
 	tenantEntry["prefix"] = binaryToJson(prefix);
 
-	tenantEntry["tenant_state"] = TenantAPI::tenantStateToString(tenantState);
+	tenantEntry["tenant_state"] = MetaclusterAPI::TenantStateToString(tenantState);
 	tenantEntry["assigned_cluster"] = binaryToJson(assignedCluster);
 
 	if (tenantGroup.present()) {
@@ -183,10 +183,10 @@ std::string MetaclusterTenantMapEntry::toJson() const {
 	}
 
 	tenantEntry["lock_state"] = TenantAPI::tenantLockStateToString(tenantLockState);
-	if (tenantState == TenantAPI::TenantState::RENAMING) {
+	if (tenantState == MetaclusterAPI::TenantState::RENAMING) {
 		ASSERT(renameDestination.present());
 		tenantEntry["rename_destination"] = binaryToJson(renameDestination.get());
-	} else if (tenantState == TenantAPI::TenantState::ERROR) {
+	} else if (tenantState == MetaclusterAPI::TenantState::ERROR) {
 		tenantEntry["error"] = error;
 	}
 

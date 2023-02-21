@@ -28,7 +28,7 @@
 #include "fdbclient/KeyBackedTypes.h"
 #include "flow/flat_buffers.h"
 
-namespace TenantAPI {
+namespace MetaclusterAPI {
 // Represents the various states that a tenant could be in. Only applies to metacluster, not standalone clusters.
 // In a metacluster, a tenant on the management cluster could be in the other states while changes are applied to the
 // data cluster.
@@ -52,7 +52,7 @@ enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, R
 
 std::string tenantStateToString(TenantState tenantState);
 TenantState stringToTenantState(std::string stateStr);
-} // namespace TenantAPI
+} // namespace MetaclusterAPI
 
 struct ClusterUsage {
 	int numTenantGroups = 0;
@@ -131,7 +131,7 @@ struct MetaclusterTenantMapEntry {
 	int64_t id = -1;
 	Key prefix;
 	TenantName tenantName;
-	TenantAPI::TenantState tenantState = TenantAPI::TenantState::READY;
+	MetaclusterAPI::TenantState tenantState = MetaclusterAPI::TenantState::READY;
 	TenantAPI::TenantLockState tenantLockState = TenantAPI::TenantLockState::UNLOCKED;
 	Optional<TenantGroupName> tenantGroup;
 	ClusterName assignedCluster;
@@ -142,10 +142,10 @@ struct MetaclusterTenantMapEntry {
 	std::string error;
 
 	MetaclusterTenantMapEntry();
-	MetaclusterTenantMapEntry(int64_t id, TenantName tenantName, TenantAPI::TenantState tenantState);
+	MetaclusterTenantMapEntry(int64_t id, TenantName tenantName, MetaclusterAPI::TenantState tenantState);
 	MetaclusterTenantMapEntry(int64_t id,
 	                          TenantName tenantName,
-	                          TenantAPI::TenantState tenantState,
+	                          MetaclusterAPI::TenantState tenantState,
 	                          Optional<TenantGroupName> tenantGroup);
 	MetaclusterTenantMapEntry(TenantMapEntry tenantEntry);
 
@@ -180,7 +180,8 @@ struct MetaclusterTenantMapEntry {
 			if (id >= 0) {
 				prefix = TenantAPI::idToPrefix(id);
 			}
-			ASSERT(tenantState >= TenantAPI::TenantState::REGISTERING && tenantState <= TenantAPI::TenantState::ERROR);
+			ASSERT(tenantState >= MetaclusterAPI::TenantState::REGISTERING &&
+			       tenantState <= MetaclusterAPI::TenantState::ERROR);
 		}
 	}
 };

@@ -178,18 +178,18 @@ private:
 				ASSERT(!metadata.tenantsInTenantGroupIndex.count(tenantId));
 			}
 			if (tenantMapEntry.renameDestination.present()) {
-				ASSERT(tenantMapEntry.tenantState == TenantAPI::TenantState::RENAMING ||
-				       tenantMapEntry.tenantState == TenantAPI::TenantState::REMOVING);
+				ASSERT(tenantMapEntry.tenantState == MetaclusterAPI::TenantState::RENAMING ||
+				       tenantMapEntry.tenantState == MetaclusterAPI::TenantState::REMOVING);
 
 				auto nameIndexItr = metadata.tenantNameIndex.find(tenantMapEntry.renameDestination.get());
 				ASSERT(nameIndexItr != metadata.tenantNameIndex.end());
 				ASSERT_EQ(nameIndexItr->second, tenantMapEntry.id);
 				++renameCount;
 			} else {
-				ASSERT_NE(tenantMapEntry.tenantState, TenantAPI::TenantState::RENAMING);
+				ASSERT_NE(tenantMapEntry.tenantState, MetaclusterAPI::TenantState::RENAMING);
 			}
 			// An error string should be set if and only if the tenant state is an error
-			ASSERT((tenantMapEntry.tenantState == TenantAPI::TenantState::ERROR) != tenantMapEntry.error.empty());
+			ASSERT((tenantMapEntry.tenantState == MetaclusterAPI::TenantState::ERROR) != tenantMapEntry.error.empty());
 		}
 
 		ASSERT_EQ(tenantMap.size() + renameCount, metadata.tenantNameIndex.size());

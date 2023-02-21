@@ -1545,7 +1545,7 @@ struct RestoreClusterImpl {
 			}
 
 			MetaclusterTenantMapEntry entry = f.get().get();
-			entry.tenantState = TenantAPI::TenantState::ERROR;
+			entry.tenantState = MetaclusterAPI::TenantState::ERROR;
 			entry.error = "The tenant is missing after restoring its data cluster";
 			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, entry.id, entry);
 		}
@@ -1826,8 +1826,8 @@ struct RestoreClusterImpl {
 			// SOMEDAY: this could optionally complete the partial operations (e.g. finish creating or removing the
 			// tenant)
 			if (self->dataClusterTenantMap.find(tenantId) == self->dataClusterTenantMap.end() &&
-			    managementTenant.tenantState != TenantAPI::TenantState::REGISTERING &&
-			    managementTenant.tenantState != TenantAPI::TenantState::REMOVING) {
+			    managementTenant.tenantState != MetaclusterAPI::TenantState::REGISTERING &&
+			    managementTenant.tenantState != MetaclusterAPI::TenantState::REMOVING) {
 				if (self->restoreDryRun) {
 					self->messages.push_back(fmt::format("The tenant `{}' with ID {} is missing on the data cluster",
 					                                     printable(managementTenant.tenantName),
@@ -1837,7 +1837,7 @@ struct RestoreClusterImpl {
 					// include tenants we previously marked as missing, and as new errors are added it could include
 					// other tenants
 					++missingTenantCount;
-					if (managementTenant.tenantState != TenantAPI::TenantState::ERROR) {
+					if (managementTenant.tenantState != MetaclusterAPI::TenantState::ERROR) {
 						missingTenants.push_back(tenantId);
 						if (missingTenants.size() == CLIENT_KNOBS->METACLUSTER_RESTORE_BATCH_SIZE) {
 							wait(self->runRestoreManagementTransaction([self = self, missingTenants = missingTenants](
@@ -1891,7 +1891,7 @@ struct RestoreClusterImpl {
 		}
 
 		if (!self->restoreDryRun) {
-			tenantEntry.tenantState = TenantAPI::TenantState::READY;
+			tenantEntry.tenantState = MetaclusterAPI::TenantState::READY;
 			tenantEntry.assignedCluster = self->clusterName;
 			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, tenantEntry.id, tenantEntry);
 			ManagementClusterMetadata::tenantMetadata().tenantNameIndex.set(tr, tenantEntry.tenantName, tenantEntry.id);
@@ -2204,7 +2204,7 @@ struct CreateTenantImpl {
 		    wait(tryGetTenantTransaction(tr, self->tenantEntry.tenantName));
 		if (existingEntry.present()) {
 			if (!existingEntry.get().matchesConfiguration(self->tenantEntry) ||
-			    existingEntry.get().tenantState != TenantAPI::TenantState::REGISTERING) {
+			    existingEntry.get().tenantState != MetaclusterAPI::TenantState::REGISTERING) {
 				// The tenant already exists and is either completely created or has a different
 				// configuration
 				throw tenant_already_exists();
@@ -2363,7 +2363,7 @@ struct CreateTenantImpl {
 		self->tenantEntry.setId(lastId.get() + 1);
 		ManagementClusterMetadata::tenantMetadata().lastTenantId.set(tr, self->tenantEntry.id);
 
-		self->tenantEntry.tenantState = TenantAPI::TenantState::REGISTERING;
+		self->tenantEntry.tenantState = MetaclusterAPI::TenantState::REGISTERING;
 		ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->tenantEntry.id, self->tenantEntry);
 		ManagementClusterMetadata::tenantMetadata().tenantNameIndex.set(
 		    tr, self->tenantEntry.tenantName, self->tenantEntry.id);
@@ -2424,9 +2424,9 @@ struct CreateTenantImpl {
 			throw tenant_removed();
 		}
 
-		if (managementEntry.get().tenantState == TenantAPI::TenantState::REGISTERING) {
+		if (managementEntry.get().tenantState == MetaclusterAPI::TenantState::REGISTERING) {
 			MetaclusterTenantMapEntry updatedEntry = managementEntry.get();
-			updatedEntry.tenantState = TenantAPI::TenantState::READY;
+			updatedEntry.tenantState = MetaclusterAPI::TenantState::READY;
 			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, updatedEntry.id, updatedEntry);
 			ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 		}
@@ -2506,13 +2506,13 @@ struct DeleteTenantImpl {
 
 		// Disallow removing the "new" name of a renamed tenant before it completes
 		if (self->tenantName.present() && tenantEntry.tenantName != self->tenantName.get()) {
-			ASSERT(tenantEntry.tenantState == TenantAPI::TenantState::RENAMING ||
-			       tenantEntry.tenantState == TenantAPI::TenantState::REMOVING);
+			ASSERT(tenantEntry.tenantState == MetaclusterAPI::TenantState::RENAMING ||
+			       tenantEntry.tenantState == MetaclusterAPI::TenantState::REMOVING);
 			throw tenant_not_found();
 		}
 
 		wait(self->ctx.setCluster(tr, tenantEntry.assignedCluster));
-		return std::make_pair(resolvedId, tenantEntry.tenantState == TenantAPI::TenantState::REMOVING);
+		return std::make_pair(resolvedId, tenantEntry.tenantState == MetaclusterAPI::TenantState::REMOVING);
 	}
 
 	// Does an initial check if the tenant is empty. This is an optimization to prevent us marking a tenant
@@ -2541,8 +2541,8 @@ struct DeleteTenantImpl {
 	                                                    Reference<typename DB::TransactionT> tr) {
 		state MetaclusterTenantMapEntry tenantEntry = wait(getTenantTransaction(tr, self->tenantId));
 
-		if (tenantEntry.tenantState != TenantAPI::TenantState::REMOVING) {
-			tenantEntry.tenantState = TenantAPI::TenantState::REMOVING;
+		if (tenantEntry.tenantState != MetaclusterAPI::TenantState::REMOVING) {
+			tenantEntry.tenantState = MetaclusterAPI::TenantState::REMOVING;
 
 			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, tenantEntry.id, tenantEntry);
 			ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
@@ -2560,7 +2560,7 @@ struct DeleteTenantImpl {
 			return Void();
 		}
 
-		ASSERT(tenantEntry.get().tenantState == TenantAPI::TenantState::REMOVING);
+		ASSERT(tenantEntry.get().tenantState == MetaclusterAPI::TenantState::REMOVING);
 
 		// Erase the tenant entry itself
 		ManagementClusterMetadata::tenantMetadata().tenantMap.erase(tr, tenantEntry.get().id);
@@ -2711,7 +2711,7 @@ Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenant
     TenantName end,
     int limit,
     int offset = 0,
-    std::vector<TenantAPI::TenantState> filters = std::vector<TenantAPI::TenantState>()) {
+    std::vector<MetaclusterAPI::TenantState> filters = std::vector<MetaclusterAPI::TenantState>()) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	state std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> results;
 
@@ -2843,15 +2843,15 @@ struct ConfigureTenantImpl {
 			throw tenant_not_found();
 		}
 
-		if (tenantEntry.get().tenantState != TenantAPI::TenantState::READY &&
-		    tenantEntry.get().tenantState != TenantAPI::TenantState::UPDATING_CONFIGURATION) {
+		if (tenantEntry.get().tenantState != MetaclusterAPI::TenantState::READY &&
+		    tenantEntry.get().tenantState != MetaclusterAPI::TenantState::UPDATING_CONFIGURATION) {
 			throw invalid_tenant_state();
 		}
 
 		wait(self->ctx.setCluster(tr, tenantEntry.get().assignedCluster));
 
 		self->updatedEntry = tenantEntry.get();
-		self->updatedEntry.tenantState = TenantAPI::TenantState::UPDATING_CONFIGURATION;
+		self->updatedEntry.tenantState = MetaclusterAPI::TenantState::UPDATING_CONFIGURATION;
 
 		state std::map<Standalone<StringRef>, Optional<Value>>::iterator configItr;
 		for (configItr = self->configurationParameters.begin(); configItr != self->configurationParameters.end();
@@ -2871,7 +2871,7 @@ struct ConfigureTenantImpl {
 		}
 
 		if (self->updatedEntry.matchesConfiguration(tenantEntry.get()) &&
-		    tenantEntry.get().tenantState == TenantAPI::TenantState::READY) {
+		    tenantEntry.get().tenantState == MetaclusterAPI::TenantState::READY) {
 			return false;
 		}
 
@@ -2905,12 +2905,13 @@ struct ConfigureTenantImpl {
 		state Optional<MetaclusterTenantMapEntry> tenantEntry =
 		    wait(tryGetTenantTransaction(tr, self->updatedEntry.id));
 
-		if (!tenantEntry.present() || tenantEntry.get().tenantState != TenantAPI::TenantState::UPDATING_CONFIGURATION ||
+		if (!tenantEntry.present() ||
+		    tenantEntry.get().tenantState != MetaclusterAPI::TenantState::UPDATING_CONFIGURATION ||
 		    tenantEntry.get().configurationSequenceNum > self->updatedEntry.configurationSequenceNum) {
 			return Void();
 		}
 
-		tenantEntry.get().tenantState = TenantAPI::TenantState::READY;
+		tenantEntry.get().tenantState = MetaclusterAPI::TenantState::READY;
 		ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, tenantEntry.get().id, tenantEntry.get());
 		ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 		return Void();
@@ -2973,7 +2974,7 @@ struct RenameTenantImpl {
 		self->tenantId = tenantEntry.id;
 
 		// If marked for deletion, abort the rename
-		if (tenantEntry.tenantState == TenantAPI::TenantState::REMOVING) {
+		if (tenantEntry.tenantState == MetaclusterAPI::TenantState::REMOVING) {
 			CODE_PROBE(true, "Metacluster rename candidates marked for deletion");
 			throw tenant_removed();
 		}
@@ -2985,7 +2986,7 @@ struct RenameTenantImpl {
 
 		wait(self->ctx.setCluster(tr, tenantEntry.assignedCluster));
 
-		if (tenantEntry.tenantState == TenantAPI::TenantState::RENAMING) {
+		if (tenantEntry.tenantState == MetaclusterAPI::TenantState::RENAMING) {
 			if (tenantEntry.tenantName != self->oldName) {
 				CODE_PROBE(true, "Renaming a tenant that is currently the destination of another rename");
 				throw tenant_not_found();
@@ -3000,7 +3001,7 @@ struct RenameTenantImpl {
 			}
 		}
 
-		if (tenantEntry.tenantState != TenantAPI::TenantState::READY) {
+		if (tenantEntry.tenantState != MetaclusterAPI::TenantState::READY) {
 			CODE_PROBE(true, "Metacluster unable to proceed with rename operation");
 			throw invalid_tenant_state();
 		}
@@ -3016,7 +3017,7 @@ struct RenameTenantImpl {
 		}
 
 		MetaclusterTenantMapEntry updatedEntry = tenantEntry;
-		updatedEntry.tenantState = TenantAPI::TenantState::RENAMING;
+		updatedEntry.tenantState = MetaclusterAPI::TenantState::RENAMING;
 		updatedEntry.renameDestination = self->newName;
 		updatedEntry.configurationSequenceNum = self->configurationSequenceNum;
 
@@ -3058,16 +3059,16 @@ struct RenameTenantImpl {
 			           "configuration sequence.");
 			return Void();
 		}
-		if (tenantEntry.get().tenantState == TenantAPI::TenantState::REMOVING) {
+		if (tenantEntry.get().tenantState == MetaclusterAPI::TenantState::REMOVING) {
 			throw tenant_removed();
 		}
 
 		MetaclusterTenantMapEntry updatedEntry = tenantEntry.get();
 
 		// Only update if in the expected state
-		if (updatedEntry.tenantState == TenantAPI::TenantState::RENAMING) {
+		if (updatedEntry.tenantState == MetaclusterAPI::TenantState::RENAMING) {
 			updatedEntry.tenantName = self->newName;
-			updatedEntry.tenantState = TenantAPI::TenantState::READY;
+			updatedEntry.tenantState = MetaclusterAPI::TenantState::READY;
 			updatedEntry.renameDestination.reset();
 			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->tenantId, updatedEntry);
 			ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
