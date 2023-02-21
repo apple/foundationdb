@@ -1659,7 +1659,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
 				if (val.present()) {
 					dataMove = decodeDataMoveValue(val.get());
-					TraceEvent(SevVerbose, "FinishMoveShardsFoundDataMove", relocationIntervalId)
+					TraceEvent(SevDebug, "FinishMoveShardsFoundDataMove", relocationIntervalId)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMove", dataMove.toString());
 					destServers.insert(destServers.end(), dataMove.dest.begin(), dataMove.dest.end());
@@ -1699,7 +1699,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					decodeKeyServersValue(UIDtoTagMap, keyServers[currentIndex].value, src, dest, srcId, destId);
 					const KeyRange currentRange =
 					    KeyRangeRef(keyServers[currentIndex].key, keyServers[currentIndex + 1].key);
-					TraceEvent(SevVerbose, "FinishMoveShardsProcessingShard", relocationIntervalId)
+					TraceEvent(SevDebug, "FinishMoveShardsProcessingShard", relocationIntervalId)
 					    .detail("Range", currentRange)
 					    .detail("SrcID", srcId)
 					    .detail("Src", describe(src))
@@ -1786,7 +1786,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					}
 				}
 
-				TraceEvent(SevVerbose, "FinishMoveShardsWaitedServers", relocationIntervalId)
+				TraceEvent(SevDebug, "FinishMoveShardsWaitedServers", relocationIntervalId)
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("ReadyServers", describe(readyServers))
 				    .detail("NewDestinations", describe(newDestinations));
@@ -1806,7 +1806,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						                          range,
 						                          allKeys,
 						                          destHasServer ? serverKeysValue(dataMoveId) : serverKeysFalse));
-						TraceEvent(SevVerbose, "FinishMoveShardsSetServerKeyRange", dataMoveId)
+						TraceEvent(SevDebug, "FinishMoveShardsSetServerKeyRange", dataMoveId)
 						    .detail("StorageServerID", ssId)
 						    .detail("KeyRange", range)
 						    .detail("ShardID", destHasServer ? dataMoveId : UID());
@@ -1817,7 +1817,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					if (range.end == dataMove.ranges.front().end) {
 						tr.clear(dataMoveKeyFor(dataMoveId));
 						complete = true;
-						TraceEvent(SevVerbose, "FinishMoveShardsDeleteMetaData", dataMoveId)
+						TraceEvent(SevDebug, "FinishMoveShardsDeleteMetaData", dataMoveId)
 						    .detail("DataMove", dataMove.toString());
 					} else {
 						TraceEvent(SevInfo, "FinishMoveShardsPartialComplete", dataMoveId)

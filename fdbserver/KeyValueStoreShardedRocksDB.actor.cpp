@@ -48,7 +48,7 @@
 static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 7 && ROCKSDB_PATCH == 3),
               "Unsupported rocksdb version. Update the rocksdb to 7.7.3 version");
 
-const Severity SHARDED_ROCKS_DEBUG = SevDebug;
+const Severity SHARDED_ROCKS_DEBUG = SevVerbose;
 const std::string rocksDataFolderSuffix = "-data";
 const std::string METADATA_SHARD_ID = "kvs-metadata";
 const std::string DEFAULT_CF_NAME = "default"; // `specialKeys` is stored in this culoumn family.
@@ -2104,6 +2104,46 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return Void();
 	}
 
+	ACTOR static Future<Void> doRestore(ShardedRocksDBKeyValueStore* self,
+	                                    std::string shardId,
+	                                    std::vector<KeyRange> ranges,
+	                                    std::vector<CheckpointMetaData> checkpoints) {
+		for (const KeyRange& range : ranges) {
+			std::vector<DataShard*> shards = self->shardManager.getDataShardsByRange(range);
+			if (!shards.empty()) {
+				TraceEvent te(SevWarnAlways, "RestoreRangesNotEmpty", self->id);
+				te.detail("Range", range);
+				te.detail("RestoreShardID", shardId);
+				for (int i = 0; i < shards.size(); ++i) {
+					te.detail("DataShard-" + std::to_string(i), shards[i]->range);
+				}
+				te.log();
+				throw failed_to_restore_checkpoint();
+			}
+		}
+		for (const KeyRange& range : ranges) {
+			self->shardManager.addRange(range, shardId);
+		}
+		TraceEvent(SevDebug, "ShardedRocksRestoreAddRange", self->id)
+		    .detail("Ranges", describe(ranges))
+		    .detail("ShardID", shardId)
+		    .detail("Checkpoints", describe(checkpoints));
+		auto a = new Writer::RestoreAction(&self->shardManager, self->path, shardId, ranges, checkpoints);
+		auto res = a->done.getFuture();
+		self->writeThread->post(a);
+
+		try {
+			wait(res);
+		} catch (Error& e) {
+			for (const KeyRange& range : ranges) {
+				self->shardManager.removeRange(range);
+			}
+			throw;
+		}
+
+		return Void();
+	}
+
 	struct Writer : IThreadPoolReceiver {
 		const UID logId;
 		int threadIndex;
@@ -3578,30 +3618,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> restore(const std::string& shardId,
 	                     const std::vector<KeyRange>& ranges,
 	                     const std::vector<CheckpointMetaData>& checkpoints) override {
-		for (const KeyRange& range : ranges) {
-			std::vector<DataShard*> shards = shardManager.getDataShardsByRange(range);
-			if (!shards.empty()) {
-				TraceEvent te(SevWarnAlways, "RestoreRangesNotEmpty", id);
-				te.detail("Range", range);
-				te.detail("RestoreShardID", shardId);
-				for (int i = 0; i < shards.size(); ++i) {
-					te.detail("DataShard-" + std::to_string(i), shards[i]->range);
-				}
-				te.log();
-				throw failed_to_restore_checkpoint();
-			}
-		}
-		for (const KeyRange& range : ranges) {
-			shardManager.addRange(range, shardId);
-		}
-		TraceEvent(SevDebug, "ShardedRocksRestoreAddRange", id)
-		    .detail("Ranges", describe(ranges))
-		    .detail("ShardID", shardId)
-		    .detail("Checkpoints", describe(checkpoints));
-		auto a = new Writer::RestoreAction(&shardManager, path, shardId, ranges, checkpoints);
-		auto res = a->done.getFuture();
-		writeThread->post(a);
-		return res;
+		return doRestore(this, shardId, ranges, checkpoints);
 	}
 
 	std::vector<std::string> removeRange(KeyRangeRef range) override { return shardManager.removeRange(range); }

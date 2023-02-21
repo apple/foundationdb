@@ -8039,6 +8039,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 	try {
 		wait(data->storage.restore(shard->destShardIdString(), shard->ranges, shard->checkpoints));
 	} catch (Error& e) {
+		state Error err = e;
 		TraceEvent(SevWarn, "FetchShardIngestedCheckpointError", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("MoveInShard", shard->toString())
@@ -8047,7 +8048,12 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 		// 	wait(fallBackToAddingShard(data, moveInShard));
 		// 	return Void();
 		// }
-		throw e;
+		if (e.code() == error_code_failed_to_restore_checkpoint && moveInShard->getPhase() != MoveInPhase::Fail) {
+			shard->setPhase(MoveInPhase::Fetching);
+			wait(updateMoveInShardMetaData(data, shard.get()));
+			return Void();
+		}
+		throw err;
 	}
 
 	TraceEvent(sevDm, "FetchShardIngestedCheckpoint", data->thisServerID)
@@ -8517,7 +8523,7 @@ void MoveInShard::addMutation(Version version,
 
 	} else if (getPhase() == MoveInPhase::ReadWritePending || getPhase() == MoveInPhase::Complete) {
 		// updates.addMutation(version, fromFetch, mutation);
-		server->addMutation(version, fromFetch, mutation,  encryptedMutation, range, server->updateEagerReads);
+		server->addMutation(version, fromFetch, mutation, encryptedMutation, range, server->updateEagerReads);
 	}
 }
 
