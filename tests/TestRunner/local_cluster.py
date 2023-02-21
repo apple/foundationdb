@@ -121,6 +121,10 @@ logdir = {logdir}
 {authz_public_key_config}
 {custom_config}
 {use_future_protocol_version}
+# configure smaller granules by default for local testing
+knob_bg_snapshot_file_target_bytes=1000000
+knob_bg_delta_file_target_bytes=50000
+knob_bg_delta_bytes_before_compact=500000
 # logsize = 10MiB
 # maxlogssize = 100MiB
 # machine-id =
