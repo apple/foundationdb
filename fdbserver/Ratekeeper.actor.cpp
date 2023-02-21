@@ -95,7 +95,7 @@ public:
 					state Future<Void> watchFuture =
 					    tr.watch(moveKeysLockOwnerKey) || tr.watch(excludedServersVersionKey) ||
 					    tr.watch(failedServersVersionKey) || tr.watch(excludedLocalityVersionKey) ||
-					    tr.watch(failedLocalityVersionKey);
+					    tr.watch(failedLocalityVersionKey) || tr.watch(storageEngineParamsVersionKey);
 					wait(tr.commit());
 					wait(watchFuture);
 					break;

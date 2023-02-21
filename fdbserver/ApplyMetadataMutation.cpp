@@ -348,7 +348,8 @@ private:
 			if ((!m.param1.startsWith(excludedServersPrefix) && m.param1 != excludedServersVersionKey) &&
 			    (!m.param1.startsWith(failedServersPrefix) && m.param1 != failedServersVersionKey) &&
 			    (!m.param1.startsWith(excludedLocalityPrefix) && m.param1 != excludedLocalityVersionKey) &&
-			    (!m.param1.startsWith(failedLocalityPrefix) && m.param1 != failedLocalityVersionKey)) {
+			    (!m.param1.startsWith(failedLocalityPrefix) && m.param1 != failedLocalityVersionKey) &&
+			    (!m.param1.startsWith(storageEngineParamsPrefix) && m.param1 != storageEngineParamsVersionKey)) {
 				auto t = txnStateStore->readValue(m.param1).get();
 				TraceEvent("MutationRequiresRestart", dbgid)
 				    .detail("M", m)

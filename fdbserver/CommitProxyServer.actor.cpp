@@ -2389,6 +2389,14 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 				}
 				rep.newTag = Tag(maxTagLocality + 1, 0);
 			}
+			if (req.checkParams) {
+				// This is now only enabled for redwood, all other storage engines are disabled
+				auto paramKeys = commitData->txnStateStore->readRange(storageEngineParamsKeys).get();
+				for (auto& kv : paramKeys) {
+					// send back all storage engine parameters saved in txnStateStore when existing storage servers rejoin
+					rep.params[kv.key.removePrefix(storageEngineParamsPrefix).toString()] = kv.value.toString();
+				}
+			}
 			req.reply.send(rep);
 		} else {
 			req.reply.sendError(worker_removed());
@@ -2412,6 +2420,30 @@ ACTOR Future<Void> ddMetricsRequestServer(CommitProxyInterface proxy, Reference<
 				} else {
 					GetDDMetricsReply newReply;
 					newReply.storageMetricsList = reply.get().storageMetricsList;
+					req.reply.send(newReply);
+				}
+			}
+		}
+	}
+}
+
+ACTOR Future<Void> storageEngineParamsRequestServer(CommitProxyInterface proxy,
+                                                    Reference<AsyncVar<ServerDBInfo> const> db) {
+	loop {
+		choose {
+			when(state GetStorageEngineParamsRequest req = waitNext(proxy.getStorageEngineParams.getFuture())) {
+				if (!db->get().distributor.present()) {
+					req.reply.sendError(dd_not_found());
+					continue;
+				}
+				TraceEvent("CPStorageEngineParamsRequestServer").log();
+				ErrorOr<GetStorageEngineParamsReply> reply = wait(
+				    errorOr(db->get().distributor.get().storageEngineParams.getReply(GetStorageEngineParamsRequest())));
+				if (reply.isError()) {
+					req.reply.sendError(reply.getError());
+				} else {
+					GetStorageEngineParamsReply newReply;
+					newReply.params = reply.get().params;
 					req.reply.send(newReply);
 				}
 			}
@@ -3035,6 +3067,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(ddMetricsRequestServer(proxy, db));
 	addActor.send(reportTxnTagCommitCost(proxy.id(), db, &commitData.ssTrTagCommitCost));
+	addActor.send(storageEngineParamsRequestServer(proxy, db));
 
 	auto openDb = openDBOnServer(db);
 
