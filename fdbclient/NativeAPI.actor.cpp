@@ -6997,6 +6997,31 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		trState->automaticIdempotency = true;
 		break;
 
+	// ReadOptions
+	case FDBTransactionOptions::READ_PRIORITY:
+	case FDBTransactionOptions::READ_SERVER_SIDE_CACHE_ENABLE:
+	case FDBTransactionOptions::READ_SERVER_SIDE_CACHE_AUTO:
+	case FDBTransactionOptions::READ_SERVER_SIDE_CACHE_DISABLE:
+		if (!trState->readOptions.present()) {
+			trState->readOptions = ReadOptions();
+		}
+
+		if( option == FDBTransactionOptions::READ_PRIORITY ) {
+			// Read Priority
+			int priority = extractIntOption(value);
+			if(priority == 0) {
+				trState->readOptions.get().type = ReadType::NORMAL;
+			} else if(priority < 0) {
+				trState->readOptions.get().type = ReadType::LOW;
+			} else {
+				trState->readOptions.get().type = ReadType::HIGH;
+			}
+		} else {
+			// Cache mode, currently only DISABLE maps to false, all others map to true
+			trState->readOptions.get().cacheResult = CacheResult(option != FDBTransactionOptions::READ_SERVER_SIDE_CACHE_DISABLE);
+		}
+		break;
+
 	default:
 		break;
 	}
