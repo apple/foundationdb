@@ -925,6 +925,8 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 				TraceEvent("TesterClearingTenantsComplete", debugID).detail("AtVersion", tr.getCommittedVersion());
 				break;
 			}
+
+			tr.reset();
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "TesterClearingTenantsError", debugID).error(e);
 			wait(tr.onError(e));
@@ -1387,8 +1389,6 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableHostname", ""); } },
 	{ "disableRemoteKVS",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } },
-	{ "disableEncryption",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedEncryption", ""); } },
 	{ "allowDefaultTenant",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDefaultTenant", ""); } }
 };

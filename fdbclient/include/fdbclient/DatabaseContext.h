@@ -414,6 +414,10 @@ public:
 	Future<Version> verifyBlobRange(const KeyRange& range,
 	                                Optional<Version> version,
 	                                Optional<Reference<Tenant>> tenant = {});
+	Future<bool> flushBlobRange(const KeyRange& range,
+	                            bool compact,
+	                            Optional<Version> version,
+	                            Optional<Reference<Tenant>> tenant = {});
 	Future<bool> blobRestore(const KeyRange range, Optional<Version> version);
 
 	// private:

@@ -47,6 +47,7 @@
 #include "fdbclient/AnnotateActor.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/BlobGranuleRequest.actor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -8557,6 +8558,41 @@ Future<Version> DatabaseContext::verifyBlobRange(const KeyRange& range,
                                                  Optional<Version> version,
                                                  Optional<Reference<Tenant>> tenant) {
 	return verifyBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, version, tenant);
+}
+
+ACTOR Future<bool> flushBlobRangeActor(Reference<DatabaseContext> cx,
+                                       KeyRange range,
+                                       bool compact,
+                                       Optional<Version> version,
+                                       Optional<Reference<Tenant>> tenant) {
+	if (tenant.present()) {
+		wait(tenant.get()->ready());
+		range = range.withPrefix(tenant.get()->prefix());
+	}
+	state Database db(cx);
+	if (!version.present()) {
+		state Transaction tr(db);
+		Version _v = wait(tr.getReadVersion());
+		version = _v;
+	}
+	FlushGranuleRequest req(-1, range, version.get(), compact);
+	try {
+		wait(success(doBlobGranuleRequests(db, range, req, &BlobWorkerInterface::flushGranuleRequest)));
+		return true;
+	} catch (Error& e) {
+		if (e.code() == error_code_blob_granule_transaction_too_old) {
+			// can't flush data at this version, because no granules
+			return false;
+		}
+		throw e;
+	}
+}
+
+Future<bool> DatabaseContext::flushBlobRange(const KeyRange& range,
+                                             bool compact,
+                                             Optional<Version> version,
+                                             Optional<Reference<Tenant>> tenant) {
+	return flushBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, compact, version, tenant);
 }
 
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,

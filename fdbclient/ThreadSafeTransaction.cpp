@@ -204,6 +204,17 @@ ThreadFuture<Version> ThreadSafeDatabase::verifyBlobRange(const KeyRangeRef& key
 	});
 }
 
+ThreadFuture<bool> ThreadSafeDatabase::flushBlobRange(const KeyRangeRef& keyRange,
+                                                      bool compact,
+                                                      Optional<Version> version) {
+	DatabaseContext* db = this->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		return db->flushBlobRange(range, compact, version);
+	});
+}
+
 ThreadSafeDatabase::ThreadSafeDatabase(ConnectionRecordType connectionRecordType,
                                        std::string connectionRecordString,
                                        int apiVersion) {
@@ -324,6 +335,18 @@ ThreadFuture<Version> ThreadSafeTenant::verifyBlobRange(const KeyRangeRef& keyRa
 		db->checkDeferredError();
 		db->addref();
 		return db->verifyBlobRange(range, version, Reference<Tenant>::addRef(tenant));
+	});
+}
+
+ThreadFuture<bool> ThreadSafeTenant::flushBlobRange(const KeyRangeRef& keyRange,
+                                                    bool compact,
+                                                    Optional<Version> version) {
+	DatabaseContext* db = this->db->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		db->addref();
+		return db->flushBlobRange(range, compact, version, Reference<Tenant>::addRef(tenant));
 	});
 }
 

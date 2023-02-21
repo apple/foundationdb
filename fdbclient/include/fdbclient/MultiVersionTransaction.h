@@ -213,6 +213,14 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                      int end_key_name_length,
 	                                      int64_t version);
 
+	FDBFuture* (*databaseFlushBlobRange)(FDBDatabase* db,
+	                                     uint8_t const* begin_key_name,
+	                                     int begin_key_name_length,
+	                                     uint8_t const* end_key_name,
+	                                     int end_key_name_length,
+	                                     fdb_bool_t compact,
+	                                     int64_t version);
+
 	FDBFuture* (*databaseGetClientStatus)(FDBDatabase* db);
 
 	// Tenant
@@ -261,6 +269,14 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                    uint8_t const* end_key_name,
 	                                    int end_key_name_length,
 	                                    int64_t version);
+
+	FDBFuture* (*tenantFlushBlobRange)(FDBTenant* db,
+	                                   uint8_t const* begin_key_name,
+	                                   int begin_key_name_length,
+	                                   uint8_t const* end_key_name,
+	                                   int end_key_name_length,
+	                                   fdb_bool_t compact,
+	                                   int64_t version);
 
 	FDBFuture* (*tenantGetId)(FDBTenant* tenant);
 	void (*tenantDestroy)(FDBTenant* tenant);
@@ -565,6 +581,7 @@ public:
 	                                                                      int rangeLimit) override;
 
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+	ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) override;
 
 	void addref() override { ThreadSafeReferenceCounted<DLTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLTenant>::delref(); }
@@ -616,6 +633,7 @@ public:
 	                                                                      int rangeLimit) override;
 
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+	ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
@@ -885,6 +903,7 @@ public:
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+	ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) override;
 
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::delref(); }
@@ -1014,6 +1033,7 @@ public:
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+	ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;

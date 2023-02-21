@@ -963,13 +963,8 @@ public:
 	std::string CLUSTER_RECOVERY_EVENT_NAME_PREFIX;
 
 	// Encryption
-	bool ENABLE_ENCRYPTION;
-	std::string ENCRYPTION_MODE;
 	int SIM_KMS_MAX_KEYS;
 	int ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH;
-	bool ENABLE_TLOG_ENCRYPTION;
-	bool ENABLE_STORAGE_SERVER_ENCRYPTION; // Currently only Redwood engine supports encryption
-	bool ENABLE_BLOB_GRANULE_ENCRYPTION;
 
 	// Compression
 	bool ENABLE_BLOB_GRANULE_COMPRESSION;

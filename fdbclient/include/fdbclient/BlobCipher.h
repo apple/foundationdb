@@ -165,7 +165,7 @@ struct BlobCipherDetails {
 	// BaseCipher encryption key identifier
 	EncryptCipherBaseKeyId baseCipherId = INVALID_ENCRYPT_CIPHER_KEY_ID;
 	// Random salt
-	EncryptCipherRandomSalt salt{};
+	EncryptCipherRandomSalt salt = INVALID_ENCRYPT_RANDOM_SALT;
 
 	static uint32_t getSize() {
 		return sizeof(EncryptCipherDomainId) + sizeof(EncryptCipherBaseKeyId) + sizeof(EncryptCipherRandomSalt);

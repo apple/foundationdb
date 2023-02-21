@@ -19,8 +19,6 @@
  */
 
 #pragma once
-#include "fdbserver/EncryptionOpsUtils.h"
-#include <unordered_map>
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H)
 #define FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H
 #include "fdbserver/ProxyCommitData.actor.g.h"

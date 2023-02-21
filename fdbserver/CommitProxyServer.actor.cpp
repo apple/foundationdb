@@ -42,7 +42,6 @@
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/DataDistributorInterface.h"
-#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbserver/IKeyValueStore.h"
