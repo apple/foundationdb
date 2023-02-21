@@ -242,11 +242,9 @@ description is not currently required but encouraged.
     <Option name="read_ahead_disable" code="52"
             description="Deprecated" />
     <Option name="read_server_side_cache_enable" code="507"
-            description="Storage server should cache disk blocks needed for subsequent read requests in this transaction."/>
+            description="Storage server should cache disk blocks needed for subsequent read requests in this transaction.  This is the default behavior."/>
     <Option name="read_server_side_cache_disable" code="508"
             description="Storage server should not cache disk blocks needed for subsequent read requests in this transaction.  This can be used to avoid cache pollution for reads not expected to be repeated."/>
-    <Option name="read_server_side_cache_auto" code="509"
-            description="Default storage server cache behavior.  Currently this is equivalent to setting 'read_server_side_cache_enable'."/>
     <Option name="read_priority" code="510"
             paramType="Int" paramDescription="Read priority level where 0 means Normal, &gt;=1 means High, and &lt;=-1 is Low."
             description="Priority level to use for subsequent read requests in this transaction.  At present, only Low/Normal/High priority levels are supported."/>
