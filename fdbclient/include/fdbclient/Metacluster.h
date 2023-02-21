@@ -29,8 +29,7 @@
 #include "flow/flat_buffers.h"
 
 namespace TenantAPI {
-// Represents the various states that a tenant could be in.
-// In a standalone cluster, a tenant should only ever be in the READY state.
+// Represents the various states that a tenant could be in. Only applies to metacluster, not standalone clusters.
 // In a metacluster, a tenant on the management cluster could be in the other states while changes are applied to the
 // data cluster.
 //
