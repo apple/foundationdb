@@ -61,6 +61,7 @@ struct CommitProxyInterface {
 	RequestStream<struct ProxySnapRequest> proxySnapReq;
 	RequestStream<struct ExclusionSafetyCheckRequest> exclusionSafetyCheckReq;
 	RequestStream<struct GetDDMetricsRequest> getDDMetrics;
+	RequestStream<struct GetStorageEngineParamsRequest> getStorageEngineParams;
 	PublicRequestStream<struct ExpireIdempotencyIdRequest> expireIdempotencyId;
 	PublicRequestStream<struct GetTenantIdRequest> getTenantId;
 
@@ -92,6 +93,8 @@ struct CommitProxyInterface {
 			expireIdempotencyId =
 			    PublicRequestStream<struct ExpireIdempotencyIdRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
 			getTenantId = PublicRequestStream<struct GetTenantIdRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
+			getStorageEngineParams =
+			    RequestStream<struct GetStorageEngineParamsRequest>(commit.getEndpoint().getAdjustedEndpoint(12));
 		}
 	}
 
@@ -110,6 +113,7 @@ struct CommitProxyInterface {
 		streams.push_back(getDDMetrics.getReceiver());
 		streams.push_back(expireIdempotencyId.getReceiver());
 		streams.push_back(getTenantId.getReceiver());
+		streams.push_back(getStorageEngineParams.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -503,10 +507,12 @@ struct GetStorageServerRejoinInfoReply {
 	Optional<Tag> newTag;
 	bool newLocality;
 	std::vector<std::pair<Version, Tag>> history;
+	// TODO: change to Optional afterwards
+	std::map<std::string, std::string> params;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, tag, newTag, newLocality, history);
+		serializer(ar, version, tag, newTag, newLocality, history, params);
 	}
 };
 
@@ -514,14 +520,16 @@ struct GetStorageServerRejoinInfoRequest {
 	constexpr static FileIdentifier file_identifier = 994279;
 	UID id;
 	Optional<Value> dcId;
+	bool checkParams;
 	ReplyPromise<GetStorageServerRejoinInfoReply> reply;
 
 	GetStorageServerRejoinInfoRequest() {}
-	explicit GetStorageServerRejoinInfoRequest(UID const& id, Optional<Value> const& dcId) : id(id), dcId(dcId) {}
+	explicit GetStorageServerRejoinInfoRequest(UID const& id, Optional<Value> const& dcId, bool checkParams = false)
+	  : id(id), dcId(dcId), checkParams(checkParams) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, dcId, reply);
+		serializer(ar, id, dcId, checkParams, reply);
 	}
 };
 
