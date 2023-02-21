@@ -1073,6 +1073,10 @@ public:
 	                                      // when the disk permits
 	NotifiedVersion oldestVersion; // See also storageVersion()
 	NotifiedVersion durableVersion; // At least this version will be readable from storage after a power failure
+	// In the event of the disk corruption, sqlite and redwood will either not recover, recover to durableVersion
+	// but be unable to read some data, or they could lose the last commit. If we lose the last commit, the storage
+	// might not be able to peek from the tlog (depending on when it sent the last pop). So this version just keeps
+	// track of the version we committed to the storage engine before we did commit durableVersion.
 	Version storageMinRecoverVersion = 0;
 	Version rebootAfterDurableVersion;
 	int8_t primaryLocality;
@@ -11174,7 +11178,7 @@ ACTOR Future<Void> serveChangeFeedVersionUpdateRequests(
 }
 
 ACTOR Future<Void> storageEngineConsistencyCheck(StorageServer* self) {
-	if (SERVER_KNOBS->STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL == 0.0) {
+	if (SERVER_KNOBS->STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL <= 0.0) {
 		return Void();
 	}
 
@@ -11203,7 +11207,7 @@ ACTOR Future<Void> storageEngineConsistencyCheck(StorageServer* self) {
 
 		auto kvShards = self->storage.getExistingRanges();
 
-		TraceEvent(SevInfo, "StorageEngineConsistencyCheckStarted");
+		TraceEvent(SevInfo, "StorageEngineConsistencyCheckStarted").log();
 
 		auto kvRanges = kvShards.ranges();
 		for (auto it = kvRanges.begin(); it != kvRanges.end(); ++it) {
