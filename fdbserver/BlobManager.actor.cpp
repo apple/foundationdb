@@ -19,14 +19,20 @@
  */
 
 #include <algorithm>
+#include <ctime>
 #include <limits>
 #include <sstream>
 #include <queue>
 #include <vector>
 #include <unordered_map>
 
+#include "fdbclient/BackupContainer.h"
+#include "fdbclient/ClientBooleanParams.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/ServerKnobs.h"
 #include "fdbrpc/simulator.h"
+#include "flow/CodeProbe.h"
+#include "flow/serialize.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BlobGranuleCommon.h"
@@ -38,6 +44,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tuple.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/BlobGranuleValidation.actor.h"
@@ -276,9 +283,14 @@ struct BlobManagerStats {
 	Counter granulesFullyPurged;
 	Counter granulesPartiallyPurged;
 	Counter filesPurged;
+	Counter manifestSizeInBytes;
 	Future<Void> logger;
 	int64_t activeMerges;
 	int64_t blockedAssignments;
+
+	Version lastFlushVersion;
+	Version lastMLogTruncationVersion;
+	int64_t lastManifestSeqNo;
 
 	// Current stats maintained for a given blob worker process
 	explicit BlobManagerStats(UID id,
@@ -293,13 +305,17 @@ struct BlobManagerStats {
 	    ccBytesChecked("CCBytesChecked", cc), ccMismatches("CCMismatches", cc), ccTimeouts("CCTimeouts", cc),
 	    ccErrors("CCErrors", cc), purgesProcessed("PurgesProcessed", cc),
 	    granulesFullyPurged("GranulesFullyPurged", cc), granulesPartiallyPurged("GranulesPartiallyPurged", cc),
-	    filesPurged("FilesPurged", cc), activeMerges(0), blockedAssignments(0) {
+	    filesPurged("FilesPurged", cc), manifestSizeInBytes("ManifestSizeInBytes", cc), activeMerges(0),
+	    blockedAssignments(0), lastFlushVersion(0), lastMLogTruncationVersion(0), lastManifestSeqNo(0) {
 		specialCounter(cc, "WorkerCount", [workers]() { return workers->size(); });
 		specialCounter(cc, "Epoch", [epoch]() { return epoch; });
 		specialCounter(cc, "ActiveMerges", [this]() { return this->activeMerges; });
 		specialCounter(cc, "HardBoundaries", [mergeHardBoundaries]() { return mergeHardBoundaries->size(); });
 		specialCounter(cc, "SoftBoundaries", [mergeBoundaries]() { return mergeBoundaries->size(); });
 		specialCounter(cc, "BlockedAssignments", [this]() { return this->blockedAssignments; });
+		specialCounter(cc, "LastFlushVersion", [this]() { return this->lastFlushVersion; });
+		specialCounter(cc, "LastMLogTruncationVersion", [this]() { return this->lastMLogTruncationVersion; });
+		specialCounter(cc, "LastManifestSeqNo", [this]() { return this->lastManifestSeqNo; });
 		logger = cc.traceCounters("BlobManagerMetrics", id, interval, "BlobManagerMetrics");
 	}
 };
@@ -5275,6 +5291,92 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 	}
 }
 
+ACTOR Future<Void> updateLastFlushTs(Database db) {
+	state Transaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			KeyBackedProperty<int64_t> lastFlushTs(blobGranulesLastFlushKey);
+			int64_t epochs = (int64_t)now();
+			lastFlushTs.set(&tr, epochs);
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<int64_t> getLastFlushTs(Database db) {
+	state Transaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			KeyBackedProperty<int64_t> lastFlushTs(blobGranulesLastFlushKey);
+			state int64_t ret;
+			wait(store(ret, lastFlushTs.getD(&tr, Snapshot::False, 0)));
+			return ret;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<Void> maybeFlushAndTruncateMutationLogs(Reference<BlobManagerData> bmData) {
+	try {
+		int64_t lastFlushTs = wait(getLastFlushTs(bmData->db));
+		bool shouldFlush = (now() - lastFlushTs) > SERVER_KNOBS->BLOB_RESTORE_MLOGS_RETENTION_SECS;
+		if (!shouldFlush) {
+			TraceEvent("SkipBlobGranulesFlush").detail("LastFlushTs", lastFlushTs);
+			return Void();
+		}
+
+		state std::string mlogsUrl = wait(getMutationLogUrl());
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
+		state BackupDescription desc = wait(bc->describeBackup(true));
+		if (!desc.contiguousLogEnd.present()) {
+			TraceEvent("SkipBlobGranulesFlush").detail("LogUrl", mlogsUrl);
+			return Void(); // skip truncation if no valid backup for mutation logs
+		}
+
+		state Version logEndVersion = desc.contiguousLogEnd.get();
+		// Force flush in-memory data of all blob workers until end of log
+		FlushGranuleRequest req(bmData->epoch, normalKeys, logEndVersion, false);
+		wait(success(doBlobGranuleRequests(bmData->db, normalKeys, req, &BlobWorkerInterface::flushGranuleRequest)));
+		wait(updateLastFlushTs(bmData->db));
+		bmData->stats.lastFlushVersion = logEndVersion;
+
+		// Truncate mutation logs to max retention period
+		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(bmData->db));
+		Optional<int64_t> logEndEpochs = wait(timeKeeperEpochsFromVersion(logEndVersion, tr));
+		if (!logEndEpochs.present()) {
+			TraceEvent("SkipMutationLogTruncation").detail("LogEndVersion", logEndVersion);
+			return Void(); // skip truncation if no timestamp about log end
+		}
+
+		// Find timestamp and version to truncate
+		int64_t epochs = logEndEpochs.get() - SERVER_KNOBS->BLOB_RESTORE_MLOGS_RETENTION_SECS;
+		if (epochs <= 0) {
+			TraceEvent("SkipMutationLogTruncation").detail("Epochs", epochs);
+			return Void();
+		}
+		state std::string timestamp = BackupAgentBase::formatTime(epochs);
+		state Version truncVersion = wait(timeKeeperVersionFromDatetime(timestamp, bmData->db));
+
+		wait(bc->expireData(truncVersion, true));
+		bmData->stats.lastMLogTruncationVersion = truncVersion;
+		TraceEvent("TruncateMutationLogs").detail("Version", truncVersion).detail("Timestamp", timestamp);
+		CODE_PROBE(true, "Flush blob granules and truncate mutation logs");
+	} catch (Error& e) {
+		TraceEvent("TruncateMutationLogsError").error(e); // skip and retry next time
+	}
+	return Void();
+}
+
 ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 	bmData->initBStore();
 
@@ -5288,9 +5390,14 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 				break;
 			}
 		}
-		if (activeRanges) {
+		if (activeRanges && SERVER_KNOBS->BLOB_MANIFEST_BACKUP) {
 			if (bmData->manifestStore.isValid()) {
-				wait(dumpManifest(bmData->db, bmData->manifestStore, bmData->epoch, bmData->manifestDumperSeqNo));
+				wait(maybeFlushAndTruncateMutationLogs(bmData));
+				int64_t bytes =
+				    wait(dumpManifest(bmData->db, bmData->manifestStore, bmData->epoch, bmData->manifestDumperSeqNo));
+				bmData->stats.lastManifestSeqNo = bmData->manifestDumperSeqNo;
+				bmData->stats.manifestSizeInBytes += bytes;
+
 				bmData->manifestDumperSeqNo++;
 			} else {
 				TraceEvent(SevError, "InvalidBlobManifestUrl").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);

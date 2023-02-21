@@ -21,10 +21,15 @@
 #include "fdbclient/Metacluster.h"
 #include "fdbclient/MetaclusterManagement.actor.h"
 
-FDB_DEFINE_BOOLEAN_PARAM(AddNewTenants);
+FDB_DEFINE_BOOLEAN_PARAM(ApplyManagementClusterUpdates);
 FDB_DEFINE_BOOLEAN_PARAM(RemoveMissingTenants);
 FDB_DEFINE_BOOLEAN_PARAM(AssignClusterAutomatically);
+FDB_DEFINE_BOOLEAN_PARAM(GroupAlreadyExists);
+FDB_DEFINE_BOOLEAN_PARAM(IsRestoring);
 FDB_DEFINE_BOOLEAN_PARAM(RunOnDisconnectedCluster);
+FDB_DEFINE_BOOLEAN_PARAM(RunOnMismatchedCluster);
+FDB_DEFINE_BOOLEAN_PARAM(RestoreDryRun);
+FDB_DEFINE_BOOLEAN_PARAM(ForceJoinNewMetacluster);
 
 std::string clusterTypeToString(const ClusterType& clusterType) {
 	switch (clusterType) {
@@ -70,6 +75,7 @@ DataClusterState DataClusterEntry::stringToClusterState(std::string stateStr) {
 
 json_spirit::mObject DataClusterEntry::toJson() const {
 	json_spirit::mObject obj;
+	obj["id"] = id.toString();
 	obj["capacity"] = capacity.toJson();
 	obj["allocated"] = allocated.toJson();
 	obj["cluster_state"] = DataClusterEntry::clusterStateToString(clusterState);
@@ -91,5 +97,10 @@ MetaclusterMetadata::metaclusterRegistration() {
 
 KeyBackedSet<UID>& MetaclusterMetadata::registrationTombstones() {
 	static KeyBackedSet<UID> instance("\xff/metacluster/registrationTombstones"_sr);
+	return instance;
+}
+
+KeyBackedMap<ClusterName, UID>& MetaclusterMetadata::activeRestoreIds() {
+	static KeyBackedMap<ClusterName, UID> instance("\xff/metacluster/activeRestoreIds"_sr);
 	return instance;
 }

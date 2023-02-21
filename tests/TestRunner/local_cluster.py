@@ -114,6 +114,7 @@ logdir = {logdir}
 {bg_knob_line}
 {encrypt_knob_line1}
 {encrypt_knob_line2}
+{encrypt_knob_line3}
 {tls_config}
 {authz_public_key_config}
 {custom_config}
@@ -256,13 +257,14 @@ logdir = {logdir}
             bg_knob_line = ""
             encrypt_knob_line1 = ""
             encrypt_knob_line2 = ""
+            encrypt_knob_line3 = ""
             if self.use_legacy_conf_syntax:
                 conf_template = conf_template.replace("-", "_")
             if self.blob_granules_enabled:
                 bg_knob_line = "knob_bg_url=file://" + str(self.data) + "/fdbblob/"
             if self.enable_encryption_at_rest:
-                encrypt_knob_line1 = "knob_enable_encryption=true"
                 encrypt_knob_line2 = "knob_kms_connector_type=FDBPerfKmsConnector"
+                encrypt_knob_line3 = "knob_enable_configurable_encryption=true"
             f.write(
                 conf_template.format(
                     etcdir=self.etc,
@@ -273,6 +275,7 @@ logdir = {logdir}
                     bg_knob_line=bg_knob_line,
                     encrypt_knob_line1=encrypt_knob_line1,
                     encrypt_knob_line2=encrypt_knob_line2,
+                    encrypt_knob_line3=encrypt_knob_line3,
                     tls_config=self.tls_conf_string(),
                     authz_public_key_config=self.authz_public_key_conf_string(),
                     optional_tls=":tls" if self.tls_config is not None else "",

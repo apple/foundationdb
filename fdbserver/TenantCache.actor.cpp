@@ -30,6 +30,7 @@
 #include "fdbserver/TenantCache.h"
 #include "flow/flow.h"
 #include "flow/Trace.h"
+#include "flow/WipedString.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class TenantCacheImpl {
@@ -218,7 +219,7 @@ public:
 void TenantCache::insert(TenantMapEntry& tenant) {
 	ASSERT(tenantCache.find(tenant.prefix) == tenantCache.end());
 
-	TenantInfo tenantInfo(tenant.id, Optional<Standalone<StringRef>>());
+	TenantInfo tenantInfo(tenant.id, Optional<WipedString>());
 	tenantCache[tenantInfo.prefix.get()] = makeReference<TCTenantInfo>(tenantInfo);
 	tenantCache[tenantInfo.prefix.get()]->updateCacheGeneration(generation);
 

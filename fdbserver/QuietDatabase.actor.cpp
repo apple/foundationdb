@@ -744,7 +744,7 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
                                         std::string context) {
 	if (g_network->isSimulated() && g_simulator->usableRegions > 1 && !g_simulator->quiesced) {
 		state bool primaryDead = g_simulator->datacenterDead(g_simulator->primaryDcId);
-		bool remoteDead = g_simulator->datacenterDead(g_simulator->remoteDcId);
+		state bool remoteDead = g_simulator->datacenterDead(g_simulator->remoteDcId);
 
 		// FIXME: the primary and remote can both be considered dead because excludes are not handled properly by the
 		// datacenterDead function
@@ -753,20 +753,22 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
 			return Void();
 		}
 		if (primaryDead || remoteDead) {
+			if (remoteDead) {
+				std::vector<AddressExclusion> servers =
+				    g_simulator->getAllAddressesInDCToExclude(g_simulator->remoteDcId);
+				TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration")
+				    .detail("Location", context)
+				    .detail("Stage", "ExcludeServers")
+				    .detail("Servers", describe(servers));
+				wait(excludeServers(cx, servers, false));
+			}
+
 			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration")
 			    .detail("Location", context)
 			    .detail("Stage", "Repopulate")
 			    .detail("RemoteDead", remoteDead)
 			    .detail("PrimaryDead", primaryDead);
 			g_simulator->usableRegions = 1;
-
-			state std::vector<AddressExclusion> servers = g_simulator->getAllAddressesInDCToExclude(
-			    primaryDead ? g_simulator->primaryDcId : g_simulator->remoteDcId);
-			wait(excludeServers(cx, servers, false));
-			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration")
-			    .detail("Location", context)
-			    .detail("Stage", "ServerExcluded")
-			    .detail("Servers", describe(servers));
 
 			wait(success(ManagementAPI::changeConfig(
 			    cx.getReference(),

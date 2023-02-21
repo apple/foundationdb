@@ -267,6 +267,8 @@ public:
 	int64_t TAG_THROTTLING_PAGE_SIZE; // Used to round up the cost of operations
 	// Cost multiplier for writes (because write operations are more expensive than reads):
 	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
+	// Maximum duration that a transaction can be tag throttled by proxy before being rejected
+	double PROXY_MAX_TAG_THROTTLE_DURATION;
 
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;
@@ -292,6 +294,7 @@ public:
 	int METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK;
 	double METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY;
 	double METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT;
+	int METACLUSTER_RESTORE_BATCH_SIZE;
 	int TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantEntryCache is refreshed
 	bool CLIENT_ENABLE_USING_CLUSTER_ID_KEY;
 
@@ -301,6 +304,7 @@ public:
 	// key_not_found errors for. If TenantInfo::INVALID_TENANT is contained within the list then no tenants will be
 	// dropped. This Knob should ONLY be used in simulation for testing purposes
 	std::string SIMULATION_EKP_TENANT_IDS_TO_DROP;
+	bool SIMULATION_ENABLE_SNAPSHOT_ENCRYPTION_CHECKS;
 	bool ENABLE_CONFIGURABLE_ENCRYPTION;
 	int ENCRYPT_HEADER_FLAGS_VERSION;
 	int ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION;

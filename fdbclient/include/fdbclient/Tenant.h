@@ -36,6 +36,7 @@ namespace TenantAPI {
 KeyRef idToPrefix(Arena& p, int64_t id);
 Key idToPrefix(int64_t id);
 int64_t prefixToId(KeyRef prefix, EnforceValidTenantId = EnforceValidTenantId::True);
+KeyRangeRef clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenantInfo, Arena& arena);
 
 // return true if begin and end has the same non-negative prefix id
 bool withinSingleTenant(KeyRangeRef const&);
@@ -105,6 +106,8 @@ struct TenantMapEntry {
 	static TenantMapEntry decode(ValueRef const& value) {
 		return ObjectReader::fromStringRef<TenantMapEntry>(value, IncludeVersion());
 	}
+
+	bool operator==(TenantMapEntry const& other) const;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

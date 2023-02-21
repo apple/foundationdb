@@ -268,6 +268,10 @@ ERROR( metacluster_no_capacity, 2166, "Metacluster does not have capacity to cre
 ERROR( management_cluster_invalid_access, 2167, "Standard transactions cannot be run against the management cluster" )
 ERROR( tenant_creation_permanently_failed, 2168, "The tenant creation did not complete in a timely manner and has permanently failed" )
 ERROR( cluster_removed, 2169, "The cluster is being removed from the metacluster" )
+ERROR( cluster_restoring, 2170, "The cluster is being restored to the metacluster" )
+ERROR( invalid_data_cluster, 2171, "The data cluster being restored has no record of its metacluster" )
+ERROR( metacluster_mismatch, 2172, "The cluster does not have the expected name or is associated with a different metacluster" )
+ERROR( conflicting_restore, 2173, "Another restore is running for the same data cluster" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

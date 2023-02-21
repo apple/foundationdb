@@ -1,5 +1,5 @@
 [[test]]
-title = 'Blob Granule API Tenant Correctness Multi Threaded'
+title = 'Blob Granule API Tenant Encryption Correctness Multi Threaded'
 multiThreaded = true
 buggify = true
 minFdbThreads = 2

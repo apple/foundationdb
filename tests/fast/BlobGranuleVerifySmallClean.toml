@@ -1,8 +1,6 @@
 [configuration]
 blobGranulesEnabled = true
 allowDefaultTenant = false
-# FIXME: re-enable rocks at some point
-storageEngineExcludeTypes = [4, 5]
 testClass = "BlobGranule"
 
 [[test]]
