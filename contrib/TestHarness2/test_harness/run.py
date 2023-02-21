@@ -58,7 +58,7 @@ class StatFetcher:
 
 
 class TestPicker:
-    def __init__(self, test_dir: Path):
+    def __init__(self, test_dir: Path, binaries: OrderedDict[Version, Path]):
         if not test_dir.exists():
             raise RuntimeError("{} is neither a directory nor a file".format(test_dir))
         self.include_files_regex = re.compile(config.include_test_files)
@@ -69,6 +69,7 @@ class TestPicker:
         self.tests: OrderedDict[str, TestDescription] = collections.OrderedDict()
         self.restart_test: Pattern = re.compile(r".*-\d+\.(txt|toml)")
         self.follow_test: Pattern = re.compile(r".*-[2-9]\d*\.(txt|toml)")
+        self.old_binaries: OrderedDict[Version, Path] = binaries
 
         for subdir in self.test_dir.iterdir():
             if subdir.is_dir() and subdir.name in config.test_dirs:
@@ -84,6 +85,10 @@ class TestPicker:
             self.load_stats(config.stats)
         else:
             self.fetch_stats()
+
+        if not self.tests:
+            raise Exception(
+                "No tests to run! Please check if tests are included/excluded incorrectly or old binaries are missing for restarting tests")
 
     def add_time(self, test_file: Path, run_time: int, out: SummaryTree) -> None:
         # getting the test name is fairly inefficient. But since we only have 100s of tests, I won't bother
@@ -132,6 +137,23 @@ class TestPicker:
             or self.exclude_files_regex.search(str(path)) is not None
         ):
             return
+        # Skip restarting tests that do not have old binaries in the given version range
+        # In particular, this is only for restarting tests with the "until" keyword,
+        # since without "until", it will at least run with the current binary.
+        if is_restarting_test(path):
+            candidates: List[Path] = []
+            dirs = path.parent.parts
+            version_expr = dirs[-1].split("_")
+            if (version_expr[0] == "from" or version_expr[0] == "to") and len(version_expr) == 4 and version_expr[2] == "until":
+                max_version = Version.parse(version_expr[3])
+                min_version = Version.parse(version_expr[1])
+                for ver, binary in self.old_binaries.items():
+                    if min_version <= ver < max_version:
+                        candidates.append(binary)
+                if not len(candidates):
+                    # No valid old binary found
+                    return
+
         with path.open("r") as f:
             test_name: str | None = None
             test_class: str | None = None
@@ -263,7 +285,7 @@ class OldBinaries:
             max_version = Version.parse(version_expr[3])
         candidates: List[Path] = []
         for ver, binary in self.binaries.items():
-            if min_version <= ver <= max_version:
+            if min_version <= ver < max_version:
                 candidates.append(binary)
         if len(candidates) == 0:
             return config.binary
@@ -474,7 +496,7 @@ class TestRunner:
         self.cluster_file: str | None = None
         self.fdb_app_dir: str | None = None
         self.binary_chooser = OldBinaries()
-        self.test_picker = TestPicker(self.test_path)
+        self.test_picker = TestPicker(self.test_path, self.binary_chooser.binaries)
 
     def backup_sim_dir(self, seed: int):
         temp_dir = config.run_dir / str(self.uid)

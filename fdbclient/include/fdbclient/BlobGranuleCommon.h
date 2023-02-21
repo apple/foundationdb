@@ -113,6 +113,8 @@ struct BlobGranuleCipherKeysMeta {
 	}
 };
 
+// When updating this struct with new fields, you must update and add new api versioning for corresponding struct in
+// fdb_c.h!
 struct BlobGranuleCipherKey {
 	constexpr static FileIdentifier file_identifier = 7274734;
 	EncryptCipherDomainId encryptDomainId;
@@ -137,6 +139,8 @@ struct BlobGranuleCipherKey {
 	}
 };
 
+// When updating this struct with new fields, you must update and add new api versioning for corresponding struct in
+// fdb_c.h!
 struct BlobGranuleCipherKeysCtx {
 	constexpr static FileIdentifier file_identifier = 1278718;
 	BlobGranuleCipherKey textCipherKey;
@@ -193,6 +197,7 @@ struct BlobFilePointerRef {
 	int64_t offset;
 	int64_t length;
 	int64_t fullFileLength;
+	Version fileVersion;
 	Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx;
 
 	// Non-serializable fields
@@ -201,25 +206,34 @@ struct BlobFilePointerRef {
 
 	BlobFilePointerRef() {}
 
-	BlobFilePointerRef(Arena& to, const std::string& filename, int64_t offset, int64_t length, int64_t fullFileLength)
-	  : filename(to, filename), offset(offset), length(length), fullFileLength(fullFileLength) {}
+	BlobFilePointerRef(Arena& to,
+	                   const std::string& filename,
+	                   int64_t offset,
+	                   int64_t length,
+	                   int64_t fullFileLength,
+	                   Version fileVersion)
+	  : filename(to, filename), offset(offset), length(length), fullFileLength(fullFileLength),
+	    fileVersion(fileVersion) {}
 
 	BlobFilePointerRef(Arena& to,
 	                   const std::string& filename,
 	                   int64_t offset,
 	                   int64_t length,
 	                   int64_t fullFileLength,
+	                   Version fileVersion,
 	                   Optional<BlobGranuleCipherKeysCtx> ciphKeysCtx)
 	  : filename(to, filename), offset(offset), length(length), fullFileLength(fullFileLength),
-	    cipherKeysCtx(ciphKeysCtx) {}
+	    fileVersion(fileVersion), cipherKeysCtx(ciphKeysCtx) {}
 
 	BlobFilePointerRef(Arena& to,
 	                   const std::string& filename,
 	                   int64_t offset,
 	                   int64_t length,
 	                   int64_t fullFileLength,
+	                   Version fileVersion,
 	                   Optional<BlobGranuleCipherKeysMeta> ciphKeysMeta)
-	  : filename(to, filename), offset(offset), length(length), fullFileLength(fullFileLength) {
+	  : filename(to, filename), offset(offset), length(length), fullFileLength(fullFileLength),
+	    fileVersion(fileVersion) {
 		if (ciphKeysMeta.present()) {
 			cipherKeysMetaRef = BlobGranuleCipherKeysMetaRef(to, ciphKeysMeta.get());
 		}
@@ -227,12 +241,12 @@ struct BlobFilePointerRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, filename, offset, length, fullFileLength, cipherKeysCtx);
+		serializer(ar, filename, offset, length, fullFileLength, fileVersion, cipherKeysCtx);
 	}
 
 	std::string toString() const {
 		std::stringstream ss;
-		ss << filename.toString() << ":" << offset << ":" << length << ":" << fullFileLength;
+		ss << filename.toString() << ":" << offset << ":" << length << ":" << fullFileLength << "@" << fileVersion;
 		if (cipherKeysCtx.present()) {
 			ss << ":CipherKeysCtx:TextCipher:" << cipherKeysCtx.get().textCipherKey.encryptDomainId << ":"
 			   << cipherKeysCtx.get().textCipherKey.baseCipherId << ":" << cipherKeysCtx.get().textCipherKey.salt
@@ -253,6 +267,7 @@ struct BlobGranuleChunkRef {
 	constexpr static FileIdentifier file_identifier = 865198;
 	KeyRangeRef keyRange;
 	Version includedVersion;
+	// FIXME: remove snapshotVersion, it is deprecated with fileVersion in BlobFilePointerRef
 	Version snapshotVersion;
 	Optional<BlobFilePointerRef> snapshotFile; // not set if it's an incremental read
 	VectorRef<BlobFilePointerRef> deltaFiles;
@@ -320,13 +335,15 @@ struct GranuleHistory {
 };
 
 // A manifest to assist full fdb restore from blob granule files
-struct BlobManifest {
-	constexpr static FileIdentifier file_identifier = 298872;
-	VectorRef<KeyValueRef> rows;
+struct BlobManifestTailer {
+	constexpr static FileIdentifier file_identifier = 379431;
+	int64_t totalRows;
+	int64_t totalSegments;
+	int64_t totalBytes;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rows);
+		serializer(ar, totalRows, totalSegments, totalBytes);
 	}
 };
 

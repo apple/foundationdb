@@ -1742,13 +1742,7 @@ Standalone<BlobRestoreArg> decodeBlobRestoreArg(ValueRef const& value) {
 }
 
 const Key blobManifestVersionKey = "\xff\x02/blobManifestVersion"_sr;
-
-const KeyRangeRef storageQuotaKeys("\xff/storageQuota/"_sr, "\xff/storageQuota0"_sr);
-const KeyRef storageQuotaPrefix = storageQuotaKeys.begin;
-
-Key storageQuotaKey(StringRef tenantGroupName) {
-	return tenantGroupName.withPrefix(storageQuotaPrefix);
-}
+const Key blobGranulesLastFlushKey = "\xff\x02/blobGranulesLastFlushTs"_sr;
 
 const KeyRangeRef idempotencyIdKeys("\xff\x02/idmp/"_sr, "\xff\x02/idmp0"_sr);
 const KeyRef idempotencyIdsExpiredVersion("\xff\x02/idmpExpiredVersion"_sr);

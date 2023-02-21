@@ -174,7 +174,7 @@ void ISimulator::displayWorkers() const {
 	return;
 }
 
-Standalone<StringRef> ISimulator::makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow) {
+WipedString ISimulator::makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow) {
 	ASSERT_GT(authKeys.size(), 0);
 	auto tokenSpec = authz::jwt::TokenRef{};
 	auto [keyName, key] = *authKeys.begin();
@@ -189,9 +189,8 @@ Standalone<StringRef> ISimulator::makeToken(int64_t tenantId, uint64_t ttlSecond
 	auto const tokenId = deterministicRandom()->randomAlphaNumeric(10);
 	tokenSpec.tokenId = StringRef(tokenId);
 	tokenSpec.tenants = VectorRef<int64_t>(&tenantId, 1);
-	auto ret = Standalone<StringRef>();
-	ret.contents() = authz::jwt::signToken(ret.arena(), tokenSpec, key);
-	return ret;
+	Arena arena;
+	return WipedString(authz::jwt::signToken(arena, tokenSpec, key));
 }
 
 int openCount = 0;
@@ -1420,6 +1419,19 @@ public:
 			}
 		}
 		return canKillProcesses(processesLeft, processesDead, KillType::KillInstantly, nullptr);
+	}
+
+	std::vector<AddressExclusion> getAllAddressesInDCToExclude(Optional<Standalone<StringRef>> dcId) const override {
+		std::vector<AddressExclusion> addresses;
+		if (!dcId.present()) {
+			return addresses;
+		}
+		for (const auto& processInfo : getAllProcesses()) {
+			if (processInfo->locality.dcId() == dcId) {
+				addresses.emplace_back(processInfo->address.ip, processInfo->address.port);
+			}
+		}
+		return addresses;
 	}
 
 	bool datacenterDead(Optional<Standalone<StringRef>> dcId) const override {

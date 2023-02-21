@@ -32,9 +32,15 @@
 FDB_DEFINE_BOOLEAN_PARAM(EnforceValidTenantId);
 
 namespace TenantAPI {
-Key idToPrefix(int64_t id) {
+
+KeyRef idToPrefix(Arena& p, int64_t id) {
 	int64_t swapped = bigEndian64(id);
-	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), TenantAPI::PREFIX_SIZE);
+	return StringRef(p, reinterpret_cast<const uint8_t*>(&swapped), TenantAPI::PREFIX_SIZE);
+}
+
+Key idToPrefix(int64_t id) {
+	Arena p(TenantAPI::PREFIX_SIZE);
+	return Key(idToPrefix(p, id), p);
 }
 
 int64_t prefixToId(KeyRef prefix, EnforceValidTenantId enforceValidTenantId) {
@@ -60,7 +66,15 @@ KeyRangeRef clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenantInfo, 
 	}
 }
 
-}; // namespace TenantAPI
+bool withinSingleTenant(KeyRangeRef const& range) {
+	if (range.begin >= "\x80"_sr || range.begin.size() < TenantAPI::PREFIX_SIZE) {
+		return false;
+	}
+	auto tRange = prefixRange(range.begin.substr(0, TenantAPI::PREFIX_SIZE));
+	return tRange.contains(range);
+}
+
+} // namespace TenantAPI
 
 std::string TenantMapEntry::tenantStateToString(TenantState tenantState) {
 	switch (tenantState) {
@@ -171,6 +185,10 @@ std::string TenantMapEntry::toJson() const {
 		tenantEntry["tenant_group"] = binaryToJson(tenantGroup.get());
 	}
 
+	if (tenantState == TenantState::ERROR && error.size()) {
+		tenantEntry["error"] = error;
+	}
+
 	return json_spirit::write_string(json_spirit::mValue(tenantEntry));
 }
 
@@ -187,6 +205,13 @@ void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> 
 		TraceEvent(SevWarnAlways, "UnknownTenantConfigurationParameter").detail("Parameter", parameter);
 		throw invalid_tenant_configuration();
 	}
+}
+
+bool TenantMapEntry::operator==(TenantMapEntry const& other) const {
+	return id == other.id && tenantName == other.tenantName && tenantState == other.tenantState &&
+	       tenantLockState == other.tenantLockState && tenantGroup == other.tenantGroup &&
+	       assignedCluster == other.assignedCluster && configurationSequenceNum == other.configurationSequenceNum &&
+	       renameDestination == other.renameDestination && error == other.error;
 }
 
 json_spirit::mObject TenantGroupEntry::toJson() const {
@@ -206,6 +231,11 @@ TenantMetadataSpecification& TenantMetadata::instance() {
 Key TenantMetadata::tenantMapPrivatePrefix() {
 	static Key _prefix = "\xff"_sr.withSuffix(tenantMap().subspace.begin);
 	return _prefix;
+}
+
+KeyBackedProperty<int64_t>& TenantMetadata::tenantIdPrefix() {
+	static KeyBackedProperty<int64_t> instance(TenantMetadata::instance().subspace.withSuffix("idPrefix"_sr));
+	return instance;
 }
 
 TEST_CASE("/fdbclient/libb64/base64decoder") {

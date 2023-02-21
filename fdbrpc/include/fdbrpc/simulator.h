@@ -32,6 +32,7 @@
 #include "flow/Histogram.h"
 #include "flow/ChaosMetrics.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/WipedString.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "flow/IAsyncFile.h"
@@ -130,6 +131,7 @@ public:
 	                              KillType kt,
 	                              KillType* newKillType) const = 0;
 	virtual bool isAvailable() const = 0;
+	virtual std::vector<AddressExclusion> getAllAddressesInDCToExclude(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
 	ProtocolVersion protocolVersion() const override = 0;
@@ -346,7 +348,7 @@ public:
 	double checkDisabled(const std::string& desc) const;
 
 	// generate authz token for use in simulation environment
-	Standalone<StringRef> makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow);
+	WipedString makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow);
 
 	static thread_local ProcessInfo* currentProcess;
 

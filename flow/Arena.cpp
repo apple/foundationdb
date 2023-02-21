@@ -134,6 +134,7 @@ void* Arena::allocate4kAlignedBuffer(uint32_t size) {
 }
 
 FDB_DEFINE_BOOLEAN_PARAM(FastInaccurateEstimate);
+FDB_DEFINE_BOOLEAN_PARAM(IsSecureMem);
 
 size_t Arena::getSize(FastInaccurateEstimate fastInaccurateEstimate) const {
 	if (impl) {
@@ -176,6 +177,9 @@ void ArenaBlock::delref() {
 	}
 }
 
+bool ArenaBlock::isSecure() const {
+	return secure;
+}
 bool ArenaBlock::isTiny() const {
 	return tinySize != NOT_TINY;
 }
@@ -233,6 +237,15 @@ size_t ArenaBlock::estimatedTotalSize() const {
 		return size();
 	}
 	return totalSizeEstimate;
+}
+
+void ArenaBlock::wipeUsed() {
+	int dataOffset = isTiny() ? TINY_HEADER : sizeof(ArenaBlock);
+	void* dataBegin = (char*)getData() + dataOffset;
+	int dataSize = used() - dataOffset;
+	makeDefined(dataBegin, dataSize);
+	::memset(dataBegin, 0, dataSize);
+	makeNoAccess(dataBegin, dataSize);
 }
 
 // just for debugging:
@@ -314,7 +327,7 @@ void* ArenaBlock::dependOn4kAlignedBuffer(Reference<ArenaBlock>& self, uint32_t 
 	}
 }
 
-void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
+void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes, IsSecureMem isSecure) {
 	ArenaBlock* b = self.getPtr();
 	allowAccess(b);
 	if (!self || self->unused() < bytes) {
@@ -324,6 +337,8 @@ void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
 	}
 
 	void* result = (char*)b->getData() + b->addUsed(bytes);
+	if (isSecure)
+		b->secure = 1;
 	disallowAccess(b);
 	makeUndefined(result, bytes);
 	return result;
@@ -332,6 +347,7 @@ void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
 // Return an appropriately-sized ArenaBlock to store the given data
 ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 	ArenaBlock* b;
+	// all blocks are initialized with no-wipe by default. allocate() sets it, if needed.
 	if (dataSize <= SMALL - TINY_HEADER && !next) {
 		static_assert(sizeof(ArenaBlock) <= 32); // Need to allocate at least sizeof(ArenaBlock) for an ArenaBlock*. See
 		                                         // https://github.com/apple/foundationdb/issues/6753
@@ -345,6 +361,7 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 			INSTRUMENT_ALLOCATE("Arena64");
 		}
 		b->tinyUsed = TINY_HEADER;
+		b->secure = 0;
 
 	} else {
 		int reqSize = dataSize + sizeof(ArenaBlock);
@@ -392,6 +409,7 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 			b->totalSizeEstimate = b->bigSize;
 			b->tinySize = b->tinyUsed = NOT_TINY;
 			b->bigUsed = sizeof(ArenaBlock);
+			b->secure = 0;
 		} else {
 #ifdef ALLOC_INSTRUMENTATION
 			allocInstr["ArenaHugeKB"].alloc((reqSize + 1023) >> 10);
@@ -401,6 +419,7 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 			b->bigSize = reqSize;
 			b->totalSizeEstimate = b->bigSize;
 			b->bigUsed = sizeof(ArenaBlock);
+			b->secure = 0;
 
 #if !DEBUG_DETERMINISM
 			if (FLOW_KNOBS && g_allocation_tracing_disabled == 0 &&
@@ -468,6 +487,9 @@ void ArenaBlock::destroy() {
 }
 
 void ArenaBlock::destroyLeaf() {
+	if (secure) {
+		wipeUsed();
+	}
 	if (isTiny()) {
 		if (tinySize <= 32) {
 			FastAllocator<32>::release(this);
@@ -972,5 +994,63 @@ TEST_CASE("/flow/Arena/OptionalMap") {
 	checkOptional<true>(Optional<TestOptionalMapClass*>(ptr));
 	delete ptr;
 
+	return Void();
+}
+
+TEST_CASE("/flow/Arena/Secure") {
+#ifndef ADDRESS_SANITIZER
+	// Note: Assumptions underlying this unit test are speculative.
+	//       Disable for a build configuration or entirely if deemed flaky.
+	//       As of writing, below equivalency of (buf == newBuf) holds except for ASAN builds.
+	auto& rng = *deterministicRandom();
+	auto sizes = std::vector<int>{ 1 };
+	for (auto i = 2; i <= ArenaBlock::LARGE * 2; i *= 2) {
+		sizes.push_back(i);
+		// randomly select one value between this pow2 and the next
+		sizes.push_back(rng.randomInt(sizes.back() + 1, sizes.back() * 2));
+	}
+	auto totalIters = 0;
+	auto samePtrCount = 0;
+	for (auto iter = 0; iter < 100; iter++) {
+		for (auto len : sizes) {
+			uint8_t* buf = nullptr;
+			{
+				Arena arena;
+				buf = new (arena, WipeAfterUse{}) uint8_t[len];
+				for (auto i = 0; i < len; i++)
+					buf[i] = rng.randomInt(1, 256);
+			}
+			{
+				Arena arena;
+				uint8_t* newBuf = nullptr;
+				if (rng.coinflip()) {
+					newBuf = new (arena, WipeAfterUse{}) uint8_t[len];
+				} else {
+					newBuf = new (arena) uint8_t[len];
+				}
+				ASSERT_EQ(newBuf, buf);
+				// there's no hard guarantee about the above equality and the result could vary by platform,
+				// malloc implementation, and tooling instrumentation (e.g. ASAN, valgrind)
+				// but it is practically likely because of
+				//   a) how Arena uses (and malloc variants tend to use) thread-local freelists, and
+				//   b) the fact that we earlier allocated the memory blocks in some size sequence,
+				//      freed them in reverse order, and then allocated them again immediately in the same size
+				//      sequence.
+				// in the same vein, it is speculative but likely that if buf == newBuf,
+				// the memory backing the address is the same and remained untouched,
+				// because FDB servers are single-threaded
+				samePtrCount++;
+				for (auto i = 0; i < len; i++) {
+					if (newBuf[i] != 0) {
+						fmt::print("Non-zero byte found at iter {} size {} offset {}\n", iter + 1, len, i);
+						ASSERT(false);
+					}
+				}
+			}
+			totalIters++;
+		}
+	}
+	fmt::print("Total iterations: {}, # of times check passed: {}\n", totalIters, samePtrCount);
+#endif // ADDRESS_SANITIZER
 	return Void();
 }

@@ -88,7 +88,7 @@ public:
 	  : PriorityMultiLock(concurrency, parseStringToVector<int>(weights, ',')) {}
 
 	PriorityMultiLock(int concurrency, std::vector<int> weightsByPriority)
-	  : concurrency(concurrency), available(concurrency), waiting(0), totalPendingWeights(0) {
+	  : concurrency(concurrency), available(concurrency), waiting(0), totalPendingWeights(0), killed(false) {
 
 		priorities.resize(weightsByPriority.size());
 		for (int i = 0; i < priorities.size(); ++i) {
@@ -102,6 +102,9 @@ public:
 	~PriorityMultiLock() { kill(); }
 
 	Future<Lock> lock(int priority = 0) {
+		if (killed)
+			throw broken_promise();
+
 		Priority& p = priorities[priority];
 		Queue& q = p.queue;
 
@@ -135,17 +138,33 @@ public:
 		return w.lockPromise.getFuture();
 	}
 
-	void kill() {
-		pml_debug_printf("kill %s\n", toString().c_str());
+	// Halt stops the PML from handing out any new locks but leaves waiters and runners alone.
+	// Existing and new waiters will not see an error, they will just never get a lock.
+	// Can be safely called multiple times.
+	void halt() {
+		pml_debug_printf("halt %s\n", toString().c_str());
 		brokenOnDestruct.reset();
 
-		// handleRelease will not free up any execution slots when it ends via cancel
-		fRunner.cancel();
-		available = 0;
+		if (fRunner.isValid()) {
+			fRunner.cancel();
+			// Adjust available and concurrency so that if all runners finish the available
+			available -= concurrency;
+			concurrency = 0;
+		}
 
 		waitingPriorities.clear();
-		for (auto& p : priorities) {
-			p.queue.clear();
+	}
+
+	// Halt, then make existing and new waiters get a broken_promise error.
+	// Can be safely called multiple times.
+	void kill() {
+		if (!killed) {
+			// Killed must be set first because waiters which ignore exceptions could call wait again immediately.
+			killed = true;
+			halt();
+			for (auto& p : priorities) {
+				p.queue.clear();
+			}
 		}
 	}
 
@@ -231,6 +250,7 @@ private:
 	Future<Void> fRunner;
 	AsyncTrigger wakeRunner;
 	Promise<Void> brokenOnDestruct;
+	bool killed;
 
 	ACTOR static void handleRelease(Reference<PriorityMultiLock> self, Priority* priority, Future<Void> holder) {
 		pml_debug_printf("%f handleRelease self=%p start\n", now(), self.getPtr());

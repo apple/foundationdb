@@ -33,9 +33,13 @@
 FDB_DECLARE_BOOLEAN_PARAM(EnforceValidTenantId);
 
 namespace TenantAPI {
+KeyRef idToPrefix(Arena& p, int64_t id);
 Key idToPrefix(int64_t id);
 int64_t prefixToId(KeyRef prefix, EnforceValidTenantId = EnforceValidTenantId::True);
 KeyRangeRef clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenantInfo, Arena& arena);
+
+// return true if begin and end has the same non-negative prefix id
+bool withinSingleTenant(KeyRangeRef const&);
 
 constexpr static int PREFIX_SIZE = sizeof(int64_t);
 } // namespace TenantAPI
@@ -102,6 +106,8 @@ struct TenantMapEntry {
 	static TenantMapEntry decode(ValueRef const& value) {
 		return ObjectReader::fromStringRef<TenantMapEntry>(value, IncludeVersion());
 	}
+
+	bool operator==(TenantMapEntry const& other) const;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -174,7 +180,7 @@ struct TenantIdCodec {
 	static int64_t unpack(Standalone<StringRef> val) { return bigEndian64(*(int64_t*)val.begin()); }
 
 	static Optional<int64_t> lowerBound(Standalone<StringRef> val) {
-		if (val.startsWith("\xff"_sr)) {
+		if (val >= "\x80"_sr) {
 			return {};
 		}
 		if (val.size() == 8) {
@@ -204,6 +210,7 @@ struct TenantMetadataSpecification {
 	KeyBackedObjectProperty<TenantTombstoneCleanupData, decltype(IncludeVersion())> tombstoneCleanupData;
 	KeyBackedSet<Tuple> tenantGroupTenantIndex;
 	KeyBackedObjectMap<TenantGroupName, TenantGroupEntry, decltype(IncludeVersion()), NullCodec> tenantGroupMap;
+	KeyBackedMap<TenantGroupName, int64_t> storageQuota;
 	KeyBackedBinaryValue<Versionstamp> lastTenantModification;
 
 	TenantMetadataSpecification(KeyRef prefix)
@@ -213,6 +220,7 @@ struct TenantMetadataSpecification {
 	    tombstoneCleanupData(subspace.withSuffix("tombstoneCleanup"_sr), IncludeVersion()),
 	    tenantGroupTenantIndex(subspace.withSuffix("tenantGroup/tenantIndex/"_sr)),
 	    tenantGroupMap(subspace.withSuffix("tenantGroup/map/"_sr), IncludeVersion()),
+	    storageQuota(subspace.withSuffix("storageQuota/"_sr)),
 	    lastTenantModification(subspace.withSuffix("lastModification"_sr)) {}
 };
 
@@ -228,7 +236,11 @@ struct TenantMetadata {
 	static inline auto& tombstoneCleanupData() { return instance().tombstoneCleanupData; }
 	static inline auto& tenantGroupTenantIndex() { return instance().tenantGroupTenantIndex; }
 	static inline auto& tenantGroupMap() { return instance().tenantGroupMap; }
+	static inline auto& storageQuota() { return instance().storageQuota; }
 	static inline auto& lastTenantModification() { return instance().lastTenantModification; }
+	// This system keys stores the tenant id prefix that is used during metacluster/standalone cluster creation. If the
+	// key is not present then we will assume the prefix to be 0
+	static KeyBackedProperty<int64_t>& tenantIdPrefix();
 
 	static Key tenantMapPrivatePrefix();
 };

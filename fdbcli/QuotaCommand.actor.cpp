@@ -21,6 +21,7 @@
 #include "fdbcli/fdbcli.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "flow/actorcompiler.h" // This must be the last include
 
 namespace {
@@ -60,22 +61,25 @@ ACTOR Future<Void> getQuota(Reference<IDatabase> db, TransactionTag tag, QuotaTy
 	loop {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		try {
-			state ThreadFuture<Optional<Value>> resultFuture =
-			    tr->get(quotaType == QuotaType::STORAGE ? storageQuotaKey(tag) : ThrottleApi::getTagQuotaKey(tag));
-			Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
-			if (!v.present()) {
-				fmt::print("<empty>\n");
-			} else {
-				if (quotaType == QuotaType::STORAGE) {
-					int64_t storageQuota = BinaryReader::fromStringRef<int64_t>(v.get(), Unversioned());
-					fmt::print("{}\n", storageQuota);
-					return Void();
+			if (quotaType == QuotaType::STORAGE) {
+				Optional<int64_t> value = wait(TenantMetadata::storageQuota().get(tr, tag));
+				if (value.present()) {
+					fmt::print("{}\n", value.get());
+				} else {
+					fmt::print("<empty>\n");
 				}
-				auto const quota = ThrottleApi::TagQuotaValue::fromValue(v.get());
-				if (quotaType == QuotaType::TOTAL) {
-					fmt::print("{}\n", quota.totalQuota);
+			} else {
+				state ThreadFuture<Optional<Value>> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(tag));
+				Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
+				Optional<ThrottleApi::TagQuotaValue> quota =
+				    v.map([](Value val) { return ThrottleApi::TagQuotaValue::fromValue(val); });
+
+				if (!quota.present()) {
+					fmt::print("<empty>\n");
+				} else if (quotaType == QuotaType::TOTAL) {
+					fmt::print("{}\n", quota.get().totalQuota);
 				} else if (quotaType == QuotaType::RESERVED) {
-					fmt::print("{}\n", quota.reservedQuota);
+					fmt::print("{}\n", quota.get().reservedQuota);
 				}
 			}
 			return Void();
@@ -91,7 +95,7 @@ ACTOR Future<Void> setQuota(Reference<IDatabase> db, TransactionTag tag, QuotaTy
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
 			if (quotaType == QuotaType::STORAGE) {
-				tr->set(storageQuotaKey(tag), BinaryWriter::toValue<int64_t>(value, Unversioned()));
+				TenantMetadata::storageQuota().set(tr, tag, value);
 			} else {
 				state ThreadFuture<Optional<Value>> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(tag));
 				Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
@@ -129,7 +133,7 @@ ACTOR Future<Void> clearQuota(Reference<IDatabase> db, TransactionTag tag) {
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
-			tr->clear(storageQuotaKey(tag));
+			TenantMetadata::storageQuota().erase(tr, tag);
 			tr->clear(ThrottleApi::getTagQuotaKey(tag));
 			wait(safeThreadFutureToFuture(tr->commit()));
 			fmt::print("Successfully cleared quota.\n");

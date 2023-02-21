@@ -112,6 +112,9 @@ listen-address = public
 datadir = {datadir}/$ID
 logdir = {logdir}
 {bg_knob_line}
+{encrypt_knob_line1}
+{encrypt_knob_line2}
+{encrypt_knob_line3}
 {tls_config}
 {authz_public_key_config}
 {custom_config}
@@ -142,6 +145,7 @@ logdir = {logdir}
         port=None,
         ip_address=None,
         blob_granules_enabled: bool = False,
+        enable_encryption_at_rest: bool = False,
         use_future_protocol_version: bool = False,
         redundancy: str = "single",
         tls_config: TLSConfig = None,
@@ -172,6 +176,7 @@ logdir = {logdir}
         self.first_port = port
         self.custom_config = custom_config
         self.blob_granules_enabled = blob_granules_enabled
+        self.enable_encryption_at_rest = enable_encryption_at_rest
         if blob_granules_enabled:
             # add extra process for blob_worker
             self.process_number += 1
@@ -250,10 +255,16 @@ logdir = {logdir}
         with open(new_conf_file, "x") as f:
             conf_template = LocalCluster.configuration_template
             bg_knob_line = ""
+            encrypt_knob_line1 = ""
+            encrypt_knob_line2 = ""
+            encrypt_knob_line3 = ""
             if self.use_legacy_conf_syntax:
                 conf_template = conf_template.replace("-", "_")
             if self.blob_granules_enabled:
                 bg_knob_line = "knob_bg_url=file://" + str(self.data) + "/fdbblob/"
+            if self.enable_encryption_at_rest:
+                encrypt_knob_line2 = "knob_kms_connector_type=FDBPerfKmsConnector"
+                encrypt_knob_line3 = "knob_enable_configurable_encryption=true"
             f.write(
                 conf_template.format(
                     etcdir=self.etc,
@@ -262,6 +273,9 @@ logdir = {logdir}
                     logdir=self.log,
                     ip_address=self.ip_address,
                     bg_knob_line=bg_knob_line,
+                    encrypt_knob_line1=encrypt_knob_line1,
+                    encrypt_knob_line2=encrypt_knob_line2,
+                    encrypt_knob_line3=encrypt_knob_line3,
                     tls_config=self.tls_conf_string(),
                     authz_public_key_config=self.authz_public_key_conf_string(),
                     optional_tls=":tls" if self.tls_config is not None else "",
@@ -397,9 +411,15 @@ logdir = {logdir}
         return self.__fdbcli_exec(cmd, subprocess.PIPE, None, timeout)
 
     def create_database(self, storage="ssd", enable_tenants=True):
+        if self.enable_encryption_at_rest:
+            # only redwood supports EAR
+            storage = "ssd-redwood-1-experimental"
         db_config = "configure new {} {}".format(self.redundancy, storage)
         if enable_tenants:
             db_config += " tenant_mode=optional_experimental"
+        if self.enable_encryption_at_rest:
+            # FIXME: could support domain_aware if tenants are required
+            db_config += " encryption_at_rest_mode=cluster_aware"
         if self.blob_granules_enabled:
             db_config += " blob_granules_enabled:=1"
         self.fdbcli_exec(db_config)

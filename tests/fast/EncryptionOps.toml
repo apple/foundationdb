@@ -1,7 +1,7 @@
 [configuration]
 buggify = false
 testClass = "Encryption"
-disableEncryption = true
+encryptModes = ['disabled']
 
 [[knobs]]
 enable_configurable_encryption = true
