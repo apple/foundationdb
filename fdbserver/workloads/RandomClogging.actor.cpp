@@ -106,7 +106,6 @@ struct RandomCloggingWorkload : TestWorkload {
 			for (int i = 0; i < 10; i++)
 				self->clogRandomPair(t);
 
-			std::vector<Future<Void>> cloggers;
 			for (int i = 0; i < swizzled.size(); i++)
 				self->doClog(swizzled[i], ends[i] - starts[i], starts[i]);
 		}

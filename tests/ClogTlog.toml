@@ -1,0 +1,21 @@
+[configuration]
+generateFearless = false
+processesPerMachine = 1
+machineCount = 20
+commitProxyCount = 4
+config = 'triple'
+desiredTLogCount = 6
+
+[[test]]
+testTitle = 'ClogTlog'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 30000
+    transactionsPerSecond = 2500.0
+    testDuration = 120.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'ClogTlog'
+    testDuration = 1000.0
