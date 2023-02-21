@@ -171,6 +171,7 @@ ACTOR Future<Optional<BlobRestoreStatus>> getRestoreStatus(Database db, KeyRange
 ACTOR Future<Optional<BlobRestoreArg>> getRestoreArg(Database db, KeyRangeRef range);
 ACTOR Future<Version> getRestoreTargetVersion(Database db, KeyRangeRef range, Version defaultVersion);
 ACTOR Future<Version> getManifestVersion(Database db);
+ACTOR Future<std::string> getMutationLogUrl();
 #include "flow/unactorcompiler.h"
 
 #endif

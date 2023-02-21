@@ -247,6 +247,31 @@ public interface Database extends AutoCloseable, TransactionContext {
 	CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey, Executor e);
 
 	/**
+	 * Runs {@link #blobbifyRange(byte[] beginKey, byte[] endKey, boolean wait)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param wait wait for blobbification to complete
+
+	 * @return if the recording of the range was successful
+	 */
+	default CompletableFuture<Boolean> blobbifyRangeBlocking(byte[] beginKey, byte[] endKey) {
+		return blobbifyRangeBlocking(beginKey, endKey, getExecutor());
+	}
+
+	/**
+	 * Sets a range to be blobbified in the database. Must be a completely unblobbified range.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param wait wait for blobbification to complete
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return if the recording of the range was successful
+	 */
+	CompletableFuture<Boolean> blobbifyRangeBlocking(byte[] beginKey, byte[] endKey, Executor e);
+
+	/**
 	 * Runs {@link #unblobbifyRange(byte[] beginKey, byte[] endKey)} on the default executor.
 	 *
 	 * @param beginKey start of the key range
@@ -330,6 +355,46 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 * @return a future with the version of the last blob granule.
 	 */
 	CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey, long version, Executor e);
+
+	/**
+	 * Runs {@link #flushBlobRange(byte[] beginKey, byte[] endKey)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param compact force compact or just flush
+	 *
+	 * @return a future with a boolean for success or failure
+	 */
+	default CompletableFuture<Boolean> flushBlobRange(byte[] beginKey, byte[] endKey, boolean compact) {
+		return flushBlobRange(beginKey, endKey, compact, -2, getExecutor());
+	}
+
+	/**
+	 * Runs {@link #flushBlobRange(byte[] beginKey, byte[] endKey, long version)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param compact force compact or just flush
+	 * @param version version to flush at
+	 *
+	 * @return a future with a boolean for success or failure
+	 */
+	default CompletableFuture<Boolean> flushBlobRange(byte[] beginKey, byte[] endKey, boolean compact, long version) {
+		return flushBlobRange(beginKey, endKey, compact, version, getExecutor());
+	}
+
+	/**
+	 * Checks if a blob range is blobbified.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param compact force compact or just flush
+	 * @param version version to flush at
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+	 *
+	 * @return a future with a boolean for success or failure
+	 */
+	CompletableFuture<Boolean> flushBlobRange(byte[] beginKey, byte[] endKey, boolean compact, long version, Executor e);
 
 	/**
 	 * Runs a read-only transactional function against this {@code Database} with retry logic.
