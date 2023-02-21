@@ -201,13 +201,13 @@ public:
 				    RequestStream<struct UpdateCommitCostRequest>(getValue.getEndpoint().getAdjustedEndpoint(22));
 				auditStorage =
 				    RequestStream<struct AuditStorageRequest>(getValue.getEndpoint().getAdjustedEndpoint(23));
-				getStorageEngineParams = RequestStream<struct GetStorageEngineParamsRequest>(
-				    getStorageEngineParams.getEndpoint().getAdjustedEndpoint(24));
-				setStorageEngineParams = RequestStream<struct SetStorageEngineParamsRequest>(
-				    setStorageEngineParams.getEndpoint().getAdjustedEndpoint(25));
+				getStorageEngineParams =
+				    RequestStream<struct GetStorageEngineParamsRequest>(getValue.getEndpoint().getAdjustedEndpoint(24));
+				setStorageEngineParams =
+				    RequestStream<struct SetStorageEngineParamsRequest>(getValue.getEndpoint().getAdjustedEndpoint(25));
 				checkStorageEngineParamsCompatibility =
 				    RequestStream<struct CheckStorageEngineParamsCompatibilityRequest>(
-				        checkStorageEngineParamsCompatibility.getEndpoint().getAdjustedEndpoint(26));
+				        getValue.getEndpoint().getAdjustedEndpoint(26));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -1189,7 +1189,7 @@ struct SetStorageEngineParamsReply {
 	StorageEngineParamResult result;
 
 	SetStorageEngineParamsReply() {}
-	SetStorageEngineParamsReply(StorageEngineParamResult result) : result(result) {}
+	explicit SetStorageEngineParamsReply(StorageEngineParamResult result) : result(result) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1199,11 +1199,15 @@ struct SetStorageEngineParamsReply {
 
 struct SetStorageEngineParamsRequest {
 	constexpr static FileIdentifier file_identifier = 13292000;
+	std::map<std::string, std::string> params;
 	ReplyPromise<SetStorageEngineParamsReply> reply;
+
+	SetStorageEngineParamsRequest() {}
+	explicit SetStorageEngineParamsRequest(std::map<std::string, std::string> const& params) : params(params) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply);
+		serializer(ar, params, reply);
 	}
 };
 

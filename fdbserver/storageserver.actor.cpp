@@ -430,6 +430,9 @@ struct StorageServerDisk {
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
 	std::map<std::string, std::string> getStorageEngineParams() const { return storage->getParameters(); }
+	StorageEngineParamResult setStorageEngineParams(const std::map<std::string, std::string>& params) const {
+		return storage->setParameters(params);
+	}
 
 	// The following are pointers to the Counters in StorageServer::counters of the same names.
 	Counter* kvCommitLogicalBytes;
@@ -1013,6 +1016,22 @@ public:
 		tssInQuarantine = true;
 	}
 
+	void checkStorageEngineParams(std::map<std::string, std::string>& params) {
+		bool reboot = false;
+		for (const auto& [k, v] : params) {
+			std::string currV = storageEngineParams->contains(k) ? storageEngineParams->at(k) : "NULL";
+			if (currV != v) {
+				TraceEvent("MismatchStorageEngineParam").detail("Param", k).detail("Expected", v).detail("Used", currV);
+				reboot = true;
+				(*storageEngineParams)[k] = v;
+			}
+		}
+		if (reboot) {
+			TraceEvent("RebootKVSForParams").log();
+			throw please_reboot_kv_store();
+		}
+	}
+
 	StorageServerDisk storage;
 
 	KeyRangeMap<Reference<ShardInfo>> shards;
@@ -1363,14 +1382,13 @@ public:
 	// Connection to blob store for fetchKeys()
 	Reference<BlobConnectionProvider> blobConn;
 	// Storage engine parameters
-	Optional<std::map<std::string, std::string>> storageEngineParams;
+	std::shared_ptr<std::map<std::string, std::string>> storageEngineParams;
 
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
 	              StorageServerInterface const& ssi,
 	              Reference<IPageEncryptionKeyProvider> encryptionKeyProvider,
-	              Optional<std::map<std::string, std::string>> storageEngineParams =
-	                  Optional<std::map<std::string, std::string>>())
+	              std::shared_ptr<std::map<std::string, std::string>> storageEngineParams = nullptr)
 	  : encryptionKeyProvider(encryptionKeyProvider), storageEngineParams(storageEngineParams), shardAware(false),
 	    tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                            TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
@@ -11127,6 +11145,16 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				GetStorageEngineParamsReply _reply(params);
 				req.reply.send(_reply);
 			}
+			when(SetStorageEngineParamsRequest req = waitNext(ssi.setStorageEngineParams.getFuture())) {
+				StorageEngineParamResult res = self->storage.setStorageEngineParams(req.params);
+				SetStorageEngineParamsReply _reply(res);
+				req.reply.send(_reply);
+				// do the reboot here
+				if (_reply.result.needReboot.size()) {
+					TraceEvent("RebootDueToKVSParamChange").detail("Params", describe(_reply.result.needReboot));
+					throw please_reboot();
+				}
+			}
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);
 				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
@@ -11145,7 +11173,7 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 
 	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise
 	// just close it.
-	if (e.code() == error_code_please_reboot) {
+	if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_kv_store) {
 		// do nothing.
 	} else if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
 		// SOMEDAY: could close instead of dispose if tss in quarantine gets removed so it could still be
@@ -11244,9 +11272,11 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 			         wait(commitProxies->size()
 			                  ? basicLoadBalance(commitProxies,
 			                                     &CommitProxyInterface::getStorageServerRejoinInfo,
-			                                     GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()))
+			                                     GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId(), true))
 			                  : Never())) {
 				state GetStorageServerRejoinInfoReply rep = _rep;
+
+				self->checkStorageEngineParams(rep.params);
 
 				try {
 					tr.reset();
@@ -11403,7 +11433,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
                                  Reference<IPageEncryptionKeyProvider> encryptionKeyProvider,
-                                 Optional<std::map<std::string, std::string>> storageEngineParams) {
+                                 std::shared_ptr<std::map<std::string, std::string>> storageEngineParams) {
 	state StorageServer self(persistentData, db, ssi, encryptionKeyProvider, storageEngineParams);
 	self.shardAware = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && persistentData->shardAware();
 	state Future<Void> ssCore;
@@ -11496,7 +11526,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Promise<Void> recovered,
                                  Reference<IClusterConnectionRecord> connRecord,
                                  Reference<IPageEncryptionKeyProvider> encryptionKeyProvider,
-                                 Optional<std::map<std::string, std::string>> storageEngineParams) {
+                                 std::shared_ptr<std::map<std::string, std::string>> storageEngineParams) {
 	state StorageServer self(persistentData, db, ssi, encryptionKeyProvider, storageEngineParams);
 	state Future<Void> ssCore;
 	self.folder = folder;
