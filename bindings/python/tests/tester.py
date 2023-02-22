@@ -19,37 +19,24 @@
 # limitations under the License.
 #
 
-
-import ctypes
-import math
-import sys
-import os
-import struct
-import threading
-import random
-import time
-import traceback
 import json
+import math
+import os
+import random
+import struct
+import sys
+import threading
 
-sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..')]
+sys.path[:0] = [os.path.join(os.path.dirname(__file__), "..")]
 import fdb
+
 fdb.api_version(int(sys.argv[2]))
 
+import fdb.tuple
+from directory_extension import DirectoryExtension
 from fdb import six
 from fdb.impl import strinc
-import fdb.tuple
-
-from directory_extension import DirectoryExtension
-
-from cancellation_timeout_tests import test_timeouts
-from cancellation_timeout_tests import test_db_timeouts
-from cancellation_timeout_tests import test_cancellation
-from cancellation_timeout_tests import test_retry_limits
-from cancellation_timeout_tests import test_db_retry_limits
-from cancellation_timeout_tests import test_combinations
-
-from size_limit_tests import test_size_limit_option, test_get_approximate_size
-from tenant_tests import test_tenants
+from unit_tests import run_unit_tests
 
 random.seed(0)
 
@@ -92,13 +79,16 @@ class Stack:
             if isinstance(raw[i][1], fdb.Future):
                 try:
                     val = raw[i][1].wait()
-                    if val is None or (hasattr(val, 'present') and not val.present()):
-                        raw[i] = (raw[i][0], b'RESULT_NOT_PRESENT')
+                    if val is None or (hasattr(val, "present") and not val.present()):
+                        raw[i] = (raw[i][0], b"RESULT_NOT_PRESENT")
                     else:
                         raw[i] = (raw[i][0], val)
                 except fdb.FDBError as e:
                     # print('ERROR: %r' % e)
-                    raw[i] = (raw[i][0], fdb.tuple.pack((b'ERROR', str(e.code).encode('ascii'))))
+                    raw[i] = (
+                        raw[i][0],
+                        fdb.tuple.pack((b"ERROR", str(e.code).encode("ascii"))),
+                    )
 
         if count is None:
             if with_idx:
@@ -113,7 +103,9 @@ class Stack:
 
 
 class Instruction:
-    def __init__(self, tr, stack, op, index, isDatabase=False, isTenant=False, isSnapshot=False):
+    def __init__(
+        self, tr, stack, op, index, isDatabase=False, isTenant=False, isSnapshot=False
+    ):
         self.tr = tr
         self.stack = stack
         self.op = op
@@ -127,151 +119,6 @@ class Instruction:
 
     def push(self, val):
         self.stack.push(self.index, val)
-
-
-def test_fdb_transactional_generator(db):
-    try:
-        @fdb.transactional
-        def function_that_yields(tr):
-            yield 0
-        assert fdb.get_api_version() < 630, "Pre-6.3, a decorator may wrap a function that yields"
-    except ValueError:
-        assert fdb.get_api_version() >= 630, "Post-6.3, a decorator should throw if wrapped function yields"
-
-
-def test_fdb_transactional_returns_generator(db):
-    try:
-        def function_that_yields(tr):
-            yield 0
-
-        @fdb.transactional
-        def function_that_returns(tr):
-            return function_that_yields(tr)
-        function_that_returns()
-        assert fdb.get_api_version() < 630, "Pre-6.3, returning a generator is allowed"
-    except ValueError:
-        assert fdb.get_api_version() >= 630, "Post-6.3, returning a generator should throw"
-
-
-def test_db_options(db):
-    db.options.set_location_cache_size(100001)
-    db.options.set_max_watches(100001)
-    db.options.set_datacenter_id("dc_id")
-    db.options.set_machine_id("machine_id")
-    db.options.set_snapshot_ryw_enable()
-    db.options.set_snapshot_ryw_disable()
-    db.options.set_transaction_logging_max_field_length(1000)
-    db.options.set_transaction_timeout(100000)
-    db.options.set_transaction_timeout(0)
-    db.options.set_transaction_timeout(0)
-    db.options.set_transaction_max_retry_delay(100)
-    db.options.set_transaction_size_limit(100000)
-    db.options.set_transaction_retry_limit(10)
-    db.options.set_transaction_retry_limit(-1)
-    db.options.set_transaction_causal_read_risky()
-    db.options.set_transaction_include_port_in_address()
-
-
-@fdb.transactional
-def test_options(tr):
-    tr.options.set_priority_system_immediate()
-    tr.options.set_priority_batch()
-    tr.options.set_causal_read_risky()
-    tr.options.set_causal_write_risky()
-    tr.options.set_read_your_writes_disable()
-    tr.options.set_read_system_keys()
-    tr.options.set_access_system_keys()
-    tr.options.set_transaction_logging_max_field_length(1000)
-    tr.options.set_timeout(60 * 1000)
-    tr.options.set_retry_limit(50)
-    tr.options.set_max_retry_delay(100)
-    tr.options.set_used_during_commit_protection_disable()
-    tr.options.set_debug_transaction_identifier('my_transaction')
-    tr.options.set_log_transaction()
-    tr.options.set_read_lock_aware()
-    tr.options.set_lock_aware()
-    tr.options.set_include_port_in_address()
-
-    tr.get(b'\xff').wait()
-
-
-def check_watches(db, watches, expected):
-    for i, watch in enumerate(watches):
-        if watch.is_ready() or expected:
-            try:
-                watch.wait()
-                if not expected:
-                    assert False, "Watch %d is ready" % i
-            except fdb.FDBError as e:
-                tr = db.create_transaction()
-                tr.on_error(e).wait()
-                return False
-
-    return True
-
-
-def test_watches(db):
-    while True:
-        db[b'w0'] = b'0'
-        db[b'w3'] = b'3'
-
-        watches = [None]
-
-        @fdb.transactional
-        def txn1(tr):
-            watches[0] = tr.watch(b'w0')
-            tr.set(b'w0', b'0')
-            assert not watches[0].is_ready()
-
-        txn1(db)
-
-        watches.append(db.clear_and_watch(b'w1'))
-        watches.append(db.set_and_watch(b'w2', b'2'))
-        watches.append(db.get_and_watch(b'w3'))
-
-        assert watches[3][0] == b'3'
-        watches[3] = watches[3][1]
-
-        time.sleep(1)
-
-        if not check_watches(db, watches, False):
-            continue
-
-        del db[b'w1']
-
-        time.sleep(5)
-
-        if not check_watches(db, watches, False):
-            continue
-
-        db[b'w0'] = b'a'
-        db[b'w1'] = b'b'
-        del db[b'w2']
-        db.bit_xor(b'w3', b'\xff\xff')
-
-        if check_watches(db, watches, True):
-            return
-
-
-@fdb.transactional
-def test_locality(tr):
-    tr.options.set_timeout(60 * 1000)
-    tr.options.set_read_system_keys()  # We do this because the last shard (for now, someday the last N shards) is in the /FF/ keyspace
-
-    # This isn't strictly transactional, thought we expect it to be given the size of our database
-    boundary_keys = list(fdb.locality.get_boundary_keys(tr, b'', b'\xff\xff')) + [b'\xff\xff']
-    end_keys = [tr.get_key(fdb.KeySelector.last_less_than(k)) for k in boundary_keys[1:]]
-
-    start_addresses = [fdb.locality.get_addresses_for_key(tr, k) for k in boundary_keys[:-1]]
-    end_addresses = [fdb.locality.get_addresses_for_key(tr, k) for k in end_keys]
-
-    if [set(s.wait()) for s in start_addresses] != [set(e.wait()) for e in end_addresses]:
-        raise Exception("Locality not internally consistent.")
-
-
-def test_predicates():
-    assert fdb.predicates.is_retryable(fdb.FDBError(1020))
-    assert not fdb.predicates.is_retryable(fdb.FDBError(10))
 
 
 class Tester:
@@ -339,9 +186,9 @@ class Tester:
             # if op != "PUSH" and op != "SWAP":
             #     print("%d. Instruction is %s" % (idx, op))
 
-            isDatabase = op.endswith(six.u('_DATABASE'))
-            isTenant = op.endswith(six.u('_TENANT'))
-            isSnapshot = op.endswith(six.u('_SNAPSHOT'))
+            isDatabase = op.endswith(six.u("_DATABASE"))
+            isTenant = op.endswith(six.u("_TENANT"))
+            isSnapshot = op.endswith(six.u("_SNAPSHOT"))
 
             if isDatabase:
                 op = op[:-9]
@@ -355,7 +202,9 @@ class Tester:
             else:
                 obj = self.current_transaction()
 
-            inst = Instruction(obj, self.stack, op, idx, isDatabase, isTenant, isSnapshot)
+            inst = Instruction(
+                obj, self.stack, op, idx, isDatabase, isTenant, isSnapshot
+            )
 
             try:
                 if inst.op == six.u("PUSH"):
@@ -395,7 +244,7 @@ class Tester:
                         f = obj.__getitem__(key)
 
                     if f == None:
-                        inst.push(b'RESULT_NOT_PRESENT')
+                        inst.push(b"RESULT_NOT_PRESENT")
                     else:
                         inst.push(f)
                 elif inst.op == six.u("GET_ESTIMATED_RANGE_SIZE"):
@@ -429,9 +278,22 @@ class Tester:
                     self.push_range(inst, r)
                 elif inst.op == six.u("GET_RANGE_STARTS_WITH"):
                     prefix, limit, reverse, mode = inst.pop(4)
-                    self.push_range(inst, obj.get_range_startswith(prefix, limit, reverse, mode))
+                    self.push_range(
+                        inst, obj.get_range_startswith(prefix, limit, reverse, mode)
+                    )
                 elif inst.op == six.u("GET_RANGE_SELECTOR"):
-                    begin_key, begin_or_equal, begin_offset, end_key, end_or_equal, end_offset, limit, reverse, mode, prefix = inst.pop(10)
+                    (
+                        begin_key,
+                        begin_or_equal,
+                        begin_offset,
+                        end_key,
+                        end_or_equal,
+                        end_offset,
+                        limit,
+                        reverse,
+                        mode,
+                        prefix,
+                    ) = inst.pop(10)
                     beginSel = fdb.KeySelector(begin_key, begin_or_equal, begin_offset)
                     endSel = fdb.KeySelector(end_key, end_or_equal, end_offset)
                     if limit == 0 and mode == -1 and random.random() < 0.5:
@@ -534,11 +396,16 @@ class Tester:
                     prefix = inst.pop()
                     count = inst.pop()
                     items = inst.pop(count)
-                    if not fdb.tuple.has_incomplete_versionstamp(items) and random.random() < 0.5:
+                    if (
+                        not fdb.tuple.has_incomplete_versionstamp(items)
+                        and random.random() < 0.5
+                    ):
                         inst.push(b"ERROR: NONE")
                     else:
                         try:
-                            packed = fdb.tuple.pack_with_versionstamp(tuple(items), prefix=prefix)
+                            packed = fdb.tuple.pack_with_versionstamp(
+                                tuple(items), prefix=prefix
+                            )
                             inst.push(b"OK")
                             inst.push(packed)
                         except ValueError as e:
@@ -568,7 +435,12 @@ class Tester:
                 elif inst.op == six.u("ENCODE_FLOAT"):
                     f_bytes = inst.pop()
                     f = struct.unpack(">f", f_bytes)[0]
-                    if not math.isnan(f) and not math.isinf(f) and not f == -0.0 and f == int(f):
+                    if (
+                        not math.isnan(f)
+                        and not math.isinf(f)
+                        and not f == -0.0
+                        and f == int(f)
+                    ):
                         f = int(f)
                     inst.push(fdb.tuple.SingleFloat(f))
                 elif inst.op == six.u("ENCODE_DOUBLE"):
@@ -603,11 +475,15 @@ class Tester:
                 elif inst.op == six.u("TENANT_SET_ACTIVE"):
                     name = inst.pop()
                     self.tenant = self.db.open_tenant(name)
+                    self.tenant.get_id().wait()
+                    inst.push(b"SET_ACTIVE_TENANT")
                 elif inst.op == six.u("TENANT_CLEAR_ACTIVE"):
                     self.tenant = None
                 elif inst.op == six.u("TENANT_LIST"):
                     begin, end, limit = inst.pop(3)
-                    tenant_list = fdb.tenant_management.list_tenants(self.db, begin, end, limit)
+                    tenant_list = fdb.tenant_management.list_tenants(
+                        self.db, begin, end, limit
+                    )
                     result = []
                     for tenant in tenant_list:
                         result += [tenant.key]
@@ -618,38 +494,23 @@ class Tester:
                         except (json.decoder.JSONDecodeError, KeyError):
                             assert False, "Invalid Tenant Metadata"
                     inst.push(fdb.tuple.pack(tuple(result)))
+                elif inst.op == six.u("TENANT_GET_ID"):
+                    if self.tenant != None:
+                        self.tenant.get_id().wait()
+                        inst.push(b"GOT_TENANT_ID")
+                    else:
+                        inst.push(b"NO_ACTIVE_TENANT")
                 elif inst.op == six.u("UNIT_TESTS"):
-                    try:
-                        test_db_options(db)
-                        test_options(db)
-                        test_watches(db)
-                        test_cancellation(db)
-                        test_retry_limits(db)
-                        test_db_retry_limits(db)
-                        test_timeouts(db)
-                        test_db_timeouts(db)
-                        test_combinations(db)
-                        test_locality(db)
-                        test_predicates()
-
-                        test_size_limit_option(db)
-                        test_get_approximate_size(db)
-
-                        if fdb.get_api_version() >= 710:
-                            test_tenants(db)
-
-                    except fdb.FDBError as e:
-                        print("Unit tests failed: %s" % e.description)
-                        traceback.print_exc()
-
-                        raise Exception("Unit tests failed: %s" % e.description)
-                elif inst.op.startswith(six.u('DIRECTORY_')):
+                    run_unit_tests(db)
+                elif inst.op.startswith(six.u("DIRECTORY_")):
                     self.directory_extension.process_instruction(inst)
                 else:
                     raise Exception("Unknown op %s" % inst.op)
             except fdb.FDBError as e:
                 # print('ERROR: %r' % e)
-                inst.stack.push(idx, fdb.tuple.pack((b"ERROR", str(e.code).encode('ascii'))))
+                inst.stack.push(
+                    idx, fdb.tuple.pack((b"ERROR", str(e.code).encode("ascii")))
+                )
 
             # print("        to %s" % self.stack)
             # print()
@@ -657,6 +518,6 @@ class Tester:
         [thr.join() for thr in self.threads]
 
 
-if __name__ == '__main__':
-    t = Tester(db, sys.argv[1].encode('ascii'))
+if __name__ == "__main__":
+    t = Tester(db, sys.argv[1].encode("ascii"))
     t.run()

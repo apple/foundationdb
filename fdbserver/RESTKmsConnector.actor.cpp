@@ -35,6 +35,7 @@
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/IAsyncFile.h"
+#include "flow/IConnection.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
@@ -47,6 +48,7 @@
 #include <rapidjson/writer.h>
 #include <boost/algorithm/string.hpp>
 #include <cstring>
+#include <stack>
 #include <memory>
 #include <queue>
 #include <sstream>
@@ -776,10 +778,10 @@ Future<T> kmsRequestImpl(Reference<RESTKmsConnectorCtx> ctx,
 
 ACTOR Future<Void> fetchEncryptionKeysByKeyIds(Reference<RESTKmsConnectorCtx> ctx, KmsConnLookupEKsByKeyIdsReq req) {
 	state KmsConnLookupEKsByKeyIdsRep reply;
+
 	try {
 		bool refreshKmsUrls = shouldRefreshKmsUrls(ctx);
 		StringRef requestBodyRef = getEncryptKeysByKeyIdsRequestBody(ctx, req, refreshKmsUrls, req.arena);
-
 		std::function<Standalone<VectorRef<EncryptCipherKeyDetailsRef>>(Reference<RESTKmsConnectorCtx>,
 		                                                                Reference<HTTP::Response>)>
 		    f = &parseEncryptCipherResponse;
@@ -1058,11 +1060,13 @@ ACTOR Future<Void> procureValidationTokensFromFiles(Reference<RESTKmsConnectorCt
 ACTOR Future<Void> procureValidationTokens(Reference<RESTKmsConnectorCtx> ctx) {
 	std::string_view mode{ SERVER_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKEN_MODE };
 
+	TraceEvent("ProcureValidationTokensStart", ctx->uid);
 	if (mode.compare("file") == 0) {
 		wait(procureValidationTokensFromFiles(ctx, SERVER_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS));
 	} else {
 		throw not_implemented();
 	}
+	TraceEvent("ProcureValidationTokensDone", ctx->uid);
 
 	return Void();
 }

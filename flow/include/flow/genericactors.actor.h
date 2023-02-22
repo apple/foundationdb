@@ -26,6 +26,7 @@
 #include "flow/network.h"
 #include <utility>
 #include <functional>
+#include <unordered_set>
 #if defined(NO_INTELLISENSE) && !defined(FLOW_GENERICACTORS_ACTOR_G_H)
 #define FLOW_GENERICACTORS_ACTOR_G_H
 #include "flow/genericactors.actor.g.h"
@@ -111,6 +112,21 @@ std::vector<T> parseStringToVector(std::string str, char delim) {
 		T item;
 		tokenStream >> item;
 		result.push_back(item);
+	}
+	return result;
+}
+
+template <class T>
+std::unordered_set<T> parseStringToUnorderedSet(std::string str, char delim) {
+	std::unordered_set<T> result;
+	std::stringstream stream(str);
+	std::string token;
+	while (stream.good()) {
+		getline(stream, token, delim);
+		std::istringstream tokenStream(token);
+		T item;
+		tokenStream >> item;
+		result.emplace(item);
 	}
 	return result;
 }
@@ -1291,6 +1307,13 @@ inline Future<Void> operator||(Future<Void> const& lhs, Future<Void> const& rhs)
 	}
 
 	return chooseActor(lhs, rhs);
+}
+
+ACTOR template <class T>
+Future<T> joinWith(Future<T> f, Future<Void> other) {
+	wait(other);
+	T t = wait(f);
+	return t;
 }
 
 // wait <interval> then call what() in a loop forever

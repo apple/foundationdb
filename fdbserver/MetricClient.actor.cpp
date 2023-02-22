@@ -31,8 +31,10 @@
 #ifndef WIN32
 #include <sys/socket.h>
 #endif
-#include "flow/actorcompiler.h"
 #include "flow/network.h"
+#include "flow/IUDPSocket.h"
+#include "flow/IConnection.h"
+#include "flow/actorcompiler.h"
 
 UDPMetricClient::UDPMetricClient()
   : socket_fd(-1), model(knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)),

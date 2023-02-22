@@ -24,6 +24,7 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
+#include "flow/WipedString.h"
 #include "flow/serialize.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/CommitTransaction.h"
@@ -46,20 +47,22 @@ struct AuthzSecurityWorkload : TestWorkload {
 	std::vector<Future<Void>> clients;
 	Arena arena;
 	Reference<Tenant> tenant;
+	Reference<Tenant> anotherTenant;
 	TenantName tenantName;
 	TenantName anotherTenantName;
-	Standalone<StringRef> signedToken;
-	Standalone<StringRef> signedTokenAnotherTenant;
+	WipedString signedToken;
+	WipedString signedTokenAnotherTenant;
 	Standalone<StringRef> tLogConfigKey;
 	PerfIntCounter crossTenantGetPositive, crossTenantGetNegative, crossTenantCommitPositive, crossTenantCommitNegative,
-	    publicNonTenantRequestPositive, tLogReadNegative;
+	    publicNonTenantRequestPositive, tLogReadNegative, keyLocationLeakNegative;
 	std::vector<std::function<Future<Void>(Database cx)>> testFunctions;
 
 	AuthzSecurityWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), crossTenantGetPositive("CrossTenantGetPositive"),
 	    crossTenantGetNegative("CrossTenantGetNegative"), crossTenantCommitPositive("CrossTenantCommitPositive"),
 	    crossTenantCommitNegative("CrossTenantCommitNegative"),
-	    publicNonTenantRequestPositive("PublicNonTenantRequestPositive"), tLogReadNegative("TLogReadNegative") {
+	    publicNonTenantRequestPositive("PublicNonTenantRequestPositive"), tLogReadNegative("TLogReadNegative"),
+	    keyLocationLeakNegative("KeyLocationLeakNegative") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 500.0) / clientCount;
 		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
@@ -68,10 +71,6 @@ struct AuthzSecurityWorkload : TestWorkload {
 		tLogConfigKey = getOption(options, "tLogConfigKey"_sr, "TLogInterface"_sr);
 		ASSERT(g_network->isSimulated());
 		// make it comfortably longer than the timeout of the workload
-		signedToken = g_simulator->makeToken(
-		    tenantName, uint64_t(std::lround(getCheckTimeout())) + uint64_t(std::lround(testDuration)) + 100);
-		signedTokenAnotherTenant = g_simulator->makeToken(
-		    anotherTenantName, uint64_t(std::lround(getCheckTimeout())) + uint64_t(std::lround(testDuration)) + 100);
 		testFunctions.push_back(
 		    [this](Database cx) { return testCrossTenantGetDisallowed(this, cx, PositiveTestcase::True); });
 		testFunctions.push_back(
@@ -83,14 +82,20 @@ struct AuthzSecurityWorkload : TestWorkload {
 		testFunctions.push_back(
 		    [this](Database cx) { return testPublicNonTenantRequestsAllowedWithoutTokens(this, cx); });
 		testFunctions.push_back([this](Database cx) { return testTLogReadDisallowed(this, cx); });
+		testFunctions.push_back([this](Database cx) { return testKeyLocationLeakDisallowed(this, cx); });
 	}
 
 	Future<Void> setup(Database const& cx) override {
 		tenant = makeReference<Tenant>(cx, tenantName);
-		return tenant->ready();
+		anotherTenant = makeReference<Tenant>(cx, anotherTenantName);
+		return tenant->ready() && anotherTenant->ready();
 	}
 
 	Future<Void> start(Database const& cx) override {
+		signedToken = g_simulator->makeToken(
+		    tenant->id(), uint64_t(std::lround(getCheckTimeout())) + uint64_t(std::lround(testDuration)) + 100);
+		signedTokenAnotherTenant = g_simulator->makeToken(
+		    anotherTenant->id(), uint64_t(std::lround(getCheckTimeout())) + uint64_t(std::lround(testDuration)) + 100);
 		for (int c = 0; c < actorCount; c++)
 			clients.push_back(timeout(runTestClient(this, cx->clone()), testDuration, Void()));
 		return waitForAll(clients);
@@ -105,7 +110,8 @@ struct AuthzSecurityWorkload : TestWorkload {
 		clients.clear();
 		return errors == 0 && crossTenantGetPositive.getValue() > 0 && crossTenantGetNegative.getValue() > 0 &&
 		       crossTenantCommitPositive.getValue() > 0 && crossTenantCommitNegative.getValue() > 0 &&
-		       publicNonTenantRequestPositive.getValue() > 0 && tLogReadNegative.getValue() > 0;
+		       publicNonTenantRequestPositive.getValue() > 0 && tLogReadNegative.getValue() > 0 &&
+		       keyLocationLeakNegative.getValue() > 0;
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
@@ -115,22 +121,23 @@ struct AuthzSecurityWorkload : TestWorkload {
 		m.push_back(crossTenantCommitNegative.getMetric());
 		m.push_back(publicNonTenantRequestPositive.getMetric());
 		m.push_back(tLogReadNegative.getMetric());
+		m.push_back(keyLocationLeakNegative.getMetric());
 	}
 
-	void setAuthToken(Transaction& tr, Standalone<StringRef> token) {
+	void setAuthToken(Transaction& tr, StringRef token) {
 		tr.setOption(FDBTransactionOptions::AUTHORIZATION_TOKEN, token);
 	}
 
 	ACTOR static Future<Version> setAndCommitKeyValueAndGetVersion(AuthzSecurityWorkload* self,
 	                                                               Database cx,
 	                                                               Reference<Tenant> tenant,
-	                                                               Standalone<StringRef> token,
+	                                                               WipedString token,
 	                                                               StringRef key,
 	                                                               StringRef value) {
 		state Transaction tr(cx, tenant);
-		self->setAuthToken(tr, token);
 		loop {
 			try {
+				self->setAuthToken(tr, token);
 				tr.set(key, value);
 				wait(tr.commit());
 				return tr.getCommittedVersion();
@@ -143,13 +150,13 @@ struct AuthzSecurityWorkload : TestWorkload {
 	ACTOR static Future<KeyRangeLocationInfo> refreshAndGetCachedLocation(AuthzSecurityWorkload* self,
 	                                                                      Database cx,
 	                                                                      Reference<Tenant> tenant,
-	                                                                      Standalone<StringRef> token,
+	                                                                      WipedString token,
 	                                                                      StringRef key) {
 		state Transaction tr(cx, tenant);
-		self->setAuthToken(tr, token);
 		loop {
 			try {
 				// trigger GetKeyServerLocationsRequest and subsequent cache update
+				self->setAuthToken(tr, token);
 				wait(success(tr.get(key)));
 				auto loc = cx->getCachedLocation(tr.trState->getTenantInfo(), key);
 				if (loc.present()) {
@@ -174,7 +181,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 	                                                 Version committedVersion,
 	                                                 Standalone<StringRef> key,
 	                                                 Optional<Standalone<StringRef>> expectedValue,
-	                                                 Standalone<StringRef> token,
+	                                                 WipedString token,
 	                                                 Database cx,
 	                                                 KeyRangeLocationInfo loc) {
 		loop {
@@ -182,7 +189,6 @@ struct AuthzSecurityWorkload : TestWorkload {
 			req.key = key;
 			req.version = committedVersion;
 			req.tenantInfo.tenantId = tenant->id();
-			req.tenantInfo.name = tenant->name.get();
 			req.tenantInfo.token = token;
 			try {
 				GetValueReply reply = wait(loadBalance(loc.locations->locations(),
@@ -261,7 +267,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 
 	ACTOR static Future<Optional<Error>> tryCommit(AuthzSecurityWorkload* self,
 	                                               Reference<Tenant> tenant,
-	                                               Standalone<StringRef> token,
+	                                               WipedString token,
 	                                               Key key,
 	                                               Value newValue,
 	                                               Version readVersion,
@@ -271,7 +277,6 @@ struct AuthzSecurityWorkload : TestWorkload {
 			CommitTransactionRequest req;
 			req.transaction.mutations.push_back(req.arena, MutationRef(MutationRef::SetValue, prefixedKey, newValue));
 			req.transaction.read_snapshot = readVersion;
-			req.tenantInfo.name = tenant->name.get();
 			req.tenantInfo.token = token;
 			req.tenantInfo.tenantId = tenant->id();
 			try {
@@ -344,10 +349,10 @@ struct AuthzSecurityWorkload : TestWorkload {
 		state Version committedVersion =
 		    wait(setAndCommitKeyValueAndGetVersion(self, cx, self->tenant, self->signedToken, key, value));
 		state Transaction tr(cx, self->tenant);
-		self->setAuthToken(tr, self->signedToken);
 		state Optional<Value> tLogConfigString;
 		loop {
 			try {
+				self->setAuthToken(tr, self->signedToken);
 				Optional<Value> value = wait(tr.get(self->tLogConfigKey));
 				ASSERT(value.present());
 				tLogConfigString = value;
@@ -396,6 +401,68 @@ struct AuthzSecurityWorkload : TestWorkload {
 				TraceEvent(SevError, "AuthzSecurityUnexpectedError").detail("Error", reply.getError().name()).log();
 			}
 		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> testKeyLocationLeakDisallowed(AuthzSecurityWorkload* self, Database cx) {
+		state Key key = self->randomString();
+		state Value value = self->randomString();
+		state Version v1 =
+		    wait(setAndCommitKeyValueAndGetVersion(self, cx, self->tenant, self->signedToken, key, value));
+		state Version v2 = wait(setAndCommitKeyValueAndGetVersion(
+		    self, cx, self->anotherTenant, self->signedTokenAnotherTenant, key, value));
+
+		{
+			GetKeyServerLocationsReply rep =
+			    wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
+			                          &CommitProxyInterface::getKeyServersLocations,
+			                          GetKeyServerLocationsRequest(SpanContext(),
+			                                                       TenantInfo(self->tenant->id(), self->signedToken),
+			                                                       key,
+			                                                       Optional<KeyRef>(),
+			                                                       100,
+			                                                       false,
+			                                                       v2,
+			                                                       Arena())));
+			for (auto const& [range, ssIfaces] : rep.results) {
+				if (!range.begin.startsWith(self->tenant->prefix())) {
+					TraceEvent(SevError, "AuthzSecurityKeyRangeLeak")
+					    .detail("TenantId", self->tenant->id())
+					    .detail("LeakingRangeBegin", range.begin.printable());
+				}
+				if (!range.end.startsWith(self->tenant->prefix())) {
+					TraceEvent(SevError, "AuthzSecurityKeyRangeLeak")
+					    .detail("TenantId", self->tenant->id())
+					    .detail("LeakingRangeEnd", range.end.printable());
+				}
+			}
+		}
+		{
+			GetKeyServerLocationsReply rep = wait(basicLoadBalance(
+			    cx->getCommitProxies(UseProvisionalProxies::False),
+			    &CommitProxyInterface::getKeyServersLocations,
+			    GetKeyServerLocationsRequest(SpanContext(),
+			                                 TenantInfo(self->anotherTenant->id(), self->signedTokenAnotherTenant),
+			                                 key,
+			                                 Optional<KeyRef>(),
+			                                 100,
+			                                 false,
+			                                 v2,
+			                                 Arena())));
+			for (auto const& [range, ssIfaces] : rep.results) {
+				if (!range.begin.startsWith(self->anotherTenant->prefix())) {
+					TraceEvent(SevError, "AuthzSecurityKeyRangeLeak")
+					    .detail("TenantId", self->anotherTenant->id())
+					    .detail("LeakingRangeBegin", range.begin.printable());
+				}
+				if (!range.end.startsWith(self->anotherTenant->prefix())) {
+					TraceEvent(SevError, "AuthzSecurityKeyRangeLeak")
+					    .detail("TenantId", self->anotherTenant->id())
+					    .detail("LeakingRangeEnd", range.end.printable());
+				}
+			}
+		}
+		++self->keyLocationLeakNegative;
 		return Void();
 	}
 

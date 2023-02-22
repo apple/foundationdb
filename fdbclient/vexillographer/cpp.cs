@@ -47,9 +47,9 @@ namespace vexillographer
 
         private static string getCInfoLine(Option o, string indent, string structName)
         {
-            return String.Format("{0}ADD_OPTION_INFO({1}, {2}, \"{2}\", \"{3}\", \"{4}\", {5}, {6}, {7}, {8}, FDBOptionInfo::ParamType::{9})",
+            return String.Format("{0}ADD_OPTION_INFO({1}, {2}, \"{2}\", \"{3}\", \"{4}\", {5}, {6}, {7}, {8}, {9}, FDBOptionInfo::ParamType::{10})",
                 indent, structName, o.name.ToUpper(), o.comment, o.getParameterComment(), (o.paramDesc != null).ToString().ToLower(), 
-                o.hidden.ToString().ToLower(), o.persistent.ToString().ToLower(), o.defaultFor, o.paramType);
+                o.hidden.ToString().ToLower(), o.persistent.ToString().ToLower(), o.sensitive.ToString().ToLower(), o.defaultFor, o.paramType);
         }
 
         private static void writeCppInfo(TextWriter outFile, Scope scope, IEnumerable<Option> options)

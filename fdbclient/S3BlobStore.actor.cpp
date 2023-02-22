@@ -20,6 +20,7 @@
 
 #include "fdbclient/S3BlobStore.h"
 
+#include "flow/IConnection.h"
 #include "md5/md5.h"
 #include "libb64/encode.h"
 #include "fdbclient/sha1/SHA1.h"
@@ -68,6 +69,11 @@ S3BlobStoreEndpoint::Stats S3BlobStoreEndpoint::Stats::operator-(const Stats& rh
 }
 
 S3BlobStoreEndpoint::Stats S3BlobStoreEndpoint::s_stats;
+std::unique_ptr<S3BlobStoreEndpoint::BlobStats> S3BlobStoreEndpoint::blobStats;
+Future<Void> S3BlobStoreEndpoint::statsLogger = Never();
+
+std::unordered_map<BlobStoreConnectionPoolKey, Reference<S3BlobStoreEndpoint::ConnectionPoolData>>
+    S3BlobStoreEndpoint::globalConnectionPool;
 
 S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	secure_connection = 1;
@@ -95,6 +101,7 @@ S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	max_send_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_SEND_BYTES_PER_SECOND;
 	max_recv_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_RECV_BYTES_PER_SECOND;
 	sdk_auth = false;
+	global_connection_pool = CLIENT_KNOBS->BLOBSTORE_GLOBAL_CONNECTION_POOL;
 }
 
 bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
@@ -133,6 +140,7 @@ bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(max_send_bytes_per_second, sbps);
 	TRY_PARAM(max_recv_bytes_per_second, rbps);
 	TRY_PARAM(sdk_auth, sa);
+	TRY_PARAM(global_connection_pool, gcp);
 #undef TRY_PARAM
 	return false;
 }
@@ -170,6 +178,8 @@ std::string S3BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	_CHECK_PARAM(read_cache_blocks_per_file, rcb);
 	_CHECK_PARAM(max_send_bytes_per_second, sbps);
 	_CHECK_PARAM(max_recv_bytes_per_second, rbps);
+	_CHECK_PARAM(sdk_auth, sa);
+	_CHECK_PARAM(global_connection_pool, gcp);
 #undef _CHECK_PARAM
 	return r;
 }
@@ -716,21 +726,27 @@ Future<Void> S3BlobStoreEndpoint::updateSecret() {
 	return updateSecret_impl(Reference<S3BlobStoreEndpoint>::addRef(this));
 }
 
-ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3BlobStoreEndpoint> b) {
+ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3BlobStoreEndpoint> b,
+                                                                   bool* reusingConn) {
 	// First try to get a connection from the pool
-	while (!b->connectionPool.empty()) {
-		S3BlobStoreEndpoint::ReusableConnection rconn = b->connectionPool.front();
-		b->connectionPool.pop();
+	*reusingConn = false;
+	while (!b->connectionPool->pool.empty()) {
+		S3BlobStoreEndpoint::ReusableConnection rconn = b->connectionPool->pool.front();
+		b->connectionPool->pool.pop();
 
 		// If the connection expires in the future then return it
 		if (rconn.expirationTime > now()) {
+			*reusingConn = true;
+			++b->blobStats->reusedConnections;
 			TraceEvent("S3BlobStoreEndpointReusingConnected")
 			    .suppressFor(60)
 			    .detail("RemoteEndpoint", rconn.conn->getPeerAddress())
 			    .detail("ExpiresIn", rconn.expirationTime - now());
 			return rconn;
 		}
+		++b->blobStats->expiredConnections;
 	}
+	++b->blobStats->newConnections;
 	std::string host = b->host, service = b->service;
 	if (service.empty()) {
 		if (b->useProxy) {
@@ -739,7 +755,7 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 		}
 		service = b->knobs.secure_connection ? "https" : "http";
 	}
-	bool isTLS = b->knobs.secure_connection == 1;
+	bool isTLS = b->knobs.isTLS();
 	state Reference<IConnection> conn;
 	if (b->useProxy) {
 		if (isTLS) {
@@ -768,14 +784,17 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 	return S3BlobStoreEndpoint::ReusableConnection({ conn, now() + b->knobs.max_connection_life });
 }
 
-Future<S3BlobStoreEndpoint::ReusableConnection> S3BlobStoreEndpoint::connect() {
-	return connect_impl(Reference<S3BlobStoreEndpoint>::addRef(this));
+Future<S3BlobStoreEndpoint::ReusableConnection> S3BlobStoreEndpoint::connect(bool* reusing) {
+	return connect_impl(Reference<S3BlobStoreEndpoint>::addRef(this), reusing);
 }
 
 void S3BlobStoreEndpoint::returnConnection(ReusableConnection& rconn) {
 	// If it expires in the future then add it to the pool in the front
-	if (rconn.expirationTime > now())
-		connectionPool.push(rconn);
+	if (rconn.expirationTime > now()) {
+		connectionPool->pool.push(rconn);
+	} else {
+		++blobStats->expiredConnections;
+	}
 	rconn.conn = Reference<IConnection>();
 }
 
@@ -859,10 +878,15 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 		state bool connectionEstablished = false;
 		state Reference<HTTP::Response> r;
 		state std::string canonicalURI = resource;
+		state UID connID = UID();
+		state double reqStartTimer;
+		state double connectStartTimer = g_network->timer();
+		state bool reusingConn = false;
+		state bool fastRetry = false;
 
 		try {
 			// Start connecting
-			Future<S3BlobStoreEndpoint::ReusableConnection> frconn = bstore->connect();
+			Future<S3BlobStoreEndpoint::ReusableConnection> frconn = bstore->connect(&reusingConn);
 
 			// Make a shallow copy of the queue by calling addref() on each buffer in the chain and then prepending that
 			// chain to contentCopy
@@ -883,6 +907,8 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 			state S3BlobStoreEndpoint::ReusableConnection rconn =
 			    wait(timeoutError(frconn, bstore->knobs.connect_timeout));
 			connectionEstablished = true;
+			connID = rconn.conn->getDebugID();
+			reqStartTimer = g_network->timer();
 
 			// Finish/update the request headers (which includes Date header)
 			// This must be done AFTER the connection is ready because if credentials are coming from disk they are
@@ -909,39 +935,58 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 
 			remoteAddress = rconn.conn->getPeerAddress();
 			wait(bstore->requestRate->getAllowance(1));
-			Reference<HTTP::Response> _r = wait(timeoutError(HTTP::doRequest(rconn.conn,
-			                                                                 verb,
-			                                                                 canonicalURI,
-			                                                                 headers,
-			                                                                 &contentCopy,
-			                                                                 contentLen,
-			                                                                 bstore->sendRate,
-			                                                                 &bstore->s_stats.bytes_sent,
-			                                                                 bstore->recvRate),
-			                                                 requestTimeout));
+
+			Future<Reference<HTTP::Response>> reqF = HTTP::doRequest(rconn.conn,
+			                                                         verb,
+			                                                         canonicalURI,
+			                                                         headers,
+			                                                         &contentCopy,
+			                                                         contentLen,
+			                                                         bstore->sendRate,
+			                                                         &bstore->s_stats.bytes_sent,
+			                                                         bstore->recvRate);
+
+			// if we reused a connection from the pool, and immediately got an error, retry immediately discarding the
+			// connection
+			if (reqF.isReady() && reusingConn) {
+				fastRetry = true;
+			}
+
+			Reference<HTTP::Response> _r = wait(timeoutError(reqF, requestTimeout));
 			r = _r;
 
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
 			// received the "Connection: close" header.
-			if (r->headers["Connection"] != "close")
+			if (r->headers["Connection"] != "close") {
 				bstore->returnConnection(rconn);
+			} else {
+				++bstore->blobStats->expiredConnections;
+			}
 			rconn.conn.clear();
 
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;
+			// TODO: should this also do rconn.conn.clear()? (would need to extend lifetime outside of try block)
 			err = e;
 		}
+
+		double end = g_network->timer();
+		double connectDuration = reqStartTimer - connectStartTimer;
+		double reqDuration = end - reqStartTimer;
+		bstore->blobStats->requestLatency.addMeasurement(reqDuration);
 
 		// If err is not present then r is valid.
 		// If r->code is in successCodes then record the successful request and return r.
 		if (!err.present() && successCodes.count(r->code) != 0) {
 			bstore->s_stats.requests_successful++;
+			++bstore->blobStats->requestsSuccessful;
 			return r;
 		}
 
 		// Otherwise, this request is considered failed.  Update failure count.
 		bstore->s_stats.requests_failed++;
+		++bstore->blobStats->requestsFailed;
 
 		// All errors in err are potentially retryable as well as certain HTTP response codes...
 		bool retryable = err.present() || r->code == 500 || r->code == 502 || r->code == 503 || r->code == 429;
@@ -949,8 +994,14 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 		// But only if our previous attempt was not the last allowable try.
 		retryable = retryable && (thisTry < maxTries);
 
+		if (!retryable || !err.present()) {
+			fastRetry = false;
+		}
+
 		TraceEvent event(SevWarn,
-		                 retryable ? "S3BlobStoreEndpointRequestFailedRetryable" : "S3BlobStoreEndpointRequestFailed");
+		                 retryable ? (fastRetry ? "S3BlobStoreEndpointRequestFailedFastRetryable"
+		                                        : "S3BlobStoreEndpointRequestFailedRetryable")
+		                           : "S3BlobStoreEndpointRequestFailed");
 
 		// Attach err to trace event if present, otherwise extract some stuff from the response
 		if (err.present()) {
@@ -962,6 +1013,12 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 		}
 
 		event.detail("ConnectionEstablished", connectionEstablished);
+		event.detail("ReusingConn", reusingConn);
+		if (connectionEstablished) {
+			event.detail("ConnID", connID);
+			event.detail("ConnectDuration", connectDuration);
+			event.detail("ReqDuration", reqDuration);
+		}
 
 		if (remoteAddress.present())
 			event.detail("RemoteEndpoint", remoteAddress.get());
@@ -971,16 +1028,19 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 		event.detail("Verb", verb).detail("Resource", resource).detail("ThisTry", thisTry);
 
 		// If r is not valid or not code 429 then increment the try count.  429's will not count against the attempt
-		// limit.
-		if (!r || r->code != 429)
+		// limit. Also skip incrementing the retry count for fast retries
+		if (!fastRetry && (!r || r->code != 429))
 			++thisTry;
 
-		// We will wait delay seconds before the next retry, start with nextRetryDelay.
-		double delay = nextRetryDelay;
-		// Double but limit the *next* nextRetryDelay.
-		nextRetryDelay = std::min(nextRetryDelay * 2, 60.0);
+		if (fastRetry) {
+			++bstore->blobStats->fastRetries;
+			wait(delay(0));
+		} else if (retryable) {
+			// We will wait delay seconds before the next retry, start with nextRetryDelay.
+			double delay = nextRetryDelay;
+			// Double but limit the *next* nextRetryDelay.
+			nextRetryDelay = std::min(nextRetryDelay * 2, 60.0);
 
-		if (retryable) {
 			// If r is valid then obey the Retry-After response header if present.
 			if (r) {
 				auto iRetryAfter = r->headers.find("Retry-After");
@@ -997,6 +1057,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 			}
 
 			// Log the delay then wait.
+
 			event.detail("RetryDelay", delay);
 			wait(::delay(delay));
 		} else {
@@ -1018,8 +1079,12 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 				// active connection timing out vs a connection timing out, though not between an active connection
 				// failing vs connection attempt failing.
 				// TODO:  Add more error types?
-				if (code == error_code_timed_out && !connectionEstablished)
+				if (code == error_code_timed_out && !connectionEstablished) {
+					TraceEvent(SevWarn, "S3BlobStoreEndpointConnectTimeout")
+					    .suppressFor(60)
+					    .detail("Timeout", requestTimeout);
 					throw connection_failed();
+				}
 
 				if (code == error_code_timed_out || code == error_code_connection_failed ||
 				    code == error_code_lookup_failed)

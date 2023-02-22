@@ -38,6 +38,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
+#include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -92,6 +93,7 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 	Version minSuccessfulReadVersion = MAX_VERSION;
 
 	Future<Void> summaryClient;
+	Future<Void> forceFlushingClient;
 	Promise<Void> triggerSummaryComplete;
 
 	// stats
@@ -128,7 +130,10 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 		}
 	}
 
-	void openTenant(Database const& cx) { tenant = makeReference<Tenant>(cx, tenantName); }
+	Future<Void> openTenant(Database const& cx) {
+		tenant = makeReference<Tenant>(cx, tenantName);
+		return tenant->ready();
+	}
 
 	// TODO could make keys variable length?
 	Key getKey(uint32_t key, uint32_t id) {
@@ -195,6 +200,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 	// parameters global across all clients
 	int64_t targetByteRate;
 	bool doMergeCheckAtEnd;
+	bool doForceFlushing;
 
 	std::vector<Reference<ThreadData>> directories;
 	std::vector<Future<Void>> clients;
@@ -214,6 +220,9 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		// randomize between low and high directory count
 		int64_t targetDirectories = 1 + (randomness % 8);
 		randomness /= 8;
+
+		doForceFlushing = (randomness % 4);
+		randomness /= 4;
 
 		int64_t targetMyDirectories =
 		    (targetDirectories / clientCount) + ((targetDirectories % clientCount > clientId) ? 1 : 0);
@@ -282,17 +291,17 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		}
 
 		state int directoryIdx = 0;
-		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
+		state std::vector<std::pair<int64_t, TenantMapEntry>> tenants;
 		state BGTenantMap tenantData(self->dbInfo);
 		state Reference<GranuleTenantData> data;
 		for (; directoryIdx < self->directories.size(); directoryIdx++) {
 			// Set up the blob range first
-			TenantMapEntry tenantEntry = wait(self->setUpTenant(cx, self->directories[directoryIdx]->tenantName));
-			self->directories[directoryIdx]->openTenant(cx);
+			state TenantMapEntry tenantEntry = wait(self->setUpTenant(cx, self->directories[directoryIdx]->tenantName));
+			wait(self->directories[directoryIdx]->openTenant(cx));
 			self->directories[directoryIdx]->tenantEntry = tenantEntry;
 			self->directories[directoryIdx]->directoryRange =
 			    KeyRangeRef(tenantEntry.prefix, tenantEntry.prefix.withSuffix(normalKeys.end));
-			tenants.push_back({ self->directories[directoryIdx]->tenant->name.get(), tenantEntry });
+			tenants.push_back({ self->directories[directoryIdx]->tenant->id(), tenantEntry });
 			bool _success = wait(cx->blobbifyRange(self->directories[directoryIdx]->directoryRange));
 			ASSERT(_success);
 		}
@@ -894,6 +903,12 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			// Wait for blob worker to initialize snapshot before starting test for that range
 			Future<Void> start = waitFirstSnapshot(this, cx, it, true);
 			it->summaryClient = validateGranuleSummaries(cx, normalKeys, it->tenant, it->triggerSummaryComplete);
+			if (doForceFlushing && deterministicRandom()->random01() < 0.25) {
+				it->forceFlushingClient =
+				    validateForceFlushing(cx, it->directoryRange, testDuration, it->triggerSummaryComplete);
+			} else {
+				it->forceFlushingClient = Future<Void>(Void());
+			}
 			clients.push_back(timeout(writeWorker(this, start, cx, it), testDuration, Void()));
 			clients.push_back(timeout(readWorker(this, start, cx, it), testDuration, Void()));
 		}
@@ -997,7 +1012,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		}
 
 		// validate that summary completes without error
-		wait(threadData->summaryClient);
+		wait(threadData->summaryClient && threadData->forceFlushingClient);
 
 		return result;
 	}
@@ -1005,12 +1020,6 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 	ACTOR Future<bool> _check(Database cx, BlobGranuleCorrectnessWorkload* self) {
 		// check error counts, and do an availability check at the end
 		state std::vector<Future<bool>> results;
-		state Future<Void> checkFeedCleanupFuture;
-		if (self->clientId == 0) {
-			checkFeedCleanupFuture = checkFeedCleanup(cx, BGW_DEBUG);
-		} else {
-			checkFeedCleanupFuture = Future<Void>(Void());
-		}
 
 		for (auto& it : self->directories) {
 			results.push_back(self->checkDirectory(cx, self, it));
@@ -1019,6 +1028,14 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		for (auto& f : results) {
 			bool dirSuccess = wait(f);
 			allSuccessful &= dirSuccess;
+		}
+
+		// do feed cleanup check only after data is guaranteed to be available for each granule
+		state Future<Void> checkFeedCleanupFuture;
+		if (self->clientId == 0) {
+			checkFeedCleanupFuture = checkFeedCleanup(cx, BGW_DEBUG);
+		} else {
+			checkFeedCleanupFuture = Future<Void>(Void());
 		}
 		wait(checkFeedCleanupFuture);
 		return allSuccessful;

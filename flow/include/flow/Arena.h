@@ -31,6 +31,7 @@
 #include "flow/Trace.h"
 #include "flow/ObjectSerializerTraits.h"
 #include "flow/FileIdentifier.h"
+#include "flow/Optional.h"
 #include <algorithm>
 #include <boost/functional/hash.hpp>
 #include <stdint.h>
@@ -94,6 +95,9 @@ protected:
 
 FDB_DECLARE_BOOLEAN_PARAM(FastInaccurateEstimate);
 
+// Tag struct to indicate that the block containing allocated memory needs to be zero-ed out after use
+struct WipeAfterUse {};
+
 // An Arena is a custom allocator that consists of a set of ArenaBlocks.  Allocation is performed by bumping a pointer
 // on the most recent ArenaBlock until the block is unable to service the next allocation request.  When the current
 // ArenaBlock is full, a new (larger) one is added to the Arena.  Deallocation is not directly supported.  Instead,
@@ -123,6 +127,8 @@ public:
 
 	friend void* operator new(size_t size, Arena& p);
 	friend void* operator new[](size_t size, Arena& p);
+	friend void* operator new(size_t size, Arena& p, struct WipeAfterUse);
+	friend void* operator new[](size_t size, Arena& p, struct WipeAfterUse);
 
 	bool sameArena(const Arena& other) const { return impl.getPtr() == other.impl.getPtr(); }
 
@@ -156,16 +162,19 @@ struct ArenaBlockRef {
 	uint32_t nextBlockOffset;
 };
 
+FDB_DECLARE_BOOLEAN_PARAM(IsSecureMem);
+
 struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 	enum {
 		SMALL = 64,
 		LARGE = 8193 // If size == used == LARGE, then use hugeSize, hugeUsed
 	};
 
-	enum { NOT_TINY = 255, TINY_HEADER = 6 };
+	enum { NOT_TINY = 127, TINY_HEADER = 6 };
 
 	// int32_t referenceCount;	  // 4 bytes (in ThreadSafeReferenceCounted)
-	uint8_t tinySize, tinyUsed; // If these == NOT_TINY, use bigSize, bigUsed instead
+	bool secure : 1; // If this is set, block is zero-ed out after use
+	uint8_t tinySize : 7, tinyUsed; // If these == NOT_TINY, use bigSize, bigUsed instead
 	// if tinySize != NOT_TINY, following variables aren't used
 	uint32_t bigSize, bigUsed; // include block header
 	uint32_t nextBlockOffset;
@@ -173,6 +182,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 
 	void addref();
 	void delref();
+	bool isSecure() const;
 	bool isTiny() const;
 	int size() const;
 	int used() const;
@@ -181,6 +191,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 	const void* getNextData() const;
 	size_t totalSize() const;
 	size_t estimatedTotalSize() const;
+	void wipeUsed();
 	// just for debugging:
 	void getUniqueBlocks(std::set<ArenaBlock*>& a);
 	int addUsed(int bytes);
@@ -188,7 +199,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 	void* make4kAlignedBuffer(uint32_t size);
 	static void dependOn(Reference<ArenaBlock>& self, ArenaBlock* other);
 	static void* dependOn4kAlignedBuffer(Reference<ArenaBlock>& self, uint32_t size);
-	static void* allocate(Reference<ArenaBlock>& self, int bytes);
+	static void* allocate(Reference<ArenaBlock>& self, int bytes, IsSecureMem isSecure = IsSecureMem::False);
 	// Return an appropriately-sized ArenaBlock to store the given data
 	static ArenaBlock* create(int dataSize, Reference<ArenaBlock>& next);
 	void destroy();
@@ -207,6 +218,19 @@ inline void* operator new[](size_t size, Arena& p) {
 }
 inline void operator delete[](void*, Arena& p) {}
 
+inline void* operator new(size_t size, Arena& p, struct WipeAfterUse) {
+	UNSTOPPABLE_ASSERT(size < std::numeric_limits<int>::max());
+	return ArenaBlock::allocate(p.impl, (int)size, IsSecureMem::True);
+}
+
+inline void operator delete(void*, Arena& p, struct WipeAfterUse) {}
+
+inline void* operator new[](size_t size, Arena& p, struct WipeAfterUse) {
+	UNSTOPPABLE_ASSERT(size < std::numeric_limits<int>::max());
+	return ArenaBlock::allocate(p.impl, (int)size, IsSecureMem::True);
+}
+inline void operator delete[](void*, Arena& p, struct WipeAfterUse) {}
+
 template <class Archive>
 inline void load(Archive& ar, Arena& p) {
 	p = ar.arena();
@@ -215,221 +239,6 @@ template <class Archive>
 inline void save(Archive& ar, const Arena& p) {
 	// No action required
 }
-
-// Optional is a wrapper for std::optional. There
-// are two primary reasons to use this wrapper instead
-// of using std::optional directly:
-//
-// 1) Legacy: A lot of code was written using Optional before
-//    std::optional was available.
-// 2) When you call get but no value is present Optional gives an
-//    assertion failure. std::optional, on the other hand, would
-//    throw std::bad_optional_access. It is easier to debug assertion
-//    failures, and FDB generally does not handle std exceptions, so
-//    assertion failures are preferable. This is the main reason we
-//    don't intend to use std::optional directly.
-template <class T>
-class Optional : public ComposedIdentifier<T, 4> {
-public:
-	using ValueType = T;
-
-	Optional() = default;
-
-	template <class U>
-	Optional(const U& t) : impl(std::in_place, t) {}
-	Optional(T&& t) : impl(std::in_place, std::move(t)) {}
-
-	/* This conversion constructor was nice, but combined with the prior constructor it means that Optional<int> can be
-	converted to Optional<Optional<int>> in the wrong way (a non-present Optional<int> converts to a non-present
-	Optional<Optional<int>>). Use .castTo<>() instead. template <class S> Optional(const Optional<S>& o) :
-	valid(o.present()) { if (valid) new (&value) T(o.get()); } */
-
-	Optional(Arena& a, const Optional<T>& o) {
-		if (o.present())
-			impl = std::make_optional<T>(a, o.get());
-	}
-	int expectedSize() const { return present() ? get().expectedSize() : 0; }
-
-	template <class R>
-	Optional<R> castTo() const {
-		return map([](const T& v) { return (R)v; });
-	}
-
-private:
-	template <class F>
-	using MapRet = std::decay_t<std::invoke_result_t<F, T>>;
-
-	template <class F>
-	using EnableIfNotMemberPointer =
-	    std::enable_if_t<!std::is_member_object_pointer_v<F> && !std::is_member_function_pointer_v<F>>;
-
-public:
-	// If the optional is set, calls the function f on the value and returns the value. Otherwise, returns an empty
-	// optional.
-	template <class F, typename = EnableIfNotMemberPointer<F>>
-	Optional<MapRet<F>> map(const F& f) const& {
-		return present() ? Optional<MapRet<F>>(f(get())) : Optional<MapRet<F>>();
-	}
-	template <class F, typename = EnableIfNotMemberPointer<F>>
-	Optional<MapRet<F>> map(const F& f) && {
-		return present() ? Optional<MapRet<F>>(f(std::move(*this).get())) : Optional<MapRet<F>>();
-	}
-
-	// Converts an Optional<T> to an Optional<R> of one of its value's members
-	//
-	// v.map(&T::member) is equivalent to v.map([](T v) { return v.member; })
-	template <class R, class Rp = std::decay_t<R>>
-	std::enable_if_t<std::is_class_v<T>, Optional<Rp>> map(
-	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) const& {
-		return present() ? Optional<Rp>(get().*member) : Optional<Rp>();
-	}
-	template <class R, class Rp = std::decay_t<R>>
-	std::enable_if_t<std::is_class_v<T>, Optional<Rp>> map(
-	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) && {
-		return present() ? Optional<Rp>(std::move(*this).get().*member) : Optional<Rp>();
-	}
-
-	// Converts an Optional<T> to an Optional<R> of a value returned by a member function of T
-	//
-	// v.map(&T::memberFunc, arg1, arg2, ...) is equivalent to
-	// v.map([](T v) { return v.memberFunc(arg1, arg2, ...); })
-	template <class R, class... Args, class Rp = std::decay_t<R>>
-	std::enable_if_t<std::is_class_v<T>, Optional<Rp>> map(
-	    R (std::conditional_t<std::is_class_v<T>, T, Void>::*memberFunc)(Args...) const,
-	    Args&&... args) const& {
-		return present() ? Optional<Rp>((get().*memberFunc)(std::forward<Args>(args)...)) : Optional<Rp>();
-	}
-	template <class R, class... Args, class Rp = std::decay_t<R>>
-	std::enable_if_t<std::is_class_v<T>, Optional<Rp>> map(
-	    R (std::conditional_t<std::is_class_v<T>, T, Void>::*memberFunc)(Args...) const,
-	    Args&&... args) && {
-		return present() ? Optional<Rp>((std::move(*this).get().*memberFunc)(std::forward<Args>(args)...))
-		                 : Optional<Rp>();
-	}
-
-	// Given T that is a pointer or pointer-like type to type P (e.g. T=P* or T=Reference<P>), converts an Optional<T>
-	// to an Optional<R> of one its value's members. If the optional value is present and false-like (null), then
-	// returns an empty Optional<R>.
-	//
-	// v.mapRef(&P::member) is equivalent to Optional<R>(v.get()->member) if v is present and non-null
-	template <class P, class R, class Rp = std::decay_t<R>>
-	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, Optional<Rp>> mapRef(R P::*member) const& {
-		if (!present() || !get()) {
-			return Optional<Rp>();
-		}
-
-		P& p = *get();
-		return p.*member;
-	}
-
-	// Given T that is a pointer or pointer-like type to type P (e.g. T=P* or T=Reference<P>), converts an Optional<T>
-	// to an Optional<R> of a value returned by a member function of P. If the optional value is present and false-like
-	// (null), then returns an empty Optional<R>.
-	//
-	// v.mapRef(&T::memberFunc, arg1, arg2, ...) is equivalent to Optional<R>(v.get()->memberFunc(arg1, arg2, ...)) if v
-	// is present and non-null
-	template <class P, class R, class... Args, class Rp = std::decay_t<R>>
-	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, Optional<Rp>> mapRef(R (P::*memberFunc)(Args...) const,
-	                                                                                  Args&&... args) const& {
-		if (!present() || !get()) {
-			return Optional<Rp>();
-		}
-		P& p = *get();
-		return (p.*memberFunc)(std::forward<Args>(args)...);
-	}
-
-	// Similar to map with a mapped type of Optional<R>, but flattens the result. For example, if the mapped result is
-	// of type Optional<R>, map will return Optional<Optional<R>> while flatMap will return Optional<R>
-	template <class... Args>
-	auto flatMap(Args&&... args) const& {
-		auto val = map(std::forward<Args>(args)...);
-		using R = typename decltype(val)::ValueType::ValueType;
-
-		if (val.present()) {
-			return val.get();
-		} else {
-			return Optional<R>();
-		}
-	}
-	template <class... Args>
-	auto flatMap(Args&&... args) && {
-		auto val = std::move(*this).map(std::forward<Args>(args)...);
-		using R = typename decltype(val)::ValueType::ValueType;
-
-		if (val.present()) {
-			return val.get();
-		} else {
-			return Optional<R>();
-		}
-	}
-
-	// Similar to mapRef with a mapped type of Optional<R>, but flattens the result. For example, if the mapped result
-	// is of type Optional<R>, mapRef will return Optional<Optional<R>> while flatMapRef will return Optional<R>
-	template <class... Args>
-	auto flatMapRef(Args&&... args) const& {
-		auto val = mapRef(std::forward<Args>(args)...);
-		using R = typename decltype(val)::ValueType::ValueType;
-
-		if (val.present()) {
-			return val.get();
-		} else {
-			return Optional<R>();
-		}
-	}
-	template <class... Args>
-	auto flatMapRef(Args&&... args) && {
-		auto val = std::move(*this).mapRef(std::forward<Args>(args)...);
-		using R = typename decltype(val)::ValueType::ValueType;
-
-		if (val.present()) {
-			return val.get();
-		} else {
-			return Optional<R>();
-		}
-	}
-
-	bool present() const { return impl.has_value(); }
-	T& get() & {
-		UNSTOPPABLE_ASSERT(impl.has_value());
-		return impl.value();
-	}
-	T const& get() const& {
-		UNSTOPPABLE_ASSERT(impl.has_value());
-		return impl.value();
-	}
-	T&& get() && {
-		UNSTOPPABLE_ASSERT(impl.has_value());
-		return std::move(impl.value());
-	}
-	template <class U>
-	T orDefault(U&& defaultValue) const& {
-		return impl.value_or(std::forward<U>(defaultValue));
-	}
-	template <class U>
-	T orDefault(U&& defaultValue) && {
-		return std::move(impl).value_or(std::forward<U>(defaultValue));
-	}
-
-	// Spaceship operator.  Treats not-present as less-than present.
-	int compare(Optional const& rhs) const {
-		if (present() == rhs.present()) {
-			return present() ? get().compare(rhs.get()) : 0;
-		}
-		return present() ? 1 : -1;
-	}
-
-	bool operator==(Optional const& o) const { return impl == o.impl; }
-	bool operator!=(Optional const& o) const { return !(*this == o); }
-	// Ordering: If T is ordered, then Optional() < Optional(t) and (Optional(u)<Optional(v))==(u<v)
-	bool operator<(Optional const& o) const { return impl < o.impl; }
-
-	void reset() { impl.reset(); }
-	size_t hash() const { return hashFunc(impl); }
-
-private:
-	static inline std::hash<std::optional<T>> hashFunc{};
-	std::optional<T> impl;
-};
 
 template <class Archive, class T>
 inline void load(Archive& ar, Optional<T>& value) {

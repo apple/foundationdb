@@ -290,6 +290,10 @@ struct RegisterMasterRequest {
 	}
 };
 
+// Instantiated in worker.actor.cpp
+extern template class RequestStream<RegisterMasterRequest, false>;
+extern template struct NetNotifiedQueue<RegisterMasterRequest, false>;
+
 struct RecruitFromConfigurationReply {
 	constexpr static FileIdentifier file_identifier = 2224085;
 	std::vector<WorkerInterface> backupWorkers;
@@ -717,6 +721,10 @@ struct RecruitMasterRequest {
 	}
 };
 
+// Instantiated in worker.actor.cpp
+extern template class RequestStream<RecruitMasterRequest, false>;
+extern template struct NetNotifiedQueue<RecruitMasterRequest, false>;
+
 struct InitializeCommitProxyRequest {
 	constexpr static FileIdentifier file_identifier = 10344153;
 	MasterInterface master;
@@ -734,6 +742,10 @@ struct InitializeCommitProxyRequest {
 	}
 };
 
+// Instantiated in worker.actor.cpp
+extern template class RequestStream<InitializeCommitProxyRequest, false>;
+extern template struct NetNotifiedQueue<InitializeCommitProxyRequest, false>;
+
 struct InitializeGrvProxyRequest {
 	constexpr static FileIdentifier file_identifier = 8265613;
 	MasterInterface master;
@@ -746,6 +758,10 @@ struct InitializeGrvProxyRequest {
 		serializer(ar, master, masterLifetime, recoveryCount, reply);
 	}
 };
+
+// Instantiated in worker.actor.cpp
+extern template class RequestStream<InitializeGrvProxyRequest, false>;
+extern template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
 
 struct InitializeDataDistributorRequest {
 	constexpr static FileIdentifier file_identifier = 8858952;
@@ -851,6 +867,7 @@ struct InitializeStorageRequest {
 	Version initialClusterVersion;
 	Optional<std::map<std::string, std::string>> storageEngineParams; // Parameters to initialize the storage engine
 	ReplyPromise<InitializeStorageReply> reply;
+	EncryptionAtRestMode encryptMode;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -862,6 +879,7 @@ struct InitializeStorageRequest {
 		           reply,
 		           tssPairIDAndVersion,
 		           initialClusterVersion,
+		           encryptMode,
 		           storageEngineParams);
 	}
 };
@@ -1179,7 +1197,6 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei, Reference<
 class IKeyValueStore;
 class ServerCoordinators;
 class IDiskQueue;
-class IPageEncryptionKeyProvider;
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
@@ -1188,7 +1205,6 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
-                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider,
                                  std::shared_ptr<std::map<std::string, std::string>> storageEngineParams = nullptr);
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
@@ -1198,7 +1214,6 @@ ACTOR Future<Void> storageServer(
     Promise<Void> recovered,
     Reference<IClusterConnectionRecord>
         connRecord, // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
-    Reference<IPageEncryptionKeyProvider> encryptionKeyProvider,
     std::shared_ptr<std::map<std::string, std::string>> storageEngineParams = nullptr);
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
@@ -1296,6 +1311,8 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 
 typedef decltype(&tLog) TLogFn;
 
+extern bool isSimulatorProcessReliable();
+
 ACTOR template <class T>
 Future<T> ioTimeoutError(Future<T> what, double time, const char* context = nullptr) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
@@ -1308,7 +1325,7 @@ Future<T> ioTimeoutError(Future<T> what, double time, const char* context = null
 		when(T t = wait(what)) { return t; }
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable()) {
+			if (!isSimulatorProcessReliable()) {
 				err = err.asInjectedFault();
 			}
 			TraceEvent e(SevError, "IoTimeoutError");
@@ -1353,7 +1370,7 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 		when(T t = wait(what)) { return t; }
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable()) {
+			if (!isSimulatorProcessReliable()) {
 				err = err.asInjectedFault();
 			}
 			TraceEvent e(SevError, "IoTimeoutError");

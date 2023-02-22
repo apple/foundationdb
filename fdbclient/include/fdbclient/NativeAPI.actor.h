@@ -29,6 +29,7 @@
 
 #include "flow/BooleanParam.h"
 #include "flow/flow.h"
+#include "flow/WipedString.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitProxyInterface.h"
@@ -71,6 +72,7 @@ struct NetworkOptions {
 	std::string traceClockSource;
 	std::string traceFileIdentifier;
 	std::string tracePartialFileSuffix;
+	bool traceInitializeOnSetup;
 	Optional<bool> logClientInfo;
 	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
 	bool runLoopProfilingEnabled;
@@ -237,14 +239,17 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	void setWatch(Future<Void> watchFuture);
 };
 
-class Tenant : public ReferenceCounted<Tenant> {
+class Tenant : public ReferenceCounted<Tenant>, public FastAllocated<Tenant>, NonCopyable {
 public:
 	Tenant(Database cx, TenantName name);
 	explicit Tenant(int64_t id);
 	Tenant(Future<int64_t> id, Optional<TenantName> name);
 
+	static Tenant* allocateOnForeignThread() { return (Tenant*)Tenant::operator new(sizeof(Tenant)); }
+
 	Future<Void> ready() const { return success(idFuture); }
 	int64_t id() const;
+	Future<int64_t> getIdFuture() const;
 	KeyRef prefix() const;
 	std::string description() const;
 
@@ -267,7 +272,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
 	Future<Version> readVersionFuture;
 	Promise<Optional<Value>> metadataVersion;
-	Optional<Standalone<StringRef>> authToken;
+	Optional<WipedString> authToken;
 	Reference<TransactionLogInfo> trLogInfo;
 	TransactionOptions options;
 	Optional<ReadOptions> readOptions;
@@ -279,6 +284,8 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	// Measured by summing the bytes accessed by each read and write operation
 	// after rounding up to the nearest page size and applying a write penalty
 	int64_t totalCost = 0;
+
+	double proxyTagThrottledDuration = 0.0;
 
 	// Special flag to skip prepending tenant prefix to mutations and conflict ranges
 	// when a dummy, internal transaction gets commited. The sole purpose of commitDummyTransaction() is to
@@ -486,6 +493,8 @@ public:
 
 	int64_t getTotalCost() const { return trState->totalCost; }
 
+	double getTagThrottledDuration() const;
+
 	// Will be fulfilled only after commit() returns success
 	[[nodiscard]] Future<Standalone<StringRef>> getVersionstamp();
 
@@ -646,6 +655,7 @@ struct KeyRangeLocationInfo;
 // Return the aggregated StorageMetrics of range keys to the caller. The locations tell which interface should
 // serve the request. The final result is within (min-permittedError/2, max + permittedError/2) if valid.
 ACTOR Future<Optional<StorageMetrics>> waitStorageMetricsWithLocation(TenantInfo tenantInfo,
+                                                                      Version version,
                                                                       KeyRange keys,
                                                                       std::vector<KeyRangeLocationInfo> locations,
                                                                       StorageMetrics min,

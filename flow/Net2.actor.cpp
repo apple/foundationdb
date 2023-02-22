@@ -26,7 +26,9 @@
 #include "flow/Trace.h"
 #include <algorithm>
 #include <memory>
+#ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
+#endif
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #include <boost/asio.hpp>
@@ -44,6 +46,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/TaskQueue.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/ChaosMetrics.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/AsioReactor.h"
 #include "flow/Profiler.h"
@@ -55,6 +58,8 @@
 #include "flow/Util.h"
 #include "flow/UnitTest.h"
 #include "flow/ScopeExit.h"
+#include "flow/IUDPSocket.h"
+#include "flow/IConnection.h"
 
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
@@ -520,6 +525,7 @@ private:
 		if (error)
 			TraceEvent(SevWarn, "N2_CloseError", id)
 			    .suppressFor(1.0)
+			    .detail("PeerAddr", peer_address)
 			    .detail("ErrorCode", error.value())
 			    .detail("Message", error.message());
 	}
@@ -527,6 +533,7 @@ private:
 	void onReadError(const boost::system::error_code& error) {
 		TraceEvent(SevWarn, "N2_ReadError", id)
 		    .suppressFor(1.0)
+		    .detail("PeerAddr", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
@@ -534,6 +541,7 @@ private:
 	void onWriteError(const boost::system::error_code& error) {
 		TraceEvent(SevWarn, "N2_WriteError", id)
 		    .suppressFor(1.0)
+		    .detail("PeerAddr", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
@@ -1140,6 +1148,7 @@ private:
 	void onReadError(const boost::system::error_code& error) {
 		TraceEvent(SevWarn, "N2_ReadError", id)
 		    .suppressFor(1.0)
+		    .detail("PeerAddr", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
@@ -1147,6 +1156,7 @@ private:
 	void onWriteError(const boost::system::error_code& error) {
 		TraceEvent(SevWarn, "N2_WriteError", id)
 		    .suppressFor(1.0)
+		    .detail("PeerAddr", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();

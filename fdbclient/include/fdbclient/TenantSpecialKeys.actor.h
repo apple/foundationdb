@@ -70,7 +70,7 @@ private:
 	                                        RangeResult* results,
 	                                        GetRangeLimits limitsHint) {
 		std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
-		    wait(TenantAPI::listTenantsTransaction(&ryw->getTransaction(), kr.begin, kr.end, limitsHint.rows));
+		    wait(TenantAPI::listTenantMetadataTransaction(&ryw->getTransaction(), kr.begin, kr.end, limitsHint.rows));
 
 		for (auto tenant : tenants) {
 			std::string jsonString = tenant.second.toJson();
@@ -110,8 +110,7 @@ private:
 	    std::vector<std::pair<Standalone<StringRef>, Optional<Value>>> configMutations,
 	    int64_t tenantId,
 	    std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
-		state TenantMapEntry tenantEntry;
-		tenantEntry.setId(tenantId);
+		state TenantMapEntry tenantEntry(tenantId, tenantName, TenantState::READY);
 
 		for (auto const& [name, value] : configMutations) {
 			tenantEntry.configure(name, value);
@@ -122,7 +121,7 @@ private:
 		}
 
 		std::pair<Optional<TenantMapEntry>, bool> entry =
-		    wait(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenantName, tenantEntry));
+		    wait(TenantAPI::createTenantTransaction(&ryw->getTransaction(), tenantEntry));
 
 		return entry.second;
 	}
@@ -135,9 +134,13 @@ private:
 		    TenantMetadata::tenantCount().getD(&ryw->getTransaction(), Snapshot::False, 0);
 		int64_t _nextId = wait(TenantAPI::getNextTenantId(&ryw->getTransaction()));
 		state int64_t nextId = _nextId;
+		ASSERT(nextId > 0);
 
 		state std::vector<Future<bool>> createFutures;
 		for (auto const& [tenant, config] : tenants) {
+			if (!TenantAPI::nextTenantIdPrefixMatches(nextId - 1, nextId)) {
+				throw cluster_no_capacity();
+			}
 			createFutures.push_back(createTenant(ryw, tenant, config, nextId++, tenantGroupNetTenantDelta));
 		}
 
@@ -180,7 +183,7 @@ private:
 			}
 		}
 
-		wait(TenantAPI::configureTenantTransaction(&ryw->getTransaction(), tenantName, originalEntry, updatedEntry));
+		wait(TenantAPI::configureTenantTransaction(&ryw->getTransaction(), originalEntry, updatedEntry));
 		return Void();
 	}
 
@@ -190,7 +193,7 @@ private:
 		state Optional<TenantMapEntry> tenantEntry =
 		    wait(TenantAPI::tryGetTenantTransaction(&ryw->getTransaction(), tenantName));
 		if (tenantEntry.present()) {
-			wait(TenantAPI::deleteTenantTransaction(&ryw->getTransaction(), tenantName));
+			wait(TenantAPI::deleteTenantTransaction(&ryw->getTransaction(), tenantEntry.get().id));
 			if (tenantEntry.get().tenantGroup.present()) {
 				(*tenantGroupNetTenantDelta)[tenantEntry.get().tenantGroup.get()]--;
 			}
@@ -203,7 +206,7 @@ private:
 	                                            TenantName beginTenant,
 	                                            TenantName endTenant,
 	                                            std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
-		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants = wait(
+		state std::vector<std::pair<TenantName, int64_t>> tenants = wait(
 		    TenantAPI::listTenantsTransaction(&ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->TOO_MANY));
 
 		if (tenants.size() == CLIENT_KNOBS->TOO_MANY) {
@@ -217,10 +220,7 @@ private:
 
 		std::vector<Future<Void>> deleteFutures;
 		for (auto tenant : tenants) {
-			deleteFutures.push_back(TenantAPI::deleteTenantTransaction(&ryw->getTransaction(), tenant.first));
-			if (tenant.second.tenantGroup.present()) {
-				(*tenantGroupNetTenantDelta)[tenant.second.tenantGroup.get()]--;
-			}
+			deleteFutures.push_back(deleteSingleTenant(ryw, tenant.first, tenantGroupNetTenantDelta));
 		}
 
 		wait(waitForAll(deleteFutures));

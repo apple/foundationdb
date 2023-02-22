@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -26,12 +27,9 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/QuietDatabase.h"
+#include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// "ssd" is an alias to the preferred type which skews the random distribution toward it but that's okay.
-static const char* storeTypes[] = {
-	"ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "memory-radixtree-beta"
-};
 static const char* storageMigrationTypes[] = { "perpetual_storage_wiggle=0 storage_migration_type=aggressive",
 	                                           "perpetual_storage_wiggle=1",
 	                                           "perpetual_storage_wiggle=1 storage_migration_type=gradual",
@@ -232,6 +230,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	bool storageMigrationCompatibleConf; // only allow generating configuration suitable for storage migration test
 	bool waitStoreTypeCheck;
 	bool downgradeTest1; // if this is true, don't pick up downgrade incompatible config
+	std::vector<int> storageEngineExcludeTypes;
 	std::vector<Future<Void>> clients;
 	PerfIntCounter retries;
 
@@ -244,6 +243,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		storageMigrationCompatibleConf = getOption(options, "storageMigrationCompatibleConf"_sr, false);
 		waitStoreTypeCheck = getOption(options, "waitStoreTypeCheck"_sr, false);
 		downgradeTest1 = getOption(options, "downgradeTest1"_sr, false);
+		storageEngineExcludeTypes = getOption(options, "storageEngineExcludeTypes"_sr);
 		g_simulator->usableRegions = 1;
 	}
 
@@ -277,6 +277,13 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _start(ConfigureDatabaseWorkload* self, Database cx) {
+		// Redwood is the only storage engine type supporting encryption.
+		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+		TraceEvent("ConfigureDatabase_Config").detail("Config", config.toString());
+		if (config.encryptionAtRestMode.isEncryptionEnabled()) {
+			TraceEvent("ConfigureDatabase_EncryptionEnabled");
+			self->storageEngineExcludeTypes = { 0, 1, 2, 4, 5 };
+		}
 		if (self->clientId == 0) {
 			self->clients.push_back(timeout(self->singleDB(self, cx), self->testDuration, Void()));
 			wait(waitForAll(self->clients));
@@ -418,10 +425,35 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				wait(success(changeQuorum(cx, ch)));
 				//TraceEvent("ConfigureTestConfigureEnd").detail("NewQuorum", s);
 			} else if (randomChoice == 5) {
-				wait(success(IssueConfigurationChange(
-				    cx,
-				    storeTypes[deterministicRandom()->randomInt(0, sizeof(storeTypes) / sizeof(storeTypes[0]))],
-				    true)));
+				int storeType = 0;
+				while (true) {
+					storeType = deterministicRandom()->randomInt(0, 4);
+					if (std::count(self->storageEngineExcludeTypes.begin(),
+					               self->storageEngineExcludeTypes.end(),
+					               storeType) == 0) {
+						break;
+					}
+				}
+				constexpr std::array ssdTypes{ "ssd", "ssd-1", "ssd-2" };
+				constexpr std::array memoryTypes{ "memory", "memory-1", "memory-2" };
+				const char* storeTypeStr = nullptr;
+				switch (storeType) {
+				case 0:
+					storeTypeStr = ssdTypes[deterministicRandom()->randomInt(0, 3)];
+					break;
+				case 1:
+					storeTypeStr = memoryTypes[deterministicRandom()->randomInt(0, 3)];
+					break;
+				case 2:
+					storeTypeStr = "memory-radixtree-beta";
+					break;
+				case 3:
+					storeTypeStr = "ssd-redwood-1-experimental";
+					break;
+				default:
+					ASSERT(false);
+				}
+				wait(success(IssueConfigurationChange(cx, storeTypeStr, true)));
 			} else if (randomChoice == 6) {
 				// Some configurations will be invalid, and that's fine.
 				int length = sizeof(logTypes) / sizeof(logTypes[0]);

@@ -1,0 +1,22 @@
+[configuration]
+allowDefaultTenant = false
+tenantModes = ['optional', 'required']
+allowCreatingTenants = false
+extraDatabaseMode = 'Multiple'
+extraDatabaseCount = 5
+
+[[test]]
+testTitle = 'MetaclusterManagementConcurrencyTest'
+clearAfterTest = true
+timeout = 2100
+runSetup = true
+
+    [[test.workload]]
+    testName = 'MetaclusterManagementConcurrency'
+    testDuration = 30
+    
+    [[test.workload]]
+    testName = 'TenantManagementConcurrency'
+    useMetacluster = true
+    createMetacluster = false
+    testDuration = 30

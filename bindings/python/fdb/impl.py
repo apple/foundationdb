@@ -1326,6 +1326,9 @@ class Database(_TransactionCreator):
         self.capi.fdb_database_create_transaction(self.dpointer, ctypes.byref(pointer))
         return Transaction(pointer.value, self)
 
+    def get_client_status(self):
+        return Key(self.capi.fdb_database_get_client_status(self.dpointer))
+
 
 class Tenant(_TransactionCreator):
     def __init__(self, tpointer):
@@ -1338,6 +1341,9 @@ class Tenant(_TransactionCreator):
         pointer = ctypes.c_void_p()
         self.capi.fdb_tenant_create_transaction(self.tpointer, ctypes.byref(pointer))
         return Transaction(pointer.value, self)
+
+    def get_id(self):
+        return FutureInt64(self.capi.fdb_tenant_get_id(self.tpointer))
 
 
 fill_operations()
@@ -1453,7 +1459,7 @@ def check_error_code(code, func, arguments):
     return None
 
 
-if sys.maxsize <= 2 ** 32:
+if sys.maxsize <= 2**32:
     raise Exception("FoundationDB API requires a 64-bit python interpreter!")
 if platform.system() == "Windows":
     capi_name = "fdb_c.dll"
@@ -1707,8 +1713,14 @@ def init_c_api():
     _capi.fdb_database_set_option.restype = ctypes.c_int
     _capi.fdb_database_set_option.errcheck = check_error_code
 
+    _capi.fdb_database_get_client_status.argtypes = [ctypes.c_void_p]
+    _capi.fdb_database_get_client_status.restype = ctypes.c_void_p
+
     _capi.fdb_tenant_destroy.argtypes = [ctypes.c_void_p]
     _capi.fdb_tenant_destroy.restype = None
+
+    _capi.fdb_tenant_get_id.argtypes = [ctypes.c_void_p]
+    _capi.fdb_tenant_get_id.restype = ctypes.c_void_p
 
     _capi.fdb_tenant_create_transaction.argtypes = [
         ctypes.c_void_p,
@@ -1884,7 +1896,6 @@ if hasattr(ctypes.pythonapi, "Py_IncRef"):
 
     def _unpin_callback(cb):
         ctypes.pythonapi.Py_DecRef(ctypes.py_object(cb))
-
 
 else:
     _active_callbacks = set()

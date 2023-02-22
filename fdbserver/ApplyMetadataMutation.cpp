@@ -25,7 +25,6 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ApplyMetadataMutation.h"
-#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
@@ -87,7 +86,15 @@ public:
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
 	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
 	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), initialCommit(initialCommit_),
-	    provisionalCommitProxy(provisionalCommitProxy_) {}
+	    provisionalCommitProxy(provisionalCommitProxy_) {
+		if (encryptMode.isEncryptionEnabled()) {
+			ASSERT(cipherKeys != nullptr);
+			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
+			if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+				ASSERT(cipherKeys->count(ENCRYPT_HEADER_DOMAIN_ID));
+			}
+		}
+	}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           ResolverData& resolverData_,
@@ -98,7 +105,15 @@ public:
 	    cipherKeys(cipherKeys_), encryptMode(encryptMode), txnStateStore(resolverData_.txnStateStore),
 	    toCommit(resolverData_.toCommit), confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem),
 	    popVersion(resolverData_.popVersion), keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
-	    initialCommit(resolverData_.initialCommit), forResolver(true) {}
+	    initialCommit(resolverData_.initialCommit), forResolver(true) {
+		if (encryptMode.isEncryptionEnabled()) {
+			ASSERT(cipherKeys != nullptr);
+			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
+			if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+				ASSERT(cipherKeys->count(ENCRYPT_HEADER_DOMAIN_ID));
+			}
+		}
+	}
 
 private:
 	// The following variables are incoming parameters
@@ -137,8 +152,8 @@ private:
 	std::map<Tag, Version>* tag_popped = nullptr;
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
-	std::unordered_map<int64_t, TenantName>* tenantMap = nullptr;
-	std::map<TenantName, int64_t>* tenantNameIndex = nullptr;
+	std::map<int64_t, TenantName>* tenantMap = nullptr;
+	std::unordered_map<TenantName, int64_t>* tenantNameIndex = nullptr;
 	EncryptionAtRestMode encryptMode;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
@@ -673,20 +688,19 @@ private:
 	void checkSetTenantMapPrefix(MutationRef m) {
 		KeyRef prefix = TenantMetadata::tenantMap().subspace.begin;
 		if (m.param1.startsWith(prefix)) {
-			TenantName tenantName = m.param1.removePrefix(prefix);
 			TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
 
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
 
 				TraceEvent("CommitProxyInsertTenant", dbgid)
-				    .detail("Tenant", tenantName)
+				    .detail("Tenant", tenantEntry.tenantName)
 				    .detail("Id", tenantEntry.id)
 				    .detail("Version", version);
 
-				(*tenantMap)[tenantEntry.id] = tenantName;
+				(*tenantMap)[tenantEntry.id] = tenantEntry.tenantName;
 				if (tenantNameIndex) {
-					(*tenantNameIndex)[tenantName] = tenantEntry.id;
+					(*tenantNameIndex)[tenantEntry.tenantName] = tenantEntry.id;
 				}
 			}
 
@@ -1096,25 +1110,31 @@ private:
 			if (tenantMap && tenantNameIndex) {
 				ASSERT(version != invalidVersion);
 
-				StringRef startTenant = std::max(range.begin, subspace.begin).removePrefix(subspace.begin);
-				StringRef endTenant =
-				    range.end.startsWith(subspace.begin) ? range.end.removePrefix(subspace.begin) : "\xff\xff"_sr;
+				Optional<int64_t> startId = 0;
+				Optional<int64_t> endId;
+
+				if (range.begin > subspace.begin) {
+					startId = TenantIdCodec::lowerBound(range.begin.removePrefix(subspace.begin));
+				}
+				if (range.end.startsWith(subspace.begin)) {
+					endId = TenantIdCodec::lowerBound(range.end.removePrefix(subspace.begin));
+				}
 
 				TraceEvent("CommitProxyEraseTenants", dbgid)
-				    .detail("BeginTenant", startTenant)
-				    .detail("EndTenant", endTenant)
+				    .detail("BeginTenant", startId)
+				    .detail("EndTenant", endId)
 				    .detail("Version", version);
 
-				auto startItr = tenantNameIndex->lower_bound(startTenant);
-				auto endItr = tenantNameIndex->lower_bound(endTenant);
+				auto startItr = startId.present() ? tenantMap->lower_bound(startId.get()) : tenantMap->end();
+				auto endItr = endId.present() ? tenantMap->lower_bound(endId.get()) : tenantMap->end();
 
 				auto itr = startItr;
 				while (itr != endItr) {
-					tenantMap->erase(itr->second);
+					tenantNameIndex->erase(itr->second);
 					itr++;
 				}
 
-				tenantNameIndex->erase(startItr, endItr);
+				tenantMap->erase(startItr, endItr);
 			}
 
 			if (!initialCommit) {

@@ -40,6 +40,16 @@
 
 namespace fdb_cli {
 
+constexpr char msgTypeKey[] = "type";
+constexpr char msgClusterKey[] = "cluster";
+constexpr char msgClusterTypeKey[] = "cluster_type";
+constexpr char msgMetaclusterName[] = "metacluster_name";
+constexpr char msgMetaclusterKey[] = "metacluster";
+constexpr char msgDataClustersKey[] = "data_clusters";
+constexpr char msgCapacityKey[] = "capacity";
+constexpr char msgAllocatedKey[] = "allocated";
+constexpr char msgErrorKey[] = "error";
+
 struct CommandHelp {
 	std::string usage;
 	std::string short_desc;
@@ -272,6 +282,8 @@ ACTOR Future<bool> tssqCommandActor(Reference<IDatabase> db, std::vector<StringR
 ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx, std::vector<StringRef> tokens);
 // targetversion command
 ACTOR Future<bool> targetVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// idempotencyids command
+ACTOR Future<bool> idempotencyIdsCommandActor(Database cx, std::vector<StringRef> tokens);
 
 } // namespace fdb_cli
 

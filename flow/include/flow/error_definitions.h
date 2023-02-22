@@ -137,6 +137,7 @@ ERROR( proxy_tag_throttled, 1223, "Exceeded maximum proxy tag throttling duratio
 ERROR( key_value_store_deadline_exceeded, 1224, "Exceeded maximum time allowed to read or write.")
 ERROR( storage_quota_exceeded, 1225, "Exceeded the maximum storage quota allocated to the tenant.")
 ERROR( audit_storage_error, 1226, "Found data corruption" )
+ERROR( master_failed, 1227, "Cluster recovery terminating because master has failed")
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -267,6 +268,10 @@ ERROR( metacluster_no_capacity, 2166, "Metacluster does not have capacity to cre
 ERROR( management_cluster_invalid_access, 2167, "Standard transactions cannot be run against the management cluster" )
 ERROR( tenant_creation_permanently_failed, 2168, "The tenant creation did not complete in a timely manner and has permanently failed" )
 ERROR( cluster_removed, 2169, "The cluster is being removed from the metacluster" )
+ERROR( cluster_restoring, 2170, "The cluster is being restored to the metacluster" )
+ERROR( invalid_data_cluster, 2171, "The data cluster being restored has no record of its metacluster" )
+ERROR( metacluster_mismatch, 2172, "The cluster does not have the expected name or is associated with a different metacluster" )
+ERROR( conflicting_restore, 2173, "Another restore is running for the same data cluster" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
@@ -325,6 +330,11 @@ ERROR( restore_duplicate_uid, 2371, "Attempted to restore using a UID that had b
 ERROR( task_invalid_version, 2381, "Invalid task version")
 ERROR( task_interrupted, 2382, "Task execution stopped due to timeout, abort, or completion by another worker")
 ERROR( invalid_encryption_key_file, 2383, "The provided encryption key file has invalid contents" )
+ERROR( blob_restore_missing_logs, 2384, "Missing mutation logs" )
+ERROR( blob_restore_corrupted_logs, 2385, "Corrupted mutation logs" )
+ERROR( blob_restore_invalid_manifest_url, 2386, "Invalid manifest URL" )
+ERROR( blob_restore_corrupted_manifest, 2387, "Corrupted manifest" )
+ERROR( blob_restore_missing_manifest, 2388, "Missing manifest" )
 
 ERROR( key_not_found, 2400, "Expected key is missing")
 ERROR( json_malformed, 2401, "JSON string was malformed")
@@ -353,6 +363,7 @@ ERROR( encrypt_invalid_id, 2706, "Invalid encryption cipher details" )
 ERROR( encrypt_keys_fetch_failed, 2707, "Encryption keys fetch from external KMS failed" )
 ERROR( encrypt_invalid_kms_config, 2708, "Invalid encryption/kms configuration: discovery-url, validation-token, endpoint etc." )
 ERROR( encrypt_unsupported, 2709, "Encryption not supported" )
+ERROR( encrypt_mode_mismatch, 2710, "Encryption mode mismatch with configuration")
 
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error

@@ -47,6 +47,9 @@ bool getOption(VectorRef<KeyValueRef> options, Key key, bool defaultValue);
 std::vector<std::string> getOption(VectorRef<KeyValueRef> options,
                                    Key key,
                                    std::vector<std::string> defaultValue); // comma-separated strings
+std::vector<int> getOption(VectorRef<KeyValueRef> options,
+                           Key key,
+                           std::vector<int> defaultValue = {}); // comma-separated integers
 bool hasOption(VectorRef<KeyValueRef> options, Key key);
 
 struct WorkloadContext {
@@ -335,6 +338,7 @@ public:
 	ISimulator::BackupAgentType simDrAgents;
 
 	KnobKeyValuePairs overrideKnobs;
+	std::vector<std::string> disabledFailureInjectionWorkloads;
 };
 
 ACTOR Future<DistributedTestResults> runWorkload(Database cx,

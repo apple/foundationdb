@@ -186,10 +186,15 @@ ACTOR Future<bool> tenantCreateCommand(Reference<IDatabase> db, std::vector<Stri
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 				TenantMapEntry tenantEntry;
+				AssignClusterAutomatically assignClusterAutomatically = AssignClusterAutomatically::True;
 				for (auto const& [name, value] : configuration.get()) {
+					if (name == "assigned_cluster"_sr) {
+						assignClusterAutomatically = AssignClusterAutomatically::False;
+					}
 					tenantEntry.configure(name, value);
 				}
-				wait(MetaclusterAPI::createTenant(db, tokens[2], tenantEntry));
+				tenantEntry.tenantName = tokens[2];
+				wait(MetaclusterAPI::createTenant(db, tenantEntry, assignClusterAutomatically));
 			} else {
 				if (!doneExistenceCheck) {
 					// Hold the reference to the standalone's memory
@@ -360,10 +365,18 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			state std::vector<TenantName> tenantNames;
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
-				    wait(MetaclusterAPI::listTenants(db, beginTenant, endTenant, limit, offset, filters));
-				for (auto tenant : tenants) {
-					tenantNames.push_back(tenant.first);
+				if (filters.empty()) {
+					std::vector<std::pair<TenantName, int64_t>> tenants =
+					    wait(MetaclusterAPI::listTenants(db, beginTenant, endTenant, limit, offset));
+					for (auto tenant : tenants) {
+						tenantNames.push_back(tenant.first);
+					}
+				} else {
+					std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
+					    wait(MetaclusterAPI::listTenantMetadata(db, beginTenant, endTenant, limit, offset, filters));
+					for (auto tenant : tenants) {
+						tenantNames.push_back(tenant.first);
+					}
 				}
 			} else {
 				// Hold the reference to the standalone's memory
@@ -450,13 +463,15 @@ ACTOR Future<bool> tenantGetCommand(Reference<IDatabase> db, std::vector<StringR
 				std::string tenantState;
 				std::string tenantGroup;
 				std::string assignedCluster;
+				std::string error;
 
 				doc.get("id", id);
 				doc.get("prefix.printable", prefix);
 
 				doc.get("tenant_state", tenantState);
 				bool hasTenantGroup = doc.tryGet("tenant_group.printable", tenantGroup);
-				bool hasAssignedCluster = doc.tryGet("assigned_cluster", assignedCluster);
+				bool hasAssignedCluster = doc.tryGet("assigned_cluster.printable", assignedCluster);
+				bool hasError = doc.tryGet("error", error);
 
 				fmt::print("  id: {}\n", id);
 				fmt::print("  prefix: {}\n", printable(prefix).c_str());
@@ -466,6 +481,9 @@ ACTOR Future<bool> tenantGetCommand(Reference<IDatabase> db, std::vector<StringR
 				}
 				if (hasAssignedCluster) {
 					fmt::print("  assigned cluster: {}\n", printable(assignedCluster).c_str());
+				}
+				if (hasError) {
+					fmt::print("  error: {}\n", error);
 				}
 			}
 			return true;

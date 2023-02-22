@@ -27,6 +27,7 @@
 #include "flow/FastRef.h"
 #include "flow/Net2Packet.h"
 
+#include <fmt/format.h>
 #include <unordered_map>
 #include <utility>
 
@@ -37,6 +38,8 @@
 // the pool.
 
 using RESTConnectionPoolKey = std::pair<std::string, std::string>;
+
+class IConnection;
 
 class RESTConnectionPool : public ReferenceCounted<RESTConnectionPool> {
 public:
@@ -105,6 +108,11 @@ public:
 
 	explicit RESTUrl(const std::string& fullUrl, const bool isSecure);
 	explicit RESTUrl(const std::string& fullUrl, const std::string& body, const bool isSecure);
+
+	std::string toString() const {
+		return fmt::format(
+		    "Host {} Service {} Resource {} ReqParams {} Body {}", host, service, resource, reqParameters, body);
+	}
 
 private:
 	void parseUrl(const std::string& fullUrl, bool isSecure);

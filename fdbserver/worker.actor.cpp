@@ -70,6 +70,8 @@
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/serialize.h"
+#include "flow/ChaosMetrics.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -97,6 +99,21 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #else
 #define KV_STORE(filename, uid) keyValueStoreMemory(filename, uid)
 #endif
+
+template class RequestStream<RecruitMasterRequest, false>;
+template struct NetNotifiedQueue<RecruitMasterRequest, false>;
+
+template class RequestStream<RegisterMasterRequest, false>;
+template struct NetNotifiedQueue<RegisterMasterRequest, false>;
+
+template class RequestStream<InitializeCommitProxyRequest, false>;
+template struct NetNotifiedQueue<InitializeCommitProxyRequest, false>;
+
+template class RequestStream<InitializeGrvProxyRequest, false>;
+template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
+
+template class RequestStream<GetServerDBInfoRequest, false>;
+template struct NetNotifiedQueue<GetServerDBInfoRequest, false>;
 
 namespace {
 RoleLineageCollector roleLineageCollector;
@@ -251,7 +268,7 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 				CODE_PROBE(true, "Worker terminated with file_not_found error");
 				return Void();
 			} else if (e.getError().code() == error_code_lock_file_failure) {
-				CODE_PROBE(true, "Unable to lock file", probe::decoration::rare);
+				CODE_PROBE(true, "Unable to lock file", probe::context::net2, probe::assert::noSim);
 				throw please_reboot_kv_store();
 			}
 			throw e.getError();
@@ -1314,7 +1331,6 @@ ACTOR Future<Void> storageServerRollbackRebooter(
     IKeyValueStore* store,
     bool validateDataFiles,
     Promise<Void>* rebootKVStore,
-    Reference<IPageEncryptionKeyProvider> encryptionKeyProvider,
     std::shared_ptr<std::map<std::string, std::string>> storageEngineParams) {
 	state TrackRunningStorage _(id, storeType, runningStorages);
 	loop {
@@ -1349,7 +1365,6 @@ ACTOR Future<Void> storageServerRollbackRebooter(
 			             ? (/* Disable for RocksDB */ storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
 			                deterministicRandom()->coinflip())
 			             : true),
-			    encryptionKeyProvider,
 			    params);
 			Promise<Void> nextRebootKVStorePromise;
 			filesClosed->add(store->onClosed() ||
@@ -1393,7 +1408,6 @@ ACTOR Future<Void> storageServerRollbackRebooter(
 		                                  folder,
 		                                  Promise<Void>(),
 		                                  Reference<IClusterConnectionRecord>(nullptr),
-		                                  encryptionKeyProvider,
 		                                  storageEngineParams);
 		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
 	}
@@ -1858,14 +1872,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
 
-				Reference<IPageEncryptionKeyProvider> encryptionKeyProvider;
-				if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
-					encryptionKeyProvider =
-					    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryptionWithAuth>>(dbInfo);
-				} else {
-					encryptionKeyProvider =
-					    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryption>>(dbInfo);
-				}
 				IKeyValueStore* kv = openKVStore(
 				    s.storeType,
 				    s.filename,
@@ -1879,7 +1885,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                s.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 				                deterministicRandom()->coinflip())
 				             : true),
-				    encryptionKeyProvider,
+				    dbInfo,
 				    Optional<std::map<std::string, std::string>>(StorageEngineParamsFactory::getParams(s.storeType)));
 				Future<Void> kvClosed =
 				    kv->onClosed() ||
@@ -1932,8 +1938,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				    std::make_shared<std::map<std::string, std::string>>(
 				        StorageEngineParamsFactory::getParams(s.storeType));
 				Promise<Void> recovery;
-				Future<Void> f = storageServer(
-				    kv, recruited, dbInfo, folder, recovery, connRecord, encryptionKeyProvider, paramsPtr);
+				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connRecord, paramsPtr);
 				recoveries.push_back(recovery.getFuture());
 				f = handleIOErrors(f, kv, s.storeID, kvClosed);
 				f = storageServerRollbackRebooter(&runningStorages,
@@ -1950,9 +1955,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                                  kv,
 				                                  validateDataFiles,
 				                                  &rebootKVSPromise,
-				                                  encryptionKeyProvider,
 				                                  paramsPtr);
-				errorForwarders.add(forwardError(errors, ssRole, recruited.id(), f));
 			} else if (s.storedComponent == DiskStore::TLogData) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::TLog;
@@ -2557,15 +2560,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                   folder,
 					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
-					Reference<IPageEncryptionKeyProvider> encryptionKeyProvider;
-					if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
-						encryptionKeyProvider =
-						    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryptionWithAuth>>(
-						        dbInfo);
-					} else {
-						encryptionKeyProvider =
-						    makeReference<TenantAwareEncryptionKeyProvider<EncodingType::AESEncryption>>(dbInfo);
-					}
 					IKeyValueStore* data = openKVStore(
 					    req.storeType,
 					    filename,
@@ -2579,8 +2573,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                req.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 					                deterministicRandom()->coinflip())
 					             : true),
-					    encryptionKeyProvider,
-					    req.storageEngineParams);
+					    dbInfo,
+					    req.encryptMode,
+						req.storageEngineParams);
 
 					Future<Void> kvClosed =
 					    data->onClosed() ||
@@ -2601,7 +2596,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                               storageReady,
 					                               dbInfo,
 					                               folder,
-					                               encryptionKeyProvider,
 					                               paramsPtr);
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
@@ -2619,9 +2613,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                                  data,
 					                                  false,
 					                                  &rebootKVSPromise2,
-					                                  encryptionKeyProvider,
 					                                  paramsPtr);
-					errorForwarders.add(forwardError(errors, ssRole, recruited.id(), s));
 				} else if (storageCache.exists(req.reqId)) {
 					forwardPromise(req.reply, storageCache.get(req.reqId));
 				} else {
@@ -2675,7 +2667,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.txnState);
 				DUMPTOKEN(recruited.getTenantId);
 
-				// printf("Recruited as commitProxyServer\n");
 				errorForwarders.add(zombie(recruited,
 				                           forwardError(errors,
 				                                        Role::COMMIT_PROXY,
@@ -3521,7 +3512,7 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
 extern void setupStackSignal();
 
 ACTOR Future<Void> serveProtocolInfo() {
-	state RequestStream<ProtocolInfoRequest> protocolInfo(
+	state PublicRequestStream<ProtocolInfoRequest> protocolInfo(
 	    PeerCompatibilityPolicy{ RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() });
 	protocolInfo.makeWellKnownEndpoint(WLTOKEN_PROTOCOL_INFO, TaskPriority::DefaultEndpoint);
 	loop {

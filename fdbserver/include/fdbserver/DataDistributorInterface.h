@@ -199,10 +199,10 @@ struct GetStorageWigglerStateRequest {
 
 struct TenantsOverStorageQuotaReply {
 	constexpr static FileIdentifier file_identifier = 5952266;
-	std::unordered_set<TenantName> tenants;
+	std::unordered_set<int64_t> tenants;
 
 	TenantsOverStorageQuotaReply() {}
-	explicit TenantsOverStorageQuotaReply(std::unordered_set<TenantName> const& tenants) : tenants(tenants) {}
+	explicit TenantsOverStorageQuotaReply(std::unordered_set<int64_t> const& tenants) : tenants(tenants) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
