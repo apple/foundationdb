@@ -673,183 +673,6 @@ void updateClusterMetadata(Transaction tr,
 }
 
 template <class DB>
-struct RegisterClusterImpl {
-	MetaclusterOperationContext<DB> ctx;
-
-	// Initialization parameters
-	ClusterName clusterName;
-	ClusterConnectionString connectionString;
-	DataClusterEntry clusterEntry;
-
-	RegisterClusterImpl(Reference<DB> managementDb,
-	                    ClusterName clusterName,
-	                    ClusterConnectionString connectionString,
-	                    DataClusterEntry clusterEntry)
-	  : ctx(managementDb), clusterName(clusterName), connectionString(connectionString), clusterEntry(clusterEntry) {}
-
-	// Store the cluster entry for the new cluster in a registering state
-	ACTOR static Future<Void> registerInManagementCluster(RegisterClusterImpl* self,
-	                                                      Reference<typename DB::TransactionT> tr) {
-		state Optional<DataClusterMetadata> dataClusterMetadata = wait(tryGetClusterTransaction(tr, self->clusterName));
-		if (!dataClusterMetadata.present()) {
-			self->clusterEntry.clusterState = DataClusterState::REGISTERING;
-			self->clusterEntry.allocated = ClusterUsage();
-			self->clusterEntry.id = deterministicRandom()->randomUniqueID();
-
-			ManagementClusterMetadata::dataClusters().set(tr, self->clusterName, self->clusterEntry);
-			ManagementClusterMetadata::dataClusterConnectionRecords.set(tr, self->clusterName, self->connectionString);
-		} else if (dataClusterMetadata.get().entry.clusterState == DataClusterState::REMOVING) {
-			throw cluster_removed();
-		} else if (!dataClusterMetadata.get().matchesConfiguration(
-		               DataClusterMetadata(self->clusterEntry, self->connectionString)) ||
-		           dataClusterMetadata.get().entry.clusterState != DataClusterState::REGISTERING) {
-			throw cluster_already_exists();
-		} else {
-			self->clusterEntry = dataClusterMetadata.get().entry;
-		}
-
-		TraceEvent("RegisteringDataCluster")
-		    .detail("ClusterName", self->clusterName)
-		    .detail("ClusterID", self->clusterEntry.id)
-		    .detail("Capacity", self->clusterEntry.capacity)
-		    .detail("ConnectionString", self->connectionString.toString());
-
-		return Void();
-	}
-
-	ACTOR static Future<Void> configureDataCluster(RegisterClusterImpl* self) {
-		state Reference<IDatabase> dataClusterDb = wait(openDatabase(self->connectionString));
-		state Reference<ITransaction> tr = dataClusterDb->createTransaction();
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-				state Future<std::vector<std::pair<TenantName, int64_t>>> existingTenantsFuture =
-				    TenantAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, 1);
-				state ThreadFuture<RangeResult> existingDataFuture = tr->getRange(normalKeys, 1);
-				state Future<bool> tombstoneFuture =
-				    MetaclusterMetadata::registrationTombstones().exists(tr, self->clusterEntry.id);
-
-				// Check whether this cluster has already been registered
-				state Optional<MetaclusterRegistrationEntry> existingRegistration =
-				    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
-				if (existingRegistration.present()) {
-					if (existingRegistration.get().clusterType != ClusterType::METACLUSTER_DATA ||
-					    existingRegistration.get().name != self->clusterName ||
-					    !existingRegistration.get().matches(self->ctx.metaclusterRegistration.get()) ||
-					    existingRegistration.get().id != self->clusterEntry.id) {
-						throw cluster_already_registered();
-					} else {
-						// We already successfully registered the cluster with these details, so there's nothing to
-						// do
-						return Void();
-					}
-				}
-
-				// Check if the cluster was removed concurrently
-				bool tombstone = wait(tombstoneFuture);
-				if (tombstone) {
-					throw cluster_removed();
-				}
-
-				// Check for any existing data
-				std::vector<std::pair<TenantName, int64_t>> existingTenants =
-				    wait(safeThreadFutureToFuture(existingTenantsFuture));
-				if (!existingTenants.empty()) {
-					TraceEvent(SevWarn, "CannotRegisterClusterWithTenants").detail("ClusterName", self->clusterName);
-					throw cluster_not_empty();
-				}
-
-				RangeResult existingData = wait(safeThreadFutureToFuture(existingDataFuture));
-				if (!existingData.empty()) {
-					TraceEvent(SevWarn, "CannotRegisterClusterWithData").detail("ClusterName", self->clusterName);
-					throw cluster_not_empty();
-				}
-
-				MetaclusterMetadata::metaclusterRegistration().set(
-				    tr,
-				    self->ctx.metaclusterRegistration.get().toDataClusterRegistration(self->clusterName,
-				                                                                      self->clusterEntry.id));
-
-				// If we happen to have any orphaned restore IDs from a previous time this cluster was in a metacluster,
-				// erase them now.
-				MetaclusterMetadata::activeRestoreIds().clear(tr);
-
-				wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
-
-				TraceEvent("ConfiguredDataCluster")
-				    .detail("ClusterName", self->clusterName)
-				    .detail("ClusterID", self->clusterEntry.id)
-				    .detail("Capacity", self->clusterEntry.capacity)
-				    .detail("Version", tr->getCommittedVersion())
-				    .detail("ConnectionString", self->connectionString.toString());
-
-				return Void();
-			} catch (Error& e) {
-				wait(safeThreadFutureToFuture(tr->onError(e)));
-			}
-		}
-	}
-
-	// Store the cluster entry for the new cluster
-	ACTOR static Future<Void> markClusterReady(RegisterClusterImpl* self, Reference<typename DB::TransactionT> tr) {
-		state Optional<DataClusterMetadata> dataClusterMetadata = wait(tryGetClusterTransaction(tr, self->clusterName));
-		if (!dataClusterMetadata.present() ||
-		    dataClusterMetadata.get().entry.clusterState == DataClusterState::REMOVING) {
-			throw cluster_removed();
-		} else if (dataClusterMetadata.get().entry.id != self->clusterEntry.id) {
-			throw cluster_already_exists();
-		} else if (dataClusterMetadata.get().entry.clusterState == DataClusterState::READY) {
-			return Void();
-		} else if (dataClusterMetadata.get().entry.clusterState == DataClusterState::RESTORING) {
-			throw cluster_restoring();
-		} else {
-			ASSERT(dataClusterMetadata.get().entry.clusterState == DataClusterState::REGISTERING);
-			dataClusterMetadata.get().entry.clusterState = DataClusterState::READY;
-
-			if (dataClusterMetadata.get().entry.hasCapacity()) {
-				ManagementClusterMetadata::clusterCapacityIndex.insert(
-				    tr, Tuple::makeTuple(dataClusterMetadata.get().entry.allocated.numTenantGroups, self->clusterName));
-			}
-			ManagementClusterMetadata::dataClusters().set(tr, self->clusterName, dataClusterMetadata.get().entry);
-			ManagementClusterMetadata::dataClusterConnectionRecords.set(tr, self->clusterName, self->connectionString);
-		}
-
-		TraceEvent("RegisteredDataCluster")
-		    .detail("ClusterName", self->clusterName)
-		    .detail("ClusterID", self->clusterEntry.id)
-		    .detail("Capacity", dataClusterMetadata.get().entry.capacity)
-		    .detail("ConnectionString", self->connectionString.toString());
-
-		return Void();
-	}
-
-	ACTOR static Future<Void> run(RegisterClusterImpl* self) {
-		wait(self->ctx.runManagementTransaction(
-		    [self = self](Reference<typename DB::TransactionT> tr) { return registerInManagementCluster(self, tr); }));
-
-		// Don't use ctx to run this transaction because we have not set up the data cluster metadata on it and we
-		// don't have a metacluster registration on the data cluster
-		wait(configureDataCluster(self));
-		wait(self->ctx.runManagementTransaction(
-		    [self = self](Reference<typename DB::TransactionT> tr) { return markClusterReady(self, tr); }));
-
-		return Void();
-	}
-	Future<Void> run() { return run(this); }
-};
-
-ACTOR template <class DB>
-Future<Void> registerCluster(Reference<DB> db,
-                             ClusterName name,
-                             ClusterConnectionString connectionString,
-                             DataClusterEntry entry) {
-	state RegisterClusterImpl<DB> impl(db, name, connectionString, entry);
-	wait(impl.run());
-	return Void();
-}
-
-template <class DB>
 struct RemoveClusterImpl {
 	MetaclusterOperationContext<DB> ctx;
 
@@ -1188,6 +1011,183 @@ Future<bool> removeCluster(Reference<DB> db,
 	state RemoveClusterImpl<DB> impl(db, name, clusterType, forceRemove, dataClusterTimeout);
 	wait(impl.run());
 	return impl.dataClusterUpdated;
+}
+
+template <class DB>
+struct RegisterClusterImpl {
+	MetaclusterOperationContext<DB> ctx;
+
+	// Initialization parameters
+	ClusterName clusterName;
+	ClusterConnectionString connectionString;
+	DataClusterEntry clusterEntry;
+
+	RegisterClusterImpl(Reference<DB> managementDb,
+	                    ClusterName clusterName,
+	                    ClusterConnectionString connectionString,
+	                    DataClusterEntry clusterEntry)
+	  : ctx(managementDb), clusterName(clusterName), connectionString(connectionString), clusterEntry(clusterEntry) {}
+
+	// Store the cluster entry for the new cluster in a registering state
+	ACTOR static Future<Void> registerInManagementCluster(RegisterClusterImpl* self,
+	                                                      Reference<typename DB::TransactionT> tr) {
+		state Optional<DataClusterMetadata> dataClusterMetadata = wait(tryGetClusterTransaction(tr, self->clusterName));
+		if (!dataClusterMetadata.present()) {
+			self->clusterEntry.clusterState = DataClusterState::REGISTERING;
+			self->clusterEntry.allocated = ClusterUsage();
+			self->clusterEntry.id = deterministicRandom()->randomUniqueID();
+
+			ManagementClusterMetadata::dataClusters().set(tr, self->clusterName, self->clusterEntry);
+			ManagementClusterMetadata::dataClusterConnectionRecords.set(tr, self->clusterName, self->connectionString);
+		} else if (dataClusterMetadata.get().entry.clusterState == DataClusterState::REMOVING) {
+			throw cluster_removed();
+		} else if (!dataClusterMetadata.get().matchesConfiguration(
+		               DataClusterMetadata(self->clusterEntry, self->connectionString)) ||
+		           dataClusterMetadata.get().entry.clusterState != DataClusterState::REGISTERING) {
+			throw cluster_already_exists();
+		} else {
+			self->clusterEntry = dataClusterMetadata.get().entry;
+		}
+
+		TraceEvent("RegisteringDataCluster")
+		    .detail("ClusterName", self->clusterName)
+		    .detail("ClusterID", self->clusterEntry.id)
+		    .detail("Capacity", self->clusterEntry.capacity)
+		    .detail("ConnectionString", self->connectionString.toString());
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> configureDataCluster(RegisterClusterImpl* self) {
+		state Reference<IDatabase> dataClusterDb = wait(openDatabase(self->connectionString));
+		state Reference<ITransaction> tr = dataClusterDb->createTransaction();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+				state Future<std::vector<std::pair<TenantName, int64_t>>> existingTenantsFuture =
+				    TenantAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, 1);
+				state ThreadFuture<RangeResult> existingDataFuture = tr->getRange(normalKeys, 1);
+				state Future<bool> tombstoneFuture =
+				    MetaclusterMetadata::registrationTombstones().exists(tr, self->clusterEntry.id);
+
+				// Check whether this cluster has already been registered
+				state Optional<MetaclusterRegistrationEntry> existingRegistration =
+				    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
+				if (existingRegistration.present()) {
+					if (existingRegistration.get().clusterType != ClusterType::METACLUSTER_DATA ||
+					    existingRegistration.get().name != self->clusterName ||
+					    !existingRegistration.get().matches(self->ctx.metaclusterRegistration.get()) ||
+					    existingRegistration.get().id != self->clusterEntry.id) {
+						throw cluster_already_registered();
+					} else {
+						// We already successfully registered the cluster with these details, so there's nothing to
+						// do
+						return Void();
+					}
+				}
+
+				// Check if the cluster was removed concurrently
+				bool tombstone = wait(tombstoneFuture);
+				if (tombstone) {
+					throw cluster_removed();
+				}
+
+				// Check for any existing data
+				std::vector<std::pair<TenantName, int64_t>> existingTenants =
+				    wait(safeThreadFutureToFuture(existingTenantsFuture));
+				if (!existingTenants.empty()) {
+					TraceEvent(SevWarn, "CannotRegisterClusterWithTenants").detail("ClusterName", self->clusterName);
+					throw cluster_not_empty();
+				}
+
+				RangeResult existingData = wait(safeThreadFutureToFuture(existingDataFuture));
+				if (!existingData.empty()) {
+					TraceEvent(SevWarn, "CannotRegisterClusterWithData").detail("ClusterName", self->clusterName);
+					throw cluster_not_empty();
+				}
+
+				MetaclusterMetadata::metaclusterRegistration().set(
+				    tr,
+				    self->ctx.metaclusterRegistration.get().toDataClusterRegistration(self->clusterName,
+				                                                                      self->clusterEntry.id));
+
+				// If we happen to have any orphaned restore IDs from a previous time this cluster was in a metacluster,
+				// erase them now.
+				MetaclusterMetadata::activeRestoreIds().clear(tr);
+
+				wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
+
+				TraceEvent("ConfiguredDataCluster")
+				    .detail("ClusterName", self->clusterName)
+				    .detail("ClusterID", self->clusterEntry.id)
+				    .detail("Capacity", self->clusterEntry.capacity)
+				    .detail("Version", tr->getCommittedVersion())
+				    .detail("ConnectionString", self->connectionString.toString());
+
+				return Void();
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
+			}
+		}
+	}
+
+	// Store the cluster entry for the new cluster
+	ACTOR static Future<Void> markClusterReady(RegisterClusterImpl* self, Reference<typename DB::TransactionT> tr) {
+		state Optional<DataClusterMetadata> dataClusterMetadata = wait(tryGetClusterTransaction(tr, self->clusterName));
+		if (!dataClusterMetadata.present() ||
+		    dataClusterMetadata.get().entry.clusterState == DataClusterState::REMOVING) {
+			throw cluster_removed();
+		} else if (dataClusterMetadata.get().entry.id != self->clusterEntry.id) {
+			throw cluster_already_exists();
+		} else if (dataClusterMetadata.get().entry.clusterState == DataClusterState::READY) {
+			return Void();
+		} else if (dataClusterMetadata.get().entry.clusterState == DataClusterState::RESTORING) {
+			throw cluster_restoring();
+		} else {
+			ASSERT(dataClusterMetadata.get().entry.clusterState == DataClusterState::REGISTERING);
+			dataClusterMetadata.get().entry.clusterState = DataClusterState::READY;
+
+			if (dataClusterMetadata.get().entry.hasCapacity()) {
+				ManagementClusterMetadata::clusterCapacityIndex.insert(
+				    tr, Tuple::makeTuple(dataClusterMetadata.get().entry.allocated.numTenantGroups, self->clusterName));
+			}
+			ManagementClusterMetadata::dataClusters().set(tr, self->clusterName, dataClusterMetadata.get().entry);
+			ManagementClusterMetadata::dataClusterConnectionRecords.set(tr, self->clusterName, self->connectionString);
+		}
+
+		TraceEvent("RegisteredDataCluster")
+		    .detail("ClusterName", self->clusterName)
+		    .detail("ClusterID", self->clusterEntry.id)
+		    .detail("Capacity", dataClusterMetadata.get().entry.capacity)
+		    .detail("ConnectionString", self->connectionString.toString());
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> run(RegisterClusterImpl* self) {
+		wait(self->ctx.runManagementTransaction(
+		    [self = self](Reference<typename DB::TransactionT> tr) { return registerInManagementCluster(self, tr); }));
+
+		// Don't use ctx to run this transaction because we have not set up the data cluster metadata on it and we
+		// don't have a metacluster registration on the data cluster
+		wait(configureDataCluster(self));
+		wait(self->ctx.runManagementTransaction(
+		    [self = self](Reference<typename DB::TransactionT> tr) { return markClusterReady(self, tr); }));
+
+		return Void();
+	}
+	Future<Void> run() { return run(this); }
+};
+
+ACTOR template <class DB>
+Future<Void> registerCluster(Reference<DB> db,
+                             ClusterName name,
+                             ClusterConnectionString connectionString,
+                             DataClusterEntry entry) {
+	state RegisterClusterImpl<DB> impl(db, name, connectionString, entry);
+	wait(impl.run());
+	return Void();
 }
 
 ACTOR template <class Transaction>
