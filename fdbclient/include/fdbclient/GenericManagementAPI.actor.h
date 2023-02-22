@@ -133,7 +133,9 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 
 ConfigureAutoResult parseConfig(StatusObject const& status);
 
-bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bool creating);
+bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bool& paramsChange, bool creating);
+
+bool checkForConfigChange(std::map<std::string, std::string>& m);
 
 bool isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration> oldConfiguration,
                                        std::map<std::string, std::string> newConfig,
@@ -278,10 +280,12 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 			m.erase(iter);
 		}
 	}
-	if(!checkForStorageEngineParamsChange(m, creating)) {
+	state bool storageEngineParamsChange = false;
+	if(!checkForStorageEngineParamsChange(m, storageEngineParamsChange, creating)) {
 		fmt::print("Invalid configuration for storage engine params\n");
 		return ConfigurationResult::INVALID_CONFIGURATION;
 	}
+
 	if (creating) {
 		m[initIdKey.toString()] = deterministicRandom()->randomUniqueID().toString();
 		if (!isCompleteConfiguration(m)) {
@@ -547,8 +551,17 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 				wait(wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(false)));
 			}
 
-			tr->addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));
-			tr->set(moveKeysLockOwnerKey, versionKey);
+			if (checkForConfigChange(m)) {
+				tr->addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));
+				tr->set(moveKeysLockOwnerKey, versionKey);
+			}
+			
+			if (storageEngineParamsChange) {
+				// TODO : check if we need to change the catch block abd uf tge versionKey can be reused
+				tr->addReadConflictRange(singleKeyRange(storageEngineParamsVersionKey));
+				fmt::print("Set storage engine params version Key\n");
+				tr->set(storageEngineParamsVersionKey, versionKey);
+			}
 
 			wait(safeThreadFutureToFuture(tr->commit()));
 			break;

@@ -83,7 +83,7 @@ bool parseStorageEngineParams(KeyValueStoreType::StoreType storeType,
 				           KeyValueStoreType::getStoreTypeStr(storeType));
 				return false;
 			} else {
-				TraceEvent(SevDebug, "ReplaceDefaultStorageEngineParameter")
+				TraceEvent("ReplaceDefaultStorageEngineParameter")
 				    .detail("StoreType", KeyValueStoreType::getStoreTypeStr(storeType))
 				    .detail("Parameter", k)
 				    .detail("DefaultValue", paramsInitMap[k])
@@ -98,11 +98,12 @@ bool parseStorageEngineParams(KeyValueStoreType::StoreType storeType,
 	return true;
 }
 
-bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bool creating) {
+bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bool& paramsChange, bool creating) {
 	auto storageEngineParamsKey = configKeysPrefix.toString() + "storage_engine_params";
 	bool storageEngineParamsChange = m.count(storageEngineParamsKey) != 0;
 	if (!storageEngineParamsChange)
 		return true;
+	paramsChange = true;
 	auto paramsVal = m[storageEngineParamsKey];
 	auto storeType =
 	    static_cast<KeyValueStoreType::StoreType>(std::stoi(m[configKeysPrefix.toString() + "storage_engine"]));
@@ -111,6 +112,15 @@ bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bo
 	// erase the raw value string delimitered by ","
 	m.erase(storageEngineParamsKey);
 	return true;
+}
+
+bool checkForConfigChange(std::map<std::string, std::string>& m) {
+	for (const auto& [k, _] : m) {
+		Key key(k);
+		if (key.startsWith(configKeysPrefix) && !key.startsWith(storageEngineParamsPrefix))
+			return true;
+	}
+	return false;
 }
 
 // Defines the mapping between configuration names (as exposed by fdbcli, buildConfiguration()) and actual configuration
