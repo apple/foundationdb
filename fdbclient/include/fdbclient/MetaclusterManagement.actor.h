@@ -712,7 +712,9 @@ struct RemoveClusterImpl {
 		if ((self->clusterId.present() && clusterMetadata.entry.id != self->clusterId.get()) ||
 		    (!self->legalClusterStates.empty() &&
 		     !self->legalClusterStates.count(clusterMetadata.entry.clusterState))) {
-			throw cluster_already_exists();
+			// The type of error is currently ignored, and this is only used to terminate the remove operation.
+			// If that changes in the future, we may want to introduce a more suitable error type.
+			throw operation_failed();
 		}
 
 		if (!self->forceRemove && self->ctx.dataClusterMetadata.get().entry.allocated.numTenantGroups > 0) {
@@ -1196,9 +1198,15 @@ struct RegisterClusterImpl {
 				removeCluster.clusterId = self->clusterEntry.id;
 				removeCluster.legalClusterStates.insert(DataClusterState::REGISTERING);
 				wait(removeCluster.run());
+				TraceEvent("RegisterClusterRolledBack")
+				    .detail("ClusterName", self->clusterName)
+				    .detail("ConnectionString", self->connectionString.toString());
 			} catch (Error& e) {
 				// Removing the cluster after failing to register the data cluster is a best effort attempt. If it
 				// fails, the operator will need to remove it (or re-register it) themselves.
+				TraceEvent(SevWarn, "RegisterClusterRollbackFailed")
+				    .detail("ClusterName", self->clusterName)
+				    .detail("ConnectionString", self->connectionString.toString());
 			}
 			throw error;
 		}

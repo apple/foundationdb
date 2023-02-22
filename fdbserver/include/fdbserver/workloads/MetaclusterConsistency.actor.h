@@ -98,10 +98,11 @@ private:
 			auto allocatedItr = data.clusterAllocatedMap.find(clusterName);
 			if (!clusterMetadata.entry.hasCapacity()) {
 				ASSERT(allocatedItr == data.clusterAllocatedMap.end());
-			} else if (clusterMetadata.entry.clusterState == DataClusterState::READY) {
-				ASSERT(allocatedItr != data.clusterAllocatedMap.end());
+			} else if (allocatedItr != data.clusterAllocatedMap.end()) {
 				ASSERT_EQ(allocatedItr->second, clusterMetadata.entry.allocated.numTenantGroups);
 				++numFoundInAllocatedMap;
+			} else {
+				ASSERT_NE(clusterMetadata.entry.clusterState, DataClusterState::READY);
 			}
 
 			// Check that the number of tenant groups in the cluster is smaller than the allocated number of tenant
