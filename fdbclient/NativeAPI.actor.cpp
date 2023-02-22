@@ -7095,6 +7095,26 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		trState->automaticIdempotency = true;
 		break;
 
+	case FDBTransactionOptions::READ_SERVER_SIDE_CACHE_ENABLE:
+		trState->readOptions.withDefault(ReadOptions()).cacheResult = CacheResult::True;
+		break;
+
+	case FDBTransactionOptions::READ_SERVER_SIDE_CACHE_DISABLE:
+		trState->readOptions.withDefault(ReadOptions()).cacheResult = CacheResult::False;
+		break;
+
+	case FDBTransactionOptions::READ_PRIORITY_LOW:
+		trState->readOptions.withDefault(ReadOptions()).type = ReadType::LOW;
+		break;
+
+	case FDBTransactionOptions::READ_PRIORITY_NORMAL:
+		trState->readOptions.withDefault(ReadOptions()).type = ReadType::NORMAL;
+		break;
+
+	case FDBTransactionOptions::READ_PRIORITY_HIGH:
+		trState->readOptions.withDefault(ReadOptions()).type = ReadType::HIGH;
+		break;
+
 	default:
 		break;
 	}
@@ -10885,13 +10905,13 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 			if ((!blobbifiedBegin.get().empty() && blobbifiedBegin.get().front().begin < purgeRange.begin) ||
 			    (!blobbifiedEnd.get().empty() && blobbifiedEnd.get().front().begin < purgeRange.end)) {
 				TraceEvent("UnalignedPurge")
-				    .detail("Range", range)
+				    .detail("Range", purgeRange)
 				    .detail("Version", purgeVersion)
 				    .detail("Force", force);
 				throw unsupported_operation();
 			}
 
-			Value purgeValue = blobGranulePurgeValueFor(purgeVersion, range, force);
+			Value purgeValue = blobGranulePurgeValueFor(purgeVersion, purgeRange, force);
 			tr.atomicOp(
 			    addVersionStampAtEnd(blobGranulePurgeKeys.begin), purgeValue, MutationRef::SetVersionstampedKey);
 			tr.set(blobGranulePurgeChangeKey, deterministicRandom()->randomUniqueID().toString());
@@ -10901,8 +10921,8 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 			purgeKey = blobGranulePurgeKeys.begin.withSuffix(vs);
 			if (BG_REQUEST_DEBUG) {
 				fmt::print("purgeBlobGranules for range [{0} - {1}) at version {2} registered {3}\n",
-				           range.begin.printable(),
-				           range.end.printable(),
+				           purgeRange.begin.printable(),
+				           purgeRange.end.printable(),
 				           purgeVersion,
 				           purgeKey.printable());
 			}
@@ -10910,8 +10930,8 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 		} catch (Error& e) {
 			if (BG_REQUEST_DEBUG) {
 				fmt::print("purgeBlobGranules for range [{0} - {1}) at version {2} encountered error {3}\n",
-				           range.begin.printable(),
-				           range.end.printable(),
+				           purgeRange.begin.printable(),
+				           purgeRange.end.printable(),
 				           purgeVersion,
 				           e.name());
 			}

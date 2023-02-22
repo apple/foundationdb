@@ -181,7 +181,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 	ACTOR static Future<Void> createTenant(TenantManagementConcurrencyWorkload* self) {
 		state TenantName tenant = self->chooseTenantName();
-		state TenantMapEntry entry;
+		state MetaclusterTenantMapEntry entry;
 
 		state UID debugId = deterministicRandom()->randomUniqueID();
 
@@ -196,7 +196,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 				Future<Void> createFuture =
 				    self->useMetacluster
 				        ? MetaclusterAPI::createTenant(self->mvDb, entry, AssignClusterAutomatically::True)
-				        : success(TenantAPI::createTenant(self->dataDb.getReference(), tenant, entry));
+				        : success(TenantAPI::createTenant(self->dataDb.getReference(), tenant, TenantMapEntry(entry)));
 				Optional<Void> result = wait(timeout(createFuture, 30));
 				if (result.present()) {
 					TraceEvent(SevDebug, "TenantManagementConcurrencyCreatedTenant", debugId)

@@ -21,6 +21,7 @@
 #include <cstring>
 #include <unordered_set>
 
+#include "fdbclient/BlobWorkerInterface.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
@@ -54,21 +55,26 @@ struct AuthzSecurityWorkload : TestWorkload {
 	WipedString signedTokenAnotherTenant;
 	Standalone<StringRef> tLogConfigKey;
 	PerfIntCounter crossTenantGetPositive, crossTenantGetNegative, crossTenantCommitPositive, crossTenantCommitNegative,
-	    publicNonTenantRequestPositive, tLogReadNegative, keyLocationLeakNegative;
+	    publicNonTenantRequestPositive, tLogReadNegative, keyLocationLeakNegative, crossTenantBGReadPositive,
+	    crossTenantBGReadNegative;
 	std::vector<std::function<Future<Void>(Database cx)>> testFunctions;
+	bool checkBlobGranules;
 
 	AuthzSecurityWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), crossTenantGetPositive("CrossTenantGetPositive"),
 	    crossTenantGetNegative("CrossTenantGetNegative"), crossTenantCommitPositive("CrossTenantCommitPositive"),
 	    crossTenantCommitNegative("CrossTenantCommitNegative"),
 	    publicNonTenantRequestPositive("PublicNonTenantRequestPositive"), tLogReadNegative("TLogReadNegative"),
-	    keyLocationLeakNegative("KeyLocationLeakNegative") {
+	    keyLocationLeakNegative("KeyLocationLeakNegative"), crossTenantBGReadPositive("CrossTenantBGReadPositive"),
+	    crossTenantBGReadNegative("CrossTenantBGReadNegative") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 500.0) / clientCount;
 		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
 		tenantName = getOption(options, "tenantA"_sr, "authzSecurityTestTenant"_sr);
 		anotherTenantName = getOption(options, "tenantB"_sr, "authzSecurityTestTenant"_sr);
 		tLogConfigKey = getOption(options, "tLogConfigKey"_sr, "TLogInterface"_sr);
+		checkBlobGranules = getOption(options, "checkBlobGranules"_sr, false);
+
 		ASSERT(g_network->isSimulated());
 		// make it comfortably longer than the timeout of the workload
 		testFunctions.push_back(
@@ -83,6 +89,13 @@ struct AuthzSecurityWorkload : TestWorkload {
 		    [this](Database cx) { return testPublicNonTenantRequestsAllowedWithoutTokens(this, cx); });
 		testFunctions.push_back([this](Database cx) { return testTLogReadDisallowed(this, cx); });
 		testFunctions.push_back([this](Database cx) { return testKeyLocationLeakDisallowed(this, cx); });
+
+		if (checkBlobGranules) {
+			testFunctions.push_back(
+			    [this](Database cx) { return testCrossTenantBGReadDisallowed(this, cx, PositiveTestcase::True); });
+			testFunctions.push_back(
+			    [this](Database cx) { return testCrossTenantBGReadDisallowed(this, cx, PositiveTestcase::False); });
+		}
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -122,6 +135,8 @@ struct AuthzSecurityWorkload : TestWorkload {
 		m.push_back(publicNonTenantRequestPositive.getMetric());
 		m.push_back(tLogReadNegative.getMetric());
 		m.push_back(keyLocationLeakNegative.getMetric());
+		m.push_back(crossTenantBGReadPositive.getMetric());
+		m.push_back(crossTenantBGReadNegative.getMetric());
 	}
 
 	void setAuthToken(Transaction& tr, StringRef token) {
@@ -309,7 +324,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 				++self->crossTenantCommitPositive;
 			} else if (outcome.get().code() == error_code_permission_denied) {
 				TraceEvent(SevError, "AuthzSecurityError")
-				    .detail("Case", "CrossTenantGetDisallowed")
+				    .detail("Case", "CrossTenantCommitDisallowed")
 				    .detail("Subcase", "Positive")
 				    .log();
 			}
@@ -318,7 +333,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 			    tryCommit(self, self->tenant, self->signedTokenAnotherTenant, key, newValue, committedVersion, cx));
 			if (!outcome.present()) {
 				TraceEvent(SevError, "AuthzSecurityError")
-				    .detail("Case", "CrossTenantGetDisallowed")
+				    .detail("Case", "CrossTenantCommitDisallowed")
 				    .detail("Subcase", "Negative")
 				    .log();
 			} else if (outcome.get().code() == error_code_permission_denied) {
@@ -463,6 +478,76 @@ struct AuthzSecurityWorkload : TestWorkload {
 			}
 		}
 		++self->keyLocationLeakNegative;
+
+		return Void();
+	}
+
+	ACTOR static Future<Optional<Error>> tryBlobGranuleRead(AuthzSecurityWorkload* self,
+	                                                        Database cx,
+	                                                        Reference<Tenant> tenant,
+	                                                        Key key,
+	                                                        WipedString token,
+	                                                        Version committedVersion) {
+		state Transaction tr(cx, tenant);
+		self->setAuthToken(tr, token);
+		KeyRange range(KeyRangeRef(key, keyAfter(key)));
+		try {
+			wait(success(tr.readBlobGranules(range, 0, committedVersion)));
+			return Optional<Error>();
+		} catch (Error& e) {
+			CODE_PROBE(e.code() == error_code_permission_denied,
+			           "Cross tenant blob granule read meets permission_denied");
+			return e;
+		}
+	}
+
+	// TODO: add separate tests to separately test blob granule locations call and blob worker interface call
+
+	static void checkCrossTenantOutcome(std::string testcase,
+	                                    PerfIntCounter& positiveCounter,
+	                                    PerfIntCounter& negativeCounter,
+	                                    Optional<Error> outcome,
+	                                    PositiveTestcase positive) {
+		if (positive) {
+			// Supposed to succeed. Expected to occasionally fail because of buggify, faultInjection, or data
+			// distribution, but should not return permission_denied
+			if (!outcome.present()) {
+				++positiveCounter;
+			} else if (outcome.get().code() == error_code_permission_denied) {
+				TraceEvent(SevError, "AuthzSecurityError")
+				    .detail("Case", "CrossTenant" + testcase + "Disallowed")
+				    .detail("Subcase", "Positive")
+				    .log();
+			}
+		} else {
+			// Should always fail. Expected to return permission_denied, but expected to occasionally fail with
+			// different errors
+			if (!outcome.present()) {
+				TraceEvent(SevError, "AuthzSecurityError")
+				    .detail("Case", "CrossTenant" + testcase + "Disallowed")
+				    .detail("Subcase", "Negative")
+				    .log();
+			} else if (outcome.get().code() == error_code_permission_denied) {
+				++negativeCounter;
+			}
+		}
+	}
+
+	ACTOR static Future<Void> testCrossTenantBGReadDisallowed(AuthzSecurityWorkload* self,
+	                                                          Database cx,
+	                                                          PositiveTestcase positive) {
+		state Key key = self->randomString();
+		state Value value = self->randomString();
+		state Version committedVersion =
+		    wait(setAndCommitKeyValueAndGetVersion(self, cx, self->tenant, self->signedToken, key, value));
+		Optional<Error> outcome = wait(tryBlobGranuleRead(self,
+		                                                  cx,
+		                                                  self->tenant,
+		                                                  key,
+		                                                  positive ? self->signedToken : self->signedTokenAnotherTenant,
+		                                                  committedVersion));
+		checkCrossTenantOutcome(
+		    "BGRead", self->crossTenantBGReadPositive, self->crossTenantBGReadNegative, outcome, positive);
 		return Void();
 	}
 
