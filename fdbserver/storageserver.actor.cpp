@@ -1255,7 +1255,6 @@ public:
 	void clearTenants(StringRef startTenant, StringRef endTenant, Version version);
 
 	void checkTenantEntry(Version version, TenantInfo tenant);
-	KeyRangeRef clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenantInfo, Arena& arena);
 
 	std::vector<StorageServerShard> getStorageServerShards(KeyRangeRef range);
 	std::shared_ptr<MoveInShard> getMoveInShard(const UID& dataMoveId, const Version version);
@@ -4474,17 +4473,6 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 	return result;
 }
 
-KeyRangeRef StorageServer::clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenantInfo, Arena& arena) {
-	if (tenantInfo.hasTenant()) {
-		return KeyRangeRef(range.begin.startsWith(tenantInfo.prefix.get()) ? range.begin : tenantInfo.prefix.get(),
-		                   range.end.startsWith(tenantInfo.prefix.get())
-		                       ? range.end
-		                       : allKeys.end.withPrefix(tenantInfo.prefix.get(), arena));
-	} else {
-		return range;
-	}
-}
-
 ACTOR Future<Key> findKey(StorageServer* data,
                           KeySelectorRef sel,
                           Version version,
@@ -4686,7 +4674,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			throw wrong_shard_server();
 		}
 
-		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenantInfo, req.arena);
+		KeyRangeRef searchRange = TenantAPI::clampRangeToTenant(shard, req.tenantInfo, req.arena);
 
 		state int offset1 = 0;
 		state int offset2;
@@ -5851,7 +5839,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			throw wrong_shard_server();
 		}
 
-		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenantInfo, req.arena);
+		KeyRangeRef searchRange = TenantAPI::clampRangeToTenant(shard, req.tenantInfo, req.arena);
 
 		state int offset1 = 0;
 		state int offset2;
@@ -6052,7 +6040,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			throw wrong_shard_server();
 		}
 
-		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenantInfo, req.arena);
+		KeyRangeRef searchRange = TenantAPI::clampRangeToTenant(shard, req.tenantInfo, req.arena);
 
 		state int offset1 = 0;
 		state int offset2;
@@ -6242,7 +6230,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		state uint64_t changeCounter = data->shardChangeCounter;
 
 		KeyRange shard = getShardKeyRange(data, req.sel);
-		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenantInfo, req.arena);
+		KeyRangeRef searchRange = TenantAPI::clampRangeToTenant(shard, req.tenantInfo, req.arena);
 
 		state int offset;
 		Key absoluteKey = wait(findKey(data, req.sel, version, searchRange, &offset, req.spanContext, req.options));
@@ -7294,9 +7282,7 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 
 			data->counters.feedBytesFetched += remoteResult.expectedSize();
 			data->fetchKeysBytesBudget -= remoteResult.expectedSize();
-			if (data->fetchKeysBytesBudget <= 0) {
-				data->fetchKeysBudgetUsed.set(true);
-			}
+			data->fetchKeysBudgetUsed.set(data->fetchKeysBytesBudget <= 0);
 			wait(yield());
 		}
 	} catch (Error& e) {
@@ -8853,16 +8839,15 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					metricReporter.addFetchedBytes(expectedBlockSize, this_block.size());
 
 					// Write this_block to storage
+					state int sinceYield = 0;
 					state KeyValueRef* kvItr = this_block.begin();
 					for (; kvItr != this_block.end(); ++kvItr) {
 						data->storage.writeKeyValue(*kvItr);
-						wait(yield());
-					}
-
-					kvItr = this_block.begin();
-					for (; kvItr != this_block.end(); ++kvItr) {
 						data->byteSampleApplySet(*kvItr, invalidVersion);
-						wait(yield());
+						if (++sinceYield > 1000) {
+							wait(yield());
+							sinceYield = 0;
+						}
 					}
 
 					ASSERT(this_block.readThrough.present() || this_block.size());
@@ -8871,9 +8856,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					this_block = RangeResult();
 
 					data->fetchKeysBytesBudget -= expectedBlockSize;
-					if (data->fetchKeysBytesBudget <= 0) {
-						data->fetchKeysBudgetUsed.set(true);
-					}
+					data->fetchKeysBudgetUsed.set(data->fetchKeysBytesBudget <= 0);
 				}
 			} catch (Error& e) {
 				if (e.code() != error_code_end_of_stream && e.code() != error_code_connection_failed &&
@@ -11064,6 +11047,8 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 
 ACTOR Future<Void> updateStorage(StorageServer* data) {
 	state UnlimitedCommitBytes unlimitedCommitBytes = UnlimitedCommitBytes::False;
+	state Future<Void> durableDelay = Void();
+
 	loop {
 		unlimitedCommitBytes = UnlimitedCommitBytes::False;
 		ASSERT(data->durableVersion.get() == data->storageVersion());
@@ -11074,7 +11059,19 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				wait(delay(endTime - now(), TaskPriority::UpdateStorage));
 			}
 		}
-		wait(data->desiredOldestVersion.whenAtLeast(data->storageVersion() + 1));
+
+		// If the fetch keys budget is not used up then we have already waited for the storage commit delay so
+		// wait for either a new mutation version or the budget to be used up.
+		// Otherwise, don't wait at all.
+		if (!data->fetchKeysBudgetUsed.get()) {
+			wait(data->desiredOldestVersion.whenAtLeast(data->storageVersion() + 1) ||
+			     data->fetchKeysBudgetUsed.onChange());
+		}
+
+		// Yield to TaskPriority::UpdateStorage in case more mutations have arrived but were not processed yet.
+		// If the fetch keys budget has already been used up, then we likely arrived here without waiting the
+		// full post storage commit delay, so this will allow the update actor to process some mutations
+		// before we proceed.
 		wait(delay(0, TaskPriority::UpdateStorage));
 
 		state Promise<Void> durableInProgress;
@@ -11181,6 +11178,17 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				break;
 		}
 
+		// Allow data fetch to use an additional bytesLeft but don't penalize fetch budget if bytesLeft is negative
+		if (bytesLeft > 0) {
+			data->fetchKeysBytesBudget += bytesLeft;
+			data->fetchKeysBudgetUsed.set(data->fetchKeysBytesBudget <= 0);
+
+			// Dependng on how negative the fetchKeys budget was it could still be used up
+			if (!data->fetchKeysBudgetUsed.get()) {
+				wait(durableDelay || data->fetchKeysBudgetUsed.onChange());
+			}
+		}
+
 		if (removeKVSRanges) {
 			TraceEvent(SevDebug, "RemoveKVSRangesVersionDurable", data->thisServerID)
 			    .detail("NewDurableVersion", newOldestVersion)
@@ -11282,11 +11290,10 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		    .detail("DurableVersion", newOldestVersion);
 		state Future<Void> durable = data->storage.commit();
 		++data->counters.kvCommits;
-		state Future<Void> durableDelay = Void();
 
-		if (bytesLeft > 0) {
-			durableDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage);
-		}
+		// If the mutation bytes budget was not fully used then wait some time before the next commit
+		durableDelay =
+		    (bytesLeft > 0) ? delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage) : Void();
 
 		wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"));
 		data->storageCommitLatencyHistogram->sampleSeconds(now() - beforeStorageCommit);

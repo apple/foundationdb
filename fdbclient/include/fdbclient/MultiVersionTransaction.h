@@ -409,6 +409,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 
 	FDBFuture* (*transactionCommit)(FDBTransaction* tr);
 	fdb_error_t (*transactionGetCommittedVersion)(FDBTransaction* tr, int64_t* outVersion);
+	FDBFuture* (*transactionGetTagThrottledDuration)(FDBTransaction* tr);
 	FDBFuture* (*transactionGetTotalCost)(FDBTransaction* tr);
 	FDBFuture* (*transactionGetApproximateSize)(FDBTransaction* tr);
 	FDBFuture* (*transactionWatch)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength);
@@ -428,6 +429,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*futureGetInt64)(FDBFuture* f, int64_t* outValue);
 	fdb_error_t (*futureGetUInt64)(FDBFuture* f, uint64_t* outValue);
 	fdb_error_t (*futureGetBool)(FDBFuture* f, fdb_bool_t* outValue);
+	fdb_error_t (*futureGetDouble)(FDBFuture* f, double* outValue);
 	fdb_error_t (*futureGetError)(FDBFuture* f);
 	fdb_error_t (*futureGetKey)(FDBFuture* f, uint8_t const** outKey, int* outKeyLength);
 	fdb_error_t (*futureGetValue)(FDBFuture* f, fdb_bool_t* outPresent, uint8_t const** outValue, int* outValueLength);
@@ -538,6 +540,7 @@ public:
 	Version getCommittedVersion() override;
 	ThreadFuture<VersionVector> getVersionVector() override;
 	ThreadFuture<SpanContext> getSpanContext() override { return SpanContext(); };
+	ThreadFuture<double> getTagThrottledDuration() override;
 	ThreadFuture<int64_t> getTotalCost() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
@@ -774,6 +777,7 @@ public:
 	Version getCommittedVersion() override;
 	ThreadFuture<VersionVector> getVersionVector() override;
 	ThreadFuture<SpanContext> getSpanContext() override;
+	ThreadFuture<double> getTagThrottledDuration() override;
 	ThreadFuture<int64_t> getTotalCost() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 

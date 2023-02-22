@@ -35,7 +35,7 @@ class GetClientStatusIntegrationTest {
 		try (Database db = fdb.open()) {
 			// Run a simple transaction to make sure the database is fully initialized
 			db.run(tr -> {
-				return tr.getReadVersion();
+				return tr.getReadVersion().join();
 			});
 
 			// Here we just check if a meaningful client report status is returned

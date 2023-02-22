@@ -48,8 +48,8 @@ struct BlobWorkerStats {
 	Counter readDrivenCompactions;
 	Counter oldFeedSnapshots;
 
-	int numRangesAssigned;
-	int mutationBytesBuffered;
+	int64_t numRangesAssigned;
+	int64_t mutationBytesBuffered;
 	int activeReadRequests;
 	// TODO: add gauge for granules blocking on old snapshots, once this guage is fixed
 	int granulesPendingSplitCheck;

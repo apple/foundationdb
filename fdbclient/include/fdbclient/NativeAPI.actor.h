@@ -285,6 +285,8 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	// after rounding up to the nearest page size and applying a write penalty
 	int64_t totalCost = 0;
 
+	double proxyTagThrottledDuration = 0.0;
+
 	// Special flag to skip prepending tenant prefix to mutations and conflict ranges
 	// when a dummy, internal transaction gets commited. The sole purpose of commitDummyTransaction() is to
 	// resolve the state of earlier transaction that returned commit_unknown_result or request_maybe_delivered.
@@ -490,6 +492,8 @@ public:
 	Version getCommittedVersion() const { return trState->committedVersion; }
 
 	int64_t getTotalCost() const { return trState->totalCost; }
+
+	double getTagThrottledDuration() const;
 
 	// Will be fulfilled only after commit() returns success
 	[[nodiscard]] Future<Standalone<StringRef>> getVersionstamp();
