@@ -563,7 +563,7 @@ private:
 };
 
 void RocksDBSstFileWriter::open(const std::string localFile) {
-	this->localFile = localFile;
+	this->localFile = abspath(localFile);
 	rocksdb::Status status = this->writer->Open(this->localFile);
 	if (!status.ok()) {
 		TraceEvent(SevError, "RocksDBSstFileWriterWrapperOpenFileError")

@@ -9597,7 +9597,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	}
 }
 
-ACTOR Future<Void> createSstFileForCheckpointShardBytesSample(StorageServer* data, CheckpointMetaData metaData) {
+ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* data,
+                                                              CheckpointMetaData metaData,
+                                                              std::string bytesSampleFile) {
 	state int failureCount = 0;
 	state std::unique_ptr<IRocksDBSstFileWriter> sstWriter;
 	state int64_t numGetRangeQueries;
@@ -9605,11 +9607,13 @@ ACTOR Future<Void> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 	state std::vector<KeyRange>::iterator metaDataRangesIter;
 	state Key readBegin;
 	state Key readEnd;
+	state bool anyFileCreated;
 
 	loop {
 		try {
+			anyFileCreated = false;
 			sstWriter = newRocksDBSstFileWriter();
-			sstWriter->open(metaData.bytesSampeFile);
+			sstWriter->open(bytesSampleFile);
 			if (sstWriter == nullptr) {
 				break;
 			}
@@ -9640,21 +9644,29 @@ ACTOR Future<Void> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 						RangeResult readResult = wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd),
 						                                                      SERVER_KNOBS->STORAGE_LIMIT_BYTES,
 						                                                      SERVER_KNOBS->STORAGE_LIMIT_BYTES));
+						Key lastKey;
 						numGetRangeQueries++;
 						for (int i = 0; i < readResult.size(); i++) {
 							sstWriter->write(readResult[i].key, readResult[i].value);
+							lastKey = readResult[i].key;
 							numSampledKeys++;
 						}
 						if (readResult.more) {
 							ASSERT(readResult.readThrough.present());
 							readBegin = keyAfter(readResult.readThrough.get());
+							ASSERT(readBegin <= readEnd);
 						} else {
 							break;
 						}
 					} catch (Error& e) {
 						if (failureCount < SERVER_KNOBS->ROCKSDB_CREATE_SST_FILE_RETRY_COUNT_MAX) {
 							failureCount++;
-							continue;
+							if (e.code() == error_code_failed_to_create_checkpoint_shard_metadata) {
+								throw retry();
+							} else {
+								wait(delay(0.5));
+								continue;
+							}
 						} else {
 							throw e;
 						}
@@ -9662,57 +9674,75 @@ ACTOR Future<Void> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 				}
 				metaDataRangesIter++;
 			}
-			bool anyFileCreated = sstWriter->finish();
+			anyFileCreated = sstWriter->finish();
 			ASSERT((numSampledKeys > 0 && anyFileCreated) || (numSampledKeys == 0 && !anyFileCreated));
-			TraceEvent("DumpCheckPointMetaData", data->thisServerID)
+			TraceEvent(SevDebug, "DumpCheckPointMetaData", data->thisServerID)
 			    .detail("NumSampledKeys", numSampledKeys)
 			    .detail("NumGetRangeQueries", numGetRangeQueries)
 			    .detail("CheckpointID", metaData.checkpointID)
-			    .detail("BytesSampeFile", anyFileCreated ? metaData.bytesSampeFile : "noFileCreated");
+			    .detail("BytesSampleFile", anyFileCreated ? bytesSampleFile : "noFileCreated");
 			break;
 
 		} catch (Error& e) {
-			throw e;
+			if (e.code() == error_code_retry) {
+				wait(delay(0.5));
+				continue;
+			} else {
+				TraceEvent(SevDebug, "StorageCreateCheckpointMetaDataSstFileDumpedFailure", data->thisServerID)
+				    .detail("PendingCheckpoint", metaData.toString())
+				    .detail("Error", e.name());
+				throw e;
+			}
 		}
 	}
 
-	return Void();
+	return anyFileCreated;
 }
 
 ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData metaData) {
 	ASSERT(std::find(metaData.src.begin(), metaData.src.end(), data->thisServerID) != metaData.src.end() &&
 	       !metaData.ranges.empty());
-	state std::string dir = data->folder + rocksdbCheckpointDirPrefix + metaData.checkpointID.toString();
-	metaData.bytesSampeFile = dir + "/" + checkpointBytesSampleFileName;
-	const CheckpointRequest req(
-	    metaData.version, metaData.ranges, static_cast<CheckpointFormat>(metaData.format), metaData.checkpointID, dir);
+	state std::string checkpointDir = data->folder + rocksdbCheckpointDirPrefix + metaData.checkpointID.toString();
+	state std::string bytesSampleFile = checkpointDir + "/" + checkpointBytesSampleFileName;
+	state std::string bytesSampleTempDir = data->folder + checkpointBytesSampleTempFolder;
+	state std::string bytesSampleTempFile =
+	    bytesSampleTempDir + "/" + metaData.checkpointID.toString() + "_" + checkpointBytesSampleFileName;
+	const CheckpointRequest req(metaData.version,
+	                            metaData.ranges,
+	                            static_cast<CheckpointFormat>(metaData.format),
+	                            metaData.checkpointID,
+	                            checkpointDir);
 	state CheckpointMetaData checkpointResult;
+
 	try {
-		wait(store(checkpointResult, data->storage.checkpoint(req)));
+		// Create checkpoint
+		state Future<Void> createCheckpoint = store(checkpointResult, data->storage.checkpoint(req));
+		// Dump the checkpoint meta data to the sst file of metadata.
+		if (!directoryExists(abspath(bytesSampleTempDir))) {
+			platform::createDirectory(abspath(bytesSampleTempDir));
+		}
+		state bool sampleByteSstFileCreated =
+		    wait(createSstFileForCheckpointShardBytesSample(data, metaData, bytesSampleTempFile));
+		checkpointResult.bytesSampleFile = sampleByteSstFileCreated ? bytesSampleFile : Optional<std::string>();
+		wait(createCheckpoint);
 		ASSERT(checkpointResult.src.empty() && checkpointResult.getState() == CheckpointMetaData::Complete);
 		checkpointResult.src.push_back(data->thisServerID);
 		checkpointResult.actionId = metaData.actionId;
 		data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
 		TraceEvent("StorageCreatedCheckpoint", data->thisServerID).detail("Checkpoint", checkpointResult.toString());
+		// Move sst file to the checkpoint folder
+		if (sampleByteSstFileCreated) {
+			ASSERT(directoryExists(abspath(checkpointDir)));
+			ASSERT(!fileExists(abspath(bytesSampleFile)));
+			ASSERT(fileExists(abspath(bytesSampleTempFile)));
+			renameFile(abspath(bytesSampleTempFile), abspath(bytesSampleFile));
+		}
 	} catch (Error& e) {
 		// If checkpoint creation fails, the failure is persisted.
 		checkpointResult = metaData;
 		checkpointResult.setState(CheckpointMetaData::Fail);
 		TraceEvent("StorageCreatedCheckpointFailure", data->thisServerID)
 		    .detail("PendingCheckpoint", checkpointResult.toString());
-	}
-
-	// Dump the checkpoint meta data to the sst file of metadata.
-	try {
-		wait(createSstFileForCheckpointShardBytesSample(data, metaData));
-		TraceEvent("StorageCreateCheckpointMetaDataSstFileDumped", data->thisServerID)
-		    .detail("Checkpoint", checkpointResult.toString());
-	} catch (Error& e) {
-		// If the checkpoint meta data is not dumped successfully, remove the checkpoint.
-		TraceEvent(SevWarn, "StorageCreateCheckpointMetaDataSstFileDumpedFailure", data->thisServerID)
-		    .errorUnsuppressed(e)
-		    .detail("PendingCheckpoint", checkpointResult.toString());
-		data->checkpoints[checkpointResult.checkpointID].setState(CheckpointMetaData::Fail);
 	}
 
 	// Persist the checkpoint meta data.

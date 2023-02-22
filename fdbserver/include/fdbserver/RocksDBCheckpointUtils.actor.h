@@ -32,6 +32,7 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 const std::string checkpointBytesSampleFileName = "metadata_bytes.sst";
+const std::string checkpointBytesSampleTempFolder = "/metadata_temp";
 
 class IRocksDBSstFileWriter {
 public:
