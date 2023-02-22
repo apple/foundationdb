@@ -40,6 +40,7 @@
 
 template <class DB, class TenantMapEntryT>
 class TenantData {
+public:
 	Reference<DB> db;
 	TenantMetadataSpecification<TenantMapEntryT>* tenantMetadata;
 
@@ -126,7 +127,10 @@ public:
 	  : db(db), tenantMetadata(tenantMetadata) {}
 
 	Future<Void> load() {
-		return runTransaction([this](Reference<typename DB::TransactionT> tr) { return loadTenantMetadata(this); });
+		return runTransactionVoid(db, [this](Reference<typename DB::TransactionT> tr) {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			return loadTenantMetadata(this, tr);
+		});
 	}
 
 	template <class Transaction>

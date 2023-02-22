@@ -48,7 +48,7 @@ public:
 		KeyBackedRangeResult<UID> registrationTombstones;
 		KeyBackedRangeResult<std::pair<ClusterName, UID>> activeRestoreIds;
 
-		std::map<ClusterName, int64_t> clusterCapacityMap;
+		std::map<ClusterName, int64_t> clusterAllocatedMap;
 		std::map<ClusterName, std::set<int64_t>> clusterTenantMap;
 		std::map<ClusterName, std::set<TenantGroupName>> clusterTenantGroupMap;
 
@@ -62,7 +62,7 @@ public:
 			ASSERT(clusterTenantCounts == other.clusterTenantCounts);
 			ASSERT(registrationTombstones == other.registrationTombstones);
 			ASSERT(activeRestoreIds == other.activeRestoreIds);
-			ASSERT(clusterCapacityMap == other.clusterCapacityMap);
+			ASSERT(clusterAllocatedMap == other.clusterAllocatedMap);
 			ASSERT(clusterTenantMap == other.clusterTenantMap);
 			ASSERT(clusterTenantGroupMap == other.clusterTenantGroupMap);
 			ASSERT(tenantIdPrefix == other.tenantIdPrefix);
@@ -73,7 +73,7 @@ public:
 			return metaclusterRegistration == other.metaclusterRegistration && dataClusters == other.dataClusters &&
 			       clusterTenantCounts == other.clusterTenantCounts &&
 			       registrationTombstones == other.registrationTombstones &&
-			       activeRestoreIds == other.activeRestoreIds && clusterCapacityMap == other.clusterCapacityMap &&
+			       activeRestoreIds == other.activeRestoreIds && clusterAllocatedMap == other.clusterAllocatedMap &&
 			       clusterTenantMap == other.clusterTenantMap && clusterTenantGroupMap == other.clusterTenantGroupMap &&
 			       tenantIdPrefix == other.tenantIdPrefix && tenantData == other.tenantData;
 		}
@@ -157,14 +157,14 @@ private:
 			ASSERT_EQ(t.size(), 2);
 			int64_t capacity = t.getInt(0);
 			ClusterName clusterName = t.getString(1);
-			ASSERT(self->managementMetadata.clusterCapacityMap.try_emplace(clusterName, capacity).second);
+			ASSERT(self->managementMetadata.clusterAllocatedMap.try_emplace(clusterName, capacity).second);
 		}
 
 		for (auto t : clusterTenantTuples.results) {
 			ASSERT_EQ(t.size(), 3);
 			TenantName tenantName = t.getString(1);
 			int64_t tenantId = t.getInt(2);
-			// ASSERT(tenantName == self->managementMetadata.tenantMap[tenantId].tenantName);
+			ASSERT(tenantName == self->managementMetadata.tenantData.tenantMap[tenantId].tenantName);
 			self->managementMetadata.clusterTenantMap[t.getString(0)].insert(tenantId);
 		}
 
