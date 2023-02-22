@@ -521,7 +521,7 @@ ACTOR Future<Void> dataDistributionRelocator(struct DDQueue* self,
                                              RelocateData rd,
                                              Future<Void> prevCleanup,
                                              const DDEnabledState* ddEnabledState,
-                                             UID gDebugID = UID());
+                                             UID debugID = UID());
 
 struct DDQueue : public IDDRelocationQueue {
 	struct DDDataMove {
