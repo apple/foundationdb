@@ -2511,7 +2511,7 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 
 	if (diskParameters->nextOperation < now())
 		diskParameters->nextOperation = now();
-	diskParameters->nextOperation += (1.0 / diskParameters->iops) + (size / diskParameters->bandwidth);
+	diskParameters->nextOperation += (1.0 / diskParameters->iops) + (1.0 * size / diskParameters->bandwidth);
 
 	double randomLatency;
 	if (sync) {
