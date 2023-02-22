@@ -446,11 +446,11 @@ struct ReadWriteWorkload : ReadWriteCommon {
 
 		// ReadTypes of LOW, NORMAL, and HIGH can be set through transaction options, so setOption for those
 		if (readType == ReadType::LOW) {
-			tr.setOption(FDBTransactionOptions::READ_PRIORITY, -1);
+			tr.setOption(FDBTransactionOptions::READ_PRIORITY_LOW);
 		} else if (readType == ReadType::NORMAL) {
-			tr.setOption(FDBTransactionOptions::READ_PRIORITY, 0);
+			tr.setOption(FDBTransactionOptions::READ_PRIORITY_NORMAL);
 		} else if (readType == ReadType::HIGH) {
-			tr.setOption(FDBTransactionOptions::READ_PRIORITY, 1);
+			tr.setOption(FDBTransactionOptions::READ_PRIORITY_HIGH);
 		} else {
 			// Otherwise fall back to NativeAPI readOptions
 			tr.getTransaction().trState->readOptions.withDefault(ReadOptions()).type = readType;

@@ -7086,27 +7086,25 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		trState->automaticIdempotency = true;
 		break;
 
-	// ReadOptions
-	case FDBTransactionOptions::READ_PRIORITY:
 	case FDBTransactionOptions::READ_SERVER_SIDE_CACHE_ENABLE:
-	case FDBTransactionOptions::READ_SERVER_SIDE_CACHE_DISABLE: {
-		ReadOptions& readOptions = trState->readOptions.withDefault(ReadOptions());
+		trState->readOptions.withDefault(ReadOptions()).cacheResult = CacheResult::True;
+		break;
 
-		if (option == FDBTransactionOptions::READ_PRIORITY) {
-			// Read Priority
-			int priority = extractIntOption(value);
-			if (priority == 0) {
-				readOptions.type = ReadType::NORMAL;
-			} else if (priority < 0) {
-				readOptions.type = ReadType::LOW;
-			} else {
-				readOptions.type = ReadType::HIGH;
-			}
-		} else {
-			// Cache mode
-			readOptions.cacheResult = CacheResult(option == FDBTransactionOptions::READ_SERVER_SIDE_CACHE_ENABLE);
-		}
-	} break;
+	case FDBTransactionOptions::READ_SERVER_SIDE_CACHE_DISABLE:
+		trState->readOptions.withDefault(ReadOptions()).cacheResult = CacheResult::False;
+		break;
+
+	case FDBTransactionOptions::READ_PRIORITY_LOW:
+		trState->readOptions.withDefault(ReadOptions()).type = ReadType::LOW;
+		break;
+
+	case FDBTransactionOptions::READ_PRIORITY_NORMAL:
+		trState->readOptions.withDefault(ReadOptions()).type = ReadType::NORMAL;
+		break;
+
+	case FDBTransactionOptions::READ_PRIORITY_HIGH:
+		trState->readOptions.withDefault(ReadOptions()).type = ReadType::HIGH;
+		break;
 
 	default:
 		break;
