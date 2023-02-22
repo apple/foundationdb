@@ -665,7 +665,7 @@ ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<String
 	state int uidIdx;
 	if (tokens[1] == "lock"_sr && (tokens.size() < 3 || tokens.size() > 5)) {
 		fmt::print("Usage: tenant lock <NAME> [w|rw] [UID]\n\n");
-		fmt::print("Locks a tenant with for read-write or read-only with a given UID.\n");
+		fmt::print("Locks a tenant for read-write or read-only with a given UID.\n");
 		fmt::print("generate one. By default a read-write lock is created.\n");
 		fmt::print(" If no UID is passed, fdbcli will UID has to be a 16-byte number represented in hex.");
 		return false;
@@ -686,7 +686,7 @@ ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<String
 			} else if (tokens[3] == "rw"_sr) {
 				desiredLockState = TenantLockState::LOCKED;
 			} else {
-				fmt::print(stderr, "Invalid lock type \"{}\"\n", tokens[3]);
+				fmt::print(stderr, "ERROR: Invalid lock type `{}'\n", tokens[3]);
 				return false;
 			}
 		} else {
@@ -698,7 +698,8 @@ ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<String
 			uid = UID::fromStringThrowsOnFailure(tokens[uidIdx].toString());
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_operation_failed);
-			fmt::print(stderr, "Couldn't not parse {} as a valid UID", tokens[uidIdx].toString());
+			fmt::print(stderr, "ERROR: Couldn't not parse `{}' as a valid UID", tokens[uidIdx].toString());
+			return false;
 		}
 	} else {
 		ASSERT(desiredLockState != TenantLockState::UNLOCKED);
@@ -710,30 +711,30 @@ ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<String
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				fmt::print(stderr, "Locking a cluster through a management cluster not yet supported\n");
+				fmt::print(stderr, "ERROR: Locking a cluster through a management cluster not yet supported\n");
 				return false;
 			}
 			auto f = tr->get(nameKey);
 			Optional<Value> entry = wait(safeThreadFutureToFuture(f));
 			if (!entry.present()) {
-				fmt::print(stderr, "Tenant \"{}\" does not exist\n", name);
+				fmt::print(stderr, "ERROR: Tenant `{}' does not exist\n", name);
 				return false;
 			}
 			auto tenantId = getTenantId(entry.get());
 			wait(TenantAPI::changeLockState(tr.getPtr(), tenantId, desiredLockState, uid));
 			wait(safeThreadFutureToFuture(tr->commit()));
 			if (desiredLockState != TenantLockState::UNLOCKED) {
-				fmt::print("Locked tenant {} with UID {}", name.toString(), uid.toString());
+				fmt::print("Locked tenant `{}' with UID `{}'", name.toString(), uid.toString());
 			} else {
-				fmt::print("Unlocked tenant {}", name.toString());
+				fmt::print("Unlocked tenant `{}'", name.toString());
 			}
 			return true;
 		} catch (Error& e) {
 			if (e.code() == error_code_tenant_locked) {
 				if (desiredLockState == TenantLockState::UNLOCKED) {
-					fmt::print(stderr, "Wrong lock UID\n");
+					fmt::print(stderr, "ERROR: Wrong lock UID\n");
 				} else {
-					fmt::print(stderr, "Tenant locked with a different UID\n");
+					fmt::print(stderr, "ERROR: Tenant locked with a different UID\n");
 				}
 				return false;
 			}
