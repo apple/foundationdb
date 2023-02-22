@@ -1512,7 +1512,8 @@ struct RestoreClusterImpl {
 					}
 
 					TraceEvent(SevWarn, "MetaclusterRestoreClusterAlreadyRegistered")
-					    .detail("ExistingRegistration", metaclusterRegistration.get());
+					    .detail("ExistingRegistration", metaclusterRegistration.get())
+					    .detail("NewRegistration", dataClusterEntry);
 					throw cluster_already_registered();
 				}
 
