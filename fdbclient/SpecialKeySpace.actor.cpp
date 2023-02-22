@@ -2938,7 +2938,9 @@ ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
 	return Void();
 }
 
-ACTOR Future<RangeResult> storageEngineParamsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
+ACTOR Future<RangeResult> storageEngineParamsGetRangeActor(ReadYourWritesTransaction* ryw,
+                                                           KeyRef prefix,
+                                                           KeyRangeRef kr) {
 	state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>::addRef(ryw);
 	state KeyRange keys = kr.removePrefix(prefix);
 	state RangeResult result;
@@ -2956,7 +2958,7 @@ ACTOR Future<RangeResult> storageEngineParamsGetRangeActor(ReadYourWritesTransac
 				fmt::print("DD not found, please try again later\n");
 				TraceEvent(SevWarnAlways, "DataDistributorNotPresent")
 				    .detail("Operation", "StorageEngineParamsGetRangeActor")
-					.backtrace();
+				    .backtrace();
 			}
 			throw err;
 		}
@@ -2966,7 +2968,7 @@ ACTOR Future<RangeResult> storageEngineParamsGetRangeActor(ReadYourWritesTransac
 StorageEngineParamsImpl::StorageEngineParamsImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
 
 Future<RangeResult> StorageEngineParamsImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                             KeyRangeRef kr,
-                                                             GetRangeLimits limitsHint) const {
+                                                      KeyRangeRef kr,
+                                                      GetRangeLimits limitsHint) const {
 	return storageEngineParamsGetRangeActor(ryw, getKeyRange().begin, kr);
 }

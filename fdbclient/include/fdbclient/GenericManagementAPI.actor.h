@@ -281,7 +281,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 		}
 	}
 	state bool storageEngineParamsChange = false;
-	if(!checkForStorageEngineParamsChange(m, storageEngineParamsChange, creating)) {
+	if (!checkForStorageEngineParamsChange(m, storageEngineParamsChange, creating)) {
 		fmt::print("Invalid configuration for storage engine params\n");
 		return ConfigurationResult::INVALID_CONFIGURATION;
 	}
@@ -555,7 +555,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 				tr->addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));
 				tr->set(moveKeysLockOwnerKey, versionKey);
 			}
-			
+
 			if (storageEngineParamsChange) {
 				// TODO : check if we need to change the catch block abd uf tge versionKey can be reused
 				tr->addReadConflictRange(singleKeyRange(storageEngineParamsVersionKey));

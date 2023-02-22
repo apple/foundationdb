@@ -2939,7 +2939,8 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 				// This is now only enabled for redwood, all other storage engines are disabled
 				auto paramKeys = commitData->txnStateStore->readRange(storageEngineParamsKeys).get();
 				for (auto& kv : paramKeys) {
-					// send back all storage engine parameters saved in txnStateStore when existing storage servers rejoin
+					// send back all storage engine parameters saved in txnStateStore when existing storage servers
+					// rejoin
 					rep.params[kv.key.removePrefix(storageEngineParamsPrefix).toString()] = kv.value.toString();
 				}
 			}
