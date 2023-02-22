@@ -683,6 +683,10 @@ struct RemoveClusterImpl {
 	ForceRemove forceRemove;
 	double dataClusterTimeout;
 
+	// Optional parameters that are set by internal users
+	Optional<UID> clusterId;
+	std::set<DataClusterState> legalClusterStates;
+
 	// Parameters set in markClusterRemoving
 	Optional<int64_t> lastTenantId;
 
@@ -704,6 +708,12 @@ struct RemoveClusterImpl {
 	ACTOR static Future<Void> markClusterRemoving(RemoveClusterImpl* self, Reference<typename DB::TransactionT> tr) {
 		state DataClusterMetadata clusterMetadata = wait(getClusterTransaction(tr, self->clusterName));
 		wait(self->ctx.setCluster(tr, self->clusterName));
+
+		if ((self->clusterId.present() && clusterMetadata.entry.id != self->clusterId.get()) ||
+		    (!self->legalClusterStates.empty() &&
+		     !self->legalClusterStates.count(clusterMetadata.entry.clusterState))) {
+			throw cluster_already_exists();
+		}
 
 		if (!self->forceRemove && self->ctx.dataClusterMetadata.get().entry.allocated.numTenantGroups > 0) {
 			throw cluster_not_empty();
@@ -1166,12 +1176,33 @@ struct RegisterClusterImpl {
 	}
 
 	ACTOR static Future<Void> run(RegisterClusterImpl* self) {
+		// Used if we need to rollback
+		state RemoveClusterImpl<DB> removeCluster(
+		    self->ctx.managementDb, self->clusterName, ClusterType::METACLUSTER_MANAGEMENT, ForceRemove::True, 5.0);
+
 		wait(self->ctx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return registerInManagementCluster(self, tr); }));
 
 		// Don't use ctx to run this transaction because we have not set up the data cluster metadata on it and we
 		// don't have a metacluster registration on the data cluster
-		wait(configureDataCluster(self));
+		try {
+			wait(configureDataCluster(self));
+		} catch (Error& e) {
+			state Error error = e;
+			try {
+				// Attempt to unregister the cluster if we could not configure the data cluster. We should only do this
+				// if the data cluster state matches our ID and is in the REGISTERING in case somebody else has
+				// attempted to complete the registration or start a new one.
+				removeCluster.clusterId = self->clusterEntry.id;
+				removeCluster.legalClusterStates.insert(DataClusterState::REGISTERING);
+				wait(removeCluster.run());
+			} catch (Error& e) {
+				// Removing the cluster after failing to register the data cluster is a best effort attempt. If it
+				// fails, the operator will need to remove it (or re-register it) themselves.
+			}
+			throw error;
+		}
+
 		wait(self->ctx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return markClusterReady(self, tr); }));
 
