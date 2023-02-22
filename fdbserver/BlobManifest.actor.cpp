@@ -241,6 +241,8 @@ public:
 		}
 	}
 
+	int64_t totalBytes() { return totalBytes_; }
+
 	// Close the splitter. No more data should be added after
 	ACTOR static Future<Void> close(Reference<BlobManifestFileSplitter> self) {
 		self->flushNext();
@@ -351,19 +353,20 @@ public:
 	virtual ~BlobManifestDumper() {}
 
 	// Execute the dumper
-	ACTOR static Future<Void> execute(Reference<BlobManifestDumper> self) {
+	ACTOR static Future<int64_t> execute(Reference<BlobManifestDumper> self) {
 		try {
-			wait(dump(self));
+			state int64_t bytes = wait(dump(self));
 			wait(cleanup(self));
+			return bytes;
 		} catch (Error& e) {
 			dprint("WARNING: unexpected blob manifest dumper error {}\n", e.what()); // skip error handling for now
+			return 0;
 		}
-		return Void();
 	}
 
 private:
 	// Read system keys and write to manifest files
-	ACTOR static Future<Void> dump(Reference<BlobManifestDumper> self) {
+	ACTOR static Future<int64_t> dump(Reference<BlobManifestDumper> self) {
 		state Reference<BlobManifestFileSplitter> splitter = self->fileSplitter_;
 		state Transaction tr(self->db_);
 		loop {
@@ -412,7 +415,7 @@ private:
 
 				// last flush for in-memory data
 				wait(BlobManifestFileSplitter::close(splitter));
-				return Void();
+				return splitter->totalBytes();
 			} catch (Error& e) {
 				TraceEvent("BlobManfiestDumpError").error(e).log();
 				dprint("Manifest dumping error {}\n", e.what());
@@ -795,10 +798,13 @@ private:
 };
 
 // API to dump a manifest copy to external storage
-ACTOR Future<Void> dumpManifest(Database db, Reference<BlobConnectionProvider> blobConn, int64_t epoch, int64_t seqNo) {
+ACTOR Future<int64_t> dumpManifest(Database db,
+                                   Reference<BlobConnectionProvider> blobConn,
+                                   int64_t epoch,
+                                   int64_t seqNo) {
 	Reference<BlobManifestDumper> dumper = makeReference<BlobManifestDumper>(db, blobConn, epoch, seqNo);
-	wait(BlobManifestDumper::execute(dumper));
-	return Void();
+	int64_t bytes = wait(BlobManifestDumper::execute(dumper));
+	return bytes;
 }
 
 // API to load manifest from external blob storage

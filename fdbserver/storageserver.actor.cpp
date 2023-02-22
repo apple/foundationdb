@@ -855,7 +855,6 @@ public:
 	void clearTenants(StringRef startTenant, StringRef endTenant, Version version);
 
 	void checkTenantEntry(Version version, TenantInfo tenant);
-	KeyRangeRef clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenantInfo, Arena& arena);
 
 	std::vector<StorageServerShard> getStorageServerShards(KeyRangeRef range);
 
@@ -4036,17 +4035,6 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 	return result;
 }
 
-KeyRangeRef StorageServer::clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenantInfo, Arena& arena) {
-	if (tenantInfo.hasTenant()) {
-		return KeyRangeRef(range.begin.startsWith(tenantInfo.prefix.get()) ? range.begin : tenantInfo.prefix.get(),
-		                   range.end.startsWith(tenantInfo.prefix.get())
-		                       ? range.end
-		                       : allKeys.end.withPrefix(tenantInfo.prefix.get(), arena));
-	} else {
-		return range;
-	}
-}
-
 ACTOR Future<Key> findKey(StorageServer* data,
                           KeySelectorRef sel,
                           Version version,
@@ -4248,7 +4236,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			throw wrong_shard_server();
 		}
 
-		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenantInfo, req.arena);
+		KeyRangeRef searchRange = TenantAPI::clampRangeToTenant(shard, req.tenantInfo, req.arena);
 
 		state int offset1 = 0;
 		state int offset2;
@@ -5413,7 +5401,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			throw wrong_shard_server();
 		}
 
-		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenantInfo, req.arena);
+		KeyRangeRef searchRange = TenantAPI::clampRangeToTenant(shard, req.tenantInfo, req.arena);
 
 		state int offset1 = 0;
 		state int offset2;
@@ -5614,7 +5602,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			throw wrong_shard_server();
 		}
 
-		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenantInfo, req.arena);
+		KeyRangeRef searchRange = TenantAPI::clampRangeToTenant(shard, req.tenantInfo, req.arena);
 
 		state int offset1 = 0;
 		state int offset2;
@@ -5804,7 +5792,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		state uint64_t changeCounter = data->shardChangeCounter;
 
 		KeyRange shard = getShardKeyRange(data, req.sel);
-		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenantInfo, req.arena);
+		KeyRangeRef searchRange = TenantAPI::clampRangeToTenant(shard, req.tenantInfo, req.arena);
 
 		state int offset;
 		Key absoluteKey = wait(findKey(data, req.sel, version, searchRange, &offset, req.spanContext, req.options));

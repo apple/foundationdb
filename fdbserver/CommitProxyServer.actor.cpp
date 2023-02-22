@@ -2675,7 +2675,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 			ssis.push_back(it->interf);
 			maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 		}
-		rep.results.emplace_back(r.range(), ssis);
+		rep.results.emplace_back(TenantAPI::clampRangeToTenant(r.range(), req.tenant, req.arena), ssis);
 	} else if (!req.reverse) {
 		int count = 0;
 		for (auto r = commitData->keyInfo.rangeContaining(req.begin);
@@ -2687,7 +2687,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 				ssis.push_back(it->interf);
 				maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 			}
-			rep.results.emplace_back(r.range(), ssis);
+			rep.results.emplace_back(TenantAPI::clampRangeToTenant(r.range(), req.tenant, req.arena), ssis);
 			count++;
 		}
 	} else {
@@ -2700,7 +2700,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 				ssis.push_back(it->interf);
 				maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 			}
-			rep.results.emplace_back(r.range(), ssis);
+			rep.results.emplace_back(TenantAPI::clampRangeToTenant(r.range(), req.tenant, req.arena), ssis);
 			if (r == commitData->keyInfo.ranges().begin()) {
 				break;
 			}
@@ -2729,6 +2729,139 @@ ACTOR static Future<Void> readRequestServer(CommitProxyInterface proxy,
 		} else {
 			++commitData->stats.keyServerLocationIn;
 			addActor.send(doKeyServerLocationRequest(req, commitData));
+		}
+	}
+}
+
+// Right now this just proxies a call to read the system keyspace for tenant+authorization purposes, but this will
+// eventually be extended to have this mapping in the transaction state store
+ACTOR static Future<Void> doBlobGranuleLocationRequest(GetBlobGranuleLocationsRequest req,
+                                                       ProxyCommitData* commitData) {
+	if (req.reverse) {
+		// FIXME: support! currently unused
+		++commitData->stats.blobGranuleLocationOut;
+		req.reply.sendError(unsupported_operation());
+		return Void();
+	}
+	if (req.end.present() && req.end.get() <= req.begin) {
+		++commitData->stats.blobGranuleLocationOut;
+		req.reply.sendError(unsupported_operation());
+		return Void();
+	}
+	// We can't respond to these requests until we have valid txnStateStore
+	wait(commitData->validState.getFuture());
+	state int i = 0;
+
+	state Version minVersion =
+	    req.minTenantVersion == latestVersion ? commitData->stats.lastCommitVersionAssigned + 1 : req.minTenantVersion;
+
+	wait(delay(0, TaskPriority::DefaultEndpoint));
+
+	bool validTenant = wait(checkTenant(commitData, req.tenant.tenantId, minVersion, "GetBlobGranuleLocation"));
+
+	if (!validTenant) {
+		++commitData->stats.blobGranuleLocationOut;
+		req.reply.sendError(tenant_not_found());
+		return Void();
+	}
+
+	state GetBlobGranuleLocationsReply rep;
+	state KeyRange keyRange;
+	if (req.end.present()) {
+		keyRange = KeyRangeRef(req.begin, req.end.get());
+	} else {
+		keyRange = KeyRangeRef(req.begin, keyAfter(req.begin, req.arena));
+	}
+	if (req.tenant.hasTenant()) {
+		keyRange = keyRange.withPrefix(req.tenant.prefix.get(), req.arena);
+	}
+
+	req.limit = std::min(req.limit, CLIENT_KNOBS->BG_TOO_MANY_GRANULES);
+
+	ASSERT(!keyRange.empty());
+
+	state Transaction tr(commitData->cx);
+	try {
+		// TODO: could skip GRV, and keeps consistent with tenant mapping? Appears to be other issues though
+		// tr.setVersion(minVersion);
+		state RangeResult blobGranuleMapping = wait(krmGetRanges(
+		    &tr, blobGranuleMappingKeys.begin, keyRange, req.limit + 1, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+		rep.arena.dependsOn(blobGranuleMapping.arena());
+
+		// load and decode worker interfaces if not cached
+		// FIXME: potentially remove duplicate racing requests for same BW interface? Should only happen at CP startup
+		// or when BW joins cluster
+		std::unordered_set<UID> bwiLookedUp;
+		state std::vector<Future<Optional<Value>>> bwiLookupFutures;
+		for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
+			if (!blobGranuleMapping[i].value.size()) {
+				throw blob_granule_transaction_too_old();
+			}
+
+			UID workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
+			if (workerId == UID()) {
+				throw blob_granule_transaction_too_old();
+			}
+
+			if (!commitData->blobWorkerInterfCache.count(workerId) && !bwiLookedUp.count(workerId)) {
+				bwiLookedUp.insert(workerId);
+				bwiLookupFutures.push_back(tr.get(blobWorkerListKeyFor(workerId)));
+			}
+		}
+
+		wait(waitForAll(bwiLookupFutures));
+
+		for (auto& f : bwiLookupFutures) {
+			Optional<Value> workerInterface = f.get();
+			// from the time the mapping was read from the db, the associated blob worker
+			// could have died and so its interface wouldn't be present as part of the blobWorkerList
+			// we persist in the db. So throw blob_granule_request_failed to have client retry to get the new mapping
+			if (!workerInterface.present()) {
+				throw blob_granule_request_failed();
+			}
+
+			BlobWorkerInterface bwInterf = decodeBlobWorkerListValue(workerInterface.get());
+			commitData->blobWorkerInterfCache[bwInterf.id()] = bwInterf;
+		}
+
+		// Mapping is valid, all worker interfaces are cached, we can populate response
+		for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
+			// FIXME: avoid duplicate decode?
+			UID workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
+			rep.results.push_back({ KeyRangeRef(blobGranuleMapping[i].key, blobGranuleMapping[i + 1].key),
+			                        commitData->blobWorkerInterfCache[workerId] });
+		}
+
+	} catch (Error& e) {
+		++commitData->stats.blobGranuleLocationOut;
+		if (e.code() == error_code_operation_cancelled) {
+			throw;
+		}
+		// TODO: only specific error types?
+		req.reply.sendError(e);
+		return Void();
+	}
+
+	req.reply.send(rep);
+	++commitData->stats.blobGranuleLocationOut;
+	return Void();
+}
+
+ACTOR static Future<Void> bgReadRequestServer(CommitProxyInterface proxy,
+                                              PromiseStream<Future<Void>> addActor,
+                                              ProxyCommitData* commitData) {
+	loop {
+		GetBlobGranuleLocationsRequest req = waitNext(proxy.getBlobGranuleLocations.getFuture());
+		// WARNING: this code is run at a high priority, so it needs to do as little work as possible
+		if ((commitData->stats.blobGranuleLocationIn.getValue() - commitData->stats.blobGranuleLocationOut.getValue() >
+		     SERVER_KNOBS->BLOB_GRANULE_LOCATION_MAX_QUEUE_SIZE) ||
+		    (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.0001))) {
+			++commitData->stats.blobGranuleLocationErrors;
+			req.reply.sendError(commit_proxy_memory_limit_exceeded());
+			TraceEvent(SevWarnAlways, "ProxyBGLocationRequestThresholdExceeded", commitData->dbgid).suppressFor(60);
+		} else {
+			++commitData->stats.blobGranuleLocationIn;
+			addActor.send(doBlobGranuleLocationRequest(req, commitData));
 		}
 	}
 }
@@ -3443,6 +3576,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	addActor.send(monitorRemoteCommitted(&commitData));
 	addActor.send(tenantIdServer(proxy, addActor, &commitData));
 	addActor.send(readRequestServer(proxy, addActor, &commitData));
+	addActor.send(bgReadRequestServer(proxy, addActor, &commitData));
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(ddMetricsRequestServer(proxy, db));
 	addActor.send(reportTxnTagCommitCost(proxy.id(), db, &commitData.ssTrTagCommitCost));

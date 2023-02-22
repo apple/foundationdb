@@ -90,7 +90,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		// Ensure associated counter values gets updated
 		ASSERT_EQ(cache->numRefreshByInit(), 1);
 
-		state TenantMapEntry dummy(std::numeric_limits<int64_t>::max(), "name"_sr, TenantState::READY);
+		state TenantMapEntry dummy(std::numeric_limits<int64_t>::max(), "name"_sr);
 		Optional<TenantEntryCachePayload<int64_t>> value = wait(cache->getById(dummy.id));
 		ASSERT(!value.present());
 

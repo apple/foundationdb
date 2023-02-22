@@ -295,6 +295,8 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_int64(FDBFuture* f, int6
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_uint64(FDBFuture* f, uint64_t* out);
 
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_double(FDBFuture* f, double* out);
+
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_key(FDBFuture* f, uint8_t const** out_key, int* out_key_length);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_value(FDBFuture* f,
@@ -622,12 +624,14 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_transaction_get_committed_version(F
                                                                                int64_t* out_version);
 
 /*
- * These functions intentionally return an FDBFuture instead of an integer
+ * These functions intentionally return an FDBFuture instead of a numeric value
  * directly, so that calling the API can see the effect of previous
  * mutations on the transaction. Specifically, mutations are applied
  * asynchronously by the main thread. In order to see them, this call has to
  * be serviced by the main thread too.
  */
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_tag_throttled_duration(FDBTransaction* tr);
+
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_total_cost(FDBTransaction* tr);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* tr);
