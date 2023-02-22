@@ -130,7 +130,7 @@ struct TenantCapacityLimits : TestWorkload {
 			}
 			// Attempt to create a tenant on the metacluster which should fail since the cluster is at capacity
 			try {
-				TenantMapEntry entry;
+				MetaclusterTenantMapEntry entry;
 				entry.tenantName = "test_tenant_metacluster"_sr;
 				wait(MetaclusterAPI::createTenant(self->managementDb, entry, AssignClusterAutomatically::True));
 				ASSERT(false);

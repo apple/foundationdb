@@ -36,6 +36,7 @@ struct FDBOptionInfo {
 	bool hasParameter;
 	bool hidden;
 	bool persistent;
+	bool sensitive;
 
 	// If non-negative, this specifies the code for the transaction option that this option is the default value for.
 	// Options that have a defaultFor will only retain the value from time they were most recently set (i.e. there can
@@ -52,10 +53,11 @@ struct FDBOptionInfo {
 	              bool hasParameter,
 	              bool hidden,
 	              bool persistent,
+	              bool sensitive,
 	              int defaultFor,
 	              ParamType paramType)
 	  : name(name), comment(comment), parameterComment(parameterComment), hasParameter(hasParameter), hidden(hidden),
-	    persistent(persistent), defaultFor(defaultFor), paramType(paramType) {}
+	    persistent(persistent), sensitive(sensitive), defaultFor(defaultFor), paramType(paramType) {}
 
 	FDBOptionInfo() {}
 };
@@ -109,8 +111,10 @@ public:
 };
 
 #define ADD_OPTION_INFO(                                                                                               \
-    type, var, name, comment, parameterComment, hasParameter, hidden, persistent, defaultFor, paramType)               \
+    type, var, name, comment, parameterComment, hasParameter, hidden, persistent, sensitive, defaultFor, paramType)    \
 	type::optionInfo.insert(                                                                                           \
-	    var, FDBOptionInfo(name, comment, parameterComment, hasParameter, hidden, persistent, defaultFor, paramType));
+	    var,                                                                                                           \
+	    FDBOptionInfo(                                                                                                 \
+	        name, comment, parameterComment, hasParameter, hidden, persistent, sensitive, defaultFor, paramType));
 
 #endif

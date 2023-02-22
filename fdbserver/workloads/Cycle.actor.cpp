@@ -21,6 +21,7 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
+#include "flow/WipedString.h"
 #include "flow/serialize.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/TokenSign.h"
@@ -41,7 +42,7 @@ struct CycleMembers<true> {
 	Arena arena;
 	TenantName tenant;
 	int64_t tenantId;
-	Standalone<StringRef> signedToken;
+	WipedString signedToken;
 	bool useToken;
 };
 

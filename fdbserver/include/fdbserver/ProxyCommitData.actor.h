@@ -19,8 +19,6 @@
  */
 
 #pragma once
-#include "fdbserver/EncryptionOpsUtils.h"
-#include <unordered_map>
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H)
 #define FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H
 #include "fdbserver/ProxyCommitData.actor.g.h"
@@ -67,6 +65,7 @@ struct ProxyStats {
 	Counter tenantIdRequestIn;
 	Counter tenantIdRequestOut;
 	Counter tenantIdRequestErrors;
+	Counter blobGranuleLocationIn, blobGranuleLocationOut, blobGranuleLocationErrors;
 	Counter txnExpensiveClearCostEstCount;
 	Version lastCommitVersionAssigned;
 
@@ -121,6 +120,8 @@ struct ProxyStats {
 	    keyServerLocationIn("KeyServerLocationIn", cc), keyServerLocationOut("KeyServerLocationOut", cc),
 	    keyServerLocationErrors("KeyServerLocationErrors", cc), tenantIdRequestIn("TenantIdRequestIn", cc),
 	    tenantIdRequestOut("TenantIdRequestOut", cc), tenantIdRequestErrors("TenantIdRequestErrors", cc),
+	    blobGranuleLocationIn("BlobGranuleLocationIn", cc), blobGranuleLocationOut("BlobGranuleLocationOut", cc),
+	    blobGranuleLocationErrors("BlobGranuleLocationErrors", cc),
 	    txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), lastCommitVersionAssigned(0),
 	    commitLatencySample("CommitLatencyMetrics",
 	                        id,
@@ -179,6 +180,7 @@ struct ProxyCommitData {
 	int64_t commitBatchesMemBytesCount;
 	std::unordered_map<TenantName, int64_t> tenantNameIndex;
 	std::map<int64_t, TenantName> tenantMap;
+	std::set<int64_t> lockedTenants;
 	std::unordered_set<int64_t> tenantsOverStorageQuota;
 	ProxyStats stats;
 	MasterInterface master;
@@ -221,6 +223,7 @@ struct ProxyCommitData {
 	EventMetricHandle<SingleKeyMutation> singleKeyMutationEvent;
 
 	std::map<UID, Reference<StorageInfo>> storageCache;
+	std::map<UID, BlobWorkerInterface> blobWorkerInterfCache;
 	std::unordered_map<UID, StorageServerInterface> tssMapping;
 	std::map<Tag, Version> tag_popped;
 	Deque<std::pair<Version, Version>> txsPopVersions;

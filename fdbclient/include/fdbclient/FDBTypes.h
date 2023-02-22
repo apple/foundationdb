@@ -1063,9 +1063,9 @@ struct StorageBytes {
 	constexpr static FileIdentifier file_identifier = 3928581;
 	// Free space on the filesystem
 	int64_t free;
-	// Total space on the filesystem
+	// Total capacity on the filesystem usable by non-privileged users.
 	int64_t total;
-	// Used by *this* store, not total - free
+	// Total size of all files owned by *this* storage instance, not total - free
 	int64_t used;
 	// Amount of space available for use by the store, which includes free space on the filesystem
 	// and internal free space within the store data that is immediately reusable.
@@ -1653,6 +1653,7 @@ struct ReadOptions {
 	ReadType type;
 	// Once CacheResult is serializable, change type from bool to CacheResult
 	bool cacheResult;
+	bool lockAware = false;
 	Optional<UID> debugID;
 	Optional<Version> consistencyCheckStartVersion;
 
@@ -1666,7 +1667,7 @@ struct ReadOptions {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, type, cacheResult, debugID, consistencyCheckStartVersion);
+		serializer(ar, type, cacheResult, debugID, consistencyCheckStartVersion, lockAware);
 	}
 };
 

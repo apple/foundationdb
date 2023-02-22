@@ -105,9 +105,7 @@ struct VersionedMessage {
 			ArenaReader reader(arena, message, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 			MutationRef m;
 			reader >> m;
-			const BlobCipherEncryptHeader* header = m.encryptionHeader();
-			cipherDetails.insert(header->cipherTextDetails);
-			cipherDetails.insert(header->cipherHeaderDetails);
+			m.updateEncryptCipherDetails(cipherDetails);
 		}
 	}
 };

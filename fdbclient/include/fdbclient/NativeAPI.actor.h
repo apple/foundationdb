@@ -29,6 +29,7 @@
 
 #include "flow/BooleanParam.h"
 #include "flow/flow.h"
+#include "flow/WipedString.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitProxyInterface.h"
@@ -229,6 +230,7 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	Promise<Void> onChangeTrigger;
 	Promise<Void> onSetWatchTrigger;
 	Future<Void> watchFuture;
+	Optional<ReadOptions> readOptions;
 
 	Watch() : valuePresent(false), setPresent(false), watchFuture(Never()) {}
 	Watch(Key key) : key(key), valuePresent(false), setPresent(false), watchFuture(Never()) {}
@@ -271,7 +273,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
 	Future<Version> readVersionFuture;
 	Promise<Optional<Value>> metadataVersion;
-	Optional<Standalone<StringRef>> authToken;
+	Optional<WipedString> authToken;
 	Reference<TransactionLogInfo> trLogInfo;
 	TransactionOptions options;
 	Optional<ReadOptions> readOptions;
@@ -283,6 +285,8 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	// Measured by summing the bytes accessed by each read and write operation
 	// after rounding up to the nearest page size and applying a write penalty
 	int64_t totalCost = 0;
+
+	double proxyTagThrottledDuration = 0.0;
 
 	// Special flag to skip prepending tenant prefix to mutations and conflict ranges
 	// when a dummy, internal transaction gets commited. The sole purpose of commitDummyTransaction() is to
@@ -489,6 +493,8 @@ public:
 	Version getCommittedVersion() const { return trState->committedVersion; }
 
 	int64_t getTotalCost() const { return trState->totalCost; }
+
+	double getTagThrottledDuration() const;
 
 	// Will be fulfilled only after commit() returns success
 	[[nodiscard]] Future<Standalone<StringRef>> getVersionstamp();

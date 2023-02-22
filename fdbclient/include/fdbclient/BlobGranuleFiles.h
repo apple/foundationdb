@@ -62,7 +62,12 @@ std::string randomBGFilename(UID blobWorkerID, UID granuleID, Version version, s
 void sortDeltasByKey(const Standalone<GranuleDeltas>& deltasByVersion, const KeyRangeRef& fileRange);
 
 // just for client passthrough. reads all key-value pairs from a snapshot file, and all mutations from a delta file
-RangeResult bgReadSnapshotFile(const StringRef& data, const KeyRangeRef& keys = normalKeys);
-Standalone<VectorRef<GranuleMutationRef>> bgReadDeltaFile(const StringRef& data);
+RangeResult bgReadSnapshotFile(const StringRef& data,
+                               Optional<KeyRef> tenantPrefix,
+                               Optional<BlobGranuleCipherKeysCtx> encryptionCtx,
+                               const KeyRangeRef& keys = normalKeys);
+Standalone<VectorRef<GranuleMutationRef>> bgReadDeltaFile(const StringRef& data,
+                                                          Optional<KeyRef> tenantPrefix,
+                                                          Optional<BlobGranuleCipherKeysCtx> encryptionCtx);
 
 #endif

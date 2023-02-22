@@ -2,9 +2,9 @@
 extraMachineCountDC = 2
 maxTLogVersion=6
 disableHostname=true
-disableEncryption=true
-storageEngineExcludeTypes=[3, 4]
+storageEngineExcludeTypes=[3, 4, 5]
 tenantModes=['disabled']
+encryptModes=['disabled']
 
 [[knobs]]
 # This can be removed once the lower bound of this downgrade test is a version that understands the new protocol

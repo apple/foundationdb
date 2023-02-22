@@ -2255,14 +2255,6 @@ int main(int argc, char* argv[]) {
 						}
 					}
 				}
-				g_knobs.setKnob("enable_encryption",
-				                KnobValue::create(ini.GetBoolValue("META", "enableEncryption", false)));
-				g_knobs.setKnob("enable_tlog_encryption",
-				                KnobValue::create(ini.GetBoolValue("META", "enableTLogEncryption", false)));
-				g_knobs.setKnob("enable_storage_server_encryption",
-				                KnobValue::create(ini.GetBoolValue("META", "enableStorageServerEncryption", false)));
-				g_knobs.setKnob("enable_blob_granule_encryption",
-				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
 				g_knobs.setKnob("enable_blob_granule_compression",
 				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
 				g_knobs.setKnob("encrypt_header_auth_token_enabled",
@@ -2270,6 +2262,14 @@ int main(int argc, char* argv[]) {
 				g_knobs.setKnob("encrypt_header_auth_token_algo",
 				                KnobValue::create((int)ini.GetLongValue(
 				                    "META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO)));
+				g_knobs.setKnob("enable_configurable_encryption",
+				                KnobValue::create(ini.GetBoolValue("META",
+				                                                   "enableConfigurableEncryption",
+				                                                   CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION)));
+
+				g_knobs.setKnob(
+				    "shard_encode_location_metadata",
+				    KnobValue::create(ini.GetBoolValue("META", "enableShardEncodeLocationMetadata", false)));
 			}
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator->run();
