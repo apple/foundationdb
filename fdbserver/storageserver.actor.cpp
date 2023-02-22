@@ -9621,9 +9621,9 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 			std::sort(metaData.ranges.begin(), metaData.ranges.end(), [](KeyRange a, KeyRange b) {
 				// Make sure no overlapping between compared two ranges
 				if (a.begin < b.begin) {
-					ASSERT(a.end < b.begin);
+					ASSERT(a.end <= b.begin);
 				} else if (a.begin > b.begin) {
-					ASSERT(a.end > b.begin);
+					ASSERT(a.end >= b.begin);
 				} else {
 					ASSERT(false);
 				}
