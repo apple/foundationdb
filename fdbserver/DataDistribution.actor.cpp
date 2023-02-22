@@ -447,7 +447,7 @@ public:
 				if (self->configuration.usableRegions > 1) {
 					teams.emplace_back(iShard.remoteSrc, /*primary=*/false);
 				}
-				self->physicalShardCollection->initPhysicalShardCollection(keys, teams, iShard.srcId.first(), 0);
+				self->physicalShardCollection->initPhysicalShardCollection(keys, teams, iShard.srcId.first(), UID());
 			}
 		}
 

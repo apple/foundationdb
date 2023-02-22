@@ -73,6 +73,7 @@ struct MoveKeysParams {
 	UID relocationIntervalId;
 	const DDEnabledState* ddEnabledState = nullptr;
 	CancelConflictingDataMoves cancelConflictingDataMoves = CancelConflictingDataMoves::False;
+	UID debugID;
 
 	MoveKeysParams() {}
 
@@ -113,6 +114,46 @@ struct MoveKeysParams {
 	    finishMoveKeysParallelismLock(finishMoveKeysParallelismLock), hasRemote(hasRemote),
 	    relocationIntervalId(relocationIntervalId), ddEnabledState(ddEnabledState),
 	    cancelConflictingDataMoves(cancelConflictingDataMoves) {}
+
+	MoveKeysParams(UID dataMoveId,
+	               const KeyRange& keys,
+	               const std::vector<UID>& destinationTeam,
+	               const std::vector<UID>& healthyDestinations,
+	               const MoveKeysLock& lock,
+	               const Promise<Void>& dataMovementComplete,
+	               FlowLock* startMoveKeysParallelismLock,
+	               FlowLock* finishMoveKeysParallelismLock,
+	               bool hasRemote,
+	               UID relocationIntervalId,
+	               const DDEnabledState* ddEnabledState,
+	               CancelConflictingDataMoves cancelConflictingDataMoves,
+	               UID debugID)
+	  : dataMoveId(dataMoveId), keys(keys), destinationTeam(destinationTeam), healthyDestinations(healthyDestinations),
+	    lock(lock), dataMovementComplete(dataMovementComplete),
+	    startMoveKeysParallelismLock(startMoveKeysParallelismLock),
+	    finishMoveKeysParallelismLock(finishMoveKeysParallelismLock), hasRemote(hasRemote),
+	    relocationIntervalId(relocationIntervalId), ddEnabledState(ddEnabledState),
+	    cancelConflictingDataMoves(cancelConflictingDataMoves), debugID(debugID) {}
+
+	MoveKeysParams(UID dataMoveId,
+	               const std::vector<KeyRange>& ranges,
+	               const std::vector<UID>& destinationTeam,
+	               const std::vector<UID>& healthyDestinations,
+	               const MoveKeysLock& lock,
+	               const Promise<Void>& dataMovementComplete,
+	               FlowLock* startMoveKeysParallelismLock,
+	               FlowLock* finishMoveKeysParallelismLock,
+	               bool hasRemote,
+	               UID relocationIntervalId,
+	               const DDEnabledState* ddEnabledState,
+	               CancelConflictingDataMoves cancelConflictingDataMoves,
+	               UID debugID)
+	  : dataMoveId(dataMoveId), ranges(ranges), destinationTeam(destinationTeam),
+	    healthyDestinations(healthyDestinations), lock(lock), dataMovementComplete(dataMovementComplete),
+	    startMoveKeysParallelismLock(startMoveKeysParallelismLock),
+	    finishMoveKeysParallelismLock(finishMoveKeysParallelismLock), hasRemote(hasRemote),
+	    relocationIntervalId(relocationIntervalId), ddEnabledState(ddEnabledState),
+	    cancelConflictingDataMoves(cancelConflictingDataMoves), debugID(debugID) {}
 };
 
 // read the lock value in system keyspace but do not change anything
@@ -151,7 +192,10 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
                                    MoveKeysLock lock,
                                    FlowLock* cleanUpDataMoveParallelismLock,
                                    KeyRange range,
-                                   const DDEnabledState* ddEnabledState);
+                                   const DDEnabledState* ddEnabledState,
+                                   PromiseStream<Future<Void>> addCleanUpDataMoveActor = PromiseStream<Future<Void>>(),
+                                   bool backgroundCleanUp = false,
+                                   UID debugID = UID());
 
 ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInterface server);
 // Adds a newly recruited storage server to a database (e.g. adding it to FF/serverList)

@@ -315,6 +315,13 @@ class DDTxnProcessorImpl {
 				for (int i = 0; i < dms.size(); ++i) {
 					auto dataMove = std::make_shared<DataMove>(decodeDataMoveValue(dms[i].value), true);
 					const DataMoveMetaData& meta = dataMove->meta;
+					if (meta.ranges.empty()) {
+						// This dataMove cancellation is delayed to background cancellation
+						// For this case, the dataMove has empty ranges but it is in Deleting phase
+						// We simply bypass this case
+						ASSERT(meta.getPhase() == DataMoveMetaData::Deleting);
+						continue;
+					}
 					ASSERT(!meta.ranges.empty());
 					for (const UID& id : meta.src) {
 						auto& dc = server_dc[id];
@@ -336,7 +343,6 @@ class DDTxnProcessorImpl {
 					std::sort(dataMove->remoteSrc.begin(), dataMove->remoteSrc.end());
 					std::sort(dataMove->primaryDest.begin(), dataMove->primaryDest.end());
 					std::sort(dataMove->remoteDest.begin(), dataMove->remoteDest.end());
-
 					auto ranges = result->dataMoveMap.intersectingRanges(meta.ranges.front());
 					for (auto& r : ranges) {
 						ASSERT(!r.value()->valid);

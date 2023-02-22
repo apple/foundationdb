@@ -512,12 +512,16 @@ void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap, 
 }
 
 // Cancells in-flight data moves intersecting with range.
-ACTOR Future<Void> cancelDataMove(struct DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState);
+ACTOR Future<Void> cancelDataMove(struct DDQueue* self,
+                                  KeyRange range,
+                                  const DDEnabledState* ddEnabledState,
+                                  UID debugID = UID());
 
 ACTOR Future<Void> dataDistributionRelocator(struct DDQueue* self,
                                              RelocateData rd,
                                              Future<Void> prevCleanup,
-                                             const DDEnabledState* ddEnabledState);
+                                             const DDEnabledState* ddEnabledState,
+                                             UID gDebugID = UID());
 
 struct DDQueue : public IDDRelocationQueue {
 	struct DDDataMove {
@@ -674,6 +678,8 @@ struct DDQueue : public IDDRelocationQueue {
 	FutureStream<RelocateShard> input;
 	PromiseStream<GetMetricsRequest> getShardMetrics;
 	PromiseStream<GetTopKMetricsRequest> getTopKMetrics;
+
+	PromiseStream<Future<Void>> addCleanUpDataMoveActor;
 
 	double lastInterval;
 	int suppressIntervals;
@@ -1150,6 +1156,7 @@ struct DDQueue : public IDDRelocationQueue {
 	// canceled inflight relocateData. Launch the relocation for the rd.
 	void launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>> combined,
 	                      const DDEnabledState* ddEnabledState) {
+		UID debugID = deterministicRandom()->randomUniqueID();
 		[[maybe_unused]] int startedHere = 0;
 		double startTime = now();
 		// kick off relocators from items in the queue as need be
@@ -1220,9 +1227,6 @@ struct DDQueue : public IDDRelocationQueue {
 				}
 			}
 
-			Future<Void> fCleanup =
-			    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
-
 			// If there is a job in flight that wants data relocation which we are about to cancel/modify,
 			//     make sure that we keep the relocation intent for the job that we launch
 			auto f = inFlight.intersectingRanges(rd.keys);
@@ -1236,7 +1240,18 @@ struct DDQueue : public IDDRelocationQueue {
 			// update both inFlightActors and inFlight key range maps, cancelling deleted RelocateShards
 			std::vector<KeyRange> ranges;
 			inFlightActors.getRangesAffectedByInsertion(rd.keys, ranges);
+			TraceEvent(SevDebug, "CancelInFlightActorsInRelocator")
+			    .detail("DebugID", debugID)
+			    .detail("Range", rd.keys)
+			    .detail("IntersectRange", KeyRangeRef(ranges.front().begin, ranges.back().end));
 			inFlightActors.cancel(KeyRangeRef(ranges.front().begin, ranges.back().end));
+
+			TraceEvent(SevDebug, "CancelDataMoveInRelocatorStart").detail("DebugID", debugID).detail("Range", rd.keys);
+			// Future<Void> fCleanup =
+			Future<Void> fCleanup = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA
+			                            ? cancelDataMove(this, rd.keys, ddEnabledState, debugID)
+			                            : Void();
+
 			inFlight.insert(rd.keys, rd);
 			for (int r = 0; r < ranges.size(); r++) {
 				RelocateData& rrs = inFlight.rangeContaining(ranges[r].begin)->value();
@@ -1254,20 +1269,26 @@ struct DDQueue : public IDDRelocationQueue {
 							rrs.dataMoveId = UID();
 						} else {
 							rrs.dataMoveId = deterministicRandom()->randomUniqueID();
+							TraceEvent(SevDebug, "GenerateMoveIdByRandom")
+							    .detail("DebugID", debugID)
+							    .detail("DataMoveId", rrs.dataMoveId);
 						}
 					} else {
 						rrs.dataMoveId = anonymousShardId;
 					}
 				}
+				TraceEvent(SevDebug, "GenerateMoveId").detail("DebugID", debugID).detail("DataMoveId", rrs.dataMoveId);
 
 				launch(rrs, busymap, singleRegionTeamSize);
 				activeRelocations++;
-				TraceEvent(SevVerbose, "InFlightRelocationChange")
+				TraceEvent(SevDebug, "InFlightRelocationChange")
+				    .detail("DebugID", debugID)
 				    .detail("Launch", rrs.dataMoveId)
 				    .detail("Total", activeRelocations);
 				startRelocation(rrs.priority, rrs.healthPriority);
 				// Start the actor that relocates data in the rrs.keys
-				inFlightActors.insert(rrs.keys, dataDistributionRelocator(this, rrs, fCleanup, ddEnabledState));
+				inFlightActors.insert(rrs.keys,
+				                      dataDistributionRelocator(this, rrs, fCleanup, ddEnabledState, debugID));
 			}
 
 			// logRelocation( rd, "LaunchedRelocation" );
@@ -1365,29 +1386,122 @@ struct DDQueue : public IDDRelocationQueue {
 	                            TraceEvent* traceEvent);
 };
 
-ACTOR Future<Void> cancelDataMove(struct DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState) {
-	std::vector<Future<Void>> cleanup;
-	auto f = self->dataMoves.intersectingRanges(range);
-	for (auto it = f.begin(); it != f.end(); ++it) {
-		if (!it->value().isValid()) {
-			continue;
+ACTOR Future<Void> cancelDataMove(struct DDQueue* self,
+                                  KeyRange range,
+                                  const DDEnabledState* ddEnabledState,
+                                  UID debugID) {
+	state std::vector<Future<Void>> cleanup;
+	TraceEvent(SevDebug, "CancelDataMove", self->distributorId).detail("DebugID", debugID).detail("Range", range);
+	state std::vector<UID> existingCleanedupDataMoves;
+	state std::vector<UID> newCleanedupDataMoves;
+	state std::vector<std::pair<KeyRange, UID>> lastObservedDataMoves;
+
+	loop {
+		try {
+			existingCleanedupDataMoves.clear();
+			newCleanedupDataMoves.clear();
+			lastObservedDataMoves.clear();
+			auto f = self->dataMoves.intersectingRanges(range);
+			for (auto it = f.begin(); it != f.end(); ++it) {
+				TraceEvent(SevDebug, "CancelDataMoveDetails", self->distributorId)
+				    .detail("DebugID", debugID)
+				    .detail("DataMoveID", it->value().id)
+				    .detail("IntersectRange", KeyRangeRef(it->range().begin, it->range().end))
+				    .detail("Range", range);
+				if (!it->value().isValid()) {
+					continue;
+				}
+				KeyRange keys = KeyRangeRef(it->range().begin, it->range().end);
+				TraceEvent(SevDebug, "DDQueueCancelDataMove", self->distributorId)
+				    .detail("DebugID", debugID)
+				    .detail("DataMoveID", it->value().id)
+				    .detail("IntersectRange", keys)
+				    .detail("Range", range)
+				    .detail("CancelValid", it->value().cancel.isValid());
+				if (!it->value().cancel.isValid()) {
+					newCleanedupDataMoves.push_back(it->value().id);
+					it->value().cancel = cleanUpDataMove(self->cx,
+					                                     it->value().id,
+					                                     self->lock,
+					                                     &self->cleanUpDataMoveParallelismLock,
+					                                     keys,
+					                                     ddEnabledState,
+					                                     self->addCleanUpDataMoveActor,
+					                                     false,
+					                                     debugID);
+				} else {
+					existingCleanedupDataMoves.push_back(it->value().id);
+				}
+				TraceEvent(SevDebug, "DDQueueAddedToWaitListDataMoveCancel", self->distributorId)
+				    .detail("DebugID", debugID)
+				    .detail("DataMoveID", it->value().id)
+				    .detail("IntersectRange", keys)
+				    .detail("Range", range)
+				    .detail("CancelValid", it->value().cancel.isValid())
+				    .detail("NewCleanUp", newCleanedupDataMoves)
+				    .detail("ExistingCleanUp", existingCleanedupDataMoves);
+				lastObservedDataMoves.push_back(std::make_pair(keys, it->value().id));
+				cleanup.push_back(it->value().cancel);
+			}
+
+			wait(waitForAll(cleanup));
+
+			for (auto observedDataMove : lastObservedDataMoves) {
+				auto f = self->dataMoves.intersectingRanges(observedDataMove.first);
+				for (auto it = f.begin(); it != f.end(); ++it) {
+					if (it->value().id != observedDataMove.second) {
+						// Invariant: When two concurrent cleanups/relocations try to modify on the same range,
+						// the one who set ddQueue->dataMoves at first win the race
+						// others do backoff and retry cleanup later
+						// In this case, someone else of the overlapping range has changed the ddQueue->dataMoves
+						// Thus, the cleanup retries later
+						TraceEvent(SevDebug, "DataMoveCancelWhenCleanUpDone", self->distributorId)
+						    .detail("DebugID", debugID)
+						    .detail("Range", range)
+						    .detail("OldRange", observedDataMove.first)
+						    .detail("LastObservedDataMoveID", observedDataMove.second)
+						    .detail("CurrentDataMoveID", it->value().id);
+						throw retry();
+					}
+				}
+			}
+
+			auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(range);
+			if (!ranges.empty()) {
+				TraceEvent e(SevDebug, "InsertDataMoveByCleanUpDone", self->distributorId);
+				e.setMaxEventLength(4000000);
+				for (int i = 0; i < ranges.size(); i++) {
+					e.detail("CurrentAffectedRange" + std::to_string(i), static_cast<KeyRange>(ranges[i]));
+					e.detail("CurrentAffectedDataMoveId" + std::to_string(i), ranges[i].value.id);
+				}
+				auto f = self->dataMoves.intersectingRanges(range);
+				int cc = 0;
+				for (auto it = f.begin(); it != f.end(); ++it) {
+					KeyRangeRef ikr(it->range().begin, it->range().end);
+					e.detail("CurrentIntersectRange" + std::to_string(cc), ikr);
+					e.detail("CurrentIntersectDataMoveId" + std::to_string(cc), it->value().id);
+					cc++;
+				}
+				e.detail("DebugID", debugID);
+				e.detail("NewDataMoveId", DDQueue::DDDataMove().id);
+				e.detail("NewRange", KeyRangeRef(ranges.front().begin, ranges.back().end));
+				e.detail("Range", range);
+				e.detail("WaitedNewCleanUp", newCleanedupDataMoves);
+				e.detail("WaitedExistingCleanUp", existingCleanedupDataMoves);
+
+				self->dataMoves.insert(KeyRangeRef(ranges.front().begin, ranges.back().end), DDQueue::DDDataMove());
+			}
+			break;
+
+		} catch (Error& e) {
+			if (e.code() == error_code_retry) {
+				wait(delay(1));
+			} else {
+				throw;
+			}
 		}
-		KeyRange keys = KeyRangeRef(it->range().begin, it->range().end);
-		TraceEvent(SevInfo, "DDQueueCancelDataMove", self->distributorId)
-		    .detail("DataMoveID", it->value().id)
-		    .detail("DataMoveRange", keys)
-		    .detail("Range", range);
-		if (!it->value().cancel.isValid()) {
-			it->value().cancel = cleanUpDataMove(
-			    self->cx, it->value().id, self->lock, &self->cleanUpDataMoveParallelismLock, keys, ddEnabledState);
-		}
-		cleanup.push_back(it->value().cancel);
 	}
-	wait(waitForAll(cleanup));
-	auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(range);
-	if (!ranges.empty()) {
-		self->dataMoves.insert(KeyRangeRef(ranges.front().begin, ranges.back().end), DDQueue::DDDataMove());
-	}
+
 	return Void();
 }
 
@@ -1408,7 +1522,8 @@ static std::string destServersString(std::vector<std::pair<Reference<IDataDistri
 ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
                                              RelocateData rd,
                                              Future<Void> prevCleanup,
-                                             const DDEnabledState* ddEnabledState) {
+                                             const DDEnabledState* ddEnabledState,
+                                             UID debugID) {
 	state Promise<Void> errorOut(self->error);
 	state TraceInterval relocateShardInterval("RelocateShard", rd.randomId);
 	state PromiseStream<RelocateData> dataTransferComplete(self->dataTransferComplete);
@@ -1427,7 +1542,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state double startTime = now();
 	state std::vector<UID> destIds;
 	state WantTrueBest wantTrueBest(isValleyFillerPriority(rd.priority));
-	state uint64_t debugID = deterministicRandom()->randomUInt64();
 	state bool enableShardMove = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD;
 
 	try {
@@ -1471,6 +1585,20 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 					ASSERT(rd.dataMoveId.isValid());
 				}
+				auto f = self->dataMoves.intersectingRanges(rd.keys);
+				TraceEvent e(SevDebug, "InsertDataMoveByRelocator", distributorId);
+				e.setMaxEventLength(20000);
+				int cc = 0;
+				for (auto it = f.begin(); it != f.end(); ++it) {
+					KeyRangeRef ikr(it->range().begin, it->range().end);
+					e.detail("CurrentIntersectRange" + std::to_string(cc), ikr);
+					e.detail("CurrentIntersectDataMoveId" + std::to_string(cc), it->value().id);
+					cc++;
+				}
+				e.detail("DebugID", debugID);
+				e.detail("NewDataMoveID", rd.dataMoveId);
+				e.detail("NewRange", rd.keys);
+				e.detail("Range", rd.keys);
 				self->dataMoves.insert(rd.keys, DDQueue::DDDataMove(rd.dataMoveId));
 			}
 		}
@@ -1760,6 +1888,23 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							    .detail("Range", kr);
 						}
 					}
+					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+						ASSERT(rd.dataMoveId.isValid());
+					}
+					auto ff = self->dataMoves.intersectingRanges(rd.keys);
+					TraceEvent e(SevDebug, "InsertDataMoveByRelocatorAfterGetPhysicalShard", distributorId);
+					e.setMaxEventLength(20000);
+					int cc = 0;
+					for (auto it = ff.begin(); it != ff.end(); ++it) {
+						KeyRangeRef ikr(it->range().begin, it->range().end);
+						e.detail("CurrentIntersectRange" + std::to_string(cc), ikr);
+						e.detail("CurrentIntersectDataMoveId" + std::to_string(cc), it->value().id);
+						cc++;
+					}
+					e.detail("DebugID", debugID);
+					e.detail("NewDataMoveID", rd.dataMoveId);
+					e.detail("NewRange", rd.keys);
+					e.detail("Range", rd.keys);
 					self->dataMoves.insert(rd.keys, DDQueue::DDDataMove(rd.dataMoveId));
 				}
 				ASSERT(rd.dataMoveId.first() != UID().first());
@@ -1872,7 +2017,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				                                          self->teamCollections.size() > 1,
 				                                          relocateShardInterval.pairID,
 				                                          ddEnabledState,
-				                                          CancelConflictingDataMoves::False);
+				                                          CancelConflictingDataMoves::False,
+				                                          debugID);
 			} else {
 				params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
 				                                          rd.keys,
@@ -1885,7 +2031,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				                                          self->teamCollections.size() > 1,
 				                                          relocateShardInterval.pairID,
 				                                          ddEnabledState,
-				                                          CancelConflictingDataMoves::False);
+				                                          CancelConflictingDataMoves::False,
+				                                          debugID);
 			}
 			state Future<Void> doMoveKeys = self->txnProcessor->moveKeys(*params);
 			state Future<Void> pollHealth =
@@ -1913,7 +2060,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 									                                          self->teamCollections.size() > 1,
 									                                          relocateShardInterval.pairID,
 									                                          ddEnabledState,
-									                                          CancelConflictingDataMoves::False);
+									                                          CancelConflictingDataMoves::False,
+									                                          debugID);
 								} else {
 									params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
 									                                          rd.keys,
@@ -1926,7 +2074,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 									                                          self->teamCollections.size() > 1,
 									                                          relocateShardInterval.pairID,
 									                                          ddEnabledState,
-									                                          CancelConflictingDataMoves::False);
+									                                          CancelConflictingDataMoves::False,
+									                                          debugID);
 								}
 								doMoveKeys = self->txnProcessor->moveKeys(*params);
 							} else {
@@ -1936,7 +2085,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 									if (ranges.size() == 1 && static_cast<KeyRange>(ranges[0]) == rd.keys &&
 									    ranges[0].value.id == rd.dataMoveId && !ranges[0].value.cancel.isValid()) {
 										self->dataMoves.insert(rd.keys, DDQueue::DDDataMove());
-										TraceEvent(SevVerbose, "DequeueDataMoveOnSuccess", self->distributorId)
+										TraceEvent(SevDebug, "DequeueDataMoveOnSuccess", self->distributorId)
 										    .detail("DataMoveID", rd.dataMoveId)
 										    .detail("DataMoveRange", rd.keys);
 									}
@@ -2068,6 +2217,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 		relocationComplete.send(rd);
 
 		if (err.code() == error_code_data_move_dest_team_not_found) {
+			TraceEvent(SevDebug, "DataMoveDestTeamNotFound").detail("InputRange", rd.keys).detail("DebugID", debugID);
 			wait(cancelDataMove(self, rd.keys, ddEnabledState));
 		}
 
@@ -2449,6 +2599,7 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 
 	state PromiseStream<KeyRange> rangesComplete;
 	state Future<Void> launchQueuedWorkTimeout = Never();
+	state Future<Void> onCleanUpDataMoveActorError = actorCollection(self.addCleanUpDataMoveActor.getFuture());
 
 	for (int i = 0; i < teamCollections.size(); i++) {
 		ddQueueFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_OVERUTILIZED_TEAM));
@@ -2610,6 +2761,7 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) {
 					r.send(self.getUnhealthyRelocationCount());
 				}
+				when(wait(onCleanUpDataMoveActorError)) {}
 			}
 		}
 	} catch (Error& e) {

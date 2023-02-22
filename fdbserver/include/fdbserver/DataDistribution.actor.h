@@ -315,7 +315,7 @@ public:
 	};
 
 	// Generate a random physical shard ID, which is not UID().first() nor anonymousShardId.first()
-	uint64_t generateNewPhysicalShardID(uint64_t debugID);
+	uint64_t generateNewPhysicalShardID(UID debugID);
 
 	// If the input team has any available physical shard, return an available physical shard from the input team and
 	// not in `excludedPhysicalShards`. This method is used for two-step team selection The overall process has two
@@ -325,14 +325,14 @@ public:
 	Optional<uint64_t> trySelectAvailablePhysicalShardFor(ShardsAffectedByTeamFailure::Team team,
 	                                                      StorageMetrics const& metrics,
 	                                                      const std::unordered_set<uint64_t>& excludedPhysicalShards,
-	                                                      uint64_t debugID);
+	                                                      UID debugID);
 
 	// Step 2: get a remote team which has the input physical shard.
 	// Second field in the returned pair indicates whether this physical shard is available or not.
 	// Return empty if no such remote team.
 	// May return a problematic remote team, and re-selection is required for this case.
 	std::pair<Optional<ShardsAffectedByTeamFailure::Team>, bool>
-	tryGetAvailableRemoteTeamWith(uint64_t inputPhysicalShardID, StorageMetrics const& moveInMetrics, uint64_t debugID);
+	tryGetAvailableRemoteTeamWith(uint64_t inputPhysicalShardID, StorageMetrics const& moveInMetrics, UID debugID);
 	// Invariant:
 	// (1) If forceToUseNewPhysicalShard is set, use the bestTeams selected by getTeam(), and create a new physical
 	// shard for the teams
@@ -347,7 +347,7 @@ public:
 	void initPhysicalShardCollection(KeyRange keys,
 	                                 std::vector<ShardsAffectedByTeamFailure::Team> selectedTeams,
 	                                 uint64_t physicalShardID,
-	                                 uint64_t debugID);
+	                                 UID debugID);
 
 	// Create a physical shard when updating PhysicalShardCollection
 	void updatePhysicalShardCollection(KeyRange keys,
@@ -355,7 +355,7 @@ public:
 	                                   std::vector<ShardsAffectedByTeamFailure::Team> selectedTeams,
 	                                   uint64_t physicalShardID,
 	                                   const StorageMetrics& metrics,
-	                                   uint64_t debugID);
+	                                   UID debugID);
 
 	// Update physicalShard metrics and return whether the keyRange needs to move out of its physical shard
 	MoveKeyRangeOutPhysicalShard trackPhysicalShard(KeyRange keyRange,
@@ -405,16 +405,16 @@ private:
 	void insertPhysicalShardToCollection(uint64_t physicalShardID,
 	                                     StorageMetrics const& metrics,
 	                                     std::vector<ShardsAffectedByTeamFailure::Team> teams,
-	                                     uint64_t debugID,
+	                                     UID debugID,
 	                                     PhysicalShardCreationTime whenCreated);
 
 	// In teamPhysicalShardIDs, add the input physical shard id to the input teams
 	void updateTeamPhysicalShardIDsMap(uint64_t physicalShardID,
 	                                   std::vector<ShardsAffectedByTeamFailure::Team> inputTeams,
-	                                   uint64_t debugID);
+	                                   UID debugID);
 
 	// In keyRangePhysicalShardIDMap, set the input physical shard id to the input key range
-	void updatekeyRangePhysicalShardIDMap(KeyRange keyRange, uint64_t physicalShardID, uint64_t debugID);
+	void updatekeyRangePhysicalShardIDMap(KeyRange keyRange, uint64_t physicalShardID, UID debugID);
 
 	// Checks the consistency between the mapping of physical shards and key ranges.
 	void checkKeyRangePhysicalShardMapping();

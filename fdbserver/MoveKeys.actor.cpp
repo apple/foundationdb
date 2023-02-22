@@ -1250,7 +1250,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
                                           FlowLock* startMoveKeysLock,
                                           UID relocationIntervalId,
                                           const DDEnabledState* ddEnabledState,
-                                          CancelConflictingDataMoves cancelConflictingDataMoves) {
+                                          CancelConflictingDataMoves cancelConflictingDataMoves,
+                                          UID debugID) {
 	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	state Future<Void> warningLogger = logWarningAfter("StartMoveShardsTooLong", 600, servers);
 
@@ -1260,7 +1261,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 
 	TraceEvent(SevDebug, "StartMoveShardsBegin", relocationIntervalId)
 	    .detail("DataMoveID", dataMoveId)
-	    .detail("TargetRange", describe(ranges));
+	    .detail("TargetRange", describe(ranges))
+	    .detail("DebugID", debugID);
 
 	// TODO: make startMoveShards work with multiple ranges.
 	ASSERT(ranges.size() == 1);
@@ -1295,6 +1297,11 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					TraceEvent(SevVerbose, "StartMoveShardsFoundDataMove", relocationIntervalId)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMove", dataMove.toString());
+					if (dataMove.getPhase() == DataMoveMetaData::Deleting && dataMove.ranges.empty()) {
+						TraceEvent(SevVerbose, "StartMoveShardsDataMove", relocationIntervalId)
+						    .detail("DataMoveBeingDeletedByBackgroundCleanup", dataMoveId);
+						throw data_move_cancelled();
+					}
 					ASSERT(!dataMove.ranges.empty() && dataMove.ranges.front().begin == keys.begin);
 					if (cancelDataMove) {
 						dataMove.setPhase(DataMoveMetaData::Deleting);
@@ -1303,8 +1310,9 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						throw movekeys_conflict();
 					}
 					if (dataMove.getPhase() == DataMoveMetaData::Deleting) {
-						TraceEvent(SevVerbose, "StartMoveShardsDataMove", relocationIntervalId)
-						    .detail("DataMoveBeingDeleted", dataMoveId);
+						TraceEvent(SevDebug, "StartMoveShardsDataMove", relocationIntervalId)
+						    .detail("DataMoveBeingDeleted", dataMoveId)
+						    .detail("DebugID", debugID);
 						throw data_move_cancelled();
 					}
 					if (dataMove.getPhase() == DataMoveMetaData::Running) {
@@ -1409,11 +1417,12 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 									ASSERT(val.present());
 									DataMoveMetaData dmv = decodeDataMoveValue(val.get());
 									TraceEvent(
-									    SevWarnAlways, "StartMoveShardsFoundConflictingDataMove", relocationIntervalId)
+									    SevError, "StartMoveShardsFoundConflictingDataMove", relocationIntervalId)
 									    .detail("Range", rangeIntersectKeys)
 									    .detail("DataMoveID", dataMoveId.toString())
 									    .detail("ExistingDataMoveID", destId.toString())
-									    .detail("ExistingDataMove", dmv.toString());
+									    .detail("ExistingDataMove", dmv.toString())
+									    .detail("DebugID", debugID);
 									cancelDataMove = true;
 									throw retry();
 								}
@@ -1488,13 +1497,14 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 
 				wait(tr.commit());
 
-				TraceEvent(SevVerbose, "DataMoveMetaDataCommit", dataMove.id)
+				TraceEvent(SevDebug, "DataMoveMetaDataCommit", dataMove.id)
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("DataMoveKey", dataMoveKeyFor(dataMoveId))
 				    .detail("CommitVersion", tr.getCommittedVersion())
 				    .detail("DeltaRange", currentKeys.toString())
 				    .detail("Range", describe(dataMove.ranges))
-				    .detail("DataMove", dataMove.toString());
+				    .detail("DataMove", dataMove.toString())
+				    .detail("DebugID", debugID);
 
 				dataMove = DataMoveMetaData();
 				if (complete) {
@@ -1508,7 +1518,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					    .errorUnsuppressed(e)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMoveRange", keys)
-					    .detail("CurrentDataMoveMetaData", dataMove.toString());
+					    .detail("CurrentDataMoveMetaData", dataMove.toString())
+					    .detail("DebugID", debugID);
 					wait(tr.onError(e));
 				}
 			}
@@ -1516,11 +1527,14 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "StartMoveShardsError", relocationIntervalId)
 		    .errorUnsuppressed(e)
-		    .detail("DataMoveID", dataMoveId);
+		    .detail("DataMoveID", dataMoveId)
+		    .detail("DebugID", debugID);
 		throw;
 	}
 
-	TraceEvent(SevDebug, "StartMoveShardsEnd", relocationIntervalId).detail("DataMoveID", dataMoveId);
+	TraceEvent(SevDebug, "StartMoveShardsEnd", relocationIntervalId)
+	    .detail("DataMoveID", dataMoveId)
+	    .detail("DebugID", debugID);
 
 	return Void();
 }
@@ -1645,6 +1659,11 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					TraceEvent(SevVerbose, "FinishMoveShardsFoundDataMove", relocationIntervalId)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMove", dataMove.toString());
+					if (dataMove.getPhase() == DataMoveMetaData::Deleting && dataMove.ranges.empty()) {
+						TraceEvent(SevWarn, "FinishMoveShardsDataMoveDeletingByBackgroundCleanup", relocationIntervalId)
+						    .detail("DataMoveID", dataMoveId);
+						throw data_move_cancelled();
+					}
 					destServers.insert(destServers.end(), dataMove.dest.begin(), dataMove.dest.end());
 					std::sort(destServers.begin(), destServers.end());
 					if (dataMove.getPhase() == DataMoveMetaData::Deleting) {
@@ -2354,10 +2373,22 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
                                    MoveKeysLock lock,
                                    FlowLock* cleanUpDataMoveParallelismLock,
                                    KeyRange keys,
-                                   const DDEnabledState* ddEnabledState) {
+                                   const DDEnabledState* ddEnabledState,
+                                   PromiseStream<Future<Void>> addCleanUpDataMoveActor,
+                                   bool asBackgroundCleanUp,
+                                   UID debugID) {
 	state KeyRange range;
-	TraceEvent(SevVerbose, "CleanUpDataMoveBegin", dataMoveId).detail("DataMoveID", dataMoveId).detail("Range", keys);
+	TraceEvent(SevDebug, "CleanUpDataMoveBegin", dataMoveId)
+	    .detail("DataMoveID", dataMoveId)
+	    .detail("Range", keys)
+	    .detail("DebugID", debugID)
+	    .detail("BackgroundCleanUp", asBackgroundCleanUp);
 	state bool complete = false;
+	state int transactionRetryCount = 0;
+	state bool backgroundCleanUpTriggeredAsThink = false;
+	state bool backgroundCleanUpDoneAsThink = false;
+	state bool needTriggeredBackgroundCleanUp = false;
+	state bool enteredNormalRoutine = false;
 
 	wait(cleanUpDataMoveParallelismLock->take(TaskPriority::DataDistributionLaunch));
 	state FlowLock::Releaser releaser = FlowLock::Releaser(*cleanUpDataMoveParallelismLock);
@@ -2372,24 +2403,120 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 			range = KeyRange();
 
 			try {
+				if (asBackgroundCleanUp) {
+					// If this function behaves as a background cleanup
+					// Delay 10 seconds to make sure the older relocator's mutation take effect
+					wait(delay(10));
+				}
+
 				tr.trState->taskID = TaskPriority::MoveKeys;
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
 
-				Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
-				if (val.present()) {
-					dataMove = decodeDataMoveValue(val.get());
-					ASSERT(!dataMove.ranges.empty());
-					TraceEvent(SevVerbose, "CleanUpDataMoveMetaData", dataMoveId)
-					    .detail("DataMoveID", dataMoveId)
-					    .detail("DataMoveMetaData", dataMove.toString());
-					range = dataMove.ranges.front();
-					ASSERT(!range.empty());
-				} else {
-					TraceEvent(SevDebug, "CleanUpDataMoveNotExist", dataMoveId).detail("DataMoveID", dataMoveId);
+				state Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
+				// Five cases:
+				if (!val.present() && asBackgroundCleanUp) {
+					// Case 1 (due to retry): Behave as a background cleanup but its commit returns unknown result, then
+					// retry For this case, since we cannot read the dataMoveId aften 10 seconds We believe that the
+					// previous commit succeed
+					ASSERT(!backgroundCleanUpDoneAsThink);
+					ASSERT(transactionRetryCount > 0);
+					backgroundCleanUpDoneAsThink = true;
 					break;
 				}
+
+				if (!val.present()) {
+					// Case 2: The dataMoveId metadata may be written by the old relocator in near future
+					// For this case, we
+					// (1) Put a place holder with deleting status
+					// 		If the older relocator sees this place holder, the old relocator aborts
+					//		If the older relocator is failed to see the place holder,
+					// 			(1.1) Either the mutataion by the old relocator to the meta data is failed
+					//			(1.2) Or the mutataion by the current cleanup is failed, then we redo the normal routine (Case 5)
+					// (2) Start a background cleanUpDataMove (this cleanUpDataMove enters Case 3)
+					// Leverage background cleanup for dataMoveId metadata
+					needTriggeredBackgroundCleanUp = true;
+					TraceEvent(SevDebug, "CleanUpDataMoveTriggerBackground", dataMoveId)
+					    .detail("DataMoveID", dataMoveId)
+					    .detail("DebugID", debugID);
+					ASSERT(!asBackgroundCleanUp);
+					dataMove = DataMoveMetaData(dataMoveId);
+					dataMove.setPhase(DataMoveMetaData::Deleting);
+					tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
+					wait(tr.commit());
+					ASSERT(!backgroundCleanUpTriggeredAsThink);
+					addCleanUpDataMoveActor.send(cleanUpDataMove(occ,
+					                                             dataMoveId,
+					                                             lock,
+					                                             cleanUpDataMoveParallelismLock,
+					                                             keys,
+					                                             ddEnabledState,
+					                                             addCleanUpDataMoveActor,
+					                                             true,
+					                                             debugID));
+					backgroundCleanUpTriggeredAsThink = true;
+					TraceEvent(SevDebug, "CleanUpDataMovePlaceHolder", dataMoveId)
+					    .detail("DataMoveID", dataMoveId)
+					    .detail("DebugID", debugID)
+					    .detail("BackgroundCleanUp", asBackgroundCleanUp);
+					break;
+				}
+
+				ASSERT(val.present());
+				dataMove = decodeDataMoveValue(val.get());
+				if (asBackgroundCleanUp) {
+					// Case 3: Background cleanup has been set for dataMoveId metadata
+					// For this case, the current function behaves as the background cleanup
+					// Only clean up dataMoveId, no need to revert serverKey and keyServer
+					ASSERT(dataMove.ranges.empty());
+					ASSERT(dataMove.getPhase() == DataMoveMetaData::Deleting);
+					tr.clear(dataMoveKeyFor(dataMoveId));
+					TraceEvent(SevDebug, "CleanUpDataMoveBackground", dataMoveId)
+					    .detail("DebugID", debugID)
+					    .detail("BackgroundCleanUp", asBackgroundCleanUp)
+					    .detail("DataMoveID", dataMove.toString());
+					wait(tr.commit());
+					backgroundCleanUpDoneAsThink = true;
+					break;
+				}
+
+				// Case 4 (due to retry): the first run of Case 1 commit return an unknown result, then retry
+				// The placeholder is actually placed but we think it gets
+				// failed (backgroundCleanUpTriggeredAsThink == false)
+				if (dataMove.ranges.empty()) {
+					ASSERT(transactionRetryCount > 0);
+					ASSERT(!backgroundCleanUpTriggeredAsThink);
+					addCleanUpDataMoveActor.send(cleanUpDataMove(occ,
+					                                             dataMoveId,
+					                                             lock,
+					                                             cleanUpDataMoveParallelismLock,
+					                                             keys,
+					                                             ddEnabledState,
+					                                             addCleanUpDataMoveActor,
+					                                             true,
+					                                             debugID));
+					backgroundCleanUpTriggeredAsThink = true;
+					TraceEvent(SevDebug, "CleanUpDataMovePlaceHolderRetry", dataMoveId)
+					    .detail("DataMoveID", dataMoveId)
+					    .detail("DebugID", debugID)
+					    .detail("BackgroundCleanUp", asBackgroundCleanUp);
+					break;
+				}
+
+				// Case 5: The dataMoveId metadata has been written by the old relocator
+				// For this case, the current function behaves as normal
+				// Cleanup dataMoveId and revert serverKey and keyServer
+				enteredNormalRoutine = true;
+				TraceEvent(SevDebug, "CleanUpDataMoveMetaData", dataMoveId)
+				    .detail("DebugID", debugID)
+				    .detail("DataMoveID", dataMoveId)
+				    .detail("DataMoveMetaData", dataMove.toString())
+				    .detail("BackgroundCleanUp", asBackgroundCleanUp);
+				ASSERT(!dataMove.ranges.empty());
+				ASSERT(!asBackgroundCleanUp);
+
+				range = dataMove.ranges.front();
 
 				dataMove.setPhase(DataMoveMetaData::Deleting);
 
@@ -2488,17 +2615,42 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				wait(tr.onError(e));
 				TraceEvent(SevWarn, "CleanUpDataMoveRetriableError", dataMoveId)
 				    .error(err)
-				    .detail("DataMoveRange", range.toString());
+				    .detail("DataMoveID", dataMoveId)
+				    .detail("DataMoveRange", range.toString())
+				    .detail("RetryTimes", transactionRetryCount)
+				    .detail("DebugID", debugID)
+				    .detail("BackgroundCleanUp", asBackgroundCleanUp);
+				transactionRetryCount++;
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "CleanUpDataMoveFail", dataMoveId).errorUnsuppressed(e);
+		TraceEvent(SevWarn, "CleanUpDataMoveFail", dataMoveId)
+		    .errorUnsuppressed(e)
+		    .detail("DataMoveID", dataMoveId)
+		    .detail("DataMoveRange", range.toString())
+		    .detail("Range", keys)
+		    .detail("DebugID", debugID)
+		    .detail("BackgroundCleanUp", asBackgroundCleanUp);
 		throw;
 	}
 
 	TraceEvent(SevDebug, "CleanUpDataMoveEnd", dataMoveId)
 	    .detail("DataMoveID", dataMoveId)
-	    .detail("DataMoveRange", range.toString());
+	    .detail("DataMoveRange", range.toString())
+	    .detail("Range", keys)
+	    .detail("DebugID", debugID)
+	    .detail("BackgroundCleanUp", asBackgroundCleanUp);
+
+	if (needTriggeredBackgroundCleanUp) {
+		if (!enteredNormalRoutine) {
+			ASSERT(backgroundCleanUpTriggeredAsThink);
+		} else {
+			ASSERT(transactionRetryCount > 0);
+		}
+	} else if (asBackgroundCleanUp) {
+		ASSERT(!enteredNormalRoutine);
+		ASSERT(backgroundCleanUpDoneAsThink);
+	}
 
 	return Void();
 }
@@ -2516,7 +2668,8 @@ Future<Void> rawStartMovement(Database occ,
 		                       params.startMoveKeysParallelismLock,
 		                       params.relocationIntervalId,
 		                       params.ddEnabledState,
-		                       params.cancelConflictingDataMoves);
+		                       params.cancelConflictingDataMoves,
+		                       params.debugID);
 	}
 	ASSERT(params.keys.present());
 	return startMoveKeys(std::move(occ),

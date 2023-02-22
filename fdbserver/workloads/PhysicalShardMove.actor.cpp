@@ -529,6 +529,14 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 					state DataMoveMetaData dataMove = decodeDataMoveValue(dataMoves[i].value);
 					ASSERT(dataMoveId == dataMove.id);
 					TraceEvent("TestCancelDataMoveBegin").detail("DataMove", dataMove.toString());
+					if (dataMove.ranges.empty()) {
+						// This dataMove cancellation is delayed to background cancellation
+						// For this case, the dataMove has empty ranges but it is in Deleting phase
+						// We simply bypass this case
+						ASSERT(dataMove.getPhase() == DataMoveMetaData::Deleting);
+						TraceEvent("TestCancelEmptyDataMoveEnd").detail("DataMove", dataMove.toString());
+						continue;
+					}
 					wait(cleanUpDataMove(cx,
 					                     dataMoveId,
 					                     moveKeysLock,

@@ -154,6 +154,7 @@ struct DataMoveMetaData {
 	DataMoveMetaData(UID id, KeyRange range) : id(id), version(invalidVersion), priority(0), mode(0) {
 		this->ranges.push_back(range);
 	}
+	DataMoveMetaData(UID id) : id(id), version(invalidVersion) {}
 
 	Phase getPhase() const { return static_cast<Phase>(phase); }
 

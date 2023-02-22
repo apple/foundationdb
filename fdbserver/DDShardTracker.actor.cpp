@@ -1682,7 +1682,7 @@ std::string PhysicalShardCollection::convertIDsToString(std::set<uint64_t> ids) 
 
 void PhysicalShardCollection::updateTeamPhysicalShardIDsMap(uint64_t inputPhysicalShardID,
                                                             std::vector<ShardsAffectedByTeamFailure::Team> inputTeams,
-                                                            uint64_t debugID) {
+                                                            UID debugID) {
 	ASSERT(inputTeams.size() <= 2);
 	ASSERT(inputPhysicalShardID != anonymousShardId.first() && inputPhysicalShardID != UID().first());
 	for (auto inputTeam : inputTeams) {
@@ -1700,7 +1700,7 @@ void PhysicalShardCollection::updateTeamPhysicalShardIDsMap(uint64_t inputPhysic
 void PhysicalShardCollection::insertPhysicalShardToCollection(uint64_t physicalShardID,
                                                               StorageMetrics const& metrics,
                                                               std::vector<ShardsAffectedByTeamFailure::Team> teams,
-                                                              uint64_t debugID,
+                                                              UID debugID,
                                                               PhysicalShardCreationTime whenCreated) {
 	ASSERT(physicalShardID != anonymousShardId.first() && physicalShardID != UID().first());
 	ASSERT(physicalShardInstances.count(physicalShardID) == 0);
@@ -1713,7 +1713,7 @@ void PhysicalShardCollection::insertPhysicalShardToCollection(uint64_t physicalS
 // They are all updated in this method.
 void PhysicalShardCollection::updatekeyRangePhysicalShardIDMap(KeyRange keyRange,
                                                                uint64_t physicalShardID,
-                                                               uint64_t debugID) {
+                                                               UID debugID) {
 	ASSERT(physicalShardID != UID().first());
 	auto ranges = keyRangePhysicalShardIDMap.intersectingRanges(keyRange);
 	std::set<uint64_t> physicalShardIDSet;
@@ -1777,7 +1777,7 @@ Optional<uint64_t> PhysicalShardCollection::trySelectAvailablePhysicalShardFor(
     ShardsAffectedByTeamFailure::Team team,
     StorageMetrics const& moveInMetrics,
     const std::unordered_set<uint64_t>& excludedPhysicalShards,
-    uint64_t debugID) {
+    UID debugID) {
 	ASSERT(team.servers.size() > 0);
 	// Case: The team is not tracked in the mapping (teamPhysicalShardIDs)
 	if (teamPhysicalShardIDs.count(team) == 0) {
@@ -1816,7 +1816,7 @@ Optional<uint64_t> PhysicalShardCollection::trySelectAvailablePhysicalShardFor(
 	return deterministicRandom()->randomChoice(availablePhysicalShardIDs);
 }
 
-uint64_t PhysicalShardCollection::generateNewPhysicalShardID(uint64_t debugID) {
+uint64_t PhysicalShardCollection::generateNewPhysicalShardID(UID debugID) {
 	uint64_t physicalShardID = UID().first();
 	int stuckCount = 0;
 	while (physicalShardID == UID().first() || physicalShardID == anonymousShardId.first()) {
@@ -1932,7 +1932,7 @@ InOverSizePhysicalShard PhysicalShardCollection::isInOverSizePhysicalShard(KeyRa
 std::pair<Optional<ShardsAffectedByTeamFailure::Team>, bool> PhysicalShardCollection::tryGetAvailableRemoteTeamWith(
     uint64_t inputPhysicalShardID,
     StorageMetrics const& moveInMetrics,
-    uint64_t debugID) {
+    UID debugID) {
 	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
 	ASSERT(inputPhysicalShardID != anonymousShardId.first() && inputPhysicalShardID != UID().first());
@@ -1962,7 +1962,7 @@ std::pair<Optional<ShardsAffectedByTeamFailure::Team>, bool> PhysicalShardCollec
 void PhysicalShardCollection::initPhysicalShardCollection(KeyRange keys,
                                                           std::vector<ShardsAffectedByTeamFailure::Team> selectedTeams,
                                                           uint64_t physicalShardID,
-                                                          uint64_t debugID) {
+                                                          UID debugID) {
 	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
 	ASSERT(physicalShardID != UID().first());
@@ -1992,7 +1992,7 @@ void PhysicalShardCollection::updatePhysicalShardCollection(
     std::vector<ShardsAffectedByTeamFailure::Team> selectedTeams,
     uint64_t physicalShardID,
     const StorageMetrics& metrics,
-    uint64_t debugID) {
+    UID debugID) {
 	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
 	ASSERT(physicalShardID != UID().first());
