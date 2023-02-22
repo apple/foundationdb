@@ -39,10 +39,10 @@
 #include "fdbserver/workloads/TenantData.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-template <class DB, class TenantMapEntryT>
+template <class DB, class TenantTypes>
 class TenantConsistencyCheck {
 private:
-	TenantData<DB, TenantMapEntryT> tenantData;
+	TenantData<DB, typename TenantTypes::TenantMapEntryT> tenantData;
 
 	// Note: this check can only be run on metaclusters with a reasonable number of tenants, as should be
 	// the case with the current metacluster simulation workloads
@@ -148,7 +148,7 @@ private:
 
 public:
 	TenantConsistencyCheck() {}
-	TenantConsistencyCheck(Reference<DB> db, TenantMetadataSpecification<TenantMapEntryT>* tenantMetadata)
+	TenantConsistencyCheck(Reference<DB> db, TenantMetadataSpecification<TenantTypes>* tenantMetadata)
 	  : tenantData(db, tenantMetadata) {}
 
 	Future<Void> run() { return run(this); }

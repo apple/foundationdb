@@ -214,6 +214,12 @@ struct MetaclusterTenantGroupEntry {
 	}
 };
 
+class MetaclusterTenantTypes {
+public:
+	using TenantMapEntryT = MetaclusterTenantMapEntry;
+	using TenantGroupEntryT = MetaclusterTenantGroupEntry;
+};
+
 struct MetaclusterMetrics {
 	int numTenants = 0;
 	int numDataClusters = 0;

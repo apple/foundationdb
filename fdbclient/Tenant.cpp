@@ -188,9 +188,8 @@ bool TenantTombstoneCleanupData::operator!=(TenantTombstoneCleanupData const& ot
 	return !(*this == other);
 }
 
-TenantMetadataSpecification<TenantMapEntry, TenantGroupEntry>& TenantMetadata::instance() {
-	static TenantMetadataSpecification _instance =
-	    TenantMetadataSpecification<TenantMapEntry, TenantGroupEntry>("\xff/"_sr);
+TenantMetadataSpecification<StandardTenantTypes>& TenantMetadata::instance() {
+	static TenantMetadataSpecification _instance = TenantMetadataSpecification<StandardTenantTypes>("\xff/"_sr);
 	return _instance;
 }
 

@@ -70,9 +70,8 @@ KeyBackedMap<ClusterName, int64_t, TupleCodec<ClusterName>, BinaryCodec<int64_t>
 KeyBackedSet<Tuple> ManagementClusterMetadata::clusterTenantIndex("metacluster/dataCluster/tenantMap/"_sr);
 KeyBackedSet<Tuple> ManagementClusterMetadata::clusterTenantGroupIndex("metacluster/dataCluster/tenantGroupMap/"_sr);
 
-TenantMetadataSpecification<MetaclusterTenantMapEntry, MetaclusterTenantGroupEntry>&
-ManagementClusterMetadata::tenantMetadata() {
-	static TenantMetadataSpecification<MetaclusterTenantMapEntry, MetaclusterTenantGroupEntry> instance(""_sr);
+TenantMetadataSpecification<MetaclusterTenantTypes>& ManagementClusterMetadata::tenantMetadata() {
+	static TenantMetadataSpecification<MetaclusterTenantTypes> instance(""_sr);
 	return instance;
 }
 

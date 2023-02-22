@@ -115,6 +115,12 @@ struct TenantGroupEntry {
 	}
 };
 
+class StandardTenantTypes {
+public:
+	using TenantMapEntryT = TenantMapEntry;
+	using TenantGroupEntryT = TenantGroupEntry;
+};
+
 struct TenantTombstoneCleanupData {
 	constexpr static FileIdentifier file_identifier = 3291339;
 
@@ -166,18 +172,20 @@ struct TenantIdCodec {
 	}
 };
 
-template <class TenantMapEntryImpl, class TenantGroupEntryImpl>
+template <class TenantTypes>
 struct TenantMetadataSpecification {
 	Key subspace;
 
-	KeyBackedObjectMap<int64_t, TenantMapEntryImpl, decltype(IncludeVersion()), TenantIdCodec> tenantMap;
+	KeyBackedObjectMap<int64_t, typename TenantTypes::TenantMapEntryT, decltype(IncludeVersion()), TenantIdCodec>
+	    tenantMap;
 	KeyBackedMap<TenantName, int64_t> tenantNameIndex;
 	KeyBackedProperty<int64_t> lastTenantId;
 	KeyBackedBinaryValue<int64_t> tenantCount;
 	KeyBackedSet<int64_t> tenantTombstones;
 	KeyBackedObjectProperty<TenantTombstoneCleanupData, decltype(IncludeVersion())> tombstoneCleanupData;
 	KeyBackedSet<Tuple> tenantGroupTenantIndex;
-	KeyBackedObjectMap<TenantGroupName, TenantGroupEntryImpl, decltype(IncludeVersion()), NullCodec> tenantGroupMap;
+	KeyBackedObjectMap<TenantGroupName, typename TenantTypes::TenantGroupEntryT, decltype(IncludeVersion()), NullCodec>
+	    tenantGroupMap;
 	KeyBackedMap<TenantGroupName, int64_t> storageQuota;
 	KeyBackedBinaryValue<Versionstamp> lastTenantModification;
 
@@ -193,7 +201,7 @@ struct TenantMetadataSpecification {
 };
 
 struct TenantMetadata {
-	static TenantMetadataSpecification<TenantMapEntry, TenantGroupEntry>& instance();
+	static TenantMetadataSpecification<StandardTenantTypes>& instance();
 
 	static inline auto& subspace() { return instance().subspace; }
 	static inline auto& tenantMap() { return instance().tenantMap; }

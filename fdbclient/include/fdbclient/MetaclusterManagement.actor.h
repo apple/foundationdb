@@ -122,7 +122,7 @@ struct ManagementClusterMetadata {
 		}
 	};
 
-	static TenantMetadataSpecification<MetaclusterTenantMapEntry, MetaclusterTenantGroupEntry>& tenantMetadata();
+	static TenantMetadataSpecification<MetaclusterTenantTypes>& tenantMetadata();
 
 	// A map from cluster name to the metadata associated with a cluster
 	static KeyBackedObjectMap<ClusterName, DataClusterEntry, decltype(IncludeVersion())>& dataClusters();

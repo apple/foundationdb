@@ -355,10 +355,10 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		return waitForAll(deleteFutures);
 	}
 
-	ACTOR template <class Transaction, class TenantMapEntryImpl, class TenantGroupEntryImpl>
+	ACTOR template <class Transaction, class TenantTypes>
 	static Future<std::unordered_set<int64_t>> getTenantsInGroup(
 	    Transaction tr,
-	    TenantMetadataSpecification<TenantMapEntryImpl, TenantGroupEntryImpl> tenantMetadata,
+	    TenantMetadataSpecification<TenantTypes> tenantMetadata,
 	    TenantGroupName tenantGroup) {
 		KeyBackedRangeResult<Tuple> groupTenants =
 		    wait(tenantMetadata.tenantGroupTenantIndex.getRange(tr,
