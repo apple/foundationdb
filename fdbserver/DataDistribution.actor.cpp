@@ -662,24 +662,28 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			actors.push_back(self->pollMoveKeysLock());
+
+			DataDistributionTrackerInitParams trackerParams{ .db = self->txnProcessor,
+				                                             .distributorId = self->ddId,
+				                                             .readyToStart = self->initialized,
+				                                             .output = self->relocationProducer,
+				                                             .shardsAffectedByTeamFailure =
+				                                                 self->shardsAffectedByTeamFailure,
+				                                             .physicalShardCollection = self->physicalShardCollection,
+				                                             .anyZeroHealthyTeams = anyZeroHealthyTeams,
+				                                             .shards = &shards,
+				                                             .trackerCancelled = &trackerCancelled,
+				                                             .ddTenantCache = self->ddTenantCache };
 			actors.push_back(reportErrorsExcept(dataDistributionTracker(self->initData,
-			                                                            self->txnProcessor,
-			                                                            self->relocationProducer,
-			                                                            self->shardsAffectedByTeamFailure,
-			                                                            self->physicalShardCollection,
 			                                                            getShardMetrics,
 			                                                            getTopKShardMetrics.getFuture(),
 			                                                            getShardMetricsList,
 			                                                            getAverageShardBytes.getFuture(),
-			                                                            self->initialized,
-			                                                            anyZeroHealthyTeams,
-			                                                            self->ddId,
-			                                                            &shards,
-			                                                            &trackerCancelled,
-			                                                            self->ddTenantCache),
+			                                                            trackerParams),
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
+
 			actors.push_back(reportErrorsExcept(dataDistributionQueue(self->txnProcessor,
 			                                                          self->relocationProducer,
 			                                                          self->relocationConsumer.getFuture(),

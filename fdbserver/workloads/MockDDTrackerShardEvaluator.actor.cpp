@@ -152,21 +152,22 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 		        .get();
 		Reference<PhysicalShardCollection> physicalShardCollection = makeReference<PhysicalShardCollection>();
 		Reference<AsyncVar<bool>> zeroHealthyTeams = makeReference<AsyncVar<bool>>(false);
-		actors.add(dataDistributionTracker(initData,
-		                                   mock,
-		                                   output,
-		                                   ddcx.shardsAffectedByTeamFailure,
-		                                   physicalShardCollection,
-		                                   getShardMetrics,
-		                                   getTopKMetrics.getFuture(),
-		                                   getShardMetricsList,
-		                                   getAverageShardBytes.getFuture(),
-		                                   Promise<Void>(),
-		                                   zeroHealthyTeams,
-		                                   ddcx.id(),
-		                                   &shards,
-		                                   &ddcx.trackerCancelled,
-		                                   {}));
+		actors.add(dataDistributionTracker(
+		    initData,
+		    getShardMetrics,
+		    getTopKMetrics.getFuture(),
+		    getShardMetricsList,
+		    getAverageShardBytes.getFuture(),
+		    DataDistributionTrackerInitParams{ .db = mock,
+		                                       .distributorId = ddcx.id(),
+		                                       .readyToStart = Promise<Void>(),
+		                                       .output = output,
+		                                       .shardsAffectedByTeamFailure = ddcx.shardsAffectedByTeamFailure,
+		                                       .physicalShardCollection = physicalShardCollection,
+		                                       .anyZeroHealthyTeams = zeroHealthyTeams,
+		                                       .shards = &shards,
+		                                       .trackerCancelled = &ddcx.trackerCancelled,
+		                                       .ddTenantCache = {} }));
 		actors.add(relocateShardReporter(this, output.getFuture()));
 
 		return timeout(reportErrors(actors.getResult(), "MockDDTrackerShardEvaluatorWorkload"), testDuration, Void());
