@@ -704,7 +704,7 @@ private:
 				}
 			}
 			if (lockedTenants) {
-				if (tenantEntry.tenantLockState == TenantLockState::UNLOCKED) {
+				if (tenantEntry.tenantLockState == TenantAPI::TenantLockState::UNLOCKED) {
 					lockedTenants->erase(tenantEntry.id);
 				} else {
 					lockedTenants->insert(tenantEntry.id);

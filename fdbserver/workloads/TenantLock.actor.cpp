@@ -76,7 +76,10 @@ struct TenantLock : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> changeLockState(Database db, TenantName name, TenantLockState desiredState, UID lockID) {
+	ACTOR static Future<Void> changeLockState(Database db,
+	                                          TenantName name,
+	                                          TenantAPI::TenantLockState desiredState,
+	                                          UID lockID) {
 		state Reference<Tenant> tenant = makeReference<Tenant>(db, name);
 		state ReadYourWritesTransaction tr(db);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -105,8 +108,8 @@ struct TenantLock : TestWorkload {
 		    .detail("LockID1", lockID1)
 		    .detail("LockID2", lockID2)
 		    .log();
-		wait(changeLockState(db, self->tenant1, TenantLockState::LOCKED, lockID1));
-		wait(changeLockState(db, self->tenant2, TenantLockState::LOCKED, lockID2));
+		wait(changeLockState(db, self->tenant1, TenantAPI::TenantLockState::LOCKED, lockID1));
+		wait(changeLockState(db, self->tenant2, TenantAPI::TenantLockState::LOCKED, lockID2));
 		TraceEvent("TenantLockProgress").detail("Phase", "Tx against locked tenant").log();
 		wait(testExpectedError(success(probeTx(db, self->tenant1, currentValue1)),
 		                       "AccessLockedTenant",
@@ -130,7 +133,7 @@ struct TenantLock : TestWorkload {
 		TraceEvent("TenantLockProgress").detail("Phase", "Read-write Tx against locked tenant with lock-aware").log();
 		wait(store(currentValue2, probeTx(db, self->tenant2, currentValue2, false, LockAwareTx::READ_WRITE)));
 		TraceEvent("TenantLockProgress").detail("Phase", "Unlock tenant1").log();
-		wait(changeLockState(db, self->tenant1, TenantLockState::UNLOCKED, lockID1));
+		wait(changeLockState(db, self->tenant1, TenantAPI::TenantLockState::UNLOCKED, lockID1));
 		TraceEvent("TenantLockProgress").detail("Phase", "Tx against unlocked tenant1").log();
 		wait(store(currentValue1, probeTx(db, self->tenant1, currentValue1)));
 		TraceEvent("TenantLockProgress").detail("Phase", "Tx against locked tenant2").log();
@@ -141,14 +144,14 @@ struct TenantLock : TestWorkload {
 		                       {},
 		                       Error::fromCode(error_code_internal_error)));
 		TraceEvent("TenantLockProgress").detail("Phase", "Unlock tenant2 with wrong lockID").log();
-		wait(testExpectedError(changeLockState(db, self->tenant2, TenantLockState::UNLOCKED, lockID1),
+		wait(testExpectedError(changeLockState(db, self->tenant2, TenantAPI::TenantLockState::UNLOCKED, lockID1),
 		                       "UnlockWithWrongID",
 		                       tenant_locked(),
 		                       Optional<bool*>(),
 		                       {},
 		                       Error::fromCode(error_code_internal_error)));
 		TraceEvent("TenantLockProgress").detail("Phase", "Unlock tenant2").log();
-		wait(changeLockState(db, self->tenant2, TenantLockState::UNLOCKED, lockID2));
+		wait(changeLockState(db, self->tenant2, TenantAPI::TenantLockState::UNLOCKED, lockID2));
 		TraceEvent("TenantLockProgress").detail("Phase", "Second Tx against both unlocked tenants").log();
 		wait(store(currentValue1, probeTx(db, self->tenant1, currentValue1)));
 		wait(store(currentValue2, probeTx(db, self->tenant2, currentValue2)));
