@@ -2229,7 +2229,9 @@ public:
 							self->remappedPages[r.originalPageID][r.version] = r.newPageID;
 						}
 					}
-					when(wait(remapRecoverActor)) { remapRecoverActor = Never(); }
+					when(wait(remapRecoverActor)) {
+						remapRecoverActor = Never();
+					}
 				}
 			} catch (Error& e) {
 				if (e.code() != error_code_end_of_stream) {
@@ -7961,9 +7963,9 @@ public:
 	                     UID logID,
 	                     Reference<AsyncVar<ServerDBInfo> const> db,
 	                     Optional<EncryptionAtRestMode> encryptionMode,
-	                     Optional<std::map<std::string, std::string>> params,
 	                     EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE,
-	                     Reference<IPageEncryptionKeyProvider> keyProvider = {})
+	                     Reference<IPageEncryptionKeyProvider> keyProvider = {},
+	                     Optional<std::map<std::string, std::string>> params = {})
 	  : m_filename(filename),
 	    prefetch(getStorageEngineParamBoolean(params.get(), "kvstore_range_prefetch") /*runtime change*/),
 	    metrics_interval(getStorageEngineParamDouble(params.get(), "metrics_interval")) {
@@ -8341,7 +8343,7 @@ IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                        Reference<AsyncVar<ServerDBInfo> const> db,
                                        Optional<EncryptionAtRestMode> encryptionMode,
                                        Optional<std::map<std::string, std::string>> params) {
-	return new KeyValueStoreRedwood(filename, logID, db, encryptionMode, params);
+	return new KeyValueStoreRedwood(filename, logID, db, encryptionMode, {}, {}, params);
 }
 
 int randomSize(int max) {
@@ -10721,7 +10723,9 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 				if (entriesRead == m_extentQueue.numEntries)
 					break;
 			}
-			when(wait(queueRecoverActor)) { queueRecoverActor = Never(); }
+			when(wait(queueRecoverActor)) {
+				queueRecoverActor = Never();
+			}
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_end_of_stream) {
