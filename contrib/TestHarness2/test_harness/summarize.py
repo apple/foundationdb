@@ -465,6 +465,7 @@ class Summary:
                 self.out.append(child)
 
         self.out.attributes['Ok'] = '1' if self.ok() else '0'
+        self.out.attributes['Runtime'] = str(self.runtime)
         if not self.ok():
             reason = 'Unknown'
             if self.error:

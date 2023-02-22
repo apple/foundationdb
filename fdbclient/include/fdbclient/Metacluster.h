@@ -28,6 +28,32 @@
 #include "fdbclient/KeyBackedTypes.h"
 #include "flow/flat_buffers.h"
 
+namespace MetaclusterAPI {
+// Represents the various states that a tenant could be in. Only applies to metacluster, not standalone clusters.
+// In a metacluster, a tenant on the management cluster could be in the other states while changes are applied to the
+// data cluster.
+//
+// REGISTERING - the tenant has been created on the management cluster and is being created on the data cluster
+// READY - the tenant has been created on both clusters, is active, and is consistent between the two clusters
+// REMOVING - the tenant has been marked for removal and is being removed on the data cluster
+// UPDATING_CONFIGURATION - the tenant configuration has changed on the management cluster and is being applied to the
+//                          data cluster
+// RENAMING - the tenant is in the process of being renamed
+// ERROR - the tenant is in an error state
+//
+// A tenant in any configuration is allowed to be removed. Only tenants in the READY or UPDATING_CONFIGURATION phases
+// can have their configuration updated. A tenant must not exist or be in the REGISTERING phase to be created. To be
+// renamed, a tenant must be in the READY or RENAMING state. In the latter case, the rename destination must match
+// the original rename attempt.
+//
+// If an operation fails and the tenant is left in a non-ready state, re-running the same operation is legal. If
+// successful, the tenant will return to the READY state.
+enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, RENAMING, ERROR };
+
+std::string tenantStateToString(TenantState tenantState);
+TenantState stringToTenantState(std::string stateStr);
+} // namespace MetaclusterAPI
+
 struct ClusterUsage {
 	int numTenantGroups = 0;
 
@@ -93,9 +119,77 @@ struct DataClusterEntry {
 
 	json_spirit::mObject toJson() const;
 
+	bool operator==(DataClusterEntry const& other) const {
+		return id == other.id && capacity == other.capacity && allocated == other.allocated &&
+		       clusterState == other.clusterState;
+	}
+
+	bool operator!=(DataClusterEntry const& other) const { return !(*this == other); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, id, capacity, allocated, clusterState);
+	}
+};
+
+struct MetaclusterTenantMapEntry {
+	constexpr static FileIdentifier file_identifier = 12247338;
+
+	int64_t id = -1;
+	Key prefix;
+	TenantName tenantName;
+	MetaclusterAPI::TenantState tenantState = MetaclusterAPI::TenantState::READY;
+	TenantAPI::TenantLockState tenantLockState = TenantAPI::TenantLockState::UNLOCKED;
+	Optional<TenantGroupName> tenantGroup;
+	ClusterName assignedCluster;
+	int64_t configurationSequenceNum = 0;
+	Optional<TenantName> renameDestination;
+
+	// Can be set to an error string if the tenant is in the ERROR state
+	std::string error;
+
+	MetaclusterTenantMapEntry();
+	MetaclusterTenantMapEntry(int64_t id, TenantName tenantName, MetaclusterAPI::TenantState tenantState);
+	MetaclusterTenantMapEntry(int64_t id,
+	                          TenantName tenantName,
+	                          MetaclusterAPI::TenantState tenantState,
+	                          Optional<TenantGroupName> tenantGroup);
+	MetaclusterTenantMapEntry(TenantMapEntry tenantEntry);
+
+	void setId(int64_t id);
+	std::string toJson() const;
+
+	bool matchesConfiguration(MetaclusterTenantMapEntry const& other) const;
+	bool matchesConfiguration(TenantMapEntry const& other) const;
+	void configure(Standalone<StringRef> parameter, Optional<Value> value);
+
+	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
+	static MetaclusterTenantMapEntry decode(ValueRef const& value) {
+		return ObjectReader::fromStringRef<MetaclusterTenantMapEntry>(value, IncludeVersion());
+	}
+
+	bool operator==(MetaclusterTenantMapEntry const& other) const;
+	bool operator!=(MetaclusterTenantMapEntry const& other) const;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar,
+		           id,
+		           tenantName,
+		           tenantState,
+		           tenantLockState,
+		           tenantGroup,
+		           assignedCluster,
+		           configurationSequenceNum,
+		           renameDestination,
+		           error);
+		if constexpr (Ar::isDeserializing) {
+			if (id >= 0) {
+				prefix = TenantAPI::idToPrefix(id);
+			}
+			ASSERT(tenantState >= MetaclusterAPI::TenantState::REGISTERING &&
+			       tenantState <= MetaclusterAPI::TenantState::ERROR);
+		}
 	}
 };
 
@@ -172,6 +266,13 @@ struct MetaclusterRegistrationEntry {
 			                   id.shortString());
 		}
 	}
+
+	bool operator==(MetaclusterRegistrationEntry const& other) const {
+		return clusterType == other.clusterType && metaclusterName == other.metaclusterName && name == other.name &&
+		       metaclusterId == other.metaclusterId && id == other.id;
+	}
+
+	bool operator!=(MetaclusterRegistrationEntry const& other) const { return !(*this == other); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

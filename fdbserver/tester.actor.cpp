@@ -925,7 +925,6 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 				TraceEvent("TesterClearingTenantsComplete", debugID).detail("AtVersion", tr.getCommittedVersion());
 				break;
 			}
-
 			tr.reset();
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "TesterClearingTenantsError", debugID).error(e);
