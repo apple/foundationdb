@@ -100,7 +100,8 @@ FDB_DECLARE_BOOLEAN_PARAM(IsRestoring);
 FDB_DECLARE_BOOLEAN_PARAM(RunOnDisconnectedCluster);
 FDB_DECLARE_BOOLEAN_PARAM(RunOnMismatchedCluster);
 FDB_DECLARE_BOOLEAN_PARAM(RestoreDryRun);
-FDB_DECLARE_BOOLEAN_PARAM(ForceJoinNewMetacluster);
+FDB_DECLARE_BOOLEAN_PARAM(ForceJoin);
+FDB_DECLARE_BOOLEAN_PARAM(ForceRemove);
 
 namespace MetaclusterAPI {
 
@@ -870,7 +871,7 @@ struct RemoveClusterImpl {
 	Reference<DB> db;
 	ClusterType clusterType;
 	ClusterName clusterName;
-	bool forceRemove;
+	ForceRemove forceRemove;
 	double dataClusterTimeout;
 
 	// Parameters set in markClusterRemoving
@@ -882,7 +883,7 @@ struct RemoveClusterImpl {
 	RemoveClusterImpl(Reference<DB> db,
 	                  ClusterName clusterName,
 	                  ClusterType clusterType,
-	                  bool forceRemove,
+	                  ForceRemove forceRemove,
 	                  double dataClusterTimeout)
 	  : ctx(db,
 	        Optional<ClusterName>(),
@@ -1191,7 +1192,7 @@ ACTOR template <class DB>
 Future<bool> removeCluster(Reference<DB> db,
                            ClusterName name,
                            ClusterType clusterType,
-                           bool forceRemove,
+                           ForceRemove forceRemove,
                            double dataClusterTimeout = 0) {
 	state RemoveClusterImpl<DB> impl(db, name, clusterType, forceRemove, dataClusterTimeout);
 	wait(impl.run());
@@ -1332,7 +1333,7 @@ struct RestoreClusterImpl {
 	ClusterConnectionString connectionString;
 	ApplyManagementClusterUpdates applyManagementClusterUpdates;
 	RestoreDryRun restoreDryRun;
-	ForceJoinNewMetacluster forceJoinNewMetacluster;
+	ForceJoin forceJoin;
 	std::vector<std::string>& messages;
 
 	// Unique ID generated for this restore. Used to avoid concurrent restores
@@ -1352,11 +1353,11 @@ struct RestoreClusterImpl {
 	                   ClusterConnectionString connectionString,
 	                   ApplyManagementClusterUpdates applyManagementClusterUpdates,
 	                   RestoreDryRun restoreDryRun,
-	                   ForceJoinNewMetacluster forceJoinNewMetacluster,
+	                   ForceJoin forceJoin,
 	                   std::vector<std::string>& messages)
 	  : ctx(managementDb, {}, { DataClusterState::RESTORING }), clusterName(clusterName),
 	    connectionString(connectionString), applyManagementClusterUpdates(applyManagementClusterUpdates),
-	    restoreDryRun(restoreDryRun), forceJoinNewMetacluster(forceJoinNewMetacluster), messages(messages) {}
+	    restoreDryRun(restoreDryRun), forceJoin(forceJoin), messages(messages) {}
 
 	ACTOR template <class Transaction>
 	static Future<Void> checkRestoreId(RestoreClusterImpl* self, Transaction tr) {
@@ -1422,7 +1423,7 @@ struct RestoreClusterImpl {
 				if (!metaclusterRegistration.present()) {
 					throw invalid_data_cluster();
 				} else if (!metaclusterRegistration.get().matches(self->ctx.metaclusterRegistration.get())) {
-					if (!self->forceJoinNewMetacluster) {
+					if (!self->forceJoin) {
 						TraceEvent(SevWarn, "MetaclusterRestoreClusterMismatch")
 						    .detail("ExistingRegistration", metaclusterRegistration.get())
 						    .detail("ManagementClusterRegistration", self->ctx.metaclusterRegistration.get());
@@ -2073,7 +2074,7 @@ struct RestoreClusterImpl {
 		wait(self->runRestoreDataClusterTransaction(
 		    [self = self](Reference<ITransaction> tr) { return getTenantsFromDataCluster(self, tr); },
 		    RunOnDisconnectedCluster::False,
-		    RunOnMismatchedCluster(self->restoreDryRun && self->forceJoinNewMetacluster)));
+		    RunOnMismatchedCluster(self->restoreDryRun && self->forceJoin)));
 
 		// Fix any differences between the data cluster and the management cluster
 		wait(reconcileTenants(self));
@@ -2164,10 +2165,10 @@ Future<Void> restoreCluster(Reference<DB> db,
                             ClusterConnectionString connectionString,
                             ApplyManagementClusterUpdates applyManagementClusterUpdates,
                             RestoreDryRun restoreDryRun,
-                            ForceJoinNewMetacluster forceJoinNewMetacluster,
+                            ForceJoin forceJoin,
                             std::vector<std::string>* messages) {
 	state RestoreClusterImpl<DB> impl(
-	    db, name, connectionString, applyManagementClusterUpdates, restoreDryRun, forceJoinNewMetacluster, *messages);
+	    db, name, connectionString, applyManagementClusterUpdates, restoreDryRun, forceJoin, *messages);
 	wait(impl.run());
 	return Void();
 }
