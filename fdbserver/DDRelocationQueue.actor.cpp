@@ -1541,6 +1541,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state double startTime = now();
 	state std::vector<UID> destIds;
 	state WantTrueBest wantTrueBest(isValleyFillerPriority(rd.priority));
+	state uint64_t debugIDForPhysicalShardCollection = deterministicRandom()->randomUInt64();
 	state bool enableShardMove = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD;
 
 	try {
@@ -1677,7 +1678,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							       physicalShardIDCandidate != anonymousShardId.first());
 							std::pair<Optional<ShardsAffectedByTeamFailure::Team>, bool> remoteTeamWithPhysicalShard =
 							    self->physicalShardCollection->tryGetAvailableRemoteTeamWith(
-							        physicalShardIDCandidate, metrics, debugID);
+							        physicalShardIDCandidate, metrics, debugIDForPhysicalShardCollection);
 							if (!remoteTeamWithPhysicalShard.second) {
 								// Physical shard with `physicalShardIDCandidate` is not available. Retry selecting new
 								// dst physical shard.
@@ -1770,11 +1771,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 
 								if (forceToUseNewPhysicalShard) {
 									physicalShardIDCandidate =
-									    self->physicalShardCollection->generateNewPhysicalShardID(debugID);
+									    self->physicalShardCollection->generateNewPhysicalShardID(debugIDForPhysicalShardCollection);
 								} else {
 									Optional<uint64_t> candidate =
 									    self->physicalShardCollection->trySelectAvailablePhysicalShardFor(
-									        primaryTeam, metrics, excludedDstPhysicalShards, debugID);
+									        primaryTeam, metrics, excludedDstPhysicalShards, debugIDForPhysicalShardCollection);
 									if (candidate.present()) {
 										physicalShardIDCandidate = candidate.get();
 									} else {
@@ -2176,7 +2177,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						// The update of PhysicalShardToTeams, PhysicalShardInstances, keyRangePhysicalShardIDMap should
 						// be atomic
 						self->physicalShardCollection->updatePhysicalShardCollection(
-						    rd.keys, rd.isRestore(), selectedTeams, rd.dataMoveId.first(), metrics, debugID);
+						    rd.keys, rd.isRestore(), selectedTeams, rd.dataMoveId.first(), metrics, debugIDForPhysicalShardCollection);
 					}
 
 					return Void();
@@ -2216,7 +2217,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 		relocationComplete.send(rd);
 
 		if (err.code() == error_code_data_move_dest_team_not_found) {
-			TraceEvent(SevDebug, "DataMoveDestTeamNotFound").detail("InputRange", rd.keys).detail("DebugID", debugID);
+			TraceEvent(SevDebug, "DataMoveDestTeamNotFound").detail("InputRange", rd.keys).detail("DebugID", debugIDForPhysicalShardCollection);
 			wait(cancelDataMove(self, rd.keys, ddEnabledState));
 		}
 
