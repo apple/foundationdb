@@ -343,7 +343,7 @@ if(NOT WIN32)
     COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-        --upgrade-path "71.2.5" "71.3.0" "71.2.5"
+        --upgrade-path "71.2.6" "71.3.0" "71.2.6"
         --process-number 3
       )
   set_tests_properties("fdb_c_upgrade_to_future_version" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
@@ -352,7 +352,7 @@ if(NOT WIN32)
     COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/ApiBlobGranulesCorrectness.toml
-        --upgrade-path "71.2.5" "71.3.0" "71.2.5"
+        --upgrade-path "71.2.6" "71.3.0" "71.2.6"
         --blob-granules-enabled
         --process-number 3
       )
