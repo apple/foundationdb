@@ -2081,6 +2081,12 @@ public:
 		lastCommittedHeader = header;
 	}
 
+	void initCommitRecord(Value commitRecord) override {
+		header.userCommitRecord = commitRecord;
+		updateHeaderPage();
+		updateLastCommittedHeader();
+	}
+
 	ACTOR static Future<Void> recover(DWALPager* self) {
 		ASSERT(!self->recoverFuture.isValid());
 
@@ -5297,6 +5303,10 @@ public:
 			debug_printf("BTree recovered.\n");
 		}
 		self->m_lazyClearActor = 0;
+
+		// Update the b-tree header, which will be written to the backup header page by the pager on the first commit.
+		// In this way, if
+		self->m_pager->initCommitRecord(ObjectWriter::toValue(self->m_header, Unversioned()));
 
 		TraceEvent e(SevInfo, "RedwoodRecoveredBTree");
 		e.detail("FileName", self->m_name);

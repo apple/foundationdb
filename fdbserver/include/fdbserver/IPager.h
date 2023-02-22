@@ -873,6 +873,10 @@ public:
 	// TODO: Document further.
 	virtual Future<Void> init() = 0;
 
+	// Setting initial commit record, which the pager can persist before the first commit.
+	// It is supposed to be called after init() and before the first commit().
+	virtual void initCommitRecord(Value commitRecord) = 0;
+
 	// Returns latest committed version
 	virtual Version getLastCommittedVersion() const = 0;
 
