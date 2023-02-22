@@ -672,39 +672,6 @@ void updateClusterMetadata(Transaction tr,
 	}
 }
 
-// Store the cluster entry for the new cluster
-ACTOR template <class Transaction>
-static Future<Void> registerInManagementCluster(Transaction tr,
-                                                ClusterName clusterName,
-                                                DataClusterEntry clusterEntry,
-                                                ClusterConnectionString connectionString,
-                                                RestoreDryRun restoreDryRun) {
-	state Optional<DataClusterMetadata> dataClusterMetadata = wait(tryGetClusterTransaction(tr, clusterName));
-	if (dataClusterMetadata.present() &&
-	    !dataClusterMetadata.get().matchesConfiguration(DataClusterMetadata(clusterEntry, connectionString))) {
-		TraceEvent("RegisterClusterAlreadyExists").detail("ClusterName", clusterName);
-		throw cluster_already_exists();
-	} else if (!restoreDryRun && !dataClusterMetadata.present()) {
-		clusterEntry.allocated = ClusterUsage();
-
-		if (clusterEntry.hasCapacity()) {
-			ManagementClusterMetadata::clusterCapacityIndex.insert(
-			    tr, Tuple::makeTuple(clusterEntry.allocated.numTenantGroups, clusterName));
-		}
-		ManagementClusterMetadata::dataClusters().set(tr, clusterName, clusterEntry);
-		ManagementClusterMetadata::dataClusterConnectionRecords.set(tr, clusterName, connectionString);
-
-		TraceEvent("RegisteredDataCluster")
-		    .detail("ClusterName", clusterName)
-		    .detail("ClusterID", clusterEntry.id)
-		    .detail("Capacity", clusterEntry.capacity)
-		    .detail("Version", tr->getCommittedVersion())
-		    .detail("ConnectionString", connectionString.toString());
-	}
-
-	return Void();
-}
-
 template <class DB>
 struct RegisterClusterImpl {
 	MetaclusterOperationContext<DB> ctx;
@@ -1480,6 +1447,37 @@ struct RestoreClusterImpl {
 		}
 	}
 
+	// Store the cluster entry for the restored cluster
+	ACTOR static Future<Void> registerRestoringClusterInManagementCluster(RestoreClusterImpl* self,
+	                                                                      Reference<typename DB::TransactionT> tr) {
+		state DataClusterEntry clusterEntry;
+		clusterEntry.id = self->dataClusterId;
+		clusterEntry.clusterState = DataClusterState::RESTORING;
+
+		state Optional<DataClusterMetadata> dataClusterMetadata = wait(tryGetClusterTransaction(tr, self->clusterName));
+		if (dataClusterMetadata.present() &&
+		    (dataClusterMetadata.get().entry.clusterState != DataClusterState::RESTORING ||
+		     !dataClusterMetadata.get().matchesConfiguration(
+		         DataClusterMetadata(clusterEntry, self->connectionString)))) {
+			TraceEvent("RestoredClusterAlreadyExists").detail("ClusterName", self->clusterName);
+			throw cluster_already_exists();
+		} else if (!self->restoreDryRun) {
+			MetaclusterMetadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
+
+			ManagementClusterMetadata::dataClusters().set(tr, self->clusterName, clusterEntry);
+			ManagementClusterMetadata::dataClusterConnectionRecords.set(tr, self->clusterName, self->connectionString);
+
+			TraceEvent("RegisteredRestoringDataCluster")
+			    .detail("ClusterName", self->clusterName)
+			    .detail("ClusterID", clusterEntry.id)
+			    .detail("Capacity", clusterEntry.capacity)
+			    .detail("Version", tr->getCommittedVersion())
+			    .detail("ConnectionString", self->connectionString.toString());
+		}
+
+		return Void();
+	}
+
 	// If adding a data cluster to a restored management cluster, write a metacluster registration entry
 	// to attach it
 	ACTOR static Future<Void> writeDataClusterRegistration(RestoreClusterImpl* self) {
@@ -2122,15 +2120,7 @@ struct RestoreClusterImpl {
 
 		// Record the data cluster in the management cluster
 		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
-			if (!self->restoreDryRun) {
-				MetaclusterMetadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
-			}
-
-			DataClusterEntry entry;
-			entry.id = self->dataClusterId;
-			entry.clusterState = DataClusterState::RESTORING;
-			return registerInManagementCluster(
-			    tr, self->clusterName, entry, self->connectionString, self->restoreDryRun);
+			return registerRestoringClusterInManagementCluster(self, tr);
 		}));
 
 		// Write a metacluster registration entry in the data cluster
