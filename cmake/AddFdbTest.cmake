@@ -270,7 +270,13 @@ function(stage_correctness_package)
     list(APPEND package_files "${out_file}")
   endforeach()
 
-  list(APPEND package_files ${test_files} ${external_files})
+  add_custom_command(
+    OUTPUT "${STAGE_OUT_DIR}/rocksdb_logtool.py"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/contrib/rocksdb_logtool.py" "${STAGE_OUT_DIR}/rocksdb_logtool.py"
+    DEPENDS "${CMAKE_SOURCE_DIR}/contrib/rocksdb_logtool.py"
+  )
+
+  list(APPEND package_files ${test_files} ${external_files} "${STAGE_OUT_DIR}/rocksdb_logtool.py")
   if(STAGE_OUT_FILES)
     set(${STAGE_OUT_FILES} ${package_files} PARENT_SCOPE)
   endif()

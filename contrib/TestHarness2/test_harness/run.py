@@ -88,7 +88,8 @@ class TestPicker:
 
         if not self.tests:
             raise Exception(
-                "No tests to run! Please check if tests are included/excluded incorrectly or old binaries are missing for restarting tests")
+                "No tests to run! Please check if tests are included/excluded incorrectly or old binaries are missing for restarting tests"
+            )
 
     def add_time(self, test_file: Path, run_time: int, out: SummaryTree) -> None:
         # getting the test name is fairly inefficient. But since we only have 100s of tests, I won't bother
@@ -144,7 +145,11 @@ class TestPicker:
             candidates: List[Path] = []
             dirs = path.parent.parts
             version_expr = dirs[-1].split("_")
-            if (version_expr[0] == "from" or version_expr[0] == "to") and len(version_expr) == 4 and version_expr[2] == "until":
+            if (
+                (version_expr[0] == "from" or version_expr[0] == "to")
+                and len(version_expr) == 4
+                and version_expr[2] == "until"
+            ):
                 max_version = Version.parse(version_expr[3])
                 min_version = Version.parse(version_expr[1])
                 for ver, binary in self.old_binaries.items():
@@ -384,6 +389,21 @@ class TestRun:
     def delete_simdir(self):
         shutil.rmtree(self.temp_path / Path("simfdb"))
 
+    def _run_rocksdb_logtool(self):
+        """Calls RocksDB LogTool to upload the test logs if 1) test failed 2) test is RocksDB related"""
+        if not os.path.exists("rocksdb_logtool.py"):
+            raise RuntimeError("rocksdb_logtool.py missing")
+        command = [
+            "python3",
+            "rocksdb_logtool.py",
+            "report",
+            "--test-uid",
+            str(self.uid),
+            "--log-directory",
+            str(self.temp_path),
+        ]
+        subprocess.run(command, check=True)
+
     def run(self):
         command: List[str] = []
         env: Dict[str, str] = os.environ.copy()
@@ -473,6 +493,9 @@ class TestRun:
         self.summary.valgrind_out_file = valgrind_file
         self.summary.error_out = err_out
         self.summary.summarize(self.temp_path, " ".join(command))
+
+        if not self.summary.ok():
+            self._run_rocksdb_logtool()
         return self.summary.ok()
 
 
