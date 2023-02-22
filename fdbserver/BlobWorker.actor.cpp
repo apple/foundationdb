@@ -458,9 +458,24 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
                                                                   Arena* arena) {
 	state BlobGranuleCipherKeysCtx cipherKeysCtx;
 	state EncryptCipherDomainId domainId = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
+	state Reference<GranuleTenantData> tenantData;
+	state int retryCount = 0;
 	if (bwData->encryptMode.mode == EncryptionAtRestMode::DOMAIN_AWARE) {
-		state Reference<GranuleTenantData> tenantData = wait(bwData->tenantData.getDataForGranule(keyRange));
-		ASSERT(tenantData.isValid());
+		loop {
+			wait(store(tenantData, bwData->tenantData.getDataForGranule(keyRange)));
+			if (tenantData.isValid()) {
+				break;
+			} else {
+				CODE_PROBE(true, "cipher keys for unknown tenant");
+				// Assume not loaded yet, just wait a bit. Could do sophisticated mechanism but will redo tenant
+				// loading to be versioned anyway. 10 retries means it's likely not a transient race with
+				// loading tenants, and instead a persistent issue.
+				retryCount++;
+				TraceEvent(retryCount <= 10 ? SevDebug : SevWarn, "BlobWorkerUnknownTenantForCipherKeys", bwData->id)
+				    .detail("KeyRange", keyRange);
+				wait(delay(0.1));
+			}
+		}
 		domainId = tenantData->entry.id;
 	}
 
