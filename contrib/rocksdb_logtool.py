@@ -176,7 +176,7 @@ def _setup_args():
 def _main():
     args = _setup_args()
 
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
 
     logger.debug(f"Using cluster file {args.cluster_file}")
     joshua.open(args.cluster_file)
