@@ -22,6 +22,7 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated
 // version of this file.  In intellisense use the source version.
+#include "flow/FastRef.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLI_FDBCLI_ACTOR_G_H)
 #define FDBCLI_FDBCLI_ACTOR_G_H
 #include "fdbcli/fdbcli.actor.g.h"
@@ -162,10 +163,11 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
                                          Future<Void> warn);
 // configure storage engine command
 ACTOR Future<bool> configureStorageEngineCommandActor(Reference<IDatabase> db,
-                                         Database localDb,
-                                         std::vector<StringRef> tokens,
-                                         LineNoise* linenoise,
-                                         Future<Void> warn);
+                                                      Reference<ITransaction> tr,
+                                                      Database localDb,
+                                                      std::vector<StringRef> tokens,
+                                                      LineNoise* linenoise,
+                                                      Future<Void> warn);
 // consistency command
 ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
                                                 std::vector<StringRef> tokens,

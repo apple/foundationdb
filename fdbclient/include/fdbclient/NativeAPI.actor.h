@@ -568,6 +568,7 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, Span
 ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx,
                                                                                   KeyRange keys,
                                                                                   int shardLimit);
+ACTOR Future<std::string> fetchStorageEngineParams(Database cx);
 
 std::string unprintable(const std::string&);
 

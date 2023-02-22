@@ -2937,3 +2937,36 @@ ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
 	}
 	return Void();
 }
+
+ACTOR Future<RangeResult> storageEngineParamsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
+	state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>::addRef(ryw);
+	state KeyRange keys = kr.removePrefix(prefix);
+	state RangeResult result;
+	loop {
+		try {
+			if (keys.contains("storage_engine"_sr)) {
+				std::string paramsStr = wait(fetchStorageEngineParams(tr->getDatabase()));
+				auto k = prefix.withSuffix("storage_engine"_sr);
+				result.push_back_deep(result.arena(), KeyValueRef(k, ValueRef(paramsStr)));
+			}
+			return result;
+		} catch (Error& e) {
+			state Error err(e);
+			if (e.code() == error_code_dd_not_found) {
+				fmt::print("DD not found, please try again later\n");
+				TraceEvent(SevWarnAlways, "DataDistributorNotPresent")
+				    .detail("Operation", "StorageEngineParamsGetRangeActor")
+					.backtrace();
+			}
+			throw err;
+		}
+	}
+}
+
+StorageEngineParamsImpl::StorageEngineParamsImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
+
+Future<RangeResult> StorageEngineParamsImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                             KeyRangeRef kr,
+                                                             GetRangeLimits limitsHint) const {
+	return storageEngineParamsGetRangeActor(ryw, getKeyRange().begin, kr);
+}
