@@ -1856,12 +1856,24 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR static Future<Void> delayedTrace(int opCode) {
+		state double start = now();
+		loop {
+			wait(delay(1.0));
+			TraceEvent("TenantManagementOpNotFinishedAfter")
+			    .detail("Duration", now() - start)
+			    .detail("OpCode", opCode)
+			    .log();
+		}
+	}
+
 	ACTOR Future<Void> _start(Database cx, TenantManagementWorkload* self) {
 		state double start = now();
 
 		// Run a random sequence of tenant management operations for the duration of the test
 		while (now() < start + self->testDuration) {
 			state int operation = deterministicRandom()->randomInt(0, 9);
+			state Future<Void> logger = delayedTrace(operation);
 			if (operation == 0) {
 				wait(createTenant(self));
 			} else if (operation == 1) {
