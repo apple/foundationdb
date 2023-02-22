@@ -55,7 +55,7 @@ private:
 		KeyBackedRangeResult<Tuple> clusterTenantGroupTuples;
 
 		std::map<int64_t, MetaclusterTenantMapEntry> tenantMap;
-		KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroups;
+		KeyBackedRangeResult<std::pair<TenantGroupName, MetaclusterTenantGroupEntry>> tenantGroups;
 
 		std::map<ClusterName, std::set<int64_t>> clusterTenantMap;
 		std::map<ClusterName, std::set<TenantGroupName>> clusterTenantGroupMap;
@@ -250,8 +250,7 @@ private:
 		// Each tenant group in the tenant group map should be present in the cluster tenant group map
 		// and have the correct cluster assigned to it.
 		for (auto [name, entry] : managementMetadata.tenantGroups.results) {
-			ASSERT(entry.assignedCluster.present());
-			auto clusterItr = managementMetadata.clusterTenantGroupMap.find(entry.assignedCluster.get());
+			auto clusterItr = managementMetadata.clusterTenantGroupMap.find(entry.assignedCluster);
 			ASSERT(clusterItr->second.count(name));
 		}
 
@@ -360,7 +359,6 @@ private:
 		}
 		for (auto const& [name, entry] : dataClusterTenantGroupMap) {
 			ASSERT(expectedTenantGroups.count(name));
-			ASSERT(!entry.assignedCluster.present());
 			expectedTenantGroups.erase(name);
 		}
 

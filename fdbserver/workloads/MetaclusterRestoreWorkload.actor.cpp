@@ -337,10 +337,10 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		return waitForAll(deleteFutures);
 	}
 
-	ACTOR template <class Transaction, class TenantMapEntryImpl>
+	ACTOR template <class Transaction, class TenantMapEntryImpl, class TenantGroupEntryImpl>
 	static Future<std::unordered_set<int64_t>> getTenantsInGroup(
 	    Transaction tr,
-	    TenantMetadataSpecification<TenantMapEntryImpl> tenantMetadata,
+	    TenantMetadataSpecification<TenantMapEntryImpl, TenantGroupEntryImpl> tenantMetadata,
 	    TenantGroupName tenantGroup) {
 		KeyBackedRangeResult<Tuple> groupTenants =
 		    wait(tenantMetadata.tenantGroupTenantIndex.getRange(tr,
@@ -428,7 +428,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	ACTOR static Future<std::pair<TenantCollisions, GroupCollisions>> getCollisions(MetaclusterRestoreWorkload* self,
 	                                                                                Database db) {
 		state KeyBackedRangeResult<std::pair<TenantName, int64_t>> managementTenantList;
-		state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> managementGroupList;
+		state KeyBackedRangeResult<std::pair<TenantGroupName, MetaclusterTenantGroupEntry>> managementGroupList;
 		state KeyBackedRangeResult<std::pair<TenantName, int64_t>> dataClusterTenants;
 		state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> dataClusterGroups;
 

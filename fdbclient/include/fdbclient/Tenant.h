@@ -96,10 +96,7 @@ struct TenantMapEntry {
 struct TenantGroupEntry {
 	constexpr static FileIdentifier file_identifier = 10764222;
 
-	Optional<ClusterName> assignedCluster;
-
 	TenantGroupEntry() = default;
-	TenantGroupEntry(Optional<ClusterName> assignedCluster) : assignedCluster(assignedCluster) {}
 
 	json_spirit::mObject toJson() const;
 
@@ -110,7 +107,7 @@ struct TenantGroupEntry {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, assignedCluster);
+		serializer(ar);
 	}
 };
 
@@ -162,7 +159,7 @@ struct TenantIdCodec {
 	}
 };
 
-template <class TenantMapEntryImpl>
+template <class TenantMapEntryImpl, class TenantGroupEntryImpl>
 struct TenantMetadataSpecification {
 	Key subspace;
 
@@ -173,7 +170,7 @@ struct TenantMetadataSpecification {
 	KeyBackedSet<int64_t> tenantTombstones;
 	KeyBackedObjectProperty<TenantTombstoneCleanupData, decltype(IncludeVersion())> tombstoneCleanupData;
 	KeyBackedSet<Tuple> tenantGroupTenantIndex;
-	KeyBackedObjectMap<TenantGroupName, TenantGroupEntry, decltype(IncludeVersion()), NullCodec> tenantGroupMap;
+	KeyBackedObjectMap<TenantGroupName, TenantGroupEntryImpl, decltype(IncludeVersion()), NullCodec> tenantGroupMap;
 	KeyBackedMap<TenantGroupName, int64_t> storageQuota;
 	KeyBackedBinaryValue<Versionstamp> lastTenantModification;
 
@@ -189,7 +186,7 @@ struct TenantMetadataSpecification {
 };
 
 struct TenantMetadata {
-	static TenantMetadataSpecification<TenantMapEntry>& instance();
+	static TenantMetadataSpecification<TenantMapEntry, TenantGroupEntry>& instance();
 
 	static inline auto& subspace() { return instance().subspace; }
 	static inline auto& tenantMap() { return instance().tenantMap; }

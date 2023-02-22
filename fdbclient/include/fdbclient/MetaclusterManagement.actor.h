@@ -116,7 +116,7 @@ struct ManagementClusterMetadata {
 		}
 	};
 
-	static TenantMetadataSpecification<MetaclusterTenantMapEntry>& tenantMetadata();
+	static TenantMetadataSpecification<MetaclusterTenantMapEntry, MetaclusterTenantGroupEntry>& tenantMetadata();
 
 	// A map from cluster name to the metadata associated with a cluster
 	static KeyBackedObjectMap<ClusterName, DataClusterEntry, decltype(IncludeVersion())>& dataClusters();
@@ -1257,7 +1257,7 @@ void managementClusterAddTenantToGroup(Transaction tr,
 
 		if (!groupAlreadyExists) {
 			ManagementClusterMetadata::tenantMetadata().tenantGroupMap.set(
-			    tr, tenantEntry.tenantGroup.get(), TenantGroupEntry(tenantEntry.assignedCluster));
+			    tr, tenantEntry.tenantGroup.get(), MetaclusterTenantGroupEntry(tenantEntry.assignedCluster));
 			ManagementClusterMetadata::clusterTenantGroupIndex.insert(
 			    tr, Tuple::makeTuple(tenantEntry.assignedCluster, tenantEntry.tenantGroup.get()));
 		}
@@ -1870,7 +1870,7 @@ struct RestoreClusterImpl {
 	ACTOR static Future<bool> addTenantToManagementCluster(RestoreClusterImpl* self,
 	                                                       Reference<ITransaction> tr,
 	                                                       MetaclusterTenantMapEntry tenantEntry) {
-		state Future<Optional<TenantGroupEntry>> tenantGroupEntry = Optional<TenantGroupEntry>();
+		state Future<Optional<MetaclusterTenantGroupEntry>> tenantGroupEntry = Optional<MetaclusterTenantGroupEntry>();
 		if (tenantEntry.tenantGroup.present()) {
 			tenantGroupEntry =
 			    ManagementClusterMetadata::tenantMetadata().tenantGroupMap.get(tr, tenantEntry.tenantGroup.get());
@@ -2251,23 +2251,22 @@ struct CreateTenantImpl {
 	ACTOR static Future<std::pair<ClusterName, bool>> assignTenant(CreateTenantImpl* self,
 	                                                               Reference<typename DB::TransactionT> tr) {
 		// If our tenant group is already assigned, then we just use that assignment
-		state Optional<TenantGroupEntry> groupEntry;
+		state Optional<MetaclusterTenantGroupEntry> groupEntry;
 		if (self->tenantEntry.tenantGroup.present()) {
-			Optional<TenantGroupEntry> _groupEntry =
+			Optional<MetaclusterTenantGroupEntry> _groupEntry =
 			    wait(ManagementClusterMetadata::tenantMetadata().tenantGroupMap.get(
 			        tr, self->tenantEntry.tenantGroup.get()));
 			groupEntry = _groupEntry;
 
 			if (groupEntry.present()) {
-				ASSERT(groupEntry.get().assignedCluster.present());
 				if (!self->assignClusterAutomatically &&
-				    groupEntry.get().assignedCluster.get() != self->tenantEntry.assignedCluster) {
+				    groupEntry.get().assignedCluster != self->tenantEntry.assignedCluster) {
 					TraceEvent("MetaclusterCreateTenantGroupClusterMismatch")
-					    .detail("TenantGroupCluster", groupEntry.get().assignedCluster.get())
+					    .detail("TenantGroupCluster", groupEntry.get().assignedCluster)
 					    .detail("SpecifiedCluster", self->tenantEntry.assignedCluster);
 					throw invalid_tenant_configuration();
 				}
-				return std::make_pair(groupEntry.get().assignedCluster.get(), true);
+				return std::make_pair(groupEntry.get().assignedCluster, true);
 			}
 		}
 
@@ -2799,7 +2798,7 @@ struct ConfigureTenantImpl {
 			return Void();
 		}
 
-		state Optional<TenantGroupEntry> tenantGroupEntry =
+		state Optional<MetaclusterTenantGroupEntry> tenantGroupEntry =
 		    wait(ManagementClusterMetadata::tenantMetadata().tenantGroupMap.get(tr, desiredGroup.get()));
 
 		// If we are creating a new tenant group, we need to have capacity on the current cluster
@@ -3119,20 +3118,20 @@ Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newNa
 }
 
 template <class Transaction>
-Future<Optional<TenantGroupEntry>> tryGetTenantGroupTransaction(Transaction tr, TenantGroupName name) {
+Future<Optional<MetaclusterTenantGroupEntry>> tryGetTenantGroupTransaction(Transaction tr, TenantGroupName name) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	return ManagementClusterMetadata::tenantMetadata().tenantGroupMap.get(tr, name);
 }
 
 ACTOR template <class DB>
-Future<Optional<TenantGroupEntry>> tryGetTenantGroup(Reference<DB> db, TenantGroupName name) {
+Future<Optional<MetaclusterTenantGroupEntry>> tryGetTenantGroup(Reference<DB> db, TenantGroupName name) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			Optional<TenantGroupEntry> entry = wait(tryGetTenantGroupTransaction(tr, name));
+			Optional<MetaclusterTenantGroupEntry> entry = wait(tryGetTenantGroupTransaction(tr, name));
 			return entry;
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
@@ -3141,30 +3140,28 @@ Future<Optional<TenantGroupEntry>> tryGetTenantGroup(Reference<DB> db, TenantGro
 }
 
 ACTOR template <class Transaction>
-Future<std::vector<std::pair<TenantGroupName, TenantGroupEntry>>> listTenantGroupsTransaction(Transaction tr,
-                                                                                              TenantGroupName begin,
-                                                                                              TenantGroupName end,
-                                                                                              int limit) {
+Future<std::vector<std::pair<TenantGroupName, MetaclusterTenantGroupEntry>>>
+listTenantGroupsTransaction(Transaction tr, TenantGroupName begin, TenantGroupName end, int limit) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
-	KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> results =
+	KeyBackedRangeResult<std::pair<TenantGroupName, MetaclusterTenantGroupEntry>> results =
 	    wait(ManagementClusterMetadata::tenantMetadata().tenantGroupMap.getRange(tr, begin, end, limit));
 
 	return results.results;
 }
 
 ACTOR template <class DB>
-Future<std::vector<std::pair<TenantGroupName, TenantGroupEntry>>> listTenantGroups(Reference<DB> db,
-                                                                                   TenantGroupName begin,
-                                                                                   TenantGroupName end,
-                                                                                   int limit) {
+Future<std::vector<std::pair<TenantGroupName, MetaclusterTenantGroupEntry>>> listTenantGroups(Reference<DB> db,
+                                                                                              TenantGroupName begin,
+                                                                                              TenantGroupName end,
+                                                                                              int limit) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			std::vector<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroups =
+			std::vector<std::pair<TenantGroupName, MetaclusterTenantGroupEntry>> tenantGroups =
 			    wait(listTenantGroupsTransaction(tr, begin, end, limit));
 			return tenantGroups;
 		} catch (Error& e) {

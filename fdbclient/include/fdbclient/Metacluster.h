@@ -186,6 +186,27 @@ struct MetaclusterTenantMapEntry {
 	}
 };
 
+struct MetaclusterTenantGroupEntry {
+	constexpr static FileIdentifier file_identifier = 1082739;
+
+	ClusterName assignedCluster;
+
+	MetaclusterTenantGroupEntry() = default;
+	MetaclusterTenantGroupEntry(ClusterName assignedCluster) : assignedCluster(assignedCluster) {}
+
+	json_spirit::mObject toJson() const;
+
+	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion()); }
+	static MetaclusterTenantGroupEntry decode(ValueRef const& value) {
+		return ObjectReader::fromStringRef<MetaclusterTenantGroupEntry>(value, IncludeVersion());
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, assignedCluster);
+	}
+};
+
 struct MetaclusterMetrics {
 	int numTenants = 0;
 	int numDataClusters = 0;

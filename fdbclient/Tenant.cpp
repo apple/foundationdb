@@ -163,15 +163,13 @@ bool TenantMapEntry::operator==(TenantMapEntry const& other) const {
 
 json_spirit::mObject TenantGroupEntry::toJson() const {
 	json_spirit::mObject tenantGroupEntry;
-	if (assignedCluster.present()) {
-		tenantGroupEntry["assigned_cluster"] = binaryToJson(assignedCluster.get());
-	}
-
+	// No fields currently
 	return tenantGroupEntry;
 }
 
-TenantMetadataSpecification<TenantMapEntry>& TenantMetadata::instance() {
-	static TenantMetadataSpecification _instance = TenantMetadataSpecification<TenantMapEntry>("\xff/"_sr);
+TenantMetadataSpecification<TenantMapEntry, TenantGroupEntry>& TenantMetadata::instance() {
+	static TenantMetadataSpecification _instance =
+	    TenantMetadataSpecification<TenantMapEntry, TenantGroupEntry>("\xff/"_sr);
 	return _instance;
 }
 

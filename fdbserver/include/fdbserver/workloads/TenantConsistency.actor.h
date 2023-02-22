@@ -64,15 +64,15 @@ private:
 	// the case with the current metacluster simulation workloads
 	static inline const int metaclusterMaxTenants = 10e6;
 
-	ACTOR template <class TenantMapEntryImpl>
+	ACTOR template <class TenantMapEntryImpl, class TenantGroupEntryImpl>
 	static Future<std::map<int64_t, TenantMapEntryImpl>> loadTenantMetadataImpl(
 	    TenantConsistencyCheck* self,
-	    TenantMetadataSpecification<TenantMapEntryImpl>* tenantMetadata,
+	    TenantMetadataSpecification<TenantMapEntryImpl, TenantGroupEntryImpl>* tenantMetadata,
 	    Reference<typename DB::TransactionT> tr) {
 		state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntryImpl>> tenantList;
 		state KeyBackedRangeResult<std::pair<TenantName, int64_t>> tenantNameIndexList;
 		state KeyBackedRangeResult<int64_t> tenantTombstoneList;
-		state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroupList;
+		state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntryImpl>> tenantGroupList;
 		state KeyBackedRangeResult<Tuple> tenantGroupTenantTuples;
 
 		loop {
@@ -110,8 +110,8 @@ private:
 		    std::set<int64_t>(tenantTombstoneList.results.begin(), tenantTombstoneList.results.end());
 
 		ASSERT(!tenantGroupList.more);
-		self->metadata.tenantGroupMap =
-		    std::map<TenantGroupName, TenantGroupEntry>(tenantGroupList.results.begin(), tenantGroupList.results.end());
+		self->metadata.tenantGroupMap = std::map<TenantGroupName, TenantGroupEntryImpl>(tenantGroupList.results.begin(),
+		                                                                                tenantGroupList.results.end());
 
 		for (auto t : tenantGroupTenantTuples.results) {
 			ASSERT_EQ(t.size(), 2);
@@ -214,12 +214,12 @@ private:
 		}
 		if (self->metadata.clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 			std::map<int64_t, MetaclusterTenantMapEntry> tenantMap =
-			    wait(loadTenantMetadataImpl<MetaclusterTenantMapEntry>(
+			    wait(loadTenantMetadataImpl<MetaclusterTenantMapEntry, MetaclusterTenantGroupEntry>(
 			        self, &MetaclusterAPI::ManagementClusterMetadata::tenantMetadata(), tr));
 			self->validateTenantMetadata(tenantMap);
 		} else {
 			std::map<int64_t, TenantMapEntry> tenantMap =
-			    wait(loadTenantMetadataImpl<TenantMapEntry>(self, &TenantMetadata::instance(), tr));
+			    wait(loadTenantMetadataImpl<TenantMapEntry, TenantGroupEntry>(self, &TenantMetadata::instance(), tr));
 			self->validateTenantMetadata(tenantMap);
 		}
 
