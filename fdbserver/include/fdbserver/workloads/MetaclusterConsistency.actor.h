@@ -98,7 +98,7 @@ private:
 			auto allocatedItr = data.clusterAllocatedMap.find(clusterName);
 			if (!clusterMetadata.entry.hasCapacity()) {
 				ASSERT(allocatedItr == data.clusterAllocatedMap.end());
-			} else {
+			} else if (clusterMetadata.entry.clusterState == DataClusterState::READY) {
 				ASSERT(allocatedItr != data.clusterAllocatedMap.end());
 				ASSERT_EQ(allocatedItr->second, clusterMetadata.entry.allocated.numTenantGroups);
 				++numFoundInAllocatedMap;
