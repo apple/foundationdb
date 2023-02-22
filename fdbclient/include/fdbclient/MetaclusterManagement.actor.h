@@ -959,9 +959,12 @@ struct RemoveClusterImpl {
 		state KeyBackedRangeResult<Tuple> tenantEntries = wait(tenantEntriesFuture);
 
 		// Erase each tenant from the tenant map on the management cluster
+		std::set<int64_t> erasedTenants;
 		for (Tuple entry : tenantEntries.results) {
+			int64_t tenantId = entry.getInt(2);
 			ASSERT(entry.getString(0) == self->ctx.clusterName.get());
-			ManagementClusterMetadata::tenantMetadata().tenantMap.erase(tr, entry.getInt(2));
+			erasedTenants.insert(tenantId);
+			ManagementClusterMetadata::tenantMetadata().tenantMap.erase(tr, tenantId);
 			ManagementClusterMetadata::tenantMetadata().tenantNameIndex.erase(tr, entry.getString(1));
 			ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 		}
@@ -975,9 +978,9 @@ struct RemoveClusterImpl {
 		}
 
 		ManagementClusterMetadata::tenantMetadata().tenantCount.atomicOp(
-		    tr, -tenantEntries.results.size(), MutationRef::AddValue);
+		    tr, -erasedTenants.size(), MutationRef::AddValue);
 		ManagementClusterMetadata::clusterTenantCount.atomicOp(
-		    tr, self->ctx.clusterName.get(), -tenantEntries.results.size(), MutationRef::AddValue);
+		    tr, self->ctx.clusterName.get(), -erasedTenants.size(), MutationRef::AddValue);
 
 		return !tenantEntries.more;
 	}
