@@ -61,6 +61,13 @@
 #error "MVC should not depend on the Native API"
 #endif
 
+#define TIMER_START(i) auto start##i = std::chrono::steady_clock::now()
+
+#define TIMER_END(i, desc)                                                                                             \
+	auto end##i = std::chrono::steady_clock::now();                                                                    \
+	std::cout << (externalClient ? "    " : "") << #desc << " took "                                                   \
+	          << std::chrono::duration_cast<std::chrono::microseconds>(end##i - start##i).count() << " us.\n"
+
 void throwIfError(FdbCApi::fdb_error_t e) {
 	if (e) {
 		throw Error(e);
@@ -1114,10 +1121,15 @@ void DLApi::selectApiVersion(int apiVersion) {
 	// External clients must support at least this version
 	// Versions newer than what we understand are rejected in the C bindings
 	headerVersion = std::max(apiVersion, 400);
-
+	// auto externalClient = false;
+	// TIMER_START(1);
 	init();
+	// TIMER_END(1, DLApi::selectApiVersion::init());
+
+	// TIMER_START(2);
 	throwIfError(api->selectApiVersion(apiVersion, headerVersion));
 	throwIfError(api->setNetworkOption(static_cast<FDBNetworkOption>(FDBNetworkOptions::EXTERNAL_CLIENT), nullptr, 0));
+	// TIMER_END(2, DLApi::selectApiVersion::throwIfError);
 }
 
 const char* DLApi::getClientVersion() {
@@ -2710,13 +2722,6 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 	}
 }
 
-#define TIMER_START(i) auto start##i = std::chrono::steady_clock::now()
-
-#define TIMER_END(i, desc)                                                                                             \
-	auto end##i = std::chrono::steady_clock::now();                                                                    \
-	std::cout << #desc << " took " << std::chrono::duration_cast<std::chrono::microseconds>(end##i - start##i).count() \
-	          << " us.\n"
-
 #if defined(__unixish__)
 std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPerThread(std::string path,
                                                                                         std::string buildId) {
@@ -2947,12 +2952,14 @@ void MultiVersionApi::setupNetwork() {
 
 	// function to initialize external clients
 	auto extInitFunc = [this](Reference<ClientInfo> client) {
+		// TIMER_START(1);
 		TraceEvent("InitializingExternalClient").detail("LibraryPath", client->libPath);
 		client->api->selectApiVersion(apiVersion.version());
 		if (client->useFutureVersion) {
 			client->api->useFutureProtocolVersion();
 		}
 		client->loadVersion();
+		// TIMER_END(1, extInitFunc);
 	};
 
 	try {
@@ -2995,7 +3002,7 @@ void MultiVersionApi::setupNetwork() {
 			}
 			TIMER_START(2);
 			localClient->api->setupNetwork();
-			TIMER_END(2, localClient->api->setupNetwork());
+			TIMER_END(2, Setting up local network);
 
 			if (!apiVersion.hasFailOnExternalClientErrors()) {
 				ignoreExternalClientFailures = true;
@@ -3003,7 +3010,7 @@ void MultiVersionApi::setupNetwork() {
 
 			assert(externalClients.empty());
 
-			TIMER_START(3);
+			// TIMER_START(3);
 			for (auto i : externalClientDescriptions) {
 				std::string path = i.second.libPath;
 				std::string filename = basename(path);
@@ -3015,12 +3022,12 @@ void MultiVersionApi::setupNetwork() {
 					    new ClientInfo(new DLApi(path, false /*unlink on load*/), path, useFutureVersion, 0))));
 				}
 			}
-			TIMER_END(3, Retrieving first external clients);
+			// TIMER_END(3, Retrieving first external clients);
 
 			TIMER_START(4);
 			// initialize the first external thread for each library
 			runOnExternalClients(0, extInitFunc, false, !ignoreExternalClientFailures);
-			TIMER_END(4, Init first external clients);
+			TIMER_END(4, Init first external clients(mostly loading library functions));
 
 			TIMER_START(5);
 			// generate copies of the first external thread for each library
@@ -3037,17 +3044,18 @@ void MultiVersionApi::setupNetwork() {
 					    new DLApi(libCopies[idx].first, false /*unlink on load*/), path, useFutureVersion, idx)));
 				}
 			}
-			TIMER_END(5, Copying external clients);
+			TIMER_END(5, External client copy loop);
 		}
+		// TIMER_START(11);
 		localClient->loadVersion();
+		// TIMER_END(11, localClient->loadVersion());
 
 		if (bypassMultiClientApi) {
 			networkSetup = true;
 		} else {
 			TIMER_START(6);
 			runOnExternalClientsThreadRange(extInitFunc, 1, threadCount, false, !ignoreExternalClientFailures);
-			TIMER_END(
-			    6, runOnExternalClientsThreadRange(extInitFunc, 1, threadCount, false, !ignoreExternalClientFailures));
+			TIMER_END(6, Init remaining external clients(mostly loading library functions));
 
 			std::string baseTraceFileId;
 			if (apiVersion.hasTraceFileIdentifier()) {
@@ -3074,7 +3082,7 @@ void MultiVersionApi::setupNetwork() {
 			    },
 			    false,
 			    !ignoreExternalClientFailures);
-			TIMER_END(7, runOnExternalClientsAllThreads2);
+			TIMER_END(7, Setup External Networks);
 
 			if (localClientDisabled && !hasNonFailedExternalClients()) {
 				TraceEvent(SevWarn, "CannotSetupNetwork")
@@ -3092,7 +3100,7 @@ void MultiVersionApi::setupNetwork() {
 		flushTraceFileVoid();
 		throw e;
 	}
-	TIMER_END(1, setupNetwork);
+	TIMER_END(1, MultiVersionApi::setupNetwork);
 }
 
 THREAD_FUNC_RETURN runNetworkThread(void* param) {
