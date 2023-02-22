@@ -2474,8 +2474,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				// s = a.shardManager->getDb()->Flush(rocksdb::FlushOptions(),
 				//                                    a.shardManager->getColumnFamilies());
 
-				ASSERT(a.shardManager->getDb()->SyncWAL().ok());
 				ASSERT(a.shardManager->getDb()->FlushWAL(true).ok());
+				ASSERT(a.shardManager->getDb()->SyncWAL().ok());
 				rocksdb::FlushOptions flushOptions;
 				flushOptions.wait = true;
 				flushOptions.allow_write_stall = true;
@@ -2483,14 +2483,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				// for (const auto& range : a.request.ranges) {
 				// rocksdb::Slice begin = toSlice(range.begin);
 				// rocksdb::Slice end = toSlice(range.end);
-				rocksdb::CompactRangeOptions compactOpts;
-				compactOpts.change_level = true;
-				compactOpts.target_level = 6;
-				compactOpts.allow_write_stall = true;
+				// rocksdb::CompactRangeOptions compactOpts;
+				// compactOpts.change_level = true;
+				// compactOpts.target_level = 6;
+				// compactOpts.allow_write_stall = true;
 
-				ASSERT(a.shardManager->getDb()
-				           ->CompactRange(rocksdb::CompactRangeOptions(), ps->cf, nullptr, nullptr)
-				           .ok());
+				// ASSERT(a.shardManager->getDb()
+				//            ->CompactRange(rocksdb::CompactRangeOptions(), ps->cf, nullptr, nullptr)
+				//            .ok());
 				// }
 
 				s = rocksdb::Checkpoint::Create(a.shardManager->getDb(), &checkpoint);
@@ -2503,12 +2503,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				// rocksdb::Checkpoint* tcp = nullptr;
 				rocksdb::ColumnFamilyHandle* tmh = nullptr;
 				rocksdb::DB* tmpDb;
-				if (false) {
-					// const std::string tmpCheckpointDir = "/root/checkpoint/" + a.request.checkpointID.toString();
-					const std::string tmpCheckpointDir = checkpointDir + "-tmp";
+				{
+					const std::string tmpCheckpointDir = "/root/checkpoints/" + a.request.checkpointID.toString();
+					// const std::string tmpCheckpointDir = checkpointDir + "-tmp";
 					platform::eraseDirectoryRecursive(tmpCheckpointDir);
 					uint64_t debugCheckpointSeq = -1;
 					s = checkpoint->CreateCheckpoint(tmpCheckpointDir, /*log_size_for_flush=*/0, &debugCheckpointSeq);
+					TraceEvent(SevDebug, "CreateCheckpoint", logId).detail("Status", s.ToString());
 					ASSERT(s.ok());
 
 					TraceEvent(SevInfo, "ShardedRocksCreatedTmpCheckpoint", logId).detail("DataPath", tmpCheckpointDir);
@@ -4319,110 +4320,109 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointRestore") {
 	return Void();
 }
 
-// TEST_CASE("noSim/ShardedRocksDB/ManualCheckpoint") {
-// 	const std::string path = "/root/checkpoint/d0ab243aefc665919efc87e884de3e29";
-// 	// const std::string path = "/root/checkpoint/d0ab243aefc665919efc87e884de3e29";
-// 	const std::string cfName = "726d19ab67035956";
+TEST_CASE("noSim/ShardedRocksDB/ManualCheckpoint") {
+	const std::string path = "/Users/heliu/checkpoints/744fa11129101d3602c399176cd16710";
+	const std::string cfName = "02c399176cd16710";
 
-// 	const UID logId = deterministicRandom()->randomUniqueID();
+	const UID logId = deterministicRandom()->randomUniqueID();
 
-// 	rocksdb::Options dbOptions(getOptions());
-// 	dbOptions.disable_auto_compactions = true;
-// 	std::vector<std::string> columnFamilies;
-// 	rocksdb::Status s = rocksdb::DB::ListColumnFamilies(dbOptions, path, &columnFamilies);
+	rocksdb::Options dbOptions(getOptions());
+	dbOptions.disable_auto_compactions = true;
+	std::vector<std::string> columnFamilies;
+	rocksdb::Status s = rocksdb::DB::ListColumnFamilies(dbOptions, path, &columnFamilies);
 
-// 	std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
-// 	for (const auto& name : columnFamilies) {
-// 		descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, rocksdb::ColumnFamilyOptions(dbOptions) });
-// 	}
+	std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
+	for (const auto& name : columnFamilies) {
+		descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, rocksdb::ColumnFamilyOptions(dbOptions) });
+	}
 
-// 	rocksdb::DB* db = nullptr;
-// 	std::vector<rocksdb::ColumnFamilyHandle*> handles;
-// 	s = rocksdb::DB::Open(dbOptions, path, descriptors, &handles, &db);
-// 	ASSERT(s.ok());
+	rocksdb::DB* db = nullptr;
+	std::vector<rocksdb::ColumnFamilyHandle*> handles;
+	s = rocksdb::DB::Open(dbOptions, path, descriptors, &handles, &db);
+	ASSERT(s.ok());
 
-// 	rocksdb::ColumnFamilyHandle* cf;
-// 	for (auto* handle : handles) {
-// 		if (handle->GetName() == cfName) {
-// 			cf = handle;
-// 			break;
-// 		}
-// 	}
-// 	ASSERT(cf != nullptr);
+	rocksdb::ColumnFamilyHandle* cf;
+	for (auto* handle : handles) {
+		if (handle->GetName() == cfName) {
+			cf = handle;
+			break;
+		}
+	}
+	ASSERT(cf != nullptr);
 
-// 	rocksdb::Checkpoint* checkpoint = nullptr;
-// 	s = rocksdb::Checkpoint::Create(db, &checkpoint);
-// 	ASSERT(s.ok());
+	rocksdb::Checkpoint* checkpoint = nullptr;
+	s = rocksdb::Checkpoint::Create(db, &checkpoint);
+	ASSERT(s.ok());
 
-// 	const std::string checkpointDir = "sharded-rocks-checkpoint";
-// 	platform::eraseDirectoryRecursive(checkpointDir);
-// 	rocksdb::ExportImportFilesMetaData* pMetadata = nullptr;
-// 	s = checkpoint->ExportColumnFamily(cf, checkpointDir, &pMetadata);
-// 	ASSERT(s.ok());
-// 	for (const auto& file : pMetadata->files) {
-// 		TraceEvent(SevDebug, "CheckpointFile", logId)
-// 		    .detail("Name", file.name)
-// 		    .detail("SmallestKey", file.smallestkey)
-// 		    .detail("LargestKey", file.largestkey)
-// 		    .detail("Size", file.size);
-// 	}
+	const std::string checkpointDir = "sharded-rocks-checkpoint";
+	platform::eraseDirectoryRecursive(checkpointDir);
+	rocksdb::ExportImportFilesMetaData* pMetadata = nullptr;
+	s = checkpoint->ExportColumnFamily(cf, checkpointDir, &pMetadata);
+	ASSERT(s.ok());
+	for (const auto& file : pMetadata->files) {
+		TraceEvent(SevDebug, "CheckpointFile", logId)
+		    .detail("Name", file.name)
+		    .detail("SmallestKey", file.smallestkey)
+		    .detail("LargestKey", file.largestkey)
+		    .detail("Size", file.size);
+	}
 
-// 	rocksdb::ExportImportFilesMetaData metadata = *pMetadata;
-// 	delete pMetadata;
+	rocksdb::ExportImportFilesMetaData metadata = *pMetadata;
+	delete pMetadata;
 
-// 	{
-// 		rocksdb::ImportColumnFamilyOptions importOptions;
-// 		importOptions.move_files = false;
-// 		rocksdb::ColumnFamilyHandle* handle;
-// 		const std::string name = deterministicRandom()->randomAlphaNumeric(8);
-// 		s = db->CreateColumnFamilyWithImport(
-// 		    // rocksdb::ColumnFamilyOptions(), cfName, importOptions, metadata, &handle);
-// 		    getCFOptions(),
-// 		    name,
-// 		    importOptions,
-// 		    metadata,
-// 		    &handle);
-// 		ASSERT(s.ok());
-// 		handles.push_back(handle);
+	{
+		rocksdb::ImportColumnFamilyOptions importOptions;
+		importOptions.move_files = false;
+		rocksdb::ColumnFamilyHandle* handle;
+		const std::string name = deterministicRandom()->randomAlphaNumeric(8);
+		s = db->CreateColumnFamilyWithImport(
+		    // rocksdb::ColumnFamilyOptions(), cfName, importOptions, metadata, &handle);
+		    getCFOptions(),
+		    name,
+		    importOptions,
+		    metadata,
+		    &handle);
+		ASSERT(s.ok());
+		handles.push_back(handle);
 
-// 		auto options = getReadOptions();
-// 		rocksdb::Iterator* oriIter = db->NewIterator(options, cf);
-// 		rocksdb::Iterator* resIter = db->NewIterator(options, handle);
-// 		oriIter->SeekToFirst();
-// 		resIter->SeekToFirst();
-// 		while (oriIter->Valid() && resIter->Valid()) {
-// 			TraceEvent(SevInfo, "RocksTestValidateCheckpoint", logId)
-// 			    .detail("KeyInDB", toStringRef(oriIter->key()))
-// 			    .detail("ValueInDB", toStringRef(oriIter->value()))
-// 			    .detail("KeyInCheckpoint", toStringRef(resIter->key()))
-// 			    .detail("ValueInCheckpoint", toStringRef(resIter->value()));
-// 			if (oriIter->key().compare(resIter->key()) != 0 || oriIter->value().compare(resIter->value()) != 0) {
-// 				TraceEvent(SevError, "RocksValidateCheckpointError", logId)
-// 				    .detail("KeyInDB", toStringRef(oriIter->key()))
-// 				    .detail("ValueInDB", toStringRef(oriIter->value()))
-// 				    .detail("KeyInCheckpoint", toStringRef(resIter->key()))
-// 				    .detail("ValueInCheckpoint", toStringRef(resIter->value()));
-// 				break;
-// 			}
-// 			oriIter->Next();
-// 			resIter->Next();
-// 		}
-// 		if (oriIter->Valid() || resIter->Valid()) {
-// 			s = rocksdb::Status::Corruption();
-// 		}
-// 		delete oriIter;
-// 		delete resIter;
-// 	}
-// 	for (auto* handle : handles) {
-// 		ASSERT(db->DestroyColumnFamilyHandle(handle).ok());
-// 	}
+		auto options = getReadOptions();
+		rocksdb::Iterator* oriIter = db->NewIterator(options, cf);
+		rocksdb::Iterator* resIter = db->NewIterator(options, handle);
+		oriIter->SeekToFirst();
+		resIter->SeekToFirst();
+		while (oriIter->Valid() && resIter->Valid()) {
+			TraceEvent(SevInfo, "RocksTestValidateCheckpoint", logId)
+			    .detail("KeyInDB", toStringRef(oriIter->key()))
+			    .detail("ValueInDB", toStringRef(oriIter->value()))
+			    .detail("KeyInCheckpoint", toStringRef(resIter->key()))
+			    .detail("ValueInCheckpoint", toStringRef(resIter->value()));
+			if (oriIter->key().compare(resIter->key()) != 0 || oriIter->value().compare(resIter->value()) != 0) {
+				TraceEvent(SevError, "RocksValidateCheckpointError", logId)
+				    .detail("KeyInDB", toStringRef(oriIter->key()))
+				    .detail("ValueInDB", toStringRef(oriIter->value()))
+				    .detail("KeyInCheckpoint", toStringRef(resIter->key()))
+				    .detail("ValueInCheckpoint", toStringRef(resIter->value()));
+				break;
+			}
+			oriIter->Next();
+			resIter->Next();
+		}
+		if (oriIter->Valid() || resIter->Valid()) {
+			s = rocksdb::Status::Corruption();
+		}
+		delete oriIter;
+		delete resIter;
+	}
+	for (auto* handle : handles) {
+		ASSERT(db->DestroyColumnFamilyHandle(handle).ok());
+	}
 
-// 	ASSERT(db->Close().ok());
-// 	delete db;
-// 	// ASSERT(rocksdb::DestroyDB(path, dbOptions).ok());
+	ASSERT(db->Close().ok());
+	delete db;
+	// ASSERT(rocksdb::DestroyDB(path, dbOptions).ok());
 
-// 	return Void();
-// }
+	return Void();
+}
 } // namespace
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL

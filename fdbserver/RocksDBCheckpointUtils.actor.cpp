@@ -157,6 +157,92 @@ Error statusToError(const rocksdb::Status& s) {
 	}
 }
 
+// Fetch a single sst file from storage server. The progress is checkpointed via cFun.
+ACTOR Future<int64_t> doFetchCheckpointFile(Database cx,
+                                            std::string remoteFile,
+                                            std::string localFile,
+                                            UID ssId,
+                                            UID checkpointId,
+                                            int maxRetries = 3) {
+	state Transaction tr(cx);
+	state StorageServerInterface ssi;
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			Optional<Value> ss = wait(tr.get(serverListKeyFor(ssId)));
+			if (!ss.present()) {
+				throw checkpoint_not_found();
+			}
+			ssi = decodeServerListValue(ss.get());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	state int attempt = 0;
+	state int64_t offset = 0;
+	state Reference<IAsyncFile> asyncFile;
+	loop {
+		offset = 0;
+		try {
+			asyncFile = Reference<IAsyncFile>();
+			++attempt;
+			TraceEvent(SevDebug, "FetchCheckpointFileBegin")
+			    .detail("RemoteFile", remoteFile)
+			    .detail("LocalFile", localFile)
+			    .detail("TargetUID", ssId)
+			    .detail("CheckpointId", checkpointId)
+			    .detail("Attempt", attempt);
+
+			wait(IAsyncFileSystem::filesystem()->deleteFile(localFile, true));
+			const int64_t flags = IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE |
+			                      IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
+			wait(store(asyncFile, IAsyncFileSystem::filesystem()->open(localFile, flags, 0666)));
+
+			state ReplyPromiseStream<FetchCheckpointReply> stream =
+			    ssi.fetchCheckpoint.getReplyStream(FetchCheckpointRequest(checkpointId, remoteFile));
+			TraceEvent(SevDebug, "FetchCheckpointFileReceivingData")
+			    .detail("RemoteFile", remoteFile)
+			    .detail("LocalFile", localFile)
+			    .detail("TargetUID", ssId)
+			    .detail("CheckpointId", checkpointId)
+			    .detail("Attempt", attempt);
+			loop {
+				state FetchCheckpointReply rep = waitNext(stream.getFuture());
+				wait(asyncFile->write(rep.data.begin(), rep.data.size(), offset));
+				wait(asyncFile->flush());
+				offset += rep.data.size();
+			}
+		} catch (Error& e) {
+			if (e.code() != error_code_end_of_stream ||
+			    (g_network->isSimulated() && attempt == 1 && deterministicRandom()->coinflip())) {
+				TraceEvent(SevWarnAlways, "FetchCheckpointFileError")
+				    .errorUnsuppressed(e)
+				    .detail("RemoteFile", remoteFile)
+				    .detail("LocalFile", localFile)
+				    .detail("TargetUID", ssId)
+				    .detail("CheckpointId", checkpointId)
+				    .detail("Attempt", attempt);
+				if (attempt >= maxRetries) {
+					throw e;
+				}
+			} else {
+				wait(asyncFile->sync());
+				int64_t fileSize = wait(asyncFile->size());
+				TraceEvent(SevDebug, "FetchCheckpointFileEnd")
+				    .detail("RemoteFile", remoteFile)
+				    .detail("LocalFile", localFile)
+				    .detail("TargetUID", ssId)
+				    .detail("CheckpointId", checkpointId)
+				    .detail("Attempt", attempt)
+				    .detail("FileSize", fileSize);
+				return fileSize;
+			}
+		}
+	}
+}
+
 // RocksDBColumnFamilyReader reads a RocksDB checkpoint, and returns the key-value pairs via nextKeyValues.
 class RocksDBColumnFamilyReader : public ICheckpointReader {
 public:
@@ -818,102 +904,26 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
                                        std::string dir,
                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun,
                                        int maxRetries = 3) {
-	state RocksDBColumnFamilyCheckpoint rocksCF;
-	ObjectReader reader(metaData->serializedCheckpoint.begin(), IncludeVersion());
-	reader.deserialize(rocksCF);
+	state RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(*metaData);
 
 	// Skip fetched file.
 	if (rocksCF.sstFiles[idx].fetched && rocksCF.sstFiles[idx].db_path == dir) {
 		return Void();
 	}
 
-	state std::string remoteFile = rocksCF.sstFiles[idx].name;
-	state std::string localFile = dir + rocksCF.sstFiles[idx].name;
+	std::string remoteFile = rocksCF.sstFiles[idx].name;
+	std::string localFile = dir + rocksCF.sstFiles[idx].name;
 	ASSERT(!metaData->src.empty());
-	state UID ssID = metaData->src.front();
+	state UID ssId = metaData->src.front();
 
-	state Transaction tr(cx);
-	state StorageServerInterface ssi;
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			Optional<Value> ss = wait(tr.get(serverListKeyFor(ssID)));
-			if (!ss.present()) {
-				throw checkpoint_not_found();
-			}
-			ssi = decodeServerListValue(ss.get());
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
+	int64_t fileSize = wait(doFetchCheckpointFile(cx, remoteFile, localFile, ssId, metaData->checkpointID));
+	rocksCF.sstFiles[idx].db_path = dir;
+	rocksCF.sstFiles[idx].fetched = true;
+	metaData->serializedCheckpoint = ObjectWriter::toValue(rocksCF, IncludeVersion());
+	if (cFun) {
+		wait(cFun(*metaData));
 	}
-
-	state int attempt = 0;
-	state int64_t offset = 0;
-	state Reference<IAsyncFile> asyncFile;
-	loop {
-		offset = 0;
-		try {
-			asyncFile = Reference<IAsyncFile>();
-			++attempt;
-			TraceEvent("FetchCheckpointFileBegin", metaData->checkpointID)
-			    .detail("RemoteFile", remoteFile)
-			    .detail("TargetUID", ssID.toString())
-			    .detail("StorageServer", ssi.id().toString())
-			    .detail("LocalFile", localFile)
-			    .detail("Attempt", attempt);
-
-			wait(IAsyncFileSystem::filesystem()->deleteFile(localFile, true));
-			const int64_t flags = IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE |
-			                      IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
-			wait(store(asyncFile, IAsyncFileSystem::filesystem()->open(localFile, flags, 0666)));
-
-			state ReplyPromiseStream<FetchCheckpointReply> stream =
-			    ssi.fetchCheckpoint.getReplyStream(FetchCheckpointRequest(metaData->checkpointID, remoteFile));
-			TraceEvent("FetchCheckpointFileReceivingData", metaData->checkpointID)
-			    .detail("RemoteFile", remoteFile)
-			    .detail("TargetUID", ssID.toString())
-			    .detail("StorageServer", ssi.id().toString())
-			    .detail("LocalFile", localFile)
-			    .detail("Attempt", attempt);
-			loop {
-				state FetchCheckpointReply rep = waitNext(stream.getFuture());
-				wait(asyncFile->write(rep.data.begin(), rep.data.size(), offset));
-				wait(asyncFile->flush());
-				offset += rep.data.size();
-			}
-		} catch (Error& e) {
-			if (e.code() != error_code_end_of_stream ||
-			    (g_network->isSimulated() && attempt == 1 && deterministicRandom()->coinflip())) {
-				TraceEvent("FetchCheckpointFileError", metaData->checkpointID)
-				    .errorUnsuppressed(e)
-				    .detail("RemoteFile", remoteFile)
-				    .detail("StorageServer", ssi.toString())
-				    .detail("LocalFile", localFile)
-				    .detail("Attempt", attempt);
-				if (attempt >= maxRetries) {
-					throw e;
-				}
-			} else {
-				wait(asyncFile->sync());
-				int64_t fileSize = wait(asyncFile->size());
-				TraceEvent("FetchCheckpointFileEnd", metaData->checkpointID)
-				    .detail("RemoteFile", remoteFile)
-				    .detail("StorageServer", ssi.toString())
-				    .detail("LocalFile", localFile)
-				    .detail("Attempt", attempt)
-				    .detail("DataSize", offset)
-				    .detail("FileSize", fileSize);
-				rocksCF.sstFiles[idx].db_path = dir;
-				rocksCF.sstFiles[idx].fetched = true;
-				metaData->serializedCheckpoint = ObjectWriter::toValue(rocksCF, IncludeVersion());
-				if (cFun) {
-					wait(cFun(*metaData));
-				}
-				return Void();
-			}
-		}
-	}
+	return Void();
 }
 
 // TODO: Return when a file exceeds a limit.
