@@ -18,11 +18,7 @@
  * limitations under the License.
  */
 
-#include <chrono>
-#include <cstddef>
-#include <dlfcn.h>
 #include <filesystem>
-#include <sstream>
 #ifdef __unixish__
 #include <fcntl.h>
 #endif
@@ -45,6 +41,7 @@
 #include "fdbclient/ClientVersion.h"
 #include "fdbclient/LocalClientAPI.h"
 #include "fdbclient/VersionVector.h"
+#include "fdbclient/buildid.h"
 
 #include "flow/ThreadPrimitives.h"
 #include "flow/network.h"
@@ -59,143 +56,9 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-#include "fdbclient/buildid.h"
-
-int symbol_func() {
-	return 1;
-}
-
 #ifdef FDBCLIENT_NATIVEAPI_ACTOR_H
 #error "MVC should not depend on the Native API"
 #endif
-
-//#include "llvm/IR/GlobalObject.h"
-
-/**/
-/**/
-///**/
-//#include <dlfcn.h>
-//#include <link.h>
-//#include <stddef.h>
-//#include <string.h>
-//
-//#ifndef NT_GNU_BUILD_ID
-//#define NT_GNU_BUILD_ID 3
-//#endif
-//
-//#ifndef ElfW
-//#define ElfW(type) Elf_##type
-//#endif
-//
-//#define ALIGN(val, align) (((val) + (align)-1) & ~((align)-1))
-//
-// struct build_id_note {
-//	ElfW(Nhdr) nhdr;
-//
-//	char name[4];
-//	uint8_t build_id[0];
-//};
-//
-// enum tag { BY_NAME, BY_SYMBOL };
-//
-// struct callback_data {
-//	union {
-//		const char* name;
-//
-//		/* Base address of shared object, taken from Dl_info::dli_fbase */
-//		const void* dli_fbase;
-//	};
-//	enum tag tag;
-//	struct build_id_note* note;
-//};
-//
-// static int build_id_find_nhdr_callback(struct dl_phdr_info* info, size_t size, void* data_) {
-//	struct callback_data* data = (callback_data*)data_;
-//
-//	if (data->tag == BY_NAME)
-//		if (!info->dlpi_name || strcmp(info->dlpi_name, data->name) != 0)
-//			return 0;
-//
-//	if (data->tag == BY_SYMBOL) {
-//		/* Calculate address where shared object is mapped into the process space.
-//		 * (Using the base address and the virtual address of the first LOAD segment)
-//		 */
-//		void* map_start = NULL;
-//		for (unsigned i = 0; i < info->dlpi_phnum; i++) {
-//			if (info->dlpi_phdr[i].p_type == PT_LOAD) {
-//				map_start = (void*)(info->dlpi_addr + info->dlpi_phdr[i].p_vaddr);
-//				break;
-//			}
-//		}
-//
-//		if (map_start != data->dli_fbase)
-//			return 0;
-//	}
-//
-//	for (unsigned i = 0; i < info->dlpi_phnum; i++) {
-//		if (info->dlpi_phdr[i].p_type != PT_NOTE)
-//			continue;
-//
-//		struct build_id_note* note = (build_id_note*)(info->dlpi_addr + info->dlpi_phdr[i].p_vaddr);
-//		ptrdiff_t len = info->dlpi_phdr[i].p_filesz;
-//
-//		while (len >= sizeof(struct build_id_note)) {
-//			if (note->nhdr.n_type == NT_GNU_BUILD_ID && note->nhdr.n_descsz != 0 && note->nhdr.n_namesz == 4 &&
-//			    memcmp(note->name, "GNU", 4) == 0) {
-//				data->note = note;
-//				return 1;
-//			}
-//
-//			size_t offset = sizeof(ElfW(Nhdr)) + ALIGN(note->nhdr.n_namesz, 4) + ALIGN(note->nhdr.n_descsz, 4);
-//			note = (struct build_id_note*)((char*)note + offset);
-//			len -= offset;
-//		}
-//	}
-//
-//	return 0;
-//}
-//
-// const struct build_id_note* build_id_find_nhdr_by_name(const char* name) {
-//	struct callback_data data = {
-//		.tag = BY_NAME,
-//		.name = name,
-//		.note = NULL,
-//	};
-//
-//	if (!dl_iterate_phdr(build_id_find_nhdr_callback, &data))
-//		return NULL;
-//
-//	return data.note;
-//}
-//
-// const struct build_id_note* build_id_find_nhdr_by_symbol(const void* symbol) {
-//	Dl_info info;
-//
-//	if (!dladdr(symbol, &info))
-//		return NULL;
-//
-//	if (!info.dli_fbase)
-//		return NULL;
-//
-//	struct callback_data data = {
-//		.tag = BY_SYMBOL,
-//		.dli_fbase = info.dli_fbase,
-//		.note = NULL,
-//	};
-//
-//	if (!dl_iterate_phdr(build_id_find_nhdr_callback, &data))
-//		return NULL;
-//
-//	return data.note;
-//}
-//
-// ElfW(Word) build_id_length(const struct build_id_note* note) {
-//	return note->nhdr.n_descsz;
-//}
-//
-// const uint8_t* build_id_data(const struct build_id_note* note) {
-//	return note->build_id;
-//}
 
 void throwIfError(FdbCApi::fdb_error_t e) {
 	if (e) {
@@ -1243,6 +1106,7 @@ void DLApi::init() {
 	loadClientFunction(&api->clusterCreateDatabase, lib, fdbCPath, "fdb_cluster_create_database", headerVersion < 610);
 	loadClientFunction(&api->clusterDestroy, lib, fdbCPath, "fdb_cluster_destroy", headerVersion < 610);
 	loadClientFunction(&api->futureGetCluster, lib, fdbCPath, "fdb_future_get_cluster", headerVersion < 610);
+	loadClientFunction(&api->retrieveBuildID, lib, fdbCPath, "fdb_retrieve_build_id", headerVersion >= 720);
 }
 
 void DLApi::selectApiVersion(int apiVersion) {
@@ -1304,6 +1168,10 @@ void DLApi::stopNetwork() {
 	if (networkSetup) {
 		throwIfError(api->stopNetwork());
 	}
+}
+
+const uint8_t* DLApi::retrieveBuildID() {
+	return api->retrieveBuildID();
 }
 
 Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
@@ -2681,6 +2549,16 @@ void MultiVersionApi::runOnExternalClientsAllThreads(std::function<void(Referenc
 	}
 }
 
+void MultiVersionApi::runOnExternalClientsThreadRange(std::function<void(Reference<ClientInfo>)> func,
+                                                      int startIdx,
+                                                      int endIdx,
+                                                      bool runOnFailedClients,
+                                                      bool failOnError) {
+	for (int i = startIdx; i < std::min(endIdx, threadCount); i++) {
+		runOnExternalClients(i, func, runOnFailedClients, failOnError);
+	}
+}
+
 // runOnFailedClients should be used cautiously. Some failed clients may not have successfully loaded all symbols.
 void MultiVersionApi::runOnExternalClients(int threadIdx,
                                            std::function<void(Reference<ClientInfo>)> func,
@@ -2831,128 +2709,77 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 	}
 }
 
-#define TIMED(description, code)                                                                                       \
+#define TIMED(code)                                                                                                    \
 	start = std::chrono::steady_clock::now();                                                                          \
 	code;                                                                                                              \
 	end = std::chrono::steady_clock::now();                                                                            \
-	std::cout << #description << " took "                                                                              \
-	          << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << " us.\n"
+	std::cout << #code << " took " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()       \
+	          << " us.\n"
 
 #if defined(__unixish__)
-std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
-	auto start = std::chrono::steady_clock::now();
-	auto end = std::chrono::steady_clock::now();
+std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPerThread(std::string path,
+                                                                                        std::string buildId) {
 
 	ASSERT_GE(threadCount, 1);
-	// Copy library for each thread configured per version
+	// Copy library for each thread configured per version if the copies do not already exist
 	std::vector<std::pair<std::string, bool>> paths;
 
-	TIMED("loading library", void* lib = loadLibrary(path.c_str())); // dlopen(path.c_str(), RTLD_LAZY);
-	void (*retreiveBuildID)(uint8_t**) = nullptr;
-	TIMED("loading client func", loadClientFunction(&retreiveBuildID, lib, path, "fdb_retrieve_build_id", true));
+	std::string filename = basename(path);
 
-	//// loadClientFunction(build_id_find_nhdr_by_symbol, handle, "", "build_id_find_nhdr_by_symbol", true);
-	//// loadClientFunction(build_id_length, handle, "", "build_id_length", true);
-	// loadClientFunction(build_id_data, handle, "", "build_id_data", true);
-	//
-	// std::cout << "Loaded functions " << std::endl;
+	for (int ii = 1; ii < threadCount; ++ii) {
 
-	// const struct build_id_note* (*build_id_find_nhdr_by_name)(const char* name) =
-	//     (const struct build_id_note* (*)(const char* name))dlsym(handle, "build_id_find_nhdr_by_name");
-	// const struct build_id_note* (*build_id_find_nhdr_by_symbol)(const void* symbol) =
-	//     (const struct build_id_note* (*)(const void* symbol))dlsym(handle, "build_id_find_nhdr_by_symbol");
-	//// reinterpret_cast<ElfW(Word) (*build_id_length)(const struct build_id_note* note)()> =
-	////     (ElfW(Word)(*)(const struct build_id_note*))dlsym(handle, "build_id_length");
-	// void* tmp = dlsym(handle, "build_id_data");
-	// typedef const uint8_t* (*build_id_data)(const struct build_id_note* note);
-	// build_id_data my_build_id_data = reinterpret_cast<build_id_data>(reinterpret_cast<long>(tmp));
+		constexpr int MAX_TMP_NAME_LENGTH = PATH_MAX + 12;
+		char cpName[MAX_TMP_NAME_LENGTH];
+		snprintf(cpName, MAX_TMP_NAME_LENGTH, "%s/%s-%d-%s", tmpDir.c_str(), filename.c_str(), ii, buildId.c_str());
 
-	// const struct build_id_note* note_by_symbol = build_id_find_nhdr_by_name(path.c_str());
-	// std::cout << "Note by symbol " << note_by_symbol << std::endl;
-	// ElfW(Word) len = 20;
-	// const uint8_t* build_id = build_id_data(note_by_symbol);
+		if (!(std::filesystem::exists(cpName))) {
 
-	// https://gist.github.com/miguelmota/4fc9b46cf21111af5fa613555c14de92
-	constexpr int BUILD_ID_LENGTH = 20; // hardcoded for now, can also be retrieved inside api func
-	uint8_t* build_id = nullptr;
-	TIMED("retrieving build id ", retreiveBuildID(&build_id));
+			int cpFd = open(cpName, O_RDWR | O_CREAT, 0755);
+			int fd;
 
-	TIMED(
-	    "filling string stream ", std::ostringstream ss_build_id; ss_build_id << std::hex << std::setfill('0');
-	    for (ElfW(Word) i = 0; i < BUILD_ID_LENGTH;
-	         i++) { ss_build_id << std::hex << std::setw(2) << static_cast<int>(build_id[i]); });
+			if ((fd = open(path.c_str(), O_RDONLY)) == -1) {
+				TraceEvent("ExternalClientNotFound").detail("LibraryPath", path);
+				throw file_not_found();
+			}
 
-	if (threadCount == 1) {
-		paths.push_back({ path, false });
-	} else {
-		// It's tempting to use the so once without copying. However, we don't know
-		// if the thing we're about to copy is the shared object executing this code
-		// or not, so this optimization is unsafe.
-		// paths.push_back({path, false});
-		for (int ii = 0; ii < threadCount; ++ii) {
-			std::string filename = basename(path);
+			TraceEvent("CopyingExternalClient")
+			    .detail("FileName", filename)
+			    .detail("LibraryPath", path)
+			    .detail("CopyPath", cpName);
 
-			constexpr int MAX_TMP_NAME_LENGTH = PATH_MAX + 12;
-			char tempName[MAX_TMP_NAME_LENGTH];
-			snprintf(tempName,
-			         MAX_TMP_NAME_LENGTH,
-			         "%s/%s-%d-%s",
-			         tmpDir.c_str(),
-			         filename.c_str(),
-			         ii,
-			         ss_build_id.str().c_str());
-
-			if (!(std::filesystem::exists(tempName))) {
-
-				int tempFd = open(tempName, O_RDWR | O_CREAT, 0755);
-				int fd;
-
-				if ((fd = open(path.c_str(), O_RDONLY)) == -1) {
-					TraceEvent("ExternalClientNotFound").detail("LibraryPath", path);
-					throw file_not_found();
+			constexpr size_t buf_sz = 4096;
+			char buf[buf_sz];
+			while (1) {
+				ssize_t readCount = read(fd, buf, buf_sz);
+				if (readCount == 0) {
+					// eof
+					break;
 				}
-
-				TraceEvent("CopyingExternalClient")
-				    .detail("FileName", filename)
-				    .detail("LibraryPath", path)
-				    .detail("TempPath", tempName);
-
-				constexpr size_t buf_sz = 4096;
-				char buf[buf_sz];
-				while (1) {
-					ssize_t readCount = read(fd, buf, buf_sz);
-					if (readCount == 0) {
-						// eof
-						break;
-					}
-					if (readCount == -1) {
-						TraceEvent(SevError, "ExternalClientCopyFailedReadError")
+				if (readCount == -1) {
+					TraceEvent(SevError, "ExternalClientCopyFailedReadError")
+					    .GetLastError()
+					    .detail("LibraryPath", path);
+					throw platform_error();
+				}
+				ssize_t written = 0;
+				while (written != readCount) {
+					ssize_t writeCount = write(cpFd, buf + written, readCount - written);
+					if (writeCount == -1) {
+						TraceEvent(SevError, "ExternalClientCopyFailedWriteError")
 						    .GetLastError()
 						    .detail("LibraryPath", path);
 						throw platform_error();
 					}
-					ssize_t written = 0;
-					while (written != readCount) {
-						ssize_t writeCount = write(tempFd, buf + written, readCount - written);
-						if (writeCount == -1) {
-							TraceEvent(SevError, "ExternalClientCopyFailedWriteError")
-							    .GetLastError()
-							    .detail("LibraryPath", path);
-							throw platform_error();
-						}
-						written += writeCount;
-					}
+					written += writeCount;
 				}
-
-				close(fd);
-				close(tempFd);
 			}
 
-			paths.push_back({ tempName, true }); // use + delete temporary copies of the library.
+			close(fd);
+			close(cpFd);
 		}
+		paths.push_back({ cpName, false }); // use + no not delete copies of the library.
 	}
 
-	closeLibrary(lib);
 	return paths;
 }
 #else // if defined (__unixish__)
@@ -3101,98 +2928,30 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		}
 	}
 }
-//  static, i get "ld.lld: error: relocation refers to a symbol in a
-//  discarded section: build_id" GCC: works w/o static
 
-// extern char build_id_start;
-// extern char build_id_end;
-
-// const char __attribute__((section(".TEST"))) build_id =
-//     '!'; // Clang:  with static, it compiles but result is all 0z, without
-
-// GlobalVariable* build_id = new llvm::GlobalVariable();
-// build_id->setSection(".TEST");
+std::string getBuildIdString(const uint8_t* build_id) {
+	// https://gist.github.com/miguelmota/4fc9b46cf21111af5fa613555c14de92
+	const int BUILD_ID_LENGTH = 20;
+	std::ostringstream ss_build_id;
+	ss_build_id << std::hex << std::setfill('0');
+	for (ElfW(Word) i = 0; i < BUILD_ID_LENGTH; i++) {
+		ss_build_id << std::hex << std::setw(2) << static_cast<int>(build_id[i]);
+	};
+	return ss_build_id.str();
+}
 
 void MultiVersionApi::setupNetwork() {
-	auto start = std::chrono::steady_clock::now();
 
-	// const struct build_id_note* note = build_id_find_nhdr_by_name("");
-	// if (!note)
-	//	std::cout << "note is null\n";
+	// function to initialize external clients
+	auto extInitFunc = [this](Reference<ClientInfo> client) {
+		TraceEvent("InitializingExternalClient").detail("LibraryPath", client->libPath);
+		client->api->selectApiVersion(apiVersion.version());
+		if (client->useFutureVersion) {
+			client->api->useFutureProtocolVersion();
+		}
+		client->loadVersion();
+	};
 
-	// auto start = std::chrono::steady_clock::now();
-
-	// const struct build_id_note* note_by_symbol = build_id_find_nhdr_by_symbol((const void*)symbol_func);
-	//  if (note != note_by_symbol)
-	//		std::cout << "note_by_symbol is not note\n";
-
-	// auto middle = std::chrono::steady_clock::now();
-	// ElfW(Word) len = build_id_length(note_by_symbol);
-	//
-	// const uint8_t* build_id = build_id_data(note_by_symbol);
-	//
-	// auto end = std::chrono::steady_clock::now();
-	//
-	// auto d1 = std::chrono::duration_cast<std::chrono::microseconds>((middle - start));
-	// auto d2 = std::chrono::duration_cast<std::chrono::microseconds>((end - middle));
-	//
-	// std::cout << "d1 " << d1.count() << " us\n";
-	// std::cout << "d2 " << d2.count() << " us \n";
-	//
-	// printf("Build ID: ");
-	// for (ElfW(Word) i = 0; i < len; i++) {
-	//	printf("%02x", build_id[i]);
-	//}
-	// printf("\n");
-
-	// const build_id_note* note = build_id_find_nhdr_by_name("libfdb_c.so");
-	// if (!note)
-	//	std::cout << "not is null\n";
-	//
-	// const uint8_t* build_id = build_id_data(note);
-	//
-	// printf("Build ID: ");
-	// for (ElfW(Word) i = 0; i < 20; i++) {
-	//	printf("%02x", build_id[i]);
-	//}
-	// printf("\n");
-
-	//	const char* s;
-	//
-	//	s = &build_id;
-	//
-	//	// section data is 20 bytes in size
-	//	s -= 20;
-	//
-	//	// std::cout << "Address is at " << static_cast<const void*>(s) << std::endl;
-	//	//  sha1 data continues for 20 bytes
-	//	printf("  > Build ID: ");
-	//	int x;
-	//	for (x = 0; x < 20; x++) {
-	//		printf("%02hhx", s[x]);
-	//	}
-	//
-	//	printf(" <\n");
-
-	// printf("build_id_find_nhdr_by_name\n");
-	// const struct build_id_note* note = build_id_find_nhdr_by_name("./libfdb_c.so");
-
-	// std::cout << "Note is null = " << (note == NULL) << "\n";
-
-	// printf("build_id_find_nhdr_by_symbol\n");
-	// const struct build_id_note* note_by_symbol = build_id_find_nhdr_by_symbol((void*)build_id_length);
-
-	//	printf("build_id_length\n");
-	//	ElfW(Word) len = build_id_length(note);
-
-	// printf("build_id_data\n");
-	// const uint8_t* build_id = build_id_data(note);
-	//
-	// printf("Build ID: ");
-	// for (ElfW(Word) i = 0; i < 20; i++) {
-	//	printf("%02x", build_id[i]);
-	//}
-	// printf("\n");
 	try {
 		if (!externalClient) {
 			loadEnvironmentVariableNetworkOptions();
@@ -3219,8 +2978,8 @@ void MultiVersionApi::setupNetwork() {
 			}
 
 			if (externalClientDescriptions.empty() && !disableBypass) {
-				bypassMultiClientApi = true; // SOMEDAY: we won't be able to set this option once it becomes possible to
-				                             // add clients after setupNetwork is called
+				bypassMultiClientApi = true; // SOMEDAY: we won't be able to set this option once it becomes
+				                             // possible to add clients after setupNetwork is called
 			}
 
 			if (!bypassMultiClientApi) {
@@ -3237,45 +2996,44 @@ void MultiVersionApi::setupNetwork() {
 				ignoreExternalClientFailures = true;
 			}
 
+			assert(externalClients.empty());
+
 			for (auto i : externalClientDescriptions) {
 				std::string path = i.second.libPath;
 				std::string filename = basename(path);
 				bool useFutureVersion = i.second.useFutureVersion;
 
-				// Copy external lib for each thread
 				if (externalClients.count(filename) == 0) {
 					externalClients[filename] = {};
-					auto start = std::chrono::steady_clock::now();
-					auto libCopies = copyExternalLibraryPerThread(path);
-					auto end = std::chrono::steady_clock::now();
-					std::cout << "copyExternalLibraryPerThread() took "
-					          << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << " us.\n";
+					externalClients[filename].push_back((Reference<ClientInfo>(
+					    new ClientInfo(new DLApi(path, false /*unlink on load*/), path, useFutureVersion, 0))));
+				}
+			}
 
-					for (int idx = 0; idx < libCopies.size(); ++idx) {
-						// bool unlinkOnLoad = libCopies[idx].second && !retainClientLibCopies;
-						externalClients[filename].push_back(Reference<ClientInfo>(new ClientInfo(
-						    new DLApi(libCopies[idx].first, false /*unlink on load*/), path, useFutureVersion, idx)));
-					}
+			// initialize the first external thread for each library
+			runOnExternalClients(0, extInitFunc, false, !ignoreExternalClientFailures);
+
+			// generate copies of the first external thread for each library
+			for (auto i : externalClients) {
+				std::string path = i.second[0]->libPath;
+				std::string filename = basename(path);
+				bool useFutureVersion = i.second[0]->useFutureVersion;
+
+				auto libCopies = copyExternalLibraryPerThread(
+				    path, getBuildIdString(dynamic_cast<DLApi*>(externalClients[filename][0]->api)->retrieveBuildID()));
+
+				for (int idx = 0; idx < libCopies.size(); ++idx) {
+					externalClients[filename].push_back(Reference<ClientInfo>(new ClientInfo(
+					    new DLApi(libCopies[idx].first, false /*unlink on load*/), path, useFutureVersion, idx)));
 				}
 			}
 		}
-
 		localClient->loadVersion();
 
 		if (bypassMultiClientApi) {
 			networkSetup = true;
 		} else {
-			runOnExternalClientsAllThreads(
-			    [this](Reference<ClientInfo> client) {
-				    TraceEvent("InitializingExternalClient").detail("LibraryPath", client->libPath);
-				    client->api->selectApiVersion(apiVersion.version());
-				    if (client->useFutureVersion) {
-					    client->api->useFutureProtocolVersion();
-				    }
-				    client->loadVersion();
-			    },
-			    false,
-			    !ignoreExternalClientFailures);
+			runOnExternalClientsThreadRange(extInitFunc, 1, threadCount, false, !ignoreExternalClientFailures);
 
 			std::string baseTraceFileId;
 			if (apiVersion.hasTraceFileIdentifier()) {
@@ -3318,9 +3076,6 @@ void MultiVersionApi::setupNetwork() {
 		flushTraceFileVoid();
 		throw e;
 	}
-	auto end = std::chrono::steady_clock::now();
-	std::cout << "setupNetwork() took " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()
-	          << " us.\n";
 }
 
 THREAD_FUNC_RETURN runNetworkThread(void* param) {

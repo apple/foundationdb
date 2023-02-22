@@ -59,13 +59,10 @@
 
 #include "fdb_c_options.g.h"
 #include "fdb_c_types.h"
-#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-DLLEXPORT void fdb_retrieve_build_id(const unsigned char** build_id);
 
 DLLEXPORT const char* fdb_get_error(fdb_error_t code);
 

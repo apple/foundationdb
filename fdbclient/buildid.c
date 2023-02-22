@@ -147,3 +147,12 @@ ElfW(Word) build_id_length(const struct build_id_note* note) {
 const uint8_t* build_id_data(const struct build_id_note* note) {
 	return note->build_id;
 }
+
+int dummy_func() {
+	return 1;
+}
+
+const uint8_t* retrieveBuildID() {
+	const struct build_id_note* note_by_symbol = build_id_find_nhdr_by_symbol((const void*)dummy_func);
+	return build_id_data(note_by_symbol);
+}

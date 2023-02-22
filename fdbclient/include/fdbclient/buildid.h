@@ -39,6 +39,8 @@ ElfW(Word) build_id_length(const struct build_id_note* note);
 
 const uint8_t* build_id_data(const struct build_id_note* note);
 
+const uint8_t* retrieveBuildID();
+
 #ifdef __cplusplus
 }
 #endif

@@ -31,18 +31,6 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/ThreadHelper.actor.h"
 
-//#include <link.h>
-//
-// struct build_id_note;
-//
-// const struct build_id_note* build_id_find_nhdr_by_name(const char* name);
-//
-// const struct build_id_note* build_id_find_nhdr_by_symbol(const void* symbol);
-//
-// ElfW(Word) build_id_length(const struct build_id_note* note);
-//
-// const uint8_t* build_id_data(const struct build_id_note* note);
-
 // FdbCApi is used as a wrapper around the FoundationDB C API that gets loaded from an external client library.
 // All of the required functions loaded from that external library are stored in function pointers in this struct.
 struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
@@ -436,6 +424,9 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	FDBFuture* (*clusterCreateDatabase)(FDBCluster* cluster, uint8_t* dbName, int dbNameLength);
 	void (*clusterDestroy)(FDBCluster* cluster);
 	fdb_error_t (*futureGetCluster)(FDBFuture* f, FDBCluster** outCluster);
+
+	// Build ID
+	const uint8_t* (*retrieveBuildID)();
 };
 
 // An implementation of ITransaction that wraps a transaction object created on an externally loaded client library.
@@ -636,6 +627,7 @@ public:
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
 	void useFutureProtocolVersion() override;
+	const uint8_t* retrieveBuildID();
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	void setupNetwork() override;
@@ -1160,6 +1152,12 @@ public:
 	void runOnExternalClientsAllThreads(std::function<void(Reference<ClientInfo>)>,
 	                                    bool runOnFailedClients = false,
 	                                    bool failOnError = false);
+	void runOnExternalClientsThreadRange(std::function<void(Reference<ClientInfo>)>,
+	                                     int startIdx,
+	                                     int endIdx,
+	                                     bool runOnFailedClients = false,
+	                                     bool failOnError = false);
+
 	bool hasNonFailedExternalClients();
 
 	void updateSupportedVersions();
@@ -1192,7 +1190,7 @@ private:
 	void addExternalLibraryDirectory(std::string path);
 	// Return a vector of (pathname, unlink_on_close) pairs.  Makes threadCount - 1 copies of the library stored in
 	// path, and returns a vector of length threadCount.
-	std::vector<std::pair<std::string, bool>> copyExternalLibraryPerThread(std::string path);
+	std::vector<std::pair<std::string, bool>> copyExternalLibraryPerThread(std::string path, std::string build_id);
 	void disableLocalClient();
 	void setSupportedClientVersions(Standalone<StringRef> versions);
 
