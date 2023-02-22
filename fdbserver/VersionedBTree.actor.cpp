@@ -1598,11 +1598,11 @@ ACTOR Future<Void> redwoodHistogramsLogger(double interval) {
 	}
 }
 
-ACTOR Future<Void> redwoodMetricsLogger() {
+ACTOR Future<Void> redwoodMetricsLogger(double metricsInterval) {
 	g_redwoodMetrics.clear();
 	state Future<Void> loggingFuture = redwoodHistogramsLogger(SERVER_KNOBS->REDWOOD_HISTOGRAM_INTERVAL);
 	loop {
-		wait(delay(SERVER_KNOBS->REDWOOD_METRICS_INTERVAL));
+		wait(delay(metricsInterval));
 
 		TraceEvent e("RedwoodMetrics");
 		double elapsed = now() - g_redwoodMetrics.startTime;
@@ -2018,7 +2018,8 @@ public:
 	          int concurrentExtentReads,
 	          bool memoryOnly,
 	          Reference<IPageEncryptionKeyProvider> keyProvider,
-	          Promise<Void> errorPromise = {})
+	          Promise<Void> errorPromise = {},
+	          double metricsInterval = SERVER_KNOBS->REDWOOD_METRICS_INTERVAL)
 	  : keyProvider(keyProvider),
 	    ioLock(makeReference<PriorityMultiLock>(FLOW_KNOBS->MAX_OUTSTANDING, SERVER_KNOBS->REDWOOD_IO_PRIORITIES)),
 	    pageCacheBytes(pageCacheSizeBytes), desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize),
@@ -2034,7 +2035,8 @@ public:
 
 		g_redwoodMetrics.ioLock = ioLock.getPtr();
 		if (!g_redwoodMetricsActor.isValid()) {
-			g_redwoodMetricsActor = redwoodMetricsLogger();
+			TraceEvent("GRedwoodMetricsActorInit").detail("Interval", metricsInterval);
+			g_redwoodMetricsActor = redwoodMetricsLogger(metricsInterval);
 		}
 
 		commitFuture = Void();
@@ -2228,9 +2230,7 @@ public:
 							self->remappedPages[r.originalPageID][r.version] = r.newPageID;
 						}
 					}
-					when(wait(remapRecoverActor)) {
-						remapRecoverActor = Never();
-					}
+					when(wait(remapRecoverActor)) { remapRecoverActor = Never(); }
 				}
 			} catch (Error& e) {
 				if (e.code() != error_code_end_of_stream) {
@@ -4924,6 +4924,8 @@ public:
 	void close() { return close_impl(false); }
 
 	StorageBytes getStorageBytes() const { return m_pager->getStorageBytes(); }
+
+	int getPageSize() const { return m_pager->getLogicalPageSize(); }
 
 	// Set key to value as of the next commit
 	// The new value is not readable until after the next commit is completed.
@@ -7853,7 +7855,8 @@ public:
 	                     Reference<IPageEncryptionKeyProvider> encryptionKeyProvider,
 	                     Optional<std::map<std::string, std::string>> params)
 	  : m_filename(filename),
-	    prefetch(getStorageEngineParamBoolean(params.get(), "kvstore_range_prefetch") /*runtime change*/) {
+	    prefetch(getStorageEngineParamBoolean(params.get(), "kvstore_range_prefetch") /*runtime change*/),
+	    metrics_interval(getStorageEngineParamDouble(params.get(), "metrics_interval")) {
 
 		int pageSize = BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4)
 		                       : getStorageEngineParamInt(params.get(), "default_page_size"); // needReplacement
@@ -7901,7 +7904,8 @@ public:
 		                               SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
 		                               false,
 		                               m_keyProvider,
-		                               m_error);
+		                               m_error,
+		                               metrics_interval);
 		m_tree = new VersionedBTree(pager, filename, encodingType, m_keyProvider);
 		m_init = catchError(init_impl(this));
 	}
@@ -7922,6 +7926,7 @@ public:
 		TraceEvent(SevInfo, "RedwoodShutdown").detail("Filename", self->m_filename).detail("Dispose", dispose);
 
 		g_redwoodMetrics.ioLock = nullptr;
+		g_redwoodMetricsActor = Future<Void>();
 
 		// In simulation, if the instance is being disposed of then sometimes run destructive sanity check.
 		if (g_network->isSimulated() && dispose && BUGGIFY) {
@@ -8176,17 +8181,27 @@ public:
 
 	~KeyValueStoreRedwood() override{};
 
-	std::map<std::string, std::string> getParameters() override {
+	std::map<std::string, std::string> getParameters() const override {
 		std::map<std::string, std::string> result;
 		// how to get the default page size from m_tree,
 		// what's the general way to get it
 		result["kvstore_range_prefetch"] = prefetch ? "true" : "false";
+		result["default_page_size"] = std::to_string(m_tree->getPageSize());
+		result["metrics_interval"] = std::to_string(metrics_interval);
 		return result;
 	}
 
 	StorageEngineParamResult setParameters(std::map<std::string, std::string> const& params) override {
 		// TODO
-		StorageEngineParamResult result;
+		StorageEngineParamResult result = checkCompatibility(params);
+		for (const auto& k : result.applied) {
+			if (k == "kvstore_range_prefetch")
+				prefetch = !prefetch;
+			TraceEvent("RedwoodStorageEngineParamsApplied").detail("Param", k);
+		}
+		for (const auto& k : result.needReboot) {
+			TraceEvent("RedwoodStorageEngineParamsNeedReboot").detail("Param", k);
+		}
 		return result;
 	}
 
@@ -8198,9 +8213,10 @@ public:
 				getStorageEngineParamBoolean(params, "kvstore_range_prefetch") == prefetch
 				    ? result.unchanged.push_back(k)
 				    : result.applied.push_back(k);
-			} else {
-				// do something
-			}
+			} else if (k == "metrics_interval") {
+				result.needReboot.push_back(k);
+			} 
+			// do something else
 		}
 		return result;
 	}
@@ -8212,6 +8228,7 @@ private:
 	Promise<Void> m_closed;
 	Promise<Void> m_error;
 	bool prefetch;
+	double metrics_interval;
 	Version m_nextCommitVersion;
 	Reference<IPageEncryptionKeyProvider> m_keyProvider;
 	Future<Void> m_lastCommit = Void();
@@ -10616,9 +10633,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 				if (entriesRead == m_extentQueue.numEntries)
 					break;
 			}
-			when(wait(queueRecoverActor)) {
-				queueRecoverActor = Never();
-			}
+			when(wait(queueRecoverActor)) { queueRecoverActor = Never(); }
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_end_of_stream) {
