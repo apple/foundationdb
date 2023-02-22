@@ -164,7 +164,7 @@ private:
 			ASSERT_EQ(t.size(), 3);
 			TenantName tenantName = t.getString(1);
 			int64_t tenantId = t.getInt(2);
-			MetaclusterTenantMapEntry const& entry = self->managementMetadata.tenantMap[tenantId];
+			MetaclusterTenantMapEntry const& entry = self->managementMetadata.tenantData.tenantMap[tenantId];
 			bool renaming =
 			    entry.tenantState == MetaclusterAPI::TenantState::RENAMING && entry.renameDestination == tenantName;
 			ASSERT(tenantName == entry.tenantName || renaming);

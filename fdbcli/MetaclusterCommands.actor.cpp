@@ -171,13 +171,13 @@ ACTOR Future<bool> metaclusterRemoveCommand(Reference<IDatabase> db, std::vector
 	}
 
 	state ClusterNameRef clusterName = tokens[tokens.size() - 1];
-	state ForceRemove forceRemove = ForceRemove(tokens.size() == 4);
 
 	state ClusterType clusterType = wait(runTransaction(db, [](Reference<ITransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		return TenantAPI::getClusterType(tr);
 	}));
 
+	ForceRemove forceRemove(tokens.size() == 4);
 	if (clusterType == ClusterType::METACLUSTER_DATA && !forceRemove) {
 		if (tokens[2] == "FORCE"_sr) {
 			fmt::print("ERROR: a cluster name must be specified.\n");
