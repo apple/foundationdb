@@ -366,6 +366,12 @@ struct MetaclusterOperationContext {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
+				state bool checkRestoring = !self->extraSupportedDataClusterStates.count(DataClusterState::RESTORING);
+				state Future<KeyBackedRangeResult<std::pair<ClusterName, UID>>> activeRestoreIdFuture;
+				if (checkRestoring && self->clusterName.present()) {
+					activeRestoreIdFuture = MetaclusterMetadata::activeRestoreIds().getRange(tr, {}, {}, 1);
+				}
+
 				state Optional<MetaclusterRegistrationEntry> currentMetaclusterRegistration =
 				    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
 
@@ -379,6 +385,13 @@ struct MetaclusterOperationContext {
 				} else if (!self->metaclusterRegistration.get().matches(currentMetaclusterRegistration.get())) {
 					if (!runOnMismatchedCluster) {
 						throw cluster_removed();
+					}
+				}
+
+				if (checkRestoring) {
+					KeyBackedRangeResult<std::pair<ClusterName, UID>> activeRestoreId = wait(activeRestoreIdFuture);
+					if (!activeRestoreId.results.empty()) {
+						throw cluster_restoring();
 					}
 				}
 
@@ -791,6 +804,10 @@ struct RegisterClusterImpl {
 				    self->ctx.metaclusterRegistration.get().toDataClusterRegistration(self->clusterName,
 				                                                                      self->clusterEntry.id));
 
+				// If we happen to have any orphaned restore IDs from a previous time this cluster was in a metacluster,
+				// erase them now.
+				MetaclusterMetadata::activeRestoreIds().clear(tr);
+
 				wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 
 				TraceEvent("ConfiguredDataCluster")
@@ -817,6 +834,8 @@ struct RegisterClusterImpl {
 			throw cluster_already_exists();
 		} else if (dataClusterMetadata.get().entry.clusterState == DataClusterState::READY) {
 			return Void();
+		} else if (dataClusterMetadata.get().entry.clusterState == DataClusterState::RESTORING) {
+			throw cluster_restoring();
 		} else {
 			ASSERT(dataClusterMetadata.get().entry.clusterState == DataClusterState::REGISTERING);
 			dataClusterMetadata.get().entry.clusterState = DataClusterState::READY;
@@ -933,6 +952,7 @@ struct RemoveClusterImpl {
 		if (self->ctx.dataClusterIsRegistered) {
 			// Delete metacluster related metadata
 			MetaclusterMetadata::metaclusterRegistration().clear(tr);
+			MetaclusterMetadata::activeRestoreIds().clear(tr);
 			TenantMetadata::tenantTombstones().clear(tr);
 			TenantMetadata::tombstoneCleanupData().clear(tr);
 
@@ -1033,6 +1053,7 @@ struct RemoveClusterImpl {
 		ManagementClusterMetadata::dataClusters().erase(tr, ctx.clusterName.get());
 		ManagementClusterMetadata::dataClusterConnectionRecords.erase(tr, ctx.clusterName.get());
 		ManagementClusterMetadata::clusterTenantCount.erase(tr, ctx.clusterName.get());
+		MetaclusterMetadata::activeRestoreIds().erase(tr, ctx.clusterName.get());
 	}
 
 	// Removes the next set of metadata from the management cluster; returns true when all specified
