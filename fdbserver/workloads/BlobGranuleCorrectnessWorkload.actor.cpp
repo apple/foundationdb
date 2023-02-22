@@ -917,7 +917,6 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 
 	ACTOR Future<Void> checkTenantRanges(BlobGranuleCorrectnessWorkload* self,
 	                                     Database cx,
-
 	                                     Reference<ThreadData> threadData) {
 		// check that reading ranges with tenant name gives valid result of ranges just for tenant, with no tenant
 		// prefix

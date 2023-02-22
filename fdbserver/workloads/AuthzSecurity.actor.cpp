@@ -83,7 +83,8 @@ struct AuthzSecurityWorkload : TestWorkload {
 	PerfIntCounter crossTenantGetPositive, crossTenantGetNegative, crossTenantCommitPositive, crossTenantCommitNegative,
 	    publicNonTenantRequestPositive, tLogReadNegative, keyLocationLeakNegative, bgLocationLeakNegative,
 	    crossTenantBGLocPositive, crossTenantBGLocNegative, crossTenantBGReqPositive, crossTenantBGReqNegative,
-	    crossTenantBGReadPositive, crossTenantBGReadNegative;
+	    crossTenantBGReadPositive, crossTenantBGReadNegative, crossTenantGetGranulesPositive,
+	    crossTenantGetGranulesNegative;
 	std::vector<std::function<Future<Void>(Database cx)>> testFunctions;
 	bool checkBlobGranules;
 
@@ -95,7 +96,9 @@ struct AuthzSecurityWorkload : TestWorkload {
 	    keyLocationLeakNegative("KeyLocationLeakNegative"), bgLocationLeakNegative("BGLocationLeakNegative"),
 	    crossTenantBGLocPositive("CrossTenantBGLocPositive"), crossTenantBGLocNegative("CrossTenantBGLocNegative"),
 	    crossTenantBGReqPositive("CrossTenantBGReqPositive"), crossTenantBGReqNegative("CrossTenantBGReqNegative"),
-	    crossTenantBGReadPositive("CrossTenantBGReadPositive"), crossTenantBGReadNegative("CrossTenantBGReadNegative") {
+	    crossTenantBGReadPositive("CrossTenantBGReadPositive"), crossTenantBGReadNegative("CrossTenantBGReadNegative"),
+	    crossTenantGetGranulesPositive("CrossTenantGetGranulesPositive"),
+	    crossTenantGetGranulesNegative("CrossTenantGetGranulesNegative") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 500.0) / clientCount;
 		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
@@ -133,6 +136,11 @@ struct AuthzSecurityWorkload : TestWorkload {
 			    [this](Database cx) { return testCrossTenantBGReadDisallowed(this, cx, PositiveTestcase::True); });
 			testFunctions.push_back(
 			    [this](Database cx) { return testCrossTenantBGReadDisallowed(this, cx, PositiveTestcase::False); });
+			testFunctions.push_back(
+			    [this](Database cx) { return testCrossTenantGetGranulesDisallowed(this, cx, PositiveTestcase::True); });
+			testFunctions.push_back([this](Database cx) {
+				return testCrossTenantGetGranulesDisallowed(this, cx, PositiveTestcase::False);
+			});
 		}
 	}
 
@@ -167,7 +175,8 @@ struct AuthzSecurityWorkload : TestWorkload {
 			success &= bgLocationLeakNegative.getValue() > 0 && crossTenantBGLocPositive.getValue() > 0 &&
 			           crossTenantBGLocNegative.getValue() > 0 && crossTenantBGReqPositive.getValue() > 0 &&
 			           crossTenantBGReqNegative.getValue() > 0 && crossTenantBGReadPositive.getValue() > 0 &&
-			           crossTenantBGReadNegative.getValue() > 0;
+			           crossTenantBGReadNegative.getValue() > 0 && crossTenantGetGranulesPositive.getValue() > 0 &&
+			           crossTenantGetGranulesNegative.getValue() > 0;
 		}
 		return success;
 	}
@@ -188,6 +197,8 @@ struct AuthzSecurityWorkload : TestWorkload {
 			m.push_back(crossTenantBGReqNegative.getMetric());
 			m.push_back(crossTenantBGReadPositive.getMetric());
 			m.push_back(crossTenantBGReadNegative.getMetric());
+			m.push_back(crossTenantGetGranulesPositive.getMetric());
+			m.push_back(crossTenantGetGranulesNegative.getMetric());
 		}
 	}
 
@@ -539,11 +550,11 @@ struct AuthzSecurityWorkload : TestWorkload {
 	                                                                               TenantInfo tenant,
 	                                                                               Version v) {
 		try {
-			GetBlobGranuleLocationsReply reply =
-			    wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
-			                          &CommitProxyInterface::getBlobGranuleLocations,
-			                          GetBlobGranuleLocationsRequest(
-			                              SpanContext(), tenant, ""_sr, Optional<KeyRef>(), 100, false, v, Arena())));
+			GetBlobGranuleLocationsReply reply = wait(
+			    basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
+			                     &CommitProxyInterface::getBlobGranuleLocations,
+			                     GetBlobGranuleLocationsRequest(
+			                         SpanContext(), tenant, ""_sr, Optional<KeyRef>(), 100, false, false, v, Arena())));
 			return reply;
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled) {
@@ -725,6 +736,43 @@ struct AuthzSecurityWorkload : TestWorkload {
 		                                                  committedVersion));
 		checkCrossTenantOutcome(
 		    "BGRead", self->crossTenantBGReadPositive, self->crossTenantBGReadNegative, outcome, positive);
+		return Void();
+	}
+
+	ACTOR static Future<Optional<Error>> tryGetGranules(AuthzSecurityWorkload* self,
+	                                                    Database cx,
+	                                                    Reference<Tenant> tenant,
+	                                                    Key key,
+	                                                    WipedString token) {
+		state Transaction tr(cx, tenant);
+		self->setAuthToken(tr, token);
+		KeyRange range(KeyRangeRef(key, keyAfter(key)));
+		try {
+			Standalone<VectorRef<KeyRangeRef>> result = wait(tr.getBlobGranuleRanges(range, 1000));
+
+			ASSERT(result.size() <= 1);
+			if (!result.empty()) {
+				ASSERT(result[0].contains(key));
+			}
+			return Optional<Error>();
+		} catch (Error& e) {
+			CODE_PROBE(e.code() == error_code_permission_denied, "Cross tenant get granules meets permission_denied");
+			return e;
+		}
+	}
+
+	ACTOR static Future<Void> testCrossTenantGetGranulesDisallowed(AuthzSecurityWorkload* self,
+	                                                               Database cx,
+	                                                               PositiveTestcase positive) {
+		state Key key = self->randomString();
+		state Value value = self->randomString();
+		Optional<Error> outcome = wait(
+		    tryGetGranules(self, cx, self->tenant, key, positive ? self->signedToken : self->signedTokenAnotherTenant));
+		checkCrossTenantOutcome("GetGranules",
+		                        self->crossTenantGetGranulesPositive,
+		                        self->crossTenantGetGranulesNegative,
+		                        outcome,
+		                        positive);
 		return Void();
 	}
 
