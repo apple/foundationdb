@@ -56,7 +56,8 @@ struct AuthzSecurityWorkload : TestWorkload {
 	Standalone<StringRef> tLogConfigKey;
 	PerfIntCounter crossTenantGetPositive, crossTenantGetNegative, crossTenantCommitPositive, crossTenantCommitNegative,
 	    publicNonTenantRequestPositive, tLogReadNegative, keyLocationLeakNegative, bgLocationLeakNegative,
-	    crossTenantBGReadPositive, crossTenantBGReadNegative, crossTenantBGLocPositive, crossTenantBGLocNegative;
+	    crossTenantBGLocPositive, crossTenantBGLocNegative, crossTenantBGReqPositive, crossTenantBGReqNegative,
+	    crossTenantBGReadPositive, crossTenantBGReadNegative;
 	std::vector<std::function<Future<Void>(Database cx)>> testFunctions;
 	bool checkBlobGranules;
 
@@ -66,8 +67,9 @@ struct AuthzSecurityWorkload : TestWorkload {
 	    crossTenantCommitNegative("CrossTenantCommitNegative"),
 	    publicNonTenantRequestPositive("PublicNonTenantRequestPositive"), tLogReadNegative("TLogReadNegative"),
 	    keyLocationLeakNegative("KeyLocationLeakNegative"), bgLocationLeakNegative("BGLocationLeakNegative"),
-	    crossTenantBGReadPositive("CrossTenantBGReadPositive"), crossTenantBGReadNegative("CrossTenantBGReadNegative"),
-	    crossTenantBGLocPositive("CrossTenantBGLocPositive"), crossTenantBGLocNegative("CrossTenantBGLocNegative") {
+	    crossTenantBGLocPositive("CrossTenantBGLocPositive"), crossTenantBGLocNegative("CrossTenantBGLocNegative"),
+	    crossTenantBGReqPositive("CrossTenantBGReqPositive"), crossTenantBGReqNegative("CrossTenantBGReqNegative"),
+	    crossTenantBGReadPositive("CrossTenantBGReadPositive"), crossTenantBGReadNegative("CrossTenantBGReadNegative") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 500.0) / clientCount;
 		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
@@ -97,6 +99,10 @@ struct AuthzSecurityWorkload : TestWorkload {
 			    [this](Database cx) { return testCrossTenantBGLocDisallowed(this, cx, PositiveTestcase::True); });
 			testFunctions.push_back(
 			    [this](Database cx) { return testCrossTenantBGLocDisallowed(this, cx, PositiveTestcase::False); });
+			testFunctions.push_back(
+			    [this](Database cx) { return testCrossTenantBGRequestDisallowed(this, cx, PositiveTestcase::True); });
+			testFunctions.push_back(
+			    [this](Database cx) { return testCrossTenantBGRequestDisallowed(this, cx, PositiveTestcase::False); });
 			testFunctions.push_back(
 			    [this](Database cx) { return testCrossTenantBGReadDisallowed(this, cx, PositiveTestcase::True); });
 			testFunctions.push_back(
@@ -132,9 +138,10 @@ struct AuthzSecurityWorkload : TestWorkload {
 		               publicNonTenantRequestPositive.getValue() > 0 && tLogReadNegative.getValue() > 0 &&
 		               keyLocationLeakNegative.getValue() > 0;
 		if (checkBlobGranules) {
-			success &= bgLocationLeakNegative.getValue() > 0 && crossTenantBGReadPositive.getValue() > 0 &&
-			           crossTenantBGReadNegative.getValue() > 0 && crossTenantBGLocPositive.getValue() > 0 &&
-			           crossTenantBGLocNegative.getValue() > 0;
+			success &= bgLocationLeakNegative.getValue() > 0 && crossTenantBGLocPositive.getValue() > 0 &&
+			           crossTenantBGLocNegative.getValue() > 0 && crossTenantBGReqPositive.getValue() > 0 &&
+			           crossTenantBGReqNegative.getValue() > 0 && crossTenantBGReadPositive.getValue() > 0 &&
+			           crossTenantBGReadNegative.getValue() > 0;
 		}
 		return success;
 	}
@@ -150,6 +157,8 @@ struct AuthzSecurityWorkload : TestWorkload {
 		m.push_back(bgLocationLeakNegative.getMetric());
 		m.push_back(crossTenantBGLocPositive.getMetric());
 		m.push_back(crossTenantBGLocNegative.getMetric());
+		m.push_back(crossTenantBGReqPositive.getMetric());
+		m.push_back(crossTenantBGReqNegative.getMetric());
 		m.push_back(crossTenantBGReadPositive.getMetric());
 		m.push_back(crossTenantBGReadNegative.getMetric());
 	}
@@ -574,6 +583,48 @@ struct AuthzSecurityWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR static Future<Optional<Error>> tryBlobGranuleRequest(AuthzSecurityWorkload* self,
+	                                                           Database cx,
+	                                                           Reference<Tenant> tenant,
+	                                                           WipedString locToken,
+	                                                           WipedString reqToken,
+	                                                           Version committedVersion) {
+		try {
+			ErrorOr<GetBlobGranuleLocationsReply> rep =
+			    wait(getGranuleLocations(self, cx, TenantInfo(tenant->id(), locToken), committedVersion));
+			if (rep.isError()) {
+				if (rep.getError().code() == error_code_permission_denied) {
+					TraceEvent(SevError, "AuthzSecurityError")
+					    .detail("Case", "GranuleLocBeforeRequestDisallowed")
+					    .log();
+				}
+				throw rep.getError();
+			}
+
+			int locIdx = deterministicRandom()->randomInt(0, rep.get().results.size());
+
+			ASSERT(!rep.get().results.empty());
+			BlobGranuleFileRequest req;
+			req.arena.dependsOn(rep.get().arena);
+			req.keyRange = rep.get().results[locIdx].first;
+			req.tenantInfo = TenantInfo(tenant->id(), reqToken);
+			req.readVersion = committedVersion;
+
+			auto& bwInterf = rep.get().results[locIdx].second;
+			ErrorOr<BlobGranuleFileReply> rep = wait(bwInterf.blobGranuleFileRequest.tryGetReply(req));
+			if (rep.isError()) {
+				throw rep.getError();
+			}
+			ASSERT(!rep.get().chunks.empty());
+
+			return Optional<Error>();
+		} catch (Error& e) {
+			CODE_PROBE(e.code() == error_code_permission_denied,
+			           "Cross tenant blob granule read meets permission_denied");
+			return e;
+		}
+	}
+
 	ACTOR static Future<Optional<Error>> tryBlobGranuleRead(AuthzSecurityWorkload* self,
 	                                                        Database cx,
 	                                                        Reference<Tenant> tenant,
@@ -592,8 +643,6 @@ struct AuthzSecurityWorkload : TestWorkload {
 			return e;
 		}
 	}
-
-	// TODO: add separate test for unauthorized blob worker interface call with authorized locations
 
 	static void checkCrossTenantOutcome(std::string testcase,
 	                                    PerfIntCounter& positiveCounter,
@@ -637,6 +686,25 @@ struct AuthzSecurityWorkload : TestWorkload {
 		Optional<Error> outcome = rep.isError() ? rep.getError() : Optional<Error>();
 		checkCrossTenantOutcome(
 		    "BGLoc", self->crossTenantBGLocPositive, self->crossTenantBGLocNegative, outcome, positive);
+		return Void();
+	}
+
+	ACTOR static Future<Void> testCrossTenantBGRequestDisallowed(AuthzSecurityWorkload* self,
+	                                                             Database cx,
+	                                                             PositiveTestcase positive) {
+		state Key key = self->randomString();
+		state Value value = self->randomString();
+		state Version committedVersion =
+		    wait(setAndCommitKeyValueAndGetVersion(self, cx, self->tenant, self->signedToken, key, value));
+		Optional<Error> outcome =
+		    wait(tryBlobGranuleRequest(self,
+		                               cx,
+		                               self->tenant,
+		                               self->signedToken,
+		                               positive ? self->signedToken : self->signedTokenAnotherTenant,
+		                               committedVersion));
+		checkCrossTenantOutcome(
+		    "BGRequest", self->crossTenantBGReqPositive, self->crossTenantBGReqNegative, outcome, positive);
 		return Void();
 	}
 
