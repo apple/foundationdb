@@ -40,6 +40,32 @@
 
 FDB_BOOLEAN_PARAM(PositiveTestcase);
 
+bool checkGranuleLocations(ErrorOr<GetBlobGranuleLocationsReply> rep, TenantInfo tenant) {
+	if (rep.isError()) {
+		if (rep.getError().code() == error_code_permission_denied) {
+			TraceEvent(SevError, "AuthzSecurityError")
+			    .detail("Case", "CrossTenantGranuleLocationCheckDisallowed")
+			    .log();
+		}
+		return false;
+	} else {
+		ASSERT(!rep.get().results.empty());
+		for (auto const& [range, bwIface] : rep.get().results) {
+			if (!range.begin.startsWith(tenant.prefix.get())) {
+				TraceEvent(SevError, "AuthzSecurityBlobGranuleRangeLeak")
+				    .detail("TenantId", tenant.tenantId)
+				    .detail("LeakingRangeBegin", range.begin.printable());
+			}
+			if (!range.end.startsWith(tenant.prefix.get())) {
+				TraceEvent(SevError, "AuthzSecurityBlobGranuleRangeLeak")
+				    .detail("TenantId", tenant.tenantId)
+				    .detail("LeakingRangeEnd", range.end.printable());
+			}
+		}
+		return true;
+	}
+}
+
 struct AuthzSecurityWorkload : TestWorkload {
 	static constexpr auto NAME = "AuthzSecurity";
 	int actorCount;
@@ -154,13 +180,15 @@ struct AuthzSecurityWorkload : TestWorkload {
 		m.push_back(publicNonTenantRequestPositive.getMetric());
 		m.push_back(tLogReadNegative.getMetric());
 		m.push_back(keyLocationLeakNegative.getMetric());
-		m.push_back(bgLocationLeakNegative.getMetric());
-		m.push_back(crossTenantBGLocPositive.getMetric());
-		m.push_back(crossTenantBGLocNegative.getMetric());
-		m.push_back(crossTenantBGReqPositive.getMetric());
-		m.push_back(crossTenantBGReqNegative.getMetric());
-		m.push_back(crossTenantBGReadPositive.getMetric());
-		m.push_back(crossTenantBGReadNegative.getMetric());
+		if (checkBlobGranules) {
+			m.push_back(bgLocationLeakNegative.getMetric());
+			m.push_back(crossTenantBGLocPositive.getMetric());
+			m.push_back(crossTenantBGLocNegative.getMetric());
+			m.push_back(crossTenantBGReqPositive.getMetric());
+			m.push_back(crossTenantBGReqNegative.getMetric());
+			m.push_back(crossTenantBGReadPositive.getMetric());
+			m.push_back(crossTenantBGReadNegative.getMetric());
+		}
 	}
 
 	void setAuthToken(Transaction& tr, StringRef token) {
@@ -527,32 +555,6 @@ struct AuthzSecurityWorkload : TestWorkload {
 		}
 	}
 
-	bool checkGranuleLocations(ErrorOr<GetBlobGranuleLocationsReply> rep, TenantInfo tenant) {
-		if (rep.isError()) {
-			if (rep.getError().code() == error_code_permission_denied) {
-				TraceEvent(SevError, "AuthzSecurityError")
-				    .detail("Case", "CrossTenantGranuleLocationCheckDisallowed")
-				    .log();
-			}
-			return false;
-		} else {
-			ASSERT(!rep.get().results.empty());
-			for (auto const& [range, bwIface] : rep.get().results) {
-				if (!range.begin.startsWith(tenant.prefix.get())) {
-					TraceEvent(SevError, "AuthzSecurityBlobGranuleRangeLeak")
-					    .detail("TenantId", tenant.tenantId)
-					    .detail("LeakingRangeBegin", range.begin.printable());
-				}
-				if (!range.end.startsWith(tenant.prefix.get())) {
-					TraceEvent(SevError, "AuthzSecurityBlobGranuleRangeLeak")
-					    .detail("TenantId", tenant.tenantId)
-					    .detail("LeakingRangeEnd", range.end.printable());
-				}
-			}
-			return true;
-		}
-	}
-
 	ACTOR static Future<Void> testBlobGranuleLocationLeakDisallowed(AuthzSecurityWorkload* self, Database cx) {
 		state Key key = self->randomString();
 		state Value value = self->randomString();
@@ -567,13 +569,13 @@ struct AuthzSecurityWorkload : TestWorkload {
 		{
 			tenantInfo = TenantInfo(self->tenant->id(), self->signedToken);
 			ErrorOr<GetBlobGranuleLocationsReply> rep = wait(getGranuleLocations(self, cx, tenantInfo, v2));
-			bool checkSuccess = self->checkGranuleLocations(rep, tenantInfo);
+			bool checkSuccess = checkGranuleLocations(rep, tenantInfo);
 			success &= checkSuccess;
 		}
 		{
 			tenantInfo = TenantInfo(self->anotherTenant->id(), self->signedTokenAnotherTenant);
 			ErrorOr<GetBlobGranuleLocationsReply> rep = wait(getGranuleLocations(self, cx, tenantInfo, v2));
-			bool checkSuccess = self->checkGranuleLocations(rep, tenantInfo);
+			bool checkSuccess = checkGranuleLocations(rep, tenantInfo);
 			success &= checkSuccess;
 		}
 		if (success) {
