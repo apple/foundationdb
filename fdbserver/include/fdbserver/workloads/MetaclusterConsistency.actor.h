@@ -54,7 +54,7 @@ private:
 		KeyBackedRangeResult<Tuple> clusterTenantTuples;
 		KeyBackedRangeResult<Tuple> clusterTenantGroupTuples;
 
-		std::map<int64_t, TenantMapEntry> tenantMap;
+		std::map<int64_t, MetaclusterTenantMapEntry> tenantMap;
 		KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroups;
 
 		std::map<ClusterName, std::set<int64_t>> clusterTenantMap;
@@ -74,7 +74,7 @@ private:
 
 	ACTOR static Future<Void> loadManagementClusterMetadata(MetaclusterConsistencyCheck* self) {
 		state Reference<typename DB::TransactionT> managementTr = self->managementDb->createTransaction();
-		state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantList;
+		state KeyBackedRangeResult<std::pair<int64_t, MetaclusterTenantMapEntry>> tenantList;
 
 		loop {
 			try {
@@ -123,7 +123,7 @@ private:
 		}
 
 		self->managementMetadata.tenantMap =
-		    std::map<int64_t, TenantMapEntry>(tenantList.results.begin(), tenantList.results.end());
+		    std::map<int64_t, MetaclusterTenantMapEntry>(tenantList.results.begin(), tenantList.results.end());
 
 		for (auto t : self->managementMetadata.clusterTenantTuples.results) {
 			ASSERT_EQ(t.size(), 3);
@@ -218,27 +218,25 @@ private:
 		std::map<ClusterName, int> clusterAllocated;
 		std::set<TenantGroupName> processedTenantGroups;
 		for (auto [tenantId, entry] : managementMetadata.tenantMap) {
-			ASSERT(entry.assignedCluster.present());
-
 			// Each tenant should be assigned to the same cluster where it is stored in the cluster tenant index
-			auto clusterItr = managementMetadata.clusterTenantMap.find(entry.assignedCluster.get());
+			auto clusterItr = managementMetadata.clusterTenantMap.find(entry.assignedCluster);
 			ASSERT(clusterItr != managementMetadata.clusterTenantMap.end());
 			ASSERT(clusterItr->second.count(tenantId));
 
 			if (entry.tenantGroup.present()) {
 				// Count the number of tenant groups allocated in each cluster
 				if (processedTenantGroups.insert(entry.tenantGroup.get()).second) {
-					++clusterAllocated[entry.assignedCluster.get()];
+					++clusterAllocated[entry.assignedCluster];
 				}
 				// The tenant group should be stored in the same cluster where it is stored in the cluster tenant
 				// group index
-				auto clusterTenantGroupItr = managementMetadata.clusterTenantGroupMap.find(entry.assignedCluster.get());
+				auto clusterTenantGroupItr = managementMetadata.clusterTenantGroupMap.find(entry.assignedCluster);
 				ASSERT(clusterTenantGroupItr != managementMetadata.clusterTenantGroupMap.end());
 				ASSERT(clusterTenantGroupItr->second.count(entry.tenantGroup.get()));
 			} else {
 				// Track the actual tenant group allocation per cluster (a tenant with no group counts against the
 				// allocation)
-				++clusterAllocated[entry.assignedCluster.get()];
+				++clusterAllocated[entry.assignedCluster];
 			}
 		}
 
@@ -316,11 +314,11 @@ private:
 		} else {
 			ASSERT_LE(dataClusterTenantMap.size(), expectedTenants.size());
 			for (auto tenantName : expectedTenants) {
-				TenantMapEntry const& metaclusterEntry = self->managementMetadata.tenantMap[tenantName];
+				MetaclusterTenantMapEntry const& metaclusterEntry = self->managementMetadata.tenantMap[tenantName];
 				if (!dataClusterTenantMap.count(tenantName)) {
-					ASSERT(metaclusterEntry.tenantState == TenantState::REGISTERING ||
-					       metaclusterEntry.tenantState == TenantState::REMOVING ||
-					       metaclusterEntry.tenantState == TenantState::ERROR);
+					ASSERT(metaclusterEntry.tenantState == MetaclusterAPI::TenantState::REGISTERING ||
+					       metaclusterEntry.tenantState == MetaclusterAPI::TenantState::REMOVING ||
+					       metaclusterEntry.tenantState == MetaclusterAPI::TenantState::ERROR);
 				} else if (metaclusterEntry.tenantGroup.present()) {
 					tenantGroupsWithCompletedTenants.insert(metaclusterEntry.tenantGroup.get());
 				}
@@ -329,17 +327,15 @@ private:
 
 		for (auto [tenantId, entry] : dataClusterTenantMap) {
 			ASSERT(expectedTenants.count(tenantId));
-			TenantMapEntry const& metaclusterEntry = self->managementMetadata.tenantMap[tenantId];
-			ASSERT(!entry.assignedCluster.present());
+			MetaclusterTenantMapEntry const& metaclusterEntry = self->managementMetadata.tenantMap[tenantId];
 			ASSERT_EQ(entry.id, metaclusterEntry.id);
 			ASSERT(entry.tenantName == metaclusterEntry.tenantName);
 
-			ASSERT_EQ(entry.tenantState, TenantState::READY);
 			if (!self->allowPartialMetaclusterOperations) {
-				ASSERT_EQ(metaclusterEntry.tenantState, TenantState::READY);
+				ASSERT_EQ(metaclusterEntry.tenantState, MetaclusterAPI::TenantState::READY);
 			}
-			if (metaclusterEntry.tenantState != TenantState::UPDATING_CONFIGURATION &&
-			    metaclusterEntry.tenantState != TenantState::REMOVING) {
+			if (metaclusterEntry.tenantState != MetaclusterAPI::TenantState::UPDATING_CONFIGURATION &&
+			    metaclusterEntry.tenantState != MetaclusterAPI::TenantState::REMOVING) {
 				ASSERT_EQ(entry.configurationSequenceNum, metaclusterEntry.configurationSequenceNum);
 			} else {
 				ASSERT_LE(entry.configurationSequenceNum, metaclusterEntry.configurationSequenceNum);
