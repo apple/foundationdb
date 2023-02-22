@@ -411,7 +411,8 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 			    self->mvDb, AllowPartialMetaclusterOperations::True);
 			wait(metaclusterConsistencyCheck.run());
 		} else {
-			state TenantConsistencyCheck<DatabaseContext> tenantConsistencyCheck(self->dataDb.getReference());
+			state TenantConsistencyCheck<DatabaseContext, TenantMapEntry> tenantConsistencyCheck(
+			    self->dataDb.getReference(), &TenantMetadata::instance());
 			wait(tenantConsistencyCheck.run());
 		}
 

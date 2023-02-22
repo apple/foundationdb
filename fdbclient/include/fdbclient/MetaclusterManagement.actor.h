@@ -80,6 +80,12 @@ struct DataClusterMetadata {
 		return obj;
 	}
 
+	bool operator==(DataClusterMetadata const& other) const {
+		return entry == other.entry && connectionString == other.connectionString;
+	}
+
+	bool operator!=(DataClusterMetadata const& other) const { return !(*this == other); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, connectionString, entry);
@@ -1532,6 +1538,7 @@ struct RestoreClusterImpl {
 	ACTOR static Future<Void> markManagementTenantsAsError(RestoreClusterImpl* self,
 	                                                       Reference<typename DB::TransactionT> tr,
 	                                                       std::vector<int64_t> tenants) {
+		ASSERT(!self->restoreDryRun);
 		state std::vector<Future<Optional<MetaclusterTenantMapEntry>>> getFutures;
 		for (auto tenantId : tenants) {
 			getFutures.push_back(tryGetTenantTransaction(tr, tenantId));
@@ -2093,7 +2100,9 @@ struct RestoreClusterImpl {
 
 		// Record the data cluster in the management cluster
 		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
-			MetaclusterMetadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
+			if (!self->restoreDryRun) {
+				MetaclusterMetadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
+			}
 
 			DataClusterEntry entry;
 			entry.id = self->dataClusterId;
