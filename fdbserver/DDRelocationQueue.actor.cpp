@@ -1366,28 +1366,70 @@ struct DDQueue : public IDDRelocationQueue {
 };
 
 ACTOR Future<Void> cancelDataMove(struct DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState) {
-	std::vector<Future<Void>> cleanup;
-	auto f = self->dataMoves.intersectingRanges(range);
-	for (auto it = f.begin(); it != f.end(); ++it) {
-		if (!it->value().isValid()) {
-			continue;
+	state std::vector<Future<Void>> cleanup;
+	state std::vector<std::pair<KeyRange, UID>> lastObservedDataMoves;
+
+	loop {
+		try {
+			cleanup.clear();
+			lastObservedDataMoves.clear();
+			auto f = self->dataMoves.intersectingRanges(range);
+			for (auto it = f.begin(); it != f.end(); ++it) {
+				if (!it->value().isValid()) {
+					continue;
+				}
+				KeyRange keys = KeyRangeRef(it->range().begin, it->range().end);
+				TraceEvent(SevInfo, "DDQueueCancelDataMove", self->distributorId)
+				    .detail("DataMoveID", it->value().id)
+				    .detail("DataMoveRange", keys)
+				    .detail("Range", range);
+				if (!it->value().cancel.isValid()) {
+					it->value().cancel = cleanUpDataMove(self->cx,
+					                                     it->value().id,
+					                                     self->lock,
+					                                     &self->cleanUpDataMoveParallelismLock,
+					                                     keys,
+					                                     ddEnabledState);
+				}
+				lastObservedDataMoves.push_back(std::make_pair(keys, it->value().id));
+				cleanup.push_back(it->value().cancel);
+			}
+
+			wait(waitForAll(cleanup));
+
+			for (auto observedDataMove : lastObservedDataMoves) {
+				auto f = self->dataMoves.intersectingRanges(observedDataMove.first);
+				for (auto it = f.begin(); it != f.end(); ++it) {
+					if (it->value().id != observedDataMove.second) {
+						// Invariant: When two concurrent cleanups/relocations try to modify on the same range,
+						// the one who set ddQueue->dataMoves at first win the race
+						// others do backoff and retry cleanup later
+						// In this case, someone else of the overlapping range has changed the ddQueue->dataMoves
+						// Thus, the cleanup retries later
+						TraceEvent(SevInfo, "DataMoveWrittenByConcurrentDataMove", self->distributorId)
+						    .detail("Range", range)
+						    .detail("OldRange", observedDataMove.first)
+						    .detail("LastObservedDataMoveID", observedDataMove.second)
+						    .detail("CurrentDataMoveID", it->value().id);
+						throw retry();
+					}
+				}
+			}
+			auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(range);
+			if (!ranges.empty()) {
+				self->dataMoves.insert(KeyRangeRef(ranges.front().begin, ranges.back().end), DDQueue::DDDataMove());
+			}
+			break;
+
+		} catch (Error& e) {
+			if (e.code() == error_code_retry) {
+				wait(delay(1));
+			} else {
+				throw;
+			}
 		}
-		KeyRange keys = KeyRangeRef(it->range().begin, it->range().end);
-		TraceEvent(SevInfo, "DDQueueCancelDataMove", self->distributorId)
-		    .detail("DataMoveID", it->value().id)
-		    .detail("DataMoveRange", keys)
-		    .detail("Range", range);
-		if (!it->value().cancel.isValid()) {
-			it->value().cancel = cleanUpDataMove(
-			    self->cx, it->value().id, self->lock, &self->cleanUpDataMoveParallelismLock, keys, ddEnabledState);
-		}
-		cleanup.push_back(it->value().cancel);
 	}
-	wait(waitForAll(cleanup));
-	auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(range);
-	if (!ranges.empty()) {
-		self->dataMoves.insert(KeyRangeRef(ranges.front().begin, ranges.back().end), DDQueue::DDDataMove());
-	}
+
 	return Void();
 }
 
