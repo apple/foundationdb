@@ -1247,7 +1247,6 @@ struct DDQueue : public IDDRelocationQueue {
 			inFlightActors.cancel(KeyRangeRef(ranges.front().begin, ranges.back().end));
 
 			TraceEvent(SevDebug, "CancelDataMoveInRelocatorStart").detail("DebugID", debugID).detail("Range", rd.keys);
-			// Future<Void> fCleanup =
 			Future<Void> fCleanup = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA
 			                            ? cancelDataMove(this, rd.keys, ddEnabledState, debugID)
 			                            : Void();
