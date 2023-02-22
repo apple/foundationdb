@@ -112,7 +112,10 @@ struct StorageEngineParamsFactory {
 	}
 
 	static std::map<std::string, std::string>& getParams(KeyValueStoreType::StoreType storeType) {
-		return factories().at(storeType);
+		if (factories().contains(storeType))
+			return factories().at(storeType);
+		// TODO : return an empty map here
+		return factories()[storeType];
 	}
 };
 
