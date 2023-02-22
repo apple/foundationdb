@@ -662,13 +662,14 @@ ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<String
 	state Reference<ITransaction> tr;
 	state StringRef name;
 	state Key nameKey;
-	state TenantLockState desiredLockState;
+	state TenantAPI::TenantLockState desiredLockState;
 	state int uidIdx;
 	if (tokens[1] == "lock"_sr && (tokens.size() < 3 || tokens.size() > 5)) {
 		fmt::print("Usage: tenant lock <NAME> [w|rw] [UID]\n\n");
 		fmt::print("Locks a tenant for read-write or read-only with a given UID.\n");
-		fmt::print("generate one. By default a read-write lock is created.\n");
-		fmt::print(" If no UID is passed, fdbcli will UID has to be a 16-byte number represented in hex.");
+		fmt::print("By default a read-write lock is created.\n");
+		fmt::print("If no UID is passed, fdbcli generate one.\n");
+		fmt::print("UID has to be a 16-byte number represented in hex.\n");
 		return false;
 	} else if (tokens[1] == "unlock"_sr && tokens.size() != 4) {
 		fmt::print("Usage: tenant unlock <NAME> <UID>\n\n");
@@ -678,20 +679,20 @@ ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<String
 	nameKey = tenantMapSpecialKeyRange.begin.withSuffix(name);
 	if (tokens[1] == "unlock"_sr) {
 		uidIdx = 3;
-		desiredLockState = TenantLockState::UNLOCKED;
+		desiredLockState = TenantAPI::TenantLockState::UNLOCKED;
 	} else {
 		uidIdx = 4;
 		if (tokens.size() > 3) {
 			if (tokens[3] == "w"_sr) {
-				desiredLockState = TenantLockState::READ_ONLY;
+				desiredLockState = TenantAPI::TenantLockState::READ_ONLY;
 			} else if (tokens[3] == "rw"_sr) {
-				desiredLockState = TenantLockState::LOCKED;
+				desiredLockState = TenantAPI::TenantLockState::LOCKED;
 			} else {
 				fmt::print(stderr, "ERROR: Invalid lock type `{}'\n", tokens[3]);
 				return false;
 			}
 		} else {
-			desiredLockState = TenantLockState::LOCKED;
+			desiredLockState = TenantAPI::TenantLockState::LOCKED;
 		}
 	}
 	if (tokens.size() > uidIdx) {
@@ -703,7 +704,7 @@ ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<String
 			return false;
 		}
 	} else {
-		ASSERT(desiredLockState != TenantLockState::UNLOCKED);
+		ASSERT(desiredLockState != TenantAPI::TenantLockState::UNLOCKED);
 		uid = deterministicRandom()->randomUniqueID();
 	}
 	tr = db->createTransaction();
@@ -724,7 +725,7 @@ ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<String
 			auto tenantId = getTenantId(entry.get());
 			wait(TenantAPI::changeLockState(tr.getPtr(), tenantId, desiredLockState, uid));
 			wait(safeThreadFutureToFuture(tr->commit()));
-			if (desiredLockState != TenantLockState::UNLOCKED) {
+			if (desiredLockState != TenantAPI::TenantLockState::UNLOCKED) {
 				fmt::print("Locked tenant `{}' with UID `{}'", name.toString(), uid.toString());
 			} else {
 				fmt::print("Unlocked tenant `{}'", name.toString());
@@ -732,7 +733,7 @@ ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<String
 			return true;
 		} catch (Error& e) {
 			if (e.code() == error_code_tenant_locked) {
-				if (desiredLockState == TenantLockState::UNLOCKED) {
+				if (desiredLockState == TenantAPI::TenantLockState::UNLOCKED) {
 					fmt::print(stderr, "ERROR: Wrong lock UID\n");
 				} else {
 					fmt::print(stderr, "ERROR: Tenant locked with a different UID\n");
