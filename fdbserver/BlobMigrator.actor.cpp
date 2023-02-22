@@ -329,27 +329,15 @@ private:
 	// Apply mutation logs to blob granules so that they reach to a consistent version for all blob granules
 	ACTOR static Future<Void> applyMutationLogs(Reference<BlobMigrator> self) {
 		// check last version in mutation logs
-
-		state std::string baseUrl = SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL;
-		state std::string mlogsUrl;
-		if (baseUrl.starts_with("file://")) {
-			state std::vector<std::string> containers = wait(IBackupContainer::listContainers(baseUrl, {}));
-			if (containers.size() == 0) {
-				TraceEvent("MissingMutationLogs", self->interf_.id()).detail("Url", baseUrl);
-				throw restore_missing_data();
-			}
-			mlogsUrl = containers.front();
-		} else {
-			mlogsUrl = baseUrl;
-		}
+		state std::string mlogsUrl = wait(getMutationLogUrl());
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
 		BackupDescription desc = wait(bc->describeBackup());
 		if (!desc.contiguousLogEnd.present()) {
-			TraceEvent("InvalidMutationLogs").detail("Url", baseUrl);
+			TraceEvent("InvalidMutationLogs").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL);
 			throw blob_restore_missing_logs();
 		}
 		if (!desc.minLogBegin.present()) {
-			TraceEvent("InvalidMutationLogs").detail("Url", baseUrl);
+			TraceEvent("InvalidMutationLogs").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL);
 			throw blob_restore_missing_logs();
 		}
 		state Version minLogVersion = desc.minLogBegin.get();

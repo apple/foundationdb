@@ -30,6 +30,7 @@
 #include "fdbserver/TenantCache.h"
 #include "flow/flow.h"
 #include "flow/Trace.h"
+#include "flow/WipedString.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class TenantCacheImpl {
@@ -218,7 +219,7 @@ public:
 void TenantCache::insert(TenantMapEntry& tenant) {
 	ASSERT(tenantCache.find(tenant.prefix) == tenantCache.end());
 
-	TenantInfo tenantInfo(tenant.id, Optional<Standalone<StringRef>>());
+	TenantInfo tenantInfo(tenant.id, Optional<WipedString>());
 	tenantCache[tenantInfo.prefix.get()] = makeReference<TCTenantInfo>(tenantInfo);
 	tenantCache[tenantInfo.prefix.get()]->updateCacheGeneration(generation);
 
@@ -357,7 +358,7 @@ public:
 
 		for (uint16_t i = 0; i < tenantCount; i++) {
 			TenantName tenantName(format("%s_%08d", "ddtc_test_tenant", tenantNumber + i));
-			TenantMapEntry tenant(tenantNumber + i, tenantName, TenantState::READY);
+			TenantMapEntry tenant(tenantNumber + i, tenantName);
 
 			tenantCache.insert(tenant);
 		}
@@ -385,7 +386,7 @@ public:
 
 		for (uint16_t i = 0; i < tenantCount; i++) {
 			TenantName tenantName(format("%s_%08d", "ddtc_test_tenant", tenantNumber + i));
-			TenantMapEntry tenant(tenantNumber + i, tenantName, TenantState::READY);
+			TenantMapEntry tenant(tenantNumber + i, tenantName);
 
 			tenantCache.insert(tenant);
 		}
@@ -399,7 +400,7 @@ public:
 
 			if (tenantOrdinal % staleTenantFraction != 0) {
 				TenantName tenantName(format("%s_%08d", "ddtc_test_tenant", tenantOrdinal));
-				TenantMapEntry tenant(tenantOrdinal, tenantName, TenantState::READY);
+				TenantMapEntry tenant(tenantOrdinal, tenantName);
 				bool newTenant = tenantCache.update(tenant);
 				ASSERT(!newTenant);
 				keepCount++;

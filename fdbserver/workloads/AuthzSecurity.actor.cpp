@@ -21,9 +21,11 @@
 #include <cstring>
 #include <unordered_set>
 
+#include "fdbclient/BlobWorkerInterface.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
+#include "flow/WipedString.h"
 #include "flow/serialize.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/CommitTransaction.h"
@@ -49,24 +51,30 @@ struct AuthzSecurityWorkload : TestWorkload {
 	Reference<Tenant> anotherTenant;
 	TenantName tenantName;
 	TenantName anotherTenantName;
-	Standalone<StringRef> signedToken;
-	Standalone<StringRef> signedTokenAnotherTenant;
+	WipedString signedToken;
+	WipedString signedTokenAnotherTenant;
 	Standalone<StringRef> tLogConfigKey;
 	PerfIntCounter crossTenantGetPositive, crossTenantGetNegative, crossTenantCommitPositive, crossTenantCommitNegative,
-	    publicNonTenantRequestPositive, tLogReadNegative;
+	    publicNonTenantRequestPositive, tLogReadNegative, keyLocationLeakNegative, crossTenantBGReadPositive,
+	    crossTenantBGReadNegative;
 	std::vector<std::function<Future<Void>(Database cx)>> testFunctions;
+	bool checkBlobGranules;
 
 	AuthzSecurityWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), crossTenantGetPositive("CrossTenantGetPositive"),
 	    crossTenantGetNegative("CrossTenantGetNegative"), crossTenantCommitPositive("CrossTenantCommitPositive"),
 	    crossTenantCommitNegative("CrossTenantCommitNegative"),
-	    publicNonTenantRequestPositive("PublicNonTenantRequestPositive"), tLogReadNegative("TLogReadNegative") {
+	    publicNonTenantRequestPositive("PublicNonTenantRequestPositive"), tLogReadNegative("TLogReadNegative"),
+	    keyLocationLeakNegative("KeyLocationLeakNegative"), crossTenantBGReadPositive("CrossTenantBGReadPositive"),
+	    crossTenantBGReadNegative("CrossTenantBGReadNegative") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 500.0) / clientCount;
 		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
 		tenantName = getOption(options, "tenantA"_sr, "authzSecurityTestTenant"_sr);
 		anotherTenantName = getOption(options, "tenantB"_sr, "authzSecurityTestTenant"_sr);
 		tLogConfigKey = getOption(options, "tLogConfigKey"_sr, "TLogInterface"_sr);
+		checkBlobGranules = getOption(options, "checkBlobGranules"_sr, false);
+
 		ASSERT(g_network->isSimulated());
 		// make it comfortably longer than the timeout of the workload
 		testFunctions.push_back(
@@ -80,6 +88,14 @@ struct AuthzSecurityWorkload : TestWorkload {
 		testFunctions.push_back(
 		    [this](Database cx) { return testPublicNonTenantRequestsAllowedWithoutTokens(this, cx); });
 		testFunctions.push_back([this](Database cx) { return testTLogReadDisallowed(this, cx); });
+		testFunctions.push_back([this](Database cx) { return testKeyLocationLeakDisallowed(this, cx); });
+
+		if (checkBlobGranules) {
+			testFunctions.push_back(
+			    [this](Database cx) { return testCrossTenantBGReadDisallowed(this, cx, PositiveTestcase::True); });
+			testFunctions.push_back(
+			    [this](Database cx) { return testCrossTenantBGReadDisallowed(this, cx, PositiveTestcase::False); });
+		}
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -107,7 +123,8 @@ struct AuthzSecurityWorkload : TestWorkload {
 		clients.clear();
 		return errors == 0 && crossTenantGetPositive.getValue() > 0 && crossTenantGetNegative.getValue() > 0 &&
 		       crossTenantCommitPositive.getValue() > 0 && crossTenantCommitNegative.getValue() > 0 &&
-		       publicNonTenantRequestPositive.getValue() > 0 && tLogReadNegative.getValue() > 0;
+		       publicNonTenantRequestPositive.getValue() > 0 && tLogReadNegative.getValue() > 0 &&
+		       keyLocationLeakNegative.getValue() > 0;
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
@@ -117,16 +134,19 @@ struct AuthzSecurityWorkload : TestWorkload {
 		m.push_back(crossTenantCommitNegative.getMetric());
 		m.push_back(publicNonTenantRequestPositive.getMetric());
 		m.push_back(tLogReadNegative.getMetric());
+		m.push_back(keyLocationLeakNegative.getMetric());
+		m.push_back(crossTenantBGReadPositive.getMetric());
+		m.push_back(crossTenantBGReadNegative.getMetric());
 	}
 
-	void setAuthToken(Transaction& tr, Standalone<StringRef> token) {
+	void setAuthToken(Transaction& tr, StringRef token) {
 		tr.setOption(FDBTransactionOptions::AUTHORIZATION_TOKEN, token);
 	}
 
 	ACTOR static Future<Version> setAndCommitKeyValueAndGetVersion(AuthzSecurityWorkload* self,
 	                                                               Database cx,
 	                                                               Reference<Tenant> tenant,
-	                                                               Standalone<StringRef> token,
+	                                                               WipedString token,
 	                                                               StringRef key,
 	                                                               StringRef value) {
 		state Transaction tr(cx, tenant);
@@ -145,7 +165,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 	ACTOR static Future<KeyRangeLocationInfo> refreshAndGetCachedLocation(AuthzSecurityWorkload* self,
 	                                                                      Database cx,
 	                                                                      Reference<Tenant> tenant,
-	                                                                      Standalone<StringRef> token,
+	                                                                      WipedString token,
 	                                                                      StringRef key) {
 		state Transaction tr(cx, tenant);
 		loop {
@@ -176,7 +196,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 	                                                 Version committedVersion,
 	                                                 Standalone<StringRef> key,
 	                                                 Optional<Standalone<StringRef>> expectedValue,
-	                                                 Standalone<StringRef> token,
+	                                                 WipedString token,
 	                                                 Database cx,
 	                                                 KeyRangeLocationInfo loc) {
 		loop {
@@ -262,7 +282,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 
 	ACTOR static Future<Optional<Error>> tryCommit(AuthzSecurityWorkload* self,
 	                                               Reference<Tenant> tenant,
-	                                               Standalone<StringRef> token,
+	                                               WipedString token,
 	                                               Key key,
 	                                               Value newValue,
 	                                               Version readVersion,
@@ -304,7 +324,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 				++self->crossTenantCommitPositive;
 			} else if (outcome.get().code() == error_code_permission_denied) {
 				TraceEvent(SevError, "AuthzSecurityError")
-				    .detail("Case", "CrossTenantGetDisallowed")
+				    .detail("Case", "CrossTenantCommitDisallowed")
 				    .detail("Subcase", "Positive")
 				    .log();
 			}
@@ -313,7 +333,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 			    tryCommit(self, self->tenant, self->signedTokenAnotherTenant, key, newValue, committedVersion, cx));
 			if (!outcome.present()) {
 				TraceEvent(SevError, "AuthzSecurityError")
-				    .detail("Case", "CrossTenantGetDisallowed")
+				    .detail("Case", "CrossTenantCommitDisallowed")
 				    .detail("Subcase", "Negative")
 				    .log();
 			} else if (outcome.get().code() == error_code_permission_denied) {
@@ -396,6 +416,138 @@ struct AuthzSecurityWorkload : TestWorkload {
 				TraceEvent(SevError, "AuthzSecurityUnexpectedError").detail("Error", reply.getError().name()).log();
 			}
 		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> testKeyLocationLeakDisallowed(AuthzSecurityWorkload* self, Database cx) {
+		state Key key = self->randomString();
+		state Value value = self->randomString();
+		state Version v1 =
+		    wait(setAndCommitKeyValueAndGetVersion(self, cx, self->tenant, self->signedToken, key, value));
+		state Version v2 = wait(setAndCommitKeyValueAndGetVersion(
+		    self, cx, self->anotherTenant, self->signedTokenAnotherTenant, key, value));
+
+		{
+			GetKeyServerLocationsReply rep =
+			    wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
+			                          &CommitProxyInterface::getKeyServersLocations,
+			                          GetKeyServerLocationsRequest(SpanContext(),
+			                                                       TenantInfo(self->tenant->id(), self->signedToken),
+			                                                       key,
+			                                                       Optional<KeyRef>(),
+			                                                       100,
+			                                                       false,
+			                                                       v2,
+			                                                       Arena())));
+			for (auto const& [range, ssIfaces] : rep.results) {
+				if (!range.begin.startsWith(self->tenant->prefix())) {
+					TraceEvent(SevError, "AuthzSecurityKeyRangeLeak")
+					    .detail("TenantId", self->tenant->id())
+					    .detail("LeakingRangeBegin", range.begin.printable());
+				}
+				if (!range.end.startsWith(self->tenant->prefix())) {
+					TraceEvent(SevError, "AuthzSecurityKeyRangeLeak")
+					    .detail("TenantId", self->tenant->id())
+					    .detail("LeakingRangeEnd", range.end.printable());
+				}
+			}
+		}
+		{
+			GetKeyServerLocationsReply rep = wait(basicLoadBalance(
+			    cx->getCommitProxies(UseProvisionalProxies::False),
+			    &CommitProxyInterface::getKeyServersLocations,
+			    GetKeyServerLocationsRequest(SpanContext(),
+			                                 TenantInfo(self->anotherTenant->id(), self->signedTokenAnotherTenant),
+			                                 key,
+			                                 Optional<KeyRef>(),
+			                                 100,
+			                                 false,
+			                                 v2,
+			                                 Arena())));
+			for (auto const& [range, ssIfaces] : rep.results) {
+				if (!range.begin.startsWith(self->anotherTenant->prefix())) {
+					TraceEvent(SevError, "AuthzSecurityKeyRangeLeak")
+					    .detail("TenantId", self->anotherTenant->id())
+					    .detail("LeakingRangeBegin", range.begin.printable());
+				}
+				if (!range.end.startsWith(self->anotherTenant->prefix())) {
+					TraceEvent(SevError, "AuthzSecurityKeyRangeLeak")
+					    .detail("TenantId", self->anotherTenant->id())
+					    .detail("LeakingRangeEnd", range.end.printable());
+				}
+			}
+		}
+		++self->keyLocationLeakNegative;
+
+		return Void();
+	}
+
+	ACTOR static Future<Optional<Error>> tryBlobGranuleRead(AuthzSecurityWorkload* self,
+	                                                        Database cx,
+	                                                        Reference<Tenant> tenant,
+	                                                        Key key,
+	                                                        WipedString token,
+	                                                        Version committedVersion) {
+		state Transaction tr(cx, tenant);
+		self->setAuthToken(tr, token);
+		KeyRange range(KeyRangeRef(key, keyAfter(key)));
+		try {
+			wait(success(tr.readBlobGranules(range, 0, committedVersion)));
+			return Optional<Error>();
+		} catch (Error& e) {
+			CODE_PROBE(e.code() == error_code_permission_denied,
+			           "Cross tenant blob granule read meets permission_denied");
+			return e;
+		}
+	}
+
+	// TODO: add separate tests to separately test blob granule locations call and blob worker interface call
+
+	static void checkCrossTenantOutcome(std::string testcase,
+	                                    PerfIntCounter& positiveCounter,
+	                                    PerfIntCounter& negativeCounter,
+	                                    Optional<Error> outcome,
+	                                    PositiveTestcase positive) {
+		if (positive) {
+			// Supposed to succeed. Expected to occasionally fail because of buggify, faultInjection, or data
+			// distribution, but should not return permission_denied
+			if (!outcome.present()) {
+				++positiveCounter;
+			} else if (outcome.get().code() == error_code_permission_denied) {
+				TraceEvent(SevError, "AuthzSecurityError")
+				    .detail("Case", "CrossTenant" + testcase + "Disallowed")
+				    .detail("Subcase", "Positive")
+				    .log();
+			}
+		} else {
+			// Should always fail. Expected to return permission_denied, but expected to occasionally fail with
+			// different errors
+			if (!outcome.present()) {
+				TraceEvent(SevError, "AuthzSecurityError")
+				    .detail("Case", "CrossTenant" + testcase + "Disallowed")
+				    .detail("Subcase", "Negative")
+				    .log();
+			} else if (outcome.get().code() == error_code_permission_denied) {
+				++negativeCounter;
+			}
+		}
+	}
+
+	ACTOR static Future<Void> testCrossTenantBGReadDisallowed(AuthzSecurityWorkload* self,
+	                                                          Database cx,
+	                                                          PositiveTestcase positive) {
+		state Key key = self->randomString();
+		state Value value = self->randomString();
+		state Version committedVersion =
+		    wait(setAndCommitKeyValueAndGetVersion(self, cx, self->tenant, self->signedToken, key, value));
+		Optional<Error> outcome = wait(tryBlobGranuleRead(self,
+		                                                  cx,
+		                                                  self->tenant,
+		                                                  key,
+		                                                  positive ? self->signedToken : self->signedTokenAnotherTenant,
+		                                                  committedVersion));
+		checkCrossTenantOutcome(
+		    "BGRead", self->crossTenantBGReadPositive, self->crossTenantBGReadNegative, outcome, positive);
 		return Void();
 	}
 

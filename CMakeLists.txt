@@ -97,7 +97,10 @@ else()
     set(FDB_VERSION ${PROJECT_VERSION})
 endif()
 if (NOT FDB_RELEASE)
-    string(TIMESTAMP FDB_BUILDTIME %Y%m%d%H%M%S)
+    string(TIMESTAMP FDB_BUILD_TIMESTMAP %Y%m%d%H%M%S)
+    # Adding support to pass custom fdb_build timestamp,
+    # required to achieve uniform naming across different builds
+    set(FDB_BUILDTIME "${FDB_BUILD_TIMESTMAP}" CACHE STRING "A timestamp for packages")
     set(FDB_BUILDTIME_STRING ".${FDB_BUILDTIME}")
     set(PRERELEASE_TAG "prerelease")
 endif()

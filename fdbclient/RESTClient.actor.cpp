@@ -40,6 +40,19 @@
 
 #include "flow/actorcompiler.h" // always the last include
 
+#define ENABLE_VERBOSE_DEBUG true
+
+#define TRACE_REST_OP(opName, url, secure)                                                                             \
+	do {                                                                                                               \
+		if (ENABLE_VERBOSE_DEBUG) {                                                                                    \
+			const std::string urlStr = url.toString();                                                                 \
+			TraceEvent(SevDebug, "RESTClientOp")                                                                       \
+			    .detail("Op", #opName)                                                                                 \
+			    .detail("Url", urlStr)                                                                                 \
+			    .detail("IsSecure", secure);                                                                           \
+		}                                                                                                              \
+	} while (0);
+
 json_spirit::mObject RESTClient::Stats::getJSON() {
 	json_spirit::mObject o;
 
@@ -61,10 +74,13 @@ RESTClient::Stats RESTClient::Stats::operator-(const Stats& rhs) {
 	return r;
 }
 
-RESTClient::RESTClient() {}
+RESTClient::RESTClient() {
+	conectionPool = makeReference<RESTConnectionPool>(knobs.connection_pool_size);
+}
 
 RESTClient::RESTClient(std::unordered_map<std::string, int>& knobSettings) {
 	knobs.set(knobSettings);
+	conectionPool = makeReference<RESTConnectionPool>(knobs.connection_pool_size);
 }
 
 void RESTClient::setKnobs(const std::unordered_map<std::string, int>& knobSettings) {
@@ -82,6 +98,10 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<RESTClient> cli
                                                        std::set<unsigned int> successCodes) {
 	state UnsentPacketQueue content;
 	state int contentLen = url->body.size();
+
+	if (ENABLE_VERBOSE_DEBUG) {
+		TraceEvent(SevDebug, "DoRequestImpl").detail("Url", url->toString());
+	}
 
 	if (url->body.size() > 0) {
 		PacketWriter pw(content.getWriteBuffer(url->body.size()), nullptr, Unversioned());
@@ -166,7 +186,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<RESTClient> cli
 		// But only if our previous attempt was not the last allowable try.
 		retryable = retryable && (thisTry < maxTries);
 
-		TraceEvent event(SevWarn, retryable ? "RESTClient_FailedRetryable" : "RESTClient_RequestFailed");
+		TraceEvent event(SevWarn, retryable ? "RESTClientFailedRetryable" : "RESTClientRequestFailed");
 
 		// Attach err to trace event if present, otherwise extract some stuff from the response
 		if (err.present()) {
@@ -269,6 +289,7 @@ Future<Reference<HTTP::Response>> RESTClient::doPost(const std::string& fullUrl,
                                                      const std::string& requestBody,
                                                      Optional<HTTP::Headers> optHeaders) {
 	RESTUrl url(fullUrl, requestBody, knobs.secure_connection);
+	TRACE_REST_OP("DoPost", url, knobs.secure_connection);
 	return doPutOrPost(HTTP::HTTP_VERB_POST, optHeaders, std::addressof(url), { HTTP::HTTP_STATUS_CODE_OK });
 }
 
@@ -276,6 +297,7 @@ Future<Reference<HTTP::Response>> RESTClient::doPut(const std::string& fullUrl,
                                                     const std::string& requestBody,
                                                     Optional<HTTP::Headers> optHeaders) {
 	RESTUrl url(fullUrl, requestBody, knobs.secure_connection);
+	TRACE_REST_OP("DoPut", url, knobs.secure_connection);
 	return doPutOrPost(
 	    HTTP::HTTP_VERB_PUT,
 	    optHeaders,
@@ -299,16 +321,19 @@ Future<Reference<HTTP::Response>> RESTClient::doGetHeadDeleteOrTrace(const std::
 
 Future<Reference<HTTP::Response>> RESTClient::doGet(const std::string& fullUrl, Optional<HTTP::Headers> optHeaders) {
 	RESTUrl url(fullUrl, knobs.secure_connection);
+	TRACE_REST_OP("DoGet", url, knobs.secure_connection);
 	return doGetHeadDeleteOrTrace(HTTP::HTTP_VERB_GET, optHeaders, std::addressof(url), { HTTP::HTTP_STATUS_CODE_OK });
 }
 
 Future<Reference<HTTP::Response>> RESTClient::doHead(const std::string& fullUrl, Optional<HTTP::Headers> optHeaders) {
 	RESTUrl url(fullUrl, knobs.secure_connection);
+	TRACE_REST_OP("DoHead", url, knobs.secure_connection);
 	return doGetHeadDeleteOrTrace(HTTP::HTTP_VERB_HEAD, optHeaders, std::addressof(url), { HTTP::HTTP_STATUS_CODE_OK });
 }
 
 Future<Reference<HTTP::Response>> RESTClient::doDelete(const std::string& fullUrl, Optional<HTTP::Headers> optHeaders) {
 	RESTUrl url(fullUrl, knobs.secure_connection);
+	TRACE_REST_OP("DoDelete", url, knobs.secure_connection);
 	return doGetHeadDeleteOrTrace(
 	    HTTP::HTTP_VERB_DELETE,
 	    optHeaders,
@@ -321,6 +346,7 @@ Future<Reference<HTTP::Response>> RESTClient::doDelete(const std::string& fullUr
 
 Future<Reference<HTTP::Response>> RESTClient::doTrace(const std::string& fullUrl, Optional<HTTP::Headers> optHeaders) {
 	RESTUrl url(fullUrl, knobs.secure_connection);
+	TRACE_REST_OP("DoTrace", url, knobs.secure_connection);
 	return doGetHeadDeleteOrTrace(
 	    HTTP::HTTP_VERB_TRACE, optHeaders, std::addressof(url), { HTTP::HTTP_STATUS_CODE_OK });
 }

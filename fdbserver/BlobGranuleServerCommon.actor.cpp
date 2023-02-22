@@ -209,6 +209,7 @@ void GranuleFiles::getFiles(Version beginVersion,
 		                       snapshotF->offset,
 		                       snapshotF->length,
 		                       snapshotF->fullFileLength,
+		                       snapshotF->version,
 		                       summarize ? Optional<BlobGranuleCipherKeysMeta>() : snapshotF->cipherKeysMeta);
 		lastIncluded = chunk.snapshotVersion;
 	} else {
@@ -221,6 +222,7 @@ void GranuleFiles::getFiles(Version beginVersion,
 		                                   deltaF->offset,
 		                                   deltaF->length,
 		                                   deltaF->fullFileLength,
+		                                   deltaF->version,
 		                                   summarize ? Optional<BlobGranuleCipherKeysMeta>() : deltaF->cipherKeysMeta);
 		deltaBytesCounter += deltaF->length;
 		ASSERT(lastIncluded < deltaF->version);
@@ -235,6 +237,7 @@ void GranuleFiles::getFiles(Version beginVersion,
 		                                   deltaF->offset,
 		                                   deltaF->length,
 		                                   deltaF->fullFileLength,
+		                                   deltaF->version,
 		                                   deltaF->cipherKeysMeta);
 		deltaBytesCounter += deltaF->length;
 		lastIncluded = deltaF->version;

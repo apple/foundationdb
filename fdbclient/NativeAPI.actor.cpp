@@ -47,6 +47,7 @@
 #include "fdbclient/AnnotateActor.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/BlobGranuleRequest.actor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -1530,6 +1531,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsCommitStarted("CommitStarted", cc), transactionsCommitCompleted("CommitCompleted", cc),
     transactionKeyServerLocationRequests("KeyServerLocationRequests", cc),
     transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc),
+    transactionBlobGranuleLocationRequests("BlobGranuleLocationRequests", cc),
+    transactionBlobGranuleLocationRequestsCompleted("BlobGranuleLocationRequestsCompleted", cc),
     transactionStatusRequests("StatusRequests", cc), transactionTenantLookupRequests("TenantLookupRequests", cc),
     transactionTenantLookupRequestsCompleted("TenantLookupRequestsCompleted", cc), transactionsTooOld("TooOld", cc),
     transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc),
@@ -1830,6 +1833,8 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsCommitStarted("CommitStarted", cc), transactionsCommitCompleted("CommitCompleted", cc),
     transactionKeyServerLocationRequests("KeyServerLocationRequests", cc),
     transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc),
+    transactionBlobGranuleLocationRequests("BlobGranuleLocationRequests", cc),
+    transactionBlobGranuleLocationRequestsCompleted("BlobGranuleLocationRequestsCompleted", cc),
     transactionStatusRequests("StatusRequests", cc), transactionTenantLookupRequests("TenantLookupRequests", cc),
     transactionTenantLookupRequestsCompleted("TenantLookupRequestsCompleted", cc), transactionsTooOld("TooOld", cc),
     transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc),
@@ -3203,6 +3208,91 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<Transac
 	                            trState->readVersionFuture.isValid() && trState->readVersionFuture.isReady()
 	                                ? trState->readVersion()
 	                                : latestVersion);
+}
+
+ACTOR Future<std::vector<std::pair<KeyRange, BlobWorkerInterface>>> getBlobGranuleLocations_internal(
+    Database cx,
+    TenantInfo tenant,
+    KeyRange keys,
+    int limit,
+    Reverse reverse,
+    SpanContext spanContext,
+    Optional<UID> debugID,
+    UseProvisionalProxies useProvisionalProxies,
+    Version version) {
+	state Span span("NAPI:getBlobGranuleLocations"_loc, spanContext);
+	if (debugID.present())
+		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getBlobGranuleLocations.Before");
+
+	loop {
+		++cx->transactionBlobGranuleLocationRequests;
+		choose {
+			when(wait(cx->onProxiesChanged())) {}
+			when(GetBlobGranuleLocationsReply _rep = wait(basicLoadBalance(
+			         cx->getCommitProxies(useProvisionalProxies),
+			         &CommitProxyInterface::getBlobGranuleLocations,
+			         GetBlobGranuleLocationsRequest(
+			             span.context, tenant, keys.begin, keys.end, limit, reverse, version, keys.arena()),
+			         TaskPriority::DefaultPromiseEndpoint))) {
+				++cx->transactionBlobGranuleLocationRequestsCompleted;
+				state GetBlobGranuleLocationsReply rep = _rep;
+				if (debugID.present())
+					g_traceBatch.addEvent(
+					    "TransactionDebug", debugID.get().first(), "NativeAPI.getBlobGranuleLocations.After");
+				ASSERT(rep.results.size());
+
+				state std::vector<std::pair<KeyRange, BlobWorkerInterface>> results;
+				state int granule = 0;
+				for (; granule < rep.results.size(); granule++) {
+					// FIXME: cache mapping?
+					results.emplace_back(
+					    KeyRange(toPrefixRelativeRange(rep.results[granule].first, tenant.prefix) & keys),
+					    rep.results[granule].second);
+					wait(yield());
+				}
+
+				return results;
+			}
+		}
+	}
+}
+
+// Get the Blob Worker locations for each granule in the 'keys' key-range, similar to getKeyRangeLocations
+Future<std::vector<std::pair<KeyRange, BlobWorkerInterface>>> getBlobGranuleLocations(
+    Database const& cx,
+    TenantInfo const& tenant,
+    KeyRange const& keys,
+    int limit,
+    Reverse reverse,
+    SpanContext const& spanContext,
+    Optional<UID> const& debugID,
+    UseProvisionalProxies useProvisionalProxies,
+    Version version) {
+
+	ASSERT(!keys.empty());
+
+	// FIXME: wrap this with location caching for blob workers like getKeyRangeLocations has
+	return getBlobGranuleLocations_internal(
+	    cx, tenant, keys, limit, reverse, spanContext, debugID, useProvisionalProxies, version);
+}
+
+Future<std::vector<std::pair<KeyRange, BlobWorkerInterface>>> getBlobGranuleLocations(
+    Reference<TransactionState> trState,
+    KeyRange const& keys,
+    int limit,
+    Reverse reverse,
+    UseTenant useTenant) {
+	return getBlobGranuleLocations(
+	    trState->cx,
+	    useTenant ? trState->getTenantInfo(AllowInvalidTenantID::True) : TenantInfo(),
+	    keys,
+	    limit,
+	    reverse,
+	    trState->spanContext,
+	    trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>(),
+	    trState->useProvisionalProxies,
+	    trState->readVersionFuture.isValid() && trState->readVersionFuture.isReady() ? trState->readVersion()
+	                                                                                 : latestVersion);
 }
 
 ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange keys) {
@@ -6978,7 +7068,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 
 	case FDBTransactionOptions::AUTHORIZATION_TOKEN:
 		if (value.present())
-			trState->authToken = Standalone<StringRef>(value.get());
+			trState->authToken = WipedString(value.get());
 		else
 			trState->authToken.reset();
 		break;
@@ -7003,6 +7093,26 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 			    IdempotencyIdRef(BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned())));
 		}
 		trState->automaticIdempotency = true;
+		break;
+
+	case FDBTransactionOptions::READ_SERVER_SIDE_CACHE_ENABLE:
+		trState->readOptions.withDefault(ReadOptions()).cacheResult = CacheResult::True;
+		break;
+
+	case FDBTransactionOptions::READ_SERVER_SIDE_CACHE_DISABLE:
+		trState->readOptions.withDefault(ReadOptions()).cacheResult = CacheResult::False;
+		break;
+
+	case FDBTransactionOptions::READ_PRIORITY_LOW:
+		trState->readOptions.withDefault(ReadOptions()).type = ReadType::LOW;
+		break;
+
+	case FDBTransactionOptions::READ_PRIORITY_NORMAL:
+		trState->readOptions.withDefault(ReadOptions()).type = ReadType::NORMAL;
+		break;
+
+	case FDBTransactionOptions::READ_PRIORITY_HIGH:
+		trState->readOptions.withDefault(ReadOptions()).type = ReadType::HIGH;
 		break;
 
 	default:
@@ -7197,6 +7307,7 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	double latency = replyTime - trState->startTime;
 	trState->cx->lastProxyRequestTime = trState->startTime;
 	trState->cx->updateCachedReadVersion(trState->startTime, rep.version);
+	trState->proxyTagThrottledDuration += rep.proxyTagThrottledDuration;
 	if (rep.rkBatchThrottled) {
 		trState->cx->lastRkBatchThrottleTime = replyTime;
 	}
@@ -7380,6 +7491,10 @@ Optional<Version> Transaction::getCachedReadVersion() const {
 	}
 }
 
+double Transaction::getTagThrottledDuration() const {
+	return trState->proxyTagThrottledDuration;
+}
+
 Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 	if (committing.isValid()) {
 		return transaction_invalid_version();
@@ -7518,7 +7633,9 @@ uint32_t Transaction::getSize() {
 
 Future<Void> Transaction::onError(Error const& e) {
 	if (g_network->isSimulated() && ++trState->numErrors % 10 == 0) {
-		TraceEvent(SevWarnAlways, "TransactionTooManyRetries").detail("NumRetries", trState->numErrors);
+		TraceEvent(SevWarnAlways, "TransactionTooManyRetries")
+		    .errorUnsuppressed(e)
+		    .detail("NumRetries", trState->numErrors);
 	}
 	if (e.code() == error_code_success) {
 		return client_invalid_operation();
@@ -7539,6 +7656,9 @@ Future<Void> Transaction::onError(Error const& e) {
 			++trState->cx->transactionsProcessBehind;
 		else if (e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled) {
 			++trState->cx->transactionsThrottled;
+		} else if (e.code() == error_code_proxy_tag_throttled) {
+			++trState->cx->transactionsThrottled;
+			trState->proxyTagThrottledDuration += CLIENT_KNOBS->PROXY_MAX_TAG_THROTTLE_DURATION;
 		}
 
 		double backoff = getBackoff(e.code());
@@ -7989,6 +8109,7 @@ Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange 
 
 #define BG_REQUEST_DEBUG false
 
+// FIXME: make this use getBlobGranuleLocations!
 // the blob granule requests are a bit funky because they piggyback off the existing transaction to read from the system
 // keyspace
 ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Transaction* self,
@@ -8071,15 +8192,9 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
     bool summarize) { // read not present is "use transaction version"
 
 	ASSERT(chunkLimit > 0);
-
-	state RangeResult blobGranuleMapping;
-	state Key granuleStartKey;
-	state Key granuleEndKey;
 	state KeyRange keyRange = range;
-	state UID workerId;
 	state int i;
 	state Version rv;
-	state Optional<KeyRef> tenantPrefix;
 
 	state Standalone<VectorRef<BlobGranuleChunkRef>> results;
 	state double startTime = now();
@@ -8105,113 +8220,62 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 	}
 
 	if (self->getTenant().present()) {
-		// have to bypass tenant to read system key space, and add tenant prefix to part of mapping
+		// ensure tenant is populated for getBlobGranuleLocations request
 		wait(self->getTenant().get()->ready());
-		tenantPrefix = self->getTenant().get()->prefix();
-		Standalone<StringRef> mappingPrefix = tenantPrefix.get().withPrefix(blobGranuleMappingKeys.begin);
-
-		// basically krmGetRange, but enable it to not use tenant without RAW_ACCESS by doing manual getRange with
-		// UseTenant::False
-		GetRangeLimits limits(CLIENT_KNOBS->BG_TOO_MANY_GRANULES);
-		limits.minRows = 2;
-		RangeResult rawMapping = wait(getRange(self->trState,
-		                                       lastLessOrEqual(keyRange.begin.withPrefix(mappingPrefix)),
-		                                       firstGreaterThan(keyRange.end.withPrefix(mappingPrefix)),
-		                                       limits,
-		                                       Reverse::False,
-		                                       UseTenant::False));
-		// strip off mapping prefix
-		Standalone<StringRef> prefix =
-		    StringRef(blobGranuleMappingKeys.begin.toString() + tenantPrefix.get().toString());
-		blobGranuleMapping = krmDecodeRanges(prefix, range, rawMapping);
-	} else {
-		self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		wait(store(blobGranuleMapping,
-		           krmGetRanges(self,
-		                        blobGranuleMappingKeys.begin,
-		                        keyRange,
-		                        CLIENT_KNOBS->BG_TOO_MANY_GRANULES,
-		                        GetRangeLimits::BYTE_LIMIT_UNLIMITED)));
 	}
-	if (blobGranuleMapping.more) {
+
+	state std::vector<std::pair<KeyRange, BlobWorkerInterface>> blobGranuleMapping = wait(getBlobGranuleLocations(
+	    self->trState, keyRange, CLIENT_KNOBS->BG_TOO_MANY_GRANULES, Reverse::False, UseTenant::True));
+
+	if (blobGranuleMapping.empty()) {
+		throw blob_granule_transaction_too_old();
+	}
+	ASSERT(blobGranuleMapping.front().first.begin <= keyRange.begin);
+	if (blobGranuleMapping.back().first.end < keyRange.end) {
 		if (BG_REQUEST_DEBUG) {
-			fmt::print("BG Mapping for [{0} - {1}) too large!\n", keyRange.begin.printable(), keyRange.end.printable());
+			fmt::print("BG Mapping for [{0} - {1}) too large! ({2}) LastRange=[{3} - {4}): {5}\n",
+			           keyRange.begin.printable(),
+			           keyRange.end.printable(),
+			           blobGranuleMapping.size(),
+			           blobGranuleMapping.back().first.begin.printable(),
+			           blobGranuleMapping.back().first.end.printable(),
+			           blobGranuleMapping.back().second.id().shortString());
 		}
 		TraceEvent(SevWarn, "BGMappingTooLarge")
 		    .detail("Range", range)
 		    .detail("Max", CLIENT_KNOBS->BG_TOO_MANY_GRANULES);
 		throw unsupported_operation();
 	}
-	ASSERT(!blobGranuleMapping.more && blobGranuleMapping.size() <= CLIENT_KNOBS->BG_TOO_MANY_GRANULES);
-
-	if (blobGranuleMapping.size() < 2) {
-		throw blob_granule_transaction_too_old();
-	}
+	ASSERT(blobGranuleMapping.size() <= CLIENT_KNOBS->BG_TOO_MANY_GRANULES);
 
 	if (BG_REQUEST_DEBUG) {
 		fmt::print("Doing blob granule request @ {}\n", rv);
 		fmt::print("blob worker assignments:\n");
 	}
 
-	for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
-		granuleStartKey = blobGranuleMapping[i].key;
-		granuleEndKey = blobGranuleMapping[i + 1].key;
-		if (!blobGranuleMapping[i].value.size()) {
-			if (BG_REQUEST_DEBUG) {
-				fmt::print("Key range [{0} - {1}) missing worker assignment!\n",
-				           granuleStartKey.printable(),
-				           granuleEndKey.printable());
-			}
-			throw blob_granule_transaction_too_old();
-		}
-
-		workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
-		if (workerId == UID()) {
-			if (BG_REQUEST_DEBUG) {
-				fmt::print("Key range [{0} - {1}) has no assigned worker yet!\n",
-				           granuleStartKey.printable(),
-				           granuleEndKey.printable());
-			}
-			throw blob_granule_transaction_too_old();
-		}
-		if (BG_REQUEST_DEBUG) {
-			fmt::print(
-			    "  [{0} - {1}): {2}\n", granuleStartKey.printable(), granuleEndKey.printable(), workerId.toString());
-		}
-
-		if (!self->trState->cx->blobWorker_interf.count(workerId)) {
-			state Optional<Value> workerInterface;
-			// again, have to bypass system keys and tenant requirements if tenant is present
-			wait(store(workerInterface, getValue(self->trState, blobWorkerListKeyFor(workerId), UseTenant::False)));
-			// from the time the mapping was read from the db, the associated blob worker
-			// could have died and so its interface wouldn't be present as part of the blobWorkerList
-			// we persist in the db. So throw blob_granule_request_failed to get the new mapping
-			if (!workerInterface.present()) {
-				throw blob_granule_request_failed();
-			}
-			// FIXME: maybe just want to insert here if there are racing queries for the same worker or something?
-			self->trState->cx->blobWorker_interf[workerId] = decodeBlobWorkerListValue(workerInterface.get());
-			if (BG_REQUEST_DEBUG) {
-				fmt::print("    decoded worker interface for {0}\n", workerId.toString());
-			}
-		}
-	}
-
 	// Make request for each granule
-	for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
-		granuleStartKey = blobGranuleMapping[i].key;
-		granuleEndKey = blobGranuleMapping[i + 1].key;
+	for (i = 0; i < blobGranuleMapping.size(); i++) {
+		state KeyRange granule = blobGranuleMapping[i].first;
+		state BlobWorkerInterface bwInterf = blobGranuleMapping[i].second;
+		if (!self->trState->cx->blobWorker_interf.count(bwInterf.id())) {
+			self->trState->cx->blobWorker_interf[bwInterf.id()] = bwInterf;
+		}
 		// if this was a time travel and the request returned larger bounds, skip this chunk
-		if (granuleEndKey <= keyRange.begin) {
+		if (granule.end <= keyRange.begin) {
 			continue;
 		}
-		workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
-		// prune first/last granules to requested range
-		if (keyRange.begin > granuleStartKey) {
-			granuleStartKey = keyRange.begin;
+		if (BG_REQUEST_DEBUG) {
+			fmt::print("Blob granule request mapping [{0} - {1})={2}\n",
+			           granule.begin.printable(),
+			           granule.end.printable(),
+			           bwInterf.id().toString().substr(0, 5));
 		}
-		if (keyRange.end < granuleEndKey) {
-			granuleEndKey = keyRange.end;
+		// prune first/last granules to requested range
+		if (keyRange.begin > granule.begin) {
+			granule = KeyRangeRef(keyRange.begin, granule.end);
+		}
+		if (keyRange.end < granule.end) {
+			granule = KeyRangeRef(granule.begin, keyRange.end);
 		}
 
 		if (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01)) {
@@ -8219,20 +8283,20 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			ASSERT(!self->trState->cx->blobWorker_interf.empty());
 			CODE_PROBE(true, "Randomizing blob worker id for request");
 			TraceEvent ev("RandomizingBlobWorkerForReq");
-			ev.detail("OriginalWorker", workerId);
+			ev.detail("OriginalWorker", bwInterf.id());
 			int randomIdx = deterministicRandom()->randomInt(0, self->trState->cx->blobWorker_interf.size());
 			for (auto& it : self->trState->cx->blobWorker_interf) {
 				if (randomIdx == 0) {
-					workerId = it.first;
+					bwInterf = it.second;
 					break;
 				}
 				randomIdx--;
 			}
-			ev.detail("NewWorker", workerId);
+			ev.detail("NewWorker", bwInterf.id());
 		}
 
 		state BlobGranuleFileRequest req;
-		req.keyRange = KeyRangeRef(StringRef(req.arena, granuleStartKey), StringRef(req.arena, granuleEndKey));
+		req.keyRange = KeyRangeRef(StringRef(req.arena, granule.begin), StringRef(req.arena, granule.end));
 		req.beginVersion = begin;
 		req.readVersion = rv;
 		req.tenantInfo = self->getTenant().present() ? self->trState->getTenantInfo() : TenantInfo();
@@ -8240,8 +8304,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		req.summarize = summarize;
 
 		std::vector<Reference<ReferencedInterface<BlobWorkerInterface>>> v;
-		v.push_back(
-		    makeReference<ReferencedInterface<BlobWorkerInterface>>(self->trState->cx->blobWorker_interf[workerId]));
+		v.push_back(makeReference<ReferencedInterface<BlobWorkerInterface>>(bwInterf));
 		state Reference<MultiInterface<ReferencedInterface<BlobWorkerInterface>>> location =
 		    makeReference<BWLocationInfo>(v);
 		// use load balance with one option for now for retry and error handling
@@ -8255,11 +8318,11 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 				                                                 nullptr))) {
 					if (BG_REQUEST_DEBUG) {
 						fmt::print("Blob granule request for [{0} - {1}) @ {2} - {3} got reply from {4}:\n",
-						           granuleStartKey.printable(),
-						           granuleEndKey.printable(),
+						           granule.begin.printable(),
+						           granule.end.printable(),
 						           begin,
 						           rv,
-						           workerId.toString().substr(0, 5));
+						           bwInterf.id().toString().substr(0, 5));
 					}
 					ASSERT(!rep.chunks.empty());
 					results.arena().dependsOn(rep.arena);
@@ -8286,9 +8349,9 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 							}
 						}
 
-						ASSERT(chunk.tenantPrefix.present() == tenantPrefix.present());
+						ASSERT(chunk.tenantPrefix.present() == self->getTenant().present());
 						if (chunk.tenantPrefix.present()) {
-							ASSERT(chunk.tenantPrefix.get() == tenantPrefix.get());
+							ASSERT(chunk.tenantPrefix.get() == self->getTenant().get()->prefix());
 						}
 
 						if (!results.empty() && results.back().keyRange.end != chunk.keyRange.begin) {
@@ -8304,8 +8367,8 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 						}
 						results.push_back(results.arena(), chunk);
 						StringRef chunkEndKey = chunk.keyRange.end;
-						if (tenantPrefix.present()) {
-							chunkEndKey = chunkEndKey.removePrefix(tenantPrefix.get());
+						if (chunk.tenantPrefix.present()) {
+							chunkEndKey = chunkEndKey.removePrefix(chunk.tenantPrefix.get());
 						}
 						keyRange = KeyRangeRef(std::min(chunkEndKey, keyRange.end), keyRange.end);
 						if (summarize && results.size() == chunkLimit) {
@@ -8322,20 +8385,19 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 				    location->get(0, &BlobWorkerInterface::blobGranuleFileRequest).getEndpoint(),
 				    FailureStatus(true)))) {
 					if (BG_REQUEST_DEBUG) {
-						fmt::print("readBlobGranules got BW {0} failed\n", workerId.toString());
+						fmt::print("readBlobGranules got BW {0} failed\n", bwInterf.id().toString());
 					}
-
 					throw connection_failed();
 				}
 			}
 		} catch (Error& e) {
 			if (BG_REQUEST_DEBUG) {
 				fmt::print("Blob granule request for [{0} - {1}) @ {2} - {3} got error from {4}: {5}\n",
-				           granuleStartKey.printable(),
-				           granuleEndKey.printable(),
+				           granule.begin.printable(),
+				           granule.end.printable(),
 				           begin,
 				           rv,
-				           workerId.toString().substr(0, 5),
+				           bwInterf.id().toString().substr(0, 5),
 				           e.name());
 			}
 			// worker is up but didn't actually have granule, or connection failed
@@ -8533,6 +8595,41 @@ Future<Version> DatabaseContext::verifyBlobRange(const KeyRange& range,
                                                  Optional<Version> version,
                                                  Optional<Reference<Tenant>> tenant) {
 	return verifyBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, version, tenant);
+}
+
+ACTOR Future<bool> flushBlobRangeActor(Reference<DatabaseContext> cx,
+                                       KeyRange range,
+                                       bool compact,
+                                       Optional<Version> version,
+                                       Optional<Reference<Tenant>> tenant) {
+	if (tenant.present()) {
+		wait(tenant.get()->ready());
+		range = range.withPrefix(tenant.get()->prefix());
+	}
+	state Database db(cx);
+	if (!version.present()) {
+		state Transaction tr(db);
+		Version _v = wait(tr.getReadVersion());
+		version = _v;
+	}
+	FlushGranuleRequest req(-1, range, version.get(), compact);
+	try {
+		wait(success(doBlobGranuleRequests(db, range, req, &BlobWorkerInterface::flushGranuleRequest)));
+		return true;
+	} catch (Error& e) {
+		if (e.code() == error_code_blob_granule_transaction_too_old) {
+			// can't flush data at this version, because no granules
+			return false;
+		}
+		throw e;
+	}
+}
+
+Future<bool> DatabaseContext::flushBlobRange(const KeyRange& range,
+                                             bool compact,
+                                             Optional<Version> version,
+                                             Optional<Reference<Tenant>> tenant) {
+	return flushBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, compact, version, tenant);
 }
 
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
@@ -10808,13 +10905,13 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 			if ((!blobbifiedBegin.get().empty() && blobbifiedBegin.get().front().begin < purgeRange.begin) ||
 			    (!blobbifiedEnd.get().empty() && blobbifiedEnd.get().front().begin < purgeRange.end)) {
 				TraceEvent("UnalignedPurge")
-				    .detail("Range", range)
+				    .detail("Range", purgeRange)
 				    .detail("Version", purgeVersion)
 				    .detail("Force", force);
 				throw unsupported_operation();
 			}
 
-			Value purgeValue = blobGranulePurgeValueFor(purgeVersion, range, force);
+			Value purgeValue = blobGranulePurgeValueFor(purgeVersion, purgeRange, force);
 			tr.atomicOp(
 			    addVersionStampAtEnd(blobGranulePurgeKeys.begin), purgeValue, MutationRef::SetVersionstampedKey);
 			tr.set(blobGranulePurgeChangeKey, deterministicRandom()->randomUniqueID().toString());
@@ -10824,8 +10921,8 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 			purgeKey = blobGranulePurgeKeys.begin.withSuffix(vs);
 			if (BG_REQUEST_DEBUG) {
 				fmt::print("purgeBlobGranules for range [{0} - {1}) at version {2} registered {3}\n",
-				           range.begin.printable(),
-				           range.end.printable(),
+				           purgeRange.begin.printable(),
+				           purgeRange.end.printable(),
 				           purgeVersion,
 				           purgeKey.printable());
 			}
@@ -10833,8 +10930,8 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 		} catch (Error& e) {
 			if (BG_REQUEST_DEBUG) {
 				fmt::print("purgeBlobGranules for range [{0} - {1}) at version {2} encountered error {3}\n",
-				           range.begin.printable(),
-				           range.end.printable(),
+				           purgeRange.begin.printable(),
+				           purgeRange.end.printable(),
 				           purgeVersion,
 				           e.name());
 			}
@@ -10937,8 +11034,39 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
 	}
 }
 
+ACTOR Future<bool> blobbifyRangeActor(Reference<DatabaseContext> cx,
+                                      KeyRange range,
+                                      bool doWait,
+                                      Optional<Reference<Tenant>> tenant) {
+	if (BG_REQUEST_DEBUG) {
+		fmt::print("BlobbifyRange [{0} - {1}) ({2})\n", range.begin.printable(), range.end.printable(), doWait);
+	}
+	state bool result = wait(setBlobRangeActor(cx, range, true, tenant));
+	if (!doWait || !result) {
+		return result;
+	}
+	// FIXME: add blob worker verifyRange rpc call that just waits for granule to become readable at any version
+	loop {
+		Version verifyVersion = wait(cx->verifyBlobRange(range, latestVersion, tenant));
+		if (verifyVersion != invalidVersion) {
+			if (BG_REQUEST_DEBUG) {
+				fmt::print("BlobbifyRange [{0} - {1}) got complete @ {2}\n",
+				           range.begin.printable(),
+				           range.end.printable(),
+				           verifyVersion);
+			}
+			return result;
+		}
+		wait(delay(0.1));
+	}
+}
+
 Future<bool> DatabaseContext::blobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant) {
-	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, true, tenant);
+	return blobbifyRangeActor(Reference<DatabaseContext>::addRef(this), range, false, tenant);
+}
+
+Future<bool> DatabaseContext::blobbifyRangeBlocking(KeyRange range, Optional<Reference<Tenant>> tenant) {
+	return blobbifyRangeActor(Reference<DatabaseContext>::addRef(this), range, true, tenant);
 }
 
 Future<bool> DatabaseContext::unblobbifyRange(KeyRange range, Optional<Reference<Tenant>> tenant) {

@@ -91,7 +91,7 @@ bool parseTenantListOptions(std::vector<StringRef> const& tokens,
                             int startIndex,
                             int& limit,
                             int& offset,
-                            std::vector<TenantState>& filters) {
+                            std::vector<MetaclusterAPI::TenantState>& filters) {
 	for (int tokenNum = startIndex; tokenNum < tokens.size(); ++tokenNum) {
 		Optional<Value> value;
 		StringRef token = tokens[tokenNum];
@@ -123,7 +123,7 @@ bool parseTenantListOptions(std::vector<StringRef> const& tokens,
 			auto filterStrings = value.get().splitAny(","_sr);
 			try {
 				for (auto sref : filterStrings) {
-					filters.push_back(TenantMapEntry::stringToTenantState(sref.toString()));
+					filters.push_back(MetaclusterAPI::stringToTenantState(sref.toString()));
 				}
 			} catch (Error& e) {
 				fmt::print(stderr, "ERROR: unrecognized tenant state(s) `{}'.\n", value.get().toString());
@@ -185,7 +185,7 @@ ACTOR Future<bool> tenantCreateCommand(Reference<IDatabase> db, std::vector<Stri
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				TenantMapEntry tenantEntry;
+				MetaclusterTenantMapEntry tenantEntry;
 				AssignClusterAutomatically assignClusterAutomatically = AssignClusterAutomatically::True;
 				for (auto const& [name, value] : configuration.get()) {
 					if (name == "assigned_cluster"_sr) {
@@ -337,7 +337,7 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 	state StringRef endTenant = "\xff\xff"_sr;
 	state int limit = 100;
 	state int offset = 0;
-	state std::vector<TenantState> filters;
+	state std::vector<MetaclusterAPI::TenantState> filters;
 
 	if (tokens.size() >= 3) {
 		beginTenant = tokens[2];
@@ -372,7 +372,7 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 						tenantNames.push_back(tenant.first);
 					}
 				} else {
-					std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
+					std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenants =
 					    wait(MetaclusterAPI::listTenantMetadata(db, beginTenant, endTenant, limit, offset, filters));
 					for (auto tenant : tenants) {
 						tenantNames.push_back(tenant.first);
@@ -433,7 +433,7 @@ ACTOR Future<bool> tenantGetCommand(Reference<IDatabase> db, std::vector<StringR
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			state std::string tenantJson;
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				TenantMapEntry entry = wait(MetaclusterAPI::getTenantTransaction(tr, tokens[2]));
+				MetaclusterTenantMapEntry entry = wait(MetaclusterAPI::getTenantTransaction(tr, tokens[2]));
 				tenantJson = entry.toJson();
 			} else {
 				// Hold the reference to the standalone's memory
@@ -468,14 +468,16 @@ ACTOR Future<bool> tenantGetCommand(Reference<IDatabase> db, std::vector<StringR
 				doc.get("id", id);
 				doc.get("prefix.printable", prefix);
 
-				doc.get("tenant_state", tenantState);
+				bool hasTenantState = doc.tryGet("tenant_state", tenantState);
 				bool hasTenantGroup = doc.tryGet("tenant_group.printable", tenantGroup);
 				bool hasAssignedCluster = doc.tryGet("assigned_cluster.printable", assignedCluster);
 				bool hasError = doc.tryGet("error", error);
 
 				fmt::print("  id: {}\n", id);
 				fmt::print("  prefix: {}\n", printable(prefix).c_str());
-				fmt::print("  tenant state: {}\n", printable(tenantState).c_str());
+				if (hasTenantState) {
+					fmt::print("  tenant state: {}\n", printable(tenantState).c_str());
+				}
 				if (hasTenantGroup) {
 					fmt::print("  tenant group: {}\n", tenantGroup.c_str());
 				}
@@ -544,7 +546,6 @@ ACTOR Future<bool> tenantConfigureCommand(Reference<IDatabase> db, std::vector<S
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				TenantMapEntry tenantEntry;
 				wait(MetaclusterAPI::configureTenant(db, tokens[2], configuration.get()));
 			} else {
 				applyConfigurationToSpecialKeys(tr, tokens[2], configuration.get());

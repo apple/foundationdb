@@ -241,6 +241,16 @@ description is not currently required but encouraged.
             description="Reads performed by a transaction will not see any prior mutations that occured in that transaction, instead seeing the value which was in the database at the transaction's read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction. It is an error to set this option after performing any reads or writes on the transaction."/>
     <Option name="read_ahead_disable" code="52"
             description="Deprecated" />
+    <Option name="read_server_side_cache_enable" code="507"
+            description="Storage server should cache disk blocks needed for subsequent read requests in this transaction.  This is the default behavior."/>
+    <Option name="read_server_side_cache_disable" code="508"
+            description="Storage server should not cache disk blocks needed for subsequent read requests in this transaction.  This can be used to avoid cache pollution for reads not expected to be repeated."/>
+    <Option name="read_priority_normal" code="509"
+            description="Use normal read priority for subsequent read requests in this transaction.  This is the default read priority."/>
+    <Option name="read_priority_low" code="510"
+            description="Use low read priority for subsequent read requests in this transaction."/>
+    <Option name="read_priority_high" code="511"
+            description="Use high read priority for subsequent read requests in this transaction."/>
     <Option name="durability_datacenter" code="110" />
     <Option name="durability_risky" code="120" />
     <Option name="durability_dev_null_is_web_scale" code="130"
@@ -332,7 +342,7 @@ description is not currently required but encouraged.
     <Option name="authorization_token" code="2000"
             description="Attach given authorization token to the transaction such that subsequent tenant-aware requests are authorized"
             paramType="String" paramDescription="A JSON Web Token authorized to access data belonging to one or more tenants, indicated by 'tenants' claim of the token's payload."
-            persistent="true"/>
+            persistent="true" sensitive="true"/>
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

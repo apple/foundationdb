@@ -733,6 +733,7 @@ const KeyRange decodeBlobRestoreArgKeyFor(const KeyRef key);
 const Value blobRestoreArgValueFor(BlobRestoreArg args);
 Standalone<BlobRestoreArg> decodeBlobRestoreArg(ValueRef const& value);
 extern const Key blobManifestVersionKey;
+extern const Key blobGranulesLastFlushKey;
 
 extern const KeyRangeRef idempotencyIdKeys;
 extern const KeyRef idempotencyIdsExpiredVersion;
