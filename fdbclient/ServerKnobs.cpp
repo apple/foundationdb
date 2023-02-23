@@ -474,6 +474,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY, isSimulated ? 10.0 : 300.0 ); // Delays shard clean up, must be larger than ROCKSDB_READ_VALUE_TIMEOUT to prevent reading deleted shard.
 	init( ROCKSDB_ENABLE_EXPENSIVE_VALIDATION,                  true );
 	init( ROCKSDB_CHECKPOINT_MAX_RETRY,                            3 );
+	init( ROCKSDB_CREATE_SST_FILE_RETRY_COUNT_MAX,                50 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;

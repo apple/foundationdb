@@ -54,6 +54,7 @@ struct CheckpointMetaData {
 	std::vector<UID> src; // Storage server(s) on which this checkpoint is created.
 	UID checkpointID; // A unique id for this checkpoint.
 	int16_t state; // CheckpointState.
+	Optional<std::string> bytesSampleFile;
 
 	// A serialized metadata associated with format, this data can be understood by the corresponding KVS.
 	Standalone<StringRef> serializedCheckpoint;
@@ -109,14 +110,16 @@ struct CheckpointMetaData {
 		                  " [Version]: " + std::to_string(version) + " [Format]: " + std::to_string(format) +
 		                  " [Server]: " + describe(src) + " [ID]: " + checkpointID.toString() +
 		                  " [State]: " + std::to_string(static_cast<int>(state)) +
-		                  (actionId.present() ? (" [Action ID]: " + actionId.get().toString()) : "");
+		                  (actionId.present() ? (" [Action ID]: " + actionId.get().toString()) : "") +
+		                  (bytesSampleFile.present() ? (" [BytesSampleFile]: " + bytesSampleFile.get()) : "");
 		;
 		return res;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, ranges, format, state, checkpointID, src, serializedCheckpoint, actionId);
+		serializer(
+		    ar, version, ranges, format, state, checkpointID, src, serializedCheckpoint, actionId, bytesSampleFile);
 	}
 };
 
