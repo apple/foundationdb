@@ -227,6 +227,17 @@ public:
 		return std::move(impl).value_or(std::forward<U>(defaultValue));
 	}
 
+	// A combination of orDefault() and get()
+	// Stores defaultValue in *this if *this was not present, then returns the stored value.
+	// Can only be called on lvalues because returning a reference into an rvalue is dangerous.
+	template <class U>
+	T& withDefault(U&& defaultValue) & {
+		if (!impl.has_value()) {
+			impl.emplace(std::forward<U>(defaultValue));
+		}
+		return impl.value();
+	}
+
 	// Spaceship operator.  Treats not-present as less-than present.
 	int compare(Optional const& rhs) const {
 		if (present() == rhs.present()) {
