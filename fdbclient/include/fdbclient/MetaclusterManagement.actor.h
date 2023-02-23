@@ -1496,6 +1496,7 @@ struct RestoreClusterImpl {
 		state Optional<DataClusterMetadata> dataClusterMetadata = wait(tryGetClusterTransaction(tr, self->clusterName));
 		if (dataClusterMetadata.present() &&
 		    (dataClusterMetadata.get().entry.clusterState != DataClusterState::RESTORING ||
+		     dataClusterMetadata.get().entry.id != clusterEntry.id ||
 		     !dataClusterMetadata.get().matchesConfiguration(
 		         DataClusterMetadata(clusterEntry, self->connectionString)))) {
 			TraceEvent("RestoredClusterAlreadyExists").detail("ClusterName", self->clusterName);
@@ -1706,6 +1707,7 @@ struct RestoreClusterImpl {
 		    .detail("OldName", oldTenantName)
 		    .detail("NewName", newTenantName)
 		    .detail("TenantID", tenantId)
+		    .detail("ActualTenantName", entry.map(&TenantMapEntry::tenantName))
 		    .detail("OldEntryPresent", entry.present())
 		    .detail("NewEntryPresent", newId.present());
 
