@@ -763,7 +763,7 @@ struct PhysicalShard {
 
 		std::vector<std::string> sstFiles{ filePath };
 		rocksdb::IngestExternalFileOptions ingestOptions;
-		ingestOptions.move_files = true;
+		ingestOptions.move_files = false;
 		ingestOptions.verify_checksums_before_ingest = true;
 		const rocksdb::Status status = db->IngestExternalFile(cf, sstFiles, ingestOptions);
 		TraceEvent(SevInfo, "PhysicalShardRestoreFileEnd")
@@ -2628,7 +2628,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				// ASSERT(tmh != nullptr);
 				// ASSERT(tmpDb != nullptr);
 
-				CheckpointMetaData res(ps->getAllRanges(), version, a.request.format, a.request.checkpointID);
+				// CheckpointMetaData res(ps->getAllRanges(), version, a.request.format, a.request.checkpointID);
+				CheckpointMetaData res(a.request.ranges, version, a.request.format, a.request.checkpointID);
 				platform::eraseDirectoryRecursive(checkpointDir);
 
 				if (a.request.format == DataMoveRocksCF) {
@@ -4342,109 +4343,109 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointRestore") {
 	return Void();
 }
 
-TEST_CASE("noSim/ShardedRocksDB/ManualCheckpoint") {
-	const std::string path = "/Users/heliu/checkpoints/744fa11129101d3602c399176cd16710";
-	const std::string cfName = "02c399176cd16710";
+// TEST_CASE("noSim/ShardedRocksDB/ManualCheckpoint") {
+// 	const std::string path = "/Users/heliu/checkpoints/744fa11129101d3602c399176cd16710";
+// 	const std::string cfName = "02c399176cd16710";
 
-	const UID logId = deterministicRandom()->randomUniqueID();
+// 	const UID logId = deterministicRandom()->randomUniqueID();
 
-	rocksdb::Options dbOptions(getOptions());
-	dbOptions.disable_auto_compactions = true;
-	std::vector<std::string> columnFamilies;
-	rocksdb::Status s = rocksdb::DB::ListColumnFamilies(dbOptions, path, &columnFamilies);
+// 	rocksdb::Options dbOptions(getOptions());
+// 	dbOptions.disable_auto_compactions = true;
+// 	std::vector<std::string> columnFamilies;
+// 	rocksdb::Status s = rocksdb::DB::ListColumnFamilies(dbOptions, path, &columnFamilies);
 
-	std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
-	for (const auto& name : columnFamilies) {
-		descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, rocksdb::ColumnFamilyOptions(dbOptions) });
-	}
+// 	std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
+// 	for (const auto& name : columnFamilies) {
+// 		descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, rocksdb::ColumnFamilyOptions(dbOptions) });
+// 	}
 
-	rocksdb::DB* db = nullptr;
-	std::vector<rocksdb::ColumnFamilyHandle*> handles;
-	s = rocksdb::DB::Open(dbOptions, path, descriptors, &handles, &db);
-	ASSERT(s.ok());
+// 	rocksdb::DB* db = nullptr;
+// 	std::vector<rocksdb::ColumnFamilyHandle*> handles;
+// 	s = rocksdb::DB::Open(dbOptions, path, descriptors, &handles, &db);
+// 	ASSERT(s.ok());
 
-	rocksdb::ColumnFamilyHandle* cf;
-	for (auto* handle : handles) {
-		if (handle->GetName() == cfName) {
-			cf = handle;
-			break;
-		}
-	}
-	ASSERT(cf != nullptr);
+// 	rocksdb::ColumnFamilyHandle* cf;
+// 	for (auto* handle : handles) {
+// 		if (handle->GetName() == cfName) {
+// 			cf = handle;
+// 			break;
+// 		}
+// 	}
+// 	ASSERT(cf != nullptr);
 
-	rocksdb::Checkpoint* checkpoint = nullptr;
-	s = rocksdb::Checkpoint::Create(db, &checkpoint);
-	ASSERT(s.ok());
+// 	rocksdb::Checkpoint* checkpoint = nullptr;
+// 	s = rocksdb::Checkpoint::Create(db, &checkpoint);
+// 	ASSERT(s.ok());
 
-	const std::string checkpointDir = "sharded-rocks-checkpoint";
-	platform::eraseDirectoryRecursive(checkpointDir);
-	rocksdb::ExportImportFilesMetaData* pMetadata = nullptr;
-	s = checkpoint->ExportColumnFamily(cf, checkpointDir, &pMetadata);
-	ASSERT(s.ok());
-	for (const auto& file : pMetadata->files) {
-		TraceEvent(SevDebug, "CheckpointFile", logId)
-		    .detail("Name", file.name)
-		    .detail("SmallestKey", file.smallestkey)
-		    .detail("LargestKey", file.largestkey)
-		    .detail("Size", file.size);
-	}
+// 	const std::string checkpointDir = "sharded-rocks-checkpoint";
+// 	platform::eraseDirectoryRecursive(checkpointDir);
+// 	rocksdb::ExportImportFilesMetaData* pMetadata = nullptr;
+// 	s = checkpoint->ExportColumnFamily(cf, checkpointDir, &pMetadata);
+// 	ASSERT(s.ok());
+// 	for (const auto& file : pMetadata->files) {
+// 		TraceEvent(SevDebug, "CheckpointFile", logId)
+// 		    .detail("Name", file.name)
+// 		    .detail("SmallestKey", file.smallestkey)
+// 		    .detail("LargestKey", file.largestkey)
+// 		    .detail("Size", file.size);
+// 	}
 
-	rocksdb::ExportImportFilesMetaData metadata = *pMetadata;
-	delete pMetadata;
+// 	rocksdb::ExportImportFilesMetaData metadata = *pMetadata;
+// 	delete pMetadata;
 
-	{
-		rocksdb::ImportColumnFamilyOptions importOptions;
-		importOptions.move_files = false;
-		rocksdb::ColumnFamilyHandle* handle;
-		const std::string name = deterministicRandom()->randomAlphaNumeric(8);
-		s = db->CreateColumnFamilyWithImport(
-		    // rocksdb::ColumnFamilyOptions(), cfName, importOptions, metadata, &handle);
-		    getCFOptions(),
-		    name,
-		    importOptions,
-		    metadata,
-		    &handle);
-		ASSERT(s.ok());
-		handles.push_back(handle);
+// 	{
+// 		rocksdb::ImportColumnFamilyOptions importOptions;
+// 		importOptions.move_files = false;
+// 		rocksdb::ColumnFamilyHandle* handle;
+// 		const std::string name = deterministicRandom()->randomAlphaNumeric(8);
+// 		s = db->CreateColumnFamilyWithImport(
+// 		    // rocksdb::ColumnFamilyOptions(), cfName, importOptions, metadata, &handle);
+// 		    getCFOptions(),
+// 		    name,
+// 		    importOptions,
+// 		    metadata,
+// 		    &handle);
+// 		ASSERT(s.ok());
+// 		handles.push_back(handle);
 
-		auto options = getReadOptions();
-		rocksdb::Iterator* oriIter = db->NewIterator(options, cf);
-		rocksdb::Iterator* resIter = db->NewIterator(options, handle);
-		oriIter->SeekToFirst();
-		resIter->SeekToFirst();
-		while (oriIter->Valid() && resIter->Valid()) {
-			TraceEvent(SevInfo, "RocksTestValidateCheckpoint", logId)
-			    .detail("KeyInDB", toStringRef(oriIter->key()))
-			    .detail("ValueInDB", toStringRef(oriIter->value()))
-			    .detail("KeyInCheckpoint", toStringRef(resIter->key()))
-			    .detail("ValueInCheckpoint", toStringRef(resIter->value()));
-			if (oriIter->key().compare(resIter->key()) != 0 || oriIter->value().compare(resIter->value()) != 0) {
-				TraceEvent(SevError, "RocksValidateCheckpointError", logId)
-				    .detail("KeyInDB", toStringRef(oriIter->key()))
-				    .detail("ValueInDB", toStringRef(oriIter->value()))
-				    .detail("KeyInCheckpoint", toStringRef(resIter->key()))
-				    .detail("ValueInCheckpoint", toStringRef(resIter->value()));
-				break;
-			}
-			oriIter->Next();
-			resIter->Next();
-		}
-		if (oriIter->Valid() || resIter->Valid()) {
-			s = rocksdb::Status::Corruption();
-		}
-		delete oriIter;
-		delete resIter;
-	}
-	for (auto* handle : handles) {
-		ASSERT(db->DestroyColumnFamilyHandle(handle).ok());
-	}
+// 		auto options = getReadOptions();
+// 		rocksdb::Iterator* oriIter = db->NewIterator(options, cf);
+// 		rocksdb::Iterator* resIter = db->NewIterator(options, handle);
+// 		oriIter->SeekToFirst();
+// 		resIter->SeekToFirst();
+// 		while (oriIter->Valid() && resIter->Valid()) {
+// 			TraceEvent(SevInfo, "RocksTestValidateCheckpoint", logId)
+// 			    .detail("KeyInDB", toStringRef(oriIter->key()))
+// 			    .detail("ValueInDB", toStringRef(oriIter->value()))
+// 			    .detail("KeyInCheckpoint", toStringRef(resIter->key()))
+// 			    .detail("ValueInCheckpoint", toStringRef(resIter->value()));
+// 			if (oriIter->key().compare(resIter->key()) != 0 || oriIter->value().compare(resIter->value()) != 0) {
+// 				TraceEvent(SevError, "RocksValidateCheckpointError", logId)
+// 				    .detail("KeyInDB", toStringRef(oriIter->key()))
+// 				    .detail("ValueInDB", toStringRef(oriIter->value()))
+// 				    .detail("KeyInCheckpoint", toStringRef(resIter->key()))
+// 				    .detail("ValueInCheckpoint", toStringRef(resIter->value()));
+// 				break;
+// 			}
+// 			oriIter->Next();
+// 			resIter->Next();
+// 		}
+// 		if (oriIter->Valid() || resIter->Valid()) {
+// 			s = rocksdb::Status::Corruption();
+// 		}
+// 		delete oriIter;
+// 		delete resIter;
+// 	}
+// 	for (auto* handle : handles) {
+// 		ASSERT(db->DestroyColumnFamilyHandle(handle).ok());
+// 	}
 
-	ASSERT(db->Close().ok());
-	delete db;
-	// ASSERT(rocksdb::DestroyDB(path, dbOptions).ok());
+// 	ASSERT(db->Close().ok());
+// 	delete db;
+// 	// ASSERT(rocksdb::DestroyDB(path, dbOptions).ok());
 
-	return Void();
-}
+// 	return Void();
+// }
 TEST_CASE("noSim/ShardedRocksDB/RocksDBSstFileWriter") {
 	state std::string localFile = "rocksdb-sst-file-dump.sst";
 	state std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();

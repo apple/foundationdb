@@ -8013,6 +8013,12 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 	return Void();
 }
 
+ACTOR Future<Void> applyByteSampleResult(StorageServer* data,
+                                         IKeyValueStore* storage,
+                                         Key begin,
+                                         Key end,
+                                         std::vector<Standalone<VectorRef<KeyValueRef>>>* results = nullptr);
+
 ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
                                               MoveInShard* moveInShard,
                                               std::shared_ptr<MoveInShardMetaData> shard) {
@@ -8051,9 +8057,15 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 		return Void();
 	}
 
+	std::vector<Future<Void>> sampleRanges;
 	for (const auto& range : moveInShard->ranges()) {
 		data->storage.persistRangeMapping(range, true);
+		sampleRanges.push_back(applyByteSampleResult(data,
+		                                             data->storage.getKeyValueStore(),
+		                                             range.begin.withPrefix(persistByteSampleKeys.begin),
+		                                             range.end.withPrefix(persistByteSampleKeys.begin)));
 	}
+	wait(waitForAll(sampleRanges));
 	shard->setPhase(MoveInPhase::ApplyingUpdates);
 	wait(updateMoveInShardMetaData(data, shard.get()));
 
@@ -11118,23 +11130,24 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 
 	try {
 		// Create checkpoint
-		state Future<Void> createCheckpoint = store(checkpointResult, data->storage.checkpoint(req));
+		wait(store(checkpointResult, data->storage.checkpoint(req)));
+		ASSERT(checkpointResult.src.empty() && checkpointResult.getState() == CheckpointMetaData::Complete);
+		checkpointResult.src.push_back(data->thisServerID);
+		checkpointResult.actionId = metaData.actionId;
 		// Dump the checkpoint meta data to the sst file of metadata.
 		if (!directoryExists(abspath(bytesSampleTempDir))) {
 			platform::createDirectory(abspath(bytesSampleTempDir));
 		}
 		state bool sampleByteSstFileCreated =
 		    wait(createSstFileForCheckpointShardBytesSample(data, metaData, bytesSampleTempFile));
-		wait(createCheckpoint);
 		checkpointResult.bytesSampleFile = sampleByteSstFileCreated ? bytesSampleFile : Optional<std::string>();
-		ASSERT(checkpointResult.src.empty() && checkpointResult.getState() == CheckpointMetaData::Complete);
-		checkpointResult.src.push_back(data->thisServerID);
-		checkpointResult.actionId = metaData.actionId;
 		data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
 		TraceEvent("StorageCreatedCheckpoint", data->thisServerID).detail("Checkpoint", checkpointResult.toString());
 		// Move sst file to the checkpoint folder
 		if (sampleByteSstFileCreated) {
-			ASSERT(directoryExists(abspath(checkpointDir)));
+			if (!directoryExists(abspath(checkpointDir))) {
+				platform::createDirectory(abspath(checkpointDir));
+			}
 			ASSERT(!fileExists(abspath(bytesSampleFile)));
 			ASSERT(fileExists(abspath(bytesSampleTempFile)));
 			renameFile(abspath(bytesSampleTempFile), abspath(bytesSampleFile));
@@ -11809,7 +11822,7 @@ ACTOR Future<Void> applyByteSampleResult(StorageServer* data,
                                          IKeyValueStore* storage,
                                          Key begin,
                                          Key end,
-                                         std::vector<Standalone<VectorRef<KeyValueRef>>>* results = nullptr) {
+                                         std::vector<Standalone<VectorRef<KeyValueRef>>>* results) {
 	state int totalFetches = 0;
 	state int totalKeys = 0;
 	state int totalBytes = 0;

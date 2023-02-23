@@ -248,12 +248,12 @@ ACTOR Future<Void> fetchCheckpointBytesSampleFile(Database cx,
                                                   std::string dir,
                                                   std::function<Future<Void>(const CheckpointMetaData&)> cFun,
                                                   int maxRetries = 3) {
-	TraceEvent(SevDebug, "FetchCheckpointByteSampleBegin").detail("Checkpoint", metaData->toString());
-	if (!metaData->bytesSampleFile.present()) {
-		return Void();
-	}
+	ASSERT(metaData->bytesSampleFile.present()); 
+	state std::string localFile = dir + "/metadata_bytes.sst";
+	TraceEvent(SevDebug, "FetchCheckpointByteSampleBegin")
+	    .detail("Checkpoint", metaData->toString())
+	    .detail("LocalFile", localFile);
 
-	state std::string localFile = dir + "metadata_bytes.sst";
 	ASSERT(!metaData->src.empty());
 	state UID ssId = metaData->src.front();
 
@@ -1236,7 +1236,9 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 		wait(waitForAll(fs));
 	} else if (metaData->getFormat() == RocksDBKeyValues) {
 		wait(fetchCheckpointRanges(cx, metaData, dir, cFun));
-		wait(fetchCheckpointBytesSampleFile(cx, metaData, dir, cFun));
+		if (metaData->bytesSampleFile.present()) {
+			wait(fetchCheckpointBytesSampleFile(cx, metaData, dir, cFun));
+		}
 	} else if (metaData->getFormat() == RocksDB) {
 		throw not_implemented();
 	}
