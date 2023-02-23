@@ -1387,8 +1387,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		ASSERT(snapshotVersion < version);
 
 		state Optional<BlobGranuleCipherKeysCtx> snapCipherKeysCtx;
-		ASSERT(!(g_network && g_network->isSimulated() && bwData->encryptMode.isEncryptionEnabled() &&
-		         !snapshotF.cipherKeysMeta.present()));
+		ASSERT(!(bwData->encryptMode.isEncryptionEnabled() && !snapshotF.cipherKeysMeta.present()));
 		if (snapshotF.cipherKeysMeta.present()) {
 			ASSERT(bwData->encryptMode.isEncryptionEnabled());
 			CODE_PROBE(true, "fetching cipher keys for blob snapshot file");
@@ -1418,8 +1417,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 
 			deltaF = files.deltaFiles[deltaIdx];
 
-			ASSERT(!(g_network && g_network->isSimulated() && bwData->encryptMode.isEncryptionEnabled() &&
-			         !deltaF.cipherKeysMeta.present()));
+			ASSERT(!(bwData->encryptMode.isEncryptionEnabled() && !deltaF.cipherKeysMeta.present()));
 
 			if (deltaF.cipherKeysMeta.present()) {
 				ASSERT(bwData->encryptMode.isEncryptionEnabled());
@@ -4025,8 +4023,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 							    .detail("FileName", chunk.snapshotFile.get().filename.toString())
 							    .detail("Encrypted", encrypted);
 						}
-						ASSERT(!(g_network && g_network->isSimulated() && bwData->encryptMode.isEncryptionEnabled() &&
-						         !encrypted));
+						ASSERT(!(bwData->encryptMode.isEncryptionEnabled() && !encrypted));
 						if (encrypted) {
 							ASSERT(bwData->encryptMode.isEncryptionEnabled());
 							ASSERT(!chunk.snapshotFile.get().cipherKeysCtx.present());
@@ -4045,8 +4042,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 							    .detail("Encrypted", encrypted);
 						}
 
-						ASSERT(!(g_network && g_network->isSimulated() && bwData->encryptMode.isEncryptionEnabled() &&
-						         !encrypted));
+						ASSERT(!(bwData->encryptMode.isEncryptionEnabled() && !encrypted));
 						if (encrypted) {
 							ASSERT(bwData->encryptMode.isEncryptionEnabled());
 							ASSERT(!chunk.deltaFiles[deltaIdx].cipherKeysCtx.present());

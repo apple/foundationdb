@@ -3021,11 +3021,9 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			decodedMutations.push_back(decodeChangeFeedDurableValue(kv.value));
 			if (doFilterMutations || !req.encrypted) {
 				for (auto& m : decodedMutations.back().first) {
-					if (g_network && g_network->isSimulated()) {
-						ASSERT(data->encryptionMode.present());
-						ASSERT(!data->encryptionMode.get().isEncryptionEnabled() || m.isEncrypted() ||
-						       isBackupLogMutation(m) || mutationForKey(m, lastEpochEndPrivateKey));
-					}
+					ASSERT(data->encryptionMode.present());
+					ASSERT(!data->encryptionMode.get().isEncryptionEnabled() || m.isEncrypted() ||
+					       isBackupLogMutation(m) || mutationForKey(m, lastEpochEndPrivateKey));
 					if (m.isEncrypted()) {
 						m.updateEncryptCipherDetails(cipherDetails);
 					}
@@ -3057,12 +3055,10 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			if (doFilterMutations || !req.encrypted) {
 				mutations.resize(mutations.arena(), encryptedMutations.size());
 				for (int j = 0; j < encryptedMutations.size(); j++) {
-					if (g_network && g_network->isSimulated()) {
-						ASSERT(data->encryptionMode.present());
-						ASSERT(!data->encryptionMode.get().isEncryptionEnabled() ||
-						       encryptedMutations[j].isEncrypted() || isBackupLogMutation(encryptedMutations[j]) ||
-						       mutationForKey(encryptedMutations[j], lastEpochEndPrivateKey));
-					}
+					ASSERT(data->encryptionMode.present());
+					ASSERT(!data->encryptionMode.get().isEncryptionEnabled() || encryptedMutations[j].isEncrypted() ||
+					       isBackupLogMutation(encryptedMutations[j]) ||
+					       mutationForKey(encryptedMutations[j], lastEpochEndPrivateKey));
 					if (encryptedMutations[j].isEncrypted()) {
 						cipherKeys[j] = encryptedMutations[j].getCipherKeys(cipherMap);
 						mutations[j] =
@@ -9248,11 +9244,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				} else {
 					MutationRef msg;
 					cloneReader >> msg;
-					if (g_network && g_network->isSimulated()) {
-						ASSERT(data->encryptionMode.present());
-						ASSERT(!data->encryptionMode.get().isEncryptionEnabled() || msg.isEncrypted() ||
-						       isBackupLogMutation(msg));
-					}
+					ASSERT(data->encryptionMode.present());
+					ASSERT(!data->encryptionMode.get().isEncryptionEnabled() || msg.isEncrypted() ||
+					       isBackupLogMutation(msg));
 					if (msg.isEncrypted()) {
 						if (!cipherKeys.present()) {
 							msg.updateEncryptCipherDetails(cipherDetails);
@@ -9406,11 +9400,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				MutationRef msg;
 				MutationRefAndCipherKeys encryptedMutation;
 				rd >> msg;
-				if (g_network && g_network->isSimulated()) {
-					ASSERT(data->encryptionMode.present());
-					ASSERT(!data->encryptionMode.get().isEncryptionEnabled() || msg.isEncrypted() ||
-					       isBackupLogMutation(msg));
-				}
+				ASSERT(data->encryptionMode.present());
+				ASSERT(!data->encryptionMode.get().isEncryptionEnabled() || msg.isEncrypted() ||
+				       isBackupLogMutation(msg));
 				if (msg.isEncrypted()) {
 					ASSERT(cipherKeys.present());
 					encryptedMutation.mutation = msg;
