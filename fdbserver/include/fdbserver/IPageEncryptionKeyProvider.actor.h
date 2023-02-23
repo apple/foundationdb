@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/TenantInfo.h"
@@ -41,6 +42,7 @@
 #define XXH_INLINE_ALL
 #include "flow/xxhash.h"
 
+#include <array>
 #include <functional>
 #include <limits>
 #include <tuple>
@@ -66,6 +68,25 @@ class IPageEncryptionKeyProvider : public ReferenceCounted<IPageEncryptionKeyPro
 public:
 	using EncryptionKey = ArenaPage::EncryptionKey;
 
+	struct EncryptionDomain {
+		int64_t domainId;
+		size_t prefixLength;
+	};
+
+	struct EncryptionDomainInfo {
+		EncryptionDomain domain;
+		Optional<EncryptionDomain> outerDomain;
+
+		EncryptionDomainInfo(const EncryptionDomain& dom) : domain(dom){};
+
+		EncryptionDomainInfo(const KeyRef& key, const EncryptionDomain& dom, const EncryptionDomain& outer) {
+			domain = dom;
+			if (key.size() == dom.prefixLength) {
+				outerDomain = outer;
+			}
+		}
+	};
+
 	virtual ~IPageEncryptionKeyProvider() = default;
 
 	// Expected encoding type being used with the encryption key provider.
@@ -89,23 +110,31 @@ public:
 	virtual int64_t getDefaultEncryptionDomainId() const { throw not_implemented(); }
 
 	// Get encryption domain from a key. Return the domain id, and the size of the encryption domain prefix.
-	virtual std::tuple<int64_t, size_t> getEncryptionDomain(const KeyRef& key) { throw not_implemented(); }
+	// If the key belong to a key range that needs to stay unencrypted, INVALID_ENCRYPT_DOMAIN_ID is returned as domain
+	// id.
+	virtual EncryptionDomainInfo getEncryptionDomain(const KeyRef& key) { throw not_implemented(); }
 
 	// Get encryption domain of a page given encoding header.
 	virtual int64_t getEncryptionDomainIdFromHeader(const void* encodingHeader) { throw not_implemented(); }
 
+	// Whether the key range between the two keys (inclusive) may cross multiple encryption domain.
+	virtual bool mayCrossEncryptionDomains(const KeyRef& begin, const KeyRef& end) { throw not_implemented(); }
+
 	// Helper methods.
 
 	// Check if a key fits in an encryption domain.
-	bool keyFitsInDomain(int64_t domainId, const KeyRef& key, bool canUseDefaultDomain) {
+	bool keyFitsInDomain(int64_t domainId, const KeyRef& key, bool canUseOuterDomain) {
 		ASSERT(enableEncryptionDomain());
-		int64_t keyDomainId;
-		size_t prefixLength;
-		std::tie(keyDomainId, prefixLength) = getEncryptionDomain(key);
-		return keyDomainId == domainId ||
-		       (canUseDefaultDomain && (domainId == getDefaultEncryptionDomainId() && key.size() == prefixLength));
+		auto info = getEncryptionDomain(key);
+		return info.domain.domainId == domainId ||
+		       (canUseOuterDomain && info.outerDomain.present() && info.outerDomain.get().domainId == domainId);
 	}
 };
+
+inline bool operator==(const IPageEncryptionKeyProvider::EncryptionDomain& a,
+                       const IPageEncryptionKeyProvider::EncryptionDomain& b) {
+	return a.domainId == b.domainId;
+}
 
 // The null key provider is useful to simplify page decoding.
 // It throws an error for any key info requested.
@@ -242,19 +271,29 @@ public:
 
 	int64_t getDefaultEncryptionDomainId() const override { return FDB_DEFAULT_ENCRYPT_DOMAIN_ID; }
 
-	std::tuple<int64_t, size_t> getEncryptionDomain(const KeyRef& key) override {
-		int64_t domainId;
+	EncryptionDomainInfo getEncryptionDomain(const KeyRef& key) override {
+		static const EncryptionDomain defaultDomain{ FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
 		if (key.size() < PREFIX_LENGTH) {
-			domainId = getDefaultEncryptionDomainId();
+			return EncryptionDomainInfo(defaultDomain);
 		} else {
 			// Use first 4 bytes as a 32-bit int for the domain id.
-			domainId = checkDomainId(static_cast<int64_t>(*reinterpret_cast<const int32_t*>(key.begin())));
+			int64_t domainId = checkDomainId(static_cast<int64_t>(*reinterpret_cast<const int32_t*>(key.begin())));
+			EncryptionDomain dom{ domainId, PREFIX_LENGTH };
+			return EncryptionDomainInfo(key, dom, defaultDomain);
 		}
-		return { domainId, (domainId == getDefaultEncryptionDomainId() ? 0 : PREFIX_LENGTH) };
 	}
 
 	int64_t getEncryptionDomainIdFromHeader(const void* encodingHeader) override {
 		return getEncryptionDomainIdFromAesEncryptionHeader<encodingType>(encodingHeader);
+	}
+
+	bool mayCrossEncryptionDomains(const KeyRef& begin, const KeyRef& end) override {
+		if (begin.size() < PREFIX_LENGTH || end.size() < PREFIX_LENGTH) {
+			return true;
+		}
+		int32_t beginDomainId = *reinterpret_cast<const int32_t*>(begin.begin());
+		int32_t endDomainId = *reinterpret_cast<const int32_t*>(end.begin());
+		return beginDomainId != endDomainId;
 	}
 
 private:
@@ -315,12 +354,31 @@ public:
 	using Encoder = typename ArenaPage::AESEncryptionEncoder<encodingType>;
 	using EncodingHeader = typename Encoder::Header;
 
-	const StringRef systemKeysPrefix = systemKeys.begin;
+	const KeyRef systemKeysPrefix = systemKeys.begin;
+
+	const EncryptionDomain defaultDomain{ FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
+	const EncryptionDomain systemKeyDomain{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
+		                                    static_cast<size_t>(systemKeysPrefix.size()) };
+
+	const EncryptCipherDomainId whitelistedDomainIdBegin = MIN_ENCRYPT_DOMAIN_ID - 1;
+	const std::array<KeyRef, 3> whitelistedKeyPrefixes = { applyLogKeys.begin,
+		                                                   backupLogKeys.begin,
+		                                                   changeFeedDurableKeys.begin };
+	const std::array<EncryptionDomain, 3> whitelistedDomain = {
+		EncryptionDomain{ whitelistedDomainIdBegin, static_cast<size_t>(whitelistedKeyPrefixes[0].size()) },
+		EncryptionDomain{ whitelistedDomainIdBegin - 1, static_cast<size_t>(whitelistedKeyPrefixes[1].size()) },
+		EncryptionDomain{ whitelistedDomainIdBegin - 2, static_cast<size_t>(whitelistedKeyPrefixes[2].size()) },
+	};
 
 	AESEncryptionKeyProvider(Reference<AsyncVar<ServerDBInfo> const> db, EncryptionAtRestMode encryptionMode)
 	  : db(db), encryptionMode(encryptionMode) {
 		ASSERT(encryptionMode != EncryptionAtRestMode::DISABLED);
 		ASSERT(db.isValid());
+		// We assume all whitelisted key ranges are within the system key range. Otherwise getEncryptionDomain() needs
+		// to be updated.
+		for (auto& whitelisted : whitelistedKeyPrefixes) {
+			ASSERT(whitelisted.startsWith(systemKeysPrefix));
+		}
 	}
 
 	virtual ~AESEncryptionKeyProvider() = default;
@@ -373,28 +431,46 @@ public:
 
 	int64_t getDefaultEncryptionDomainId() const override { return FDB_DEFAULT_ENCRYPT_DOMAIN_ID; }
 
-	std::tuple<int64_t, size_t> getEncryptionDomain(const KeyRef& key) override {
-		// System key.
+	EncryptionDomainInfo getEncryptionDomain(const KeyRef& key) override {
+		// System key. We assume whitelisted key ranges are all within the system key space to make the check more
+		// efficient.
 		if (key.startsWith(systemKeysPrefix)) {
-			return { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, systemKeysPrefix.size() };
+			for (int i = 0; i < whitelistedKeyPrefixes.size(); i++) {
+				if (key.startsWith(whitelistedKeyPrefixes[i])) {
+					return EncryptionDomainInfo(key, whitelistedDomain[i], systemKeyDomain);
+				}
+			}
+			return EncryptionDomainInfo(key, systemKeyDomain, defaultDomain);
 		}
 		// Cluster-aware encryption.
 		if (encryptionMode == EncryptionAtRestMode::CLUSTER_AWARE) {
-			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
+			return EncryptionDomainInfo(defaultDomain);
 		}
 		// Key smaller than tenant prefix in size belongs to the default domain.
 		if (key.size() < TenantAPI::PREFIX_SIZE) {
-			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
+			return EncryptionDomainInfo(defaultDomain);
 		}
 		int64_t tenantId = TenantAPI::extractTenantIdFromKeyRef(key);
 		if (tenantId == TenantInfo::INVALID_TENANT) {
-			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
+			return EncryptionDomainInfo(defaultDomain);
 		}
-		return { tenantId, TenantAPI::PREFIX_SIZE };
+		EncryptionDomain dom{ tenantId, TenantAPI::PREFIX_SIZE };
+		return EncryptionDomainInfo(key, dom, defaultDomain);
 	}
 
 	int64_t getEncryptionDomainIdFromHeader(const void* encodingHeader) override {
 		return getEncryptionDomainIdFromAesEncryptionHeader<encodingType>(encodingHeader);
+	}
+
+	bool mayCrossEncryptionDomains(const KeyRef& begin, const KeyRef& end) override {
+		int64_t beginDomainId = getEncryptionDomain(begin).domain.domainId;
+		int64_t endDomainId = getEncryptionDomain(end).domain.domainId;
+		// For simplicity, return true if both of the end keys falls in one of the special encryption domain.
+		// For example if both keys falls in system key space, the key range may still cross one of the
+		// whitelisted key ranges.
+		return beginDomainId != endDomainId || beginDomainId == SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID ||
+		       (beginDomainId == FDB_DEFAULT_ENCRYPT_DOMAIN_ID &&
+		        encryptionMode != EncryptionAtRestMode::CLUSTER_AWARE);
 	}
 
 private:

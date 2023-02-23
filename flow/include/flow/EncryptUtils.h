@@ -42,6 +42,8 @@ constexpr const EncryptCipherDomainId INVALID_ENCRYPT_DOMAIN_ID = -1;
 constexpr const EncryptCipherDomainId SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID = -2;
 constexpr const EncryptCipherDomainId ENCRYPT_HEADER_DOMAIN_ID = -3;
 constexpr const EncryptCipherDomainId FDB_DEFAULT_ENCRYPT_DOMAIN_ID = -4;
+// Update this value when adding more special encryption domain IDs.
+constexpr const EncryptCipherDomainId MIN_ENCRYPT_DOMAIN_ID = -4;
 
 constexpr const EncryptCipherBaseKeyId INVALID_ENCRYPT_CIPHER_KEY_ID = 0;
 

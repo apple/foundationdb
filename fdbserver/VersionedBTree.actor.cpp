@@ -5673,9 +5673,9 @@ private:
 		bool splitByDomain;
 		IPageEncryptionKeyProvider* keyProvider;
 
-		Optional<int64_t> domainId = Optional<int64_t>();
-		size_t domainPrefixLength = 0;
-		bool canUseDefaultDomain = false;
+		using EncryptionDomain = IPageEncryptionKeyProvider::EncryptionDomain;
+		Optional<EncryptionDomain> domain;
+		Optional<EncryptionDomain> outerDomain;
 
 		// Number of bytes used by the generated/serialized BTreePage, including all headers
 		int usedBytes() const { return pageSize - bytesLeft; }
@@ -5697,7 +5697,7 @@ private:
 
 		std::string toString() const {
 			return format("{start=%d count=%d used %d/%d bytes (%.2f%% slack) kvBytes=%d blocks=%d blockSize=%d "
-			              "large=%d, domain=%s}",
+			              "large=%d, domain=%s, outerDomain=%s}",
 			              startIndex,
 			              count,
 			              usedBytes(),
@@ -5707,7 +5707,8 @@ private:
 			              blockCount,
 			              blockSize,
 			              largeDeltaTree,
-			              ::toString(domainId).c_str());
+			              ::toString(domain.map([](const auto& d) { return d.domainId; })).c_str(),
+			              ::toString(outerDomain.map([](const auto& d) { return d.domainId; })).c_str());
 		}
 
 		// Move an item from a to b if a has 2 or more items and the item fits in b
@@ -5748,53 +5749,41 @@ private:
 				return false;
 			}
 
+			using Info = IPageEncryptionKeyProvider::EncryptionDomainInfo;
+			auto canUseOuterDomain = [&](const Info& info) -> bool {
+				ASSERT(domain.present());
+				return height > 1 && outerDomain.present() &&
+				       (outerDomain.get() == info.domain ||
+				        (outerDomain == info.outerDomain &&
+				         (nextRecord.key == dbEnd.key ||
+				          !nextRecord.key.startsWith(rec.key.substr(0, info.domain.prefixLength)))));
+			};
+
 			if (enableEncryptionDomain) {
-				int64_t defaultDomainId = keyProvider->getDefaultEncryptionDomainId();
-				int64_t currentDomainId;
-				size_t prefixLength;
 				if (count == 0 || splitByDomain) {
-					std::tie(currentDomainId, prefixLength) = keyProvider->getEncryptionDomain(rec.key);
-				}
-				if (count == 0) {
-					domainId = currentDomainId;
-					domainPrefixLength = prefixLength;
-					canUseDefaultDomain =
-					    (height > 1 && (currentDomainId == defaultDomainId ||
-					                    (prefixLength == rec.key.size() &&
-					                     (nextRecord.key == dbEnd.key ||
-					                      !nextRecord.key.startsWith(rec.key.substr(0, prefixLength))))));
-				} else if (splitByDomain) {
-					ASSERT(domainId.present());
-					if (domainId == currentDomainId) {
-						// The new record falls in the same domain as the rest of the page.
-						// Since this is not the first record, the key must contain a non-prefix portion,
-						// so we cannot use the default domain the encrypt the page (unless domainId is the default
-						// domain).
-						if (domainId != defaultDomainId) {
-							ASSERT(prefixLength < rec.key.size());
-							canUseDefaultDomain = false;
+					Info info = keyProvider->getEncryptionDomain(rec.key);
+					if (count == 0) {
+						domain = info.domain;
+						outerDomain = info.outerDomain;
+						if (!canUseOuterDomain(info)) {
+							outerDomain = {};
 						}
-					} else if (canUseDefaultDomain &&
-					           (currentDomainId == defaultDomainId ||
-					            (prefixLength == rec.key.size() &&
-					             (nextRecord.key == dbEnd.key ||
-					              !nextRecord.key.startsWith(rec.key.substr(0, prefixLength)))))) {
-						// The new record meets one of the following conditions:
-						//   1. it falls in the default domain, or
-						//   2. its key contain only the domain prefix, and
-						//     2a. the following record doesn't fall in the same domain.
-						// In this case switch to use the default domain to encrypt the page.
-						// Condition 2a is needed, because if there are multiple records from the same domain,
-						// they need to form their own page(s).
-						domainId = defaultDomainId;
-						domainPrefixLength = 0;
 					} else {
-						// The new record doesn't fit in the same domain as the existing page.
-						return false;
+						ASSERT(domain.present());
+						if (domain.get().domainId == info.domain.domainId) {
+							ASSERT(!info.outerDomain.present());
+							outerDomain = {};
+						} else if (canUseOuterDomain(info)) {
+							domain = outerDomain;
+							outerDomain = {};
+						} else {
+							return false;
+						}
 					}
 				} else {
-					ASSERT(domainPrefixLength < rec.key.size());
-					canUseDefaultDomain = false;
+					ASSERT(domain.present());
+					ASSERT(domain.get().prefixLength < rec.key.size());
+					outerDomain = {};
 				}
 			}
 
@@ -5822,8 +5811,8 @@ private:
 		}
 
 		void finish() {
-			if (enableEncryptionDomain && canUseDefaultDomain) {
-				domainId = keyProvider->getDefaultEncryptionDomainId();
+			if (enableEncryptionDomain && outerDomain.present()) {
+				domain = outerDomain;
 			}
 		}
 	};
@@ -5853,16 +5842,8 @@ private:
 		    isEncodingTypeEncrypted(m_encodingType) && m_keyProvider->enableEncryptionDomain();
 		// Whether we may need to split by encryption domain. It is mean to be an optimization to avoid
 		// unnecessary domain check and may not be exhaust all cases.
-		bool splitByDomain = false;
-		if (enableEncryptionDomain && records.size() > 1) {
-			int64_t firstDomain = std::get<0>(m_keyProvider->getEncryptionDomain(records[0].key));
-			int64_t lastDomain = std::get<0>(m_keyProvider->getEncryptionDomain(records[records.size() - 1].key));
-			// If the two record falls in the same non-default domain, we know all the records fall in the
-			// same domain. Otherwise we may need to split pages by domain.
-			if (firstDomain != lastDomain || firstDomain == m_keyProvider->getDefaultEncryptionDomainId()) {
-				splitByDomain = true;
-			}
-		}
+		bool splitByDomain = enableEncryptionDomain && records.size() > 1 &&
+		                     m_keyProvider->mayCrossEncryptionDomains(records[0].key, records[records.size() - 1].key);
 
 		// deltaSizes contains pair-wise delta sizes for [lowerBound, records..., upperBound]
 		std::vector<int> deltaSizes(records.size() + 1);
@@ -5913,8 +5894,8 @@ private:
 			PageToBuild& b = pages.back();
 
 			// We can rebalance the two pages only if they are in the same encryption domain.
-			ASSERT(!enableEncryptionDomain || (a.domainId.present() && b.domainId.present()));
-			if (!enableEncryptionDomain || a.domainId.get() == b.domainId.get()) {
+			ASSERT(!enableEncryptionDomain || (a.domain.present() && b.domain.present()));
+			if (!enableEncryptionDomain || a.domain == b.domain) {
 
 				// While the last page page has too much slack and the second to last page
 				// has more than the minimum record count, shift a record from the second
@@ -5965,8 +5946,8 @@ private:
 		state int pageIndex;
 
 		if (enableEncryptionDomain) {
-			ASSERT(pagesToBuild[0].domainId.present());
-			int64_t domainId = pagesToBuild[0].domainId.get();
+			ASSERT(pagesToBuild[0].domain.present());
+			int64_t domainId = pagesToBuild[0].domain.get().domainId;
 			// We make sure the page lower bound fits in the domain of the page.
 			// If the page domain is the default domain, we make sure the page doesn't fall within a domain
 			// specific subtree.
@@ -5974,10 +5955,11 @@ private:
 			// use the domain prefix as the lower bound. Such a lower bound will ensure that pages for a domain
 			// form a full subtree (i.e. have a single root) in the B-tree.
 			if (!self->m_keyProvider->keyFitsInDomain(domainId, pageLowerBound.key, true)) {
-				if (domainId == self->m_keyProvider->getDefaultEncryptionDomainId()) {
-					pageLowerBound = RedwoodRecordRef(entries[0].key);
+				KeyRef domainPrefix = entries[0].key.substr(0, pagesToBuild[0].domain.get().prefixLength);
+				if (pageLowerBound.key < domainPrefix) {
+					pageLowerBound = RedwoodRecordRef(domainPrefix);
 				} else {
-					pageLowerBound = RedwoodRecordRef(entries[0].key.substr(0, pagesToBuild[0].domainPrefixLength));
+					pageLowerBound = RedwoodRecordRef(entries[0].key);
 				}
 			}
 		}
@@ -6003,17 +5985,17 @@ private:
 				int64_t ubDomainId;
 				KeyRef ubDomainPrefix;
 				if (lastPage) {
-					size_t ubPrefixLength;
-					std::tie(ubDomainId, ubPrefixLength) = self->m_keyProvider->getEncryptionDomain(pageUpperBound.key);
-					ubDomainPrefix = pageUpperBound.key.substr(0, ubPrefixLength);
+					auto info = self->m_keyProvider->getEncryptionDomain(pageUpperBound.key);
+					ubDomainId = info.domain.domainId;
+					ubDomainPrefix = pageUpperBound.key.substr(0, info.domain.prefixLength);
 				} else {
 					PageToBuild& nextPage = pagesToBuild[pageIndex + 1];
-					ASSERT(nextPage.domainId.present());
-					ubDomainId = nextPage.domainId.get();
-					ubDomainPrefix = entries[nextPage.startIndex].key.substr(0, nextPage.domainPrefixLength);
+					ASSERT(nextPage.domain.present());
+					ubDomainId = nextPage.domain.get().domainId;
+					ubDomainPrefix = entries[nextPage.startIndex].key.substr(0, nextPage.domain.get().prefixLength);
 				}
-				if (ubDomainId != self->m_keyProvider->getDefaultEncryptionDomainId() &&
-				    p->domainId.get() != ubDomainId) {
+				KeyRef currentDomainPrefix = entries[p->startIndex].key.substr(0, p->domain.get().prefixLength);
+				if (p->domain.get().domainId != ubDomainId && !currentDomainPrefix.startsWith(ubDomainPrefix)) {
 					pageUpperBound = RedwoodRecordRef(ubDomainPrefix);
 				}
 			}
@@ -6054,7 +6036,7 @@ private:
 			    self->m_encodingType, (p->blockCount == 1) ? PageType::BTreeNode : PageType::BTreeSuperNode, height);
 			if (page->isEncrypted()) {
 				ArenaPage::EncryptionKey k =
-				    wait(enableEncryptionDomain ? self->m_keyProvider->getLatestEncryptionKey(p->domainId.get())
+				    wait(enableEncryptionDomain ? self->m_keyProvider->getLatestEncryptionKey(p->domain.get().domainId)
 				                                : self->m_keyProvider->getLatestDefaultEncryptionKey());
 				page->encryptionKey = k;
 			}
@@ -6148,7 +6130,7 @@ private:
 
 			if (self->m_pBoundaryVerifier != nullptr) {
 				ASSERT(self->m_pBoundaryVerifier->update(
-				    childPageID, v, pageLowerBound.key, pageUpperBound.key, height, p->domainId));
+				    childPageID, v, pageLowerBound.key, pageUpperBound.key, height, p->domain.get().domainId));
 			}
 
 			if (++sinceYield > 100) {
@@ -6208,11 +6190,9 @@ private:
 				ASSERT(self->m_expectedEncryptionMode.present() &&
 				       self->m_expectedEncryptionMode.get().isEncryptionEnabled());
 				ASSERT(self->m_keyProvider.isValid() && self->m_keyProvider->enableEncryptionDomain());
-				int64_t domainId;
-				size_t prefixLength;
-				std::tie(domainId, prefixLength) = self->m_keyProvider->getEncryptionDomain(records[0].key);
-				ASSERT(domainId != self->m_keyProvider->getDefaultEncryptionDomainId());
-				ASSERT(records[0].key.size() == prefixLength);
+				auto info = self->m_keyProvider->getEncryptionDomain(records[0].key);
+				ASSERT(info.domain.domainId != self->m_keyProvider->getDefaultEncryptionDomainId());
+				ASSERT(records[0].key.size() == info.domain.prefixLength);
 				CODE_PROBE(true,
 				           "Writing a new root because the current root is encrypted with non-default encryption "
 				           "domain cipher key");
