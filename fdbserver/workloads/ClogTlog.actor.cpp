@@ -36,8 +36,9 @@
 struct ClogTlogWorkload : TestWorkload {
 	bool enabled;
 	double testDuration;
-	bool processClassUpdated = false;
+	bool clogged = false;
 	Optional<NetworkAddress> tlog; // the tlog to be clogged with all other processes except the CC
+	std::vector<std::pair<IPAddress, IPAddress>> cloggedPairs;
 
 	ClogTlogWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
@@ -66,70 +67,57 @@ struct ClogTlogWorkload : TestWorkload {
 		g_simulator.clogInterface(machine->address.ip, t);
 	}
 
-	// Clog a random tlog with all proxies so that this triggers a recovery
-	// and the recovery will become stuck.
-	ACTOR static Future<Void> clogTlog(ClogTlogWorkload* self, Database cx, double seconds) {
-		ASSERT(self->dbInfo->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION);
+	// Clog a random tlog with all other processes so that this triggers a recovery
+	// and the recovery may become stuck if the clogged tlog is recruited again.
+	void clogTlog(double seconds) {
+		ASSERT(dbInfo->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION);
 
-		IPAddress cc = self->dbInfo->get().clusterInterface.address().ip;
-		std::vector<IPAddress> ips;
-		std::set<IPAddress> candidates;
+		IPAddress cc = dbInfo->get().clusterInterface.address().ip;
+		std::vector<IPAddress> ips; // all FDB process IPs
 		for (const auto& process : g_simulator.getAllProcesses()) {
 			const auto& ip = process->address.ip;
-			if (cc == ip) {
-				TraceEvent("ClogTlogSkipCC").detail("IP", ip);
-			} else {
-				if (process->startingClass == ProcessClass::LogClass) {
-					candidates.insert(ip);
-				}
+			if (process->startingClass != ProcessClass::TesterClass) {
 				ips.push_back(ip);
 			}
 		}
 		ASSERT(ips.size() > 0);
 
 		// Find all primary tlogs
-		std::vector<NetworkAddress> logs;
-		bool found = false;
-		for (int i = 0; i < self->dbInfo->get().logSystemConfig.tLogs.size(); i++) {
-			const auto& tlogset = self->dbInfo->get().logSystemConfig.tLogs[i];
+		std::vector<NetworkAddress> logs; // all primary logs except CC
+		for (int i = 0; i < dbInfo->get().logSystemConfig.tLogs.size(); i++) {
+			const auto& tlogset = dbInfo->get().logSystemConfig.tLogs[i];
 			if (!tlogset.isLocal)
 				continue;
 			for (const auto& log : tlogset.tLogs) {
 				const NetworkAddress& addr = log.interf().address();
-				if (cc == addr.ip) {
-					TraceEvent("ClogTlogSkipCC").detail("IP", addr.ip);
-				} else {
-					if (self->tlog.present() && self->tlog.get() == addr) {
-						found = true;
+				if (cc != addr.ip) {
+					if (!tlog.present()) {
+						tlog = addr;
 					}
 					logs.push_back(addr);
 				}
-				// logs.push_back(addr.ip);
 			}
 		}
-		ASSERT(logs.size() > 0);
+		ASSERT(logs.size() > 0 && tlog.present());
 
-		// Clog all proxies and one tlogs
-		if (!found) {
-			// Choose a tlog, preferring the one of "log" class
-			self->tlog.reset();
-			for (const auto& log : logs) {
-				if (candidates.find(log.ip) != candidates.end()) {
-					self->tlog = log;
-					break;
-				}
-			}
-			if (!self->tlog.present()) {
-				self->tlog = logs[0];
+		// clog pairs
+		for (const auto& ip : ips) {
+			if (ip != tlog.get().ip && ip != cc) {
+				g_simulator.clogPair(ip, tlog.get().ip, seconds);
+				g_simulator.clogPair(tlog.get().ip, ip, seconds);
+				cloggedPairs.emplace_back(ip, tlog.get().ip);
+				cloggedPairs.emplace_back(tlog.get().ip, ip);
 			}
 		}
-		for (const auto& proxy : ips) {
-			if (proxy != self->tlog.get().ip) {
-				g_simulator.clogPair(proxy, self->tlog.get().ip, seconds);
-				g_simulator.clogPair(self->tlog.get().ip, proxy, seconds);
-			}
+		clogged = true;
+	}
+
+	void unclogAll() {
+		// unclog previously clogged connections
+		for (const auto& pair : cloggedPairs) {
+			g_simulator.unclogPair(pair.first, pair.second);
 		}
-		return Void();
+		cloggedPairs.clear();
 	}
 
 	ACTOR static Future<Void> excludeFailedLog(ClogTlogWorkload* self, Database cx) {
@@ -143,13 +131,15 @@ struct ClogTlogWorkload : TestWorkload {
 				timeout = delay(30);
 			}
 			when(wait(timeout)) {
-				// recovery state hasn't changed in 10s, exclude the failed tlog
+				// recovery state hasn't changed in 30s, exclude the failed tlog
 				std::vector<StringRef> tokens;
 				state Optional<ConfigureAutoResult> conf;
 
-				// tokens.push_back("configure"_sr);
-				TraceEvent("ExcludeFailedLog").detail("TLog", self->tlog.get());
-				tokens.push_back(StringRef("exclude=" + self->tlog.get().toString()));
+				TEST(true); // Exclude failed tlog
+				TraceEvent("ExcludeFailedLog")
+				    .detail("TLog", self->tlog.get())
+				    .detail("RecoveryState", self->dbInfo->get().recoveryState);
+				tokens.push_back(StringRef("exclude=" + formatIpPort(self->tlog.get().ip, self->tlog.get().port)));
 				ConfigurationResult r =
 				    wait(ManagementAPI::changeConfig(cx.getReference(), tokens, conf, /*force=*/true));
 				TraceEvent("ExcludeFailedLog")
@@ -164,34 +154,35 @@ struct ClogTlogWorkload : TestWorkload {
 		// Let cycle workload issue some transactions.
 		wait(delay(20.0));
 
+		while (self->dbInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED) {
+			wait(self->dbInfo->onChange());
+		}
+
 		double startTime = now();
 		state double workloadEnd = now() + self->testDuration;
 		TraceEvent("ClogTlog").detail("StartTime", startTime).detail("EndTime", workloadEnd);
-		state Future<Void> excludeLog;
-		loop {
-			while (self->dbInfo->get().recoveryState < RecoveryState::RECOVERY_TRANSACTION) {
-				wait(self->dbInfo->onChange());
-			}
 
-			wait(clogTlog(self, cx, workloadEnd - now()));
-			loop choose {
-				when(wait(self->dbInfo->onChange())) {
-					if (self->dbInfo->get().recoveryState < RecoveryState::RECOVERY_TRANSACTION) {
-						break;
-					}
-					if (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED) {
-						TraceEvent("ClogDoneFullyRecovered");
-						return Void();
-					}
-				}
-				when(wait(delayUntil(workloadEnd))) {
-					// Expect to reach fully recovered state before workload ends
-					TraceEvent(SevError, "ClogTlogFailure").detail("RecoveryState", self->dbInfo->get().recoveryState);
+		// Clog and wait for recovery to happen
+		self->clogTlog(workloadEnd - now());
+		while (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED) {
+			wait(self->dbInfo->onChange());
+		}
+
+		// start exclusion and wait for fully recovery
+		state Future<Void> excludeLog = excludeFailedLog(self, cx);
+		state Future<Void> onChange = self->dbInfo->onChange();
+		loop choose {
+			when(wait(onChange)) {
+				if (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED) {
+					TraceEvent("ClogDoneFullyRecovered");
 					return Void();
 				}
+				onChange = self->dbInfo->onChange();
 			}
-			if (self->dbInfo->get().recoveryState <= RecoveryState::ALL_LOGS_RECRUITED) {
-				excludeLog = excludeFailedLog(self, cx);
+			when(wait(delayUntil(workloadEnd))) {
+				// Expect to reach fully recovered state before workload ends
+				TraceEvent(SevError, "ClogTlogFailure").detail("RecoveryState", self->dbInfo->get().recoveryState);
+				return Void();
 			}
 		}
 	}
