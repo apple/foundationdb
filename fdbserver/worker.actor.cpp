@@ -241,8 +241,7 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 		when(state ErrorOr<Void> e = wait(errorOr(actor))) {
 			if (e.isError() && e.getError().code() == error_code_please_reboot) {
 				// no need to wait.
-			}
-			if (e.isError() && e.getError().code() == error_code_please_reboot_kv_store) {
+			} else if (e.isError() && e.getError().code() == error_code_please_reboot_kv_store) {
 				store->close();
 			} else {
 				wait(onClosed);
@@ -1355,6 +1354,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(
     IKeyValueStore* store,
     bool validateDataFiles,
     Promise<Void>* rebootKVStore,
+    Optional<EncryptionAtRestMode> encryptionMode,
     std::shared_ptr<std::map<std::string, std::string>> storageEngineParams) {
 	state TrackRunningStorage _(id, storeType, runningStorages);
 	loop {
@@ -1389,6 +1389,8 @@ ACTOR Future<Void> storageServerRollbackRebooter(
 			             ? (/* Disable for RocksDB */ storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
 			                deterministicRandom()->coinflip())
 			             : true),
+			    db,
+			    encryptionMode,
 			    params);
 			Promise<Void> nextRebootKVStorePromise;
 			filesClosed->add(store->onClosed() ||
@@ -1909,8 +1911,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                s.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 				                deterministicRandom()->coinflip())
 				             : true),
-				    Optional<std::map<std::string, std::string>>(StorageEngineParamsFactory::getParams(s.storeType)),
-				    dbInfo);
+				    dbInfo,
+				    {},
+				    Optional<std::map<std::string, std::string>>(StorageEngineParamsFactory::getParams(s.storeType)));
 				Future<Void> kvClosed =
 				    kv->onClosed() ||
 				    rebootKVSPromise.getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
@@ -1979,7 +1982,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                                  kv,
 				                                  validateDataFiles,
 				                                  &rebootKVSPromise,
+				                                  {},
 				                                  paramsPtr);
+				errorForwarders.add(forwardError(errors, ssRole, recruited.id(), f));
 			} else if (s.storedComponent == DiskStore::TLogData) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::TLog;
@@ -2597,9 +2602,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                req.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 					                deterministicRandom()->coinflip())
 					             : true),
-					    req.storageEngineParams,
 					    dbInfo,
-					    req.encryptMode);
+					    req.encryptMode,
+					    req.storageEngineParams);
 
 					Future<Void> kvClosed =
 					    data->onClosed() ||
@@ -2637,7 +2642,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                                  data,
 					                                  false,
 					                                  &rebootKVSPromise2,
+					                                  req.encryptMode,
 					                                  paramsPtr);
+					errorForwarders.add(forwardError(errors, ssRole, recruited.id(), s));
 				} else if (storageCache.exists(req.reqId)) {
 					forwardPromise(req.reply, storageCache.get(req.reqId));
 				} else {
