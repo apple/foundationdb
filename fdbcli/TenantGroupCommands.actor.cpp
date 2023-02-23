@@ -147,17 +147,15 @@ ACTOR Future<bool> tenantGroupGetCommand(Reference<IDatabase> db, std::vector<St
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
-			state std::string tenantJson;
-			state Optional<TenantGroupEntry> entry;
-			state Optional<MetaclusterTenantGroupEntry> mEntry;
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				wait(store(mEntry, MetaclusterAPI::tryGetTenantGroupTransaction(tr, tokens[2])));
+				state Optional<MetaclusterTenantGroupEntry> mEntry =
+				    wait(MetaclusterAPI::tryGetTenantGroupTransaction(tr, tokens[2]));
 				if (!mEntry.present()) {
 					throw tenant_not_found();
 				}
 				tenantGroupGetOutput(mEntry.get(), useJson);
 			} else {
-				wait(store(entry, TenantAPI::tryGetTenantGroupTransaction(tr, tokens[2])));
+				state Optional<TenantGroupEntry> entry = wait(TenantAPI::tryGetTenantGroupTransaction(tr, tokens[2]));
 				if (!entry.present()) {
 					throw tenant_not_found();
 				}
