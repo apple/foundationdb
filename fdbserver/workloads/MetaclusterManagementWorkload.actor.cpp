@@ -59,12 +59,12 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		DataClusterData(Database db) : db(db) {}
 	};
 
-	struct TenantData {
+	struct TenantTestData {
 		ClusterName cluster;
 		Optional<TenantGroupName> tenantGroup;
 
-		TenantData() {}
-		TenantData(ClusterName cluster, Optional<TenantGroupName> tenantGroup)
+		TenantTestData() {}
+		TenantTestData(ClusterName cluster, Optional<TenantGroupName> tenantGroup)
 		  : cluster(cluster), tenantGroup(tenantGroup) {}
 	};
 
@@ -83,7 +83,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	std::vector<ClusterName> dataDbIndex;
 
 	int64_t totalTenantGroupCapacity = 0;
-	std::map<TenantName, TenantData> createdTenants;
+	std::map<TenantName, TenantTestData> createdTenants;
 
 	int maxTenants;
 	int maxTenantGroups;
@@ -593,7 +593,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			       assignedCluster->second.tenantGroupCapacity >=
 			           assignedCluster->second.tenantGroups.size() + assignedCluster->second.ungroupedTenants.size());
 
-			self->createdTenants[tenant] = TenantData(entry.assignedCluster, tenantGroup);
+			self->createdTenants[tenant] = TenantTestData(entry.assignedCluster, tenantGroup);
 		} catch (Error& e) {
 			if (e.code() == error_code_tenant_already_exists) {
 				ASSERT(exists);

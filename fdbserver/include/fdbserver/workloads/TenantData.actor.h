@@ -102,8 +102,8 @@ private:
 		    std::set<int64_t>(tenantTombstoneList.results.begin(), tenantTombstoneList.results.end());
 
 		ASSERT(!tenantGroupList.more);
-		self->tenantGroupMap =
-		    std::map<TenantGroupName, TenantGroupEntry>(tenantGroupList.results.begin(), tenantGroupList.results.end());
+		self->tenantGroupMap = std::map<TenantGroupName, typename TenantTypes::TenantGroupEntryT>(
+		    tenantGroupList.results.begin(), tenantGroupList.results.end());
 
 		ASSERT(!storageQuotaList.more);
 		self->storageQuotas =

@@ -229,6 +229,13 @@ json_spirit::mObject MetaclusterTenantGroupEntry::toJson() const {
 	return tenantGroupEntry;
 }
 
+bool MetaclusterTenantGroupEntry::operator==(MetaclusterTenantGroupEntry const& other) const {
+	return assignedCluster == other.assignedCluster;
+}
+bool MetaclusterTenantGroupEntry::operator!=(MetaclusterTenantGroupEntry const& other) const {
+	return !(*this == other);
+}
+
 KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>&
 MetaclusterMetadata::metaclusterRegistration() {
 	static KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())> instance(

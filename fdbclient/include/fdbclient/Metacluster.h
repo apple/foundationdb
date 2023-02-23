@@ -208,6 +208,9 @@ struct MetaclusterTenantGroupEntry {
 		return ObjectReader::fromStringRef<MetaclusterTenantGroupEntry>(value, IncludeVersion());
 	}
 
+	bool operator==(MetaclusterTenantGroupEntry const& other) const;
+	bool operator!=(MetaclusterTenantGroupEntry const& other) const;
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, assignedCluster);
