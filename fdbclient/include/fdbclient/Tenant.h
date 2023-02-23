@@ -187,8 +187,8 @@ struct TenantMetadataSpecification {
 
 	TenantMetadataSpecification(KeyRef prefix)
 	  : subspace(prefix.withSuffix("tenant/"_sr)), tenantMap(subspace.withSuffix("map/"_sr), IncludeVersion()),
-	    lastTenantId(subspace.withSuffix("lastId"_sr)), tenantCount(subspace.withSuffix("count"_sr)),
-	    tenantTombstones(subspace.withSuffix("tombstones/"_sr)),
+	    tenantNameIndex(subspace.withSuffix("nameIndex/"_sr)), lastTenantId(subspace.withSuffix("lastId"_sr)),
+	    tenantCount(subspace.withSuffix("count"_sr)), tenantTombstones(subspace.withSuffix("tombstones/"_sr)),
 	    tombstoneCleanupData(subspace.withSuffix("tombstoneCleanup"_sr), IncludeVersion()),
 	    tenantGroupTenantIndex(subspace.withSuffix("tenantGroup/tenantIndex/"_sr)),
 	    tenantGroupMap(subspace.withSuffix("tenantGroup/map/"_sr), IncludeVersion()),
