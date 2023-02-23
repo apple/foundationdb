@@ -390,17 +390,18 @@ class TestRun:
         shutil.rmtree(self.temp_path / Path("simfdb"))
 
     def _run_rocksdb_logtool(self):
-        """Calls RocksDB LogTool to upload the test logs if 1) test failed 2) test is RocksDB related"""
-        if not os.path.exists("rocksdb_logtool.py"):
-            raise RuntimeError("rocksdb_logtool.py missing")
+        """Calls Joshua LogTool to upload the test logs if 1) test failed 2) test is RocksDB related"""
+        if not os.path.exists("joshua_logtool.py"):
+            raise RuntimeError("joshua_logtool.py missing")
         command = [
             "python3",
-            "rocksdb_logtool.py",
-            "report",
+            "joshua_logtool.py",
+            "upload",
             "--test-uid",
             str(self.uid),
             "--log-directory",
             str(self.temp_path),
+            "--check-rocksdb"
         ]
         subprocess.run(command, check=True)
 
