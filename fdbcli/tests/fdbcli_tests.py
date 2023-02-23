@@ -1015,10 +1015,9 @@ def tenant_get(logger):
 
     output = run_fdbcli_command("tenant get tenant")
     lines = output.split("\n")
-    assert len(lines) == 3
+    assert len(lines) == 2
     assert lines[0].strip().startswith("id: ")
     assert lines[1].strip().startswith("prefix: ")
-    assert lines[2].strip() == "tenant state: ready"
 
     output = run_fdbcli_command("tenant get tenant JSON")
     json_output = json.loads(output, strict=False)
@@ -1035,15 +1034,13 @@ def tenant_get(logger):
     assert len(json_output["tenant"]["prefix"]) == 2
     assert "base64" in json_output["tenant"]["prefix"]
     assert "printable" in json_output["tenant"]["prefix"]
-    assert json_output["tenant"]["tenant_state"] == "ready"
 
     output = run_fdbcli_command("tenant get tenant2")
     lines = output.split("\n")
-    assert len(lines) == 4
+    assert len(lines) == 3
     assert lines[0].strip().startswith("id: ")
     assert lines[1].strip().startswith("prefix: ")
-    assert lines[2].strip() == "tenant state: ready"
-    assert lines[3].strip() == "tenant group: tenant_group2"
+    assert lines[2].strip() == "tenant group: tenant_group2"
 
     output = run_fdbcli_command("tenant get tenant2 JSON")
     json_output = json.loads(output, strict=False)
@@ -1057,7 +1054,6 @@ def tenant_get(logger):
     assert "base64" in json_output["tenant"]["name"]
     assert "printable" in json_output["tenant"]["name"]
     assert "prefix" in json_output["tenant"]
-    assert json_output["tenant"]["tenant_state"] == "ready"
     assert "tenant_group" in json_output["tenant"]
     assert len(json_output["tenant"]["tenant_group"]) == 2
     assert "base64" in json_output["tenant"]["tenant_group"]
@@ -1073,15 +1069,15 @@ def tenant_configure(logger):
 
     output = run_fdbcli_command("tenant get tenant")
     lines = output.split("\n")
-    assert len(lines) == 4
-    assert lines[3].strip() == "tenant group: tenant_group1"
+    assert len(lines) == 3
+    assert lines[2].strip() == "tenant group: tenant_group1"
 
     output = run_fdbcli_command("tenant configure tenant unset tenant_group")
     assert output == "The configuration for tenant `tenant' has been updated"
 
     output = run_fdbcli_command("tenant get tenant")
     lines = output.split("\n")
-    assert len(lines) == 3
+    assert len(lines) == 2
 
     output = run_fdbcli_command_and_get_error(
         "tenant configure tenant tenant_group=tenant_group1 tenant_group=tenant_group2"
