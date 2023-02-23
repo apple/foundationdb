@@ -37,6 +37,7 @@
 #include "fdbserver/DDTxnProcessor.h"
 #include "flow/DebugTrace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "fdbserver/DDRelocationQueue.h"
 
 #define WORK_FULL_UTILIZATION 10000 // This is not a knob; it is a fixed point scaling factor!
 
@@ -541,32 +542,62 @@ ACTOR Future<Void> getSourceServersForRange(DDQueue* self,
 	return Void();
 }
 
-DDQueue::DDQueue(UID mid,
-                 MoveKeysLock lock,
-                 Reference<IDDTxnProcessor> db,
-                 std::vector<TeamCollectionInterface> teamCollections,
-                 Reference<ShardsAffectedByTeamFailure> sABTF,
-                 Reference<PhysicalShardCollection> physicalShardCollection,
-                 PromiseStream<Promise<int64_t>> getAverageShardBytes,
-                 int teamSize,
-                 int singleRegionTeamSize,
-                 PromiseStream<RelocateShard> output,
-                 FutureStream<RelocateShard> input,
-                 PromiseStream<GetMetricsRequest> getShardMetrics,
-                 PromiseStream<GetTopKMetricsRequest> getTopKMetrics)
-  : IDDRelocationQueue(), distributorId(mid), lock(lock), cx(db->context()), txnProcessor(db),
-    teamCollections(teamCollections), shardsAffectedByTeamFailure(sABTF),
-    physicalShardCollection(physicalShardCollection), getAverageShardBytes(getAverageShardBytes),
+DDQueue::DDQueue(DDQueueInitParams const& params)
+  : IDDRelocationQueue(), distributorId(params.id), lock(params.lock), cx(params.db->context()),
+    txnProcessor(params.db), teamCollections(params.teamCollections),
+    shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
+    physicalShardCollection(params.physicalShardCollection), getAverageShardBytes(params.getAverageShardBytes),
     startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
     finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
     cleanUpDataMoveParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
     fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), activeRelocations(0),
-    queuedRelocations(0), bytesWritten(0), teamSize(teamSize), singleRegionTeamSize(singleRegionTeamSize),
-    output(output), input(input), getShardMetrics(getShardMetrics), getTopKMetrics(getTopKMetrics), lastInterval(0),
-    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
-    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
-    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")), moveReusePhysicalShard(0),
-    moveCreateNewPhysicalShard(0), retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0) {}
+    queuedRelocations(0), bytesWritten(0), teamSize(params.teamSize), singleRegionTeamSize(params.singleRegionTeamSize),
+    output(params.relocationProducer), input(params.relocationConsumer), getShardMetrics(params.getShardMetrics),
+    getTopKMetrics(params.getTopKMetrics), lastInterval(0), suppressIntervals(0),
+    rawProcessingUnhealthy(new AsyncVar<bool>(false)), rawProcessingWiggle(new AsyncVar<bool>(false)),
+    unhealthyRelocations(0), movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")),
+    moveReusePhysicalShard(0), moveCreateNewPhysicalShard(0),
+    retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0) {}
+
+void DDQueue::startRelocation(int priority, int healthPriority) {
+	// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
+	// we must count it into unhealthyRelocations; because team removers relies on unhealthyRelocations to
+	// ensure a team remover will not start before the previous one finishes removing a team and move away data
+	// NOTE: split and merge shard have higher priority. If they have to wait for unhealthyRelocations = 0,
+	// deadlock may happen: split/merge shard waits for unhealthyRelocations, while blocks team_redundant.
+	if (healthPriority == SERVER_KNOBS->PRIORITY_POPULATE_REGION ||
+	    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY ||
+	    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT ||
+	    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
+	    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT ||
+	    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT) {
+		unhealthyRelocations++;
+		rawProcessingUnhealthy->set(true);
+	}
+	if (healthPriority == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE) {
+		rawProcessingWiggle->set(true);
+	}
+	priority_relocations[priority]++;
+}
+
+void DDQueue::finishRelocation(int priority, int healthPriority) {
+	if (healthPriority == SERVER_KNOBS->PRIORITY_POPULATE_REGION ||
+	    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY ||
+	    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT ||
+	    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
+	    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT ||
+	    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT) {
+		unhealthyRelocations--;
+		ASSERT(unhealthyRelocations >= 0);
+		if (unhealthyRelocations == 0) {
+			rawProcessingUnhealthy->set(false);
+		}
+	}
+	priority_relocations[priority]--;
+	if (priority_relocations[SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE] == 0) {
+		rawProcessingWiggle->set(false);
+	}
+}
 
 void DDQueue::validate() {
 	if (EXPENSIVE_VALIDATION) {
@@ -2058,6 +2089,13 @@ Future<bool> DDQueue::rebalanceTeams(DataMovementReason moveReason,
 	return ::rebalanceTeams(this, moveReason, sourceTeam, destTeam, primary, traceEvent);
 }
 
+Future<Void> DDQueue::run(Reference<AsyncVar<bool>> processingUnhealthy,
+                          Reference<AsyncVar<bool>> processingWiggle,
+                          FutureStream<Promise<int>> getUnhealthyRelocationCount,
+                          const DDEnabledState* ddEnabledState) {
+	return Future<Void>();
+}
+
 ACTOR Future<bool> getSkipRebalanceValue(Reference<IDDTxnProcessor> txnProcessor, bool readRebalance) {
 	Optional<Value> val = wait(txnProcessor->readRebalanceDDIgnoreKey());
 
@@ -2163,36 +2201,12 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 	}
 }
 
-ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
-                                         PromiseStream<RelocateShard> output,
-                                         FutureStream<RelocateShard> input,
-                                         PromiseStream<GetMetricsRequest> getShardMetrics,
-                                         PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
+ACTOR Future<Void> dataDistributionQueue(DDQueueInitParams params,
                                          Reference<AsyncVar<bool>> processingUnhealthy,
                                          Reference<AsyncVar<bool>> processingWiggle,
-                                         std::vector<TeamCollectionInterface> teamCollections,
-                                         Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-                                         Reference<PhysicalShardCollection> physicalShardCollection,
-                                         MoveKeysLock lock,
-                                         PromiseStream<Promise<int64_t>> getAverageShardBytes,
                                          FutureStream<Promise<int>> getUnhealthyRelocationCount,
-                                         UID distributorId,
-                                         int teamSize,
-                                         int singleRegionTeamSize,
                                          const DDEnabledState* ddEnabledState) {
-	state DDQueue self(distributorId,
-	                   lock,
-	                   db,
-	                   teamCollections,
-	                   shardsAffectedByTeamFailure,
-	                   physicalShardCollection,
-	                   getAverageShardBytes,
-	                   teamSize,
-	                   singleRegionTeamSize,
-	                   output,
-	                   input,
-	                   getShardMetrics,
-	                   getTopKMetrics);
+	state DDQueue self(params);
 	state std::set<UID> serversToLaunchFrom;
 	state KeyRange keysToLaunchFrom;
 	state RelocateData launchData;
@@ -2203,7 +2217,7 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 	state PromiseStream<KeyRange> rangesComplete;
 	state Future<Void> launchQueuedWorkTimeout = Never();
 
-	for (int i = 0; i < teamCollections.size(); i++) {
+	for (int i = 0; i < self.teamCollections.size(); i++) {
 		ddQueueFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_OVERUTILIZED_TEAM));
 		ddQueueFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM));
 		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
@@ -2285,13 +2299,13 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 				}
 				when(wait(recordMetrics)) {
 					Promise<int64_t> req;
-					getAverageShardBytes.send(req);
+					self.getAverageShardBytes.send(req);
 
 					recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 
 					auto const highestPriorityRelocation = self.getHighestPriorityRelocation();
 
-					TraceEvent("MovingData", distributorId)
+					TraceEvent("MovingData", self.distributorId)
 					    .detail("InFlight", self.activeRelocations)
 					    .detail("InQueue", self.queuedRelocations)
 					    .detail("AverageShardSize", req.getFuture().isReady() ? req.getFuture().get() : -1)
@@ -2370,7 +2384,7 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 		                                             // are killed by the master dying
 		    e.code() != error_code_movekeys_conflict && e.code() != error_code_data_move_cancelled &&
 		    e.code() != error_code_data_move_dest_team_not_found)
-			TraceEvent(SevError, "DataDistributionQueueError", distributorId).error(e);
+			TraceEvent(SevError, "DataDistributionQueueError", self.distributorId).error(e);
 		throw e;
 	}
 }

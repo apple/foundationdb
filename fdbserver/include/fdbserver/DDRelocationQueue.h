@@ -35,6 +35,22 @@ struct IDDRelocationQueue {
 struct RelocateData;
 struct Busyness;
 
+struct DDQueueInitParams {
+	UID const& id;
+	MoveKeysLock const& lock;
+	Reference<IDDTxnProcessor> db;
+	std::vector<TeamCollectionInterface> const& teamCollections;
+	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
+	Reference<PhysicalShardCollection> physicalShardCollection;
+	PromiseStream<Promise<int64_t>> const& getAverageShardBytes;
+	int const& teamSize;
+	int const& singleRegionTeamSize;
+	PromiseStream<RelocateShard> const& relocationProducer;
+	FutureStream<RelocateShard> const& relocationConsumer;
+	PromiseStream<GetMetricsRequest> const& getShardMetrics;
+	PromiseStream<GetTopKMetricsRequest> const& getTopKMetrics;
+};
+
 struct DDQueue : public IDDRelocationQueue {
 	typedef Reference<IDataDistributionTeam> ITeamRef;
 	typedef std::pair<ITeamRef, ITeamRef> SrcDestTeamPair;
@@ -224,60 +240,13 @@ struct DDQueue : public IDDRelocationQueue {
 	};
 	std::vector<int> retryFindDstReasonCount;
 
-	void startRelocation(int priority, int healthPriority) {
-		// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
-		// we must count it into unhealthyRelocations; because team removers relies on unhealthyRelocations to
-		// ensure a team remover will not start before the previous one finishes removing a team and move away data
-		// NOTE: split and merge shard have higher priority. If they have to wait for unhealthyRelocations = 0,
-		// deadlock may happen: split/merge shard waits for unhealthyRelocations, while blocks team_redundant.
-		if (healthPriority == SERVER_KNOBS->PRIORITY_POPULATE_REGION ||
-		    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY ||
-		    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT ||
-		    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
-		    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT ||
-		    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT) {
-			unhealthyRelocations++;
-			rawProcessingUnhealthy->set(true);
-		}
-		if (healthPriority == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE) {
-			rawProcessingWiggle->set(true);
-		}
-		priority_relocations[priority]++;
-	}
-	void finishRelocation(int priority, int healthPriority) {
-		if (healthPriority == SERVER_KNOBS->PRIORITY_POPULATE_REGION ||
-		    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY ||
-		    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT ||
-		    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
-		    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT ||
-		    healthPriority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT) {
-			unhealthyRelocations--;
-			ASSERT(unhealthyRelocations >= 0);
-			if (unhealthyRelocations == 0) {
-				rawProcessingUnhealthy->set(false);
-			}
-		}
-		priority_relocations[priority]--;
-		if (priority_relocations[SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE] == 0) {
-			rawProcessingWiggle->set(false);
-		}
-	}
-
-	DDQueue(UID mid,
-	        MoveKeysLock lock,
-	        Reference<IDDTxnProcessor> db,
-	        std::vector<TeamCollectionInterface> teamCollections,
-	        Reference<ShardsAffectedByTeamFailure> sABTF,
-	        Reference<PhysicalShardCollection> physicalShardCollection,
-	        PromiseStream<Promise<int64_t>> getAverageShardBytes,
-	        int teamSize,
-	        int singleRegionTeamSize,
-	        PromiseStream<RelocateShard> output,
-	        FutureStream<RelocateShard> input,
-	        PromiseStream<GetMetricsRequest> getShardMetrics,
-	        PromiseStream<GetTopKMetricsRequest> getTopKMetrics);
+	DDQueue(DDQueueInitParams const& params);
 
 	DDQueue() = default;
+
+	void startRelocation(int priority, int healthPriority);
+
+	void finishRelocation(int priority, int healthPriority);
 
 	void validate();
 
@@ -331,6 +300,11 @@ struct DDQueue : public IDDRelocationQueue {
 	                            Reference<IDataDistributionTeam const> destTeam,
 	                            bool primary,
 	                            TraceEvent* traceEvent);
+
+	Future<Void> run(Reference<AsyncVar<bool>> processingUnhealthy,
+	                 Reference<AsyncVar<bool>> processingWiggle,
+	                 FutureStream<Promise<int>> getUnhealthyRelocationCount,
+	                 const DDEnabledState* ddEnabledState);
 };
 
 #endif // FOUNDATIONDB_DDRELOCATIONQUEUE_H
