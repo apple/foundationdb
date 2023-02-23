@@ -22,11 +22,14 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
+#include "flow/CodeProbe.h"
+#include "flow/NetworkAddress.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
@@ -34,6 +37,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct ClogTlogWorkload : TestWorkload {
+	static constexpr auto NAME = "ClogTlog";
 	bool enabled;
 	double testDuration;
 	bool clogged = false;
@@ -42,30 +46,18 @@ struct ClogTlogWorkload : TestWorkload {
 
 	ClogTlogWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 100.0);
-	}
-
-	std::string description() const override {
-		if (&g_simulator == g_network)
-			return "ClogTlog";
-		else
-			return "NoRC";
+		testDuration = getOption(options, "testDuration"_sr, 1000.0);
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
-		if (&g_simulator == g_network && enabled)
+		if (g_network->isSimulated() && enabled)
 			return timeout(reportErrors(clogClient(this, cx), "ClogTlogError"), testDuration, Void());
 		else
 			return Void();
 	}
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
-
-	ACTOR void doClog(ISimulator::ProcessInfo* machine, double t, double delay = 0.0) {
-		wait(::delay(delay));
-		g_simulator.clogInterface(machine->address.ip, t);
-	}
 
 	// Clog a random tlog with all other processes so that this triggers a recovery
 	// and the recovery may become stuck if the clogged tlog is recruited again.
@@ -74,7 +66,7 @@ struct ClogTlogWorkload : TestWorkload {
 
 		IPAddress cc = dbInfo->get().clusterInterface.address().ip;
 		std::vector<IPAddress> ips; // all FDB process IPs
-		for (const auto& process : g_simulator.getAllProcesses()) {
+		for (const auto& process : g_simulator->getAllProcesses()) {
 			const auto& ip = process->address.ip;
 			if (process->startingClass != ProcessClass::TesterClass) {
 				ips.push_back(ip);
@@ -103,8 +95,8 @@ struct ClogTlogWorkload : TestWorkload {
 		// clog pairs
 		for (const auto& ip : ips) {
 			if (ip != tlog.get().ip && ip != cc) {
-				g_simulator.clogPair(ip, tlog.get().ip, seconds);
-				g_simulator.clogPair(tlog.get().ip, ip, seconds);
+				g_simulator->clogPair(ip, tlog.get().ip, seconds);
+				g_simulator->clogPair(tlog.get().ip, ip, seconds);
 				cloggedPairs.emplace_back(ip, tlog.get().ip);
 				cloggedPairs.emplace_back(tlog.get().ip, ip);
 			}
@@ -115,7 +107,7 @@ struct ClogTlogWorkload : TestWorkload {
 	void unclogAll() {
 		// unclog previously clogged connections
 		for (const auto& pair : cloggedPairs) {
-			g_simulator.unclogPair(pair.first, pair.second);
+			g_simulator->unclogPair(pair.first, pair.second);
 		}
 		cloggedPairs.clear();
 	}
@@ -135,7 +127,7 @@ struct ClogTlogWorkload : TestWorkload {
 				std::vector<StringRef> tokens;
 				state Optional<ConfigureAutoResult> conf;
 
-				TEST(true); // Exclude failed tlog
+				CODE_PROBE(true, "Exclude failed tlog");
 				TraceEvent("ExcludeFailedLog")
 				    .detail("TLog", self->tlog.get())
 				    .detail("RecoveryState", self->dbInfo->get().recoveryState);
@@ -188,4 +180,4 @@ struct ClogTlogWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<ClogTlogWorkload> ClogTlogWorkloadFactory("ClogTlog");
+WorkloadFactory<ClogTlogWorkload> ClogTlogWorkloadFactory;

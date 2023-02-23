@@ -215,10 +215,10 @@ struct SimClogging {
 			t = std::max(t, clogPairUntil[pair]);
 
 		auto p = std::make_pair(from, to);
-		if (!g_simulator.speedUpSimulation && !stableConnection && clogProcessPairUntil.count(p))
+		if (!g_simulator->speedUpSimulation && !stableConnection && clogProcessPairUntil.count(p))
 			t = std::max(t, clogProcessPairUntil[p]);
 
-		if (!g_simulator.speedUpSimulation && !stableConnection && clogRecvUntil.count(to.ip))
+		if (!g_simulator->speedUpSimulation && !stableConnection && clogRecvUntil.count(to.ip))
 			t = std::max(t, clogRecvUntil[to.ip]);
 
 		return t - tnow;
