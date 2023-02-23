@@ -22,4 +22,4 @@ testTitle = 'ClogTlog'
 
     [[test.workload]]
     testName = 'ClogTlog'
-    testDuration = 1000.0
+    testDuration = 3000.0
