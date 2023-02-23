@@ -59,7 +59,7 @@ class FdbBinaryDownloader:
         if not self.local_binary_repo.exists():
             self.local_binary_repo = None
 
-    # Check if the binaries for the given version are available in the local old binaries repository
+    # Check if the binaries for the given version are available in the local old binary repository
     def version_in_local_repo(self, version):
         return (self.local_binary_repo is not None) and (self.local_binary_repo.joinpath(version).exists())
 
