@@ -1251,7 +1251,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
                                           UID relocationIntervalId,
                                           const DDEnabledState* ddEnabledState,
                                           CancelConflictingDataMoves cancelConflictingDataMoves,
-                                          UID debugID) {
+                                          UID debugID,
+                                          uint64_t relocatorDebugID) {
 	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	state Future<Void> warningLogger = logWarningAfter("StartMoveShardsTooLong", 600, servers);
 
@@ -1262,7 +1263,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 	TraceEvent(SevDebug, "StartMoveShardsBegin", relocationIntervalId)
 	    .detail("DataMoveID", dataMoveId)
 	    .detail("TargetRange", describe(ranges))
-	    .detail("DebugID", debugID);
+	    .detail("DebugID", debugID)
+	    .detail("RelocatorDebugID", relocatorDebugID);
 
 	// TODO: make startMoveShards work with multiple ranges.
 	ASSERT(ranges.size() == 1);
@@ -1312,7 +1314,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					if (dataMove.getPhase() == DataMoveMetaData::Deleting) {
 						TraceEvent(SevDebug, "StartMoveShardsDataMove", relocationIntervalId)
 						    .detail("DataMoveBeingDeleted", dataMoveId)
-						    .detail("DebugID", debugID);
+						    .detail("DebugID", debugID)
+						    .detail("RelocatorDebugID", relocatorDebugID);
 						throw data_move_cancelled();
 					}
 					if (dataMove.getPhase() == DataMoveMetaData::Running) {
@@ -1417,12 +1420,13 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 									ASSERT(val.present());
 									DataMoveMetaData dmv = decodeDataMoveValue(val.get());
 									TraceEvent(
-									    SevError, "StartMoveShardsFoundConflictingDataMove", relocationIntervalId)
+									    SevWarnAlways, "StartMoveShardsFoundConflictingDataMove", relocationIntervalId)
 									    .detail("Range", rangeIntersectKeys)
 									    .detail("DataMoveID", dataMoveId.toString())
 									    .detail("ExistingDataMoveID", destId.toString())
 									    .detail("ExistingDataMove", dmv.toString())
-									    .detail("DebugID", debugID);
+									    .detail("DebugID", debugID)
+									    .detail("RelocatorDebugID", relocatorDebugID);
 									cancelDataMove = true;
 									throw retry();
 								}
@@ -1504,7 +1508,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				    .detail("DeltaRange", currentKeys.toString())
 				    .detail("Range", describe(dataMove.ranges))
 				    .detail("DataMove", dataMove.toString())
-				    .detail("DebugID", debugID);
+				    .detail("DebugID", debugID)
+				    .detail("RelocatorDebugID", relocatorDebugID);
 
 				dataMove = DataMoveMetaData();
 				if (complete) {
@@ -1519,7 +1524,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMoveRange", keys)
 					    .detail("CurrentDataMoveMetaData", dataMove.toString())
-					    .detail("DebugID", debugID);
+					    .detail("DebugID", debugID)
+					    .detail("RelocatorDebugID", relocatorDebugID);
 					wait(tr.onError(e));
 				}
 			}
@@ -1528,13 +1534,15 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 		TraceEvent(SevWarn, "StartMoveShardsError", relocationIntervalId)
 		    .errorUnsuppressed(e)
 		    .detail("DataMoveID", dataMoveId)
-		    .detail("DebugID", debugID);
+		    .detail("DebugID", debugID)
+		    .detail("RelocatorDebugID", relocatorDebugID);
 		throw;
 	}
 
 	TraceEvent(SevDebug, "StartMoveShardsEnd", relocationIntervalId)
 	    .detail("DataMoveID", dataMoveId)
-	    .detail("DebugID", debugID);
+	    .detail("DebugID", debugID)
+	    .detail("RelocatorDebugID", relocatorDebugID);
 
 	return Void();
 }
@@ -2433,7 +2441,8 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 					// 		If the older relocator sees this place holder, the old relocator aborts
 					//		If the older relocator is failed to see the place holder,
 					// 			(1.1) Either the mutataion by the old relocator to the meta data is failed
-					//			(1.2) Or the mutataion by the current cleanup is failed, then we redo the normal routine (Case 5)
+					//			(1.2) Or the mutataion by the current cleanup is failed, then we redo the normal routine
+					//(Case 5)
 					// (2) Start a background cleanUpDataMove (this cleanUpDataMove enters Case 3)
 					// Leverage background cleanup for dataMoveId metadata
 					needTriggeredBackgroundCleanUp = true;
@@ -2669,7 +2678,8 @@ Future<Void> rawStartMovement(Database occ,
 		                       params.relocationIntervalId,
 		                       params.ddEnabledState,
 		                       params.cancelConflictingDataMoves,
-		                       params.debugID);
+		                       params.debugID,
+		                       params.relocatorDebugID);
 	}
 	ASSERT(params.keys.present());
 	return startMoveKeys(std::move(occ),

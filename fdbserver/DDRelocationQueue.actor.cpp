@@ -1243,7 +1243,8 @@ struct DDQueue : public IDDRelocationQueue {
 			TraceEvent(SevDebug, "CancelInFlightActorsInRelocator")
 			    .detail("DebugID", debugID)
 			    .detail("Range", rd.keys)
-			    .detail("IntersectRange", KeyRangeRef(ranges.front().begin, ranges.back().end));
+			    .detail("IntersectRange", KeyRangeRef(ranges.front().begin, ranges.back().end))
+			    .detail("AchievedRanges", ranges);
 			inFlightActors.cancel(KeyRangeRef(ranges.front().begin, ranges.back().end));
 
 			TraceEvent(SevDebug, "CancelDataMoveInRelocatorStart").detail("DebugID", debugID).detail("Range", rd.keys);
@@ -1283,7 +1284,8 @@ struct DDQueue : public IDDRelocationQueue {
 				TraceEvent(SevDebug, "InFlightRelocationChange")
 				    .detail("DebugID", debugID)
 				    .detail("Launch", rrs.dataMoveId)
-				    .detail("Total", activeRelocations);
+				    .detail("Total", activeRelocations)
+				    .detail("Range", rrs.keys);
 				startRelocation(rrs.priority, rrs.healthPriority);
 				// Start the actor that relocates data in the rrs.keys
 				inFlightActors.insert(rrs.keys,
@@ -1389,17 +1391,19 @@ ACTOR Future<Void> cancelDataMove(struct DDQueue* self,
                                   KeyRange range,
                                   const DDEnabledState* ddEnabledState,
                                   UID debugID) {
-	state std::vector<Future<Void>> cleanup;
 	TraceEvent(SevDebug, "CancelDataMove", self->distributorId).detail("DebugID", debugID).detail("Range", range);
+	state std::vector<Future<Void>> cleanup;
 	state std::vector<UID> existingCleanedupDataMoves;
 	state std::vector<UID> newCleanedupDataMoves;
 	state std::vector<std::pair<KeyRange, UID>> lastObservedDataMoves;
 
 	loop {
 		try {
+			cleanup.clear();
 			existingCleanedupDataMoves.clear();
 			newCleanedupDataMoves.clear();
 			lastObservedDataMoves.clear();
+
 			auto f = self->dataMoves.intersectingRanges(range);
 			for (auto it = f.begin(); it != f.end(); ++it) {
 				TraceEvent(SevDebug, "CancelDataMoveDetails", self->distributorId)
@@ -1454,7 +1458,7 @@ ACTOR Future<Void> cancelDataMove(struct DDQueue* self,
 						// others do backoff and retry cleanup later
 						// In this case, someone else of the overlapping range has changed the ddQueue->dataMoves
 						// Thus, the cleanup retries later
-						TraceEvent(SevDebug, "DataMoveCancelWhenCleanUpDone", self->distributorId)
+						TraceEvent(SevDebug, "DataMoveConcurrentCleanUpFound", self->distributorId)
 						    .detail("DebugID", debugID)
 						    .detail("Range", range)
 						    .detail("OldRange", observedDataMove.first)
@@ -1541,8 +1545,14 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state double startTime = now();
 	state std::vector<UID> destIds;
 	state WantTrueBest wantTrueBest(isValleyFillerPriority(rd.priority));
-	state uint64_t debugIDForPhysicalShardCollection = deterministicRandom()->randomUInt64();
+	state uint64_t relocatorDebugID = deterministicRandom()->randomUInt64();
 	state bool enableShardMove = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD;
+
+	TraceEvent(SevDebug, "DDRelocatorStart", distributorId)
+	    .detail("Range", rd.keys)
+	    .detail("DebugID", debugID)
+	    .detail("IsRestore", rd.isRestore())
+	    .detail("RelocatorID", relocatorDebugID);
 
 	try {
 		if (now() - self->lastInterval < 1.0) {
@@ -1599,6 +1609,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				e.detail("NewDataMoveID", rd.dataMoveId);
 				e.detail("NewRange", rd.keys);
 				e.detail("Range", rd.keys);
+				e.detail("RelocatorID", relocatorDebugID);
 				self->dataMoves.insert(rd.keys, DDQueue::DDDataMove(rd.dataMoveId));
 			}
 		}
@@ -1678,7 +1689,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							       physicalShardIDCandidate != anonymousShardId.first());
 							std::pair<Optional<ShardsAffectedByTeamFailure::Team>, bool> remoteTeamWithPhysicalShard =
 							    self->physicalShardCollection->tryGetAvailableRemoteTeamWith(
-							        physicalShardIDCandidate, metrics, debugIDForPhysicalShardCollection);
+							        physicalShardIDCandidate, metrics, relocatorDebugID);
 							if (!remoteTeamWithPhysicalShard.second) {
 								// Physical shard with `physicalShardIDCandidate` is not available. Retry selecting new
 								// dst physical shard.
@@ -1771,11 +1782,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 
 								if (forceToUseNewPhysicalShard) {
 									physicalShardIDCandidate =
-									    self->physicalShardCollection->generateNewPhysicalShardID(debugIDForPhysicalShardCollection);
+									    self->physicalShardCollection->generateNewPhysicalShardID(relocatorDebugID);
 								} else {
 									Optional<uint64_t> candidate =
 									    self->physicalShardCollection->trySelectAvailablePhysicalShardFor(
-									        primaryTeam, metrics, excludedDstPhysicalShards, debugIDForPhysicalShardCollection);
+									        primaryTeam, metrics, excludedDstPhysicalShards, relocatorDebugID);
 									if (candidate.present()) {
 										physicalShardIDCandidate = candidate.get();
 									} else {
@@ -2018,7 +2029,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				                                          relocateShardInterval.pairID,
 				                                          ddEnabledState,
 				                                          CancelConflictingDataMoves::False,
-				                                          debugID);
+				                                          debugID,
+				                                          relocatorDebugID);
 			} else {
 				params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
 				                                          rd.keys,
@@ -2032,7 +2044,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				                                          relocateShardInterval.pairID,
 				                                          ddEnabledState,
 				                                          CancelConflictingDataMoves::False,
-				                                          debugID);
+				                                          debugID,
+				                                          relocatorDebugID);
 			}
 			state Future<Void> doMoveKeys = self->txnProcessor->moveKeys(*params);
 			state Future<Void> pollHealth =
@@ -2061,7 +2074,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 									                                          relocateShardInterval.pairID,
 									                                          ddEnabledState,
 									                                          CancelConflictingDataMoves::False,
-									                                          debugID);
+									                                          debugID,
+									                                          relocatorDebugID);
 								} else {
 									params = std::make_unique<MoveKeysParams>(rd.dataMoveId,
 									                                          rd.keys,
@@ -2075,7 +2089,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 									                                          relocateShardInterval.pairID,
 									                                          ddEnabledState,
 									                                          CancelConflictingDataMoves::False,
-									                                          debugID);
+									                                          debugID,
+									                                          relocatorDebugID);
 								}
 								doMoveKeys = self->txnProcessor->moveKeys(*params);
 							} else {
@@ -2177,7 +2192,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						// The update of PhysicalShardToTeams, PhysicalShardInstances, keyRangePhysicalShardIDMap should
 						// be atomic
 						self->physicalShardCollection->updatePhysicalShardCollection(
-						    rd.keys, rd.isRestore(), selectedTeams, rd.dataMoveId.first(), metrics, debugIDForPhysicalShardCollection);
+						    rd.keys, rd.isRestore(), selectedTeams, rd.dataMoveId.first(), metrics, relocatorDebugID);
 					}
 
 					return Void();
@@ -2217,7 +2232,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 		relocationComplete.send(rd);
 
 		if (err.code() == error_code_data_move_dest_team_not_found) {
-			TraceEvent(SevDebug, "DataMoveDestTeamNotFound").detail("InputRange", rd.keys).detail("DebugID", debugIDForPhysicalShardCollection);
+			TraceEvent(SevDebug, "DataMoveDestTeamNotFound")
+			    .detail("InputRange", rd.keys)
+			    .detail("DebugID", relocatorDebugID);
 			wait(cancelDataMove(self, rd.keys, ddEnabledState));
 		}
 

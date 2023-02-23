@@ -74,6 +74,7 @@ struct MoveKeysParams {
 	const DDEnabledState* ddEnabledState = nullptr;
 	CancelConflictingDataMoves cancelConflictingDataMoves = CancelConflictingDataMoves::False;
 	UID debugID;
+	uint64_t relocatorDebugID;
 
 	MoveKeysParams() {}
 
@@ -127,13 +128,14 @@ struct MoveKeysParams {
 	               UID relocationIntervalId,
 	               const DDEnabledState* ddEnabledState,
 	               CancelConflictingDataMoves cancelConflictingDataMoves,
-	               UID debugID)
+	               UID debugID,
+	               uint64_t relocatorDebugID)
 	  : dataMoveId(dataMoveId), keys(keys), destinationTeam(destinationTeam), healthyDestinations(healthyDestinations),
 	    lock(lock), dataMovementComplete(dataMovementComplete),
 	    startMoveKeysParallelismLock(startMoveKeysParallelismLock),
 	    finishMoveKeysParallelismLock(finishMoveKeysParallelismLock), hasRemote(hasRemote),
 	    relocationIntervalId(relocationIntervalId), ddEnabledState(ddEnabledState),
-	    cancelConflictingDataMoves(cancelConflictingDataMoves), debugID(debugID) {}
+	    cancelConflictingDataMoves(cancelConflictingDataMoves), debugID(debugID), relocatorDebugID(relocatorDebugID) {}
 
 	MoveKeysParams(UID dataMoveId,
 	               const std::vector<KeyRange>& ranges,
@@ -147,13 +149,14 @@ struct MoveKeysParams {
 	               UID relocationIntervalId,
 	               const DDEnabledState* ddEnabledState,
 	               CancelConflictingDataMoves cancelConflictingDataMoves,
-	               UID debugID)
+	               UID debugID,
+	               uint64_t relocatorDebugID)
 	  : dataMoveId(dataMoveId), ranges(ranges), destinationTeam(destinationTeam),
 	    healthyDestinations(healthyDestinations), lock(lock), dataMovementComplete(dataMovementComplete),
 	    startMoveKeysParallelismLock(startMoveKeysParallelismLock),
 	    finishMoveKeysParallelismLock(finishMoveKeysParallelismLock), hasRemote(hasRemote),
 	    relocationIntervalId(relocationIntervalId), ddEnabledState(ddEnabledState),
-	    cancelConflictingDataMoves(cancelConflictingDataMoves), debugID(debugID) {}
+	    cancelConflictingDataMoves(cancelConflictingDataMoves), debugID(debugID), relocatorDebugID(relocatorDebugID) {}
 };
 
 // read the lock value in system keyspace but do not change anything
