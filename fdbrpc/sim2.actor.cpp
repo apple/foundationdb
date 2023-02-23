@@ -163,7 +163,7 @@ struct SimClogging {
 		}
 
 		auto i = clogPairLatency.find(std::make_pair(from, to));
-		if (i == clogPairLatency.end()) {
+		if (i != clogPairLatency.end()) {
 			clogPairLatency.erase(i);
 		}
 	}
