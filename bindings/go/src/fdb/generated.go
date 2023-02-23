@@ -427,7 +427,7 @@ func (o DatabaseOptions) SetTransactionUsedDuringCommitProtectionDisable() error
 	return o.setOpt(701, nil)
 }
 
-// The transaction can retrieve keys that are conflicting with other transactions.
+// Enables conflicting key reporting on all transactions, allowing them to retrieve the keys that are conflicting with other transactions.
 func (o DatabaseOptions) SetTransactionReportConflictingKeys() error {
 	return o.setOpt(702, nil)
 }
