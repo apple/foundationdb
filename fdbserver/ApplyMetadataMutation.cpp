@@ -24,6 +24,7 @@
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/Tenant.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
@@ -688,7 +689,15 @@ private:
 	void checkSetTenantMapPrefix(MutationRef m) {
 		KeyRef prefix = TenantMetadata::tenantMap().subspace.begin;
 		if (m.param1.startsWith(prefix)) {
-			TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
+			TenantMapEntry tenantEntry;
+			if (initialCommit) {
+				TenantMapEntryTxnStateStore txnStateStoreEntry = TenantMapEntryTxnStateStore::decode(m.param2);
+				tenantEntry.setId(txnStateStoreEntry.id);
+				tenantEntry.tenantName = txnStateStoreEntry.tenantName;
+				tenantEntry.tenantLockState = txnStateStoreEntry.tenantLockState;
+			} else {
+				tenantEntry = TenantMapEntry::decode(m.param2);
+			}
 
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
@@ -712,7 +721,7 @@ private:
 			}
 
 			if (!initialCommit) {
-				txnStateStore->set(KeyValueRef(m.param1, m.param2));
+				txnStateStore->set(KeyValueRef(m.param1, tenantEntry.toTxnStateStoreEntry().encode()));
 			}
 
 			// For now, this goes to all storage servers.

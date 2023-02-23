@@ -54,6 +54,29 @@ TenantLockState stringToTenantLockState(std::string stateStr);
 json_spirit::mObject binaryToJson(StringRef bytes);
 
 struct MetaclusterTenantMapEntry;
+
+struct TenantMapEntryTxnStateStore {
+	constexpr static FileIdentifier file_identifier = 11267001;
+
+	int64_t id = -1;
+	TenantName tenantName;
+	TenantAPI::TenantLockState tenantLockState = TenantAPI::TenantLockState::UNLOCKED;
+
+	TenantMapEntryTxnStateStore() {}
+	TenantMapEntryTxnStateStore(int64_t id, TenantName tenantName, TenantAPI::TenantLockState tenantLockState)
+	  : id(id), tenantName(tenantName), tenantLockState(tenantLockState) {}
+
+	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
+	static TenantMapEntryTxnStateStore decode(ValueRef const& value) {
+		return ObjectReader::fromStringRef<TenantMapEntryTxnStateStore>(value, IncludeVersion());
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, id, tenantLockState, tenantName);
+	}
+};
+
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 7054389;
 
@@ -79,6 +102,10 @@ struct TenantMapEntry {
 	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
 	static TenantMapEntry decode(ValueRef const& value) {
 		return ObjectReader::fromStringRef<TenantMapEntry>(value, IncludeVersion());
+	}
+
+	TenantMapEntryTxnStateStore toTxnStateStoreEntry() const {
+		return TenantMapEntryTxnStateStore(id, tenantName, tenantLockState);
 	}
 
 	bool operator==(TenantMapEntry const& other) const;

@@ -422,6 +422,16 @@ func (o DatabaseOptions) SetTransactionBypassUnreadable() error {
 	return o.setOpt(700, nil)
 }
 
+// By default, operations that are performed on a transaction while it is being committed will not only fail themselves, but they will attempt to fail other in-flight operations (such as the commit) as well. This behavior is intended to help developers discover situations where operations could be unintentionally executed after the transaction has been reset. Setting this option removes that protection, causing only the offending operation to fail.
+func (o DatabaseOptions) SetTransactionUsedDuringCommitProtectionDisable() error {
+	return o.setOpt(701, nil)
+}
+
+// Enables conflicting key reporting on all transactions, allowing them to retrieve the keys that are conflicting with other transactions.
+func (o DatabaseOptions) SetTransactionReportConflictingKeys() error {
+	return o.setOpt(702, nil)
+}
+
 // Use configuration database.
 func (o DatabaseOptions) SetUseConfigDatabase() error {
 	return o.setOpt(800, nil)

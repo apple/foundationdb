@@ -239,7 +239,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	                                             Database dataDb,
 	                                             std::string backupUrl,
 	                                             bool addToMetacluster,
-	                                             ForceJoinNewMetacluster forceJoinNewMetacluster,
+	                                             ForceJoin forceJoin,
 	                                             int simultaneousRestoreCount,
 	                                             MetaclusterRestoreWorkload* self) {
 		state FileBackupAgent backupAgent;
@@ -274,7 +274,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				                                    dataDb->getConnectionRecord()->getConnectionString(),
 				                                    ApplyManagementClusterUpdates::True,
 				                                    RestoreDryRun::True,
-				                                    forceJoinNewMetacluster,
+				                                    forceJoin,
 				                                    &messages));
 
 				state MetaclusterData<IDatabase> postDryRunMetaclusterData(self->managementDb);
@@ -298,7 +298,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			                                    dataDb->getConnectionRecord()->getConnectionString(),
 			                                    ApplyManagementClusterUpdates::True,
 			                                    RestoreDryRun::False,
-			                                    forceJoinNewMetacluster,
+			                                    forceJoin,
 			                                    &messages));
 			TraceEvent("MetaclusterRestoreWorkloadRestoreComplete").detail("ClusterName", clusterName);
 		}
@@ -516,8 +516,10 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			TraceEvent("MetaclusterRestoreWorkloadProcessDataCluster").detail("FromCluster", clusterItr->first);
 
 			// Remove the data cluster from its old metacluster
-			wait(success(MetaclusterAPI::removeCluster(
-			    clusterItr->second.db.getReference(), clusterItr->first, ClusterType::METACLUSTER_DATA, true)));
+			wait(success(MetaclusterAPI::removeCluster(clusterItr->second.db.getReference(),
+			                                           clusterItr->first,
+			                                           ClusterType::METACLUSTER_DATA,
+			                                           ForceRemove::True)));
 			TraceEvent("MetaclusterRestoreWorkloadForgotMetacluster").detail("ClusterName", clusterItr->first);
 
 			state std::pair<TenantCollisions, GroupCollisions> collisions =
@@ -554,7 +556,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 						    clusterItr->second.db->getConnectionRecord()->getConnectionString(),
 						    ApplyManagementClusterUpdates::False,
 						    RestoreDryRun::True,
-						    ForceJoinNewMetacluster(deterministicRandom()->coinflip()),
+						    ForceJoin(deterministicRandom()->coinflip()),
 						    &messages));
 
 						state MetaclusterData<IDatabase> postDryRunMetaclusterData(self->managementDb);
@@ -582,7 +584,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 					    clusterItr->second.db->getConnectionRecord()->getConnectionString(),
 					    ApplyManagementClusterUpdates::False,
 					    RestoreDryRun::False,
-					    ForceJoinNewMetacluster(deterministicRandom()->coinflip()),
+					    ForceJoin(deterministicRandom()->coinflip()),
 					    &messages));
 
 					ASSERT(collisions.first.empty() && collisions.second.empty());
@@ -597,8 +599,10 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 					// If the restore did not succeed, remove the partially restored cluster
 					try {
-						wait(success(MetaclusterAPI::removeCluster(
-						    self->managementDb, clusterItr->first, ClusterType::METACLUSTER_MANAGEMENT, true)));
+						wait(success(MetaclusterAPI::removeCluster(self->managementDb,
+						                                           clusterItr->first,
+						                                           ClusterType::METACLUSTER_MANAGEMENT,
+						                                           ForceRemove::True)));
 						TraceEvent("MetaclusterRestoreWorkloadRemoveFailedCluster")
 						    .detail("ClusterName", clusterItr->first);
 					} catch (Error& e) {
@@ -928,7 +932,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			                                      self->dataDbs[cluster].db,
 			                                      backupUrl.get(),
 			                                      !self->recoverManagementCluster,
-			                                      ForceJoinNewMetacluster(deterministicRandom()->coinflip()),
+			                                      ForceJoin(deterministicRandom()->coinflip()),
 			                                      backups.size(),
 			                                      self));
 		}
@@ -945,7 +949,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 					                                            self->dataDbs[cluster].db,
 					                                            backupUrl.get(),
 					                                            true,
-					                                            ForceJoinNewMetacluster::True,
+					                                            ForceJoin::True,
 					                                            backups.size(),
 					                                            self));
 				}
