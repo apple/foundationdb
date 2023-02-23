@@ -498,7 +498,7 @@ if(WITH_PYTHON)
     endif()
   endif()
 
-  if(NOT OPEN_FOR_IDE AND NOT WIN32 AND NOT USE_SANITIZER)
+  if(NOT OPEN_FOR_IDE AND NOT WIN32)
     # setup venv for testing token-based authorization
     if(APPLE)
       set(ld_env_name "DYLD_LIBRARY_PATH")

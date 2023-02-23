@@ -31,6 +31,8 @@
 #include <cctype>
 #include <time.h>
 #include <set>
+#include <unordered_set>
+#include <string_view>
 #include <iomanip>
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.actor.h"
@@ -101,7 +103,22 @@ SuppressionMap suppressedEvents;
 static TransientThresholdMetricSample<Standalone<StringRef>>* traceEventThrottlerCache;
 static const char* TRACE_EVENT_THROTTLE_STARTING_TYPE = "TraceEventThrottle_";
 static const char* TRACE_EVENT_INVALID_SUPPRESSION = "InvalidSuppression_";
+static const char* TRACE_EVENT_INVALID_AUDIT_LOG_TYPE = "InvalidAuditLogType_";
 static int TRACE_LOG_MAX_PREOPEN_BUFFER = 1000000;
+
+// special TraceEvents that may bypass throttling or suppression by AuditThisEvent{} passed to constructor
+const std::unordered_set<std::string_view> auditTopics{
+	"AttemptedRPCToPrivatePrevented",
+	"AuditTokenUsed",
+	"IncomingConnection",
+	"InvalidToken",
+	"N2_ConnectHandshakeError",
+	"N2_ConnectHandshakeUnknownError",
+	"N2_AcceptHandshakeError",
+	"N2_AcceptHandshakeUnknownError",
+	"TenantTokenMismatch",
+	"UnauthorizedAccessPrevented",
+};
 
 struct TraceLog {
 	Reference<ITraceLogFormatter> formatter;
@@ -859,9 +876,9 @@ std::string getTraceFormatExtension() {
 	return std::string(g_traceLog.formatter->getExtension());
 }
 
-BaseTraceEvent::BaseTraceEvent() : initialized(true), enabled(false), logged(true) {}
+BaseTraceEvent::BaseTraceEvent() : enabled(0), initialized(true), logged(true) {}
 BaseTraceEvent::BaseTraceEvent(Severity severity, const char* type, UID id)
-  : initialized(false), enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity), logged(false),
+  : enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity), initialized(false), logged(false),
     severity(severity), type(type), id(id) {}
 
 BaseTraceEvent::BaseTraceEvent(BaseTraceEvent&& ev) {
@@ -885,8 +902,8 @@ BaseTraceEvent::BaseTraceEvent(BaseTraceEvent&& ev) {
 
 	networkThread = ev.networkThread;
 
+	ev.enabled = 0;
 	ev.initialized = true;
-	ev.enabled = false;
 	ev.logged = true;
 }
 
@@ -912,8 +929,8 @@ BaseTraceEvent& BaseTraceEvent::operator=(BaseTraceEvent&& ev) {
 
 	networkThread = ev.networkThread;
 
+	ev.enabled = 0;
 	ev.initialized = true;
-	ev.enabled = false;
 	ev.logged = true;
 
 	return *this;
@@ -949,8 +966,31 @@ TraceEvent::TraceEvent(Severity severity, TraceInterval& interval, UID id)
 	init(interval);
 }
 
-bool BaseTraceEvent::init(TraceInterval& interval) {
-	bool result = init();
+TraceEvent::TraceEvent(Severity severity, const char* type, AuditThisEvent, UID id)
+  : BaseTraceEvent(severity, type, id) {
+	setMaxFieldLength(0);
+	setMaxEventLength(0);
+	if (FLOW_KNOBS->AUDIT_LOGGING_ENABLED) {
+		if (!isAudited(this->type)) {
+			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways,
+			           std::string(TRACE_EVENT_INVALID_AUDIT_LOG_TYPE).append(type).c_str())
+			    .suppressFor(5);
+		} else {
+			// respect the result of network init state and min trace level check in BaseTraceEvent ctor
+			if (enabled)
+				enabled = 2;
+		}
+	}
+}
+
+TraceEvent::TraceEvent(const char* type, AuditThisEvent, UID id) : TraceEvent(SevInfo, type, AuditThisEvent{}, id) {}
+
+bool TraceEvent::isAudited(std::string_view type) noexcept {
+	return auditTopics.contains(type);
+}
+
+void BaseTraceEvent::init(TraceInterval& interval) {
+	init();
 	switch (interval.count++) {
 	case 0: {
 		detail("BeginPair", interval.pairID);
@@ -963,10 +1003,9 @@ bool BaseTraceEvent::init(TraceInterval& interval) {
 	default:
 		ASSERT(false);
 	}
-	return result;
 }
 
-bool BaseTraceEvent::init() {
+int BaseTraceEvent::init() {
 	ASSERT(!logged);
 	if (initialized) {
 		return enabled;
@@ -977,12 +1016,14 @@ bool BaseTraceEvent::init() {
 
 	++g_allocation_tracing_disabled;
 
-	enabled = enabled && (!g_network || severity >= FLOW_KNOBS->MIN_TRACE_SEVERITY);
+	enabled = (!g_network || severity >= FLOW_KNOBS->MIN_TRACE_SEVERITY) ? enabled : 0;
+
+	std::string_view typeSv(type);
 
 	// Backstop to throttle very spammy trace events
-	if (enabled && g_network && !g_network->isSimulated() && severity > SevDebug && isNetworkThread()) {
+	if (enabled == 1 && g_network && !g_network->isSimulated() && severity > SevDebug && isNetworkThread()) {
 		if (traceEventThrottlerCache->isAboveThreshold(StringRef((uint8_t*)type, strlen(type)))) {
-			enabled = false;
+			enabled = 0;
 			TraceEvent(SevWarnAlways, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str())
 			    .suppressFor(5);
 		} else {
@@ -1054,7 +1095,7 @@ TraceEvent& TraceEvent::errorImpl(class Error const& error, bool includeCancelle
 			           std::string(TRACE_EVENT_INVALID_SUPPRESSION).append(type).c_str())
 			    .suppressFor(5);
 		} else {
-			enabled = false;
+			enabled = 0; // even force-enabled events should respect suppression by error type
 		}
 	}
 	return *this;
@@ -1078,7 +1119,7 @@ BaseTraceEvent& BaseTraceEvent::detailImpl(std::string&& key, std::string&& valu
 			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, "TraceEventOverflow")
 			    .setMaxEventLength(1000)
 			    .detail("TraceFirstBytes", fields.toString().substr(0, 300));
-			enabled = false;
+			enabled = 0;
 		}
 		--g_allocation_tracing_disabled;
 	}
@@ -1149,6 +1190,7 @@ BaseTraceEvent& TraceEvent::sample(double sampleRate, bool logSampleRate) {
 			return *this;
 		}
 
+		// forced logs (enabled == 2) shall not be sampled anyway
 		enabled = enabled && deterministicRandom()->random01() < sampleRate;
 
 		if (enabled && logSampleRate) {
@@ -1161,7 +1203,8 @@ BaseTraceEvent& TraceEvent::sample(double sampleRate, bool logSampleRate) {
 
 BaseTraceEvent& TraceEvent::suppressFor(double duration, bool logSuppressedEventCount) {
 	ASSERT(!logged);
-	if (enabled) {
+	// only suppress if not force-enabled (enabled == 2)
+	if (enabled == 1) {
 		if (initialized) {
 			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways,
 			           std::string(TRACE_EVENT_INVALID_SUPPRESSION).append(type).c_str())
@@ -1290,7 +1333,6 @@ void BaseTraceEvent::log() {
 				if (isNetworkThread()) {
 					TraceEvent::eventCounts[severity / 10]++;
 				}
-
 				g_traceLog.writeEvent(fields, trackingKey, severity > SevWarnAlways);
 
 				if (g_traceLog.isOpen()) {

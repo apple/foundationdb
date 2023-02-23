@@ -341,11 +341,15 @@ class BindPromise {
 	Promise<Void> p;
 	const char* errContext;
 	UID errID;
+	bool isAudited;
 
 public:
-	BindPromise(const char* errContext, UID errID) : errContext(errContext), errID(errID) {}
-	BindPromise(BindPromise const& r) : p(r.p), errContext(r.errContext), errID(r.errID) {}
-	BindPromise(BindPromise&& r) noexcept : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
+	BindPromise(const char* errContext, UID errID) : errContext(errContext), errID(errID), isAudited(false) {}
+	BindPromise(const char* errContext, UID errID, AuditThisEvent)
+	  : errContext(errContext), errID(errID), isAudited(true) {}
+	BindPromise(BindPromise const& r) : p(r.p), errContext(r.errContext), errID(r.errID), isAudited(r.isAudited) {}
+	BindPromise(BindPromise&& r) noexcept
+	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), isAudited(r.isAudited) {}
 
 	Future<Void> getFuture() const { return p.getFuture(); }
 
@@ -354,7 +358,12 @@ public:
 			if (error) {
 				// Log the error...
 				{
-					TraceEvent evt(SevWarn, errContext, errID);
+					std::optional<TraceEvent> traceEvent;
+					if (isAudited)
+						traceEvent.emplace(SevWarn, errContext, AuditThisEvent{}, errID);
+					else
+						traceEvent.emplace(SevWarn, errContext, errID);
+					TraceEvent& evt = *traceEvent;
 					evt.suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
 					// There is no function in OpenSSL to use to check if an error code is from OpenSSL,
 					// but all OpenSSL errors have a non-zero "library" code set in bits 24-32, and linux
@@ -801,7 +810,8 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 			if (h.err.failed()) {
 				TraceEvent(SevWarn,
 				           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError"
-				                                                        : "N2_AcceptHandshakeError")
+				                                                        : "N2_AcceptHandshakeError",
+				           AuditThisEvent{})
 				    .detail("ErrorCode", h.err.value())
 				    .detail("ErrorMsg", h.err.message().c_str())
 				    .detail("BackgroundThread", true);
@@ -812,7 +822,8 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 		} catch (...) {
 			TraceEvent(SevWarn,
 			           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeUnknownError"
-			                                                        : "N2_AcceptHandshakeUnknownError")
+			                                                        : "N2_AcceptHandshakeUnknownError",
+			           AuditThisEvent{})
 			    .detail("BackgroundThread", true);
 			h.done.sendError(connection_failed());
 		}
@@ -903,7 +914,7 @@ public:
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
 				// Otherwise use flow network thread
-				BindPromise p("N2_AcceptHandshakeError", UID());
+				BindPromise p("N2_AcceptHandshakeError", UID(), AuditThisEvent{});
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::server, std::move(p));
 			}
@@ -985,7 +996,7 @@ public:
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
 				// Otherwise use flow network thread
-				BindPromise p("N2_ConnectHandshakeError", self->id);
+				BindPromise p("N2_ConnectHandshakeError", self->id, AuditThisEvent{});
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::client, std::move(p));
 			}

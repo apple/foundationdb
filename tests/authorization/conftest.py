@@ -19,16 +19,19 @@
 # limitations under the License.
 #
 import fdb
+import functools
 import pytest
 import subprocess
 import admin_server
 import base64
 import glob
 import time
+import ipaddress
 from local_cluster import TLSConfig
 from tmp_cluster import TempCluster
 from typing import Union
 from util import random_alphanum_str, random_alphanum_bytes, to_str, to_bytes
+from test_util import ScopedTraceChecker
 import xml.etree.ElementTree as ET
 
 fdb.api_version(720)
@@ -102,6 +105,7 @@ def admin_ipc():
 
 @pytest.fixture(autouse=True, scope=cluster_scope)
 def cluster(admin_ipc, build_dir, public_key_refresh_interval, trusted_client, force_multi_version_client, use_grv_cache):
+    cluster_creation_time = time.time()
     with TempCluster(
             build_dir=build_dir,
             tls_config=TLSConfig(server_chain_len=3, client_chain_len=2),
@@ -125,32 +129,67 @@ def cluster(admin_ipc, build_dir, public_key_refresh_interval, trusted_client, f
         admin_ipc.request("configure_client", [force_multi_version_client, use_grv_cache, logdir])
         admin_ipc.request("configure_tls", [keyfile, certfile, cafile])
         admin_ipc.request("connect", [str(cluster.cluster_file)])
+
+        def check_no_invalid_traces(entries):
+            for filename, ev_type, entry in entries:
+                if ev_type.startswith("InvalidAuditLogType_"):
+                    pytest.fail("Invalid audit log detected in file {}: {}".format(filename, entry.items()))
+
+        cluster.add_trace_check(check_no_invalid_traces)
+
+        def check_public_keyset_apply(entries, cluster_creation_time):
+            keyset_apply_ev_type = "AuthzPublicKeySetApply"
+            bad_ev_type = "AuthzPublicKeyFileNotSet"
+            apply_trace_time = None
+            bad_trace_time = None
+            for filename, ev_type, entry in entries:
+                if apply_trace_time is None and ev_type == keyset_apply_ev_type and int(entry.attrib["NumPublicKeys"]) > 0:
+                    apply_trace_time = float(entry.attrib["Time"])
+                if bad_trace_time is None and ev_type == bad_ev_type:
+                    bad_trace_found = float(entry.attrib["Time"])
+            if apply_trace_time is None:
+                pytest.fail(f"failed to find '{keyset_apply_ev_type}' event with >0 public keys")
+            else:
+                print(f"'{keyset_apply_ev_type}' found at {apply_trace_time - cluster_creation_time}s since cluster creation")
+            if bad_trace_time is not None:
+                pytest.fail(f"unexpected '{bad_ev_type}' trace found at {bad_trace_time}")
+
+        cluster.add_trace_check(functools.partial(check_public_keyset_apply, cluster_creation_time=cluster_creation_time))
+
+        def check_connection_traces(entries, look_for_untrusted):
+            trusted_conns_traced = False # admin connections
+            untrusted_conns_traced = False
+            ev_target = "IncomingConnection"
+            for _, ev_type, entry in entries:
+                if ev_type == ev_target:
+                    trusted = entry.attrib["Trusted"]
+                    from_addr = entry.attrib["FromAddr"]
+                    client_ip, port, tls_suffix = from_addr.split(":")
+                    if tls_suffix != "tls":
+                        pytest.fail(f"{ev_target} trace entry's FromAddr does not have a valid ':tls' suffix: found '{tls_suffix}'")
+                    try:
+                        ip = ipaddress.ip_address(client_ip)
+                    except ValueError as e:
+                        pytest.fail(f"{ev_target} trace entry's FromAddr '{client_ip}' has an invalid IP format: {e}")
+
+                    if trusted == "1":
+                        trusted_conns_traced = True
+                    elif trusted == "0":
+                        untrusted_conns_traced = True
+                    else:
+                        pytest.fail(f"{ev_target} trace entry's Trusted field has an unexpected value: {trusted}")
+            if look_for_untrusted and not untrusted_conns_traced:
+                pytest.fail("failed to find any 'IncomingConnection' traces for untrusted clients")
+            if not trusted_conns_traced:
+                pytest.fail("failed to find any 'IncomingConnection' traces for trusted clients")
+
+        cluster.add_trace_check(functools.partial(check_connection_traces, look_for_untrusted=not trusted_client))
+
         yield cluster
-        err_count = {}
-        for file in glob.glob(str(cluster.log.joinpath("*.xml"))):
-            lineno = 1
-            for line in open(file):
-                try:
-                    doc = ET.fromstring(line)
-                except:
-                    continue
-                if doc.attrib.get("Severity", "") == "40":
-                    ev_type = doc.attrib.get("Type", "[unset]")
-                    err = doc.attrib.get("Error", "[unset]")
-                    tup = (file, ev_type, err)
-                    err_count[tup] = err_count.get(tup, 0) + 1
-                lineno += 1
-        print("Sev40 Summary:")
-        if len(err_count) == 0:
-            print("  No errors")
-        else:
-            for tup, count in err_count.items():
-                print("  {}: {}".format(tup, count))
 
 @pytest.fixture
 def db(cluster, admin_ipc):
     db = fdb.open(str(cluster.cluster_file))
-    #db.options.set_transaction_timeout(2000) # 2 seconds
     db.options.set_transaction_retry_limit(10)
     yield db
     admin_ipc.request("cleanup_database")
@@ -188,11 +227,17 @@ def tenant_tr_gen(db, use_grv_cache):
     return fn
 
 @pytest.fixture
-def token_claim_1h(db):
+def tenant_id_from_name(db):
+    def fn(tenant_name):
+        tenant = db.open_tenant(to_bytes(tenant_name))
+        return tenant.get_id().wait() # returns int
+    return fn
+
+@pytest.fixture
+def token_claim_1h(tenant_id_from_name):
     # JWT claim that is valid for 1 hour since time of invocation
     def fn(tenant_name: Union[bytes, str]):
-        tenant = db.open_tenant(to_bytes(tenant_name))
-        tenant_id = tenant.get_id().wait()
+        tenant_id = tenant_id_from_name(tenant_name)
         now = time.time()
         return {
             "iss": "fdb-authz-tester",

@@ -537,8 +537,11 @@ public:
 	const TraceEventFields& getFields() const { return fields; }
 
 protected:
+	// enabled == 0 for disabled trace
+	// enabled == 1 for trace events that may be suppressed or throttled
+	// enabled == 2 to indicate forced logging
+	int enabled;
 	bool initialized;
-	bool enabled;
 	bool logged;
 	std::string trackingKey;
 	TraceEventFields fields;
@@ -558,9 +561,16 @@ protected:
 	static unsigned long eventCounts[NUM_MAJOR_LEVELS_OF_EVENTS];
 	static thread_local bool networkThread;
 
-	bool init();
-	bool init(struct TraceInterval&);
+	int init();
+	void init(struct TraceInterval&);
 };
+
+// Construct TraceEvents with this tag struct to ensure that the events are not suppressed or throttled.
+// Force-enablement activates only iff FLOW_KNOBS->AUDIT_LOGGING_ENABLED is set and the event type is
+// whitelisted: i.e. passes TraceEvent::isAudited() check.
+// Failing to satify the latter condition would result in an error/warning trace in simulation/real execution mode.
+// Force-enabled traces still adhere to MIN_TRACE_SEVERITY and buffer-all-logs-before-network-init policy.
+struct AuditThisEvent {};
 
 // The TraceEvent class provides the implementation for BaseTraceEvent. The only functions that should be implemented
 // here are those that must be called first in a trace event call sequence, such as the suppression functions.
@@ -570,6 +580,8 @@ struct TraceEvent : public BaseTraceEvent {
 	TraceEvent(Severity, const char* type, UID id = UID());
 	TraceEvent(struct TraceInterval&, UID id = UID());
 	TraceEvent(Severity severity, struct TraceInterval& interval, UID id = UID());
+	TraceEvent(const char* type, AuditThisEvent, UID id = UID());
+	TraceEvent(Severity, const char* type, AuditThisEvent, UID id = UID());
 
 	BaseTraceEvent& error(const class Error& e) {
 		if (enabled) {
@@ -587,6 +599,8 @@ struct TraceEvent : public BaseTraceEvent {
 
 	BaseTraceEvent& sample(double sampleRate, bool logSampleRate = true);
 	BaseTraceEvent& suppressFor(double duration, bool logSuppressedEventCount = true);
+
+	static bool isAudited(std::string_view type) noexcept;
 
 private:
 	TraceEvent& errorImpl(const class Error& e, bool includeCancelled = false);

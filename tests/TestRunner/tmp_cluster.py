@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from cluster_args import CreateTmpFdbClusterArgParser
@@ -36,6 +37,7 @@ class TempCluster(LocalCluster):
         self.remove_at_exit = remove_at_exit
         self.enable_tenants = enable_tenants
         self.enable_encryption_at_rest = enable_encryption_at_rest
+        self.trace_check_entries = []
         super().__init__(
             tmp_dir,
             self.build_dir.joinpath("bin", "fdbserver"),
@@ -62,6 +64,7 @@ class TempCluster(LocalCluster):
 
     def __exit__(self, xc_type, exc_value, traceback):
         super().__exit__(xc_type, exc_value, traceback)
+        self.check_trace()
         if self.remove_at_exit:
             shutil.rmtree(self.tmp_dir)
 
@@ -70,6 +73,39 @@ class TempCluster(LocalCluster):
         if self.remove_at_exit:
             shutil.rmtree(self.tmp_dir)
 
+    def add_trace_check(self, check_func, filename_substr: str = ""):
+        self.trace_check_entries.append((check_func, None, None, filename_substr))
+
+    def add_trace_check_from(self, check_func, time_begin, filename_substr: str = ""):
+        self.trace_check_entries.append((check_func, time_begin, None, filename_substr))
+
+    def add_trace_check_from_to(self, check_func, time_begin, time_end, filename_substr: str = ""):
+        self.trace_check_entries.append((check_func, time_begin, time_end, filename_substr))
+
+    # generator function that yields (filename, event_type, XML_trace_entry) that matches the parameter
+    def __loop_through_trace(self, time_begin, time_end, filename_substr: str):
+        glob_pattern = str(self.log.joinpath("*.xml"))
+        for file in glob.glob(glob_pattern):
+            if filename_substr and file.find(filename_substr) == -1:
+                continue
+            for line in open(file):
+                try:
+                    entry = ET.fromstring(line)
+                    # Below fields always exist. If not, their access throws to be skipped over
+                    ev_type = entry.attrib["Type"]
+                    ts = float(entry.attrib["Time"])
+                    if time_begin != None and ts < time_begin:
+                        continue
+                    if time_end != None and time_end < ts:
+                        break # no need to look further in this file
+                    yield (file, ev_type, entry)
+                except Exception as e:
+                    pass # ignore header, footer, or broken line
+
+    # applies user-provided check_func that takes a trace entry generator as the parameter 
+    def check_trace(self):
+        for check_func, time_begin, time_end, filename_substr in self.trace_check_entries:
+            check_func(self.__loop_through_trace(time_begin, time_end, filename_substr))
 
 if __name__ == "__main__":
     script_desc = """
