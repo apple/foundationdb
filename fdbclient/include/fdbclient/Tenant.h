@@ -124,10 +124,7 @@ struct TenantMapEntry {
 struct TenantGroupEntry {
 	constexpr static FileIdentifier file_identifier = 10764222;
 
-	Optional<ClusterName> assignedCluster;
-
 	TenantGroupEntry() = default;
-	TenantGroupEntry(Optional<ClusterName> assignedCluster) : assignedCluster(assignedCluster) {}
 
 	json_spirit::mObject toJson() const;
 
@@ -141,8 +138,14 @@ struct TenantGroupEntry {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, assignedCluster);
+		serializer(ar);
 	}
+};
+
+class StandardTenantTypes {
+public:
+	using TenantMapEntryT = TenantMapEntry;
+	using TenantGroupEntryT = TenantGroupEntry;
 };
 
 struct TenantTombstoneCleanupData {
@@ -196,11 +199,12 @@ struct TenantIdCodec {
 	}
 };
 
-template <class TenantMapEntryImpl>
+template <class TenantTypes>
 struct TenantMetadataSpecification {
 	Key subspace;
 
-	KeyBackedObjectMap<int64_t, TenantMapEntryImpl, decltype(IncludeVersion()), TenantIdCodec> tenantMap;
+	KeyBackedObjectMap<int64_t, typename TenantTypes::TenantMapEntryT, decltype(IncludeVersion()), TenantIdCodec>
+	    tenantMap;
 	KeyBackedMap<TenantName, int64_t> tenantNameIndex;
 	KeyBackedMap<int64_t, UID> lockId;
 	KeyBackedProperty<int64_t> lastTenantId;
@@ -208,7 +212,8 @@ struct TenantMetadataSpecification {
 	KeyBackedSet<int64_t> tenantTombstones;
 	KeyBackedObjectProperty<TenantTombstoneCleanupData, decltype(IncludeVersion())> tombstoneCleanupData;
 	KeyBackedSet<Tuple> tenantGroupTenantIndex;
-	KeyBackedObjectMap<TenantGroupName, TenantGroupEntry, decltype(IncludeVersion()), NullCodec> tenantGroupMap;
+	KeyBackedObjectMap<TenantGroupName, typename TenantTypes::TenantGroupEntryT, decltype(IncludeVersion()), NullCodec>
+	    tenantGroupMap;
 	KeyBackedMap<TenantGroupName, int64_t> storageQuota;
 	KeyBackedBinaryValue<Versionstamp> lastTenantModification;
 
@@ -225,7 +230,7 @@ struct TenantMetadataSpecification {
 };
 
 struct TenantMetadata {
-	static TenantMetadataSpecification<TenantMapEntry>& instance();
+	static TenantMetadataSpecification<StandardTenantTypes>& instance();
 
 	static inline auto& subspace() { return instance().subspace; }
 	static inline auto& tenantMap() { return instance().tenantMap; }
