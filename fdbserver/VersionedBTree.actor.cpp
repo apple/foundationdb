@@ -6032,8 +6032,11 @@ private:
 
 			// Create and init page here otherwise many variables must become state vars
 			state Reference<ArenaPage> page = self->m_pager->newPageBuffer(p->blockCount);
-			page->init(
-			    self->m_encodingType, (p->blockCount == 1) ? PageType::BTreeNode : PageType::BTreeSuperNode, height);
+			EncodingType encoding = self->m_encodingType;
+			if (isEncodingTypeEncrypted(encoding) && p->domain.get().whitelisted()) {
+				encoding = EncodingType::XXHash64;
+			}
+			page->init(encoding, (p->blockCount == 1) ? PageType::BTreeNode : PageType::BTreeSuperNode, height);
 			if (page->isEncrypted()) {
 				ArenaPage::EncryptionKey k =
 				    wait(enableEncryptionDomain ? self->m_keyProvider->getLatestEncryptionKey(p->domain.get().domainId)
@@ -6764,10 +6767,22 @@ private:
 		// TryToUpdate indicates insert and erase operations should be tried on the existing page first
 		state bool tryToUpdate = btPage->tree()->numItems > 0 && update->boundariesNormal();
 
+		state BTreePage::BinaryTree::Cursor cursor = update->cBegin.valid()
+		                                                 ? self->getCursor(page.getPtr(), update->cBegin)
+		                                                 : self->getCursor(page.getPtr(), dbBegin, dbEnd);
+
 		state bool enableEncryptionDomain = page->isEncrypted() && self->m_keyProvider->enableEncryptionDomain();
 		state Optional<int64_t> pageDomainId;
 		if (enableEncryptionDomain) {
-			pageDomainId = page->getEncryptionDomainId();
+			if (page->isEncrypted()) {
+				pageDomainId = page->getEncryptionDomainId();
+			} else {
+				cursor.moveFirst();
+				ASSERT(cursor.valid());
+				auto info = self->m_keyProvider->getEncryptionDomain(cursor.get().key);
+				ASSERT(info.domain.whitelisted());
+				pageDomainId = info.domain.domainId;
+			}
 		}
 
 		debug_printf("%s tryToUpdate=%d\n", context.c_str(), tryToUpdate);
@@ -6777,10 +6792,6 @@ private:
 		                                       batch->snapshot->getVersion(),
 		                                       update->decodeLowerBound,
 		                                       update->decodeUpperBound)));
-
-		state BTreePage::BinaryTree::Cursor cursor = update->cBegin.valid()
-		                                                 ? self->getCursor(page.getPtr(), update->cBegin)
-		                                                 : self->getCursor(page.getPtr(), dbBegin, dbEnd);
 
 		if (self->m_pBoundaryVerifier != nullptr) {
 			if (update->cBegin.valid()) {

@@ -68,9 +68,13 @@ class IPageEncryptionKeyProvider : public ReferenceCounted<IPageEncryptionKeyPro
 public:
 	using EncryptionKey = ArenaPage::EncryptionKey;
 
+	static const EncryptCipherDomainId whitelistedDomainIdBegin = MIN_ENCRYPT_DOMAIN_ID - 1;
+
 	struct EncryptionDomain {
 		int64_t domainId;
 		size_t prefixLength;
+
+		bool whitelisted() const { return domainId <= whitelistedDomainIdBegin; }
 	};
 
 	struct EncryptionDomainInfo {
@@ -360,7 +364,6 @@ public:
 	const EncryptionDomain systemKeyDomain{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
 		                                    static_cast<size_t>(systemKeysPrefix.size()) };
 
-	const EncryptCipherDomainId whitelistedDomainIdBegin = MIN_ENCRYPT_DOMAIN_ID - 1;
 	const std::array<KeyRef, 3> whitelistedKeyPrefixes = { applyLogKeys.begin,
 		                                                   backupLogKeys.begin,
 		                                                   changeFeedDurableKeys.begin };
