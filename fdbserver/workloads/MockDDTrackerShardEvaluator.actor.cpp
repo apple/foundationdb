@@ -39,6 +39,8 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 
 	std::map<RelocateReason, int> rsReasonCounts;
 
+	DataDistributionTracker shardTracker;
+
 	// --- test configs ---
 
 	// Each key space is convert from an int N. [N, N+1) represent a key space. So at most we have 2G key spaces
@@ -152,12 +154,8 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 		        .get();
 		Reference<PhysicalShardCollection> physicalShardCollection = makeReference<PhysicalShardCollection>();
 		Reference<AsyncVar<bool>> zeroHealthyTeams = makeReference<AsyncVar<bool>>(false);
-		actors.add(dataDistributionTracker(
-		    initData,
-		    getShardMetrics,
-		    getTopKMetrics.getFuture(),
-		    getShardMetricsList,
-		    getAverageShardBytes.getFuture(),
+
+		shardTracker.init(
 		    DataDistributionTrackerInitParams{ .db = mock,
 		                                       .distributorId = ddcx.id(),
 		                                       .readyToStart = Promise<Void>(),
@@ -167,7 +165,13 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 		                                       .anyZeroHealthyTeams = zeroHealthyTeams,
 		                                       .shards = &shards,
 		                                       .trackerCancelled = &ddcx.trackerCancelled,
-		                                       .ddTenantCache = {} }));
+		                                       .ddTenantCache = {} });
+		actors.add(shardTracker.run(initData,
+		                            getShardMetrics.getFuture(),
+		                            getTopKMetrics.getFuture(),
+		                            getShardMetricsList.getFuture(),
+		                            getAverageShardBytes.getFuture()));
+
 		actors.add(relocateShardReporter(this, output.getFuture()));
 
 		return timeout(reportErrors(actors.getResult(), "MockDDTrackerShardEvaluatorWorkload"), testDuration, Void());

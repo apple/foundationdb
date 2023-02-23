@@ -592,6 +592,9 @@ ACTOR Future<Void> monitorPhysicalShardStatus(Reference<PhysicalShardCollection>
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList) {
+	// Declare at beginning because shardTracker is implicit non-copiable. It has to be initialized later
+	state DataDistributionTracker shardTracker;
+
 	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
 	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
 	self->txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(cx));
@@ -663,23 +666,22 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			actors.push_back(self->pollMoveKeysLock());
 
-			DataDistributionTrackerInitParams trackerParams{ .db = self->txnProcessor,
-				                                             .distributorId = self->ddId,
-				                                             .readyToStart = self->initialized,
-				                                             .output = self->relocationProducer,
-				                                             .shardsAffectedByTeamFailure =
-				                                                 self->shardsAffectedByTeamFailure,
-				                                             .physicalShardCollection = self->physicalShardCollection,
-				                                             .anyZeroHealthyTeams = anyZeroHealthyTeams,
-				                                             .shards = &shards,
-				                                             .trackerCancelled = &trackerCancelled,
-				                                             .ddTenantCache = self->ddTenantCache };
-			actors.push_back(reportErrorsExcept(dataDistributionTracker(self->initData,
-			                                                            getShardMetrics,
-			                                                            getTopKShardMetrics.getFuture(),
-			                                                            getShardMetricsList,
-			                                                            getAverageShardBytes.getFuture(),
-			                                                            trackerParams),
+			shardTracker.init(
+			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
+			                                       .distributorId = self->ddId,
+			                                       .readyToStart = self->initialized,
+			                                       .output = self->relocationProducer,
+			                                       .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
+			                                       .physicalShardCollection = self->physicalShardCollection,
+			                                       .anyZeroHealthyTeams = anyZeroHealthyTeams,
+			                                       .shards = &shards,
+			                                       .trackerCancelled = &trackerCancelled,
+			                                       .ddTenantCache = self->ddTenantCache });
+			actors.push_back(reportErrorsExcept(shardTracker.run(self->initData,
+			                                                     getShardMetrics.getFuture(),
+			                                                     getTopKShardMetrics.getFuture(),
+			                                                     getShardMetricsList.getFuture(),
+			                                                     getAverageShardBytes.getFuture()),
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
