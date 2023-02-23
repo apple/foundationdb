@@ -176,9 +176,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 					state Error registerError = e;
 					if (registerError.code() == error_code_cluster_removed ||
 					    registerError.code() == error_code_cluster_not_empty) {
-						if (e.code() == error_code_cluster_removed) {
+						if (registerError.code() == error_code_cluster_removed) {
 							ASSERT(retried);
-						} else if (e.code() == error_code_cluster_not_empty) {
+						} else if (registerError.code() == error_code_cluster_not_empty) {
 							ASSERT(dataDb->detached);
 						}
 
@@ -430,15 +430,15 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				break;
 			} catch (Error& e) {
 				state Error error = e;
-				if (e.code() == error_code_conflicting_restore) {
+				if (error.code() == error_code_conflicting_restore) {
 					ASSERT(retried);
 					CODE_PROBE(true, "MetaclusterManagementWorkload: timed out restore conflicts with retried restore");
 					continue;
-				} else if (e.code() == error_code_cluster_not_found) {
+				} else if (error.code() == error_code_cluster_not_found) {
 					ASSERT(!dataDb->registered);
 					return Void();
-				} else if (e.code() == error_code_tenant_already_exists ||
-				           e.code() == error_code_invalid_tenant_configuration) {
+				} else if (error.code() == error_code_tenant_already_exists ||
+				           error.code() == error_code_invalid_tenant_configuration) {
 					ASSERT(dataDb->detached);
 					wait(removeFailedRestoredCluster(self, clusterName));
 					wait(resolveCollisions(self, clusterName, dataDb));
