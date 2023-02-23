@@ -67,13 +67,13 @@ public class TransactionIntegrationTest {
         CompletableFuture<Void> commitFuture = tr.commit();
 
         // All operations after a submitted commit should fail
-        expectCompletionException(tr, (tx) -> {
+        expectUsedDuringCommitError(() -> {
             tr.get("key3".getBytes()).join();
         });
         // The set by itself has no effect
         tr.set("key2".getBytes(), "val2".getBytes());
         // But the second commit should fail too
-        expectCompletionException(tr, (tx) -> {
+        expectUsedDuringCommitError(() -> {
             tr.commit().join();
         });
 
@@ -81,18 +81,18 @@ public class TransactionIntegrationTest {
         commitFuture.join();
 
         // The behavior after completed commit should be the same
-        expectCompletionException(tr, (tx) -> {
+        expectUsedDuringCommitError(() -> {
             tr.get("key3".getBytes()).join();
         });
         tr.set("key2".getBytes(), "val2".getBytes());
-        expectCompletionException(tr, (tx) -> {
+        expectUsedDuringCommitError(() -> {
             tr.commit().join();
         });
     }
 
-    private void expectCompletionException(Transaction tr, Consumer<? super Transaction> operation) {
+    private void expectUsedDuringCommitError(Runnable operation) {
         try {
-            operation.accept(tr);
+            operation.run();
             Assertions.fail();
         } catch (CompletionException ce) {
             FDBException fdbEx = (FDBException) ce.getCause();
