@@ -3024,7 +3024,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 					if (g_network && g_network->isSimulated()) {
 						ASSERT(data->encryptionMode.present());
 						ASSERT(!data->encryptionMode.get().isEncryptionEnabled() || m.isEncrypted() ||
-						       isBackupLogMutation(m) || mutationContainsKey(m, lastEpochEndPrivateKey));
+						       isBackupLogMutation(m) || mutationForKey(m, lastEpochEndPrivateKey));
 					}
 					if (m.isEncrypted()) {
 						m.updateEncryptCipherDetails(cipherDetails);
@@ -3061,7 +3061,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 						ASSERT(data->encryptionMode.present());
 						ASSERT(!data->encryptionMode.get().isEncryptionEnabled() ||
 						       encryptedMutations[j].isEncrypted() || isBackupLogMutation(encryptedMutations[j]) ||
-						       mutationContainsKey(encryptedMutations[j], lastEpochEndPrivateKey));
+						       mutationForKey(encryptedMutations[j], lastEpochEndPrivateKey));
 					}
 					if (encryptedMutations[j].isEncrypted()) {
 						cipherKeys[j] = encryptedMutations[j].getCipherKeys(cipherMap);
@@ -6186,7 +6186,7 @@ void applyChangeFeedMutation(StorageServer* self,
                              KeyRangeRef const& shard) {
 	ASSERT(self->encryptionMode.present());
 	ASSERT(!self->encryptionMode.get().isEncryptionEnabled() || encryptedMutation.mutation.isEncrypted() ||
-	       isBackupLogMutation(m) || mutationContainsKey(m, lastEpochEndPrivateKey));
+	       isBackupLogMutation(m) || mutationForKey(m, lastEpochEndPrivateKey));
 	if (m.type == MutationRef::SetValue) {
 		for (auto& it : self->keyChangeFeed[m.param1]) {
 			if (version < it->stopVersion && !it->removing && version > it->emptyVersion) {

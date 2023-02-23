@@ -1042,7 +1042,7 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 	return ids;
 }
 
-bool mutationContainsKey(const MutationRef& m, const KeyRef& key) {
+bool mutationForKey(const MutationRef& m, const KeyRef& key) {
 	return isSingleKeyMutation((MutationRef::Type)m.type) && m.param1 == key;
 }
 
