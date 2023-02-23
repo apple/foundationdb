@@ -1409,6 +1409,7 @@ struct RestoreClusterImpl {
 		} else if (transactionId.get() != self->restoreId) {
 			throw conflicting_restore();
 		} else {
+			MetaclusterMetadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
 			MetaclusterMetadata::activeRestoreIds().erase(tr, self->clusterName);
 		}
 
@@ -1504,6 +1505,7 @@ struct RestoreClusterImpl {
 			TraceEvent("RestoredClusterAlreadyExists").detail("ClusterName", self->clusterName);
 			throw cluster_already_exists();
 		} else if (!self->restoreDryRun) {
+			MetaclusterMetadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
 			MetaclusterMetadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
 
 			ManagementClusterMetadata::dataClusters().set(tr, self->clusterName, clusterEntry);
@@ -1558,6 +1560,7 @@ struct RestoreClusterImpl {
 
 				if (!self->restoreDryRun) {
 					MetaclusterMetadata::metaclusterRegistration().set(tr, dataClusterEntry);
+					MetaclusterMetadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
 					MetaclusterMetadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
 					wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 				}
@@ -1572,6 +1575,7 @@ struct RestoreClusterImpl {
 	}
 
 	void markClusterRestoring(Reference<typename DB::TransactionT> tr) {
+		MetaclusterMetadata::activeRestoreIds().addReadConflictKey(tr, clusterName);
 		MetaclusterMetadata::activeRestoreIds().set(tr, clusterName, restoreId);
 		if (ctx.dataClusterMetadata.get().entry.clusterState != DataClusterState::RESTORING) {
 			DataClusterEntry updatedEntry = ctx.dataClusterMetadata.get().entry;
