@@ -1073,8 +1073,9 @@ ACTOR Future<bool> checkExclusion(Database db,
 		return false;
 	}
 
-	// The numerator is the total space in use by FDB that is not immediately reusable;
-	// the denominator is the total space usable by FDB (either used or unused currently)
+	// The numerator is the total space in use by FDB that is not immediately reusable.
+	// This is calculated as: used + free - available = used + free - (free - reusable) = used - reusable.
+	// The denominator is the total capacity usable by FDB (either used or unused currently).
 	double finalUnavailableRatio = (totalKvStoreUsedBytes + totalKvStoreFreeBytes - totalKvStoreAvailableBytes) /
 	                               (totalKvStoreUsedBytesNonExcluded + totalKvStoreFreeBytesNotExcluded);
 
