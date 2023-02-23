@@ -943,6 +943,20 @@ struct KeyValueStoreType {
 	}
 	std::string toString() const { return getStoreTypeStr((StoreType)type); }
 
+	static KeyValueStoreType fromStoreTypeStr(const std::string& storeTypeStr) {
+		if (storeTypeStr == "ssd-1") {
+			return KeyValueStoreType::SSD_BTREE_V1;
+		} else if (storeTypeStr == "ssd" || storeTypeStr == "ssd-2") {
+			return KeyValueStoreType::SSD_BTREE_V2;
+		} else if (storeTypeStr == "redwood" || storeTypeStr == "ssd-redwood-1-experimental") {
+			return KeyValueStoreType::SSD_REDWOOD_V1;
+		} else if (storeTypeStr == "memory" || storeTypeStr == "memory-2") {
+			return KeyValueStoreType::MEMORY;
+		} else {
+			return KeyValueStoreType::END;
+		}
+	}
+
 private:
 	uint32_t type;
 };
@@ -1589,20 +1603,29 @@ struct StorageMetadataType {
 	// no need to serialize part (should be assigned after initialization)
 	bool wrongConfigured = false;
 
+	bool needReplacement = false;
+
 	StorageMetadataType() : createdTime(0) {}
-	StorageMetadataType(double t, KeyValueStoreType storeType = KeyValueStoreType::END, bool wrongConfigured = false)
-	  : createdTime(t), storeType(storeType), wrongConfigured(wrongConfigured) {}
+	StorageMetadataType(double t,
+	                    KeyValueStoreType storeType = KeyValueStoreType::END,
+	                    bool wrongConfigured = false,
+	                    bool needReplacement = false)
+	  : createdTime(t), storeType(storeType), wrongConfigured(wrongConfigured), needReplacement(needReplacement) {}
 
 	static double currentTime() { return g_network->timer(); }
 
 	bool operator==(const StorageMetadataType& b) const {
-		return createdTime == b.createdTime && storeType == b.storeType && wrongConfigured == b.wrongConfigured;
+		return createdTime == b.createdTime && storeType == b.storeType && wrongConfigured == b.wrongConfigured &&
+		       needReplacement == b.needReplacement;
 	}
 
 	bool operator<(const StorageMetadataType& b) const {
 		if (wrongConfigured == b.wrongConfigured) {
-			// the older SS has smaller createdTime
-			return createdTime < b.createdTime;
+			if (needReplacement == b.needReplacement)
+				// the older SS has smaller createdTime
+				return createdTime < b.createdTime;
+			else
+				return needReplacement > b.needReplacement;
 		}
 		return wrongConfigured > b.wrongConfigured;
 	}
@@ -1613,7 +1636,7 @@ struct StorageMetadataType {
 	// to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, createdTime, storeType);
+		serializer(ar, createdTime, storeType, needReplacement);
 	}
 
 	StatusObject toJSON() const {
