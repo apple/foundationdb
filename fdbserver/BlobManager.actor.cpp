@@ -2760,6 +2760,8 @@ ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 		successor = Optional<UID>();
 	}
 
+	CODE_PROBE(successor.present(), "Blob worker has affinity after failure");
+
 	for (auto& it : rangesToMove) {
 		// Send revoke request
 		RangeAssignment raRevoke;
@@ -3802,6 +3804,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 			}
 			while (bmData->workerAffinities.count(workerId)) {
 				workerId = bmData->workerAffinities[workerId];
+				CODE_PROBE(true, "Blob worker has affinity after reboot");
 			}
 			// prevent racing status updates from old owner from causing issues until this request gets sent out
 			// properly
@@ -3938,8 +3941,7 @@ ACTOR Future<Void> initializeBlobWorker(Reference<BlobManagerData> self, Recruit
 		state InitializeBlobWorkerRequest initReq;
 		initReq.reqId = deterministicRandom()->randomUniqueID();
 		initReq.interfaceId = interfaceId;
-		initReq.storeType = (KeyValueStoreType::StoreType)(
-		    SERVER_KNOBS->BLOB_WORKER_STORE_TYPE < 0 ? KeyValueStoreType::END : SERVER_KNOBS->BLOB_WORKER_STORE_TYPE);
+		initReq.storeType = (KeyValueStoreType::StoreType)(SERVER_KNOBS->BLOB_WORKER_STORE_TYPE);
 
 		// acknowledge that this worker is currently being recruited on
 		self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());

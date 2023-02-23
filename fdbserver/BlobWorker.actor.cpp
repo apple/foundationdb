@@ -5580,9 +5580,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		// Since the blob worker gets initalized through the blob manager it is more reliable to fetch the encryption
 		// state using the DB Config rather than passing it through the initalization request for the blob manager and
 		// blob worker
-		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
-		self->encryptMode = config.encryptionAtRestMode;
-		TraceEvent("BWEncryptionAtRestMode", self->id).detail("Mode", self->encryptMode.toString());
+		state Future<DatabaseConfiguration> configFuture = getDatabaseConfiguration(cx);
 
 		if (self->storage) {
 			wait(self->storage->init());
@@ -5626,6 +5624,10 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		rep.interf = bwInterf;
 		recruitReply.send(rep);
 
+		DatabaseConfiguration config = wait(configFuture);
+		self->encryptMode = config.encryptionAtRestMode;
+		TraceEvent("BWEncryptionAtRestMode", self->id).detail("Mode", self->encryptMode.toString());
+
 		TraceEvent("BlobWorkerInit", self->id).log();
 		wait(blobWorkerCore(bwInterf, self));
 		return Void();
@@ -5642,7 +5644,7 @@ ACTOR Future<UID> restorePersistentState(Reference<BlobWorkerData> self) {
 
 	wait(waitForAll(std::vector{ fID }));
 
-	if (!fID.get().present()) {
+	if (!SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED || !fID.get().present()) {
 		CODE_PROBE(true, "Restored uninitialized blob worker");
 		throw worker_removed();
 	}
@@ -5665,12 +5667,14 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		wait(self->storage->commit());
 		state UID previous = wait(restorePersistentState(self));
 
+		if (recovered.canBeSet()) {
+			recovered.send(Void());
+		}
+
 		// Since the blob worker gets initalized through the blob manager it is more reliable to fetch the encryption
 		// state using the DB Config rather than passing it through the initalization request for the blob manager and
 		// blob worker
-		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
-		self->encryptMode = config.encryptionAtRestMode;
-		TraceEvent("BWEncryptionAtRestMode", self->id).detail("Mode", self->encryptMode.toString());
+		state Future<DatabaseConfiguration> configFuture = getDatabaseConfiguration(cx);
 
 		if (BW_DEBUG) {
 			printf("Initializing blob worker s3 stuff\n");
@@ -5695,12 +5699,15 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 			throw e;
 		}
 
-		if (recovered.canBeSet()) {
-			recovered.send(Void());
-		}
-
+		// Only update the ID on disk after registering with the database so that if this process is rebooted after
+		// registration and before the ID is updated on disk the next generation will consider its ID from two
+		// generations ago its successor.
 		self->storage->set(KeyValueRef(persistID, BinaryWriter::toValue(self->id, Unversioned())));
 		wait(self->storage->commit());
+
+		DatabaseConfiguration config = wait(configFuture);
+		self->encryptMode = config.encryptionAtRestMode;
+		TraceEvent("BWEncryptionAtRestMode", self->id).detail("Mode", self->encryptMode.toString());
 
 		TraceEvent("BlobWorkerInit", self->id).log();
 		wait(blobWorkerCore(bwInterf, self));

@@ -1790,7 +1790,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state std::map<SharedLogsKey, std::vector<SharedLogsValue>> sharedLogs;
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
 	state WorkerCache<InitializeBackupReply> backupWorkerCache;
-	state WorkerCache<InitializeBlobWorkerReply> blobWorkerCache;
+	state Future<Void> blobWorkerFuture = Void();
 
 	state WorkerSnapRequest lastSnapReq;
 	// Here the key is UID+role, as we still send duplicate requests to a process which is both storage and tlog
@@ -2031,41 +2031,56 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				logData.back().uid = s.storeID;
 				errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, s.storeID, tl));
 			} else if (s.storedComponent == DiskStore::BlobWorker) {
-				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobWorker;
+				if (blobWorkerFuture.isReady()) {
+					LocalLineage _;
+					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobWorker;
 
-				BlobWorkerInterface recruited(locality, deterministicRandom()->randomUniqueID());
-				recruited.initEndpoints();
+					BlobWorkerInterface recruited(locality, deterministicRandom()->randomUniqueID());
+					recruited.initEndpoints();
 
-				std::map<std::string, std::string> details;
-				details["StorageEngine"] = s.storeType.toString();
-				startRole(Role::BLOB_WORKER, recruited.id(), interf.id(), details, "Restored");
+					std::map<std::string, std::string> details;
+					details["StorageEngine"] = s.storeType.toString();
+					startRole(Role::BLOB_WORKER, recruited.id(), interf.id(), details, "Restored");
 
-				DUMPTOKEN(recruited.waitFailure);
-				DUMPTOKEN(recruited.blobGranuleFileRequest);
-				DUMPTOKEN(recruited.assignBlobRangeRequest);
-				DUMPTOKEN(recruited.revokeBlobRangeRequest);
-				DUMPTOKEN(recruited.granuleAssignmentsRequest);
-				DUMPTOKEN(recruited.granuleStatusStreamRequest);
-				DUMPTOKEN(recruited.haltBlobWorker);
-				DUMPTOKEN(recruited.minBlobVersionRequest);
+					DUMPTOKEN(recruited.waitFailure);
+					DUMPTOKEN(recruited.blobGranuleFileRequest);
+					DUMPTOKEN(recruited.assignBlobRangeRequest);
+					DUMPTOKEN(recruited.revokeBlobRangeRequest);
+					DUMPTOKEN(recruited.granuleAssignmentsRequest);
+					DUMPTOKEN(recruited.granuleStatusStreamRequest);
+					DUMPTOKEN(recruited.haltBlobWorker);
+					DUMPTOKEN(recruited.minBlobVersionRequest);
 
-				IKeyValueStore* data = openKVStore(s.storeType,
-				                                   s.filename,
-				                                   recruited.id(),
-				                                   memoryLimit,
-				                                   false,
-				                                   false,
-				                                   false,
-				                                   dbInfo,
-				                                   EncryptionAtRestMode());
-				filesClosed.add(data->onClosed());
+					IKeyValueStore* data = openKVStore(s.storeType,
+					                                   s.filename,
+					                                   recruited.id(),
+					                                   memoryLimit,
+					                                   false,
+					                                   false,
+					                                   false,
+					                                   dbInfo,
+					                                   EncryptionAtRestMode());
+					filesClosed.add(data->onClosed());
 
-				Promise<Void> recovery;
-				Future<Void> bw = blobWorker(recruited, recovery, dbInfo, data);
-				recoveries.push_back(recovery.getFuture());
-				bw = handleIOErrors(bw, data, recruited.id());
-				errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
+					Promise<Void> recovery;
+					Future<Void> bw = blobWorker(recruited, recovery, dbInfo, data);
+					recoveries.push_back(recovery.getFuture());
+					bw = handleIOErrors(bw, data, recruited.id());
+					blobWorkerFuture = bw;
+					errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
+				} else {
+					CODE_PROBE(true, "Multiple blob workers after reboot", probe::decoration::rare);
+					IKeyValueStore* data = openKVStore(s.storeType,
+					                                   s.filename,
+					                                   UID(),
+					                                   memoryLimit,
+					                                   false,
+					                                   false,
+					                                   false,
+					                                   dbInfo,
+					                                   EncryptionAtRestMode());
+					data->dispose();
+				}
 			}
 		}
 
@@ -2681,7 +2696,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				}
 			}
 			when(InitializeBlobWorkerRequest req = waitNext(interf.blobWorker.getFuture())) {
-				if (!blobWorkerCache.exists(req.reqId)) {
+				if (blobWorkerFuture.isReady()) {
 					LocalLineage _;
 					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobWorker;
 
@@ -2699,7 +2714,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.minBlobVersionRequest);
 
 					IKeyValueStore* data = nullptr;
-					if (req.storeType != KeyValueStoreType::END) {
+					if (SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED && req.storeType != KeyValueStoreType::END) {
 						std::string filename =
 						    filenameFromId(req.storeType, folder, fileBlobWorkerPrefix.toString(), recruited.id());
 						data = openKVStore(req.storeType,
@@ -2716,13 +2731,13 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 					ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady = req.reply;
 					Future<Void> bw = blobWorker(recruited, blobWorkerReady, dbInfo, data);
-					if (req.storeType != KeyValueStoreType::END) {
+					if (SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED && req.storeType != KeyValueStoreType::END) {
 						bw = handleIOErrors(bw, data, recruited.id());
 					}
+					blobWorkerFuture = bw;
 					errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
-
 				} else {
-					forwardPromise(req.reply, blobWorkerCache.get(req.reqId));
+					req.reply.sendError(recruitment_failed());
 				}
 			}
 			when(InitializeCommitProxyRequest req = waitNext(interf.commitProxy.getFuture())) {
