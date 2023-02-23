@@ -196,7 +196,8 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 				Future<Void> createFuture =
 				    self->useMetacluster
 				        ? MetaclusterAPI::createTenant(self->mvDb, entry, AssignClusterAutomatically::True)
-				        : success(TenantAPI::createTenant(self->dataDb.getReference(), tenant, TenantMapEntry(entry)));
+				        : success(
+				              TenantAPI::createTenant(self->dataDb.getReference(), tenant, entry.toTenantMapEntry()));
 				Optional<Void> result = wait(timeout(createFuture, 30));
 				if (result.present()) {
 					TraceEvent(SevDebug, "TenantManagementConcurrencyCreatedTenant", debugId)
