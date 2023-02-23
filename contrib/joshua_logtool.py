@@ -156,7 +156,7 @@ def _setup_args():
     upload_parser.add_argument(
         "--check-rocksdb",
         action="store_true",
-        help="Only upload logs when RocksDB is involved",
+        help="If true, only upload logs when RocksDB is involved; otherwise, always upload logs.",
     )
 
     download_parser = subparsers.add_parser(
