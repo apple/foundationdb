@@ -90,16 +90,14 @@ ACTOR Future<bool> tenantGroupListCommand(Reference<IDatabase> db, std::vector<S
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
-			state std::vector<TenantGroupName> tenantGroupNames;
-			state std::vector<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroups;
-			state std::vector<std::pair<TenantGroupName, MetaclusterTenantGroupEntry>> metaclusterTenantGroups;
+
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				wait(store(metaclusterTenantGroups,
-				           MetaclusterAPI::listTenantGroupsTransaction(tr, beginTenantGroup, endTenantGroup, limit)));
+				std::vector<std::pair<TenantGroupName, MetaclusterTenantGroupEntry>> metaclusterTenantGroups =
+				    wait(MetaclusterAPI::listTenantGroupsTransaction(tr, beginTenantGroup, endTenantGroup, limit));
 				tenantGroupListOutput(metaclusterTenantGroups, tokens.size());
 			} else {
-				wait(store(tenantGroups,
-				           TenantAPI::listTenantGroupsTransaction(tr, beginTenantGroup, endTenantGroup, limit)));
+				std::vector<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroups =
+				    wait(TenantAPI::listTenantGroupsTransaction(tr, beginTenantGroup, endTenantGroup, limit));
 				tenantGroupListOutput(tenantGroups, tokens.size());
 			}
 
