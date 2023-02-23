@@ -613,11 +613,11 @@ struct AuthzSecurityWorkload : TestWorkload {
 			req.readVersion = committedVersion;
 
 			auto& bwInterf = rep.get().results[locIdx].second;
-			ErrorOr<BlobGranuleFileReply> rep = wait(bwInterf.blobGranuleFileRequest.tryGetReply(req));
-			if (rep.isError()) {
-				throw rep.getError();
+			ErrorOr<BlobGranuleFileReply> fileRep = wait(bwInterf.blobGranuleFileRequest.tryGetReply(req));
+			if (fileRep.isError()) {
+				throw fileRep.getError();
 			}
-			ASSERT(!rep.get().chunks.empty());
+			ASSERT(!fileRep.get().chunks.empty());
 
 			return Optional<Error>();
 		} catch (Error& e) {
