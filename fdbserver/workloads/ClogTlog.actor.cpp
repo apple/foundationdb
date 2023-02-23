@@ -167,6 +167,7 @@ struct ClogTlogWorkload : TestWorkload {
 			when(wait(onChange)) {
 				if (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED) {
 					TraceEvent("ClogDoneFullyRecovered");
+					self->unclogAll();
 					return Void();
 				}
 				onChange = self->dbInfo->onChange();
