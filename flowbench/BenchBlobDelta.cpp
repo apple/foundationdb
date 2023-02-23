@@ -151,7 +151,8 @@ static void bench_serialize_deltas(benchmark::State& state) {
 
 	uint32_t serializedBytes = 0;
 	for (auto _ : state) {
-		Value serialized = serializeChunkedDeltaFile(fileName, delta, range, chunkSize, compressFilter, cipherKeysCtx);
+		Value serialized = serializeChunkedDeltaFile(
+		    fileName, delta, range, chunkSize, compressFilter, EncryptionAtRestMode::DISABLED, cipherKeysCtx);
 		serializedBytes += serialized.size();
 	}
 	state.SetBytesProcessed(static_cast<long>(state.iterations()) * targetBytes);

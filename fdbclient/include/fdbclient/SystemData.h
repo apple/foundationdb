@@ -431,6 +431,7 @@ std::pair<std::vector<std::pair<UID, NetworkAddress>>, std::vector<std::pair<UID
 extern const KeyRef globalKeysPrefix;
 extern const KeyRef lastEpochEndKey;
 extern const KeyRef lastEpochEndPrivateKey;
+bool mutationContainsKey(const MutationRef& m, const KeyRef& key);
 extern const KeyRef killStorageKey;
 extern const KeyRef killStoragePrivateKey;
 extern const KeyRef rebootWhenDurableKey;
@@ -539,6 +540,8 @@ extern const KeyRef backupLatestVersionsPrefix;
 // Key range reserved by backup agent to storing mutations
 extern const KeyRangeRef backupLogKeys;
 extern const KeyRangeRef applyLogKeys;
+// Returns true if m is a blog or alog mutation
+bool isBackupLogMutation(const MutationRef& m);
 
 extern const KeyRef backupVersionKey;
 extern const ValueRef backupVersionValue;

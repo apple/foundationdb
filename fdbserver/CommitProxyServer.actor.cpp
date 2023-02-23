@@ -1806,11 +1806,11 @@ void pushToBackupMutations(CommitBatchContext* self,
 			    .detail("TenantMap", pProxyCommitData->tenantMap.size());
 			ASSERT(TenantAPI::withinSingleTenant(KeyRangeRef(m.param1, m.param2)));
 		}
+		ASSERT(!pProxyCommitData->encryptMode.isEncryptionEnabled() || writtenMutation.isEncrypted());
 
 		// Add the mutation to the relevant backup tag
 		for (auto backupName : pProxyCommitData->vecBackupKeys[m.param1]) {
 			// If encryption is enabled make sure the mutation we are writing is also encrypted
-			ASSERT(!pProxyCommitData->encryptMode.isEncryptionEnabled() || writtenMutation.isEncrypted());
 			CODE_PROBE(writtenMutation.isEncrypted(), "using encrypted backup mutation");
 			self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, writtenMutation);
 		}
@@ -1842,8 +1842,8 @@ void pushToBackupMutations(CommitBatchContext* self,
 					backupMutation =
 					    backupMutation.encrypt(self->cipherKeys, domainId, arena, BlobCipherMetrics::BACKUP);
 				}
-				ASSERT(backupMutation.isEncrypted());
 			}
+			ASSERT(!pProxyCommitData->encryptMode.isEncryptionEnabled() || backupMutation.isEncrypted());
 
 			// Add the mutation to the relevant backup tag
 			for (auto backupName : backupRange.value()) {
@@ -2130,6 +2130,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			                                getEncryptDetailsFromMutationRef(self->pProxyCommitData, idempotencyIdSet);
 			                            MutationRef encryptedMutation = idempotencyIdSet.encrypt(
 			                                self->cipherKeys, domainId, self->arena, BlobCipherMetrics::TLOG);
+			                            ASSERT(encryptedMutation.isEncrypted());
 			                            self->toCommit.writeTypedMessage(encryptedMutation);
 		                            } else {
 			                            self->toCommit.writeTypedMessage(idempotencyIdSet);

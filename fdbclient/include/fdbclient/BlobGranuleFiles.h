@@ -24,6 +24,7 @@
 // This file contains functions for readers who want to materialize blob granules from the underlying files
 
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "flow/CompressionUtils.h"
 
@@ -31,6 +32,7 @@ Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
                                const Standalone<GranuleSnapshot>& snapshot,
                                int chunkSize,
                                Optional<CompressionFilter> compressFilter,
+                               EncryptionAtRestMode encryptMode,
                                Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = {},
                                bool isSnapshotSorted = true);
 
@@ -39,6 +41,7 @@ Value serializeChunkedDeltaFile(const Standalone<StringRef>& fileNameRef,
                                 const KeyRangeRef& fileRange,
                                 int chunkSize,
                                 Optional<CompressionFilter> compressFilter,
+                                EncryptionAtRestMode encryptMode,
                                 Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = {});
 
 ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<BlobGranuleChunkRef>>& files,

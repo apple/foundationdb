@@ -840,6 +840,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	                                                   keyRange,
 	                                                   SERVER_KNOBS->BG_DELTA_FILE_TARGET_CHUNK_BYTES,
 	                                                   compressFilter,
+	                                                   bwData->encryptMode,
 	                                                   cipherKeysCtx);
 	state size_t serializedSize = serialized.size();
 	bwData->stats.compressionBytesRaw += deltasToWrite.expectedSize();
@@ -1129,6 +1130,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	                                                  snapshot,
 	                                                  SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES,
 	                                                  compressFilter,
+	                                                  bwData->encryptMode,
 	                                                  cipherKeysCtx);
 	state size_t serializedSize = serialized.size();
 	bwData->stats.compressionBytesRaw += snapshot.expectedSize();
