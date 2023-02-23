@@ -42,6 +42,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
+#include "flow/Histogram.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -172,26 +173,21 @@ struct Resolver : ReferenceCounted<Resolver> {
 	int numLogs;
 
 	// End-to-end server latency of resolver requests.
-	LatencySample resolverLatency;
+	Reference<Histogram> resolverLatencyDist;
 
 	// Queue wait times, per request.
-	LatencySample queueWaitLatency;
+	Reference<Histogram> queueWaitLatencyDist;
 
 	// Actual work, per req request.
-	LatencySample computeLatency;
+	Reference<Histogram> computeTimeDist;
 
-	// Maximum number of waiters in queue during metrics interval.
-	int64_t maxQueueDepth;
+	// Distribution of waiters in queue.
+	// 0 or 1 will be most common, but higher values are interesting.
+	Reference<Histogram> queueDepthDist;
 
 	Future<Void> logger;
 
 	EncryptionAtRestMode encryptMode;
-
-	int64_t getAndResetMaxQueueDepth() {
-		int64_t ret = maxQueueDepth;
-		maxQueueDepth = version.numWaiting();
-		return ret;
-	}
 
 	Resolver(UID dbgid, int commitProxyCount, int resolverCount, EncryptionAtRestMode encryptMode)
 	  : dbgid(dbgid), commitProxyCount(commitProxyCount), resolverCount(resolverCount), encryptMode(encryptMode),
@@ -205,23 +201,15 @@ struct Resolver : ReferenceCounted<Resolver> {
 	    resolvedStateTransactions("ResolvedStateTransactions", cc),
 	    resolvedStateMutations("ResolvedStateMutations", cc), resolvedStateBytes("ResolvedStateBytes", cc),
 	    resolveBatchOut("ResolveBatchOut", cc), metricsRequests("MetricsRequests", cc),
-	    splitRequests("SplitRequests", cc), resolverLatency("ResolverLatencyNetrics",
-	                                                        dbgid,
-	                                                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                                                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-	    queueWaitLatency("ResolverQueueWaitMetrics",
-	                     dbgid,
-	                     SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                     SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-	    computeLatency("ResolverComputeTimeMetrics",
-	                   dbgid,
-	                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                   SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-	    maxQueueDepth(0) {
+	    splitRequests("SplitRequests", cc),
+	    resolverLatencyDist(Histogram::getHistogram("Resolver"_sr, "Latency"_sr, Histogram::Unit::milliseconds)),
+	    queueWaitLatencyDist(Histogram::getHistogram("Resolver"_sr, "QueueWait"_sr, Histogram::Unit::milliseconds)),
+	    computeTimeDist(Histogram::getHistogram("Resolver"_sr, "ComputeTime"_sr, Histogram::Unit::milliseconds)),
+	    // Distribution of queue depths, with knowledge that Histogram has 32 buckets, and each bucket will have size 1.
+	    queueDepthDist(Histogram::getHistogram("Resolver"_sr, "QueueDepth"_sr, Histogram::Unit::countLinear, 0, 31)) {
 		specialCounter(cc, "Version", [this]() { return this->version.get(); });
 		specialCounter(cc, "NeededVersion", [this]() { return this->neededVersion.get(); });
 		specialCounter(cc, "TotalStateBytes", [this]() { return this->totalStateBytes.get(); });
-		specialCounter(cc, "MaxQueueDepth", [this]() { return this->getAndResetMaxQueueDepth(); });
 
 		logger = cc.traceCounters("ResolverMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "ResolverMetrics");
 	}
@@ -285,15 +273,17 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 			self->neededVersion.set(std::max(self->neededVersion.get(), req.prevVersion));
 		}
 
-		// Update queue depth metric. Check if we're going to be one of the waiters or not.
+		// Update queue depth metric before waiting. Check if we're going to be one of the waiters or not.
 		int waiters = self->version.numWaiting();
 		if (self->version.get() < req.prevVersion) {
 			waiters++;
 		}
-		self->maxQueueDepth = std::max<int64_t>(self->maxQueueDepth, waiters);
+		self->queueDepthDist->sampleRecordCounter(waiters);
 
 		choose {
 			when(wait(self->version.whenAtLeast(req.prevVersion))) {
+				// Update queue depth metric after waiting.
+				self->queueDepthDist->sampleRecordCounter(self->version.numWaiting());
 				break;
 			}
 			when(wait(self->checkNeededVersion.onTrigger())) {}
@@ -307,7 +297,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 
 	// Time until now has been spent waiting in the queue to do actual work.
 	double queueWaitEndTime = g_network->timer();
-	self->queueWaitLatency.addMeasurement(queueWaitEndTime - req.requestTime());
+	self->queueWaitLatencyDist->sampleSeconds(queueWaitEndTime - req.requestTime());
 
 	if (self->version.get() ==
 	    req.prevVersion) { // Not a duplicate (check relies on no waiting between here and self->version.set() below!)
@@ -514,7 +504,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 
 		// Measure the time spent doing actual work in the resolver.
 		const double endComputeTime = g_network->timer();
-		self->computeLatency.addMeasurement(endComputeTime - beginComputeTime);
+		self->computeTimeDist->sampleSeconds(endComputeTime - beginComputeTime);
 
 		if (req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.After");
@@ -543,7 +533,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 	// Measure server-side RPC latency from the time a request was
 	// received to time the response was sent.
 	const double endTime = g_network->timer();
-	self->resolverLatency.addMeasurement(endTime - req.requestTime());
+	self->resolverLatencyDist->sampleSeconds(endTime - req.requestTime());
 
 	++self->resolveBatchOut;
 
