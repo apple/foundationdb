@@ -31,7 +31,8 @@ FDB_DEFINE_BOOLEAN_PARAM(IsRestoring);
 FDB_DEFINE_BOOLEAN_PARAM(RunOnDisconnectedCluster);
 FDB_DEFINE_BOOLEAN_PARAM(RunOnMismatchedCluster);
 FDB_DEFINE_BOOLEAN_PARAM(RestoreDryRun);
-FDB_DEFINE_BOOLEAN_PARAM(ForceJoinNewMetacluster);
+FDB_DEFINE_BOOLEAN_PARAM(ForceJoin);
+FDB_DEFINE_BOOLEAN_PARAM(ForceRemove);
 
 namespace MetaclusterAPI {
 

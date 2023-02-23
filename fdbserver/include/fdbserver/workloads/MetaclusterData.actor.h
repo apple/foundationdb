@@ -164,14 +164,19 @@ private:
 			ASSERT_EQ(t.size(), 3);
 			TenantName tenantName = t.getString(1);
 			int64_t tenantId = t.getInt(2);
-			ASSERT(tenantName == self->managementMetadata.tenantData.tenantMap[tenantId].tenantName);
-			self->managementMetadata.clusterTenantMap[t.getString(0)].insert(tenantId);
+			MetaclusterTenantMapEntry const& entry = self->managementMetadata.tenantData.tenantMap[tenantId];
+			bool renaming =
+			    entry.tenantState == MetaclusterAPI::TenantState::RENAMING && entry.renameDestination == tenantName;
+			ASSERT(tenantName == entry.tenantName || renaming);
+			if (!renaming) {
+				ASSERT(self->managementMetadata.clusterTenantMap[t.getString(0)].insert(tenantId).second);
+			}
 		}
 
 		for (auto t : clusterTenantGroupTuples.results) {
 			ASSERT_EQ(t.size(), 2);
 			TenantGroupName tenantGroupName = t.getString(1);
-			self->managementMetadata.clusterTenantGroupMap[t.getString(0)].insert(tenantGroupName);
+			ASSERT(self->managementMetadata.clusterTenantGroupMap[t.getString(0)].insert(tenantGroupName).second);
 		}
 
 		return Void();

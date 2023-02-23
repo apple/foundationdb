@@ -1439,6 +1439,9 @@ Error validateAndProcessTenantAccess(CommitTransactionRequest& tr,
 	if (!isValid) {
 		return tenant_not_found();
 	}
+	if (!tr.isLockAware() && pProxyCommitData->lockedTenants.count(tr.tenantInfo.tenantId) > 0) {
+		return tenant_locked();
+	}
 
 	// only do the mutation check when the transaction use raw_access option and the tenant mode is required
 	if (pProxyCommitData->getTenantMode() != TenantMode::REQUIRED || tr.tenantInfo.hasTenant()) {

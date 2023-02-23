@@ -219,7 +219,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		try {
 			loop {
 				Future<bool> removeFuture = MetaclusterAPI::removeCluster(
-				    self->managementDb, clusterName, ClusterType::METACLUSTER_MANAGEMENT, detachCluster);
+				    self->managementDb, clusterName, ClusterType::METACLUSTER_MANAGEMENT, ForceRemove(detachCluster));
 				try {
 					Optional<bool> result = wait(timeout(removeFuture, deterministicRandom()->randomInt(1, 30)));
 					if (result.present()) {
@@ -288,7 +288,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				                                   dataDb->db->getConnectionRecord()->getConnectionString(),
 				                                   ApplyManagementClusterUpdates::True,
 				                                   RestoreDryRun(dryRun),
-				                                   ForceJoinNewMetacluster(forceJoin),
+				                                   ForceJoin(forceJoin),
 				                                   &messages);
 				Optional<Void> result = wait(timeout(restoreFuture, deterministicRandom()->randomInt(1, 30)));
 				if (result.present()) {
@@ -1001,7 +1001,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		std::vector<Future<Void>> removeClusterFutures;
 		for (auto [clusterName, clusterMetadata] : dataClusters) {
 			removeClusterFutures.push_back(success(MetaclusterAPI::removeCluster(
-			    self->managementDb, clusterName, ClusterType::METACLUSTER_MANAGEMENT, !deleteTenants)));
+			    self->managementDb, clusterName, ClusterType::METACLUSTER_MANAGEMENT, ForceRemove(!deleteTenants))));
 		}
 
 		wait(waitForAll(removeClusterFutures));
