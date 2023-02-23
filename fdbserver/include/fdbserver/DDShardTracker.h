@@ -24,7 +24,6 @@
 // send request/signal to DDTracker through interface
 // call synchronous method from components outside DDShardTracker
 struct IDDShardTracker {
-	// FIXME: the streams are not used yet
 	Promise<Void> readyToStart;
 	FutureStream<GetMetricsRequest> getShardMetrics;
 	FutureStream<GetTopKMetricsRequest> getTopKMetrics;
