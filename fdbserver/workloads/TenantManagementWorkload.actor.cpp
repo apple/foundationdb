@@ -1747,7 +1747,7 @@ struct TenantManagementWorkload : TestWorkload {
 		return tenantGroups;
 	}
 
-	ACTOR template <class TenantMapEntryImpl>
+	template <class TenantMapEntryImpl>
 	static void verifyTenantList(TenantManagementWorkload* self,
 	                             std::vector<std::pair<TenantGroupName, TenantMapEntryImpl>> tenantGroups,
 	                             TenantGroupName beginTenantGroup,
@@ -1798,6 +1798,7 @@ struct TenantManagementWorkload : TestWorkload {
 					    wait(listTenantGroupsImpl(tr, beginTenantGroup, endTenantGroup, limit, operationType, self));
 					verifyTenantList(self, tenantGroups, beginTenantGroup, endTenantGroup, limit);
 				}
+				return Void();
 			} catch (Error& e) {
 				state bool retry = false;
 				state Error error = e;
