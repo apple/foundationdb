@@ -1447,10 +1447,6 @@ struct RestoreClusterImpl {
 				state Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
 				    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
 
-				if (!self->restoreDryRun) {
-					MetaclusterMetadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
-				}
-
 				if (!metaclusterRegistration.present()) {
 					throw invalid_data_cluster();
 				} else if (!metaclusterRegistration.get().matches(self->ctx.metaclusterRegistration.get())) {
@@ -2143,6 +2139,15 @@ struct RestoreClusterImpl {
 					throw;
 				}
 			}
+		}
+
+		// Set the restore ID in the data cluster
+		if (!self->restoreDryRun) {
+			wait(self->ctx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
+				MetaclusterMetadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
+				MetaclusterMetadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
+				return Future<Void>(Void());
+			}));
 		}
 
 		// get all the tenants in the metacluster
