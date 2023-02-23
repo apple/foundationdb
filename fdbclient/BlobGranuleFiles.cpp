@@ -24,7 +24,6 @@
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/ClientKnobs.h"
 #include "fdbclient/CommitTransaction.h"
-#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/SystemData.h" // for allKeys unit test - could remove
 
@@ -379,8 +378,7 @@ struct IndexBlockRef {
 		}
 	}
 
-	void finalize(Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx, Arena& arena, EncryptionAtRestMode encryptMode) {
-		ASSERT(!encryptMode.isEncryptionEnabled() || cipherKeysCtx.present());
+	void finalize(Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx, Arena& arena) {
 		if (cipherKeysCtx.present()) {
 			// IndexBlock childBlock pointers offsets are relative to IndexBlock endOffset instead of file start offset.
 			// Compressing indexBlock will need offset recalculation (circular depedency). IndexBlock size is bounded by
@@ -536,8 +534,7 @@ struct IndexBlobGranuleFileChunkRef {
 	static Value toBytes(Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx,
 	                     Optional<CompressionFilter> compFilter,
 	                     const Value& chunk,
-	                     Arena& arena,
-	                     EncryptionAtRestMode encryptMode) {
+	                     Arena& arena) {
 		IndexBlobGranuleFileChunkRef chunkRef;
 
 		if (compFilter.present()) {
@@ -546,7 +543,6 @@ struct IndexBlobGranuleFileChunkRef {
 			chunkRef.buffer = StringRef(arena, chunk.contents());
 		}
 
-		ASSERT(!encryptMode.isEncryptionEnabled() || cipherKeysCtx.present());
 		if (cipherKeysCtx.present()) {
 			CODE_PROBE(true, "encrypting granule chunk");
 			IndexBlobGranuleFileChunkRef::encrypt(cipherKeysCtx.get(), chunkRef, arena);
@@ -720,10 +716,8 @@ struct IndexedBlobGranuleFile {
 // serializing once, adding the serialized size to each offset, and serializing again. This relies on the fact that
 // ObjectWriter/flatbuffers uses fixed size integers instead of variable size.
 
-Value serializeIndexBlock(Standalone<IndexedBlobGranuleFile>& file,
-                          Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx,
-                          EncryptionAtRestMode encryptMode) {
-	file.indexBlockRef.finalize(cipherKeysCtx, file.arena(), encryptMode);
+Value serializeIndexBlock(Standalone<IndexedBlobGranuleFile>& file, Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
+	file.indexBlockRef.finalize(cipherKeysCtx, file.arena());
 
 	Value serialized = ObjectWriter::toValue(file, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 	file.chunkStartOffset = serialized.contents().size();
@@ -738,9 +732,8 @@ Value serializeIndexBlock(Standalone<IndexedBlobGranuleFile>& file,
 Value serializeFileFromChunks(Standalone<IndexedBlobGranuleFile>& file,
                               Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx,
                               std::vector<Value>& chunks,
-                              int previousChunkBytes,
-                              EncryptionAtRestMode encryptMode) {
-	Value indexBlockBytes = serializeIndexBlock(file, cipherKeysCtx, encryptMode);
+                              int previousChunkBytes) {
+	Value indexBlockBytes = serializeIndexBlock(file, cipherKeysCtx);
 	int32_t indexSize = indexBlockBytes.size();
 	chunks[0] = indexBlockBytes;
 
@@ -773,7 +766,6 @@ Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
                                const Standalone<GranuleSnapshot>& snapshot,
                                int targetChunkBytes,
                                Optional<CompressionFilter> compressFilter,
-                               EncryptionAtRestMode encryptMode,
                                Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx,
                                bool isSnapshotSorted) {
 
@@ -809,8 +801,8 @@ Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
 		if (currentChunkBytesEstimate >= targetChunkBytes || i == snapshot.size() - 1) {
 			Value serialized =
 			    BinaryWriter::toValue(currentChunk, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
-			Value chunkBytes = IndexBlobGranuleFileChunkRef::toBytes(
-			    cipherKeysCtx, compressFilter, serialized, file.arena(), encryptMode);
+			Value chunkBytes =
+			    IndexBlobGranuleFileChunkRef::toBytes(cipherKeysCtx, compressFilter, serialized, file.arena());
 			chunks.push_back(chunkBytes);
 			// TODO remove validation
 			if (!file.indexBlockRef.block.children.empty() && isSnapshotSorted) {
@@ -837,7 +829,7 @@ Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
 		    file.arena(), keyAfter(snapshot.back().key), previousChunkBytes);
 	}
 
-	return serializeFileFromChunks(file, cipherKeysCtx, chunks, previousChunkBytes, encryptMode);
+	return serializeFileFromChunks(file, cipherKeysCtx, chunks, previousChunkBytes);
 }
 
 // TODO: use redwood prefix trick to optimize cpu comparison
@@ -1039,7 +1031,6 @@ Value serializeChunkedDeltaFile(const Standalone<StringRef>& fileNameRef,
                                 const KeyRangeRef& fileRange,
                                 int chunkSize,
                                 Optional<CompressionFilter> compressFilter,
-                                EncryptionAtRestMode encryptMode,
                                 Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx) {
 	if (BG_ENCRYPT_COMPRESS_DEBUG) {
 		TraceEvent(SevDebug, "SerializeChunkedDelta")
@@ -1084,8 +1075,8 @@ Value serializeChunkedDeltaFile(const Standalone<StringRef>& fileNameRef,
 		if (currentChunkBytesEstimate >= chunkSize || i == boundaries.size() - 1) {
 			Value serialized =
 			    BinaryWriter::toValue(currentChunk, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
-			Value chunkBytes = IndexBlobGranuleFileChunkRef::toBytes(
-			    cipherKeysCtx, compressFilter, serialized, file.arena(), encryptMode);
+			Value chunkBytes =
+			    IndexBlobGranuleFileChunkRef::toBytes(cipherKeysCtx, compressFilter, serialized, file.arena());
 			chunks.push_back(chunkBytes);
 
 			// TODO remove validation
@@ -1112,7 +1103,7 @@ Value serializeChunkedDeltaFile(const Standalone<StringRef>& fileNameRef,
 		file.indexBlockRef.block.children.emplace_back_deep(file.arena(), fileRange.end, previousChunkBytes);
 	}
 
-	return serializeFileFromChunks(file, cipherKeysCtx, chunks, previousChunkBytes, encryptMode);
+	return serializeFileFromChunks(file, cipherKeysCtx, chunks, previousChunkBytes);
 }
 
 ParsedDeltaBoundaryRef deltaAtVersion(const DeltaBoundaryRef& delta, Version beginVersion, Version readVersion) {
@@ -2203,7 +2194,6 @@ struct KeyValueGen {
 	int maxVersionIncrease;
 	int targetMutationsPerDelta;
 	KeyRange allRange;
-	EncryptionAtRestMode encryptMode;
 
 	// start at higher version to allow snapshot files to have version 1
 	Version version = 10;
@@ -2222,7 +2212,6 @@ struct KeyValueGen {
 		targetValueLength = deterministicRandom()->randomExp(0, 12);
 		allRange = KeyRangeRef(StringRef(sharedPrefix),
 		                       sharedPrefix.size() == 0 ? "\xff"_sr : strinc(StringRef(sharedPrefix)));
-		encryptMode = EncryptionAtRestMode::DISABLED;
 
 		if (deterministicRandom()->coinflip()) {
 			clearFrequency = 0.0;
@@ -2254,7 +2243,6 @@ struct KeyValueGen {
 		}
 
 		if (deterministicRandom()->coinflip()) {
-			encryptMode = EncryptionAtRestMode::DOMAIN_AWARE;
 			cipherKeys = getCipherKeysCtx(ar);
 		}
 		if (deterministicRandom()->coinflip()) {
@@ -2444,11 +2432,9 @@ TEST_CASE("/blobgranule/files/validateEncryptionCompression") {
 	std::vector<Value> snapshotValues;
 	for (bool encryptionMode : encryptionModes) {
 		Optional<BlobGranuleCipherKeysCtx> keys = encryptionMode ? cipherKeys : Optional<BlobGranuleCipherKeysCtx>();
-		EncryptionAtRestMode encryptMode =
-		    encryptionMode ? EncryptionAtRestMode::DOMAIN_AWARE : EncryptionAtRestMode::DISABLED;
 		for (auto& compressionMode : compressionModes) {
-			Value v = serializeChunkedSnapshot(
-			    fileNameRef, snapshotData, targetSnapshotChunkSize, compressionMode, encryptMode, keys);
+			Value v =
+			    serializeChunkedSnapshot(fileNameRef, snapshotData, targetSnapshotChunkSize, compressionMode, keys);
 			fmt::print("snapshot({0}, {1}): {2}\n",
 			           encryptionMode,
 			           compressionMode.present() ? CompressionUtils::toString(compressionMode.get()) : "",
@@ -2464,11 +2450,9 @@ TEST_CASE("/blobgranule/files/validateEncryptionCompression") {
 	std::vector<Value> deltaValues;
 	for (bool encryptionMode : encryptionModes) {
 		Optional<BlobGranuleCipherKeysCtx> keys = encryptionMode ? cipherKeys : Optional<BlobGranuleCipherKeysCtx>();
-		EncryptionAtRestMode encryptMode =
-		    encryptionMode ? EncryptionAtRestMode::DOMAIN_AWARE : EncryptionAtRestMode::DISABLED;
 		for (auto& compressionMode : compressionModes) {
 			Value v = serializeChunkedDeltaFile(
-			    fileNameRef, deltaData, kvGen.allRange, targetDeltaChunkSize, compressionMode, encryptMode, keys);
+			    fileNameRef, deltaData, kvGen.allRange, targetDeltaChunkSize, compressionMode, keys);
 			fmt::print("delta({0}, {1}): {2}\n",
 			           encryptionMode,
 			           compressionMode.present() ? CompressionUtils::toString(compressionMode.get()) : "",
@@ -2508,8 +2492,8 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 
 	fmt::print("Constructing snapshot with {0} rows, {1} chunks\n", data.size(), targetChunks);
 
-	Value serialized = serializeChunkedSnapshot(
-	    fnameRef, data, targetChunkSize, kvGen.compressFilter, kvGen.encryptMode, kvGen.cipherKeys);
+	Value serialized =
+	    serializeChunkedSnapshot(fnameRef, data, targetChunkSize, kvGen.compressFilter, kvGen.cipherKeys);
 
 	fmt::print("Snapshot serialized! {0} bytes\n", serialized.size());
 
@@ -2655,7 +2639,7 @@ TEST_CASE("/blobgranule/files/deltaFormatUnitTest") {
 	    }
 	}*/
 	Value serialized = serializeChunkedDeltaFile(
-	    fileNameRef, data, kvGen.allRange, targetChunkSize, kvGen.compressFilter, kvGen.encryptMode, kvGen.cipherKeys);
+	    fileNameRef, data, kvGen.allRange, targetChunkSize, kvGen.compressFilter, kvGen.cipherKeys);
 	std::vector<StringRef> deltaPtr{ serialized };
 
 	// check whole file
@@ -2814,7 +2798,7 @@ TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 	}
 
 	Value serializedSnapshot = serializeChunkedSnapshot(
-	    fileNameRef, snapshotData, targetSnapshotChunkSize, kvGen.compressFilter, kvGen.encryptMode, kvGen.cipherKeys);
+	    fileNameRef, snapshotData, targetSnapshotChunkSize, kvGen.compressFilter, kvGen.cipherKeys);
 
 	// split deltas up across multiple files
 	int deltaFiles = std::min(deltaData.size(), deterministicRandom()->randomInt(1, 21));
@@ -2841,7 +2825,6 @@ TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 				                                                  kvGen.allRange,
 				                                                  targetDeltaChunkSize,
 				                                                  kvGen.compressFilter,
-				                                                  kvGen.encryptMode,
 				                                                  kvGen.cipherKeys);
 				serializedDeltaFiles.emplace_back(fileData.back().version, serializedDelta);
 			}
@@ -2974,7 +2957,6 @@ TEST_CASE("/blobgranule/files/bgReadDeltaFile") {
 		                                             KeyRangeRef(t_strA, t_strAfterE),
 		                                             chunkSize,
 		                                             kvGen.compressFilter,
-		                                             kvGen.encryptMode,
 		                                             kvGen.cipherKeys);
 		Standalone<VectorRef<GranuleMutationRef>> actualMutations =
 		    bgReadDeltaFile(serialized, addTenantPrefix ? tenantPrefix : Optional<KeyRef>(), kvGen.cipherKeys);
@@ -3192,8 +3174,7 @@ int WRITE_RUNS = 5;
 std::pair<int64_t, double> doSnapshotWriteBench(const Standalone<GranuleSnapshot>& data,
                                                 bool chunked,
                                                 Optional<BlobGranuleCipherKeysCtx> cipherKeys,
-                                                Optional<CompressionFilter> compressionFilter,
-                                                EncryptionAtRestMode encryptMode) {
+                                                Optional<CompressionFilter> compressionFilter) {
 	Standalone<StringRef> fileNameRef = StringRef();
 	int64_t serializedBytes = 0;
 	double elapsed = -timer_monotonic();
@@ -3202,8 +3183,7 @@ std::pair<int64_t, double> doSnapshotWriteBench(const Standalone<GranuleSnapshot
 			serializedBytes = ObjectWriter::toValue(data, Unversioned()).size();
 		} else {
 			serializedBytes =
-			    serializeChunkedSnapshot(fileNameRef, data, 64 * 1024, compressionFilter, encryptMode, cipherKeys)
-			        .size();
+			    serializeChunkedSnapshot(fileNameRef, data, 64 * 1024, compressionFilter, cipherKeys).size();
 		}
 	}
 	elapsed += timer_monotonic();
@@ -3215,8 +3195,7 @@ std::pair<int64_t, double> doDeltaWriteBench(const Standalone<GranuleDeltas>& da
                                              const KeyRangeRef& fileRange,
                                              bool chunked,
                                              Optional<BlobGranuleCipherKeysCtx> cipherKeys,
-                                             Optional<CompressionFilter> compressionFilter,
-                                             EncryptionAtRestMode encryptMode) {
+                                             Optional<CompressionFilter> compressionFilter) {
 	Standalone<StringRef> fileNameRef = StringRef();
 	int64_t serializedBytes = 0;
 	double elapsed = -timer_monotonic();
@@ -3224,9 +3203,9 @@ std::pair<int64_t, double> doDeltaWriteBench(const Standalone<GranuleDeltas>& da
 		if (!chunked) {
 			serializedBytes = ObjectWriter::toValue(data, Unversioned()).size();
 		} else {
-			serializedBytes = serializeChunkedDeltaFile(
-			                      fileNameRef, data, fileRange, 32 * 1024, compressionFilter, encryptMode, cipherKeys)
-			                      .size();
+			serializedBytes =
+			    serializeChunkedDeltaFile(fileNameRef, data, fileRange, 32 * 1024, compressionFilter, cipherKeys)
+			        .size();
 		}
 	}
 	elapsed += timer_monotonic();
@@ -3258,8 +3237,7 @@ void chunkFromFileSet(const FileSet& fileSet,
 
 FileSet rewriteChunkedFileSet(const FileSet& fileSet,
                               Optional<BlobGranuleCipherKeysCtx> keys,
-                              Optional<CompressionFilter> compressionFilter,
-                              EncryptionAtRestMode encryptMode) {
+                              Optional<CompressionFilter> compressionFilter) {
 	Standalone<StringRef> fileNameRef = StringRef();
 	FileSet newFiles;
 	newFiles.snapshotFile = fileSet.snapshotFile;
@@ -3267,11 +3245,11 @@ FileSet rewriteChunkedFileSet(const FileSet& fileSet,
 	newFiles.commonPrefix = fileSet.commonPrefix;
 	newFiles.range = fileSet.range;
 
-	std::get<2>(newFiles.snapshotFile) = serializeChunkedSnapshot(
-	    fileNameRef, std::get<3>(newFiles.snapshotFile), 64 * 1024, compressionFilter, encryptMode, keys);
+	std::get<2>(newFiles.snapshotFile) =
+	    serializeChunkedSnapshot(fileNameRef, std::get<3>(newFiles.snapshotFile), 64 * 1024, compressionFilter, keys);
 	for (auto& deltaFile : newFiles.deltaFiles) {
 		std::get<2>(deltaFile) = serializeChunkedDeltaFile(
-		    fileNameRef, std::get<3>(deltaFile), fileSet.range, 32 * 1024, compressionFilter, encryptMode, keys);
+		    fileNameRef, std::get<3>(deltaFile), fileSet.range, 32 * 1024, compressionFilter, keys);
 	}
 
 	return newFiles;
@@ -3396,8 +3374,6 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 				continue;
 			}
 			Optional<BlobGranuleCipherKeysCtx> keys = encrypt ? cipherKeys : Optional<BlobGranuleCipherKeysCtx>();
-			EncryptionAtRestMode encryptMode =
-			    encrypt ? EncryptionAtRestMode::DOMAIN_AWARE : EncryptionAtRestMode::DISABLED;
 			for (auto& compressionFilter : compressionModes) {
 				if (!chunk && compressionFilter.present()) {
 					continue;
@@ -3424,8 +3400,7 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 				int64_t snapshotTotalBytes = 0;
 				double snapshotTotalElapsed = 0.0;
 				for (auto& fileSet : fileSets) {
-					auto res = doSnapshotWriteBench(
-					    std::get<3>(fileSet.snapshotFile), chunk, keys, compressionFilter, encryptMode);
+					auto res = doSnapshotWriteBench(std::get<3>(fileSet.snapshotFile), chunk, keys, compressionFilter);
 					snapshotTotalBytes += res.first;
 					snapshotTotalElapsed += res.second;
 				}
@@ -3435,8 +3410,8 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 				double deltaTotalElapsed = 0.0;
 				for (auto& fileSet : fileSets) {
 					for (auto& deltaFile : fileSet.deltaFiles) {
-						auto res = doDeltaWriteBench(
-						    std::get<3>(deltaFile), fileSet.range, chunk, keys, compressionFilter, encryptMode);
+						auto res =
+						    doDeltaWriteBench(std::get<3>(deltaFile), fileSet.range, chunk, keys, compressionFilter);
 						deltaTotalBytes += res.first;
 						deltaTotalElapsed += res.second;
 					}
@@ -3488,8 +3463,6 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 			}
 
 			Optional<BlobGranuleCipherKeysCtx> keys = encrypt ? cipherKeys : Optional<BlobGranuleCipherKeysCtx>();
-			EncryptionAtRestMode encryptMode =
-			    encrypt ? EncryptionAtRestMode::DOMAIN_AWARE : EncryptionAtRestMode::DISABLED;
 			for (auto& compressionFilter : compressionModes) {
 				if (!chunk && compressionFilter.present()) {
 					continue;
@@ -3526,7 +3499,7 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 					if (!chunk) {
 						newFileSet = fileSet;
 					} else {
-						newFileSet = rewriteChunkedFileSet(fileSet, keys, compressionFilter, encryptMode);
+						newFileSet = rewriteChunkedFileSet(fileSet, keys, compressionFilter);
 					}
 
 					auto res = doReadBench(newFileSet, chunk, fileSet.range, false, keys, newFileSet.deltaFiles.size());

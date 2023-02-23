@@ -278,7 +278,6 @@ private:
 		                                       rows_,
 		                                       SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES,
 		                                       compressionFilter,
-		                                       EncryptionAtRestMode::DISABLED,
 		                                       cipherKeysCtx,
 		                                       false);
 		pendingFutures_.push_back(writeToFile(this, bytes, fname));
