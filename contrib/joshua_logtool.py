@@ -52,8 +52,8 @@ def _extract_ensemble_id(work_directory: str) -> str:
 
 
 def _get_log_subspace(ensemble_id: str, test_uid: str):
-    ensemble_space = joshua.dir_ensembles
-    log_space = ensemble_space.create_or_open(joshua.db, "simulation_logs")
+    subspace = joshua.dir_ensemble_results_application
+    log_space = subspace.create_or_open(joshua.db, "simulation_logs")
     return log_space[bytes(ensemble_id, "utf-8")][bytes(test_uid, "utf-8")]
 
 
