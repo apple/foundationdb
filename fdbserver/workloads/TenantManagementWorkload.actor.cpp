@@ -359,11 +359,10 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	// Creates tenant(s) using the specified operation type
-	ACTOR template <class TenantMapEntryImpl>
-	static Future<Void> createTenantImpl(Reference<ReadYourWritesTransaction> tr,
-	                                     std::map<TenantName, TenantMapEntryImpl> tenantsToCreate,
-	                                     OperationType operationType,
-	                                     TenantManagementWorkload* self) {
+	ACTOR static Future<Void> createTenantImpl(Reference<ReadYourWritesTransaction> tr,
+	                                           std::map<TenantName, TenantMapEntry> tenantsToCreate,
+	                                           OperationType operationType,
+	                                           TenantManagementWorkload* self) {
 		if (operationType == OperationType::SPECIAL_KEYS) {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			for (auto [tenant, entry] : tenantsToCreate) {
@@ -393,18 +392,25 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(waitForAll(createFutures));
 			wait(tr->commit());
 		} else {
-			ASSERT(OperationType::METACLUSTER == operationType);
-			ASSERT(tenantsToCreate.size() == 1);
-			TenantMapEntryImpl tEntry = tenantsToCreate.begin()->second;
-			MetaclusterTenantMapEntry modifiedEntry(tEntry);
-			auto assign = AssignClusterAutomatically::True;
-			if (deterministicRandom()->coinflip()) {
-				modifiedEntry.assignedCluster = self->dataClusterName;
-				assign = AssignClusterAutomatically::False;
-			}
-			wait(MetaclusterAPI::createTenant(self->mvDb, modifiedEntry, assign));
+			UNREACHABLE();
 		}
 
+		return Void();
+	}
+
+	ACTOR static Future<Void> createTenantImpl(Reference<ReadYourWritesTransaction> tr,
+	                                           std::map<TenantName, MetaclusterTenantMapEntry> tenantsToCreate,
+	                                           OperationType operationType,
+	                                           TenantManagementWorkload* self) {
+		ASSERT_EQ(operationType, OperationType::METACLUSTER);
+		ASSERT_EQ(tenantsToCreate.size(), 1);
+		auto assign = AssignClusterAutomatically::True;
+		if (deterministicRandom()->coinflip()) {
+			tenantsToCreate.begin()->second.assignedCluster = self->dataClusterName;
+			assign = AssignClusterAutomatically::False;
+		}
+
+		wait(MetaclusterAPI::createTenant(self->mvDb, tenantsToCreate.begin()->second, assign));
 		return Void();
 	}
 
@@ -437,16 +443,6 @@ struct TenantManagementWorkload : TestWorkload {
 
 	ACTOR static Future<Void> createTenant(TenantManagementWorkload* self) {
 		state OperationType operationType = self->randomOperationType();
-		if (operationType == OperationType::METACLUSTER) {
-			wait(createTenantHelper<MetaclusterTenantMapEntry>(self, operationType));
-		} else {
-			wait(createTenantHelper<TenantMapEntry>(self, operationType));
-		}
-		return Void();
-	}
-
-	ACTOR template <class TenantMapEntryImpl>
-	static Future<Void> createTenantHelper(TenantManagementWorkload* self, OperationType operationType) {
 		int numTenants = 1;
 
 		// For transaction-based operations, test creating multiple tenants in the same transaction
@@ -465,14 +461,14 @@ struct TenantManagementWorkload : TestWorkload {
 		state bool hasSystemTenantGroup = false;
 
 		state int newTenants = 0;
-		state std::map<TenantName, TenantMapEntryImpl> tenantsToCreate;
+		state std::map<TenantName, TenantMapEntry> tenantsToCreate;
 		for (int i = 0; i < numTenants; ++i) {
 			TenantName tenant = self->chooseTenantName(true);
 			while (tenantsToCreate.count(tenant)) {
 				tenant = self->chooseTenantName(true);
 			}
 
-			TenantMapEntryImpl entry;
+			TenantMapEntry entry;
 			entry.tenantName = tenant;
 			entry.tenantGroup = self->chooseTenantGroup(true);
 
@@ -509,9 +505,8 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 
 					try {
-						Optional<Void> result =
-						    wait(timeout(createTenantImpl<TenantMapEntryImpl>(tr, tenantsToCreate, operationType, self),
-						                 deterministicRandom()->randomInt(1, 30)));
+						Optional<Void> result = wait(timeout(createTenantImpl(tr, tenantsToCreate, operationType, self),
+						                                     deterministicRandom()->randomInt(1, 30)));
 
 						if (result.present()) {
 							// Make sure that we had capacity to create the tenants. This cannot be validated for
@@ -584,7 +579,7 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(!hasSystemTenant);
 				ASSERT(!hasSystemTenantGroup);
 
-				state typename std::map<TenantName, TenantMapEntryImpl>::iterator tenantItr;
+				state typename std::map<TenantName, TenantMapEntry>::iterator tenantItr;
 				for (tenantItr = tenantsToCreate.begin(); tenantItr != tenantsToCreate.end(); ++tenantItr) {
 					// Ignore any tenants that already existed
 					if (self->createdTenants.count(tenantItr->first)) {

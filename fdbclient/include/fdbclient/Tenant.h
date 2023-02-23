@@ -53,8 +53,6 @@ TenantLockState stringToTenantLockState(std::string stateStr);
 
 json_spirit::mObject binaryToJson(StringRef bytes);
 
-struct MetaclusterTenantMapEntry;
-
 struct TenantMapEntryTxnStateStore {
 	constexpr static FileIdentifier file_identifier = 11267001;
 
@@ -90,7 +88,6 @@ struct TenantMapEntry {
 	TenantMapEntry();
 	TenantMapEntry(int64_t id, TenantName tenantName);
 	TenantMapEntry(int64_t id, TenantName tenantName, Optional<TenantGroupName> tenantGroup);
-	TenantMapEntry(MetaclusterTenantMapEntry metaclusterEntry);
 
 	void setId(int64_t id);
 	std::string toJson() const;

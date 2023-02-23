@@ -1837,7 +1837,7 @@ struct RestoreClusterImpl {
 					wait(self->runRestoreDataClusterTransaction(
 					    [self = self, managementTenant = managementTenant](Reference<ITransaction> tr) {
 						    return updateTenantConfiguration(
-						        self, tr, managementTenant.id, TenantMapEntry(managementTenant));
+						        self, tr, managementTenant.id, managementTenant.toTenantMapEntry());
 					    }));
 					// SOMEDAY: we could mark the tenant in the management cluster as READY if it is in the
 					// UPDATING_CONFIGURATION state
@@ -1948,7 +1948,7 @@ struct RestoreClusterImpl {
 	// Returns true if the group needs to be created
 	ACTOR static Future<bool> addTenantToManagementCluster(RestoreClusterImpl* self,
 	                                                       Reference<ITransaction> tr,
-	                                                       MetaclusterTenantMapEntry tenantEntry) {
+	                                                       TenantMapEntry tenantEntry) {
 		state Future<Optional<TenantGroupEntry>> tenantGroupEntry = Optional<TenantGroupEntry>();
 		if (tenantEntry.tenantGroup.present()) {
 			tenantGroupEntry =
@@ -1969,19 +1969,22 @@ struct RestoreClusterImpl {
 			}
 		}
 
+		state MetaclusterTenantMapEntry managementEntry = MetaclusterTenantMapEntry::fromTenantMapEntry(tenantEntry);
+		managementEntry.assignedCluster = self->clusterName;
+
 		if (!self->restoreDryRun) {
-			tenantEntry.tenantState = MetaclusterAPI::TenantState::READY;
-			tenantEntry.assignedCluster = self->clusterName;
-			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, tenantEntry.id, tenantEntry);
-			ManagementClusterMetadata::tenantMetadata().tenantNameIndex.set(tr, tenantEntry.tenantName, tenantEntry.id);
+
+			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, managementEntry.id, managementEntry);
+			ManagementClusterMetadata::tenantMetadata().tenantNameIndex.set(
+			    tr, managementEntry.tenantName, managementEntry.id);
 
 			ManagementClusterMetadata::tenantMetadata().tenantCount.atomicOp(tr, 1, MutationRef::AddValue);
 			ManagementClusterMetadata::clusterTenantCount.atomicOp(
-			    tr, tenantEntry.assignedCluster, 1, MutationRef::AddValue);
+			    tr, managementEntry.assignedCluster, 1, MutationRef::AddValue);
 
 			// Updated indexes to include the new tenant
 			ManagementClusterMetadata::clusterTenantIndex.insert(
-			    tr, Tuple::makeTuple(tenantEntry.assignedCluster, tenantEntry.tenantName, tenantEntry.id));
+			    tr, Tuple::makeTuple(managementEntry.assignedCluster, managementEntry.tenantName, managementEntry.id));
 		}
 
 		wait(success(tenantGroupEntry));
@@ -1989,15 +1992,15 @@ struct RestoreClusterImpl {
 		if (tenantGroupEntry.get().present() && tenantGroupEntry.get().get().assignedCluster != self->clusterName) {
 			self->messages.push_back(
 			    fmt::format("The tenant `{}' is part of a tenant group `{}' that already exists on cluster `{}'",
-			                printable(tenantEntry.tenantName),
-			                printable(tenantEntry.tenantGroup.get()),
+			                printable(managementEntry.tenantName),
+			                printable(managementEntry.tenantGroup.get()),
 			                printable(tenantGroupEntry.get().get().assignedCluster)));
 			throw invalid_tenant_configuration();
 		}
 
 		if (!self->restoreDryRun) {
 			managementClusterAddTenantToGroup(tr,
-			                                  tenantEntry,
+			                                  managementEntry,
 			                                  &self->ctx.dataClusterMetadata.get(),
 			                                  GroupAlreadyExists(tenantGroupEntry.get().present()),
 			                                  IsRestoring::True);
@@ -2008,7 +2011,7 @@ struct RestoreClusterImpl {
 
 	ACTOR static Future<Void> addTenantBatchToManagementCluster(RestoreClusterImpl* self,
 	                                                            Reference<typename DB::TransactionT> tr,
-	                                                            std::vector<MetaclusterTenantMapEntry> tenants) {
+	                                                            std::vector<TenantMapEntry> tenants) {
 		Optional<int64_t> tenantIdPrefix = wait(TenantMetadata::tenantIdPrefix().get(tr));
 		ASSERT(tenantIdPrefix.present());
 
@@ -2063,7 +2066,7 @@ struct RestoreClusterImpl {
 
 	ACTOR static Future<Void> addTenantsToManagementCluster(RestoreClusterImpl* self) {
 		state std::unordered_map<int64_t, TenantMapEntry>::iterator itr;
-		state std::vector<MetaclusterTenantMapEntry> tenantBatch;
+		state std::vector<TenantMapEntry> tenantBatch;
 		state int64_t tenantsToAdd = 0;
 
 		for (itr = self->dataClusterTenantMap.begin(); itr != self->dataClusterTenantMap.end(); ++itr) {
@@ -2071,7 +2074,7 @@ struct RestoreClusterImpl {
 			    self->mgmtClusterTenantMap.find(itr->second.id);
 			if (managementEntry == self->mgmtClusterTenantMap.end()) {
 				++tenantsToAdd;
-				tenantBatch.push_back(MetaclusterTenantMapEntry(itr->second));
+				tenantBatch.push_back(itr->second);
 			} else if (managementEntry->second.tenantName != itr->second.tenantName ||
 			           managementEntry->second.assignedCluster != self->clusterName ||
 			           !managementEntry->second.matchesConfiguration(itr->second)) {
@@ -2477,9 +2480,8 @@ struct CreateTenantImpl {
 	}
 
 	ACTOR static Future<Void> storeTenantInDataCluster(CreateTenantImpl* self, Reference<ITransaction> tr) {
-		TenantMapEntry entry(self->tenantEntry);
-		std::pair<Optional<TenantMapEntry>, bool> dataClusterTenant =
-		    wait(TenantAPI::createTenantTransaction(tr, entry, ClusterType::METACLUSTER_DATA));
+		std::pair<Optional<TenantMapEntry>, bool> dataClusterTenant = wait(TenantAPI::createTenantTransaction(
+		    tr, self->tenantEntry.toTenantMapEntry(), ClusterType::METACLUSTER_DATA));
 
 		// If the tenant map entry is empty, then we encountered a tombstone indicating that the tenant was
 		// simultaneously removed.
@@ -2966,9 +2968,7 @@ struct ConfigureTenantImpl {
 			return Void();
 		}
 
-		TenantMapEntry dataClusterEntry = self->updatedEntry;
-
-		wait(TenantAPI::configureTenantTransaction(tr, tenantEntry.get(), dataClusterEntry));
+		wait(TenantAPI::configureTenantTransaction(tr, tenantEntry.get(), self->updatedEntry.toTenantMapEntry()));
 		return Void();
 	}
 

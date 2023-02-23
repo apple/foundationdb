@@ -154,7 +154,9 @@ struct MetaclusterTenantMapEntry {
 	                          TenantName tenantName,
 	                          MetaclusterAPI::TenantState tenantState,
 	                          Optional<TenantGroupName> tenantGroup);
-	MetaclusterTenantMapEntry(TenantMapEntry tenantEntry);
+
+	static MetaclusterTenantMapEntry fromTenantMapEntry(TenantMapEntry const& source);
+	TenantMapEntry toTenantMapEntry() const;
 
 	void setId(int64_t id);
 	std::string toJson() const;
