@@ -392,25 +392,20 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(waitForAll(createFutures));
 			wait(tr->commit());
 		} else {
-			UNREACHABLE();
+			ASSERT_EQ(operationType, OperationType::METACLUSTER);
+			ASSERT_EQ(tenantsToCreate.size(), 1);
+			MetaclusterTenantMapEntry entry =
+			    MetaclusterTenantMapEntry::fromTenantMapEntry(tenantsToCreate.begin()->second);
+			auto assign = AssignClusterAutomatically::True;
+			if (deterministicRandom()->coinflip()) {
+				entry.assignedCluster = self->dataClusterName;
+				assign = AssignClusterAutomatically::False;
+			}
+
+			wait(MetaclusterAPI::createTenant(self->mvDb, entry, assign));
+			return Void();
 		}
 
-		return Void();
-	}
-
-	ACTOR static Future<Void> createTenantImpl(Reference<ReadYourWritesTransaction> tr,
-	                                           std::map<TenantName, MetaclusterTenantMapEntry> tenantsToCreate,
-	                                           OperationType operationType,
-	                                           TenantManagementWorkload* self) {
-		ASSERT_EQ(operationType, OperationType::METACLUSTER);
-		ASSERT_EQ(tenantsToCreate.size(), 1);
-		auto assign = AssignClusterAutomatically::True;
-		if (deterministicRandom()->coinflip()) {
-			tenantsToCreate.begin()->second.assignedCluster = self->dataClusterName;
-			assign = AssignClusterAutomatically::False;
-		}
-
-		wait(MetaclusterAPI::createTenant(self->mvDb, tenantsToCreate.begin()->second, assign));
 		return Void();
 	}
 
