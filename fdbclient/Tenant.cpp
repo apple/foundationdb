@@ -161,6 +161,10 @@ bool TenantMapEntry::operator==(TenantMapEntry const& other) const {
 	       tenantGroup == other.tenantGroup && configurationSequenceNum == other.configurationSequenceNum;
 }
 
+bool TenantMapEntry::operator!=(TenantMapEntry const& other) const {
+	return !(*this == other);
+}
+
 json_spirit::mObject TenantGroupEntry::toJson() const {
 	json_spirit::mObject tenantGroupEntry;
 	if (assignedCluster.present()) {
@@ -168,6 +172,23 @@ json_spirit::mObject TenantGroupEntry::toJson() const {
 	}
 
 	return tenantGroupEntry;
+}
+
+bool TenantGroupEntry::operator==(TenantGroupEntry const& other) const {
+	return assignedCluster == other.assignedCluster;
+}
+bool TenantGroupEntry::operator!=(TenantGroupEntry const& other) const {
+	return !(*this == other);
+}
+
+bool TenantTombstoneCleanupData::operator==(TenantTombstoneCleanupData const& other) const {
+	return tombstonesErasedThrough == other.tombstonesErasedThrough &&
+	       nextTombstoneEraseVersion == other.nextTombstoneEraseVersion &&
+	       nextTombstoneEraseId == other.nextTombstoneEraseId;
+}
+
+bool TenantTombstoneCleanupData::operator!=(TenantTombstoneCleanupData const& other) const {
+	return !(*this == other);
 }
 
 TenantMetadataSpecification<TenantMapEntry>& TenantMetadata::instance() {

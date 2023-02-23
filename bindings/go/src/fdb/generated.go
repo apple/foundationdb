@@ -479,6 +479,31 @@ func (o TransactionOptions) SetReadAheadDisable() error {
 	return o.setOpt(52, nil)
 }
 
+// Storage server should cache disk blocks needed for subsequent read requests in this transaction.  This is the default behavior.
+func (o TransactionOptions) SetReadServerSideCacheEnable() error {
+	return o.setOpt(507, nil)
+}
+
+// Storage server should not cache disk blocks needed for subsequent read requests in this transaction.  This can be used to avoid cache pollution for reads not expected to be repeated.
+func (o TransactionOptions) SetReadServerSideCacheDisable() error {
+	return o.setOpt(508, nil)
+}
+
+// Use normal read priority for subsequent read requests in this transaction.  This is the default read priority.
+func (o TransactionOptions) SetReadPriorityNormal() error {
+	return o.setOpt(509, nil)
+}
+
+// Use low read priority for subsequent read requests in this transaction.
+func (o TransactionOptions) SetReadPriorityLow() error {
+	return o.setOpt(510, nil)
+}
+
+// Use high read priority for subsequent read requests in this transaction.
+func (o TransactionOptions) SetReadPriorityHigh() error {
+	return o.setOpt(511, nil)
+}
+
 // Not yet implemented.
 func (o TransactionOptions) SetDurabilityDatacenter() error {
 	return o.setOpt(110, nil)
