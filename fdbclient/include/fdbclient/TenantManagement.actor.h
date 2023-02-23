@@ -372,7 +372,6 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 
 		// This is idempotent because we only erase an entry from the tenant map if it is present
 		TenantMetadata::tenantMap().erase(tr, tenantId);
-		TenantMetadata::tenantLockId().erase(tr, tenantId);
 		TenantMetadata::tenantNameIndex().erase(tr, tenantEntry.get().tenantName);
 		TenantMetadata::tenantCount().atomicOp(tr, -1, MutationRef::AddValue);
 		TenantMetadata::lastTenantModification().setVersionstamp(tr, Versionstamp(), 0);
@@ -499,7 +498,7 @@ Future<Void> changeLockState(Transaction* tr, int64_t tenant, TenantLockState de
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 	wait(store(entry, TenantAPI::getTenantTransaction(tr, tenant)));
-	Optional<UID> currLockID = wait(TenantMetadata::tenantLockId().get(tr, tenant));
+	auto currLockID = entry.tenantLockId;
 	if (currLockID.present()) {
 		if (currLockID.get() != lockID) {
 			throw tenant_locked();
@@ -511,12 +510,12 @@ Future<Void> changeLockState(Transaction* tr, int64_t tenant, TenantLockState de
 	}
 	TenantMapEntry newState = entry;
 	newState.tenantLockState = desiredLockState;
-	wait(configureTenantTransaction(tr, entry, newState));
 	if (desiredLockState == TenantLockState::UNLOCKED) {
-		TenantMetadata::tenantLockId().erase(tr, tenant);
+		newState.tenantLockId = {};
 	} else {
-		TenantMetadata::tenantLockId().set(tr, tenant, lockID);
+		newState.tenantLockId = lockID;
 	}
+	wait(configureTenantTransaction(tr, entry, newState));
 	return Void();
 }
 

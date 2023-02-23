@@ -61,6 +61,7 @@ struct TenantMapEntry {
 	Key prefix;
 	TenantName tenantName;
 	TenantAPI::TenantLockState tenantLockState = TenantAPI::TenantLockState::UNLOCKED;
+	Optional<UID> tenantLockId;
 	Optional<TenantGroupName> tenantGroup;
 	int64_t configurationSequenceNum = 0;
 
@@ -85,7 +86,7 @@ struct TenantMapEntry {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, tenantName, tenantLockState, tenantGroup, configurationSequenceNum);
+		serializer(ar, id, tenantName, tenantLockState, tenantLockId, tenantGroup, configurationSequenceNum);
 		if constexpr (Ar::isDeserializing) {
 			if (id >= 0) {
 				prefix = TenantAPI::idToPrefix(id);
@@ -175,7 +176,6 @@ struct TenantMetadataSpecification {
 
 	KeyBackedObjectMap<int64_t, TenantMapEntryImpl, decltype(IncludeVersion()), TenantIdCodec> tenantMap;
 	KeyBackedMap<TenantName, int64_t> tenantNameIndex;
-	KeyBackedMap<int64_t, UID> lockId;
 	KeyBackedProperty<int64_t> lastTenantId;
 	KeyBackedBinaryValue<int64_t> tenantCount;
 	KeyBackedSet<int64_t> tenantTombstones;
@@ -187,7 +187,6 @@ struct TenantMetadataSpecification {
 
 	TenantMetadataSpecification(KeyRef prefix)
 	  : subspace(prefix.withSuffix("tenant/"_sr)), tenantMap(subspace.withSuffix("map/"_sr), IncludeVersion()),
-	    tenantNameIndex(subspace.withSuffix("nameIndex/"_sr)), lockId(subspace.withSuffix("lockId"_sr)),
 	    lastTenantId(subspace.withSuffix("lastId"_sr)), tenantCount(subspace.withSuffix("count"_sr)),
 	    tenantTombstones(subspace.withSuffix("tombstones/"_sr)),
 	    tombstoneCleanupData(subspace.withSuffix("tombstoneCleanup"_sr), IncludeVersion()),
@@ -203,7 +202,6 @@ struct TenantMetadata {
 	static inline auto& subspace() { return instance().subspace; }
 	static inline auto& tenantMap() { return instance().tenantMap; }
 	static inline auto& tenantNameIndex() { return instance().tenantNameIndex; }
-	static inline auto& tenantLockId() { return instance().lockId; }
 	static inline auto& lastTenantId() { return instance().lastTenantId; }
 	static inline auto& tenantCount() { return instance().tenantCount; }
 	static inline auto& tenantTombstones() { return instance().tenantTombstones; }

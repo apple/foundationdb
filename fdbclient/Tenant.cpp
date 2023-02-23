@@ -139,6 +139,9 @@ std::string TenantMapEntry::toJson() const {
 	}
 
 	tenantEntry["lock_state"] = TenantAPI::tenantLockStateToString(tenantLockState);
+	if (tenantLockId.present()) {
+		tenantEntry["lock_id"] = tenantLockId.get().toString();
+	}
 
 	return json_spirit::write_string(json_spirit::mValue(tenantEntry));
 }

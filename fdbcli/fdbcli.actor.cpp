@@ -2115,8 +2115,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 
 				if (tokencmp(tokens[0], "createtenant") || tokencmp(tokens[0], "deletetenant") ||
 				    tokencmp(tokens[0], "listtenants") || tokencmp(tokens[0], "gettenant") ||
-				    tokencmp(tokens[0], "configuretenant") || tokencmp(tokens[0], "renametenant") ||
-				    tokencmp(tokens[0], "locktenant") || tokencmp(tokens[0], "unlocktenant")) {
+				    tokencmp(tokens[0], "configuretenant") || tokencmp(tokens[0], "renametenant")) {
 					bool _result = wait(makeInterruptable(tenantCommandForwarder(db, tokens)));
 					if (!_result) {
 						is_error = true;

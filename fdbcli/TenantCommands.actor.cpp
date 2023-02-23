@@ -845,6 +845,12 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 	} else if (tokencmp(tokens[1], "rename") && tokens.size() < 4) {
 		static std::vector<const char*> opts = { "<OLD_NAME>", "<NEW_NAME>" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+	} else if (tokencmp(tokens[1], "lock") && tokens.size() < 5) {
+		static std::vector<const char*> opts = { "<NAME>", "[w|rw]", "[UID]" };
+		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+	} else if (tokencmp(tokens[1], "unlock") && tokens.size() < 4) {
+		static std::vector<const char*> opts = { "<NAME>", "<UID>" };
+		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else {
 		return {};
 	}
@@ -857,7 +863,9 @@ CommandFactory tenantRegisterFactory("tenant",
                                                  "`list' prints a list of tenants in the cluster.\n"
                                                  "`get' prints the metadata for a particular tenant.\n"
                                                  "`configure' modifies the configuration for a tenant.\n"
-                                                 "`rename' changes the name of a tenant.\n"),
+                                                 "`rename' changes the name of a tenant.\n"
+                                                 "`lock` locks a tenant\n"
+                                                 "`unlock` unlocks a tenant\n"),
                                      &tenantGenerator,
                                      &tenantHintGenerator);
 
