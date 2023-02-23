@@ -247,8 +247,7 @@ struct DatabaseConfiguration {
 	KeyValueStoreType storageServerStoreType;
 
 	// Storage engine params
-	using storageEngineParamsMap = std::map<std::string, std::string>;
-	Optional<storageEngineParamsMap> storageEngineParams;
+	Optional<std::map<std::string, std::string>> storageEngineParams;
 
 	// Testing StorageServers
 	int32_t desiredTSSCount;

@@ -213,9 +213,9 @@ inline IKeyValueStore* openKVStore(
     bool checkChecksums = false,
     bool checkIntegrity = false,
     bool openRemotely = false,
-    Optional<std::map<std::string, std::string>> params = Optional<std::map<std::string, std::string>>(),
     Reference<AsyncVar<ServerDBInfo> const> db = {},
-    Optional<EncryptionAtRestMode> encryptionMode = {}) {
+    Optional<EncryptionAtRestMode> encryptionMode = {},
+	Optional<std::map<std::string, std::string>> params = Optional<std::map<std::string, std::string>>()) {
 	// Only Redwood support encryption currently.
 	if (encryptionMode.present() && encryptionMode.get().isEncryptionEnabled() &&
 	    storeType != KeyValueStoreType::SSD_REDWOOD_V1) {

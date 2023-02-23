@@ -7963,9 +7963,9 @@ public:
 	                     UID logID,
 	                     Reference<AsyncVar<ServerDBInfo> const> db,
 	                     Optional<EncryptionAtRestMode> encryptionMode,
+	                     Optional<std::map<std::string, std::string>> params = {},
 	                     EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE,
-	                     Reference<IPageEncryptionKeyProvider> keyProvider = {},
-	                     Optional<std::map<std::string, std::string>> params = {})
+	                     Reference<IPageEncryptionKeyProvider> keyProvider = {})
 	  : m_filename(filename),
 	    prefetch(getStorageEngineParamBoolean(params.get(), "kvstore_range_prefetch") /*runtime change*/),
 	    metrics_interval(getStorageEngineParamDouble(params.get(), "metrics_interval")) {
@@ -7999,7 +7999,6 @@ public:
 		                               remapCleanupWindowBytes,
 		                               SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
 		                               false,
-
 		                               m_error,
 		                               metrics_interval);
 
@@ -8291,7 +8290,6 @@ public:
 	}
 
 	StorageEngineParamResult setParameters(std::map<std::string, std::string> const& params) override {
-		// TODO
 		StorageEngineParamResult result = checkCompatibility(params);
 		for (const auto& k : result.applied) {
 			if (k == "kvstore_range_prefetch")
@@ -8301,20 +8299,44 @@ public:
 		for (const auto& k : result.needReboot) {
 			TraceEvent("RedwoodStorageEngineParamsNeedReboot").detail("Param", k);
 		}
+		for (const auto& k : result.needReplacement) {
+			TraceEvent("RedwoodStorageEngineParamsNeedReplacement").detail("Param", k);
+		}
 		return result;
 	}
 
+	void addParamsToResults(StorageEngineParamResult& result, const std::string& param, const std::string& value) {
+		if (param == "kvstore_range_prefetch") {
+			result.applied.push_back(param);
+		} else if (param == "metrics_interval") {
+			result.needReboot.push_back(param);
+		} else if (param == "default_page_size") {
+			result.needReplacement.push_back(param);
+		} else if (param == "remote_kv_store") {
+			result.needReboot.push_back(param);
+		}
+	}
+
 	StorageEngineParamResult checkCompatibility(std::map<std::string, std::string> const& params) override {
-		// TODO
 		StorageEngineParamResult result;
+		auto old = getParameters();
+		// TODO : have a set lookup for parameters
 		for (auto const& [k, v] : params) {
-			if (k == "kvstore_range_prefetch") {
-				getStorageEngineParamBoolean(params, "kvstore_range_prefetch") == prefetch
-				    ? result.unchanged.push_back(k)
-				    : result.applied.push_back(k);
-			} else if (k == "metrics_interval") {
-				result.needReboot.push_back(k);
+			TraceEvent("CheckCompatibilityParam").detail("Param", k).detail("Old", old[k]).detail("New", v);
+			if (old[k] == v) {
+				result.unchanged.push_back(k);
+				continue;
 			}
+			// if (k == "kvstore_range_prefetch") {
+			// 	getStorageEngineParamBoolean(params, "kvstore_range_prefetch") == prefetch
+			// 	    ? result.unchanged.push_back(k)
+			// 	    : result.applied.push_back(k);
+			// } else if (k == "metrics_interval") {
+			// 	result.needReboot.push_back(k);
+			// } else if (k == "default_page_size") {
+			// 	result.needReplacement.push_back(k);
+			// }
+			addParamsToResults(result, k, v);
 			// do something else
 		}
 		return result;
@@ -8343,7 +8365,7 @@ IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                        Reference<AsyncVar<ServerDBInfo> const> db,
                                        Optional<EncryptionAtRestMode> encryptionMode,
                                        Optional<std::map<std::string, std::string>> params) {
-	return new KeyValueStoreRedwood(filename, logID, db, encryptionMode, {}, {}, params);
+	return new KeyValueStoreRedwood(filename, logID, db, encryptionMode, params);
 }
 
 int randomSize(int max) {
@@ -11512,6 +11534,7 @@ TEST_CASE("/redwood/correctness/EnforceEncodingType") {
 		                               isEncodingTypeAESEncrypted(initialEncodingType)
 		                                   ? EncryptionAtRestMode::CLUSTER_AWARE
 		                                   : EncryptionAtRestMode::DISABLED,
+		                               {},
 		                               initialEncodingType,
 		                               encryptionKeyProviders.at(initialEncodingType));
 		wait(kvs->init());
@@ -11525,6 +11548,7 @@ TEST_CASE("/redwood/correctness/EnforceEncodingType") {
 		                               UID(),
 		                               {}, // db
 		                               {}, // encryptionMode
+		                               {},
 		                               reopenEncodingType,
 		                               encryptionKeyProviders.at(reopenEncodingType));
 		try {

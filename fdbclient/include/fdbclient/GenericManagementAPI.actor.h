@@ -534,7 +534,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 			}
 
 			for (auto i = m.begin(); i != m.end(); ++i) {
-				fmt::print("Set config key:{}; val:{}\n", i->first, i->second);
+				// fmt::print("Set config key:{}; val:{}\n", i->first, i->second);
 				tr->set(StringRef(i->first), StringRef(i->second));
 				if (i->first == perpetualStorageWiggleKey) {
 					if (i->second == "0") {
@@ -554,12 +554,13 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 			if (checkForConfigChange(m)) {
 				tr->addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));
 				tr->set(moveKeysLockOwnerKey, versionKey);
+				// fmt::print("Set moveKeysLock Key\n");
 			}
 
 			if (storageEngineParamsChange) {
 				// TODO : check if we need to change the catch block abd uf tge versionKey can be reused
 				tr->addReadConflictRange(singleKeyRange(storageEngineParamsVersionKey));
-				fmt::print("Set storage engine params version Key\n");
+				// fmt::print("Set storage engine params version Key\n");
 				tr->set(storageEngineParamsVersionKey, versionKey);
 			}
 
@@ -567,6 +568,8 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 			break;
 		} catch (Error& e) {
 			state Error e1(e);
+			// fmt::print("Configure {} failed, error code {}\n", creating ? "new" : "existing",
+			// std::to_string(e.code()));
 			if ((e.code() == error_code_not_committed || e.code() == error_code_transaction_too_old) && creating) {
 				// The database now exists.  Determine whether we created it or it was already existing/created by
 				// someone else.  The latter is an error.

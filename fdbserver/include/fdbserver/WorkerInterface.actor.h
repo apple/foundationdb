@@ -865,9 +865,9 @@ struct InitializeStorageRequest {
 	Optional<std::pair<UID, Version>>
 	    tssPairIDAndVersion; // Only set if recruiting a tss. Will be the UID and Version of its SS pair.
 	Version initialClusterVersion;
-	Optional<std::map<std::string, std::string>> storageEngineParams; // Parameters to initialize the storage engine
 	ReplyPromise<InitializeStorageReply> reply;
 	EncryptionAtRestMode encryptMode;
+	Optional<std::map<std::string, std::string>> storageEngineParams; // Parameters to initialize the storage engine
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1212,8 +1212,7 @@ ACTOR Future<Void> storageServer(
     Reference<AsyncVar<ServerDBInfo> const> db,
     std::string folder,
     Promise<Void> recovered,
-    Reference<IClusterConnectionRecord>
-        connRecord, // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
+    Reference<IClusterConnectionRecord> connRecord, // changes pssi->id() to be the recovered ID
     std::shared_ptr<std::map<std::string, std::string>> storageEngineParams = nullptr);
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,

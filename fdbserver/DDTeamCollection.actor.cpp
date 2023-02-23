@@ -2237,9 +2237,9 @@ public:
 						    .detail("NewV", v);
 						newParams[paramK] = v.toString();
 					}
-					if (newParams.size()) {
-						collection.add(self->storageParamsUpdater(newParams));
-					}
+				}
+				if (newParams.size()) {
+					collection.add(self->storageParamsUpdater(newParams));
 				}
 
 				state Future<Void> watchFuture = tr.watch(storageEngineParamsVersionKey);
@@ -2259,20 +2259,45 @@ public:
 		// get all storages interfaces
 		// send the change requests
 		// runtime/reboot/replacement
-		state std::vector<Future<ErrorOr<SetStorageEngineParamsReply>>> fs;
-		for (const auto& [_, ss] : self->server_info) {
+		std::vector<Future<ErrorOr<SetStorageEngineParamsReply>>> fs;
+		state std::map<UID, Future<ErrorOr<SetStorageEngineParamsReply>>> fmap;
+		for (const auto& [serverId, ss] : self->server_info) {
 			StorageServerInterface si = ss->getLastKnownInterface();
-			fs.push_back(si.setStorageEngineParams.tryGetReply(SetStorageEngineParamsRequest(newParams)));
+			Future<ErrorOr<SetStorageEngineParamsReply>> f =
+			    si.setStorageEngineParams.tryGetReply(SetStorageEngineParamsRequest(newParams));
+			fs.push_back(f);
+			fmap[serverId] = f;
 		}
 		wait(waitForAll(fs));
-		for (Future<ErrorOr<SetStorageEngineParamsReply>>& f : fs) {
+		state std::vector<Future<Void>> collection;
+		for (const auto& [serverId, f] : fmap) {
+			TraceEvent("DDTCSetStorageEngineParameterResult").detail("ServerId", serverId);
 			ASSERT(f.isReady() && !f.get().isError());
 			SetStorageEngineParamsReply reply = f.get().get();
 			// TODO: handle the needreboot and needreplacement parameters
 			for (const auto& k : reply.result.applied) {
 				self->configuration.storageEngineParams.get()[k] = newParams[k];
 			}
+			for (const auto& k : reply.result.needReplacement) {
+				TraceEvent("NeedReplacementStorageEngineParameter")
+				    .detail("Param", k)
+				    .detail("ServerId", serverId)
+				    .detail("Size", reply.result.needReplacement.size());
+				// TODO : update the parameter on DD configuration
+			}
+			if (reply.result.needReplacement.size()) {
+				if (self->storageWiggler && !self->storageWiggler->isStopped()) {
+					// wiggle the storage
+					TraceEvent("WiggleStorageServerForKVParamUpdate").detail("ServerId", serverId);
+					collection.push_back(
+					    self->updateStorageMetadata(self->server_info[serverId].getPtr(), false, true));
+				} else {
+					TraceEvent(SevWarnAlways, "NeedReplacementInvalidAsWiggleNotEnabled").detail("ServerId", serverId);
+				}
+			}
 		}
+
+		wait(waitForAll(collection));
 
 		TraceEvent("DDStorageParamsUpdater").detail("NewParams", describe(newParams));
 		return Void();
@@ -2961,7 +2986,9 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> updateStorageMetadata(DDTeamCollection* self, TCServerInfo* server) {
+	ACTOR static Future<Void> updateStorageMetadata(DDTeamCollection* self,
+	                                                TCServerInfo* server,
+	                                                bool needReplacement) {
 		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
 		    serverMetadataKeys.begin, IncludeVersion());
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
@@ -2970,7 +2997,8 @@ public:
 		wait(server->updateStoreType());
 		state StorageMetadataType data(StorageMetadataType::currentTime(),
 		                               server->getStoreType(),
-		                               !server->isCorrectStoreType(self->configuration.storageServerStoreType));
+		                               !server->isCorrectStoreType(self->configuration.storageServerStoreType),
+		                               needReplacement);
 
 		// read storage metadata
 		loop {
@@ -2981,6 +3009,7 @@ public:
 				// NOTE: in upgrade testing, there may not be any metadata
 				if (metadata.present()) {
 					data.createdTime = metadata.get().createdTime;
+					data.needReplacement = needReplacement || metadata.get().needReplacement;
 				}
 				metadataMap.set(tr, server->getId(), data);
 				wait(tr->commit());
@@ -3717,8 +3746,8 @@ Future<Void> DDTeamCollection::readStorageWiggleMap() {
 	return DDTeamCollectionImpl::readStorageWiggleMap(this);
 }
 
-Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server, bool isTss) {
-	return isTss ? Never() : DDTeamCollectionImpl::updateStorageMetadata(this, server);
+Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server, bool isTss, bool needReplacement) {
+	return isTss ? Never() : DDTeamCollectionImpl::updateStorageMetadata(this, server, needReplacement);
 }
 
 void DDTeamCollection::resetLocalitySet() {

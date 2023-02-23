@@ -156,23 +156,24 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 	// key:=value is unvalidated and unchecked
 	pos = mode.find(":=");
 	if (pos != std::string::npos) {
-		auto k = mode.substr(0, pos);
-		auto v = mode.substr(pos + 2);
-		if (k == "redwood") {
-			logType = KeyValueStoreType::SSD_BTREE_V2;
-			storeType = KeyValueStoreType::SSD_REDWOOD_V1;
-		} else {
-			// TODO: check if storage type is supported
-			fmt::print("Error: Unsupported params change for storage engine {}", k);
-			return out;
-		}
-		if (storeType.present()) {
-			out[p + "storage_engine_params"] = v;
-			out[p + "log_engine"] = format("%d", logType.get().storeType());
-			out[p + "storage_engine"] = format("%d", storeType.get().storeType());
-		} else {
-			out[p + k] = v;
-		}
+		// auto k = mode.substr(0, pos);
+		// auto v = mode.substr(pos + 2);
+		// if (k == "redwood") {
+		// 	logType = KeyValueStoreType::SSD_BTREE_V2;
+		// 	storeType = KeyValueStoreType::SSD_REDWOOD_V1;
+		// } else {
+		// 	// TODO: check if storage type is supported
+		// 	fmt::print("Error: Unsupported params change for storage engine {}", k);
+		// 	return out;
+		// }
+		// if (storeType.present()) {
+		// 	out[p + "storage_engine_params"] = v;
+		// 	out[p + "log_engine"] = format("%d", logType.get().storeType());
+		// 	out[p + "storage_engine"] = format("%d", storeType.get().storeType());
+		// } else {
+		// 	out[p + k] = v;
+		// }
+		out[p + mode.substr(0, pos)] = mode.substr(pos + 2);
 		return out;
 	}
 
@@ -303,6 +304,21 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 				return out;
 			}
 			out[p + key] = format("%d", mode);
+		}
+
+		if (key == "storage_engine" || key == "log_engine") {
+			std::string storeTypeStr = value;
+			pos = value.find(":");
+			if (pos != std::string::npos) {
+				storeTypeStr = value.substr(0, pos);
+				auto paramsStr = value.substr(pos + 1);
+				if (storeTypeStr != "redwood" || key != "storage_engine") {
+					fmt::print("Error: Unsupported params change for storage engine {}", storeTypeStr);
+					return out;
+				}
+				out[p + fmt::format("{}_params", key)] = paramsStr;
+			}
+			out[p + key] = format("%d", KeyValueStoreType::fromStoreTypeStr(storeTypeStr));
 		}
 
 		return out;

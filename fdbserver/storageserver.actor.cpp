@@ -11384,12 +11384,10 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				self->actors.add(auditStorageQ(self, req));
 			}
 			when(GetStorageEngineParamsRequest req = waitNext(ssi.getStorageEngineParams.getFuture())) {
-				// json_spirit::mObject resultObj;
-				// resultObj["storage_engine"] = self->storage.getKeyValueStoreType().toString();
-				// resultObj["remote"] = self->storage.
+
 				auto params = self->storage.getStorageEngineParams();
-				// const std::string params_json_str =
-				//     json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print);
+				// some params are at storage server level to control the storage engine
+				ASSERT(!params.contains("remote_kv_store"));
 				GetStorageEngineParamsReply _reply(params);
 				req.reply.send(_reply);
 			}
@@ -11397,10 +11395,12 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				StorageEngineParamResult res = self->storage.setStorageEngineParams(req.params);
 				SetStorageEngineParamsReply _reply(res);
 				req.reply.send(_reply);
-				// do the reboot here
+				// runtime already finished,
+				// reboot are thrown here
+				// replacement will be handled by DD wiggler
 				if (_reply.result.needReboot.size()) {
 					TraceEvent("RebootDueToKVSParamChange").detail("Params", describe(_reply.result.needReboot));
-					throw please_reboot();
+					throw please_reboot_kv_store();
 				}
 			}
 			when(wait(updateProcessStatsTimer)) {
