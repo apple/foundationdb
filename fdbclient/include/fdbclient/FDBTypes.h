@@ -1653,6 +1653,7 @@ struct ReadOptions {
 	ReadType type;
 	// Once CacheResult is serializable, change type from bool to CacheResult
 	bool cacheResult;
+	bool lockAware = false;
 	Optional<UID> debugID;
 	Optional<Version> consistencyCheckStartVersion;
 
@@ -1666,7 +1667,7 @@ struct ReadOptions {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, type, cacheResult, debugID, consistencyCheckStartVersion);
+		serializer(ar, type, cacheResult, debugID, consistencyCheckStartVersion, lockAware);
 	}
 };
 
