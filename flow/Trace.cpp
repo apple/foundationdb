@@ -116,7 +116,6 @@ const std::unordered_set<std::string_view> auditTopics{
 	"N2_ConnectHandshakeUnknownError",
 	"N2_AcceptHandshakeError",
 	"N2_AcceptHandshakeUnknownError",
-	"TenantTokenMismatch",
 	"UnauthorizedAccessPrevented",
 };
 
