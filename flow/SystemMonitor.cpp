@@ -28,6 +28,10 @@
 #include <cxxabi.h>
 #endif
 
+#ifdef ADDRESS_SANITIZER
+#include <sanitizer/asan_interface.h>
+#endif
+
 SystemMonitorMachineState machineState;
 
 void initializeSystemMonitorMachineState(SystemMonitorMachineState machineState) {
@@ -422,6 +426,9 @@ Future<Void> startMemoryUsageMonitor(uint64_t memLimit) {
 	}
 	auto checkMemoryUsage = [=]() {
 		if (getResidentMemoryUsage() > memLimit) {
+#if defined(ADDRESS_SANITIZER) && defined(__linux__)
+			__sanitizer_print_memory_profile(/*top percent*/ 100, /*max contexts*/ 10);
+#endif
 			platform::outOfMemory();
 		}
 	};
