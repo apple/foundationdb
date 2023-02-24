@@ -6386,8 +6386,13 @@ private:
 
 	struct InternalPageModifier {
 		InternalPageModifier() {}
-		InternalPageModifier(Reference<const ArenaPage> p, bool alreadyCloned, bool updating, ParentInfo* parentInfo)
-		  : updating(updating), page(p), clonedPage(alreadyCloned), changesMade(false), parentInfo(parentInfo) {}
+		InternalPageModifier(Reference<const ArenaPage> p,
+		                     bool alreadyCloned,
+		                     bool updating,
+		                     ParentInfo* parentInfo,
+		                     int maxHeightAllowed)
+		  : updating(updating), page(p), clonedPage(alreadyCloned), changesMade(false), parentInfo(parentInfo),
+		    maxHeightAllowed(maxHeightAllowed) {}
 
 		// Whether updating the existing page is allowed
 		bool updating;
@@ -6401,6 +6406,7 @@ private:
 		// Whether there are any changes to the page, either made in place or staged in rebuild
 		bool changesMade;
 		ParentInfo* parentInfo;
+		int maxHeightAllowed;
 
 		BTreePage* btPage() const { return (BTreePage*)page->mutateData(); }
 
@@ -6432,7 +6438,7 @@ private:
 					const RedwoodRecordRef& rec = recs[i];
 					debug_printf("internal page (updating) insert: %s\n", rec.toString(false).c_str());
 
-					if (!end.insert(rec)) {
+					if (!end.insert(rec, 0, maxHeightAllowed)) {
 						debug_printf("internal page: failed to insert %s, switching to rebuild\n",
 						             rec.toString(false).c_str());
 
@@ -6625,6 +6631,8 @@ private:
 			}
 		}
 
+		state int maxHeightAllowed = btPage->tree()->initialHeight + SERVER_KNOBS->REDWOOD_NODE_MAX_UNBALANCE;
+
 		// Leaf Page
 		if (btPage->isLeaf()) {
 			// When true, we are modifying the existing DeltaTree
@@ -6650,7 +6658,6 @@ private:
 
 			// Now, process each mutation range and merge changes with existing data.
 			bool firstMutationBoundary = true;
-			constexpr int maxHeightAllowed = 8;
 
 			while (mBegin != mEnd) {
 				// Apply the change to the mutation buffer start boundary key only if
@@ -7122,7 +7129,7 @@ private:
 			// which to build new page(s) if modification is not possible or not allowed.
 			// If pageCopy is already set it was initialized to page above so the modifier doesn't need
 			// to copy it
-			state InternalPageModifier modifier(page, pageCopy.isValid(), tryToUpdate, parentInfo);
+			state InternalPageModifier modifier(page, pageCopy.isValid(), tryToUpdate, parentInfo, maxHeightAllowed);
 
 			// Apply the possible changes for each subtree range recursed to, except the last one.
 			// For each range, the expected next record, if any, is checked against the first boundary
