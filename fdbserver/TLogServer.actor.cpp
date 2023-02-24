@@ -361,6 +361,10 @@ struct TLogData : NonCopyable {
 	// Distribution of end-to-end server latency of tlog commit requests.
 	Reference<Histogram> commitLatencyDist;
 
+	// Distribution of queue wait times, per request.
+	// This is the time spent waiting for previous versions.
+	Reference<Histogram> queueWaitLatencyDist;
+
 	TLogData(UID dbgid,
 	         UID workerID,
 	         IKeyValueStore* persistentData,
@@ -376,7 +380,8 @@ struct TLogData : NonCopyable {
 	    peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
 	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopDeadline(0), dataFolder(folder),
 	    degraded(degraded),
-	    commitLatencyDist(Histogram::getHistogram("tLog"_sr, "commit"_sr, Histogram::Unit::milliseconds)) {
+	    commitLatencyDist(Histogram::getHistogram("tLog"_sr, "commit"_sr, Histogram::Unit::milliseconds)),
+	    queueWaitLatencyDist(Histogram::getHistogram("tlog"_sr, "QueueWait"_sr, Histogram::Unit::milliseconds)) {
 		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 };
@@ -2307,6 +2312,10 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 	logData->minKnownCommittedVersion = std::max(logData->minKnownCommittedVersion, req.minKnownCommittedVersion);
 
 	wait(logData->version.whenAtLeast(req.prevVersion));
+
+	// Time until now has been spent waiting in the queue to do actual work.
+	double queueWaitEndTime = g_network->timer();
+	self->queueWaitLatencyDist->sampleSeconds(queueWaitEndTime - req.requestTime());
 
 	// Calling check_yield instead of yield to avoid a destruction ordering problem in simulation
 	if (g_network->check_yield(g_network->getCurrentTask())) {
