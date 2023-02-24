@@ -668,7 +668,7 @@ ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<String
 		fmt::print("Usage: tenant lock <NAME> [w|rw] [UID]\n\n");
 		fmt::print("Locks a tenant for read-write or read-only with a given UID.\n");
 		fmt::print("By default a read-write lock is created.\n");
-		fmt::print("If no UID is passed, fdbcli generate one.\n");
+		fmt::print("If no UID is passed, fdbcli will generate one.\n");
 		fmt::print("UID has to be a 16-byte number represented in hex.\n");
 		return false;
 	} else if (tokens[1] == "unlock"_sr && tokens.size() != 4) {
@@ -870,8 +870,8 @@ CommandFactory tenantRegisterFactory("tenant",
                                                  "`get' prints the metadata for a particular tenant.\n"
                                                  "`configure' modifies the configuration for a tenant.\n"
                                                  "`rename' changes the name of a tenant.\n"
-                                                 "`lock` locks a tenant\n"
-                                                 "`unlock` unlocks a tenant\n"),
+                                                 "`lock` locks a tenant.\n"
+                                                 "`unlock` unlocks a tenant.\n"),
                                      &tenantGenerator,
                                      &tenantHintGenerator);
 
