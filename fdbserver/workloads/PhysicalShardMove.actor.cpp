@@ -300,11 +300,12 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				e.setMaxEventLength(20000);
 				e.detail("Checkpoint", records[i].toString());
 				e.detail("SstFile", records[i].bytesSampleFile.present() ? records[i].bytesSampleFile.get() : "NoFile");
+				e.detail("CheckPointAsKeyValues", asKeyValues);
 
 				std::vector<std::pair<Key, Value>> kvsSample;
 				if (records[i].bytesSampleFile.present()) {
 					std::string localFile = records[i].bytesSampleFile.get();
-					std::cout << records[i].bytesSampleFile.get() << "\n";
+					std::cout << "Sst bytesSampleFile found: " << records[i].bytesSampleFile.get() << "\n";
 					rocksdb::Status status;
 					rocksdb::IngestExternalFileOptions ingestOptions;
 					rocksdb::DB* db;

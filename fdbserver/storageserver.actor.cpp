@@ -9665,8 +9665,10 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 			numGetRangeQueries = 0;
 			numSampledKeys = 0;
 			metaDataRangesIter = metaData.ranges.begin();
+			state TraceEvent e(SevDebug, "DumpCheckPointMetaData", data->thisServerID);
+			e.setMaxEventLength(20000);
 			while (metaDataRangesIter != metaData.ranges.end()) {
-				KeyRange range = Standalone(*metaDataRangesIter);
+				KeyRange range = *metaDataRangesIter;
 				readBegin = range.begin.withPrefix(persistByteSampleKeys.begin);
 				readEnd = range.end.withPrefix(persistByteSampleKeys.begin);
 				loop {
@@ -9677,6 +9679,8 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 						numGetRangeQueries++;
 						for (int i = 0; i < readResult.size(); i++) {
 							ASSERT(!readResult[i].key.empty() && !readResult[i].value.empty());
+							e.detail("Key" + std::to_string(numSampledKeys), readResult[i].key);
+							e.detail("Value" + std::to_string(numSampledKeys), readResult[i].value);
 							sstWriter->write(readResult[i].key, readResult[i].value);
 							numSampledKeys++;
 						}
@@ -9699,11 +9703,10 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 			}
 			anyFileCreated = sstWriter->finish();
 			ASSERT((numSampledKeys > 0 && anyFileCreated) || (numSampledKeys == 0 && !anyFileCreated));
-			TraceEvent(SevDebug, "DumpCheckPointMetaData", data->thisServerID)
-			    .detail("NumSampledKeys", numSampledKeys)
-			    .detail("NumGetRangeQueries", numGetRangeQueries)
-			    .detail("CheckpointID", metaData.checkpointID)
-			    .detail("BytesSampleFile", anyFileCreated ? bytesSampleFile : "noFileCreated");
+			e.detail("NumSampledKeys", numSampledKeys);
+			e.detail("NumGetRangeQueries", numGetRangeQueries);
+			e.detail("CheckpointID", metaData.checkpointID);
+			e.detail("BytesSampleFile", anyFileCreated ? bytesSampleFile : "noFileCreated");
 			break;
 
 		} catch (Error& e) {
@@ -9755,7 +9758,9 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		checkpointResult.src.push_back(data->thisServerID);
 		checkpointResult.actionId = metaData.actionId;
 		data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
-		TraceEvent("StorageCreatedCheckpoint", data->thisServerID).detail("Checkpoint", checkpointResult.toString());
+		TraceEvent e("StorageCreatedCheckpoint", data->thisServerID);
+		e.setMaxEventLength(20000);
+		e.detail("Checkpoint", checkpointResult.toString());
 		// Move sst file to the checkpoint folder
 		if (sampleByteSstFileCreated) {
 			ASSERT(directoryExists(abspath(checkpointDir)));
@@ -9763,6 +9768,7 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 			ASSERT(fileExists(abspath(bytesSampleTempFile)));
 			renameFile(abspath(bytesSampleTempFile), abspath(bytesSampleFile));
 		}
+		e.detail("CheckpointFolder", platform::listFiles(checkpointDir));
 	} catch (Error& e) {
 		// If checkpoint creation fails, the failure is persisted.
 		checkpointResult = metaData;
@@ -10811,7 +10817,6 @@ void StorageServer::byteSampleApplySet(KeyValueRef kv, Version ver) {
 	if (old != byteSample.end())
 		delta = -byteSample.getMetric(old);
 	if (sampleInfo.inSample) {
-		// std::cout << "Set bytes: " << key.toString() << ": " << sampleInfo.sampledSize << "\n";
 		delta += sampleInfo.sampledSize;
 		byteSample.insert(key, sampleInfo.sampledSize);
 		addMutationToMutationLogOrStorage(ver,
@@ -10830,7 +10835,6 @@ void StorageServer::byteSampleApplySet(KeyValueRef kv, Version ver) {
 		if (any) {
 			byteSample.erase(old);
 			auto diskRange = singleKeyRange(key.withPrefix(persistByteSampleKeys.begin));
-			// std::cout << "Clear bytes: " << diskRange.toString() << "\n";
 			addMutationToMutationLogOrStorage(ver,
 			                                  MutationRef(MutationRef::ClearRange, diskRange.begin, diskRange.end));
 			++counters.kvSystemClearRanges;
