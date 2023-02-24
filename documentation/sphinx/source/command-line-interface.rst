@@ -183,6 +183,23 @@ The ``defaulttenant`` command configures ``fdbcli`` to run its commands without 
 
 The active tenant cannot be changed while a transaction (using ``begin``) is open.
 
+datadistribution
+----------------
+
+The ``datadistribution`` command is used to enable or disable functionalities of data distributor.
+Its syntax is
+- ``datadistribution <on|off>``. Fully enable or disable the data distributor.
+- ``datadistribution <enable|disable> <ssfailure|rebalance|rebalance_disk|rebalance_read>``. Enable or disable part of data distribution features.
+
+ssfailure
+    Whether storage server failure will trigger data movement for replica repairing.
+rebalance_disk
+    If enabled, data distributor will do data movement to make sure every storage server use similar disk space.
+rebalance_read
+    If enabled, data distributor will do data movement to balance the read bytes bandwidth among storage servers. This feature needs ``knob_READ_SAMPLING_ENABLED=true``.
+rebalance
+    Control both rebalance_disk and rebalance_read.
+
 exclude
 -------
 
@@ -428,7 +445,7 @@ The available process classes are ``unset``, ``storage``, ``transaction``, ``res
 setknob
 -------
 
-The ``setknob`` command can be used to set knobs dynamically. Its syntax is ``setknob <KNOBNAME> <KNOBVALUE> [CONFIGCLASS]``. If not present in a ``begin\commit`` block, the CLI will prompt for a description of the change. 
+The ``setknob`` command can be used to set knobs dynamically. Its syntax is ``setknob <KNOBNAME> <KNOBVALUE> [CONFIGCLASS]``. If not present in a ``begin\commit`` block, the CLI will prompt for a description of the change.
 
 Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
 
@@ -480,7 +497,7 @@ create
 
 Creates a new tenant in the cluster.
 
-``NAME`` - The desired name of the tenant. The name can be any byte string that does not begin with the ``\xff`` byte. 
+``NAME`` - The desired name of the tenant. The name can be any byte string that does not begin with the ``\xff`` byte.
 
 ``TENANT_GROUP`` - The tenant group the tenant will be placed in.
 
