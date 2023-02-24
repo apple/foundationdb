@@ -374,7 +374,17 @@ struct TLogData : NonCopyable {
 
 	// Distribution of queue wait times, per request.
 	// This is the time spent waiting for previous versions.
+	//
+	// Note: we only wait for previous versions to enter the
+	// in-memory DiskQueue commit queue, not until the records are
+	// flushed and durable.
 	Reference<Histogram> queueWaitLatencyDist;
+
+	// Distribution of just the disk commit times, per request.
+	//
+	// Time starts as soon as this request is done waiting for previous versions,
+	// and ends when the data is flushed and durable.
+	Reference<Histogram> timeUntilDurableDist;
 
 	TLogData(UID dbgid,
 	         UID workerID,
@@ -392,7 +402,8 @@ struct TLogData : NonCopyable {
 	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopDeadline(0), dataFolder(folder),
 	    degraded(degraded),
 	    commitLatencyDist(Histogram::getHistogram("tLog"_sr, "commit"_sr, Histogram::Unit::microseconds)),
-	    queueWaitLatencyDist(Histogram::getHistogram("tlog"_sr, "QueueWait"_sr, Histogram::Unit::microseconds)) {
+	    queueWaitLatencyDist(Histogram::getHistogram("tlog"_sr, "QueueWait"_sr, Histogram::Unit::microseconds)),
+	    timeUntilDurableDist(Histogram::getHistogram("tLog"_sr, "TimeUntilDurable"_sr, Histogram::Unit::microseconds)) {
 		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 };
@@ -2291,7 +2302,7 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 	wait(logData->version.whenAtLeast(req.prevVersion));
 
 	// Time until now has been spent waiting in the queue to do actual work.
-	double queueWaitEndTime = g_network->timer();
+	state double queueWaitEndTime = g_network->timer();
 	self->queueWaitLatencyDist->sampleSeconds(queueWaitEndTime - req.requestTime());
 
 	// Calling check_yield instead of yield to avoid a destruction ordering problem in simulation
@@ -2315,8 +2326,6 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		req.reply.sendError(tlog_stopped());
 		return Void();
 	}
-
-	state double beforeCommitT = now();
 
 	// Not a duplicate (check relies on critical section between here self->version.set() below!)
 	state bool isNotDuplicate = (logData->version.get() == req.prevVersion);
@@ -2359,20 +2368,29 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 	wait(
 	    timeoutWarning(logData->queueCommittedVersion.whenAtLeast(req.version) || stopped, 0.1, warningCollectorInput));
 
+	// This is the point at which the transaction is durable (unless it timed out, or the tlog stopped).
+	const double durableTime = g_network->timer();
+
 	if (stopped.isReady()) {
 		ASSERT(logData->stopped());
 		req.reply.sendError(tlog_stopped());
 		return Void();
 	}
 
-	if (isNotDuplicate) {
-		self->commitLatencyDist->sampleSeconds(now() - beforeCommitT);
-	}
-
 	if (req.debugID.present())
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.After");
 
 	req.reply.send(logData->durableKnownCommittedVersion);
+
+	// Measure server-side RPC latency from the time a request was
+	// received until time the response was sent.
+	const double endTime = g_network->timer();
+
+	if (isNotDuplicate) {
+		self->timeUntilDurableDist->sampleSeconds(durableTime - queueWaitEndTime);
+		self->commitLatencyDist->sampleSeconds(endTime - req.requestTime());
+	}
+
 	return Void();
 }
 
