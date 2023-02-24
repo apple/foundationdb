@@ -358,6 +358,7 @@ struct TLogData : NonCopyable {
 	Reference<AsyncVar<bool>> degraded;
 	std::vector<TagsAndMessage> tempTagMessages;
 
+	// Distribution of end-to-end server latency of tlog commit requests.
 	Reference<Histogram> commitLatencyDist;
 
 	TLogData(UID dbgid,
@@ -2329,8 +2330,6 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		return Void();
 	}
 
-	state double beforeCommitT = now();
-
 	// Not a duplicate (check relies on critical section between here self->version.set() below!)
 	state bool isNotDuplicate = (logData->version.get() == req.prevVersion);
 	if (isNotDuplicate) {
@@ -2378,8 +2377,12 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		return Void();
 	}
 
+	// Measure server-side RPC latency from the time a request was
+	// received to time the response was sent.
+	const double endTime = g_network->timer();
+
 	if (isNotDuplicate) {
-		self->commitLatencyDist->sampleSeconds(now() - beforeCommitT);
+		self->commitLatencyDist->sampleSeconds(endTime - req.requestTime());
 	}
 
 	if (req.debugID.present())
