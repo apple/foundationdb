@@ -145,8 +145,7 @@ void assert_impl(char const* a_nm,
                  char const* file,
                  int line) {
 	if (!success) {
-		throw internal_error_impl(
-		    a_nm, Traceable<T>::toString(a), opName, b_nm, Traceable<U>::toString(b), file, line);
+		throw internal_error_impl(a_nm, Traceable<T>::toString(a), opName, b_nm, Traceable<U>::toString(b), file, line);
 	}
 }
 
