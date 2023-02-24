@@ -32,7 +32,25 @@
 #include <cstdint>
 #include <limits>
 
+#include <rocksdb/c.h>
+#include <rocksdb/cache.h>
+#include <rocksdb/db.h>
+#include <rocksdb/filter_policy.h>
+#include <rocksdb/listener.h>
+#include <rocksdb/metadata.h>
+#include <rocksdb/options.h>
+#include <rocksdb/perf_context.h>
+#include <rocksdb/rate_limiter.h>
+#include <rocksdb/slice_transform.h>
+#include <rocksdb/statistics.h>
+#include <rocksdb/table.h>
+#include <rocksdb/utilities/checkpoint.h>
+#include <rocksdb/utilities/table_properties_collectors.h>
+#include <rocksdb/version.h>
+
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+#define PERSIST_PREFIX "\xff\xff"
 
 namespace {
 std::string printValue(const ErrorOr<Optional<Value>>& value) {
@@ -42,6 +60,10 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 	return value.get().present() ? value.get().get().toString() : "Value Not Found.";
 }
 } // namespace
+
+rocksdb::Slice toSlice(StringRef s) {
+	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
+}
 
 struct PhysicalShardMoveWorkLoad : TestWorkload {
 	static constexpr auto NAME = "PhysicalShardMove";
@@ -272,6 +294,26 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		for (; i < records.size(); ++i) {
 			loop {
 				TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", records[i].toString());
+				ASSERT(records[i].bytesSampleFile.present());
+				std::string localFile = records[i].bytesSampleFile.get();
+				std::cout << records[i].bytesSampleFile.get() << "\n";
+				// Check: bytes sst file per records[i]
+				rocksdb::Status status;
+				rocksdb::IngestExternalFileOptions ingestOptions;
+				rocksdb::DB* db;
+				rocksdb::Options options;
+				options.create_if_missing = true;
+				status = rocksdb::DB::Open(options, "testdb", &db);
+				ASSERT(status.ok());
+				status = db->IngestExternalFile({ localFile }, ingestOptions);
+				ASSERT(status.ok());
+				for (const auto [key, value] : *kvs) {
+					std::string bytes;
+					status = db->Get(rocksdb::ReadOptions(), toSlice(key.withPrefix(PERSIST_PREFIX "BS/"_sr)), &bytes);
+					std::cout << key.withPrefix(PERSIST_PREFIX "BS/"_sr).toString() << ": " << bytes << "\n";
+				}
+				delete db;
+
 				try {
 					state CheckpointMetaData record;
 					if (asKeyValues) {

@@ -108,14 +108,16 @@ struct CheckpointMetaData {
 		                  " [Version]: " + std::to_string(version) + " [Format]: " + std::to_string(format) +
 		                  " [Server]: " + describe(src) + " [ID]: " + checkpointID.toString() +
 		                  " [State]: " + std::to_string(static_cast<int>(state)) +
-		                  (actionId.present() ? (" [Action ID]: " + actionId.get().toString()) : "");
+		                  (actionId.present() ? (" [Action ID]: " + actionId.get().toString()) : "") +
+		                  (bytesSampleFile.present() ? " [bytesSampleFile]: " + bytesSampleFile.get() : "");
 		;
 		return res;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, ranges, format, state, checkpointID, src, serializedCheckpoint, actionId);
+		serializer(
+		    ar, version, ranges, format, state, checkpointID, src, serializedCheckpoint, actionId, bytesSampleFile);
 	}
 };
 

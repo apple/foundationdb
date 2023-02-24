@@ -771,6 +771,8 @@ public:
 	double STORAGE_COMMIT_INTERVAL;
 	int BYTE_SAMPLING_FACTOR;
 	int BYTE_SAMPLING_OVERHEAD;
+	double MIN_BYTE_SAMPLING_PROBABILITY; // Adjustable only for test of PhysicalShardMove. Should always be 0 for other
+	                                      // cases
 	int MAX_STORAGE_SERVER_WATCH_BYTES;
 	int MAX_BYTE_SAMPLE_CLEAR_MAP_SIZE;
 	double LONG_BYTE_SAMPLE_RECOVERY_DELAY;
