@@ -174,6 +174,23 @@ The ``deletetenant`` command is used to delete tenants from the cluster. Its syn
 
 In order to delete a tenant, it must be empty. To delete a tenant with data, first clear that data using the ``clear`` command. If the tenant does not exist, ``fdbcli`` will report an error.
 
+datadistribution
+----------------
+
+The ``datadistribution`` command is used to enable or disable functionalities of data distributor.
+Its syntax is
+- ``datadistribution <on|off>``. Fully enable or disable the data distributor.
+- ``datadistribution <enable|disable> <ssfailure|rebalance|rebalance_disk|rebalance_read>``. Enable or disable part of data distribution features.
+
+ssfailure
+    Whether storage server failure will trigger data movement for replica repairing.
+rebalance_disk
+    If enabled, data distributor will do data movement to make sure every storage server use similar disk space.
+rebalance_read
+    If enabled, data distributor will do data movement to balance the read bytes bandwidth among storage servers. This feature needs ``knob_READ_SAMPLING_ENABLED=true``.
+rebalance
+    Control both rebalance_disk and rebalance_read.
+
 exclude
 -------
 
