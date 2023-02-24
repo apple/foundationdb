@@ -430,7 +430,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				break;
 			} catch (Error& e) {
 				state Error error = e;
-				if (error.code() == error_code_conflicting_restore) {
+				if (error.code() == error_code_conflicting_restore ||
+				    error.code() == error_code_cluster_already_exists) {
 					ASSERT(retried);
 					CODE_PROBE(true, "MetaclusterManagementWorkload: timed out restore conflicts with retried restore");
 					continue;
