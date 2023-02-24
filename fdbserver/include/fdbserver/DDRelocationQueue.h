@@ -32,8 +32,57 @@ struct IDDRelocationQueue {
 	;
 };
 
-struct RelocateData;
-struct Busyness;
+struct RelocateData {
+	KeyRange keys;
+	int priority;
+	int boundaryPriority;
+	int healthPriority;
+	RelocateReason reason;
+
+	double startTime;
+	UID randomId; // inherit from RelocateShard.traceId
+	UID dataMoveId;
+	int workFactor;
+	std::vector<UID> src;
+	std::vector<UID> completeSources;
+	std::vector<UID> completeDests;
+	bool wantsNewServers;
+	bool cancellable;
+	TraceInterval interval;
+	std::shared_ptr<DataMove> dataMove;
+
+	RelocateData();
+	explicit RelocateData(RelocateShard const& rs);
+
+	static bool isHealthPriority(int priority) {
+		return priority == SERVER_KNOBS->PRIORITY_POPULATE_REGION ||
+		       priority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY || priority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT ||
+		       priority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT || priority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT ||
+		       priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT || priority == SERVER_KNOBS->PRIORITY_TEAM_HEALTHY ||
+		       priority == SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER ||
+		       priority == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE;
+	}
+
+	static bool isBoundaryPriority(int priority) {
+		return priority == SERVER_KNOBS->PRIORITY_SPLIT_SHARD || priority == SERVER_KNOBS->PRIORITY_MERGE_SHARD;
+	}
+
+	bool isRestore() const;
+
+	bool operator>(const RelocateData& rhs) const;
+	bool operator==(const RelocateData& rhs) const;
+	bool operator!=(const RelocateData& rhs) const;
+};
+
+struct Busyness {
+	std::vector<int> ledger;
+
+	Busyness() : ledger(10, 0) {}
+	bool canLaunch(int prio, int work) const;
+	void addWork(int prio, int work);
+	void removeWork(int prio, int work);
+	std::string toString();
+};
 
 struct DDQueueInitParams {
 	UID const& id;
@@ -52,6 +101,8 @@ struct DDQueueInitParams {
 };
 
 struct DDQueue : public IDDRelocationQueue {
+	friend struct DDQueueImpl;
+
 	typedef Reference<IDataDistributionTeam> ITeamRef;
 	typedef std::pair<ITeamRef, ITeamRef> SrcDestTeamPair;
 
@@ -240,7 +291,7 @@ struct DDQueue : public IDDRelocationQueue {
 	};
 	std::vector<int> retryFindDstReasonCount;
 
-	DDQueue(DDQueueInitParams const& params);
+	void init(DDQueueInitParams const& params);
 
 	DDQueue() = default;
 
@@ -305,6 +356,9 @@ struct DDQueue : public IDDRelocationQueue {
 	                 Reference<AsyncVar<bool>> processingWiggle,
 	                 FutureStream<Promise<int>> getUnhealthyRelocationCount,
 	                 const DDEnabledState* ddEnabledState);
+
+protected:
+	DDQueue(DDQueueInitParams const& params);
 };
 
 #endif // FOUNDATIONDB_DDRELOCATIONQUEUE_H
