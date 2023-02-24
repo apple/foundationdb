@@ -814,6 +814,11 @@ void tenantGenerator(const char* text,
 			const char* opts[] = { "tenant_group", nullptr };
 			arrayGenerator(text, line, opts, lc);
 		}
+	} else if (tokencmp(tokens[1], "lock")) {
+		if (tokens.size() == 3) {
+			const char* opts[] = { "w", "rw", nullptr };
+			arrayGenerator(text, line, opts, lc);
+		}
 	}
 }
 
