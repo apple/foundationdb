@@ -2438,7 +2438,9 @@ public:
 							self->remappedPages[r.originalPageID][r.version] = r.newPageID;
 						}
 					}
-					when(wait(remapRecoverActor)) { remapRecoverActor = Never(); }
+					when(wait(remapRecoverActor)) {
+						remapRecoverActor = Never();
+					}
 				}
 			} catch (Error& e) {
 				if (e.code() != error_code_end_of_stream) {
@@ -5761,6 +5763,7 @@ private:
 		// Leaves can have just one record if it's large, but internal pages should have at least 4
 		int minRecords = height == 1 ? 1 : 4;
 		double maxSlack = SERVER_KNOBS->REDWOOD_PAGE_REBUILD_MAX_SLACK;
+		double maxNewSlack = SERVER_KNOBS->REDWOOD_PAGE_REBUILD_SLACK_DISTRIBUTION;
 		std::vector<PageToBuild> pages;
 
 		// deltaSizes contains pair-wise delta sizes for [lowerBound, records..., upperBound]
@@ -5808,7 +5811,7 @@ private:
 			// While the last page page has too much slack and the second to last page
 			// has more than the minimum record count, shift a record from the second
 			// to last page to the last page.
-			while (b.slackFraction() > maxSlack && a.count > minRecords) {
+			while (b.slackFraction() > maxNewSlack && a.count > minRecords) {
 				int i = a.lastIndex();
 				if (!PageToBuild::shiftItem(a, b, deltaSizes[i], records[i].kvBytes())) {
 					break;
@@ -6383,8 +6386,13 @@ private:
 
 	struct InternalPageModifier {
 		InternalPageModifier() {}
-		InternalPageModifier(Reference<const ArenaPage> p, bool alreadyCloned, bool updating, ParentInfo* parentInfo)
-		  : updating(updating), page(p), clonedPage(alreadyCloned), changesMade(false), parentInfo(parentInfo) {}
+		InternalPageModifier(Reference<const ArenaPage> p,
+		                     bool alreadyCloned,
+		                     bool updating,
+		                     ParentInfo* parentInfo,
+		                     int maxHeightAllowed)
+		  : updating(updating), page(p), clonedPage(alreadyCloned), changesMade(false), parentInfo(parentInfo),
+		    maxHeightAllowed(maxHeightAllowed) {}
 
 		// Whether updating the existing page is allowed
 		bool updating;
@@ -6398,6 +6406,7 @@ private:
 		// Whether there are any changes to the page, either made in place or staged in rebuild
 		bool changesMade;
 		ParentInfo* parentInfo;
+		int maxHeightAllowed;
 
 		BTreePage* btPage() const { return (BTreePage*)page->mutateData(); }
 
@@ -6429,7 +6438,7 @@ private:
 					const RedwoodRecordRef& rec = recs[i];
 					debug_printf("internal page (updating) insert: %s\n", rec.toString(false).c_str());
 
-					if (!end.insert(rec)) {
+					if (!end.insert(rec, 0, maxHeightAllowed)) {
 						debug_printf("internal page: failed to insert %s, switching to rebuild\n",
 						             rec.toString(false).c_str());
 
@@ -6566,7 +6575,7 @@ private:
 		debug_print(addPrefix(context, update->toString()));
 
 		if (REDWOOD_DEBUG) {
-			int c = 0;
+			[[maybe_unused]] int c = 0;
 			auto i = mBegin;
 			while (1) {
 				debug_printf("%s Mutation %4d '%s':  %s\n",
@@ -6622,6 +6631,8 @@ private:
 			}
 		}
 
+		state int maxHeightAllowed = btPage->tree()->initialHeight + SERVER_KNOBS->REDWOOD_NODE_MAX_UNBALANCE;
+
 		// Leaf Page
 		if (btPage->isLeaf()) {
 			// When true, we are modifying the existing DeltaTree
@@ -6647,7 +6658,6 @@ private:
 
 			// Now, process each mutation range and merge changes with existing data.
 			bool firstMutationBoundary = true;
-			constexpr int maxHeightAllowed = 8;
 
 			while (mBegin != mEnd) {
 				// Apply the change to the mutation buffer start boundary key only if
@@ -7119,7 +7129,7 @@ private:
 			// which to build new page(s) if modification is not possible or not allowed.
 			// If pageCopy is already set it was initialized to page above so the modifier doesn't need
 			// to copy it
-			state InternalPageModifier modifier(page, pageCopy.isValid(), tryToUpdate, parentInfo);
+			state InternalPageModifier modifier(page, pageCopy.isValid(), tryToUpdate, parentInfo, maxHeightAllowed);
 
 			// Apply the possible changes for each subtree range recursed to, except the last one.
 			// For each range, the expected next record, if any, is checked against the first boundary
@@ -10412,7 +10422,9 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 				if (entriesRead == m_extentQueue.numEntries)
 					break;
 			}
-			when(wait(queueRecoverActor)) { queueRecoverActor = Never(); }
+			when(wait(queueRecoverActor)) {
+				queueRecoverActor = Never();
+			}
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_end_of_stream) {

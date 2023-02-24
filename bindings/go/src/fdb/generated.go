@@ -392,9 +392,11 @@ func (o DatabaseOptions) SetUseConfigDatabase() error {
 	return o.setOpt(800, nil)
 }
 
-// An integer between 0 and 100 (default is 0) expressing the probability that a client will verify it can't read stale data whenever it detects a recovery.
-func (o DatabaseOptions) SetTestCausalReadRisky() error {
-	return o.setOpt(900, nil)
+// Enables verification of causal read risky by checking whether clients are able to read stale data when they detect a recovery, and logging an error if so.
+//
+// Parameter: integer between 0 and 100 expressing the probability a client will verify it can't read stale data
+func (o DatabaseOptions) SetTestCausalReadRisky(param int64) error {
+	return o.setOpt(900, int64ToBytes(param))
 }
 
 // The transaction, if not self-conflicting, may be committed a second time after commit succeeds, in the event of a fault

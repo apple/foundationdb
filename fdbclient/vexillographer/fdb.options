@@ -203,7 +203,8 @@ description is not currently required but encouraged.
     <Option name="use_config_database" code="800"
             description="Use configuration database." />
     <Option name="test_causal_read_risky" code="900"
-            description="An integer between 0 and 100 (default is 0) expressing the probability that a client will verify it can't read stale data whenever it detects a recovery." />
+            paramType="Int" paramDescription="integer between 0 and 100 expressing the probability a client will verify it can't read stale data"
+            description="Enables verification of causal read risky by checking whether clients are able to read stale data when they detect a recovery, and logging an error if so." />
   </Scope>
   
   <Scope name="TransactionOption">
@@ -307,7 +308,8 @@ description is not currently required but encouraged.
             hidden="true"/>
     <Option name="authorization_token" code="2000"
             description="Attach given authorization token to the transaction such that subsequent tenant-aware requests are authorized"
-            paramType="String" paramDescription="A JSON Web Token authorized to access data belonging to one or more tenants, indicated by 'tenants' claim of the token's payload."/>
+            paramType="String" paramDescription="A JSON Web Token authorized to access data belonging to one or more tenants, indicated by 'tenants' claim of the token's payload."
+            persistent="true"/>
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

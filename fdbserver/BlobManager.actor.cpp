@@ -632,8 +632,11 @@ ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmDat
 			state PromiseStream<Key> resultStream;
 			state Standalone<VectorRef<KeyRef>> keys;
 			// SplitMetrics.bytes / 3 as min split size because of same splitThreshold logic above.
+			// Estimated metrics doesn't work well when split metrics request spans multiple shards, since estimate is
+			// for the whole range. Pass empty metrics instead of *estimated*, since it's already incorporated somewhat
+			// in splitMetrics, and storage will trust its local byte sample over the estimate.
 			state Future<Void> streamFuture = bmData->db->splitStorageMetricsStream(
-			    resultStream, range, splitMetrics, estimated, splitMetrics.bytes / 3);
+			    resultStream, range, splitMetrics, StorageMetrics(), splitMetrics.bytes / 3);
 			loop {
 				try {
 					Key k = waitNext(resultStream.getFuture());
@@ -1156,8 +1159,6 @@ ACTOR Future<Void> checkManagerLock(Transaction* tr, Reference<BlobManagerData> 
 
 		throw blob_manager_replaced();
 	}
-	tr->addReadConflictRange(singleKeyRange(blobManagerEpochKey));
-	tr->addWriteConflictRange(singleKeyRange(blobManagerEpochKey));
 
 	return Void();
 }
@@ -3923,7 +3924,9 @@ ACTOR Future<Void> blobWorkerRecruiter(
 
 	// wait until existing blob workers have been acknowledged so we don't break recruitment invariants
 	loop choose {
-		when(wait(self->startRecruiting.onTrigger())) { break; }
+		when(wait(self->startRecruiting.onTrigger())) {
+			break;
+		}
 	}
 
 	loop {
@@ -3960,7 +3963,9 @@ ACTOR Future<Void> blobWorkerRecruiter(
 				}
 
 				// when the CC changes, so does the request stream so we need to restart recruiting here
-				when(wait(recruitBlobWorker->onChange())) { fCandidateWorker = Future<RecruitBlobWorkerReply>(); }
+				when(wait(recruitBlobWorker->onChange())) {
+					fCandidateWorker = Future<RecruitBlobWorkerReply>();
+				}
 
 				// signal used to restart the loop and try to recruit the next blob worker
 				when(wait(self->restartRecruiting.onTrigger())) {}

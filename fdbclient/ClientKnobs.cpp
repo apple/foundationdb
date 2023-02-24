@@ -80,7 +80,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CHANGE_FEED_CACHE_SIZE,               100000 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_SIZE = 1;
 	init( CHANGE_FEED_POP_TIMEOUT,                10.0 );
 	init( CHANGE_FEED_STREAM_MIN_BYTES,            1e4 ); if( randomize && BUGGIFY ) CHANGE_FEED_STREAM_MIN_BYTES = 1;
-	init( CHANGE_FEED_START_INTERVAL,             30.0 ); if( randomize && BUGGIFY ) CHANGE_FEED_START_INTERVAL = 10.0;
+	init( CHANGE_FEED_START_INTERVAL,             20.0 ); if( randomize && BUGGIFY ) CHANGE_FEED_START_INTERVAL = 10.0;
+	init( CHANGE_FEED_COALESCE_LOCATIONS,        false ); if( randomize && BUGGIFY ) CHANGE_FEED_COALESCE_LOCATIONS = false;
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1;
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && BUGGIFY ) GRV_BATCH_TIMEOUT = 0.1;
@@ -218,7 +219,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( BLOBSTORE_CONCURRENT_WRITES_PER_FILE,      5 );
 	init( BLOBSTORE_CONCURRENT_READS_PER_FILE,       3 );
-	init( BLOBSTORE_ENABLE_READ_CACHE,           false );
+	init( BLOBSTORE_ENABLE_READ_CACHE,            true );
 	init( BLOBSTORE_READ_BLOCK_SIZE,       1024 * 1024 );
 	init( BLOBSTORE_READ_AHEAD_BLOCKS,               0 );
 	init( BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE,      2 );
@@ -234,6 +235,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BLOBSTORE_WRITE_REQUESTS_PER_SECOND,       50 );
 	init( BLOBSTORE_READ_REQUESTS_PER_SECOND,       100 );
 	init( BLOBSTORE_DELETE_REQUESTS_PER_SECOND,     200 );
+
+	init( BGR_READ_BLOCK_SIZE,             20*1024*1024 ); if( randomize && BUGGIFY ) BGR_READ_BLOCK_SIZE = 64 * 1024 * deterministicRandom()->randomInt(1, 100);
 
 	// Dynamic Knobs
 	init( COMMIT_QUORUM_TIMEOUT,                    3.0 );
@@ -277,7 +280,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	// Blob granules
 	init( BG_MAX_GRANULE_PARALLELISM,                10 );
-	init( BG_TOO_MANY_GRANULES,                   10000 );
+	init( BG_TOO_MANY_GRANULES,                   20000 );
 
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_TIMES,        3 );
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_DELAY,      2.0 );

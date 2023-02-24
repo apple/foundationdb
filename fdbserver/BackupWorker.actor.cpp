@@ -937,7 +937,9 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		}
 
 		loop choose {
-			when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) { break; }
+			when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
+				break;
+			}
 			when(wait(logSystemChange)) {
 				if (self->logSystem.get()) {
 					r = self->logSystem.get()->peekLogRouter(self->myId, tagAt, self->tag);
@@ -1007,7 +1009,9 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 			state Future<Version> committedVersion = self->getMinKnownCommittedVersion();
 
 			loop choose {
-				when(wait(success(present))) { break; }
+				when(wait(success(present))) {
+					break;
+				}
 				when(wait(success(committedVersion) || delay(SERVER_KNOBS->BACKUP_NOOP_POP_DELAY, self->cx->taskID))) {
 					if (committedVersion.isReady()) {
 						self->popVersion =

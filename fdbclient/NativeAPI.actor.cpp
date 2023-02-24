@@ -949,7 +949,9 @@ ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
 					proxiesChangeTrigger->trigger();
 				}
 			}
-			when(wait(actors.getResult())) { UNSTOPPABLE_ASSERT(false); }
+			when(wait(actors.getResult())) {
+				UNSTOPPABLE_ASSERT(false);
+			}
 		}
 	}
 }
@@ -3223,7 +3225,6 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
 	newState->startTime = startTime;
 	newState->committedVersion = committedVersion;
 	newState->conflictingKeys = conflictingKeys;
-	newState->authToken = authToken;
 	newState->tenantSet = tenantSet;
 
 	return newState;
@@ -3340,7 +3341,9 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 					    std::vector<Error>{ transaction_too_old(), future_version() });
 				}
 				choose {
-					when(wait(trState->cx->connectionFileChanged())) { throw transaction_too_old(); }
+					when(wait(trState->cx->connectionFileChanged())) {
+						throw transaction_too_old();
+					}
 					when(GetValueReply _reply = wait(loadBalance(
 					         trState->cx.getPtr(),
 					         locationInfo.locations,
@@ -3481,7 +3484,9 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 			state GetKeyReply reply;
 			try {
 				choose {
-					when(wait(trState->cx->connectionFileChanged())) { throw transaction_too_old(); }
+					when(wait(trState->cx->connectionFileChanged())) {
+						throw transaction_too_old();
+					}
 					when(GetKeyReply _reply = wait(loadBalance(
 					         trState->cx.getPtr(),
 					         locationInfo.locations,
@@ -3636,7 +3641,9 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 				                     TaskPriority::DefaultPromiseEndpoint))) {
 					resp = r;
 				}
-				when(wait(cx->connectionRecord ? cx->connectionRecord->onChange() : Never())) { wait(Never()); }
+				when(wait(cx->connectionRecord ? cx->connectionRecord->onChange() : Never())) {
+					wait(Never());
+				}
 			}
 			if (watchValueID.present()) {
 				g_traceBatch.addEvent("WatchValueDebug", watchValueID.get().first(), "NativeAPI.watchValue.After");
@@ -3952,7 +3959,9 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 				state GetKeyValuesFamilyReply rep;
 				try {
 					choose {
-						when(wait(trState->cx->connectionFileChanged())) { throw transaction_too_old(); }
+						when(wait(trState->cx->connectionFileChanged())) {
+							throw transaction_too_old();
+						}
 						when(GetKeyValuesFamilyReply _rep = wait(loadBalance(
 						         trState->cx.getPtr(),
 						         locations[shard].locations,
@@ -4846,7 +4855,9 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 								return Void();
 							}
 
-							when(GetKeyValuesStreamReply _rep = waitNext(replyStream.getFuture())) { rep = _rep; }
+							when(GetKeyValuesStreamReply _rep = waitNext(replyStream.getFuture())) {
+								rep = _rep;
+							}
 						}
 						++trState->cx->transactionPhysicalReadsCompleted;
 					} catch (Error& e) {
@@ -5300,7 +5311,9 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 				loop {
 					choose {
 						// NativeAPI watchValue future finishes or errors
-						when(wait(watch->watchFuture)) { break; }
+						when(wait(watch->watchFuture)) {
+							break;
+						}
 
 						when(wait(cx->connectionFileChanged())) {
 							CODE_PROBE(true, "Recreated a watch after switch");
@@ -6726,7 +6739,9 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 			state Future<Void> onProxiesChanged = cx->onProxiesChanged();
 
 			choose {
-				when(wait(onProxiesChanged)) { onProxiesChanged = cx->onProxiesChanged(); }
+				when(wait(onProxiesChanged)) {
+					onProxiesChanged = cx->onProxiesChanged();
+				}
 				when(GetReadVersionReply v =
 				         wait(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies(
 				                                   flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES)),
@@ -7147,7 +7162,9 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 				needToConnect = false;
 			}
 			choose {
-				when(wait(coordinator->onChange())) { needToConnect = true; }
+				when(wait(coordinator->onChange())) {
+					needToConnect = true;
+				}
 
 				when(ProtocolVersion pv = wait(protocolVersion)) {
 					if (!expectedVersion.present() || expectedVersion.get() != pv) {
@@ -8574,8 +8591,12 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 			}
 
 			choose {
-				when(wait(cx->connectionFileChanged())) { cx->invalidateCache(KeyRef(), keys); }
-				when(wait(waitForAll(futures))) { break; }
+				when(wait(cx->connectionFileChanged())) {
+					cx->invalidateCache(KeyRef(), keys);
+				}
+				when(wait(waitForAll(futures))) {
+					break;
+				}
 				when(wait(delay(timeout))) {
 					TraceEvent("GetCheckpointTimeout").detail("Range", keys).detail("Version", version);
 				}
@@ -8891,15 +8912,11 @@ Version ChangeFeedData::getVersion() {
 // native api has consumed and processed, them, and then the fdb client has consumed all of the mutations.
 ACTOR Future<Void> changeFeedWaitLatest(Reference<ChangeFeedData> self, Version version) {
 	// wait on SS to have sent up through version
-	int desired = 0;
-	int waiting = 0;
 	std::vector<Future<Void>> allAtLeast;
 	for (auto& it : self->storageData) {
 		if (it->version.get() < version) {
-			waiting++;
 			if (version > it->desired.get()) {
 				it->desired.set(version);
-				desired++;
 			}
 			allAtLeast.push_back(it->version.whenAtLeast(version));
 		}
@@ -8958,8 +8975,12 @@ ACTOR Future<Void> changeFeedWhenAtLatest(Reference<ChangeFeedData> self, Versio
 		// only allowed to use empty versions if you're caught up
 		Future<Void> waitEmptyVersion = (self->notAtLatest.get() == 0) ? changeFeedWaitLatest(self, version) : Never();
 		choose {
-			when(wait(waitEmptyVersion)) { break; }
-			when(wait(lastReturned)) { break; }
+			when(wait(waitEmptyVersion)) {
+				break;
+			}
+			when(wait(lastReturned)) {
+				break;
+			}
 			when(wait(self->refresh.getFuture())) {}
 			when(wait(self->notAtLatest.onChange())) {}
 		}
@@ -9492,6 +9513,51 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	return Void();
 }
 
+void coalesceChangeFeedLocations(std::vector<KeyRangeLocationInfo>& locations) {
+	// only coalesce if same tenant
+	if (locations.front().tenantEntry.id != locations.back().tenantEntry.id) {
+		return;
+	}
+	std::vector<UID> teamUIDs;
+	bool anyToCoalesce = false;
+	teamUIDs.reserve(locations.size());
+	for (int i = 0; i < locations.size(); i++) {
+		ASSERT(locations[i].locations->size() > 0);
+		UID teamUID = locations[i].locations->getId(0);
+		for (int j = 1; j < locations[i].locations->size(); j++) {
+			UID locUID = locations[i].locations->getId(j);
+			teamUID = UID(teamUID.first() ^ locUID.first(), teamUID.second() ^ locUID.second());
+		}
+		if (!teamUIDs.empty() && teamUIDs.back() == teamUID) {
+			anyToCoalesce = true;
+		}
+		teamUIDs.push_back(teamUID);
+	}
+
+	if (!anyToCoalesce) {
+		return;
+	}
+
+	CODE_PROBE(true, "coalescing change feed locations");
+
+	// FIXME: there's technically a probability of "hash" collisions here, but it's extremely low. Could validate that
+	// two teams with the same xor are in fact the same, or fall back to not doing this if it gets a wrong shard server
+	// error or something
+
+	std::vector<KeyRangeLocationInfo> coalesced;
+	coalesced.reserve(locations.size());
+	coalesced.push_back(locations[0]);
+	for (int i = 1; i < locations.size(); i++) {
+		if (teamUIDs[i] == teamUIDs[i - 1]) {
+			coalesced.back().range = KeyRangeRef(coalesced.back().range.begin, locations[i].range.end);
+		} else {
+			coalesced.push_back(locations[i]);
+		}
+	}
+
+	locations = coalesced;
+}
+
 ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
                                             Reference<ChangeFeedData> results,
                                             Key rangeID,
@@ -9530,6 +9596,10 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 			if (locations.size() >= CLIENT_KNOBS->CHANGE_FEED_LOCATION_LIMIT) {
 				ASSERT_WE_THINK(false);
 				throw unknown_change_feed();
+			}
+
+			if (CLIENT_KNOBS->CHANGE_FEED_COALESCE_LOCATIONS && locations.size() > 1) {
+				coalesceChangeFeedLocations(locations);
 			}
 
 			state std::vector<int> chosenLocations(locations.size());

@@ -42,6 +42,36 @@ special_key_ranges = [
     ("kill storage", b"/globals/killStorage", b"/globals/killStorage\x00"),
 ]
 
+def test_token_option(private_key, token_gen, default_tenant, tenant_tr_gen):
+    token = token_gen(private_key, token_claim_1h(default_tenant))
+    tr = tenant_tr_gen(default_tenant)
+    tr.options.set_authorization_token(token)
+    tr[b"abc"] = b"def"
+    tr.commit().wait()
+    tr.on_error(fdb.FDBError(1020)).wait() # fake a transaction conflict (not_committed)
+    # token should survive a soft reset by on_error
+    assert tr[b"abc"].value == b"def"
+    # token should not survive a hard reset
+    tr.reset()
+    try:
+        value = tr[b"abc"].value
+        assert False, f"expected permission denied, but read transaction went through, value: {value}"
+    except fdb.FDBError as e:
+        assert e.code == 6000, f"expected permission_denied, got {e} instead"
+
+    # setting token again after reset should work normally
+    tr.options.set_authorization_token(token)
+    assert tr[b"abc"].value == b"def"
+
+    tr.reset() # to clear any read cache
+    tr.options.set_authorization_token(token)
+    tr.options.set_authorization_token() # setting empty option should invalidate any set token
+    try:
+        value = tr[b"abc"].value
+        assert False, f"expected permission denied, but read transaction went through, value: {value}"
+    except fdb.FDBError as e:
+        assert e.code == 6000, f"expected permission_denied, got {e} instead"
+
 def test_simple_tenant_access(private_key, token_gen, default_tenant, tenant_tr_gen):
     token = token_gen(private_key, token_claim_1h(default_tenant))
     tr = tenant_tr_gen(default_tenant)

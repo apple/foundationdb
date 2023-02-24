@@ -193,7 +193,9 @@ ACTOR template <class T>
 Future<T> timeoutWarning(Future<T> what, double time, PromiseStream<Void> output) {
 	state Future<Void> end = delay(time);
 	loop choose {
-		when(T t = wait(what)) { return t; }
+		when(T t = wait(what)) {
+			return t;
+		}
 		when(wait(end)) {
 			output.send(Void());
 			end = delay(time);
@@ -331,7 +333,9 @@ void endStreamOnDisconnect(Future<Void> signal,
 	stream.setRequestStreamEndpoint(endpoint);
 	try {
 		choose {
-			when(wait(signal)) { stream.sendError(connection_failed()); }
+			when(wait(signal)) {
+				stream.sendError(connection_failed());
+			}
 			when(wait(peer.isValid() ? peer->disconnect.getFuture() : Never())) {
 				stream.sendError(connection_failed());
 			}
@@ -360,7 +364,9 @@ Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
 	loop {
 		try {
 			choose {
-				when(X x = wait(value)) { return x; }
+				when(X x = wait(value)) {
+					return x;
+				}
 				when(wait(signal)) {
 					return ErrorOr<X>(IFailureMonitor::failureMonitor().knownUnauthorized(endpoint)
 					                      ? unauthorized_attempt()
