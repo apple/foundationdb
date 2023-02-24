@@ -592,8 +592,9 @@ ACTOR Future<Void> monitorPhysicalShardStatus(Reference<PhysicalShardCollection>
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList) {
-	// Declare at beginning because shardTracker is implicit non-copiable. It has to be initialized later
+	// Declare at beginning because shardTracker and ddQueue is implicit non-copiable. It has to be initialized later
 	state DataDistributionTracker shardTracker;
+	state DDQueue ddQueue;
 
 	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
 	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
@@ -686,25 +687,23 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
 
-			DDQueueInitParams params{ .id = self->ddId,
-				                      .lock = self->lock,
-				                      .db = self->txnProcessor,
-				                      .teamCollections = tcis,
-				                      .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
-				                      .physicalShardCollection = self->physicalShardCollection,
-				                      .getAverageShardBytes = getAverageShardBytes,
-				                      .teamSize = replicaSize,
-				                      .singleRegionTeamSize = self->configuration.storageTeamSize,
-				                      .relocationProducer = self->relocationProducer,
-				                      .relocationConsumer = self->relocationConsumer.getFuture(),
-				                      .getShardMetrics = getShardMetrics,
-				                      .getTopKMetrics = getTopKShardMetrics };
-
-			actors.push_back(reportErrorsExcept(dataDistributionQueue(params,
-			                                                          processingUnhealthy,
-			                                                          processingWiggle,
-			                                                          getUnhealthyRelocationCount.getFuture(),
-			                                                          self->context->ddEnabledState.get()),
+			ddQueue.init(DDQueueInitParams{ .id = self->ddId,
+			                                .lock = self->lock,
+			                                .db = self->txnProcessor,
+			                                .teamCollections = tcis,
+			                                .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
+			                                .physicalShardCollection = self->physicalShardCollection,
+			                                .getAverageShardBytes = getAverageShardBytes,
+			                                .teamSize = replicaSize,
+			                                .singleRegionTeamSize = self->configuration.storageTeamSize,
+			                                .relocationProducer = self->relocationProducer,
+			                                .relocationConsumer = self->relocationConsumer.getFuture(),
+			                                .getShardMetrics = getShardMetrics,
+			                                .getTopKMetrics = getTopKShardMetrics });
+			actors.push_back(reportErrorsExcept(ddQueue.run(processingUnhealthy,
+			                                                processingWiggle,
+			                                                getUnhealthyRelocationCount.getFuture(),
+			                                                self->context->ddEnabledState.get()),
 			                                    "DDQueue",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
