@@ -525,12 +525,6 @@ struct TeamCollectionInterface {
 	PromiseStream<GetTeamRequest> getTeam;
 };
 
-struct DDQueueInitParams;
-ACTOR Future<Void> dataDistributionQueue(DDQueueInitParams params,
-                                         Reference<AsyncVar<bool>> processingUnhealthy,
-                                         Reference<AsyncVar<bool>> processingWiggle,
-                                         FutureStream<Promise<int>> getUnhealthyRelocationCount,
-                                         const DDEnabledState* ddEnabledState);
 #ifndef __INTEL_COMPILER
 #pragma endregion
 #endif
