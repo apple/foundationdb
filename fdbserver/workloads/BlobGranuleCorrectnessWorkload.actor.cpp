@@ -135,6 +135,13 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 		return tenant->ready();
 	}
 
+	// randomly reopen tenant and do not wait for it to be ready, to test races
+	void maybeReopenTenant(Database const& cx) {
+		if (BUGGIFY_WITH_PROB(0.01)) {
+			openTenant(cx);
+		}
+	}
+
 	// TODO could make keys variable length?
 	Key getKey(uint32_t key, uint32_t id) {
 		std::stringstream ss;
@@ -727,6 +734,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 					    deterministicRandom()->randomInt(startIdx * startIdx, endIdxExclusive * endIdxExclusive));
 					beginVersion = threadData->writeVersions[beginVersionIdx];
 				}
+
+				threadData->maybeReopenTenant(cx);
 
 				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
 				    wait(readFromBlob(cx, threadData->bstore, range, beginVersion, readVersion, threadData->tenant));
