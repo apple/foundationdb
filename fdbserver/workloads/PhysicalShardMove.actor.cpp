@@ -317,12 +317,19 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 					ASSERT(status.ok());
 					int j = 0;
 					for (const auto [key, value] : *kvs) {
-						std::string bytes;
-						status = db->Get(
-						    rocksdb::ReadOptions(), toSlice(key.withPrefix(persistByteSampleKeys.begin)), &bytes);
-						e.detail("Key" + std::to_string(j), key.withPrefix(persistByteSampleKeys.begin));
-						e.detail("Value" + std::to_string(j), bytes.empty() ? "NoBytes" : bytes);
-						j++;
+						int sampleDepth = 0;
+						Key keyToRead = key.withPrefix(persistByteSampleKeys.begin);
+						while (sampleDepth < SERVER_KNOBS->ROCKSDB_MOVE_BYTES_SAMPLE_MAX_DEPTH) {
+							for (int i = 0; i < sampleDepth; i++) {
+								keyToRead = keyToRead.withPrefix(persistByteSampleKeys.begin);
+							}
+							std::string bytes;
+							status = db->Get(rocksdb::ReadOptions(), toSlice(keyToRead), &bytes);
+							e.detail("Key" + std::to_string(j), keyToRead);
+							e.detail("Value" + std::to_string(j), bytes.empty() ? "NoBytes" : bytes);
+							j++;
+							sampleDepth++;
+						}
 					}
 					delete db;
 				}

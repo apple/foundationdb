@@ -9634,6 +9634,7 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 	state Key readBegin;
 	state Key readEnd;
 	state bool anyFileCreated;
+	state int sampleDepth;
 
 	loop {
 		try {
@@ -9662,44 +9663,54 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 				return a.begin < b.begin;
 			});
 
+			sampleDepth = 0;
 			numGetRangeQueries = 0;
 			numSampledKeys = 0;
-			metaDataRangesIter = metaData.ranges.begin();
 			state TraceEvent e(SevDebug, "DumpCheckPointMetaData", data->thisServerID);
 			e.setMaxEventLength(20000);
-			while (metaDataRangesIter != metaData.ranges.end()) {
-				KeyRange range = *metaDataRangesIter;
-				readBegin = range.begin.withPrefix(persistByteSampleKeys.begin);
-				readEnd = range.end.withPrefix(persistByteSampleKeys.begin);
-				loop {
-					try {
-						RangeResult readResult = wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd),
-						                                                      SERVER_KNOBS->STORAGE_LIMIT_BYTES,
-						                                                      SERVER_KNOBS->STORAGE_LIMIT_BYTES));
-						numGetRangeQueries++;
-						for (int i = 0; i < readResult.size(); i++) {
-							ASSERT(!readResult[i].key.empty() && !readResult[i].value.empty());
-							e.detail("Key" + std::to_string(numSampledKeys), readResult[i].key);
-							e.detail("Value" + std::to_string(numSampledKeys), readResult[i].value);
-							sstWriter->write(readResult[i].key, readResult[i].value);
-							numSampledKeys++;
-						}
-						if (readResult.more) {
-							ASSERT(readResult.readThrough.present());
-							readBegin = keyAfter(readResult.readThrough.get());
-							ASSERT(readBegin <= readEnd);
-						} else {
-							break;
-						}
-					} catch (Error& e) {
-						if (failureCount < SERVER_KNOBS->ROCKSDB_CREATE_SST_FILE_RETRY_COUNT_MAX) {
-							throw retry(); // retry from sketch
-						} else {
-							throw e;
+			// SS sampled bytes also get sampled
+			// We dump all sampled bytes until we reach the max recursion depth
+			while (sampleDepth < SERVER_KNOBS->ROCKSDB_MOVE_BYTES_SAMPLE_MAX_DEPTH) {
+				metaDataRangesIter = metaData.ranges.begin();
+				while (metaDataRangesIter != metaData.ranges.end()) {
+					KeyRange range = *metaDataRangesIter;
+					readBegin = range.begin.withPrefix(persistByteSampleKeys.begin);
+					readEnd = range.end.withPrefix(persistByteSampleKeys.begin);
+					for (int i = 0; i < sampleDepth; i++) {
+						readBegin = readBegin.withPrefix(persistByteSampleKeys.begin);
+						readEnd = readEnd.withPrefix(persistByteSampleKeys.begin);
+					}
+					loop {
+						try {
+							RangeResult readResult = wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd),
+							                                                      SERVER_KNOBS->STORAGE_LIMIT_BYTES,
+							                                                      SERVER_KNOBS->STORAGE_LIMIT_BYTES));
+							numGetRangeQueries++;
+							for (int i = 0; i < readResult.size(); i++) {
+								ASSERT(!readResult[i].key.empty() && !readResult[i].value.empty());
+								e.detail("Key" + std::to_string(numSampledKeys), readResult[i].key);
+								e.detail("Value" + std::to_string(numSampledKeys), readResult[i].value);
+								sstWriter->write(readResult[i].key, readResult[i].value);
+								numSampledKeys++;
+							}
+							if (readResult.more) {
+								ASSERT(readResult.readThrough.present());
+								readBegin = keyAfter(readResult.readThrough.get());
+								ASSERT(readBegin <= readEnd);
+							} else {
+								break;
+							}
+						} catch (Error& e) {
+							if (failureCount < SERVER_KNOBS->ROCKSDB_CREATE_BYTES_SAMPLE_FILE_RETRY_MAX) {
+								throw retry(); // retry from sketch
+							} else {
+								throw e;
+							}
 						}
 					}
+					metaDataRangesIter++;
 				}
-				metaDataRangesIter++;
+				sampleDepth++;
 			}
 			anyFileCreated = sstWriter->finish();
 			ASSERT((numSampledKeys > 0 && anyFileCreated) || (numSampledKeys == 0 && !anyFileCreated));
