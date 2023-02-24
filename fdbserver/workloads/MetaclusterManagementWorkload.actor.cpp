@@ -998,20 +998,21 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 			MetaclusterTenantMapEntry newEntry = wait(MetaclusterAPI::getTenant(self->managementDb, newTenantName));
 
-			auto tenantData = self->createdTenants.find(tenant);
-			ASSERT(tenantData != self->createdTenants.end());
-			ASSERT(tenantData->second->tenantGroup == newEntry.tenantGroup);
-			ASSERT(tenantData->second->cluster == newEntry.assignedCluster);
+			auto tenantDataItr = self->createdTenants.find(tenant);
+			ASSERT(tenantDataItr != self->createdTenants.end());
 
-			self->createdTenants[newTenantName] = tenantData->second;
-			ASSERT(tenantData->second);
-			self->createdTenants.erase(tenantData);
+			Reference<TenantTestData> tenantData = tenantDataItr->second;
+			ASSERT(tenantData->tenantGroup == newEntry.tenantGroup);
+			ASSERT(tenantData->cluster == newEntry.assignedCluster);
+
+			self->createdTenants[newTenantName] = tenantData;
+			self->createdTenants.erase(tenantDataItr);
 
 			auto& dataDb = self->dataDbs[newEntry.assignedCluster];
 			ASSERT(dataDb->registered);
 
 			dataDb->tenants.erase(tenant);
-			dataDb->tenants[newTenantName] = tenantData->second;
+			dataDb->tenants[newTenantName] = tenantData;
 
 			if (newEntry.tenantGroup.present()) {
 				auto& tenantGroup = self->tenantGroups[newEntry.tenantGroup.get()];
