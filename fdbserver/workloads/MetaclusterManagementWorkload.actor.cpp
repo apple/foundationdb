@@ -45,12 +45,12 @@ FDB_DEFINE_BOOLEAN_PARAM(AllowPartialMetaclusterOperations);
 struct MetaclusterManagementWorkload : TestWorkload {
 	static constexpr auto NAME = "MetaclusterManagement";
 
-	struct TenantData : ReferenceCounted<TenantData> {
+	struct TenantTestData : ReferenceCounted<TenantTestData> {
 		ClusterName cluster;
 		Optional<TenantGroupName> tenantGroup;
 
-		TenantData() {}
-		TenantData(ClusterName cluster, Optional<TenantGroupName> tenantGroup)
+		TenantTestData() {}
+		TenantTestData(ClusterName cluster, Optional<TenantGroupName> tenantGroup)
 		  : cluster(cluster), tenantGroup(tenantGroup) {}
 	};
 
@@ -68,7 +68,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		bool detached = false;
 		int tenantGroupCapacity = 0;
 
-		std::map<TenantName, Reference<TenantData>> tenants;
+		std::map<TenantName, Reference<TenantTestData>> tenants;
 		std::map<TenantGroupName, Reference<TenantGroupData>> tenantGroups;
 		std::set<TenantName> ungroupedTenants;
 
@@ -83,7 +83,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	std::vector<ClusterName> dataDbIndex;
 
 	int64_t totalTenantGroupCapacity = 0;
-	std::map<TenantName, Reference<TenantData>> createdTenants;
+	std::map<TenantName, Reference<TenantTestData>> createdTenants;
 
 	int maxTenants;
 	int maxTenantGroups;
@@ -709,7 +709,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			ASSERT(entry.tenantGroup == tenantGroup);
 			ASSERT(TenantAPI::getTenantIdPrefix(entry.id) == self->tenantIdPrefix);
 
-			Reference<TenantData> tenantData = makeReference<TenantData>(entry.assignedCluster, tenantGroup);
+			Reference<TenantTestData> tenantData = makeReference<TenantTestData>(entry.assignedCluster, tenantGroup);
 			self->createdTenants[tenant] = tenantData;
 
 			auto assignedCluster = self->dataDbs.find(entry.assignedCluster);

@@ -234,6 +234,19 @@ bool MetaclusterTenantMapEntry::operator!=(MetaclusterTenantMapEntry const& othe
 	return !(*this == other);
 }
 
+json_spirit::mObject MetaclusterTenantGroupEntry::toJson() const {
+	json_spirit::mObject tenantGroupEntry;
+	tenantGroupEntry["assigned_cluster"] = binaryToJson(assignedCluster);
+	return tenantGroupEntry;
+}
+
+bool MetaclusterTenantGroupEntry::operator==(MetaclusterTenantGroupEntry const& other) const {
+	return assignedCluster == other.assignedCluster;
+}
+bool MetaclusterTenantGroupEntry::operator!=(MetaclusterTenantGroupEntry const& other) const {
+	return !(*this == other);
+}
+
 KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>&
 MetaclusterMetadata::metaclusterRegistration() {
 	static KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())> instance(
