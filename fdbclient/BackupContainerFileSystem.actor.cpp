@@ -19,6 +19,8 @@
  */
 
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupContainer.h"
+#include "flow/BooleanParam.h"
 #ifdef BUILD_AZURE_BACKUP
 #include "fdbclient/BackupContainerAzureBlobStore.h"
 #endif
@@ -33,6 +35,8 @@
 #include <cinttypes>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+FDB_DEFINE_BOOLEAN_PARAM(IncludeKeyRangeMap);
 
 class BackupContainerFileSystemImpl {
 public:
@@ -159,7 +163,8 @@ public:
 	ACTOR static Future<Void> writeKeyspaceSnapshotFile(Reference<BackupContainerFileSystem> bc,
 	                                                    std::vector<std::string> fileNames,
 	                                                    std::vector<std::pair<Key, Key>> beginEndKeys,
-	                                                    int64_t totalBytes) {
+	                                                    int64_t totalBytes,
+	                                                    IncludeKeyRangeMap includeKeyRangeMap) {
 		ASSERT(!fileNames.empty() && fileNames.size() == beginEndKeys.size());
 
 		state Version minVer = std::numeric_limits<Version>::max();
@@ -188,11 +193,13 @@ public:
 		doc.create("beginVersion") = minVer;
 		doc.create("endVersion") = maxVer;
 
-		auto ranges = doc.subDoc("keyRanges");
-		for (int i = 0; i < beginEndKeys.size(); i++) {
-			auto fileDoc = ranges.subDoc(fileNames[i], /*split=*/false);
-			fileDoc.create("beginKey") = beginEndKeys[i].first.toString();
-			fileDoc.create("endKey") = beginEndKeys[i].second.toString();
+		if (includeKeyRangeMap) {
+			auto ranges = doc.subDoc("keyRanges");
+			for (int i = 0; i < beginEndKeys.size(); i++) {
+				auto fileDoc = ranges.subDoc(fileNames[i], /*split=*/false);
+				fileDoc.create("beginKey") = beginEndKeys[i].first.toString();
+				fileDoc.create("endKey") = beginEndKeys[i].second.toString();
+			}
 		}
 
 		wait(yield());
@@ -940,13 +947,8 @@ public:
 			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
 			    wait(bc->readKeyspaceSnapshot(snapshots[i]));
 
-			// Old backup does not have metadata about key ranges and can not be filtered with key ranges.
-			if (keyRangesFilter.size() && results.second.empty() && !results.first.empty()) {
-				throw backup_not_filterable_with_key_ranges();
-			}
-
-			// Filter by keyRangesFilter.
-			if (keyRangesFilter.empty()) {
+			// return all of the range files
+			if (keyRangesFilter.empty() || results.second.empty()) {
 				restorable.ranges = std::move(results.first);
 				restorable.keyRanges = std::move(results.second);
 				minKeyRangeVersion = snapshots[i].beginVersion;
@@ -1215,9 +1217,10 @@ BackupContainerFileSystem::readKeyspaceSnapshot(KeyspaceSnapshotFile snapshot) {
 
 Future<Void> BackupContainerFileSystem::writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
                                                                   const std::vector<std::pair<Key, Key>>& beginEndKeys,
-                                                                  int64_t totalBytes) {
+                                                                  int64_t totalBytes,
+                                                                  IncludeKeyRangeMap includeKeyRangeMap) {
 	return BackupContainerFileSystemImpl::writeKeyspaceSnapshotFile(
-	    Reference<BackupContainerFileSystem>::addRef(this), fileNames, beginEndKeys, totalBytes);
+	    Reference<BackupContainerFileSystem>::addRef(this), fileNames, beginEndKeys, totalBytes, includeKeyRangeMap);
 };
 
 Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beginVersion,
@@ -1737,8 +1740,10 @@ ACTOR Future<Void> testBackupContainer(std::string url,
 			wait(testWriteSnapshotFile(range, begin, end, blockSize));
 
 			if (deterministicRandom()->random01() < .2) {
-				writes.push_back(c->writeKeyspaceSnapshotFile(
-				    snapshots.rbegin()->second, snapshotBeginEndKeys.rbegin()->second, snapshotSizes.rbegin()->second));
+				writes.push_back(c->writeKeyspaceSnapshotFile(snapshots.rbegin()->second,
+				                                              snapshotBeginEndKeys.rbegin()->second,
+				                                              snapshotSizes.rbegin()->second,
+				                                              IncludeKeyRangeMap::False));
 				snapshots[v] = {};
 				snapshotBeginEndKeys[v] = {};
 				snapshotSizes[v] = 0;

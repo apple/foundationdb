@@ -19,10 +19,19 @@
  */
 
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/filesystem.hpp>
+#include <boost/filesystem/directory.hpp>
+#include <boost/filesystem/file_status.hpp>
+#include <boost/filesystem/path.hpp>
+#include <boost/range/iterator_range.hpp>
+#include <boost/range/iterator_range_core.hpp>
 #include <cinttypes>
 #include <fstream>
 #include <functional>
+#include <istream>
+#include <iterator>
 #include <map>
+#include <streambuf>
 #include <toml.hpp>
 
 #include "flow/ActorCollection.h"
@@ -53,6 +62,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/Platform.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 FDB_DEFINE_BOOLEAN_PARAM(UntrustedMode);
@@ -1781,6 +1791,55 @@ ACTOR Future<Void> initializeSimConfig(Database db) {
 	}
 }
 
+void encryptionAtRestPlaintextMarkerCheck() {
+	if (!g_simulator->dataAtRestPlaintextMarker.present()) {
+		// Encryption at-rest was not enabled, do nothing
+		return;
+	}
+
+	ASSERT(g_simulator->isSimulated());
+
+	namespace fs = boost::filesystem;
+
+	printf("EncryptionAtRestPlaintextMarkerCheckStart\n");
+	TraceEvent("EncryptionAtRestPlaintextMarkerCheckStart");
+	fs::path p("simfdb/");
+	fs::recursive_directory_iterator end;
+	int scanned = 0;
+	bool success = true;
+	// Enumerate all files in the "simfdb/" folder and look for "marker" string
+	for (fs::recursive_directory_iterator itr(p); itr != end; ++itr) {
+		if (boost::filesystem::is_regular_file(itr->path())) {
+			std::ifstream f(itr->path().string().c_str());
+			if (f) {
+				std::string buf;
+				int count = 0;
+				while (std::getline(f, buf)) {
+					// SOMEDAY: using 'std::boyer_moore_horspool_searcher' would significantly improve search
+					// time
+					if (buf.find(g_simulator->dataAtRestPlaintextMarker.get()) != std::string::npos) {
+						TraceEvent("EncryptionAtRestPlaintextMarkerCheckPanic")
+						    .detail("Filename", itr->path().string())
+						    .detail("LineBuf", buf)
+						    .detail("Marker", g_simulator->dataAtRestPlaintextMarker.get());
+						success = false;
+					}
+					count++;
+				}
+				TraceEvent("EncryptionAtRestPlaintextMarkerCheckScanned")
+				    .detail("Filename", itr->path().string())
+				    .detail("NumLines", count);
+				scanned++;
+			} else {
+				TraceEvent(SevError, "FileOpenError").detail("Filename", itr->path().string());
+			}
+		}
+		ASSERT(success);
+	}
+	printf("EncryptionAtRestPlaintextMarkerCheckEnd NumFiles: %d\n", scanned);
+	TraceEvent("EncryptionAtRestPlaintextMarkerCheckEnd").detail("NumFiles", scanned);
+}
+
 /**
  * \brief Test orchestrator: sends test specification to testers in the right order and collects the results.
  *
@@ -2008,6 +2067,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 	}
 	printf("\n");
+
+	encryptionAtRestPlaintextMarkerCheck();
 
 	return Void();
 }

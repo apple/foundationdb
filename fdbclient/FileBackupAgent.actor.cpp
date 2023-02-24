@@ -3185,8 +3185,8 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 			}
 		}
 
-		std::vector<std::string> files;
-		std::vector<std::pair<Key, Key>> beginEndKeys;
+		state std::vector<std::string> files;
+		state std::vector<std::pair<Key, Key>> beginEndKeys;
 		state Version maxVer = 0;
 		state Version minVer = std::numeric_limits<Version>::max();
 		state int64_t totalBytes = 0;
@@ -3227,7 +3227,15 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 		}
 
 		Params.endVersion().set(task, maxVer);
-		wait(bc->writeKeyspaceSnapshotFile(files, beginEndKeys, totalBytes));
+
+		DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(cx));
+		// Avoid keyRange filtering optimization for 'manifest' files
+		wait(bc->writeKeyspaceSnapshotFile(files,
+		                                   beginEndKeys,
+		                                   totalBytes,
+		                                   dbConfig.encryptionAtRestMode.isEncryptionEnabled()
+		                                       ? IncludeKeyRangeMap::False
+		                                       : IncludeKeyRangeMap::True));
 
 		TraceEvent(SevInfo, "FileBackupWroteSnapshotManifest")
 		    .detail("BackupUID", config.getUid())
