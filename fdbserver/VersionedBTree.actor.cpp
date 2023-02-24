@@ -1004,6 +1004,7 @@ public:
 				try {
 					page->postReadHeader(c.pageID);
 					// These pages are not encrypted
+					ASSERT(!page->isEncrypted());
 					page->postReadPayload(c.pageID);
 				} catch (Error& e) {
 					bool isInjected = false;
@@ -2783,6 +2784,31 @@ public:
 		return bytes;
 	}
 
+	ACTOR static Future<Void> postReadPageHeader(DWALPager* self, Reference<ArenaPage> page) {
+		// Regardless of whether encryption is enabled, key provider will be set. We rely on it to get expected
+		// encoding type.
+		if (!self->keyProvider.isValid()) {
+			wait(self->keyProviderInitialized.getFuture());
+			ASSERT(self->keyProvider.isValid());
+		}
+		EncodingType expectedEncodingType = self->keyProvider->expectedEncodingType();
+		// In case encryption is enabled and the page being read is not encrypted, the page could fall in one of the key
+		// ranges whitelisted from encryption. Let the caller (VersionedBTree) decide whether this is the case.
+		if (page->getEncodingType() != expectedEncodingType &&
+		    (!isEncodingTypeEncrypted(expectedEncodingType) || page->isEncrypted())) {
+			TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
+			    .detail("PhysicalPageID", page->getPhysicalPageID())
+			    .detail("EncodingTypeFound", page->getEncodingType())
+			    .detail("EncodingTypeExpected", expectedEncodingType);
+			throw unexpected_encoding_type();
+		}
+		if (page->isEncrypted()) {
+			ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
+			page->encryptionKey = k;
+		}
+		return Void();
+	}
+
 	// Read a physical page from the page file.  Note that header pages use a page size of smallestPhysicalBlock.
 	// If the user chosen physical page size is larger, then there will be a gap of unused space after the header pages
 	// and before the user-chosen sized pages.
@@ -2810,21 +2836,7 @@ public:
 
 		try {
 			page->postReadHeader(pageID);
-			if (page->isEncrypted()) {
-				if (!self->keyProvider.isValid()) {
-					wait(self->keyProviderInitialized.getFuture());
-					ASSERT(self->keyProvider.isValid());
-				}
-				if (self->keyProvider->expectedEncodingType() != page->getEncodingType()) {
-					TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
-					    .detail("PhysicalPageID", page->getPhysicalPageID())
-					    .detail("EncodingTypeFound", page->getEncodingType())
-					    .detail("EncodingTypeExpected", self->keyProvider->expectedEncodingType());
-					throw unexpected_encoding_type();
-				}
-				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
-				page->encryptionKey = k;
-			}
+			wait(postReadPageHeader(self, page));
 			page->postReadPayload(pageID);
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p\n",
 			             self->filename.c_str(),
@@ -2889,21 +2901,7 @@ public:
 
 		try {
 			page->postReadHeader(pageIDs.front());
-			if (page->isEncrypted()) {
-				if (!self->keyProvider.isValid()) {
-					wait(self->keyProviderInitialized.getFuture());
-					ASSERT(self->keyProvider.isValid());
-				}
-				if (self->keyProvider->expectedEncodingType() != page->getEncodingType()) {
-					TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
-					    .detail("PhysicalPageID", page->getPhysicalPageID())
-					    .detail("EncodingTypeFound", page->getEncodingType())
-					    .detail("EncodingTypeExpected", self->keyProvider->expectedEncodingType());
-					throw unexpected_encoding_type();
-				}
-				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
-				page->encryptionKey = k;
-			}
+			wait(postReadPageHeader(self, page));
 			page->postReadPayload(pageIDs.front());
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p bytes=%d\n",
 			             self->filename.c_str(),
@@ -4940,6 +4938,8 @@ public:
 		}
 	};
 
+	enum class PageEncryptionCheckMode : int { Strict, AllowWhitelist, Ignore };
+
 	// All async opts on the btree are based on pager reads, writes, and commits, so
 	// we can mostly forward these next few functions to the pager
 	Future<Void> getError() const { return m_pager->getError(); }
@@ -6214,6 +6214,51 @@ private:
 		return records;
 	}
 
+	static void checkUnencryptedPage(VersionedBTree* self,
+	                                 Reference<const ArenaPage> page,
+	                                 PageEncryptionCheckMode mode,
+	                                 Optional<KeyRef> pageLowerBound = {},
+	                                 BTreePage::BinaryTree::Cursor cursor = {}) {
+		if (!isEncodingTypeEncrypted(self->m_encodingType) || page->isEncrypted()) {
+			return;
+		}
+		auto getDomain = [&](KeyRef key) { return self->m_keyProvider->getEncryptionDomain(key).domain; };
+		IPageEncryptionKeyProvider::EncryptionDomain domain;
+		bool valid = false;
+		switch (mode) {
+		case PageEncryptionCheckMode::Strict:
+			valid = false;
+			break;
+		case PageEncryptionCheckMode::AllowWhitelist:
+			// Both page lower bound and the cursor should be valid in this case.
+			ASSERT(pageLowerBound.present());
+			ASSERT(cursor.cache.isValid());
+			domain = getDomain(pageLowerBound.get());
+			valid = domain.whitelisted();
+			if (valid) {
+				cursor.moveFirst();
+				valid = cursor.valid() && (getDomain(cursor.get().key) == domain);
+			}
+			if (valid) {
+				cursor.moveLast();
+				valid = cursor.valid() && (getDomain(cursor.get().key) == domain);
+			}
+			break;
+		case PageEncryptionCheckMode::Ignore:
+			valid = true;
+			break;
+		default:
+			ASSERT(false);
+		}
+		if (!valid) {
+			TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
+			    .detail("PhysicalPageID", page->getPhysicalPageID())
+			    .detail("EncodingTypeFound", page->getEncodingType())
+			    .detail("EncodingTypeExpected", self->m_encodingType);
+			throw unexpected_encoding_type();
+		}
+	}
+
 	ACTOR static Future<Reference<const ArenaPage>> readPage(VersionedBTree* self,
 	                                                         PagerEventReasons reason,
 	                                                         unsigned int level,
@@ -6770,6 +6815,8 @@ private:
 		state BTreePage::BinaryTree::Cursor cursor = update->cBegin.valid()
 		                                                 ? self->getCursor(page.getPtr(), update->cBegin)
 		                                                 : self->getCursor(page.getPtr(), dbBegin, dbEnd);
+		checkUnencryptedPage(
+		    self, page, PageEncryptionCheckMode::AllowWhitelist, update->subtreeLowerBound.key, cursor);
 
 		state bool enableEncryptionDomain = page->isEncrypted() && self->m_keyProvider->enableEncryptionDomain();
 		state Optional<int64_t> pageDomainId;
@@ -7677,10 +7724,12 @@ public:
 			                    !options.present() || options.get().cacheResult || path.back().btPage()->height != 2),
 			           [=](Reference<const ArenaPage> p) {
 				           BTreePage::BinaryTree::Cursor cursor = btree->getCursor(p.getPtr(), link);
+				           VersionedBTree::checkUnencryptedPage(
+				               btree, p, PageEncryptionCheckMode::AllowWhitelist, link.get().key, cursor);
 #if REDWOOD_DEBUG
 				           path.push_back({ p, cursor, link.get().getChildPage() });
 #else
-					    path.push_back({ p, cursor });
+					       path.push_back({ p, cursor });
 #endif
 
 				           if (btree->m_pBoundaryVerifier != nullptr) {
@@ -7703,10 +7752,11 @@ public:
 			debug_printf("pushPage(root=%s)\n", ::toString(id).c_str());
 			return map(readPage(btree, reason, btree->m_header.height, pager.getPtr(), id, ioMaxPriority, false, true),
 			           [=](Reference<const ArenaPage> p) {
+				           VersionedBTree::checkUnencryptedPage(btree, p, PageEncryptionCheckMode::Strict);
 #if REDWOOD_DEBUG
 				           path.push_back({ p, btree->getCursor(p.getPtr(), dbBegin, dbEnd), id });
 #else
-					    path.push_back({ p, btree->getCursor(p.getPtr(), dbBegin, dbEnd) });
+					       path.push_back({ p, btree->getCursor(p.getPtr(), dbBegin, dbEnd) });
 #endif
 				           return Void();
 			           });
