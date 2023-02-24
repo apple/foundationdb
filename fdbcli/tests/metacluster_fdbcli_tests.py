@@ -64,6 +64,11 @@ def get_cluster_connection_str(cluster_file_path):
 
 @enable_logging()
 def metacluster_create(logger, cluster_file, name, tenant_id_prefix):
+    # set the tenant mode to disabled for the metacluster otherwise creation will fail
+    rc, out, err = run_fdbcli_command(cluster_file, "configure tenant_mode=disabled")
+    logger.debug('Metacluster tenant mode set to disabled')
+    if rc != 0:
+        raise Exception(err)
     rc, out, err = run_fdbcli_command(cluster_file, "metacluster create_experimental", name, str(tenant_id_prefix))
     if rc != 0:
         raise Exception(err)

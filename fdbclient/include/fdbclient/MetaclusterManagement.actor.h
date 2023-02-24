@@ -531,7 +531,7 @@ Future<Void> managementClusterCheckEmpty(Transaction tr) {
 }
 
 ACTOR template <class Transaction>
-Future<TenantMode> getManagementClusterTenantMode(Transaction tr) {
+Future<TenantMode> getClusterConfiguredTenantMode(Transaction tr) {
 	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
 	    tr->get(tenantModeConfKey);
 	Optional<Value> tenantModeValue = wait(safeThreadFutureToFuture(tenantModeFuture));
@@ -557,7 +557,7 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db,
 
 			state Future<Void> metaclusterEmptinessCheck = managementClusterCheckEmpty(tr);
 			state Future<TenantMode> tenantModeFuture =
-			    enableTenantModeCheck ? getManagementClusterTenantMode(tr) : Future<TenantMode>(TenantMode::DISABLED);
+			    enableTenantModeCheck ? getClusterConfiguredTenantMode(tr) : Future<TenantMode>(TenantMode::DISABLED);
 
 			Optional<MetaclusterRegistrationEntry> existingRegistration = wait(metaclusterRegistrationFuture);
 			if (existingRegistration.present()) {
@@ -575,7 +575,7 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db,
 			wait(metaclusterEmptinessCheck);
 			TenantMode tenantMode = wait(tenantModeFuture);
 			if (tenantMode != TenantMode::DISABLED) {
-				return fmt::format("cluster is configured with tenant mode: {} when tenants should be disabled",
+				return fmt::format("cluster is configured with tenant mode: `{}' when tenants should be disabled",
 				                   tenantMode);
 			}
 

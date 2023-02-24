@@ -97,13 +97,11 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 	bool backupComplete = false;
 	double endTime = std::numeric_limits<double>::max();
-	bool enableMetaclusterTenantModeCheck;
 
 	MetaclusterRestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 1000));
 		initialTenants = std::min<int>(maxTenants, getOption(options, "initialTenants"_sr, 40));
 		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
-		enableMetaclusterTenantModeCheck = getOption(options, "enableMetaclusterTenantModeCheck"_sr, false);
 
 		tenantGroupCapacity = (initialTenants / 2 + maxTenantGroups - 1) / g_simulator->extraDatabases.size();
 		int mode = deterministicRandom()->randomInt(0, 3);
@@ -185,7 +183,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		    "management_cluster"_sr,
 		    deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
 		                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1),
-		    self->enableMetaclusterTenantModeCheck)));
+		    false)));
 
 		ASSERT(g_simulator->extraDatabases.size() > 0);
 		state std::vector<std::string>::iterator extraDatabasesItr;
@@ -542,7 +540,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		    "management_cluster"_sr,
 		    deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
 		                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1),
-		    self->enableMetaclusterTenantModeCheck)));
+		    false)));
 		state std::map<ClusterName, DataClusterData>::iterator clusterItr;
 		for (clusterItr = self->dataDbs.begin(); clusterItr != self->dataDbs.end(); ++clusterItr) {
 			TraceEvent("MetaclusterRestoreWorkloadProcessDataCluster").detail("FromCluster", clusterItr->first);

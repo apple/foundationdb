@@ -104,7 +104,6 @@ struct TenantManagementWorkload : TestWorkload {
 	Database dataDb;
 	bool hasNoTenantKey = false; // whether this workload has non-tenant key
 	int64_t tenantIdPrefix = 0;
-	bool enableMetaclusterTenantModeCheck;
 
 	// This test exercises multiple different ways to work with tenants
 	enum class OperationType {
@@ -134,7 +133,6 @@ struct TenantManagementWorkload : TestWorkload {
 		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 		singleClient = getOption(options, "singleClient"_sr, false);
-		enableMetaclusterTenantModeCheck = getOption(options, "enableMetaclusterTenantModeCheck"_sr, false);
 
 		localTenantNamePrefix = format("%stenant_%d_", tenantNamePrefix.toString().c_str(), clientId);
 		localTenantGroupNamePrefix = format("%stenantgroup_%d_", tenantNamePrefix.toString().c_str(), clientId);
@@ -239,10 +237,8 @@ struct TenantManagementWorkload : TestWorkload {
 		if (self->useMetacluster) {
 			fmt::print("Create metacluster and register data cluster ... \n");
 			// Configure the metacluster (this changes the tenant mode)
-			wait(success(MetaclusterAPI::createMetacluster(cx.getReference(),
-			                                               "management_cluster"_sr,
-			                                               self->tenantIdPrefix,
-			                                               self->enableMetaclusterTenantModeCheck)));
+			wait(success(MetaclusterAPI::createMetacluster(
+			    cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix, false)));
 
 			DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;
