@@ -84,9 +84,10 @@ struct AuthzSecurityWorkload : TestWorkload {
 	    publicNonTenantRequestPositive, tLogReadNegative, keyLocationLeakNegative, bgLocationLeakNegative,
 	    crossTenantBGLocPositive, crossTenantBGLocNegative, crossTenantBGReqPositive, crossTenantBGReqNegative,
 	    crossTenantBGReadPositive, crossTenantBGReadNegative, crossTenantGetGranulesPositive,
-	    crossTenantGetGranulesNegative;
+	    crossTenantGetGranulesNegative, blobbifyNegative, unblobbifyNegative, listBlobNegative, verifyBlobNegative,
+	    flushBlobNegative, purgeBlobNegative;
 	std::vector<std::function<Future<Void>(Database cx)>> testFunctions;
-	bool checkBlobGranules;
+	bool checkBlobGranules, checkBlobManagement;
 
 	AuthzSecurityWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), crossTenantGetPositive("CrossTenantGetPositive"),
@@ -98,7 +99,10 @@ struct AuthzSecurityWorkload : TestWorkload {
 	    crossTenantBGReqPositive("CrossTenantBGReqPositive"), crossTenantBGReqNegative("CrossTenantBGReqNegative"),
 	    crossTenantBGReadPositive("CrossTenantBGReadPositive"), crossTenantBGReadNegative("CrossTenantBGReadNegative"),
 	    crossTenantGetGranulesPositive("CrossTenantGetGranulesPositive"),
-	    crossTenantGetGranulesNegative("CrossTenantGetGranulesNegative") {
+	    crossTenantGetGranulesNegative("CrossTenantGetGranulesNegative"), blobbifyNegative("BlobbifyNegative"),
+	    unblobbifyNegative("UnblobbifyNegative"), listBlobNegative("ListBlobNegative"),
+	    verifyBlobNegative("VerifyBlobNegative"), flushBlobNegative("FlushBlobNegative"),
+	    purgeBlobNegative("PurgeBlobNegative") {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 500.0) / clientCount;
 		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
@@ -106,6 +110,9 @@ struct AuthzSecurityWorkload : TestWorkload {
 		anotherTenantName = getOption(options, "tenantB"_sr, "authzSecurityTestTenant"_sr);
 		tLogConfigKey = getOption(options, "tLogConfigKey"_sr, "TLogInterface"_sr);
 		checkBlobGranules = getOption(options, "checkBlobGranules"_sr, false);
+		checkBlobManagement =
+		    checkBlobGranules && getOption(options, "checkBlobManagement"_sr, sharedRandomNumber % 2 == 0);
+		sharedRandomNumber /= 2;
 
 		ASSERT(g_network->isSimulated());
 		// make it comfortably longer than the timeout of the workload
@@ -142,6 +149,14 @@ struct AuthzSecurityWorkload : TestWorkload {
 				return testCrossTenantGetGranulesDisallowed(this, cx, PositiveTestcase::False);
 			});
 		}
+		if (checkBlobManagement) {
+			testFunctions.push_back([this](Database cx) { return testBlobbifyDisallowed(this, cx); });
+			testFunctions.push_back([this](Database cx) { return testUnblobbifyDisallowed(this, cx); });
+			testFunctions.push_back([this](Database cx) { return testListBlobDisallowed(this, cx); });
+			testFunctions.push_back([this](Database cx) { return testVerifyBlobDisallowed(this, cx); });
+			testFunctions.push_back([this](Database cx) { return testFlushBlobDisallowed(this, cx); });
+			testFunctions.push_back([this](Database cx) { return testPurgeBlobDisallowed(this, cx); });
+		}
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -176,7 +191,12 @@ struct AuthzSecurityWorkload : TestWorkload {
 			           crossTenantBGLocNegative.getValue() > 0 && crossTenantBGReqPositive.getValue() > 0 &&
 			           crossTenantBGReqNegative.getValue() > 0 && crossTenantBGReadPositive.getValue() > 0 &&
 			           crossTenantBGReadNegative.getValue() > 0 && crossTenantGetGranulesPositive.getValue() > 0 &&
-			           crossTenantGetGranulesNegative.getValue() > 0;
+			           crossTenantGetGranulesNegative.getValue() > 0 && blobbifyNegative.getValue() > 0;
+		}
+		if (checkBlobManagement) {
+			success &= blobbifyNegative.getValue() > 0 && unblobbifyNegative.getValue() > 0 &&
+			           listBlobNegative.getValue() > 0 && verifyBlobNegative.getValue() > 0 &&
+			           flushBlobNegative.getValue() > 0 && purgeBlobNegative.getValue() > 0;
 		}
 		return success;
 	}
@@ -199,6 +219,14 @@ struct AuthzSecurityWorkload : TestWorkload {
 			m.push_back(crossTenantBGReadNegative.getMetric());
 			m.push_back(crossTenantGetGranulesPositive.getMetric());
 			m.push_back(crossTenantGetGranulesNegative.getMetric());
+		}
+		if (checkBlobManagement) {
+			m.push_back(blobbifyNegative.getMetric());
+			m.push_back(unblobbifyNegative.getMetric());
+			m.push_back(listBlobNegative.getMetric());
+			m.push_back(verifyBlobNegative.getMetric());
+			m.push_back(flushBlobNegative.getMetric());
+			m.push_back(purgeBlobNegative.getMetric());
 		}
 	}
 
@@ -773,6 +801,77 @@ struct AuthzSecurityWorkload : TestWorkload {
 		                        self->crossTenantGetGranulesNegative,
 		                        outcome,
 		                        positive);
+		return Void();
+	}
+
+	ACTOR static Future<Void> checkBlobManagementNegative(AuthzSecurityWorkload* self,
+	                                                      std::string opName,
+	                                                      Future<Void> op,
+	                                                      PerfIntCounter* counter) {
+		try {
+			wait(op);
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) {
+				throw e;
+			}
+			if (e.code() == error_code_permission_denied) {
+				++(*counter);
+			} else {
+				TraceEvent(SevError, "AuthzSecurityBlobManagementAllowed")
+				    .detail("OpType", opName)
+				    .detail("TenantId", self->tenant->id());
+			}
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> testBlobbifyDisallowed(AuthzSecurityWorkload* self, Database cx) {
+		Future<Void> op;
+		if (deterministicRandom()->coinflip()) {
+			op = success(cx->blobbifyRange(normalKeys, self->tenant));
+		} else {
+			op = success(cx->blobbifyRangeBlocking(normalKeys, self->tenant));
+		}
+		wait(checkBlobManagementNegative(self, "Blobbify", op, &self->blobbifyNegative));
+		return Void();
+	}
+
+	ACTOR static Future<Void> testUnblobbifyDisallowed(AuthzSecurityWorkload* self, Database cx) {
+		wait(checkBlobManagementNegative(
+		    self, "Unblobbify", success(cx->unblobbifyRange(normalKeys, self->tenant)), &self->unblobbifyNegative));
+		return Void();
+	}
+
+	ACTOR static Future<Void> testListBlobDisallowed(AuthzSecurityWorkload* self, Database cx) {
+		wait(checkBlobManagementNegative(self,
+		                                 "ListBlob",
+		                                 success(cx->listBlobbifiedRanges(normalKeys, 1000, self->tenant)),
+		                                 &self->listBlobNegative));
+		return Void();
+	}
+
+	ACTOR static Future<Void> testVerifyBlobDisallowed(AuthzSecurityWorkload* self, Database cx) {
+		wait(checkBlobManagementNegative(
+		    self, "VerifyBlob", success(cx->verifyBlobRange(normalKeys, {}, self->tenant)), &self->verifyBlobNegative));
+		return Void();
+	}
+
+	ACTOR static Future<Void> testFlushBlobDisallowed(AuthzSecurityWorkload* self, Database cx) {
+		wait(checkBlobManagementNegative(
+		    self,
+		    "FlushBlob",
+		    success(cx->flushBlobRange(normalKeys, {}, deterministicRandom()->coinflip(), self->tenant)),
+		    &self->flushBlobNegative));
+		return Void();
+	}
+
+	ACTOR static Future<Void> testPurgeBlobDisallowed(AuthzSecurityWorkload* self, Database cx) {
+		wait(checkBlobManagementNegative(
+		    self,
+		    "PurgeBlob",
+		    success(cx->purgeBlobGranules(normalKeys, 1, self->tenant, deterministicRandom()->coinflip())),
+		    &self->purgeBlobNegative));
 		return Void();
 	}
 
