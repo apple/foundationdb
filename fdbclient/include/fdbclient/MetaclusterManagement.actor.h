@@ -575,7 +575,7 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db,
 			wait(metaclusterEmptinessCheck);
 			TenantMode tenantMode = wait(tenantModeFuture);
 			if (tenantMode != TenantMode::DISABLED) {
-				return fmt::format("cluster is configured with tenant mode: `{}' when tenants should be disabled",
+				return fmt::format("cluster is configured with tenant mode `{}' when tenants should be disabled",
 				                   tenantMode);
 			}
 
