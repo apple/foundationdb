@@ -1006,9 +1006,9 @@ struct StorageBytes {
 	constexpr static FileIdentifier file_identifier = 3928581;
 	// Free space on the filesystem
 	int64_t free;
-	// Total space on the filesystem
+	// Total capacity on the filesystem usable by non-privileged users.
 	int64_t total;
-	// Used by *this* store, not total - free
+	// Total size of all files owned by *this* storage instance, not total - free
 	int64_t used;
 	// Amount of space available for use by the store, which includes free space on the filesystem
 	// and internal free space within the store data that is immediately reusable.
