@@ -573,13 +573,12 @@ void RocksDBSstFileWriter::open(const std::string localFile) {
 			throw failed_to_create_checkpoint_shard_metadata();
 		}
 	} catch (Error& e) {
-		throw failed_to_create_checkpoint_shard_metadata();
+		throw e;
 	}
 }
 
 void RocksDBSstFileWriter::write(const KeyRef key, const ValueRef value) {
 	try {
-		std::cout << "Write: " << key.toString() << ": " << value.toString() << "\n";
 		rocksdb::Status status = this->writer->Put(toSlice(key), toSlice(value));
 		if (!status.ok()) {
 			TraceEvent(SevError, "RocksDBSstFileWriterWrapperWriteError")
@@ -591,7 +590,7 @@ void RocksDBSstFileWriter::write(const KeyRef key, const ValueRef value) {
 		}
 		this->hasData = true;
 	} catch (Error& e) {
-		throw failed_to_create_checkpoint_shard_metadata();
+		throw e;
 	}
 }
 
@@ -611,7 +610,7 @@ bool RocksDBSstFileWriter::finish() {
 		}
 		return true;
 	} catch (Error& e) {
-		throw failed_to_create_checkpoint_shard_metadata();
+		throw e;
 	}
 }
 

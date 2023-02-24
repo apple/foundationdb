@@ -65,6 +65,8 @@ rocksdb::Slice toSlice(StringRef s) {
 	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
 }
 
+static const KeyRangeRef persistByteSampleKeys = KeyRangeRef(PERSIST_PREFIX "BS/"_sr, PERSIST_PREFIX "BS0"_sr);
+
 struct PhysicalShardMoveWorkLoad : TestWorkload {
 	static constexpr auto NAME = "PhysicalShardMove";
 
@@ -293,27 +295,38 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state int i = 0;
 		for (; i < records.size(); ++i) {
 			loop {
-				TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", records[i].toString());
-				ASSERT(records[i].bytesSampleFile.present());
-				std::string localFile = records[i].bytesSampleFile.get();
-				std::cout << records[i].bytesSampleFile.get() << "\n";
 				// Check: bytes sst file per records[i]
-				rocksdb::Status status;
-				rocksdb::IngestExternalFileOptions ingestOptions;
-				rocksdb::DB* db;
-				rocksdb::Options options;
-				options.create_if_missing = true;
-				status = rocksdb::DB::Open(options, "testdb", &db);
-				ASSERT(status.ok());
-				status = db->IngestExternalFile({ localFile }, ingestOptions);
-				ASSERT(status.ok());
-				for (const auto [key, value] : *kvs) {
-					std::string bytes;
-					status = db->Get(rocksdb::ReadOptions(), toSlice(key.withPrefix(PERSIST_PREFIX "BS/"_sr)), &bytes);
-					std::cout << key.withPrefix(PERSIST_PREFIX "BS/"_sr).toString() << ": " << bytes << "\n";
-				}
-				delete db;
+				TraceEvent e(SevDebug, "TestSampledBytes");
+				e.setMaxEventLength(20000);
+				e.detail("Checkpoint", records[i].toString());
+				e.detail("SstFile", records[i].bytesSampleFile.present() ? records[i].bytesSampleFile.get() : "NoFile");
 
+				std::vector<std::pair<Key, Value>> kvsSample;
+				if (records[i].bytesSampleFile.present()) {
+					std::string localFile = records[i].bytesSampleFile.get();
+					std::cout << records[i].bytesSampleFile.get() << "\n";
+					rocksdb::Status status;
+					rocksdb::IngestExternalFileOptions ingestOptions;
+					rocksdb::DB* db;
+					rocksdb::Options options;
+					options.create_if_missing = true;
+					status = rocksdb::DB::Open(options, "testdb", &db);
+					ASSERT(status.ok());
+					status = db->IngestExternalFile({ localFile }, ingestOptions);
+					ASSERT(status.ok());
+					int j = 0;
+					for (const auto [key, value] : *kvs) {
+						std::string bytes;
+						status = db->Get(
+						    rocksdb::ReadOptions(), toSlice(key.withPrefix(persistByteSampleKeys.begin)), &bytes);
+						e.detail("Key" + std::to_string(j), key.withPrefix(persistByteSampleKeys.begin));
+						e.detail("Value" + std::to_string(j), bytes.empty() ? "NoBytes" : bytes);
+						j++;
+					}
+					delete db;
+				}
+
+				TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", records[i].toString());
 				try {
 					state CheckpointMetaData record;
 					if (asKeyValues) {
@@ -361,6 +374,15 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		}
 
 		TraceEvent(SevDebug, "TestCheckpointRestored").detail("Checkpoint", describe(fetchedCheckpoints));
+
+		// Validate the restored sampled bytes
+		/*RangeResult kvRangeSample = wait(kvStore->readRange(persistByteSampleKeys));
+		ASSERT(!kvRangeSample.more);
+		std::unordered_map<Key, Value> kvsKvsSample;
+		for (int i = 0; i < kvRangeSample.size(); ++i) {
+		    kvsKvsSample[kvRangeSample[i].key] = kvRangeSample[i].value;
+		    // TODO
+		}*/
 
 		// Validate the restored kv-store.
 		RangeResult kvRange = wait(kvStore->readRange(normalKeys));

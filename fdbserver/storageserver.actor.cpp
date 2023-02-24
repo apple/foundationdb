@@ -9634,10 +9634,8 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 	state Key readBegin;
 	state Key readEnd;
 	state bool anyFileCreated;
-	std::cout << "createSstFileForCheckpointShardBytesSample start\n";
 
 	loop {
-		std::cout << "newloop\n";
 		try {
 			ASSERT(directoryExists(parentDirectory(bytesSampleFile)));
 			if (fileExists(abspath(bytesSampleFile))) {
@@ -9671,7 +9669,6 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 				KeyRange range = Standalone(*metaDataRangesIter);
 				readBegin = range.begin.withPrefix(persistByteSampleKeys.begin);
 				readEnd = range.end.withPrefix(persistByteSampleKeys.begin);
-				std::cout << "ReadRange: " << readBegin.toString() << " ~ " << readEnd.toString() << "\n";
 				loop {
 					try {
 						RangeResult readResult = wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd),
@@ -9679,6 +9676,7 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 						                                                      SERVER_KNOBS->STORAGE_LIMIT_BYTES));
 						numGetRangeQueries++;
 						for (int i = 0; i < readResult.size(); i++) {
+							ASSERT(!readResult[i].key.empty() && !readResult[i].value.empty());
 							sstWriter->write(readResult[i].key, readResult[i].value);
 							numSampledKeys++;
 						}
@@ -9690,15 +9688,8 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 							break;
 						}
 					} catch (Error& e) {
-						std::cout << "Error on read " << readBegin.toString() << " ~ " << readEnd.toString() << "\n";
 						if (failureCount < SERVER_KNOBS->ROCKSDB_CREATE_SST_FILE_RETRY_COUNT_MAX) {
-							if (e.code() == error_code_failed_to_create_checkpoint_shard_metadata) {
-								throw retry(); // retry from sketch
-							} else {
-								wait(delay(0.5));
-								failureCount++;
-								continue; // retry current range
-							}
+							throw retry(); // retry from sketch
 						} else {
 							throw e;
 						}
@@ -9716,7 +9707,6 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 			break;
 
 		} catch (Error& e) {
-			std::cout << "Error on read2\n";
 			if (e.code() == error_code_retry) {
 				wait(delay(0.5));
 				failureCount++;
@@ -9729,7 +9719,6 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 			}
 		}
 	}
-	std::cout << "createSstFileForCheckpointShardBytesSample end\n";
 
 	return anyFileCreated;
 }
