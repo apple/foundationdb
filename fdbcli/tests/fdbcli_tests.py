@@ -1021,8 +1021,11 @@ def tenant_lock(logger):
     output = run_fdbcli_command('tenant lock tenant w')
     output = output.strip()
     logger.debug('output: {}'.format(output))
-    assert output.startswith("Locked tenant tenant with UID ")
-    uid_str = output.strip("Locked tenant tenant with UID ")
+    start_string = "Locked tenant `tenant' with UID `"
+    assert output.startswith(start_string)
+    assert output.endswith("'")
+    output = output[:-1]
+    uid_str = output.strip(start_string)
     assert len(uid_str) <= 32  # could be smaller than 32 if the first 4 bits are 0
 
     logger.debug('Verify tenant is readable')
@@ -1036,15 +1039,15 @@ def tenant_lock(logger):
     logger.debug('output: {}'.format(output))
     assert output == 'ERROR: Tenant is locked (2144)'
 
-    logger.debug('Unlock tenant')
+    logger.debug('Unlock tenant with UID "{}"'.format(uid_str))
     output = run_fdbcli_command('tenant unlock tenant {}'.format(uid_str))
     logger.debug('output: {}'.format(output.strip()))
-    assert output.strip() == 'Unlocked tenant tenant'
+    assert output.strip() == "Unlocked tenant `tenant'"
 
     logger.debug('Lock tenant in rw mode')
     output = run_fdbcli_command('tenant lock tenant rw {}'.format(uid_str)).strip()
     logger.debug('output: {}'.format(output))
-    assert output == 'Locked tenant tenant with UID {}'.format(uid_str)
+    assert output == "Locked tenant `tenant' with UID `{}'".format(uid_str)
 
     logger.debug('Verify tenant is NOT readable')
     output = run_fdbcli_command_and_get_error('usetenant tenant; get foo').strip()
@@ -1059,7 +1062,7 @@ def tenant_lock(logger):
     logger.debug('Unlock tenant')
     output = run_fdbcli_command('tenant unlock tenant {}'.format(uid_str))
     logger.debug('output: {}'.format(output.strip()))
-    assert output.strip() == 'Unlocked tenant tenant'
+    assert output.strip() == "Unlocked tenant `tenant'"
 
 
 @enable_logging()

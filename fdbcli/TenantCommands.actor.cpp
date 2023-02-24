@@ -697,7 +697,13 @@ ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<String
 	}
 	if (tokens.size() > uidIdx) {
 		try {
-			uid = UID::fromStringThrowsOnFailure(tokens[uidIdx].toString());
+			auto uidStr = tokens[uidIdx].toString();
+			if (uidStr.size() < 32) {
+				// UID::fromString expects the string to be exactly 32 characters long, but the uid might be shorter
+				// if the most significant byte[s] are 0. So we need to pad
+				uidStr.insert(0, 32 - uidStr.size(), '0');
+			}
+			uid = UID::fromStringThrowsOnFailure(uidStr);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_operation_failed);
 			fmt::print(stderr, "ERROR: Couldn't not parse `{}' as a valid UID", tokens[uidIdx].toString());

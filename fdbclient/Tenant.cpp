@@ -161,7 +161,8 @@ void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> 
 
 bool TenantMapEntry::operator==(TenantMapEntry const& other) const {
 	return id == other.id && tenantName == other.tenantName && tenantLockState == other.tenantLockState &&
-	       tenantGroup == other.tenantGroup && configurationSequenceNum == other.configurationSequenceNum;
+	       tenantLockId == other.tenantLockId && tenantGroup == other.tenantGroup &&
+	       configurationSequenceNum == other.configurationSequenceNum;
 }
 
 bool TenantMapEntry::operator!=(TenantMapEntry const& other) const {
