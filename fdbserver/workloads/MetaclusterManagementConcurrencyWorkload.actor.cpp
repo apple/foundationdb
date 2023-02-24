@@ -48,9 +48,11 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 	std::vector<ClusterName> dataDbIndex;
 
 	double testDuration;
+	bool enableMetaclusterTenantModeCheck;
 
 	MetaclusterManagementConcurrencyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
+		enableMetaclusterTenantModeCheck = getOption(options, "enableMetaclusterTenantModeCheck"_sr, false);
 	}
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
@@ -75,7 +77,8 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 			    cx.getReference(),
 			    "management_cluster"_sr,
 			    deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
-			                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1))));
+			                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1),
+			    self->enableMetaclusterTenantModeCheck)));
 		}
 		return Void();
 	}

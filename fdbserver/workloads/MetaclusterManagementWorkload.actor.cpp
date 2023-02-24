@@ -89,6 +89,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	int maxTenantGroups;
 	int64_t tenantIdPrefix;
 	double testDuration;
+	bool enableMetaclusterTenantModeCheck;
 
 	MetaclusterManagementWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 1000));
@@ -98,6 +99,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		                           "tenantIdPrefix"_sr,
 		                           deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
 		                                                            TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1));
+		enableMetaclusterTenantModeCheck = getOption(options, "enableMetaclusterTenantModeCheck"_sr, false);
 	}
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
@@ -127,8 +129,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			self->dataDbs[self->dataDbIndex.back()] = makeReference<DataClusterData>(
 			    Database::createSimulatedExtraDatabase(connectionString, cx->defaultTenant));
 		}
-		wait(success(
-		    MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix)));
+		wait(success(MetaclusterAPI::createMetacluster(
+		    cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix, self->enableMetaclusterTenantModeCheck)));
 		return Void();
 	}
 

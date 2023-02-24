@@ -54,12 +54,14 @@ struct TenantCapacityLimits : TestWorkload {
 	const Key specialKeysTenantMapPrefix = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT)
 	                                           .begin.withSuffix(TenantRangeImpl::submoduleRange.begin)
 	                                           .withSuffix(TenantRangeImpl::mapSubRange.begin);
+	bool enableMetaclusterTenantModeCheck;
 
 	TenantCapacityLimits(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		tenantIdPrefix = getOption(options,
 		                           "tenantIdPrefix"_sr,
 		                           deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
 		                                                            TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1));
+		enableMetaclusterTenantModeCheck = getOption(options, "enableMetaclusterTenantModeCheck"_sr, false);
 		if (clientId == 0) {
 			useMetacluster = deterministicRandom()->coinflip();
 		}
@@ -80,8 +82,10 @@ struct TenantCapacityLimits : TestWorkload {
 			MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 			self->managementDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
-			wait(success(
-			    MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix)));
+			wait(success(MetaclusterAPI::createMetacluster(cx.getReference(),
+			                                               "management_cluster"_sr,
+			                                               self->tenantIdPrefix,
+			                                               self->enableMetaclusterTenantModeCheck)));
 
 			DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;

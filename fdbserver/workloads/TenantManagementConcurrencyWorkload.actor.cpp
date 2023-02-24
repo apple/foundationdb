@@ -48,6 +48,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 	double testDuration;
 	bool useMetacluster;
 	bool createMetacluster;
+	bool enableMetaclusterTenantModeCheck;
 
 	Reference<IDatabase> mvDb;
 	Database dataDb;
@@ -57,6 +58,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 		createMetacluster = getOption(options, "createMetacluster"_sr, true);
+		enableMetaclusterTenantModeCheck = getOption(options, "enableMetaclusterTenantModeCheck"_sr, false);
 
 		if (hasOption(options, "useMetacluster"_sr)) {
 			useMetacluster = getOption(options, "useMetacluster"_sr, false);
@@ -109,7 +111,8 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 			    cx.getReference(),
 			    "management_cluster"_sr,
 			    deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
-			                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1))));
+			                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1),
+			    self->enableMetaclusterTenantModeCheck)));
 
 			state int extraDatabaseIdx;
 			for (extraDatabaseIdx = 0; extraDatabaseIdx < g_simulator->extraDatabases.size(); ++extraDatabaseIdx) {
