@@ -42,9 +42,10 @@ ACTOR Future<Reference<IDatabase>> openDatabase(ClusterConnectionString connecti
 	if (g_network->isSimulated()) {
 		Reference<IClusterConnectionRecord> clusterFile =
 		    makeReference<ClusterConnectionMemoryRecord>(connectionString);
-		Database nativeDb = Database::createDatabase(clusterFile, -1);
+		Database nativeDb = Database::createDatabase(clusterFile, ApiVersion::LATEST_VERSION);
 		Reference<IDatabase> threadSafeDb =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(nativeDb)));
+		MultiVersionApi::api->selectApiVersion(ApiVersion::LATEST_VERSION);
 		return MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeDb);
 	} else {
 		return MultiVersionApi::api->createDatabaseFromConnectionString(connectionString.toString().c_str());

@@ -435,6 +435,30 @@ public:
 		tr->clear(subspace);
 	}
 
+	template <class Transaction>
+	void addReadConflictKey(Transaction tr, KeyType const& key) {
+		Key k = subspace.begin.withSuffix(KeyCodec::pack(key));
+		tr->addReadConflictRange(singleKeyRange(k));
+	}
+
+	template <class Transaction>
+	void addReadConflictRange(Transaction tr, KeyType const& begin, KeyType const& end) {
+		tr->addReadConflictRange(subspace.begin.withSuffix(KeyCodec::pack(begin)),
+		                         subspace.begin.withSuffix(KeyCodec::pack(end)));
+	}
+
+	template <class Transaction>
+	void addWriteConflictKey(Transaction tr, KeyType const& key) {
+		Key k = subspace.begin.withSuffix(KeyCodec::pack(key));
+		tr->addWriteConflictRange(singleKeyRange(k));
+	}
+
+	template <class Transaction>
+	void addWriteConflictRange(Transaction tr, KeyType const& begin, KeyType const& end) {
+		tr->addWriteConflictRange(subspace.begin.withSuffix(KeyCodec::pack(begin)),
+		                          subspace.begin.withSuffix(KeyCodec::pack(end)));
+	}
+
 	KeyRange subspace;
 };
 
