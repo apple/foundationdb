@@ -157,15 +157,8 @@ struct SimClogging {
 
 	void unclogPair(const IPAddress& from, const IPAddress& to) {
 		auto pair = std::make_pair(from, to);
-		auto it = clogPairUntil.find(pair);
-		if (it != clogPairUntil.end()) {
-			clogPairUntil.erase(it);
-		}
-
-		auto i = clogPairLatency.find(std::make_pair(from, to));
-		if (i != clogPairLatency.end()) {
-			clogPairLatency.erase(i);
-		}
+		clogPairUntil.erase(pair);
+		clogPairLatency.erase(pair);
 	}
 
 	// Clog a pair of processes until a time. This is more fine-grained than
