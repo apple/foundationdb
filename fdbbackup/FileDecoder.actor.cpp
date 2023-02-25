@@ -114,7 +114,7 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 	BackupTLSConfig tlsConfig;
 	bool list_only = false;
 	bool save_file_locally = false;
-	std::vector<std::string> prefixes; // Key prefixes for filtering
+	std::vector<std::vector<std::string>> prefixeses; // Key prefixeses for filtering
 	// more efficient data structure for intersection queries than "prefixes"
 	KeyRangeMap<int> rangeMap;
 	Version beginVersionFilter = 0;
@@ -200,6 +200,25 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 		return match;
 	}
 
+	bool matchFilters(MutationRef m) {
+		for (const auto& prefix : prefixes) {
+			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+				if (m.param1.startsWith(StringRef(prefix))) {
+					return true;
+				}
+			} else if (m.type == MutationRef::ClearRange) {
+				KeyRange range(KeyRangeRef(m.param1, m.param2));
+				KeyRange range2 = prefixRange(StringRef(prefix));
+				if (range.intersects(range2)) {
+					return true;
+				}
+			} else {
+				ASSERT(false);
+			}
+		}
+		return false;
+	}
+
 	std::string toString() {
 		std::string s;
 		s.append("ContainerURL: ");
@@ -249,8 +268,8 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 // Decode an ASCII string, e.g., "\x15\x1b\x19\x04\xaf\x0c\x28\x0a",
 // into the binary string. Set "err" to true if the format is invalid.
 // Note ',' '\' '," ';' are escaped by '\'. Normal characters can be
-// unencoded into HEX, but not recommended.
-std::string decode_hex_string(std::string line, bool& err) {
+// unencoded into HEX, but not recommended. Set "err" to true if the format is invalid.
+std::string decode_hex_string(std::string line, bool& err, bool& err) {
 	size_t i = 0;
 	std::string ret;
 
@@ -300,6 +319,40 @@ std::string decode_hex_string(std::string line, bool& err) {
 	return line.substr(0, i);
 }
 
+// Parses and returns a ";" separated HEX encoded strings.
+// Sets "err" to true if there is any parsing error.
+std::vector<std::string> parsePrefixesLine(const std::string& line, bool& err) {
+	std::vector<std::string> results;
+	err = false;
+
+	int p = 0;
+	while (p < line.size()) {
+		int end = line.find_first_of(',', p);
+		if (end == line.npos) {
+			end = line.size();
+		}
+		auto prefix = decode_hex_string(line.substr(p, end - p), err);
+		if (err) {
+			return results;
+		}
+		results.push_back(prefix);
+		p = end + 1;
+	}
+	return results;
+}
+
+std::vector<std::string> parsePrefixFile(const std::string& filename, bool& err) {
+	std::ifstream t(filename);
+	std::string line;
+
+	t.seekg(0, std::ios::end);
+	line.reserve(t.tellg());
+	t.seekg(0, std::ios::beg);
+
+	line.assign((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
+	return parsePrefixesLine(line, err);
+}
+
 // Parses and returns a ";" separated HEX encoded strings. So the ";" in
 // the string should be escaped as "\;".
 // Sets "err" to true if there is any parsing error.
@@ -338,6 +391,8 @@ std::vector<std::string> parsePrefixFile(const std::string& filename, bool& err)
 int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 	bool err = false;
 
+	bool err = false;
+
 	while (args->Next()) {
 		auto lastError = args->LastError();
 		switch (lastError) {
@@ -367,9 +422,13 @@ int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 			break;
 
 		case OPT_FILTERS:
-			param->prefixes = parsePrefixFile(args->OptionArg(), err);
+			param->prefixes.push_back(args->OptionArg());
+			break;
+
+		case OPT_FILTERS:
+			param->prefixeses = parsePrefixFile(args->OptionArg(), err);
 			if (err) {
-				throw std::runtime_error("ERROR:" + std::string(args->OptionArg()) + "contains invalid prefix(es)");
+				throw std::runtime_error("ERROR:" + std::string(parsePrefixFile(args->OptionArg()) + "contains invalid prefix(es)"), err);
 			}
 			break;
 
@@ -796,7 +855,7 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container,
 		int sub = 0;
 		for (const auto& m : vms.mutations) {
 			sub++; // sub sequence number starts at 1
-			bool print = params->prefixes.empty(); // no filtering
+			bool print = params->prefixeses.empty(); // no filtering
 
 			if (!print) {
 				print = params->matchFilters(m);
