@@ -87,7 +87,8 @@ void printDecodeUsage() {
 	             "                 The same credential format/file fdbbackup uses.\n" TLS_HELP
 	             "  --build-flags  Print build information and exit.\n"
 	             "  --list-only    Print file list and exit.\n"
-	             "  -k KEY_PREFIX  Use the prefix for filtering mutations\n"
+	             "  --validate-filters Validate the default RangeMap filtering logic with a slower one.\n"
+	             "  -k KEY_PREFIX  Use a single prefix for filtering mutations.\n"
 	             "  --filters PREFIX_FILTER_FILE\n"
 	             "                 A file containing a list of prefix filters in HEX format separated by \";\",\n"
 	             "                 e.g., \"\\x05\\x01;\\x15\\x2b\"\n"
@@ -117,6 +118,7 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 	BackupTLSConfig tlsConfig;
 	bool list_only = false;
 	bool save_file_locally = false;
+	bool validate_filters = false;
 	std::vector<std::string> prefixes; // Key prefixes for filtering
 	// more efficient data structure for intersection queries than "prefixes"
 	KeyRangeMap<int> rangeMap;
@@ -151,7 +153,7 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 		bool match = false;
 		if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 			auto ranges = rangeMap.intersectingRanges(singleKeyRange(m.param1));
-			for ([[maybe_unused]] const auto r : ranges) {
+			for (const auto& r : ranges) {
 				if (r.cvalue() == 1) {
 					match = true;
 					break;
@@ -159,7 +161,7 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 			}
 		} else if (m.type == MutationRef::ClearRange) {
 			auto ranges = rangeMap.intersectingRanges(KeyRangeRef(m.param1, m.param2));
-			for ([[maybe_unused]] const auto r : ranges) {
+			for (const auto& r : ranges) {
 				if (r.cvalue() == 1) {
 					match = true;
 					break;
@@ -168,7 +170,11 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 		} else {
 			ASSERT(false);
 		}
+		if (!validate_filters) {
+			return match;
+		}
 
+		// If we choose to validate the filters, go through filters one by one
 		for (const auto& prefix : prefixes) {
 			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 				if (m.param1.startsWith(StringRef(prefix))) {
@@ -180,8 +186,7 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 				KeyRange range2 = prefixRange(StringRef(prefix));
 				if (range.intersects(range2)) {
 					ASSERT(match);
-				ASSERT(match);
-				return true;
+					return true;
 				}
 			} else {
 				ASSERT(false);
@@ -253,6 +258,7 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 			}
 		}
 		s.append(", list_only: ").append(list_only ? "true" : "false");
+		s.append(", validate_filters: ").append(validate_filters ? "true" : "false");
 		if (beginVersionFilter != 0) {
 			s.append(", beginVersionFilter: ").append(std::to_string(beginVersionFilter));
 		}
@@ -428,6 +434,10 @@ int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 
 		case OPT_LIST_ONLY:
 			param->list_only = true;
+			break;
+
+		case OPT_VALIDATE_FILTERS:
+			param->validate_filters = true;
 			break;
 
 		case OPT_KEY_PREFIX:
