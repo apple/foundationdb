@@ -639,6 +639,8 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == LiteralStringRef("blob_granules_enabled")) {
 		parse((&type), value);
 		blobGranulesEnabled = (type != 0);
+	} else if (ck.startsWith("excluded/"_sr)) {
+		// excluded servers: don't keep the state internally
 	} else {
 		return false;
 	}

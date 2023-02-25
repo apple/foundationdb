@@ -275,7 +275,8 @@ CommandFactory configureFactory(
         "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
         "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|perpetual_storage_wiggle_locality="
         "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|storage_migration_type={disabled|gradual|aggressive}"
-        "|tenant_mode={disabled|optional_experimental|required_experimental}|blob_granules_enabled={0|1}",
+        "|tenant_mode={disabled|optional_experimental|required_experimental}|blob_granules_enabled={0|1}"
+        "|exclude=<ADDRESS...>",
         "change the database configuration",
         "The `new' option, if present, initializes a new database with the given configuration rather than changing "
         "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
@@ -309,6 +310,10 @@ CommandFactory configureFactory(
         "tenant_mode=<disabled|optional_experimental|required_experimental>: Sets the tenant mode for the cluster. If "
         "optional, then transactions can be run with or without specifying tenants. If required, all data must be "
         "accessed using tenants.\n\n"
+        "exclude=<ADDRESS...>: Sets the addresses in the format of IP1:port1,IP2:port2 pairs to be excluded during "
+        "recruitment. Note this should be only used when the database is unavailable because of the faulty processes "
+        "that are blocking the recovery from completion. The number of addresses should be less than the replication "
+        "factor to avoid data loss.\n\n"
 
         "See the FoundationDB Administration Guide for more information."));
 
