@@ -535,9 +535,10 @@ ACTOR Future<bool> tenantConfigureCommand(Reference<IDatabase> db, std::vector<S
 		return false;
 	}
 
-	state bool ignoreCapacityLimit = tokens[tokens.size() - 1] == "ignore_capacity_limit";
+	state bool ignoreCapacityLimit = tokens.back() == "ignore_capacity_limit";
+	int configurationEndIndex = tokens.size() - (ignoreCapacityLimit ? 1 : 0);
 	state Optional<std::map<Standalone<StringRef>, Optional<Value>>> configuration =
-	    parseTenantConfiguration(tokens, 3, tokens.size() - ignoreCapacityLimit, true);
+	    parseTenantConfiguration(tokens, 3, configurationEndIndex, true);
 
 	if (!configuration.present()) {
 		return false;
@@ -755,11 +756,12 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 				                                     "<[unset] tenant_group[=<GROUP_NAME>]>",
 				                                     "[ignore_capacity_limit]" };
 			return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
-		} else if (tokens.size() >= 4 && tokens.size() < 6 && "unset"_sr.startsWith(tokens[3]) &&
-		           tokens[3].size() <= 5) {
-			static std::vector<const char*> opts = { "<tenant_group[=<GROUP_NAME>]>", "[ignore_capacity_limit]" };
-			return std::vector<const char*>(opts.begin() + tokens.size() - 4, opts.end());
-		} else if (tokens.size() < 5) {
+		} else if ("unset"_sr.startsWith(tokens[3]) && tokens[3].size() <= 5) {
+			if (tokens.size() < 6) {
+				static std::vector<const char*> opts = { "<tenant_group[=<GROUP_NAME>]>", "[ignore_capacity_limit]" };
+				return std::vector<const char*>(opts.begin() + tokens.size() - 4, opts.end());
+			}
+		} else if (tokens.size() == 4) {
 			static std::vector<const char*> opts = { "[ignore_capacity_limit]" };
 			return opts;
 		}

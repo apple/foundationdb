@@ -1115,6 +1115,14 @@ def tenant_configure(logger):
     )
 
     output = run_fdbcli_command_and_get_error(
+        "tenant configure tenant tenant_group=tenant1 unknown_token"
+    )
+    assert (
+        output
+        == "ERROR: invalid configuration string `unknown_token'. String must specify a value using `='."
+    )
+
+    output = run_fdbcli_command_and_get_error(
         "tenant configure tenant3 tenant_group=tenant_group1"
     )
     assert output == "ERROR: Tenant does not exist (2131)"
