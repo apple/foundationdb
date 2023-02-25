@@ -187,7 +187,7 @@ ssfailure
 rebalance_disk
     If enabled, data distributor will do data movement to make sure every storage server use similar disk space.
 rebalance_read
-    If enabled, data distributor will do data movement to balance the read bytes bandwidth among storage servers. This feature needs ``knob_READ_SAMPLING_ENABLED=true``.
+    If enabled, data distributor will do data movement to balance the read bytes bandwidth among storage servers. This feature needs ``knob_read_sampling_enabled=true``.
 rebalance
     Control both rebalance_disk and rebalance_read.
 
