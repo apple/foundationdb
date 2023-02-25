@@ -180,6 +180,26 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 		return false;
 	}
 
+	bool matchFilters(KeyValueRef kv) {
+		bool match = false;
+		auto ranges = rangeMap.intersectingRanges(singleKeyRange(kv.key));
+		for ([[maybe_unused]] const auto r : ranges) {
+			if (r.cvalue() == 1) {
+				match = true;
+				break;
+			}
+		}
+
+		for (const auto& prefix : prefixes) {
+			if (kv.key.startsWith(StringRef(prefix))) {
+				ASSERT(match);
+				return true;
+			}
+		}
+
+		return match;
+	}
+
 	std::string toString() {
 		std::string s;
 		s.append("ContainerURL: ");
@@ -663,7 +683,8 @@ public:
 					platform::createDirectory(path);
 				}
 			}
-		self->lfd = open(self->file.fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
+
+			self->lfd = open(self->file.fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
 			if (self->lfd == -1) {
 				TraceEvent(SevError, "OpenLocalFileFailed").detail("File", self->file.fileName);
 				throw platform_error();
@@ -687,7 +708,6 @@ public:
 			state Standalone<VectorRef<KeyValueRef>> chunks =
 			    wait(fileBackup::decodeRangeFileBlock(self->fd, self->offset, len));
 			self->blocks.push_back(chunks);
-			// TODO (Vishesh): Implement self->save
 
 			TraceEvent("ReadFile")
 			    .detail("Name", self->file.fileName)
@@ -730,7 +750,21 @@ ACTOR Future<Void> process_range_file(Reference<IBackupContainer> container,
 
 	for (auto& block : progress.blocks) {
 		for (const auto& kv : block) {
-			std::cout << "Key = " << printable(kv.key) << "  Value = " << printable(kv.value) << std::endl;
+			bool print = params->prefixes.empty(); // no filtering
+
+			if (!print) {
+				print = params->matchFilters(kv);
+			}
+
+			if (print) {
+				TraceEvent(SevVerbose, format("KVPair_%llu", file.version).c_str(), uid)
+				    .detail("Version", file.version)
+				    .setMaxFieldLength(-1)
+				    .detail("Key", kv.key)
+				    .detail("Value", kv.value);
+				std::cout << file.version << " Key = " << printable(kv.key) << "  Value = " << printable(kv.value)
+				          << std::endl;
+			}
 		}
 	}
 
