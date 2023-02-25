@@ -248,7 +248,7 @@ std::vector<std::string> parsePrefixesLine(const std::string& line, bool& err) {
 
 	int p = 0;
 	while (p < line.size()) {
-		int end = line.find_first_of(',', p);
+		int end = line.find_first_of(';', p);
 		if (end == line.npos) {
 			end = line.size();
 		}
@@ -612,7 +612,7 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 				    .detail("Version", vms.version)
 				    .setMaxFieldLength(-1)
 				    .detail("M", m.toString());
-				std::cout << vms.version << " " << m.toString() << "\n";
+				std::cout << vms.version << "." << sub << " " << m.toString() << "\n";
 			}
 		}
 	}
