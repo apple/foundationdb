@@ -182,7 +182,8 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		    self->managementDb,
 		    "management_cluster"_sr,
 		    deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
-		                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1))));
+		                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1),
+		    false)));
 
 		ASSERT(g_simulator->extraDatabases.size() > 0);
 		state std::vector<std::string>::iterator extraDatabasesItr;
@@ -538,7 +539,8 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		    self->managementDb,
 		    "management_cluster"_sr,
 		    deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
-		                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1))));
+		                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1),
+		    false)));
 		state std::map<ClusterName, DataClusterData>::iterator clusterItr;
 		for (clusterItr = self->dataDbs.begin(); clusterItr != self->dataDbs.end(); ++clusterItr) {
 			TraceEvent("MetaclusterRestoreWorkloadProcessDataCluster").detail("FromCluster", clusterItr->first);

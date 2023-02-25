@@ -80,8 +80,8 @@ struct TenantCapacityLimits : TestWorkload {
 			MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 			self->managementDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
-			wait(success(
-			    MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix)));
+			wait(success(MetaclusterAPI::createMetacluster(
+			    cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix, false)));
 
 			DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;

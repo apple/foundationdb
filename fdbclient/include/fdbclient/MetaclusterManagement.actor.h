@@ -530,8 +530,19 @@ Future<Void> managementClusterCheckEmpty(Transaction tr) {
 	return Void();
 }
 
+ACTOR template <class Transaction>
+Future<TenantMode> getClusterConfiguredTenantMode(Transaction tr) {
+	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
+	    tr->get(tenantModeConfKey);
+	Optional<Value> tenantModeValue = wait(safeThreadFutureToFuture(tenantModeFuture));
+	return TenantMode::fromValue(tenantModeValue.castTo<ValueRef>());
+}
+
 ACTOR template <class DB>
-Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName name, int64_t tenantIdPrefix) {
+Future<Optional<std::string>> createMetacluster(Reference<DB> db,
+                                                ClusterName name,
+                                                int64_t tenantIdPrefix,
+                                                bool enableTenantModeCheck) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	state Optional<UID> metaclusterUid;
 	ASSERT(tenantIdPrefix >= TenantAPI::TENANT_ID_PREFIX_MIN_VALUE &&
@@ -545,6 +556,8 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName na
 			    MetaclusterMetadata::metaclusterRegistration().get(tr);
 
 			state Future<Void> metaclusterEmptinessCheck = managementClusterCheckEmpty(tr);
+			state Future<TenantMode> tenantModeFuture =
+			    enableTenantModeCheck ? getClusterConfiguredTenantMode(tr) : Future<TenantMode>(TenantMode::DISABLED);
 
 			Optional<MetaclusterRegistrationEntry> existingRegistration = wait(metaclusterRegistrationFuture);
 			if (existingRegistration.present()) {
@@ -560,6 +573,11 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName na
 			}
 
 			wait(metaclusterEmptinessCheck);
+			TenantMode tenantMode = wait(tenantModeFuture);
+			if (tenantMode != TenantMode::DISABLED) {
+				return fmt::format("cluster is configured with tenant mode `{}' when tenants should be disabled",
+				                   tenantMode);
+			}
 
 			if (!metaclusterUid.present()) {
 				metaclusterUid = deterministicRandom()->randomUniqueID();

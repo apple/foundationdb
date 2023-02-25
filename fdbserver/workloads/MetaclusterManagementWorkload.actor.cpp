@@ -127,8 +127,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			self->dataDbs[self->dataDbIndex.back()] = makeReference<DataClusterData>(
 			    Database::createSimulatedExtraDatabase(connectionString, cx->defaultTenant));
 		}
-		wait(success(
-		    MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix)));
+		wait(success(MetaclusterAPI::createMetacluster(
+		    cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix, false)));
 		return Void();
 	}
 
