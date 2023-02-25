@@ -20,12 +20,15 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <streambuf>
 #include <string>
 #include <vector>
 #include <fcntl.h>
+
 #ifdef _WIN32
 #include <io.h>
 #endif
@@ -79,8 +82,11 @@ void printDecodeUsage() {
 	             "  --build-flags  Print build information and exit.\n"
 	             "  --list-only    Print file list and exit.\n"
 	             "  -k KEY_PREFIX  Use the prefix for filtering mutations\n"
+	             "  --filters PREFIX_FILTER_FILE\n"
+	             "                 A file containing a list of prefix filters in HEX format separated by \";\",\n"
+	             "                 e.g., \"\\x05\\x01;\\x15\\x2b\"\n"
 	             "  --hex-prefix   HEX_PREFIX\n"
-	             "                 The prefix specified in HEX format, e.g., \"\\\\x05\\\\x01\".\n"
+	             "                 The prefix specified in HEX format, e.g., --hex-prefix \"\\\\x05\\\\x01\".\n"
 	             "  --begin-version-filter BEGIN_VERSION\n"
 	             "                 The version range's begin version (inclusive) for filtering.\n"
 	             "  --end-version-filter END_VERSION\n"
@@ -105,7 +111,7 @@ struct DecodeParams {
 	BackupTLSConfig tlsConfig;
 	bool list_only = false;
 	bool save_file_locally = false;
-	std::string prefix; // Key prefix for filtering
+	std::vector<std::string> prefixes; // Key prefixes for filtering
 	Version beginVersionFilter = 0;
 	Version endVersionFilter = std::numeric_limits<Version>::max();
 
@@ -115,6 +121,25 @@ struct DecodeParams {
 	bool overlap(Version begin, Version end) const {
 		// Filter [100, 200),  [50,75) [200, 300)
 		return !(begin >= endVersionFilter || end <= beginVersionFilter);
+	}
+
+	bool matchFilters(MutationRef m) {
+		for (const auto& prefix : prefixes) {
+			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+				if (m.param1.startsWith(StringRef(prefix))) {
+					return true;
+				}
+			} else if (m.type == MutationRef::ClearRange) {
+				KeyRange range(KeyRangeRef(m.param1, m.param2));
+				KeyRange range2 = prefixRange(StringRef(prefix));
+				if (range.intersects(range2)) {
+					return true;
+				}
+			} else {
+				ASSERT(false);
+			}
+		}
+		return false;
 	}
 
 	std::string toString() {
@@ -145,8 +170,8 @@ struct DecodeParams {
 		if (endVersionFilter < std::numeric_limits<Version>::max()) {
 			s.append(", endVersionFilter: ").append(std::to_string(endVersionFilter));
 		}
-		if (!prefix.empty()) {
-			s.append(", KeyPrefix: ").append(printable(KeyRef(prefix)));
+		if (!prefixes.empty()) {
+			s.append(", KeyPrefixes: ").append(printable(describe(prefixes)));
 		}
 		for (const auto& [knob, value] : knobs) {
 			s.append(", KNOB-").append(knob).append(" = ").append(value);
@@ -164,8 +189,8 @@ struct DecodeParams {
 };
 
 // Decode an ASCII string, e.g., "\x15\x1b\x19\x04\xaf\x0c\x28\x0a",
-// into the binary string.
-std::string decode_hex_string(std::string line) {
+// into the binary string. Set "err" to true if the format is invalid.
+std::string decode_hex_string(std::string line, bool& err) {
 	size_t i = 0;
 	std::string ret;
 
@@ -174,6 +199,7 @@ std::string decode_hex_string(std::string line) {
 		case '\\':
 			if (i + 2 > line.length()) {
 				std::cerr << "Invalid hex string at: " << i << "\n";
+				err = true;
 				return ret;
 			}
 			switch (line[i + 1]) {
@@ -187,6 +213,7 @@ std::string decode_hex_string(std::string line) {
 			case 'x':
 				if (i + 4 > line.length()) {
 					std::cerr << "Invalid hex string at: " << i << "\n";
+					err = true;
 					return ret;
 				}
 				char* pEnd;
@@ -202,6 +229,7 @@ std::string decode_hex_string(std::string line) {
 				break;
 			default:
 				std::cerr << "Invalid hex string at: " << i << "\n";
+				err = true;
 				return ret;
 			}
 		default:
@@ -212,7 +240,43 @@ std::string decode_hex_string(std::string line) {
 	return line.substr(0, i);
 }
 
+// Parses and returns a ";" separated HEX encoded strings.
+// Sets "err" to true if there is any parsing error.
+std::vector<std::string> parsePrefixesLine(const std::string& line, bool& err) {
+	std::vector<std::string> results;
+	err = false;
+
+	int p = 0;
+	while (p < line.size()) {
+		int end = line.find_first_of(',', p);
+		if (end == line.npos) {
+			end = line.size();
+		}
+		auto prefix = decode_hex_string(line.substr(p, end - p), err);
+		if (err) {
+			return results;
+		}
+		results.push_back(prefix);
+		p = end + 1;
+	}
+	return results;
+}
+
+std::vector<std::string> parsePrefixFile(const std::string& filename, bool& err) {
+	std::ifstream t(filename);
+	std::string line;
+
+	t.seekg(0, std::ios::end);
+	line.reserve(t.tellg());
+	t.seekg(0, std::ios::beg);
+
+	line.assign((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
+	return parsePrefixesLine(line, err);
+}
+
 int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
+	bool err = false;
+
 	while (args->Next()) {
 		auto lastError = args->LastError();
 		switch (lastError) {
@@ -238,11 +302,15 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 			break;
 
 		case OPT_KEY_PREFIX:
-			param->prefix = args->OptionArg();
+			param->prefixes.push_back(args->OptionArg());
+			break;
+
+		case OPT_FILTERS:
+			param->prefixes = parsePrefixFile(args->OptionArg(), err);
 			break;
 
 		case OPT_HEX_KEY_PREFIX:
-			param->prefix = decode_hex_string(args->OptionArg());
+			param->prefixes.push_back(decode_hex_string(args->OptionArg(), err));
 			break;
 
 		case OPT_BEGIN_VERSION_FILTER:
@@ -534,23 +602,15 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 		int sub = 0;
 		for (const auto& m : vms.mutations) {
 			sub++; // sub sequence number starts at 1
-			bool print = params.prefix.empty(); // no filtering
+			bool print = params.prefixes.empty(); // no filtering
 
 			if (!print) {
-				if (isSingleKeyMutation((MutationRef::Type)m.type)) {
-					print = m.param1.startsWith(StringRef(params.prefix));
-				} else if (m.type == MutationRef::ClearRange) {
-					KeyRange range(KeyRangeRef(m.param1, m.param2));
-					KeyRange range2 = prefixRange(StringRef(params.prefix));
-					print = range.intersects(range2);
-				} else {
-					ASSERT(false);
-				}
+				print = params.matchFilters(m);
 			}
 			if (print) {
-				TraceEvent(format("Mutation_%llu_%d", vms.version, sub).c_str(), uid)
+				TraceEvent(SevVerbose, format("Mutation_%llu_%d", vms.version, sub).c_str(), uid)
 				    .detail("Version", vms.version)
-				    .setMaxFieldLength(10000)
+				    .setMaxFieldLength(-1)
 				    .detail("M", m.toString());
 				std::cout << vms.version << " " << m.toString() << "\n";
 			}
