@@ -1076,8 +1076,9 @@ ACTOR Future<bool> checkExclusion(Database db,
 	// The numerator is the total space in use by FDB that is not immediately reusable.
 	// This is calculated as: used + free - available = used + free - (free - reusable) = used - reusable.
 	// The denominator is the total capacity usable by FDB (either used or unused currently).
-	double finalUnavailableRatio = (totalKvStoreUsedBytes + totalKvStoreFreeBytes - totalKvStoreAvailableBytes) /
-	                               (totalKvStoreUsedBytesNonExcluded + totalKvStoreFreeBytesNotExcluded);
+	double finalUnavailableRatio =
+	    (totalKvStoreUsedBytes + totalKvStoreFreeBytes - totalKvStoreAvailableBytes) /
+	    std::max((totalKvStoreUsedBytesNonExcluded + totalKvStoreFreeBytesNotExcluded), (int64_t)1);
 
 	if (ssExcludedCount == ssTotalCount || finalUnavailableRatio > 0.9) {
 		std::string temp = "ERROR: This exclude may cause the total available space in the cluster to drop below 10%.\n"
