@@ -42,10 +42,13 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/SystemData.h"
 #include "flow/ArgParseUtil.h"
+#include "flow/FastRef.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
@@ -114,7 +117,7 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 	BackupTLSConfig tlsConfig;
 	bool list_only = false;
 	bool save_file_locally = false;
-	std::vector<std::vector<std::string>> prefixeses; // Key prefixeses for filtering
+	std::vector<std::string> prefixes; // Key prefixes for filtering
 	// more efficient data structure for intersection queries than "prefixes"
 	KeyRangeMap<int> rangeMap;
 	Version beginVersionFilter = 0;
@@ -129,6 +132,13 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 	}
 
 	bool overlap(Version version) const { return version >= beginVersionFilter && version < endVersionFilter; }
+
+	void updateRangeMap() {
+		for (const auto& prefix : prefixes) {
+			rangeMap.insert(prefixRange(StringRef(prefix)), 1);
+		}
+		rangeMap.coalesce(allKeys);
+	}
 
 	void updateRangeMap() {
 		for (const auto& prefix : prefixes) {
@@ -170,7 +180,8 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 				KeyRange range2 = prefixRange(StringRef(prefix));
 				if (range.intersects(range2)) {
 					ASSERT(match);
-					return true;
+				ASSERT(match);
+				return true;
 				}
 			} else {
 				ASSERT(false);
@@ -216,6 +227,7 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 				ASSERT(false);
 			}
 		}
+		ASSERT(!match);
 		return false;
 	}
 
@@ -268,8 +280,8 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 // Decode an ASCII string, e.g., "\x15\x1b\x19\x04\xaf\x0c\x28\x0a",
 // into the binary string. Set "err" to true if the format is invalid.
 // Note ',' '\' '," ';' are escaped by '\'. Normal characters can be
-// unencoded into HEX, but not recommended. Set "err" to true if the format is invalid.
-std::string decode_hex_string(std::string line, bool& err, bool& err) {
+// unencoded into HEX, but not recommended.
+std::string decode_hex_string(std::string line, bool& err) {
 	size_t i = 0;
 	std::string ret;
 
@@ -319,7 +331,8 @@ std::string decode_hex_string(std::string line, bool& err, bool& err) {
 	return line.substr(0, i);
 }
 
-// Parses and returns a ";" separated HEX encoded strings.
+// Parses and returns a ";" separated HEX encoded strings. So the ";" in
+// the string should be escaped as "\;".
 // Sets "err" to true if there is any parsing error.
 std::vector<std::string> parsePrefixesLine(const std::string& line, bool& err) {
 	std::vector<std::string> results;
@@ -422,13 +435,9 @@ int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 			break;
 
 		case OPT_FILTERS:
-			param->prefixes.push_back(args->OptionArg());
-			break;
-
-		case OPT_FILTERS:
-			param->prefixeses = parsePrefixFile(args->OptionArg(), err);
+			param->prefixes = parsePrefixFile(args->OptionArg(), err);
 			if (err) {
-				throw std::runtime_error("ERROR:" + std::string(parsePrefixFile(args->OptionArg()) + "contains invalid prefix(es)"), err);
+				throw std::runtime_error("ERROR:" + std::string(args->OptionArg()) + "contains invalid prefix(es)");
 			}
 			break;
 
@@ -855,9 +864,10 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container,
 		int sub = 0;
 		for (const auto& m : vms.mutations) {
 			sub++; // sub sequence number starts at 1
-			bool print = params->prefixeses.empty(); // no filtering
+			bool print = params.prefixes.empty(); // no filtering
 
 			if (!print) {
+				print = params->matchFilters(m);
 				print = params->matchFilters(m);
 			}
 			if (print) {
@@ -874,6 +884,7 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container,
 }
 
 ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
+ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 	state Reference<IBackupContainer> container =
 	    IBackupContainer::openContainer(params->container_url, params->proxy, {});
 	state UID uid = deterministicRandom()->randomUniqueID();
@@ -887,8 +898,8 @@ ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 	                                  }),
 	                   listing.logs.end());
 	std::sort(listing.logs.begin(), listing.logs.end());
-	TraceEvent("Container", uid).detail("URL", params->container_url).detail("Logs", listing.logs.size());
-	TraceEvent("DecodeParam", uid).setMaxFieldLength(100000).detail("Value", params->toString());
+	TraceEvent("Container", uid).detail("URL", params.container_url).detail("Logs", listing.logs.size());
+	TraceEvent("DecodeParam", uid).setMaxFieldLength(100000).detail("Value", params.toString());
 
 	BackupDescription desc = wait(container->describeBackup());
 	std::cout << "\n" << desc.toString() << "\n";
