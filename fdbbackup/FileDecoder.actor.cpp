@@ -41,9 +41,12 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IKnobCollection.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/MutationList.h"
+#include "fdbclient/SystemData.h"
 #include "flow/ArgParseUtil.h"
+#include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
@@ -105,7 +108,7 @@ void printBuildInformation() {
 	std::cout << jsonBuildInformation() << "\n";
 }
 
-struct DecodeParams {
+struct DecodeParams : public ReferenceCounted<DecodeParams> {
 	std::string container_url;
 	Optional<std::string> proxy;
 	std::string fileFilter; // only files match the filter will be decoded
@@ -115,6 +118,8 @@ struct DecodeParams {
 	bool list_only = false;
 	bool save_file_locally = false;
 	std::vector<std::string> prefixes; // Key prefixes for filtering
+	// more efficient data structure for intersection queries than "prefixes"
+	KeyRangeMap<int> rangeMap;
 	Version beginVersionFilter = 0;
 	Version endVersionFilter = std::numeric_limits<Version>::max();
 
@@ -126,22 +131,53 @@ struct DecodeParams {
 		return !(begin >= endVersionFilter || end <= beginVersionFilter);
 	}
 
+	void updateRangeMap() {
+		for (const auto& prefix : prefixes) {
+			rangeMap.insert(prefixRange(StringRef(prefix)), 1);
+		}
+		rangeMap.coalesce(allKeys);
+	}
+
 	bool matchFilters(MutationRef m) {
+		bool match = false;
+		if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+			auto ranges = rangeMap.intersectingRanges(singleKeyRange(m.param1));
+			for ([[maybe_unused]] const auto r : ranges) {
+				if (r.cvalue() == 1) {
+					match = true;
+					break;
+				}
+			}
+		} else if (m.type == MutationRef::ClearRange) {
+			auto ranges = rangeMap.intersectingRanges(KeyRangeRef(m.param1, m.param2));
+			for ([[maybe_unused]] const auto r : ranges) {
+				if (r.cvalue() == 1) {
+					match = true;
+					break;
+				}
+			}
+		} else {
+			ASSERT(false);
+		}
+
 		for (const auto& prefix : prefixes) {
 			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 				if (m.param1.startsWith(StringRef(prefix))) {
+					ASSERT(match);
 					return true;
 				}
 			} else if (m.type == MutationRef::ClearRange) {
 				KeyRange range(KeyRangeRef(m.param1, m.param2));
 				KeyRange range2 = prefixRange(StringRef(prefix));
 				if (range.intersects(range2)) {
-					return true;
+				ASSERT(match);
+				return true;
 				}
 			} else {
 				ASSERT(false);
 			}
 		}
+		ASSERT(!match);
 		return false;
 	}
 
@@ -193,6 +229,8 @@ struct DecodeParams {
 
 // Decode an ASCII string, e.g., "\x15\x1b\x19\x04\xaf\x0c\x28\x0a",
 // into the binary string. Set "err" to true if the format is invalid.
+// Note ',' '\' '," ';' are escaped by '\'. Normal characters can be
+// unencoded into HEX, but not recommended.
 std::string decode_hex_string(std::string line, bool& err) {
 	size_t i = 0;
 	std::string ret;
@@ -243,7 +281,8 @@ std::string decode_hex_string(std::string line, bool& err) {
 	return line.substr(0, i);
 }
 
-// Parses and returns a ";" separated HEX encoded strings.
+// Parses and returns a ";" separated HEX encoded strings. So the ";" in
+// the string should be escaped as "\;".
 // Sets "err" to true if there is any parsing error.
 std::vector<std::string> parsePrefixesLine(const std::string& line, bool& err) {
 	std::vector<std::string> results;
@@ -277,7 +316,7 @@ std::vector<std::string> parsePrefixFile(const std::string& filename, bool& err)
 	return parsePrefixesLine(line, err);
 }
 
-int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
+int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 	bool err = false;
 
 	while (args->Next()) {
@@ -310,6 +349,9 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 
 		case OPT_FILTERS:
 			param->prefixes = parsePrefixFile(args->OptionArg(), err);
+			if (err) {
+				throw std::runtime_error("ERROR:" + std::string(args->OptionArg()) + "contains invalid prefix(es)");
+			}
 			break;
 
 		case OPT_HEX_KEY_PREFIX:
@@ -413,11 +455,11 @@ void printLogFiles(std::string msg, const std::vector<LogFile>& files) {
 	std::cout << std::endl;
 }
 
-std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, const DecodeParams& params) {
+std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, const Reference<DecodeParams> params) {
 	std::vector<LogFile> filtered;
 	for (const auto& file : files) {
-		if (file.fileName.find(params.fileFilter) != std::string::npos &&
-		    params.overlap(file.beginVersion, file.endVersion + 1)) {
+		if (file.fileName.find(params->fileFilter) != std::string::npos &&
+		    params->overlap(file.beginVersion, file.endVersion + 1)) {
 			filtered.push_back(file);
 		}
 	}
@@ -585,13 +627,16 @@ public:
 	int lfd = -1; // local file descriptor
 };
 
-ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile file, UID uid, DecodeParams params) {
+ACTOR Future<Void> process_file(Reference<IBackupContainer> container,
+                                LogFile file,
+                                UID uid,
+                                Reference<DecodeParams> params) {
 	if (file.fileSize == 0) {
 		TraceEvent("SkipEmptyFile", uid).detail("Name", file.fileName);
 		return Void();
 	}
 
-	state DecodeProgress progress(file, params.save_file_locally);
+	state DecodeProgress progress(file, params->save_file_locally);
 	wait(progress.openFile(container));
 	while (true) {
 		auto batch = progress.getNextBatch();
@@ -599,7 +644,7 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 			break;
 
 		const VersionedMutations& vms = batch.get();
-		if (vms.version < params.beginVersionFilter || vms.version >= params.endVersionFilter) {
+		if (vms.version < params->beginVersionFilter || vms.version >= params->endVersionFilter) {
 			TraceEvent("SkipVersion").detail("Version", vms.version);
 			continue;
 		}
@@ -607,10 +652,10 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 		int sub = 0;
 		for (const auto& m : vms.mutations) {
 			sub++; // sub sequence number starts at 1
-			bool print = params.prefixes.empty(); // no filtering
+			bool print = params->prefixes.empty(); // no filtering
 
 			if (!print) {
-				print = params.matchFilters(m);
+				print = params->matchFilters(m);
 			}
 			if (print) {
 				TraceEvent(SevVerbose, format("Mutation_%llu_%d", vms.version, sub).c_str(), uid)
@@ -625,9 +670,9 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 	return Void();
 }
 
-ACTOR Future<Void> decode_logs(DecodeParams params) {
+ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 	state Reference<IBackupContainer> container =
-	    IBackupContainer::openContainer(params.container_url, params.proxy, {});
+	    IBackupContainer::openContainer(params->container_url, params->proxy, {});
 	state UID uid = deterministicRandom()->randomUniqueID();
 	state BackupFileList listing = wait(container->dumpFileList());
 	// remove partitioned logs
@@ -639,8 +684,8 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 	                                  }),
 	                   listing.logs.end());
 	std::sort(listing.logs.begin(), listing.logs.end());
-	TraceEvent("Container", uid).detail("URL", params.container_url).detail("Logs", listing.logs.size());
-	TraceEvent("DecodeParam", uid).setMaxFieldLength(100000).detail("Value", params.toString());
+	TraceEvent("Container", uid).detail("URL", params->container_url).detail("Logs", listing.logs.size());
+	TraceEvent("DecodeParam", uid).setMaxFieldLength(100000).detail("Value", params->toString());
 
 	BackupDescription desc = wait(container->describeBackup());
 	std::cout << "\n" << desc.toString() << "\n";
@@ -648,7 +693,7 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 	state std::vector<LogFile> logs = getRelevantLogFiles(listing.logs, params);
 	printLogFiles("Relevant files are: ", logs);
 
-	if (params.list_only)
+	if (params->list_only)
 		return Void();
 
 	state int idx = 0;
@@ -667,31 +712,32 @@ int main(int argc, char** argv) {
 	try {
 		std::unique_ptr<CSimpleOpt> args(
 		    new CSimpleOpt(argc, argv, file_converter::gConverterOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE));
-		file_converter::DecodeParams param;
-		int status = file_converter::parseDecodeCommandLine(&param, args.get());
-		std::cout << "Params: " << param.toString() << "\n";
+		auto param = makeReference<file_converter::DecodeParams>();
+		int status = file_converter::parseDecodeCommandLine(param, args.get());
+		std::cout << "Params: " << param->toString() << "\n";
+		param->updateRangeMap();
 		if (status != FDB_EXIT_SUCCESS) {
 			file_converter::printDecodeUsage();
 			return status;
 		}
 
-		if (param.log_enabled) {
-			if (param.log_dir.empty()) {
+		if (param->log_enabled) {
+			if (param->log_dir.empty()) {
 				setNetworkOption(FDBNetworkOptions::TRACE_ENABLE);
 			} else {
-				setNetworkOption(FDBNetworkOptions::TRACE_ENABLE, StringRef(param.log_dir));
+				setNetworkOption(FDBNetworkOptions::TRACE_ENABLE, StringRef(param->log_dir));
 			}
-			if (!param.trace_format.empty()) {
-				setNetworkOption(FDBNetworkOptions::TRACE_FORMAT, StringRef(param.trace_format));
+			if (!param->trace_format.empty()) {
+				setNetworkOption(FDBNetworkOptions::TRACE_FORMAT, StringRef(param->trace_format));
 			} else {
 				setNetworkOption(FDBNetworkOptions::TRACE_FORMAT, "json"_sr);
 			}
-			if (!param.trace_log_group.empty()) {
-				setNetworkOption(FDBNetworkOptions::TRACE_LOG_GROUP, StringRef(param.trace_log_group));
+			if (!param->trace_log_group.empty()) {
+				setNetworkOption(FDBNetworkOptions::TRACE_LOG_GROUP, StringRef(param->trace_log_group));
 			}
 		}
 
-		if (!param.tlsConfig.setupTLS()) {
+		if (!param->tlsConfig.setupTLS()) {
 			TraceEvent(SevError, "TLSError").log();
 			throw tls_error();
 		}
@@ -699,15 +745,15 @@ int main(int argc, char** argv) {
 		platformInit();
 		Error::init();
 
-		StringRef url(param.container_url);
+		StringRef url(param->container_url);
 		setupNetwork(0, UseMetrics::True);
 
 		// Must be called after setupNetwork() to be effective
-		param.updateKnobs();
+		param->updateKnobs();
 
 		TraceEvent::setNetworkThread();
-		openTraceFile(NetworkAddress(), 10 << 20, 500 << 20, param.log_dir, "decode", param.trace_log_group);
-		param.tlsConfig.setupBlobCredentials();
+		openTraceFile(NetworkAddress(), 10 << 20, 500 << 20, param->log_dir, "decode", param->trace_log_group);
+		param->tlsConfig.setupBlobCredentials();
 
 		auto f = stopAfter(decode_logs(param));
 
