@@ -327,7 +327,7 @@ std::vector<std::string> parsePrefixesLine(const std::string& line, bool& err) {
 
 	int p = 0;
 	while (p < line.size()) {
-		int end = line.find_first_of(',', p);
+		int end = line.find_first_of(';', p);
 		if (end == line.npos) {
 			end = line.size();
 		}
