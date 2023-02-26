@@ -2002,7 +2002,15 @@ struct RestoreClusterImpl {
 		Optional<MetaclusterTenantMapEntry> existingEntry = wait(tryGetTenantTransaction(tr, tenantEntry.tenantName));
 		if (existingEntry.present()) {
 			if (existingEntry.get().assignedCluster == self->clusterName) {
-				ASSERT(existingEntry.get().matchesConfiguration(tenantEntry));
+				if (existingEntry.get().id != tenantEntry.id ||
+				    !existingEntry.get().matchesConfiguration(tenantEntry)) {
+					ASSERT(self->restoreDryRun);
+					self->messages.push_back(
+					    fmt::format("The tenant `{}' was modified concurrently with the restore dry-run",
+					                printable(tenantEntry.tenantName)));
+					throw tenant_already_exists();
+				}
+
 				// This is a retry, so return success
 				return false;
 			} else {
