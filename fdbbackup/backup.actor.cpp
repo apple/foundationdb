@@ -2769,6 +2769,10 @@ ACTOR Future<Void> queryBackup(const char* name,
 		restoreVersion = v;
 	}
 
+	state int64_t totalRangeFilesSize = 0;
+	state int64_t totalLogFilesSize = 0;
+	state JsonBuilderArray rangeFilesJson;
+	state JsonBuilderArray logFilesJson;
 	try {
 		state Reference<IBackupContainer> bc = openBackupContainer(name, destinationContainer, proxy, {});
 		BackupDescription desc = wait(bc->describeBackup());
@@ -2793,10 +2797,6 @@ ACTOR Future<Void> queryBackup(const char* name,
 			return Void();
 		}
 
-		state int64_t totalRangeFilesSize = 0;
-		state int64_t totalLogFilesSize = 0;
-		state JsonBuilderArray rangeFilesJson;
-		state JsonBuilderArray logFilesJson;
 		if (snapshotVersion != invalidVersion) {
 			Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(snapshotVersion, keyRangesFilter));
 			if (fileSet.present()) {
