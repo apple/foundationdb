@@ -746,6 +746,8 @@ struct RemoveClusterImpl {
 			updatedEntry.clusterState = DataClusterState::REMOVING;
 			updatedEntry.capacity.numTenantGroups = 0;
 
+			MetaclusterMetadata::activeRestoreIds().erase(tr, self->clusterName);
+
 			updateClusterMetadata(tr,
 			                      self->ctx.clusterName.get(),
 			                      self->ctx.dataClusterMetadata.get(),
@@ -800,10 +802,11 @@ struct RemoveClusterImpl {
 		return Void();
 	}
 
-	// Returns true if all tenants have been purged
-	ACTOR static Future<bool> purgeTenants(RemoveClusterImpl* self,
-	                                       Reference<typename DB::TransactionT> tr,
-	                                       std::pair<Tuple, Tuple> clusterTupleRange) {
+	// Returns a pair of bools. The first will be true if all tenants have been purged, and the second will be true if
+	// any tenants have been purged
+	ACTOR static Future<std::pair<bool, bool>> purgeTenants(RemoveClusterImpl* self,
+	                                                        Reference<typename DB::TransactionT> tr,
+	                                                        std::pair<Tuple, Tuple> clusterTupleRange) {
 		ASSERT(self->ctx.dataClusterMetadata.get().entry.clusterState == DataClusterState::REMOVING);
 
 		// Get the list of tenants
@@ -838,7 +841,7 @@ struct RemoveClusterImpl {
 		ManagementClusterMetadata::clusterTenantCount.atomicOp(
 		    tr, self->ctx.clusterName.get(), -erasedTenants, MutationRef::AddValue);
 
-		return !tenantEntries.more;
+		return std::make_pair(!tenantEntries.more, !tenantEntries.results.empty());
 	}
 
 	// Returns true if all tenant groups have been purged
@@ -879,7 +882,6 @@ struct RemoveClusterImpl {
 		ManagementClusterMetadata::dataClusters().erase(tr, ctx.clusterName.get());
 		ManagementClusterMetadata::dataClusterConnectionRecords.erase(tr, ctx.clusterName.get());
 		ManagementClusterMetadata::clusterTenantCount.erase(tr, ctx.clusterName.get());
-		MetaclusterMetadata::activeRestoreIds().erase(tr, ctx.clusterName.get());
 	}
 
 	// Removes the next set of metadata from the management cluster; returns true when all specified
@@ -887,25 +889,23 @@ struct RemoveClusterImpl {
 	ACTOR static Future<bool> managementClusterPurgeSome(RemoveClusterImpl* self,
 	                                                     Reference<typename DB::TransactionT> tr,
 	                                                     std::pair<Tuple, Tuple> clusterTupleRange,
-	                                                     bool* deleteTenants,
-	                                                     bool* deleteTenantGroups) {
+	                                                     bool* deleteTenants) {
 		if (deleteTenants) {
-			bool deletedAllTenants = wait(purgeTenants(self, tr, clusterTupleRange));
-			if (!deletedAllTenants) {
+			std::pair<bool, bool> deleteResult = wait(purgeTenants(self, tr, clusterTupleRange));
+			// If we didn't delete everything, return and try again on the next iteration
+			if (!deleteResult.first) {
 				return false;
 			}
-			*deleteTenants = false;
+
+			// If there was nothing to delete, then we don't have to try purging tenants again the next time
+			*deleteTenants = deleteResult.second;
 		}
 
-		if (deleteTenantGroups) {
-			bool deletedAllTenantGroups = wait(purgeTenantGroups(self, tr, clusterTupleRange));
-			if (!deletedAllTenantGroups) {
-				return false;
-			}
-			*deleteTenantGroups = false;
+		bool deletedAllTenantGroups = wait(purgeTenantGroups(self, tr, clusterTupleRange));
+		if (!deletedAllTenantGroups) {
+			return false;
 		}
 
-		self->removeDataClusterEntry(tr);
 		return true;
 	}
 
@@ -915,21 +915,23 @@ struct RemoveClusterImpl {
 		    Tuple::makeTuple(self->ctx.clusterName.get()), Tuple::makeTuple(keyAfter(self->ctx.clusterName.get())));
 
 		state bool deleteTenants = true;
-		state bool deleteTenantGroups = true;
 
 		loop {
 			bool clearedAll = wait(self->ctx.runManagementTransaction(
-			    [self = self,
-			     clusterTupleRange = clusterTupleRange,
-			     deleteTenants = &deleteTenants,
-			     deleteTenantGroups = &deleteTenantGroups](Reference<typename DB::TransactionT> tr) {
-				    return managementClusterPurgeSome(self, tr, clusterTupleRange, deleteTenants, deleteTenantGroups);
+			    [self = self, clusterTupleRange = clusterTupleRange, deleteTenants = &deleteTenants](
+			        Reference<typename DB::TransactionT> tr) {
+				    return managementClusterPurgeSome(self, tr, clusterTupleRange, deleteTenants);
 			    }));
 
 			if (clearedAll) {
 				break;
 			}
 		}
+
+		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+			self->removeDataClusterEntry(tr);
+			return Future<Void>(Void());
+		}));
 
 		TraceEvent("RemovedDataCluster").detail("Name", self->ctx.clusterName.get());
 		return Void();
@@ -1069,6 +1071,10 @@ struct RegisterClusterImpl {
 			self->clusterEntry.clusterState = DataClusterState::REGISTERING;
 			self->clusterEntry.allocated = ClusterUsage();
 			self->clusterEntry.id = deterministicRandom()->randomUniqueID();
+
+			// If we happen to have any orphaned restore IDs from a previous time this cluster was in a metacluster,
+			// erase them now.
+			MetaclusterMetadata::activeRestoreIds().erase(tr, self->clusterName);
 
 			ManagementClusterMetadata::dataClusters().set(tr, self->clusterName, self->clusterEntry);
 			ManagementClusterMetadata::dataClusterConnectionRecords.set(tr, self->clusterName, self->connectionString);
@@ -1511,21 +1517,21 @@ struct RestoreClusterImpl {
 	// Store the cluster entry for the restored cluster
 	ACTOR static Future<Void> registerRestoringClusterInManagementCluster(RestoreClusterImpl* self,
 	                                                                      Reference<typename DB::TransactionT> tr) {
-		state DataClusterEntry clusterEntry;
-		clusterEntry.id = self->dataClusterId;
-		clusterEntry.clusterState = DataClusterState::RESTORING;
 
 		state Optional<DataClusterMetadata> dataClusterMetadata = wait(tryGetClusterTransaction(tr, self->clusterName));
 		if (dataClusterMetadata.present() &&
 		    (dataClusterMetadata.get().entry.clusterState != DataClusterState::RESTORING ||
-		     dataClusterMetadata.get().entry.id != clusterEntry.id ||
-		     !dataClusterMetadata.get().matchesConfiguration(
-		         DataClusterMetadata(clusterEntry, self->connectionString)))) {
+		     !self->dataClusterId.isValid() || dataClusterMetadata.get().entry.id != self->dataClusterId)) {
 			TraceEvent("RestoredClusterAlreadyExists").detail("ClusterName", self->clusterName);
 			throw cluster_already_exists();
 		} else if (!self->restoreDryRun) {
 			MetaclusterMetadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
 			MetaclusterMetadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
+
+			self->dataClusterId = deterministicRandom()->randomUniqueID();
+			DataClusterEntry clusterEntry;
+			clusterEntry.id = self->dataClusterId;
+			clusterEntry.clusterState = DataClusterState::RESTORING;
 
 			ManagementClusterMetadata::dataClusters().set(tr, self->clusterName, clusterEntry);
 			ManagementClusterMetadata::dataClusterConnectionRecords.set(tr, self->clusterName, self->connectionString);
@@ -2232,8 +2238,6 @@ struct RestoreClusterImpl {
 	}
 
 	ACTOR static Future<Void> runManagementClusterRepopulate(RestoreClusterImpl* self) {
-		self->dataClusterId = deterministicRandom()->randomUniqueID();
-
 		// Record the data cluster in the management cluster
 		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return registerRestoringClusterInManagementCluster(self, tr);
