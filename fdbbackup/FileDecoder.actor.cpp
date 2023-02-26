@@ -82,6 +82,8 @@ void printDecodeUsage() {
 	             "  --blob-credentials FILE\n"
 	             "                 File containing blob credentials in JSON format.\n"
 	             "                 The same credential format/file fdbbackup uses.\n"
+	             "  -t, --file-type [log|range|both]\n"
+	             "                 Specifies the backup file type to decode.\n"
 #ifndef TLS_DISABLED
 	    TLS_HELP
 #endif
@@ -117,6 +119,8 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 	std::string log_dir, trace_format, trace_log_group;
 	BackupTLSConfig tlsConfig;
 	bool list_only = false;
+	bool decode_logs = true;
+	bool decode_range = true;
 	bool save_file_locally = false;
 	bool validate_filters = false;
 	std::vector<std::string> prefixes; // Key prefixes for filtering
@@ -165,22 +169,22 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 		return false;
 	}
 
-	bool matchFilters(KeyValueRef kv) {
- 		bool match = filters.match(kv);
+	bool matchFilters(KeyValueRef kv) const {
+		bool match = filters.match(kv);
 
 		if (!validate_filters) {
 			return match;
 		}
 
- 		for (const auto& prefix : prefixes) {
- 			if (kv.key.startsWith(StringRef(prefix))) {
- 				ASSERT(match);
- 				return true;
- 			}
- 		}
+		for (const auto& prefix : prefixes) {
+			if (kv.key.startsWith(StringRef(prefix))) {
+				ASSERT(match);
+				return true;
+			}
+		}
 
- 		return match;
- 	}
+		return match;
+	}
 
 	std::string toString() {
 		std::string s;
@@ -333,6 +337,20 @@ int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 		case OPT_CONTAINER:
 			param->container_url = args->OptionArg();
 			break;
+
+		case OPT_FILE_TYPE: {
+			auto ftype = std::string(args->OptionArg());
+			if (ftype == "log") {
+				param->decode_range = false;
+			} else if (ftype == "range") {
+				param->decode_logs = false;
+			} else if (ftype != "both" && ftype != "") {
+				err = true;
+				std::cerr << "ERROR: Unrecognized backup file type option: " << args->OptionArg() << "\n";
+				return FDB_EXIT_ERROR;
+			}
+			break;
+		}
 
 		case OPT_LIST_ONLY:
 			param->list_only = true;
@@ -816,32 +834,43 @@ ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 	BackupDescription desc = wait(container->describeBackup());
 	std::cout << "\n" << desc.toString() << "\n";
 
-	state std::vector<LogFile> logFiles = getRelevantLogFiles(listing.logs, params);
-	printLogFiles("Relevant log files are: ", logFiles);
+	state std::vector<LogFile> logFiles;
+	state std::vector<RangeFile> rangeFiles;
 
-	state std::vector<RangeFile> rangeFiles = getRelevantRangeFiles(listing.ranges, params);
-	printLogFiles("Releavant range files are: ", rangeFiles);
+	if (params->decode_logs) {
+		logFiles = getRelevantLogFiles(listing.logs, params);
+		printLogFiles("Relevant log files are: ", logFiles);
+	}
+
+	if (params->decode_range) {
+		rangeFiles = getRelevantRangeFiles(listing.ranges, params);
+		printLogFiles("Releavant range files are: ", rangeFiles);
+	}
 
 	if (params->list_only)
 		return Void();
 
 	// Decode log files.
 	state int idx = 0;
-	while (idx < logFiles.size()) {
-		TraceEvent("ProcessFile").detail("Name", logFiles[idx].fileName).detail("I", idx);
-		wait(process_file(container, logFiles[idx], uid, params));
-		idx++;
+	if (params->decode_logs) {
+		while (idx < logFiles.size()) {
+			TraceEvent("ProcessFile").detail("Name", logFiles[idx].fileName).detail("I", idx);
+			wait(process_file(container, logFiles[idx], uid, params));
+			idx++;
+		}
+		TraceEvent("DecodeLogsDone", uid).log();
 	}
-	TraceEvent("DecodeLogsDone", uid).log();
 
 	// Decode range files.
-	idx = 0;
-	while (idx < rangeFiles.size()) {
-		TraceEvent("ProcessFile").detail("Name", rangeFiles[idx].fileName).detail("I", idx);
-		wait(process_range_file(container, rangeFiles[idx], uid, params));
-		idx++;
+	if (params->decode_range) {
+		idx = 0;
+		while (idx < rangeFiles.size()) {
+			TraceEvent("ProcessFile").detail("Name", rangeFiles[idx].fileName).detail("I", idx);
+			wait(process_range_file(container, rangeFiles[idx], uid, params));
+			idx++;
+		}
+		TraceEvent("DecodeRangeFileDone", uid).log();
 	}
-	TraceEvent("DecodeRangeFileDone", uid).log();
 
 	return Void();
 }
