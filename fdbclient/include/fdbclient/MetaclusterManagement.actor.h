@@ -1811,21 +1811,24 @@ struct RestoreClusterImpl {
 			state MetaclusterTenantMapEntry managementTenant = managementEntry->second;
 
 			// Rename
-			state bool renamed = tenantName != managementTenant.tenantName;
+			state TenantName managementTenantName = managementTenant.tenantState != TenantState::RENAMING
+			                                            ? managementTenant.tenantName
+			                                            : managementTenant.renameDestination.get();
+			state bool renamed = tenantName != managementTenantName;
 			if (renamed) {
 				state TenantName temporaryName;
-				state bool usingTemporaryName = self->dataClusterTenantNames.count(managementTenant.tenantName) > 0;
+				state bool usingTemporaryName = self->dataClusterTenantNames.count(managementTenantName) > 0;
 				if (usingTemporaryName) {
-					temporaryName = metaclusterTemporaryRenamePrefix.withSuffix(managementTenant.tenantName);
+					temporaryName = metaclusterTemporaryRenamePrefix.withSuffix(managementTenantName);
 				} else {
-					temporaryName = managementTenant.tenantName;
+					temporaryName = managementTenantName;
 				}
 
 				if (self->restoreDryRun) {
 					self->messages.push_back(fmt::format("Rename tenant `{}' with ID {} to `{}' on data cluster{}",
 					                                     printable(tenantEntry.tenantName),
 					                                     tenantEntry.id,
-					                                     printable(managementTenant.tenantName),
+					                                     printable(managementTenantName),
 					                                     usingTemporaryName ? " via temporary name" : ""));
 				} else {
 					wait(self->runRestoreDataClusterTransaction(
@@ -1864,11 +1867,13 @@ struct RestoreClusterImpl {
 						                configurationChanged ? "" : " (internal metadata only)"));
 					}
 				} else {
-					wait(self->runRestoreDataClusterTransaction(
-					    [self = self, managementTenant = managementTenant](Reference<ITransaction> tr) {
-						    return updateTenantConfiguration(
-						        self, tr, managementTenant.id, managementTenant.toTenantMapEntry());
-					    }));
+					wait(self->runRestoreDataClusterTransaction([self = self,
+					                                             managementTenant = managementTenant,
+					                                             tenantName = tenantName](Reference<ITransaction> tr) {
+						TenantMapEntry updatedEntry = managementTenant.toTenantMapEntry();
+						updatedEntry.tenantName = tenantName;
+						return updateTenantConfiguration(self, tr, managementTenant.id, updatedEntry);
+					}));
 					// SOMEDAY: we could mark the tenant in the management cluster as READY if it is in the
 					// UPDATING_CONFIGURATION state
 				}
@@ -1878,7 +1883,7 @@ struct RestoreClusterImpl {
 		}
 	}
 
-	Future<Void> renameTenantBatch(std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenantsToRename) {
+	Future<Void> renameTenantBatch(std::map<TenantName, TenantMapEntry> tenantsToRename) {
 		return runRestoreDataClusterTransaction([this, tenantsToRename](Reference<ITransaction> tr) {
 			std::vector<Future<Void>> renameFutures;
 			for (auto t : tenantsToRename) {
@@ -1899,15 +1904,23 @@ struct RestoreClusterImpl {
 
 		if (!self->restoreDryRun) {
 			state int reconcileIndex;
-			state std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenantsToRename;
+			state std::map<TenantName, TenantMapEntry> tenantsToRename;
 			for (reconcileIndex = 0; reconcileIndex < reconcileFutures.size(); ++reconcileIndex) {
 				Optional<std::pair<TenantName, MetaclusterTenantMapEntry>> const& result =
 				    reconcileFutures[reconcileIndex].get();
-				if (result.present() && result.get().first.startsWith(metaclusterTemporaryRenamePrefix) &&
-				    result.get().first != result.get().second.tenantName) {
-					tenantsToRename.push_back(result.get());
-					if (tenantsToRename.size() >= CLIENT_KNOBS->METACLUSTER_RESTORE_BATCH_SIZE) {
-						wait(self->renameTenantBatch(tenantsToRename));
+
+				if (result.present() && result.get().first.startsWith(metaclusterTemporaryRenamePrefix)) {
+					TenantMapEntry destinationTenant = result.get().second.toTenantMapEntry();
+					if (result.get().second.renameDestination.present()) {
+						destinationTenant.tenantName = result.get().second.renameDestination.get();
+					}
+
+					if (result.get().first != destinationTenant.tenantName) {
+						tenantsToRename[result.get().first] = destinationTenant;
+
+						if (tenantsToRename.size() >= CLIENT_KNOBS->METACLUSTER_RESTORE_BATCH_SIZE) {
+							wait(self->renameTenantBatch(tenantsToRename));
+						}
 					}
 				}
 			}
