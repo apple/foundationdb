@@ -146,6 +146,7 @@ enum {
 	// Restore constants
 	OPT_RESTORECONTAINER,
 	OPT_RESTORE_VERSION,
+	OPT_RESTORE_SNAPSHOT_VERSION,
 	OPT_RESTORE_TIMESTAMP,
 	OPT_PREFIX_ADD,
 	OPT_PREFIX_REMOVE,
@@ -679,6 +680,7 @@ CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
 	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "-qrv", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "--query-restore-version", SO_REQ_SEP },
+	{ OPT_RESTORE_SNAPSHOT_VERSION, "--query-restore-snapshot-version", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS_FILTER, "-k", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS_FILTER, "--keys", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
@@ -1088,6 +1090,9 @@ static void printBackupUsage(bool devhelp) {
 	       "containing no data at or after a\n"
 	       "                 version approximately NUM_DAYS days worth of versions prior to the latest log version in "
 	       "the backup.\n");
+	printf("  --query-restore-snapshot-version VERSION\n"
+	       "                 For query operations, set snapshot version for restoring a backup. Set -1 for maximum\n"
+	       "                 restorable version (default) and -3 for minimum restorable version.\n");
 	printf("  -qrv --query-restore-version VERSION\n"
 	       "                 For query operations, set target version for restoring a backup. Set -1 for maximum\n"
 	       "                 restorable version (default) and -3 for minimum restorable version.\n");
@@ -2741,6 +2746,7 @@ ACTOR Future<Void> queryBackup(const char* name,
                                Optional<std::string> proxy,
                                Standalone<VectorRef<KeyRangeRef>> keyRangesFilter,
                                Version restoreVersion,
+                               Version snapshotVersion,
                                std::string originalClusterFile,
                                std::string restoreTimestamp,
                                Verbose verbose) {
@@ -2755,6 +2761,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 	    .detail("DestinationContainer", destinationContainer)
 	    .detail("KeyRangesFilter", printable(keyRangesFilter))
 	    .detail("SpecifiedRestoreVersion", restoreVersion)
+	    .detail("SpecifiedSnapshotVersion", snapshotVersion)
 	    .detail("RestoreTimestamp", restoreTimestamp)
 	    .detail("BackupClusterFile", originalClusterFile);
 
@@ -2809,12 +2816,67 @@ ACTOR Future<Void> queryBackup(const char* name,
 			                           format("the specified restorable version %lld is not valid", restoreVersion));
 			return Void();
 		}
-		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, keyRangesFilter));
+
+		state int64_t totalRangeFilesSize = 0;
+		state int64_t totalLogFilesSize = 0;
+		state JsonBuilderArray rangeFilesJson;
+		state JsonBuilderArray logFilesJson;
+		if (snapshotVersion != invalidVersion) {
+			Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(snapshotVersion, keyRangesFilter));
+			if (fileSet.present()) {
+				result["snapshot_version"] = fileSet.get().targetVersion;
+				result["restore_version"] = fileSet.get().targetVersion;  // In case there isn't any more log files.
+				for (const auto& rangeFile : fileSet.get().ranges) {
+					JsonBuilderObject object;
+					object["file_name"] = rangeFile.fileName;
+					object["file_size"] = rangeFile.fileSize;
+					object["version"] = rangeFile.version;
+					object["key_range"] = fileSet.get().keyRanges.count(rangeFile.fileName) == 0
+					                          ? "none"
+					                          : fileSet.get().keyRanges.at(rangeFile.fileName).toString();
+					rangeFilesJson.push_back(object);
+					totalRangeFilesSize += rangeFile.fileSize;
+				}
+				for (const auto& log : fileSet.get().logs) {
+					JsonBuilderObject object;
+					object["file_name"] = log.fileName;
+					object["file_size"] = log.fileSize;
+					object["begin_version"] = log.beginVersion;
+					object["end_version"] = log.endVersion;
+					logFilesJson.push_back(object);
+					totalLogFilesSize += log.fileSize;
+				}
+
+				snapshotVersion = fileSet.get().targetVersion;
+
+				TraceEvent("BackupQueryReceivedRestorableFilesSetFromSnapshot")
+					.detail("SnapshotVersion", snapshotVersion)
+				    .detail("DestinationContainer", destinationContainer)
+				    .detail("KeyRangesFilter", printable(keyRangesFilter))
+				    .detail("ActualRestoreVersion", fileSet.get().targetVersion)
+				    .detail("NumRangeFiles", fileSet.get().ranges.size())
+				    .detail("NumLogFiles", fileSet.get().logs.size())
+				    .detail("RangeFilesBytes", totalRangeFilesSize)
+				    .detail("LogFilesBytes", totalLogFilesSize);
+			} else {
+				reportBackupQueryError(
+				    operationId,
+				    result,
+				    format("no restorable files set found for specified key ranges from snapshotVersion %lld",
+				           snapshotVersion));
+				return Void();
+			}
+		}
+
+		state Optional<RestorableFileSet> fileSet;
+		if (snapshotVersion == invalidVersion) {
+			wait(store(fileSet, bc->getRestoreSet(restoreVersion, keyRangesFilter)));
+		} else {
+			// We only need to know all the log files from snapshotVersion to restoreVersion.
+			wait(store(fileSet, bc->getRestoreSet(restoreVersion, keyRangesFilter, /*logOnly=*/true, snapshotVersion)));
+		}
 		if (fileSet.present()) {
-			int64_t totalRangeFilesSize = 0, totalLogFilesSize = 0;
 			result["restore_version"] = fileSet.get().targetVersion;
-			JsonBuilderArray rangeFilesJson;
-			JsonBuilderArray logFilesJson;
 			for (const auto& rangeFile : fileSet.get().ranges) {
 				JsonBuilderObject object;
 				object["file_name"] = rangeFile.fileName;
@@ -2836,14 +2898,6 @@ ACTOR Future<Void> queryBackup(const char* name,
 				totalLogFilesSize += log.fileSize;
 			}
 
-			result["total_range_files_size"] = totalRangeFilesSize;
-			result["total_log_files_size"] = totalLogFilesSize;
-
-			if (verbose) {
-				result["ranges"] = rangeFilesJson;
-				result["logs"] = logFilesJson;
-			}
-
 			TraceEvent("BackupQueryReceivedRestorableFilesSet")
 			    .detail("DestinationContainer", destinationContainer)
 			    .detail("KeyRangesFilter", printable(keyRangesFilter))
@@ -2852,7 +2906,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 			    .detail("NumLogFiles", fileSet.get().logs.size())
 			    .detail("RangeFilesBytes", totalRangeFilesSize)
 			    .detail("LogFilesBytes", totalLogFilesSize);
-		} else {
+		} else if (snapshotVersion == invalidVersion) {
 			reportBackupQueryError(operationId, result, "no restorable files set found for specified key ranges");
 			return Void();
 		}
@@ -2860,6 +2914,14 @@ ACTOR Future<Void> queryBackup(const char* name,
 	} catch (Error& e) {
 		reportBackupQueryError(operationId, result, e.what());
 		return Void();
+	}
+
+	result["total_range_files_size"] = totalRangeFilesSize;
+	result["total_log_files_size"] = totalLogFilesSize;
+
+	if (verbose) {
+		result["ranges"] = rangeFilesJson;
+		result["logs"] = logFilesJson;
 	}
 
 	printf("%s\n", result.getJson().c_str());
@@ -3424,6 +3486,7 @@ int main(int argc, char* argv[]) {
 		int maxErrors = 20;
 		Version beginVersion = invalidVersion;
 		Version restoreVersion = invalidVersion;
+		Version snapshotVersion = invalidVersion;
 		std::string restoreTimestamp;
 		WaitForComplete waitForDone{ false };
 		StopWhenDone stopWhenDone{ true };
@@ -3755,6 +3818,17 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				}
 				restoreVersion = ver;
+				break;
+			}
+			case OPT_RESTORE_SNAPSHOT_VERSION: {
+				const char* a = args->OptionArg();
+				long long ver = 0;
+				if (!sscanf(a, "%lld", &ver)) {
+					fprintf(stderr, "ERROR: Could not parse database version `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					return FDB_EXIT_ERROR;
+				}
+				snapshotVersion = ver;
 				break;
 			}
 			case OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY: {
@@ -4141,6 +4215,7 @@ int main(int argc, char* argv[]) {
 				                          proxy,
 				                          backupKeysFilter,
 				                          restoreVersion,
+				                          snapshotVersion,
 				                          restoreClusterFileOrig,
 				                          restoreTimestamp,
 				                          Verbose{ !quietDisplay }));
