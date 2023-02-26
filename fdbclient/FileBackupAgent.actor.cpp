@@ -3374,7 +3374,6 @@ bool RangeMapFilters::match(const KeyValueRef& kv) const {
 	return false;
 }
 
-
 // Returns a vector of filtered KV refs from data which are either part of incomplete mutation groups OR complete
 // and have data relevant to one of the KV ranges in ranges
 std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, const RangeMapFilters& filters) {
