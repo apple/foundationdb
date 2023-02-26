@@ -2825,7 +2825,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 			Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(snapshotVersion, keyRangesFilter));
 			if (fileSet.present()) {
 				result["snapshot_version"] = fileSet.get().targetVersion;
-				result["restore_version"] = fileSet.get().targetVersion;  // In case there isn't any more log files.
+				result["restore_version"] = fileSet.get().targetVersion; // In case there isn't any more log files.
 				for (const auto& rangeFile : fileSet.get().ranges) {
 					JsonBuilderObject object;
 					object["file_name"] = rangeFile.fileName;
@@ -2850,7 +2850,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 				snapshotVersion = fileSet.get().targetVersion;
 
 				TraceEvent("BackupQueryReceivedRestorableFilesSetFromSnapshot")
-					.detail("SnapshotVersion", snapshotVersion)
+				    .detail("SnapshotVersion", snapshotVersion)
 				    .detail("DestinationContainer", destinationContainer)
 				    .detail("KeyRangesFilter", printable(keyRangesFilter))
 				    .detail("ActualRestoreVersion", fileSet.get().targetVersion)
