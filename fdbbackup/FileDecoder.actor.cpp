@@ -20,11 +20,9 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
-#include <streambuf>
 #include <string>
 #include <vector>
 #include <fcntl.h>
@@ -288,14 +286,7 @@ std::vector<std::string> parsePrefixesLine(const std::string& line, bool& err) {
 }
 
 std::vector<std::string> parsePrefixFile(const std::string& filename, bool& err) {
-	std::ifstream t(filename);
-	std::string line;
-
-	t.seekg(0, std::ios::end);
-	line.reserve(t.tellg());
-	t.seekg(0, std::ios::beg);
-
-	line.assign((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
+	std::string line = readFileBytes(filename, 64 * 1024 * 1024);
 	return parsePrefixesLine(line, err);
 }
 
