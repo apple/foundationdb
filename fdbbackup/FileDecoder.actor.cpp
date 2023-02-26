@@ -121,7 +121,7 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 	bool validate_filters = false;
 	std::vector<std::string> prefixes; // Key prefixes for filtering
 	// more efficient data structure for intersection queries than "prefixes"
-	KeyRangeMap<int> rangeMap;
+	fileBackup::RangeMapFilters filters;
 	Version beginVersionFilter = 0;
 	Version endVersionFilter = std::numeric_limits<Version>::max();
 
@@ -135,41 +135,10 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 
 	bool overlap(Version version) const { return version >= beginVersionFilter && version < endVersionFilter; }
 
-	void updateRangeMap() {
-		for (const auto& prefix : prefixes) {
-			rangeMap.insert(prefixRange(StringRef(prefix)), 1);
-		}
-		rangeMap.coalesce(allKeys);
-	}
+	void updateRangeMap() { filters.updateFilters(prefixes); }
 
-	void updateRangeMap() {
-		for (const auto& prefix : prefixes) {
-			rangeMap.insert(prefixRange(StringRef(prefix)), 1);
-		}
-		rangeMap.coalesce(allKeys);
-	}
-
-	bool matchFilters(MutationRef m) {
-		bool match = false;
-		if (isSingleKeyMutation((MutationRef::Type)m.type)) {
-			auto ranges = rangeMap.intersectingRanges(singleKeyRange(m.param1));
-			for (const auto& r : ranges) {
-				if (r.cvalue() == 1) {
-					match = true;
-					break;
-				}
-			}
-		} else if (m.type == MutationRef::ClearRange) {
-			auto ranges = rangeMap.intersectingRanges(KeyRangeRef(m.param1, m.param2));
-			for (const auto& r : ranges) {
-				if (r.cvalue() == 1) {
-					match = true;
-					break;
-				}
-			}
-		} else {
-			ASSERT(false);
-		}
+	bool matchFilters(const MutationRef& m) const {
+		bool match = filters.match(m);
 		if (!validate_filters) {
 			return match;
 		}
