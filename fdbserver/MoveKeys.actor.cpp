@@ -1772,6 +1772,10 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					    storageServerInterfaces[s], range, tr.getReadVersion().get(), GetShardStateRequest::READABLE));
 				}
 
+				TraceEvent(SevDebug, "FinishMoveShardsWaitingServers", relocationIntervalId)
+				    .detail("DataMoveID", dataMoveId)
+				    .detail("NewDestinations", describe(newDestinations));
+
 				// Wait for all storage server moves, and explicitly swallow errors for tss ones with
 				// waitForAllReady If this takes too long the transaction will time out and retry, which is ok
 				wait(timeout(waitForAll(serverReady),

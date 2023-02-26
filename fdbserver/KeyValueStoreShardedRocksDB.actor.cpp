@@ -2945,9 +2945,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 				for (const auto& checkpoint : a.checkpoints) {
 					status = ps->restore(checkpoint);
-					if (status.ok() && checkpoint.bytesSampleFile.present()) {
-						status = a.shardManager->getSpecialKeysShard()->restoreFile(checkpoint.bytesSampleFile.get());
-					}
+					// if (status.ok() && checkpoint.bytesSampleFile.present()) {
+					// 	status = a.shardManager->getSpecialKeysShard()->restoreFile(checkpoint.bytesSampleFile.get());
+					// }
 					if (!status.ok()) {
 						TraceEvent(SevWarnAlways, "ShardedRocksIngestFileError", logId)
 						    .detail("Error", status.ToString())

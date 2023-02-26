@@ -2448,7 +2448,9 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 	if (version <= data->version.get())
 		return version;
 	choose {
-		when(wait(data->version.whenAtLeast(version))) { return version; }
+		when(wait(data->version.whenAtLeast(version))) {
+			return version;
+		}
 		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
 			if (deterministicRandom()->random01() < 0.001)
 				TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
@@ -2470,7 +2472,9 @@ ACTOR Future<Version> waitForMinVersion(StorageServer* data, Version version) {
 		return version;
 	}
 	choose {
-		when(wait(data->version.whenAtLeast(version))) { return version; }
+		when(wait(data->version.whenAtLeast(version))) {
+			return version;
+		}
 		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
 			if (deterministicRandom()->random01() < 0.001)
 				TraceEvent(SevWarn, "ShardServerFutureVersion1000x", data->thisServerID)
@@ -7149,7 +7153,9 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		when(wait(changeFeedInfo->fetchLock.take())) {
 			feedFetchReleaser = FlowLock::Releaser(changeFeedInfo->fetchLock);
 		}
-		when(wait(changeFeedInfo->durableFetchVersion.whenAtLeast(endVersion))) { return invalidVersion; }
+		when(wait(changeFeedInfo->durableFetchVersion.whenAtLeast(endVersion))) {
+			return invalidVersion;
+		}
 	}
 
 	state Version startVersion = beginVersion;
@@ -7966,9 +7972,16 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 			// 	fCheckpointMetaData.push_back(
 			// 	    fetchCheckpointRanges(data->cx, record, dir, checkpointRangeMap[record.checkpointID]));
 			// }
+			if (!directoryExists(dir)) {
+				ASSERT(platform::createDirectory(dir));
+			}
 			for (const auto& [range, record] : records) {
 				// ASSERT(!checkpointRangeMap[record.checkpointID].empty());
-				fCheckpointMetaData.push_back(fetchCheckpointRanges(data->cx, record, dir, { range }));
+				const std::string checkpointDir = joinPath(dir, record.checkpointID.toString());
+				if (!directoryExists(checkpointDir)) {
+					ASSERT(platform::createDirectory(checkpointDir));
+				}
+				fCheckpointMetaData.push_back(fetchCheckpointRanges(data->cx, record, checkpointDir, { range }));
 			}
 			wait(store(localRecords, getAll(fCheckpointMetaData)));
 			if (moveInShard->getPhase() == MoveInPhase::Fail) {
@@ -8057,19 +8070,42 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 		return Void();
 	}
 
-	std::vector<Future<Void>> sampleRanges;
 	for (const auto& range : moveInShard->ranges()) {
 		data->storage.persistRangeMapping(range, true);
-		sampleRanges.push_back(applyByteSampleResult(data,
-		                                             data->storage.getKeyValueStore(),
-		                                             range.begin.withPrefix(persistByteSampleKeys.begin),
-		                                             range.end.withPrefix(persistByteSampleKeys.begin)));
 	}
-	wait(waitForAll(sampleRanges));
+	for (const auto& checkpoint : shard->checkpoints) {
+		if (!checkpoint.bytesSampleFile.present()) {
+			continue;
+		}
+		std::unique_ptr<ICheckpointByteSampleReader> reader = newCheckpointByteSampleReader(checkpoint);
+		while (reader->hasNext()) {
+			KeyValue kv = reader->next();
+			int64_t size = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
+			KeyRef key = kv.key.removePrefix(persistByteSampleKeys.begin);
+			// data->byteSampleApplySet(kv, data->data().getLatestVersion());
+			TraceEvent(SevDebug, "StorageRestoreCheckpointKeySample", data->thisServerID)
+			    .detail("Checkpoint", checkpoint.checkpointID)
+			    .detail("SampleKey", key)
+			    .detail("Size", size);
+			data->metrics.byteSample.sample.insert(key, size);
+			data->addMutationToMutationLogOrStorage(invalidVersion,
+			                                        MutationRef(MutationRef::SetValue, kv.key, kv.value));
+		}
+	}
 	shard->setPhase(MoveInPhase::ApplyingUpdates);
 	wait(updateMoveInShardMetaData(data, shard.get()));
 
 	// shard->fetchComplete.send(Void());
+
+	for (const auto checkpoint : shard->checkpoints) {
+		int64_t checkpointBytes = 0;
+		for (const auto& range : checkpoint.ranges) {
+			checkpointBytes += data->metrics.byteSample.getEstimate(range);
+		}
+		TraceEvent(SevDebug, "StorageRestoreCheckpointStats", data->thisServerID)
+		    .detail("Checkpoint", checkpoint.toString())
+		    .detail("Bytes", checkpointBytes);
+	}
 
 	TraceEvent(sevDm, "FetchShardIngestCheckpointEnd", data->thisServerID)
 	    .detail("Checkpoints", describe(shard->checkpoints));
@@ -8127,6 +8163,7 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 		// Version newHighWatermark = invalidVersion;
 		if (!updates.empty()) {
 			TraceEvent(sevDm, "FetchShardApplyingUpdates", data->thisServerID)
+			    .detail("MoveInShard", moveInShard->toString())
 			    .detail("MinVerion", updates.front().version)
 			    .detail("MaxVerion", updates.back().version)
 			    .detail("Size", updates.size());
@@ -11063,6 +11100,10 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 						for (int i = 0; i < readResult.size(); i++) {
 							sstWriter->write(readResult[i].key, readResult[i].value);
 							lastKey = readResult[i].key;
+							TraceEvent(SevDebug, "CheckpointByteSampleKey")
+							    .detail("CheckpointID", metaData.checkpointID)
+							    .detail("Key", readResult[i].key.removePrefix(persistByteSampleKeys.begin))
+							    .detail("Value", readResult[i].value);
 							numSampledKeys++;
 						}
 						if (readResult.more) {
@@ -11178,6 +11219,15 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		data->checkpoints[checkpointResult.checkpointID].setState(CheckpointMetaData::Deleting);
 		data->actors.add(deleteCheckpointQ(data, metaData.version, checkpointResult));
 	}
+
+	int64_t checkpointBytes = 0;
+	for (const auto& range : checkpointResult.ranges) {
+		checkpointBytes += data->metrics.byteSample.getEstimate(range);
+	}
+
+	TraceEvent(SevDebug, "StorageCreatedCheckpointStats", data->thisServerID)
+	    .detail("Checkpoint", checkpointResult.toString())
+	    .detail("Bytes", checkpointBytes);
 
 	return Void();
 }
@@ -11659,12 +11709,12 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 					self->addMutationToMutationLog(
 					    mLV, MutationRef(MutationRef::SetValue, persistCheckpointKey, checkpointValue(checkpoint)));
 				}
+				self->actors.add(deleteCheckpointQ(self, mLV.version + 1, checkpoint));
+				TraceEvent("SSDeleteCheckpointScheduled", self->thisServerID)
+				    .detail("MovedOutRange", keys.toString())
+				    .detail("Checkpoint", checkpoint.toString())
+				    .detail("DeleteVersion", mLV.version + 1);
 			}
-			self->actors.add(deleteCheckpointQ(self, mLV.version + 1, checkpoint));
-			TraceEvent("SSDeleteCheckpointScheduled", self->thisServerID)
-			    .detail("MovedOutRange", keys.toString())
-			    .detail("Checkpoint", checkpoint.toString())
-			    .detail("DeleteVersion", mLV.version + 1);
 		}
 	}
 
@@ -12320,7 +12370,9 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 
 						}*/
 					}
-					when(wait(timeout)) { timedout = true; }
+					when(wait(timeout)) {
+						timedout = true;
+					}
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled)

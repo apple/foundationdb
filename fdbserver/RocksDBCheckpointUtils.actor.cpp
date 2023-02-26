@@ -26,6 +26,7 @@
 #include <rocksdb/options.h>
 #include <rocksdb/slice.h>
 #include <rocksdb/slice_transform.h>
+#include <rocksdb/sst_file_reader.h>
 #include <rocksdb/types.h>
 #include <rocksdb/version.h>
 #endif // SSD_ROCKSDB_EXPERIMENTAL
@@ -217,7 +218,7 @@ ACTOR Future<int64_t> doFetchCheckpointFile(Database cx,
 		} catch (Error& e) {
 			if (e.code() != error_code_end_of_stream ||
 			    (g_network->isSimulated() && attempt == 1 && deterministicRandom()->coinflip())) {
-				TraceEvent(SevWarnAlways, "FetchCheckpointFileError")
+				TraceEvent(e.code() != error_code_end_of_stream ? SevWarnAlways : SevWarn, "FetchCheckpointFileError")
 				    .errorUnsuppressed(e)
 				    .detail("RemoteFile", remoteFile)
 				    .detail("LocalFile", localFile)
@@ -248,7 +249,7 @@ ACTOR Future<Void> fetchCheckpointBytesSampleFile(Database cx,
                                                   std::string dir,
                                                   std::function<Future<Void>(const CheckpointMetaData&)> cFun,
                                                   int maxRetries = 3) {
-	ASSERT(metaData->bytesSampleFile.present()); 
+	ASSERT(metaData->bytesSampleFile.present());
 	state std::string localFile = dir + "/metadata_bytes.sst";
 	TraceEvent(SevDebug, "FetchCheckpointByteSampleBegin")
 	    .detail("Checkpoint", metaData->toString())
@@ -890,6 +891,47 @@ bool RocksDBSstFileWriter::finish() {
 	return true;
 }
 
+class RocksDBCheckpointByteSampleReader : public ICheckpointByteSampleReader {
+public:
+	RocksDBCheckpointByteSampleReader(const CheckpointMetaData& checkpoint);
+	~RocksDBCheckpointByteSampleReader() {}
+
+	KeyValue next() override;
+
+	bool hasNext() const override;
+
+private:
+	std::unique_ptr<rocksdb::SstFileReader> sstReader;
+	std::unique_ptr<rocksdb::Iterator> iter;
+};
+
+RocksDBCheckpointByteSampleReader::RocksDBCheckpointByteSampleReader(const CheckpointMetaData& checkpoint)
+  : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())) {
+	ASSERT(checkpoint.bytesSampleFile.present());
+	rocksdb::Status status = sstReader->Open(checkpoint.bytesSampleFile.get());
+	TraceEvent(SevDebug, "RocksDBCheckpointByteSampleReaderInit")
+	    .detail("Checkpoint", checkpoint.toString())
+	    .detail("Status", status.ToString());
+	if (status.ok()) {
+		iter.reset(sstReader->NewIterator(rocksdb::ReadOptions()));
+		iter->SeekToFirst();
+	} else {
+		TraceEvent(SevError, "RocksDBCheckpointByteSampleReaderInit")
+		    .detail("Checkpoint", checkpoint.toString())
+		    .detail("Status", status.ToString());
+	}
+}
+
+bool RocksDBCheckpointByteSampleReader::hasNext() const {
+	return iter != nullptr && this->iter->Valid();
+}
+
+KeyValue RocksDBCheckpointByteSampleReader::next() {
+	KeyValueRef res(toStringRef(this->iter->key()), toStringRef(this->iter->value()));
+	iter->Next();
+	return res;
+}
+
 // RocksDBCFCheckpointReader reads an exported RocksDB Column Family checkpoint, and returns the serialized
 // checkpoint via nextChunk.
 class RocksDBCFCheckpointReader : public ICheckpointReader {
@@ -1344,6 +1386,13 @@ std::unique_ptr<IRocksDBSstFileWriter> newRocksDBSstFileWriter() {
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 	std::unique_ptr<IRocksDBSstFileWriter> sstWriter = std::make_unique<RocksDBSstFileWriter>();
 	return sstWriter;
+#endif // SSD_ROCKSDB_EXPERIMENTAL
+	return nullptr;
+}
+
+std::unique_ptr<ICheckpointByteSampleReader> newCheckpointByteSampleReader(const CheckpointMetaData& checkpoint) {
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
+	return std::make_unique<RocksDBCheckpointByteSampleReader>(checkpoint);
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 	return nullptr;
 }

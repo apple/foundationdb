@@ -6,4 +6,4 @@
      [[test.workload]]
      testName = 'UnitTests'
      maxTestCases = 10
-     testsMatching = 'noSim/ShardedRocksDB/ManualCheckpoint'
+     testsMatching = 'noSim/ShardedRocksDB/'
