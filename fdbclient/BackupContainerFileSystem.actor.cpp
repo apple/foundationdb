@@ -927,6 +927,9 @@ public:
 		// Find the most recent keyrange snapshot through which we can restore filtered key ranges into targetVersion.
 		state std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
 		state int i = snapshots.size() - 1;
+		if (targetVersion == earliestVersion) {
+			i = 0;
+		}
 		for (; i >= 0; i--) {
 			// The smallest version of filtered range files >= snapshot beginVersion > targetVersion
 			if (targetVersion >= 0 && snapshots[i].beginVersion > targetVersion) {
@@ -967,7 +970,7 @@ public:
 				}
 			}
 			// 'latestVersion' represents using the minimum restorable version in a snapshot.
-			restorable.targetVersion = targetVersion == latestVersion ? maxKeyRangeVersion : targetVersion;
+			restorable.targetVersion = targetVersion == earliestVersion ? maxKeyRangeVersion : targetVersion;
 			// Any version < maxKeyRangeVersion is not restorable.
 			if (restorable.targetVersion < maxKeyRangeVersion)
 				continue;

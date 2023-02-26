@@ -1056,7 +1056,7 @@ static void printBackupUsage(bool devhelp) {
 	       "the backup.\n");
 	printf("  -qrv --query-restore-version VERSION\n"
 	       "                 For query operations, set target version for restoring a backup. Set -1 for maximum\n"
-	       "                 restorable version (default) and -2 for minimum restorable version.\n");
+	       "                 restorable version (default) and -3 for minimum restorable version.\n");
 	printf(
 	    "  --query-restore-timestamp DATETIME\n"
 	    "                 For query operations, instead of a numeric version, use this to specify a timestamp in %s\n",
@@ -2759,9 +2759,10 @@ ACTOR Future<Void> queryBackup(const char* name,
 				    result,
 				    errorMessage = format("the backup for the specified key ranges is not restorable to any version"));
 			}
+			TraceEvent("BackupQueryResolveMaxRestoreVersion").detail("Version", restoreVersion);
 		}
 
-		if (restoreVersion < 0 && restoreVersion != latestVersion) {
+		if (restoreVersion < 0 && restoreVersion != earliestVersion) {
 			reportBackupQueryError(operationId,
 			                       result,
 			                       errorMessage =
