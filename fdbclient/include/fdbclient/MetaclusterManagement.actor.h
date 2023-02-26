@@ -2140,21 +2140,21 @@ struct RestoreClusterImpl {
 			}
 
 			if (tenantBatch.size() == CLIENT_KNOBS->METACLUSTER_RESTORE_BATCH_SIZE) {
-				wait(runTransaction(self->ctx.managementDb,
-				                    [self = self, tenantBatch = tenantBatch](Reference<typename DB::TransactionT> tr) {
-					                    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					                    return addTenantBatchToManagementCluster(self, tr, tenantBatch);
-				                    }));
+				wait(self->runRestoreManagementTransaction(
+				    [self = self, tenantBatch = tenantBatch](Reference<typename DB::TransactionT> tr) {
+					    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					    return addTenantBatchToManagementCluster(self, tr, tenantBatch);
+				    }));
 				tenantBatch.clear();
 			}
 		}
 
 		if (!tenantBatch.empty()) {
-			wait(runTransaction(self->ctx.managementDb,
-			                    [self = self, tenantBatch = tenantBatch](Reference<typename DB::TransactionT> tr) {
-				                    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				                    return addTenantBatchToManagementCluster(self, tr, tenantBatch);
-			                    }));
+			wait(self->runRestoreManagementTransaction(
+			    [self = self, tenantBatch = tenantBatch](Reference<typename DB::TransactionT> tr) {
+				    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				    return addTenantBatchToManagementCluster(self, tr, tenantBatch);
+			    }));
 		}
 
 		if (self->restoreDryRun) {
