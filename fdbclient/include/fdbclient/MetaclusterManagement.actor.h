@@ -1854,7 +1854,6 @@ struct RestoreClusterImpl {
 			bool configurationChanged = !managementTenant.matchesConfiguration(tenantEntry);
 			if (configurationChanged ||
 			    managementTenant.configurationSequenceNum != tenantEntry.configurationSequenceNum) {
-				ASSERT(managementTenant.configurationSequenceNum >= tenantEntry.configurationSequenceNum);
 				if (self->restoreDryRun) {
 					// If this is an update to the internal sequence number only and we are also renaming the tenant,
 					// we don't need to report anything. The internal metadata update is (at least partially) caused
@@ -1869,7 +1868,9 @@ struct RestoreClusterImpl {
 				} else {
 					wait(self->runRestoreDataClusterTransaction([self = self,
 					                                             managementTenant = managementTenant,
+					                                             tenantEntry = tenantEntry,
 					                                             tenantName = tenantName](Reference<ITransaction> tr) {
+						ASSERT_GE(managementTenant.configurationSequenceNum, tenantEntry.configurationSequenceNum);
 						TenantMapEntry updatedEntry = managementTenant.toTenantMapEntry();
 						updatedEntry.tenantName = tenantName;
 						return updateTenantConfiguration(self, tr, managementTenant.id, updatedEntry);
