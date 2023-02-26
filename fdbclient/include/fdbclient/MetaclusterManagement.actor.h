@@ -1780,18 +1780,24 @@ struct RestoreClusterImpl {
 
 		// A data cluster tenant is not present on the management cluster
 		if (managementEntry == self->mgmtClusterTenantMap.end() ||
-		    managementEntry->second.assignedCluster != self->clusterName) {
+		    managementEntry->second.assignedCluster != self->clusterName ||
+		    managementEntry->second.tenantState == TenantState::REMOVING) {
 			if (self->restoreDryRun) {
 				if (managementEntry == self->mgmtClusterTenantMap.end()) {
 					self->messages.push_back(fmt::format("Delete missing tenant `{}' with ID {} on data cluster",
 					                                     printable(tenantEntry.tenantName),
 					                                     tenantEntry.id));
-				} else {
+				} else if (managementEntry->second.assignedCluster != self->clusterName) {
 					self->messages.push_back(fmt::format(
 					    "Delete tenant `{}' with ID {} on data cluster because it is now located on the cluster `{}'",
 					    printable(tenantEntry.tenantName),
 					    tenantEntry.id,
 					    printable(managementEntry->second.assignedCluster)));
+				} else {
+					self->messages.push_back(
+					    fmt::format("Delete tenant `{}' with ID {} on data cluster because it is in the REMOVING state",
+					                printable(tenantEntry.tenantName),
+					                tenantEntry.id));
 				}
 			} else {
 				wait(self->runRestoreDataClusterTransaction([tenantEntry = tenantEntry](Reference<ITransaction> tr) {
