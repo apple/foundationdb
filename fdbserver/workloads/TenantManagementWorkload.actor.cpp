@@ -1521,7 +1521,8 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(tr->commit());
 			ASSERT(!specialKeysUseInvalidTuple);
 		} else if (operationType == OperationType::METACLUSTER) {
-			wait(MetaclusterAPI::configureTenant(self->mvDb, tenant, configParameters));
+			wait(MetaclusterAPI::configureTenant(
+			    self->mvDb, tenant, configParameters, IgnoreCapacityLimit(deterministicRandom()->coinflip())));
 		} else {
 			// We don't have a transaction or database variant of this function
 			ASSERT(false);

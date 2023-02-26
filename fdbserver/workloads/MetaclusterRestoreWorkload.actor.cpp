@@ -859,7 +859,8 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 		loop {
 			try {
-				wait(MetaclusterAPI::configureTenant(self->managementDb, tenantName, configurationParams));
+				wait(MetaclusterAPI::configureTenant(
+				    self->managementDb, tenantName, configurationParams, IgnoreCapacityLimit::False));
 
 				auto& tenantData = self->createdTenants[tenantId];
 
