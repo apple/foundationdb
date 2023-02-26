@@ -56,8 +56,8 @@ enum {
 
 CSimpleOpt::SOption gConverterOptions[] = { { OPT_CONTAINER, "-r", SO_REQ_SEP },
 	                                        { OPT_CONTAINER, "--container", SO_REQ_SEP },
-											{ OPT_FILE_TYPE, "-t", SO_REQ_SEP },
-											{ OPT_FILE_TYPE, "-file-type", SO_REQ_SEP },
+	                                        { OPT_FILE_TYPE, "-t", SO_REQ_SEP },
+	                                        { OPT_FILE_TYPE, "-file-type", SO_REQ_SEP },
 	                                        { OPT_BEGIN_VERSION, "-b", SO_REQ_SEP },
 	                                        { OPT_BEGIN_VERSION, "--begin", SO_REQ_SEP },
 	                                        { OPT_CRASHONERROR, "--crash", SO_NONE },
