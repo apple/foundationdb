@@ -140,6 +140,7 @@ struct ManagementClusterMetadata {
 	static KeyBackedMap<ClusterName, int64_t, TupleCodec<ClusterName>, BinaryCodec<int64_t>> clusterTenantCount;
 
 	// A set of (cluster name, tenant name, tenant ID) tuples ordered by cluster
+	// Renaming tenants are stored twice in the index, with the destination name stored with ID -1
 	static KeyBackedSet<Tuple> clusterTenantIndex;
 
 	// A set of (cluster, tenant group name) tuples ordered by cluster
@@ -813,12 +814,14 @@ struct RemoveClusterImpl {
 		state KeyBackedRangeResult<Tuple> tenantEntries = wait(tenantEntriesFuture);
 
 		// Erase each tenant from the tenant map on the management cluster
-		std::set<int64_t> erasedTenants;
+		int64_t erasedTenants = 0;
 		for (Tuple entry : tenantEntries.results) {
 			int64_t tenantId = entry.getInt(2);
 			ASSERT(entry.getString(0) == self->ctx.clusterName.get());
-			erasedTenants.insert(tenantId);
-			ManagementClusterMetadata::tenantMetadata().tenantMap.erase(tr, tenantId);
+			if (tenantId != TenantInfo::INVALID_TENANT) {
+				++erasedTenants;
+				ManagementClusterMetadata::tenantMetadata().tenantMap.erase(tr, tenantId);
+			}
 			ManagementClusterMetadata::tenantMetadata().tenantNameIndex.erase(tr, entry.getString(1));
 			ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 		}
@@ -831,10 +834,9 @@ struct RemoveClusterImpl {
 			    Tuple::makeTuple(self->ctx.clusterName.get(), keyAfter(tenantEntries.results.rbegin()->getString(1))));
 		}
 
-		ManagementClusterMetadata::tenantMetadata().tenantCount.atomicOp(
-		    tr, -erasedTenants.size(), MutationRef::AddValue);
+		ManagementClusterMetadata::tenantMetadata().tenantCount.atomicOp(tr, -erasedTenants, MutationRef::AddValue);
 		ManagementClusterMetadata::clusterTenantCount.atomicOp(
-		    tr, self->ctx.clusterName.get(), -erasedTenants.size(), MutationRef::AddValue);
+		    tr, self->ctx.clusterName.get(), -erasedTenants, MutationRef::AddValue);
 
 		return !tenantEntries.more;
 	}
@@ -1995,7 +1997,6 @@ struct RestoreClusterImpl {
 		managementEntry.assignedCluster = self->clusterName;
 
 		if (!self->restoreDryRun) {
-
 			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, managementEntry.id, managementEntry);
 			ManagementClusterMetadata::tenantMetadata().tenantNameIndex.set(
 			    tr, managementEntry.tenantName, managementEntry.id);
@@ -2689,8 +2690,9 @@ struct DeleteTenantImpl {
 
 			ManagementClusterMetadata::clusterTenantIndex.erase(
 			    tr,
-			    Tuple::makeTuple(
-			        tenantEntry.get().assignedCluster, tenantEntry.get().renameDestination.get(), self->tenantId));
+			    Tuple::makeTuple(tenantEntry.get().assignedCluster,
+			                     tenantEntry.get().renameDestination.get(),
+			                     TenantInfo::INVALID_TENANT));
 		}
 
 		// Remove the tenant from its tenant group
@@ -3144,7 +3146,7 @@ struct RenameTenantImpl {
 
 		// Updated indexes to include the new tenant
 		ManagementClusterMetadata::clusterTenantIndex.insert(
-		    tr, Tuple::makeTuple(updatedEntry.assignedCluster, self->newName, self->tenantId));
+		    tr, Tuple::makeTuple(updatedEntry.assignedCluster, self->newName, TenantInfo::INVALID_TENANT));
 
 		return Void();
 	}
@@ -3195,6 +3197,10 @@ struct RenameTenantImpl {
 			// Remove the tenant from the cluster -> tenant index
 			ManagementClusterMetadata::clusterTenantIndex.erase(
 			    tr, Tuple::makeTuple(updatedEntry.assignedCluster, self->oldName, self->tenantId));
+			ManagementClusterMetadata::clusterTenantIndex.erase(
+			    tr, Tuple::makeTuple(updatedEntry.assignedCluster, self->newName, TenantInfo::INVALID_TENANT));
+			ManagementClusterMetadata::clusterTenantIndex.insert(
+			    tr, Tuple::makeTuple(updatedEntry.assignedCluster, self->newName, self->tenantId));
 		}
 
 		return Void();
