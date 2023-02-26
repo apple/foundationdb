@@ -335,7 +335,7 @@ struct AccumulatedMutations {
 	// Returns true if a complete chunk contains any MutationRefs which intersect with any
 	// range in ranges.
 	// It is undefined behavior to run this if isComplete() does not return true.
-	bool matchesAnyRange(const std::vector<KeyRange>& ranges) const;
+	bool matchesAnyRange(const KeyRangeMap<int>& rangeMap) const;
 
 	std::vector<KeyValueRef> kvs;
 	std::string serializedMutations;
