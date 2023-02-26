@@ -165,6 +165,23 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 		return false;
 	}
 
+	bool matchFilters(KeyValueRef kv) {
+ 		bool match = filters.match(kv);
+
+		if (!validate_filters) {
+			return match;
+		}
+
+ 		for (const auto& prefix : prefixes) {
+ 			if (kv.key.startsWith(StringRef(prefix))) {
+ 				ASSERT(match);
+ 				return true;
+ 			}
+ 		}
+
+ 		return match;
+ 	}
+
 	std::string toString() {
 		std::string s;
 		s.append("ContainerURL: ");
