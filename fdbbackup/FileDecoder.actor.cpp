@@ -20,9 +20,11 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <streambuf>
 #include <string>
 #include <vector>
 #include <fcntl.h>
@@ -80,6 +82,8 @@ void printDecodeUsage() {
 	             "  --blob-credentials FILE\n"
 	             "                 File containing blob credentials in JSON format.\n"
 	             "                 The same credential format/file fdbbackup uses.\n"
+	             "  -t, --file-type [log|range|both]\n"
+	             "                 Specifies the backup file type to decode.\n"
 #ifndef TLS_DISABLED
 	    TLS_HELP
 #endif
@@ -115,6 +119,8 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 	std::string log_dir, trace_format, trace_log_group;
 	BackupTLSConfig tlsConfig;
 	bool list_only = false;
+	bool decode_logs = true;
+	bool decode_range = true;
 	bool save_file_locally = false;
 	bool validate_filters = false;
 	std::vector<std::string> prefixes; // Key prefixes for filtering
@@ -130,6 +136,8 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 		// Filter [100, 200),  [50,75) [200, 300)
 		return !(begin >= endVersionFilter || end <= beginVersionFilter);
 	}
+
+	bool overlap(Version version) const { return version >= beginVersionFilter && version < endVersionFilter; }
 
 	void updateRangeMap() { filters.updateFilters(prefixes); }
 
@@ -159,6 +167,23 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 		}
 		ASSERT(!match);
 		return false;
+	}
+
+	bool matchFilters(KeyValueRef kv) const {
+		bool match = filters.match(kv);
+
+		if (!validate_filters) {
+			return match;
+		}
+
+		for (const auto& prefix : prefixes) {
+			if (kv.key.startsWith(StringRef(prefix))) {
+				ASSERT(match);
+				return true;
+			}
+		}
+
+		return match;
 	}
 
 	std::string toString() {
@@ -313,6 +338,20 @@ int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 			param->container_url = args->OptionArg();
 			break;
 
+		case OPT_FILE_TYPE: {
+			auto ftype = std::string(args->OptionArg());
+			if (ftype == "log") {
+				param->decode_range = false;
+			} else if (ftype == "range") {
+				param->decode_logs = false;
+			} else if (ftype != "both" && ftype != "") {
+				err = true;
+				std::cerr << "ERROR: Unrecognized backup file type option: " << args->OptionArg() << "\n";
+				return FDB_EXIT_ERROR;
+			}
+			break;
+		}
+
 		case OPT_LIST_ONLY:
 			param->list_only = true;
 			break;
@@ -425,8 +464,9 @@ int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 	return FDB_EXIT_SUCCESS;
 }
 
-void printLogFiles(std::string msg, const std::vector<LogFile>& files) {
-	std::cout << msg << " " << files.size() << " log files\n";
+template <class BackupFile>
+void printLogFiles(std::string msg, const std::vector<BackupFile>& files) {
+	std::cout << msg << " " << files.size() << " total\n";
 	for (const auto& file : files) {
 		std::cout << file.toString() << "\n";
 	}
@@ -438,6 +478,17 @@ std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, cons
 	for (const auto& file : files) {
 		if (file.fileName.find(params->fileFilter) != std::string::npos &&
 		    params->overlap(file.beginVersion, file.endVersion + 1)) {
+			filtered.push_back(file);
+		}
+	}
+	return filtered;
+}
+
+std::vector<RangeFile> getRelevantRangeFiles(const std::vector<RangeFile>& files,
+                                             const Reference<DecodeParams> params) {
+	std::vector<RangeFile> filtered;
+	for (const auto& file : files) {
+		if (file.fileName.find(params->fileFilter) != std::string::npos && params->overlap(file.version)) {
 			filtered.push_back(file);
 		}
 	}
@@ -605,6 +656,121 @@ public:
 	int lfd = -1; // local file descriptor
 };
 
+class DecodeRangeProgress {
+public:
+	std::vector<Standalone<VectorRef<KeyValueRef>>> blocks;
+
+	DecodeRangeProgress() = default;
+	DecodeRangeProgress(const RangeFile& file, bool save) : file(file), save(save) {}
+	~DecodeRangeProgress() {
+		if (lfd != -1) {
+			close(lfd);
+		}
+	}
+
+	// Open and loads file into memory
+	Future<Void> openFile(Reference<IBackupContainer> container) { return openFileImpl(this, container); }
+
+	ACTOR static Future<Void> openFileImpl(DecodeRangeProgress* self, Reference<IBackupContainer> container) {
+		Reference<IAsyncFile> fd = wait(container->readFile(self->file.fileName));
+		self->fd = fd;
+		if (self->save) {
+			std::string dir = self->file.fileName;
+			std::size_t found = self->file.fileName.find_last_of('/');
+			if (found != std::string::npos) {
+				std::string path = self->file.fileName.substr(0, found);
+				if (!directoryExists(path)) {
+					platform::createDirectory(path);
+				}
+			}
+
+			self->lfd = open(self->file.fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
+			if (self->lfd == -1) {
+				TraceEvent(SevError, "OpenLocalFileFailed").detail("File", self->file.fileName);
+				throw platform_error();
+			}
+		}
+		while (!self->eof) {
+			wait(readAndDecodeFile(self));
+		}
+		return Void();
+	}
+
+	// Reads a file block, decodes it into key/value pairs, and stores these pairs.
+	ACTOR static Future<Void> readAndDecodeFile(DecodeRangeProgress* self) {
+		try {
+			state int64_t len = std::min<int64_t>(self->file.blockSize, self->file.fileSize - self->offset);
+			if (len == 0) {
+				self->eof = true;
+				return Void();
+			}
+
+			state Standalone<VectorRef<KeyValueRef>> chunks =
+			    wait(fileBackup::decodeRangeFileBlock(self->fd, self->offset, len));
+			self->blocks.push_back(chunks);
+
+			TraceEvent("ReadFile")
+			    .detail("Name", self->file.fileName)
+			    .detail("Len", len)
+			    .detail("Offset", self->offset);
+			self->offset += len;
+
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "CorruptRangeFileBlock")
+			    .error(e)
+			    .detail("Filename", self->file.fileName)
+			    .detail("BlockOffset", self->offset)
+			    .detail("BlockLen", self->file.blockSize);
+			throw;
+		}
+
+		return Void();
+	}
+
+	RangeFile file;
+	Reference<IAsyncFile> fd;
+	int64_t offset = 0;
+	bool save = false;
+	bool eof = false;
+	int lfd = -1; // local file descriptor
+};
+
+ACTOR Future<Void> process_range_file(Reference<IBackupContainer> container,
+                                      RangeFile file,
+                                      UID uid,
+                                      Reference<DecodeParams> params) {
+
+	if (file.fileSize == 0) {
+		TraceEvent("SkipEmptyFile", uid).detail("Name", file.fileName);
+		return Void();
+	}
+
+	state DecodeRangeProgress progress(file, params->save_file_locally);
+	wait(progress.openFile(container));
+
+	for (auto& block : progress.blocks) {
+		for (const auto& kv : block) {
+			bool print = params->prefixes.empty(); // no filtering
+
+			if (!print) {
+				print = params->matchFilters(kv);
+			}
+
+			if (print) {
+				TraceEvent(SevVerbose, format("KVPair_%llu", file.version).c_str(), uid)
+				    .detail("Version", file.version)
+				    .setMaxFieldLength(-1)
+				    .detail("Key", kv.key)
+				    .detail("Value", kv.value);
+				std::cout << file.version << " Key = " << printable(kv.key) << "  Value = " << printable(kv.value)
+				          << std::endl;
+			}
+		}
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> process_file(Reference<IBackupContainer> container,
                                 LogFile file,
                                 UID uid,
@@ -668,19 +834,44 @@ ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 	BackupDescription desc = wait(container->describeBackup());
 	std::cout << "\n" << desc.toString() << "\n";
 
-	state std::vector<LogFile> logs = getRelevantLogFiles(listing.logs, params);
-	printLogFiles("Relevant files are: ", logs);
+	state std::vector<LogFile> logFiles;
+	state std::vector<RangeFile> rangeFiles;
+
+	if (params->decode_logs) {
+		logFiles = getRelevantLogFiles(listing.logs, params);
+		printLogFiles("Relevant log files are: ", logFiles);
+	}
+
+	if (params->decode_range) {
+		rangeFiles = getRelevantRangeFiles(listing.ranges, params);
+		printLogFiles("Releavant range files are: ", rangeFiles);
+	}
 
 	if (params->list_only)
 		return Void();
 
+	// Decode log files.
 	state int idx = 0;
-	while (idx < logs.size()) {
-		TraceEvent("ProcessFile").detail("Name", logs[idx].fileName).detail("I", idx);
-		wait(process_file(container, logs[idx], uid, params));
-		idx++;
+	if (params->decode_logs) {
+		while (idx < logFiles.size()) {
+			TraceEvent("ProcessFile").detail("Name", logFiles[idx].fileName).detail("I", idx);
+			wait(process_file(container, logFiles[idx], uid, params));
+			idx++;
+		}
+		TraceEvent("DecodeLogsDone", uid).log();
 	}
-	TraceEvent("DecodeDone", uid).log();
+
+	// Decode range files.
+	if (params->decode_range) {
+		idx = 0;
+		while (idx < rangeFiles.size()) {
+			TraceEvent("ProcessFile").detail("Name", rangeFiles[idx].fileName).detail("I", idx);
+			wait(process_range_file(container, rangeFiles[idx], uid, params));
+			idx++;
+		}
+		TraceEvent("DecodeRangeFileDone", uid).log();
+	}
+
 	return Void();
 }
 
