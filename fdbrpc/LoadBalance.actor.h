@@ -94,10 +94,12 @@ Future<Void> tssComparison(Req req,
 	// we want to record ss/tss errors to metrics
 	state int srcErrorCode = error_code_success;
 	state int tssErrorCode = error_code_success;
+	state ErrorOr<Resp> src;
+	state Optional<ErrorOr<Resp>> tss;
 
 	loop {
 		choose {
-			when(state ErrorOr<Resp> src = wait(fSource)) {
+			when(wait(store(src, fSource))) {
 				srcEndTime = now();
 				fSource = Never();
 				finished++;
@@ -105,7 +107,7 @@ Future<Void> tssComparison(Req req,
 					break;
 				}
 			}
-			when(state Optional<ErrorOr<Resp>> tss = wait(fTssWithTimeout)) {
+			when(wait(store(tss, fTssWithTimeout))) {
 				tssEndTime = now();
 				fTssWithTimeout = Never();
 				finished++;
@@ -659,7 +661,6 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				    .detail("Attempts", numAttempts);
 			}
 			secondRequestData.startRequest(backoff, triedAllOptions, stream, request, model, alternatives, channel);
-			state bool firstFinished = false;
 
 			loop choose {
 				when(ErrorOr<REPLY_TYPE(Request)> result =
@@ -669,7 +670,6 @@ Future<REPLY_TYPE(Request)> loadBalance(
 					}
 
 					firstRequestEndpoint = Optional<uint64_t>();
-					firstFinished = true;
 				}
 				when(ErrorOr<REPLY_TYPE(Request)> result = wait(secondRequestData.response)) {
 					if (secondRequestData.checkAndProcessResult(atMostOnce)) {

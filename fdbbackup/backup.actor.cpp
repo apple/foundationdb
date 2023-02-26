@@ -134,6 +134,7 @@ enum {
 	OPT_PROXY,
 	OPT_TAGNAME,
 	OPT_BACKUPKEYS,
+	OPT_BACKUPKEYS_FILE,
 	OPT_WAITFORDONE,
 	OPT_BACKUPKEYS_FILTER,
 	OPT_INCREMENTALONLY,
@@ -248,6 +249,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS_FILE, "--keys-file", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_DRYRUN, "-n", SO_NONE },
 	{ OPT_DRYRUN, "--dryrun", SO_NONE },
@@ -721,6 +723,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS_FILE, "--keys-file", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_WAITFORDONE, "-w", SO_NONE },
 	{ OPT_WAITFORDONE, "--waitfordone", SO_NONE },
@@ -798,6 +801,7 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS_FILE, "--keys-file", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
@@ -1125,6 +1129,8 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup or to filter the backup in query operations.\n"
 	       "                 If not specified, the entire database will be backed up or no filter will be applied.\n");
+	printf("  --keys-file FILE\n"
+	       "                 Same as -k option, except keys are specified in the input file.\n");
 	printf("  --partitioned-log-experimental  Starts with new type of backup system using partitioned logs.\n");
 	printf("  -n, --dryrun   For backup start or restore start, performs a trial run with no actual changes made.\n");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
@@ -1198,6 +1204,8 @@ static void printRestoreUsage(bool devhelp) {
 	printf("  -w, --waitfordone\n");
 	printf("                 Wait for the restore to complete before exiting.  Prints progress updates.\n");
 	printf("  -k KEYS        List of key ranges from the backup to restore.\n");
+	printf("  --keys-file FILE\n"
+	       "                 Same as -k option, except keys are specified in the input file.\n");
 	printf("  --remove-prefix PREFIX\n");
 	printf("                 Prefix to remove from the restored keys.\n");
 	printf("  --add-prefix PREFIX\n");
@@ -1321,6 +1329,8 @@ static void printDBBackupUsage(bool devhelp) {
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 	       "                 If not specified, the entire database will be backed up.\n");
+	printf("  --keys-file FILE\n"
+	       "                 Same as -k option, except keys are specified in the input file.\n");
 	printf("  --cleanup      Abort will attempt to stop mutation logging on the source cluster.\n");
 	printf("  --dstonly      Abort will not make any changes on the source cluster.\n");
 #ifndef TLS_DISABLED
@@ -3640,6 +3650,15 @@ int main(int argc, char* argv[]) {
 			case OPT_BACKUPKEYS:
 				try {
 					addKeyRange(args->OptionArg(), backupKeys);
+				} catch (Error&) {
+					printHelpTeaser(argv[0]);
+					return FDB_EXIT_ERROR;
+				}
+				break;
+			case OPT_BACKUPKEYS_FILE:
+				try {
+					std::string line = readFileBytes(args->OptionArg(), 64 * 1024 * 1024);
+					addKeyRange(line, backupKeys);
 				} catch (Error&) {
 					printHelpTeaser(argv[0]);
 					return FDB_EXIT_ERROR;

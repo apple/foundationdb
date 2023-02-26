@@ -87,7 +87,8 @@ void printDecodeUsage() {
 #endif
 	             "  --build-flags  Print build information and exit.\n"
 	             "  --list-only    Print file list and exit.\n"
-	             "  -k KEY_PREFIX  Use the prefix for filtering mutations\n"
+	             "  --validate-filters Validate the default RangeMap filtering logic with a slower one.\n"
+	             "  -k KEY_PREFIX  Use a single prefix for filtering mutations.\n"
 	             "  --filters PREFIX_FILTER_FILE\n"
 	             "                 A file containing a list of prefix filters in HEX format separated by \";\",\n"
 	             "                 e.g., \"\\x05\\x01;\\x15\\x2b\"\n"
@@ -117,9 +118,10 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 	BackupTLSConfig tlsConfig;
 	bool list_only = false;
 	bool save_file_locally = false;
+	bool validate_filters = false;
 	std::vector<std::string> prefixes; // Key prefixes for filtering
 	// more efficient data structure for intersection queries than "prefixes"
-	KeyRangeMap<int> rangeMap;
+	fileBackup::RangeMapFilters filters;
 	Version beginVersionFilter = 0;
 	Version endVersionFilter = std::numeric_limits<Version>::max();
 
@@ -133,35 +135,15 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 
 	bool overlap(Version version) const { return version >= beginVersionFilter && version < endVersionFilter; }
 
-	void updateRangeMap() {
-		for (const auto& prefix : prefixes) {
-			rangeMap.insert(prefixRange(StringRef(prefix)), 1);
-		}
-		rangeMap.coalesce(allKeys);
-	}
+	void updateRangeMap() { filters.updateFilters(prefixes); }
 
-	bool matchFilters(MutationRef m) {
-		bool match = false;
-		if (isSingleKeyMutation((MutationRef::Type)m.type)) {
-			auto ranges = rangeMap.intersectingRanges(singleKeyRange(m.param1));
-			for ([[maybe_unused]] const auto r : ranges) {
-				if (r.cvalue() == 1) {
-					match = true;
-					break;
-				}
-			}
-		} else if (m.type == MutationRef::ClearRange) {
-			auto ranges = rangeMap.intersectingRanges(KeyRangeRef(m.param1, m.param2));
-			for ([[maybe_unused]] const auto r : ranges) {
-				if (r.cvalue() == 1) {
-					match = true;
-					break;
-				}
-			}
-		} else {
-			ASSERT(false);
+	bool matchFilters(const MutationRef& m) const {
+		bool match = filters.match(m);
+		if (!validate_filters) {
+			return match;
 		}
 
+		// If we choose to validate the filters, go through filters one by one
 		for (const auto& prefix : prefixes) {
 			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 				if (m.param1.startsWith(StringRef(prefix))) {
@@ -181,26 +163,6 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 		}
 		ASSERT(!match);
 		return false;
-	}
-
-	bool matchFilters(KeyValueRef kv) {
-		bool match = false;
-		auto ranges = rangeMap.intersectingRanges(singleKeyRange(kv.key));
-		for ([[maybe_unused]] const auto r : ranges) {
-			if (r.cvalue() == 1) {
-				match = true;
-				break;
-			}
-		}
-
-		for (const auto& prefix : prefixes) {
-			if (kv.key.startsWith(StringRef(prefix))) {
-				ASSERT(match);
-				return true;
-			}
-		}
-
-		return match;
 	}
 
 	std::string toString() {
@@ -225,6 +187,7 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 			}
 		}
 		s.append(", list_only: ").append(list_only ? "true" : "false");
+		s.append(", validate_filters: ").append(validate_filters ? "true" : "false");
 		if (beginVersionFilter != 0) {
 			s.append(", beginVersionFilter: ").append(std::to_string(beginVersionFilter));
 		}
@@ -327,14 +290,7 @@ std::vector<std::string> parsePrefixesLine(const std::string& line, bool& err) {
 }
 
 std::vector<std::string> parsePrefixFile(const std::string& filename, bool& err) {
-	std::ifstream t(filename);
-	std::string line;
-
-	t.seekg(0, std::ios::end);
-	line.reserve(t.tellg());
-	t.seekg(0, std::ios::beg);
-
-	line.assign((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
+	std::string line = readFileBytes(filename, 64 * 1024 * 1024);
 	return parsePrefixesLine(line, err);
 }
 
@@ -363,6 +319,10 @@ int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 
 		case OPT_LIST_ONLY:
 			param->list_only = true;
+			break;
+
+		case OPT_VALIDATE_FILTERS:
+			param->validate_filters = true;
 			break;
 
 		case OPT_KEY_PREFIX:
