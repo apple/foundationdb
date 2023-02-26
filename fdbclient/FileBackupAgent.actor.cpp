@@ -3331,34 +3331,41 @@ bool AccumulatedMutations::isComplete() const {
 // Returns true if a complete chunk contains any MutationRefs which intersect with any
 // range in ranges.
 // It is undefined behavior to run this if isComplete() does not return true.
-bool AccumulatedMutations::matchesAnyRange(const KeyRangeMap<int>& rangeMap) const {
+bool AccumulatedMutations::matchesAnyRange(const RangeMapFilters& filters) const {
 	std::vector<MutationRef> mutations = decodeMutationLogValue(serializedMutations);
 	for (auto& m : mutations) {
-		if (isSingleKeyMutation((MutationRef::Type)m.type)) {
-			auto ranges = rangeMap.intersectingRanges(singleKeyRange(m.param1));
-			for (const auto& r : ranges) {
-				if (r.cvalue() == 1) {
-					return true;
-				}
-			}
-		} else if (m.type == MutationRef::ClearRange) {
-			auto ranges = rangeMap.intersectingRanges(KeyRangeRef(m.param1, m.param2));
-			for (const auto& r : ranges) {
-				if (r.cvalue() == 1) {
-					return true;
-				}
-			}
-		} else {
-			ASSERT(false);
+		if (filters.match(m)) {
+			return true;
 		}
 	}
 
 	return false;
 }
 
+bool RangeMapFilters::match(const MutationRef& m) const {
+	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+		auto ranges = rangeMap.intersectingRanges(singleKeyRange(m.param1));
+		for (const auto& r : ranges) {
+			if (r.cvalue() == 1) {
+				return true;
+			}
+		}
+	} else if (m.type == MutationRef::ClearRange) {
+		auto ranges = rangeMap.intersectingRanges(KeyRangeRef(m.param1, m.param2));
+		for (const auto& r : ranges) {
+			if (r.cvalue() == 1) {
+				return true;
+			}
+		}
+	} else {
+		ASSERT(false);
+	}
+	return false;
+}
+
 // Returns a vector of filtered KV refs from data which are either part of incomplete mutation groups OR complete
 // and have data relevant to one of the KV ranges in ranges
-std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, const KeyRangeMap<int>& rangeMap) {
+std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, const RangeMapFilters& filters) {
 	std::unordered_map<Version, AccumulatedMutations> mutationBlocksByVersion;
 
 	for (auto& kv : data) {
@@ -3372,7 +3379,7 @@ std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, c
 		AccumulatedMutations& m = vb.second;
 
 		// If the mutations are incomplete or match one of the ranges, include in results.
-		if (!m.isComplete() || m.matchesAnyRange(rangeMap)) {
+		if (!m.isComplete() || m.matchesAnyRange(filters)) {
 			output.insert(output.end(), m.kvs.begin(), m.kvs.end());
 		}
 	}
@@ -3430,11 +3437,6 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 				wait(tr->onError(e));
 			}
 		}
-		state KeyRangeMap<int> rangeMap;
-		for (const auto& range : ranges) {
-			rangeMap.insert(range, 1);
-		}
-		rangeMap.coalesce(allKeys);
 
 		state Key mutationLogPrefix = restore.mutationLogPrefix();
 		state Reference<IAsyncFile> inFile = wait(bc->readFile(logFile.fileName));
@@ -3443,7 +3445,8 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 
 		// Filter the KV pairs extracted from the log file block to remove any records known to not be needed for this
 		// restore based on the restore range set.
-		state std::vector<KeyValueRef> dataFiltered = filterLogMutationKVPairs(dataOriginal, rangeMap);
+		RangeMapFilters filters(ranges);
+		state std::vector<KeyValueRef> dataFiltered = filterLogMutationKVPairs(dataOriginal, filters);
 
 		state int start = 0;
 		state int end = dataFiltered.size();
