@@ -2674,6 +2674,24 @@ static void reportBackupQueryError(UID operationId, JsonBuilderObject& result, s
 	TraceEvent("BackupQueryFailure").detail("OperationId", operationId).detail("Reason", errorMessage);
 }
 
+std::pair<Version, Version> getMaxMinRestorableVersions(const BackupDescription& desc, bool mayOnlyApplyMutationLog) {
+	Version maxRestorableVersion = invalidVersion;
+	Version minRestorableVersion = invalidVersion;
+	if (desc.maxRestorableVersion.present()) {
+		maxRestorableVersion = desc.maxRestorableVersion.get();
+	} else if (mayOnlyApplyMutationLog && desc.contiguousLogEnd.present()) {
+		maxRestorableVersion = desc.contiguousLogEnd.get();
+	}
+
+	if (desc.minRestorableVersion.present()) {
+		minRestorableVersion = desc.minRestorableVersion.get();
+	} else if (mayOnlyApplyMutationLog && desc.minLogBegin.present()) {
+		minRestorableVersion = desc.minLogBegin.get();
+	}
+
+	return std::make_pair(maxRestorableVersion, minRestorableVersion);
+}
+
 // If restoreVersion is invalidVersion or latestVersion, use the maximum or minimum restorable version respectively for
 // selected key ranges. If restoreTimestamp is specified, any specified restoreVersion will be overriden to the version
 // resolved to that timestamp.
@@ -2730,23 +2748,21 @@ ACTOR Future<Void> queryBackup(const char* name,
 
 	try {
 		state Reference<IBackupContainer> bc = openBackupContainer(name, destinationContainer, proxy, {});
+		BackupDescription desc = wait(bc->describeBackup());
+		auto [maxRestorableVersion, minRestorableVersion] = getMaxMinRestorableVersions(desc, !keyRangesFilter.empty());
 		if (restoreVersion == invalidVersion) {
-			BackupDescription desc = wait(bc->describeBackup());
-			if (desc.maxRestorableVersion.present()) {
-				restoreVersion = desc.maxRestorableVersion.get();
-				// Use continuous log end version for the maximum restorable version for the key ranges.
-			} else if (keyRangesFilter.size() && desc.contiguousLogEnd.present()) {
-				restoreVersion = desc.contiguousLogEnd.get();
-			} else {
-				reportBackupQueryError(
-				    operationId,
-				    result,
-				    errorMessage = format("the backup for the specified key ranges is not restorable to any version"));
-			}
-			TraceEvent("BackupQueryResolveMaxRestoreVersion").detail("Version", restoreVersion);
+			restoreVersion = maxRestorableVersion;
 		}
-
-		if (restoreVersion < 0 && restoreVersion != earliestVersion) {
+		if (restoreVersion == earliestVersion) {
+			restoreVersion = minRestorableVersion;
+		}
+		if (snapshotVersion == earliestVersion) {
+			snapshotVersion = minRestorableVersion;
+		}
+		TraceEvent("BackupQueryResolveRestoreVersion")
+		    .detail("RestoreVersion", restoreVersion)
+		    .detail("SnapshotVersion", snapshotVersion);
+		if (restoreVersion < 0) {
 			reportBackupQueryError(operationId,
 			                       result,
 			                       errorMessage =
@@ -2762,7 +2778,6 @@ ACTOR Future<Void> queryBackup(const char* name,
 			Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(snapshotVersion, keyRangesFilter));
 			if (fileSet.present()) {
 				result["snapshot_version"] = fileSet.get().targetVersion;
-				result["restore_version"] = fileSet.get().targetVersion; // In case there isn't any more log files.
 				for (const auto& rangeFile : fileSet.get().ranges) {
 					JsonBuilderObject object;
 					object["file_name"] = rangeFile.fileName;
@@ -2807,6 +2822,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 
 		state Optional<RestorableFileSet> fileSet;
 		if (snapshotVersion == invalidVersion) {
+			// Using the latest snapshot.
 			wait(store(fileSet, bc->getRestoreSet(restoreVersion, keyRangesFilter)));
 		} else {
 			// We only need to know all the log files from snapshotVersion to restoreVersion.
