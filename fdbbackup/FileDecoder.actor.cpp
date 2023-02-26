@@ -164,44 +164,21 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 	}
 
 	bool matchFilters(KeyValueRef kv) {
-		bool match = false;
-		auto ranges = rangeMap.intersectingRanges(singleKeyRange(kv.key));
-		for ([[maybe_unused]] const auto r : ranges) {
-			if (r.cvalue() == 1) {
-				match = true;
-				break;
-			}
+ 		bool match = filters.match(kv);
+
+		if (!validate_filters) {
+			return match;
 		}
 
-		for (const auto& prefix : prefixes) {
-			if (kv.key.startsWith(StringRef(prefix))) {
-				ASSERT(match);
-				return true;
-			}
-		}
+ 		for (const auto& prefix : prefixes) {
+ 			if (kv.key.startsWith(StringRef(prefix))) {
+ 				ASSERT(match);
+ 				return true;
+ 			}
+ 		}
 
-		return match;
-	}
-
-	bool matchFilters(MutationRef m) {
-		for (const auto& prefix : prefixes) {
-			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
-				if (m.param1.startsWith(StringRef(prefix))) {
-					return true;
-				}
-			} else if (m.type == MutationRef::ClearRange) {
-				KeyRange range(KeyRangeRef(m.param1, m.param2));
-				KeyRange range2 = prefixRange(StringRef(prefix));
-				if (range.intersects(range2)) {
-					return true;
-				}
-			} else {
-				ASSERT(false);
-			}
-		}
-		ASSERT(!match);
-		return false;
-	}
+ 		return match;
+ 	}
 
 	std::string toString() {
 		std::string s;
@@ -837,7 +814,6 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container,
 			bool print = params.prefixes.empty(); // no filtering
 
 			if (!print) {
-				print = params->matchFilters(m);
 				print = params->matchFilters(m);
 			}
 			if (print) {

@@ -4041,6 +4041,18 @@ bool RangeMapFilters::match(const MutationRef& m) const {
 	return false;
 }
 
+bool RangeMapFilters::match(const KeyValueRef& kv) const {
+	auto ranges = rangeMap.intersectingRanges(singleKeyRange(kv.key));
+	for (const auto& r : ranges) {
+		if (r.cvalue() == 1) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
 // Returns a vector of filtered KV refs from data which are either part of incomplete mutation groups OR complete
 // and have data relevant to one of the KV ranges in ranges
 std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, const RangeMapFilters& filters) {

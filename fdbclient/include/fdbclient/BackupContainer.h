@@ -341,6 +341,9 @@ public:
 	// Returns if the mutation matches any filter ranges.
 	bool match(const MutationRef& m) const;
 
+	// Returns if the key-value pair matches any filter ranges.
+	bool match(const KeyValueRef& kv) const;
+
 private:
 	KeyRangeMap<int> rangeMap;
 };
