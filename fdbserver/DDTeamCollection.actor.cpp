@@ -2277,6 +2277,7 @@ public:
 				TraceEvent(SevError, "DDTCSetStorageEngineParamsFailed")
 				    .detail("ServerId", serverId)
 				    .detail("Error", f.get().getError().code());
+				continue;
 			}
 			SetStorageEngineParamsReply reply = f.get().get();
 			// TODO: handle the needreboot and needreplacement parameters
@@ -2309,6 +2310,7 @@ public:
 					                                                 reply.result.needReplacement,
 					                                                 noNeedReplacement));
 				} else {
+					// TODO : rollback the change or print warning?
 					TraceEvent(SevWarnAlways, "NeedReplacementInvalidAsWiggleNotEnabled").detail("ServerId", serverId);
 				}
 			}
@@ -2329,10 +2331,15 @@ public:
 		}
 		wait(waitForAll(fs));
 		int index = 0;
-		std::map<std::string, std::string> result;
-		for (const auto& [_, ss] : self->server_info) {
+		StorageEngineParamSet result;
+		for (const auto& [serverId, ss] : self->server_info) {
 			Future<ErrorOr<GetStorageEngineParamsReply>> f = fs[index++];
-			ASSERT(f.isReady() && !f.get().isError());
+			if (!f.isReady() || f.get().isError()) {
+				TraceEvent(SevError, "GetStorageEngineParamsError")
+				    .detail("ServerId", serverId)
+				    .detail("Error", f.get().getError().code());
+				continue;
+			}
 			GetStorageEngineParamsReply reply = f.get().get();
 			json_spirit::mObject paramsObj;
 			for (const auto& [k, v] : reply.params.getParams()) {
@@ -2340,7 +2347,7 @@ public:
 			}
 			const std::string params_json_str = json_spirit::write_string(json_spirit::mValue(paramsObj));
 			const std::string addr = ss->getLastKnownInterface().address().toString();
-			result[addr] = params_json_str;
+			result.set(addr, params_json_str);
 			TraceEvent("GetStorageParamsPerProcess").detail("Process", addr).detail("Params", params_json_str);
 		}
 		return result;

@@ -8321,14 +8321,16 @@ public:
 			TraceEvent("CheckCompatibilityParam").detail("Param", k).detail("New", v);
 			if (k == "kvstore_range_prefetch") {
 				params.getBool(k) == prefetch ? result.unchanged.push_back(k) : result.applied.push_back(k);
-			} else if (k == "metrics_interval" || k == "histogram_interval") {
+			} else if (k == "metrics_interval") {
 				params.getDouble(k) == metrics_interval ? result.unchanged.push_back(k)
 				                                        : result.needReboot.push_back(k);
+			} else if (k == "histogram_interval") {
+				params.getDouble(k) == histogram_interval ? result.unchanged.push_back(k)
+				                                          : result.needReboot.push_back(k);
 			} else if (k == "default_page_size") {
 				params.getInt(k) == m_tree->getPageSize() ? result.unchanged.push_back(k)
 				                                          : result.needReplacement.push_back(k);
 			}
-			// do something else
 		}
 		return result;
 	}
