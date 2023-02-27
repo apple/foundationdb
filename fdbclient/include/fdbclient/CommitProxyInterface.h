@@ -583,16 +583,18 @@ struct GetStorageServerRejoinInfoRequest {
 	constexpr static FileIdentifier file_identifier = 994279;
 	UID id;
 	Optional<Value> dcId;
-	bool checkParams;
+	bool checkStorageEngineParams;
 	ReplyPromise<GetStorageServerRejoinInfoReply> reply;
 
 	GetStorageServerRejoinInfoRequest() {}
-	explicit GetStorageServerRejoinInfoRequest(UID const& id, Optional<Value> const& dcId, bool checkParams = false)
-	  : id(id), dcId(dcId), checkParams(checkParams) {}
+	explicit GetStorageServerRejoinInfoRequest(UID const& id,
+	                                           Optional<Value> const& dcId,
+	                                           bool checkStorageEngineParams = false)
+	  : id(id), dcId(dcId), checkStorageEngineParams(checkStorageEngineParams) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, dcId, checkParams, reply);
+		serializer(ar, id, dcId, checkStorageEngineParams, reply);
 	}
 };
 

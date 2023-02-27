@@ -280,7 +280,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 	}
 	state bool storageEngineParamsChange = false;
 	if (!checkForStorageEngineParamsChange(m, storageEngineParamsChange, creating)) {
-		fmt::print("Invalid configuration for storage engine params\n");
+		fmt::print("Error: Invalid configuration for storage engine params\n");
 		return ConfigurationResult::INVALID_CONFIGURATION;
 	}
 

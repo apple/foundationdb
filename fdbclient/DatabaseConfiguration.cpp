@@ -437,10 +437,11 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	result["tenant_mode"] = tenantMode.toString();
 	result["encryption_at_rest_mode"] = encryptionAtRestMode.toString();
 
-	// Add storage engine params into the json string
-	if (storageEngineParams.present()) {
+	// Add storage engine params, if not empty, into the json string
+	if (storageEngineParams.getParams().size()) {
+		ASSERT(StorageEngineParamsFactory::isSupported(storageServerStoreType));
 		StatusObject params;
-		for (auto const& [k, v] : storageEngineParams.get().getParams()) {
+		for (auto const& [k, v] : storageEngineParams.getParams()) {
 			params[k] = v;
 		}
 		result["storage_engine_params"] = params;
@@ -678,10 +679,9 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == "encryption_at_rest_mode"_sr) {
 		encryptionAtRestMode = EncryptionAtRestMode::fromValueRef(Optional<ValueRef>(value));
 	} else if (ck.startsWith(storageEngineParamsPrefix.removePrefix(configKeysPrefix))) {
-		ASSERT(storageEngineParams.present());
 		// TODO : should we hardcode the above condition like others?
 		auto paramName = ck.removePrefix(storageEngineParamsPrefix.removePrefix(configKeysPrefix)).toString();
-		storageEngineParams.get().set(paramName, value.toString());
+		storageEngineParams.set(paramName, value.toString());
 	} else {
 		return false;
 	}

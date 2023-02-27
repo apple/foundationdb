@@ -2217,7 +2217,7 @@ public:
 		// always set the params from database configuration when DD starts
 		// it will handle the case where the watch actor did not respond when DD was rebooted
 		// there is no effect if it's consistent with storage servers
-		wait(self->storageParamsUpdater(self->configuration.storageEngineParams.get()));
+		wait(self->storageParamsUpdater(self->configuration.storageEngineParams));
 		state SignalableActorCollection collection;
 		state StorageEngineParamSet newParams;
 		loop {
@@ -2228,16 +2228,15 @@ public:
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				RangeResult paramsF = wait(tr.getRange(storageEngineParamsKeys, CLIENT_KNOBS->TOO_MANY));
 				for (const auto& [k, v] : paramsF) {
-					TraceEvent("MonitorStorageEngineParamsChange").detail("Param", k).detail("Value", v);
+					TraceEvent(SevDebug, "MonitorStorageEngineParamsChange").detail("Param", k).detail("Value", v);
 					// params[k.removePrefix(storageEngineParamsPrefix).toString()] = v.toString();
 					auto paramK = k.removePrefix(storageEngineParamsPrefix).toString();
-					ASSERT(self->configuration.storageEngineParams.present());
-					ASSERT(self->configuration.storageEngineParams.get().getParams().contains(paramK));
+					ASSERT(self->configuration.storageEngineParams.getParams().contains(paramK));
 					// TODO : compare the real value but not the casted string
 					// now it's okay as storage server will compare the real value not the string
-					auto oldV = self->configuration.storageEngineParams.get().getParams().at(paramK);
+					auto oldV = self->configuration.storageEngineParams.getParams().at(paramK);
 					if (v.toString() != oldV) {
-						TraceEvent("NewStorageEngineParamsChange")
+						TraceEvent("DDTCStorageEngineParamsChange")
 						    .detail("Param", paramK)
 						    .detail("OldV", oldV)
 						    .detail("NewV", v);
@@ -2282,7 +2281,7 @@ public:
 			}
 			SetStorageEngineParamsReply reply = f.get().get();
 			for (const auto& k : reply.result.applied) {
-				self->configuration.storageEngineParams.get().set(k, newParams.getParams().at(k));
+				self->configuration.storageEngineParams.set(k, newParams.getParams().at(k));
 			}
 			for (const auto& k : reply.result.needReplacement) {
 				TraceEvent(SevDebug, "StorageEngineParamUpdaterNeedReplacement")
@@ -2476,8 +2475,8 @@ public:
 			isr.reqId = deterministicRandom()->randomUniqueID();
 			isr.interfaceId = interfaceId;
 			isr.encryptMode = self->configuration.encryptionAtRestMode;
-			if (self->configuration.storageEngineParams.present())
-				isr.storageEngineParams = self->configuration.storageEngineParams.get();
+			if (self->configuration.storageEngineParams.getParams().size())
+				isr.storageEngineParams = self->configuration.storageEngineParams;
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
 			state bool doRecruit = true;

@@ -66,21 +66,22 @@ bool parseStorageEngineParams(KeyValueStoreType::StoreType storeType,
 	auto& paramsInitMap = StorageEngineParamsFactory::getParams(storeType);
 	// Insert all default values when creating the database
 	if (creating) {
-		for (auto const& [k, pair] : paramsInitMap)
+		for (auto const& [k, pair] : paramsInitMap) {
 			out[storageEngineParamsPrefix.toString() + k] = pair.second;
+		}
 		if (kvPairsStr.empty()) {
-			fmt::print("Empty param str is given, use the default values\n");
+			fmt::print("Debug: Empty param str is given, use the default values\n");
 			return true;
 		}
 	}
 
 	std::vector<std::string> kvPairs;
 	boost::split(kvPairs, kvPairsStr, [](char c) { return c == ','; });
-	for (auto const& _kv : kvPairs) {
-		auto pos = _kv.find("=");
+	for (auto const& kv : kvPairs) {
+		auto pos = kv.find("=");
 		if (pos != std::string::npos) {
-			auto k = _kv.substr(0, pos);
-			auto v = _kv.substr(pos + 1);
+			auto k = kv.substr(0, pos);
+			auto v = kv.substr(pos + 1);
 			fmt::print("Parsed storage engine param, k:{}; v:{}\n", k, v);
 			if (!paramsInitMap.count(k)) {
 				fmt::print("Error: {} is not a supported parameter for storage engine {}.\n",
@@ -88,7 +89,7 @@ bool parseStorageEngineParams(KeyValueStoreType::StoreType storeType,
 				           KeyValueStoreType::getStoreTypeStr(storeType));
 				return false;
 			} else {
-				TraceEvent("ReplaceDefaultStorageEngineParameter")
+				TraceEvent(SevDebug, "ReplaceDefaultStorageEngineParameter")
 				    .detail("StoreType", KeyValueStoreType::getStoreTypeStr(storeType))
 				    .detail("Parameter", k)
 				    .detail("DefaultValue", paramsInitMap[k].second)
@@ -96,7 +97,7 @@ bool parseStorageEngineParams(KeyValueStoreType::StoreType storeType,
 				out[storageEngineParamsPrefix.toString() + k] = v;
 			}
 		} else {
-			// TODO: print error message that invalid parameters are given
+			fmt::print("Error: {} does not follow the foramt <param>=<val>\n", kv);
 			return false;
 		}
 	}
@@ -107,9 +108,8 @@ bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bo
 	auto storageEngineParamsKey = configKeysPrefix.toString() + "storage_engine_params";
 	bool storageEngineParamsChange = m.count(storageEngineParamsKey) != 0;
 	if (!storageEngineParamsChange)
-		return true;
+		return true; // no storage engine params change
 	paramsChange = true;
-	auto paramsVal = m[storageEngineParamsKey];
 	auto storeType =
 	    static_cast<KeyValueStoreType::StoreType>(std::stoi(m[configKeysPrefix.toString() + "storage_engine"]));
 	if (!parseStorageEngineParams(storeType, m[storageEngineParamsKey], m, creating))
@@ -292,7 +292,8 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 				auto paramsStr = value.substr(pos + 1);
 				auto storeType = KeyValueStoreType::fromStoreTypeStr(storeTypeStr);
 				if (storeType != KeyValueStoreType::SSD_REDWOOD_V1) {
-					fmt::print("Error: Unsupported params change for storage engine {}\n", storeType.toString());
+					fmt::print("Error: storage parameter change is not supported for storage engine {}\n",
+					           storeType.toString());
 					return out;
 				}
 				out[p + fmt::format("{}_params", key)] = paramsStr;

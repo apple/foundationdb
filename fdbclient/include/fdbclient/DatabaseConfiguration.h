@@ -120,8 +120,6 @@ struct StorageEngineParamsFactory {
 
 	static std::map<std::string, std::pair<StorageEngineParamSet::CHANGETYPE, std::string>>& getParams(
 	    KeyValueStoreType::StoreType storeType) {
-		if (factories().contains(storeType))
-			return factories().at(storeType);
 		return factories()[storeType];
 	}
 
@@ -139,6 +137,8 @@ struct StorageEngineParamsFactory {
 	                                                       const std::string& name) {
 		return factories()[storeType][name].first;
 	}
+
+	static bool isSupported(KeyValueStoreType::StoreType storeType) { return factories().contains(storeType); }
 };
 
 struct DatabaseConfiguration {
@@ -269,8 +269,7 @@ struct DatabaseConfiguration {
 	KeyValueStoreType storageServerStoreType;
 
 	// Storage engine params
-	// TODO: check do we need Optional here
-	Optional<StorageEngineParamSet> storageEngineParams;
+	StorageEngineParamSet storageEngineParams; // empty if not used
 
 	// Testing StorageServers
 	int32_t desiredTSSCount;
