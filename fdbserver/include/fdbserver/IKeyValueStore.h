@@ -200,7 +200,6 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                                    bool checkChecksums = false,
                                    bool checkIntegrity = false,
                                    bool openRemotely = false,
-                                   // TODO : check remote and encryption not enabled together
                                    Reference<AsyncVar<ServerDBInfo> const> db = {},
                                    Optional<EncryptionAtRestMode> encryptionMode = {},
                                    Optional<StorageEngineParamSet> params = {}) {
@@ -215,6 +214,12 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 	}
 	openRemotely = openRemotely || params.present() ? params.get().get("remote_kv_store", false) : false;
 	if (openRemotely) {
+		if (encryptionMode.present() && encryptionMode.get().isEncryptionEnabled()) {
+			TraceEvent(SevWarn, "KVStoreNotSupportedConfig")
+				.detail("Encryption", encryptionMode)
+				.detail("Message", "Encryption is not suppored on remote kv store yet");
+			throw encrypt_unsupported();
+		}
 		return openRemoteKVStore(
 		    storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity, encryptionMode, params);
 	}
