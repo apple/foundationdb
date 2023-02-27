@@ -1764,6 +1764,8 @@ public:
 		StorageBytes sb = storage.getStorageBytes();
 		metrics.getStorageMetrics(req, sb, counters.bytesInput.getRate(), versionLag, lastUpdate);
 	}
+
+	bool isUsingStorageEngineParams() const { return storageEngineParams != nullptr; }
 };
 
 const StringRef StorageServer::CurrentRunningFetchKeys::emptyString = ""_sr;
@@ -4976,23 +4978,31 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 }
 
 ACTOR Future<Void> getStorageEngineParamsActor(StorageServer* self, GetStorageEngineParamsRequest req) {
-	StorageEngineParamSet params = wait(self->storage.getStorageEngineParams());
-	GetStorageEngineParamsReply _reply(params);
-	req.reply.send(_reply);
+	if (StorageEngineParamsFactory::isSupported(self->storage.getKeyValueStoreType())) {
+		StorageEngineParamSet params = wait(self->storage.getStorageEngineParams());
+		GetStorageEngineParamsReply _reply(params);
+		req.reply.send(_reply);
+	} else {
+		req.reply.sendError(not_implemented());
+	}
 	return Void();
 }
 
 ACTOR Future<Void> setStorageEngineParamsActor(StorageServer* self, SetStorageEngineParamsRequest req) {
-	StorageEngineParamResult res = wait(self->storage.setStorageEngineParams(req.params));
-	SetStorageEngineParamsReply _reply(res);
-	req.reply.send(_reply);
-	// runtime already finished,
-	// reboot are thrown here
-	// replacement will be handled by DD wiggler
-	if (_reply.result.needReboot.size()) {
-		TraceEvent("RebootDueToKVSParamChange").detail("Params", describe(_reply.result.needReboot));
-		// is it okay to do the reboot at once or better do it together
-		throw please_reboot_kv_store();
+	if (StorageEngineParamsFactory::isSupported(self->storage.getKeyValueStoreType())) {
+		StorageEngineParamResult res = wait(self->storage.setStorageEngineParams(req.params));
+		SetStorageEngineParamsReply _reply(res);
+		req.reply.send(_reply);
+		// runtime already finished,
+		// reboot are thrown here
+		// replacement will be handled by DD wiggler
+		if (_reply.result.needReboot.size()) {
+			TraceEvent("RebootDueToKVSParamChange").detail("Params", describe(_reply.result.needReboot));
+			// is it okay to do the reboot at once or better do it together
+			throw please_reboot_kv_store();
+		}
+	} else {
+		req.reply.sendError(not_implemented());
 	}
 	return Void();
 }
@@ -11603,7 +11613,8 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 			         wait(commitProxies->size()
 			                  ? basicLoadBalance(commitProxies,
 			                                     &CommitProxyInterface::getStorageServerRejoinInfo,
-			                                     GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId(), true))
+			                                     GetStorageServerRejoinInfoRequest(
+			                                         ssi.id(), ssi.locality.dcId(), self->isUsingStorageEngineParams()))
 			                  : Never())) {
 				state GetStorageServerRejoinInfoReply rep = _rep;
 				if (rep.encryptMode != encryptionMode) {
@@ -11616,7 +11627,11 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 				// When a new storage starts, rep.params is the same as existing params
 				// When an existing storage rejoins, exsiting params are intialized as defaults
 				// It will reboot if "needReboot" params mistmatch
-				wait(self->checkStorageEngineParams(rep.params));
+				if (self->isUsingStorageEngineParams()) {
+					TraceEvent(SevDebug, "ReplaceInterfaceCheckStorageEngineParams")
+					    .detail("Params", describe(rep.params.get().getParams()));
+					wait(self->checkStorageEngineParams(rep.params.get()));
+				}
 
 				try {
 					tr.reset();

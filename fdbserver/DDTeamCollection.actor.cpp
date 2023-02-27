@@ -2333,11 +2333,13 @@ public:
 		int index = 0;
 		StorageEngineParamSet result;
 		for (const auto& [serverId, ss] : self->server_info) {
+			const std::string addr = ss->getLastKnownInterface().address().toString();
 			Future<ErrorOr<GetStorageEngineParamsReply>> f = fs[index++];
 			if (!f.isReady() || f.get().isError()) {
-				TraceEvent(SevError, "GetStorageEngineParamsError")
+				TraceEvent(SevWarnAlways, "GetStorageEngineParamsError")
 				    .detail("ServerId", serverId)
 				    .detail("Error", f.get().getError().code());
+				result.set(addr, fmt::format("Error code: {}", std::to_string(f.get().getError().code())));
 				continue;
 			}
 			GetStorageEngineParamsReply reply = f.get().get();
@@ -2346,7 +2348,6 @@ public:
 				paramsObj[k] = v;
 			}
 			const std::string params_json_str = json_spirit::write_string(json_spirit::mValue(paramsObj));
-			const std::string addr = ss->getLastKnownInterface().address().toString();
 			result.set(addr, params_json_str);
 			TraceEvent("GetStorageParamsPerProcess").detail("Process", addr).detail("Params", params_json_str);
 		}
@@ -3708,7 +3709,9 @@ Future<Void> DDTeamCollection::monitorPerpetualStorageWiggle() {
 
 Future<Void> DDTeamCollection::monitorStorageEngineParamsChange() {
 	ASSERT(!db->isMocked());
-	return DDTeamCollectionImpl::monitorStorageEngineParamsChange(this);
+	return StorageEngineParamsFactory::isSupported(configuration.storageServerStoreType)
+	           ? DDTeamCollectionImpl::monitorStorageEngineParamsChange(this)
+	           : Never();
 }
 
 Future<Void> DDTeamCollection::storageParamsUpdater(StorageEngineParamSet newParams) {

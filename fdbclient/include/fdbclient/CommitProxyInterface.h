@@ -570,8 +570,7 @@ struct GetStorageServerRejoinInfoReply {
 	bool newLocality;
 	std::vector<std::pair<Version, Tag>> history;
 	EncryptionAtRestMode encryptMode;
-	// TODO: change to Optional afterwards
-	StorageEngineParamSet params;
+	Optional<StorageEngineParamSet> params;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

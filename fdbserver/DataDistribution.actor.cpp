@@ -1714,8 +1714,6 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				req.reply.send(getTenantsOverStorageQuota(self));
 			}
 			when(GetStorageEngineParamsRequest req = waitNext(di.storageEngineParams.getFuture())) {
-				// TODO : do something and return the result
-				TraceEvent("DDGetStorageEngineParamsRequest").log();
 				actors.add(getStorageEngineParams(self, req));
 			}
 		}

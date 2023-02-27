@@ -1366,7 +1366,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 
 		TraceEvent("StorageServerRequestedReboot", id)
 		    .detail("RebootStorageEngine", e.getError().code() == error_code_please_reboot_kv_store)
-		    .detail("Params", describe(storageEngineParams->getParams()));
+		    .detail("Params", !storageEngineParams ? describe(storageEngineParams->getParams()) : "");
 
 		if (e.getError().code() == error_code_please_reboot_kv_store) {
 			// Wait the kv store shutdown complete before opening a new one
@@ -1387,7 +1387,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 			             : true),
 			    db,
 			    encryptionMode,
-			    *storageEngineParams);
+			    !storageEngineParams ? *storageEngineParams : Optional<StorageEngineParamSet>());
 			filesClosed->add(store->onClosed());
 		}
 
@@ -1948,7 +1948,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 				// When an exsiting storage rejoins, use the default parameter values to open the KVS
 				std::shared_ptr<StorageEngineParamSet> paramsPtr =
-				    std::make_shared<StorageEngineParamSet>(StorageEngineParamsFactory::getParamsValue(s.storeType));
+				    StorageEngineParamsFactory::isSupported(s.storeType)
+				        ? std::make_shared<StorageEngineParamSet>(
+				              StorageEngineParamsFactory::getParamsValue(s.storeType))
+				        : nullptr;
 				Promise<Void> recovery;
 				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connRecord, paramsPtr);
 				recoveries.push_back(recovery.getFuture());
@@ -2598,7 +2601,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					std::shared_ptr<StorageEngineParamSet> paramsPtr =
 					    req.storageEngineParams.present()
 					        ? std::make_shared<StorageEngineParamSet>(req.storageEngineParams.get())
-					        : std::make_shared<StorageEngineParamSet>();
+					        : nullptr;
 					Future<Void> s = storageServer(data,
 					                               recruited,
 					                               req.seedTag,
