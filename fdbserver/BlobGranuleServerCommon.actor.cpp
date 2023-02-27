@@ -508,6 +508,7 @@ ACTOR Future<Void> loadBlobMetadataForTenants(BGTenantMap* self, std::vector<Blo
 					TraceEvent(SevWarn, "BlobMetadataFetchMissingTenants")
 					    .suppressFor(30.0)
 					    .detail("Count", missingIds.size());
+					CODE_PROBE(true, "blob metadata fetch missing tenants");
 
 					req.domainIds.clear();
 					for (auto& id : missingIds) {
@@ -523,6 +524,7 @@ ACTOR Future<Void> loadBlobMetadataForTenants(BGTenantMap* self, std::vector<Blo
 			if (e.code() == error_code_operation_cancelled) {
 				throw e;
 			}
+			CODE_PROBE(true, "blob metadata fetch error");
 			TraceEvent(SevWarn, "BlobMetadataFetchError").errorUnsuppressed(e).suppressFor(30.0);
 		}
 		wait(delay(retrySleep));
