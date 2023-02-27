@@ -25,6 +25,7 @@
 #include "flow/JsonTraceLogFormatter.h"
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/UnitTest.h"
 #include <exception>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -105,19 +106,6 @@ static const char* TRACE_EVENT_THROTTLE_STARTING_TYPE = "TraceEventThrottle_";
 static const char* TRACE_EVENT_INVALID_SUPPRESSION = "InvalidSuppression_";
 static const char* TRACE_EVENT_INVALID_AUDIT_LOG_TYPE = "InvalidAuditLogType_";
 static int TRACE_LOG_MAX_PREOPEN_BUFFER = 1000000;
-
-// special TraceEvents that may bypass throttling or suppression by AuditThisEvent{} passed to constructor
-const std::unordered_set<std::string_view> auditTopics{
-	"AttemptedRPCToPrivatePrevented",
-	"AuditTokenUsed",
-	"IncomingConnection",
-	"InvalidToken",
-	"N2_ConnectHandshakeError",
-	"N2_ConnectHandshakeUnknownError",
-	"N2_AcceptHandshakeError",
-	"N2_AcceptHandshakeUnknownError",
-	"UnauthorizedAccessPrevented",
-};
 
 struct TraceLog {
 	Reference<ITraceLogFormatter> formatter;
@@ -875,13 +863,15 @@ std::string getTraceFormatExtension() {
 	return std::string(g_traceLog.formatter->getExtension());
 }
 
-BaseTraceEvent::BaseTraceEvent() : enabled(0), initialized(true), logged(true) {}
+BaseTraceEvent::State::State(Severity severity) noexcept
+  : value((g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) ? Type::ENABLED : Type::DISABLED) {}
+
+BaseTraceEvent::BaseTraceEvent() : enabled(), initialized(true), logged(true) {}
 BaseTraceEvent::BaseTraceEvent(Severity severity, const char* type, UID id)
-  : enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity), initialized(false), logged(false),
-    severity(severity), type(type), id(id) {}
+  : enabled(severity), initialized(false), logged(false), severity(severity), type(type), id(id) {}
 
 BaseTraceEvent::BaseTraceEvent(BaseTraceEvent&& ev) {
-	enabled = ev.enabled;
+	enabled = std::move(ev.enabled);
 	err = ev.err;
 	fields = std::move(ev.fields);
 	id = ev.id;
@@ -901,14 +891,13 @@ BaseTraceEvent::BaseTraceEvent(BaseTraceEvent&& ev) {
 
 	networkThread = ev.networkThread;
 
-	ev.enabled = 0;
 	ev.initialized = true;
 	ev.logged = true;
 }
 
 BaseTraceEvent& BaseTraceEvent::operator=(BaseTraceEvent&& ev) {
 	// Note: still broken if ev and this are the same memory address.
-	enabled = ev.enabled;
+	enabled = std::move(ev.enabled);
 	err = ev.err;
 	fields = std::move(ev.fields);
 	id = ev.id;
@@ -928,7 +917,6 @@ BaseTraceEvent& BaseTraceEvent::operator=(BaseTraceEvent&& ev) {
 
 	networkThread = ev.networkThread;
 
-	ev.enabled = 0;
 	ev.initialized = true;
 	ev.logged = true;
 
@@ -965,28 +953,23 @@ TraceEvent::TraceEvent(Severity severity, TraceInterval& interval, UID id)
 	init(interval);
 }
 
-TraceEvent::TraceEvent(Severity severity, const char* type, AuditThisEvent, UID id)
-  : BaseTraceEvent(severity, type, id) {
+TraceEvent::TraceEvent(Severity severity, AuditedEvent auditedEvent, UID id)
+  : BaseTraceEvent(severity, auditedEvent.type(), id) {
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 	if (FLOW_KNOBS->AUDIT_LOGGING_ENABLED) {
-		if (!isAudited(this->type)) {
+		if (!auditedEvent) {
+			// Event is not whitelisted. Trace error in simulation and warning in real deployment
 			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways,
-			           std::string(TRACE_EVENT_INVALID_AUDIT_LOG_TYPE).append(type).c_str())
+			           std::string(TRACE_EVENT_INVALID_AUDIT_LOG_TYPE).append(auditedEvent.typeSv()).c_str())
 			    .suppressFor(5);
 		} else {
-			// respect the result of network init state and min trace level check in BaseTraceEvent ctor
-			if (enabled)
-				enabled = 2;
+			enabled.promoteToForcedIfEnabled();
 		}
 	}
 }
 
-TraceEvent::TraceEvent(const char* type, AuditThisEvent, UID id) : TraceEvent(SevInfo, type, AuditThisEvent{}, id) {}
-
-bool TraceEvent::isAudited(std::string_view type) noexcept {
-	return auditTopics.contains(type);
-}
+TraceEvent::TraceEvent(AuditedEvent auditedEvent, UID id) : TraceEvent(SevInfo, auditedEvent, id) {}
 
 void BaseTraceEvent::init(TraceInterval& interval) {
 	init();
@@ -1004,7 +987,7 @@ void BaseTraceEvent::init(TraceInterval& interval) {
 	}
 }
 
-int BaseTraceEvent::init() {
+BaseTraceEvent::State BaseTraceEvent::init() {
 	ASSERT(!logged);
 	if (initialized) {
 		return enabled;
@@ -1015,14 +998,16 @@ int BaseTraceEvent::init() {
 
 	++g_allocation_tracing_disabled;
 
-	enabled = (!g_network || severity >= FLOW_KNOBS->MIN_TRACE_SEVERITY) ? enabled : 0;
+	if (g_network && severity < FLOW_KNOBS->MIN_TRACE_SEVERITY)
+		enabled = BaseTraceEvent::State::disabled();
 
 	std::string_view typeSv(type);
 
 	// Backstop to throttle very spammy trace events
-	if (enabled == 1 && g_network && !g_network->isSimulated() && severity > SevDebug && isNetworkThread()) {
+	if (enabled.isSuppressible() && g_network && !g_network->isSimulated() && severity > SevDebug &&
+	    isNetworkThread()) {
 		if (traceEventThrottlerCache->isAboveThreshold(StringRef((uint8_t*)type, strlen(type)))) {
-			enabled = 0;
+			enabled.suppress();
 			TraceEvent(SevWarnAlways, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str())
 			    .suppressFor(5);
 		} else {
@@ -1094,7 +1079,8 @@ TraceEvent& TraceEvent::errorImpl(class Error const& error, bool includeCancelle
 			           std::string(TRACE_EVENT_INVALID_SUPPRESSION).append(type).c_str())
 			    .suppressFor(5);
 		} else {
-			enabled = 0; // even force-enabled events should respect suppression by error type
+			// even force-enabled events should respect suppression by error type
+			enabled = BaseTraceEvent::State::disabled();
 		}
 	}
 	return *this;
@@ -1118,7 +1104,7 @@ BaseTraceEvent& BaseTraceEvent::detailImpl(std::string&& key, std::string&& valu
 			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, "TraceEventOverflow")
 			    .setMaxEventLength(1000)
 			    .detail("TraceFirstBytes", fields.toString().substr(0, 300));
-			enabled = 0;
+			enabled = BaseTraceEvent::State::disabled();
 		}
 		--g_allocation_tracing_disabled;
 	}
@@ -1189,8 +1175,8 @@ BaseTraceEvent& TraceEvent::sample(double sampleRate, bool logSampleRate) {
 			return *this;
 		}
 
-		// forced logs (enabled == 2) shall not be sampled anyway
-		enabled = enabled && deterministicRandom()->random01() < sampleRate;
+		if (deterministicRandom()->random01() >= sampleRate)
+			enabled.suppress();
 
 		if (enabled && logSampleRate) {
 			detail("SampleRate", sampleRate);
@@ -1202,8 +1188,7 @@ BaseTraceEvent& TraceEvent::sample(double sampleRate, bool logSampleRate) {
 
 BaseTraceEvent& TraceEvent::suppressFor(double duration, bool logSuppressedEventCount) {
 	ASSERT(!logged);
-	// only suppress if not force-enabled (enabled == 2)
-	if (enabled == 1) {
+	if (enabled.isSuppressible()) {
 		if (initialized) {
 			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways,
 			           std::string(TRACE_EVENT_INVALID_SUPPRESSION).append(type).c_str())
@@ -1214,7 +1199,8 @@ BaseTraceEvent& TraceEvent::suppressFor(double duration, bool logSuppressedEvent
 		if (g_network) {
 			if (isNetworkThread()) {
 				int64_t suppressedEventCount = suppressedEvents.checkAndInsertSuppression(type, duration);
-				enabled = enabled && suppressedEventCount >= 0;
+				if (suppressedEventCount < 0)
+					enabled.suppress();
 				if (enabled && logSuppressedEventCount) {
 					detail("SuppressedEventCount", suppressedEventCount);
 				}
@@ -1805,3 +1791,8 @@ std::string traceableStringToString(const char* value, size_t S) {
 
 	return std::string(value, S - 1); // Exclude trailing \0 byte
 }
+
+// AuditedEvent unit test: make sure that whitelist-checks for AuditedEvent gets evaluated at compile time, and has a
+// correct outcome
+static_assert("InvalidToken"_audit, "Either AuditedEvent has a bug or whitelisting for this event type has changed");
+static_assert(!"nvalidToken"_audit, "AuditedEvent has a bug");

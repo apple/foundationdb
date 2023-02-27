@@ -191,7 +191,7 @@ bool TokenCache::validate(TenantId tenantId, StringRef token) {
 }
 
 #define TRACE_INVALID_PARSED_TOKEN(reason, token)                                                                      \
-	TraceEvent(SevWarn, "InvalidToken", AuditThisEvent{})                                                              \
+	TraceEvent(SevWarn, "InvalidToken"_audit)                                                                          \
 	    .detail("From", peer)                                                                                          \
 	    .detail("Reason", reason)                                                                                      \
 	    .detail("CurrentTime", currentTime)                                                                            \
@@ -288,7 +288,7 @@ bool TokenCacheImpl::validate(TenantId tenantId, StringRef token) {
 	auto& entry = cachedEntry.get();
 	if (entry->expirationTime < currentTime) {
 		CODE_PROBE(true, "Found expired token in cache");
-		TraceEvent(SevWarn, "InvalidToken", AuditThisEvent{}).detail("From", peer).detail("Reason", "ExpiredInCache");
+		TraceEvent(SevWarn, "InvalidToken"_audit).detail("From", peer).detail("Reason", "ExpiredInCache");
 		return false;
 	}
 	bool tenantFound = false;
@@ -300,7 +300,7 @@ bool TokenCacheImpl::validate(TenantId tenantId, StringRef token) {
 	}
 	if (!tenantFound) {
 		CODE_PROBE(true, "Valid token doesn't reference tenant");
-		TraceEvent(SevWarn, "InvalidToken", AuditThisEvent{})
+		TraceEvent(SevWarn, "InvalidToken"_audit)
 		    .detail("From", peer)
 		    .detail("Reason", "TenantTokenMismatch")
 		    .detail("RequestedTenant", fmt::format("{:#x}", tenantId))
@@ -324,7 +324,7 @@ void TokenCacheImpl::logTokenUsage(double currentTime, AuditEntry&& entry) {
 		// access in the context of this (client_ip, tenant, token_id) tuple hasn't been logged in current window. log
 		// usage.
 		CODE_PROBE(true, "Audit Logging Running");
-		TraceEvent("AuditTokenUsed", AuditThisEvent{})
+		TraceEvent("AuditTokenUsed"_audit)
 		    .detail("Client", iter->address)
 		    .detail("TenantId", fmt::format("{:#x}", iter->tenantId))
 		    .detail("TokenId", iter->tokenId)

@@ -22,6 +22,7 @@
 #define FLOW_TRACE_H
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <stdarg.h>
 #include <stdint.h>
@@ -426,6 +427,48 @@ struct SpecialTraceMetricType
 
 TRACE_METRIC_TYPE(double, double);
 
+class AuditedEvent;
+
+consteval AuditedEvent operator""_audit(const char*, size_t) noexcept;
+
+class AuditedEvent {
+	// special TraceEvents that may bypass throttling or suppression
+	static constexpr std::array<std::string_view, 9> auditTopics{
+		"AttemptedRPCToPrivatePrevented",
+		"AuditTokenUsed",
+		"IncomingConnection",
+		"InvalidToken",
+		"N2_ConnectHandshakeError",
+		"N2_ConnectHandshakeUnknownError",
+		"N2_AcceptHandshakeError",
+		"N2_AcceptHandshakeUnknownError",
+		"UnauthorizedAccessPrevented",
+	};
+	const char* eventType;
+	int len;
+	bool valid;
+	explicit constexpr AuditedEvent(const char* type, int len) noexcept
+	  : eventType(type), len(len),
+	    valid(std::find(auditTopics.begin(), auditTopics.end(), std::string_view(type, len)) !=
+	          auditTopics.end()) // whitelist looked up during compile time
+	{}
+
+	friend consteval AuditedEvent operator""_audit(const char*, size_t) noexcept;
+
+public:
+	constexpr const char* type() const noexcept { return eventType; }
+
+	constexpr std::string_view typeSv() const noexcept { return std::string_view(eventType, len); }
+
+	explicit constexpr operator bool() const noexcept { return valid; }
+};
+
+// This, along with private AuditedEvent constructor, guarantees that AuditedEvent is always created with a string
+// literal
+consteval AuditedEvent operator""_audit(const char* eventType, size_t len) noexcept {
+	return AuditedEvent(eventType, len);
+}
+
 // The BaseTraceEvent class is the parent class of TraceEvent and provides all functionality on the TraceEvent except
 // for the functionality that can be used to suppress the trace event.
 //
@@ -472,6 +515,52 @@ struct BaseTraceEvent {
 	BaseTraceEvent& detailf(std::string key, const char* valueFormat, ...);
 
 protected:
+	class State {
+		enum class Type {
+			DISABLED = 0,
+			ENABLED,
+			FORCED,
+		};
+		Type value;
+
+	public:
+		constexpr State() noexcept : value(Type::DISABLED) {}
+		State(Severity severity) noexcept;
+		State(Severity severity, AuditedEvent) noexcept : State(severity) {
+			if (*this)
+				value = Type::FORCED;
+		}
+
+		State(const State& other) noexcept = default;
+		State(State&& other) noexcept : value(other.value) { other.value = Type::DISABLED; }
+		State& operator=(const State& other) noexcept = default;
+		State& operator=(State&& other) noexcept {
+			if (this != &other) {
+				value = other.value;
+				other.value = Type::DISABLED;
+			}
+			return *this;
+		}
+		bool operator==(const State& other) const noexcept = default;
+		bool operator!=(const State& other) const noexcept = default;
+
+		explicit operator bool() const noexcept { return value == Type::ENABLED || value == Type::FORCED; }
+
+		void suppress() noexcept {
+			if (value == Type::ENABLED)
+				value = Type::DISABLED;
+		}
+
+		bool isSuppressible() const noexcept { return value == Type::ENABLED; }
+
+		void promoteToForcedIfEnabled() noexcept {
+			if (value == Type::ENABLED)
+				value = Type::FORCED;
+		}
+
+		static constexpr State disabled() noexcept { return State(); }
+	};
+
 	BaseTraceEvent();
 	BaseTraceEvent(Severity, const char* type, UID id = UID());
 
@@ -517,15 +606,15 @@ public:
 
 	BaseTraceEvent& GetLastError();
 
-	bool isEnabled() const { return enabled; }
+	bool isEnabled() const { return static_cast<bool>(enabled); }
 
 	BaseTraceEvent& setErrorKind(ErrorKind errorKind);
 
-	explicit operator bool() const { return enabled; }
+	explicit operator bool() const { return static_cast<bool>(enabled); }
 
 	void log();
 
-	void disable() { enabled = false; } // Disables the trace event so it doesn't get logged
+	void disable() { enabled.suppress(); } // Disables the trace event so it doesn't get logged
 
 	virtual ~BaseTraceEvent(); // Actually logs the event
 
@@ -537,10 +626,7 @@ public:
 	const TraceEventFields& getFields() const { return fields; }
 
 protected:
-	// enabled == 0 for disabled trace
-	// enabled == 1 for trace events that may be suppressed or throttled
-	// enabled == 2 to indicate forced logging
-	int enabled;
+	State enabled;
 	bool initialized;
 	bool logged;
 	std::string trackingKey;
@@ -561,16 +647,9 @@ protected:
 	static unsigned long eventCounts[NUM_MAJOR_LEVELS_OF_EVENTS];
 	static thread_local bool networkThread;
 
-	int init();
+	State init();
 	void init(struct TraceInterval&);
 };
-
-// Construct TraceEvents with this tag struct to ensure that the events are not suppressed or throttled.
-// Force-enablement activates only iff FLOW_KNOBS->AUDIT_LOGGING_ENABLED is set and the event type is
-// whitelisted: i.e. passes TraceEvent::isAudited() check.
-// Failing to satify the latter condition would result in an error/warning trace in simulation/real execution mode.
-// Force-enabled traces still adhere to MIN_TRACE_SEVERITY and buffer-all-logs-before-network-init policy.
-struct AuditThisEvent {};
 
 // The TraceEvent class provides the implementation for BaseTraceEvent. The only functions that should be implemented
 // here are those that must be called first in a trace event call sequence, such as the suppression functions.
@@ -580,8 +659,8 @@ struct TraceEvent : public BaseTraceEvent {
 	TraceEvent(Severity, const char* type, UID id = UID());
 	TraceEvent(struct TraceInterval&, UID id = UID());
 	TraceEvent(Severity severity, struct TraceInterval& interval, UID id = UID());
-	TraceEvent(const char* type, AuditThisEvent, UID id = UID());
-	TraceEvent(Severity, const char* type, AuditThisEvent, UID id = UID());
+	TraceEvent(AuditedEvent, UID id = UID());
+	TraceEvent(Severity, AuditedEvent, UID id = UID());
 
 	BaseTraceEvent& error(const class Error& e) {
 		if (enabled) {
@@ -599,8 +678,6 @@ struct TraceEvent : public BaseTraceEvent {
 
 	BaseTraceEvent& sample(double sampleRate, bool logSampleRate = true);
 	BaseTraceEvent& suppressFor(double duration, bool logSuppressedEventCount = true);
-
-	static bool isAudited(std::string_view type) noexcept;
 
 private:
 	TraceEvent& errorImpl(const class Error& e, bool includeCancelled = false);

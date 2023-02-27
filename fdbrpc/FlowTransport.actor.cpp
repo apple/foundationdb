@@ -971,7 +971,7 @@ void Peer::onIncomingConnection(Reference<Peer> self, Reference<IConnection> con
 	if (!destination.isPublic() || outgoingConnectionIdle || destination > compatibleAddr ||
 	    (lastConnectTime > 1.0 && now() - lastConnectTime > FLOW_KNOBS->ALWAYS_ACCEPT_DELAY)) {
 		// Keep the new connection
-		TraceEvent("IncomingConnection", AuditThisEvent{}, conn->getDebugID())
+		TraceEvent("IncomingConnection"_audit, conn->getDebugID())
 		    .suppressFor(1.0)
 		    .detail("FromAddr", conn->getPeerAddress())
 		    .detail("CanonicalAddr", destination)
@@ -1072,7 +1072,7 @@ ACTOR static void deliver(TransportData* self,
 	} else if (destination.token.first() & TOKEN_STREAM_FLAG) {
 		// We don't have the (stream) endpoint 'token', notify the remote machine
 		if (receiver) {
-			TraceEvent(SevWarnAlways, "AttemptedRPCToPrivatePrevented", AuditThisEvent{})
+			TraceEvent(SevWarnAlways, "AttemptedRPCToPrivatePrevented"_audit)
 			    .detail("From", peerAddress)
 			    .detail("Token", destination.token)
 			    .detail("Receiver", typeid(*receiver).name());

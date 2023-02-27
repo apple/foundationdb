@@ -695,7 +695,7 @@ struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<Ne
 		if constexpr (IsPublic) {
 			if (!message.verify()) {
 				if constexpr (HasReply<T>) {
-					TraceEvent(SevWarnAlways, "UnauthorizedAccessPrevented", AuditThisEvent{})
+					TraceEvent(SevWarnAlways, "UnauthorizedAccessPrevented"_audit)
 					    .detail("RequestType", typeid(T).name())
 					    .detail("ClientIP", FlowTransport::transport().currentDeliveryPeerAddress())
 					    .log();
