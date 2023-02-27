@@ -1024,9 +1024,8 @@ def tenant_lock(logger):
     start_string = "Locked tenant `tenant' with UID `"
     assert output.startswith(start_string)
     assert output.endswith("'")
-    output = output[:-1]
-    uid_str = output.strip(start_string)
-    assert len(uid_str) <= 32  # could be smaller than 32 if the first 4 bits are 0
+    uid_str = output[len(start_string):-1]
+    assert len(uid_str) == 32  # could be smaller than 32 if the first 4 bits are 0
 
     logger.debug('Verify tenant is readable')
     output = run_fdbcli_command('usetenant tenant; get foo').strip()
