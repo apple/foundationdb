@@ -2781,7 +2781,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 		if (snapshotVersion != invalidVersion) {
 			// When a snapshot version is specified, we will first get a restore set using the latest snapshot file to
 			// restore to the snapshot version. After snapshot version, we will only use mutation logs to restore.
-			wait(store(fileSet, bc->getRestoreSet(snapshotVersion, keyRangesFilter)));
+			wait(store(fileSet, bc->getRestoreSet(snapshotVersion, cx, keyRangesFilter)));
 			if (fileSet.present()) {
 				result["snapshot_version"] = fileSet.get().targetVersion;
 				for (const auto& rangeFile : fileSet.get().ranges) {
@@ -2826,10 +2826,10 @@ ACTOR Future<Void> queryBackup(const char* name,
 			}
 
 			// We only need to know all the mutation logs from `snapshotVersion` to `restoreVersion`.
-			wait(store(fileSet, bc->getRestoreSet(restoreVersion, keyRangesFilter, /*logOnly=*/true, snapshotVersion)));
+			wait(store(fileSet, bc->getRestoreSet(restoreVersion, cx, keyRangesFilter, /*logOnly=*/true, snapshotVersion)));
 		} else {
 			// When a snapshot version is not specified, we use the latest snapshot to restore to the `restoreVersion`.
-			wait(store(fileSet, bc->getRestoreSet(restoreVersion, keyRangesFilter)));
+			wait(store(fileSet, bc->getRestoreSet(restoreVersion, cx, keyRangesFilter)));
 		}
 
 		if (fileSet.present()) {
