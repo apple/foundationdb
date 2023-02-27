@@ -22,18 +22,18 @@ package com.apple.foundationdb.test;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.apple.foundationdb.ApiVersion;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.KeyValue;
 import com.apple.foundationdb.TransactionContext;
 
 public class IterableTest {
-	public static final int API_VERSION = 720;
 
 	public static void main(String[] args) throws InterruptedException {
 		final int reps = 1000;
 		try {
-			FDB fdb = FDB.selectAPIVersion(API_VERSION);
+			FDB fdb = FDB.selectAPIVersion(ApiVersion.LATEST);
 			try(Database db = fdb.open()) {
 				runTests(reps, db);
 			}

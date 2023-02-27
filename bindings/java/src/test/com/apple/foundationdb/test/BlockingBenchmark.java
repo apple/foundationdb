@@ -24,18 +24,17 @@ import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
+import com.apple.foundationdb.ApiVersion;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.Transaction;
 
 public class BlockingBenchmark {
-	public static final int API_VERSION = 720;
-
 	private static final int REPS = 100000;
 	private static final int PARALLEL = 100;
 
 	public static void main(String[] args) throws InterruptedException {
-		FDB fdb = FDB.selectAPIVersion(API_VERSION);
+		FDB fdb = FDB.selectAPIVersion(ApiVersion.LATEST);
 
 		// The cluster file DOES NOT need to be valid, although it must exist.
 		//  This is because the database is never really contacted in this test.

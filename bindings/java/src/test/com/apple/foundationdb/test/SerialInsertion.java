@@ -24,19 +24,18 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.apple.foundationdb.ApiVersion;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.Transaction;
 
 public class SerialInsertion {
-	public static final int API_VERSION = 720;
-
 	private static final int THREAD_COUNT = 10;
 	private static final int BATCH_SIZE = 1000;
 	private static final int NODES = 1000000;
 
 	public static void main(String[] args) {
-		FDB api = FDB.selectAPIVersion(API_VERSION);
+		FDB api = FDB.selectAPIVersion(ApiVersion.LATEST);
 		try(Database database = api.open()) {
 			long start = System.currentTimeMillis();
 

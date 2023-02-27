@@ -23,11 +23,11 @@ package com.apple.foundationdb.test;
 import java.nio.charset.Charset;
 import java.util.Random;
 
+import com.apple.foundationdb.ApiVersion;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 
 public abstract class AbstractTester {
-	public static final int API_VERSION = 720;
 	protected static final int NUM_RUNS = 25;
 	protected static final Charset ASCII = Charset.forName("ASCII");
 
@@ -79,7 +79,7 @@ public abstract class AbstractTester {
 		args = TesterArgs.parseArgs(argStrings);
 		if (args == null) return;
 
-		fdb = FDB.selectAPIVersion(API_VERSION);
+		fdb = FDB.selectAPIVersion(ApiVersion.LATEST);
 
 		// Validate argument combinations and set options.
 		if (!args.useMultiversionApi()) {

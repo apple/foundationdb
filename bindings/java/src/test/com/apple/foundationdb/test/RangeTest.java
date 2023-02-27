@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.concurrent.CompletionException;
 import java.util.function.Function;
 
+import com.apple.foundationdb.ApiVersion;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.FDBException;
@@ -34,11 +35,10 @@ import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncIterable;
 
 public class RangeTest {
-	private static final int API_VERSION = 720;
 
 	public static void main(String[] args) {
-		System.out.println("About to use version " + API_VERSION);
-		FDB fdb = FDB.selectAPIVersion(API_VERSION);
+		System.out.println("About to use version " + ApiVersion.LATEST);
+		FDB fdb = FDB.selectAPIVersion(ApiVersion.LATEST);
 
 		try(Database db = fdb.open()) {
 			try {
