@@ -1038,30 +1038,30 @@ public:
 	Future<Void> checkStorageEngineParams(std::map<std::string, std::string>& params) {
 		return fmap(
 		    [this, &params](StorageEngineParamResult res) {
-			    // StorageEngineParamResult res = storage.checkStorageEngineParamsCompatibility(params);
-			    // runtime mutable params are always consistent in database configuration and storages themselves
+			    // all changed params are those not written into the storage files
 			    for (const auto& k : res.applied) {
 				    std::string currV = storageEngineParams->contains(k) ? storageEngineParams->at(k) : "NULL";
-				    TraceEvent("MismatchAppliedStorageEngineParam")
+				    TraceEvent("ApplyRuntimeStorageEngineParamChangeAfterRejoin")
 				        .detail("Param", k)
 				        .detail("Expected", params[k])
 				        .detail("Used", currV);
 			    }
 			    for (const auto& k : res.needReboot) {
 				    std::string currV = storageEngineParams->contains(k) ? storageEngineParams->at(k) : "NULL";
-				    TraceEvent("MismatchRebootStorageEngineParam")
+				    TraceEvent("MismatchedStorageEngineParamNeedReboot")
 				        .detail("Param", k)
 				        .detail("Expected", params[k])
 				        .detail("Used", currV);
 				    (*storageEngineParams)[k] = params[k];
 			    }
 			    if (res.needReboot.size()) {
-				    TraceEvent("RebootKVSForParams").detail("Params", describe(res.needReboot));
+				    TraceEvent("RebootKVSAfterRejoinForParams").detail("Params", describe(res.needReboot));
 				    throw please_reboot_kv_store();
 			    }
 			    return Void();
 		    },
-		    storage.checkStorageEngineParamsCompatibility(params));
+			// it is safe to call when params is the same as the one storage's using
+		    storage.setStorageEngineParams(params));
 	}
 
 	StorageServerDisk storage;
