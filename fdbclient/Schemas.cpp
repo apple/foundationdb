@@ -146,6 +146,10 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                   "storage_metadata":{
                      "created_time_datetime":"1970-01-01 00:00:00.000 +0000",
                      "created_time_timestamp": 0,
+                     "need_replacement":false,
+                     "params_need_to_be_replaced":[
+                        "default_page_size"
+                     ],
                      "storage_engine":{
                      "$enum":[
                      "ssd",

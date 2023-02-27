@@ -1655,7 +1655,7 @@ struct StorageMetadataType {
 			StatusArray parmsObj;
 			for (const auto& k : paramsNeedTobeReplaced)
 				parmsObj.push_back(k);
-			result["Params_need_to_be_replaced"] = parmsObj;
+			result["params_need_to_be_replaced"] = parmsObj;
 		}
 		return result;
 	}
