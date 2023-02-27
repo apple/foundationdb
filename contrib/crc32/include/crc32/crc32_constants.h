@@ -411,7 +411,7 @@ static const __vector unsigned long long vcrc_const[255] __attribute__((aligned(
 	{ 0x00000000d4d403bc, 0x00000001f5ac7380 },
 	/* x^79872 mod p(x)` << 1, x^79936 mod p(x)` << 1 */
 	{ 0x00000001734b89aa, 0x000000011822ea70 },
-	/* x^78848 mod p(x)` << 1, x^7.7.3 mod p(x)` << 1 */
+	/* x^78848 mod p(x)` << 1, x^78912 mod p(x)` << 1 */
 	{ 0x000000010e7a58d6, 0x00000000c3a33848 },
 	/* x^77824 mod p(x)` << 1, x^77888 mod p(x)` << 1 */
 	{ 0x00000001f9f04e9c, 0x00000001bd151c24 },
@@ -922,7 +922,7 @@ static const __vector unsigned long long vcrc_const[255] __attribute__((aligned(
 	{ 0x00000001f5ac7380, 0x00000000d4d403bc },
 	/* x^79872 mod p(x)` << 1, x^79936 mod p(x)` << 1 */
 	{ 0x000000011822ea70, 0x00000001734b89aa },
-	/* x^78848 mod p(x)` << 1, x^7.7.3 mod p(x)` << 1 */
+	/* x^78848 mod p(x)` << 1, x^78912 mod p(x)` << 1 */
 	{ 0x00000000c3a33848, 0x000000010e7a58d6 },
 	/* x^77824 mod p(x)` << 1, x^77888 mod p(x)` << 1 */
 	{ 0x00000001bd151c24, 0x00000001f9f04e9c },
@@ -1704,7 +1704,7 @@ static const __vector unsigned long long v_Barrett_const[2] __attribute__((align
       /* x^79872 mod p(x)` << 1, x^79936 mod p(x)` << 1 */
       .octa 0x000000011822ea7000000001734b89aa
 
-      /* x^78848 mod p(x)` << 1, x^7.7.3 mod p(x)` << 1 */
+      /* x^78848 mod p(x)` << 1, x^78912 mod p(x)` << 1 */
       .octa 0x00000000c3a33848000000010e7a58d6
 
       /* x^77824 mod p(x)` << 1, x^77888 mod p(x)` << 1 */
