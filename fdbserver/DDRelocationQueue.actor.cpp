@@ -1240,14 +1240,17 @@ struct DDQueue : public IDDRelocationQueue {
 			// update both inFlightActors and inFlight key range maps, cancelling deleted RelocateShards
 			std::vector<KeyRange> ranges;
 			inFlightActors.getRangesAffectedByInsertion(rd.keys, ranges);
+			auto rangesInDDMove = dataMoves.getAffectedRangesAfterInsertion(rd.keys);
 			TraceEvent(SevDebug, "CancelInFlightActorsInRelocator")
 			    .detail("DebugID", debugID)
 			    .detail("Range", rd.keys)
-			    .detail("IntersectRange", KeyRangeRef(ranges.front().begin, ranges.back().end))
-			    .detail("AchievedRanges", ranges);
+			    .detail("AffectRange", KeyRangeRef(ranges.front().begin, ranges.back().end))
+			    .detail("AffectRanges", ranges)
+			    .detail("AffectRangeSeenByDDMove", KeyRangeRef(rangesInDDMove.front().begin, rangesInDDMove.back().end))
+			    .detail("AffectRangesSeenByDDMove", rangesInDDMove);
+
 			inFlightActors.cancel(KeyRangeRef(ranges.front().begin, ranges.back().end));
 
-			TraceEvent(SevDebug, "CancelDataMoveInRelocatorStart").detail("DebugID", debugID).detail("Range", rd.keys);
 			Future<Void> fCleanup = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA
 			                            ? cancelDataMove(this, rd.keys, ddEnabledState, debugID)
 			                            : Void();
@@ -1391,7 +1394,6 @@ ACTOR Future<Void> cancelDataMove(struct DDQueue* self,
                                   KeyRange range,
                                   const DDEnabledState* ddEnabledState,
                                   UID debugID) {
-	TraceEvent(SevDebug, "CancelDataMove", self->distributorId).detail("DebugID", debugID).detail("Range", range);
 	state std::vector<Future<Void>> cleanup;
 	state std::vector<UID> existingCleanedupDataMoves;
 	state std::vector<UID> newCleanedupDataMoves;
@@ -1404,23 +1406,29 @@ ACTOR Future<Void> cancelDataMove(struct DDQueue* self,
 			newCleanedupDataMoves.clear();
 			lastObservedDataMoves.clear();
 
+			auto rangesSeenByDDM = self->dataMoves.getAffectedRangesAfterInsertion(range);
+			TraceEvent(SevDebug, "CancelDataMoveStart", self->distributorId)
+			    .detail("DebugID", debugID)
+			    .detail("RangeSeensByDDM", KeyRangeRef(rangesSeenByDDM.front().begin, rangesSeenByDDM.back().end))
+			    .detail("RangesSeenByDDM", rangesSeenByDDM)
+			    .detail("Range", range);
+
 			auto f = self->dataMoves.intersectingRanges(range);
 			for (auto it = f.begin(); it != f.end(); ++it) {
-				TraceEvent(SevDebug, "CancelDataMoveDetails", self->distributorId)
-				    .detail("DebugID", debugID)
-				    .detail("DataMoveID", it->value().id)
-				    .detail("IntersectRange", KeyRangeRef(it->range().begin, it->range().end))
-				    .detail("Range", range);
 				if (!it->value().isValid()) {
+					TraceEvent("CancelDataMoveInvalid")
+					    .detail("DebugID", debugID)
+					    .detail("DataMoveID", it->value().id)
+					    .detail("Range", range);
 					continue;
 				}
 				KeyRange keys = KeyRangeRef(it->range().begin, it->range().end);
-				TraceEvent(SevDebug, "DDQueueCancelDataMove", self->distributorId)
+				TraceEvent(SevInfo, "DDQueueCancelDataMove", self->distributorId)
 				    .detail("DebugID", debugID)
 				    .detail("DataMoveID", it->value().id)
-				    .detail("IntersectRange", keys)
+				    .detail("DataMoveRange", keys)
 				    .detail("Range", range)
-				    .detail("CancelValid", it->value().cancel.isValid());
+				    .detail("ExistingDataMove", it->value().cancel.isValid());
 				if (!it->value().cancel.isValid()) {
 					newCleanedupDataMoves.push_back(it->value().id);
 					it->value().cancel = cleanUpDataMove(self->cx,
@@ -1435,20 +1443,24 @@ ACTOR Future<Void> cancelDataMove(struct DDQueue* self,
 				} else {
 					existingCleanedupDataMoves.push_back(it->value().id);
 				}
-				TraceEvent(SevDebug, "DDQueueAddedToWaitListDataMoveCancel", self->distributorId)
-				    .detail("DebugID", debugID)
-				    .detail("DataMoveID", it->value().id)
-				    .detail("IntersectRange", keys)
-				    .detail("Range", range)
-				    .detail("CancelValid", it->value().cancel.isValid())
-				    .detail("NewCleanUp", newCleanedupDataMoves)
-				    .detail("ExistingCleanUp", existingCleanedupDataMoves);
 				lastObservedDataMoves.push_back(std::make_pair(keys, it->value().id));
 				cleanup.push_back(it->value().cancel);
 			}
 
+			rangesSeenByDDM = self->dataMoves.getAffectedRangesAfterInsertion(range);
+			TraceEvent(SevDebug, "CancelDataMoveWaitForAll", self->distributorId)
+			    .detail("DebugID", debugID)
+			    .detail("RangeSeenByDDM", KeyRangeRef(rangesSeenByDDM.front().begin, rangesSeenByDDM.back().end))
+			    .detail("RangesSeenByDDM", rangesSeenByDDM)
+			    .detail("Range", range)
+			    .detail("WaitForNewCleanUp", newCleanedupDataMoves)
+			    .detail("WaitForExistingCleanUp", existingCleanedupDataMoves);
 			wait(waitForAll(cleanup));
 
+			auto rangesSeenByDDM = self->dataMoves.getAffectedRangesAfterInsertion(range);
+			TraceEvent(SevDebug, "CancelDataMoveCheck", self->distributorId)
+			    .detail("DebugID", debugID)
+			    .detail("Range", range);
 			for (auto observedDataMove : lastObservedDataMoves) {
 				auto f = self->dataMoves.intersectingRanges(observedDataMove.first);
 				for (auto it = f.begin(); it != f.end(); ++it) {
@@ -1463,7 +1475,10 @@ ACTOR Future<Void> cancelDataMove(struct DDQueue* self,
 						    .detail("Range", range)
 						    .detail("OldRange", observedDataMove.first)
 						    .detail("LastObservedDataMoveID", observedDataMove.second)
-						    .detail("CurrentDataMoveID", it->value().id);
+						    .detail("CurrentDataMoveID", it->value().id)
+						    .detail("RangeSeenByDDM",
+						            KeyRangeRef(rangesSeenByDDM.front().begin, rangesSeenByDDM.back().end))
+						    .detail("RangesSeenByDDM", rangesSeenByDDM);
 						throw retry();
 					}
 				}
@@ -1471,32 +1486,22 @@ ACTOR Future<Void> cancelDataMove(struct DDQueue* self,
 
 			auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(range);
 			if (!ranges.empty()) {
-				TraceEvent e(SevDebug, "InsertDataMoveByCleanUpDone", self->distributorId);
-				e.setMaxEventLength(4000000);
-				for (int i = 0; i < ranges.size(); i++) {
-					e.detail("CurrentAffectedRange" + std::to_string(i), static_cast<KeyRange>(ranges[i]));
-					e.detail("CurrentAffectedDataMoveId" + std::to_string(i), ranges[i].value.id);
-				}
-				auto f = self->dataMoves.intersectingRanges(range);
-				int cc = 0;
-				for (auto it = f.begin(); it != f.end(); ++it) {
-					KeyRangeRef ikr(it->range().begin, it->range().end);
-					e.detail("CurrentIntersectRange" + std::to_string(cc), ikr);
-					e.detail("CurrentIntersectDataMoveId" + std::to_string(cc), it->value().id);
-					cc++;
-				}
-				e.detail("DebugID", debugID);
-				e.detail("NewDataMoveId", DDQueue::DDDataMove().id);
-				e.detail("NewRange", KeyRangeRef(ranges.front().begin, ranges.back().end));
-				e.detail("Range", range);
-				e.detail("WaitedNewCleanUp", newCleanedupDataMoves);
-				e.detail("WaitedExistingCleanUp", existingCleanedupDataMoves);
-
 				self->dataMoves.insert(KeyRangeRef(ranges.front().begin, ranges.back().end), DDQueue::DDDataMove());
 			}
+			TraceEvent(SevDebug, "InsertDataMoveByCleanUpDone", self->distributorId)
+			    .detail("DebugID", debugID)
+			    .detail("NewDataMoveId", DDQueue::DDDataMove().id)
+			    .detail("NewRange", KeyRangeRef(ranges.front().begin, ranges.back().end))
+			    .detail("Range", range)
+			    .detail("WaitedNewCleanUp", newCleanedupDataMoves)
+			    .detail("WaitedExistingCleanUp", existingCleanedupDataMoves);
 			break;
 
 		} catch (Error& e) {
+			TraceEvent(SevDebug, "CancelDataMoveError", self->distributorId)
+			    .detail("DebugID", debugID)
+			    .detail("Range", range)
+			    .detail("Error", e.what());
 			if (e.code() == error_code_retry) {
 				wait(delay(1));
 			} else {
@@ -1548,7 +1553,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state uint64_t relocatorDebugID = deterministicRandom()->randomUInt64();
 	state bool enableShardMove = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD;
 
+	auto rangesSeenByDDM = self->dataMoves.getAffectedRangesAfterInsertion(rd.keys);
 	TraceEvent(SevDebug, "DDRelocatorStart", distributorId)
+	    .detail("RangeSeenByDDM", KeyRangeRef(rangesSeenByDDM.front().begin, rangesSeenByDDM.back().end))
 	    .detail("Range", rd.keys)
 	    .detail("DebugID", debugID)
 	    .detail("IsRestore", rd.isRestore())
@@ -2216,6 +2223,13 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 		}
 	} catch (Error& e) {
 		state Error err = e;
+		TraceEvent(SevDebug, "DDRelocatorError", distributorId)
+		    .detail("Range", rd.keys)
+		    .detail("DebugID", debugID)
+		    .detail("IsRestore", rd.isRestore())
+		    .detail("RelocatorID", relocatorDebugID)
+		    .detail("Error", err.what());
+
 		TraceEvent(relocateShardInterval.end(), distributorId)
 		    .errorUnsuppressed(err)
 		    .detail("Duration", now() - startTime);
@@ -2232,9 +2246,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 		relocationComplete.send(rd);
 
 		if (err.code() == error_code_data_move_dest_team_not_found) {
-			TraceEvent(SevDebug, "DataMoveDestTeamNotFound")
-			    .detail("InputRange", rd.keys)
-			    .detail("DebugID", relocatorDebugID);
+			TraceEvent(SevDebug, "DataMoveDestTeamNotFound").detail("InputRange", rd.keys).detail("DebugID", debugID);
 			wait(cancelDataMove(self, rd.keys, ddEnabledState));
 		}
 

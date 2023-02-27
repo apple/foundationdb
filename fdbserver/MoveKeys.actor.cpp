@@ -2403,6 +2403,8 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 
 	try {
 		loop {
+			complete = false;
+
 			state Transaction tr(occ);
 			state std::unordered_map<UID, std::vector<Shard>> physicalShardMap;
 			state std::set<UID> oldDests;
@@ -2592,17 +2594,20 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				if (range.end == dataMove.ranges.front().end) {
 					tr.clear(dataMoveKeyFor(dataMoveId));
 					complete = true;
-					TraceEvent(SevVerbose, "CleanUpDataMoveDeleteMetaData", dataMoveId)
+					TraceEvent(SevDebug, "CleanUpDataMoveDeleteMetaData", dataMoveId)
+					    .detail("DebugID", debugID)
 					    .detail("DataMoveID", dataMove.toString());
 
 				} else {
 					dataMove.ranges.front() = KeyRangeRef(range.end, dataMove.ranges.front().end);
 					dataMove.setPhase(DataMoveMetaData::Deleting);
 					tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
-					TraceEvent(SevVerbose, "CleanUpDataMovePartial", dataMoveId)
+					TraceEvent(SevDebug, "CleanUpDataMovePartial", dataMoveId)
+					    .detail("DebugID", debugID)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("CurrentRange", range)
-					    .detail("NewDataMove", dataMove.toString());
+					    .detail("NewDataMove", dataMove.toString())
+					    .detail("Complete", complete);
 				}
 
 				std::vector<Future<Void>> actors;
@@ -2613,16 +2618,18 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 
 				wait(tr.commit());
 
-				TraceEvent(SevVerbose, "CleanUpDataMoveCommitted", dataMoveId)
+				TraceEvent(SevDebug, "CleanUpDataMoveCommitted", dataMoveId)
+				    .detail("DebugID", debugID)
 				    .detail("DataMoveID", dataMoveId)
-				    .detail("Range", range);
+				    .detail("Range", range)
+				    .detail("Complete", complete);
 				if (complete) {
 					break;
 				}
 			} catch (Error& e) {
 				state Error err = e;
 				wait(tr.onError(e));
-				TraceEvent(SevWarn, "CleanUpDataMoveRetriableError", dataMoveId)
+				TraceEvent(SevDebug, "CleanUpDataMoveRetriableError", dataMoveId)
 				    .error(err)
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("DataMoveRange", range.toString())
@@ -2633,7 +2640,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "CleanUpDataMoveFail", dataMoveId)
+		TraceEvent(SevDebug, "CleanUpDataMoveFail", dataMoveId)
 		    .errorUnsuppressed(e)
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("DataMoveRange", range.toString())
