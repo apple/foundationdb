@@ -1060,7 +1060,7 @@ public:
 			    }
 			    return Void();
 		    },
-			// it is safe to call when params is the same as the one storage's using
+		    // it is safe to call when params is the same as the one storage's using
 		    storage.setStorageEngineParams(params));
 	}
 
