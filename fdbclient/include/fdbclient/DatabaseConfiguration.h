@@ -102,20 +102,44 @@ struct RegionInfo {
 
 // used to initialize default parameters' values for different storage engines
 struct StorageEngineParamsFactory {
-	static std::map<KeyValueStoreType::StoreType, std::map<std::string, std::string>>& factories() {
-		static std::map<KeyValueStoreType::StoreType, std::map<std::string, std::string>> theFactories;
+
+	static std::map<KeyValueStoreType::StoreType,
+	                std::map<std::string, std::pair<StorageEngineParamsSet::CHANGETYPE, std::string>>>&
+	factories() {
+		static std::map<KeyValueStoreType::StoreType,
+		                std::map<std::string, std::pair<StorageEngineParamsSet::CHANGETYPE, std::string>>>
+		    theFactories;
 		return theFactories;
 	}
 
-	StorageEngineParamsFactory(KeyValueStoreType::StoreType storeType, std::map<std::string, std::string> const& vals) {
+	StorageEngineParamsFactory(
+	    KeyValueStoreType::StoreType storeType,
+	    std::map<std::string, std::pair<StorageEngineParamsSet::CHANGETYPE, std::string>> const& vals) {
 		factories()[storeType] = vals;
 	}
 
-	static std::map<std::string, std::string>& getParams(KeyValueStoreType::StoreType storeType) {
+	static std::map<std::string, std::pair<StorageEngineParamsSet::CHANGETYPE, std::string>>& getParams(
+	    KeyValueStoreType::StoreType storeType) {
 		if (factories().contains(storeType))
 			return factories().at(storeType);
 		// TODO : return an empty map here
 		return factories()[storeType];
+	}
+
+	static std::map<std::string, std::string> getParamsValue(KeyValueStoreType::StoreType storeType) {
+		std::map<std::string, std::string> result;
+		if (factories().contains(storeType)) {
+			auto m = factories().at(storeType);
+			for (const auto& [k, pair] : m)
+				result[k] = pair.second;
+		}
+		// TODO : return an empty map here
+		return result;
+	}
+
+	static StorageEngineParamsSet::CHANGETYPE getChangeType(KeyValueStoreType::StoreType storeType,
+	                                                        const std::string& name) {
+		return factories()[storeType][name].first;
 	}
 };
 

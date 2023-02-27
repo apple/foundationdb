@@ -1349,7 +1349,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(
     bool isTss,
     Reference<AsyncVar<ServerDBInfo> const> db,
     std::string folder,
-    ActorCollection* filesClosed,
+    SignalableActorCollection* filesClosed,
     int64_t memoryLimit,
     IKeyValueStore* store,
     bool validateDataFiles,
@@ -1367,12 +1367,13 @@ ACTOR Future<Void> storageServerRollbackRebooter(
 
 		TraceEvent("StorageServerRequestedReboot", id)
 		    .detail("RebootStorageEngine", e.getError().code() == error_code_please_reboot_kv_store)
-		    .log();
+		    .detail("Params", describe(*storageEngineParams));
 
 		if (e.getError().code() == error_code_please_reboot_kv_store) {
 			// Add the to actorcollection to make sure filesClosed not return
 			filesClosed->add(rebootKVStore->getFuture());
-			wait(delay(SERVER_KNOBS->REBOOT_KV_STORE_DELAY));
+			wait(delay(SERVER_KNOBS->REBOOT_KV_STORE_DELAY *
+			           10)); // TODO : Fixing using onClosed() Future get before hand
 			// use the up-to-date storage engine paras
 			// TODO : fix this condition
 			Optional<std::map<std::string, std::string>> params(*storageEngineParams);
@@ -1785,9 +1786,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state Future<Void> loggingTrigger = Void();
 	state double loggingDelay = SERVER_KNOBS->WORKER_LOGGING_INTERVAL;
 	// These two promises are destroyed after the "filesClosed" below to avoid broken_promise
-	state Promise<Void> rebootKVSPromise;
+	state Promise<Void> rebootKVSPromise; // TODO : remove these two
 	state Promise<Void> rebootKVSPromise2;
-	state ActorCollection filesClosed(true);
+	state SignalableActorCollection filesClosed;
 	state Promise<Void> stopping;
 	state WorkerCache<InitializeStorageReply> storageCache;
 	state Future<Void> metricsLogger;
@@ -1913,7 +1914,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				             : true),
 				    dbInfo,
 				    {},
-				    Optional<std::map<std::string, std::string>>(StorageEngineParamsFactory::getParams(s.storeType)));
+				    Optional<std::map<std::string, std::string>>(
+				        StorageEngineParamsFactory::getParamsValue(s.storeType)));
 				Future<Void> kvClosed =
 				    kv->onClosed() ||
 				    rebootKVSPromise.getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
@@ -1961,9 +1963,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.changeFeedVersionUpdate);
 				// TODO : add for the new interface
 
+				// When an exsiting storage rejoins, use the default parameter values to open the KVS
 				std::shared_ptr<std::map<std::string, std::string>> paramsPtr =
 				    std::make_shared<std::map<std::string, std::string>>(
-				        StorageEngineParamsFactory::getParams(s.storeType));
+				        StorageEngineParamsFactory::getParamsValue(s.storeType));
 				Promise<Void> recovery;
 				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connRecord, paramsPtr);
 				recoveries.push_back(recovery.getFuture());
@@ -2562,6 +2565,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					std::map<std::string, std::string> details;
 					details["StorageEngine"] = req.storeType.toString();
 					details["IsTSS"] = std::to_string(isTss);
+					// TODO : add storage engine params into the details?
 					Role ssRole = isTss ? Role::TESTING_STORAGE_SERVER : Role::STORAGE_SERVER;
 					startRole(ssRole, recruited.id(), interf.id(), details);
 
@@ -2924,7 +2928,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			// We get cancelled e.g. when an entire simulation times out, but in that case
 			// we won't be restarted and don't need to wait for shutdown
 			stopping.send(Void());
-			wait(filesClosed.getResult()); // Wait for complete shutdown of KV stores
+			wait(filesClosed.signal()); // Wait for complete shutdown of KV stores
 			wait(delay(0.0)); // Unwind the callstack to make sure that IAsyncFile references are all gone
 			TraceEvent(SevInfo, "WorkerShutdownComplete", interf.id());
 		}

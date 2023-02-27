@@ -26,10 +26,13 @@
 #include "flow/genericactors.actor.h"
 #include "flow/UnitTest.h"
 
-StorageEngineParamsFactory redwoodFactory(KeyValueStoreType::SSD_REDWOOD_V1,
-                                          { { "default_page_size", "8192" },
-                                            { "kvstore_range_prefetch", "true" },
-                                            { "metrics_interval", "5.0" } });
+StorageEngineParamsFactory redwoodFactory(
+    KeyValueStoreType::SSD_REDWOOD_V1,
+    { { "default_page_size", { StorageEngineParamsSet::CHANGETYPE::NEEDREPLACEMENT, "8192" } },
+      { "kvstore_range_prefetch", { StorageEngineParamsSet::CHANGETYPE::RUNTIME, "true" } },
+      { "metrics_interval", { StorageEngineParamsSet::CHANGETYPE::NEEDREBOOT, "5.0" } },
+      { "histogram_interval", { StorageEngineParamsSet::CHANGETYPE::NEEDREBOOT, "30.0" } },
+      { "remote_kv_store", { StorageEngineParamsSet::CHANGETYPE::NEEDREBOOT, "false" } } });
 
 DatabaseConfiguration::DatabaseConfiguration() {
 	resetInternal();
