@@ -98,10 +98,10 @@ enum { error_code_actor_cancelled = error_code_operation_cancelled };
 extern Error internal_error_impl(const char* file, int line);
 extern Error internal_error_impl(const char* msg, const char* file, int line);
 extern Error internal_error_impl(const char* a_nm,
-                                 std::string a,
+                                 std::string const& a,
                                  const char* op_nm,
                                  const char* b_nm,
-                                 std::string b,
+                                 std::string const& b,
                                  const char* file,
                                  int line);
 

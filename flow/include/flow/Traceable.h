@@ -241,7 +241,7 @@ struct Traceable<std::string_view> : TraceableStringImpl<std::string_view> {};
 
 template <class T>
 struct Traceable<std::atomic<T>> : std::true_type {
-	static std::string toString(const std::atomic<T>& value) { return Traceable<T>::toString(value); }
+	static std::string toString(const std::atomic<T>& value) { return Traceable<T>::toString(value.load()); }
 };
 
 #endif

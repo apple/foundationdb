@@ -182,7 +182,7 @@ private:
 };
 
 template <class T>
-struct Traceable<Reference<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
+struct Traceable<Reference<T>> : std::bool_constant<Traceable<T>::value> {
 	static std::string toString(const Reference<T>& value) {
 		return value ? Traceable<T>::toString(*value) : "[not set]";
 	}
