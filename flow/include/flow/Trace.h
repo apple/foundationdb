@@ -433,9 +433,11 @@ consteval AuditedEvent operator""_audit(const char*, size_t) noexcept;
 
 class AuditedEvent {
 	// special TraceEvents that may bypass throttling or suppression
-	static constexpr std::array<std::string_view, 9> auditTopics{
+	static constexpr std::array<std::string_view, 11> auditTopics{
 		"AttemptedRPCToPrivatePrevented",
 		"AuditTokenUsed",
+		"AuthzPublicKeySetApply",
+		"AuthzPublicKeySetRefreshError",
 		"IncomingConnection",
 		"InvalidToken",
 		"N2_ConnectHandshakeError",

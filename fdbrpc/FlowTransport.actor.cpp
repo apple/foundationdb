@@ -1574,7 +1574,7 @@ void TransportData::applyPublicKeySet(StringRef jwkSetString) {
 			numPrivateKeys++;
 		}
 	}
-	TraceEvent(SevInfo, "AuthzPublicKeySetApply").detail("NumPublicKeys", publicKeys.size());
+	TraceEvent(SevInfo, "AuthzPublicKeySetApply"_audit).detail("NumPublicKeys", publicKeys.size());
 	if (numPrivateKeys > 0) {
 		TraceEvent(SevWarnAlways, "AuthzPublicKeySetContainsPrivateKeys").detail("NumPrivateKeys", numPrivateKeys);
 	}
@@ -2066,7 +2066,7 @@ ACTOR static Future<Void> watchPublicKeyJwksFile(std::string filePath, Transport
 			}
 			// parse/read error
 			errorCount++;
-			TraceEvent(SevWarn, "AuthzPublicKeySetRefreshError").error(e).detail("ErrorCount", errorCount);
+			TraceEvent(SevWarn, "AuthzPublicKeySetRefreshError"_audit).error(e).detail("ErrorCount", errorCount);
 		}
 	}
 }
