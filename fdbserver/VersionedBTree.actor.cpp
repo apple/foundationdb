@@ -2157,8 +2157,9 @@ public:
 					    .detail("Filename", self->filename)
 					    .detail("PageID", backupHeaderPageID);
 
-					// If this is a restarted sim test, assume this situation was created by the first phase being killed
-					// during initialization so the second phase found the file on disk but it is not recoverable.
+					// If this is a restarted sim test, assume this situation was created by the first phase being
+					// killed during initialization so the second phase found the file on disk but it is not
+					// recoverable.
 					if (g_network->isSimulated() && g_simulator->restarted) {
 						throw e.asInjectedFault();
 					}
