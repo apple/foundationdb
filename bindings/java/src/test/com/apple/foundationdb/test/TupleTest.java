@@ -24,7 +24,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
 
-import com.apple.foundationdb.ApiVersion;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.TransactionContext;
@@ -38,7 +37,7 @@ public class TupleTest {
 	public static void main(String[] args) throws NoSuchFieldException {
 		final int reps = 1000;
 		try {
-			FDB fdb = FDB.selectAPIVersion(ApiVersion.LATEST);
+			FDB fdb = FDB.selectAPIVersion(TestApiVersion.CURRENT);
 			try(Database db = fdb.open()) {
 				runTests(reps, db);
 			}

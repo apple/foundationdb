@@ -23,7 +23,6 @@ package com.apple.foundationdb.test;
 import java.util.UUID;
 import java.util.concurrent.CompletionException;
 
-import com.apple.foundationdb.ApiVersion;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.FDBException;
@@ -40,7 +39,7 @@ public class SnapshotTransactionTest {
 	private static final Subspace SUBSPACE = new Subspace(Tuple.from("test", "conflict_ranges"));
 
 	public static void main(String[] args) {
-		FDB fdb = FDB.selectAPIVersion(ApiVersion.LATEST);
+		FDB fdb = FDB.selectAPIVersion(TestApiVersion.CURRENT);
 		try(Database db = fdb.open()) {
 			snapshotReadShouldNotConflict(db);
 			snapshotShouldNotAddConflictRange(db);

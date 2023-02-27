@@ -114,6 +114,7 @@ set(JAVA_TESTS_SRCS
   src/test/com/apple/foundationdb/test/StackOperation.java
   src/test/com/apple/foundationdb/test/StackTester.java
   src/test/com/apple/foundationdb/test/StackUtils.java
+  src/test/com/apple/foundationdb/test/TestApiVersion.java
   src/test/com/apple/foundationdb/test/TesterArgs.java
   src/test/com/apple/foundationdb/test/TestResult.java
   src/test/com/apple/foundationdb/test/TuplePerformanceTest.java

@@ -26,7 +26,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.apple.foundationdb.ApiVersion;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.KeyValue;
@@ -44,7 +43,7 @@ public class ParallelRandomScan {
 	private static final int PARALLELISM_STEP = 5;
 
 	public static void main(String[] args) throws InterruptedException {
-		FDB api = FDB.selectAPIVersion(ApiVersion.LATEST);
+		FDB api = FDB.selectAPIVersion(TestApiVersion.CURRENT);
 		try(Database database = api.open(args[0])) {
 			for(int i = PARALLELISM_MIN; i <= PARALLELISM_MAX; i += PARALLELISM_STEP) {
 				runTest(database, i, ROWS, DURATION_MS);

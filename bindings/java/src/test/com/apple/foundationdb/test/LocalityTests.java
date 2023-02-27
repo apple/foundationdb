@@ -23,7 +23,6 @@ package com.apple.foundationdb.test;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-import com.apple.foundationdb.ApiVersion;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.LocalityUtil;
@@ -35,7 +34,7 @@ import com.apple.foundationdb.tuple.ByteArrayUtil;
 public class LocalityTests {
 
 	public static void main(String[] args) {
-		FDB fdb = FDB.selectAPIVersion(ApiVersion.LATEST);
+		FDB fdb = FDB.selectAPIVersion(TestApiVersion.CURRENT);
 		try(Database database = fdb.open(args[0])) {
 			try(Transaction tr = database.createTransaction()) {
 				String[] keyAddresses = LocalityUtil.getAddressesForKey(tr, "a".getBytes()).join();

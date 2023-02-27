@@ -22,7 +22,6 @@ package com.apple.foundationdb.test;
 
 import java.util.concurrent.CompletableFuture;
 
-import com.apple.foundationdb.ApiVersion;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.MutationType;
@@ -34,7 +33,7 @@ import com.apple.foundationdb.tuple.Versionstamp;
 public class VersionstampSmokeTest {
 
 	public static void main(String[] args) {
-		FDB fdb = FDB.selectAPIVersion(ApiVersion.LATEST);
+		FDB fdb = FDB.selectAPIVersion(TestApiVersion.CURRENT);
 		try(Database db = fdb.open()) {
 			db.run(tr -> {
 				tr.clear(Tuple.from("prefix").range());

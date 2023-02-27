@@ -26,7 +26,6 @@ import java.util.Random;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.apple.foundationdb.ApiVersion;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 
@@ -49,7 +48,7 @@ public class ConcurrentGetSetGet {
 	}
 
 	public static void main(String[] args) {
-		try(Database database = FDB.selectAPIVersion(ApiVersion.LATEST).open()) {
+		try(Database database = FDB.selectAPIVersion(TestApiVersion.CURRENT).open()) {
 			new ConcurrentGetSetGet().apply(database);
 		}
 	}

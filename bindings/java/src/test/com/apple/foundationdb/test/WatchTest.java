@@ -26,7 +26,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.apple.foundationdb.ApiVersion;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.FDBException;
@@ -35,7 +34,7 @@ import com.apple.foundationdb.Transaction;
 public class WatchTest {
 
 	public static void main(String[] args) {
-		FDB fdb = FDB.selectAPIVersion(ApiVersion.LATEST);
+		FDB fdb = FDB.selectAPIVersion(TestApiVersion.CURRENT);
 		try(Database database = fdb.open(args[0])) {
 			database.options().setLocationCacheSize(42);
 			try(Transaction tr = database.createTransaction()) {

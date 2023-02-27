@@ -25,7 +25,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
-import com.apple.foundationdb.ApiVersion;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.KeyValue;
@@ -40,7 +39,7 @@ public class SerialIteration {
 	private static final int THREAD_COUNT = 1;
 
 	public static void main(String[] args) throws InterruptedException {
-		FDB api = FDB.selectAPIVersion(ApiVersion.LATEST);
+		FDB api = FDB.selectAPIVersion(TestApiVersion.CURRENT);
 		try(Database database = api.open(args[0])) {
 			for(int i = 1; i <= THREAD_COUNT; i++) {
 				runThreadedTest(database, i);
