@@ -315,6 +315,36 @@ protected:
 };
 
 namespace fileBackup {
+// Use RangeMap to store a list of ranges for efficient query if a mutation
+// matches to any of the range.
+class RangeMapFilters {
+public:
+	RangeMapFilters() = default;
+
+	explicit RangeMapFilters(const std::vector<KeyRange>& ranges) {
+		for (const auto& range : ranges) {
+			rangeMap.insert(range, 1);
+		}
+		rangeMap.coalesce(allKeys);
+	}
+
+	void updateFilters(std::vector<std::string>& prefixes) {
+		for (const auto& prefix : prefixes) {
+			rangeMap.insert(prefixRange(StringRef(prefix)), 1);
+		}
+		rangeMap.coalesce(allKeys);
+	}
+
+	// Returns if the mutation matches any filter ranges.
+	bool match(const MutationRef& m) const;
+
+	// Returns if the key-value pair matches any filter ranges.
+	bool match(const KeyValueRef& kv) const;
+
+private:
+	KeyRangeMap<int> rangeMap;
+};
+
 // Accumulates mutation log value chunks, as both a vector of chunks and as a combined chunk,
 // in chunk order, and can check the chunk set for completion or intersection with a set
 // of ranges.
@@ -335,7 +365,7 @@ struct AccumulatedMutations {
 	// Returns true if a complete chunk contains any MutationRefs which intersect with any
 	// range in ranges.
 	// It is undefined behavior to run this if isComplete() does not return true.
-	bool matchesAnyRange(const std::vector<KeyRange>& ranges) const;
+	bool matchesAnyRange(const RangeMapFilters& rangeMap) const;
 
 	std::vector<KeyValueRef> kvs;
 	std::string serializedMutations;

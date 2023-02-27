@@ -31,6 +31,7 @@ namespace file_converter {
 // File format convertion constants
 enum {
 	OPT_CONTAINER,
+	OPT_FILE_TYPE,
 	OPT_BEGIN_VERSION,
 	OPT_BLOB_CREDENTIALS,
 	OPT_CRASHONERROR,
@@ -42,7 +43,9 @@ enum {
 	OPT_INPUT_FILE,
 	OPT_BUILD_FLAGS,
 	OPT_LIST_ONLY,
+	OPT_VALIDATE_FILTERS,
 	OPT_KEY_PREFIX,
+	OPT_FILTERS,
 	OPT_HEX_KEY_PREFIX,
 	OPT_BEGIN_VERSION_FILTER,
 	OPT_END_VERSION_FILTER,
@@ -53,6 +56,8 @@ enum {
 
 CSimpleOpt::SOption gConverterOptions[] = { { OPT_CONTAINER, "-r", SO_REQ_SEP },
 	                                        { OPT_CONTAINER, "--container", SO_REQ_SEP },
+	                                        { OPT_FILE_TYPE, "-t", SO_REQ_SEP },
+	                                        { OPT_FILE_TYPE, "-file-type", SO_REQ_SEP },
 	                                        { OPT_BEGIN_VERSION, "-b", SO_REQ_SEP },
 	                                        { OPT_BEGIN_VERSION, "--begin", SO_REQ_SEP },
 	                                        { OPT_CRASHONERROR, "--crash", SO_NONE },
@@ -70,7 +75,9 @@ CSimpleOpt::SOption gConverterOptions[] = { { OPT_CONTAINER, "-r", SO_REQ_SEP },
 #endif
 	                                        { OPT_BUILD_FLAGS, "--build-flags", SO_NONE },
 	                                        { OPT_LIST_ONLY, "--list-only", SO_NONE },
+	                                        { OPT_VALIDATE_FILTERS, "--validate-filters", SO_NONE },
 	                                        { OPT_KEY_PREFIX, "-k", SO_REQ_SEP },
+	                                        { OPT_FILTERS, "--filters", SO_REQ_SEP },
 	                                        { OPT_HEX_KEY_PREFIX, "--hex-prefix", SO_REQ_SEP },
 	                                        { OPT_BEGIN_VERSION_FILTER, "--begin-version-filter", SO_REQ_SEP },
 	                                        { OPT_END_VERSION_FILTER, "--end-version-filter", SO_REQ_SEP },
