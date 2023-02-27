@@ -739,9 +739,9 @@ ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<String
 			wait(TenantAPI::changeLockState(tr.getPtr(), tenantId, desiredLockState, uid));
 			wait(safeThreadFutureToFuture(tr->commit()));
 			if (desiredLockState != TenantAPI::TenantLockState::UNLOCKED) {
-				fmt::print("Locked tenant `{}' with UID `{}'", name.toString(), uid.toString());
+				fmt::print("Locked tenant `{}' with UID `{}'\n", name.toString(), uid.toString());
 			} else {
-				fmt::print("Unlocked tenant `{}'", name.toString());
+				fmt::print("Unlocked tenant `{}'\n", name.toString());
 			}
 			return true;
 		} catch (Error& e) {
