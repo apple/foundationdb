@@ -1429,6 +1429,11 @@ struct TenantMode {
 	uint32_t mode;
 };
 
+template <>
+struct Traceable<TenantMode> : std::true_type {
+	static std::string toString(const TenantMode& value) { return value.toString(); }
+};
+
 struct EncryptionAtRestMode {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
 	// just before END.
