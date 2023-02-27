@@ -761,6 +761,7 @@ ACTOR Future<Void> process_range_file(Reference<IBackupContainer> container,
 			}
 		}
 	}
+	TraceEvent("ProcessRangeFileDone", uid).detail("File", file.fileName);
 
 	return Void();
 }
