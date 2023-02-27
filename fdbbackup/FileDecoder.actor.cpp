@@ -40,13 +40,10 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/SystemData.h"
 #include "flow/ArgParseUtil.h"
-#include "flow/FastRef.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
@@ -313,44 +310,7 @@ std::vector<std::string> parsePrefixFile(const std::string& filename, bool& err)
 	return parsePrefixesLine(line, err);
 }
 
-// Parses and returns a ";" separated HEX encoded strings. So the ";" in
-// the string should be escaped as "\;".
-// Sets "err" to true if there is any parsing error.
-std::vector<std::string> parsePrefixesLine(const std::string& line, bool& err) {
-	std::vector<std::string> results;
-	err = false;
-
-	int p = 0;
-	while (p < line.size()) {
-		int end = line.find_first_of(';', p);
-		if (end == line.npos) {
-			end = line.size();
-		}
-		auto prefix = decode_hex_string(line.substr(p, end - p), err);
-		if (err) {
-			return results;
-		}
-		results.push_back(prefix);
-		p = end + 1;
-	}
-	return results;
-}
-
-std::vector<std::string> parsePrefixFile(const std::string& filename, bool& err) {
-	std::ifstream t(filename);
-	std::string line;
-
-	t.seekg(0, std::ios::end);
-	line.reserve(t.tellg());
-	t.seekg(0, std::ios::beg);
-
-	line.assign((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
-	return parsePrefixesLine(line, err);
-}
-
 int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
-	bool err = false;
-
 	bool err = false;
 
 	while (args->Next()) {
@@ -738,8 +698,9 @@ public:
 				return Void();
 			}
 
+			Database dummy; // Only a placeholder for now
 			state Standalone<VectorRef<KeyValueRef>> chunks =
-			    wait(fileBackup::decodeRangeFileBlock(self->fd, self->offset, len));
+			    wait(fileBackup::decodeRangeFileBlock(self->fd, self->offset, len, dummy));
 			self->blocks.push_back(chunks);
 
 			TraceEvent("ReadFile")
@@ -829,7 +790,7 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container,
 		int sub = 0;
 		for (const auto& m : vms.mutations) {
 			sub++; // sub sequence number starts at 1
-			bool print = params.prefixes.empty(); // no filtering
+			bool print = params->prefixes.empty(); // no filtering
 
 			if (!print) {
 				print = params->matchFilters(m);
@@ -848,7 +809,6 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container,
 }
 
 ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
-ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 	state Reference<IBackupContainer> container =
 	    IBackupContainer::openContainer(params->container_url, params->proxy, {});
 	state UID uid = deterministicRandom()->randomUniqueID();
@@ -862,8 +822,8 @@ ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 	                                  }),
 	                   listing.logs.end());
 	std::sort(listing.logs.begin(), listing.logs.end());
-	TraceEvent("Container", uid).detail("URL", params.container_url).detail("Logs", listing.logs.size());
-	TraceEvent("DecodeParam", uid).setMaxFieldLength(100000).detail("Value", params.toString());
+	TraceEvent("Container", uid).detail("URL", params->container_url).detail("Logs", listing.logs.size());
+	TraceEvent("DecodeParam", uid).setMaxFieldLength(100000).detail("Value", params->toString());
 
 	BackupDescription desc = wait(container->describeBackup());
 	std::cout << "\n" << desc.toString() << "\n";
