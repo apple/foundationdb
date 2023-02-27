@@ -200,9 +200,9 @@ struct Resolver : ReferenceCounted<Resolver> {
 	    resolvedStateMutations("ResolvedStateMutations", cc), resolvedStateBytes("ResolvedStateBytes", cc),
 	    resolveBatchOut("ResolveBatchOut", cc), metricsRequests("MetricsRequests", cc),
 	    splitRequests("SplitRequests", cc),
-	    resolverLatencyDist(Histogram::getHistogram("Resolver"_sr, "Latency"_sr, Histogram::Unit::milliseconds)),
-	    queueWaitLatencyDist(Histogram::getHistogram("Resolver"_sr, "QueueWait"_sr, Histogram::Unit::milliseconds)),
-	    computeTimeDist(Histogram::getHistogram("Resolver"_sr, "ComputeTime"_sr, Histogram::Unit::milliseconds)),
+	    resolverLatencyDist(Histogram::getHistogram("Resolver"_sr, "Latency"_sr, Histogram::Unit::microseconds)),
+	    queueWaitLatencyDist(Histogram::getHistogram("Resolver"_sr, "QueueWait"_sr, Histogram::Unit::microseconds)),
+	    computeTimeDist(Histogram::getHistogram("Resolver"_sr, "ComputeTime"_sr, Histogram::Unit::microseconds)),
 	    // Distribution of queue depths, with knowledge that Histogram has 32 buckets, and each bucket will have size 1.
 	    queueDepthDist(Histogram::getHistogram("Resolver"_sr, "QueueDepth"_sr, Histogram::Unit::countLinear, 0, 31)) {
 		specialCounter(cc, "Version", [this]() { return this->version.get(); });
