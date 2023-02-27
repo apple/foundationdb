@@ -122,7 +122,6 @@ struct StorageEngineParamsFactory {
 	    KeyValueStoreType::StoreType storeType) {
 		if (factories().contains(storeType))
 			return factories().at(storeType);
-		// TODO : return an empty map here
 		return factories()[storeType];
 	}
 
@@ -133,7 +132,6 @@ struct StorageEngineParamsFactory {
 			for (const auto& [k, pair] : m)
 				result[k] = pair.second;
 		}
-		// TODO : return an empty map here
 		return result;
 	}
 

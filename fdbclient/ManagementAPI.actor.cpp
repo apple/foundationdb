@@ -119,15 +119,6 @@ bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bo
 	return true;
 }
 
-bool checkForConfigChange(std::map<std::string, std::string>& m) {
-	for (const auto& [k, _] : m) {
-		Key key(k);
-		if (key.startsWith(configKeysPrefix) && !key.startsWith(storageEngineParamsPrefix))
-			return true;
-	}
-	return false;
-}
-
 // Defines the mapping between configuration names (as exposed by fdbcli, buildConfiguration()) and actual configuration
 // parameters
 std::map<std::string, std::string> configForToken(std::string const& mode) {
@@ -160,23 +151,6 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 	// key:=value is unvalidated and unchecked
 	pos = mode.find(":=");
 	if (pos != std::string::npos) {
-		// auto k = mode.substr(0, pos);
-		// auto v = mode.substr(pos + 2);
-		// if (k == "redwood") {
-		// 	logType = KeyValueStoreType::SSD_BTREE_V2;
-		// 	storeType = KeyValueStoreType::SSD_REDWOOD_V1;
-		// } else {
-		// 	// TODO: check if storage type is supported
-		// 	fmt::print("Error: Unsupported params change for storage engine {}", k);
-		// 	return out;
-		// }
-		// if (storeType.present()) {
-		// 	out[p + "storage_engine_params"] = v;
-		// 	out[p + "log_engine"] = format("%d", logType.get().storeType());
-		// 	out[p + "storage_engine"] = format("%d", storeType.get().storeType());
-		// } else {
-		// 	out[p + k] = v;
-		// }
 		out[p + mode.substr(0, pos)] = mode.substr(pos + 2);
 		return out;
 	}
@@ -328,23 +302,6 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			}
 			out[p + key] = format("%d", KeyValueStoreType::fromStoreTypeStr(storeTypeStr));
 		}
-
-		// if (key == "log_engine") {
-		// 	// should be allowed to select any storage engine you want
-		// 	pos = value.find(":");
-		// 	if (pos != std::string::npos) {
-		// 		fmt::print("Error: storage engine parameters are not supported for the log engine.\n");
-		// 		return out;
-		// 	}
-		// 	auto storeType = KeyValueStoreType::fromStoreTypeStr(value);
-		// 	if (storeType != KeyValueStoreType::StoreType::SSD_BTREE_V2 &&
-		// 	    storeType != KeyValueStoreType::StoreType::MEMORY &&
-		// 	    storeType != KeyValueStoreType::StoreType::SSD_BTREE_V1) {
-		// 		fmt::print("Error: {} is not allowed to be the log engine.\n", value);
-		// 		return out;
-		// 	}
-		// 	out[p + key] = format("%d", storeType);
-		// }
 
 		return out;
 	}

@@ -8016,7 +8016,6 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 }
 
 ACTOR Future<std::string> fetchStorageEngineParams(Database cx) {
-	fmt::print("FetchStorageEningParams ...\n");
 	loop {
 		choose {
 			when(wait(cx->onProxiesChanged())) {}

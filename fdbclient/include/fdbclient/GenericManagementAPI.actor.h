@@ -135,8 +135,6 @@ ConfigureAutoResult parseConfig(StatusObject const& status);
 
 bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bool& paramsChange, bool creating);
 
-bool checkForConfigChange(std::map<std::string, std::string>& m);
-
 bool isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration> oldConfiguration,
                                        std::map<std::string, std::string> newConfig,
                                        bool creating);
@@ -551,16 +549,11 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 				wait(wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(false)));
 			}
 
-			if (checkForConfigChange(m)) {
-				tr->addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));
-				tr->set(moveKeysLockOwnerKey, versionKey);
-				// fmt::print("Set moveKeysLock Key\n");
-			}
+			tr->addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));
+			tr->set(moveKeysLockOwnerKey, versionKey);
 
 			if (storageEngineParamsChange) {
-				// TODO : check if we need to change the catch block abd uf tge versionKey can be reused
 				tr->addReadConflictRange(singleKeyRange(storageEngineParamsVersionKey));
-				// fmt::print("Set storage engine params version Key\n");
 				tr->set(storageEngineParamsVersionKey, versionKey);
 			}
 
@@ -568,8 +561,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 			break;
 		} catch (Error& e) {
 			state Error e1(e);
-			// fmt::print("Configure {} failed, error code {}\n", creating ? "new" : "existing",
-			// std::to_string(e.code()));
 			if ((e.code() == error_code_not_committed || e.code() == error_code_transaction_too_old) && creating) {
 				// The database now exists.  Determine whether we created it or it was already existing/created by
 				// someone else.  The latter is an error.
