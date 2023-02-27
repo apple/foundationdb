@@ -11115,7 +11115,8 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 							TraceEvent(SevDebug, "CheckpointByteSampleKey")
 							    .detail("CheckpointID", metaData.checkpointID)
 							    .detail("Key", readResult[i].key.removePrefix(persistByteSampleKeys.begin))
-							    .detail("SampleSize",BinaryReader::fromStringRef<int64_t>(readResult[i].value, Unversioned()));
+							    .detail("SampleSize",
+							            BinaryReader::fromStringRef<int64_t>(readResult[i].value, Unversioned()));
 							numSampledKeys++;
 						}
 						if (readResult.more) {

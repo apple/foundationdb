@@ -946,8 +946,10 @@ public:
 								}
 							}
 
-							RelocateShard rs(
-							    shards[i], maxPriority, RelocateReason::TEAM_HEALTH, deterministicRandom()->randomUniqueID());
+							RelocateShard rs(shards[i],
+							                 maxPriority,
+							                 RelocateReason::TEAM_HEALTH,
+							                 deterministicRandom()->randomUniqueID());
 
 							self->output.send(rs);
 							TraceEvent("SendRelocateToDDQueue", self->distributorId)
