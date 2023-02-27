@@ -898,11 +898,12 @@ struct InitializeBlobWorkerRequest {
 	constexpr static FileIdentifier file_identifier = 5838547;
 	UID reqId;
 	UID interfaceId;
+	KeyValueStoreType storeType;
 	ReplyPromise<InitializeBlobWorkerReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reqId, interfaceId, reply);
+		serializer(ar, reqId, interfaceId, storeType, reply);
 	}
 };
 
@@ -1188,15 +1189,21 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
                                      ConfigDBType configDBType,
                                      Reference<AsyncVar<Optional<UID>>> clusterId);
 
-ACTOR Future<Void> blobWorker(BlobWorkerInterface bwi,
-                              ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady,
-                              Reference<AsyncVar<ServerDBInfo> const> dbInfo);
-ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei, Reference<AsyncVar<ServerDBInfo>> db);
-
 // These servers are started by workerServer
 class IKeyValueStore;
 class ServerCoordinators;
 class IDiskQueue;
+
+ACTOR Future<Void> blobWorker(BlobWorkerInterface bwi,
+                              ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady,
+                              Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                              IKeyValueStore* persistentData);
+ACTOR Future<Void> blobWorker(BlobWorkerInterface bwi,
+                              Promise<Void> recovered,
+                              Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                              IKeyValueStore* persistentData);
+ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei, Reference<AsyncVar<ServerDBInfo>> db);
+
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,

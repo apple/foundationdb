@@ -304,6 +304,23 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			out[p + key] = format("%d", KeyValueStoreType::fromStoreTypeStr(storeTypeStr));
 		}
 
+		if (key == "exclude") {
+			int p = 0;
+			while (p < value.size()) {
+				int end = value.find_first_of(',', p);
+				if (end == value.npos) {
+					end = value.size();
+				}
+				auto addrRef = StringRef(value).substr(p, end - p);
+				AddressExclusion addr = AddressExclusion::parse(addrRef);
+				if (addr.isValid()) {
+					out[encodeExcludedServersKey(addr)] = "";
+				} else {
+					printf("Error: invalid address format: %s\n", addrRef.toString().c_str());
+				}
+				p = end + 1;
+			}
+		}
 		return out;
 	}
 

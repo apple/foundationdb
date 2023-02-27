@@ -52,7 +52,6 @@ ACTOR Future<bool> checkStorageEngineParamCommandActor(Reference<IDatabase> db,
 	return result;
 }
 
-
 CommandFactory configureStorageEngineFactory(
     "check-storage-engine",
     CommandHelp("check-storage-engine",

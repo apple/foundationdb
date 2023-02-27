@@ -29,6 +29,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/TimedRequest.h"
 
 struct ResolverInterface {
 	constexpr static FileIdentifier file_identifier = 1755944;
@@ -121,7 +122,7 @@ struct ResolveTransactionBatchReply {
 	}
 };
 
-struct ResolveTransactionBatchRequest {
+struct ResolveTransactionBatchRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 16462858;
 	Arena arena;
 

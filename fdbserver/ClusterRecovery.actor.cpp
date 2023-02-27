@@ -966,6 +966,7 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	} else {
 		TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
 		           self->dbgid)
+		    .setMaxFieldLength(-1)
 		    .detail("StatusCode", RecoveryStatus::recruiting_transaction_servers)
 		    .detail("Status", RecoveryStatus::names[RecoveryStatus::recruiting_transaction_servers])
 		    .detail("Conf", self->configuration.toString())

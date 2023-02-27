@@ -1439,6 +1439,9 @@ Error validateAndProcessTenantAccess(CommitTransactionRequest& tr,
 	if (!isValid) {
 		return tenant_not_found();
 	}
+	if (!tr.isLockAware() && pProxyCommitData->lockedTenants.count(tr.tenantInfo.tenantId) > 0) {
+		return tenant_locked();
+	}
 
 	// only do the mutation check when the transaction use raw_access option and the tenant mode is required
 	if (pProxyCommitData->getTenantMode() != TenantMode::REQUIRED || tr.tenantInfo.hasTenant()) {
@@ -1806,11 +1809,11 @@ void pushToBackupMutations(CommitBatchContext* self,
 			    .detail("TenantMap", pProxyCommitData->tenantMap.size());
 			ASSERT(TenantAPI::withinSingleTenant(KeyRangeRef(m.param1, m.param2)));
 		}
+		ASSERT(!pProxyCommitData->encryptMode.isEncryptionEnabled() || writtenMutation.isEncrypted());
 
 		// Add the mutation to the relevant backup tag
 		for (auto backupName : pProxyCommitData->vecBackupKeys[m.param1]) {
 			// If encryption is enabled make sure the mutation we are writing is also encrypted
-			ASSERT(!pProxyCommitData->encryptMode.isEncryptionEnabled() || writtenMutation.isEncrypted());
 			CODE_PROBE(writtenMutation.isEncrypted(), "using encrypted backup mutation");
 			self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, writtenMutation);
 		}
@@ -1842,8 +1845,8 @@ void pushToBackupMutations(CommitBatchContext* self,
 					backupMutation =
 					    backupMutation.encrypt(self->cipherKeys, domainId, arena, BlobCipherMetrics::BACKUP);
 				}
-				ASSERT(backupMutation.isEncrypted());
 			}
+			ASSERT(!pProxyCommitData->encryptMode.isEncryptionEnabled() || backupMutation.isEncrypted());
 
 			// Add the mutation to the relevant backup tag
 			for (auto backupName : backupRange.value()) {
@@ -2130,6 +2133,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			                                getEncryptDetailsFromMutationRef(self->pProxyCommitData, idempotencyIdSet);
 			                            MutationRef encryptedMutation = idempotencyIdSet.encrypt(
 			                                self->cipherKeys, domainId, self->arena, BlobCipherMetrics::TLOG);
+			                            ASSERT(encryptedMutation.isEncrypted());
 			                            self->toCommit.writeTypedMessage(encryptedMutation);
 		                            } else {
 			                            self->toCommit.writeTypedMessage(idempotencyIdSet);
@@ -2784,9 +2788,27 @@ ACTOR static Future<Void> doBlobGranuleLocationRequest(GetBlobGranuleLocationsRe
 	try {
 		// TODO: could skip GRV, and keeps consistent with tenant mapping? Appears to be other issues though
 		// tr.setVersion(minVersion);
-		state RangeResult blobGranuleMapping = wait(krmGetRanges(
-		    &tr, blobGranuleMappingKeys.begin, keyRange, req.limit + 1, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+		// FIXME: could use streaming range read for large mappings?
+		state RangeResult blobGranuleMapping;
+		// add +1 to convert from range limit to boundary limit, 3 to allow for sequnce of:
+		// end of previous range - query begin key - start of granule - query end key - end of granule
+		// to pick up the intersecting granule
+		req.limit = std::max(3, req.limit + 1);
+		if (req.justGranules) {
+			// use krm unaligned for granules
+			wait(store(
+			    blobGranuleMapping,
+			    krmGetRangesUnaligned(
+			        &tr, blobGranuleMappingKeys.begin, keyRange, req.limit, GetRangeLimits::BYTE_LIMIT_UNLIMITED)));
+		} else {
+			// use aligned mapping for reads
+			wait(store(
+			    blobGranuleMapping,
+			    krmGetRanges(
+			        &tr, blobGranuleMappingKeys.begin, keyRange, req.limit, GetRangeLimits::BYTE_LIMIT_UNLIMITED)));
+		}
 		rep.arena.dependsOn(blobGranuleMapping.arena());
+		ASSERT(blobGranuleMapping.empty() || blobGranuleMapping.size() >= 2);
 
 		// load and decode worker interfaces if not cached
 		// FIXME: potentially remove duplicate racing requests for same BW interface? Should only happen at CP startup
@@ -2795,15 +2817,21 @@ ACTOR static Future<Void> doBlobGranuleLocationRequest(GetBlobGranuleLocationsRe
 		state std::vector<Future<Optional<Value>>> bwiLookupFutures;
 		for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
 			if (!blobGranuleMapping[i].value.size()) {
+				if (req.justGranules) {
+					// skip non-blobbified ranges if justGranules
+					continue;
+				}
 				throw blob_granule_transaction_too_old();
 			}
 
 			UID workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
-			if (workerId == UID()) {
+			if (workerId == UID() && !req.justGranules) {
+				// range with no worker but set for blobbification counts for granule boundaries but not readability
 				throw blob_granule_transaction_too_old();
 			}
 
-			if (!commitData->blobWorkerInterfCache.count(workerId) && !bwiLookedUp.count(workerId)) {
+			if (!req.justGranules && !commitData->blobWorkerInterfCache.count(workerId) &&
+			    !bwiLookedUp.count(workerId)) {
 				bwiLookedUp.insert(workerId);
 				bwiLookupFutures.push_back(tr.get(blobWorkerListKeyFor(workerId)));
 			}
@@ -2826,12 +2854,20 @@ ACTOR static Future<Void> doBlobGranuleLocationRequest(GetBlobGranuleLocationsRe
 
 		// Mapping is valid, all worker interfaces are cached, we can populate response
 		for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
-			// FIXME: avoid duplicate decode?
-			UID workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
-			rep.results.push_back({ KeyRangeRef(blobGranuleMapping[i].key, blobGranuleMapping[i + 1].key),
-			                        commitData->blobWorkerInterfCache[workerId] });
+			KeyRangeRef granule(blobGranuleMapping[i].key, blobGranuleMapping[i + 1].key);
+			if (req.justGranules) {
+				if (!blobGranuleMapping[i].value.size()) {
+					continue;
+				}
+				rep.results.push_back({ granule, BlobWorkerInterface() });
+			} else {
+				// FIXME: avoid duplicate decode?
+				UID workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
+				rep.results.push_back({ granule, commitData->blobWorkerInterfCache[workerId] });
+			}
 		}
 
+		rep.more = blobGranuleMapping.more;
 	} catch (Error& e) {
 		++commitData->stats.blobGranuleLocationOut;
 		if (e.code() == error_code_operation_cancelled) {

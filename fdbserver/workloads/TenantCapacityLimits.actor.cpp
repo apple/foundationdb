@@ -80,8 +80,8 @@ struct TenantCapacityLimits : TestWorkload {
 			MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 			self->managementDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
-			wait(success(
-			    MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix)));
+			wait(success(MetaclusterAPI::createMetacluster(
+			    cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix, false)));
 
 			DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;
@@ -130,7 +130,7 @@ struct TenantCapacityLimits : TestWorkload {
 			}
 			// Attempt to create a tenant on the metacluster which should fail since the cluster is at capacity
 			try {
-				TenantMapEntry entry;
+				MetaclusterTenantMapEntry entry;
 				entry.tenantName = "test_tenant_metacluster"_sr;
 				wait(MetaclusterAPI::createTenant(self->managementDb, entry, AssignClusterAutomatically::True));
 				ASSERT(false);

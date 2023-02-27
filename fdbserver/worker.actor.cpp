@@ -334,6 +334,7 @@ StringRef fileLogDataPrefix = "log-"_sr;
 StringRef fileVersionedLogDataPrefix = "log2-"_sr;
 StringRef fileLogQueuePrefix = "logqueue-"_sr;
 StringRef tlogQueueExtension = "fdq"_sr;
+StringRef fileBlobWorkerPrefix = "bw-"_sr;
 
 enum class FilesystemCheck {
 	FILES_ONLY,
@@ -485,7 +486,7 @@ TLogFn tLogFnForOptions(TLogOptions options) {
 }
 
 struct DiskStore {
-	enum COMPONENT { TLogData, Storage, UNSET };
+	enum COMPONENT { TLogData, Storage, BlobWorker, UNSET };
 
 	UID storeID = UID();
 	std::string filename = ""; // For KVStoreMemory just the base filename to be passed to IDiskQueue
@@ -544,6 +545,9 @@ std::vector<DiskStore> getDiskStores(std::string folder,
 			store.tLogOptions.version = TLogVersion::V2;
 			store.tLogOptions.spillType = TLogSpillType::VALUE;
 			prefix = fileLogDataPrefix;
+		} else if (filename.startsWith(fileBlobWorkerPrefix)) {
+			store.storedComponent = DiskStore::BlobWorker;
+			prefix = fileBlobWorkerPrefix;
 		} else {
 			continue;
 		}
@@ -1788,7 +1792,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state std::map<SharedLogsKey, std::vector<SharedLogsValue>> sharedLogs;
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
 	state WorkerCache<InitializeBackupReply> backupWorkerCache;
-	state WorkerCache<InitializeBlobWorkerReply> blobWorkerCache;
+	state Future<Void> blobWorkerFuture = Void();
 
 	state WorkerSnapRequest lastSnapReq;
 	// Here the key is UID+role, as we still send duplicate requests to a process which is both storage and tlog
@@ -1984,7 +1988,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					logQueueBasename = fileLogQueuePrefix.toString() + optionsString.toString() + "-";
 				}
 				ASSERT_WE_THINK(abspath(parentDirectory(s.filename)) == folder);
-				IKeyValueStore* kv = openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles);
+				IKeyValueStore* kv = openKVStore(s.storeType,
+				                                 s.filename,
+				                                 s.storeID,
+				                                 memoryLimit,
+				                                 validateDataFiles,
+				                                 false,
+				                                 false,
+				                                 dbInfo,
+				                                 EncryptionAtRestMode());
 				const DiskQueueVersion dqv = s.tLogOptions.getDiskQueueVersion();
 				const int64_t diskQueueWarnSize =
 				    s.tLogOptions.spillType == TLogSpillType::VALUE ? 10 * SERVER_KNOBS->TARGET_BYTES_PER_TLOG : -1;
@@ -2028,6 +2040,57 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				logData.back().actor = oldLog.getFuture() || tl;
 				logData.back().uid = s.storeID;
 				errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, s.storeID, tl));
+			} else if (s.storedComponent == DiskStore::BlobWorker) {
+				if (blobWorkerFuture.isReady()) {
+					LocalLineage _;
+					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobWorker;
+
+					BlobWorkerInterface recruited(locality, deterministicRandom()->randomUniqueID());
+					recruited.initEndpoints();
+
+					std::map<std::string, std::string> details;
+					details["StorageEngine"] = s.storeType.toString();
+					startRole(Role::BLOB_WORKER, recruited.id(), interf.id(), details, "Restored");
+
+					DUMPTOKEN(recruited.waitFailure);
+					DUMPTOKEN(recruited.blobGranuleFileRequest);
+					DUMPTOKEN(recruited.assignBlobRangeRequest);
+					DUMPTOKEN(recruited.revokeBlobRangeRequest);
+					DUMPTOKEN(recruited.granuleAssignmentsRequest);
+					DUMPTOKEN(recruited.granuleStatusStreamRequest);
+					DUMPTOKEN(recruited.haltBlobWorker);
+					DUMPTOKEN(recruited.minBlobVersionRequest);
+
+					IKeyValueStore* data = openKVStore(s.storeType,
+					                                   s.filename,
+					                                   recruited.id(),
+					                                   memoryLimit,
+					                                   false,
+					                                   false,
+					                                   false,
+					                                   dbInfo,
+					                                   EncryptionAtRestMode());
+					filesClosed.add(data->onClosed());
+
+					Promise<Void> recovery;
+					Future<Void> bw = blobWorker(recruited, recovery, dbInfo, data);
+					recoveries.push_back(recovery.getFuture());
+					bw = handleIOErrors(bw, data, recruited.id());
+					blobWorkerFuture = bw;
+					errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
+				} else {
+					CODE_PROBE(true, "Multiple blob workers after reboot", probe::decoration::rare);
+					IKeyValueStore* data = openKVStore(s.storeType,
+					                                   s.filename,
+					                                   UID(),
+					                                   memoryLimit,
+					                                   false,
+					                                   false,
+					                                   false,
+					                                   dbInfo,
+					                                   EncryptionAtRestMode());
+					data->dispose();
+				}
 			}
 		}
 
@@ -2491,7 +2554,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
 					std::string filename =
 					    filenameFromId(req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId);
-					IKeyValueStore* data = openKVStore(req.storeType, filename, logId, memoryLimit);
+					IKeyValueStore* data = openKVStore(req.storeType,
+					                                   filename,
+					                                   logId,
+					                                   memoryLimit,
+					                                   false,
+					                                   false,
+					                                   false,
+					                                   dbInfo,
+					                                   EncryptionAtRestMode());
 					const DiskQueueVersion dqv = tLogOptions.getDiskQueueVersion();
 					IDiskQueue* queue = openDiskQueue(
 					    joinPath(folder,
@@ -2640,7 +2711,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				}
 			}
 			when(InitializeBlobWorkerRequest req = waitNext(interf.blobWorker.getFuture())) {
-				if (!blobWorkerCache.exists(req.reqId)) {
+				if (blobWorkerFuture.isReady()) {
+					LocalLineage _;
+					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobWorker;
+
 					BlobWorkerInterface recruited(locality, req.interfaceId);
 					recruited.initEndpoints();
 					startRole(Role::BLOB_WORKER, recruited.id(), interf.id());
@@ -2654,12 +2728,31 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.haltBlobWorker);
 					DUMPTOKEN(recruited.minBlobVersionRequest);
 
-					ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady = req.reply;
-					Future<Void> bw = blobWorker(recruited, blobWorkerReady, dbInfo);
-					errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
+					IKeyValueStore* data = nullptr;
+					if (SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED && req.storeType != KeyValueStoreType::END) {
+						std::string filename =
+						    filenameFromId(req.storeType, folder, fileBlobWorkerPrefix.toString(), recruited.id());
+						data = openKVStore(req.storeType,
+						                   filename,
+						                   recruited.id(),
+						                   memoryLimit,
+						                   false,
+						                   false,
+						                   false,
+						                   dbInfo,
+						                   EncryptionAtRestMode());
+						filesClosed.add(data->onClosed());
+					}
 
+					ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady = req.reply;
+					Future<Void> bw = blobWorker(recruited, blobWorkerReady, dbInfo, data);
+					if (SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED && req.storeType != KeyValueStoreType::END) {
+						bw = handleIOErrors(bw, data, recruited.id());
+					}
+					blobWorkerFuture = bw;
+					errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
 				} else {
-					forwardPromise(req.reply, blobWorkerCache.get(req.reqId));
+					req.reply.sendError(recruitment_failed());
 				}
 			}
 			when(InitializeCommitProxyRequest req = waitNext(interf.commitProxy.getFuture())) {

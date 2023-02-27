@@ -1046,6 +1046,10 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 	return ids;
 }
 
+bool mutationForKey(const MutationRef& m, const KeyRef& key) {
+	return isSingleKeyMutation((MutationRef::Type)m.type) && m.param1 == key;
+}
+
 const KeyRef previousCoordinatorsKey = "\xff/previousCoordinators"_sr;
 const KeyRef coordinatorsKey = "\xff/coordinators"_sr;
 const KeyRef logsKey = "\xff/logs"_sr;
@@ -1107,6 +1111,10 @@ const KeyRef clusterIdKey = "\xff/clusterIdKey"_sr;
 const KeyRef backupEnabledKey = "\xff/backupEnabled"_sr;
 const KeyRangeRef backupLogKeys("\xff\x02/blog/"_sr, "\xff\x02/blog0"_sr);
 const KeyRangeRef applyLogKeys("\xff\x02/alog/"_sr, "\xff\x02/alog0"_sr);
+bool isBackupLogMutation(const MutationRef& m) {
+	return isSingleKeyMutation((MutationRef::Type)m.type) &&
+	       (backupLogKeys.contains(m.param1) || applyLogKeys.contains(m.param1));
+}
 // static_assert( backupLogKeys.begin.size() == backupLogPrefixBytes, "backupLogPrefixBytes incorrect" );
 const KeyRef backupVersionKey = "\xff/backupDataFormat"_sr;
 const ValueRef backupVersionValue = "4"_sr;
@@ -1684,6 +1692,34 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 	ObjectReader reader(value.begin(), IncludeVersion());
 	reader.deserialize(interf);
 	return interf;
+}
+
+const KeyRangeRef blobWorkerAffinityKeys("\xff\x02/bwa/"_sr, "\xff\x02/bwa0"_sr);
+
+const Key blobWorkerAffinityKeyFor(UID workerID) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobWorkerAffinityKeys.begin);
+	wr << workerID;
+	return wr.toValue();
+}
+
+UID decodeBlobWorkerAffinityKey(KeyRef const& key) {
+	UID workerID;
+	BinaryReader reader(key.removePrefix(blobWorkerAffinityKeys.begin),
+	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
+	reader >> workerID;
+	return workerID;
+}
+
+const Value blobWorkerAffinityValue(UID const& id) {
+	return ObjectWriter::toValue(id, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
+}
+
+UID decodeBlobWorkerAffinityValue(ValueRef const& value) {
+	UID id;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(id);
+	return id;
 }
 
 const KeyRangeRef blobRestoreCommandKeys("\xff\x02/blobRestoreCommand/"_sr, "\xff\x02/blobRestoreCommand0"_sr);

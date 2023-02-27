@@ -566,6 +566,9 @@ public class AsyncStackTester {
 				db.options().setTransactionRetryLimit(-1);
 				db.options().setTransactionCausalReadRisky();
 				db.options().setTransactionIncludePortInAddress();
+				db.options().setTransactionUsedDuringCommitProtectionDisable();
+				db.options().setTransactionBypassUnreadable();
+				db.options().setTransactionReportConflictingKeys();
 
 				// Test network busyness
 				double busyness = db.getMainThreadBusyness();
@@ -590,6 +593,8 @@ public class AsyncStackTester {
 				tr.options().setReadLockAware();
 				tr.options().setLockAware();
 				tr.options().setIncludePortInAddress();
+				tr.options().setReportConflictingKeys();
+				tr.options().setBypassUnreadable();
 
 				if(!(new FDBException("Fake", 1020)).isRetryable() ||
 						(new FDBException("Fake", 10)).isRetryable())

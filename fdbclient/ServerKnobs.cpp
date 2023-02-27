@@ -799,7 +799,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( FETCH_BLOCK_BYTES,                                     2e6 );
 	init( FETCH_KEYS_PARALLELISM_BYTES,                          4e6 ); if( randomize && BUGGIFY ) FETCH_KEYS_PARALLELISM_BYTES = 3e6;
 	init( FETCH_KEYS_PARALLELISM,                                  2 );
-	init( FETCH_KEYS_PARALLELISM_FULL,                             6 );
+	init( FETCH_KEYS_PARALLELISM_CHANGE_FEED,                      6 );
 	init( FETCH_KEYS_LOWER_PRIORITY,                               0 );
 	init( SERVE_FETCH_CHECKPOINT_PARALLELISM,                      4 );
 	init( SERVE_AUDIT_STORAGE_PARALLELISM,                         1 );
@@ -851,7 +851,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// This exists for flexibility but assigning each ReadType to its own unique priority number makes the most sense
 	// The enumeration is currently: eager, fetch, low, normal, high
 	init( STORAGESERVER_READTYPE_PRIORITY_MAP,           "0,1,2,3,4" );
-	init( SPLIT_METRICS_MAX_ROWS,                              10000 );
+	init( SPLIT_METRICS_MAX_ROWS,                              10000 ); if( randomize && BUGGIFY ) SPLIT_METRICS_MAX_ROWS = 10;
 
 	//Wait Failure
 	init( MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS,                 250 ); if( randomize && BUGGIFY ) MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS = 2;
@@ -1041,6 +1041,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_WORKER_DO_REJECT_WHEN_FULL,                      true ); if ( randomize && BUGGIFY ) BLOB_WORKER_DO_REJECT_WHEN_FULL = false;
 	init( BLOB_WORKER_REJECT_WHEN_FULL_THRESHOLD,                0.9 );
 	init( BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY,                30.0 ); if ( randomize && BUGGIFY ) BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY = deterministicRandom()->randomInt(0, 10) - 1;
+	init( BLOB_WORKER_DISK_ENABLED,                            false ); if ( randomize && BUGGIFY ) BLOB_WORKER_DISK_ENABLED = true;
+	init( BLOB_WORKER_STORE_TYPE,                                  3 );
+	init( BLOB_WORKER_REJOIN_TIME,                              10.0 );
 
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN,                   0.1 );
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX,                   5.0 );

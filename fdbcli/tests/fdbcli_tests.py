@@ -1015,10 +1015,9 @@ def tenant_get(logger):
 
     output = run_fdbcli_command("tenant get tenant")
     lines = output.split("\n")
-    assert len(lines) == 3
+    assert len(lines) == 2
     assert lines[0].strip().startswith("id: ")
     assert lines[1].strip().startswith("prefix: ")
-    assert lines[2].strip() == "tenant state: ready"
 
     output = run_fdbcli_command("tenant get tenant JSON")
     json_output = json.loads(output, strict=False)
@@ -1035,15 +1034,13 @@ def tenant_get(logger):
     assert len(json_output["tenant"]["prefix"]) == 2
     assert "base64" in json_output["tenant"]["prefix"]
     assert "printable" in json_output["tenant"]["prefix"]
-    assert json_output["tenant"]["tenant_state"] == "ready"
 
     output = run_fdbcli_command("tenant get tenant2")
     lines = output.split("\n")
-    assert len(lines) == 4
+    assert len(lines) == 3
     assert lines[0].strip().startswith("id: ")
     assert lines[1].strip().startswith("prefix: ")
-    assert lines[2].strip() == "tenant state: ready"
-    assert lines[3].strip() == "tenant group: tenant_group2"
+    assert lines[2].strip() == "tenant group: tenant_group2"
 
     output = run_fdbcli_command("tenant get tenant2 JSON")
     json_output = json.loads(output, strict=False)
@@ -1057,7 +1054,6 @@ def tenant_get(logger):
     assert "base64" in json_output["tenant"]["name"]
     assert "printable" in json_output["tenant"]["name"]
     assert "prefix" in json_output["tenant"]
-    assert json_output["tenant"]["tenant_state"] == "ready"
     assert "tenant_group" in json_output["tenant"]
     assert len(json_output["tenant"]["tenant_group"]) == 2
     assert "base64" in json_output["tenant"]["tenant_group"]
@@ -1071,17 +1067,27 @@ def tenant_configure(logger):
     output = run_fdbcli_command("tenant configure tenant tenant_group=tenant_group1")
     assert output == "The configuration for tenant `tenant' has been updated"
 
-    output = run_fdbcli_command("tenant get tenant")
-    lines = output.split("\n")
-    assert len(lines) == 4
-    assert lines[3].strip() == "tenant group: tenant_group1"
-
-    output = run_fdbcli_command("tenant configure tenant unset tenant_group")
+    output = run_fdbcli_command(
+        "tenant configure tenant tenant_group=tenant_group1 ignore_capacity_limit"
+    )
     assert output == "The configuration for tenant `tenant' has been updated"
 
     output = run_fdbcli_command("tenant get tenant")
     lines = output.split("\n")
     assert len(lines) == 3
+    assert lines[2].strip() == "tenant group: tenant_group1"
+
+    output = run_fdbcli_command("tenant configure tenant unset tenant_group")
+    assert output == "The configuration for tenant `tenant' has been updated"
+
+    output = run_fdbcli_command(
+        "tenant configure tenant unset tenant_group ignore_capacity_limit"
+    )
+    assert output == "The configuration for tenant `tenant' has been updated"
+
+    output = run_fdbcli_command("tenant get tenant")
+    lines = output.split("\n")
+    assert len(lines) == 2
 
     output = run_fdbcli_command_and_get_error(
         "tenant configure tenant tenant_group=tenant_group1 tenant_group=tenant_group2"
@@ -1109,17 +1115,27 @@ def tenant_configure(logger):
     )
 
     output = run_fdbcli_command_and_get_error(
+        "tenant configure tenant tenant_group=tenant1 unknown_token"
+    )
+    assert (
+        output
+        == "ERROR: invalid configuration string `unknown_token'. String must specify a value using `='."
+    )
+
+    output = run_fdbcli_command_and_get_error(
         "tenant configure tenant3 tenant_group=tenant_group1"
     )
     assert output == "ERROR: Tenant does not exist (2131)"
-
 
     expected_output = """
 ERROR: assigned_cluster is only valid in metacluster configuration.
 ERROR: Tenant configuration is invalid (2140)
     """.strip()
-    output = run_fdbcli_command_and_get_error('tenant configure tenant assigned_cluster=nonexist')
+    output = run_fdbcli_command_and_get_error(
+        "tenant configure tenant assigned_cluster=nonexist"
+    )
     assert output == expected_output
+
 
 @enable_logging()
 def tenant_rename(logger):

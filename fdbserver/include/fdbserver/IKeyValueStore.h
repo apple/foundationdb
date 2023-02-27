@@ -216,8 +216,8 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 	if (openRemotely) {
 		if (encryptionMode.present() && encryptionMode.get().isEncryptionEnabled()) {
 			TraceEvent(SevWarn, "KVStoreNotSupportedConfig")
-				.detail("Encryption", encryptionMode)
-				.detail("Message", "Encryption is not suppored on remote kv store yet");
+			    .detail("Encryption", encryptionMode)
+			    .detail("Message", "Encryption is not suppored on remote kv store yet");
 			throw encrypt_unsupported();
 		}
 		return openRemoteKVStore(

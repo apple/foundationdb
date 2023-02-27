@@ -42,9 +42,10 @@ ACTOR Future<Reference<IDatabase>> openDatabase(ClusterConnectionString connecti
 	if (g_network->isSimulated()) {
 		Reference<IClusterConnectionRecord> clusterFile =
 		    makeReference<ClusterConnectionMemoryRecord>(connectionString);
-		Database nativeDb = Database::createDatabase(clusterFile, -1);
+		Database nativeDb = Database::createDatabase(clusterFile, ApiVersion::LATEST_VERSION);
 		Reference<IDatabase> threadSafeDb =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(nativeDb)));
+		MultiVersionApi::api->selectApiVersion(ApiVersion::LATEST_VERSION);
 		return MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeDb);
 	} else {
 		return MultiVersionApi::api->createDatabaseFromConnectionString(connectionString.toString().c_str());
@@ -70,8 +71,8 @@ KeyBackedMap<ClusterName, int64_t, TupleCodec<ClusterName>, BinaryCodec<int64_t>
 KeyBackedSet<Tuple> ManagementClusterMetadata::clusterTenantIndex("metacluster/dataCluster/tenantMap/"_sr);
 KeyBackedSet<Tuple> ManagementClusterMetadata::clusterTenantGroupIndex("metacluster/dataCluster/tenantGroupMap/"_sr);
 
-TenantMetadataSpecification& ManagementClusterMetadata::tenantMetadata() {
-	static TenantMetadataSpecification instance(""_sr);
+TenantMetadataSpecification<MetaclusterTenantTypes>& ManagementClusterMetadata::tenantMetadata() {
+	static TenantMetadataSpecification<MetaclusterTenantTypes> instance(""_sr);
 	return instance;
 }
 

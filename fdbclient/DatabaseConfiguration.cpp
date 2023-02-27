@@ -682,6 +682,8 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		// TODO : should we hardcode the above condition like others?
 		auto paramName = ck.removePrefix(storageEngineParamsPrefix.removePrefix(configKeysPrefix)).toString();
 		storageEngineParams.set(paramName, value.toString());
+	} else if (ck.startsWith("excluded/"_sr)) {
+		// excluded servers: don't keep the state internally
 	} else {
 		return false;
 	}

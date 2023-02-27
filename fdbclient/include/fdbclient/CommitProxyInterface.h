@@ -480,10 +480,13 @@ struct GetBlobGranuleLocationsReply {
 	constexpr static FileIdentifier file_identifier = 2923309;
 	Arena arena;
 	std::vector<std::pair<KeyRangeRef, BlobWorkerInterface>> results;
+	bool more;
+
+	// FIXME: change to vector of <KeyRangeRef, UID> and then separate map UID->BWInterf
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, results, arena);
+		serializer(ar, results, more, arena);
 	}
 };
 
@@ -496,6 +499,7 @@ struct GetBlobGranuleLocationsRequest {
 	Optional<KeyRef> end;
 	int limit;
 	bool reverse;
+	bool justGranules;
 	ReplyPromise<GetBlobGranuleLocationsReply> reply;
 
 	// This version is used to specify the minimum metadata version a proxy must have in order to declare that
@@ -504,23 +508,24 @@ struct GetBlobGranuleLocationsRequest {
 	// updates from other proxies before answering.
 	Version minTenantVersion;
 
-	GetBlobGranuleLocationsRequest() : limit(0), reverse(false), minTenantVersion(latestVersion) {}
+	GetBlobGranuleLocationsRequest() : limit(0), reverse(false), justGranules(false), minTenantVersion(latestVersion) {}
 	GetBlobGranuleLocationsRequest(SpanContext spanContext,
 	                               TenantInfo const& tenant,
 	                               KeyRef const& begin,
 	                               Optional<KeyRef> const& end,
 	                               int limit,
 	                               bool reverse,
+	                               bool justGranules,
 	                               Version minTenantVersion,
 	                               Arena const& arena)
 	  : arena(arena), spanContext(spanContext), tenant(tenant), begin(begin), end(end), limit(limit), reverse(reverse),
-	    minTenantVersion(minTenantVersion) {}
+	    justGranules(justGranules), minTenantVersion(minTenantVersion) {}
 
 	bool verify() const { return tenant.isAuthorized(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, begin, end, limit, reverse, reply, spanContext, tenant, minTenantVersion, arena);
+		serializer(ar, begin, end, limit, reverse, reply, spanContext, tenant, minTenantVersion, justGranules, arena);
 	}
 };
 

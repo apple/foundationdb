@@ -2274,7 +2274,7 @@ public:
 		state std::vector<Future<Void>> collection;
 		for (const auto& [serverId, f] : fmap) {
 			if (!f.isReady() || f.get().isError()) {
-				TraceEvent(SevError, "DDTCSetStorageEngineParamsFailed")
+				TraceEvent(SevWarnAlways, "DDTCSetStorageEngineParamsFailed")
 				    .detail("ServerId", serverId)
 				    .detail("Error", f.get().getError().code());
 				continue;
