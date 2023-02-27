@@ -2273,7 +2273,11 @@ public:
 		state std::vector<Future<Void>> collection;
 		for (const auto& [serverId, f] : fmap) {
 			TraceEvent("DDTCSetStorageEngineParameterResult").detail("ServerId", serverId);
-			ASSERT(f.isReady() && !f.get().isError());
+			if (!f.isReady() || f.get().isError()) {
+				TraceEvent(SevError, "DDTCSetStorageEngineParamsFailed")
+				    .detail("ServerId", serverId)
+				    .detail("Error", f.get().getError().code());
+			}
 			SetStorageEngineParamsReply reply = f.get().get();
 			// TODO: handle the needreboot and needreplacement parameters
 			for (const auto& k : reply.result.applied) {
