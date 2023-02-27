@@ -429,7 +429,7 @@ TRACE_METRIC_TYPE(double, double);
 
 class AuditedEvent;
 
-inline consteval AuditedEvent operator""_audit(const char*, size_t) noexcept;
+inline constexpr AuditedEvent operator""_audit(const char*, size_t) noexcept;
 
 class AuditedEvent {
 	// special TraceEvents that may bypass throttling or suppression
@@ -455,7 +455,7 @@ class AuditedEvent {
 	          std::end(auditTopics)) // whitelist looked up during compile time
 	{}
 
-	friend consteval AuditedEvent operator""_audit(const char*, size_t) noexcept;
+	friend constexpr AuditedEvent operator""_audit(const char*, size_t) noexcept;
 
 public:
 	constexpr const char* type() const noexcept { return eventType; }
@@ -467,7 +467,7 @@ public:
 
 // This, along with private AuditedEvent constructor, guarantees that AuditedEvent is always created with a string
 // literal
-consteval AuditedEvent operator""_audit(const char* eventType, size_t len) noexcept {
+inline constexpr AuditedEvent operator""_audit(const char* eventType, size_t len) noexcept {
 	return AuditedEvent(eventType, len);
 }
 
