@@ -2853,17 +2853,21 @@ ACTOR static Future<Void> doBlobGranuleLocationRequest(GetBlobGranuleLocationsRe
 		}
 
 		// Mapping is valid, all worker interfaces are cached, we can populate response
+		std::unordered_set<UID> interfsIncluded;
 		for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
 			KeyRangeRef granule(blobGranuleMapping[i].key, blobGranuleMapping[i + 1].key);
 			if (req.justGranules) {
 				if (!blobGranuleMapping[i].value.size()) {
 					continue;
 				}
-				rep.results.push_back({ granule, BlobWorkerInterface() });
+				rep.results.push_back({ granule, UID() });
 			} else {
 				// FIXME: avoid duplicate decode?
 				UID workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
-				rep.results.push_back({ granule, commitData->blobWorkerInterfCache[workerId] });
+				rep.results.push_back({ granule, workerId });
+				if (interfsIncluded.insert(workerId).second) {
+					rep.bwInterfs.push_back(commitData->blobWorkerInterfCache[workerId]);
+				}
 			}
 		}
 

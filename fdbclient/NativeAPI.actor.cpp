@@ -156,6 +156,9 @@ FDB_DEFINE_BOOLEAN_PARAM(BalanceOnRequests);
 // Whether or not a request should include the tenant name
 FDB_BOOLEAN_PARAM(UseTenant);
 
+// Whether a blob granule request is a request for the mapping to read, or a request to get granule boundaries
+FDB_BOOLEAN_PARAM(JustGranules);
+
 NetworkOptions networkOptions;
 TLSConfig tlsConfig(TLSEndpointType::CLIENT);
 
@@ -3210,13 +3213,13 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<Transac
 	                                : latestVersion);
 }
 
-ACTOR Future<std::vector<std::pair<KeyRange, BlobWorkerInterface>>> getBlobGranuleLocations_internal(
+ACTOR Future<std::vector<std::pair<KeyRange, UID>>> getBlobGranuleLocations_internal(
     Database cx,
     TenantInfo tenant,
     KeyRange keys,
     int limit,
     Reverse reverse,
-    bool justGranules,
+    JustGranules justGranules,
     SpanContext spanContext,
     Optional<UID> debugID,
     UseProvisionalProxies useProvisionalProxies,
@@ -3253,8 +3256,11 @@ ACTOR Future<std::vector<std::pair<KeyRange, BlobWorkerInterface>>> getBlobGranu
 				ASSERT(!rep.more || !rep.results.empty());
 				*more = rep.more;
 
-				state std::vector<std::pair<KeyRange, BlobWorkerInterface>> results;
+				state std::vector<std::pair<KeyRange, UID>> results;
 				state int granule = 0;
+				for (auto& bwInterf : rep.bwInterfs) {
+					cx->blobWorker_interf.insert({ bwInterf.id(), bwInterf });
+				}
 				for (; granule < rep.results.size(); granule++) {
 					// FIXME: cache mapping?
 					KeyRange range(toPrefixRelativeRange(rep.results[granule].first, tenant.prefix));
@@ -3272,18 +3278,17 @@ ACTOR Future<std::vector<std::pair<KeyRange, BlobWorkerInterface>>> getBlobGranu
 }
 
 // Get the Blob Worker locations for each granule in the 'keys' key-range, similar to getKeyRangeLocations
-Future<std::vector<std::pair<KeyRange, BlobWorkerInterface>>> getBlobGranuleLocations(
-    Database const& cx,
-    TenantInfo const& tenant,
-    KeyRange const& keys,
-    int limit,
-    Reverse reverse,
-    bool justGranules,
-    SpanContext const& spanContext,
-    Optional<UID> const& debugID,
-    UseProvisionalProxies useProvisionalProxies,
-    Version version,
-    bool* more) {
+Future<std::vector<std::pair<KeyRange, UID>>> getBlobGranuleLocations(Database const& cx,
+                                                                      TenantInfo const& tenant,
+                                                                      KeyRange const& keys,
+                                                                      int limit,
+                                                                      Reverse reverse,
+                                                                      JustGranules justGranules,
+                                                                      SpanContext const& spanContext,
+                                                                      Optional<UID> const& debugID,
+                                                                      UseProvisionalProxies useProvisionalProxies,
+                                                                      Version version,
+                                                                      bool* more) {
 
 	ASSERT(!keys.empty());
 
@@ -3292,14 +3297,13 @@ Future<std::vector<std::pair<KeyRange, BlobWorkerInterface>>> getBlobGranuleLoca
 	    cx, tenant, keys, limit, reverse, justGranules, spanContext, debugID, useProvisionalProxies, version, more);
 }
 
-Future<std::vector<std::pair<KeyRange, BlobWorkerInterface>>> getBlobGranuleLocations(
-    Reference<TransactionState> trState,
-    KeyRange const& keys,
-    int limit,
-    Reverse reverse,
-    UseTenant useTenant,
-    bool justGranules,
-    bool* more) {
+Future<std::vector<std::pair<KeyRange, UID>>> getBlobGranuleLocations(Reference<TransactionState> trState,
+                                                                      KeyRange const& keys,
+                                                                      int limit,
+                                                                      Reverse reverse,
+                                                                      UseTenant useTenant,
+                                                                      JustGranules justGranules,
+                                                                      bool* more) {
 	return getBlobGranuleLocations(
 	    trState->cx,
 	    useTenant ? trState->getTenantInfo(AllowInvalidTenantID::True) : TenantInfo(),
@@ -8150,8 +8154,8 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Trans
 		if (BUGGIFY_WITH_PROB(0.01)) {
 			remaining = std::min(remaining, deterministicRandom()->randomInt(1, 10));
 		}
-		std::vector<std::pair<KeyRange, BlobWorkerInterface>> blobGranuleMapping = wait(getBlobGranuleLocations(
-		    self->trState, currentRange, remaining, Reverse::False, UseTenant::True, true, &more));
+		std::vector<std::pair<KeyRange, UID>> blobGranuleMapping = wait(getBlobGranuleLocations(
+		    self->trState, currentRange, remaining, Reverse::False, UseTenant::True, JustGranules::True, &more));
 		for (auto& it : blobGranuleMapping) {
 			if (!results.empty() && results.back().end > it.first.end) {
 				ASSERT(results.back().end > it.first.begin);
@@ -8230,13 +8234,13 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 	}
 
 	state bool moreMapping = false;
-	state std::vector<std::pair<KeyRange, BlobWorkerInterface>> blobGranuleMapping =
+	state std::vector<std::pair<KeyRange, UID>> blobGranuleMapping =
 	    wait(getBlobGranuleLocations(self->trState,
 	                                 keyRange,
 	                                 CLIENT_KNOBS->BG_TOO_MANY_GRANULES,
 	                                 Reverse::False,
 	                                 UseTenant::True,
-	                                 false,
+	                                 JustGranules::False,
 	                                 &moreMapping));
 
 	if (blobGranuleMapping.empty()) {
@@ -8252,7 +8256,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			           blobGranuleMapping.size(),
 			           blobGranuleMapping.back().first.begin.printable(),
 			           blobGranuleMapping.back().first.end.printable(),
-			           blobGranuleMapping.back().second.id().shortString());
+			           blobGranuleMapping.back().second.shortString());
 		}
 		TraceEvent(SevWarn, "BGMappingTooLarge")
 		    .detail("Range", range)
@@ -8269,14 +8273,12 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 	// Make request for each granule
 	for (i = 0; i < blobGranuleMapping.size(); i++) {
 		state KeyRange granule = blobGranuleMapping[i].first;
-		state BlobWorkerInterface bwInterf = blobGranuleMapping[i].second;
-		if (!self->trState->cx->blobWorker_interf.count(bwInterf.id())) {
-			self->trState->cx->blobWorker_interf[bwInterf.id()] = bwInterf;
-		}
 		// if this was a time travel and the request returned larger bounds, skip this chunk
 		if (granule.end <= keyRange.begin) {
 			continue;
 		}
+		state BlobWorkerInterface bwInterf = self->trState->cx->blobWorker_interf[blobGranuleMapping[i].second];
+		ASSERT(bwInterf.id() != UID());
 		if (BG_REQUEST_DEBUG) {
 			fmt::print("Blob granule request mapping [{0} - {1})={2}\n",
 			           granule.begin.printable(),
