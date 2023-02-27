@@ -1370,7 +1370,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 
 		TraceEvent("StorageServerRequestedReboot", id)
 		    .detail("RebootStorageEngine", e.getError().code() == error_code_please_reboot_kv_store)
-		    .detail("Params", !storageEngineParams ? describe(storageEngineParams->getParams()) : "");
+		    .detail("Params", storageEngineParams ? describe(storageEngineParams->getParams()) : "");
 
 		if (e.getError().code() == error_code_please_reboot_kv_store) {
 			// Wait the kv store shutdown complete before opening a new one
