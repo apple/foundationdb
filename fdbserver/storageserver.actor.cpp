@@ -7898,13 +7898,19 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 			}
 			// ASSERT(records.size() == shard->ranges.size());
 			break;
-		} catch (Error& e) {
+		} catch (Error& err) {
+			state Error e(err);
 			TraceEvent(SevWarn, "FetchShardCheckpointMetaDataError", data->thisServerID)
 			    .errorUnsuppressed(e)
 			    .detail("MoveInShardID", shard->id)
 			    .detail("MoveInShard", shard->toString());
-			if (attempt > 10) {
-				throw e;
+			if (attempt > 10 && e.code() != error_code_operation_cancelled && e.code() != error_code_actor_cancelled) {
+				if (shard->getPhase() == MoveInPhase::Fetching) {
+					wait(fallBackToAddingShard(data, moveInShard));
+					return Void();
+				} else {
+					throw e;
+				}
 			}
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    e.code() == error_code_connection_failed || e.code() == error_code_broken_promise ||
@@ -7914,7 +7920,7 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 				wait(fallBackToAddingShard(data, moveInShard));
 				return Void();
 			} else {
-				throw;
+				throw e;
 			}
 			// wait(delay(1, TaskPriority::FetchKeys));
 			// if (e.code() == error_code_checkpoint_not_found) {
@@ -7940,9 +7946,6 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 		return Void();
 	}
 
-	platform::eraseDirectoryRecursive(dir);
-	ASSERT(platform::createDirectory(dir));
-
 	state double fetchStartTime = 0;
 	// localRecords.resize(records.size());
 	attempt = 0;
@@ -7950,6 +7953,9 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 		if (moveInShard->getPhase() == MoveInPhase::Fail) {
 			return Void();
 		}
+		platform::eraseDirectoryRecursive(dir);
+		ASSERT(platform::createDirectory(dir));
+
 		++attempt;
 		try {
 			TraceEvent(sevDm, "FetchShardFetchCheckpointsBegin", data->thisServerID).detail("MoveInShardID", shard->id);
@@ -7972,9 +7978,6 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 			// 	fCheckpointMetaData.push_back(
 			// 	    fetchCheckpointRanges(data->cx, record, dir, checkpointRangeMap[record.checkpointID]));
 			// }
-			if (!directoryExists(dir)) {
-				ASSERT(platform::createDirectory(dir));
-			}
 			for (const auto& [range, record] : records) {
 				// ASSERT(!checkpointRangeMap[record.checkpointID].empty());
 				const std::string checkpointDir = joinPath(dir, record.checkpointID.toString());
@@ -7991,10 +7994,17 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "FetchShardFetchCheckpointsError", data->thisServerID)
 			    .errorUnsuppressed(e)
+			    .detail("Attempt", attempt)
 			    .detail("MoveInShardID", shard->id);
 			// .detail("CheckpointMetaData", describe(records));
-			if (attempt > 10) {
-				throw e;
+			if (attempt > 10 && e.code() != error_code_operation_cancelled && e.code() != error_code_actor_cancelled) {
+				if (shard->getPhase() == MoveInPhase::Fetching) {
+					platform::eraseDirectoryRecursive(dir);
+					wait(fallBackToAddingShard(data, moveInShard));
+					return Void();
+				} else {
+					throw e;
+				}
 			}
 			wait(delay(1));
 		}
@@ -8084,28 +8094,30 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 			KeyRef key = kv.key.removePrefix(persistByteSampleKeys.begin);
 			// data->byteSampleApplySet(kv, data->data().getLatestVersion());
 			TraceEvent(SevDebug, "StorageRestoreCheckpointKeySample", data->thisServerID)
-			    .detail("Checkpoint", checkpoint.checkpointID)
+			    .detail("Checkpoint", checkpoint.checkpointID.toString())
 			    .detail("SampleKey", key)
 			    .detail("Size", size);
 			data->metrics.byteSample.sample.insert(key, size);
 			data->addMutationToMutationLogOrStorage(invalidVersion,
 			                                        MutationRef(MutationRef::SetValue, kv.key, kv.value));
 		}
+		if (g_network->isSimulated()) {
+			int64_t checkpointBytes = 0;
+			for (const auto& range : checkpoint.ranges) {
+				checkpointBytes += data->metrics.byteSample.getEstimate(range);
+			}
+			ASSERT(checkpoint.estimatedSize.present());
+			TraceEvent(SevDebug, "StorageRestoreCheckpointStats", data->thisServerID)
+			    .detail("Checkpoint", checkpoint.toString())
+			    .detail("Bytes", checkpointBytes)
+			    .detail("CheckpointEstimatedSize", checkpoint.estimatedSize.get());
+			// ASSERT(checkpoint.estimatedSize.get() == checkpointBytes);
+		}
 	}
 	shard->setPhase(MoveInPhase::ApplyingUpdates);
 	wait(updateMoveInShardMetaData(data, shard.get()));
 
 	// shard->fetchComplete.send(Void());
-
-	for (const auto checkpoint : shard->checkpoints) {
-		int64_t checkpointBytes = 0;
-		for (const auto& range : checkpoint.ranges) {
-			checkpointBytes += data->metrics.byteSample.getEstimate(range);
-		}
-		TraceEvent(SevDebug, "StorageRestoreCheckpointStats", data->thisServerID)
-		    .detail("Checkpoint", checkpoint.toString())
-		    .detail("Bytes", checkpointBytes);
-	}
 
 	TraceEvent(sevDm, "FetchShardIngestCheckpointEnd", data->thisServerID)
 	    .detail("Checkpoints", describe(shard->checkpoints));
@@ -11103,7 +11115,7 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 							TraceEvent(SevDebug, "CheckpointByteSampleKey")
 							    .detail("CheckpointID", metaData.checkpointID)
 							    .detail("Key", readResult[i].key.removePrefix(persistByteSampleKeys.begin))
-							    .detail("Value", readResult[i].value);
+							    .detail("SampleSize",BinaryReader::fromStringRef<int64_t>(readResult[i].value, Unversioned()));
 							numSampledKeys++;
 						}
 						if (readResult.more) {
@@ -11182,6 +11194,14 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		state bool sampleByteSstFileCreated =
 		    wait(createSstFileForCheckpointShardBytesSample(data, metaData, bytesSampleTempFile));
 		checkpointResult.bytesSampleFile = sampleByteSstFileCreated ? bytesSampleFile : Optional<std::string>();
+		int64_t checkpointBytes = 0;
+		for (const auto& range : checkpointResult.ranges) {
+			checkpointBytes += data->metrics.byteSample.getEstimate(range);
+		}
+		checkpointResult.estimatedSize = checkpointBytes;
+		TraceEvent(SevDebug, "StorageCreatedCheckpointStats", data->thisServerID)
+		    .detail("Checkpoint", checkpointResult.toString())
+		    .detail("Bytes", checkpointBytes);
 		data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
 		TraceEvent("StorageCreatedCheckpoint", data->thisServerID).detail("Checkpoint", checkpointResult.toString());
 		// Move sst file to the checkpoint folder
@@ -11219,15 +11239,6 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		data->checkpoints[checkpointResult.checkpointID].setState(CheckpointMetaData::Deleting);
 		data->actors.add(deleteCheckpointQ(data, metaData.version, checkpointResult));
 	}
-
-	int64_t checkpointBytes = 0;
-	for (const auto& range : checkpointResult.ranges) {
-		checkpointBytes += data->metrics.byteSample.getEstimate(range);
-	}
-
-	TraceEvent(SevDebug, "StorageCreatedCheckpointStats", data->thisServerID)
-	    .detail("Checkpoint", checkpointResult.toString())
-	    .detail("Bytes", checkpointBytes);
 
 	return Void();
 }

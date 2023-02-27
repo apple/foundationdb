@@ -55,6 +55,7 @@ struct CheckpointMetaData {
 	UID checkpointID; // A unique id for this checkpoint.
 	int16_t state; // CheckpointState.
 	Optional<std::string> bytesSampleFile;
+	Optional<int64_t> estimatedSize;
 
 	// A serialized metadata associated with format, this data can be understood by the corresponding KVS.
 	Standalone<StringRef> serializedCheckpoint;
@@ -106,20 +107,29 @@ struct CheckpointMetaData {
 	bool operator==(const CheckpointMetaData& r) const { return checkpointID == r.checkpointID; }
 
 	std::string toString() const {
-		std::string res = "Checkpoint MetaData: [Ranges]: " + describe(ranges) +
-		                  " [Version]: " + std::to_string(version) + " [Format]: " + std::to_string(format) +
-		                  " [Server]: " + describe(src) + " [ID]: " + checkpointID.toString() +
-		                  " [State]: " + std::to_string(static_cast<int>(state)) +
-		                  (actionId.present() ? (" [Action ID]: " + actionId.get().toString()) : "") +
-		                  (bytesSampleFile.present() ? (" [BytesSampleFile]: " + bytesSampleFile.get()) : "");
-		;
+		std::string res =
+		    "Checkpoint MetaData: [Ranges]: " + describe(ranges) + " [Version]: " + std::to_string(version) +
+		    " [Format]: " + std::to_string(format) + " [Server]: " + describe(src) +
+		    " [ID]: " + checkpointID.toString() + " [State]: " + std::to_string(static_cast<int>(state)) +
+		    (actionId.present() ? (" [Action ID]: " + actionId.get().toString()) : "") +
+		    (bytesSampleFile.present() ? (" [BytesSampleFile]: " + bytesSampleFile.get()) : "") +
+		    (estimatedSize.present() ? (" [BytesSampleEstimatedSize]: " + std::to_string(estimatedSize.get())) : "");
 		return res;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, version, ranges, format, state, checkpointID, src, serializedCheckpoint, actionId, bytesSampleFile);
+		serializer(ar,
+		           version,
+		           ranges,
+		           format,
+		           state,
+		           checkpointID,
+		           src,
+		           serializedCheckpoint,
+		           actionId,
+		           bytesSampleFile,
+		           estimatedSize);
 	}
 };
 
