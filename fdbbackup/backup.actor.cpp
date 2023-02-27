@@ -2826,7 +2826,8 @@ ACTOR Future<Void> queryBackup(const char* name,
 			}
 
 			// We only need to know all the mutation logs from `snapshotVersion` to `restoreVersion`.
-			wait(store(fileSet, bc->getRestoreSet(restoreVersion, cx, keyRangesFilter, /*logOnly=*/true, snapshotVersion)));
+			wait(store(fileSet,
+			           bc->getRestoreSet(restoreVersion, cx, keyRangesFilter, /*logOnly=*/true, snapshotVersion)));
 		} else {
 			// When a snapshot version is not specified, we use the latest snapshot to restore to the `restoreVersion`.
 			wait(store(fileSet, bc->getRestoreSet(restoreVersion, cx, keyRangesFilter)));
