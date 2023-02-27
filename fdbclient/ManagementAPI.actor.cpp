@@ -316,7 +316,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			if (pos != std::string::npos) {
 				storeTypeStr = value.substr(0, pos);
 				auto paramsStr = value.substr(pos + 1);
-				auto storeType = KeyValueStoreType::fromStoreTypeStr(value);
+				auto storeType = KeyValueStoreType::fromStoreTypeStr(storeTypeStr);
 				if (storeType != KeyValueStoreType::SSD_REDWOOD_V1) {
 					fmt::print("Error: Unsupported params change for storage engine {}\n", storeType.toString());
 					return out;
