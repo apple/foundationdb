@@ -102,6 +102,7 @@ ERROR( blob_worker_full, 1077, "Blob worker cannot take on more granule assignme
 ERROR( grv_proxy_memory_limit_exceeded, 1078, "GetReadVersion proxy memory limit exceeded" )
 ERROR( blob_granule_request_failed, 1079, "BlobGranule request failed" )
 ERROR( storage_too_many_feed_streams, 1080, "Too many feed streams to a single storage server" )
+ERROR( storage_engine_not_initialized, 1081, "Storage engine was never successfully initialized." )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
