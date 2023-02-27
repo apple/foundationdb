@@ -334,7 +334,7 @@ public:
 	int extraMachineCountDC = 0;
 	Optional<bool> generateFearless, buggify;
 	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
-	    stderrSeverity, machineCount, processesPerMachine, coordinators;
+	    stderrSeverity, machineCount, processesPerMachine, coordinators, asanMachineCount;
 	bool blobGranulesEnabled = false;
 	Optional<std::string> config;
 	bool randomlyRenameZoneId = false;
@@ -396,6 +396,7 @@ public:
 		    .add("buggify", &buggify)
 		    .add("StderrSeverity", &stderrSeverity)
 		    .add("machineCount", &machineCount)
+		    .add("asanMachineCount", &asanMachineCount)
 		    .add("processesPerMachine", &processesPerMachine)
 		    .add("coordinators", &coordinators)
 		    .add("configDB", &configDBType)
@@ -1753,6 +1754,11 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
 	if (testConfig.machineCount.present()) {
 		machine_count = testConfig.machineCount.get();
+#ifdef ADDRESS_SANITIZER
+		if (testConfig.asanMachineCount.present()) {
+			machine_count = testConfig.asanMachineCount.get();
+		}
+#endif
 	} else if (generateFearless && testConfig.minimumReplication > 1) {
 		// low latency tests in fearless configurations need 4 machines per datacenter (3 for triple replication, 1 that
 		// is down during failures).
@@ -2201,7 +2207,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	    .detail("ConfigString", startingConfigString);
 
 	bool requiresExtraDBMachines = !g_simulator.extraDatabases.empty() && !useLocalDatabase;
-	int assignedMachines = 0, nonVersatileMachines = 0;
+	int assignedMachines = 0;
 	bool gradualMigrationPossible = true;
 	std::vector<ProcessClass::ClassType> processClassesSubSet = { ProcessClass::UnsetClass,
 		                                                          ProcessClass::StatelessClass };
@@ -2255,10 +2261,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				else
 					processClass = ProcessClass((ProcessClass::ClassType)deterministicRandom()->randomInt(0, 3),
 					                            ProcessClass::CommandLineSource); // Unset, Storage, or Transaction
-				if (processClass ==
-				    ProcessClass::StatelessClass) { // *can't* be assigned to other roles, even in an emergency
-					nonVersatileMachines++;
-				}
+
 				if (processClass == ProcessClass::UnsetClass || processClass == ProcessClass::StorageClass) {
 					possible_ss++;
 				}
@@ -2270,11 +2273,9 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			if (machine >= machines) {
 				if (storageCacheMachines > 0 && dc == 0) {
 					processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
-					nonVersatileMachines++;
 					storageCacheMachines--;
 				} else if (blobWorkerMachines > 0) { // add blob workers to every DC
 					processClass = ProcessClass(ProcessClass::BlobWorkerClass, ProcessClass::CommandLineSource);
-					nonVersatileMachines++;
 					blobWorkerMachines--;
 				}
 			}

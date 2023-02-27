@@ -201,8 +201,8 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	Promise<Void> fatalError;
 
 	Reference<FlowLock> initialSnapshotLock;
-	Reference<FlowLock> resnapshotLock;
-	Reference<FlowLock> deltaWritesLock;
+	Reference<FlowLock> resnapshotBudget;
+	Reference<FlowLock> deltaWritesBudget;
 
 	BlobWorkerStats stats;
 
@@ -221,9 +221,9 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	BlobWorkerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db)
 	  : id(id), db(db), tenantData(BGTenantMap(dbInfo)), dbInfo(dbInfo),
 	    initialSnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM)),
-	    resnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_RESNAPSHOT_PARALLELISM)),
-	    deltaWritesLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM)),
-	    stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, initialSnapshotLock, resnapshotLock, deltaWritesLock),
+	    resnapshotBudget(new FlowLock(SERVER_KNOBS->BLOB_WORKER_RESNAPSHOT_BUDGET_BYTES)),
+	    deltaWritesBudget(new FlowLock(SERVER_KNOBS->BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES)),
+	    stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, initialSnapshotLock, resnapshotBudget, deltaWritesBudget),
 	    isEncryptionEnabled(
 	        isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION, db->clientInfo->get())) {}
 
@@ -276,17 +276,15 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 		// worker, before agreeing to take on a new assignment, given that several large sources of memory can grow and
 		// change post-assignment
 
-		// estimate slack in bytes buffered as max(0, assignments * (delta file size / 2) - bytesBuffered)
-		int64_t expectedExtraBytesBuffered = std::max(
+		// FIXME: change these to be byte counts
+		// FIXME: buggify an extra multiplication factor for short periods of time to hopefully trigger this logic more
+		// often? estimate slack in bytes buffered as max(0, assignments * (delta file size / 2) - bytesBuffered)
+		// FIXME: this doesn't take increased delta file size for heavy write amp cases into account
+		int64_t expectedExtraBytesBuffered = std::max<int64_t>(
 		    0, stats.numRangesAssigned * (SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 2) - stats.mutationBytesBuffered);
-		// estimate slack in potential pending delta file writes
-		int64_t maximumExtraDeltaWrite = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES * deltaWritesLock->available();
 		// estimate slack in potential pending resnapshot
-		int64_t maximumExtraReSnapshot =
-		    (SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES + SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) * 2 *
-		    resnapshotLock->available();
-
-		int64_t totalExtra = expectedExtraBytesBuffered + maximumExtraDeltaWrite + maximumExtraReSnapshot;
+		int64_t totalExtra =
+		    expectedExtraBytesBuffered + deltaWritesBudget->available() + resnapshotBudget->available();
 		// assumes initial snapshot parallelism is small enough and uncommon enough to not add it to this computation
 		stats.estimatedMaxResidentMemory = stats.lastResidentMemory + totalExtra;
 
@@ -685,9 +683,10 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
                                            Future<BlobFileIndex> previousDeltaFileFuture,
                                            Future<Void> waitCommitted,
                                            Optional<std::pair<KeyRange, UID>> oldGranuleComplete,
-                                           Future<Void> startDeltaFileWrite) {
+                                           Future<Void> startDeltaFileWrite,
+                                           int64_t deltaFileBudget) {
 	wait(startDeltaFileWrite);
-	state FlowLock::Releaser holdingLock(*bwData->deltaWritesLock);
+	state FlowLock::Releaser holdingLock(*bwData->deltaWritesBudget, deltaFileBudget);
 
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 
@@ -922,6 +921,16 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	// free snapshot to reduce memory
 	snapshot = Standalone<GranuleSnapshot>();
 
+	if (serializedSize >= 5 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
+		// TODO REMOVE key range from log
+		TraceEvent(SevWarn, "BGSnapshotTooBig", bwData->id)
+		    .suppressFor(60)
+		    .detail("GranuleID", granuleID)
+		    .detail("Granule", keyRange)
+		    .detail("Version", version)
+		    .detail("Size", serializedSize);
+	}
+
 	// write to blob using multi part upload
 	state Reference<BackupContainerFileSystem> writeBStore;
 	state std::string fname;
@@ -1104,8 +1113,24 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
                                             UID granuleID,
                                             std::vector<GranuleFiles> fileSet,
                                             Version version) {
-	wait(bwData->resnapshotLock->take());
-	state FlowLock::Releaser holdingLock(*bwData->resnapshotLock);
+	state int64_t requiredBudget = 0;
+	for (auto& f : fileSet) {
+		ASSERT(!f.snapshotFiles.empty());
+		ASSERT(!f.deltaFiles.empty());
+		Version snapshotVersion = f.snapshotFiles.back().version;
+		requiredBudget += f.snapshotFiles.back().length;
+		int deltaIdx = f.deltaFiles.size() - 1;
+		while (deltaIdx >= 0 && f.deltaFiles[deltaIdx].version > snapshotVersion) {
+			requiredBudget += f.deltaFiles[deltaIdx].length;
+			deltaIdx--;
+		}
+	}
+	// assume new snapshot is the combined size of snapshot and deltas, worst case
+	requiredBudget *= 2;
+	// ensure it fits in budget
+	requiredBudget = std::min(requiredBudget, SERVER_KNOBS->BLOB_WORKER_RESNAPSHOT_BUDGET_BYTES);
+	wait(bwData->resnapshotBudget->take(TaskPriority::DefaultYield, requiredBudget));
+	state FlowLock::Releaser holdingLock(*bwData->resnapshotBudget, requiredBudget);
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 	if (BW_DEBUG) {
 		fmt::print("Compacting snapshot from blob for [{0} - {1}) @ {2}\n",
@@ -1118,9 +1143,6 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 	state std::vector<Future<RangeResult>> chunksToRead;
 	state int64_t compactBytesRead = 0;
 	for (auto& f : fileSet) {
-		ASSERT(!f.snapshotFiles.empty());
-		ASSERT(!f.deltaFiles.empty());
-
 		state BlobGranuleChunkRef chunk;
 		state GranuleFiles files = f;
 		state Version snapshotVersion = files.snapshotFiles.back().version;
@@ -1295,9 +1317,13 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 				// wait for manager stream to become ready, and send a message
 				loop {
 					choose {
-						when(wait(bwData->currentManagerStatusStream.get().onReady())) { break; }
+						when(wait(bwData->currentManagerStatusStream.get().onReady())) {
+							break;
+						}
 						when(wait(bwData->currentManagerStatusStream.onChange())) {}
-						when(wait(metadata->resumeSnapshot.getFuture())) { break; }
+						when(wait(metadata->resumeSnapshot.getFuture())) {
+							break;
+						}
 					}
 				}
 				if (metadata->resumeSnapshot.isSet()) {
@@ -1336,7 +1362,9 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 		// manager change/no response
 		choose {
 			when(wait(bwData->currentManagerStatusStream.onChange())) {}
-			when(wait(metadata->resumeSnapshot.getFuture())) { break; }
+			when(wait(metadata->resumeSnapshot.getFuture())) {
+				break;
+			}
 			when(wait(delay(1.0))) {}
 		}
 
@@ -1393,6 +1421,7 @@ ACTOR Future<BlobFileIndex> reSnapshotNoCheck(Reference<BlobWorkerData> bwData,
 	TraceEvent(SevDebug, "BlobGranuleReSnapshotOldFeed", bwData->id)
 	    .detail("Granule", metadata->keyRange)
 	    .detail("Version", reSnapshotVersion);
+	++bwData->stats.oldFeedSnapshots;
 
 	// wait for file updater to make sure that last delta file is in the metadata before
 	while (metadata->files.deltaFiles.empty() || metadata->files.deltaFiles.back().version < reSnapshotVersion) {
@@ -1423,7 +1452,9 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
 			// wait for manager stream to become ready, and send a message
 			loop {
 				choose {
-					when(wait(bwData->currentManagerStatusStream.get().onReady())) { break; }
+					when(wait(bwData->currentManagerStatusStream.get().onReady())) {
+						break;
+					}
 					when(wait(bwData->currentManagerStatusStream.onChange())) {}
 				}
 			}
@@ -1503,8 +1534,12 @@ ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
 				// wait for manager stream to become ready, and send a message
 				loop {
 					choose {
-						when(wait(delay(std::max(0.0, sendTimeGiveUp - now())))) { break; }
-						when(wait(bwData->currentManagerStatusStream.get().onReady())) { break; }
+						when(wait(delay(std::max(0.0, sendTimeGiveUp - now())))) {
+							break;
+						}
+						when(wait(bwData->currentManagerStatusStream.get().onReady())) {
+							break;
+						}
 						when(wait(bwData->currentManagerStatusStream.onChange())) {}
 					}
 				}
@@ -1786,7 +1821,9 @@ ACTOR Future<Void> waitOnCFVersion(Reference<GranuleMetadata> metadata, Version 
 			                                 ? metadata->activeCFData.get()->whenAtLeast(waitVersion)
 			                                 : Never();
 			choose {
-				when(wait(atLeast)) { break; }
+				when(wait(atLeast)) {
+					break;
+				}
 				when(wait(metadata->activeCFData.onChange())) {}
 			}
 		} catch (Error& e) {
@@ -1877,6 +1914,58 @@ ACTOR Future<Void> forceFlushCleanup(Reference<BlobWorkerData> bwData, Reference
 	return Void();
 }
 
+// We have a normal target snapshot/delta ratio, but in write-heavy cases where are behind and need to catch up,
+// we want to change this target to get more efficient. To maintain a consistent write amp if the snapshot size is
+// growing without the ability to split, we scale the bytes before recompact to reach the target write amp. We also
+// decrease the target write amp the further behind we are to be more efficient.
+struct WriteAmpTarget {
+	double targetWriteAmp;
+	int bytesBeforeCompact;
+	int targetSnapshotBytes;
+	bool catchingUp;
+
+	WriteAmpTarget() { reset(); }
+
+	void reset() {
+		catchingUp = false;
+		bytesBeforeCompact = SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT;
+		targetSnapshotBytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
+		targetWriteAmp = 1.0 * (bytesBeforeCompact + targetSnapshotBytes) / bytesBeforeCompact;
+	}
+
+	void decrease(int deltaBytes) {
+		if (SERVER_KNOBS->BG_ENABLE_DYNAMIC_WRITE_AMP) {
+			catchingUp = true;
+			double minWriteAmp =
+			    SERVER_KNOBS->BG_DYNAMIC_WRITE_AMP_MIN_FACTOR *
+			    (SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT + SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) /
+			    SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT;
+			targetWriteAmp = std::max(targetWriteAmp * SERVER_KNOBS->BG_DYNAMIC_WRITE_AMP_DECREASE_FACTOR, minWriteAmp);
+			// To not wait for next re-snapshot, pessimistically assume that all deltas are inserts and new snapshot
+			// will be bigger. This is usually the case in write-heavy catchup cases, but helps us catch up faster
+			// regardless
+			targetSnapshotBytes += deltaBytes;
+			bytesBeforeCompact = targetSnapshotBytes / (targetWriteAmp - 1.0);
+		}
+	}
+
+	void newSnapshotSize(int snapshotSize) {
+		if (SERVER_KNOBS->BG_ENABLE_DYNAMIC_WRITE_AMP) {
+			snapshotSize = std::max(snapshotSize, SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES);
+			if (catchingUp) {
+				// if catching up, always aim for larger snapshot cycles to help catch up faster
+				snapshotSize = std::max(targetSnapshotBytes, snapshotSize);
+			}
+			targetSnapshotBytes = snapshotSize;
+			bytesBeforeCompact = targetSnapshotBytes / (targetWriteAmp - 1.0);
+		}
+	}
+
+	int getDeltaFileBytes() { return getBytesBeforeCompact() / 10; }
+
+	int getBytesBeforeCompact() { return bytesBeforeCompact; }
+};
+
 // updater for a single granule
 // TODO: this is getting kind of large. Should try to split out this actor if it continues to grow?
 ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
@@ -1902,6 +1991,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 	state std::deque<std::pair<Version, Version>> rollbacksInProgress;
 	state std::deque<std::pair<Version, Version>> rollbacksCompleted;
 	state Future<Void> startDeltaFileWrite = Future<Void>(Void());
+	state WriteAmpTarget writeAmpTarget;
 
 	state bool snapshotEligible; // just wrote a delta file or just took granule over from another worker
 	state bool justDidRollback = false;
@@ -1952,6 +2042,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						metadata->bytesInNewDeltaFiles += files.deltaFiles[i].length;
 					}
 				}
+			}
+
+			if (!files.snapshotFiles.empty()) {
+				writeAmpTarget.newSnapshotSize(files.snapshotFiles.back().length);
 			}
 
 			metadata->files = startState.existingFiles.get();
@@ -2064,6 +2158,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 						metadata->files.snapshotFiles.push_back(completedFile);
 						metadata->durableSnapshotVersion.set(completedFile.version);
+						writeAmpTarget.newSnapshotSize(completedFile.length);
 						pendingSnapshots--;
 					} else {
 						handleCompletedDeltaFile(bwData,
@@ -2183,6 +2278,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				// Start actors BEFORE setting new change feed data to ensure the change feed data is properly
 				// initialized by the client
 				metadata->activeCFData.set(cfData);
+
+				// no longer catching up on old feed, resume desired write amp target
+				writeAmpTarget.reset();
 			}
 
 			// process mutations
@@ -2383,7 +2481,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			// is already whenAtLeast that version
 			bool forceFlush = !forceFlushVersions.empty() && forceFlushVersions.back() > metadata->pendingDeltaVersion;
 			CODE_PROBE(forceFlush, "Force flushing granule");
-			if (metadata->bufferedDeltaBytes >= SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES || forceFlush) {
+			if ((processedAnyMutations && metadata->bufferedDeltaBytes >= writeAmpTarget.getDeltaFileBytes()) ||
+			    forceFlush) {
 				TraceEvent(SevDebug, "BlobGranuleDeltaFile", bwData->id)
 				    .detail("Granule", metadata->keyRange)
 				    .detail("Version", lastDeltaVersion);
@@ -2451,7 +2550,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					           oldChangeFeedDataComplete.present() ? ". Finalizing " : "");
 				}
 
-				startDeltaFileWrite = bwData->deltaWritesLock->take();
+				int64_t deltaFileBudget =
+				    std::min((int64_t)metadata->bufferedDeltaBytes, SERVER_KNOBS->BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES);
+				startDeltaFileWrite = bwData->deltaWritesBudget->take(TaskPriority::DefaultYield, deltaFileBudget);
 				Future<BlobFileIndex> dfFuture =
 				    writeDeltaFile(bwData,
 				                   bstore,
@@ -2464,7 +2565,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				                   previousFuture,
 				                   waitVersionCommitted(bwData, metadata, lastDeltaVersion),
 				                   oldChangeFeedDataComplete,
-				                   startDeltaFileWrite);
+				                   startDeltaFileWrite,
+				                   deltaFileBudget);
 				inFlightFiles.push_back(InFlightFile(dfFuture, lastDeltaVersion, metadata->bufferedDeltaBytes, false));
 
 				// add new pending delta file
@@ -2498,16 +2600,16 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			// yet
 
 			// If we have enough delta files, try to re-snapshot
-			if (snapshotEligible && metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) {
+			// FIXME: have max file count in addition to bytes count
+			if (snapshotEligible && metadata->bytesInNewDeltaFiles >= writeAmpTarget.getBytesBeforeCompact()) {
 				if (BW_DEBUG && !inFlightFiles.empty()) {
 					fmt::print("Granule [{0} - {1}) ready to re-snapshot at {2} after {3} > {4} bytes, "
-					           "waiting for "
-					           "outstanding {5} files to finish\n",
+					           "waiting for outstanding {5} files to finish\n",
 					           metadata->keyRange.begin.printable(),
 					           metadata->keyRange.end.printable(),
 					           metadata->pendingDeltaVersion,
 					           metadata->bytesInNewDeltaFiles,
-					           SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT,
+					           writeAmpTarget.getBytesBeforeCompact(),
 					           inFlightFiles.size());
 				}
 
@@ -2538,6 +2640,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				} else {
 					inFlightBlobSnapshot =
 					    reSnapshotNoCheck(bwData, bstore, metadata, startState.granuleID, previousFuture);
+					writeAmpTarget.decrease(metadata->bytesInNewDeltaFiles);
 				}
 				inFlightFiles.push_back(InFlightFile(inFlightBlobSnapshot, metadata->pendingDeltaVersion, 0, true));
 				pendingSnapshots++;
@@ -2548,9 +2651,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				metadata->bytesInNewDeltaFiles = 0;
 
 				// If we have more than one snapshot file and that file is unblocked (committedVersion >=
-				// snapshotVersion), wait for it to finish
-
-				if (pendingSnapshots > 1) {
+				// snapshotVersion), wait for it to finish. Otherwise, we might write way too many delta files that then
+				// get discarded if one of the snapshots splits If catching up on old feed, allow more parallel
+				// snapshots because none of them can split
+				int maxAllowedPendingSnapshots =
+				    (metadata->pendingSnapshotVersion >= startState.changeFeedStartVersion) ? 1 : 3;
+				if (pendingSnapshots > maxAllowedPendingSnapshots) {
 					state int waitIdx = 0;
 					int idx = 0;
 					Version safeVersion =
@@ -2581,6 +2687,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							}
 							metadata->files.snapshotFiles.push_back(completedFile);
 							metadata->durableSnapshotVersion.set(completedFile.version);
+							writeAmpTarget.newSnapshotSize(completedFile.length);
 							pendingSnapshots--;
 						} else {
 							handleCompletedDeltaFile(bwData,
@@ -2604,25 +2711,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				    metadata,
 				    startState.granuleID,
 				    inFlightFiles.empty() ? Future<Void>(Void()) : success(inFlightFiles.back().future));
-
-			} else if (snapshotEligible &&
-			           metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) {
-				// if we're in the old change feed case and can't snapshot but we have enough data to, don't
-				// queue too many files in parallel, and slow down change feed consuming to let file writing
-				// catch up
-
-				CODE_PROBE(true, "Granule processing long tail of old change feed");
-				if (inFlightFiles.size() > 10 && inFlightFiles.front().version <= metadata->knownCommittedVersion) {
-					if (BW_DEBUG) {
-						fmt::print("[{0} - {1}) Waiting on delta file b/c old change feed\n",
-						           metadata->keyRange.begin.printable(),
-						           metadata->keyRange.end.printable());
-					}
-					choose {
-						when(BlobFileIndex completedDeltaFile = wait(inFlightFiles.front().future)) {}
-						when(wait(delay(0.1))) {}
-					}
-				}
 			}
 			snapshotEligible = false;
 		}
@@ -2635,6 +2723,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		}
 		// Free last change feed data
 		metadata->activeCFData.set(Reference<ChangeFeedData>());
+
+		// clear out buffered data
+		bwData->stats.mutationBytesBuffered -= metadata->bufferedDeltaBytes;
 
 		if (e.code() == error_code_operation_cancelled) {
 			throw;
@@ -3352,28 +3443,28 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 
 	state Optional<Key> tenantPrefix;
 	state Arena arena;
-	if (req.tenantInfo.name.present()) {
-		ASSERT(req.tenantInfo.tenantId != TenantInfo::INVALID_TENANT);
-		Optional<TenantMapEntry> tenantEntry = bwData->tenantData.getTenantById(req.tenantInfo.tenantId);
-		if (tenantEntry.present()) {
-			ASSERT(tenantEntry.get().id == req.tenantInfo.tenantId);
-			tenantPrefix = tenantEntry.get().prefix;
-		} else {
-			CODE_PROBE(true, "Blob worker unknown tenant");
-			// FIXME - better way. Wait on retry here, or just have better model for tenant metadata?
-			// Just throw wrong_shard_server and make the client retry and assume we load it later
-			TraceEvent(SevDebug, "BlobWorkerRequestUnknownTenant", bwData->id)
-			    .suppressFor(5.0)
-			    .detail("TenantName", req.tenantInfo.name.get())
-			    .detail("TenantId", req.tenantInfo.tenantId);
-			throw unknown_tenant();
-		}
-		req.keyRange = KeyRangeRef(req.keyRange.begin.withPrefix(tenantPrefix.get(), req.arena),
-		                           req.keyRange.end.withPrefix(tenantPrefix.get(), req.arena));
-	}
-
 	state bool didCollapse = false;
 	try {
+		if (req.tenantInfo.name.present()) {
+			ASSERT(req.tenantInfo.tenantId != TenantInfo::INVALID_TENANT);
+			Optional<TenantMapEntry> tenantEntry = bwData->tenantData.getTenantById(req.tenantInfo.tenantId);
+			if (tenantEntry.present()) {
+				ASSERT(tenantEntry.get().id == req.tenantInfo.tenantId);
+				tenantPrefix = tenantEntry.get().prefix;
+			} else {
+				CODE_PROBE(true, "Blob worker unknown tenant");
+				// FIXME - better way. Wait on retry here, or just have better model for tenant metadata?
+				// Just throw wrong_shard_server and make the client retry and assume we load it later
+				TraceEvent(SevDebug, "BlobWorkerRequestUnknownTenant", bwData->id)
+				    .suppressFor(5.0)
+				    .detail("TenantName", req.tenantInfo.name.get())
+				    .detail("TenantId", req.tenantInfo.tenantId);
+				throw unknown_tenant();
+			}
+			req.keyRange = KeyRangeRef(req.keyRange.begin.withPrefix(tenantPrefix.get(), req.arena),
+			                           req.keyRange.end.withPrefix(tenantPrefix.get(), req.arena));
+		}
+
 		// TODO remove requirement for canCollapseBegin once we implement early replying
 		ASSERT(req.beginVersion == 0 || req.canCollapseBegin);
 		if (req.beginVersion != 0) {
@@ -3432,7 +3523,9 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 
 			choose {
 				when(wait(metadata->readable.getFuture())) {}
-				when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
+				when(wait(metadata->cancelled.getFuture())) {
+					throw wrong_shard_server();
+				}
 			}
 
 			// in case both readable and cancelled are ready, check cancelled
@@ -3448,7 +3541,9 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				if (metadata->historyLoaded.canBeSet()) {
 					choose {
 						when(wait(metadata->historyLoaded.getFuture())) {}
-						when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
+						when(wait(metadata->cancelled.getFuture())) {
+							throw wrong_shard_server();
+						}
 					}
 				}
 
@@ -3460,7 +3555,9 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 						when(GranuleFiles f = wait(finalChunks[chunkIdx].second)) {
 							rangeGranulePair.push_back(std::pair(finalChunks[chunkIdx].first, f));
 						}
-						when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
+						when(wait(metadata->cancelled.getFuture())) {
+							throw wrong_shard_server();
+						}
 					}
 
 					if (rangeGranulePair.back().second.snapshotFiles.empty()) {
@@ -3497,9 +3594,13 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					// version on rollback
 					try {
 						choose {
-							when(wait(waitForVersionFuture)) { break; }
+							when(wait(waitForVersionFuture)) {
+								break;
+							}
 							when(wait(metadata->activeCFData.onChange())) {}
-							when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
+							when(wait(metadata->cancelled.getFuture())) {
+								throw wrong_shard_server();
+							}
 						}
 					} catch (Error& e) {
 						// We can get change feed cancelled from whenAtLeast. This means the change feed may
@@ -3714,6 +3815,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		req.reply.send(rep);
 		--bwData->stats.activeReadRequests;
 	} catch (Error& e) {
+		--bwData->stats.activeReadRequests;
 		if (e.code() == error_code_operation_cancelled) {
 			req.reply.sendError(wrong_shard_server());
 			throw;
@@ -3722,7 +3824,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		if (e.code() == error_code_wrong_shard_server) {
 			++bwData->stats.wrongShardServer;
 		}
-		--bwData->stats.activeReadRequests;
+
 		if (canReplyWith(e)) {
 			req.reply.sendError(e);
 		} else {
@@ -4711,28 +4813,28 @@ ACTOR Future<Void> handleFlushGranuleReq(Reference<BlobWorkerData> self, FlushGr
 
 ACTOR Future<Void> simForceFileWriteContention(Reference<BlobWorkerData> bwData) {
 	// take the file write contention lock down to just 1 or 2 open writes
-	int numToLeave = deterministicRandom()->randomInt(1, 3);
-	state int numToTake = SERVER_KNOBS->BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM - numToLeave;
-	ASSERT(bwData->deltaWritesLock->available() >= numToTake);
+	int64_t amountToLeave = (1 + 2 * deterministicRandom()->random01()) * SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES;
+	state int64_t amountToTake = SERVER_KNOBS->BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES - amountToLeave;
 
-	if (numToTake <= 0) {
+	if (amountToTake <= 0) {
 		return Void();
 	}
 	if (BW_DEBUG) {
-		fmt::print("BW {0} forcing file contention down to {1}\n", bwData->id.toString().substr(0, 5), numToTake);
+		fmt::print("BW {0} forcing file contention down to {1}\n", bwData->id.toString().substr(0, 5), amountToTake);
 	}
 
-	wait(bwData->deltaWritesLock->take(TaskPriority::DefaultYield, numToTake));
+	wait(bwData->deltaWritesBudget->take(TaskPriority::DefaultYield, amountToTake));
 	if (BW_DEBUG) {
-		fmt::print("BW {0} force acquired {1} file writes\n", bwData->id.toString().substr(0, 5), numToTake);
+		fmt::print("BW {0} force acquired {1} file write bytes\n", bwData->id.toString().substr(0, 5), amountToTake);
 	}
-	state FlowLock::Releaser holdingLock(*bwData->deltaWritesLock, numToTake);
+	state FlowLock::Releaser holdingLock(*bwData->deltaWritesBudget, amountToTake);
 	state Future<Void> delayFor = delay(deterministicRandom()->randomInt(10, 60));
 	loop {
 		choose {
 			when(wait(delayFor)) {
 				if (BW_DEBUG) {
-					fmt::print("BW {0} releasing {1} file writes\n", bwData->id.toString().substr(0, 5), numToTake);
+					fmt::print(
+					    "BW {0} releasing {1} file write bytes\n", bwData->id.toString().substr(0, 5), amountToTake);
 				}
 				return Void();
 			}
@@ -4740,9 +4842,9 @@ ACTOR Future<Void> simForceFileWriteContention(Reference<BlobWorkerData> bwData)
 			when(wait(delay(5.0))) {
 				if (g_simulator.speedUpSimulation) {
 					if (BW_DEBUG) {
-						fmt::print("BW {0} releasing {1} file writes b/c speed up simulation\n",
+						fmt::print("BW {0} releasing {1} file write bytes b/c speed up simulation\n",
 						           bwData->id.toString().substr(0, 5),
-						           numToTake);
+						           amountToTake);
 					}
 					return Void();
 				}

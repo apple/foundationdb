@@ -89,8 +89,8 @@ public:
 };
 
 class alignas(64) ThreadStatistics {
-	uint64_t conflicts;
-	uint64_t total_errors;
+	uint64_t conflicts{ 0 };
+	uint64_t total_errors{ 0 };
 	std::array<uint64_t, MAX_OP> ops;
 	std::array<uint64_t, MAX_OP> errors;
 	std::array<uint64_t, MAX_OP> latency_samples;
@@ -99,7 +99,10 @@ class alignas(64) ThreadStatistics {
 
 public:
 	ThreadStatistics() noexcept {
-		memset(this, 0, sizeof(ThreadStatistics));
+		std::fill(ops.begin(), ops.end(), 0);
+		std::fill(errors.begin(), errors.end(), 0);
+		std::fill(latency_samples.begin(), latency_samples.end(), 0);
+		std::fill(latency_us_total.begin(), latency_us_total.end(), 0);
 		sketches.resize(MAX_OP);
 	}
 

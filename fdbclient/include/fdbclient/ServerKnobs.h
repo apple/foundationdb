@@ -849,7 +849,14 @@ public:
 	int REDWOOD_EXTENT_CONCURRENT_READS; // Max number of simultaneous extent disk reads in progress.
 	int REDWOOD_KVSTORE_CONCURRENT_READS; // Max number of simultaneous point or range reads in progress.
 	bool REDWOOD_KVSTORE_RANGE_PREFETCH; // Whether to use range read prefetching
-	double REDWOOD_PAGE_REBUILD_MAX_SLACK; // When rebuilding pages, max slack to allow in page
+	double REDWOOD_PAGE_REBUILD_MAX_SLACK; // When rebuilding pages, max slack to allow in page before extending it
+	double REDWOOD_PAGE_REBUILD_SLACK_DISTRIBUTION; // When rebuilding pages, use this ratio of slack distribution
+	                                                // between the rightmost (new) page and the previous page. Defaults
+	                                                // to .5 (50%) so that slack is evenly distributed between the
+	                                                // pages. A value close to 0 indicates most slack to remain in the
+	                                                // old page, where a value close to 1 causes the new page to have
+	                                                // most of the slack. Immutable workloads with an increasing key
+	                                                // pattern benefit from setting this to a value close to 1.
 	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at
 	                                         // once
 	int REDWOOD_LAZY_CLEAR_MIN_PAGES; // Minimum number of pages to free before ending a lazy clear cycle, unless the
@@ -865,6 +872,7 @@ public:
 	double REDWOOD_HISTOGRAM_INTERVAL;
 	bool REDWOOD_EVICT_UPDATED_PAGES; // Whether to prioritize eviction of updated pages from cache.
 	int REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT; // Minimum height for which to keep and reuse page decode caches
+	int REDWOOD_NODE_MAX_UNBALANCE; // Maximum imbalance in a node before it should be rebuilt instead of updated
 
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
@@ -909,10 +917,17 @@ public:
 	int BG_MERGE_CANDIDATE_THRESHOLD_SECONDS;
 	int BG_MERGE_CANDIDATE_DELAY_SECONDS;
 	int BG_KEY_TUPLE_TRUNCATE_OFFSET;
+	bool BG_ENABLE_DYNAMIC_WRITE_AMP;
+	double BG_DYNAMIC_WRITE_AMP_MIN_FACTOR;
+	double BG_DYNAMIC_WRITE_AMP_DECREASE_FACTOR;
 
 	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
 	int BLOB_WORKER_RESNAPSHOT_PARALLELISM;
 	int BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM;
+	// The resnapshot/delta parallelism knobs are deprecated and replaced by the budget_bytes knobs! FIXME: remove after
+	// next release
+	int64_t BLOB_WORKER_RESNAPSHOT_BUDGET_BYTES;
+	int64_t BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES;
 
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
 	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
