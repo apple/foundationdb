@@ -88,7 +88,11 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 	                                            openReq.logID,
 	                                            openReq.memoryLimit,
 	                                            openReq.checkChecksums,
-	                                            openReq.checkIntegrity);
+	                                            openReq.checkIntegrity,
+	                                            false,
+	                                            {},
+	                                            openReq.encryptionMode,
+	                                            openReq.params);
 	state UID kvsId(ikvsInterface.id());
 	state ActorCollection actors(false);
 	state AfterReturn guard(kvStore, kvsId);
@@ -130,6 +134,22 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 				when(IKVSGetStorageByteRequest req = waitNext(ikvsInterface.getStorageBytes.getFuture())) {
 					StorageBytes storageBytes = kvStore->getStorageBytes();
 					req.reply.send(storageBytes);
+				}
+				when(IKVSGetParametersRequest req = waitNext(ikvsInterface.getParameters.getFuture())) {
+					Future<std::map<std::string, std::string>> resF = kvStore->getParameters();
+					ASSERT(resF.isReady());
+					GetStorageEngineParamsReply _reply(resF.get());
+					req.reply.send(_reply);
+				}
+				when(IKVSSetParametersRequest req = waitNext(ikvsInterface.setParameters.getFuture())) {
+					Future<StorageEngineParamResult> resF = kvStore->setParameters(req.params);
+					ASSERT(resF.isReady());
+					req.reply.send(resF.get());
+				}
+				when(IKVSCheckCompatibilityRequest req = waitNext(ikvsInterface.checkCompatibility.getFuture())) {
+					Future<StorageEngineParamResult> resF = kvStore->checkCompatibility(req.params);
+					ASSERT(resF.isReady());
+					req.reply.send(resF.get());
 				}
 				when(IKVSGetErrorRequest getFutureReq = waitNext(ikvsInterface.getError.getFuture())) {
 					actors.add(cancellableForwardPromise(getFutureReq.reply, kvStore->getError()));
@@ -228,10 +248,19 @@ IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
                                   UID logID,
                                   int64_t memoryLimit,
                                   bool checkChecksums,
-                                  bool checkIntegrity) {
+                                  bool checkIntegrity,
+                                  Optional<EncryptionAtRestMode> mode,
+                                  Optional<std::map<std::string, std::string>> params) {
 	RemoteIKeyValueStore* self = new RemoteIKeyValueStore();
-	self->initialized = initializeRemoteKVStore(
-	    self, OpenKVStoreRequest(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity));
+	self->initialized = initializeRemoteKVStore(self,
+	                                            OpenKVStoreRequest(storeType,
+	                                                               filename,
+	                                                               logID,
+	                                                               memoryLimit,
+	                                                               checkChecksums,
+	                                                               checkIntegrity,
+	                                                               mode.present() ? mode.get() : EncryptionAtRestMode(),
+	                                                               params));
 	return self;
 }
 

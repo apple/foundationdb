@@ -1598,9 +1598,9 @@ ACTOR Future<Void> redwoodHistogramsLogger(double interval) {
 	}
 }
 
-ACTOR Future<Void> redwoodMetricsLogger(double metricsInterval) {
+ACTOR Future<Void> redwoodMetricsLogger(double metricsInterval, double histogramInterval) {
 	g_redwoodMetrics.clear();
-	state Future<Void> loggingFuture = redwoodHistogramsLogger(SERVER_KNOBS->REDWOOD_HISTOGRAM_INTERVAL);
+	state Future<Void> loggingFuture = redwoodHistogramsLogger(histogramInterval);
 	loop {
 		wait(delay(metricsInterval));
 
@@ -2018,7 +2018,8 @@ public:
 	          int concurrentExtentReads,
 	          bool memoryOnly,
 	          Promise<Void> errorPromise = {},
-	          double metricsInterval = SERVER_KNOBS->REDWOOD_METRICS_INTERVAL)
+	          double metricsInterval = SERVER_KNOBS->REDWOOD_METRICS_INTERVAL,
+	          double histogramInterval = SERVER_KNOBS->REDWOOD_HISTOGRAM_INTERVAL)
 	  : ioLock(makeReference<PriorityMultiLock>(FLOW_KNOBS->MAX_OUTSTANDING, SERVER_KNOBS->REDWOOD_IO_PRIORITIES)),
 	    pageCacheBytes(pageCacheSizeBytes), desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize),
 	    filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
@@ -2028,10 +2029,12 @@ public:
 		pageCache.evictor().sizeLimit = pageCacheBytes;
 
 		g_redwoodMetrics.ioLock = ioLock.getPtr();
-		if (!g_redwoodMetricsActor.isValid()) {
-			TraceEvent("GRedwoodMetricsActorInit").detail("Interval", metricsInterval);
-			g_redwoodMetricsActor = redwoodMetricsLogger(metricsInterval);
-		}
+		// if (!g_redwoodMetricsActor.isValid()) {
+		TraceEvent("GRedwoodMetricsActorInit")
+		    .detail("MetricsInterval", metricsInterval)
+		    .detail("HistogramInterval", histogramInterval);
+		g_redwoodMetricsActor = redwoodMetricsLogger(metricsInterval, histogramInterval);
+		// }
 
 		commitFuture = Void();
 		recoverFuture = forwardError(recover(this), errorPromise);
@@ -7968,7 +7971,9 @@ public:
 	                     Reference<IPageEncryptionKeyProvider> keyProvider = {})
 	  : m_filename(filename),
 	    prefetch(getStorageEngineParamBoolean(params.get(), "kvstore_range_prefetch") /*runtime change*/),
-	    metrics_interval(getStorageEngineParamDouble(params.get(), "metrics_interval")) {
+	    /*should not make this a parameter, better leave a knob*/ metrics_interval(
+	        getStorageEngineParamDouble(params.get(), "metrics_interval")),
+	    histogram_interval(getStorageEngineParamDouble(params.get(), "histogram_interval")) {
 		if (!encryptionMode.present() || encryptionMode.get().isEncryptionEnabled()) {
 			ASSERT(keyProvider.isValid() || db.isValid());
 		}
@@ -8000,7 +8005,8 @@ public:
 		                               SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
 		                               false,
 		                               m_error,
-		                               metrics_interval);
+		                               metrics_interval,
+		                               histogram_interval);
 
 		m_tree = new VersionedBTree(pager, filename, logID, db, encryptionMode, encodingType, keyProvider);
 		m_init = catchError(init_impl(this));
@@ -8024,7 +8030,6 @@ public:
 		TraceEvent(SevInfo, "RedwoodShutdown").detail("Filename", self->m_filename).detail("Dispose", dispose);
 
 		g_redwoodMetrics.ioLock = nullptr;
-		g_redwoodMetricsActor = Future<Void>();
 
 		// In simulation, if the instance is being disposed of then sometimes run destructive sanity check.
 		if (g_network->isSimulated() && dispose && BUGGIFY) {
@@ -8279,18 +8284,19 @@ public:
 
 	~KeyValueStoreRedwood() override{};
 
-	std::map<std::string, std::string> getParameters() const override {
+	Future<std::map<std::string, std::string>> getParameters() const override {
 		std::map<std::string, std::string> result;
 		// how to get the default page size from m_tree,
 		// what's the general way to get it
 		result["kvstore_range_prefetch"] = prefetch ? "true" : "false";
 		result["default_page_size"] = std::to_string(m_tree->getPageSize());
 		result["metrics_interval"] = std::to_string(metrics_interval);
+		result["histogram_interval"] = std::to_string(histogram_interval);
 		return result;
 	}
 
-	StorageEngineParamResult setParameters(std::map<std::string, std::string> const& params) override {
-		StorageEngineParamResult result = checkCompatibility(params);
+	Future<StorageEngineParamResult> setParameters(std::map<std::string, std::string> const& params) override {
+		StorageEngineParamResult result = checkCompatibility(params).get();
 		for (const auto& k : result.applied) {
 			if (k == "kvstore_range_prefetch")
 				prefetch = !prefetch;
@@ -8302,41 +8308,34 @@ public:
 		for (const auto& k : result.needReplacement) {
 			TraceEvent("RedwoodStorageEngineParamsNeedReplacement").detail("Param", k);
 		}
+		for (const auto& k : result.unchanged) {
+			TraceEvent("RedwoodStorageEngineParamsUnchanged").detail("Param", k);
+		}
 		return result;
 	}
 
-	void addParamsToResults(StorageEngineParamResult& result, const std::string& param, const std::string& value) {
-		if (param == "kvstore_range_prefetch") {
-			result.applied.push_back(param);
-		} else if (param == "metrics_interval") {
-			result.needReboot.push_back(param);
-		} else if (param == "default_page_size") {
-			result.needReplacement.push_back(param);
-		} else if (param == "remote_kv_store") {
-			result.needReboot.push_back(param);
-		}
-	}
-
-	StorageEngineParamResult checkCompatibility(std::map<std::string, std::string> const& params) override {
+	Future<StorageEngineParamResult> checkCompatibility(std::map<std::string, std::string> const& params) override {
 		StorageEngineParamResult result;
-		auto old = getParameters();
 		// TODO : have a set lookup for parameters
 		for (auto const& [k, v] : params) {
-			TraceEvent("CheckCompatibilityParam").detail("Param", k).detail("Old", old[k]).detail("New", v);
-			if (old[k] == v) {
-				result.unchanged.push_back(k);
-				continue;
+			TraceEvent("CheckCompatibilityParam").detail("Param", k).detail("New", v);
+			if (k == "kvstore_range_prefetch") {
+				getStorageEngineParamBoolean(params, "kvstore_range_prefetch") == prefetch
+				    ? result.unchanged.push_back(k)
+				    : result.applied.push_back(k);
+			} else if (k == "metrics_interval") {
+				getStorageEngineParamDouble(params, "metrics_interval") == metrics_interval
+				    ? result.unchanged.push_back(k)
+				    : result.needReboot.push_back(k);
+			} else if (k == "histogram_interval") {
+				getStorageEngineParamDouble(params, "histogram_interval") == histogram_interval
+				    ? result.unchanged.push_back(k)
+				    : result.needReboot.push_back(k);
+			} else if (k == "default_page_size") {
+				getStorageEngineParamInt(params, "default_page_size") == m_tree->getPageSize()
+				    ? result.unchanged.push_back(k)
+				    : result.needReplacement.push_back(k);
 			}
-			// if (k == "kvstore_range_prefetch") {
-			// 	getStorageEngineParamBoolean(params, "kvstore_range_prefetch") == prefetch
-			// 	    ? result.unchanged.push_back(k)
-			// 	    : result.applied.push_back(k);
-			// } else if (k == "metrics_interval") {
-			// 	result.needReboot.push_back(k);
-			// } else if (k == "default_page_size") {
-			// 	result.needReplacement.push_back(k);
-			// }
-			addParamsToResults(result, k, v);
 			// do something else
 		}
 		return result;
@@ -8350,6 +8349,7 @@ private:
 	Promise<Void> m_error;
 	bool prefetch;
 	double metrics_interval;
+	double histogram_interval;
 	Version m_nextCommitVersion;
 	Reference<IPageEncryptionKeyProvider> m_keyProvider;
 	Future<Void> m_lastCommit = Void();

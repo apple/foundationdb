@@ -1179,6 +1179,7 @@ struct GetStorageEngineParamsRequest {
 };
 
 struct StorageEngineParamResult {
+	constexpr static FileIdentifier file_identifier = 15492480;
 	std::vector<std::string> unchanged;
 	std::vector<std::string> applied;
 	std::vector<std::string> needReboot;

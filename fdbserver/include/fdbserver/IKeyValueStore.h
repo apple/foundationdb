@@ -52,7 +52,11 @@ inline int getStorageEngineParamInt(std::map<std::string, std::string> const& pa
 	return std::stoi(params.at(name));
 };
 
+// make std::map<std::string, std::string> a struct and add all these helper functions there
+// add a default value as the second parameter
+// add a toJson function
 inline int getStorageEngineParamDouble(std::map<std::string, std::string> const& params, std::string const& name) {
+	// TOOD: accept default
 	return std::stod(params.at(name));
 };
 
@@ -128,11 +132,11 @@ public:
 	virtual Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) { throw not_implemented(); }
 
 	// storage engine parameters interface
-	virtual std::map<std::string, std::string> getParameters() const { throw not_implemented(); }
-	virtual StorageEngineParamResult setParameters(std::map<std::string, std::string> const& params) {
+	virtual Future<std::map<std::string, std::string>> getParameters() const { throw not_implemented(); }
+	virtual Future<StorageEngineParamResult> setParameters(std::map<std::string, std::string> const& params) {
 		throw not_implemented();
 	}
-	virtual StorageEngineParamResult checkCompatibility(std::map<std::string, std::string> const& params) {
+	virtual Future<StorageEngineParamResult> checkCompatibility(std::map<std::string, std::string> const& params) {
 		throw not_implemented();
 	}
 
@@ -203,19 +207,22 @@ extern IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
                                          UID logID,
                                          int64_t memoryLimit,
                                          bool checkChecksums = false,
-                                         bool checkIntegrity = false);
+                                         bool checkIntegrity = false,
+                                         Optional<EncryptionAtRestMode> mode = {},
+                                         Optional<std::map<std::string, std::string>> params = {});
 
-inline IKeyValueStore* openKVStore(
-    KeyValueStoreType storeType,
-    std::string const& filename,
-    UID logID,
-    int64_t memoryLimit,
-    bool checkChecksums = false,
-    bool checkIntegrity = false,
-    bool openRemotely = false,
-    Reference<AsyncVar<ServerDBInfo> const> db = {},
-    Optional<EncryptionAtRestMode> encryptionMode = {},
-	Optional<std::map<std::string, std::string>> params = Optional<std::map<std::string, std::string>>()) {
+inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
+                                   std::string const& filename,
+                                   UID logID,
+                                   int64_t memoryLimit,
+                                   bool checkChecksums = false,
+                                   bool checkIntegrity = false,
+                                   bool openRemotely = false,
+                                   // TODO : check remote and encryption not enabled together
+                                   Reference<AsyncVar<ServerDBInfo> const> db = {},
+                                   Optional<EncryptionAtRestMode> encryptionMode = {},
+                                   Optional<std::map<std::string, std::string>> params = {}) {
+
 	// Only Redwood support encryption currently.
 	if (encryptionMode.present() && encryptionMode.get().isEncryptionEnabled() &&
 	    storeType != KeyValueStoreType::SSD_REDWOOD_V1) {
@@ -224,8 +231,12 @@ inline IKeyValueStore* openKVStore(
 		    .detail("EncryptionMode", encryptionMode);
 		throw encrypt_mode_mismatch();
 	}
+	openRemotely = openRemotely || (params.present() && params.get().contains("remote_kv_store")
+	                                    ? getStorageEngineParamBoolean(params.get(), "remote_kv_store")
+	                                    : false);
 	if (openRemotely) {
-		return openRemoteKVStore(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity);
+		return openRemoteKVStore(
+		    storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity, encryptionMode, params);
 	}
 	switch (storeType) {
 	case KeyValueStoreType::SSD_BTREE_V1:

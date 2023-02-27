@@ -437,10 +437,10 @@ struct StorageServerDisk {
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
-	std::map<std::string, std::string> getStorageEngineParams() const { return storage->getParameters(); }
-	StorageEngineParamResult setStorageEngineParams(const std::map<std::string, std::string>& params) const {
-		return storage->setParameters(params);
-	}
+	Future<std::map<std::string, std::string>> getStorageEngineParams() const;
+	Future<StorageEngineParamResult> checkStorageEngineParamsCompatibility(
+	    const std::map<std::string, std::string>& params) const;
+	Future<StorageEngineParamResult> setStorageEngineParams(const std::map<std::string, std::string>& params);
 
 	Future<EncryptionAtRestMode> encryptionMode() { return storage->encryptionMode(); }
 
@@ -1035,20 +1035,33 @@ public:
 		tssInQuarantine = true;
 	}
 
-	void checkStorageEngineParams(std::map<std::string, std::string>& params) {
-		bool reboot = false;
-		for (const auto& [k, v] : params) {
-			std::string currV = storageEngineParams->contains(k) ? storageEngineParams->at(k) : "NULL";
-			if (currV != v) {
-				TraceEvent("MismatchStorageEngineParam").detail("Param", k).detail("Expected", v).detail("Used", currV);
-				reboot = true;
-				(*storageEngineParams)[k] = v;
-			}
-		}
-		if (reboot) {
-			TraceEvent("RebootKVSForParams").log();
-			throw please_reboot_kv_store();
-		}
+	Future<Void> checkStorageEngineParams(std::map<std::string, std::string>& params) {
+		return fmap(
+		    [this, &params](StorageEngineParamResult res) {
+			    // StorageEngineParamResult res = storage.checkStorageEngineParamsCompatibility(params);
+			    // runtime mutable params are always consistent in database configuration and storages themselves
+			    for (const auto& k : res.applied) {
+				    std::string currV = storageEngineParams->contains(k) ? storageEngineParams->at(k) : "NULL";
+				    TraceEvent("MismatchAppliedStorageEngineParam")
+				        .detail("Param", k)
+				        .detail("Expected", params[k])
+				        .detail("Used", currV);
+			    }
+			    for (const auto& k : res.needReboot) {
+				    std::string currV = storageEngineParams->contains(k) ? storageEngineParams->at(k) : "NULL";
+				    TraceEvent("MismatchRebootStorageEngineParam")
+				        .detail("Param", k)
+				        .detail("Expected", params[k])
+				        .detail("Used", currV);
+				    (*storageEngineParams)[k] = params[k];
+			    }
+			    if (res.needReboot.size()) {
+				    TraceEvent("RebootKVSForParams").detail("Params", describe(res.needReboot));
+				    throw please_reboot_kv_store();
+			    }
+			    return Void();
+		    },
+		    storage.checkStorageEngineParamsCompatibility(params));
 	}
 
 	StorageServerDisk storage;
@@ -4957,6 +4970,28 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 		}
 	}
 
+	return Void();
+}
+
+ACTOR Future<Void> getStorageEngineParamsActor(StorageServer* self, GetStorageEngineParamsRequest req) {
+	std::map<std::string, std::string> params = wait(self->storage.getStorageEngineParams());
+	GetStorageEngineParamsReply _reply(params);
+	req.reply.send(_reply);
+	return Void();
+}
+
+ACTOR Future<Void> setStorageEngineParamsActor(StorageServer* self, SetStorageEngineParamsRequest req) {
+	StorageEngineParamResult res = wait(self->storage.setStorageEngineParams(req.params));
+	SetStorageEngineParamsReply _reply(res);
+	req.reply.send(_reply);
+	// runtime already finished,
+	// reboot are thrown here
+	// replacement will be handled by DD wiggler
+	if (_reply.result.needReboot.size()) {
+		TraceEvent("RebootDueToKVSParamChange").detail("Params", describe(_reply.result.needReboot));
+		// is it okay to do the reboot at once or better do it together
+		throw please_reboot_kv_store();
+	}
 	return Void();
 }
 
@@ -10294,6 +10329,66 @@ void StorageServerDisk::changeLogProtocol(Version version, ProtocolVersion proto
 	    MutationRef(MutationRef::SetValue, persistLogProtocol, BinaryWriter::toValue(protocol, Unversioned())));
 }
 
+Future<std::map<std::string, std::string>> StorageServerDisk::getStorageEngineParams() const {
+	return fmap(
+	    [this](std::map<std::string, std::string> result) {
+		    // handle storage server level, storage engine related parameters
+		    const std::string remoteKVStoreParam("remote_kv_store");
+		    ASSERT(!result.contains(remoteKVStoreParam));
+		    result[remoteKVStoreParam] = "false";
+		    if (data->storageEngineParams->contains(remoteKVStoreParam) &&
+		        getStorageEngineParamBoolean(*(data->storageEngineParams), remoteKVStoreParam))
+			    result[remoteKVStoreParam] = "true";
+		    return result;
+	    },
+	    storage->getParameters());
+}
+
+Future<StorageEngineParamResult> StorageServerDisk::checkStorageEngineParamsCompatibility(
+    const std::map<std::string, std::string>& params) const {
+	return fmap(
+	    [this, &params](StorageEngineParamResult result) {
+		    const std::string remoteKVStoreParam("remote_kv_store");
+		    if (params.contains(remoteKVStoreParam)) {
+			    ASSERT(data->storageEngineParams->contains(remoteKVStoreParam));
+			    // TODO: check no result about remote_kv_store
+			    auto expected = params.at(remoteKVStoreParam);
+			    auto current = data->storageEngineParams->at(remoteKVStoreParam);
+			    TraceEvent("StorageServerDiskCheckStorageEngineParamsCompatibility")
+			        .detail("Expect", expected)
+			        .detail("Curr", current);
+			    if (expected != current) {
+				    result.needReboot.push_back(remoteKVStoreParam);
+			    }
+		    }
+		    return result;
+	    },
+	    storage->checkCompatibility(params));
+}
+
+Future<StorageEngineParamResult> StorageServerDisk::setStorageEngineParams(
+    const std::map<std::string, std::string>& params) {
+	return fmap(
+	    [this, &params](StorageEngineParamResult result) {
+		    const std::string remoteKVStoreParam("remote_kv_store");
+		    if (params.contains(remoteKVStoreParam)) {
+			    ASSERT(data->storageEngineParams->contains(remoteKVStoreParam));
+			    // TODO: check no result about remote_kv_store
+			    auto expected = params.at(remoteKVStoreParam);
+			    auto current = data->storageEngineParams->at(remoteKVStoreParam);
+			    TraceEvent("StorageServerDiskSetStorageEngineParamsCompatibility")
+			        .detail("Expect", expected)
+			        .detail("Curr", current);
+			    if (expected != current) {
+				    result.needReboot.push_back(remoteKVStoreParam);
+				    data->storageEngineParams->at(remoteKVStoreParam) = expected;
+			    }
+		    }
+		    return result;
+	    },
+	    storage->setParameters(params));
+}
+
 ACTOR Future<Void> applyByteSampleResult(StorageServer* data,
                                          IKeyValueStore* storage,
                                          Key begin,
@@ -11384,24 +11479,10 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				self->actors.add(auditStorageQ(self, req));
 			}
 			when(GetStorageEngineParamsRequest req = waitNext(ssi.getStorageEngineParams.getFuture())) {
-
-				auto params = self->storage.getStorageEngineParams();
-				// some params are at storage server level to control the storage engine
-				ASSERT(!params.contains("remote_kv_store"));
-				GetStorageEngineParamsReply _reply(params);
-				req.reply.send(_reply);
+				self->actors.add(getStorageEngineParamsActor(self, req));
 			}
 			when(SetStorageEngineParamsRequest req = waitNext(ssi.setStorageEngineParams.getFuture())) {
-				StorageEngineParamResult res = self->storage.setStorageEngineParams(req.params);
-				SetStorageEngineParamsReply _reply(res);
-				req.reply.send(_reply);
-				// runtime already finished,
-				// reboot are thrown here
-				// replacement will be handled by DD wiggler
-				if (_reply.result.needReboot.size()) {
-					TraceEvent("RebootDueToKVSParamChange").detail("Params", describe(_reply.result.needReboot));
-					throw please_reboot_kv_store();
-				}
+				self->actors.add(setStorageEngineParamsActor(self, req));
 			}
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);
@@ -11529,9 +11610,12 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 					    .detail("StorageEncryptionMode", encryptionMode)
 					    .detail("ClusterEncryptionMode", rep.encryptMode);
 					throw encrypt_mode_mismatch();
+					// TODO : tss engine can be encrypted but the existing one is not
 				}
-
-				self->checkStorageEngineParams(rep.params);
+				// When a new storage starts, rep.params is the same as existing params
+				// When an existing storage rejoins, exsiting params are intialized as defaults
+				// It will reboot if "needReboot" params mistmatch
+				wait(self->checkStorageEngineParams(rep.params));
 
 				try {
 					tr.reset();
