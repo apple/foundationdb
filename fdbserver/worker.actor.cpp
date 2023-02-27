@@ -1353,11 +1353,11 @@ ACTOR Future<Void> storageServerRollbackRebooter(
     int64_t memoryLimit,
     IKeyValueStore* store,
     bool validateDataFiles,
-    Promise<Void>* rebootKVStore,
     Optional<EncryptionAtRestMode> encryptionMode,
     std::shared_ptr<std::map<std::string, std::string>> storageEngineParams) {
 	state TrackRunningStorage _(id, storeType, runningStorages);
 	loop {
+		state Future<Void> kvClosed = store->onClosed();
 		ErrorOr<Void> e = wait(errorOr(prevStorageServer));
 		if (!e.isError())
 			return Void();
@@ -1370,10 +1370,8 @@ ACTOR Future<Void> storageServerRollbackRebooter(
 		    .detail("Params", describe(*storageEngineParams));
 
 		if (e.getError().code() == error_code_please_reboot_kv_store) {
-			// Add the to actorcollection to make sure filesClosed not return
-			filesClosed->add(rebootKVStore->getFuture());
-			wait(delay(SERVER_KNOBS->REBOOT_KV_STORE_DELAY *
-			           10)); // TODO : Fixing using onClosed() Future get before hand
+			// Wait the kv store shutdown complete before opening a new one
+			wait(kvClosed);
 			// use the up-to-date storage engine paras
 			// TODO : fix this condition
 			Optional<std::map<std::string, std::string>> params(*storageEngineParams);
@@ -1393,13 +1391,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(
 			    db,
 			    encryptionMode,
 			    params);
-			Promise<Void> nextRebootKVStorePromise;
-			filesClosed->add(store->onClosed() ||
-			                 nextRebootKVStorePromise
-			                     .getFuture() /* clear the onClosed() Future in actorCollection when rebooting */);
-			// remove the original onClosed signal from the actorCollection
-			rebootKVStore->send(Void());
-			rebootKVStore->swap(nextRebootKVStorePromise);
+			filesClosed->add(store->onClosed());
 		}
 
 		StorageServerInterface recruited;
@@ -1785,9 +1777,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
 	state double loggingDelay = SERVER_KNOBS->WORKER_LOGGING_INTERVAL;
-	// These two promises are destroyed after the "filesClosed" below to avoid broken_promise
-	state Promise<Void> rebootKVSPromise; // TODO : remove these two
-	state Promise<Void> rebootKVSPromise2;
 	state SignalableActorCollection filesClosed;
 	state Promise<Void> stopping;
 	state WorkerCache<InitializeStorageReply> storageCache;
@@ -1916,9 +1905,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				    {},
 				    Optional<std::map<std::string, std::string>>(
 				        StorageEngineParamsFactory::getParamsValue(s.storeType)));
-				Future<Void> kvClosed =
-				    kv->onClosed() ||
-				    rebootKVSPromise.getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
+				Future<Void> kvClosed = kv->onClosed();
 				filesClosed.add(kvClosed);
 
 				// std::string doesn't have startsWith
@@ -1984,7 +1971,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                                  memoryLimit,
 				                                  kv,
 				                                  validateDataFiles,
-				                                  &rebootKVSPromise,
 				                                  {},
 				                                  paramsPtr);
 				errorForwarders.add(forwardError(errors, ssRole, recruited.id(), f));
@@ -2610,10 +2596,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    req.encryptMode,
 					    req.storageEngineParams);
 
-					Future<Void> kvClosed =
-					    data->onClosed() ||
-					    rebootKVSPromise2
-					        .getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
+					Future<Void> kvClosed = data->onClosed();
 					filesClosed.add(kvClosed);
 					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
 					storageCache.set(req.reqId, storageReady.getFuture());
@@ -2645,7 +2628,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                                  memoryLimit,
 					                                  data,
 					                                  false,
-					                                  &rebootKVSPromise2,
 					                                  req.encryptMode,
 					                                  paramsPtr);
 					errorForwarders.add(forwardError(errors, ssRole, recruited.id(), s));

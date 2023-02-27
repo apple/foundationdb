@@ -66,8 +66,12 @@ bool parseStorageEngineParams(KeyValueStoreType::StoreType storeType,
 	auto& paramsInitMap = StorageEngineParamsFactory::getParams(storeType);
 	// Insert all default values when creating the database
 	if (creating) {
-		for (auto const& [k, v] : paramsInitMap)
-			out[storageEngineParamsPrefix.toString() + k] = v;
+		for (auto const& [k, pair] : paramsInitMap)
+			out[storageEngineParamsPrefix.toString() + k] = pair.second;
+		if (kvPairsStr.empty()) {
+			fmt::print("Empty param str is given, use the default values\n");
+			return true;
+		}
 	}
 
 	std::vector<std::string> kvPairs;
@@ -77,7 +81,7 @@ bool parseStorageEngineParams(KeyValueStoreType::StoreType storeType,
 		if (pos != std::string::npos) {
 			auto k = _kv.substr(0, pos);
 			auto v = _kv.substr(pos + 1);
-			fmt::print("Reading k:{}; v:{}\n", k, v);
+			fmt::print("Parsed storage engine param, k:{}; v:{}\n", k, v);
 			if (!paramsInitMap.count(k)) {
 				fmt::print("Error: {} is not a supported parameter for storage engine {}.\n",
 				           k,
@@ -87,7 +91,7 @@ bool parseStorageEngineParams(KeyValueStoreType::StoreType storeType,
 				TraceEvent("ReplaceDefaultStorageEngineParameter")
 				    .detail("StoreType", KeyValueStoreType::getStoreTypeStr(storeType))
 				    .detail("Parameter", k)
-				    .detail("DefaultValue", paramsInitMap[k])
+				    .detail("DefaultValue", paramsInitMap[k].second)
 				    .detail("Value", v);
 				out[storageEngineParamsPrefix.toString() + k] = v;
 			}
@@ -312,14 +316,35 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			if (pos != std::string::npos) {
 				storeTypeStr = value.substr(0, pos);
 				auto paramsStr = value.substr(pos + 1);
-				if (storeTypeStr != "redwood" || key != "storage_engine") {
-					fmt::print("Error: Unsupported params change for storage engine {}", storeTypeStr);
+				auto storeType = KeyValueStoreType::fromStoreTypeStr(value);
+				if (storeType != KeyValueStoreType::SSD_REDWOOD_V1) {
+					fmt::print("Error: Unsupported params change for storage engine {}\n", storeType.toString());
 					return out;
 				}
 				out[p + fmt::format("{}_params", key)] = paramsStr;
+			} else {
+				// set an empty string which will be overwritten by default values later
+				out[p + fmt::format("{}_params", key)] = "";
 			}
 			out[p + key] = format("%d", KeyValueStoreType::fromStoreTypeStr(storeTypeStr));
 		}
+
+		// if (key == "log_engine") {
+		// 	// should be allowed to select any storage engine you want
+		// 	pos = value.find(":");
+		// 	if (pos != std::string::npos) {
+		// 		fmt::print("Error: storage engine parameters are not supported for the log engine.\n");
+		// 		return out;
+		// 	}
+		// 	auto storeType = KeyValueStoreType::fromStoreTypeStr(value);
+		// 	if (storeType != KeyValueStoreType::StoreType::SSD_BTREE_V2 &&
+		// 	    storeType != KeyValueStoreType::StoreType::MEMORY &&
+		// 	    storeType != KeyValueStoreType::StoreType::SSD_BTREE_V1) {
+		// 		fmt::print("Error: {} is not allowed to be the log engine.\n", value);
+		// 		return out;
+		// 	}
+		// 	out[p + key] = format("%d", storeType);
+		// }
 
 		return out;
 	}
