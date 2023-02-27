@@ -75,7 +75,8 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 			    cx.getReference(),
 			    "management_cluster"_sr,
 			    deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
-			                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1))));
+			                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1),
+			    false)));
 		}
 		return Void();
 	}

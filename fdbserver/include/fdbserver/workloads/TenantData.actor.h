@@ -38,22 +38,22 @@
 #include "fdbclient/TenantManagement.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-template <class DB, class TenantMapEntryT>
+template <class DB, class TenantTypes>
 class TenantData {
 public:
 	Reference<DB> db;
-	TenantMetadataSpecification<TenantMapEntryT>* tenantMetadata;
+	TenantMetadataSpecification<TenantTypes>* tenantMetadata;
 
 	Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
 	ClusterType clusterType;
 
-	std::map<int64_t, TenantMapEntryT> tenantMap;
+	std::map<int64_t, typename TenantTypes::TenantMapEntryT> tenantMap;
 	std::map<TenantName, int64_t> tenantNameIndex;
 	int64_t lastTenantId;
 	int64_t tenantCount;
 	std::set<int64_t> tenantTombstones;
 	Optional<TenantTombstoneCleanupData> tombstoneCleanupData;
-	std::map<TenantGroupName, TenantGroupEntry> tenantGroupMap;
+	std::map<TenantGroupName, typename TenantTypes::TenantGroupEntryT> tenantGroupMap;
 	std::map<TenantGroupName, std::set<int64_t>> tenantGroupIndex;
 	std::map<TenantGroupName, int64_t> storageQuotas;
 
@@ -64,10 +64,10 @@ private:
 
 	ACTOR template <class Transaction>
 	static Future<Void> loadTenantMetadata(TenantData* self, Transaction tr) {
-		state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntryT>> tenantList;
+		state KeyBackedRangeResult<std::pair<int64_t, typename TenantTypes::TenantMapEntryT>> tenantList;
 		state KeyBackedRangeResult<std::pair<TenantName, int64_t>> tenantNameIndexList;
 		state KeyBackedRangeResult<int64_t> tenantTombstoneList;
-		state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroupList;
+		state KeyBackedRangeResult<std::pair<TenantGroupName, typename TenantTypes::TenantGroupEntryT>> tenantGroupList;
 		state KeyBackedRangeResult<Tuple> tenantGroupTenantTuples;
 		state KeyBackedRangeResult<std::pair<TenantGroupName, int64_t>> storageQuotaList;
 
@@ -90,7 +90,8 @@ private:
 		     store(storageQuotaList, self->tenantMetadata->storageQuota.getRange(tr, {}, {}, metaclusterMaxTenants)));
 
 		ASSERT(!tenantList.more);
-		self->tenantMap = std::map<int64_t, TenantMapEntryT>(tenantList.results.begin(), tenantList.results.end());
+		self->tenantMap = std::map<int64_t, typename TenantTypes::TenantMapEntryT>(tenantList.results.begin(),
+		                                                                           tenantList.results.end());
 
 		ASSERT(!tenantNameIndexList.more);
 		self->tenantNameIndex =
@@ -101,8 +102,8 @@ private:
 		    std::set<int64_t>(tenantTombstoneList.results.begin(), tenantTombstoneList.results.end());
 
 		ASSERT(!tenantGroupList.more);
-		self->tenantGroupMap =
-		    std::map<TenantGroupName, TenantGroupEntry>(tenantGroupList.results.begin(), tenantGroupList.results.end());
+		self->tenantGroupMap = std::map<TenantGroupName, typename TenantTypes::TenantGroupEntryT>(
+		    tenantGroupList.results.begin(), tenantGroupList.results.end());
 
 		ASSERT(!storageQuotaList.more);
 		self->storageQuotas =
@@ -123,7 +124,7 @@ private:
 
 public:
 	TenantData() {}
-	TenantData(Reference<DB> db, TenantMetadataSpecification<TenantMapEntryT>* tenantMetadata)
+	TenantData(Reference<DB> db, TenantMetadataSpecification<TenantTypes>* tenantMetadata)
 	  : db(db), tenantMetadata(tenantMetadata) {}
 
 	Future<Void> load() {

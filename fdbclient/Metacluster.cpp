@@ -33,6 +33,7 @@ FDB_DEFINE_BOOLEAN_PARAM(RunOnMismatchedCluster);
 FDB_DEFINE_BOOLEAN_PARAM(RestoreDryRun);
 FDB_DEFINE_BOOLEAN_PARAM(ForceJoin);
 FDB_DEFINE_BOOLEAN_PARAM(ForceRemove);
+FDB_DEFINE_BOOLEAN_PARAM(IgnoreCapacityLimit);
 
 namespace MetaclusterAPI {
 
@@ -132,22 +133,6 @@ json_spirit::mObject ClusterUsage::toJson() const {
 	return obj;
 }
 
-TenantMapEntry::TenantMapEntry(MetaclusterTenantMapEntry metaclusterEntry)
-  : tenantName(metaclusterEntry.tenantName), tenantLockState(metaclusterEntry.tenantLockState),
-    tenantGroup(metaclusterEntry.tenantGroup), configurationSequenceNum(metaclusterEntry.configurationSequenceNum) {
-	if (metaclusterEntry.id >= 0) {
-		setId(metaclusterEntry.id);
-	}
-}
-
-MetaclusterTenantMapEntry::MetaclusterTenantMapEntry(TenantMapEntry tenantEntry)
-  : tenantName(tenantEntry.tenantName), tenantLockState(tenantEntry.tenantLockState),
-    tenantGroup(tenantEntry.tenantGroup), configurationSequenceNum(tenantEntry.configurationSequenceNum) {
-	if (tenantEntry.id >= 0) {
-		setId(tenantEntry.id);
-	}
-}
-
 MetaclusterTenantMapEntry::MetaclusterTenantMapEntry() {}
 MetaclusterTenantMapEntry::MetaclusterTenantMapEntry(int64_t id,
                                                      TenantName tenantName,
@@ -161,6 +146,32 @@ MetaclusterTenantMapEntry::MetaclusterTenantMapEntry(int64_t id,
                                                      Optional<TenantGroupName> tenantGroup)
   : tenantName(tenantName), tenantState(tenantState), tenantGroup(tenantGroup) {
 	setId(id);
+}
+
+TenantMapEntry MetaclusterTenantMapEntry::toTenantMapEntry() const {
+	TenantMapEntry entry;
+	entry.tenantName = tenantName;
+	entry.tenantLockState = tenantLockState;
+	entry.tenantGroup = tenantGroup;
+	entry.configurationSequenceNum = configurationSequenceNum;
+	if (id >= 0) {
+		entry.setId(id);
+	}
+
+	return entry;
+}
+
+MetaclusterTenantMapEntry MetaclusterTenantMapEntry::fromTenantMapEntry(TenantMapEntry const& source) {
+	MetaclusterTenantMapEntry entry;
+	entry.tenantName = source.tenantName;
+	entry.tenantLockState = source.tenantLockState;
+	entry.tenantGroup = source.tenantGroup;
+	entry.configurationSequenceNum = source.configurationSequenceNum;
+	if (source.id >= 0) {
+		entry.setId(source.id);
+	}
+
+	return entry;
 }
 
 void MetaclusterTenantMapEntry::setId(int64_t id) {
@@ -221,6 +232,19 @@ bool MetaclusterTenantMapEntry::operator==(MetaclusterTenantMapEntry const& othe
 }
 
 bool MetaclusterTenantMapEntry::operator!=(MetaclusterTenantMapEntry const& other) const {
+	return !(*this == other);
+}
+
+json_spirit::mObject MetaclusterTenantGroupEntry::toJson() const {
+	json_spirit::mObject tenantGroupEntry;
+	tenantGroupEntry["assigned_cluster"] = binaryToJson(assignedCluster);
+	return tenantGroupEntry;
+}
+
+bool MetaclusterTenantGroupEntry::operator==(MetaclusterTenantGroupEntry const& other) const {
+	return assignedCluster == other.assignedCluster;
+}
+bool MetaclusterTenantGroupEntry::operator!=(MetaclusterTenantGroupEntry const& other) const {
 	return !(*this == other);
 }
 

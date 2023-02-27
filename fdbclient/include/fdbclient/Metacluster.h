@@ -154,7 +154,9 @@ struct MetaclusterTenantMapEntry {
 	                          TenantName tenantName,
 	                          MetaclusterAPI::TenantState tenantState,
 	                          Optional<TenantGroupName> tenantGroup);
-	MetaclusterTenantMapEntry(TenantMapEntry tenantEntry);
+
+	static MetaclusterTenantMapEntry fromTenantMapEntry(TenantMapEntry const& source);
+	TenantMapEntry toTenantMapEntry() const;
 
 	void setId(int64_t id);
 	std::string toJson() const;
@@ -191,6 +193,36 @@ struct MetaclusterTenantMapEntry {
 			       tenantState <= MetaclusterAPI::TenantState::ERROR);
 		}
 	}
+};
+
+struct MetaclusterTenantGroupEntry {
+	constexpr static FileIdentifier file_identifier = 1082739;
+
+	ClusterName assignedCluster;
+
+	MetaclusterTenantGroupEntry() = default;
+	MetaclusterTenantGroupEntry(ClusterName assignedCluster) : assignedCluster(assignedCluster) {}
+
+	json_spirit::mObject toJson() const;
+
+	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion()); }
+	static MetaclusterTenantGroupEntry decode(ValueRef const& value) {
+		return ObjectReader::fromStringRef<MetaclusterTenantGroupEntry>(value, IncludeVersion());
+	}
+
+	bool operator==(MetaclusterTenantGroupEntry const& other) const;
+	bool operator!=(MetaclusterTenantGroupEntry const& other) const;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, assignedCluster);
+	}
+};
+
+class MetaclusterTenantTypes {
+public:
+	using TenantMapEntryT = MetaclusterTenantMapEntry;
+	using TenantGroupEntryT = MetaclusterTenantGroupEntry;
 };
 
 struct MetaclusterMetrics {
