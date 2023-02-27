@@ -1350,9 +1350,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "configure-storage-engine")) {
+				if (tokencmp(tokens[0], "check-storage-engine")) {
 					bool _result = wait(makeInterruptable(
-					    configureStorageEngineCommandActor(db, tr, localDb, tokens, &linenoise, warn)));
+					    checkStorageEngineParamCommandActor(db, tr, localDb, tokens, &linenoise, warn)));
 					if (!_result)
 						is_error = true;
 					continue;

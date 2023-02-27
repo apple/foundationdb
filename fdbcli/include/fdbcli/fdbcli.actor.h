@@ -171,12 +171,12 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
                                          LineNoise* linenoise,
                                          Future<Void> warn);
 // configure storage engine command
-ACTOR Future<bool> configureStorageEngineCommandActor(Reference<IDatabase> db,
-                                                      Reference<ITransaction> tr,
-                                                      Database localDb,
-                                                      std::vector<StringRef> tokens,
-                                                      LineNoise* linenoise,
-                                                      Future<Void> warn);
+ACTOR Future<bool> checkStorageEngineParamCommandActor(Reference<IDatabase> db,
+                                                       Reference<ITransaction> tr,
+                                                       Database localDb,
+                                                       std::vector<StringRef> tokens,
+                                                       LineNoise* linenoise,
+                                                       Future<Void> warn);
 // consistency command
 ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
                                                 std::vector<StringRef> tokens,

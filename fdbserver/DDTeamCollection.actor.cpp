@@ -2339,7 +2339,10 @@ public:
 				TraceEvent(SevWarnAlways, "GetStorageEngineParamsError")
 				    .detail("ServerId", serverId)
 				    .detail("Error", f.get().getError().code());
-				result.set(addr, fmt::format("Error code: {}", std::to_string(f.get().getError().code())));
+				json_spirit::mObject errorObj;
+				errorObj["Error"] = f.get().getError().name();
+				errorObj["Message"] = f.get().getError().what();
+				result.set(addr, json_spirit::write_string(json_spirit::mValue(errorObj)));
 				continue;
 			}
 			GetStorageEngineParamsReply reply = f.get().get();
