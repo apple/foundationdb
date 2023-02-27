@@ -191,7 +191,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 			           crossTenantBGLocNegative.getValue() > 0 && crossTenantBGReqPositive.getValue() > 0 &&
 			           crossTenantBGReqNegative.getValue() > 0 && crossTenantBGReadPositive.getValue() > 0 &&
 			           crossTenantBGReadNegative.getValue() > 0 && crossTenantGetGranulesPositive.getValue() > 0 &&
-			           crossTenantGetGranulesNegative.getValue() > 0 && blobbifyNegative.getValue() > 0;
+			           crossTenantGetGranulesNegative.getValue() > 0;
 		}
 		if (checkBlobManagement) {
 			success &= blobbifyNegative.getValue() > 0 && unblobbifyNegative.getValue() > 0 &&
