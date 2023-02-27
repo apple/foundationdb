@@ -3533,6 +3533,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				wait(updateEpoch(bmData, epoc + 1));
 				BlobRestoreStatus completedStatus(BlobRestorePhase::LOADED_MANIFEST);
 				wait(updateRestoreStatus(bmData->db, normalKeys, completedStatus, BlobRestorePhase::LOADING_MANIFEST));
+				TraceEvent("BlobManifestLoaded", bmData->id).log();
 			} catch (Error& e) {
 				if (e.code() != error_code_restore_missing_data &&
 				    e.code() != error_code_blob_restore_missing_manifest) {
