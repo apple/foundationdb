@@ -2156,6 +2156,13 @@ public:
 					    .error(e)
 					    .detail("Filename", self->filename)
 					    .detail("PageID", backupHeaderPageID);
+
+					// If this is a restarted sim test, assume this situation was created by the first phase being killed
+					// during initialization so the second phase found the file on disk but it is not recoverable.
+					if (g_network->isSimulated() && g_simulator->restarted) {
+						throw e.asInjectedFault();
+					}
+
 					throw;
 				}
 			}
@@ -5246,7 +5253,23 @@ public:
 		if (btreeHeader.size() == 0) {
 			// Create new BTree
 
-			ASSERT(self->m_expectedEncryptionMode.present());
+			if (!self->m_expectedEncryptionMode.present()) {
+				// We can only create a new BTree if the encryption mode is known.
+				// If it is not know, then this init() was on a Redwood instance that already exited on disk but
+				// which had not completed its first BTree commit so it recovered to a state before the BTree
+				// existed in the Pager.  We must treat this case as error as the file is not usable via this open
+				// path.
+				Error err = storage_engine_not_initialized();
+
+				// The current version of FDB should not produce this scenario on disk so it should not be observed
+				// during recovery.  However, previous versions can produce it so in a restarted simulation test
+				// we will assume that is what happened and throw the error as an injected fault.
+				if (g_network->isSimulated() && g_simulator->restarted) {
+					err = err.asInjectedFault();
+				}
+				throw err;
+			}
+
 			self->m_encryptionMode.send(self->m_expectedEncryptionMode.get());
 			self->checkOrUpdateEncodingType("NewBTree", self->m_expectedEncryptionMode.get(), self->m_encodingType);
 			self->initEncryptionKeyProvider();
