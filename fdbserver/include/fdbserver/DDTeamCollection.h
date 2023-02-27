@@ -564,7 +564,7 @@ protected:
 	// The actor monitors the storage engine params' change and send requests to storage servers
 	Future<Void> monitorStorageEngineParamsChange();
 	// Update the storage engine parameters if requested
-	Future<Void> storageParamsUpdater(std::map<std::string, std::string> newParams);
+	Future<Void> storageParamsUpdater(StorageEngineParamSet newParams);
 
 	Future<Void> waitHealthyZoneChange();
 
@@ -714,7 +714,7 @@ public:
 	static Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self);
 
 	// considering always check before return
-	Future<std::map<std::string, std::string>> getStorageEngineParams();
+	Future<StorageEngineParamSet> getStorageEngineParams();
 
 	Database dbContext() const { return db->context(); }
 };

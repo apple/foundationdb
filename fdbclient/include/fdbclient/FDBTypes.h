@@ -1759,28 +1759,46 @@ inline void load(Ar& ar, Versionstamp& value) {
 	value.serialize(ar);
 }
 
-struct StorageEngineParamsSet {
-private:
-	std::map<std::string, std::string> params;
+struct StorageEngineParamSet {
 
-public:
+	constexpr static FileIdentifier file_identifier = 2389372;
+
 	enum CHANGETYPE { RUNTIME, NEEDREBOOT, NEEDREPLACEMENT };
 
-	StorageEngineParamsSet() {}
-	StorageEngineParamsSet(const std::map<std::string, std::string>& params) : params(params) {}
-	// Set a named parameter to a string value, replacing any existing value
+	StorageEngineParamSet() {}
+	StorageEngineParamSet(const std::map<std::string, std::string>& params) : params(params) {}
+
 	void set(const std::string& name, const std::string& value) { params[name] = value; }
 
-	// Set a named parameter to an integer converted to a string value, replacing any existing value
-	template <class valueType>
-	void set(const std::string& name, valueType value) {
-		params[name] = boost::lexical_cast<std::string>(value);
+	int get(const std::string& name, int defaultValue) const {
+		return params.contains(name) ? std::stoi(params.at(name)) : defaultValue;
 	}
 
-	template <class valueType>
-	valueType get(const std::string& name, const std::string& defaultValue) const {
-		return boost::lexical_cast<valueType>(params.contains(name) ? params.at(name) : defaultValue);
+	int getInt(const std::string& name) const { return std::stoi(params.at(name)); }
+
+	double get(const std::string& name, double defaultValue) const {
+		return params.contains(name) ? std::stod(params.at(name)) : defaultValue;
 	}
+
+	double getDouble(const std::string& name) const { return std::stod(params.at(name)); }
+
+	bool get(const std::string& name, bool defaultValue) const {
+		return params.contains(name) ? params.at(name) == "true" : defaultValue;
+	}
+
+	bool getBool(const std::string& name) const { return params.at(name) == "true"; }
+
+	const std::map<std::string, std::string>& getParams() const { return params; }
+
+	std::map<std::string, std::string>& getMutableParams() { return params; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, params);
+	}
+
+private:
+	std::map<std::string, std::string> params;
 };
 
 #endif

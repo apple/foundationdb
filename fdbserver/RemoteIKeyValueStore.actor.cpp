@@ -136,7 +136,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					req.reply.send(storageBytes);
 				}
 				when(IKVSGetParametersRequest req = waitNext(ikvsInterface.getParameters.getFuture())) {
-					Future<std::map<std::string, std::string>> resF = kvStore->getParameters();
+					Future<StorageEngineParamSet> resF = kvStore->getParameters();
 					ASSERT(resF.isReady());
 					GetStorageEngineParamsReply _reply(resF.get());
 					req.reply.send(_reply);
@@ -146,7 +146,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					ASSERT(resF.isReady());
 					req.reply.send(resF.get());
 				}
-				when(IKVSCheckCompatibilityRequest req = waitNext(ikvsInterface.checkCompatibility.getFuture())) {
+				when(IKVSSetParametersRequest req = waitNext(ikvsInterface.checkCompatibility.getFuture())) {
 					Future<StorageEngineParamResult> resF = kvStore->checkCompatibility(req.params);
 					ASSERT(resF.isReady());
 					req.reply.send(resF.get());
@@ -250,7 +250,7 @@ IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
                                   bool checkChecksums,
                                   bool checkIntegrity,
                                   Optional<EncryptionAtRestMode> mode,
-                                  Optional<std::map<std::string, std::string>> params) {
+                                  Optional<StorageEngineParamSet> params) {
 	RemoteIKeyValueStore* self = new RemoteIKeyValueStore();
 	self->initialized = initializeRemoteKVStore(self,
 	                                            OpenKVStoreRequest(storeType,

@@ -437,10 +437,9 @@ struct StorageServerDisk {
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
-	Future<std::map<std::string, std::string>> getStorageEngineParams() const;
-	Future<StorageEngineParamResult> checkStorageEngineParamsCompatibility(
-	    const std::map<std::string, std::string>& params) const;
-	Future<StorageEngineParamResult> setStorageEngineParams(const std::map<std::string, std::string>& params);
+	Future<StorageEngineParamSet> getStorageEngineParams() const;
+	Future<StorageEngineParamResult> checkStorageEngineParamsCompatibility(const StorageEngineParamSet& params) const;
+	Future<StorageEngineParamResult> setStorageEngineParams(const StorageEngineParamSet& params);
 
 	Future<EncryptionAtRestMode> encryptionMode() { return storage->encryptionMode(); }
 
@@ -1035,24 +1034,27 @@ public:
 		tssInQuarantine = true;
 	}
 
-	Future<Void> checkStorageEngineParams(std::map<std::string, std::string>& params) {
+	Future<Void> checkStorageEngineParams(StorageEngineParamSet& params) {
 		return fmap(
 		    [this, &params](StorageEngineParamResult res) {
 			    // all changed params are those not written into the storage files
 			    for (const auto& k : res.applied) {
-				    std::string currV = storageEngineParams->contains(k) ? storageEngineParams->at(k) : "NULL";
+				    // TODO : need to remove this logging
+				    std::string currV =
+				        storageEngineParams->getParams().contains(k) ? storageEngineParams->getParams().at(k) : "NULL";
 				    TraceEvent("ApplyRuntimeStorageEngineParamChangeAfterRejoin")
 				        .detail("Param", k)
-				        .detail("Expected", params[k])
+				        .detail("Expected", params.getParams().at(k))
 				        .detail("Used", currV);
 			    }
 			    for (const auto& k : res.needReboot) {
-				    std::string currV = storageEngineParams->contains(k) ? storageEngineParams->at(k) : "NULL";
+				    std::string currV =
+				        storageEngineParams->getParams().contains(k) ? storageEngineParams->getParams().at(k) : "NULL";
 				    TraceEvent("MismatchedStorageEngineParamNeedReboot")
 				        .detail("Param", k)
-				        .detail("Expected", params[k])
+				        .detail("Expected", params.getParams().at(k))
 				        .detail("Used", currV);
-				    (*storageEngineParams)[k] = params[k];
+				    storageEngineParams->set(k, params.getParams().at(k));
 			    }
 			    if (res.needReboot.size()) {
 				    TraceEvent("RebootKVSAfterRejoinForParams").detail("Params", describe(res.needReboot));
@@ -1426,12 +1428,12 @@ public:
 	// Connection to blob store for fetchKeys()
 	Reference<BlobConnectionProvider> blobConn;
 	// Storage engine parameters
-	std::shared_ptr<std::map<std::string, std::string>> storageEngineParams;
+	std::shared_ptr<StorageEngineParamSet> storageEngineParams;
 
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
 	              StorageServerInterface const& ssi,
-	              std::shared_ptr<std::map<std::string, std::string>> storageEngineParams = nullptr)
+	              std::shared_ptr<StorageEngineParamSet> storageEngineParams = nullptr)
 	  : storageEngineParams(storageEngineParams), shardAware(false),
 	    tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                            TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
@@ -4974,7 +4976,7 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 }
 
 ACTOR Future<Void> getStorageEngineParamsActor(StorageServer* self, GetStorageEngineParamsRequest req) {
-	std::map<std::string, std::string> params = wait(self->storage.getStorageEngineParams());
+	StorageEngineParamSet params = wait(self->storage.getStorageEngineParams());
 	GetStorageEngineParamsReply _reply(params);
 	req.reply.send(_reply);
 	return Void();
@@ -10329,31 +10331,31 @@ void StorageServerDisk::changeLogProtocol(Version version, ProtocolVersion proto
 	    MutationRef(MutationRef::SetValue, persistLogProtocol, BinaryWriter::toValue(protocol, Unversioned())));
 }
 
-Future<std::map<std::string, std::string>> StorageServerDisk::getStorageEngineParams() const {
+Future<StorageEngineParamSet> StorageServerDisk::getStorageEngineParams() const {
 	return fmap(
-	    [this](std::map<std::string, std::string> result) {
+	    [this](StorageEngineParamSet result) {
 		    // handle storage server level, storage engine related parameters
 		    const std::string remoteKVStoreParam("remote_kv_store");
-		    ASSERT(!result.contains(remoteKVStoreParam));
-		    result[remoteKVStoreParam] = "false";
-		    if (data->storageEngineParams->contains(remoteKVStoreParam) &&
-		        getStorageEngineParamBoolean(*(data->storageEngineParams), remoteKVStoreParam))
-			    result[remoteKVStoreParam] = "true";
+		    ASSERT(!result.getParams().contains(remoteKVStoreParam));
+		    result.set(remoteKVStoreParam, "false");
+		    if (data->storageEngineParams->getParams().contains(remoteKVStoreParam) &&
+		        data->storageEngineParams->getBool(remoteKVStoreParam))
+			    result.set(remoteKVStoreParam, "true");
 		    return result;
 	    },
 	    storage->getParameters());
 }
 
 Future<StorageEngineParamResult> StorageServerDisk::checkStorageEngineParamsCompatibility(
-    const std::map<std::string, std::string>& params) const {
+    const StorageEngineParamSet& params) const {
 	return fmap(
 	    [this, &params](StorageEngineParamResult result) {
 		    const std::string remoteKVStoreParam("remote_kv_store");
-		    if (params.contains(remoteKVStoreParam)) {
-			    ASSERT(data->storageEngineParams->contains(remoteKVStoreParam));
+		    if (params.getParams().contains(remoteKVStoreParam)) {
+			    ASSERT(data->storageEngineParams->getParams().contains(remoteKVStoreParam));
 			    // TODO: check no result about remote_kv_store
-			    auto expected = params.at(remoteKVStoreParam);
-			    auto current = data->storageEngineParams->at(remoteKVStoreParam);
+			    auto expected = params.getParams().at(remoteKVStoreParam);
+			    auto current = data->storageEngineParams->getParams().at(remoteKVStoreParam);
 			    TraceEvent("StorageServerDiskCheckStorageEngineParamsCompatibility")
 			        .detail("Expect", expected)
 			        .detail("Curr", current);
@@ -10366,22 +10368,21 @@ Future<StorageEngineParamResult> StorageServerDisk::checkStorageEngineParamsComp
 	    storage->checkCompatibility(params));
 }
 
-Future<StorageEngineParamResult> StorageServerDisk::setStorageEngineParams(
-    const std::map<std::string, std::string>& params) {
+Future<StorageEngineParamResult> StorageServerDisk::setStorageEngineParams(const StorageEngineParamSet& params) {
 	return fmap(
 	    [this, &params](StorageEngineParamResult result) {
 		    const std::string remoteKVStoreParam("remote_kv_store");
-		    if (params.contains(remoteKVStoreParam)) {
-			    ASSERT(data->storageEngineParams->contains(remoteKVStoreParam));
+		    if (params.getParams().contains(remoteKVStoreParam)) {
+			    ASSERT(data->storageEngineParams->getParams().contains(remoteKVStoreParam));
 			    // TODO: check no result about remote_kv_store
-			    auto expected = params.at(remoteKVStoreParam);
-			    auto current = data->storageEngineParams->at(remoteKVStoreParam);
+			    auto expected = params.getParams().at(remoteKVStoreParam);
+			    auto current = data->storageEngineParams->getParams().at(remoteKVStoreParam);
 			    TraceEvent("StorageServerDiskSetStorageEngineParamsCompatibility")
 			        .detail("Expect", expected)
 			        .detail("Curr", current);
 			    if (expected != current) {
 				    result.needReboot.push_back(remoteKVStoreParam);
-				    data->storageEngineParams->at(remoteKVStoreParam) = expected;
+				    data->storageEngineParams->set(remoteKVStoreParam, expected);
 			    }
 		    }
 		    return result;
@@ -11771,7 +11772,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
-                                 std::shared_ptr<std::map<std::string, std::string>> storageEngineParams) {
+                                 std::shared_ptr<StorageEngineParamSet> storageEngineParams) {
 	state StorageServer self(persistentData, db, ssi, storageEngineParams);
 	state Future<Void> ssCore;
 	self.initialClusterVersion = startVersion;
@@ -11865,7 +11866,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  std::string folder,
                                  Promise<Void> recovered,
                                  Reference<IClusterConnectionRecord> connRecord,
-                                 std::shared_ptr<std::map<std::string, std::string>> storageEngineParams) {
+                                 std::shared_ptr<StorageEngineParamSet> storageEngineParams) {
 	state StorageServer self(persistentData, db, ssi, storageEngineParams);
 	state Future<Void> ssCore;
 	self.folder = folder;

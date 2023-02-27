@@ -7966,20 +7966,20 @@ public:
 	                     UID logID,
 	                     Reference<AsyncVar<ServerDBInfo> const> db,
 	                     Optional<EncryptionAtRestMode> encryptionMode,
-	                     Optional<std::map<std::string, std::string>> params = {},
+	                     StorageEngineParamSet params = {},
 	                     EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE,
 	                     Reference<IPageEncryptionKeyProvider> keyProvider = {})
 	  : m_filename(filename),
-	    prefetch(getStorageEngineParamBoolean(params.get(), "kvstore_range_prefetch") /*runtime change*/),
-	    /*should not make this a parameter, better leave a knob*/ metrics_interval(
-	        getStorageEngineParamDouble(params.get(), "metrics_interval")),
-	    histogram_interval(getStorageEngineParamDouble(params.get(), "histogram_interval")) {
+	    prefetch(params.get("kvstore_range_prefetch", SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH)),
+	    metrics_interval(params.get("metrics_interval", SERVER_KNOBS->REDWOOD_METRICS_INTERVAL)),
+	    histogram_interval(params.get("histogram_interval", SERVER_KNOBS->REDWOOD_HISTOGRAM_INTERVAL)) {
 		if (!encryptionMode.present() || encryptionMode.get().isEncryptionEnabled()) {
 			ASSERT(keyProvider.isValid() || db.isValid());
 		}
 
-		int pageSize = BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4)
-		                       : getStorageEngineParamInt(params.get(), "default_page_size"); // needReplacement
+		int pageSize =
+		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4)
+		            : params.get("default_page_size", SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE); // needReplacement
 		int extentSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE;
 		int64_t pageCacheBytes =
 		    g_network->isSimulated()
@@ -8284,18 +8284,18 @@ public:
 
 	~KeyValueStoreRedwood() override{};
 
-	Future<std::map<std::string, std::string>> getParameters() const override {
-		std::map<std::string, std::string> result;
+	Future<StorageEngineParamSet> getParameters() const override {
+		StorageEngineParamSet result;
 		// how to get the default page size from m_tree,
 		// what's the general way to get it
-		result["kvstore_range_prefetch"] = prefetch ? "true" : "false";
-		result["default_page_size"] = std::to_string(m_tree->getPageSize());
-		result["metrics_interval"] = std::to_string(metrics_interval);
-		result["histogram_interval"] = std::to_string(histogram_interval);
+		result.set("kvstore_range_prefetch", prefetch ? "true" : "false");
+		result.set("default_page_size", std::to_string(m_tree->getPageSize()));
+		result.set("metrics_interval", std::to_string(metrics_interval));
+		result.set("histogram_interval", std::to_string(histogram_interval));
 		return result;
 	}
 
-	Future<StorageEngineParamResult> setParameters(std::map<std::string, std::string> const& params) override {
+	Future<StorageEngineParamResult> setParameters(StorageEngineParamSet const& params) override {
 		StorageEngineParamResult result = checkCompatibility(params).get();
 		for (const auto& k : result.applied) {
 			if (k == "kvstore_range_prefetch")
@@ -8314,27 +8314,19 @@ public:
 		return result;
 	}
 
-	Future<StorageEngineParamResult> checkCompatibility(std::map<std::string, std::string> const& params) override {
+	Future<StorageEngineParamResult> checkCompatibility(StorageEngineParamSet const& params) override {
 		StorageEngineParamResult result;
 		// TODO : have a set lookup for parameters
-		for (auto const& [k, v] : params) {
+		for (auto const& [k, v] : params.getParams()) {
 			TraceEvent("CheckCompatibilityParam").detail("Param", k).detail("New", v);
 			if (k == "kvstore_range_prefetch") {
-				getStorageEngineParamBoolean(params, "kvstore_range_prefetch") == prefetch
-				    ? result.unchanged.push_back(k)
-				    : result.applied.push_back(k);
-			} else if (k == "metrics_interval") {
-				getStorageEngineParamDouble(params, "metrics_interval") == metrics_interval
-				    ? result.unchanged.push_back(k)
-				    : result.needReboot.push_back(k);
-			} else if (k == "histogram_interval") {
-				getStorageEngineParamDouble(params, "histogram_interval") == histogram_interval
-				    ? result.unchanged.push_back(k)
-				    : result.needReboot.push_back(k);
+				params.getBool(k) == prefetch ? result.unchanged.push_back(k) : result.applied.push_back(k);
+			} else if (k == "metrics_interval" || k == "histogram_interval") {
+				params.getDouble(k) == metrics_interval ? result.unchanged.push_back(k)
+				                                        : result.needReboot.push_back(k);
 			} else if (k == "default_page_size") {
-				getStorageEngineParamInt(params, "default_page_size") == m_tree->getPageSize()
-				    ? result.unchanged.push_back(k)
-				    : result.needReplacement.push_back(k);
+				params.getInt(k) == m_tree->getPageSize() ? result.unchanged.push_back(k)
+				                                          : result.needReplacement.push_back(k);
 			}
 			// do something else
 		}
@@ -8364,8 +8356,9 @@ IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                        UID logID,
                                        Reference<AsyncVar<ServerDBInfo> const> db,
                                        Optional<EncryptionAtRestMode> encryptionMode,
-                                       Optional<std::map<std::string, std::string>> params) {
-	return new KeyValueStoreRedwood(filename, logID, db, encryptionMode, params);
+                                       Optional<StorageEngineParamSet> params) {
+	return new KeyValueStoreRedwood(
+	    filename, logID, db, encryptionMode, params.present() ? params.get() : StorageEngineParamSet());
 }
 
 int randomSize(int max) {

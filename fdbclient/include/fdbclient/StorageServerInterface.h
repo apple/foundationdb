@@ -1157,10 +1157,10 @@ struct GetStorageMetricsRequest {
 
 struct GetStorageEngineParamsReply {
 	constexpr static FileIdentifier file_identifier = 15492478;
-	std::map<std::string, std::string> params;
+	StorageEngineParamSet params;
 
 	GetStorageEngineParamsReply() = default;
-	GetStorageEngineParamsReply(std::map<std::string, std::string> const& params) : params(params) {}
+	GetStorageEngineParamsReply(StorageEngineParamSet const& params) : params(params) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1216,11 +1216,11 @@ struct SetStorageEngineParamsReply {
 
 struct SetStorageEngineParamsRequest {
 	constexpr static FileIdentifier file_identifier = 13292000;
-	std::map<std::string, std::string> params;
+	StorageEngineParamSet params;
 	ReplyPromise<SetStorageEngineParamsReply> reply;
 
 	SetStorageEngineParamsRequest() {}
-	explicit SetStorageEngineParamsRequest(std::map<std::string, std::string> const& params) : params(params) {}
+	explicit SetStorageEngineParamsRequest(StorageEngineParamSet const& params) : params(params) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

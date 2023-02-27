@@ -2941,7 +2941,7 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 				for (auto& kv : paramKeys) {
 					// send back all storage engine parameters saved in txnStateStore when existing storage servers
 					// rejoin
-					rep.params[kv.key.removePrefix(storageEngineParamsPrefix).toString()] = kv.value.toString();
+					rep.params.set(kv.key.removePrefix(storageEngineParamsPrefix).toString(), kv.value.toString());
 				}
 			}
 			req.reply.send(rep);

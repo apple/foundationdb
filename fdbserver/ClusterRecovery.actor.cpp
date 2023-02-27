@@ -366,7 +366,7 @@ ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 		if (self->configuration.storageEngineParams.present()) {
 			isr.storageEngineParams = self->configuration.storageEngineParams.get();
 			// TODO : remove this message later if needed
-			for (auto const& [k, v] : isr.storageEngineParams.get())
+			for (auto const& [k, v] : isr.storageEngineParams.get().getParams())
 				TraceEvent(SevInfo, "StorageEngineParams").detail("Key", k).detail("Value", v);
 		}
 

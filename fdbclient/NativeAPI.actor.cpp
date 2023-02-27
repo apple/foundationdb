@@ -8027,7 +8027,7 @@ ACTOR Future<std::string> fetchStorageEngineParams(Database cx) {
 					throw rep.getError();
 				}
 				json_spirit::mObject resultObj;
-				for (const auto& [k, vstr] : rep.get().params) {
+				for (const auto& [k, vstr] : rep.get().params.getParams()) {
 					json_spirit::mValue value;
 					json_spirit::read_string(vstr, value);
 					resultObj[k] = value;

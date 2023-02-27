@@ -28,11 +28,11 @@
 
 StorageEngineParamsFactory redwoodFactory(
     KeyValueStoreType::SSD_REDWOOD_V1,
-    { { "default_page_size", { StorageEngineParamsSet::CHANGETYPE::NEEDREPLACEMENT, "8192" } },
-      { "kvstore_range_prefetch", { StorageEngineParamsSet::CHANGETYPE::RUNTIME, "true" } },
-      { "metrics_interval", { StorageEngineParamsSet::CHANGETYPE::NEEDREBOOT, "5.0" } },
-      { "histogram_interval", { StorageEngineParamsSet::CHANGETYPE::NEEDREBOOT, "30.0" } },
-      { "remote_kv_store", { StorageEngineParamsSet::CHANGETYPE::NEEDREBOOT, "false" } } });
+    { { "default_page_size", { StorageEngineParamSet::CHANGETYPE::NEEDREPLACEMENT, "8192" } },
+      { "kvstore_range_prefetch", { StorageEngineParamSet::CHANGETYPE::RUNTIME, "true" } },
+      { "metrics_interval", { StorageEngineParamSet::CHANGETYPE::NEEDREBOOT, "5.0" } },
+      { "histogram_interval", { StorageEngineParamSet::CHANGETYPE::NEEDREBOOT, "30.0" } },
+      { "remote_kv_store", { StorageEngineParamSet::CHANGETYPE::NEEDREBOOT, "false" } } });
 
 DatabaseConfiguration::DatabaseConfiguration() {
 	resetInternal();
@@ -63,7 +63,7 @@ void DatabaseConfiguration::resetInternal() {
 	blobGranulesEnabled = false;
 	tenantMode = TenantMode::DISABLED;
 	encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
-	storageEngineParams = std::map<std::string, std::string>();
+	storageEngineParams = StorageEngineParamSet();
 }
 
 int toInt(ValueRef const& v) {
@@ -440,7 +440,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	// Add storage engine params into the json string
 	if (storageEngineParams.present()) {
 		StatusObject params;
-		for (auto const& [k, v] : storageEngineParams.get()) {
+		for (auto const& [k, v] : storageEngineParams.get().getParams()) {
 			params[k] = v;
 		}
 		result["storage_engine_params"] = params;
@@ -681,7 +681,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		ASSERT(storageEngineParams.present());
 		// TODO : should we hardcode the above condition like others?
 		auto paramName = ck.removePrefix(storageEngineParamsPrefix.removePrefix(configKeysPrefix)).toString();
-		storageEngineParams.get()[paramName] = value.toString();
+		storageEngineParams.get().set(paramName, value.toString());
 	} else {
 		return false;
 	}

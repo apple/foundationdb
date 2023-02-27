@@ -867,7 +867,7 @@ struct InitializeStorageRequest {
 	Version initialClusterVersion;
 	ReplyPromise<InitializeStorageReply> reply;
 	EncryptionAtRestMode encryptMode;
-	Optional<std::map<std::string, std::string>> storageEngineParams; // Parameters to initialize the storage engine
+	Optional<StorageEngineParamSet> storageEngineParams; // Parameters to initialize the storage engine
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1205,7 +1205,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
-                                 std::shared_ptr<std::map<std::string, std::string>> storageEngineParams = nullptr);
+                                 std::shared_ptr<StorageEngineParamSet> storageEngineParams = nullptr);
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,
@@ -1213,7 +1213,7 @@ ACTOR Future<Void> storageServer(
     std::string folder,
     Promise<Void> recovered,
     Reference<IClusterConnectionRecord> connRecord, // changes pssi->id() to be the recovered ID
-    std::shared_ptr<std::map<std::string, std::string>> storageEngineParams = nullptr);
+    std::shared_ptr<StorageEngineParamSet> storageEngineParams = nullptr);
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,

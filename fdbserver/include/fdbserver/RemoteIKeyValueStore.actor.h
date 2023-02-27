@@ -86,7 +86,7 @@ struct IKVSInterface {
 	RequestStream<struct IKVSCloseRequest> close;
 	RequestStream<struct IKVSGetParametersRequest> getParameters;
 	RequestStream<struct IKVSSetParametersRequest> setParameters;
-	RequestStream<struct IKVSCheckCompatibilityRequest> checkCompatibility;
+	RequestStream<struct IKVSSetParametersRequest> checkCompatibility;
 
 	UID uniqueID;
 
@@ -140,7 +140,7 @@ struct OpenKVStoreRequest {
 	bool checkChecksums;
 	bool checkIntegrity;
 	EncryptionAtRestMode encryptionMode;
-	Optional<std::map<std::string, std::string>> params;
+	Optional<StorageEngineParamSet> params;
 	ReplyPromise<struct IKVSInterface> reply;
 
 	OpenKVStoreRequest(){};
@@ -152,7 +152,7 @@ struct OpenKVStoreRequest {
 	                   bool checkChecksums = false,
 	                   bool checkIntegrity = false,
 	                   EncryptionAtRestMode mode = EncryptionAtRestMode::DISABLED,
-	                   Optional<std::map<std::string, std::string>> params = {})
+	                   Optional<StorageEngineParamSet> params = {})
 	  : storeType(storeType), filename(filename), logID(logID), memoryLimit(memoryLimit),
 	    checkChecksums(checkChecksums), checkIntegrity(checkIntegrity), encryptionMode(mode), params(params) {}
 
@@ -324,18 +324,7 @@ struct IKVSGetParametersRequest {
 
 struct IKVSSetParametersRequest {
 	constexpr static FileIdentifier file_identifier = 13859174;
-	std::map<std::string, std::string> params;
-	ReplyPromise<StorageEngineParamResult> reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, params, reply);
-	}
-};
-
-struct IKVSCheckCompatibilityRequest {
-	constexpr static FileIdentifier file_identifier = 13859175;
-	std::map<std::string, std::string> params;
+	StorageEngineParamSet params;
 	ReplyPromise<StorageEngineParamResult> reply;
 
 	template <class Ar>
@@ -465,19 +454,19 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 		            interf.readRange.getReply(req));
 	}
 
-	Future<std::map<std::string, std::string>> getParameters() const override {
+	Future<StorageEngineParamSet> getParameters() const override {
 		return fmap([](const GetStorageEngineParamsReply& reply) { return reply.params; },
 		            interf.getParameters.getReply(IKVSGetParametersRequest{}));
 	}
 
-	Future<StorageEngineParamResult> setParameters(std::map<std::string, std::string> const& params) override {
+	Future<StorageEngineParamResult> setParameters(StorageEngineParamSet const& params) override {
 		return interf.setParameters.getReply(
 		    IKVSSetParametersRequest{ params, ReplyPromise<StorageEngineParamResult>() });
 	}
 
-	Future<StorageEngineParamResult> checkCompatibility(std::map<std::string, std::string> const& params) override {
+	Future<StorageEngineParamResult> checkCompatibility(StorageEngineParamSet const& params) override {
 		return interf.checkCompatibility.getReply(
-		    IKVSCheckCompatibilityRequest{ params, ReplyPromise<StorageEngineParamResult>() });
+		    IKVSSetParametersRequest{ params, ReplyPromise<StorageEngineParamResult>() });
 	}
 
 	StorageBytes getStorageBytes() const override { return storageBytes; }

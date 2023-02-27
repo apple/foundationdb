@@ -47,23 +47,6 @@ struct CheckpointRequest {
 	  : version(version), ranges(ranges), format(format), checkpointID(id), checkpointDir(checkpointDir) {}
 };
 
-// TODO: move this to the right place
-inline int getStorageEngineParamInt(std::map<std::string, std::string> const& params, std::string const& name) {
-	return std::stoi(params.at(name));
-};
-
-// make std::map<std::string, std::string> a struct and add all these helper functions there
-// add a default value as the second parameter
-// add a toJson function
-inline int getStorageEngineParamDouble(std::map<std::string, std::string> const& params, std::string const& name) {
-	// TOOD: accept default
-	return std::stod(params.at(name));
-};
-
-inline bool getStorageEngineParamBoolean(std::map<std::string, std::string> const& params, std::string const& name) {
-	return params.at(name) == "true";
-}
-
 class IKeyValueStore : public IClosable {
 public:
 	virtual KeyValueStoreType getType() const = 0;
@@ -132,11 +115,11 @@ public:
 	virtual Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) { throw not_implemented(); }
 
 	// storage engine parameters interface
-	virtual Future<std::map<std::string, std::string>> getParameters() const { throw not_implemented(); }
-	virtual Future<StorageEngineParamResult> setParameters(std::map<std::string, std::string> const& params) {
+	virtual Future<StorageEngineParamSet> getParameters() const { throw not_implemented(); }
+	virtual Future<StorageEngineParamResult> setParameters(StorageEngineParamSet const& params) {
 		throw not_implemented();
 	}
-	virtual Future<StorageEngineParamResult> checkCompatibility(std::map<std::string, std::string> const& params) {
+	virtual Future<StorageEngineParamResult> checkCompatibility(StorageEngineParamSet const& params) {
 		throw not_implemented();
 	}
 
@@ -172,12 +155,11 @@ extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
                                            KeyValueStoreType storeType,
                                            bool checkChecksums = false,
                                            bool checkIntegrity = false);
-extern IKeyValueStore* keyValueStoreRedwoodV1(
-    std::string const& filename,
-    UID logID,
-    Reference<AsyncVar<ServerDBInfo> const> db = {},
-    Optional<EncryptionAtRestMode> encryptionMode = {},
-    Optional<std::map<std::string, std::string>> params = Optional<std::map<std::string, std::string>>());
+extern IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
+                                              UID logID,
+                                              Reference<AsyncVar<ServerDBInfo> const> db = {},
+                                              Optional<EncryptionAtRestMode> encryptionMode = {},
+                                              Optional<StorageEngineParamSet> params = {});
 extern IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
                                             UID logID,
                                             KeyValueStoreType storeType,
@@ -209,7 +191,7 @@ extern IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
                                          bool checkChecksums = false,
                                          bool checkIntegrity = false,
                                          Optional<EncryptionAtRestMode> mode = {},
-                                         Optional<std::map<std::string, std::string>> params = {});
+                                         Optional<StorageEngineParamSet> params = {});
 
 inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                                    std::string const& filename,
@@ -221,7 +203,7 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                                    // TODO : check remote and encryption not enabled together
                                    Reference<AsyncVar<ServerDBInfo> const> db = {},
                                    Optional<EncryptionAtRestMode> encryptionMode = {},
-                                   Optional<std::map<std::string, std::string>> params = {}) {
+                                   Optional<StorageEngineParamSet> params = {}) {
 
 	// Only Redwood support encryption currently.
 	if (encryptionMode.present() && encryptionMode.get().isEncryptionEnabled() &&
@@ -231,9 +213,7 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 		    .detail("EncryptionMode", encryptionMode);
 		throw encrypt_mode_mismatch();
 	}
-	openRemotely = openRemotely || (params.present() && params.get().contains("remote_kv_store")
-	                                    ? getStorageEngineParamBoolean(params.get(), "remote_kv_store")
-	                                    : false);
+	openRemotely = openRemotely || params.present() ? params.get().get("remote_kv_store", false) : false;
 	if (openRemotely) {
 		return openRemoteKVStore(
 		    storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity, encryptionMode, params);

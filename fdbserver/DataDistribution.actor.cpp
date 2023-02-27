@@ -1380,7 +1380,7 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 
 ACTOR Future<Void> getStorageEngineParams(Reference<DataDistributor> self, GetStorageEngineParamsRequest req) {
 	if (self->teamCollection) {
-		std::map<std::string, std::string> res = wait(self->teamCollection->getStorageEngineParams());
+		StorageEngineParamSet res = wait(self->teamCollection->getStorageEngineParams());
 		GetStorageEngineParamsReply _reply(res);
 		req.reply.send(_reply);
 	} else {

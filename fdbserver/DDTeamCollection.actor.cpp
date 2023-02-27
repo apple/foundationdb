@@ -2215,10 +2215,11 @@ public:
 
 	ACTOR static Future<Void> monitorStorageEngineParamsChange(DDTeamCollection* self) {
 		state SignalableActorCollection collection;
-		state std::map<std::string, std::string> newParams;
+		state StorageEngineParamSet newParams;
+		TraceEvent("MonitorStorageEngineParamsChangeStart").log();
 		loop {
 			state ReadYourWritesTransaction tr(self->dbContext());
-			newParams.clear();
+			newParams.getMutableParams().clear();
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -2228,18 +2229,18 @@ public:
 					// params[k.removePrefix(storageEngineParamsPrefix).toString()] = v.toString();
 					auto paramK = k.removePrefix(storageEngineParamsPrefix).toString();
 					ASSERT(self->configuration.storageEngineParams.present());
-					ASSERT(self->configuration.storageEngineParams.get().contains(paramK));
+					ASSERT(self->configuration.storageEngineParams.get().getParams().contains(paramK));
 					// TODO : compare the real value but not the casted string
-					auto oldV = self->configuration.storageEngineParams.get().at(paramK);
+					auto oldV = self->configuration.storageEngineParams.get().getParams().at(paramK);
 					if (v.toString() != oldV) {
 						TraceEvent("NewStorageEngineParamsChange")
 						    .detail("Param", paramK)
 						    .detail("OldV", oldV)
 						    .detail("NewV", v);
-						newParams[paramK] = v.toString();
+						newParams.set(paramK, v.toString());
 					}
 				}
-				if (newParams.size()) {
+				if (newParams.getParams().size()) {
 					collection.add(self->storageParamsUpdater(newParams));
 				}
 
@@ -2255,8 +2256,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> storageParamsUpdater(DDTeamCollection* self,
-	                                               std::map<std::string, std::string> newParams) {
+	ACTOR static Future<Void> storageParamsUpdater(DDTeamCollection* self, StorageEngineParamSet newParams) {
 		// get all storages interfaces
 		// send the change requests
 		// runtime/reboot/replacement
@@ -2281,7 +2281,7 @@ public:
 			SetStorageEngineParamsReply reply = f.get().get();
 			// TODO: handle the needreboot and needreplacement parameters
 			for (const auto& k : reply.result.applied) {
-				self->configuration.storageEngineParams.get()[k] = newParams[k];
+				self->configuration.storageEngineParams.get().set(k, newParams.getParams().at(k));
 			}
 			for (const auto& k : reply.result.needReplacement) {
 				TraceEvent("NeedReplacementStorageEngineParameter")
@@ -2293,7 +2293,7 @@ public:
 			std::vector<std::string> noNeedReplacement;
 			for (const auto& k : reply.result.unchanged) {
 				if (StorageEngineParamsFactory::getChangeType(self->configuration.storageServerStoreType, k) ==
-				    StorageEngineParamsSet::CHANGETYPE::NEEDREPLACEMENT) {
+				    StorageEngineParamSet::CHANGETYPE::NEEDREPLACEMENT) {
 					// change back to old value, no need to wiggle now
 					// need to update the wiggle data
 					noNeedReplacement.push_back(k);
@@ -2316,11 +2316,11 @@ public:
 
 		wait(waitForAll(collection));
 
-		TraceEvent("DDStorageParamsUpdater").detail("NewParams", describe(newParams));
+		TraceEvent("DDStorageParamsUpdater").detail("NewParams", describe(newParams.getParams()));
 		return Void();
 	}
 
-	ACTOR static Future<std::map<std::string, std::string>> getStorageEngineParams(DDTeamCollection* self) {
+	ACTOR static Future<StorageEngineParamSet> getStorageEngineParams(DDTeamCollection* self) {
 		// TODO : should wait for any pending changes for storages to apply and return
 		state std::vector<Future<ErrorOr<GetStorageEngineParamsReply>>> fs;
 		for (const auto& [_, ss] : self->server_info) {
@@ -2335,7 +2335,7 @@ public:
 			ASSERT(f.isReady() && !f.get().isError());
 			GetStorageEngineParamsReply reply = f.get().get();
 			json_spirit::mObject paramsObj;
-			for (const auto& [k, v] : reply.params) {
+			for (const auto& [k, v] : reply.params.getParams()) {
 				paramsObj[k] = v;
 			}
 			const std::string params_json_str = json_spirit::write_string(json_spirit::mValue(paramsObj));
@@ -3704,11 +3704,11 @@ Future<Void> DDTeamCollection::monitorStorageEngineParamsChange() {
 	return DDTeamCollectionImpl::monitorStorageEngineParamsChange(this);
 }
 
-Future<Void> DDTeamCollection::storageParamsUpdater(std::map<std::string, std::string> newParams) {
+Future<Void> DDTeamCollection::storageParamsUpdater(StorageEngineParamSet newParams) {
 	return DDTeamCollectionImpl::storageParamsUpdater(this, newParams);
 }
 
-Future<std::map<std::string, std::string>> DDTeamCollection::getStorageEngineParams() {
+Future<StorageEngineParamSet> DDTeamCollection::getStorageEngineParams() {
 	return DDTeamCollectionImpl::getStorageEngineParams(this);
 }
 

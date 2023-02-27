@@ -1339,22 +1339,21 @@ struct TrackRunningStorage {
 	~TrackRunningStorage() { runningStorages->erase(std::make_pair(self, storeType)); };
 };
 
-ACTOR Future<Void> storageServerRollbackRebooter(
-    std::set<std::pair<UID, KeyValueStoreType>>* runningStorages,
-    Future<Void> prevStorageServer,
-    KeyValueStoreType storeType,
-    std::string filename,
-    UID id,
-    LocalityData locality,
-    bool isTss,
-    Reference<AsyncVar<ServerDBInfo> const> db,
-    std::string folder,
-    SignalableActorCollection* filesClosed,
-    int64_t memoryLimit,
-    IKeyValueStore* store,
-    bool validateDataFiles,
-    Optional<EncryptionAtRestMode> encryptionMode,
-    std::shared_ptr<std::map<std::string, std::string>> storageEngineParams) {
+ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValueStoreType>>* runningStorages,
+                                                 Future<Void> prevStorageServer,
+                                                 KeyValueStoreType storeType,
+                                                 std::string filename,
+                                                 UID id,
+                                                 LocalityData locality,
+                                                 bool isTss,
+                                                 Reference<AsyncVar<ServerDBInfo> const> db,
+                                                 std::string folder,
+                                                 SignalableActorCollection* filesClosed,
+                                                 int64_t memoryLimit,
+                                                 IKeyValueStore* store,
+                                                 bool validateDataFiles,
+                                                 Optional<EncryptionAtRestMode> encryptionMode,
+                                                 std::shared_ptr<StorageEngineParamSet> storageEngineParams) {
 	state TrackRunningStorage _(id, storeType, runningStorages);
 	loop {
 		state Future<Void> kvClosed = store->onClosed();
@@ -1367,14 +1366,12 @@ ACTOR Future<Void> storageServerRollbackRebooter(
 
 		TraceEvent("StorageServerRequestedReboot", id)
 		    .detail("RebootStorageEngine", e.getError().code() == error_code_please_reboot_kv_store)
-		    .detail("Params", describe(*storageEngineParams));
+		    .detail("Params", describe(storageEngineParams->getParams()));
 
 		if (e.getError().code() == error_code_please_reboot_kv_store) {
 			// Wait the kv store shutdown complete before opening a new one
 			wait(kvClosed);
 			// use the up-to-date storage engine paras
-			// TODO : fix this condition
-			Optional<std::map<std::string, std::string>> params(*storageEngineParams);
 			// reopen KV store
 			store = openKVStore(
 			    storeType,
@@ -1390,7 +1387,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(
 			             : true),
 			    db,
 			    encryptionMode,
-			    params);
+			    *storageEngineParams);
 			filesClosed->add(store->onClosed());
 		}
 
@@ -1903,8 +1900,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				             : true),
 				    dbInfo,
 				    {},
-				    Optional<std::map<std::string, std::string>>(
-				        StorageEngineParamsFactory::getParamsValue(s.storeType)));
+				    Optional<StorageEngineParamSet>(StorageEngineParamsFactory::getParamsValue(s.storeType)));
 				Future<Void> kvClosed = kv->onClosed();
 				filesClosed.add(kvClosed);
 
@@ -1951,9 +1947,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				// TODO : add for the new interface
 
 				// When an exsiting storage rejoins, use the default parameter values to open the KVS
-				std::shared_ptr<std::map<std::string, std::string>> paramsPtr =
-				    std::make_shared<std::map<std::string, std::string>>(
-				        StorageEngineParamsFactory::getParamsValue(s.storeType));
+				std::shared_ptr<StorageEngineParamSet> paramsPtr =
+				    std::make_shared<StorageEngineParamSet>(StorageEngineParamsFactory::getParamsValue(s.storeType));
 				Promise<Void> recovery;
 				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connRecord, paramsPtr);
 				recoveries.push_back(recovery.getFuture());
@@ -2600,10 +2595,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					filesClosed.add(kvClosed);
 					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
 					storageCache.set(req.reqId, storageReady.getFuture());
-					std::shared_ptr<std::map<std::string, std::string>> paramsPtr =
+					std::shared_ptr<StorageEngineParamSet> paramsPtr =
 					    req.storageEngineParams.present()
-					        ? std::make_shared<std::map<std::string, std::string>>(req.storageEngineParams.get())
-					        : std::make_shared<std::map<std::string, std::string>>();
+					        ? std::make_shared<StorageEngineParamSet>(req.storageEngineParams.get())
+					        : std::make_shared<StorageEngineParamSet>();
 					Future<Void> s = storageServer(data,
 					                               recruited,
 					                               req.seedTag,

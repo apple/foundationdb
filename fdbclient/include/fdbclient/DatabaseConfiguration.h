@@ -104,21 +104,21 @@ struct RegionInfo {
 struct StorageEngineParamsFactory {
 
 	static std::map<KeyValueStoreType::StoreType,
-	                std::map<std::string, std::pair<StorageEngineParamsSet::CHANGETYPE, std::string>>>&
+	                std::map<std::string, std::pair<StorageEngineParamSet::CHANGETYPE, std::string>>>&
 	factories() {
 		static std::map<KeyValueStoreType::StoreType,
-		                std::map<std::string, std::pair<StorageEngineParamsSet::CHANGETYPE, std::string>>>
+		                std::map<std::string, std::pair<StorageEngineParamSet::CHANGETYPE, std::string>>>
 		    theFactories;
 		return theFactories;
 	}
 
 	StorageEngineParamsFactory(
 	    KeyValueStoreType::StoreType storeType,
-	    std::map<std::string, std::pair<StorageEngineParamsSet::CHANGETYPE, std::string>> const& vals) {
+	    std::map<std::string, std::pair<StorageEngineParamSet::CHANGETYPE, std::string>> const& vals) {
 		factories()[storeType] = vals;
 	}
 
-	static std::map<std::string, std::pair<StorageEngineParamsSet::CHANGETYPE, std::string>>& getParams(
+	static std::map<std::string, std::pair<StorageEngineParamSet::CHANGETYPE, std::string>>& getParams(
 	    KeyValueStoreType::StoreType storeType) {
 		if (factories().contains(storeType))
 			return factories().at(storeType);
@@ -135,8 +135,8 @@ struct StorageEngineParamsFactory {
 		return result;
 	}
 
-	static StorageEngineParamsSet::CHANGETYPE getChangeType(KeyValueStoreType::StoreType storeType,
-	                                                        const std::string& name) {
+	static StorageEngineParamSet::CHANGETYPE getChangeType(KeyValueStoreType::StoreType storeType,
+	                                                       const std::string& name) {
 		return factories()[storeType][name].first;
 	}
 };
@@ -269,7 +269,8 @@ struct DatabaseConfiguration {
 	KeyValueStoreType storageServerStoreType;
 
 	// Storage engine params
-	Optional<std::map<std::string, std::string>> storageEngineParams;
+	// TODO: check do we need Optional here
+	Optional<StorageEngineParamSet> storageEngineParams;
 
 	// Testing StorageServers
 	int32_t desiredTSSCount;
