@@ -429,11 +429,11 @@ TRACE_METRIC_TYPE(double, double);
 
 class AuditedEvent;
 
-consteval AuditedEvent operator""_audit(const char*, size_t) noexcept;
+inline consteval AuditedEvent operator""_audit(const char*, size_t) noexcept;
 
 class AuditedEvent {
 	// special TraceEvents that may bypass throttling or suppression
-	static constexpr std::array<std::string_view, 11> auditTopics{
+	static constexpr std::string_view auditTopics[]{
 		"AttemptedRPCToPrivatePrevented",
 		"AuditTokenUsed",
 		"AuthzPublicKeySetApply",
@@ -451,8 +451,8 @@ class AuditedEvent {
 	bool valid;
 	explicit constexpr AuditedEvent(const char* type, int len) noexcept
 	  : eventType(type), len(len),
-	    valid(std::find(auditTopics.begin(), auditTopics.end(), std::string_view(type, len)) !=
-	          auditTopics.end()) // whitelist looked up during compile time
+	    valid(std::find(std::begin(auditTopics), std::end(auditTopics), std::string_view(type, len)) !=
+	          std::end(auditTopics)) // whitelist looked up during compile time
 	{}
 
 	friend consteval AuditedEvent operator""_audit(const char*, size_t) noexcept;
