@@ -26,7 +26,7 @@ package com.apple.foundationdb.test;
  */
 public class TestApiVersion {
     /**
-	 * The latest API version supported by the Java binding
-	 */
+     * The latest API version supported by the Java binding
+     */
     public static final int CURRENT = 720;
 }
