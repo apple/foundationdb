@@ -23,6 +23,7 @@ import argparse
 import authlib
 import base64
 import fdb
+import functools
 import os
 import pytest
 import random
@@ -33,16 +34,20 @@ from multiprocessing import Process, Pipe
 from typing import Union
 from authz_util import token_gen, private_key_gen, public_keyset_from_keys, alg_from_kty
 from util import random_alphanum_str, random_alphanum_bytes, to_str, to_bytes, KeyFileReverter, wait_until_tenant_tr_succeeds, wait_until_tenant_tr_fails
+from test_util import ScopedTraceChecker
+from local_cluster import TLSConfig
+from tmp_cluster import TempCluster
 
 special_key_ranges = [
-    ("transaction description", b"/description", b"/description\x00"),
-    ("global knobs", b"/globalKnobs", b"/globalKnobs\x00"),
-    ("knobs", b"/knobs0", b"/knobs0\x00"),
-    ("conflicting keys", b"/transaction/conflicting_keys/", b"/transaction/conflicting_keys/\xff\xff"),
-    ("read conflict range", b"/transaction/read_conflict_range/", b"/transaction/read_conflict_range/\xff\xff"),
-    ("conflicting keys", b"/transaction/write_conflict_range/", b"/transaction/write_conflict_range/\xff\xff"),
-    ("data distribution stats", b"/metrics/data_distribution_stats/", b"/metrics/data_distribution_stats/\xff\xff"),
-    ("kill storage", b"/globals/killStorage", b"/globals/killStorage\x00"),
+    # (description, range_begin, range_end, readable, writable)
+    ("transaction description", b"\xff\xff/description", b"\xff\xff/description\x00", True, False),
+    ("global knobs", b"\xff\xff/globalKnobs", b"\xff\xff/globalKnobs\x00", True, False),
+    ("knobs", b"\xff\xff/knobs/", b"\xff\xff/knobs0\x00", True, False),
+    ("conflicting keys", b"\xff\xff/transaction/conflicting_keys/", b"\xff\xff/transaction/conflicting_keys/\xff\xff", True, False),
+    ("read conflict range", b"\xff\xff/transaction/read_conflict_range/", b"\xff\xff/transaction/read_conflict_range/\xff\xff", True, False),
+    ("conflicting keys", b"\xff\xff/transaction/write_conflict_range/", b"\xff\xff/transaction/write_conflict_range/\xff\xff", True, False),
+    ("data distribution stats", b"\xff\xff/metrics/data_distribution_stats/", b"\xff\xff/metrics/data_distribution_stats/\xff\xff", False, False),
+    ("kill storage", b"\xff\xff/globals/killStorage", b"\xff\xff/globals/killStorage\x00", True, False),
 ]
 
 # handler for when looping is assumed with usage
@@ -91,21 +96,43 @@ def test_token_option(cluster, default_tenant, tenant_tr_gen, token_claim_1h):
     except fdb.FDBError as e:
         assert e.code == 6000, f"expected permission_denied, got {e} instead"
 
-def test_simple_tenant_access(cluster, default_tenant, tenant_tr_gen, token_claim_1h):
-    token = token_gen(cluster.private_key, token_claim_1h(default_tenant))
-    tr = tenant_tr_gen(default_tenant)
-    tr.options.set_authorization_token(token)
-    def commit_some_value(tr):
-        tr[b"abc"] = b"def"
-        tr.commit().wait()
+def test_simple_tenant_access(cluster, default_tenant, tenant_tr_gen, token_claim_1h, tenant_id_from_name):
+    def check_token_usage_trace(trace_entries, token_claim, token_signature_part):
+        found = False
+        for filename, ev_type, entry in trace_entries:
+            if ev_type == "AuditTokenUsed":
+                jti_actual = entry.attrib["TokenId"]
+                jti_expect = token_claim["jti"]
+                tenantid_actual = entry.attrib["TenantId"]
+                tenantid_expect_bytes = base64.b64decode(token_claim["tenants"][0])
+                tenantid_expect = hex(int.from_bytes(tenantid_expect_bytes, "big"))
+                if jti_actual == jti_expect and tenantid_actual == tenantid_expect:
+                    found = True
+                else:
+                    print(f"found unknown tenant in token usage audit log; tokenid={jti_actual} vs. {jti_expect}, tenantid={tenantid_actual} vs. {tenantid_expect}")
+                for k, v in entry.items():
+                    if k.find(token_signature_part) != -1 or v.find(token_signature_part) != -1:
+                        pytest.fail(f"token usage trace includes sensitive token signature: key={k} value={v}")
+        if not found:
+            pytest.fail("failed to find any AuditTokenUsed entry matching token from the testcase")
 
-    loop_until_success(tr, commit_some_value)
-    tr = tenant_tr_gen(default_tenant)
-    tr.options.set_authorization_token(token)
-    def read_back_value(tr):
-       return tr[b"abc"].value
-    value = loop_until_success(tr, read_back_value)
-    assert value == b"def", "tenant write transaction not visible"
+    token_claim = token_claim_1h(default_tenant)
+    token = token_gen(cluster.private_key, token_claim)
+    token_sig_part = to_str(token[token.rfind(b".") + 1:])
+    with ScopedTraceChecker(cluster, functools.partial(check_token_usage_trace, token_claim=token_claim, token_signature_part=token_sig_part)):
+        tr = tenant_tr_gen(default_tenant)
+        tr.options.set_authorization_token(token)
+        def commit_some_value(tr):
+            tr[b"abc"] = b"def"
+            tr.commit().wait()
+
+        loop_until_success(tr, commit_some_value)
+        tr = tenant_tr_gen(default_tenant)
+        tr.options.set_authorization_token(token)
+        def read_back_value(tr):
+           return tr[b"abc"].value
+        value = loop_until_success(tr, read_back_value)
+        assert value == b"def", "tenant write transaction not visible"
 
 def test_cross_tenant_access_disallowed(cluster, default_tenant, tenant_gen, tenant_tr_gen, token_claim_1h):
     # use default tenant token with second tenant transaction and see it fail
@@ -191,15 +218,18 @@ def test_system_and_special_key_range_disallowed(db, tenant_tr_gen):
     except fdb.FDBError as e:
         assert e.code == 6000, f"expected permission_denied, got {e} instead"
 
-    for range_name, special_range_begin, special_range_end in special_key_ranges:
+    for range_name, special_range_begin, special_range_end, readable, _ in special_key_ranges:
         tr = db.create_transaction()
         tr.options.set_access_system_keys()
         tr.options.set_special_key_space_relaxed()
         try:
             kvs = tr.get_range(special_range_begin, special_range_end, limit=1).to_list()
-            assert False, f"disallowed special keyspace read for range {range_name} has succeeded. found item {kvs}"
+            if readable:
+                pass
+            else:
+                pytest.fail(f"disallowed special keyspace read for range '{range_name}' has succeeded. found item {kvs}")
         except fdb.FDBError as e:
-            assert e.code == 6000, f"expected permission_denied from attempted read to range {range_name}, got {e} instead"
+            assert e.code in [6000, 6001], f"expected authz error from attempted read to range '{range_name}', got {e} instead"
 
     try:
         tr = db.create_transaction()
@@ -210,16 +240,21 @@ def test_system_and_special_key_range_disallowed(db, tenant_tr_gen):
     except fdb.FDBError as e:
         assert e.code == 6000, f"expected permission_denied, got {e} instead"
 
-    for range_name, special_range_begin, special_range_end in special_key_ranges:
+    for range_name, special_range_begin, special_range_end, _, writable in special_key_ranges:
         tr = db.create_transaction()
         tr.options.set_access_system_keys()
         tr.options.set_special_key_space_relaxed()
+        tr.options.set_special_key_space_enable_writes()
         try:
             del tr[special_range_begin:special_range_end]
             tr.commit().wait()
-            assert False, f"write to disallowed special keyspace range {range_name} has succeeded"
+            if writable:
+                pass
+            else:
+                pytest.fail(f"write to disallowed special keyspace range '{range_name}' has succeeded")
         except fdb.FDBError as e:
-            assert e.code == 6000, f"expected permission_denied from attempted write to range {range_name}, got {e} instead"
+            error_range = [6000, 6001, 2115] if not writable else []
+            assert e.code in error_range, f"expected errors {error_range} from attempted write to range '{range_name}', got {e} instead"
 
     try:
         tr = db.create_transaction()
@@ -333,57 +368,108 @@ def test_bad_token(cluster, default_tenant, tenant_tr_gen, token_claim_1h):
         return d
 
     claim_mutations = [
-        ("no nbf", lambda claim: del_attr(claim, "nbf")),
-        ("no exp", lambda claim: del_attr(claim, "exp")),
-        ("no iat", lambda claim: del_attr(claim, "iat")),
-        ("too early", lambda claim: set_attr(claim, "nbf", time.time() + 30)),
-        ("too late", lambda claim: set_attr(claim, "exp", time.time() - 10)),
-        ("no tenants", lambda claim: del_attr(claim, "tenants")),
-        ("empty tenants", lambda claim: set_attr(claim, "tenants", [])),
+        ("no nbf", lambda claim: del_attr(claim, "nbf"), "NoNotBefore"),
+        ("no exp", lambda claim: del_attr(claim, "exp"), "NoExpirationTime"),
+        ("no iat", lambda claim: del_attr(claim, "iat"), "NoIssuedAt"),
+        ("too early", lambda claim: set_attr(claim, "nbf", time.time() + 30), "TokenNotYetValid"),
+        ("too late", lambda claim: set_attr(claim, "exp", time.time() - 10), "Expired"),
+        ("no tenants", lambda claim: del_attr(claim, "tenants"), "NoTenants"),
+        ("empty tenants", lambda claim: set_attr(claim, "tenants", []), "TenantTokenMismatch"),
     ]
-    for case_name, mutation in claim_mutations:
+
+    def check_invalid_token_trace(trace_entries, expected_reason, case_name):
+        invalid_token_found = False
+        unauthorized_access_found = False
+        for filename, ev_type, entry in trace_entries:
+            if ev_type == "InvalidToken":
+                actual_reason = entry.attrib["Reason"]
+                if actual_reason == expected_reason:
+                    invalid_token_found = True
+                else:
+                    print("InvalidToken reason mismatch: expected '{}' got '{}'".format(expected_reason, actual_reason))
+                    print("trace entry: {}".format(entry.items()))
+            elif ev_type == "UnauthorizedAccessPrevented":
+                unauthorized_access_found = True
+        if not invalid_token_found:
+            pytest.fail("Failed to find invalid token reason '{}' in trace for case '{}'".format(expected_reason, case_name))
+        if not unauthorized_access_found:
+            pytest.fail("Failed to find 'UnauthorizedAccessPrevented' event in trace for case '{}'".format(case_name))
+        
+    for case_name, mutation, expected_failure_reason in claim_mutations:
+        with ScopedTraceChecker(cluster, functools.partial(check_invalid_token_trace, expected_reason=expected_failure_reason, case_name=case_name)) as checker:
+            tr = tenant_tr_gen(default_tenant)
+            tr.options.set_authorization_token(token_gen(cluster.private_key, mutation(token_claim_1h(default_tenant))))
+            print(f"Trace check begin for '{case_name}': {checker.begin}")
+            try:
+                value = tr[b"abc"].value
+                assert False, f"expected permission_denied for case '{case_name}', but read transaction went through"
+            except fdb.FDBError as e:
+                assert e.code == 6000, f"expected permission_denied for case '{case_name}', got {e} instead"
+            tr = tenant_tr_gen(default_tenant)
+            tr.options.set_authorization_token(token_gen(cluster.private_key, mutation(token_claim_1h(default_tenant))))
+            tr[b"abc"] = b"def"
+            try:
+                tr.commit().wait()
+                assert False, f"expected permission_denied for case '{case_name}', but write transaction went through"
+            except fdb.FDBError as e:
+                assert e.code == 6000, f"expected permission_denied for case '{case_name}', got {e} instead"
+            print(f"Trace check end for '{case_name}': {time.time()}")
+
+    with ScopedTraceChecker(cluster, functools.partial(check_invalid_token_trace, expected_reason="UnknownKey", case_name="untrusted key")):
+        # unknown key case: override "kid" field in header
+        # first, update only the kid field of key with export-update-import
+        key_dict = cluster.private_key.as_dict(is_private=True)
+        key_dict["kid"] = random_alphanum_str(10)
+        renamed_key = authlib.jose.JsonWebKey.import_key(key_dict)
+        unknown_key_token = token_gen(
+                    renamed_key,
+                    token_claim_1h(default_tenant),
+                    headers={
+                        "typ": "JWT",
+                        "kty": renamed_key.kty,
+                        "alg": alg_from_kty(renamed_key.kty),
+                        "kid": renamed_key.kid,
+                    })
         tr = tenant_tr_gen(default_tenant)
-        tr.options.set_authorization_token(token_gen(cluster.private_key, mutation(token_claim_1h(default_tenant))))
+        tr.options.set_authorization_token(unknown_key_token)
         try:
             value = tr[b"abc"].value
-            assert False, f"expected permission_denied for case {case_name}, but read transaction went through"
+            assert False, f"expected permission_denied for 'unknown key' case, but read transaction went through"
         except fdb.FDBError as e:
-            assert e.code == 6000, f"expected permission_denied for case {case_name}, got {e} instead"
+            assert e.code == 6000, f"expected permission_denied for 'unknown key' case, got {e} instead"
         tr = tenant_tr_gen(default_tenant)
-        tr.options.set_authorization_token(token_gen(cluster.private_key, mutation(token_claim_1h(default_tenant))))
+        tr.options.set_authorization_token(unknown_key_token)
         tr[b"abc"] = b"def"
         try:
             tr.commit().wait()
-            assert False, f"expected permission_denied for case {case_name}, but write transaction went through"
+            assert False, f"expected permission_denied for 'unknown key' case, but write transaction went through"
         except fdb.FDBError as e:
-            assert e.code == 6000, f"expected permission_denied for case {case_name}, got {e} instead"
+            assert e.code == 6000, f"expected permission_denied for 'unknown key' case, got {e} instead"
 
-    # unknown key case: override "kid" field in header
-    # first, update only the kid field of key with export-update-import
-    key_dict = cluster.private_key.as_dict(is_private=True)
-    key_dict["kid"] = random_alphanum_str(10)
-    renamed_key = authlib.jose.JsonWebKey.import_key(key_dict)
-    unknown_key_token = token_gen(
-                renamed_key,
-                token_claim_1h(default_tenant),
-                headers={
-                    "typ": "JWT",
-                    "kty": renamed_key.kty,
-                    "alg": alg_from_kty(renamed_key.kty),
-                    "kid": renamed_key.kid,
-                })
-    tr = tenant_tr_gen(default_tenant)
-    tr.options.set_authorization_token(unknown_key_token)
-    try:
-        value = tr[b"abc"].value
-        assert False, f"expected permission_denied for 'unknown key' case, but read transaction went through"
-    except fdb.FDBError as e:
-        assert e.code == 6000, f"expected permission_denied for 'unknown key' case, got {e} instead"
-    tr = tenant_tr_gen(default_tenant)
-    tr.options.set_authorization_token(unknown_key_token)
-    tr[b"abc"] = b"def"
-    try:
-        tr.commit().wait()
-        assert False, f"expected permission_denied for 'unknown key' case, but write transaction went through"
-    except fdb.FDBError as e:
-        assert e.code == 6000, f"expected permission_denied for 'unknown key' case, got {e} instead"
+def test_authz_not_enabled_trace(build_dir):
+    # spin up a cluster without authz and see it logs as expected
+    def check_authz_disablement_traces(trace_entries):
+        keyfile_unset_ev = "AuthzPublicKeyFileNotSet"
+        tokenless_mode_ev = "AuthzTokenlessAccessEnabled"
+        keyfile_unset_found = False
+        tokenless_mode_found = False
+        for _, ev_type, _ in trace_entries:
+            if ev_type == keyfile_unset_ev:
+                keyfile_unset_found = True
+            elif ev_type == tokenless_mode_ev:
+                tokenless_mode_found = True
+        if not keyfile_unset_found:
+            pytest.fail(f"failed to locate keyfile unset trace '{keyfile_unset_ev}'")
+        if not tokenless_mode_found:
+            pytest.fail(f"failed to locate tokenless mode trace '{keyfile_unset_ev}'")
+
+    with TempCluster(
+            build_dir=build_dir,
+            tls_config = TLSConfig(server_chain_len=3, client_chain_len=2),
+            authorization_kty = "", # this ensures that no public key files are generated and produces AuthzPublicKeyFileNotSet
+            remove_at_exit=True,
+            custom_config={
+                "knob-allow-tokenless-tenant-access": "true",
+            }) as cluster:
+        cluster.add_trace_check(check_authz_disablement_traces)
+        # safe to drop cluster immediately. TempCluster.__enter__ returns only after fdbcli "create database" succeeds.

@@ -914,6 +914,7 @@ public:
 
 		if (logsOnly) {
 			state RestorableFileSet restorableSet;
+			restorableSet.targetVersion = targetVersion;
 			state std::vector<LogFile> logFiles;
 			Version begin = beginVersion == invalidVersion ? 0 : beginVersion;
 			wait(store(logFiles, bc->listLogFiles(begin, targetVersion, false)));
