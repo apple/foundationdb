@@ -2214,9 +2214,12 @@ public:
 	}
 
 	ACTOR static Future<Void> monitorStorageEngineParamsChange(DDTeamCollection* self) {
+		// always set the params from database configuration when DD starts
+		// it will handle the case where the watch actor did not respond when DD was rebooted
+		// there is no effect if it's consistent with storage servers
+		wait(self->storageParamsUpdater(self->configuration.storageEngineParams.get()));
 		state SignalableActorCollection collection;
 		state StorageEngineParamSet newParams;
-		TraceEvent("MonitorStorageEngineParamsChangeStart").log();
 		loop {
 			state ReadYourWritesTransaction tr(self->dbContext());
 			newParams.getMutableParams().clear();
@@ -2231,6 +2234,7 @@ public:
 					ASSERT(self->configuration.storageEngineParams.present());
 					ASSERT(self->configuration.storageEngineParams.get().getParams().contains(paramK));
 					// TODO : compare the real value but not the casted string
+					// now it's okay as storage server will compare the real value not the string
 					auto oldV = self->configuration.storageEngineParams.get().getParams().at(paramK);
 					if (v.toString() != oldV) {
 						TraceEvent("NewStorageEngineParamsChange")
@@ -2248,7 +2252,7 @@ public:
 				wait(tr.commit());
 
 				wait(watchFuture);
-				TraceEvent("StorageEngineParamsWatchAfter").log();
+				TraceEvent(SevDebug, "StorageEngineParamsWatchAfter").log();
 				tr.reset();
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -2257,9 +2261,7 @@ public:
 	}
 
 	ACTOR static Future<Void> storageParamsUpdater(DDTeamCollection* self, StorageEngineParamSet newParams) {
-		// get all storages interfaces
-		// send the change requests
-		// runtime/reboot/replacement
+		// send update requests to all storages interfaces
 		std::vector<Future<ErrorOr<SetStorageEngineParamsReply>>> fs;
 		state std::map<UID, Future<ErrorOr<SetStorageEngineParamsReply>>> fmap;
 		for (const auto& [serverId, ss] : self->server_info) {
@@ -2272,7 +2274,6 @@ public:
 		wait(waitForAll(fs));
 		state std::vector<Future<Void>> collection;
 		for (const auto& [serverId, f] : fmap) {
-			TraceEvent("DDTCSetStorageEngineParameterResult").detail("ServerId", serverId);
 			if (!f.isReady() || f.get().isError()) {
 				TraceEvent(SevError, "DDTCSetStorageEngineParamsFailed")
 				    .detail("ServerId", serverId)
@@ -2280,16 +2281,13 @@ public:
 				continue;
 			}
 			SetStorageEngineParamsReply reply = f.get().get();
-			// TODO: handle the needreboot and needreplacement parameters
 			for (const auto& k : reply.result.applied) {
 				self->configuration.storageEngineParams.get().set(k, newParams.getParams().at(k));
 			}
 			for (const auto& k : reply.result.needReplacement) {
-				TraceEvent("NeedReplacementStorageEngineParameter")
-				    .detail("Param", k)
+				TraceEvent(SevDebug, "StorageEngineParamUpdaterNeedReplacement")
 				    .detail("ServerId", serverId)
-				    .detail("Size", reply.result.needReplacement.size());
-				// TODO : update the parameter on DD configuration
+				    .detail("Param", k);
 			}
 			std::vector<std::string> noNeedReplacement;
 			for (const auto& k : reply.result.unchanged) {
@@ -2310,7 +2308,8 @@ public:
 					                                                 reply.result.needReplacement,
 					                                                 noNeedReplacement));
 				} else {
-					// TODO : rollback the change or print warning?
+					// TODO : rollback the change or print warning? Or should we disable configure change if wiggler not
+					// enabled
 					TraceEvent(SevWarnAlways, "NeedReplacementInvalidAsWiggleNotEnabled").detail("ServerId", serverId);
 				}
 			}
@@ -2318,7 +2317,7 @@ public:
 
 		wait(waitForAll(collection));
 
-		TraceEvent("DDStorageParamsUpdater").detail("NewParams", describe(newParams.getParams()));
+		TraceEvent("DDTCStorageParamsUpdaterFinished").detail("NewParams", describe(newParams.getParams()));
 		return Void();
 	}
 
