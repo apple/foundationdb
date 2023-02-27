@@ -512,7 +512,7 @@ An |database-blurb1| Modifications to a database are performed via transactions.
    .. code-block::
 
       {  "Healthy": <overall health status, true or false>,
-         "InitializationState": <initialization state of the Multi-Version Database>,
+         "InitializationState": <initializing|initialization_failed|created|incompatible|closed>,
          "InitializationError": <initialization error code, present if initialization failed>,
          "ProtocolVersion" : <determined protocol version of the cluster, present if determined>,
          "ConnectionRecord" : <connection file name or connection string>,
@@ -527,7 +527,7 @@ An |database-blurb1| Modifications to a database are performed via transactions.
       }
 
    The status of the actual version-specific database is embedded within the ``DatabaseStatus`` attribute. It lists the addresses of various FDB 
-   server roles, the client is aware of, and their connection status. The schema of the ``DatabaseStatus`` object is:
+   server roles the client is aware of and their connection status. The schema of the ``DatabaseStatus`` object is:
    
    .. code-block::
 
