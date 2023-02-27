@@ -9711,7 +9711,7 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 			    .detail("NumSampledKeys", numSampledKeys)
 			    .detail("NumGetRangeQueries", numGetRangeQueries)
 			    .detail("CheckpointID", metaData.checkpointID)
-			    .detail("BytesSampleFile", anyFileCreated ? bytesSampleFile : "noFileCreated");
+			    .detail("BytesSampleTempFile", anyFileCreated ? bytesSampleFile : "noFileCreated");
 			break;
 
 		} catch (Error& e) {
@@ -9763,9 +9763,6 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		checkpointResult.src.push_back(data->thisServerID);
 		checkpointResult.actionId = metaData.actionId;
 		data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
-		TraceEvent e("StorageCreatedCheckpoint", data->thisServerID);
-		e.setMaxEventLength(20000);
-		e.detail("Checkpoint", checkpointResult.toString());
 		// Move sst file to the checkpoint folder
 		if (sampleByteSstFileCreated) {
 			ASSERT(directoryExists(abspath(checkpointDir)));
@@ -9773,7 +9770,9 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 			ASSERT(fileExists(abspath(bytesSampleTempFile)));
 			renameFile(abspath(bytesSampleTempFile), abspath(bytesSampleFile));
 		}
-		e.detail("CheckpointFolder", platform::listFiles(checkpointDir));
+		TraceEvent("StorageCreatedCheckpoint", data->thisServerID)
+		    .detail("Checkpoint", checkpointResult.toString())
+		    .detail("BytesSampleFile", sampleByteSstFileCreated ? bytesSampleFile : "noFileCreated");
 	} catch (Error& e) {
 		// If checkpoint creation fails, the failure is persisted.
 		checkpointResult = metaData;

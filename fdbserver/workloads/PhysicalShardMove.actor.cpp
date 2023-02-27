@@ -344,15 +344,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 		TraceEvent(SevDebug, "TestCheckpointRestored").detail("Checkpoint", describe(fetchedCheckpoints));
 
-		// Validate the restored sampled bytes
-		/*RangeResult kvRangeSample = wait(kvStore->readRange(persistByteSampleKeys));
-		ASSERT(!kvRangeSample.more);
-		std::unordered_map<Key, Value> kvsKvsSample;
-		for (int i = 0; i < kvRangeSample.size(); ++i) {
-		    kvsKvsSample[kvRangeSample[i].key] = kvRangeSample[i].value;
-		    // TODO
-		}*/
-
 		// Validate the restored kv-store.
 		RangeResult kvRange = wait(kvStore->readRange(normalKeys));
 		ASSERT(!kvRange.more);
