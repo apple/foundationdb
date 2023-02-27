@@ -203,14 +203,14 @@ func init() {
 }
 
 func startNetwork() error {
-	if e := C.fdb_setup_network(); e != 0 {
-		return Error{int(e)}
+	if err := C.fdb_setup_network(); err != 0 {
+		return Error{int(err)}
 	}
 
 	go func() {
-		e := C.fdb_run_network()
-		if e != 0 {
-			log.Printf("Unhandled error in FoundationDB network thread: %v (%v)\n", C.GoString(C.fdb_get_error(e)), e)
+		err := C.fdb_run_network()
+		if err != 0 {
+			log.Printf("Unhandled error in FoundationDB network thread: %v (%v)\n", C.GoString(C.fdb_get_error(err)), err)
 		}
 	}()
 

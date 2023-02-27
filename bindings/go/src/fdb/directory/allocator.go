@@ -66,18 +66,18 @@ func windowSize(start int64) int64 {
 func (hca highContentionAllocator) allocate(tr fdb.Transaction, s subspace.Subspace) (subspace.Subspace, error) {
 	for {
 		rr := tr.Snapshot().GetRange(hca.counters, fdb.RangeOptions{Limit: 1, Reverse: true})
-		kvs, e := rr.GetSliceWithError()
-		if e != nil {
-			return nil, e
+		kvs, err := rr.GetSliceWithError()
+		if err != nil {
+			return nil, err
 		}
 
 		var start int64
 		var window int64
 
 		if len(kvs) == 1 {
-			t, e := hca.counters.Unpack(kvs[0].Key)
-			if e != nil {
-				return nil, e
+			t, err := hca.counters.Unpack(kvs[0].Key)
+			if err != nil {
+				return nil, err
 			}
 			start = t[0].(int64)
 		}
@@ -98,18 +98,18 @@ func (hca highContentionAllocator) allocate(tr fdb.Transaction, s subspace.Subsp
 
 			allocatorMutex.Unlock()
 
-			countStr, e := countFuture.Get()
-			if e != nil {
-				return nil, e
+			countStr, err := countFuture.Get()
+			if err != nil {
+				return nil, err
 			}
 
 			var count int64
 			if countStr == nil {
 				count = 0
 			} else {
-				e = binary.Read(bytes.NewBuffer(countStr), binary.LittleEndian, &count)
-				if e != nil {
-					return nil, e
+				err = binary.Read(bytes.NewBuffer(countStr), binary.LittleEndian, &count)
+				if err != nil {
+					return nil, err
 				}
 			}
 
@@ -139,14 +139,14 @@ func (hca highContentionAllocator) allocate(tr fdb.Transaction, s subspace.Subsp
 
 			allocatorMutex.Unlock()
 
-			kvs, e = latestCounter.GetSliceWithError()
-			if e != nil {
-				return nil, e
+			kvs, err = latestCounter.GetSliceWithError()
+			if err != nil {
+				return nil, err
 			}
 			if len(kvs) > 0 {
-				t, e := hca.counters.Unpack(kvs[0].Key)
-				if e != nil {
-					return nil, e
+				t, err := hca.counters.Unpack(kvs[0].Key)
+				if err != nil {
+					return nil, err
 				}
 				currentStart := t[0].(int64)
 				if currentStart > start {
@@ -154,9 +154,9 @@ func (hca highContentionAllocator) allocate(tr fdb.Transaction, s subspace.Subsp
 				}
 			}
 
-			v, e := candidateValue.Get()
-			if e != nil {
-				return nil, e
+			v, err := candidateValue.Get()
+			if err != nil {
+				return nil, err
 			}
 			if v == nil {
 				tr.AddWriteConflictKey(key)
