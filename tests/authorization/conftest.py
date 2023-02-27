@@ -31,7 +31,6 @@ from local_cluster import TLSConfig
 from tmp_cluster import TempCluster
 from typing import Union
 from util import random_alphanum_str, random_alphanum_bytes, to_str, to_bytes
-from test_util import ScopedTraceChecker
 import xml.etree.ElementTree as ET
 
 fdb.api_version(720)

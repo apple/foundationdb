@@ -3725,11 +3725,12 @@ void registerCrashHandler() {
 	sigaction(SIGSEGV, &action, nullptr);
 	sigaction(SIGBUS, &action, nullptr);
 	sigaction(SIGUSR2, &action, nullptr);
-// SIGTERM was disabled except for USE_GCOV case to avoid a TSAN error when fdbmonitor kills a server.
-// It is, however, also causing servers to die without flushing their trace, loss of which harms auditing and
-// diagnostics. As a workaround, we specifically disable SIGTERM handler for sanitizer builds
-// TODO: fix TSAN error associated with kill by SIGTERM
-#if !defined(USE_SANITIZER) || defined(USE_GCOV)
+#ifdef USE_GCOV
+	// SIGTERM is the "graceful" way to end an fdbserver process, so we actually
+	// don't want to invoke crashHandler. crashHandler is not actually
+	// async-signal-safe, so we can only justify calling it if we were going to
+	// crash anyway. For USE_GCOV though we need to flush coverage info, which
+	// we do through crashHandler.
 	sigaction(SIGTERM, &action, nullptr);
 #endif
 	sigaction(SIGABRT, &action, nullptr);
