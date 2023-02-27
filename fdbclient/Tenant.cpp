@@ -171,15 +171,12 @@ bool TenantMapEntry::operator!=(TenantMapEntry const& other) const {
 
 json_spirit::mObject TenantGroupEntry::toJson() const {
 	json_spirit::mObject tenantGroupEntry;
-	if (assignedCluster.present()) {
-		tenantGroupEntry["assigned_cluster"] = binaryToJson(assignedCluster.get());
-	}
-
+	// No fields currently
 	return tenantGroupEntry;
 }
 
 bool TenantGroupEntry::operator==(TenantGroupEntry const& other) const {
-	return assignedCluster == other.assignedCluster;
+	return true;
 }
 bool TenantGroupEntry::operator!=(TenantGroupEntry const& other) const {
 	return !(*this == other);
@@ -195,8 +192,8 @@ bool TenantTombstoneCleanupData::operator!=(TenantTombstoneCleanupData const& ot
 	return !(*this == other);
 }
 
-TenantMetadataSpecification<TenantMapEntry>& TenantMetadata::instance() {
-	static TenantMetadataSpecification _instance = TenantMetadataSpecification<TenantMapEntry>("\xff/"_sr);
+TenantMetadataSpecification<StandardTenantTypes>& TenantMetadata::instance() {
+	static TenantMetadataSpecification _instance = TenantMetadataSpecification<StandardTenantTypes>("\xff/"_sr);
 	return _instance;
 }
 

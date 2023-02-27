@@ -1123,12 +1123,22 @@ def tenant_configure(logger):
     output = run_fdbcli_command("tenant configure tenant tenant_group=tenant_group1")
     assert output == "The configuration for tenant `tenant' has been updated"
 
+    output = run_fdbcli_command(
+        "tenant configure tenant tenant_group=tenant_group1 ignore_capacity_limit"
+    )
+    assert output == "The configuration for tenant `tenant' has been updated"
+
     output = run_fdbcli_command("tenant get tenant")
     lines = output.split("\n")
     assert len(lines) == 3
     assert lines[2].strip() == "tenant group: tenant_group1"
 
     output = run_fdbcli_command("tenant configure tenant unset tenant_group")
+    assert output == "The configuration for tenant `tenant' has been updated"
+
+    output = run_fdbcli_command(
+        "tenant configure tenant unset tenant_group ignore_capacity_limit"
+    )
     assert output == "The configuration for tenant `tenant' has been updated"
 
     output = run_fdbcli_command("tenant get tenant")
@@ -1161,17 +1171,27 @@ def tenant_configure(logger):
     )
 
     output = run_fdbcli_command_and_get_error(
+        "tenant configure tenant tenant_group=tenant1 unknown_token"
+    )
+    assert (
+        output
+        == "ERROR: invalid configuration string `unknown_token'. String must specify a value using `='."
+    )
+
+    output = run_fdbcli_command_and_get_error(
         "tenant configure tenant3 tenant_group=tenant_group1"
     )
     assert output == "ERROR: Tenant does not exist (2131)"
-
 
     expected_output = """
 ERROR: assigned_cluster is only valid in metacluster configuration.
 ERROR: Tenant configuration is invalid (2140)
     """.strip()
-    output = run_fdbcli_command_and_get_error('tenant configure tenant assigned_cluster=nonexist')
+    output = run_fdbcli_command_and_get_error(
+        "tenant configure tenant assigned_cluster=nonexist"
+    )
     assert output == expected_output
+
 
 @enable_logging()
 def tenant_rename(logger):

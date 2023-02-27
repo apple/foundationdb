@@ -48,6 +48,7 @@ struct TenantLock : TestWorkload {
 	                                           LockAwareTx lA = LockAwareTx::NO) {
 		state ReadYourWritesTransaction tr(db, makeReference<Tenant>(db, name));
 		state UID result = deterministicRandom()->randomUniqueID();
+		state Value resultValue = BinaryWriter::toValue(result, IncludeVersion());
 		loop {
 			try {
 				switch (lA) {
@@ -60,13 +61,15 @@ struct TenantLock : TestWorkload {
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				}
 				Optional<Value> val = wait(tr.get("foo"_sr));
-				ASSERT(expectedVal.present() == val.present());
-				ASSERT(!val.present() ||
-				       BinaryReader::fromStringRef<UID>(val.get(), IncludeVersion()) == expectedVal.get());
+				if (val != resultValue) {
+					ASSERT(expectedVal.present() == val.present());
+					ASSERT(!val.present() ||
+					       BinaryReader::fromStringRef<UID>(val.get(), IncludeVersion()) == expectedVal.get());
+				}
 				if (readOnly) {
 					return BinaryReader::fromStringRef<UID>(val.get(), IncludeVersion());
 				}
-				tr.set("foo"_sr, BinaryWriter::toValue(result, IncludeVersion()));
+				tr.set("foo"_sr, resultValue);
 				wait(tr.commit());
 				return result;
 			} catch (Error& e) {

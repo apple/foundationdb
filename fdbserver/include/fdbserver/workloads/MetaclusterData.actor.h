@@ -53,7 +53,7 @@ public:
 		std::map<ClusterName, std::set<TenantGroupName>> clusterTenantGroupMap;
 
 		Optional<int64_t> tenantIdPrefix;
-		TenantData<DB, MetaclusterTenantMapEntry> tenantData;
+		TenantData<DB, MetaclusterTenantTypes> tenantData;
 
 		// Similar to operator==, but useful in assertions for identifying which member is different
 		void assertEquals(ManagementClusterData const& other) const {
@@ -83,7 +83,7 @@ public:
 
 	struct DataClusterData {
 		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
-		TenantData<DB, TenantMapEntry> tenantData;
+		TenantData<DB, StandardTenantTypes> tenantData;
 
 		// Similar to operator==, but useful in assertions for identifying which member is different
 		void assertEquals(DataClusterData const& other) const {
@@ -114,7 +114,7 @@ private:
 		state KeyBackedRangeResult<Tuple> clusterTenantTuples;
 		state KeyBackedRangeResult<Tuple> clusterTenantGroupTuples;
 
-		self->managementMetadata.tenantData = TenantData<DB, MetaclusterTenantMapEntry>(
+		self->managementMetadata.tenantData = TenantData<DB, MetaclusterTenantTypes>(
 		    self->managementDb, &MetaclusterAPI::ManagementClusterMetadata::tenantMetadata());
 
 		loop {
@@ -193,7 +193,7 @@ private:
 			state Reference<ITransaction> tr = dataDb->createTransaction();
 
 			clusterItr.first->second.tenantData =
-			    TenantData<IDatabase, TenantMapEntry>(dataDb, &TenantMetadata::instance());
+			    TenantData<IDatabase, StandardTenantTypes>(dataDb, &TenantMetadata::instance());
 			loop {
 				try {
 					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
