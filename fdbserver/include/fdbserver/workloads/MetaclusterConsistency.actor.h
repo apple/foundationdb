@@ -164,8 +164,7 @@ private:
 		// Each tenant group in the tenant group map should be present in the cluster tenant group map
 		// and have the correct cluster assigned to it.
 		for (auto const& [name, entry] : data.tenantData.tenantGroupMap) {
-			ASSERT(entry.assignedCluster.present());
-			auto clusterItr = data.clusterTenantGroupMap.find(entry.assignedCluster.get());
+			auto clusterItr = data.clusterTenantGroupMap.find(entry.assignedCluster);
 			ASSERT(clusterItr->second.count(name));
 		}
 
@@ -181,8 +180,8 @@ private:
 	                                              ClusterName clusterName,
 	                                              DataClusterMetadata clusterMetadata) {
 		state Reference<IDatabase> dataDb = wait(MetaclusterAPI::openDatabase(clusterMetadata.connectionString));
-		state TenantConsistencyCheck<IDatabase, TenantMapEntry> tenantConsistencyCheck(dataDb,
-		                                                                               &TenantMetadata::instance());
+		state TenantConsistencyCheck<IDatabase, StandardTenantTypes> tenantConsistencyCheck(
+		    dataDb, &TenantMetadata::instance());
 		wait(tenantConsistencyCheck.run());
 
 		auto dataClusterItr = self->metaclusterData.dataClusterMetadata.find(clusterName);
@@ -262,7 +261,6 @@ private:
 		}
 		for (auto const& [name, entry] : data.tenantData.tenantGroupMap) {
 			ASSERT(expectedTenantGroups.count(name));
-			ASSERT(!entry.assignedCluster.present());
 			expectedTenantGroups.erase(name);
 		}
 
@@ -274,7 +272,7 @@ private:
 	}
 
 	ACTOR static Future<Void> run(MetaclusterConsistencyCheck* self) {
-		state TenantConsistencyCheck<DB, MetaclusterTenantMapEntry> managementTenantConsistencyCheck(
+		state TenantConsistencyCheck<DB, MetaclusterTenantTypes> managementTenantConsistencyCheck(
 		    self->managementDb, &MetaclusterAPI::ManagementClusterMetadata::tenantMetadata());
 
 		wait(managementTenantConsistencyCheck.run() && self->metaclusterData.load() && checkManagementSystemKeys(self));
