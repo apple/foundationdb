@@ -1047,8 +1047,9 @@ static void printBackupUsage(bool devhelp) {
 	       "                 version approximately NUM_DAYS days worth of versions prior to the latest log version in "
 	       "the backup.\n");
 	printf("  --query-restore-snapshot-version VERSION\n"
-	       "                 For query operations, set snapshot version for restoring a backup. Set -1 for maximum\n"
-	       "                 restorable version (default) and -3 for minimum restorable version.\n");
+	       "                 For query operations, set the snapshot version, inclusive, used to restore a backup.\n"
+	       "                 Set -1 to use the latest valid snapshot,\n"
+	       "                 Set -3 to use the oldest valid snapshot.\n");
 	printf("  -qrv --query-restore-version VERSION\n"
 	       "                 For query operations, set target version for restoring a backup. Set -1 for maximum\n"
 	       "                 restorable version (default) and -3 for minimum restorable version.\n");
@@ -2753,6 +2754,8 @@ ACTOR Future<Void> queryBackup(const char* name,
 	try {
 		state Reference<IBackupContainer> bc = openBackupContainer(name, destinationContainer, proxy, {});
 		BackupDescription desc = wait(bc->describeBackup());
+		// Use continuous log end version for the maximum restorable version for the key ranges when a restorable
+		// version doesn't exist.
 		auto [maxRestorableVersion, minRestorableVersion] = getMaxMinRestorableVersions(desc, !keyRangesFilter.empty());
 		if (restoreVersion == invalidVersion) {
 			restoreVersion = maxRestorableVersion;
@@ -2774,8 +2777,11 @@ ACTOR Future<Void> queryBackup(const char* name,
 			return Void();
 		}
 
+		state Optional<RestorableFileSet> fileSet;
 		if (snapshotVersion != invalidVersion) {
-			Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(snapshotVersion, keyRangesFilter));
+			// When a snapshot version is specified, we will first get a restore set using the latest snapshot file to
+			// restore to the snapshot version. After snapshot version, we will only use mutation logs to restore.
+			wait(store(fileSet, bc->getRestoreSet(snapshotVersion, keyRangesFilter)));
 			if (fileSet.present()) {
 				result["snapshot_version"] = fileSet.get().targetVersion;
 				for (const auto& rangeFile : fileSet.get().ranges) {
@@ -2818,16 +2824,14 @@ ACTOR Future<Void> queryBackup(const char* name,
 				           snapshotVersion));
 				return Void();
 			}
+
+			// We only need to know all the mutation logs from `snapshotVersion` to `restoreVersion`.
+			wait(store(fileSet, bc->getRestoreSet(restoreVersion, keyRangesFilter, /*logOnly=*/true, snapshotVersion)));
+		} else {
+			// When a snapshot version is not specified, we use the latest snapshot to restore to the `restoreVersion`.
+			wait(store(fileSet, bc->getRestoreSet(restoreVersion, keyRangesFilter)));
 		}
 
-		state Optional<RestorableFileSet> fileSet;
-		if (snapshotVersion == invalidVersion) {
-			// Using the latest snapshot.
-			wait(store(fileSet, bc->getRestoreSet(restoreVersion, keyRangesFilter)));
-		} else {
-			// We only need to know all the log files from snapshotVersion to restoreVersion.
-			wait(store(fileSet, bc->getRestoreSet(restoreVersion, keyRangesFilter, /*logOnly=*/true, snapshotVersion)));
-		}
 		if (fileSet.present()) {
 			result["restore_version"] = fileSet.get().targetVersion;
 			for (const auto& rangeFile : fileSet.get().ranges) {
