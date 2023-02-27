@@ -2307,9 +2307,11 @@ public:
 					                                                 reply.result.needReplacement,
 					                                                 noNeedReplacement));
 				} else {
-					// TODO : rollback the change or print warning? Or should we disable configure change if wiggler not
-					// enabled
-					TraceEvent(SevWarnAlways, "NeedReplacementInvalidAsWiggleNotEnabled").detail("ServerId", serverId);
+					// TODO : now only warnings, should we consider rollback or disallow change if perpetual wiggle is
+					// not enabled
+					TraceEvent(SevWarnAlways, "NeedReplacementInvalidAsWiggleNotEnabled")
+					    .detail("ServerId", serverId)
+					    .detail("HelpMessage", "Please enable the perpetual wiggle and reboot the cluster");
 				}
 			}
 		}
