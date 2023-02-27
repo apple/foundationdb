@@ -5007,10 +5007,13 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 
 ACTOR Future<Void> getStorageEngineParamsActor(StorageServer* self, GetStorageEngineParamsRequest req) {
 	if (StorageEngineParamsFactory::isSupported(self->storage.getKeyValueStoreType())) {
+		ASSERT(self->storageEngineParams);
 		StorageEngineParamSet params = wait(self->storage.getStorageEngineParams());
 		GetStorageEngineParamsReply _reply(params);
 		req.reply.send(_reply);
 	} else {
+		TraceEvent(SevWarnAlways, "StorageEngineParamNotImplemented")
+		    .detail("StoreType", self->storage.getKeyValueStoreType().toString());
 		req.reply.sendError(not_implemented());
 	}
 	return Void();
@@ -5018,6 +5021,7 @@ ACTOR Future<Void> getStorageEngineParamsActor(StorageServer* self, GetStorageEn
 
 ACTOR Future<Void> setStorageEngineParamsActor(StorageServer* self, SetStorageEngineParamsRequest req) {
 	if (StorageEngineParamsFactory::isSupported(self->storage.getKeyValueStoreType())) {
+		ASSERT(self->storageEngineParams);
 		StorageEngineParamResult res = wait(self->storage.setStorageEngineParams(req.params));
 		SetStorageEngineParamsReply _reply(res);
 		req.reply.send(_reply);
@@ -5030,6 +5034,8 @@ ACTOR Future<Void> setStorageEngineParamsActor(StorageServer* self, SetStorageEn
 			throw please_reboot_kv_store();
 		}
 	} else {
+		TraceEvent(SevWarnAlways, "StorageEngineParamNotImplemented")
+		    .detail("StoreType", self->storage.getKeyValueStoreType().toString());
 		req.reply.sendError(not_implemented());
 	}
 	return Void();

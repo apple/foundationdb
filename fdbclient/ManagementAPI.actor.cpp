@@ -354,6 +354,10 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 	if (storeType.present()) {
 		out[p + "log_engine"] = format("%d", logType.get().storeType());
 		out[p + "storage_engine"] = format("%d", KeyValueStoreType::StoreType(storeType.get()));
+		if (storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
+			// set an empty string which will be overwritten by default values later
+			out[p + "storage_engine_params"] = "";
+		}
 		return out;
 	}
 
