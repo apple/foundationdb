@@ -28,6 +28,7 @@
 #include <vector>
 #include <unordered_set>
 #include <boost/functional/hash.hpp>
+#include <boost/lexical_cast.hpp>
 
 #include "flow/FastRef.h"
 #include "flow/ProtocolVersion.h"
@@ -950,7 +951,7 @@ struct KeyValueStoreType {
 			return KeyValueStoreType::SSD_BTREE_V2;
 		} else if (storeTypeStr == "redwood" || storeTypeStr == "ssd-redwood-1-experimental") {
 			return KeyValueStoreType::SSD_REDWOOD_V1;
-		} else if (storeTypeStr == "memory" || storeTypeStr == "memory-2") {
+		} else if (storeTypeStr == "memory" || storeTypeStr == "memory-1" || storeTypeStr == "memory-2") {
 			return KeyValueStoreType::MEMORY;
 		} else {
 			return KeyValueStoreType::END;
@@ -1599,31 +1600,36 @@ struct StorageMetadataType {
 	// when the SS is initialized, in epoch seconds, comes from currentTime()
 	double createdTime;
 	KeyValueStoreType storeType;
+	bool needReplacement = false;
+	std::set<std::string> paramsNeedTobeReplaced;
 
 	// no need to serialize part (should be assigned after initialization)
 	bool wrongConfigured = false;
-
-	bool needReplacement = false;
 
 	StorageMetadataType() : createdTime(0) {}
 	StorageMetadataType(double t,
 	                    KeyValueStoreType storeType = KeyValueStoreType::END,
 	                    bool wrongConfigured = false,
-	                    bool needReplacement = false)
-	  : createdTime(t), storeType(storeType), wrongConfigured(wrongConfigured), needReplacement(needReplacement) {}
+	                    bool needReplacement = false,
+	                    const std::set<std::string>& params = {})
+	  : createdTime(t), storeType(storeType), wrongConfigured(wrongConfigured), needReplacement(needReplacement),
+	    paramsNeedTobeReplaced(params) {}
 
 	static double currentTime() { return g_network->timer(); }
 
 	bool operator==(const StorageMetadataType& b) const {
 		return createdTime == b.createdTime && storeType == b.storeType && wrongConfigured == b.wrongConfigured &&
-		       needReplacement == b.needReplacement;
+		       needReplacement == b.needReplacement && paramsNeedTobeReplaced.size() == b.paramsNeedTobeReplaced.size();
 	}
 
 	bool operator<(const StorageMetadataType& b) const {
 		if (wrongConfigured == b.wrongConfigured) {
 			if (needReplacement == b.needReplacement)
-				// the older SS has smaller createdTime
-				return createdTime < b.createdTime;
+				if (paramsNeedTobeReplaced.size() == b.paramsNeedTobeReplaced.size())
+					// the older SS has smaller createdTime
+					return createdTime < b.createdTime;
+				else
+					return paramsNeedTobeReplaced.size() > b.paramsNeedTobeReplaced.size();
 			else
 				return needReplacement > b.needReplacement;
 		}
@@ -1636,7 +1642,7 @@ struct StorageMetadataType {
 	// to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, createdTime, storeType, needReplacement);
+		serializer(ar, createdTime, storeType, needReplacement, paramsNeedTobeReplaced);
 	}
 
 	StatusObject toJSON() const {
@@ -1644,6 +1650,13 @@ struct StorageMetadataType {
 		result["created_time_timestamp"] = createdTime;
 		result["created_time_datetime"] = epochsToGMTString(createdTime);
 		result["storage_engine"] = storeType.toString();
+		result["need_replacement"] = needReplacement;
+		if (paramsNeedTobeReplaced.size()) {
+			StatusArray parmsObj;
+			for (const auto& k : paramsNeedTobeReplaced)
+				parmsObj.push_back(k);
+			result["Params_need_to_be_replaced"] = parmsObj;
+		}
 		return result;
 	}
 };
@@ -1745,5 +1758,29 @@ template <class Ar>
 inline void load(Ar& ar, Versionstamp& value) {
 	value.serialize(ar);
 }
+
+struct StorageEngineParamsSet {
+private:
+	std::map<std::string, std::string> params;
+
+public:
+	enum CHANGETYPE { RUNTIME, NEEDREBOOT, NEEDREPLACEMENT };
+
+	StorageEngineParamsSet() {}
+	StorageEngineParamsSet(const std::map<std::string, std::string>& params) : params(params) {}
+	// Set a named parameter to a string value, replacing any existing value
+	void set(const std::string& name, const std::string& value) { params[name] = value; }
+
+	// Set a named parameter to an integer converted to a string value, replacing any existing value
+	template <class valueType>
+	void set(const std::string& name, valueType value) {
+		params[name] = boost::lexical_cast<std::string>(value);
+	}
+
+	template <class valueType>
+	valueType get(const std::string& name, const std::string& defaultValue) const {
+		return boost::lexical_cast<valueType>(params.contains(name) ? params.at(name) : defaultValue);
+	}
+};
 
 #endif

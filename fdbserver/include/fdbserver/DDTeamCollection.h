@@ -518,7 +518,11 @@ protected:
 
 	// Read storage metadata from database, get the server's storeType, and do necessary updates. Error is caught by the
 	// caller
-	Future<Void> updateStorageMetadata(TCServerInfo* server, bool isTss, bool needReplacement = false);
+	Future<Void> updateStorageMetadata(TCServerInfo* server,
+	                                   bool isTss,
+	                                   bool needReplacement = false,
+	                                   std::vector<std::string> needReplacementParams = {},
+	                                   std::vector<std::string> noNeedReplacementParams = {});
 
 	Future<Void> serverGetTeamRequests(TeamCollectionInterface tci);
 

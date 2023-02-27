@@ -163,7 +163,7 @@ void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataTy
 }
 
 bool StorageWiggler::necessary(const UID& serverId, const StorageMetadataType& metadata) const {
-	return metadata.wrongConfigured || metadata.needReplacement ||
+	return metadata.wrongConfigured || metadata.needReplacement || metadata.paramsNeedTobeReplaced.size() ||
 	       (now() - metadata.createdTime > SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC);
 }
 

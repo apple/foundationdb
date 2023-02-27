@@ -2229,6 +2229,7 @@ public:
 					auto paramK = k.removePrefix(storageEngineParamsPrefix).toString();
 					ASSERT(self->configuration.storageEngineParams.present());
 					ASSERT(self->configuration.storageEngineParams.get().contains(paramK));
+					// TODO : compare the real value but not the casted string
 					auto oldV = self->configuration.storageEngineParams.get().at(paramK);
 					if (v.toString() != oldV) {
 						TraceEvent("NewStorageEngineParamsChange")
@@ -2285,12 +2286,24 @@ public:
 				    .detail("Size", reply.result.needReplacement.size());
 				// TODO : update the parameter on DD configuration
 			}
-			if (reply.result.needReplacement.size()) {
+			std::vector<std::string> noNeedReplacement;
+			for (const auto& k : reply.result.unchanged) {
+				if (StorageEngineParamsFactory::getChangeType(self->configuration.storageServerStoreType, k) ==
+				    StorageEngineParamsSet::CHANGETYPE::NEEDREPLACEMENT) {
+					// change back to old value, no need to wiggle now
+					// need to update the wiggle data
+					noNeedReplacement.push_back(k);
+				}
+			}
+			if (reply.result.needReplacement.size() || noNeedReplacement.size()) {
 				if (self->storageWiggler && !self->storageWiggler->isStopped()) {
 					// wiggle the storage
 					TraceEvent("WiggleStorageServerForKVParamUpdate").detail("ServerId", serverId);
-					collection.push_back(
-					    self->updateStorageMetadata(self->server_info[serverId].getPtr(), false, true));
+					collection.push_back(self->updateStorageMetadata(self->server_info[serverId].getPtr(),
+					                                                 false,
+					                                                 true,
+					                                                 reply.result.needReplacement,
+					                                                 noNeedReplacement));
 				} else {
 					TraceEvent(SevWarnAlways, "NeedReplacementInvalidAsWiggleNotEnabled").detail("ServerId", serverId);
 				}
@@ -2988,7 +3001,9 @@ public:
 
 	ACTOR static Future<Void> updateStorageMetadata(DDTeamCollection* self,
 	                                                TCServerInfo* server,
-	                                                bool needReplacement) {
+	                                                bool needReplacement,
+	                                                std::vector<std::string> needReplacementParams,
+	                                                std::vector<std::string> noNeedReplacementParams) {
 		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
 		    serverMetadataKeys.begin, IncludeVersion());
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
@@ -2998,18 +3013,28 @@ public:
 		state StorageMetadataType data(StorageMetadataType::currentTime(),
 		                               server->getStoreType(),
 		                               !server->isCorrectStoreType(self->configuration.storageServerStoreType),
-		                               needReplacement);
+		                               needReplacement,
+		                               std::set(needReplacementParams.begin(), needReplacementParams.end()));
 
 		// read storage metadata
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				auto property = metadataMap.getProperty(server->getId());
-				Optional<StorageMetadataType> metadata = wait(property.get(tr));
+				Optional<StorageMetadataType> metadataOptinal = wait(property.get(tr));
 				// NOTE: in upgrade testing, there may not be any metadata
-				if (metadata.present()) {
-					data.createdTime = metadata.get().createdTime;
-					data.needReplacement = needReplacement || metadata.get().needReplacement;
+				if (metadataOptinal.present()) {
+					auto metadata = metadataOptinal.get();
+					data.createdTime = metadata.createdTime;
+					data.needReplacement = needReplacement || metadata.needReplacement;
+					data.paramsNeedTobeReplaced.insert(metadata.paramsNeedTobeReplaced.begin(),
+					                                   metadata.paramsNeedTobeReplaced.end());
+				}
+				for (const auto& k : noNeedReplacementParams) {
+					TraceEvent("UpdateStorageMetadataRollbackParam")
+					    .detail("Param", k)
+					    .detail("CurrentWiggleParams", describe(data.paramsNeedTobeReplaced));
+					data.paramsNeedTobeReplaced.erase(k);
 				}
 				metadataMap.set(tr, server->getId(), data);
 				wait(tr->commit());
@@ -3746,8 +3771,14 @@ Future<Void> DDTeamCollection::readStorageWiggleMap() {
 	return DDTeamCollectionImpl::readStorageWiggleMap(this);
 }
 
-Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server, bool isTss, bool needReplacement) {
-	return isTss ? Never() : DDTeamCollectionImpl::updateStorageMetadata(this, server, needReplacement);
+Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server,
+                                                     bool isTss,
+                                                     bool needReplacement,
+                                                     std::vector<std::string> needReplacementParams,
+                                                     std::vector<std::string> noNeedReplacementParams) {
+	return isTss ? Never()
+	             : DDTeamCollectionImpl::updateStorageMetadata(
+	                   this, server, needReplacement, needReplacementParams, noNeedReplacementParams);
 }
 
 void DDTeamCollection::resetLocalitySet() {
