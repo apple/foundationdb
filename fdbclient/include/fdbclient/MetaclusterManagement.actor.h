@@ -102,6 +102,7 @@ FDB_DECLARE_BOOLEAN_PARAM(RunOnMismatchedCluster);
 FDB_DECLARE_BOOLEAN_PARAM(RestoreDryRun);
 FDB_DECLARE_BOOLEAN_PARAM(ForceJoin);
 FDB_DECLARE_BOOLEAN_PARAM(ForceRemove);
+FDB_DECLARE_BOOLEAN_PARAM(IgnoreCapacityLimit);
 
 namespace MetaclusterAPI {
 
@@ -530,8 +531,19 @@ Future<Void> managementClusterCheckEmpty(Transaction tr) {
 	return Void();
 }
 
+ACTOR template <class Transaction>
+Future<TenantMode> getClusterConfiguredTenantMode(Transaction tr) {
+	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
+	    tr->get(tenantModeConfKey);
+	Optional<Value> tenantModeValue = wait(safeThreadFutureToFuture(tenantModeFuture));
+	return TenantMode::fromValue(tenantModeValue.castTo<ValueRef>());
+}
+
 ACTOR template <class DB>
-Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName name, int64_t tenantIdPrefix) {
+Future<Optional<std::string>> createMetacluster(Reference<DB> db,
+                                                ClusterName name,
+                                                int64_t tenantIdPrefix,
+                                                bool enableTenantModeCheck) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	state Optional<UID> metaclusterUid;
 	ASSERT(tenantIdPrefix >= TenantAPI::TENANT_ID_PREFIX_MIN_VALUE &&
@@ -545,6 +557,8 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName na
 			    MetaclusterMetadata::metaclusterRegistration().get(tr);
 
 			state Future<Void> metaclusterEmptinessCheck = managementClusterCheckEmpty(tr);
+			state Future<TenantMode> tenantModeFuture =
+			    enableTenantModeCheck ? getClusterConfiguredTenantMode(tr) : Future<TenantMode>(TenantMode::DISABLED);
 
 			Optional<MetaclusterRegistrationEntry> existingRegistration = wait(metaclusterRegistrationFuture);
 			if (existingRegistration.present()) {
@@ -560,6 +574,11 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName na
 			}
 
 			wait(metaclusterEmptinessCheck);
+			TenantMode tenantMode = wait(tenantModeFuture);
+			if (tenantMode != TenantMode::DISABLED) {
+				return fmt::format("cluster is configured with tenant mode `{}' when tenants should be disabled",
+				                   tenantMode);
+			}
 
 			if (!metaclusterUid.present()) {
 				metaclusterUid = deterministicRandom()->randomUniqueID();
@@ -1286,6 +1305,7 @@ void managementClusterAddTenantToGroup(Transaction tr,
                                        MetaclusterTenantMapEntry tenantEntry,
                                        DataClusterMetadata* clusterMetadata,
                                        GroupAlreadyExists groupAlreadyExists,
+                                       IgnoreCapacityLimit ignoreCapacityLimit = IgnoreCapacityLimit::False,
                                        IsRestoring isRestoring = IsRestoring::False) {
 	if (tenantEntry.tenantGroup.present()) {
 		if (tenantEntry.tenantGroup.get().startsWith("\xff"_sr)) {
@@ -1303,7 +1323,7 @@ void managementClusterAddTenantToGroup(Transaction tr,
 	}
 
 	if (!groupAlreadyExists && !isRestoring) {
-		ASSERT(clusterMetadata->entry.hasCapacity());
+		ASSERT(ignoreCapacityLimit || clusterMetadata->entry.hasCapacity());
 
 		DataClusterEntry updatedEntry = clusterMetadata->entry;
 		++updatedEntry.allocated.numTenantGroups;
@@ -2005,6 +2025,7 @@ struct RestoreClusterImpl {
 			                                  managementEntry,
 			                                  &self->ctx.dataClusterMetadata.get(),
 			                                  GroupAlreadyExists(tenantGroupEntry.get().present()),
+			                                  IgnoreCapacityLimit::True,
 			                                  IsRestoring::True);
 		}
 
@@ -2849,14 +2870,17 @@ struct ConfigureTenantImpl {
 	// Initialization parameters
 	TenantName tenantName;
 	std::map<Standalone<StringRef>, Optional<Value>> configurationParameters;
+	IgnoreCapacityLimit ignoreCapacityLimit = IgnoreCapacityLimit::False;
 
 	// Parameters set in updateManagementCluster
 	MetaclusterTenantMapEntry updatedEntry;
 
 	ConfigureTenantImpl(Reference<DB> managementDb,
 	                    TenantName tenantName,
-	                    std::map<Standalone<StringRef>, Optional<Value>> configurationParameters)
-	  : ctx(managementDb), tenantName(tenantName), configurationParameters(configurationParameters) {}
+	                    std::map<Standalone<StringRef>, Optional<Value>> configurationParameters,
+	                    IgnoreCapacityLimit ignoreCapacityLimit)
+	  : ctx(managementDb), tenantName(tenantName), configurationParameters(configurationParameters),
+	    ignoreCapacityLimit(ignoreCapacityLimit) {}
 
 	// This verifies that the tenant group can be changed, and if so it updates all of the tenant group data
 	// structures. It does not update the TenantMapEntry stored in the tenant map.
@@ -2874,13 +2898,16 @@ struct ConfigureTenantImpl {
 
 		// Removing a tenant group is only possible if we have capacity for more groups on the current cluster
 		else if (!desiredGroup.present()) {
-			if (!self->ctx.dataClusterMetadata.get().entry.hasCapacity()) {
+			if (!self->ctx.dataClusterMetadata.get().entry.hasCapacity() && !self->ignoreCapacityLimit) {
 				throw cluster_no_capacity();
 			}
 
 			wait(managementClusterRemoveTenantFromGroup(tr, tenantEntry, &self->ctx.dataClusterMetadata.get()));
-			managementClusterAddTenantToGroup(
-			    tr, entryWithUpdatedGroup, &self->ctx.dataClusterMetadata.get(), GroupAlreadyExists::False);
+			managementClusterAddTenantToGroup(tr,
+			                                  entryWithUpdatedGroup,
+			                                  &self->ctx.dataClusterMetadata.get(),
+			                                  GroupAlreadyExists::False,
+			                                  self->ignoreCapacityLimit);
 			return Void();
 		}
 
@@ -2889,20 +2916,26 @@ struct ConfigureTenantImpl {
 
 		// If we are creating a new tenant group, we need to have capacity on the current cluster
 		if (!tenantGroupEntry.present()) {
-			if (!self->ctx.dataClusterMetadata.get().entry.hasCapacity()) {
+			if (!self->ctx.dataClusterMetadata.get().entry.hasCapacity() && !self->ignoreCapacityLimit) {
 				throw cluster_no_capacity();
 			}
 			wait(managementClusterRemoveTenantFromGroup(tr, tenantEntry, &self->ctx.dataClusterMetadata.get()));
-			managementClusterAddTenantToGroup(
-			    tr, entryWithUpdatedGroup, &self->ctx.dataClusterMetadata.get(), GroupAlreadyExists::False);
+			managementClusterAddTenantToGroup(tr,
+			                                  entryWithUpdatedGroup,
+			                                  &self->ctx.dataClusterMetadata.get(),
+			                                  GroupAlreadyExists::False,
+			                                  self->ignoreCapacityLimit);
 			return Void();
 		}
 
 		// Moves between groups in the same cluster are freely allowed
 		else if (tenantGroupEntry.get().assignedCluster == tenantEntry.assignedCluster) {
 			wait(managementClusterRemoveTenantFromGroup(tr, tenantEntry, &self->ctx.dataClusterMetadata.get()));
-			managementClusterAddTenantToGroup(
-			    tr, entryWithUpdatedGroup, &self->ctx.dataClusterMetadata.get(), GroupAlreadyExists::True);
+			managementClusterAddTenantToGroup(tr,
+			                                  entryWithUpdatedGroup,
+			                                  &self->ctx.dataClusterMetadata.get(),
+			                                  GroupAlreadyExists::True,
+			                                  self->ignoreCapacityLimit);
 			return Void();
 		}
 
@@ -3020,8 +3053,9 @@ struct ConfigureTenantImpl {
 ACTOR template <class DB>
 Future<Void> configureTenant(Reference<DB> db,
                              TenantName name,
-                             std::map<Standalone<StringRef>, Optional<Value>> configurationParameters) {
-	state ConfigureTenantImpl<DB> impl(db, name, configurationParameters);
+                             std::map<Standalone<StringRef>, Optional<Value>> configurationParameters,
+                             IgnoreCapacityLimit ignoreCapacityLimit) {
+	state ConfigureTenantImpl<DB> impl(db, name, configurationParameters, ignoreCapacityLimit);
 	wait(impl.run());
 	return Void();
 }

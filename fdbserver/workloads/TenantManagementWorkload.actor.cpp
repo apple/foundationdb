@@ -237,8 +237,8 @@ struct TenantManagementWorkload : TestWorkload {
 		if (self->useMetacluster) {
 			fmt::print("Create metacluster and register data cluster ... \n");
 			// Configure the metacluster (this changes the tenant mode)
-			wait(success(
-			    MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix)));
+			wait(success(MetaclusterAPI::createMetacluster(
+			    cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix, false)));
 
 			DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;
@@ -1521,7 +1521,8 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(tr->commit());
 			ASSERT(!specialKeysUseInvalidTuple);
 		} else if (operationType == OperationType::METACLUSTER) {
-			wait(MetaclusterAPI::configureTenant(self->mvDb, tenant, configParameters));
+			wait(MetaclusterAPI::configureTenant(
+			    self->mvDb, tenant, configParameters, IgnoreCapacityLimit(deterministicRandom()->coinflip())));
 		} else {
 			// We don't have a transaction or database variant of this function
 			ASSERT(false);

@@ -109,7 +109,8 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 			    cx.getReference(),
 			    "management_cluster"_sr,
 			    deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
-			                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1))));
+			                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1),
+			    false)));
 
 			state int extraDatabaseIdx;
 			for (extraDatabaseIdx = 0; extraDatabaseIdx < g_simulator->extraDatabases.size(); ++extraDatabaseIdx) {
@@ -268,9 +269,10 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 	ACTOR static Future<Void> configureImpl(TenantManagementConcurrencyWorkload* self,
 	                                        TenantName tenant,
-	                                        std::map<Standalone<StringRef>, Optional<Value>> configParams) {
+	                                        std::map<Standalone<StringRef>, Optional<Value>> configParams,
+	                                        IgnoreCapacityLimit ignoreCapacityLimit) {
 		if (self->useMetacluster) {
-			wait(MetaclusterAPI::configureTenant(self->mvDb, tenant, configParams));
+			wait(MetaclusterAPI::configureTenant(self->mvDb, tenant, configParams, ignoreCapacityLimit));
 		} else {
 			state Reference<ReadYourWritesTransaction> tr = self->dataDb->createTransaction();
 			loop {
@@ -298,6 +300,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		state std::map<Standalone<StringRef>, Optional<Value>> configParams;
 		state Optional<TenantGroupName> tenantGroup = self->chooseTenantGroup();
 		state UID debugId = deterministicRandom()->randomUniqueID();
+		state IgnoreCapacityLimit ignoreCapacityLimit = IgnoreCapacityLimit(deterministicRandom()->coinflip());
 
 		configParams["tenant_group"_sr] = tenantGroup;
 
@@ -306,7 +309,8 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 				TraceEvent(SevDebug, "TenantManagementConcurrencyConfiguringTenant", debugId)
 				    .detail("TenantName", tenant)
 				    .detail("TenantGroup", tenantGroup);
-				Optional<Void> result = wait(timeout(configureImpl(self, tenant, configParams), 30));
+				Optional<Void> result =
+				    wait(timeout(configureImpl(self, tenant, configParams, ignoreCapacityLimit), 30));
 
 				if (result.present()) {
 					TraceEvent(SevDebug, "TenantManagementConcurrencyConfiguredTenant", debugId)

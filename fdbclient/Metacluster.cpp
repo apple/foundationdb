@@ -33,6 +33,7 @@ FDB_DEFINE_BOOLEAN_PARAM(RunOnMismatchedCluster);
 FDB_DEFINE_BOOLEAN_PARAM(RestoreDryRun);
 FDB_DEFINE_BOOLEAN_PARAM(ForceJoin);
 FDB_DEFINE_BOOLEAN_PARAM(ForceRemove);
+FDB_DEFINE_BOOLEAN_PARAM(IgnoreCapacityLimit);
 
 namespace MetaclusterAPI {
 
