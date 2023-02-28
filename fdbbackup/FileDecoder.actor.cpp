@@ -38,6 +38,7 @@
 #include "fdbbackup/FileConverter.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IKnobCollection.h"
@@ -166,6 +167,21 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 			}
 		}
 		ASSERT(!match);
+		return false;
+	}
+
+	bool matchFilters(const KeyRange& range) const {
+		bool match = filters.match(range);
+		if (!validate_filters) {
+			return match;
+		}
+
+		for (const auto& prefix : prefixes) {
+			if (range.intersects(prefixRange(StringRef(prefix)))) {
+				ASSERT(match);
+				return true;
+			}
+		}
 		return false;
 	}
 
@@ -814,6 +830,34 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container,
 	return Void();
 }
 
+// Use the snapshot metadata to quickly identify relevant range files and
+// then filter by versions.
+ACTOR Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> bc, Reference<DecodeParams> params) {
+	state std::vector<KeyspaceSnapshotFile> snapshots =
+	    wait((dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))->listKeyspaceSnapshots());
+	state std::vector<RangeFile> files;
+
+	state int i = 0;
+	for (; i < snapshots.size(); i++) {
+		try {
+			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
+			    wait((dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))->readKeyspaceSnapshot(snapshots[i]));
+			for (const auto& rangeFile : results.first) {
+				const auto& keyRange = results.second.at(rangeFile.fileName);
+				if (params->matchFilters(keyRange)) {
+					files.push_back(rangeFile);
+				}
+			}
+		} catch (Error& e) {
+			TraceEvent("ReadKeyspaceSnapshotError").error(e).detail("I", i);
+			if (e.code() != error_code_restore_missing_data) {
+				throw;
+			}
+		}
+	}
+	return getRelevantRangeFiles(files, params);
+}
+
 ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 	state Reference<IBackupContainer> container =
 	    IBackupContainer::openContainer(params->container_url, params->proxy, {});
@@ -843,7 +887,9 @@ ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 	}
 
 	if (params->decode_range) {
-		rangeFiles = getRelevantRangeFiles(listing.ranges, params);
+		// rangeFiles = getRelevantRangeFiles(filteredRangeFiles, params);
+		std::vector<RangeFile> files = wait(getRangeFiles(container, params));
+		rangeFiles = files;
 		printLogFiles("Releavant range files are: ", rangeFiles);
 	}
 

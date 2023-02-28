@@ -3344,18 +3344,12 @@ bool AccumulatedMutations::matchesAnyRange(const RangeMapFilters& filters) const
 
 bool RangeMapFilters::match(const MutationRef& m) const {
 	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
-		auto ranges = rangeMap.intersectingRanges(singleKeyRange(m.param1));
-		for (const auto& r : ranges) {
-			if (r.cvalue() == 1) {
-				return true;
-			}
+		if (match(singleKeyRange(m.param1))) {
+			return true;
 		}
 	} else if (m.type == MutationRef::ClearRange) {
-		auto ranges = rangeMap.intersectingRanges(KeyRangeRef(m.param1, m.param2));
-		for (const auto& r : ranges) {
-			if (r.cvalue() == 1) {
-				return true;
-			}
+		if (match(KeyRangeRef(m.param1, m.param2))) {
+			return true;
 		}
 	} else {
 		ASSERT(false);
@@ -3364,13 +3358,16 @@ bool RangeMapFilters::match(const MutationRef& m) const {
 }
 
 bool RangeMapFilters::match(const KeyValueRef& kv) const {
-	auto ranges = rangeMap.intersectingRanges(singleKeyRange(kv.key));
+	return match(singleKeyRange(kv.key));
+}
+
+bool RangeMapFilters::match(const KeyRangeRef& range) const {
+	auto ranges = rangeMap.intersectingRanges(range);
 	for (const auto& r : ranges) {
 		if (r.cvalue() == 1) {
 			return true;
 		}
 	}
-
 	return false;
 }
 
