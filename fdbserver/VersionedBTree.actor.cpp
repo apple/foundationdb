@@ -8330,6 +8330,8 @@ public:
 			} else if (k == "default_page_size") {
 				params.getInt(k) == m_tree->getPageSize() ? result.unchanged.push_back(k)
 				                                          : result.needReplacement.push_back(k);
+			} else {
+				result.unknown.push_back(k);
 			}
 		}
 		return result;

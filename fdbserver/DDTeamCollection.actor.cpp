@@ -2301,6 +2301,12 @@ public:
 				    .detail("Param", k)
 				    .detail("Value", newParams.getParams().at(k));
 			}
+			for (const auto& k : reply.result.unknown) {
+				TraceEvent(SevWarn, "UnknownStorageEngineParam")
+				    .detail("ServerId", serverId)
+				    .detail("Param", k)
+				    .detail("Value", newParams.getParams().at(k));
+			}
 			std::vector<std::string> noNeedReplacement;
 			if (necessary) {
 				for (const auto& k : reply.result.unchanged) {
