@@ -2217,7 +2217,7 @@ public:
 		// always set the params from database configuration when DD starts
 		// it will handle the case where the watch actor did not respond when DD was rebooted
 		// there is no effect if it's consistent with storage servers
-		wait(self->storageParamsUpdater(self->configuration.storageEngineParams));
+		// wait(self->storageParamsUpdater(self->configuration.storageEngineParams));
 		state SignalableActorCollection collection;
 		state StorageEngineParamSet newParams;
 		loop {
@@ -2279,17 +2279,24 @@ public:
 				    .detail("Error", f.get().getError().code());
 				continue;
 			}
+			if (!self->server_info.contains(serverId)) {
+				TraceEvent(SevWarnAlways, "DDTCSetStorageEngineParamsServerRemoved").detail("ServerId", serverId);
+				continue;
+			}
 			SetStorageEngineParamsReply reply = f.get().get();
 			for (const auto& k : reply.result.applied) {
 				self->configuration.storageEngineParams.set(k, newParams.getParams().at(k));
 			}
 			for (const auto& k : reply.result.needReplacement) {
-				TraceEvent(SevDebug, "StorageEngineParamUpdaterNeedReplacement")
+				TraceEvent(SevInfo, "StorageEngineParamUpdaterNeedReplacement")
 				    .detail("ServerId", serverId)
 				    .detail("Param", k);
 			}
 			std::vector<std::string> noNeedReplacement;
 			for (const auto& k : reply.result.unchanged) {
+				TraceEvent(SevInfo, "StorageEngineParamUpdaterUnchanged")
+				    .detail("ServerId", serverId)
+				    .detail("Param", k);
 				if (StorageEngineParamsFactory::getChangeType(self->configuration.storageServerStoreType, k) ==
 				    StorageEngineParamSet::CHANGETYPE::NEEDREPLACEMENT) {
 					// change back to old value, no need to wiggle now
@@ -2301,11 +2308,14 @@ public:
 				if (self->storageWiggler && !self->storageWiggler->isStopped()) {
 					// wiggle the storage
 					TraceEvent("WiggleStorageServerForKVParamUpdate").detail("ServerId", serverId);
-					collection.push_back(self->updateStorageMetadata(self->server_info[serverId].getPtr(),
-					                                                 false,
-					                                                 true,
-					                                                 reply.result.needReplacement,
-					                                                 noNeedReplacement));
+					collection.push_back(holdWhile(
+					    self->server_info[serverId],
+					    self->updateStorageMetadata(
+					        self->server_info[serverId].getPtr(),
+					        false,
+					        false, // it will use the number of needReplacement params to determine whether to wiggle
+					        reply.result.needReplacement,
+					        noNeedReplacement)));
 				} else {
 					// TODO : now only warnings, should we consider rollback or disallow change if perpetual wiggle is
 					// not enabled
@@ -3712,6 +3722,8 @@ Future<Void> DDTeamCollection::monitorPerpetualStorageWiggle() {
 
 Future<Void> DDTeamCollection::monitorStorageEngineParamsChange() {
 	ASSERT(!db->isMocked());
+	// Storage type change is through storage migration and will reboot DD
+	// Thus, DD will start again with the new type and reevaluate here
 	return StorageEngineParamsFactory::isSupported(configuration.storageServerStoreType)
 	           ? DDTeamCollectionImpl::monitorStorageEngineParamsChange(this)
 	           : Never();

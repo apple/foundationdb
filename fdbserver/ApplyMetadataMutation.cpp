@@ -796,7 +796,8 @@ private:
 		if (!initialCommit)
 			txnStateStore->clear(range & configKeys);
 		if (!excludedServersKeys.contains(range) && !failedServersKeys.contains(range) &&
-		    !excludedLocalityKeys.contains(range) && !failedLocalityKeys.contains(range)) {
+		    !excludedLocalityKeys.contains(range) && !failedLocalityKeys.contains(range) &&
+		    !storageEngineParamsKeys.contains(range)) {
 			TraceEvent("MutationRequiresRestart", dbgid).detail("M", m);
 			confChange = true;
 		}

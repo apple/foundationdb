@@ -133,7 +133,10 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 
 ConfigureAutoResult parseConfig(StatusObject const& status);
 
-bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bool& paramsChange, bool creating);
+bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m,
+                                       bool& paramsChange,
+                                       bool& clearExistingParams,
+                                       bool creating);
 
 bool isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration> oldConfiguration,
                                        std::map<std::string, std::string> newConfig,
@@ -279,7 +282,8 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 		}
 	}
 	state bool storageEngineParamsChange = false;
-	if (!checkForStorageEngineParamsChange(m, storageEngineParamsChange, creating)) {
+	state bool clearExistingStorageParams;
+	if (!checkForStorageEngineParamsChange(m, storageEngineParamsChange, clearExistingStorageParams, creating)) {
 		fmt::print("Error: Invalid configuration for storage engine params\n");
 		return ConfigurationResult::INVALID_CONFIGURATION;
 	}
@@ -532,7 +536,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 			}
 
 			for (auto i = m.begin(); i != m.end(); ++i) {
-				// fmt::print("Set config key:{}; val:{}\n", i->first, i->second);
 				tr->set(StringRef(i->first), StringRef(i->second));
 				if (i->first == perpetualStorageWiggleKey) {
 					if (i->second == "0") {
@@ -555,6 +558,10 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 			if (storageEngineParamsChange) {
 				tr->addReadConflictRange(singleKeyRange(storageEngineParamsVersionKey));
 				tr->set(storageEngineParamsVersionKey, versionKey);
+			}
+
+			if (clearExistingStorageParams) {
+				tr->clear(storageEngineParamsKeys);
 			}
 
 			wait(safeThreadFutureToFuture(tr->commit()));

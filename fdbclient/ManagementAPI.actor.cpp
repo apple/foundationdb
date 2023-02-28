@@ -69,10 +69,11 @@ bool parseStorageEngineParams(KeyValueStoreType::StoreType storeType,
 		for (auto const& [k, pair] : paramsInitMap) {
 			out[storageEngineParamsPrefix.toString() + k] = pair.second;
 		}
-		if (kvPairsStr.empty()) {
-			fmt::print("Debug: Empty param str is given, use the default values\n");
-			return true;
-		}
+	}
+
+	if (kvPairsStr.empty()) {
+		// no params are given, just return
+		return true;
 	}
 
 	std::vector<std::string> kvPairs;
@@ -104,7 +105,10 @@ bool parseStorageEngineParams(KeyValueStoreType::StoreType storeType,
 	return true;
 }
 
-bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bool& paramsChange, bool creating) {
+bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m,
+                                       bool& paramsChange,
+                                       bool& clearExistingParams,
+                                       bool creating) {
 	auto storageEngineParamsKey = configKeysPrefix.toString() + "storage_engine_params";
 	bool storageEngineParamsChange = m.count(storageEngineParamsKey) != 0;
 	if (!storageEngineParamsChange)
@@ -116,6 +120,7 @@ bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bo
 		return false;
 	// erase the raw value string delimitered by ","
 	m.erase(storageEngineParamsKey);
+	clearExistingParams = !StorageEngineParamsFactory::isSupported(storeType);
 	return true;
 }
 
@@ -299,6 +304,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 				out[p + fmt::format("{}_params", key)] = paramsStr;
 			} else {
 				// set an empty string which will be overwritten by default values later
+				// now log_engine_params is not used
 				out[p + fmt::format("{}_params", key)] = "";
 			}
 			out[p + key] = format("%d", KeyValueStoreType::fromStoreTypeStr(storeTypeStr));
@@ -354,10 +360,9 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 	if (storeType.present()) {
 		out[p + "log_engine"] = format("%d", logType.get().storeType());
 		out[p + "storage_engine"] = format("%d", KeyValueStoreType::StoreType(storeType.get()));
-		if (storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
-			// set an empty string which will be overwritten by default values later
-			out[p + "storage_engine_params"] = "";
-		}
+		// if "new", it will be overwritten to default values for supported types
+		// for unsupported storage types, it will clear the storage engine params system keys
+		out[p + "storage_engine_params"] = "";
 		return out;
 	}
 
