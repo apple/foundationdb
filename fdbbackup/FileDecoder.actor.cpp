@@ -773,9 +773,9 @@ ACTOR Future<Void> process_range_file(Reference<IBackupContainer> container,
 			}
 
 			if (print) {
-				TraceEvent(SevVerbose, format("KVPair_%llu", file.version).c_str(), uid)
+				TraceEvent(format("KVPair_%llu", file.version).c_str(), uid)
 				    .detail("Version", file.version)
-				    .setMaxFieldLength(-1)
+				    .setMaxFieldLength(1000)
 				    .detail("Key", kv.key)
 				    .detail("Value", kv.value);
 				std::cout << file.version << " Key = " << printable(kv.key) << "  Value = " << printable(kv.value)
@@ -818,9 +818,9 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container,
 				print = params->matchFilters(m);
 			}
 			if (print) {
-				TraceEvent(SevVerbose, format("Mutation_%llu_%d", vms.version, sub).c_str(), uid)
+				TraceEvent(format("Mutation_%llu_%d", vms.version, sub).c_str(), uid)
 				    .detail("Version", vms.version)
-				    .setMaxFieldLength(-1)
+				    .setMaxFieldLength(1000)
 				    .detail("M", m.toString());
 				std::cout << vms.version << "." << sub << " " << m.toString() << "\n";
 			}
