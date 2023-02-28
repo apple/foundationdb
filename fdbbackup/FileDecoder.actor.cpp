@@ -745,6 +745,16 @@ public:
 	int lfd = -1; // local file descriptor
 };
 
+// convert a StringRef to Hex string
+std::string hexStringRef(const StringRef& s) {
+	std::string result;
+	result.reserve(s.size() * 2);
+	for (int i = 0; i < s.size(); i++) {
+		result.append(format("%02x", s[i]));
+	}
+	return result;
+}
+
 ACTOR Future<Void> process_range_file(Reference<IBackupContainer> container,
                                       RangeFile file,
                                       UID uid,
@@ -770,9 +780,8 @@ ACTOR Future<Void> process_range_file(Reference<IBackupContainer> container,
 				TraceEvent(format("KVPair_%llu", file.version).c_str(), uid)
 				    .detail("Version", file.version)
 				    .setMaxFieldLength(1000)
-				    .detail("Key", kv.key)
-				    .detail("Value", kv.value);
-				std::cout << file.version << " Key = " << printable(kv.key) << "  Value = " << printable(kv.value)
+				    .detail("KV", kv);
+				std::cout << file.version << " key: " << hexStringRef(kv.key) << "  value: " << hexStringRef(kv.value)
 				          << std::endl;
 			}
 		}
@@ -817,7 +826,8 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container,
 				    .detail("Version", vms.version)
 				    .setMaxFieldLength(1000)
 				    .detail("M", m.toString());
-				std::cout << vms.version << "." << sub << " " << m.toString() << "\n";
+				std::cout << vms.version << "." << sub << " " << typeString[(int)m.type]
+				          << " param1: " << hexStringRef(m.param1) << " param2: " << hexStringRef(m.param2) << "\n";
 			}
 		}
 	}
