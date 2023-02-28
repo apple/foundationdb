@@ -514,7 +514,12 @@ using KeySelector = Standalone<struct KeySelectorRef>;
 using RangeResult = Standalone<struct RangeResultRef>;
 using MappedRangeResult = Standalone<struct MappedRangeResultRef>;
 
-enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
+enum {
+	invalidVersion = -1,
+	latestVersion = -2,
+	earliestVersion = -3,
+	MAX_VERSION = std::numeric_limits<int64_t>::max()
+};
 
 inline Key keyAfter(const KeyRef& key) {
 	if (key == LiteralStringRef("\xff\xff"))
