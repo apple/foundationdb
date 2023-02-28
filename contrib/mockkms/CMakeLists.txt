@@ -1,4 +1,4 @@
-if(BUILD_GO_BINDING)
+if(WITH_GO_BINDING)
   set(MOCK_KMS_SRC fault_injection.go get_encryption_keys.go mock_kms.go utils.go)
   set(MOCK_KMS_TEST_SRC ${MOCK_KMS_SRC} mockkms_test.go)
   add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/bin/mockkms

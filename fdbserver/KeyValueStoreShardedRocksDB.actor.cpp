@@ -1352,7 +1352,7 @@ public:
 
 			existingRanges.insert(it.range(), it.value()->physicalShard->id);
 		}
-		return std::move(existingRanges);
+		return existingRanges;
 	}
 
 	void validate() {
