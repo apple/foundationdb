@@ -27,6 +27,8 @@
 #include <openssl/err.h>
 #include <openssl/rand.h>
 
+#include <fmt/format.h>
+
 #include "flow/DeterministicRandom.h"
 #include "flow/Error.h"
 #include "flow/Hostname.h"
@@ -130,7 +132,7 @@ Reference<IRandom> nondeterministicRandom() {
 }
 
 std::string UID::toString() const {
-	return format("%016llx%016llx", part[0], part[1]);
+	return fmt::format("{:016x}{:016x}", part[0], part[1]);
 }
 
 UID UID::fromString(std::string const& s) {
