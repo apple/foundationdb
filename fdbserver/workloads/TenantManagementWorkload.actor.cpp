@@ -53,6 +53,8 @@ struct TenantManagementWorkload : TestWorkload {
 	struct TenantTestData {
 		Reference<Tenant> tenant;
 		Optional<TenantGroupName> tenantGroup;
+		TenantAPI::TenantLockState lockState = TenantAPI::TenantLockState::UNLOCKED;
+		Optional<UID> lockId;
 		bool empty;
 
 		TenantTestData() : empty(true) {}
@@ -672,9 +674,11 @@ struct TenantManagementWorkload : TestWorkload {
 					} else {
 						ASSERT(tenantsToCreate.size() == 1);
 						TraceEvent(SevError, "CreateTenantFailure")
-						    .error(e)
+						    .errorUnsuppressed(e)
 						    .detail("TenantName", tenantsToCreate.begin()->first);
+						ASSERT(false);
 					}
+
 					return Void();
 				}
 
@@ -684,9 +688,11 @@ struct TenantManagementWorkload : TestWorkload {
 						wait(tr->onError(e));
 					} catch (Error& e) {
 						for (auto [tenant, _] : tenantsToCreate) {
-							TraceEvent(SevError, "CreateTenantFailure").error(e).detail("TenantName", tenant);
+							TraceEvent(SevError, "CreateTenantFailure")
+							    .errorUnsuppressed(e)
+							    .detail("TenantName", tenant);
 						}
-						return Void();
+						ASSERT(false);
 					}
 				}
 			}
@@ -722,7 +728,7 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> clearTenantData(TenantManagementWorkload* self, TenantName tenantName) {
+	ACTOR static Future<bool> clearTenantData(TenantManagementWorkload* self, TenantName tenantName) {
 		state Transaction clearTr(self->dataDb, self->createdTenants[tenantName].tenant);
 		loop {
 			try {
@@ -730,9 +736,14 @@ struct TenantManagementWorkload : TestWorkload {
 				wait(clearTr.commit());
 				auto itr = self->createdTenants.find(tenantName);
 				ASSERT(itr != self->createdTenants.end());
+				ASSERT_EQ(itr->second.lockState, TenantAPI::TenantLockState::UNLOCKED);
 				itr->second.empty = true;
-				return Void();
+				return true;
 			} catch (Error& e) {
+				if (e.code() == error_code_tenant_locked) {
+					ASSERT_NE(self->createdTenants[tenantName].lockState, TenantAPI::TenantLockState::UNLOCKED);
+					return false;
+				}
 				wait(clearTr.onError(e));
 			}
 		}
@@ -841,18 +852,20 @@ struct TenantManagementWorkload : TestWorkload {
 			if (alreadyExists || endTenant.present()) {
 				for (tenantItr = tenants.begin(); tenantItr != tenants.end(); ++tenantItr) {
 					// For most tenants, we will delete the contents and make them empty
+					state bool cleared = false;
 					if (deterministicRandom()->random01() < 0.9) {
-						wait(clearTenantData(self, tenantItr->first));
+						wait(store(cleared, clearTenantData(self, tenantItr->first)));
 
 						// watch the tenant to be deleted
-						if (watchTenantCheck) {
+						if (cleared && watchTenantCheck) {
 							watchFutures.emplace_back(
 							    tenantItr->first,
 							    errorOr(watchTenant(self, self->createdTenants[tenantItr->first].tenant)));
 						}
 					}
+
 					// Otherwise, we will just report the current emptiness of the tenant
-					else {
+					if (!cleared) {
 						auto itr = self->createdTenants.find(tenantItr->first);
 						ASSERT(itr != self->createdTenants.end());
 						isEmpty = isEmpty && itr->second.empty;
@@ -861,9 +874,10 @@ struct TenantManagementWorkload : TestWorkload {
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "DeleteTenantFailure")
-			    .error(e)
+			    .errorUnsuppressed(e)
 			    .detail("TenantName", beginTenant)
 			    .detail("EndTenant", endTenant);
+			ASSERT(false);
 			return Void();
 		}
 
@@ -1013,9 +1027,10 @@ struct TenantManagementWorkload : TestWorkload {
 						ASSERT(!existedAtStart && !endTenant.present());
 					} else {
 						TraceEvent(SevError, "DeleteTenantFailure")
-						    .error(e)
+						    .errorUnsuppressed(e)
 						    .detail("TenantName", beginTenant)
 						    .detail("EndTenant", endTenant);
+						ASSERT(false);
 					}
 					return Void();
 				}
@@ -1026,10 +1041,10 @@ struct TenantManagementWorkload : TestWorkload {
 						wait(tr->onError(e));
 					} catch (Error& e) {
 						TraceEvent(SevError, "DeleteTenantFailure")
-						    .error(e)
+						    .errorUnsuppressed(e)
 						    .detail("TenantName", beginTenant)
 						    .detail("EndTenant", endTenant);
-						return Void();
+						ASSERT(false);
 					}
 				}
 			}
@@ -1043,6 +1058,8 @@ struct TenantManagementWorkload : TestWorkload {
 		state Transaction tr(self->dataDb, self->createdTenants[tenantName].tenant);
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
 				// We only every store a single key in each tenant. Therefore we expect a range read of the entire
 				// tenant to return either 0 or 1 keys, depending on whether that key has been set.
 				state RangeResult result = wait(tr.getRange(KeyRangeRef(""_sr, "\xff"_sr), 2));
@@ -1191,8 +1208,8 @@ struct TenantManagementWorkload : TestWorkload {
 				}
 
 				if (!retry) {
-					TraceEvent(SevError, "GetTenantFailure").error(error).detail("TenantName", tenant);
-					return Void();
+					TraceEvent(SevError, "GetTenantFailure").errorUnsuppressed(error).detail("TenantName", tenant);
+					ASSERT(false);
 				}
 			}
 		}
@@ -1294,11 +1311,11 @@ struct TenantManagementWorkload : TestWorkload {
 
 				if (!retry) {
 					TraceEvent(SevError, "ListTenantFailure")
-					    .error(error)
+					    .errorUnsuppressed(error)
 					    .detail("BeginTenant", beginTenant)
 					    .detail("EndTenant", endTenant);
 
-					return Void();
+					ASSERT(false);
 				}
 			}
 		}
@@ -1322,6 +1339,7 @@ struct TenantManagementWorkload : TestWorkload {
 		if (!tData.empty) {
 			loop {
 				try {
+					insertTr.setOption(FDBTransactionOptions::LOCK_AWARE);
 					insertTr.set(self->keyName, newTenantName);
 					wait(insertTr.commit());
 					break;
@@ -1469,9 +1487,9 @@ struct TenantManagementWorkload : TestWorkload {
 						wait(tr->onError(e));
 					} catch (Error& e) {
 						TraceEvent(SevError, "RenameTenantFailure")
-						    .error(e)
+						    .errorUnsuppressed(e)
 						    .detail("TenantRenames", describe(tenantRenames));
-						return Void();
+						ASSERT(false);
 					}
 				}
 			}
@@ -1595,6 +1613,7 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(!hasSystemTenantGroup);
 				ASSERT(!specialKeysUseInvalidTuple);
 				ASSERT(!assignToDifferentCluster);
+				ASSERT_EQ(operationType == OperationType::METACLUSTER, self->useMetacluster);
 				Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
 				if (configurationChanging) {
 					ASSERT_GT(currentVersionstamp.version, originalReadVersion);
@@ -1637,8 +1656,10 @@ struct TenantManagementWorkload : TestWorkload {
 				try {
 					wait(tr->onError(e));
 				} catch (Error&) {
-					TraceEvent(SevError, "ConfigureTenantFailure").error(error).detail("TenantName", tenant);
-					return Void();
+					TraceEvent(SevError, "ConfigureTenantFailure")
+					    .errorUnsuppressed(error)
+					    .detail("TenantName", tenant);
+					ASSERT(false);
 				}
 			}
 		}
@@ -1705,8 +1726,10 @@ struct TenantManagementWorkload : TestWorkload {
 				}
 
 				if (!retry) {
-					TraceEvent(SevError, "GetTenantGroupFailure").error(error).detail("TenantGroupName", tenantGroup);
-					return Void();
+					TraceEvent(SevError, "GetTenantGroupFailure")
+					    .errorUnsuppressed(error)
+					    .detail("TenantGroupName", tenantGroup);
+					ASSERT(false);
 				}
 			}
 		}
@@ -1808,39 +1831,73 @@ struct TenantManagementWorkload : TestWorkload {
 
 				if (!retry) {
 					TraceEvent(SevError, "ListTenantGroupFailure")
-					    .error(error)
+					    .errorUnsuppressed(error)
 					    .detail("BeginTenant", beginTenantGroup)
 					    .detail("EndTenant", endTenantGroup);
-
-					return Void();
+					ASSERT(false);
 				}
 			}
 		}
 	}
 
-	ACTOR static Future<Void> readTenantKey(TenantManagementWorkload* self) {
+	ACTOR static Future<Void> operateOnTenantKey(TenantManagementWorkload* self) {
 		if (self->allTestTenants.size() == 0) {
 			return Void();
 		}
+
 		state Reference<Tenant> tenant = deterministicRandom()->randomChoice(self->allTestTenants);
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb, tenant);
 		state TenantName tName = tenant->name.get();
 		state bool tenantPresent = false;
 		state TenantTestData tData = TenantTestData();
+
+		int mode = deterministicRandom()->randomInt(0, 3);
+		state bool readKey = mode == 0 || mode == 2;
+		state bool writeKey = mode == 1 || mode == 2;
+		state bool clearKey = deterministicRandom()->coinflip();
+		state bool lockAware = deterministicRandom()->coinflip();
+		state TenantAPI::TenantLockState lockState = TenantAPI::TenantLockState::UNLOCKED;
+
 		auto itr = self->createdTenants.find(tName);
 		if (itr != self->createdTenants.end() && itr->second.tenant->id() == tenant->id()) {
 			tenantPresent = true;
 			tData = itr->second;
+			lockState = itr->second.lockState;
 		}
+
 		state bool keyPresent = tenantPresent && !tData.empty;
+		state bool maybeCommitted = false;
+
 		loop {
 			try {
-				Optional<Value> val = wait(tr->get(self->keyName));
-				if (val.present()) {
-					ASSERT(keyPresent && val.get() == tName);
-				} else {
-					ASSERT(tenantPresent && tData.empty);
+				if (lockAware) {
+					tr->setOption(writeKey || deterministicRandom()->coinflip()
+					                  ? FDBTransactionOptions::LOCK_AWARE
+					                  : FDBTransactionOptions::READ_LOCK_AWARE);
 				}
+				if (readKey) {
+					Optional<Value> val = wait(tr->get(self->keyName));
+					if (val.present()) {
+						ASSERT((keyPresent && val.get() == tName) || (maybeCommitted && writeKey && !clearKey));
+					} else {
+						ASSERT((tenantPresent && tData.empty) || (maybeCommitted && writeKey && clearKey));
+					}
+
+					ASSERT(lockAware || lockState != TenantAPI::TenantLockState::LOCKED);
+				}
+				if (writeKey) {
+					if (clearKey) {
+						tr->clear(self->keyName);
+					} else {
+						tr->set(self->keyName, tName);
+					}
+
+					wait(tr->commit());
+
+					ASSERT(lockAware || lockState == TenantAPI::TenantLockState::UNLOCKED);
+					self->createdTenants[tName].empty = clearKey;
+				}
+
 				break;
 			} catch (Error& e) {
 				state Error err = e;
@@ -1848,11 +1905,113 @@ struct TenantManagementWorkload : TestWorkload {
 					ASSERT(!tenantPresent);
 					CODE_PROBE(true, "Attempted to read key from non-existent tenant");
 					return Void();
+				} else if (err.code() == error_code_tenant_locked) {
+					ASSERT(!lockAware);
+					if (!writeKey) {
+						ASSERT_EQ(lockState, TenantAPI::TenantLockState::LOCKED);
+					} else {
+						ASSERT_NE(lockState, TenantAPI::TenantLockState::UNLOCKED);
+					}
+
+					return Void();
 				}
-				wait(tr->onError(err));
+
+				try {
+					maybeCommitted = maybeCommitted || err.code() == error_code_commit_unknown_result;
+					wait(tr->onError(err));
+				} catch (Error& error) {
+					TraceEvent(SevError, "ReadKeyFailure").errorUnsuppressed(error).detail("TenantName", tenant);
+					ASSERT(false);
+				}
 			}
 		}
 		return Void();
+	}
+
+	ACTOR static Future<Void> changeLockStateImpl(Reference<ReadYourWritesTransaction> tr,
+	                                              TenantName tenant,
+	                                              TenantAPI::TenantLockState lockState,
+	                                              UID lockId,
+	                                              OperationType operationType,
+	                                              TenantManagementWorkload* self) {
+		if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			TenantMapEntry entry = wait(TenantAPI::getTenantTransaction(tr, tenant));
+			wait(TenantAPI::changeLockState(tr, entry.id, lockState, lockId));
+			wait(tr->commit());
+		} else if (operationType == OperationType::METACLUSTER) {
+			wait(MetaclusterAPI::changeTenantLockState(self->mvDb, tenant, lockState, lockId));
+		} else {
+			// We don't have a special keys or database variant of this function
+			ASSERT(false);
+		}
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> changeLockState(TenantManagementWorkload* self) {
+		state OperationType operationType =
+		    deterministicRandom()->coinflip() ? OperationType::METACLUSTER : OperationType::MANAGEMENT_TRANSACTION;
+
+		state TenantName tenant = self->chooseTenantName(true);
+		auto itr = self->createdTenants.find(tenant);
+		state bool exists = itr != self->createdTenants.end();
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb);
+
+		state TenantAPI::TenantLockState lockState = TenantAPI::TenantLockState(deterministicRandom()->randomInt(0, 3));
+		state UID lockId = deterministicRandom()->coinflip() || !exists || !itr->second.lockId.present()
+		                       ? deterministicRandom()->randomUniqueID()
+		                       : itr->second.lockId.get();
+
+		state bool lockStateChanging = exists && itr->second.lockState != lockState;
+		state bool legalLockChange =
+		    exists && (itr->second.lockId == lockId || (itr->second.lockState == TenantAPI::TenantLockState::UNLOCKED));
+
+		state Version originalReadVersion = wait(self->getLatestReadVersion(self, operationType));
+		loop {
+			try {
+				wait(changeLockStateImpl(tr, tenant, lockState, lockId, operationType, self));
+
+				ASSERT(exists);
+				ASSERT(legalLockChange);
+				ASSERT_EQ(operationType == OperationType::METACLUSTER, self->useMetacluster);
+
+				auto itr = self->createdTenants.find(tenant);
+				ASSERT(itr != self->createdTenants.end());
+				itr->second.lockState = lockState;
+				if (lockState != TenantAPI::TenantLockState::UNLOCKED) {
+					itr->second.lockId = lockId;
+				}
+
+				Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
+				if (lockStateChanging) {
+					ASSERT_GT(currentVersionstamp.version, originalReadVersion);
+				}
+
+				return Void();
+			} catch (Error& e) {
+				state Error error = e;
+				if (e.code() == error_code_tenant_not_found) {
+					ASSERT(!exists);
+					return Void();
+				} else if (e.code() == error_code_invalid_metacluster_operation) {
+					ASSERT_NE(operationType == OperationType::METACLUSTER, self->useMetacluster);
+					return Void();
+				} else if (e.code() == error_code_tenant_locked) {
+					ASSERT(!legalLockChange);
+					return Void();
+				}
+
+				try {
+					wait(tr->onError(e));
+				} catch (Error&) {
+					TraceEvent(SevError, "ConfigureTenantFailure")
+					    .errorUnsuppressed(error)
+					    .detail("TenantName", tenant);
+					ASSERT(false);
+				}
+			}
+		}
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -1879,7 +2038,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 		// Run a random sequence of tenant management operations for the duration of the test
 		while (now() < start + self->testDuration) {
-			state int operation = deterministicRandom()->randomInt(0, 9);
+			state int operation = deterministicRandom()->randomInt(0, 10);
 			state Future<Void> logger = delayedTrace(operation);
 			if (operation == 0) {
 				wait(createTenant(self));
@@ -1898,7 +2057,9 @@ struct TenantManagementWorkload : TestWorkload {
 			} else if (operation == 7) {
 				wait(listTenantGroups(self));
 			} else if (operation == 8) {
-				wait(readTenantKey(self));
+				wait(operateOnTenantKey(self));
+			} else if (operation == 9) {
+				wait(changeLockState(self));
 			}
 		}
 

@@ -2050,6 +2050,8 @@ int main(int argc, char* argv[]) {
 			} else {
 				TraceEvent(SevInfo, "AuthzPublicKeyFileNotSet");
 			}
+			if (FLOW_KNOBS->ALLOW_TOKENLESS_TENANT_ACCESS)
+				TraceEvent(SevWarnAlways, "AuthzTokenlessAccessEnabled");
 
 			if (expectsPublicAddress) {
 				for (int ii = 0; ii < (opts.publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {

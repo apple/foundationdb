@@ -6699,7 +6699,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 			    e.code() != error_code_batch_transaction_throttled && e.code() != error_code_tag_throttled &&
 			    e.code() != error_code_process_behind && e.code() != error_code_future_version &&
 			    e.code() != error_code_tenant_not_found && e.code() != error_code_illegal_tenant_access &&
-			    e.code() != error_code_proxy_tag_throttled && e.code() != error_code_storage_quota_exceeded) {
+			    e.code() != error_code_proxy_tag_throttled && e.code() != error_code_storage_quota_exceeded &&
+			    e.code() != error_code_tenant_locked) {
 				TraceEvent(SevError, "TryCommitError").error(e);
 			}
 			if (trState->trLogInfo)
