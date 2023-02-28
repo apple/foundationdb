@@ -1391,7 +1391,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 			             : true),
 			    db,
 			    encryptionMode,
-			    !storageEngineParams ? *storageEngineParams : Optional<StorageEngineParamSet>());
+			    storageEngineParams ? *storageEngineParams : Optional<StorageEngineParamSet>());
 			filesClosed->add(store->onClosed());
 		}
 
