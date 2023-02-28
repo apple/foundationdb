@@ -311,6 +311,8 @@ public:
 	int ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION;
 	int ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION;
 
+	bool ENABLE_STORAGE_ENGINE_PARAM_INTERFACE;
+
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
 };

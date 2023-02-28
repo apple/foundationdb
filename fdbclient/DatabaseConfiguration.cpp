@@ -877,6 +877,10 @@ bool DatabaseConfiguration::isOverridden(std::string key) const {
 	return false;
 }
 
+bool StorageEngineParamsFactory::isSupported(KeyValueStoreType::StoreType storeType) {
+	return CLIENT_KNOBS->ENABLE_STORAGE_ENGINE_PARAM_INTERFACE && !factories()[storeType].empty();
+}
+
 TEST_CASE("/fdbclient/databaseConfiguration/overwriteCommitProxy") {
 	DatabaseConfiguration conf1;
 	conf1.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/grv_proxies"_sr, "5"_sr));

@@ -1781,6 +1781,8 @@ struct StorageEngineParamSet {
 
 	void set(const std::string& name, const std::string& value) { params[name] = value; }
 
+	void clear(const std::string& name) { params.erase(name); }
+
 	int get(const std::string& name, int defaultValue) const {
 		return params.contains(name) ? std::stoi(params.at(name)) : defaultValue;
 	}
@@ -1803,6 +1805,10 @@ struct StorageEngineParamSet {
 
 	std::map<std::string, std::string>& getMutableParams() { return params; }
 
+	bool operator==(const StorageEngineParamSet& b) const { return params == b.params; }
+
+	bool operator!=(const StorageEngineParamSet& b) const { return !(*this == b); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, params);
@@ -1810,6 +1816,47 @@ struct StorageEngineParamSet {
 
 private:
 	std::map<std::string, std::string> params;
+};
+
+// used to initialize default parameters' values for different storage engines
+struct StorageEngineParamsFactory {
+
+	static std::map<KeyValueStoreType::StoreType,
+	                std::map<std::string, std::pair<StorageEngineParamSet::CHANGETYPE, std::string>>>&
+	factories() {
+		static std::map<KeyValueStoreType::StoreType,
+		                std::map<std::string, std::pair<StorageEngineParamSet::CHANGETYPE, std::string>>>
+		    theFactories;
+		return theFactories;
+	}
+
+	StorageEngineParamsFactory(
+	    KeyValueStoreType::StoreType storeType,
+	    std::map<std::string, std::pair<StorageEngineParamSet::CHANGETYPE, std::string>> const& vals) {
+		factories()[storeType] = vals;
+	}
+
+	static std::map<std::string, std::pair<StorageEngineParamSet::CHANGETYPE, std::string>>& getParams(
+	    KeyValueStoreType::StoreType storeType) {
+		return factories()[storeType];
+	}
+
+	static std::map<std::string, std::string> getParamsValue(KeyValueStoreType::StoreType storeType) {
+		std::map<std::string, std::string> result;
+		if (factories().contains(storeType)) {
+			auto m = factories().at(storeType);
+			for (const auto& [k, pair] : m)
+				result[k] = pair.second;
+		}
+		return result;
+	}
+
+	static StorageEngineParamSet::CHANGETYPE getChangeType(KeyValueStoreType::StoreType storeType,
+	                                                       const std::string& name) {
+		return factories()[storeType][name].first;
+	}
+
+	static bool isSupported(KeyValueStoreType::StoreType storeType);
 };
 
 #endif

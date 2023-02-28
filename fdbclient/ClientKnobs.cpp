@@ -312,6 +312,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION, 1 );
 	init( ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION, 1 );
 
+	init( ENABLE_STORAGE_ENGINE_PARAM_INTERFACE,    false );
+
 	// clang-format on
 }
 
