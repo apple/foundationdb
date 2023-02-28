@@ -314,7 +314,8 @@ getThrottledTags(Reference<DB> db, int limit, ContainsRecommended containsRecomm
 				continue;
 			}
 			state typename DB::TransactionT::template FutureT<RangeResult> f = tr->getRange(
-			    reportAuto.get() ? tagThrottleKeys : KeyRangeRef(tagThrottleKeysPrefix, tagThrottleAutoKeysPrefix), limit);
+			    reportAuto.get() ? tagThrottleKeys : KeyRangeRef(tagThrottleKeysPrefix, tagThrottleAutoKeysPrefix),
+			    limit);
 			RangeResult throttles = wait(safeThreadFutureToFuture(f));
 			std::vector<TagThrottleInfo> results;
 			for (auto throttle : throttles) {
