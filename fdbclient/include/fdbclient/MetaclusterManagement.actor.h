@@ -2871,6 +2871,8 @@ struct ConfigureTenantImpl {
 	TenantName tenantName;
 	std::map<Standalone<StringRef>, Optional<Value>> configurationParameters;
 	IgnoreCapacityLimit ignoreCapacityLimit = IgnoreCapacityLimit::False;
+	Optional<TenantAPI::TenantLockState> lockState;
+	Optional<UID> lockId;
 
 	// Parameters set in updateManagementCluster
 	MetaclusterTenantMapEntry updatedEntry;
@@ -2881,6 +2883,12 @@ struct ConfigureTenantImpl {
 	                    IgnoreCapacityLimit ignoreCapacityLimit)
 	  : ctx(managementDb), tenantName(tenantName), configurationParameters(configurationParameters),
 	    ignoreCapacityLimit(ignoreCapacityLimit) {}
+
+	ConfigureTenantImpl(Reference<DB> managementDb,
+	                    TenantName tenantName,
+	                    TenantAPI::TenantLockState lockState,
+	                    UID lockId)
+	  : ctx(managementDb), tenantName(tenantName), lockState(lockState), lockId(lockId) {}
 
 	// This verifies that the tenant group can be changed, and if so it updates all of the tenant group data
 	// structures. It does not update the TenantMapEntry stored in the tenant map.
@@ -2971,6 +2979,9 @@ struct ConfigureTenantImpl {
 		self->updatedEntry = tenantEntry.get();
 		self->updatedEntry.tenantState = MetaclusterAPI::TenantState::UPDATING_CONFIGURATION;
 
+		ASSERT_EQ(self->lockState.present(), self->lockId.present());
+		ASSERT_NE(self->lockState.present(), self->configurationParameters.size() > 0);
+
 		state std::map<Standalone<StringRef>, Optional<Value>>::iterator configItr;
 		for (configItr = self->configurationParameters.begin(); configItr != self->configurationParameters.end();
 		     ++configItr) {
@@ -2988,12 +2999,24 @@ struct ConfigureTenantImpl {
 			self->updatedEntry.configure(configItr->first, configItr->second);
 		}
 
+		if (self->lockState.present()) {
+			TenantAPI::checkLockState(tenantEntry.get(), self->lockState.get(), self->lockId.get());
+			self->updatedEntry.tenantLockState = self->lockState.get();
+			if (self->updatedEntry.tenantLockState == TenantAPI::TenantLockState::UNLOCKED) {
+				self->updatedEntry.tenantLockId = {};
+			} else {
+				self->updatedEntry.tenantLockId = self->lockId.get();
+			}
+		}
+
 		if (self->updatedEntry.matchesConfiguration(tenantEntry.get()) &&
 		    tenantEntry.get().tenantState == MetaclusterAPI::TenantState::READY) {
 			return false;
 		}
 
 		++self->updatedEntry.configurationSequenceNum;
+		ASSERT_EQ(self->updatedEntry.tenantLockState != TenantAPI::TenantLockState::UNLOCKED,
+		          self->updatedEntry.tenantLockId.present());
 		ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->updatedEntry.id, self->updatedEntry);
 		ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 
@@ -3056,6 +3079,16 @@ Future<Void> configureTenant(Reference<DB> db,
                              std::map<Standalone<StringRef>, Optional<Value>> configurationParameters,
                              IgnoreCapacityLimit ignoreCapacityLimit) {
 	state ConfigureTenantImpl<DB> impl(db, name, configurationParameters, ignoreCapacityLimit);
+	wait(impl.run());
+	return Void();
+}
+
+ACTOR template <class DB>
+Future<Void> changeTenantLockState(Reference<DB> db,
+                                   TenantName name,
+                                   TenantAPI::TenantLockState lockState,
+                                   UID lockId) {
+	state ConfigureTenantImpl<DB> impl(db, name, lockState, lockId);
 	wait(impl.run());
 	return Void();
 }
