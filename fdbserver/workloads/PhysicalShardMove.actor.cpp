@@ -32,25 +32,7 @@
 #include <cstdint>
 #include <limits>
 
-#include <rocksdb/c.h>
-#include <rocksdb/cache.h>
-#include <rocksdb/db.h>
-#include <rocksdb/filter_policy.h>
-#include <rocksdb/listener.h>
-#include <rocksdb/metadata.h>
-#include <rocksdb/options.h>
-#include <rocksdb/perf_context.h>
-#include <rocksdb/rate_limiter.h>
-#include <rocksdb/slice_transform.h>
-#include <rocksdb/statistics.h>
-#include <rocksdb/table.h>
-#include <rocksdb/utilities/checkpoint.h>
-#include <rocksdb/utilities/table_properties_collectors.h>
-#include <rocksdb/version.h>
-
 #include "flow/actorcompiler.h" // This must be the last #include.
-
-#define PERSIST_PREFIX "\xff\xff"
 
 namespace {
 std::string printValue(const ErrorOr<Optional<Value>>& value) {
@@ -60,12 +42,6 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 	return value.get().present() ? value.get().get().toString() : "Value Not Found.";
 }
 } // namespace
-
-rocksdb::Slice toSlice(StringRef s) {
-	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
-}
-
-static const KeyRangeRef persistByteSampleKeys = KeyRangeRef(PERSIST_PREFIX "BS/"_sr, PERSIST_PREFIX "BS0"_sr);
 
 struct PhysicalShardMoveWorkLoad : TestWorkload {
 	static constexpr auto NAME = "PhysicalShardMove";

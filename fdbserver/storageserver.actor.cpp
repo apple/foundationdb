@@ -9634,7 +9634,6 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 	state Key readBegin;
 	state Key readEnd;
 	state bool anyFileCreated;
-	state int sampleDepth;
 
 	loop {
 		try {
@@ -9663,20 +9662,13 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 				return a.begin < b.begin;
 			});
 
-			sampleDepth = 0;
 			numGetRangeQueries = 0;
 			numSampledKeys = 0;
-			// SS sampled bytes also get sampled
-			// We dump all sampled bytes until we reach the max recursion depth
 			metaDataRangesIter = metaData.ranges.begin();
 			while (metaDataRangesIter != metaData.ranges.end()) {
 				KeyRange range = *metaDataRangesIter;
 				readBegin = range.begin.withPrefix(persistByteSampleKeys.begin);
 				readEnd = range.end.withPrefix(persistByteSampleKeys.begin);
-				for (int i = 0; i < sampleDepth; i++) {
-					readBegin = readBegin.withPrefix(persistByteSampleKeys.begin);
-					readEnd = readEnd.withPrefix(persistByteSampleKeys.begin);
-				}
 				loop {
 					try {
 						RangeResult readResult = wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd),
