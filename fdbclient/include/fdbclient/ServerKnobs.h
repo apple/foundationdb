@@ -385,6 +385,7 @@ public:
 	int64_t ROCKSDB_MAX_BACKGROUND_JOBS;
 	int64_t ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD;
 	double ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY;
+	bool ROCKSDB_EMPTY_RANGE_CHECK;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -409,6 +410,7 @@ public:
 	int START_TRANSACTION_MAX_QUEUE_SIZE;
 	int KEY_LOCATION_MAX_QUEUE_SIZE;
 	int TENANT_ID_REQUEST_MAX_QUEUE_SIZE;
+	int BLOB_GRANULE_LOCATION_MAX_QUEUE_SIZE;
 	double COMMIT_PROXY_LIVENESS_TIMEOUT;
 
 	double COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE;
@@ -445,6 +447,10 @@ public:
 	double REPORT_TRANSACTION_COST_ESTIMATION_DELAY;
 	bool PROXY_REJECT_BATCH_QUEUED_TOO_LONG;
 	bool PROXY_USE_RESOLVER_PRIVATE_MUTATIONS;
+	bool BURSTINESS_METRICS_ENABLED;
+	// Interval on which to emit burstiness metrics on the commit proxy (in
+	// seconds).
+	double BURSTINESS_METRICS_LOG_INTERVAL;
 
 	int RESET_MASTER_BATCHES;
 	int RESET_RESOLVER_BATCHES;
@@ -663,10 +669,13 @@ public:
 	// Global tag throttler forgets about throughput from a tag once no new transactions from that
 	// tag have been received for this duration (in seconds):
 	int64_t GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER;
-	// Maximum duration that a transaction can be tag throttled by proxy before being rejected
-	double PROXY_MAX_TAG_THROTTLE_DURATION;
 	// Interval at which latency bands are logged for each tag on grv proxy
 	double GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL;
+	// When the measured tps for a tag gets too low, the denominator in the
+	// average cost calculation gets small, resulting in an unstable calculation.
+	// To protect against this, we do not compute the average cost when the
+	// measured tps drops below a certain threshold
+	double GLOBAL_TAG_THROTTLING_MIN_TPS;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
@@ -744,7 +753,7 @@ public:
 	int FETCH_BLOCK_BYTES;
 	int FETCH_KEYS_PARALLELISM_BYTES;
 	int FETCH_KEYS_PARALLELISM;
-	int FETCH_KEYS_PARALLELISM_FULL;
+	int FETCH_KEYS_PARALLELISM_CHANGE_FEED;
 	int FETCH_KEYS_LOWER_PRIORITY;
 	int SERVE_FETCH_CHECKPOINT_PARALLELISM;
 	int SERVE_AUDIT_STORAGE_PARALLELISM;
@@ -791,6 +800,8 @@ public:
 	std::string STORAGESERVER_READ_PRIORITIES;
 	int STORAGE_SERVER_READ_CONCURRENCY;
 	std::string STORAGESERVER_READTYPE_PRIORITY_MAP;
+	int SPLIT_METRICS_MAX_ROWS;
+	double STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -921,7 +932,14 @@ public:
 	int REDWOOD_DEFAULT_EXTENT_READ_SIZE; // Extent read size for Redwood files
 	int REDWOOD_EXTENT_CONCURRENT_READS; // Max number of simultaneous extent disk reads in progress.
 	bool REDWOOD_KVSTORE_RANGE_PREFETCH; // Whether to use range read prefetching
-	double REDWOOD_PAGE_REBUILD_MAX_SLACK; // When rebuilding pages, max slack to allow in page
+	double REDWOOD_PAGE_REBUILD_MAX_SLACK; // When rebuilding pages, max slack to allow in page before extending it
+	double REDWOOD_PAGE_REBUILD_SLACK_DISTRIBUTION; // When rebuilding pages, use this ratio of slack distribution
+	                                                // between the rightmost (new) page and the previous page. Defaults
+	                                                // to .5 (50%) so that slack is evenly distributed between the
+	                                                // pages. A value close to 0 indicates most slack to remain in the
+	                                                // old page, where a value close to 1 causes the new page to have
+	                                                // most of the slack. Immutable workloads with an increasing key
+	                                                // pattern benefit from setting this to a value close to 1.
 	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at
 	                                         // once
 	int REDWOOD_LAZY_CLEAR_MIN_PAGES; // Minimum number of pages to free before ending a lazy clear cycle, unless the
@@ -937,7 +955,7 @@ public:
 	double REDWOOD_HISTOGRAM_INTERVAL;
 	bool REDWOOD_EVICT_UPDATED_PAGES; // Whether to prioritize eviction of updated pages from cache.
 	int REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT; // Minimum height for which to keep and reuse page decode caches
-	bool REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT; // Whether to split pages by tenant if encryption is enabled
+	int REDWOOD_NODE_MAX_UNBALANCE; // Maximum imbalance in a node before it should be rebuilt instead of updated
 
 	std::string REDWOOD_IO_PRIORITIES;
 
@@ -950,13 +968,8 @@ public:
 	std::string CLUSTER_RECOVERY_EVENT_NAME_PREFIX;
 
 	// Encryption
-	bool ENABLE_ENCRYPTION;
-	std::string ENCRYPTION_MODE;
 	int SIM_KMS_MAX_KEYS;
 	int ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH;
-	bool ENABLE_TLOG_ENCRYPTION;
-	bool ENABLE_STORAGE_SERVER_ENCRYPTION; // Currently only Redwood engine supports encryption
-	bool ENABLE_BLOB_GRANULE_ENCRYPTION;
 
 	// Compression
 	bool ENABLE_BLOB_GRANULE_COMPRESSION;
@@ -1010,6 +1023,9 @@ public:
 	bool BLOB_WORKER_DO_REJECT_WHEN_FULL;
 	double BLOB_WORKER_REJECT_WHEN_FULL_THRESHOLD;
 	double BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY;
+	bool BLOB_WORKER_DISK_ENABLED;
+	int BLOB_WORKER_STORE_TYPE;
+	double BLOB_WORKER_REJOIN_TIME;
 
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN;
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX;
@@ -1025,6 +1041,9 @@ public:
 	std::string BLOB_RESTORE_MLOGS_URL;
 	int BLOB_MIGRATOR_ERROR_RETRIES;
 	std::string BLOB_RESTORE_MANIFEST_URL;
+	int BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE;
+	int BLOB_RESTORE_MANIFEST_RETENTION_MAX;
+	int BLOB_RESTORE_MLOGS_RETENTION_SECS;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;

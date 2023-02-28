@@ -23,7 +23,6 @@
 #include <type_traits>
 
 #include "fdbclient/FDBOptions.g.h"
-#include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
@@ -259,6 +258,35 @@ ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx,
 				*grv = tr.getReadVersion().get();
 			}
 			return blobWorkers;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<std::vector<std::pair<UID, UID>>> getBlobWorkerAffinity(Database cx,
+                                                                     bool use_system_priority = false,
+                                                                     Version* grv = nullptr) {
+	state Transaction tr(cx);
+	loop {
+		if (use_system_priority) {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		}
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			RangeResult blobWorkerAffinity = wait(tr.getRange(blobWorkerAffinityKeys, CLIENT_KNOBS->TOO_MANY));
+
+			std::vector<std::pair<UID, UID>> affinities;
+			affinities.reserve(blobWorkerAffinity.size());
+			for (int i = 0; i < blobWorkerAffinity.size(); i++) {
+				affinities.push_back(std::make_pair(decodeBlobWorkerAffinityKey(blobWorkerAffinity[i].key),
+				                                    decodeBlobWorkerAffinityValue(blobWorkerAffinity[i].value)));
+			}
+			if (grv) {
+				*grv = tr.getReadVersion().get();
+			}
+			return affinities;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -715,8 +743,8 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
                                         Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                         std::string context) {
 	if (g_network->isSimulated() && g_simulator->usableRegions > 1 && !g_simulator->quiesced) {
-		bool primaryDead = g_simulator->datacenterDead(g_simulator->primaryDcId);
-		bool remoteDead = g_simulator->datacenterDead(g_simulator->remoteDcId);
+		state bool primaryDead = g_simulator->datacenterDead(g_simulator->primaryDcId);
+		state bool remoteDead = g_simulator->datacenterDead(g_simulator->remoteDcId);
 
 		// FIXME: the primary and remote can both be considered dead because excludes are not handled properly by the
 		// datacenterDead function
@@ -725,12 +753,23 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
 			return Void();
 		}
 		if (primaryDead || remoteDead) {
+			if (remoteDead) {
+				std::vector<AddressExclusion> servers =
+				    g_simulator->getAllAddressesInDCToExclude(g_simulator->remoteDcId);
+				TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration")
+				    .detail("Location", context)
+				    .detail("Stage", "ExcludeServers")
+				    .detail("Servers", describe(servers));
+				wait(excludeServers(cx, servers, false));
+			}
+
 			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration")
 			    .detail("Location", context)
 			    .detail("Stage", "Repopulate")
 			    .detail("RemoteDead", remoteDead)
 			    .detail("PrimaryDead", primaryDead);
 			g_simulator->usableRegions = 1;
+
 			wait(success(ManagementAPI::changeConfig(
 			    cx.getReference(),
 			    (primaryDead ? g_simulator->disablePrimary : g_simulator->disableRemote) + " repopulate_anti_quorum=1",

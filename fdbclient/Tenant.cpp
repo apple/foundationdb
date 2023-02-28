@@ -32,9 +32,15 @@
 FDB_DEFINE_BOOLEAN_PARAM(EnforceValidTenantId);
 
 namespace TenantAPI {
-Key idToPrefix(int64_t id) {
+
+KeyRef idToPrefix(Arena& p, int64_t id) {
 	int64_t swapped = bigEndian64(id);
-	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), TenantAPI::PREFIX_SIZE);
+	return StringRef(p, reinterpret_cast<const uint8_t*>(&swapped), TenantAPI::PREFIX_SIZE);
+}
+
+Key idToPrefix(int64_t id) {
+	Arena p(TenantAPI::PREFIX_SIZE);
+	return Key(idToPrefix(p, id), p);
 }
 
 int64_t prefixToId(KeyRef prefix, EnforceValidTenantId enforceValidTenantId) {
@@ -48,47 +54,27 @@ int64_t prefixToId(KeyRef prefix, EnforceValidTenantId enforceValidTenantId) {
 	}
 	return id;
 }
-}; // namespace TenantAPI
 
-std::string TenantMapEntry::tenantStateToString(TenantState tenantState) {
-	switch (tenantState) {
-	case TenantState::REGISTERING:
-		return "registering";
-	case TenantState::READY:
-		return "ready";
-	case TenantState::REMOVING:
-		return "removing";
-	case TenantState::UPDATING_CONFIGURATION:
-		return "updating configuration";
-	case TenantState::RENAMING:
-		return "renaming";
-	case TenantState::ERROR:
-		return "error";
-	default:
-		UNREACHABLE();
+KeyRangeRef clampRangeToTenant(KeyRangeRef range, TenantInfo const& tenantInfo, Arena& arena) {
+	if (tenantInfo.hasTenant()) {
+		return KeyRangeRef(range.begin.startsWith(tenantInfo.prefix.get()) ? range.begin : tenantInfo.prefix.get(),
+		                   range.end.startsWith(tenantInfo.prefix.get())
+		                       ? range.end
+		                       : allKeys.end.withPrefix(tenantInfo.prefix.get(), arena));
+	} else {
+		return range;
 	}
 }
 
-TenantState TenantMapEntry::stringToTenantState(std::string stateStr) {
-	std::transform(stateStr.begin(), stateStr.end(), stateStr.begin(), [](unsigned char c) { return std::tolower(c); });
-	if (stateStr == "registering") {
-		return TenantState::REGISTERING;
-	} else if (stateStr == "ready") {
-		return TenantState::READY;
-	} else if (stateStr == "removing") {
-		return TenantState::REMOVING;
-	} else if (stateStr == "updating configuration") {
-		return TenantState::UPDATING_CONFIGURATION;
-	} else if (stateStr == "renaming") {
-		return TenantState::RENAMING;
-	} else if (stateStr == "error") {
-		return TenantState::ERROR;
+bool withinSingleTenant(KeyRangeRef const& range) {
+	if (range.begin >= "\x80"_sr || range.begin.size() < TenantAPI::PREFIX_SIZE) {
+		return false;
 	}
-
-	throw invalid_option();
+	auto tRange = prefixRange(range.begin.substr(0, TenantAPI::PREFIX_SIZE));
+	return tRange.contains(range);
 }
 
-std::string TenantMapEntry::tenantLockStateToString(TenantLockState tenantState) {
+std::string tenantLockStateToString(TenantLockState tenantState) {
 	switch (tenantState) {
 	case TenantLockState::UNLOCKED:
 		return "unlocked";
@@ -101,7 +87,7 @@ std::string TenantMapEntry::tenantLockStateToString(TenantLockState tenantState)
 	}
 }
 
-TenantLockState TenantMapEntry::stringToTenantLockState(std::string stateStr) {
+TenantLockState stringToTenantLockState(std::string stateStr) {
 	std::transform(stateStr.begin(), stateStr.end(), stateStr.begin(), [](unsigned char c) { return std::tolower(c); });
 	if (stateStr == "unlocked") {
 		return TenantLockState::UNLOCKED;
@@ -113,6 +99,7 @@ TenantLockState TenantMapEntry::stringToTenantLockState(std::string stateStr) {
 
 	UNREACHABLE();
 }
+} // namespace TenantAPI
 
 json_spirit::mObject binaryToJson(StringRef bytes) {
 	json_spirit::mObject obj;
@@ -127,15 +114,11 @@ json_spirit::mObject binaryToJson(StringRef bytes) {
 }
 
 TenantMapEntry::TenantMapEntry() {}
-TenantMapEntry::TenantMapEntry(int64_t id, TenantName tenantName, TenantState tenantState)
-  : tenantName(tenantName), tenantState(tenantState) {
+TenantMapEntry::TenantMapEntry(int64_t id, TenantName tenantName) : tenantName(tenantName) {
 	setId(id);
 }
-TenantMapEntry::TenantMapEntry(int64_t id,
-                               TenantName tenantName,
-                               TenantState tenantState,
-                               Optional<TenantGroupName> tenantGroup)
-  : tenantName(tenantName), tenantState(tenantState), tenantGroup(tenantGroup) {
+TenantMapEntry::TenantMapEntry(int64_t id, TenantName tenantName, Optional<TenantGroupName> tenantGroup)
+  : tenantName(tenantName), tenantGroup(tenantGroup) {
 	setId(id);
 }
 
@@ -151,49 +134,78 @@ std::string TenantMapEntry::toJson() const {
 	tenantEntry["name"] = binaryToJson(tenantName);
 	tenantEntry["prefix"] = binaryToJson(prefix);
 
-	tenantEntry["tenant_state"] = TenantMapEntry::tenantStateToString(tenantState);
-	if (assignedCluster.present()) {
-		tenantEntry["assigned_cluster"] = binaryToJson(assignedCluster.get());
-	}
 	if (tenantGroup.present()) {
 		tenantEntry["tenant_group"] = binaryToJson(tenantGroup.get());
+	}
+
+	tenantEntry["lock_state"] = TenantAPI::tenantLockStateToString(tenantLockState);
+	if (tenantLockId.present()) {
+		tenantEntry["lock_id"] = tenantLockId.get().toString();
 	}
 
 	return json_spirit::write_string(json_spirit::mValue(tenantEntry));
 }
 
 bool TenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const {
-	return tenantGroup == other.tenantGroup;
+	return tenantGroup == other.tenantGroup && tenantLockState == other.tenantLockState &&
+	       tenantLockId == other.tenantLockId;
 }
 
 void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> value) {
 	if (parameter == "tenant_group"_sr) {
 		tenantGroup = value;
-	} else if (parameter == "assigned_cluster"_sr) {
-		assignedCluster = value;
 	} else {
 		TraceEvent(SevWarnAlways, "UnknownTenantConfigurationParameter").detail("Parameter", parameter);
 		throw invalid_tenant_configuration();
 	}
 }
 
+bool TenantMapEntry::operator==(TenantMapEntry const& other) const {
+	return id == other.id && tenantName == other.tenantName && tenantLockState == other.tenantLockState &&
+	       tenantLockId == other.tenantLockId && tenantGroup == other.tenantGroup &&
+	       configurationSequenceNum == other.configurationSequenceNum;
+}
+
+bool TenantMapEntry::operator!=(TenantMapEntry const& other) const {
+	return !(*this == other);
+}
+
 json_spirit::mObject TenantGroupEntry::toJson() const {
 	json_spirit::mObject tenantGroupEntry;
-	if (assignedCluster.present()) {
-		tenantGroupEntry["assigned_cluster"] = binaryToJson(assignedCluster.get());
-	}
-
+	// No fields currently
 	return tenantGroupEntry;
 }
 
-TenantMetadataSpecification& TenantMetadata::instance() {
-	static TenantMetadataSpecification _instance = TenantMetadataSpecification("\xff/"_sr);
+bool TenantGroupEntry::operator==(TenantGroupEntry const& other) const {
+	return true;
+}
+bool TenantGroupEntry::operator!=(TenantGroupEntry const& other) const {
+	return !(*this == other);
+}
+
+bool TenantTombstoneCleanupData::operator==(TenantTombstoneCleanupData const& other) const {
+	return tombstonesErasedThrough == other.tombstonesErasedThrough &&
+	       nextTombstoneEraseVersion == other.nextTombstoneEraseVersion &&
+	       nextTombstoneEraseId == other.nextTombstoneEraseId;
+}
+
+bool TenantTombstoneCleanupData::operator!=(TenantTombstoneCleanupData const& other) const {
+	return !(*this == other);
+}
+
+TenantMetadataSpecification<StandardTenantTypes>& TenantMetadata::instance() {
+	static TenantMetadataSpecification _instance = TenantMetadataSpecification<StandardTenantTypes>("\xff/"_sr);
 	return _instance;
 }
 
 Key TenantMetadata::tenantMapPrivatePrefix() {
 	static Key _prefix = "\xff"_sr.withSuffix(tenantMap().subspace.begin);
 	return _prefix;
+}
+
+KeyBackedProperty<int64_t>& TenantMetadata::tenantIdPrefix() {
+	static KeyBackedProperty<int64_t> instance(TenantMetadata::instance().subspace.withSuffix("idPrefix"_sr));
+	return instance;
 }
 
 TEST_CASE("/fdbclient/libb64/base64decoder") {
@@ -215,12 +227,12 @@ TEST_CASE("/fdbclient/libb64/base64decoder") {
 }
 
 TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
-	TenantMapEntry entry1(1, "name"_sr, TenantState::READY);
+	TenantMapEntry entry1(1, "name"_sr);
 	ASSERT(entry1.prefix == "\x00\x00\x00\x00\x00\x00\x00\x01"_sr);
 	TenantMapEntry entry2 = TenantMapEntry::decode(entry1.encode());
 	ASSERT(entry1.id == entry2.id && entry1.prefix == entry2.prefix);
 
-	TenantMapEntry entry3(std::numeric_limits<int64_t>::max(), "name"_sr, TenantState::READY);
+	TenantMapEntry entry3(std::numeric_limits<int64_t>::max(), "name"_sr);
 	ASSERT(entry3.prefix == "\x7f\xff\xff\xff\xff\xff\xff\xff"_sr);
 	TenantMapEntry entry4 = TenantMapEntry::decode(entry3.encode());
 	ASSERT(entry3.id == entry4.id && entry3.prefix == entry4.prefix);
@@ -231,7 +243,7 @@ TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
 		int64_t maxPlusOne = std::min<uint64_t>(UINT64_C(1) << bits, std::numeric_limits<int64_t>::max());
 		int64_t id = deterministicRandom()->randomInt64(min, maxPlusOne);
 
-		TenantMapEntry entry(id, "name"_sr, TenantState::READY);
+		TenantMapEntry entry(id, "name"_sr);
 		int64_t bigEndianId = bigEndian64(id);
 		ASSERT(entry.id == id && entry.prefix == StringRef(reinterpret_cast<uint8_t*>(&bigEndianId), 8));
 

@@ -21,7 +21,7 @@
 // Unit tests for the FoundationDB C API.
 
 #include "fdb_c_options.g.h"
-#define FDB_API_VERSION 730
+#define FDB_USE_LATEST_API_VERSION
 #include <foundationdb/fdb_c.h>
 #include <assert.h>
 #include <string.h>
@@ -1929,6 +1929,30 @@ TEST_CASE("fdb_transaction_get_committed_version") {
 		int64_t out_version;
 		fdb_check(tr.get_committed_version(&out_version));
 		CHECK(out_version >= 0);
+		break;
+	}
+}
+
+TEST_CASE("fdb_transaction_get_tag_throttled_duration") {
+	fdb::Transaction tr(db);
+	while (1) {
+		fdb::ValueFuture f1 = tr.get("foo", /*snapshot*/ false);
+		fdb_error_t err = wait_future(f1);
+		if (err) {
+			fdb::EmptyFuture fOnError = tr.on_error(err);
+			fdb_check(wait_future(fOnError));
+			continue;
+		}
+		fdb::DoubleFuture f2 = tr.get_tag_throttled_duration();
+		err = wait_future(f2);
+		if (err) {
+			fdb::EmptyFuture fOnError = tr.on_error(err);
+			fdb_check(wait_future(fOnError));
+			continue;
+		}
+		double tagThrottledDuration;
+		fdb_check(f2.get(&tagThrottledDuration));
+		CHECK(tagThrottledDuration >= 0.0);
 		break;
 	}
 }

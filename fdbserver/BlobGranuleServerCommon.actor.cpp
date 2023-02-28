@@ -209,6 +209,7 @@ void GranuleFiles::getFiles(Version beginVersion,
 		                       snapshotF->offset,
 		                       snapshotF->length,
 		                       snapshotF->fullFileLength,
+		                       snapshotF->version,
 		                       summarize ? Optional<BlobGranuleCipherKeysMeta>() : snapshotF->cipherKeysMeta);
 		lastIncluded = chunk.snapshotVersion;
 	} else {
@@ -221,6 +222,7 @@ void GranuleFiles::getFiles(Version beginVersion,
 		                                   deltaF->offset,
 		                                   deltaF->length,
 		                                   deltaF->fullFileLength,
+		                                   deltaF->version,
 		                                   summarize ? Optional<BlobGranuleCipherKeysMeta>() : deltaF->cipherKeysMeta);
 		deltaBytesCounter += deltaF->length;
 		ASSERT(lastIncluded < deltaF->version);
@@ -235,6 +237,7 @@ void GranuleFiles::getFiles(Version beginVersion,
 		                                   deltaF->offset,
 		                                   deltaF->length,
 		                                   deltaF->fullFileLength,
+		                                   deltaF->version,
 		                                   deltaF->cipherKeysMeta);
 		deltaBytesCounter += deltaF->length;
 		lastIncluded = deltaF->version;
@@ -455,6 +458,7 @@ ACTOR Future<Void> loadBlobMetadataForTenants(BGTenantMap* self, std::vector<Blo
 	ASSERT(SERVER_KNOBS->BG_METADATA_SOURCE == "tenant");
 	ASSERT(!tenantsToLoad.empty());
 	state EKPGetLatestBlobMetadataRequest req;
+	state double retrySleep = 0.1;
 	for (const auto tenantId : tenantsToLoad) {
 		req.domainIds.emplace_back(tenantId);
 	}
@@ -462,33 +466,69 @@ ACTOR Future<Void> loadBlobMetadataForTenants(BGTenantMap* self, std::vector<Blo
 	// FIXME: if one tenant gets an error, don't kill whole process
 	state double startTime = now();
 	loop {
-		Future<EKPGetLatestBlobMetadataReply> requestFuture;
-		if (self->dbInfo.isValid() && self->dbInfo->get().encryptKeyProxy.present()) {
-			req.reply.reset();
-			requestFuture =
-			    brokenPromiseToNever(self->dbInfo->get().encryptKeyProxy.get().getLatestBlobMetadata.getReply(req));
-		} else {
-			requestFuture = Never();
-		}
-		choose {
-			when(EKPGetLatestBlobMetadataReply rep = wait(requestFuture)) {
-				ASSERT(rep.blobMetadataDetails.size() == req.domainIds.size());
-				// not guaranteed to be in same order in the request as the response
-				for (auto& metadata : rep.blobMetadataDetails) {
-					auto info = self->tenantInfoById.find(metadata.domainId);
-					if (info == self->tenantInfoById.end()) {
-						continue;
-					}
-					auto dataEntry = self->tenantData.rangeContaining(info->second.prefix);
-					ASSERT(dataEntry.begin() == info->second.prefix);
-					dataEntry.cvalue()->updateBStore(metadata);
-				}
-				double elapsed = now() - startTime;
-				BlobCipherMetrics::getInstance()->getBlobMetadataLatency.addMeasurement(elapsed);
-				return Void();
+		try {
+			Future<EKPGetLatestBlobMetadataReply> requestFuture;
+			if (self->dbInfo.isValid() && self->dbInfo->get().encryptKeyProxy.present()) {
+				req.reply.reset();
+				requestFuture =
+				    brokenPromiseToNever(self->dbInfo->get().encryptKeyProxy.get().getLatestBlobMetadata.getReply(req));
+			} else {
+				requestFuture = Never();
 			}
-			when(wait(self->dbInfo->onChange())) {}
+			choose {
+				when(EKPGetLatestBlobMetadataReply rep = wait(requestFuture)) {
+					ASSERT(rep.blobMetadataDetails.size() <= req.domainIds.size());
+					// not guaranteed to be in same order in the request as the response
+					for (auto& metadata : rep.blobMetadataDetails) {
+						auto info = self->tenantInfoById.find(metadata.domainId);
+						if (info == self->tenantInfoById.end()) {
+							continue;
+						}
+						auto dataEntry = self->tenantData.rangeContaining(info->second.prefix);
+						ASSERT(dataEntry.begin() == info->second.prefix);
+						dataEntry.cvalue()->updateBStore(metadata);
+					}
+					double elapsed = now() - startTime;
+					BlobCipherMetrics::getInstance()->getBlobMetadataLatency.addMeasurement(elapsed);
+
+					if (rep.blobMetadataDetails.size() == req.domainIds.size()) {
+						return Void();
+					}
+
+					// if not all tenants included in response, or on error, retry with missing ones
+					std::unordered_set<BlobMetadataDomainId> missingIds;
+					for (auto& id : req.domainIds) {
+						missingIds.insert(id);
+					}
+					for (auto& metadata : rep.blobMetadataDetails) {
+						missingIds.erase(metadata.domainId);
+					}
+					ASSERT(missingIds.size() > 0);
+
+					TraceEvent(SevWarn, "BlobMetadataFetchMissingTenants")
+					    .suppressFor(30.0)
+					    .detail("Count", missingIds.size());
+					CODE_PROBE(true, "blob metadata fetch missing tenants");
+
+					req.domainIds.clear();
+					for (auto& id : missingIds) {
+						req.domainIds.push_back(id);
+					}
+				}
+				when(wait(self->dbInfo->onChange())) {
+					// reset retry sleep
+					retrySleep = 0.1;
+				}
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) {
+				throw e;
+			}
+			CODE_PROBE(true, "blob metadata fetch error");
+			TraceEvent(SevWarn, "BlobMetadataFetchError").errorUnsuppressed(e).suppressFor(30.0);
 		}
+		wait(delay(retrySleep));
+		retrySleep = std::min(10.0, retrySleep * 1.5);
 	}
 }
 

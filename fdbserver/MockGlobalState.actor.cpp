@@ -33,6 +33,7 @@ public:
 	                                                                                 int shardLimit,
 	                                                                                 int expectedShardCount) {
 		state TenantInfo tenantInfo;
+		state Version version = 0;
 		loop {
 			auto locations = mgs->getKeyRangeLocations(tenantInfo,
 			                                           keys,
@@ -41,7 +42,7 @@ public:
 			                                           SpanContext(),
 			                                           Optional<UID>(),
 			                                           UseProvisionalProxies::False,
-			                                           0)
+			                                           version)
 			                     .get();
 			TraceEvent(SevDebug, "MGSWaitStorageMetrics").detail("Phase", "GetLocation");
 			// NOTE(xwang): in native API, there's code handling the non-equal situation, but I think in mock world
@@ -49,7 +50,7 @@ public:
 			ASSERT_EQ(expectedShardCount, locations.size());
 
 			Optional<StorageMetrics> res =
-			    wait(::waitStorageMetricsWithLocation(tenantInfo, keys, locations, min, max, permittedError));
+			    wait(::waitStorageMetricsWithLocation(tenantInfo, version, keys, locations, min, max, permittedError));
 
 			if (res.present()) {
 				return std::make_pair(res, -1);

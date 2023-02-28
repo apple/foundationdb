@@ -32,6 +32,7 @@
 #include "flow/Histogram.h"
 #include "flow/ChaosMetrics.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/WipedString.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "flow/IAsyncFile.h"
@@ -130,6 +131,7 @@ public:
 	                              KillType kt,
 	                              KillType* newKillType) const = 0;
 	virtual bool isAvailable() const = 0;
+	virtual std::vector<AddressExclusion> getAllAddressesInDCToExclude(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
 	ProtocolVersion protocolVersion() const override = 0;
@@ -266,6 +268,7 @@ public:
 
 	virtual void clogInterface(const IPAddress& ip, double seconds, ClogMode mode = ClogDefault) = 0;
 	virtual void clogPair(const IPAddress& from, const IPAddress& to, double seconds) = 0;
+	virtual void unclogPair(const IPAddress& from, const IPAddress& to) = 0;
 	virtual std::vector<ProcessInfo*> getAllProcesses() const = 0;
 	virtual ProcessInfo* getProcessByAddress(NetworkAddress const& address) = 0;
 	virtual MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) = 0;
@@ -338,6 +341,11 @@ public:
 
 	std::set<std::pair<std::string, unsigned>> corruptedBlocks;
 
+	// Valdiate at-rest encryption guarantees. If enabled, tests should inject a known 'marker' in Key and/or Values
+	// inserted into FDB by the workload. On shutdown, all test generated files (under simfdb/) are scanned to find if
+	// 'plaintext marker' is present.
+	Optional<std::string> dataAtRestPlaintextMarker;
+
 	flowGlobalType global(int id) const final;
 	void setGlobal(size_t id, flowGlobalType v) final;
 
@@ -346,7 +354,7 @@ public:
 	double checkDisabled(const std::string& desc) const;
 
 	// generate authz token for use in simulation environment
-	Standalone<StringRef> makeToken(StringRef tenantName, uint64_t ttlSecondsFromNow);
+	WipedString makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow);
 
 	static thread_local ProcessInfo* currentProcess;
 

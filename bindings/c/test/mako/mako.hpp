@@ -22,7 +22,7 @@
 #define MAKO_HPP
 
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 730
+#define FDB_USE_LATEST_API_VERSION
 #endif
 
 #include <array>
@@ -31,6 +31,7 @@
 #include <chrono>
 #include <list>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -143,10 +144,13 @@ constexpr const int MAX_REPORT_FILES = 200;
 struct Arguments {
 	Arguments();
 	int validate();
+	void collectTenantIds();
 	bool isAuthorizationEnabled() const noexcept;
+	std::optional<std::vector<fdb::Tenant>> prepareTenants(fdb::Database db) const;
 	void generateAuthorizationTokens();
 
-	// Needs to be called once per fdb-accessing process
+	// Needs to be called once per fdb client process from a clean state:
+	// i.e. no FDB API called
 	int setGlobalOptions() const;
 	bool isAnyTimeoutEnabled() const;
 
@@ -206,6 +210,7 @@ struct Arguments {
 	std::optional<std::string> keypair_id;
 	std::optional<std::string> private_key_pem;
 	std::map<std::string, std::string> authorization_tokens; // maps tenant name to token string
+	std::vector<int64_t> tenant_ids; // maps tenant index to tenant id for signing tokens
 	int transaction_timeout_db;
 	int transaction_timeout_tx;
 };

@@ -270,7 +270,13 @@ function(stage_correctness_package)
     list(APPEND package_files "${out_file}")
   endforeach()
 
-  list(APPEND package_files ${test_files} ${external_files})
+  add_custom_command(
+    OUTPUT "${STAGE_OUT_DIR}/joshua_logtool.py"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/contrib/joshua_logtool.py" "${STAGE_OUT_DIR}/joshua_logtool.py"
+    DEPENDS "${CMAKE_SOURCE_DIR}/contrib/joshua_logtool.py"
+  )
+
+  list(APPEND package_files ${test_files} ${external_files} "${STAGE_OUT_DIR}/joshua_logtool.py")
   if(STAGE_OUT_FILES)
     set(${STAGE_OUT_FILES} ${package_files} PARENT_SCOPE)
   endif()
@@ -387,7 +393,7 @@ function(prepare_binding_test_files build_directory target_name target_dependenc
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_flow_tester> ${build_directory}/tests/flow/bin/fdb_flow_tester
     COMMENT "Copy Flow tester for bindingtester")
 
-  set(generated_binding_files python/fdb/fdboptions.py)
+  set(generated_binding_files python/fdb/fdboptions.py python/fdb/apiversion.py)
   if(WITH_JAVA_BINDING)
     if(NOT FDB_RELEASE)
       set(not_fdb_release_string "-SNAPSHOT")
@@ -563,6 +569,7 @@ string(APPEND test_venv_cmd "${Python3_EXECUTABLE} -m venv ${test_venv_dir} ")
 string(APPEND test_venv_cmd "&& ${test_venv_activate} ")
 string(APPEND test_venv_cmd "&& pip install --upgrade pip ")
 string(APPEND test_venv_cmd "&& pip install -r ${CMAKE_SOURCE_DIR}/tests/TestRunner/requirements.txt")
+string(APPEND test_venv_cmd "&& (cd ${CMAKE_BINARY_DIR}/bindings/python && python3 setup.py install) ")
 add_test(
   NAME test_venv_setup
   COMMAND bash -c ${test_venv_cmd}
@@ -602,6 +609,12 @@ function(add_python_venv_test)
     COMMAND ${shell_cmd} ${shell_opt} "${test_venv_activate} && ${T_COMMAND}")
   set_tests_properties(${T_NAME} PROPERTIES FIXTURES_REQUIRED test_virtual_env_setup TIMEOUT ${T_TEST_TIMEOUT})
   set(test_env_vars "PYTHONPATH=${CMAKE_SOURCE_DIR}/tests/TestRunner:${CMAKE_BINARY_DIR}/tests/TestRunner")
+  if(APPLE)
+    set(ld_env_name "DYLD_LIBRARY_PATH")
+  else()
+    set(ld_env_name "LD_LIBRARY_PATH")
+  endif()
+  set(test_env_vars PROPERTIES ENVIRONMENT "${test_env_vars};${ld_env_name}=${CMAKE_BINARY_DIR}/lib:$ENV{${ld_env_name}}")
   if(USE_SANITIZER)
     set(test_env_vars "${test_env_vars};${SANITIZER_OPTIONS}")
   endif()

@@ -1,29 +1,57 @@
 #!/usr/bin/env python3
 import argparse
+import functools
+import logging
 import os
+import random
 import subprocess
-
 from argparse import RawDescriptionHelpFormatter
 
 
-def run_command(*args):
-    commands = ["{}".format(args)]
-    print(commands)
-    try:
-        process = subprocess.run(commands, stdout=subprocess.PIPE, env=fdbcli_env, timeout=20)
-        return process.stdout.decode('utf-8').strip()
-    except subprocess.TimeoutExpired:
-        raise Exception('the command is stuck')
+# TODO: deduplicate with fdbcli_tests.py
+def enable_logging(level=logging.DEBUG):
+    """Enable logging in the function with the specified logging level
+
+    Args:
+        level (logging.<level>, optional): logging level for the decorated function. Defaults to logging.ERROR.
+    """
+
+    def func_decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # initialize logger
+            logger = logging.getLogger(func.__name__)
+            logger.setLevel(level)
+            # set logging format
+            handler = logging.StreamHandler()
+            handler_format = logging.Formatter(
+                '[%(asctime)s] - %(filename)s:%(lineno)d - %(levelname)s - %(name)s - %(message)s')
+            handler.setFormatter(handler_format)
+            handler.setLevel(level)
+            logger.addHandler(handler)
+            # pass the logger to the decorated function
+            result = func(logger, *args, **kwargs)
+            return result
+
+        return wrapper
+
+    return func_decorator
 
 
 def run_fdbcli_command(cluster_file, *args):
+    """run the fdbcli statement: fdbcli --exec '<arg1> <arg2> ... <argN>'.
+
+    Returns:
+        string: Stderr output from fdbcli
+    """
     command_template = [fdbcli_bin, '-C', "{}".format(cluster_file), '--exec']
     commands = command_template + ["{}".format(' '.join(args))]
-    print(commands)
     try:
-        # if the fdbcli command is stuck for more than 20 seconds, the database is definitely unavailable
-        process = subprocess.run(commands, stdout=subprocess.PIPE, env=fdbcli_env, timeout=20)
-        return process.stdout.decode('utf-8').strip()
+        process = subprocess.run(commands, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env, timeout=20)
+        rc = process.returncode
+        out = process.stdout.decode('utf-8').strip()
+        err = process.stderr.decode('utf-8').strip()
+        return rc, out, err
     except subprocess.TimeoutExpired:
         raise Exception('The fdbcli command is stuck, database is unavailable')
 
@@ -34,18 +62,137 @@ def get_cluster_connection_str(cluster_file_path):
         return conn_str
 
 
-def metacluster_create(cluster_file, name):
-    return run_fdbcli_command(cluster_file, "metacluster create_experimental", name)
+@enable_logging()
+def metacluster_create(logger, cluster_file, name, tenant_id_prefix):
+    # creating a metacluster with optional tenant mode should fail
+    rc, out, err = run_fdbcli_command(cluster_file, "configure tenant_mode=optional_experimental")
+    if rc != 0:
+        raise Exception(err)
+    rc, out, err = run_fdbcli_command(cluster_file, "metacluster create_experimental", name, str(tenant_id_prefix))
+    if "ERROR" not in out:
+        raise Exception("Metacluster creation should have failed")
+    # set the tenant mode to disabled for the metacluster otherwise creation will fail
+    rc, out, err = run_fdbcli_command(cluster_file, "configure tenant_mode=disabled")
+    logger.debug('Metacluster tenant mode set to disabled')
+    if rc != 0:
+        raise Exception(err)
+    rc, out, err = run_fdbcli_command(cluster_file, "metacluster create_experimental", name, str(tenant_id_prefix))
+    if rc != 0:
+        raise Exception(err)
+    logger.debug(out)
+    logger.debug('Metacluster {} created'.format(name))
 
 
-def metacluster_register(management_cluster_file, data_cluster_file, name):
+def metacluster_register(management_cluster_file, data_cluster_file, name, max_tenant_groups):
     conn_str = get_cluster_connection_str(data_cluster_file)
-    return run_fdbcli_command(management_cluster_file, "metacluster register", name, "connection_string={}".format(
-        conn_str))
+    rc, out, err = run_fdbcli_command(management_cluster_file,
+                       "metacluster register",
+                       name,
+                       "connection_string={}".format(conn_str),
+                       'max_tenant_groups={}'.format(max_tenant_groups))
+    if rc != 0:
+        raise Exception(err)
+
+
+@enable_logging()
+def setup_metacluster(logger, management_cluster, data_clusters, max_tenant_groups_per_cluster):
+    management_cluster_file = management_cluster[0]
+    management_cluster_name = management_cluster[1]
+    tenant_id_prefix = random.randint(0, 32767)
+    logger.debug('management cluster: {}'.format(management_cluster_name))
+    logger.debug('data clusters: {}'.format([name for (cf, name) in data_clusters]))
+    metacluster_create(management_cluster_file, management_cluster_name, tenant_id_prefix)
+    for (cf, name) in data_clusters:
+        metacluster_register(management_cluster_file, cf, name, max_tenant_groups=max_tenant_groups_per_cluster)
 
 
 def metacluster_status(cluster_file):
-    return run_fdbcli_command(cluster_file, "metacluster status")
+    _, out, _ = run_fdbcli_command(cluster_file, "metacluster status")
+    return out
+
+
+def setup_tenants(management_cluster_file, data_cluster_files, tenants):
+    for tenant in tenants:
+        _, output, _ = run_fdbcli_command(management_cluster_file, 'tenant create', tenant)
+        expected_output = 'The tenant `{}\' has been created'.format(tenant)
+        assert output == expected_output
+
+
+def configure_tenant(management_cluster_file, data_cluster_files, tenant, tenant_group=None, assigned_cluster=None):
+    command = 'tenant configure {}'.format(tenant)
+    if tenant_group:
+        command = command + ' tenant_group={}'.format(tenant_group)
+    if assigned_cluster:
+        command = command + ' assigned_cluster={}'.format(assigned_cluster)
+
+    _, output, err = run_fdbcli_command(management_cluster_file, command)
+    return output, err
+
+
+def clear_database_and_tenants(management_cluster_file, data_cluster_files):
+    subcmd1 = 'writemode on'
+    subcmd2 = 'option on SPECIAL_KEY_SPACE_ENABLE_WRITES'
+    subcmd3 = 'clearrange ' '"" \\xff'
+    subcmd4 = 'clearrange \\xff\\xff/management/tenant/map/ \\xff\\xff/management/tenant/map0'
+    run_fdbcli_command(management_cluster_file, subcmd1, subcmd2, subcmd3, subcmd4)
+
+
+@enable_logging()
+def clusters_status_test(logger, cluster_files, max_tenant_groups_per_cluster):
+    logger.debug('Verifying no cluster is part of a metacluster')
+    for cf in cluster_files:
+        output = metacluster_status(cf)
+        assert output == "This cluster is not part of a metacluster"
+
+    logger.debug('Verified')
+    num_clusters = len(cluster_files)
+    names = ['meta_mgmt']
+    names.extend(['data{}'.format(i) for i in range(1, num_clusters)])
+    logger.debug('Setting up a metacluster')
+    setup_metacluster([cluster_files[0], names[0]], list(zip(cluster_files[1:], names[1:])),
+                      max_tenant_groups_per_cluster=max_tenant_groups_per_cluster)
+
+    expected = """
+number of data clusters: {}
+  tenant group capacity: {}
+  allocated tenant groups: 0
+"""
+    expected = expected.format(num_clusters - 1, (num_clusters - 1) * max_tenant_groups_per_cluster).strip()
+    output = metacluster_status(cluster_files[0])
+    assert expected == output
+
+    logger.debug('Metacluster setup correctly')
+
+    for (cf, name) in zip(cluster_files[1:], names[1:]):
+        output = metacluster_status(cf)
+        expected = "This cluster \"{}\" is a data cluster within the metacluster named \"{}\"".format(name, names[0])
+        assert expected == output
+
+
+@enable_logging()
+def configure_tenants_test_disableClusterAssignment(logger, cluster_files):
+    tenants = ['tenant1', 'tenant2']
+    logger.debug('Tenants to create: {}'.format(tenants))
+    setup_tenants(cluster_files[0], cluster_files[1:], tenants)
+    # Once we reach here, the tenants have been created successfully
+    logger.debug('Tenants created: {}'.format(tenants))
+    for tenant in tenants:
+        out, err = configure_tenant(cluster_files[0], cluster_files[1:], tenant, assigned_cluster='cluster')
+        assert err == 'ERROR: Tenant configuration is invalid (2140)'
+    logger.debug('Tenants configured')
+    clear_database_and_tenants(cluster_files[0], cluster_files[1:])
+    logger.debug('Tenants cleared')
+
+
+@enable_logging()
+def test_main(logger):
+    logger.debug('Tests start')
+    # This must be the first test to run, since it sets up the metacluster that
+    # will be used throughout the test
+    clusters_status_test(cluster_files, max_tenant_groups_per_cluster=5)
+
+    configure_tenants_test_disableClusterAssignment(cluster_files)
+    logger.debug('Tests complete')
 
 
 if __name__ == "__main__":
@@ -63,33 +210,8 @@ if __name__ == "__main__":
     # keep current environment variables
     fdbcli_env = os.environ.copy()
     cluster_files = fdbcli_env.get("FDB_CLUSTERS").split(';')
-    num_clusters = len(cluster_files)
     assert len(cluster_files) > 1
 
     fdbcli_bin = args.build_dir + '/bin/fdbcli'
 
-    for cf in cluster_files:
-        output = metacluster_status(cf)
-        assert output == "This cluster is not part of a metacluster"
-
-    names = ['meta_mgmt']
-    names.extend(['data{}'.format(i) for i in range(1, num_clusters)])
-
-    metacluster_create(cluster_files[0], names[0])
-    for (cf, name) in zip(cluster_files[1:], names[1:]):
-        output = metacluster_register(cluster_files[0], cf, name)
-
-    expected = """
-number of data clusters: {}
-  tenant group capacity: 0
-  allocated tenant groups: 0
-"""
-    expected = expected.format(num_clusters - 1).strip()
-    output = metacluster_status(cluster_files[0])
-    assert expected == output
-
-    for (cf, name) in zip(cluster_files[1:], names[1:]):
-        output = metacluster_status(cf)
-        expected = "This cluster \"{}\" is a data cluster within the metacluster named \"{" \
-                   "}\"".format(name, names[0])
-        assert expected == output
+    test_main()

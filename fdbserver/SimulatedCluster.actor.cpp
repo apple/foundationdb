@@ -332,9 +332,6 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "disableRemoteKVS") {
 				disableRemoteKVS = strcmp(value.c_str(), "true") == 0;
 			}
-			if (attrib == "disableEncryption") {
-				disableEncryption = strcmp(value.c_str(), "true") == 0;
-			}
 			if (attrib == "encryptModes") {
 				std::stringstream ss(value);
 				std::string token;
@@ -398,6 +395,7 @@ public:
 	ISimulator::ExtraDatabaseMode extraDatabaseMode = ISimulator::ExtraDatabaseMode::Disabled;
 	// The number of extra database used if the database mode is MULTIPLE
 	int extraDatabaseCount = 1;
+	bool extraDatabaseBackupAgents = false;
 	int minimumReplication = 0;
 	int minimumRegions = 0;
 	bool configureLocked = false;
@@ -409,9 +407,6 @@ public:
 	bool disableHostname = false;
 	// remote key value store is a child process spawned by the SS process to run the storage engine
 	bool disableRemoteKVS = false;
-	// 7.2 cannot be downgraded to 7.1 or below after enabling encryption-at-rest.
-	// TODO: Remove this bool once the encryption knobs are removed
-	bool disableEncryption = false;
 	// By default, encryption mode is set randomly (based on the tenant mode)
 	// If provided, set using EncryptionAtRestMode::fromString
 	std::vector<std::string> encryptModes;
@@ -481,6 +476,7 @@ public:
 		    .add("testPriority", &testPriority)
 		    .add("extraDatabaseMode", &extraDatabaseModeStr)
 		    .add("extraDatabaseCount", &extraDatabaseCount)
+		    .add("extraDatabaseBackupAgents", &extraDatabaseBackupAgents)
 		    .add("minimumReplication", &minimumReplication)
 		    .add("minimumRegions", &minimumRegions)
 		    .add("configureLocked", &configureLocked)
@@ -491,7 +487,6 @@ public:
 		    .add("disableTss", &disableTss)
 		    .add("disableHostname", &disableHostname)
 		    .add("disableRemoteKVS", &disableRemoteKVS)
-		    .add("disableEncryption", &disableEncryption)
 		    .add("encryptModes", &encryptModes)
 		    .add("simpleConfig", &simpleConfig)
 		    .add("generateFearless", &generateFearless)
@@ -557,6 +552,11 @@ public:
 				flushAndExit(0);
 			}
 		}
+	}
+
+	bool excludedStorageEngineType(int storageEngineType) const {
+		return std::find(storageEngineExcludeTypes.begin(), storageEngineExcludeTypes.end(), storageEngineType) !=
+		       storageEngineExcludeTypes.end();
 	}
 
 	TestConfig() = default;
@@ -1294,14 +1294,6 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			g_knobs.setKnob("remote_kv_store", KnobValueRef::create(bool{ false }));
 			TraceEvent(SevDebug, "DisableRemoteKVS");
 		}
-		// TODO: Remove this code when encryption knobs are removed
-		if (testConfig->disableEncryption) {
-			g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
-			g_knobs.setKnob("enable_tlog_encryption", KnobValueRef::create(bool{ false }));
-			g_knobs.setKnob("enable_storage_server_encryption", KnobValueRef::create(bool{ false }));
-			g_knobs.setKnob("enable_blob_granule_encryption", KnobValueRef::create(bool{ false }));
-			TraceEvent(SevDebug, "DisableEncryption");
-		}
 		*pConnString = conn;
 		*pTesterCount = testerCount;
 		bool usingSSL = conn.toString().find(":tls") != std::string::npos || listenersPerProcess > 1;
@@ -1472,6 +1464,8 @@ private:
 	void setSimpleConfig();
 	void setSpecificConfig(const TestConfig& testConfig);
 	void setDatacenters(const TestConfig& testConfig);
+	void setTenantMode(const TestConfig& testConfig);
+	void setEncryptionAtRestMode(const TestConfig& testConfig);
 	void setStorageEngine(const TestConfig& testConfig);
 	void setRegions(const TestConfig& testConfig);
 	void setReplicationType(const TestConfig& testConfig);
@@ -1579,18 +1573,83 @@ void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
 	}
 }
 
+void SimulationConfig::setTenantMode(const TestConfig& testConfig) {
+	TenantMode tenantMode = TenantMode::DISABLED;
+	if (testConfig.tenantModes.size() > 0) {
+		tenantMode = TenantMode::fromString(deterministicRandom()->randomChoice(testConfig.tenantModes));
+	} else if (testConfig.allowDefaultTenant && deterministicRandom()->coinflip()) {
+		tenantMode = deterministicRandom()->random01() < 0.9 ? TenantMode::REQUIRED : TenantMode::OPTIONAL_TENANT;
+	} else if (deterministicRandom()->coinflip()) {
+		tenantMode = TenantMode::OPTIONAL_TENANT;
+	}
+	set_config("tenant_mode=" + tenantMode.toString());
+}
+
+void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
+	std::vector<bool> available;
+	std::vector<double> probability;
+	if (!testConfig.encryptModes.empty()) {
+		// If encryptModes are specified explicitly, give them equal probability to be chosen.
+		available = std::vector<bool>(EncryptionAtRestMode::END, false);
+		probability = std::vector<double>(EncryptionAtRestMode::END, 0);
+		for (auto& mode : testConfig.encryptModes) {
+			available[EncryptionAtRestMode::fromString(mode).mode] = true;
+			probability[EncryptionAtRestMode::fromString(mode).mode] = 1.0 / testConfig.encryptModes.size();
+		}
+	} else {
+		// If encryptModes are not specified, give encryption higher chance to be enabled.
+		// The good thing is testing with encryption on doesn't loss test coverage for most of the other features.
+		available = std::vector<bool>(EncryptionAtRestMode::END, true);
+		probability = { 0.25, 0.5, 0.25 };
+		// Only Redwood support encryption. Disable encryption if Redwood is not available.
+		if ((testConfig.storageEngineType.present() && testConfig.storageEngineType != 3) ||
+		    testConfig.excludedStorageEngineType(3)) {
+			available[(int)EncryptionAtRestMode::DOMAIN_AWARE] = false;
+			available[(int)EncryptionAtRestMode::CLUSTER_AWARE] = false;
+		}
+	}
+	// domain_aware mode is supported only with required tenant mode.
+	if (db.tenantMode != TenantMode::REQUIRED) {
+		available[(int)EncryptionAtRestMode::DOMAIN_AWARE] = false;
+	}
+	int lastAvailableMode = EncryptionAtRestMode::END;
+	double totalProbability = 0;
+	for (int mode = 0; mode < (int)EncryptionAtRestMode::END; mode++) {
+		if (available[mode]) {
+			lastAvailableMode = mode;
+			totalProbability += probability[mode];
+		}
+	}
+	ASSERT(lastAvailableMode != EncryptionAtRestMode::END); // At least one mode available
+	double r = deterministicRandom()->random01() * totalProbability;
+	EncryptionAtRestMode encryptionMode;
+	for (int mode = 0;; mode++) {
+		if (available[mode] && (r < probability[mode] || mode == lastAvailableMode)) {
+			encryptionMode = (EncryptionAtRestMode::Mode)mode;
+			break;
+		}
+		r -= probability[mode];
+	}
+	TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", encryptionMode.toString());
+	CODE_PROBE(encryptionMode == EncryptionAtRestMode::DISABLED, "Disabled encryption in simulation");
+	CODE_PROBE(encryptionMode == EncryptionAtRestMode::CLUSTER_AWARE, "Enabled cluster-aware encryption in simulation");
+	CODE_PROBE(encryptionMode == EncryptionAtRestMode::DOMAIN_AWARE, "Enabled domain-aware encryption in simulation");
+	set_config("encryption_at_rest_mode=" + encryptionMode.toString());
+}
+
 // Sets storage engine based on testConfig details
 void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	// Using [0, 4) to disable the RocksDB storage engine.
 	// TODO: Figure out what is broken with the RocksDB engine in simulation.
 	int storage_engine_type = deterministicRandom()->randomInt(0, 6);
-	if (testConfig.storageEngineType.present()) {
+	if (db.encryptionAtRestMode.isEncryptionEnabled()) {
+		// Only storage engine supporting encryption is Redwood.
+		storage_engine_type = 3;
+	} else if (testConfig.storageEngineType.present()) {
 		storage_engine_type = testConfig.storageEngineType.get();
 	} else {
 		// Continuously re-pick the storage engine type if it's the one we want to exclude
-		while (std::find(testConfig.storageEngineExcludeTypes.begin(),
-		                 testConfig.storageEngineExcludeTypes.end(),
-		                 storage_engine_type) != testConfig.storageEngineExcludeTypes.end()) {
+		while (testConfig.excludedStorageEngineType(storage_engine_type)) {
 			storage_engine_type = deterministicRandom()->randomInt(0, 6);
 		}
 	}
@@ -2038,7 +2097,8 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 		setSimpleConfig();
 	}
 	setSpecificConfig(testConfig);
-
+	setTenantMode(testConfig);
+	setEncryptionAtRestMode(testConfig);
 	setStorageEngine(testConfig);
 	setReplicationType(testConfig);
 	if (generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5)) {
@@ -2059,15 +2119,6 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	setConfigDB(testConfig);
 }
 
-bool validateEncryptAndTenantModePair(EncryptionAtRestMode encryptMode, TenantMode tenantMode) {
-	// Domain aware encryption is only allowed when the tenant mode is required. Other encryption modes (disabled or
-	// cluster aware) are allowed regardless of the tenant mode
-	if (encryptMode.mode == EncryptionAtRestMode::DISABLED || encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE) {
-		return true;
-	}
-	return tenantMode == TenantMode::REQUIRED;
-}
-
 // Configures the system according to the given specifications in order to run
 // simulation under the correct conditions
 void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
@@ -2078,55 +2129,15 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
                           std::string whitelistBinPaths,
                           TestConfig testConfig,
                           ProtocolVersion protocolVersion,
-                          TenantMode tenantMode) {
+                          Optional<TenantMode>* tenantMode) {
 	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(testConfig);
+	*tenantMode = simconfig.db.tenantMode;
+
 	if (testConfig.logAntiQuorum != -1) {
 		simconfig.db.tLogWriteAntiQuorum = testConfig.logAntiQuorum;
 	}
-
-	simconfig.db.tenantMode = tenantMode;
-	simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
-	// TODO: Remove check on the ENABLE_ENCRYPTION knob once the EKP can start using the db config
-	if (!testConfig.disableEncryption && (SERVER_KNOBS->ENABLE_ENCRYPTION || !testConfig.encryptModes.empty())) {
-		if (!testConfig.encryptModes.empty()) {
-			std::vector<EncryptionAtRestMode> validEncryptModes;
-			// Get the subset of valid encrypt modes given the tenant mode
-			for (int i = 0; i < testConfig.encryptModes.size(); i++) {
-				EncryptionAtRestMode encryptMode = EncryptionAtRestMode::fromString(testConfig.encryptModes.at(i));
-				if (validateEncryptAndTenantModePair(encryptMode, tenantMode)) {
-					validEncryptModes.push_back(encryptMode);
-				}
-			}
-			if (validEncryptModes.size() > 0) {
-				simconfig.db.encryptionAtRestMode = deterministicRandom()->randomChoice(validEncryptModes);
-			}
-		} else {
-			// TODO: These cases should only trigger with probability (BUGGIFY) once the server knob is removed
-			if (tenantMode == TenantMode::DISABLED || tenantMode == TenantMode::OPTIONAL_TENANT || BUGGIFY) {
-				// optional and disabled tenant modes currently only support cluster aware encryption
-				simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::CLUSTER_AWARE;
-			} else {
-				simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::DOMAIN_AWARE;
-			}
-		}
-	}
-	// TODO: remove knob hanlding once we move off from encrypption knobs to db config
-	if (simconfig.db.encryptionAtRestMode.mode == EncryptionAtRestMode::DISABLED) {
-		g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
-		CODE_PROBE(true, "Disabled encryption in simulation");
-	} else {
-		g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ true }));
-		g_knobs.setKnob(
-		    "redwood_split_encrypted_pages_by_tenant",
-		    KnobValueRef::create(bool{ simconfig.db.encryptionAtRestMode.mode == EncryptionAtRestMode::DOMAIN_AWARE }));
-		CODE_PROBE(simconfig.db.encryptionAtRestMode.mode == EncryptionAtRestMode::CLUSTER_AWARE,
-		           "Enabled cluster-aware encryption in simulation");
-		CODE_PROBE(simconfig.db.encryptionAtRestMode.mode == EncryptionAtRestMode::DOMAIN_AWARE,
-		           "Enabled domain-aware encryption in simulation");
-	}
-	TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", simconfig.db.encryptionAtRestMode.toString());
 
 	g_simulator->blobGranulesEnabled = simconfig.db.blobGranulesEnabled;
 
@@ -2510,22 +2521,23 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 					LocalityData localities(Optional<Standalone<StringRef>>(), newZoneId, newMachineId, dcUID);
 					localities.set("data_hall"_sr, dcUID);
-					systemActors->push_back(reportErrors(simulatedMachine(ClusterConnectionString(extraDatabase),
-					                                                      conn,
-					                                                      extraIps,
-					                                                      sslEnabled,
-					                                                      localities,
-					                                                      processClass,
-					                                                      baseFolder,
-					                                                      false,
-					                                                      machine == useSeedForMachine,
-					                                                      AgentNone,
-					                                                      sslOnly,
-					                                                      whitelistBinPaths,
-					                                                      protocolVersion,
-					                                                      configDBType,
-					                                                      true),
-					                                     "SimulatedMachine"));
+					systemActors->push_back(
+					    reportErrors(simulatedMachine(ClusterConnectionString(extraDatabase),
+					                                  conn,
+					                                  extraIps,
+					                                  sslEnabled,
+					                                  localities,
+					                                  processClass,
+					                                  baseFolder,
+					                                  false,
+					                                  machine == useSeedForMachine,
+					                                  testConfig.extraDatabaseBackupAgents ? AgentAddition : AgentNone,
+					                                  sslOnly,
+					                                  whitelistBinPaths,
+					                                  protocolVersion,
+					                                  configDBType,
+					                                  true),
+					                 "SimulatedMachine"));
 					++cluster;
 				}
 			}
@@ -2651,14 +2663,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 		testConfig.storageEngineExcludeTypes.push_back(5);
 	}
 
-	// The RocksDB storage engine does not support the restarting tests because you cannot consistently get a clean
-	// snapshot of the storage engine without a snapshotting file system.
-	// https://github.com/apple/foundationdb/issues/5155
-	if (std::string_view(testFile).find("restarting") != std::string_view::npos) {
-		testConfig.storageEngineExcludeTypes.push_back(4);
-		testConfig.storageEngineExcludeTypes.push_back(5);
-	}
-
 	// The RocksDB engine is not always built with the rest of fdbserver. Don't try to use it if it is not included
 	// in the build.
 	if (!rocksDBEnabled) {
@@ -2698,28 +2702,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 
 	state Optional<TenantName> defaultTenant;
 	state Standalone<VectorRef<TenantNameRef>> tenantsToCreate;
-	state TenantMode tenantMode = TenantMode::DISABLED;
-	// If this is a restarting test, restartInfo.ini is read in restartSimulatedSystem
-	// where we update the defaultTenant and tenantMode in the testConfig
-	// Defer setting tenant mode and default tenant until later
-	if (!rebooting) {
-		if (testConfig.tenantModes.size()) {
-			auto randomPick = deterministicRandom()->randomChoice(testConfig.tenantModes);
-			tenantMode = TenantMode::fromString(randomPick);
-			if (tenantMode == TenantMode::REQUIRED && allowDefaultTenant) {
-				defaultTenant = "SimulatedDefaultTenant"_sr;
-			}
-		} else if (allowDefaultTenant && deterministicRandom()->coinflip()) {
-			defaultTenant = "SimulatedDefaultTenant"_sr;
-			if (deterministicRandom()->random01() < 0.9) {
-				tenantMode = TenantMode::REQUIRED;
-			} else {
-				tenantMode = TenantMode::OPTIONAL_TENANT;
-			}
-		} else if (deterministicRandom()->coinflip()) {
-			tenantMode = TenantMode::OPTIONAL_TENANT;
-		}
-	}
+	state Optional<TenantMode> tenantMode;
 
 	try {
 		// systemActors.push_back( startSystemMonitor(dataFolder) );
@@ -2747,17 +2730,28 @@ ACTOR void setupAndRun(std::string dataFolder,
 			                     whitelistBinPaths,
 			                     testConfig,
 			                     protocolVersion,
-			                     tenantMode);
+			                     &tenantMode);
 			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
 		}
+
 		// restartSimulatedSystem can adjust some testConfig params related to tenants
 		// so set/overwrite those options if necessary here
-		if (rebooting && testConfig.tenantModes.size()) {
-			tenantMode = TenantMode::fromString(testConfig.tenantModes[0]);
+		if (rebooting) {
+			if (testConfig.tenantModes.size()) {
+				tenantMode = TenantMode::fromString(testConfig.tenantModes[0]);
+			} else {
+				tenantMode = TenantMode::DISABLED;
+			}
 		}
-		if (testConfig.defaultTenant.present() && tenantMode != TenantMode::DISABLED && allowDefaultTenant) {
+		// setupSimulatedSystem/restartSimulatedSystem should fill tenantMode with valid value.
+		ASSERT(tenantMode.present());
+		if (tenantMode != TenantMode::DISABLED && allowDefaultTenant) {
 			// Default tenant set by testConfig or restarting data in restartInfo.ini
-			defaultTenant = testConfig.defaultTenant.get();
+			if (testConfig.defaultTenant.present()) {
+				defaultTenant = testConfig.defaultTenant.get();
+			} else if (!rebooting && (tenantMode == TenantMode::REQUIRED || deterministicRandom()->coinflip())) {
+				defaultTenant = "SimulatedDefaultTenant"_sr;
+			}
 		}
 		if (!rebooting) {
 			if (defaultTenant.present() && allowDefaultTenant) {
@@ -2773,7 +2767,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 		}
 		TraceEvent("SimulatedClusterTenantMode")
 		    .detail("UsingTenant", defaultTenant)
-		    .detail("TenantMode", tenantMode.toString())
+		    .detail("TenantMode", tenantMode.get().toString())
 		    .detail("TotalTenants", tenantsToCreate.size());
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(clusterFileDir);

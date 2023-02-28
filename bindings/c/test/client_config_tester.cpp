@@ -34,6 +34,8 @@
 #include "SimpleOpt/SimpleOpt.h"
 #include <thread>
 #include <string_view>
+#include <unordered_map>
+#include "fdbclient/FDBOptions.g.h"
 
 #if (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 #include <unistd.h>
@@ -42,13 +44,6 @@
 #else
 #error Unsupported platform
 #endif
-
-#undef ERROR
-#define ERROR(name, number, description) enum { error_code_##name = number };
-
-#include "flow/error_definitions.h"
-
-#define API_VERSION_CLIENT_TMP_DIR 720
 
 using namespace std::string_view_literals;
 
@@ -59,17 +54,14 @@ enum TesterOptionId {
 	OPT_CONNFILE,
 	OPT_EXTERNAL_CLIENT_LIBRARY,
 	OPT_EXTERNAL_CLIENT_DIRECTORY,
-	OPT_DISABLE_LOCAL_CLIENT,
-	OPT_DISABLE_CLIENT_BYPASS,
 	OPT_API_VERSION,
 	OPT_TRANSACTION_TIMEOUT,
 	OPT_TRACE,
 	OPT_TRACE_DIR,
 	OPT_TMP_DIR,
-	OPT_IGNORE_EXTERNAL_CLIENT_FAILURES,
-	OPT_FAIL_INCOMPATIBLE_CLIENT,
 	OPT_EXPECTED_ERROR,
-	OPT_PRINT_STATUS
+	OPT_PRINT_STATUS,
+	OPT_NETWORK_OPTION
 };
 
 const int MIN_TESTABLE_API_VERSION = 400;
@@ -81,17 +73,14 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_CONNFILE, "--cluster-file", SO_REQ_SEP },
 	  { OPT_EXTERNAL_CLIENT_LIBRARY, "--external-client-library", SO_REQ_SEP },
 	  { OPT_EXTERNAL_CLIENT_DIRECTORY, "--external-client-dir", SO_REQ_SEP },
-	  { OPT_DISABLE_LOCAL_CLIENT, "--disable-local-client", SO_NONE },
-	  { OPT_DISABLE_CLIENT_BYPASS, "--disable-client-bypass", SO_NONE },
 	  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
 	  { OPT_TRANSACTION_TIMEOUT, "--transaction-timeout", SO_REQ_SEP },
 	  { OPT_TRACE, "--log", SO_NONE },
 	  { OPT_TRACE_DIR, "--log-dir", SO_REQ_SEP },
 	  { OPT_TMP_DIR, "--tmp-dir", SO_REQ_SEP },
-	  { OPT_IGNORE_EXTERNAL_CLIENT_FAILURES, "--ignore-external-client-failures", SO_NONE },
-	  { OPT_FAIL_INCOMPATIBLE_CLIENT, "--fail-incompatible-client", SO_NONE },
 	  { OPT_EXPECTED_ERROR, "--expected-error", SO_REQ_SEP },
 	  { OPT_PRINT_STATUS, "--print-status", SO_NONE },
+	  { OPT_NETWORK_OPTION, "--network-option-", SO_REQ_SEP },
 	  SO_END_OF_OPTIONS };
 
 class TesterOptions {
@@ -111,6 +100,7 @@ public:
 	bool failIncompatibleClient = false;
 	fdb::Error::CodeType expectedError = 0;
 	bool printStatus = false;
+	std::vector<std::pair<std::string, std::string>> networkOptions;
 };
 
 namespace {
@@ -130,10 +120,6 @@ void printProgramUsage(const char* execName) {
 	       "                 Path to the external client library.\n"
 	       "  --external-client-dir DIR\n"
 	       "                 Directory containing external client libraries.\n"
-	       "  --disable-local-client\n"
-	       "                 Disable the local client, i.e. use only external client libraries.\n"
-	       "  --disable-client-bypass\n"
-	       "                 Disable bypassing Multi-Version Client when using the local client.\n"
 	       "  --api-version VERSION\n"
 	       "                 Required FDB API version (default %d).\n"
 	       "  --transaction-timeout MILLISECONDS\n"
@@ -144,14 +130,12 @@ void printProgramUsage(const char* execName) {
 	       "                 no effect unless --log is specified.\n"
 	       "  --tmp-dir DIR\n"
 	       "                 Directory for temporary files of the client.\n"
-	       "  --ignore-external-client-failures\n"
-	       "                 Ignore failures to initialize external clients.\n"
-	       "  --fail-incompatible-client\n"
-	       "                 Fail if there is no client matching the server version.\n"
 	       "  --expected-error ERR\n"
 	       "                 FDB error code the test expected to fail with (default: 0).\n"
 	       "  --print-status\n"
 	       "                 Print database client status.\n"
+	       "  --network-option-OPTIONNAME OPTIONVALUE\n"
+	       "                 Changes a network option. OPTIONAME should be lowercase.\n"
 	       "  -h, --help     Display this help and exit.\n",
 	       FDB_API_VERSION);
 }
@@ -170,6 +154,19 @@ bool processIntOption(const std::string& optionName, const std::string& value, i
 	return true;
 }
 
+// Extracts the key for command line arguments that are specified with a prefix (e.g. --knob-).
+// This function converts any hyphens in the extracted key to underscores.
+bool extractPrefixedArgument(std::string prefix, const std::string& arg, std::string& res) {
+	if (arg.size() <= prefix.size() || arg.find(prefix) != 0 ||
+	    (arg[prefix.size()] != '-' && arg[prefix.size()] != '_')) {
+		return false;
+	}
+
+	res = arg.substr(prefix.size() + 1);
+	std::transform(res.begin(), res.end(), res.begin(), [](int c) { return c == '-' ? '_' : c; });
+	return true;
+}
+
 bool processArg(const CSimpleOpt& args) {
 	switch (args.OptionId()) {
 	case OPT_CONNFILE:
@@ -180,12 +177,6 @@ bool processArg(const CSimpleOpt& args) {
 		break;
 	case OPT_EXTERNAL_CLIENT_DIRECTORY:
 		options.externalClientDir = args.OptionArg();
-		break;
-	case OPT_DISABLE_LOCAL_CLIENT:
-		options.disableLocalClient = true;
-		break;
-	case OPT_DISABLE_CLIENT_BYPASS:
-		options.disableClientBypass = true;
 		break;
 	case OPT_API_VERSION:
 		if (!processIntOption(
@@ -207,12 +198,6 @@ bool processArg(const CSimpleOpt& args) {
 	case OPT_TMP_DIR:
 		options.tmpDir = args.OptionArg();
 		break;
-	case OPT_IGNORE_EXTERNAL_CLIENT_FAILURES:
-		options.ignoreExternalClientFailures = true;
-		break;
-	case OPT_FAIL_INCOMPATIBLE_CLIENT:
-		options.failIncompatibleClient = true;
-		break;
 	case OPT_EXPECTED_ERROR:
 		if (!processIntOption(args.OptionText(), args.OptionArg(), 0, 10000, options.expectedError)) {
 			return false;
@@ -221,6 +206,16 @@ bool processArg(const CSimpleOpt& args) {
 	case OPT_PRINT_STATUS:
 		options.printStatus = true;
 		break;
+
+	case OPT_NETWORK_OPTION: {
+		std::string optionName;
+		if (!extractPrefixedArgument("--network-option", args.OptionSyntax(), optionName)) {
+			fmt::print(stderr, "ERROR: unable to parse network option '{}'\n", args.OptionSyntax());
+			return false;
+		}
+		options.networkOptions.emplace_back(optionName, args.OptionArg());
+		break;
+	}
 	}
 	return true;
 }
@@ -272,8 +267,14 @@ void fdb_check(fdb::Error e, std::string_view msg) {
 	}
 }
 
+std::string stringToUpper(const std::string& str) {
+	std::string outStr(str);
+	std::transform(outStr.begin(), outStr.end(), outStr.begin(), [](char c) { return std::toupper(c); });
+	return outStr;
+}
+
 void applyNetworkOptions() {
-	if (!options.tmpDir.empty() && options.apiVersion >= API_VERSION_CLIENT_TMP_DIR) {
+	if (!options.tmpDir.empty() && options.apiVersion >= FDB_API_VERSION_CLIENT_TMP_DIR) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_TMP_DIR, options.tmpDir);
 	}
 	if (!options.externalClientLibrary.empty()) {
@@ -283,20 +284,21 @@ void applyNetworkOptions() {
 	if (!options.externalClientDir.empty()) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_DIRECTORY, options.externalClientDir);
 	}
-	if (options.disableLocalClient) {
-		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT);
-	}
 	if (options.trace) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, options.traceDir);
 	}
-	if (options.ignoreExternalClientFailures) {
-		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_IGNORE_EXTERNAL_CLIENT_FAILURES);
+
+	std::unordered_map<std::string, FDBNetworkOption> networkOptionsByName;
+	for (auto const& [optionCode, optionInfo] : FDBNetworkOptions::optionInfo) {
+		networkOptionsByName[optionInfo.name] = static_cast<FDBNetworkOption>(optionCode);
 	}
-	if (options.failIncompatibleClient) {
-		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_FAIL_INCOMPATIBLE_CLIENT);
-	}
-	if (options.disableClientBypass) {
-		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_CLIENT_BYPASS);
+
+	for (auto const& [optionName, optionVal] : options.networkOptions) {
+		auto iter = networkOptionsByName.find(stringToUpper(optionName));
+		if (iter == networkOptionsByName.end()) {
+			fmt::print(stderr, "Unknown network option {}\n", optionName);
+		}
+		fdb::network::setOption(iter->second, optionVal);
 	}
 }
 

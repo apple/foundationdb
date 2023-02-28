@@ -27,8 +27,6 @@
 #include "fdbclient/FDBTypes.h"
 #include "flow/Trace.h"
 
-#include "fdbclient/BackupContainer.h"
-
 /* BackupContainerFileSystem implements a backup container which stores files in a nested folder structure.
  * Inheritors must only defined methods for writing, reading, deleting, sizing, and listing files.
  *
@@ -126,7 +124,8 @@ public:
 
 	Future<Void> writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
 	                                       const std::vector<std::pair<Key, Key>>& beginEndKeys,
-	                                       int64_t totalBytes) final;
+	                                       int64_t totalBytes,
+	                                       IncludeKeyRangeMap IncludeKeyRangeMap) final;
 
 	// List log files, unsorted, which contain data at any version >= beginVersion and <= targetVersion.
 	// "partitioned" flag indicates if new partitioned mutation logs or old logs should be listed.

@@ -379,7 +379,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 	bool adjacentReads; // keys are adjacent within a transaction
 	bool adjacentWrites;
 	int extraReadConflictRangesPerTransaction, extraWriteConflictRangesPerTransaction;
-	int readType;
+	ReadType readType;
 	bool cacheResult;
 	Optional<Key> transactionTag;
 
@@ -403,7 +403,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		rampUpConcurrency = getOption(options, "rampUpConcurrency"_sr, false);
 		batchPriority = getOption(options, "batchPriority"_sr, false);
 		descriptionString = getOption(options, "description"_sr, "ReadWrite"_sr);
-		readType = getOption(options, "readType"_sr, 3);
+		readType = static_cast<ReadType>(getOption(options, "readType"_sr, (int)ReadType::NORMAL));
 		cacheResult = getOption(options, "cacheResult"_sr, true);
 		if (hasOption(options, "transactionTag"_sr)) {
 			transactionTag = getOption(options, "transactionTag"_sr, ""_sr);
@@ -434,10 +434,27 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		if (transactionTag.present() && tr.getTags().size() == 0) {
 			tr.setOption(FDBTransactionOptions::AUTO_THROTTLE_TAG, transactionTag.get());
 		}
-		ReadOptions options;
-		options.type = static_cast<ReadType>(readType);
-		options.cacheResult = cacheResult;
-		tr.getTransaction().trState->readOptions = options;
+
+		if (cacheResult) {
+			// Enabled is the default, but sometimes set it explicitly
+			if (BUGGIFY) {
+				tr.setOption(FDBTransactionOptions::READ_SERVER_SIDE_CACHE_ENABLE);
+			}
+		} else {
+			tr.setOption(FDBTransactionOptions::READ_SERVER_SIDE_CACHE_DISABLE);
+		}
+
+		// ReadTypes of LOW, NORMAL, and HIGH can be set through transaction options, so setOption for those
+		if (readType == ReadType::LOW) {
+			tr.setOption(FDBTransactionOptions::READ_PRIORITY_LOW);
+		} else if (readType == ReadType::NORMAL) {
+			tr.setOption(FDBTransactionOptions::READ_PRIORITY_NORMAL);
+		} else if (readType == ReadType::HIGH) {
+			tr.setOption(FDBTransactionOptions::READ_PRIORITY_HIGH);
+		} else {
+			// Otherwise fall back to NativeAPI readOptions
+			tr.getTransaction().trState->readOptions.withDefault(ReadOptions()).type = readType;
+		}
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
@@ -471,7 +488,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		}
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return timeout(_start(cx, this), testDuration, Void()); }
 
 	ACTOR template <class Trans>
 	static Future<Void> readOp(Trans* tr, std::vector<int64_t> keys, ReadWriteWorkload* self, bool shouldRecord) {

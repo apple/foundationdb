@@ -22,6 +22,7 @@
 #include <string>
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbserver/RestoreUtil.h"
+#include "flow/CodeProbe.h"
 #include "flow/network.h"
 #include "flow/flow.h"
 #include "flow/ActorCollection.h"
@@ -329,27 +330,15 @@ private:
 	// Apply mutation logs to blob granules so that they reach to a consistent version for all blob granules
 	ACTOR static Future<Void> applyMutationLogs(Reference<BlobMigrator> self) {
 		// check last version in mutation logs
-
-		state std::string baseUrl = SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL;
-		state std::string mlogsUrl;
-		if (baseUrl.starts_with("file://")) {
-			state std::vector<std::string> containers = wait(IBackupContainer::listContainers(baseUrl, {}));
-			if (containers.size() == 0) {
-				TraceEvent("MissingMutationLogs", self->interf_.id()).detail("Url", baseUrl);
-				throw restore_missing_data();
-			}
-			mlogsUrl = containers.front();
-		} else {
-			mlogsUrl = baseUrl;
-		}
+		state std::string mlogsUrl = wait(getMutationLogUrl());
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
 		BackupDescription desc = wait(bc->describeBackup());
 		if (!desc.contiguousLogEnd.present()) {
-			TraceEvent("InvalidMutationLogs").detail("Url", baseUrl);
+			TraceEvent("InvalidMutationLogs").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL);
 			throw blob_restore_missing_logs();
 		}
 		if (!desc.minLogBegin.present()) {
-			TraceEvent("InvalidMutationLogs").detail("Url", baseUrl);
+			TraceEvent("InvalidMutationLogs").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL);
 			throw blob_restore_missing_logs();
 		}
 		state Version minLogVersion = desc.minLogBegin.get();
@@ -489,14 +478,8 @@ private:
 						self->actors_.add(processWaitMetricsRequest(self, req));
 					}
 					when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {
-						dprint("Handle SplitMetrics {}\n", req.keys.toString());
-						SplitMetricsReply rep;
-						for (auto granule : self->blobGranules_) {
-							// TODO: Use granule boundary as split point. A better approach is to split by size
-							if (granule.keyRange.begin > req.keys.begin && granule.keyRange.end < req.keys.end)
-								rep.splits.push_back_deep(rep.splits.arena(), granule.keyRange.begin);
-						}
-						req.reply.send(rep);
+						dprint("Handle SplitMetrics {} limit {} bytes\n", req.keys.toString(), req.limits.bytes);
+						processSplitMetricsRequest(self, req);
 					}
 					when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
 						StorageMetrics metrics;
@@ -585,6 +568,34 @@ private:
 		}
 	}
 
+	// This API is used by DD to figure out split points for data movement.
+	static void processSplitMetricsRequest(Reference<BlobMigrator> self, SplitMetricsRequest req) {
+		SplitMetricsReply rep;
+		int64_t bytes = 0; // number of bytes accumulated for current split
+		for (auto& granule : self->blobGranules_) {
+			if (!req.keys.contains(granule.keyRange)) {
+				continue;
+			}
+			bytes += granule.sizeInBytes;
+			if (bytes < req.limits.bytes) {
+				continue;
+			}
+			// Add a split point if the key range exceeds expected minimal size in bytes
+			rep.splits.push_back_deep(rep.splits.arena(), granule.keyRange.end);
+			bytes = 0;
+			// Limit number of splits in single response for fast RPC processing
+			if (rep.splits.size() > SERVER_KNOBS->SPLIT_METRICS_MAX_ROWS) {
+				CODE_PROBE(true, "Blob Migrator SplitMetrics API has more");
+				TraceEvent("BlobMigratorSplitMetricsContinued", self->interf_.id())
+				    .detail("Range", req.keys)
+				    .detail("Splits", rep.splits.size());
+				rep.more = true;
+				break;
+			}
+		}
+		req.reply.send(rep);
+	}
+
 	ACTOR static Future<Void> processWaitMetricsRequest(Reference<BlobMigrator> self, WaitMetricsRequest req) {
 		state WaitMetricsRequest waitMetricsRequest = req;
 		// FIXME get rid of this delay. it's a temp solution to avoid starvaion scheduling of DD
@@ -612,7 +623,7 @@ private:
 	static int64_t sizeInBytes(Reference<BlobMigrator> self, KeyRangeRef range) {
 		int64_t bytes = 0;
 		for (auto granule : self->blobGranules_) {
-			if (range.intersects(granule.keyRange))
+			if (range.contains(granule.keyRange))
 				bytes += granule.sizeInBytes;
 		}
 		return bytes;

@@ -24,8 +24,8 @@
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/Tenant.h"
 #include "fdbserver/ApplyMetadataMutation.h"
-#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
@@ -86,8 +86,16 @@ public:
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
 	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
-	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), initialCommit(initialCommit_),
-	    provisionalCommitProxy(provisionalCommitProxy_) {}
+	    tenantNameIndex(&proxyCommitData_.tenantNameIndex), lockedTenants(&proxyCommitData_.lockedTenants),
+	    initialCommit(initialCommit_), provisionalCommitProxy(provisionalCommitProxy_) {
+		if (encryptMode.isEncryptionEnabled()) {
+			ASSERT(cipherKeys != nullptr);
+			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
+			if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+				ASSERT(cipherKeys->count(ENCRYPT_HEADER_DOMAIN_ID));
+			}
+		}
+	}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           ResolverData& resolverData_,
@@ -98,7 +106,15 @@ public:
 	    cipherKeys(cipherKeys_), encryptMode(encryptMode), txnStateStore(resolverData_.txnStateStore),
 	    toCommit(resolverData_.toCommit), confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem),
 	    popVersion(resolverData_.popVersion), keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
-	    initialCommit(resolverData_.initialCommit), forResolver(true) {}
+	    initialCommit(resolverData_.initialCommit), forResolver(true) {
+		if (encryptMode.isEncryptionEnabled()) {
+			ASSERT(cipherKeys != nullptr);
+			ASSERT(cipherKeys->count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
+			if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+				ASSERT(cipherKeys->count(ENCRYPT_HEADER_DOMAIN_ID));
+			}
+		}
+	}
 
 private:
 	// The following variables are incoming parameters
@@ -139,6 +155,7 @@ private:
 
 	std::map<int64_t, TenantName>* tenantMap = nullptr;
 	std::unordered_map<TenantName, int64_t>* tenantNameIndex = nullptr;
+	std::set<int64_t>* lockedTenants = nullptr;
 	EncryptionAtRestMode encryptMode;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
@@ -672,7 +689,15 @@ private:
 	void checkSetTenantMapPrefix(MutationRef m) {
 		KeyRef prefix = TenantMetadata::tenantMap().subspace.begin;
 		if (m.param1.startsWith(prefix)) {
-			TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
+			TenantMapEntry tenantEntry;
+			if (initialCommit) {
+				TenantMapEntryTxnStateStore txnStateStoreEntry = TenantMapEntryTxnStateStore::decode(m.param2);
+				tenantEntry.setId(txnStateStoreEntry.id);
+				tenantEntry.tenantName = txnStateStoreEntry.tenantName;
+				tenantEntry.tenantLockState = txnStateStoreEntry.tenantLockState;
+			} else {
+				tenantEntry = TenantMapEntry::decode(m.param2);
+			}
 
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
@@ -687,9 +712,16 @@ private:
 					(*tenantNameIndex)[tenantEntry.tenantName] = tenantEntry.id;
 				}
 			}
+			if (lockedTenants) {
+				if (tenantEntry.tenantLockState == TenantAPI::TenantLockState::UNLOCKED) {
+					lockedTenants->erase(tenantEntry.id);
+				} else {
+					lockedTenants->insert(tenantEntry.id);
+				}
+			}
 
 			if (!initialCommit) {
-				txnStateStore->set(KeyValueRef(m.param1, m.param2));
+				txnStateStore->set(KeyValueRef(m.param1, tenantEntry.toTxnStateStoreEntry().encode()));
 			}
 
 			// For now, this goes to all storage servers.
@@ -1119,6 +1151,16 @@ private:
 				}
 
 				tenantMap->erase(startItr, endItr);
+
+				if (lockedTenants) {
+					auto startItr = startId.present()
+					                    ? std::lower_bound(lockedTenants->begin(), lockedTenants->end(), startId.get())
+					                    : lockedTenants->end();
+					auto endItr = endId.present()
+					                  ? std::lower_bound(lockedTenants->begin(), lockedTenants->end(), endId.get())
+					                  : lockedTenants->end();
+					lockedTenants->erase(startItr, endItr);
+				}
 			}
 
 			if (!initialCommit) {

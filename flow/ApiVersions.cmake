@@ -1,5 +1,6 @@
 # API Versions
 set(FDB_AV_LATEST_VERSION                   "730")
+set(FDB_AV_LATEST_BINDINGS_VERSION          "720")
 
 # Features
 set(FDB_AV_SNAPSHOT_RYW                     "300")
@@ -12,6 +13,15 @@ set(FDB_AV_CREATE_DB_FROM_CONN_STRING       "720")
 set(FDB_AV_FUTURE_GET_BOOL                  "720")
 set(FDB_AV_FUTURE_PROTOCOL_VERSION_API      "720")
 set(FDB_AV_TENANT_BLOB_RANGE_API            "720")
+set(FDB_AV_CLIENT_TMP_DIR                   "720")
+set(FDB_AV_DISABLE_CLIENT_BYPASS            "720")
+set(FDB_AV_GRV_CACHE                        "720")
+set(FDB_AV_CLIENT_RROFILING_DEPRECATED      "720")
+set(FDB_AV_TENANT_API_RELEASED              "720")
 set(FDB_AV_GET_TOTAL_COST                   "730")
 set(FDB_AV_FAIL_ON_EXTERNAL_CLIENT_ERRORS   "730")
+set(FDB_AV_GET_TAG_THROTTLED_DURATION       "730")
+set(FDB_AV_FUTURE_GET_DOUBLE                "730")
 set(FDB_AV_GET_CLIENT_STATUS                "730")
+set(FDB_AV_INITIALIZE_TRACE_ON_SETUP        "730")
+set(FDB_AV_TENANT_GET_ID                    "730")

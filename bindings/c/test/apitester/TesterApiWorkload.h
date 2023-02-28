@@ -135,12 +135,12 @@ protected:
 	// Generic BlobGranules setup.
 	void setupBlobGranules(TTaskFct cont);
 	void blobbifyTenant(std::optional<int> tenantId, std::shared_ptr<std::atomic<int>> blobbifiedCount, TTaskFct cont);
-	void verifyTenant(std::optional<int> tenantId, std::shared_ptr<std::atomic<int>> blobbifiedCount, TTaskFct cont);
 
 private:
 	void populateDataTx(TTaskFct cont, std::optional<int> tenantId);
 	void populateTenantData(TTaskFct cont, std::optional<int> tenantId);
 	void createTenants(TTaskFct cont);
+	void createTenantsIfNecessary(TTaskFct cont);
 
 	void clearTenantData(TTaskFct cont, std::optional<int> tenantId);
 

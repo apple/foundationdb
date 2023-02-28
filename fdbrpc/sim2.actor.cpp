@@ -21,14 +21,21 @@
 #include <cinttypes>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "flow/MkCert.h"
 #include "fmt/format.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Arena.h"
+#ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
+#endif
+#ifndef BOOST_DATE_TIME_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
+#endif
+#ifndef BOOST_REGEX_NO_LIB
 #define BOOST_REGEX_NO_LIB
+#endif
 #include "fdbrpc/SimExternalConnection.h"
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
@@ -172,7 +179,7 @@ void ISimulator::displayWorkers() const {
 	return;
 }
 
-Standalone<StringRef> ISimulator::makeToken(StringRef tenantName, uint64_t ttlSecondsFromNow) {
+WipedString ISimulator::makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow) {
 	ASSERT_GT(authKeys.size(), 0);
 	auto tokenSpec = authz::jwt::TokenRef{};
 	auto [keyName, key] = *authKeys.begin();
@@ -186,10 +193,9 @@ Standalone<StringRef> ISimulator::makeToken(StringRef tenantName, uint64_t ttlSe
 	tokenSpec.expiresAtUnixTime = now + ttlSecondsFromNow;
 	auto const tokenId = deterministicRandom()->randomAlphaNumeric(10);
 	tokenSpec.tokenId = StringRef(tokenId);
-	tokenSpec.tenants = VectorRef<StringRef>(&tenantName, 1);
-	auto ret = Standalone<StringRef>();
-	ret.contents() = authz::jwt::signToken(ret.arena(), tokenSpec, key);
-	return ret;
+	tokenSpec.tenants = VectorRef<int64_t>(&tenantId, 1);
+	Arena arena;
+	return WipedString(authz::jwt::signToken(arena, tokenSpec, key));
 }
 
 int openCount = 0;
@@ -212,6 +218,10 @@ struct SimClogging {
 		if (!g_simulator->speedUpSimulation && !stableConnection && clogPairUntil.count(pair))
 			t = std::max(t, clogPairUntil[pair]);
 
+		auto p = std::make_pair(from, to);
+		if (!g_simulator->speedUpSimulation && !stableConnection && clogProcessPairUntil.count(p))
+			t = std::max(t, clogProcessPairUntil[p]);
+
 		if (!g_simulator->speedUpSimulation && !stableConnection && clogRecvUntil.count(to.ip))
 			t = std::max(t, clogRecvUntil[to.ip]);
 
@@ -222,6 +232,20 @@ struct SimClogging {
 		auto& u = clogPairUntil[std::make_pair(from, to)];
 		u = std::max(u, now() + t);
 	}
+
+	void unclogPair(const IPAddress& from, const IPAddress& to) {
+		auto pair = std::make_pair(from, to);
+		clogPairUntil.erase(pair);
+		clogPairLatency.erase(pair);
+	}
+
+	// Clog a pair of processes until a time. This is more fine-grained than
+	// the IPAddress based one.
+	void clogPairFor(const NetworkAddress& from, const NetworkAddress& to, double t) {
+		auto& u = clogProcessPairUntil[std::make_pair(from, to)];
+		u = std::max(u, now() + t);
+	}
+
 	void clogSendFor(const IPAddress& from, double t) {
 		auto& u = clogSendUntil[from];
 		u = std::max(u, now() + t);
@@ -241,6 +265,7 @@ private:
 	std::map<IPAddress, double> clogSendUntil, clogRecvUntil;
 	std::map<std::pair<IPAddress, IPAddress>, double> clogPairUntil;
 	std::map<std::pair<IPAddress, IPAddress>, double> clogPairLatency;
+	std::map<std::pair<NetworkAddress, NetworkAddress>, double> clogProcessPairUntil;
 	double halfLatency() const {
 		double a = deterministicRandom()->random01();
 		const double pFast = 0.999;
@@ -1420,6 +1445,19 @@ public:
 		return canKillProcesses(processesLeft, processesDead, KillType::KillInstantly, nullptr);
 	}
 
+	std::vector<AddressExclusion> getAllAddressesInDCToExclude(Optional<Standalone<StringRef>> dcId) const override {
+		std::vector<AddressExclusion> addresses;
+		if (!dcId.present()) {
+			return addresses;
+		}
+		for (const auto& processInfo : getAllProcesses()) {
+			if (processInfo->locality.dcId() == dcId) {
+				addresses.emplace_back(processInfo->address.ip, processInfo->address.port);
+			}
+		}
+		return addresses;
+	}
+
 	bool datacenterDead(Optional<Standalone<StringRef>> dcId) const override {
 		if (!dcId.present()) {
 			return false;
@@ -1676,7 +1714,7 @@ public:
 			}
 
 			// Reboot if dead machines do fulfill policies
-			if (tooManyDead) {
+			if (tooManyDead || (usableRegions > 1 && notEnoughLeft)) {
 				newKt = KillType::Reboot;
 				canSurvive = false;
 				TraceEvent("KillChanged")
@@ -2295,6 +2333,12 @@ public:
 		TraceEvent("CloggingPair").detail("From", from).detail("To", to).detail("Seconds", seconds);
 		g_clogging.clogPairFor(from, to, seconds);
 	}
+
+	void unclogPair(const IPAddress& from, const IPAddress& to) override {
+		TraceEvent("UncloggingPair").detail("From", from).detail("To", to);
+		g_clogging.unclogPair(from, to);
+	}
+
 	std::vector<ProcessInfo*> getAllProcesses() const override {
 		std::vector<ProcessInfo*> processes;
 		for (auto& c : machines) {

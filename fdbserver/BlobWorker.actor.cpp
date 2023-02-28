@@ -37,12 +37,12 @@
 #include "fdbclient/Notified.h"
 
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
-#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
+#include "fdbserver/IKeyValueStore.h"
 
 #include "flow/Arena.h"
 #include "flow/CompressionUtils.h"
@@ -249,6 +249,7 @@ struct GranuleHistoryEntry : NonCopyable, ReferenceCounted<GranuleHistoryEntry> 
 struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	UID id;
 	Database db;
+	IKeyValueStore* storage;
 
 	PromiseStream<Future<Void>> addActor;
 
@@ -298,8 +299,8 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 	bool isFullRestoreMode = false;
 
-	BlobWorkerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db)
-	  : id(id), db(db), tenantData(BGTenantMap(dbInfo)), dbInfo(dbInfo),
+	BlobWorkerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db, IKeyValueStore* storage)
+	  : id(id), db(db), storage(storage), tenantData(BGTenantMap(dbInfo)), dbInfo(dbInfo),
 	    initialSnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM)),
 	    resnapshotBudget(new FlowLock(SERVER_KNOBS->BLOB_WORKER_RESNAPSHOT_BUDGET_BYTES)),
 	    deltaWritesBudget(new FlowLock(SERVER_KNOBS->BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES)),
@@ -366,7 +367,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 		// FIXME: buggify an extra multiplication factor for short periods of time to hopefully trigger this logic more
 		// often? estimate slack in bytes buffered as max(0, assignments * (delta file size / 2) - bytesBuffered)
 		// FIXME: this doesn't take increased delta file size for heavy write amp cases into account
-		int64_t expectedExtraBytesBuffered = std::max(
+		int64_t expectedExtraBytesBuffered = std::max<int64_t>(
 		    0, stats.numRangesAssigned * (SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 2) - stats.mutationBytesBuffered);
 		// estimate slack in potential pending resnapshot
 		int64_t totalExtra =
@@ -459,9 +460,24 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
                                                                   Arena* arena) {
 	state BlobGranuleCipherKeysCtx cipherKeysCtx;
 	state EncryptCipherDomainId domainId = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
+	state Reference<GranuleTenantData> tenantData;
+	state int retryCount = 0;
 	if (bwData->encryptMode.mode == EncryptionAtRestMode::DOMAIN_AWARE) {
-		state Reference<GranuleTenantData> tenantData = wait(bwData->tenantData.getDataForGranule(keyRange));
-		ASSERT(tenantData.isValid());
+		loop {
+			wait(store(tenantData, bwData->tenantData.getDataForGranule(keyRange)));
+			if (tenantData.isValid()) {
+				break;
+			} else {
+				CODE_PROBE(true, "cipher keys for unknown tenant");
+				// Assume not loaded yet, just wait a bit. Could do sophisticated mechanism but will redo tenant
+				// loading to be versioned anyway. 10 retries means it's likely not a transient race with
+				// loading tenants, and instead a persistent issue.
+				retryCount++;
+				TraceEvent(retryCount <= 10 ? SevDebug : SevWarn, "BlobWorkerUnknownTenantForCipherKeys", bwData->id)
+				    .detail("KeyRange", keyRange);
+				wait(delay(0.1));
+			}
+		}
 		domainId = tenantData->entry.id;
 	}
 
@@ -476,6 +492,7 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 
 	TextAndHeaderCipherKeys systemCipherKeys =
 	    wait(getLatestSystemEncryptCipherKeys(bwData->dbInfo, BlobCipherMetrics::BLOB_GRANULE));
+	ASSERT(systemCipherKeys.cipherHeaderKey.isValid());
 	cipherKeysCtx.headerCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(systemCipherKeys.cipherHeaderKey, *arena);
 
 	cipherKeysCtx.ivRef = makeString(AES_256_IV_LENGTH, *arena);
@@ -661,8 +678,7 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 	state RangeResult totalState = wait(tr->getRange(currentRange, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1));
 	// FIXME: remove above conflict range?
 	tr->addWriteConflictRange(currentRange);
-	ASSERT_WE_THINK(!totalState.more && totalState.size() <= SERVER_KNOBS->BG_MAX_SPLIT_FANOUT);
-	// maybe someone decreased the knob, we should gracefully handle it not in simulation
+	// maybe someone decreased the knob, we should gracefully handle it
 	if (totalState.more || totalState.size() > SERVER_KNOBS->BG_MAX_SPLIT_FANOUT) {
 		RangeResult tryAgain = wait(tr->getRange(currentRange, 10000));
 		ASSERT(!tryAgain.more);
@@ -836,6 +852,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	}
 
 	state Optional<CompressionFilter> compressFilter = getBlobFileCompressFilter();
+	ASSERT(!bwData->encryptMode.isEncryptionEnabled() || cipherKeysCtx.present());
 	state Value serialized = serializeChunkedDeltaFile(StringRef(fileName),
 	                                                   deltasToWrite,
 	                                                   keyRange,
@@ -914,8 +931,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 				}
 
 				if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-					wait(delay(0)); // should be cancelled
-					ASSERT(false);
+					wait(Never());
 				}
 
 				if (BUGGIFY_WITH_PROB(0.01)) {
@@ -950,6 +966,84 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 		++bwData->stats.s3DeleteReqs;
 		bwData->addActor.send(writeBStore->deleteFile(fname));
 		throw e;
+	}
+}
+
+ACTOR Future<BlobFileIndex> writeEmptyDeltaFile(Reference<BlobWorkerData> bwData,
+                                                KeyRange keyRange,
+                                                UID granuleID,
+                                                int64_t epoch,
+                                                int64_t seqno,
+                                                Version previousVersion,
+                                                Version currentDeltaVersion,
+                                                Future<BlobFileIndex> previousDeltaFileFuture,
+                                                Future<Void> waitCommitted,
+                                                Optional<std::pair<KeyRange, UID>> oldGranuleComplete) {
+	ASSERT(previousVersion < currentDeltaVersion);
+	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
+
+	// before updating FDB, wait for the delta file version to be committed and previous delta files to finish
+	wait(waitCommitted);
+	BlobFileIndex prev = wait(previousDeltaFileFuture);
+	wait(delay(0, TaskPriority::BlobWorkerUpdateFDB));
+
+	// update FDB with new file
+	state Key oldDFKey = blobGranuleFileKeyFor(granuleID, previousVersion, 'D');
+	state Key newDFKey = blobGranuleFileKeyFor(granuleID, currentDeltaVersion, 'D');
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
+	state Optional<Value> dfValue;
+	loop {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			wait(readAndCheckGranuleLock(tr, keyRange, epoch, seqno));
+
+			// FIXME: could construct this value from the prev BlobFileIndex, but checking that the key exists in the DB
+			// is a good sanity check anyway
+			if (!dfValue.present()) {
+				// Only check if not seen yet. If we get commit unknown result and then retry, we'd see our own delete
+				wait(store(dfValue, tr->get(oldDFKey)));
+				ASSERT(dfValue.present());
+			} else {
+				tr->addReadConflictRange(singleKeyRange(oldDFKey));
+			}
+
+			tr->clear(oldDFKey);
+			tr->set(newDFKey, dfValue.get());
+
+			if (oldGranuleComplete.present()) {
+				wait(updateGranuleSplitState(&tr->getTransaction(),
+				                             oldGranuleComplete.get().first,
+				                             oldGranuleComplete.get().second,
+				                             granuleID,
+				                             BlobGranuleSplitState::Done));
+			}
+
+			wait(tr->commit());
+			if (BW_DEBUG) {
+				fmt::print(
+				    "Granule {0} [{1} - {2}) empty delta file bumped version last delta file from {3} -> {4}, cv={5}\n",
+				    granuleID.toString(),
+				    keyRange.begin.printable(),
+				    keyRange.end.printable(),
+				    previousVersion,
+				    currentDeltaVersion,
+				    tr->getCommittedVersion());
+			}
+
+			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
+				wait(Never());
+			}
+
+			if (BUGGIFY_WITH_PROB(0.01)) {
+				wait(delay(deterministicRandom()->random01()));
+			}
+
+			return BlobFileIndex(currentDeltaVersion, "", 0, 0, 0, {});
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
 	}
 }
 
@@ -1049,6 +1143,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	}
 
 	state Optional<CompressionFilter> compressFilter = getBlobFileCompressFilter();
+	ASSERT(!bwData->encryptMode.isEncryptionEnabled() || cipherKeysCtx.present());
 	state Value serialized = serializeChunkedSnapshot(StringRef(fileName),
 	                                                  snapshot,
 	                                                  SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES,
@@ -1158,8 +1253,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	}
 
 	if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-		wait(delay(0)); // should be cancelled
-		ASSERT(false);
+		wait(Never());
 	}
 
 	// FIXME: change when we implement multiplexing
@@ -1213,8 +1307,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			DEBUG_KEY_RANGE("BlobWorkerFDBSnapshot", readVersion, metadata->keyRange, bwData->id);
 
 			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-				wait(delay(0)); // should be cancelled
-				ASSERT(false);
+				wait(Never());
 			}
 
 			// initial snapshot is committed in fdb, we can pop the change feed up to this version
@@ -1311,8 +1404,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		ASSERT(snapshotVersion < version);
 
 		state Optional<BlobGranuleCipherKeysCtx> snapCipherKeysCtx;
-		ASSERT(!(g_network && g_network->isSimulated() && bwData->encryptMode.isEncryptionEnabled() &&
-		         !snapshotF.cipherKeysMeta.present()));
+		ASSERT(!(bwData->encryptMode.isEncryptionEnabled() && !snapshotF.cipherKeysMeta.present()));
 		if (snapshotF.cipherKeysMeta.present()) {
 			ASSERT(bwData->encryptMode.isEncryptionEnabled());
 			CODE_PROBE(true, "fetching cipher keys for blob snapshot file");
@@ -1326,6 +1418,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		                                        snapshotF.offset,
 		                                        snapshotF.length,
 		                                        snapshotF.fullFileLength,
+		                                        snapshotF.version,
 		                                        snapCipherKeysCtx);
 
 		compactBytesRead += snapshotF.length;
@@ -1341,8 +1434,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 
 			deltaF = files.deltaFiles[deltaIdx];
 
-			ASSERT(!(g_network && g_network->isSimulated() && bwData->encryptMode.isEncryptionEnabled() &&
-			         !deltaF.cipherKeysMeta.present()));
+			ASSERT(!(bwData->encryptMode.isEncryptionEnabled() && !deltaF.cipherKeysMeta.present()));
 
 			if (deltaF.cipherKeysMeta.present()) {
 				ASSERT(bwData->encryptMode.isEncryptionEnabled());
@@ -1357,6 +1449,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 			                                   deltaF.offset,
 			                                   deltaF.length,
 			                                   deltaF.fullFileLength,
+			                                   deltaF.version,
 			                                   deltaCipherKeysCtx);
 			compactBytesRead += deltaF.length;
 			lastDeltaVersion = files.deltaFiles[deltaIdx].version;
@@ -1633,8 +1726,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
 			reply.proposedSplitKey = proposedSplitKey;
 			bwData->currentManagerStatusStream.get().send(reply);
 			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-				wait(delay(0)); // should be cancelled
-				ASSERT(false);
+				wait(Never());
 			}
 			// if a new manager appears, also tell it about this granule being splittable, or retry after a certain
 			// amount of time of not hearing back
@@ -1755,8 +1847,16 @@ void handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
                               Key cfKey,
                               Version cfStartVersion,
                               std::deque<std::pair<Version, Version>>* rollbacksCompleted,
-                              std::deque<Future<Void>>& inFlightPops) {
-	metadata->files.deltaFiles.push_back(completedDeltaFile);
+                              std::deque<Future<Void>>& inFlightPops,
+                              bool emptyDeltaFile) {
+	if (emptyDeltaFile) {
+		ASSERT(!metadata->files.deltaFiles.empty());
+		ASSERT(completedDeltaFile.length == 0);
+		ASSERT(metadata->files.deltaFiles.back().version < completedDeltaFile.version);
+		metadata->files.deltaFiles.back().version = completedDeltaFile.version;
+	} else {
+		metadata->files.deltaFiles.push_back(completedDeltaFile);
+	}
 	ASSERT(metadata->durableDeltaVersion.get() < completedDeltaFile.version);
 	metadata->durableDeltaVersion.set(completedDeltaFile.version);
 
@@ -1813,9 +1913,10 @@ struct InFlightFile {
 	Version version;
 	uint64_t bytes;
 	bool snapshot;
+	bool emptyDeltaFile;
 
-	InFlightFile(Future<BlobFileIndex> future, Version version, uint64_t bytes, bool snapshot)
-	  : future(future), version(version), bytes(bytes), snapshot(snapshot) {}
+	InFlightFile(Future<BlobFileIndex> future, Version version, uint64_t bytes, bool snapshot, bool emptyDeltaFile)
+	  : future(future), version(version), bytes(bytes), snapshot(snapshot), emptyDeltaFile(emptyDeltaFile) {}
 };
 
 namespace {
@@ -2233,7 +2334,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				startVersion = startState.previousDurableVersion;
 				Future<BlobFileIndex> inFlightBlobSnapshot = compactFromBlob(
 				    bwData, bstore, metadata, startState.granuleID, startState.blobFilesToSnapshot, startVersion);
-				inFlightFiles.push_back(InFlightFile(inFlightBlobSnapshot, startVersion, 0, true));
+				inFlightFiles.push_back(InFlightFile(inFlightBlobSnapshot, startVersion, 0, true, false));
 				pendingSnapshots++;
 
 				metadata->durableSnapshotVersion.set(minDurableSnapshotV);
@@ -2260,6 +2361,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				if (inFlightFiles.front().future.isReady()) {
 					BlobFileIndex completedFile = wait(inFlightFiles.front().future);
 					if (inFlightFiles.front().snapshot) {
+						ASSERT(!inFlightFiles.front().emptyDeltaFile);
 						if (metadata->files.deltaFiles.empty()) {
 							ASSERT(completedFile.version == metadata->initialSnapshotVersion);
 						} else {
@@ -2343,6 +2445,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				if (inFlightFiles.front().future.isReady()) {
 					BlobFileIndex completedFile = wait(inFlightFiles.front().future);
 					if (inFlightFiles.front().snapshot) {
+						ASSERT(!inFlightFiles.front().emptyDeltaFile);
 						if (metadata->files.deltaFiles.empty()) {
 							ASSERT(completedFile.version == metadata->initialSnapshotVersion);
 						} else {
@@ -2360,7 +2463,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						                         cfKey,
 						                         startState.changeFeedStartVersion,
 						                         &rollbacksCompleted,
-						                         inFlightPops);
+						                         inFlightPops,
+						                         inFlightFiles.front().emptyDeltaFile);
 					}
 
 					inFlightFiles.pop_front();
@@ -2733,8 +2837,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					ASSERT(lastDeltaVersion >= metadata->currentDeltas.back().version);
 					ASSERT(metadata->pendingDeltaVersion < metadata->currentDeltas.front().version);
 				} else {
-					// FIXME: could always write special metadata for empty file, so we don't actually
-					// write/read a bunch of empty blob files
 					ASSERT(forceFlush);
 					ASSERT(!forceFlushVersions.empty());
 					CODE_PROBE(true, "Force flushing empty delta file!");
@@ -2767,24 +2869,40 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					           oldChangeFeedDataComplete.present() ? ". Finalizing " : "");
 				}
 
-				int64_t deltaFileBudget =
-				    std::min((int64_t)metadata->bufferedDeltaBytes, SERVER_KNOBS->BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES);
-				startDeltaFileWrite = bwData->deltaWritesBudget->take(TaskPriority::DefaultYield, deltaFileBudget);
-				Future<BlobFileIndex> dfFuture =
-				    writeDeltaFile(bwData,
-				                   bstore,
-				                   metadata->keyRange,
-				                   startState.granuleID,
-				                   metadata->originalEpoch,
-				                   metadata->originalSeqno,
-				                   metadata->currentDeltas,
-				                   lastDeltaVersion,
-				                   previousFuture,
-				                   waitVersionCommitted(bwData, metadata, lastDeltaVersion),
-				                   oldChangeFeedDataComplete,
-				                   startDeltaFileWrite,
-				                   deltaFileBudget);
-				inFlightFiles.push_back(InFlightFile(dfFuture, lastDeltaVersion, metadata->bufferedDeltaBytes, false));
+				Future<BlobFileIndex> dfFuture;
+				bool emptyDeltaFile = metadata->bytesInNewDeltaFiles > 0 && metadata->currentDeltas.empty();
+				if (emptyDeltaFile) {
+					// Optimization to do a metadata-only update if flushing an empty delta file
+					dfFuture = writeEmptyDeltaFile(bwData,
+					                               metadata->keyRange,
+					                               startState.granuleID,
+					                               metadata->originalEpoch,
+					                               metadata->originalSeqno,
+					                               metadata->pendingDeltaVersion,
+					                               lastDeltaVersion,
+					                               previousFuture,
+					                               waitVersionCommitted(bwData, metadata, lastDeltaVersion),
+					                               oldChangeFeedDataComplete);
+				} else {
+					int64_t deltaFileBudget = std::min((int64_t)metadata->bufferedDeltaBytes,
+					                                   SERVER_KNOBS->BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES);
+					startDeltaFileWrite = bwData->deltaWritesBudget->take(TaskPriority::DefaultYield, deltaFileBudget);
+					dfFuture = writeDeltaFile(bwData,
+					                          bstore,
+					                          metadata->keyRange,
+					                          startState.granuleID,
+					                          metadata->originalEpoch,
+					                          metadata->originalSeqno,
+					                          metadata->currentDeltas,
+					                          lastDeltaVersion,
+					                          previousFuture,
+					                          waitVersionCommitted(bwData, metadata, lastDeltaVersion),
+					                          oldChangeFeedDataComplete,
+					                          startDeltaFileWrite,
+					                          deltaFileBudget);
+				}
+				inFlightFiles.push_back(
+				    InFlightFile(dfFuture, lastDeltaVersion, metadata->bufferedDeltaBytes, false, emptyDeltaFile));
 
 				// add new pending delta file
 				ASSERT(metadata->pendingDeltaVersion < lastDeltaVersion);
@@ -2810,7 +2928,14 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 				// Wait on delta file starting here. If we have too many pending delta file writes, we need to not
 				// continue to consume from the change feed, as that will pile on even more delta files to write
-				wait(startDeltaFileWrite);
+				if (!startDeltaFileWrite.isReady()) {
+					wait(startDeltaFileWrite);
+					// If we were waiting on a lock callback, ensure the writeDeltaFile callback goes first with a
+					// delay(0) here, to create the flow lock releaser, before returning control to this actor which
+					// could cancel the writeDeltaFile actor and leak the flow lock
+					wait(delay(0));
+				}
+
 			} else if (metadata->doEarlyReSnapshot()) {
 				ASSERT(metadata->currentDeltas.empty());
 				snapshotEligible = true;
@@ -2864,7 +2989,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					    reSnapshotNoCheck(bwData, bstore, metadata, startState.granuleID, previousFuture);
 					writeAmpTarget.decrease(metadata->bytesInNewDeltaFiles);
 				}
-				inFlightFiles.push_back(InFlightFile(inFlightBlobSnapshot, metadata->pendingDeltaVersion, 0, true));
+				inFlightFiles.push_back(
+				    InFlightFile(inFlightBlobSnapshot, metadata->pendingDeltaVersion, 0, true, false));
 				pendingSnapshots++;
 
 				metadata->pendingSnapshotVersion = metadata->pendingDeltaVersion;
@@ -2903,6 +3029,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						// TODO don't duplicate code
 						BlobFileIndex completedFile = wait(inFlightFiles.front().future);
 						if (inFlightFiles.front().snapshot) {
+							ASSERT(!inFlightFiles.front().emptyDeltaFile);
 							if (metadata->files.deltaFiles.empty()) {
 								ASSERT(completedFile.version == metadata->initialSnapshotVersion);
 							} else {
@@ -2919,7 +3046,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							                         cfKey,
 							                         startState.changeFeedStartVersion,
 							                         &rollbacksCompleted,
-							                         inFlightPops);
+							                         inFlightPops,
+							                         inFlightFiles.front().emptyDeltaFile);
 						}
 
 						inFlightFiles.pop_front();
@@ -2946,6 +3074,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		}
 		// Free last change feed data
 		metadata->activeCFData.set(Reference<ChangeFeedData>());
+
+		// clear out buffered data
+		bwData->stats.mutationBytesBuffered -= metadata->bufferedDeltaBytes;
 
 		if (e.code() == error_code_operation_cancelled) {
 			throw;
@@ -3663,27 +3794,27 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 
 	state Optional<Key> tenantPrefix;
 	state Arena arena;
-	if (req.tenantInfo.hasTenant()) {
-		ASSERT(req.tenantInfo.tenantId != TenantInfo::INVALID_TENANT);
-		Optional<TenantMapEntry> tenantEntry = bwData->tenantData.getTenantById(req.tenantInfo.tenantId);
-		if (tenantEntry.present()) {
-			ASSERT(tenantEntry.get().id == req.tenantInfo.tenantId);
-			tenantPrefix = tenantEntry.get().prefix;
-		} else {
-			CODE_PROBE(true, "Blob worker tenant not found");
-			// FIXME - better way. Wait on retry here, or just have better model for tenant metadata?
-			// Just throw wrong_shard_server and make the client retry and assume we load it later
-			TraceEvent(SevDebug, "BlobWorkerRequestTenantNotFound", bwData->id)
-			    .suppressFor(5.0)
-			    .detail("Tenant", req.tenantInfo.tenantId);
-			throw tenant_not_found();
-		}
-		req.keyRange = KeyRangeRef(req.keyRange.begin.withPrefix(tenantPrefix.get(), req.arena),
-		                           req.keyRange.end.withPrefix(tenantPrefix.get(), req.arena));
-	}
-
 	state bool didCollapse = false;
 	try {
+		if (req.tenantInfo.hasTenant()) {
+			ASSERT(req.tenantInfo.tenantId != TenantInfo::INVALID_TENANT);
+			Optional<TenantMapEntry> tenantEntry = bwData->tenantData.getTenantById(req.tenantInfo.tenantId);
+			if (tenantEntry.present()) {
+				ASSERT(tenantEntry.get().id == req.tenantInfo.tenantId);
+				tenantPrefix = tenantEntry.get().prefix;
+			} else {
+				CODE_PROBE(true, "Blob worker tenant not found");
+				// FIXME - better way. Wait on retry here, or just have better model for tenant metadata?
+				// Just throw wrong_shard_server and make the client retry and assume we load it later
+				TraceEvent(SevDebug, "BlobWorkerRequestTenantNotFound", bwData->id)
+				    .suppressFor(5.0)
+				    .detail("Tenant", req.tenantInfo.tenantId);
+				throw tenant_not_found();
+			}
+			req.keyRange = KeyRangeRef(req.keyRange.begin.withPrefix(tenantPrefix.get(), req.arena),
+			                           req.keyRange.end.withPrefix(tenantPrefix.get(), req.arena));
+		}
+
 		// TODO remove requirement for canCollapseBegin once we implement early replying
 		ASSERT(req.beginVersion == 0 || req.canCollapseBegin);
 		if (req.beginVersion != 0) {
@@ -3919,8 +4050,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 							    .detail("FileName", chunk.snapshotFile.get().filename.toString())
 							    .detail("Encrypted", encrypted);
 						}
-						ASSERT(!(g_network && g_network->isSimulated() && bwData->encryptMode.isEncryptionEnabled() &&
-						         !encrypted));
+						ASSERT(!(bwData->encryptMode.isEncryptionEnabled() && !encrypted));
 						if (encrypted) {
 							ASSERT(bwData->encryptMode.isEncryptionEnabled());
 							ASSERT(!chunk.snapshotFile.get().cipherKeysCtx.present());
@@ -3939,8 +4069,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 							    .detail("Encrypted", encrypted);
 						}
 
-						ASSERT(!(g_network && g_network->isSimulated() && bwData->encryptMode.isEncryptionEnabled() &&
-						         !encrypted));
+						ASSERT(!(bwData->encryptMode.isEncryptionEnabled() && !encrypted));
 						if (encrypted) {
 							ASSERT(bwData->encryptMode.isEncryptionEnabled());
 							ASSERT(!chunk.deltaFiles[deltaIdx].cipherKeysCtx.present());
@@ -4054,6 +4183,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		req.reply.send(rep);
 		--bwData->stats.activeReadRequests;
 	} catch (Error& e) {
+		--bwData->stats.activeReadRequests;
 		if (e.code() == error_code_operation_cancelled) {
 			req.reply.sendError(wrong_shard_server());
 			throw;
@@ -4062,7 +4192,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		if (e.code() == error_code_wrong_shard_server) {
 			++bwData->stats.wrongShardServer;
 		}
-		--bwData->stats.activeReadRequests;
+
 		if (canReplyWith(e)) {
 			req.reply.sendError(e);
 		} else {
@@ -4377,8 +4507,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			}
 
 			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
-				wait(delay(0)); // should be cancelled
-				ASSERT(false);
+				wait(Never());
 			}
 
 			return info;
@@ -4711,8 +4840,19 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 			}
 		}
 
+		if (isSelfReassign && e.code() == error_code_granule_assignment_conflict) {
+			// can happen because another granule owns it, or the range is force purged. Either way, we have a revoke
+			// incoming and should drop it
+			TraceEvent(SevWarn, "BlobWorkerConflictOnReassign")
+			    .detail("Range", req.keyRange)
+			    .detail("ManagerEpoch", req.managerEpoch)
+			    .detail("SeqNo", req.managerSeqno);
+			return Void();
+		}
+
 		TraceEvent(SevError, "BlobWorkerUnexpectedErrorRangeAssign", bwData->id)
 		    .error(e)
+		    .detail("IsSelfReassign", isSelfReassign)
 		    .detail("Range", req.keyRange)
 		    .detail("ManagerEpoch", req.managerEpoch)
 		    .detail("SeqNo", req.managerSeqno);
@@ -4761,15 +4901,23 @@ void handleBlobVersionRequest(Reference<BlobWorkerData> bwData, MinBlobVersionRe
 	req.reply.send(rep);
 }
 
-ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData, BlobWorkerInterface interf) {
+ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData,
+                                      BlobWorkerInterface interf,
+                                      Optional<UID> previous) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
+	state Key blobWorkerListKey = blobWorkerListKeyFor(interf.id());
+	state Key blobWorkerAffinityKey = blobWorkerAffinityKeyFor(interf.id());
+
 	TraceEvent("BlobWorkerRegister", bwData->id);
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
-			Key blobWorkerListKey = blobWorkerListKeyFor(interf.id());
+			if (previous.present()) {
+				tr->set(blobWorkerAffinityKey, blobWorkerAffinityValue(previous.get()));
+			}
+
 			// FIXME: should be able to remove this conflict range
 			tr->addReadConflictRange(singleKeyRange(blobWorkerListKey));
 			tr->set(blobWorkerListKey, blobWorkerListValue(interf));
@@ -5255,56 +5403,8 @@ ACTOR Future<Void> simForceFullMemory(Reference<BlobWorkerData> bwData) {
 	}
 }
 
-ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
-                              ReplyPromise<InitializeBlobWorkerReply> recruitReply,
-                              Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	state Database cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
-	state Reference<BlobWorkerData> self(new BlobWorkerData(bwInterf.id(), dbInfo, cx));
-	self->id = bwInterf.id();
-	self->locality = bwInterf.locality;
-	// Since the blob worker gets initalized through the blob manager it is more reliable to fetch the encryption state
-	// using the DB Config rather than passing it through the initalization request for the blob manager and blob worker
-	DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
-	self->encryptMode = config.encryptionAtRestMode;
-	TraceEvent("BWEncryptionAtRestMode").detail("Mode", self->encryptMode.toString());
-
+ACTOR Future<Void> blobWorkerCore(BlobWorkerInterface bwInterf, Reference<BlobWorkerData> self) {
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
-
-	if (BW_DEBUG) {
-		printf("Initializing blob worker s3 stuff\n");
-	}
-
-	try {
-		if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
-			if (BW_DEBUG) {
-				fmt::print("BW constructing backup container from {0}\n", SERVER_KNOBS->BG_URL);
-			}
-			self->bstore = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BG_URL);
-			if (BW_DEBUG) {
-				printf("BW constructed backup container\n");
-			}
-		}
-
-		// register the blob worker to the system keyspace
-		wait(registerBlobWorker(self, bwInterf));
-	} catch (Error& e) {
-		if (BW_DEBUG) {
-			fmt::print("BW got init error {0}\n", e.name());
-		}
-		// if any errors came up while initializing the blob worker, let the blob manager know
-		// that recruitment failed
-		if (!recruitReply.isSet()) {
-			recruitReply.sendError(recruitment_failed());
-		}
-		throw e;
-	}
-
-	// By now, we know that initialization was successful, so
-	// respond to the initialization request with the interface itself
-	// Note: this response gets picked up by the blob manager
-	InitializeBlobWorkerReply rep;
-	rep.interf = bwInterf;
-	recruitReply.send(rep);
 
 	self->addActor.send(waitFailureServer(bwInterf.waitFailure.getFuture()));
 	self->addActor.send(runGRVChecks(self));
@@ -5317,8 +5417,6 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	if (g_network->isSimulated() && SERVER_KNOBS->BLOB_WORKER_DO_REJECT_WHEN_FULL && BUGGIFY_WITH_PROB(0.25)) {
 		self->addActor.send(simForceFullMemory(self));
 	}
-
-	TraceEvent("BlobWorkerInit", self->id).log();
 
 	try {
 		loop choose {
@@ -5480,7 +5578,183 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	self->shuttingDown = true;
 
 	wait(self->granuleMetadata.clearAsync());
-	return Void();
+	throw worker_removed();
+}
+
+bool blobWorkerTerminated(Reference<BlobWorkerData> self, IKeyValueStore* persistentData, Error const& e) {
+	if (persistentData) {
+		if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
+			persistentData->dispose();
+		} else {
+			persistentData->close();
+		}
+	}
+
+	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
+	    e.code() == error_code_file_not_found || e.code() == error_code_actor_cancelled) {
+		TraceEvent("BlobWorkerTerminated", self->id).errorUnsuppressed(e);
+		return true;
+	} else {
+		return false;
+	}
+}
+
+#define PERSIST_PREFIX "\xff\xff"
+static const KeyRef persistID = PERSIST_PREFIX "ID"_sr;
+
+ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
+                              ReplyPromise<InitializeBlobWorkerReply> recruitReply,
+                              Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                              IKeyValueStore* persistentData) {
+
+	state Database cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+	state Reference<BlobWorkerData> self(new BlobWorkerData(bwInterf.id(), dbInfo, cx, persistentData));
+	self->id = bwInterf.id();
+	self->locality = bwInterf.locality;
+	try {
+		// Since the blob worker gets initalized through the blob manager it is more reliable to fetch the encryption
+		// state using the DB Config rather than passing it through the initalization request for the blob manager and
+		// blob worker
+		state Future<DatabaseConfiguration> configFuture = getDatabaseConfiguration(cx);
+
+		if (self->storage) {
+			wait(self->storage->init());
+			self->storage->set(KeyValueRef(persistID, BinaryWriter::toValue(self->id, Unversioned())));
+			wait(self->storage->commit());
+		}
+
+		if (BW_DEBUG) {
+			printf("Initializing blob worker s3 stuff\n");
+		}
+
+		try {
+			if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
+				if (BW_DEBUG) {
+					fmt::print("BW constructing backup container from {0}\n", SERVER_KNOBS->BG_URL);
+				}
+				self->bstore = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BG_URL);
+				if (BW_DEBUG) {
+					printf("BW constructed backup container\n");
+				}
+			}
+
+			// register the blob worker to the system keyspace
+			wait(registerBlobWorker(self, bwInterf, Optional<UID>()));
+		} catch (Error& e) {
+			if (BW_DEBUG) {
+				fmt::print("BW got init error {0}\n", e.name());
+			}
+			// if any errors came up while initializing the blob worker, let the blob manager know
+			// that recruitment failed
+			if (!recruitReply.isSet()) {
+				recruitReply.sendError(recruitment_failed());
+			}
+			throw e;
+		}
+
+		// By now, we know that initialization was successful, so
+		// respond to the initialization request with the interface itself
+		// Note: this response gets picked up by the blob manager
+		InitializeBlobWorkerReply rep;
+		rep.interf = bwInterf;
+		recruitReply.send(rep);
+
+		DatabaseConfiguration config = wait(configFuture);
+		self->encryptMode = config.encryptionAtRestMode;
+		TraceEvent("BWEncryptionAtRestMode", self->id).detail("Mode", self->encryptMode.toString());
+
+		TraceEvent("BlobWorkerInit", self->id).log();
+		wait(blobWorkerCore(bwInterf, self));
+		return Void();
+	} catch (Error& e) {
+		if (blobWorkerTerminated(self, persistentData, e)) {
+			return Void();
+		}
+		throw e;
+	}
+}
+
+ACTOR Future<UID> restorePersistentState(Reference<BlobWorkerData> self) {
+	state Future<Optional<Value>> fID = self->storage->readValue(persistID);
+
+	wait(waitForAll(std::vector{ fID }));
+
+	if (!SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED || !fID.get().present()) {
+		CODE_PROBE(true, "Restored uninitialized blob worker");
+		throw worker_removed();
+	}
+	UID recoveredID = BinaryReader::fromStringRef<UID>(fID.get().get(), Unversioned());
+	ASSERT(recoveredID != self->id);
+	return recoveredID;
+}
+
+ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
+                              Promise<Void> recovered,
+                              Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                              IKeyValueStore* persistentData) {
+
+	state Database cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+	state Reference<BlobWorkerData> self(new BlobWorkerData(bwInterf.id(), dbInfo, cx, persistentData));
+	self->id = bwInterf.id();
+	self->locality = bwInterf.locality;
+	try {
+		wait(self->storage->init());
+		wait(self->storage->commit());
+		state UID previous = wait(restorePersistentState(self));
+
+		if (recovered.canBeSet()) {
+			recovered.send(Void());
+		}
+
+		// Since the blob worker gets initalized through the blob manager it is more reliable to fetch the encryption
+		// state using the DB Config rather than passing it through the initalization request for the blob manager and
+		// blob worker
+		state Future<DatabaseConfiguration> configFuture = getDatabaseConfiguration(cx);
+
+		if (BW_DEBUG) {
+			printf("Initializing blob worker s3 stuff\n");
+		}
+
+		try {
+			if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
+				if (BW_DEBUG) {
+					fmt::print("BW constructing backup container from {0}\n", SERVER_KNOBS->BG_URL);
+				}
+				self->bstore = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BG_URL);
+				if (BW_DEBUG) {
+					printf("BW constructed backup container\n");
+				}
+			}
+			// register the blob worker to the system keyspace
+			wait(registerBlobWorker(self, bwInterf, previous));
+		} catch (Error& e) {
+			if (BW_DEBUG) {
+				fmt::print("BW got init error {0}\n", e.name());
+			}
+			throw e;
+		}
+
+		// Only update the ID on disk after registering with the database so that if this process is rebooted after
+		// registration and before the ID is updated on disk the next generation will consider its ID from two
+		// generations ago its successor.
+		self->storage->set(KeyValueRef(persistID, BinaryWriter::toValue(self->id, Unversioned())));
+		wait(self->storage->commit());
+
+		DatabaseConfiguration config = wait(configFuture);
+		self->encryptMode = config.encryptionAtRestMode;
+		TraceEvent("BWEncryptionAtRestMode", self->id).detail("Mode", self->encryptMode.toString());
+
+		TraceEvent("BlobWorkerInit", self->id).log();
+		wait(blobWorkerCore(bwInterf, self));
+		return Void();
+	} catch (Error& e) {
+		if (recovered.canBeSet())
+			recovered.send(Void());
+		if (blobWorkerTerminated(self, persistentData, e)) {
+			return Void();
+		}
+		throw e;
+	}
 }
 
 // TODO add unit tests for assign/revoke range, especially version ordering
