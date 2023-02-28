@@ -39,7 +39,7 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 
 	std::map<RelocateReason, int> rsReasonCounts;
 
-	DataDistributionTracker shardTracker;
+	Reference<DataDistributionTracker> shardTracker;
 
 	// --- test configs ---
 
@@ -155,7 +155,7 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 		Reference<PhysicalShardCollection> physicalShardCollection = makeReference<PhysicalShardCollection>();
 		Reference<AsyncVar<bool>> zeroHealthyTeams = makeReference<AsyncVar<bool>>(false);
 
-		shardTracker.init(
+		shardTracker = makeReference<DataDistributionTracker>(
 		    DataDistributionTrackerInitParams{ .db = mock,
 		                                       .distributorId = ddcx.id(),
 		                                       .readyToStart = Promise<Void>(),
@@ -167,11 +167,11 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 		                                       .trackerCancelled = &ddcx.trackerCancelled,
 		                                       .ddTenantCache = {} },
 		                                   initData->customReplication);
-		actors.add(shardTracker.run(initData,
-		                            getShardMetrics.getFuture(),
-		                            getTopKMetrics.getFuture(),
-		                            getShardMetricsList.getFuture(),
-		                            getAverageShardBytes.getFuture()));
+		actors.add(shardTracker->run(initData,
+		                             getShardMetrics.getFuture(),
+		                             getTopKMetrics.getFuture(),
+		                             getShardMetricsList.getFuture(),
+		                             getAverageShardBytes.getFuture()));
 		actors.add(relocateShardReporter(this, output.getFuture()));
 
 		return timeout(reportErrors(actors.getResult(), "MockDDTrackerShardEvaluatorWorkload"), testDuration, Void());
