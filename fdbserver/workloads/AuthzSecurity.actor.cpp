@@ -645,13 +645,23 @@ struct AuthzSecurityWorkload : TestWorkload {
 			int locIdx = deterministicRandom()->randomInt(0, rep.get().results.size());
 
 			ASSERT(!rep.get().results.empty());
+			ASSERT(!rep.get().bwInterfs.empty());
 			BlobGranuleFileRequest req;
 			req.arena.dependsOn(rep.get().arena);
 			req.keyRange = rep.get().results[locIdx].first;
 			req.tenantInfo = TenantInfo(tenant->id(), reqToken);
 			req.readVersion = committedVersion;
 
-			auto& bwInterf = rep.get().results[locIdx].second;
+			UID bwId = rep.get().results[locIdx].second;
+			ASSERT(bwId != UID());
+			int bwInterfIdx;
+			for (bwInterfIdx = 0; bwInterfIdx < rep.get().bwInterfs.size(); bwInterfIdx++) {
+				if (rep.get().bwInterfs[bwInterfIdx].id() == bwId) {
+					break;
+				}
+			}
+			ASSERT(bwInterfIdx < rep.get().bwInterfs.size());
+			auto& bwInterf = rep.get().bwInterfs[bwInterfIdx];
 			ErrorOr<BlobGranuleFileReply> fileRep = wait(bwInterf.blobGranuleFileRequest.tryGetReply(req));
 			if (fileRep.isError()) {
 				throw fileRep.getError();

@@ -33,8 +33,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
  */
 @ExtendWith(RequiresDatabase.class)
 public class TransactionIntegrationTest {
-    public static final int API_VERSION = 720;
-    private static final FDB fdb = FDB.selectAPIVersion(API_VERSION);
+    private static final FDB fdb = FDB.selectAPIVersion(ApiVersion.LATEST);
 
     @Test
     public void testOperationsAfterCommit() throws Exception {
