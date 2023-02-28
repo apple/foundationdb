@@ -140,6 +140,7 @@ struct ManagementClusterMetadata {
 	static KeyBackedMap<ClusterName, int64_t, TupleCodec<ClusterName>, BinaryCodec<int64_t>> clusterTenantCount;
 
 	// A set of (cluster name, tenant name, tenant ID) tuples ordered by cluster
+	// Renaming tenants are stored twice in the index, with the destination name stored with ID -1
 	static KeyBackedSet<Tuple> clusterTenantIndex;
 
 	// A set of (cluster, tenant group name) tuples ordered by cluster
@@ -745,6 +746,8 @@ struct RemoveClusterImpl {
 			updatedEntry.clusterState = DataClusterState::REMOVING;
 			updatedEntry.capacity.numTenantGroups = 0;
 
+			MetaclusterMetadata::activeRestoreIds().erase(tr, self->clusterName);
+
 			updateClusterMetadata(tr,
 			                      self->ctx.clusterName.get(),
 			                      self->ctx.dataClusterMetadata.get(),
@@ -799,10 +802,11 @@ struct RemoveClusterImpl {
 		return Void();
 	}
 
-	// Returns true if all tenants have been purged
-	ACTOR static Future<bool> purgeTenants(RemoveClusterImpl* self,
-	                                       Reference<typename DB::TransactionT> tr,
-	                                       std::pair<Tuple, Tuple> clusterTupleRange) {
+	// Returns a pair of bools. The first will be true if all tenants have been purged, and the second will be true if
+	// any tenants have been purged
+	ACTOR static Future<std::pair<bool, bool>> purgeTenants(RemoveClusterImpl* self,
+	                                                        Reference<typename DB::TransactionT> tr,
+	                                                        std::pair<Tuple, Tuple> clusterTupleRange) {
 		ASSERT(self->ctx.dataClusterMetadata.get().entry.clusterState == DataClusterState::REMOVING);
 
 		// Get the list of tenants
@@ -813,12 +817,14 @@ struct RemoveClusterImpl {
 		state KeyBackedRangeResult<Tuple> tenantEntries = wait(tenantEntriesFuture);
 
 		// Erase each tenant from the tenant map on the management cluster
-		std::set<int64_t> erasedTenants;
+		int64_t erasedTenants = 0;
 		for (Tuple entry : tenantEntries.results) {
 			int64_t tenantId = entry.getInt(2);
 			ASSERT(entry.getString(0) == self->ctx.clusterName.get());
-			erasedTenants.insert(tenantId);
-			ManagementClusterMetadata::tenantMetadata().tenantMap.erase(tr, tenantId);
+			if (tenantId != TenantInfo::INVALID_TENANT) {
+				++erasedTenants;
+				ManagementClusterMetadata::tenantMetadata().tenantMap.erase(tr, tenantId);
+			}
 			ManagementClusterMetadata::tenantMetadata().tenantNameIndex.erase(tr, entry.getString(1));
 			ManagementClusterMetadata::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 		}
@@ -831,12 +837,11 @@ struct RemoveClusterImpl {
 			    Tuple::makeTuple(self->ctx.clusterName.get(), keyAfter(tenantEntries.results.rbegin()->getString(1))));
 		}
 
-		ManagementClusterMetadata::tenantMetadata().tenantCount.atomicOp(
-		    tr, -erasedTenants.size(), MutationRef::AddValue);
+		ManagementClusterMetadata::tenantMetadata().tenantCount.atomicOp(tr, -erasedTenants, MutationRef::AddValue);
 		ManagementClusterMetadata::clusterTenantCount.atomicOp(
-		    tr, self->ctx.clusterName.get(), -erasedTenants.size(), MutationRef::AddValue);
+		    tr, self->ctx.clusterName.get(), -erasedTenants, MutationRef::AddValue);
 
-		return !tenantEntries.more;
+		return std::make_pair(!tenantEntries.more, !tenantEntries.results.empty());
 	}
 
 	// Returns true if all tenant groups have been purged
@@ -877,7 +882,6 @@ struct RemoveClusterImpl {
 		ManagementClusterMetadata::dataClusters().erase(tr, ctx.clusterName.get());
 		ManagementClusterMetadata::dataClusterConnectionRecords.erase(tr, ctx.clusterName.get());
 		ManagementClusterMetadata::clusterTenantCount.erase(tr, ctx.clusterName.get());
-		MetaclusterMetadata::activeRestoreIds().erase(tr, ctx.clusterName.get());
 	}
 
 	// Removes the next set of metadata from the management cluster; returns true when all specified
@@ -885,25 +889,23 @@ struct RemoveClusterImpl {
 	ACTOR static Future<bool> managementClusterPurgeSome(RemoveClusterImpl* self,
 	                                                     Reference<typename DB::TransactionT> tr,
 	                                                     std::pair<Tuple, Tuple> clusterTupleRange,
-	                                                     bool* deleteTenants,
-	                                                     bool* deleteTenantGroups) {
+	                                                     bool* deleteTenants) {
 		if (deleteTenants) {
-			bool deletedAllTenants = wait(purgeTenants(self, tr, clusterTupleRange));
-			if (!deletedAllTenants) {
+			std::pair<bool, bool> deleteResult = wait(purgeTenants(self, tr, clusterTupleRange));
+			// If we didn't delete everything, return and try again on the next iteration
+			if (!deleteResult.first) {
 				return false;
 			}
-			*deleteTenants = false;
+
+			// If there was nothing to delete, then we don't have to try purging tenants again the next time
+			*deleteTenants = deleteResult.second;
 		}
 
-		if (deleteTenantGroups) {
-			bool deletedAllTenantGroups = wait(purgeTenantGroups(self, tr, clusterTupleRange));
-			if (!deletedAllTenantGroups) {
-				return false;
-			}
-			*deleteTenantGroups = false;
+		bool deletedAllTenantGroups = wait(purgeTenantGroups(self, tr, clusterTupleRange));
+		if (!deletedAllTenantGroups) {
+			return false;
 		}
 
-		self->removeDataClusterEntry(tr);
 		return true;
 	}
 
@@ -913,21 +915,23 @@ struct RemoveClusterImpl {
 		    Tuple::makeTuple(self->ctx.clusterName.get()), Tuple::makeTuple(keyAfter(self->ctx.clusterName.get())));
 
 		state bool deleteTenants = true;
-		state bool deleteTenantGroups = true;
 
 		loop {
 			bool clearedAll = wait(self->ctx.runManagementTransaction(
-			    [self = self,
-			     clusterTupleRange = clusterTupleRange,
-			     deleteTenants = &deleteTenants,
-			     deleteTenantGroups = &deleteTenantGroups](Reference<typename DB::TransactionT> tr) {
-				    return managementClusterPurgeSome(self, tr, clusterTupleRange, deleteTenants, deleteTenantGroups);
+			    [self = self, clusterTupleRange = clusterTupleRange, deleteTenants = &deleteTenants](
+			        Reference<typename DB::TransactionT> tr) {
+				    return managementClusterPurgeSome(self, tr, clusterTupleRange, deleteTenants);
 			    }));
 
 			if (clearedAll) {
 				break;
 			}
 		}
+
+		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+			self->removeDataClusterEntry(tr);
+			return Future<Void>(Void());
+		}));
 
 		TraceEvent("RemovedDataCluster").detail("Name", self->ctx.clusterName.get());
 		return Void();
@@ -1067,6 +1071,10 @@ struct RegisterClusterImpl {
 			self->clusterEntry.clusterState = DataClusterState::REGISTERING;
 			self->clusterEntry.allocated = ClusterUsage();
 			self->clusterEntry.id = deterministicRandom()->randomUniqueID();
+
+			// If we happen to have any orphaned restore IDs from a previous time this cluster was in a metacluster,
+			// erase them now.
+			MetaclusterMetadata::activeRestoreIds().erase(tr, self->clusterName);
 
 			ManagementClusterMetadata::dataClusters().set(tr, self->clusterName, self->clusterEntry);
 			ManagementClusterMetadata::dataClusterConnectionRecords.set(tr, self->clusterName, self->connectionString);
@@ -1509,21 +1517,21 @@ struct RestoreClusterImpl {
 	// Store the cluster entry for the restored cluster
 	ACTOR static Future<Void> registerRestoringClusterInManagementCluster(RestoreClusterImpl* self,
 	                                                                      Reference<typename DB::TransactionT> tr) {
-		state DataClusterEntry clusterEntry;
-		clusterEntry.id = self->dataClusterId;
-		clusterEntry.clusterState = DataClusterState::RESTORING;
 
 		state Optional<DataClusterMetadata> dataClusterMetadata = wait(tryGetClusterTransaction(tr, self->clusterName));
 		if (dataClusterMetadata.present() &&
 		    (dataClusterMetadata.get().entry.clusterState != DataClusterState::RESTORING ||
-		     dataClusterMetadata.get().entry.id != clusterEntry.id ||
-		     !dataClusterMetadata.get().matchesConfiguration(
-		         DataClusterMetadata(clusterEntry, self->connectionString)))) {
+		     !self->dataClusterId.isValid() || dataClusterMetadata.get().entry.id != self->dataClusterId)) {
 			TraceEvent("RestoredClusterAlreadyExists").detail("ClusterName", self->clusterName);
 			throw cluster_already_exists();
 		} else if (!self->restoreDryRun) {
 			MetaclusterMetadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
 			MetaclusterMetadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
+
+			self->dataClusterId = deterministicRandom()->randomUniqueID();
+			DataClusterEntry clusterEntry;
+			clusterEntry.id = self->dataClusterId;
+			clusterEntry.clusterState = DataClusterState::RESTORING;
 
 			ManagementClusterMetadata::dataClusters().set(tr, self->clusterName, clusterEntry);
 			ManagementClusterMetadata::dataClusterConnectionRecords.set(tr, self->clusterName, self->connectionString);
@@ -1778,18 +1786,24 @@ struct RestoreClusterImpl {
 
 		// A data cluster tenant is not present on the management cluster
 		if (managementEntry == self->mgmtClusterTenantMap.end() ||
-		    managementEntry->second.assignedCluster != self->clusterName) {
+		    managementEntry->second.assignedCluster != self->clusterName ||
+		    managementEntry->second.tenantState == TenantState::REMOVING) {
 			if (self->restoreDryRun) {
 				if (managementEntry == self->mgmtClusterTenantMap.end()) {
 					self->messages.push_back(fmt::format("Delete missing tenant `{}' with ID {} on data cluster",
 					                                     printable(tenantEntry.tenantName),
 					                                     tenantEntry.id));
-				} else {
+				} else if (managementEntry->second.assignedCluster != self->clusterName) {
 					self->messages.push_back(fmt::format(
 					    "Delete tenant `{}' with ID {} on data cluster because it is now located on the cluster `{}'",
 					    printable(tenantEntry.tenantName),
 					    tenantEntry.id,
 					    printable(managementEntry->second.assignedCluster)));
+				} else {
+					self->messages.push_back(
+					    fmt::format("Delete tenant `{}' with ID {} on data cluster because it is in the REMOVING state",
+					                printable(tenantEntry.tenantName),
+					                tenantEntry.id));
 				}
 			} else {
 				wait(self->runRestoreDataClusterTransaction([tenantEntry = tenantEntry](Reference<ITransaction> tr) {
@@ -1803,21 +1817,24 @@ struct RestoreClusterImpl {
 			state MetaclusterTenantMapEntry managementTenant = managementEntry->second;
 
 			// Rename
-			state bool renamed = tenantName != managementTenant.tenantName;
+			state TenantName managementTenantName = managementTenant.tenantState != TenantState::RENAMING
+			                                            ? managementTenant.tenantName
+			                                            : managementTenant.renameDestination.get();
+			state bool renamed = tenantName != managementTenantName;
 			if (renamed) {
 				state TenantName temporaryName;
-				state bool usingTemporaryName = self->dataClusterTenantNames.count(managementTenant.tenantName) > 0;
+				state bool usingTemporaryName = self->dataClusterTenantNames.count(managementTenantName) > 0;
 				if (usingTemporaryName) {
-					temporaryName = metaclusterTemporaryRenamePrefix.withSuffix(managementTenant.tenantName);
+					temporaryName = metaclusterTemporaryRenamePrefix.withSuffix(managementTenantName);
 				} else {
-					temporaryName = managementTenant.tenantName;
+					temporaryName = managementTenantName;
 				}
 
 				if (self->restoreDryRun) {
 					self->messages.push_back(fmt::format("Rename tenant `{}' with ID {} to `{}' on data cluster{}",
 					                                     printable(tenantEntry.tenantName),
 					                                     tenantEntry.id,
-					                                     printable(managementTenant.tenantName),
+					                                     printable(managementTenantName),
 					                                     usingTemporaryName ? " via temporary name" : ""));
 				} else {
 					wait(self->runRestoreDataClusterTransaction(
@@ -1843,7 +1860,6 @@ struct RestoreClusterImpl {
 			bool configurationChanged = !managementTenant.matchesConfiguration(tenantEntry);
 			if (configurationChanged ||
 			    managementTenant.configurationSequenceNum != tenantEntry.configurationSequenceNum) {
-				ASSERT(managementTenant.configurationSequenceNum >= tenantEntry.configurationSequenceNum);
 				if (self->restoreDryRun) {
 					// If this is an update to the internal sequence number only and we are also renaming the tenant,
 					// we don't need to report anything. The internal metadata update is (at least partially) caused
@@ -1856,11 +1872,15 @@ struct RestoreClusterImpl {
 						                configurationChanged ? "" : " (internal metadata only)"));
 					}
 				} else {
-					wait(self->runRestoreDataClusterTransaction(
-					    [self = self, managementTenant = managementTenant](Reference<ITransaction> tr) {
-						    return updateTenantConfiguration(
-						        self, tr, managementTenant.id, managementTenant.toTenantMapEntry());
-					    }));
+					wait(self->runRestoreDataClusterTransaction([self = self,
+					                                             managementTenant = managementTenant,
+					                                             tenantEntry = tenantEntry,
+					                                             tenantName = tenantName](Reference<ITransaction> tr) {
+						ASSERT_GE(managementTenant.configurationSequenceNum, tenantEntry.configurationSequenceNum);
+						TenantMapEntry updatedEntry = managementTenant.toTenantMapEntry();
+						updatedEntry.tenantName = tenantName;
+						return updateTenantConfiguration(self, tr, managementTenant.id, updatedEntry);
+					}));
 					// SOMEDAY: we could mark the tenant in the management cluster as READY if it is in the
 					// UPDATING_CONFIGURATION state
 				}
@@ -1870,7 +1890,7 @@ struct RestoreClusterImpl {
 		}
 	}
 
-	Future<Void> renameTenantBatch(std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenantsToRename) {
+	Future<Void> renameTenantBatch(std::map<TenantName, TenantMapEntry> tenantsToRename) {
 		return runRestoreDataClusterTransaction([this, tenantsToRename](Reference<ITransaction> tr) {
 			std::vector<Future<Void>> renameFutures;
 			for (auto t : tenantsToRename) {
@@ -1891,15 +1911,23 @@ struct RestoreClusterImpl {
 
 		if (!self->restoreDryRun) {
 			state int reconcileIndex;
-			state std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenantsToRename;
+			state std::map<TenantName, TenantMapEntry> tenantsToRename;
 			for (reconcileIndex = 0; reconcileIndex < reconcileFutures.size(); ++reconcileIndex) {
 				Optional<std::pair<TenantName, MetaclusterTenantMapEntry>> const& result =
 				    reconcileFutures[reconcileIndex].get();
-				if (result.present() && result.get().first.startsWith(metaclusterTemporaryRenamePrefix) &&
-				    result.get().first != result.get().second.tenantName) {
-					tenantsToRename.push_back(result.get());
-					if (tenantsToRename.size() >= CLIENT_KNOBS->METACLUSTER_RESTORE_BATCH_SIZE) {
-						wait(self->renameTenantBatch(tenantsToRename));
+
+				if (result.present() && result.get().first.startsWith(metaclusterTemporaryRenamePrefix)) {
+					TenantMapEntry destinationTenant = result.get().second.toTenantMapEntry();
+					if (result.get().second.renameDestination.present()) {
+						destinationTenant.tenantName = result.get().second.renameDestination.get();
+					}
+
+					if (result.get().first != destinationTenant.tenantName) {
+						tenantsToRename[result.get().first] = destinationTenant;
+
+						if (tenantsToRename.size() >= CLIENT_KNOBS->METACLUSTER_RESTORE_BATCH_SIZE) {
+							wait(self->renameTenantBatch(tenantsToRename));
+						}
 					}
 				}
 			}
@@ -1980,7 +2008,15 @@ struct RestoreClusterImpl {
 		Optional<MetaclusterTenantMapEntry> existingEntry = wait(tryGetTenantTransaction(tr, tenantEntry.tenantName));
 		if (existingEntry.present()) {
 			if (existingEntry.get().assignedCluster == self->clusterName) {
-				ASSERT(existingEntry.get().matchesConfiguration(tenantEntry));
+				if (existingEntry.get().id != tenantEntry.id ||
+				    !existingEntry.get().matchesConfiguration(tenantEntry)) {
+					ASSERT(self->restoreDryRun);
+					self->messages.push_back(
+					    fmt::format("The tenant `{}' was modified concurrently with the restore dry-run",
+					                printable(tenantEntry.tenantName)));
+					throw tenant_already_exists();
+				}
+
 				// This is a retry, so return success
 				return false;
 			} else {
@@ -1995,7 +2031,6 @@ struct RestoreClusterImpl {
 		managementEntry.assignedCluster = self->clusterName;
 
 		if (!self->restoreDryRun) {
-
 			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, managementEntry.id, managementEntry);
 			ManagementClusterMetadata::tenantMetadata().tenantNameIndex.set(
 			    tr, managementEntry.tenantName, managementEntry.id);
@@ -2111,21 +2146,21 @@ struct RestoreClusterImpl {
 			}
 
 			if (tenantBatch.size() == CLIENT_KNOBS->METACLUSTER_RESTORE_BATCH_SIZE) {
-				wait(runTransaction(self->ctx.managementDb,
-				                    [self = self, tenantBatch = tenantBatch](Reference<typename DB::TransactionT> tr) {
-					                    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					                    return addTenantBatchToManagementCluster(self, tr, tenantBatch);
-				                    }));
+				wait(self->runRestoreManagementTransaction(
+				    [self = self, tenantBatch = tenantBatch](Reference<typename DB::TransactionT> tr) {
+					    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					    return addTenantBatchToManagementCluster(self, tr, tenantBatch);
+				    }));
 				tenantBatch.clear();
 			}
 		}
 
 		if (!tenantBatch.empty()) {
-			wait(runTransaction(self->ctx.managementDb,
-			                    [self = self, tenantBatch = tenantBatch](Reference<typename DB::TransactionT> tr) {
-				                    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				                    return addTenantBatchToManagementCluster(self, tr, tenantBatch);
-			                    }));
+			wait(self->runRestoreManagementTransaction(
+			    [self = self, tenantBatch = tenantBatch](Reference<typename DB::TransactionT> tr) {
+				    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				    return addTenantBatchToManagementCluster(self, tr, tenantBatch);
+			    }));
 		}
 
 		if (self->restoreDryRun) {
@@ -2203,8 +2238,6 @@ struct RestoreClusterImpl {
 	}
 
 	ACTOR static Future<Void> runManagementClusterRepopulate(RestoreClusterImpl* self) {
-		self->dataClusterId = deterministicRandom()->randomUniqueID();
-
 		// Record the data cluster in the management cluster
 		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return registerRestoringClusterInManagementCluster(self, tr);
@@ -2689,8 +2722,9 @@ struct DeleteTenantImpl {
 
 			ManagementClusterMetadata::clusterTenantIndex.erase(
 			    tr,
-			    Tuple::makeTuple(
-			        tenantEntry.get().assignedCluster, tenantEntry.get().renameDestination.get(), self->tenantId));
+			    Tuple::makeTuple(tenantEntry.get().assignedCluster,
+			                     tenantEntry.get().renameDestination.get(),
+			                     TenantInfo::INVALID_TENANT));
 		}
 
 		// Remove the tenant from its tenant group
@@ -3144,7 +3178,7 @@ struct RenameTenantImpl {
 
 		// Updated indexes to include the new tenant
 		ManagementClusterMetadata::clusterTenantIndex.insert(
-		    tr, Tuple::makeTuple(updatedEntry.assignedCluster, self->newName, self->tenantId));
+		    tr, Tuple::makeTuple(updatedEntry.assignedCluster, self->newName, TenantInfo::INVALID_TENANT));
 
 		return Void();
 	}
@@ -3195,6 +3229,10 @@ struct RenameTenantImpl {
 			// Remove the tenant from the cluster -> tenant index
 			ManagementClusterMetadata::clusterTenantIndex.erase(
 			    tr, Tuple::makeTuple(updatedEntry.assignedCluster, self->oldName, self->tenantId));
+			ManagementClusterMetadata::clusterTenantIndex.erase(
+			    tr, Tuple::makeTuple(updatedEntry.assignedCluster, self->newName, TenantInfo::INVALID_TENANT));
+			ManagementClusterMetadata::clusterTenantIndex.insert(
+			    tr, Tuple::makeTuple(updatedEntry.assignedCluster, self->newName, self->tenantId));
 		}
 
 		return Void();

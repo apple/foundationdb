@@ -214,7 +214,8 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 			    .error(e)
 			    .detail("TenantName", entry.tenantName)
 			    .detail("TenantGroup", entry.tenantGroup);
-			if (e.code() == error_code_metacluster_no_capacity || e.code() == error_code_cluster_removed) {
+			if (e.code() == error_code_metacluster_no_capacity || e.code() == error_code_cluster_removed ||
+			    e.code() == error_code_cluster_restoring) {
 				ASSERT(self->useMetacluster && !self->createMetacluster);
 			} else if (e.code() == error_code_tenant_removed) {
 				ASSERT(self->useMetacluster);
@@ -254,7 +255,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 			TraceEvent(SevDebug, "TenantManagementConcurrencyDeleteTenantError", debugId)
 			    .error(e)
 			    .detail("TenantName", tenant);
-			if (e.code() == error_code_cluster_removed) {
+			if (e.code() == error_code_cluster_removed || e.code() == error_code_cluster_restoring) {
 				ASSERT(self->useMetacluster && !self->createMetacluster);
 			} else if (e.code() != error_code_tenant_not_found) {
 				TraceEvent(SevError, "TenantManagementConcurrencyDeleteTenantFailure", debugId)
@@ -326,7 +327,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 			    .error(e)
 			    .detail("TenantName", tenant)
 			    .detail("TenantGroup", tenantGroup);
-			if (e.code() == error_code_cluster_removed) {
+			if (e.code() == error_code_cluster_removed || e.code() == error_code_cluster_restoring) {
 				ASSERT(self->useMetacluster && !self->createMetacluster);
 			} else if (e.code() == error_code_cluster_no_capacity ||
 			           e.code() == error_code_invalid_tenant_configuration) {
@@ -371,7 +372,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 			    .error(e)
 			    .detail("OldTenantName", oldTenant)
 			    .detail("NewTenantName", newTenant);
-			if (e.code() == error_code_cluster_removed) {
+			if (e.code() == error_code_cluster_removed || e.code() == error_code_cluster_restoring) {
 				ASSERT(self->useMetacluster && !self->createMetacluster);
 			} else if (e.code() == error_code_invalid_tenant_state || e.code() == error_code_tenant_removed ||
 			           e.code() == error_code_cluster_no_capacity) {
