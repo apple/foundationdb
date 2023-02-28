@@ -363,7 +363,7 @@ ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
 		isr.initialClusterVersion = self->recoveryTransactionVersion;
 		isr.encryptMode = self->configuration.encryptionAtRestMode;
-		if (self->configuration.storageEngineParams.getParams().size()) {
+		if (StorageEngineParamsFactory::isSupported(self->configuration.storageServerStoreType.storeType())) {
 			isr.storageEngineParams = self->configuration.storageEngineParams;
 		}
 

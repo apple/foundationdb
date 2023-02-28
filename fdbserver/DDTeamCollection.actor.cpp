@@ -2217,7 +2217,9 @@ public:
 		// always set the params from database configuration when DD starts
 		// it will handle the case where the watch actor did not respond when DD was rebooted
 		// there is no effect if it's consistent with storage servers
-		// wait(self->storageParamsUpdater(self->configuration.storageEngineParams));
+		// TraceEvent(SevDebug, "MonitorStorageEngineChangeColdStart")
+		//     .detail("StoreType", self->configuration.storageServerStoreType.toString());
+		wait(self->storageParamsUpdater(self->configuration.storageEngineParams, false));
 		state SignalableActorCollection collection;
 		state StorageEngineParamSet newParams;
 		loop {
@@ -2259,7 +2261,9 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> storageParamsUpdater(DDTeamCollection* self, StorageEngineParamSet newParams) {
+	ACTOR static Future<Void> storageParamsUpdater(DDTeamCollection* self,
+	                                               StorageEngineParamSet newParams,
+	                                               bool necessary) {
 		// send update requests to all storages interfaces
 		std::vector<Future<ErrorOr<SetStorageEngineParamsReply>>> fs;
 		state std::map<UID, Future<ErrorOr<SetStorageEngineParamsReply>>> fmap;
@@ -2286,28 +2290,36 @@ public:
 			SetStorageEngineParamsReply reply = f.get().get();
 			for (const auto& k : reply.result.applied) {
 				self->configuration.storageEngineParams.set(k, newParams.getParams().at(k));
+				TraceEvent(necessary ? SevDebug : SevWarnAlways, "StorageEngineParamApplied")
+				    .detail("ServerId", serverId)
+				    .detail("Param", k)
+				    .detail("Value", newParams.getParams().at(k));
 			}
 			for (const auto& k : reply.result.needReplacement) {
-				TraceEvent(SevInfo, "StorageEngineParamUpdaterNeedReplacement")
+				TraceEvent(necessary ? SevDebug : SevWarnAlways, "StorageEngineParamUpdaterNeedReplacement")
 				    .detail("ServerId", serverId)
-				    .detail("Param", k);
+				    .detail("Param", k)
+				    .detail("Value", newParams.getParams().at(k));
 			}
 			std::vector<std::string> noNeedReplacement;
-			for (const auto& k : reply.result.unchanged) {
-				TraceEvent(SevInfo, "StorageEngineParamUpdaterUnchanged")
-				    .detail("ServerId", serverId)
-				    .detail("Param", k);
-				if (StorageEngineParamsFactory::getChangeType(self->configuration.storageServerStoreType, k) ==
-				    StorageEngineParamSet::CHANGETYPE::NEEDREPLACEMENT) {
-					// change back to old value, no need to wiggle now
-					// need to update the wiggle data
-					noNeedReplacement.push_back(k);
+			if (necessary) {
+				for (const auto& k : reply.result.unchanged) {
+					TraceEvent(SevDebug, "StorageEngineParamUpdaterUnchanged")
+					    .detail("ServerId", serverId)
+					    .detail("Param", k)
+					    .detail("Value", newParams.getParams().at(k));
+					if (StorageEngineParamsFactory::getChangeType(self->configuration.storageServerStoreType, k) ==
+					    StorageEngineParamSet::CHANGETYPE::NEEDREPLACEMENT) {
+						// change back to old value, no need to wiggle now
+						// need to update the wiggle data
+						noNeedReplacement.push_back(k);
+					}
 				}
 			}
 			if (reply.result.needReplacement.size() || noNeedReplacement.size()) {
 				if (self->storageWiggler && !self->storageWiggler->isStopped()) {
 					// wiggle the storage
-					TraceEvent("WiggleStorageServerForKVParamUpdate").detail("ServerId", serverId);
+					TraceEvent("WiggleStorageServerForKVSParamUpdate").detail("ServerId", serverId);
 					collection.push_back(holdWhile(
 					    self->server_info[serverId],
 					    self->updateStorageMetadata(
@@ -2491,7 +2503,7 @@ public:
 			isr.reqId = deterministicRandom()->randomUniqueID();
 			isr.interfaceId = interfaceId;
 			isr.encryptMode = self->configuration.encryptionAtRestMode;
-			if (self->configuration.storageEngineParams.getParams().size())
+			if (StorageEngineParamsFactory::isSupported(self->configuration.storageServerStoreType.storeType()))
 				isr.storageEngineParams = self->configuration.storageEngineParams;
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
@@ -3729,8 +3741,8 @@ Future<Void> DDTeamCollection::monitorStorageEngineParamsChange() {
 	           : Never();
 }
 
-Future<Void> DDTeamCollection::storageParamsUpdater(StorageEngineParamSet newParams) {
-	return DDTeamCollectionImpl::storageParamsUpdater(this, newParams);
+Future<Void> DDTeamCollection::storageParamsUpdater(StorageEngineParamSet newParams, bool necessary) {
+	return DDTeamCollectionImpl::storageParamsUpdater(this, newParams, necessary);
 }
 
 Future<StorageEngineParamSet> DDTeamCollection::getStorageEngineParams() {

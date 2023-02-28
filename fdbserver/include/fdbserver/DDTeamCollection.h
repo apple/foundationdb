@@ -564,7 +564,10 @@ protected:
 	// The actor monitors the storage engine params' change and send requests to storage servers
 	Future<Void> monitorStorageEngineParamsChange();
 	// Update the storage engine parameters if requested
-	Future<Void> storageParamsUpdater(StorageEngineParamSet newParams);
+	// Necessary means if the update is triggered by monitored changes
+	// Or it's a safety check(like dry run) when startup
+	// It is okay to run as there won't be any changes if parameters are matched on storages and DBConfig
+	Future<Void> storageParamsUpdater(StorageEngineParamSet newParams, bool necessary = true);
 
 	Future<Void> waitHealthyZoneChange();
 
