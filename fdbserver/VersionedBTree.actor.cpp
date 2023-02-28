@@ -8343,7 +8343,12 @@ public:
 	}
 
 	Future<StorageEngineParamResult> setParameters(StorageEngineParamSet const& params) override {
-		StorageEngineParamResult result = checkCompatibility(params).get();
+		// setParameters is stateless, it will reset all unmentioned parameters to their default values
+		// so if you set with an empty set, it will reset everything to defaul if they are not now
+		StorageEngineParamSet newParams(StorageEngineParamsFactory::getParamsValue(getType().storeType()));
+		for (const auto& [k, v] : params.getParams())
+			newParams.set(k, v); // override the default
+		StorageEngineParamResult result = checkCompatibility(newParams).get();
 		for (const auto& k : result.applied) {
 			if (k == "kvstore_range_prefetch")
 				prefetch = !prefetch;

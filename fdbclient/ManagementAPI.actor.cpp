@@ -64,12 +64,6 @@ bool parseStorageEngineParams(KeyValueStoreType::StoreType storeType,
                               std::map<std::string, std::string>& out,
                               bool creating) {
 	auto& paramsInitMap = StorageEngineParamsFactory::getParams(storeType);
-	// Insert all default values when creating the database
-	if (creating) {
-		for (auto const& [k, pair] : paramsInitMap) {
-			out[storageEngineParamsPrefix.toString() + k] = pair.second;
-		}
-	}
 
 	if (kvPairsStr.empty()) {
 		// no params are given, just return
@@ -85,18 +79,11 @@ bool parseStorageEngineParams(KeyValueStoreType::StoreType storeType,
 			auto v = kv.substr(pos + 1);
 			fmt::print("Parsed storage engine param, k:{}; v:{}\n", k, v);
 			if (!paramsInitMap.count(k)) {
-				fmt::print("Error: {} is not a supported parameter for storage engine {}.\n",
+				fmt::print("Warning: {} is not a supported parameter for storage engine {}.\n",
 				           k,
 				           KeyValueStoreType::getStoreTypeStr(storeType));
-				return false;
-			} else {
-				TraceEvent(SevDebug, "ReplaceDefaultStorageEngineParameter")
-				    .detail("StoreType", KeyValueStoreType::getStoreTypeStr(storeType))
-				    .detail("Parameter", k)
-				    .detail("DefaultValue", paramsInitMap[k].second)
-				    .detail("Value", v);
-				out[storageEngineParamsPrefix.toString() + k] = v;
 			}
+			out[storageEngineParamsPrefix.toString() + k] = v;
 		} else {
 			fmt::print("Error: {} does not follow the foramt <param>=<val>\n", kv);
 			return false;
@@ -105,23 +92,17 @@ bool parseStorageEngineParams(KeyValueStoreType::StoreType storeType,
 	return true;
 }
 
-bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m,
-                                       bool& paramsChange,
-                                       bool& clearExistingParams,
-                                       bool creating) {
+bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bool& paramsChange, bool creating) {
 	auto storageEngineParamsKey = configKeysPrefix.toString() + "storage_engine_params";
-	bool storageEngineParamsChange = m.count(storageEngineParamsKey) != 0;
-	if (!storageEngineParamsChange)
+	if (!m.contains(storageEngineParamsKey))
 		return true; // no storage engine params change
 	paramsChange = true;
 	auto storeType =
 	    static_cast<KeyValueStoreType::StoreType>(std::stoi(m[configKeysPrefix.toString() + "storage_engine"]));
-	if (!parseStorageEngineParams(storeType, m[storageEngineParamsKey], m, creating))
-		return false;
+	auto paramStr = m[storageEngineParamsKey];
 	// erase the raw value string delimitered by ","
 	m.erase(storageEngineParamsKey);
-	clearExistingParams = !StorageEngineParamsFactory::isSupported(storeType);
-	return true;
+	return parseStorageEngineParams(storeType, paramStr, m, creating);
 }
 
 // Defines the mapping between configuration names (as exposed by fdbcli, buildConfiguration()) and actual configuration

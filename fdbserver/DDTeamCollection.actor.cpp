@@ -2221,31 +2221,32 @@ public:
 		//     .detail("StoreType", self->configuration.storageServerStoreType.toString());
 		wait(self->storageParamsUpdater(self->configuration.storageEngineParams, false));
 		state SignalableActorCollection collection;
-		state StorageEngineParamSet newParams;
 		loop {
 			state ReadYourWritesTransaction tr(self->dbContext());
-			newParams.getMutableParams().clear();
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				RangeResult paramsF = wait(tr.getRange(storageEngineParamsKeys, CLIENT_KNOBS->TOO_MANY));
+				StorageEngineParamSet newParams;
 				for (const auto& [k, v] : paramsF) {
-					TraceEvent(SevDebug, "MonitorStorageEngineParamsChange").detail("Param", k).detail("Value", v);
-					// params[k.removePrefix(storageEngineParamsPrefix).toString()] = v.toString();
+					// TraceEvent(SevDebug, "MonitorStorageEngineParamsChange").detail("Param", k).detail("Value", v);
 					auto paramK = k.removePrefix(storageEngineParamsPrefix).toString();
-					ASSERT(self->configuration.storageEngineParams.getParams().contains(paramK));
-					// TODO : compare the real value but not the casted string
-					// now it's okay as storage server will compare the real value not the string
-					auto oldV = self->configuration.storageEngineParams.getParams().at(paramK);
-					if (v.toString() != oldV) {
-						TraceEvent("DDTCStorageEngineParamsChange")
-						    .detail("Param", paramK)
-						    .detail("OldV", oldV)
-						    .detail("NewV", v);
-						newParams.set(paramK, v.toString());
-					}
+					newParams.set(paramK, v.toString());
 				}
-				if (newParams.getParams().size()) {
+				// TODO : compare the real value but not the casted string
+				// now it's okay as storage server will compare the real value not the string
+				// auto oldV = self->configuration.storageEngineParams.getParams().at(paramK);
+				// if (v.toString() != oldV) {
+				// 	TraceEvent("DDTCStorageEngineParamsChange")
+				// 	    .detail("Param", paramK)
+				// 	    .detail("OldV", oldV)
+				// 	    .detail("NewV", v);
+				// 	newParams.set(paramK, v.toString());
+				// }
+				if (newParams != self->configuration.storageEngineParams) {
+					TraceEvent("DDTCStorageEngineParamsChange")
+					    .detail("NewParam", describe(newParams.getParams()))
+					    .detail("OldParms", describe(self->configuration.storageEngineParams.getParams()));
 					collection.add(self->storageParamsUpdater(newParams));
 				}
 
@@ -2289,23 +2290,25 @@ public:
 			}
 			SetStorageEngineParamsReply reply = f.get().get();
 			for (const auto& k : reply.result.applied) {
-				self->configuration.storageEngineParams.set(k, newParams.getParams().at(k));
+				newParams.getParams().contains(k)
+				    ? self->configuration.storageEngineParams.set(k, newParams.getParams().at(k))
+				    : self->configuration.storageEngineParams.clear(k);
 				TraceEvent(necessary ? SevDebug : SevWarnAlways, "StorageEngineParamApplied")
 				    .detail("ServerId", serverId)
 				    .detail("Param", k)
-				    .detail("Value", newParams.getParams().at(k));
+				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
 			}
 			for (const auto& k : reply.result.needReplacement) {
 				TraceEvent(necessary ? SevDebug : SevWarnAlways, "StorageEngineParamUpdaterNeedReplacement")
 				    .detail("ServerId", serverId)
 				    .detail("Param", k)
-				    .detail("Value", newParams.getParams().at(k));
+				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
 			}
 			for (const auto& k : reply.result.unknown) {
 				TraceEvent(SevWarn, "UnknownStorageEngineParam")
 				    .detail("ServerId", serverId)
 				    .detail("Param", k)
-				    .detail("Value", newParams.getParams().at(k));
+				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
 			}
 			std::vector<std::string> noNeedReplacement;
 			if (necessary) {
@@ -2313,7 +2316,7 @@ public:
 					TraceEvent(SevDebug, "StorageEngineParamUpdaterUnchanged")
 					    .detail("ServerId", serverId)
 					    .detail("Param", k)
-					    .detail("Value", newParams.getParams().at(k));
+					    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
 					if (StorageEngineParamsFactory::getChangeType(self->configuration.storageServerStoreType, k) ==
 					    StorageEngineParamSet::CHANGETYPE::NEEDREPLACEMENT) {
 						// change back to old value, no need to wiggle now

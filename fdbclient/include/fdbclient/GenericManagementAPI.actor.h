@@ -133,10 +133,7 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 
 ConfigureAutoResult parseConfig(StatusObject const& status);
 
-bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m,
-                                       bool& paramsChange,
-                                       bool& clearExistingParams,
-                                       bool creating);
+bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bool& paramsChange, bool creating);
 
 bool isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration> oldConfiguration,
                                        std::map<std::string, std::string> newConfig,
@@ -282,8 +279,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 		}
 	}
 	state bool storageEngineParamsChange = false;
-	state bool clearExistingStorageParams;
-	if (!checkForStorageEngineParamsChange(m, storageEngineParamsChange, clearExistingStorageParams, creating)) {
+	if (!checkForStorageEngineParamsChange(m, storageEngineParamsChange, creating)) {
 		fmt::print("Error: Invalid configuration for storage engine params\n");
 		return ConfigurationResult::INVALID_CONFIGURATION;
 	}
@@ -535,6 +531,15 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 				             MutationRef::SetVersionstampedValue);
 			}
 
+			// the storage engine param change is stateless
+			// everytime storage engine or parameter changes, it will reset
+			// make sure we clear before setting the new values
+			if (storageEngineParamsChange) {
+				tr->addReadConflictRange(singleKeyRange(storageEngineParamsVersionKey));
+				tr->set(storageEngineParamsVersionKey, versionKey);
+				tr->clear(storageEngineParamsKeys);
+			}
+
 			for (auto i = m.begin(); i != m.end(); ++i) {
 				tr->set(StringRef(i->first), StringRef(i->second));
 				if (i->first == perpetualStorageWiggleKey) {
@@ -554,15 +559,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 
 			tr->addReadConflictRange(singleKeyRange(moveKeysLockOwnerKey));
 			tr->set(moveKeysLockOwnerKey, versionKey);
-
-			if (storageEngineParamsChange) {
-				tr->addReadConflictRange(singleKeyRange(storageEngineParamsVersionKey));
-				tr->set(storageEngineParamsVersionKey, versionKey);
-			}
-
-			if (clearExistingStorageParams) {
-				tr->clear(storageEngineParamsKeys);
-			}
 
 			wait(safeThreadFutureToFuture(tr->commit()));
 			break;
