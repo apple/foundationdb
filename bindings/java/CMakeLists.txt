@@ -114,6 +114,7 @@ set(JAVA_TESTS_SRCS
   src/test/com/apple/foundationdb/test/StackOperation.java
   src/test/com/apple/foundationdb/test/StackTester.java
   src/test/com/apple/foundationdb/test/StackUtils.java
+  src/test/com/apple/foundationdb/test/TestApiVersion.java
   src/test/com/apple/foundationdb/test/TesterArgs.java
   src/test/com/apple/foundationdb/test/TestResult.java
   src/test/com/apple/foundationdb/test/TuplePerformanceTest.java
@@ -138,6 +139,12 @@ set(GENERATED_JAVA_FILES
 
 vexillographer_compile(TARGET fdb_java_options LANG java OUT ${GENERATED_JAVA_DIR}
   OUTPUT ${GENERATED_JAVA_FILES})
+
+if(NOT DEFINED FDB_API_VERSION_FILE)
+  message(FATAL_ERROR "Missing definitions of API versions")
+endif()
+include(${FDB_API_VERSION_FILE})
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/main/com/apple/foundationdb/ApiVersion.java.cmake ${GENERATED_JAVA_DIR}/ApiVersion.java)
 
 set(SYSTEM_NAME "linux")
 if(APPLE)
@@ -198,7 +205,7 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/resources/META-INF)
 set(MANIFEST_FILE ${CMAKE_CURRENT_BINARY_DIR}/resources/META-INF/MANIFEST.MF)
 file(WRITE ${MANIFEST_FILE} ${MANIFEST_TEXT})
 
-add_jar(fdb-java ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_FILES} ${CMAKE_SOURCE_DIR}/LICENSE
+add_jar(fdb-java ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_FILES} ${CMAKE_SOURCE_DIR}/LICENSE ${GENERATED_JAVA_DIR}/ApiVersion.java
   OUTPUT_DIR ${PROJECT_BINARY_DIR}/lib VERSION ${FDB_VERSION} MANIFEST ${MANIFEST_FILE} GENERATE_NATIVE_HEADERS fdb_java_native)
 add_dependencies(fdb-java fdb_java_options)
 

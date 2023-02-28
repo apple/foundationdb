@@ -22,7 +22,7 @@ import fdb
 import sys
 
 if __name__ == '__main__':
-    fdb.api_version(720)
+    fdb.api_version(fdb.LATEST_API_VERSION)
 
 
 @fdb.transactional

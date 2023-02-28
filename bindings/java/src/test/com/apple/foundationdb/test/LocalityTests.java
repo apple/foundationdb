@@ -27,15 +27,14 @@ import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.LocalityUtil;
 import com.apple.foundationdb.Transaction;
-import com.apple.foundationdb.async.CloseableAsyncIterator;
 import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.async.CloseableAsyncIterator;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 public class LocalityTests {
-	public static final int API_VERSION = 720;
 
 	public static void main(String[] args) {
-		FDB fdb = FDB.selectAPIVersion(API_VERSION);
+		FDB fdb = FDB.selectAPIVersion(TestApiVersion.CURRENT);
 		try(Database database = fdb.open(args[0])) {
 			try(Transaction tr = database.createTransaction()) {
 				String[] keyAddresses = LocalityUtil.getAddressesForKey(tr, "a".getBytes()).join();

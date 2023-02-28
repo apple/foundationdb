@@ -57,6 +57,9 @@ API_VERSIONS = [
     700, 710, 720,
 ]
 
+assert (
+    API_VERSIONS[-1] == FDB_API_VERSION
+), "Bindingtester API version list must be updated to include all supported versions"
 
 fdb.api_version(FDB_API_VERSION)
 
