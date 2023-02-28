@@ -461,28 +461,38 @@ ACTOR Future<bool> tenantGetCommand(Reference<IDatabase> db, std::vector<StringR
 				int64_t id;
 				std::string prefix;
 				std::string tenantState;
+				std::string tenantLockState;
+				std::string lockId;
 				std::string tenantGroup;
 				std::string assignedCluster;
 				std::string error;
 
 				doc.get("id", id);
 				doc.get("prefix.printable", prefix);
+				doc.get("lock_state", tenantLockState);
 
 				bool hasTenantState = doc.tryGet("tenant_state", tenantState);
+				bool hasLockId = doc.tryGet("lock_id", lockId);
 				bool hasTenantGroup = doc.tryGet("tenant_group.printable", tenantGroup);
 				bool hasAssignedCluster = doc.tryGet("assigned_cluster.printable", assignedCluster);
 				bool hasError = doc.tryGet("error", error);
 
 				fmt::print("  id: {}\n", id);
-				fmt::print("  prefix: {}\n", printable(prefix).c_str());
+				fmt::print("  prefix: {}\n", printable(prefix));
 				if (hasTenantState) {
-					fmt::print("  tenant state: {}\n", printable(tenantState).c_str());
+					fmt::print("  tenant state: {}\n", printable(tenantState));
 				}
+
+				fmt::print("  lock state: {}\n", tenantLockState);
+				if (hasLockId) {
+					fmt::print("  lock id: {}\n", lockId);
+				}
+
 				if (hasTenantGroup) {
-					fmt::print("  tenant group: {}\n", tenantGroup.c_str());
+					fmt::print("  tenant group: {}\n", tenantGroup);
 				}
 				if (hasAssignedCluster) {
-					fmt::print("  assigned cluster: {}\n", printable(assignedCluster).c_str());
+					fmt::print("  assigned cluster: {}\n", printable(assignedCluster));
 				}
 				if (hasError) {
 					fmt::print("  error: {}\n", error);
@@ -726,18 +736,19 @@ ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<String
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				fmt::print(stderr, "ERROR: Locking a cluster through a management cluster not yet supported\n");
-				return false;
+				wait(MetaclusterAPI::changeTenantLockState(db, name, desiredLockState, uid));
+			} else {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				auto f = tr->get(nameKey);
+				Optional<Value> entry = wait(safeThreadFutureToFuture(f));
+				if (!entry.present()) {
+					fmt::print(stderr, "ERROR: Tenant `{}' does not exist\n", name);
+					return false;
+				}
+				auto tenantId = getTenantId(entry.get());
+				wait(TenantAPI::changeLockState(tr.getPtr(), tenantId, desiredLockState, uid));
+				wait(safeThreadFutureToFuture(tr->commit()));
 			}
-			auto f = tr->get(nameKey);
-			Optional<Value> entry = wait(safeThreadFutureToFuture(f));
-			if (!entry.present()) {
-				fmt::print(stderr, "ERROR: Tenant `{}' does not exist\n", name);
-				return false;
-			}
-			auto tenantId = getTenantId(entry.get());
-			wait(TenantAPI::changeLockState(tr.getPtr(), tenantId, desiredLockState, uid));
-			wait(safeThreadFutureToFuture(tr->commit()));
 			if (desiredLockState != TenantAPI::TenantLockState::UNLOCKED) {
 				fmt::print("Locked tenant `{}' with UID `{}'\n", name.toString(), uid.toString());
 			} else {

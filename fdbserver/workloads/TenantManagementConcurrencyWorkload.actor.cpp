@@ -25,6 +25,7 @@
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbrpc/simulator.h"
@@ -388,6 +389,89 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR static Future<Void> changeLockStateImpl(TenantManagementConcurrencyWorkload* self,
+	                                              TenantName tenant,
+	                                              TenantAPI::TenantLockState lockState,
+	                                              bool useExistingId) {
+		state UID lockId;
+		if (self->useMetacluster) {
+			MetaclusterTenantMapEntry entry = wait(MetaclusterAPI::getTenant(self->mvDb, tenant));
+			if (useExistingId && entry.tenantLockId.present()) {
+				lockId = entry.tenantLockId.get();
+			} else {
+				lockId = deterministicRandom()->randomUniqueID();
+			}
+
+			wait(MetaclusterAPI::changeTenantLockState(self->mvDb, tenant, lockState, lockId));
+		} else {
+			state Reference<ReadYourWritesTransaction> tr = self->dataDb->createTransaction();
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					TenantMapEntry entry = wait(TenantAPI::getTenantTransaction(tr, tenant));
+					if (useExistingId && entry.tenantLockId.present()) {
+						lockId = entry.tenantLockId.get();
+					} else {
+						lockId = deterministicRandom()->randomUniqueID();
+					}
+
+					wait(TenantAPI::changeLockState(tr, entry.id, lockState, lockId));
+					wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
+					break;
+				} catch (Error& e) {
+					wait(tr->onError(e));
+				}
+			}
+		}
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> changeLockState(TenantManagementConcurrencyWorkload* self) {
+		state TenantName tenant = self->chooseTenantName();
+		state TenantAPI::TenantLockState lockState = (TenantAPI::TenantLockState)deterministicRandom()->randomInt(0, 3);
+		state bool useExistingId = deterministicRandom()->coinflip();
+		state UID debugId = deterministicRandom()->randomUniqueID();
+
+		try {
+			loop {
+				TraceEvent(SevDebug, "TenantManagementConcurrencyChangingTenantLockState", debugId)
+				    .detail("TenantName", tenant)
+				    .detail("TenantLockState", TenantAPI::tenantLockStateToString(lockState))
+				    .detail("UseExistingId", useExistingId);
+
+				Optional<Void> result = wait(timeout(changeLockStateImpl(self, tenant, lockState, useExistingId), 30));
+
+				if (result.present()) {
+					TraceEvent(SevDebug, "TenantManagementConcurrencyChangedTenantLockState", debugId)
+					    .detail("TenantName", tenant)
+					    .detail("TenantLockState", TenantAPI::tenantLockStateToString(lockState))
+					    .detail("UseExistingId", useExistingId);
+					break;
+				}
+			}
+
+			return Void();
+		} catch (Error& e) {
+			TraceEvent(SevDebug, "TenantManagementConcurrencyChangeLockStateError", debugId)
+			    .error(e)
+			    .detail("TenantName", tenant)
+			    .detail("TenantLockState", TenantAPI::tenantLockStateToString(lockState))
+			    .detail("UseExistingId", useExistingId);
+			if (e.code() == error_code_cluster_removed) {
+				ASSERT(self->useMetacluster && !self->createMetacluster);
+			} else if (e.code() != error_code_tenant_not_found && e.code() != error_code_tenant_locked) {
+				TraceEvent(SevError, "TenantManagementConcurrencyChangeLockStateFailure", debugId)
+				    .error(e)
+				    .detail("TenantName", tenant)
+				    .detail("TenantLockState", TenantAPI::tenantLockStateToString(lockState))
+				    .detail("UseExistingId", useExistingId);
+				ASSERT(false);
+			}
+			return Void();
+		}
+	}
+
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	ACTOR static Future<Void> _start(Database cx, TenantManagementConcurrencyWorkload* self) {
 		state double start = now();
@@ -403,6 +487,8 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 				wait(configureTenant(self));
 			} else if (operation == 3) {
 				wait(renameTenant(self));
+			} else if (operation == 4) {
+				wait(changeLockState(self));
 			}
 		}
 

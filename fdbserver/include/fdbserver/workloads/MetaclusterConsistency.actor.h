@@ -242,6 +242,8 @@ private:
 
 			if (entry.configurationSequenceNum == metaclusterEntry.configurationSequenceNum) {
 				ASSERT(entry.tenantGroup == metaclusterEntry.tenantGroup);
+				ASSERT_EQ(entry.tenantLockState, metaclusterEntry.tenantLockState);
+				ASSERT(entry.tenantLockId == metaclusterEntry.tenantLockId);
 			}
 		}
 
