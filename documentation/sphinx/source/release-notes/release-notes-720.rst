@@ -3,12 +3,20 @@
 #############
 Release Notes
 #############
+71.2.6
+======
+
+Features
+--------
+- Read-aware Data Distribution is enabled by default. ``knob_READ_SAMPLING_ENABLED=true`` by default.
+
 
 7.2.0
 ======
 
 Features
 --------
+- Read-aware Data Distribution feature is developed for balance the read bytes bandwidth among storage servers.
 
 Performance
 -----------
