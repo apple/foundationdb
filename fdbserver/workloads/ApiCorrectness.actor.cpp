@@ -130,7 +130,7 @@ public:
 		maxKeysPerTransaction = std::max(1, maxTransactionBytes / (maxValueLength + maxLongKeyLength));
 
 		validateEncryptionAtRest =
-		    g_simulator->isSimulated()
+		    g_network->isSimulated()
 		        ? getOption(options, "validateEncryptionAtRest"_sr, deterministicRandom()->coinflip() ? 1 : 0)
 		        : 0;
 

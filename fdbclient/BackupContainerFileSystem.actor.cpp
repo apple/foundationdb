@@ -947,7 +947,8 @@ public:
 			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
 			    wait(bc->readKeyspaceSnapshot(snapshots[i]));
 
-			// return all of the range files
+			// If there is no key ranges filter for the restore OR if the snapshot contains no per-file key range info
+			// then return all of the range files
 			if (keyRangesFilter.empty() || results.second.empty()) {
 				restorable.ranges = std::move(results.first);
 				restorable.keyRanges = std::move(results.second);
