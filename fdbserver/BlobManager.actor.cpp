@@ -3103,7 +3103,9 @@ ACTOR Future<Void> monitorBlobWorker(Reference<BlobManagerData> bmData, BlobWork
 
 		choose {
 			when(wait(waitFailure)) {
-				wait(delay(SERVER_KNOBS->BLOB_WORKER_REJOIN_TIME));
+				if (SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED) {
+					wait(delay(SERVER_KNOBS->BLOB_WORKER_REJOIN_TIME));
+				}
 				if (BM_DEBUG) {
 					fmt::print("BM {0} detected BW {1} is dead\n", bmData->epoch, bwInterf.id().toString());
 				}
