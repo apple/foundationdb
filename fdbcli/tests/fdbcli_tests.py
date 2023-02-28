@@ -1009,6 +1009,61 @@ def tenant_list(logger):
     assert output == "ERROR: unrecognized tenant state(s) `14z'."
 
 
+
+@enable_logging()
+def tenant_lock(logger):
+    logger.debug('Create tenant')
+    setup_tenants(['tenant'])
+
+    logger.debug('Write test key')
+    run_fdbcli_command('usetenant tenant; writemode on; set foo bar')
+    logger.debug('Lock tenant in read-only mode')
+    output = run_fdbcli_command('tenant lock tenant w')
+    output = output.strip()
+    logger.debug('output: {}'.format(output))
+    start_string = "Locked tenant `tenant' with UID `"
+    assert output.startswith(start_string)
+    assert output.endswith("'")
+    uid_str = output[len(start_string):-1]
+    assert len(uid_str) == 32
+
+    logger.debug('Verify tenant is readable')
+    output = run_fdbcli_command('usetenant tenant; get foo').strip()
+    logger.debug('output: {}'.format(output))
+    lines = output.split('\n')
+    assert lines[-1] == "`foo' is `bar'"
+
+    logger.debug('Verify tenant is NOT writeable')
+    output = run_fdbcli_command_and_get_error('usetenant tenant; writemode on; set foo bar2').strip()
+    logger.debug('output: {}'.format(output))
+    assert output == 'ERROR: Tenant is locked (2144)'
+
+    logger.debug('Unlock tenant with UID "{}"'.format(uid_str))
+    output = run_fdbcli_command('tenant unlock tenant {}'.format(uid_str))
+    logger.debug('output: {}'.format(output.strip()))
+    assert output.strip() == "Unlocked tenant `tenant'"
+
+    logger.debug('Lock tenant in rw mode')
+    output = run_fdbcli_command('tenant lock tenant rw {}'.format(uid_str)).strip()
+    logger.debug('output: {}'.format(output))
+    assert output == "Locked tenant `tenant' with UID `{}'".format(uid_str)
+
+    logger.debug('Verify tenant is NOT readable')
+    output = run_fdbcli_command_and_get_error('usetenant tenant; get foo').strip()
+    logger.debug('output: {}'.format(output))
+    assert output == 'ERROR: Tenant is locked (2144)'
+
+    logger.debug('Verify tenant is NOT writeable')
+    output = run_fdbcli_command_and_get_error('usetenant tenant; writemode on; set foo bar2').strip()
+    logger.debug('output: {}'.format(output))
+    assert output == 'ERROR: Tenant is locked (2144)'
+
+    logger.debug('Unlock tenant')
+    output = run_fdbcli_command('tenant unlock tenant {}'.format(uid_str))
+    logger.debug('output: {}'.format(output.strip()))
+    assert output.strip() == "Unlocked tenant `tenant'"
+
+
 @enable_logging()
 def tenant_get(logger):
     setup_tenants(["tenant", "tenant2 tenant_group=tenant_group2"])
@@ -1330,6 +1385,7 @@ def tenants():
     run_tenant_test(tenant_old_commands)
     run_tenant_test(tenant_group_list)
     run_tenant_test(tenant_group_get)
+    run_tenant_test(tenant_lock)
 
 
 @enable_logging()

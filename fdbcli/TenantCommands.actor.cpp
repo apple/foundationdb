@@ -664,6 +664,100 @@ ACTOR Future<bool> tenantRenameCommand(Reference<IDatabase> db, std::vector<Stri
 	return true;
 }
 
+ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	state UID uid;
+	state Reference<ITransaction> tr;
+	state StringRef name;
+	state Key nameKey;
+	state TenantAPI::TenantLockState desiredLockState;
+	state int uidIdx;
+	if (tokens[1] == "lock"_sr && (tokens.size() < 3 || tokens.size() > 5)) {
+		fmt::print("Usage: tenant lock <NAME> [w|rw] [UID]\n\n");
+		fmt::print("Locks a tenant for read-write or read-only with a given UID.\n");
+		fmt::print("By default a read-write lock is created.\n");
+		fmt::print("If no UID is passed, fdbcli will generate one.\n");
+		fmt::print("UID has to be a 16-byte number represented in hex.\n");
+		return false;
+	} else if (tokens[1] == "unlock"_sr && tokens.size() != 4) {
+		fmt::print("Usage: tenant unlock <NAME> <UID>\n\n");
+		return false;
+	}
+	name = tokens[2];
+	nameKey = tenantMapSpecialKeyRange.begin.withSuffix(name);
+	if (tokens[1] == "unlock"_sr) {
+		uidIdx = 3;
+		desiredLockState = TenantAPI::TenantLockState::UNLOCKED;
+	} else {
+		uidIdx = 4;
+		if (tokens.size() > 3) {
+			if (tokens[3] == "w"_sr) {
+				desiredLockState = TenantAPI::TenantLockState::READ_ONLY;
+			} else if (tokens[3] == "rw"_sr) {
+				desiredLockState = TenantAPI::TenantLockState::LOCKED;
+			} else {
+				fmt::print(stderr, "ERROR: Invalid lock type `{}'\n", tokens[3]);
+				return false;
+			}
+		} else {
+			desiredLockState = TenantAPI::TenantLockState::LOCKED;
+		}
+	}
+	if (tokens.size() > uidIdx) {
+		try {
+			auto uidStr = tokens[uidIdx].toString();
+			if (uidStr.size() < 32) {
+				// UID::fromString expects the string to be exactly 32 characters long, but the uid might be shorter
+				// if the most significant byte[s] are 0. So we need to pad
+				uidStr.insert(0, 32 - uidStr.size(), '0');
+			}
+			uid = UID::fromStringThrowsOnFailure(uidStr);
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_operation_failed);
+			fmt::print(stderr, "ERROR: Couldn't not parse `{}' as a valid UID", tokens[uidIdx].toString());
+			return false;
+		}
+	} else {
+		ASSERT(desiredLockState != TenantAPI::TenantLockState::UNLOCKED);
+		uid = deterministicRandom()->randomUniqueID();
+	}
+	tr = db->createTransaction();
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
+			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
+				fmt::print(stderr, "ERROR: Locking a cluster through a management cluster not yet supported\n");
+				return false;
+			}
+			auto f = tr->get(nameKey);
+			Optional<Value> entry = wait(safeThreadFutureToFuture(f));
+			if (!entry.present()) {
+				fmt::print(stderr, "ERROR: Tenant `{}' does not exist\n", name);
+				return false;
+			}
+			auto tenantId = getTenantId(entry.get());
+			wait(TenantAPI::changeLockState(tr.getPtr(), tenantId, desiredLockState, uid));
+			wait(safeThreadFutureToFuture(tr->commit()));
+			if (desiredLockState != TenantAPI::TenantLockState::UNLOCKED) {
+				fmt::print("Locked tenant `{}' with UID `{}'\n", name.toString(), uid.toString());
+			} else {
+				fmt::print("Unlocked tenant `{}'\n", name.toString());
+			}
+			return true;
+		} catch (Error& e) {
+			if (e.code() == error_code_tenant_locked) {
+				if (desiredLockState == TenantAPI::TenantLockState::UNLOCKED) {
+					fmt::print(stderr, "ERROR: Wrong lock UID\n");
+				} else {
+					fmt::print(stderr, "ERROR: Tenant locked with a different UID\n");
+				}
+				return false;
+			}
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
 // tenant command
 Future<bool> tenantCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() == 1) {
@@ -683,6 +777,10 @@ Future<bool> tenantCommand(Reference<IDatabase> db, std::vector<StringRef> token
 		return tenantConfigureCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "rename")) {
 		return tenantRenameCommand(db, tokens);
+	} else if (tokencmp(tokens[1], "lock")) {
+		return tenantLockCommand(db, tokens);
+	} else if (tokencmp(tokens[1], "unlock")) {
+		return tenantLockCommand(db, tokens);
 	} else {
 		printUsage(tokens[0]);
 		return true;
@@ -699,14 +797,15 @@ Future<bool> tenantCommandForwarder(Reference<IDatabase> db, std::vector<StringR
 	}
 
 	return tenantCommand(db, forwardedTokens);
-} // namespace fdb_cli
+}
 
 void tenantGenerator(const char* text,
                      const char* line,
                      std::vector<std::string>& lc,
                      std::vector<StringRef> const& tokens) {
 	if (tokens.size() == 1) {
-		const char* opts[] = { "create", "delete", "deleteId", "list", "get", "configure", "rename", nullptr };
+		const char* opts[] = { "create",    "delete", "deleteId", "list",   "get",
+			                   "configure", "rename", "lock",     "unlock", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokens.size() == 3 && tokencmp(tokens[1], "create")) {
 		const char* opts[] = { "tenant_group=", nullptr };
@@ -723,6 +822,11 @@ void tenantGenerator(const char* text,
 			arrayGenerator(text, line, opts, lc);
 		} else if (tokens.size() == 4 + tokencmp(tokens[3], "unset")) {
 			const char* opts[] = { "ignore_capacity_limit", nullptr };
+			arrayGenerator(text, line, opts, lc);
+		}
+	} else if (tokencmp(tokens[1], "lock")) {
+		if (tokens.size() == 3) {
+			const char* opts[] = { "w", "rw", nullptr };
 			arrayGenerator(text, line, opts, lc);
 		}
 	}
@@ -769,6 +873,12 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 	} else if (tokencmp(tokens[1], "rename") && tokens.size() < 4) {
 		static std::vector<const char*> opts = { "<OLD_NAME>", "<NEW_NAME>" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+	} else if (tokencmp(tokens[1], "lock") && tokens.size() < 5) {
+		static std::vector<const char*> opts = { "<NAME>", "[w|rw]", "[UID]" };
+		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+	} else if (tokencmp(tokens[1], "unlock") && tokens.size() < 4) {
+		static std::vector<const char*> opts = { "<NAME>", "<UID>" };
+		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else {
 		return {};
 	}
@@ -781,7 +891,9 @@ CommandFactory tenantRegisterFactory("tenant",
                                                  "`list' prints a list of tenants in the cluster.\n"
                                                  "`get' prints the metadata for a particular tenant.\n"
                                                  "`configure' modifies the configuration for a tenant.\n"
-                                                 "`rename' changes the name of a tenant.\n"),
+                                                 "`rename' changes the name of a tenant.\n"
+                                                 "`lock` locks a tenant.\n"
+                                                 "`unlock` unlocks a tenant.\n"),
                                      &tenantGenerator,
                                      &tenantHintGenerator);
 
