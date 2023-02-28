@@ -528,10 +528,6 @@ DDQueue::DDQueue(DDQueueInitParams const& params)
     moveReusePhysicalShard(0), moveCreateNewPhysicalShard(0),
     retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0) {}
 
-void DDQueue::init(DDQueueInitParams const& params) {
-	new (this) DDQueue(params);
-}
-
 void DDQueue::startRelocation(int priority, int healthPriority) {
 	// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
 	// we must count it into unhealthyRelocations; because team removers relies on unhealthyRelocations to
@@ -2166,7 +2162,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 }
 
 struct DDQueueImpl {
-	ACTOR static Future<Void> run(DDQueue* self,
+	ACTOR static Future<Void> run(Reference<DDQueue> self,
 	                              Reference<AsyncVar<bool>> processingUnhealthy,
 	                              Reference<AsyncVar<bool>> processingWiggle,
 	                              FutureStream<Promise<int>> getUnhealthyRelocationCount,
@@ -2183,11 +2179,15 @@ struct DDQueueImpl {
 		state Future<Void> launchQueuedWorkTimeout = Never();
 
 		for (int i = 0; i < self->teamCollections.size(); i++) {
-			ddQueueFutures.push_back(BgDDLoadRebalance(self, i, DataMovementReason::REBALANCE_OVERUTILIZED_TEAM));
-			ddQueueFutures.push_back(BgDDLoadRebalance(self, i, DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM));
+			ddQueueFutures.push_back(
+			    BgDDLoadRebalance(self.getPtr(), i, DataMovementReason::REBALANCE_OVERUTILIZED_TEAM));
+			ddQueueFutures.push_back(
+			    BgDDLoadRebalance(self.getPtr(), i, DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM));
 			if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
-				ddQueueFutures.push_back(BgDDLoadRebalance(self, i, DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM));
-				ddQueueFutures.push_back(BgDDLoadRebalance(self, i, DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM));
+				ddQueueFutures.push_back(
+				    BgDDLoadRebalance(self.getPtr(), i, DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM));
+				ddQueueFutures.push_back(
+				    BgDDLoadRebalance(self.getPtr(), i, DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM));
 			}
 		}
 		ddQueueFutures.push_back(delayedAsyncVar(self->rawProcessingUnhealthy, processingUnhealthy, 0));
@@ -2368,7 +2368,11 @@ Future<Void> DDQueue::run(Reference<AsyncVar<bool>> processingUnhealthy,
                           Reference<AsyncVar<bool>> processingWiggle,
                           FutureStream<Promise<int>> getUnhealthyRelocationCount,
                           const DDEnabledState* ddEnabledState) {
-	return DDQueueImpl::run(this, processingUnhealthy, processingWiggle, getUnhealthyRelocationCount, ddEnabledState);
+	return DDQueueImpl::run(Reference<DDQueue>::addRef(this),
+	                        processingUnhealthy,
+	                        processingWiggle,
+	                        getUnhealthyRelocationCount,
+	                        ddEnabledState);
 }
 
 TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {

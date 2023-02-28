@@ -100,7 +100,7 @@ struct DDQueueInitParams {
 	PromiseStream<GetTopKMetricsRequest> const& getTopKMetrics;
 };
 
-struct DDQueue : public IDDRelocationQueue {
+struct DDQueue : public IDDRelocationQueue, ReferenceCounted<DDQueue> {
 	friend struct DDQueueImpl;
 
 	typedef Reference<IDataDistributionTeam> ITeamRef;
@@ -291,8 +291,6 @@ struct DDQueue : public IDDRelocationQueue {
 	};
 	std::vector<int> retryFindDstReasonCount;
 
-	void init(DDQueueInitParams const& params);
-
 	DDQueue() = default;
 
 	void startRelocation(int priority, int healthPriority);
@@ -357,8 +355,7 @@ struct DDQueue : public IDDRelocationQueue {
 	                 FutureStream<Promise<int>> getUnhealthyRelocationCount,
 	                 const DDEnabledState* ddEnabledState);
 
-protected:
-	DDQueue(DDQueueInitParams const& params);
+	explicit DDQueue(DDQueueInitParams const& params);
 };
 
 #endif // FOUNDATIONDB_DDRELOCATIONQUEUE_H

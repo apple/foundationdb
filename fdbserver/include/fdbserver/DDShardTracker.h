@@ -47,7 +47,7 @@ struct DataDistributionTrackerInitParams {
 	Optional<Reference<TenantCache>> ddTenantCache;
 };
 
-struct DataDistributionTracker : public IDDShardTracker {
+struct DataDistributionTracker : public IDDShardTracker, ReferenceCounted<DataDistributionTracker> {
 	friend struct DataDistributionTrackerImpl;
 
 	Reference<IDDTxnProcessor> db;
@@ -107,8 +107,6 @@ struct DataDistributionTracker : public IDDShardTracker {
 
 	DataDistributionTracker() = default;
 
-	void init(DataDistributionTrackerInitParams const& params) { new (this) DataDistributionTracker(params); }
-
 	~DataDistributionTracker() override;
 
 	double getAverageShardBytes() override { return maxShardSize->get().get() / 2.0; }
@@ -119,7 +117,6 @@ struct DataDistributionTracker : public IDDShardTracker {
 	                 FutureStream<GetMetricsListRequest> const& getShardMetricsList,
 	                 FutureStream<Promise<int64_t>> const& getAverageShardBytes);
 
-protected:
 	explicit DataDistributionTracker(DataDistributionTrackerInitParams const& params);
 };
 
