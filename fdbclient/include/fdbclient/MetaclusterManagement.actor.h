@@ -1517,7 +1517,6 @@ struct RestoreClusterImpl {
 	// Store the cluster entry for the restored cluster
 	ACTOR static Future<Void> registerRestoringClusterInManagementCluster(RestoreClusterImpl* self,
 	                                                                      Reference<typename DB::TransactionT> tr) {
-
 		state Optional<DataClusterMetadata> dataClusterMetadata = wait(tryGetClusterTransaction(tr, self->clusterName));
 		if (dataClusterMetadata.present() &&
 		    (dataClusterMetadata.get().entry.clusterState != DataClusterState::RESTORING ||
@@ -1528,7 +1527,10 @@ struct RestoreClusterImpl {
 			MetaclusterMetadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
 			MetaclusterMetadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
 
-			self->dataClusterId = deterministicRandom()->randomUniqueID();
+			if (!dataClusterMetadata.present()) {
+				self->dataClusterId = deterministicRandom()->randomUniqueID();
+			}
+
 			DataClusterEntry clusterEntry;
 			clusterEntry.id = self->dataClusterId;
 			clusterEntry.clusterState = DataClusterState::RESTORING;
