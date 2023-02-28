@@ -147,7 +147,8 @@ std::string TenantMapEntry::toJson() const {
 }
 
 bool TenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const {
-	return tenantGroup == other.tenantGroup;
+	return tenantGroup == other.tenantGroup && tenantLockState == other.tenantLockState &&
+	       tenantLockId == other.tenantLockId;
 }
 
 void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> value) {
