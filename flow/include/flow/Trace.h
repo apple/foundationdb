@@ -415,17 +415,17 @@ public:
 	const TraceEventFields& getFields() const { return fields; }
 
 	template <class Transaction>
-	void moveToTransaction(Transaction& tr) {
+	void moveTo(Transaction& tr) {
 		tr.debugTrace(std::move(*this));
 	}
 
 	template <class Transaction>
-	void moveToTransaction(Reference<Transaction> tr) {
+	void moveTo(Reference<Transaction> tr) {
 		tr->debugTrace(std::move(*this));
 	}
 
 	template <class Transaction>
-	void moveToTransaction(Transaction* tr) {
+	void moveTo(Transaction* tr) {
 		tr->debugTrace(std::move(*this));
 	}
 

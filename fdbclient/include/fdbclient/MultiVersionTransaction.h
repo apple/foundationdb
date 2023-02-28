@@ -554,6 +554,9 @@ public:
 		throw internal_error();
 	}
 
+	void debugTrace(BaseTraceEvent&& event) override;
+	void debugPrint(std::string const& message) override;
+
 	void addref() override { ThreadSafeReferenceCounted<DLTransaction>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLTransaction>::delref(); }
 

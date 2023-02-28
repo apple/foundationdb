@@ -488,6 +488,14 @@ void DLTransaction::reset() {
 	api->transactionReset(tr);
 }
 
+void DLTransaction::debugTrace(BaseTraceEvent&& event) {
+	event.detail("CommitResult", "Deferred logging unsupported").log();
+};
+
+void DLTransaction::debugPrint(std::string const& message) {
+	fmt::print("[Deferred logging unsupported] {}\n", message);
+}
+
 ThreadFuture<VersionVector> DLTransaction::getVersionVector() {
 	return VersionVector(); // not implemented
 }

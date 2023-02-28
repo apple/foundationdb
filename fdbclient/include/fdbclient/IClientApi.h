@@ -142,10 +142,8 @@ public:
 
 	virtual Optional<TenantName> getTenant() = 0;
 
-	virtual void debugTrace(BaseTraceEvent&& event) {
-		event.detail("CommitResult", "Deferred logging unsupported").log();
-	};
-	virtual void debugPrint(std::string const& message) { fmt::print("[Deferred logging unsupported] {}\n", message); }
+	virtual void debugTrace(BaseTraceEvent&& event) = 0;
+	virtual void debugPrint(std::string const& message) = 0;
 
 	template <class... Args>
 	void debugFmtPrint(std::string const& message, Args&&... args) {
