@@ -59,14 +59,10 @@ struct TenantMapEntryTxnStateStore {
 	int64_t id = -1;
 	TenantName tenantName;
 	TenantAPI::TenantLockState tenantLockState = TenantAPI::TenantLockState::UNLOCKED;
-	Optional<UID> tenantLockId;
 
 	TenantMapEntryTxnStateStore() {}
-	TenantMapEntryTxnStateStore(int64_t id,
-	                            TenantName tenantName,
-	                            TenantAPI::TenantLockState tenantLockState,
-	                            Optional<UID> tenantLockId)
-	  : id(id), tenantName(tenantName), tenantLockState(tenantLockState), tenantLockId(tenantLockId) {}
+	TenantMapEntryTxnStateStore(int64_t id, TenantName tenantName, TenantAPI::TenantLockState tenantLockState)
+	  : id(id), tenantName(tenantName), tenantLockState(tenantLockState) {}
 
 	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
 	static TenantMapEntryTxnStateStore decode(ValueRef const& value) {
@@ -75,7 +71,7 @@ struct TenantMapEntryTxnStateStore {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, tenantLockState, tenantLockId, tenantName);
+		serializer(ar, id, tenantLockState, tenantName);
 	}
 };
 
@@ -106,7 +102,7 @@ struct TenantMapEntry {
 	}
 
 	TenantMapEntryTxnStateStore toTxnStateStoreEntry() const {
-		return TenantMapEntryTxnStateStore(id, tenantName, tenantLockState, tenantLockId);
+		return TenantMapEntryTxnStateStore(id, tenantName, tenantLockState);
 	}
 
 	bool operator==(TenantMapEntry const& other) const;
