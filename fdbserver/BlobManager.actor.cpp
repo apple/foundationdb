@@ -64,7 +64,8 @@
 #define BM_DEBUG false
 #define BM_PURGE_DEBUG false
 
-void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
+void handleClientBlobRange(int64_t epoch,
+                           KeyRangeMap<bool>* knownBlobRanges,
                            Arena& ar,
                            VectorRef<KeyRangeRef>* rangesToAdd,
                            VectorRef<KeyRangeRef>* rangesToRemove,
@@ -84,14 +85,16 @@ void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
 			KeyRangeRef overlap(overlapStart, overlapEnd);
 			if (rangeActive) {
 				if (BM_DEBUG) {
-					fmt::print("BM Adding client range [{0} - {1})\n",
+					fmt::print("BM {0} Adding client range [{1} - {2})\n",
+					           epoch,
 					           overlapStart.printable().c_str(),
 					           overlapEnd.printable().c_str());
 				}
 				rangesToAdd->push_back_deep(ar, overlap);
 			} else {
 				if (BM_DEBUG) {
-					fmt::print("BM Removing client range [{0} - {1})\n",
+					fmt::print("BM {0} Removing client range [{1} - {2})\n",
+					           epoch,
 					           overlapStart.printable().c_str(),
 					           overlapEnd.printable().c_str());
 				}
@@ -102,7 +105,8 @@ void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
 	knownBlobRanges->insert(keyRange, rangeActive);
 }
 
-void updateClientBlobRanges(KeyRangeMap<bool>* knownBlobRanges,
+void updateClientBlobRanges(int64_t epoch,
+                            KeyRangeMap<bool>* knownBlobRanges,
                             RangeResult dbBlobRanges,
                             Arena& ar,
                             VectorRef<KeyRangeRef>* rangesToAdd,
@@ -126,11 +130,11 @@ void updateClientBlobRanges(KeyRangeMap<bool>* knownBlobRanges,
 	if (dbBlobRanges.size() == 0) {
 		// special case. Nothing in the DB, reset knownBlobRanges and revoke all existing ranges from workers
 		handleClientBlobRange(
-		    knownBlobRanges, ar, rangesToAdd, rangesToRemove, normalKeys.begin, normalKeys.end, false);
+		    epoch, knownBlobRanges, ar, rangesToAdd, rangesToRemove, normalKeys.begin, normalKeys.end, false);
 	} else {
 		if (dbBlobRanges[0].key > normalKeys.begin) {
 			handleClientBlobRange(
-			    knownBlobRanges, ar, rangesToAdd, rangesToRemove, normalKeys.begin, dbBlobRanges[0].key, false);
+			    epoch, knownBlobRanges, ar, rangesToAdd, rangesToRemove, normalKeys.begin, dbBlobRanges[0].key, false);
 		}
 		for (int i = 0; i < dbBlobRanges.size() - 1; i++) {
 			if (dbBlobRanges[i].key >= normalKeys.end) {
@@ -142,7 +146,8 @@ void updateClientBlobRanges(KeyRangeMap<bool>* knownBlobRanges,
 			bool active = dbBlobRanges[i].value == blobRangeActive;
 			if (active) {
 				if (BM_DEBUG) {
-					fmt::print("BM sees client range [{0} - {1})\n",
+					fmt::print("BM {0} sees client range [{1} - {2})\n",
+					           epoch,
 					           dbBlobRanges[i].key.printable(),
 					           dbBlobRanges[i + 1].key.printable());
 				}
@@ -157,10 +162,11 @@ void updateClientBlobRanges(KeyRangeMap<bool>* knownBlobRanges,
 				endKey = normalKeys.end;
 			}
 			handleClientBlobRange(
-			    knownBlobRanges, ar, rangesToAdd, rangesToRemove, dbBlobRanges[i].key, endKey, active);
+			    epoch, knownBlobRanges, ar, rangesToAdd, rangesToRemove, dbBlobRanges[i].key, endKey, active);
 		}
 		if (dbBlobRanges[dbBlobRanges.size() - 1].key < normalKeys.end) {
-			handleClientBlobRange(knownBlobRanges,
+			handleClientBlobRange(epoch,
+			                      knownBlobRanges,
 			                      ar,
 			                      rangesToAdd,
 			                      rangesToRemove,
@@ -1357,7 +1363,8 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 
 				VectorRef<KeyRangeRef> rangesToAdd;
 				VectorRef<KeyRangeRef> rangesToRemove;
-				updateClientBlobRanges(&bmData->knownBlobRanges, results, ar, &rangesToAdd, &rangesToRemove);
+				updateClientBlobRanges(
+				    bmData->epoch, &bmData->knownBlobRanges, results, ar, &rangesToAdd, &rangesToRemove);
 
 				if (needToCoalesce) {
 					// recovery has granules instead of known ranges in here. We need to do so to identify any parts of
@@ -1412,7 +1419,8 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				for (auto f : splitFutures) {
 					state BlobGranuleSplitPoints splitPoints = wait(f);
 					if (BM_DEBUG) {
-						fmt::print("Split client range [{0} - {1}) into {2} ranges:\n",
+						fmt::print("BM {0} Splitting client range [{1} - {2}) into {3} ranges.\n",
+						           bmData->epoch,
 						           splitPoints.keys[0].printable(),
 						           splitPoints.keys[splitPoints.keys.size() - 1].printable(),
 						           splitPoints.keys.size() - 1);
@@ -1421,6 +1429,14 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 					// Write to DB BEFORE sending assign requests, so that if manager dies before/during, new manager
 					// picks up the same ranges
 					wait(writeInitialGranuleMapping(bmData, splitPoints));
+
+					if (BM_DEBUG) {
+						fmt::print("BM {0} Split client range [{1} - {2}) into {3} ranges:\n",
+						           bmData->epoch,
+						           splitPoints.keys[0].printable(),
+						           splitPoints.keys[splitPoints.keys.size() - 1].printable(),
+						           splitPoints.keys.size() - 1);
+					}
 
 					for (int i = 0; i < splitPoints.keys.size() - 1; i++) {
 						KeyRange range = KeyRange(KeyRangeRef(splitPoints.keys[i], splitPoints.keys[i + 1]));
@@ -4524,6 +4540,61 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
 	return Void();
 }
 
+ACTOR Future<Void> waitForcePurgeBlobbified(Reference<BlobManagerData> self, KeyRangeRef range) {
+	// To avoid races with a range still being blobbified, wait to initiate force purge until blobbification is complete
+	// Also needs to be idempotent with previous purges though, so if range is already purging, skip this check
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} waitForcePurgeBlobbified [{1} - {2}): start\n",
+		           self->epoch,
+		           range.begin.printable(),
+		           range.end.printable());
+	}
+	state Transaction tr(self->db);
+	loop {
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+		try {
+			state Future<Optional<Version>> verifyFuture =
+			    timeout(self->db->verifyBlobRange(range, latestVersion), 10.0);
+			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr, range));
+			if (purgeState != ForcedPurgeState::NonePurged) {
+				// FIXME: likely does not solve the issue if SomePurged but not all, since some ranges might not be
+				// blobbified example would be if first [C - D) was purged, then later [A - F) was.
+				if (BM_PURGE_DEBUG) {
+					fmt::print("BM {0} waitForcePurgeComplete [{1} - {2}): already purged\n",
+					           self->epoch,
+					           range.begin.printable(),
+					           range.end.printable());
+				}
+				break;
+			}
+
+			Optional<Version> verifyVersion = wait(verifyFuture);
+			if (verifyVersion.present() && verifyVersion.get() != invalidVersion) {
+				if (BM_PURGE_DEBUG) {
+					fmt::print("BM {0} waitForcePurgeComplete [{1} - {2}): verified blobbified\n",
+					           self->epoch,
+					           range.begin.printable(),
+					           range.end.printable());
+				}
+				break;
+			}
+			tr.reset();
+			wait(delay(1.0));
+			// TODO: remove key range stuck!
+			TraceEvent("WaitForcePurgeBlobbifiedBlocking", self->id)
+			    .suppressFor(60.0)
+			    .detail("Epoch", self->epoch)
+			    .detail("Range", range);
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
 /*
  * This method is used to purge the range [startKey, endKey) at (and including) purgeVersion.
  * To do this, we do a BFS traversal starting at the active granules. Then we classify granules
@@ -4563,7 +4634,28 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 
 	state Transaction tr(self->db);
 
+	// FIXME: this should be completely separate by known blob range, to avoid any races or issues
+	// if range isn't in known blob ranges, do nothing after writing force purge range to database
+	state std::vector<KeyRange> knownPurgeRanges;
+	auto knownRanges = self->knownBlobRanges.intersectingRanges(range);
+	for (auto& it : knownRanges) {
+		if (it.cvalue()) {
+			knownPurgeRanges.push_back(range & it.range());
+		}
+	}
+
 	if (force) {
+		// before setting force purge in the database, make sure all ranges to purge are actually blobbified to avoid
+		// races
+		// FIXME: this can also apply to non-force-purges but for retention purges it's not as bad since it'll likely
+		// get another one soon
+		std::vector<Future<Void>> waitForBlobbifies;
+		waitForBlobbifies.reserve(knownPurgeRanges.size());
+		for (auto& it : knownPurgeRanges) {
+			waitForBlobbifies.push_back(waitForcePurgeBlobbified(self, it));
+		}
+		wait(waitForAll(waitForBlobbifies));
+
 		// TODO could clean this up after force purge is done, but it's safer not to
 		self->forcePurgingRanges.insert(range, true);
 		// set force purged range, to prevent future operations on this range
@@ -4595,17 +4687,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	}
 
-	// if range isn't in known blob ranges, do nothing after writing force purge range to database
-	bool anyKnownRanges = false;
-	auto knownRanges = self->knownBlobRanges.intersectingRanges(range);
-	for (auto& it : knownRanges) {
-		if (it.cvalue()) {
-			anyKnownRanges = true;
-			break;
-		}
-	}
-
-	if (!anyKnownRanges) {
+	if (knownPurgeRanges.empty()) {
 		CODE_PROBE(true, "skipping purge because not in known blob ranges");
 		TraceEvent("PurgeGranulesSkippingUnknownRange", self->id)
 		    .detail("Epoch", self->epoch)
@@ -5015,10 +5097,12 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 	self->initBStore();
 
+	// wait for BM to be fully recovered and have loaded hard boundaries before starting purges
+	wait(self->doneRecovering.getFuture());
+	wait(self->loadedClientRanges.getFuture());
+
 	loop {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 		// Wait for the watch to change, or some time to expire (whichever comes first)
 		// before checking through the purge intents. We write a UID into the change key value
@@ -5036,6 +5120,7 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 			state CoalescedKeyRangeMap<std::pair<Version, bool>> purgeMap;
 			purgeMap.insert(allKeys, std::make_pair<Version, bool>(0, false));
 			try {
+				wait(checkManagerLock(tr, self));
 				// TODO: replace 10000 with a knob
 				state RangeResult purgeIntents = wait(tr->getRange(blobGranulePurgeKeys, BUGGIFY ? 1 : 10000));
 				if (purgeIntents.size()) {
@@ -5088,8 +5173,27 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 					// done. If the BM fails then all purges will fail and so the next BM will have a clear
 					// set of metadata (i.e. no work in progress) so we will end up doing the work in the
 					// new BM
+					try {
+						wait(waitForAll(purges));
+					} catch (Error& e) {
+						// These should not get an error that then causes a transaction retry loop. All error handling
+						// should be done in the purge calls
+						if (e.code() == error_code_operation_cancelled ||
+						    e.code() == error_code_blob_manager_replaced) {
+							throw e;
+						}
+						// FIXME: refactor this into a function on BlobManagerData
+						TraceEvent(SevError, "BlobManagerUnexpectedErrorPurgeRanges", self->id)
+						    .error(e)
+						    .detail("Epoch", self->epoch);
+						ASSERT_WE_THINK(false);
 
-					wait(waitForAll(purges));
+						// if not simulation, kill the BM
+						if (self->iAmReplaced.canBeSet()) {
+							self->iAmReplaced.sendError(e);
+						}
+						throw e;
+					}
 					break;
 				} else {
 					state Future<Void> watchPurgeIntentsChange = tr->watch(blobGranulePurgeChangeKey);
@@ -5102,6 +5206,11 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 			}
 		}
 
+		if (BUGGIFY && self->maybeInjectTargetedRestart()) {
+			wait(delay(0)); // should be cancelled
+			ASSERT(false);
+		}
+
 		tr->reset();
 		loop {
 			try {
@@ -5109,6 +5218,7 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr->clear(KeyRangeRef(blobGranulePurgeKeys.begin, keyAfter(lastPurgeKey)));
+				wait(checkManagerLock(tr, self));
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
@@ -5635,7 +5745,7 @@ TEST_CASE("/blobmanager/updateranges") {
 	kbrRanges.clear();
 	added.clear();
 	removed.clear();
-	updateClientBlobRanges(&knownBlobRanges, dbDataAB, ar, &added, &removed);
+	updateClientBlobRanges(1, &knownBlobRanges, dbDataAB, ar, &added, &removed);
 
 	ASSERT(added.size() == 1);
 	ASSERT(added[0] == rangeAB);
@@ -5655,7 +5765,7 @@ TEST_CASE("/blobmanager/updateranges") {
 	kbrRanges.clear();
 	added.clear();
 	removed.clear();
-	updateClientBlobRanges(&knownBlobRanges, dbDataEmpty, ar, &added, &removed);
+	updateClientBlobRanges(1, &knownBlobRanges, dbDataEmpty, ar, &added, &removed);
 
 	ASSERT(added.size() == 0);
 
@@ -5670,7 +5780,7 @@ TEST_CASE("/blobmanager/updateranges") {
 	kbrRanges.clear();
 	added.clear();
 	removed.clear();
-	updateClientBlobRanges(&knownBlobRanges, dbDataAB_CD, ar, &added, &removed);
+	updateClientBlobRanges(1, &knownBlobRanges, dbDataAB_CD, ar, &added, &removed);
 
 	ASSERT(added.size() == 2);
 	ASSERT(added[0] == rangeAB);
@@ -5695,7 +5805,7 @@ TEST_CASE("/blobmanager/updateranges") {
 	kbrRanges.clear();
 	added.clear();
 	removed.clear();
-	updateClientBlobRanges(&knownBlobRanges, dbDataAD, ar, &added, &removed);
+	updateClientBlobRanges(1, &knownBlobRanges, dbDataAD, ar, &added, &removed);
 
 	ASSERT(added.size() == 1);
 	ASSERT(added[0] == rangeBC);
@@ -5715,7 +5825,7 @@ TEST_CASE("/blobmanager/updateranges") {
 	kbrRanges.clear();
 	added.clear();
 	removed.clear();
-	updateClientBlobRanges(&knownBlobRanges, dbDataAC, ar, &added, &removed);
+	updateClientBlobRanges(1, &knownBlobRanges, dbDataAC, ar, &added, &removed);
 
 	ASSERT(added.size() == 0);
 
@@ -5735,7 +5845,7 @@ TEST_CASE("/blobmanager/updateranges") {
 	kbrRanges.clear();
 	added.clear();
 	removed.clear();
-	updateClientBlobRanges(&knownBlobRanges, dbDataBC, ar, &added, &removed);
+	updateClientBlobRanges(1, &knownBlobRanges, dbDataBC, ar, &added, &removed);
 
 	ASSERT(added.size() == 0);
 
@@ -5755,7 +5865,7 @@ TEST_CASE("/blobmanager/updateranges") {
 	kbrRanges.clear();
 	added.clear();
 	removed.clear();
-	updateClientBlobRanges(&knownBlobRanges, dbDataBD, ar, &added, &removed);
+	updateClientBlobRanges(1, &knownBlobRanges, dbDataBD, ar, &added, &removed);
 
 	ASSERT(added.size() == 1);
 	ASSERT(added[0] == rangeCD);
@@ -5775,7 +5885,7 @@ TEST_CASE("/blobmanager/updateranges") {
 	kbrRanges.clear();
 	added.clear();
 	removed.clear();
-	updateClientBlobRanges(&knownBlobRanges, dbDataAD, ar, &added, &removed);
+	updateClientBlobRanges(1, &knownBlobRanges, dbDataAD, ar, &added, &removed);
 
 	ASSERT(added.size() == 1);
 	ASSERT(added[0] == rangeAB);
@@ -5795,7 +5905,7 @@ TEST_CASE("/blobmanager/updateranges") {
 	kbrRanges.clear();
 	added.clear();
 	removed.clear();
-	updateClientBlobRanges(&knownBlobRanges, dbDataAB_CD, ar, &added, &removed);
+	updateClientBlobRanges(1, &knownBlobRanges, dbDataAB_CD, ar, &added, &removed);
 
 	ASSERT(added.size() == 0);
 
@@ -5819,7 +5929,7 @@ TEST_CASE("/blobmanager/updateranges") {
 	kbrRanges.clear();
 	added.clear();
 	removed.clear();
-	updateClientBlobRanges(&knownBlobRanges, dbDataBC, ar, &added, &removed);
+	updateClientBlobRanges(1, &knownBlobRanges, dbDataBC, ar, &added, &removed);
 
 	ASSERT(added.size() == 1);
 	ASSERT(added[0] == rangeBC);
