@@ -11226,6 +11226,69 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 	}
 }
 
+// simulation-only debugging for leaked change feed data
+// FIXME: also add checks for data that was popped but not cleaned up
+ACTOR Future<Void> feedStorageSanityChecker(StorageServer* data) {
+	CODE_PROBE(true, "feed storage sanity checker running");
+	state int loopCount = 0;
+	state std::unordered_map<Key, int> leakedFeedCount;
+	loop {
+		state KeyRange keyRange = changeFeedDurableKeys;
+		state int64_t totalFeedBytes = 0;
+		state std::unordered_map<Key, int64_t> bytesByFeed;
+		state int64_t largestFeedBytes = 0;
+		state Key largestFeedId = "none"_sr;
+
+		loop {
+			RangeResult res = wait(data->storage.readRange(keyRange, 1000, 80000));
+			if (res.empty()) {
+				break;
+			}
+			totalFeedBytes += res.expectedSize();
+			for (auto& it : res) {
+				Key feedId;
+				Version version;
+				std::tie(feedId, version) = decodeChangeFeedDurableKey(it.key);
+				int64_t size = (it.key.expectedSize() + it.value.expectedSize());
+				bytesByFeed[feedId] += size;
+				// too verbose, uncomment if needed for debugging
+				// TraceEvent("FeedStorageSanityCheckRow", data->thisServerID).detail("FeedID", feedId).detail("Version", version).detail("Size", size);
+			}
+
+			keyRange = KeyRangeRef(keyAfter(res.back().key), keyRange.end);
+		}
+		for (auto& it : bytesByFeed) {
+			if (it.second > largestFeedBytes) {
+				largestFeedBytes = it.second;
+				largestFeedId = it.first;
+			}
+			if (!data->uidChangeFeed.count(it.first)) {
+				leakedFeedCount[it.first]++;
+				bool fatal = leakedFeedCount[it.first] > 2;
+				TraceEvent(fatal ? SevError : SevInfo, "FeedStorageSanityCheckLeakedFeed", data->thisServerID)
+				    .detail("FeedId", it.first)
+				    .detail("Bytes", it.second)
+				    .detail("LeakedCount", leakedFeedCount[it.first]);
+			} else {
+				leakedFeedCount.erase(it.first);
+			}
+		}
+		TraceEvent ev("FeedStorageSanityCheckReport", data->thisServerID);
+		ev.detail("ActiveFeeds", data->uidChangeFeed.size())
+		    .detail("FoundFeeds", bytesByFeed.size())
+		    .detail("FoundBytes", totalFeedBytes);
+		if (!bytesByFeed.empty()) {
+			ev.detail("AvgBytesPerFeed", totalFeedBytes / bytesByFeed.size())
+			    .detail("LargestFeedId", largestFeedId)
+			    .detail("LargestFeedBytes", largestFeedBytes);
+		}
+
+		loopCount++;
+		CODE_PROBE(loopCount > 2, "feed storage sanity checker ran enough checks to find leaked feeds");
+		wait(delay(30));
+	}
+}
+
 ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface ssi) {
 	state Future<Void> doUpdate = Void();
 	state bool updateReceived = false; // true iff the current update() actor assigned to doUpdate has already
@@ -11253,6 +11316,10 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(serveChangeFeedVersionUpdateRequests(self, ssi.changeFeedVersionUpdate.getFuture()));
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));
+	// FIXME: fix bugs and re-enable!
+	/*if (g_network->isSimulated() && EXPENSIVE_VALIDATION && deterministicRandom()->random01() < 0.2) {
+		self->actors.add(feedStorageSanityChecker(self));
+	}*/
 
 	self->transactionTagCounter.startNewInterval();
 	self->actors.add(
