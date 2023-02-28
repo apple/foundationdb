@@ -2378,8 +2378,7 @@ ACTOR Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
 				TraceEvent("WatchBlobRestore", self->id).detail("Phase", status.phase);
 				if (status.phase == BlobRestorePhase::INIT) {
 					if (self->db.blobGranulesEnabled.get()) {
-						wait(updateRestoreStatus(
-						    self->cx, normalKeys, BlobRestoreStatus(BlobRestorePhase::STARTING_MIGRATOR), {}));
+						wait(updateRestoreStatus(self->cx, normalKeys, BlobRestorePhase::STARTING_MIGRATOR, 0, {}, {}));
 						const auto& blobManager = self->db.serverInfo->get().blobManager;
 						if (blobManager.present()) {
 							BlobManagerSingleton(blobManager)
@@ -2391,7 +2390,7 @@ ACTOR Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
 						}
 					} else {
 						TraceEvent("SkipBlobRestoreInitCommand", self->id).log();
-						BlobRestoreStatus error(BlobRestorePhase::ERROR, error_code_restore_error);
+						BlobRestoreStatus error(BlobRestorePhase::ERROR, "Blob granules should be enabled first.");
 						Value value = blobRestoreCommandValueFor(error);
 						tr->set(blobRestoreCommandKey, value);
 					}
