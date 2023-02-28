@@ -44,7 +44,7 @@
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
-// Enforcing rocksdb version to be at 7.7.3.
+// Enforcing rocksdb version to be 7.7.3.
 static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 7 && ROCKSDB_PATCH == 3),
               "Unsupported rocksdb version. Update the rocksdb to 7.7.3 version");
 
@@ -169,92 +169,6 @@ struct ShardedRocksDBState {
 
 std::shared_ptr<rocksdb::Cache> rocksdb_block_cache = nullptr;
 
-// rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
-// 	rocksdb::ExportImportFilesMetaData metaData;
-// 	if (checkpoint.getFormat() != DataMoveRocksCF) {
-// 		return metaData;
-// 	}
-
-// 	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
-// 	TraceEvent(SevInfo, "RocksDBCF").detail("RocksDBCF", rocksCF.toString());
-// 	metaData.db_comparator_name = rocksCF.dbComparatorName;
-
-// 	for (const LiveFileMetaData& fileMetaData : rocksCF.sstFiles) {
-// 		rocksdb::LiveFileMetaData liveFileMetaData;
-// 		if (!fileMetaData.name.empty()) {
-// 			if (fileMetaData.name[0] == '/') {
-// 				liveFileMetaData.relative_filename = fileMetaData.name.substr(1);
-// 				liveFileMetaData.name = fileMetaData.name;
-// 			} else {
-// 				liveFileMetaData.relative_filename = fileMetaData.name;
-// 				liveFileMetaData.name = std::string("/") + fileMetaData.name;
-// 			}
-// 			ASSERT(liveFileMetaData.relative_filename.size() + 1 == liveFileMetaData.name.size());
-// 			ASSERT(liveFileMetaData.relative_filename[0] != '/');
-// 			ASSERT(liveFileMetaData.name[0] == '/');
-// 		}
-// 		liveFileMetaData.file_type = rocksdb::kTableFile;
-// 		liveFileMetaData.size = fileMetaData.size;
-// 		liveFileMetaData.file_number = fileMetaData.file_number;
-// 		liveFileMetaData.db_path = fileMetaData.db_path;
-// 		liveFileMetaData.directory = fileMetaData.db_path;
-// 		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
-// 		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
-// 		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
-// 		liveFileMetaData.largestkey = fileMetaData.largestkey;
-// 		liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
-// 		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
-// 		liveFileMetaData.num_entries = fileMetaData.num_entries;
-// 		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
-// 		liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
-// 		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
-// 		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
-// 		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
-// 		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
-// 		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
-// 		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
-// 		liveFileMetaData.level = fileMetaData.level;
-// 		metaData.files.push_back(liveFileMetaData);
-// 	}
-
-// 	return metaData;
-// }
-// rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
-// 	rocksdb::ExportImportFilesMetaData metaData;
-// 	if (checkpoint.getFormat() != DataMoveRocksCF) {
-// 		return metaData;
-// 	}
-
-// 	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
-// 	metaData.db_comparator_name = rocksCF.dbComparatorName;
-
-// 	for (const LiveFileMetaData& fileMetaData : rocksCF.sstFiles) {
-// 		rocksdb::LiveFileMetaData liveFileMetaData;
-// 		liveFileMetaData.size = fileMetaData.size;
-// 		liveFileMetaData.name = fileMetaData.name;
-// 		liveFileMetaData.file_number = fileMetaData.file_number;
-// 		liveFileMetaData.db_path = fileMetaData.db_path;
-// 		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
-// 		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
-// 		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
-// 		liveFileMetaData.largestkey = fileMetaData.largestkey;
-// 		liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
-// 		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
-// 		liveFileMetaData.num_entries = fileMetaData.num_entries;
-// 		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
-// 		liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
-// 		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
-// 		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
-// 		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
-// 		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
-// 		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
-// 		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
-// 		liveFileMetaData.level = fileMetaData.level;
-// 		metaData.files.push_back(liveFileMetaData);
-// 	}
-
-// 	return metaData;
-// }
 rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
 	rocksdb::ExportImportFilesMetaData metaData;
 	if (checkpoint.getFormat() != DataMoveRocksCF) {

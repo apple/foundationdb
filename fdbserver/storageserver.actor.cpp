@@ -8012,7 +8012,7 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 
 	const double duration = now() - fetchStartTime;
 	const int64_t totalBytes = getTotalFetchedBytes(localRecords);
-	TraceEvent(sevDm, "FetchShardFetchedCheckpoints", data->thisServerID)
+	TraceEvent(SevInfo, "FetchCheckpointsStats", data->thisServerID)
 	    .detail("MoveInShardID", shard->id)
 	    .detail("MoveInShard", shard->toString())
 	    .detail("Checkpoint", describe(localRecords))
@@ -8325,9 +8325,7 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 			} else if (phase == MoveInPhase::Complete) {
 				const double duration = now() - shard->startTime;
 				const int64_t totalBytes = getTotalFetchedBytes(shard->checkpoints);
-				TraceEvent(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_VERBOSE_TRACKING ? SevInfo : SevDebug,
-				           "FetchShardStats",
-				           data->thisServerID)
+				TraceEvent(SevInfo, "FetchShardStats", data->thisServerID)
 				    .detail("MoveInShardID", shard->id)
 				    .detail("MoveInShard", shard->toString())
 				    .detail("Duration", duration)
