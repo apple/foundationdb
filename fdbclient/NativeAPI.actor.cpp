@@ -1685,7 +1685,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		    std::make_unique<ClientProfilingImpl>(
 		        KeyRangeRef("profiling/"_sr, "profiling0"_sr)
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)),
-		    /* deprecated */ 720);
+		    /* deprecated */ ApiVersion::withClientProfilingDeprecated().version());
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
@@ -7057,7 +7057,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 
 	case FDBTransactionOptions::USE_GRV_CACHE:
 		validateOptionValueNotPresent(value);
-		if (apiVersionAtLeast(720) && !trState->cx->sharedStatePtr) {
+		if (apiVersionAtLeast(ApiVersion::withGrvCache().version()) && !trState->cx->sharedStatePtr) {
 			throw invalid_option();
 		}
 		if (trState->numErrors == 0) {

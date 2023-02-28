@@ -33,7 +33,7 @@ from typing import Union
 from util import random_alphanum_str, random_alphanum_bytes, to_str, to_bytes
 import xml.etree.ElementTree as ET
 
-fdb.api_version(720)
+fdb.api_version(fdb.LATEST_API_VERSION)
 
 cluster_scope = "module"
 

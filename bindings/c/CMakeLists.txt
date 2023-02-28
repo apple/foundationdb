@@ -41,12 +41,19 @@ add_custom_target(fdb_c_generated DEPENDS ${asm_file}
 vexillographer_compile(TARGET fdb_c_options LANG c OUT ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h)
 
+if(NOT DEFINED FDB_API_VERSION_FILE)
+  message(FATAL_ERROR "Missing definitions of API versions")
+endif()
+include(${FDB_API_VERSION_FILE})
+set(fdb_c_apiversion_file ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_apiversion.g.h)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c_apiversion.h.cmake ${fdb_c_apiversion_file})
+
 include(GenerateExportHeader)
 
 if(OPEN_FOR_IDE)
-  add_library(fdb_c OBJECT ${FDB_C_SRCS} ${asm_file})
+  add_library(fdb_c OBJECT ${FDB_C_SRCS} ${fdb_c_apiversion_file} ${asm_file})
 else()
-  add_library(fdb_c SHARED ${FDB_C_SRCS} ${asm_file})
+  add_library(fdb_c SHARED ${FDB_C_SRCS} ${fdb_c_apiversion_file} ${asm_file})
   strip_debug_symbols(fdb_c)
 endif()
 add_dependencies(fdb_c fdb_c_generated fdb_c_options)
@@ -507,6 +514,7 @@ fdb_install(
 fdb_install(
   FILES foundationdb/fdb_c.h
   ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
+  ${fdb_c_apiversion_file}
   ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
   ${CMAKE_SOURCE_DIR}/bindings/c/foundationdb/fdb_c_types.h
   DESTINATION include
