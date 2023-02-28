@@ -639,24 +639,28 @@ struct StorageMetrics {
 	// FIXME: currently, iosPerKSecond is not used in DataDistribution calculations.
 	int64_t iosPerKSecond = 0;
 	int64_t bytesReadPerKSecond = 0;
+	int64_t opsReadPerKSecond = 0;
 
 	static const int64_t infinity = 1LL << 60;
 
 	bool allLessOrEqual(const StorageMetrics& rhs) const {
 		return bytes <= rhs.bytes && bytesWrittenPerKSecond <= rhs.bytesWrittenPerKSecond &&
-		       iosPerKSecond <= rhs.iosPerKSecond && bytesReadPerKSecond <= rhs.bytesReadPerKSecond;
+		       iosPerKSecond <= rhs.iosPerKSecond && bytesReadPerKSecond <= rhs.bytesReadPerKSecond &&
+		       opsReadPerKSecond <= rhs.opsReadPerKSecond;
 	}
 	void operator+=(const StorageMetrics& rhs) {
 		bytes += rhs.bytes;
 		bytesWrittenPerKSecond += rhs.bytesWrittenPerKSecond;
 		iosPerKSecond += rhs.iosPerKSecond;
 		bytesReadPerKSecond += rhs.bytesReadPerKSecond;
+		opsReadPerKSecond += rhs.opsReadPerKSecond;
 	}
 	void operator-=(const StorageMetrics& rhs) {
 		bytes -= rhs.bytes;
 		bytesWrittenPerKSecond -= rhs.bytesWrittenPerKSecond;
 		iosPerKSecond -= rhs.iosPerKSecond;
 		bytesReadPerKSecond -= rhs.bytesReadPerKSecond;
+		opsReadPerKSecond -= rhs.opsReadPerKSecond;
 	}
 	template <class F>
 	void operator*=(F f) {
@@ -664,12 +668,15 @@ struct StorageMetrics {
 		bytesWrittenPerKSecond *= f;
 		iosPerKSecond *= f;
 		bytesReadPerKSecond *= f;
+		opsReadPerKSecond *= f;
 	}
-	bool allZero() const { return !bytes && !bytesWrittenPerKSecond && !iosPerKSecond && !bytesReadPerKSecond; }
+	bool allZero() const {
+		return !bytes && !bytesWrittenPerKSecond && !iosPerKSecond && !bytesReadPerKSecond && !opsReadPerKSecond;
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, bytes, bytesWrittenPerKSecond, iosPerKSecond, bytesReadPerKSecond);
+		serializer(ar, bytes, bytesWrittenPerKSecond, iosPerKSecond, bytesReadPerKSecond, opsReadPerKSecond);
 	}
 
 	void negate() { operator*=(-1.0); }
@@ -698,15 +705,17 @@ struct StorageMetrics {
 
 	bool operator==(StorageMetrics const& rhs) const {
 		return bytes == rhs.bytes && bytesWrittenPerKSecond == rhs.bytesWrittenPerKSecond &&
-		       iosPerKSecond == rhs.iosPerKSecond && bytesReadPerKSecond == rhs.bytesReadPerKSecond;
+		       iosPerKSecond == rhs.iosPerKSecond && bytesReadPerKSecond == rhs.bytesReadPerKSecond &&
+		       opsReadPerKSecond == rhs.opsReadPerKSecond;
 	}
 
 	std::string toString() const {
-		return format("Bytes: %lld, BWritePerKSec: %lld, iosPerKSec: %lld, BReadPerKSec: %lld",
+		return format("Bytes: %lld, BWritePerKSec: %lld, iosPerKSec: %lld, BReadPerKSec: %lld, OpReadPerKSec: %lld",
 		              bytes,
 		              bytesWrittenPerKSecond,
 		              iosPerKSecond,
-		              bytesReadPerKSecond);
+		              bytesReadPerKSecond,
+		              opsReadPerKSecond);
 	}
 };
 
