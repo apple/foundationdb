@@ -602,8 +602,6 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
             "description":"abc"
          }
       ],
-)statusSchema"
-                                         R"statusSchema(
       "recovery_state":{
          "seconds_since_last_recovered":1,
          "required_resolvers":1,
@@ -855,7 +853,8 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "encryption_at_rest_mode": {
              "$enum":[
              "disabled",
-             "aes_256_ctr"
+             "domain_aware",
+             "cluster_aware"
          ]}
       },
       "consistency_scan_info":{
@@ -963,11 +962,29 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
             }
          }
       },
-      "tenants":{
-         "num_tenants":0
-      },
       "metacluster" : {
-         "cluster_type" : "standalone"
+         "cluster_type" : "management",
+         "metacluster_name":"metacluster1",
+         "metacluster_id":12345,
+         "data_cluster_name" : "data_cluster1",
+         "data_cluster_id" : 12346,
+         "num_data_clusters":10
+      },
+      "tenants":{
+         "num_tenants":0,
+         "num_tenant_groups":10,
+         "tenant_group_capacity":20
+      },
+      "idempotency_ids":{
+         "size_bytes": 0,
+         "expired_version": 0,
+         "expired_age": 0,
+         "oldest_id_version": 0,
+         "oldest_id_age": 0
+      },
+      "version_epoch":{
+         "enabled": false,
+         "epoch": 0
       }
    },
    "client":{

@@ -1,12 +1,15 @@
 # FindRocksDB
 
-find_package(RocksDB 6.27.3)
+find_package(RocksDB 7.7.3)
 
 include(ExternalProject)
 
 set(RocksDB_CMAKE_ARGS
   -DUSE_RTTI=1
   -DPORTABLE=${PORTABLE_ROCKSDB}
+  -DFORCE_SSE42=${ROCKSDB_SSE42}
+  -DFORCE_AVX=${ROCKSDB_AVX}
+  -DFORCE_AVX2=${ROCKSDB_AVX2}
   -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
   -DCMAKE_C_FLAGS=${CMAKE_C_FLAGS}
   -DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}
@@ -49,8 +52,8 @@ if(ROCKSDB_FOUND)
       ${BINARY_DIR}/librocksdb.a)
 else()
   ExternalProject_Add(rocksdb
-    URL https://github.com/facebook/rocksdb/archive/refs/tags/v6.27.3.tar.gz
-    URL_HASH SHA256=ee29901749b9132692b26f0a6c1d693f47d1a9ed8e3771e60556afe80282bf58
+    URL https://github.com/facebook/rocksdb/archive/refs/tags/v7.7.3.tar.gz
+    URL_HASH SHA256=b8ac9784a342b2e314c821f6d701148912215666ac5e9bdbccd93cf3767cb611
     CMAKE_ARGS ${RocksDB_CMAKE_ARGS}
     BUILD_BYPRODUCTS <BINARY_DIR>/librocksdb.a
     INSTALL_COMMAND ""

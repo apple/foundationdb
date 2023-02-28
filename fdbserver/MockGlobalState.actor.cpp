@@ -33,6 +33,7 @@ public:
 	                                                                                 int shardLimit,
 	                                                                                 int expectedShardCount) {
 		state TenantInfo tenantInfo;
+		state Version version = 0;
 		loop {
 			auto locations = mgs->getKeyRangeLocations(tenantInfo,
 			                                           keys,
@@ -41,7 +42,7 @@ public:
 			                                           SpanContext(),
 			                                           Optional<UID>(),
 			                                           UseProvisionalProxies::False,
-			                                           0)
+			                                           version)
 			                     .get();
 			TraceEvent(SevDebug, "MGSWaitStorageMetrics").detail("Phase", "GetLocation");
 			// NOTE(xwang): in native API, there's code handling the non-equal situation, but I think in mock world
@@ -49,7 +50,7 @@ public:
 			ASSERT_EQ(expectedShardCount, locations.size());
 
 			Optional<StorageMetrics> res =
-			    wait(::waitStorageMetricsWithLocation(tenantInfo, keys, locations, min, max, permittedError));
+			    wait(::waitStorageMetricsWithLocation(tenantInfo, version, keys, locations, min, max, permittedError));
 
 			if (res.present()) {
 				return std::make_pair(res, -1);
@@ -97,10 +98,10 @@ public:
 class MockStorageServerImpl {
 public:
 	ACTOR static Future<Void> waitMetricsTenantAware(MockStorageServer* self, WaitMetricsRequest req) {
-		if (req.tenantInfo.present() && req.tenantInfo.get().tenantId != TenantInfo::INVALID_TENANT) {
+		if (req.tenantInfo.hasTenant()) {
 			// TODO(xwang) add support for tenant test, search for tenant entry
 			Optional<TenantMapEntry> entry;
-			Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
+			Optional<Key> tenantPrefix = entry.map(&TenantMapEntry::prefix);
 			if (tenantPrefix.present()) {
 				UNREACHABLE();
 				// req.keys = req.keys.withPrefix(tenantPrefix.get(), req.arena);
@@ -114,9 +115,60 @@ public:
 		}
 		return Void();
 	}
+
+	// Randomly generate keys and kv size between the fetch range, updating the byte sample.
+	// Once the fetchKeys return, the shard status will become FETCHED.
+	ACTOR static Future<Void> waitFetchKeysFinish(MockStorageServer* self, MockStorageServer::FetchKeysParams params) {
+		// between each chunk delay for random time, and finally set the fetchComplete signal.
+		ASSERT(params.totalRangeBytes > 0);
+		state int chunkCount = std::ceil(params.totalRangeBytes * 1.0 / SERVER_KNOBS->FETCH_BLOCK_BYTES);
+		state int64_t currentTotal = 0;
+		state Key lastKey = params.keys.begin;
+
+		state int i = 0;
+		for (; i < chunkCount && currentTotal < params.totalRangeBytes; ++i) {
+			wait(delayJittered(0.01));
+			int remainedBytes = (chunkCount == 1 ? params.totalRangeBytes : SERVER_KNOBS->FETCH_BLOCK_BYTES);
+
+			while (remainedBytes >= lastKey.size()) {
+				Key nextKey;
+				// try 10 times
+				for (int j = 0; j < 10; j++) {
+					nextKey = randomKeyBetween(KeyRangeRef(lastKey, params.keys.end));
+					if (nextKey < params.keys.end)
+						break;
+				}
+
+				// NOTE: in this case, we accumulate the bytes on lastKey on purpose (shall we?)
+				if (nextKey == params.keys.end) {
+					auto bytes = params.totalRangeBytes - currentTotal;
+					self->byteSampleApplySet(lastKey, bytes);
+					self->usedDiskSpace += bytes;
+					currentTotal = params.totalRangeBytes;
+					TraceEvent(SevWarn, "MockFetchKeysInaccurateSample")
+					    .detail("Range", params.keys)
+					    .detail("LastKey", lastKey)
+					    .detail("Size", bytes);
+					break; // break the most outside loop
+				}
+
+				int maxSize = std::min(remainedBytes, 130000) + 1;
+				int randomSize = deterministicRandom()->randomInt(lastKey.size(), maxSize);
+				self->usedDiskSpace += randomSize;
+				currentTotal += randomSize;
+
+				self->byteSampleApplySet(lastKey, randomSize);
+				remainedBytes -= randomSize;
+				lastKey = nextKey;
+			}
+		}
+
+		self->setShardStatus(params.keys, MockShardStatus::FETCHED, true);
+		return Void();
+	}
 };
 
-bool MockStorageServer::allShardStatusEqual(KeyRangeRef range, MockShardStatus status) {
+bool MockStorageServer::allShardStatusEqual(const KeyRangeRef& range, MockShardStatus status) const {
 	auto ranges = serverKeys.intersectingRanges(range);
 	ASSERT(!ranges.empty()); // at least the range is allKeys
 
@@ -127,26 +179,46 @@ bool MockStorageServer::allShardStatusEqual(KeyRangeRef range, MockShardStatus s
 	return true;
 }
 
-void MockStorageServer::setShardStatus(KeyRangeRef range, MockShardStatus status, bool restrictSize) {
+bool MockStorageServer::allShardStatusIn(const KeyRangeRef& range, const std::set<MockShardStatus>& status) const {
 	auto ranges = serverKeys.intersectingRanges(range);
-	ASSERT(!ranges.empty());
-	if (ranges.begin().range().contains(range)) {
-		CODE_PROBE(true, "Implicitly split single shard to 3 pieces", probe::decoration::rare);
-		threeWayShardSplitting(ranges.begin().range(), range, ranges.begin().cvalue().shardSize, restrictSize);
+	ASSERT(!ranges.empty()); // at least the range is allKeys
+
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		if (!status.count(it->cvalue().status))
+			return false;
+	}
+	return true;
+}
+
+void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus status, bool restrictSize) {
+	auto ranges = serverKeys.intersectingRanges(range);
+
+	if (ranges.empty()) {
+		CODE_PROBE(true, "new shard is adding to server", probe::decoration::rare);
+		serverKeys.insert(range, ShardInfo{ status, 0 });
 		return;
 	}
-	if (ranges.begin().begin() < range.begin) {
-		CODE_PROBE(true, "Implicitly split begin range to 2 pieces", probe::decoration::rare);
-		twoWayShardSplitting(ranges.begin().range(), range.begin, ranges.begin().cvalue().shardSize, restrictSize);
-	}
-	if (ranges.end().end() > range.end) {
-		CODE_PROBE(true, "Implicitly split end range to 2 pieces", probe::decoration::rare);
-		twoWayShardSplitting(ranges.end().range(), range.end, ranges.end().cvalue().shardSize, restrictSize);
+
+	// change the old status
+	if (ranges.begin().begin() < range.begin && ranges.begin().end() > range.end) {
+		CODE_PROBE(true, "Implicitly split single shard to 3 pieces");
+		threeWayShardSplitting(ranges.begin().range(), range, ranges.begin().cvalue().shardSize, restrictSize);
+	} else {
+		if (ranges.begin().begin() < range.begin) {
+			CODE_PROBE(true, "Implicitly split begin range to 2 pieces");
+			twoWayShardSplitting(ranges.begin().range(), range.begin, ranges.begin().cvalue().shardSize, restrictSize);
+		}
+		if (ranges.end().begin() > range.end) {
+			CODE_PROBE(true, "Implicitly split end range to 2 pieces");
+			auto lastRange = ranges.end();
+			--lastRange;
+			twoWayShardSplitting(lastRange.range(), range.end, ranges.end().cvalue().shardSize, restrictSize);
+		}
 	}
 	ranges = serverKeys.containedRanges(range);
 	// now the boundary must be aligned
 	ASSERT(ranges.begin().begin() == range.begin);
-	ASSERT(ranges.end().end() == range.end);
+	ASSERT(ranges.end().begin() == range.end);
 	uint64_t newSize = 0;
 	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
 		newSize += it->cvalue().shardSize;
@@ -155,15 +227,15 @@ void MockStorageServer::setShardStatus(KeyRangeRef range, MockShardStatus status
 		auto oldStatus = it.value().status;
 		if (isStatusTransitionValid(oldStatus, status)) {
 			it.value() = ShardInfo{ status, newSize };
-		} else if (oldStatus == MockShardStatus::COMPLETED && status == MockShardStatus::INFLIGHT) {
-			CODE_PROBE(true, "Shard already on server", probe::decoration::rare);
+		} else if ((oldStatus == MockShardStatus::COMPLETED || oldStatus == MockShardStatus::FETCHED) &&
+		           (status == MockShardStatus::INFLIGHT || status == MockShardStatus::FETCHED)) {
+			CODE_PROBE(true, "Shard already on server");
 		} else {
-			TraceEvent(SevError, "MockShardStatusTransitionError")
+			TraceEvent(SevError, "MockShardStatusTransitionError", id)
 			    .detail("From", oldStatus)
 			    .detail("To", status)
-			    .detail("ID", id)
-			    .detail("KeyBegin", range.begin.toHexString())
-			    .detail("KeyEnd", range.begin.toHexString());
+			    .detail("KeyBegin", range.begin)
+			    .detail("KeyEnd", range.begin);
 		}
 	}
 	serverKeys.coalesce(range);
@@ -171,11 +243,14 @@ void MockStorageServer::setShardStatus(KeyRangeRef range, MockShardStatus status
 
 // split the out range [a, d) based on the inner range's boundary [b, c). The result would be [a,b), [b,c), [c,d). The
 // size of the new shards are randomly split from old size of [a, d)
-void MockStorageServer::threeWayShardSplitting(KeyRangeRef outerRange,
-                                               KeyRangeRef innerRange,
+void MockStorageServer::threeWayShardSplitting(const KeyRangeRef& outerRange,
+                                               const KeyRangeRef& innerRange,
                                                uint64_t outerRangeSize,
                                                bool restrictSize) {
 	ASSERT(outerRange.contains(innerRange));
+	if (outerRange == innerRange) {
+		return;
+	}
 
 	Key left = outerRange.begin;
 	// random generate 3 shard sizes, the caller guarantee that the min, max parameters are always valid.
@@ -196,10 +271,13 @@ void MockStorageServer::threeWayShardSplitting(KeyRangeRef outerRange,
 
 // split the range [a,c) with split point b. The result would be [a, b), [b, c). The
 // size of the new shards are randomly split from old size of [a, c)
-void MockStorageServer::twoWayShardSplitting(KeyRangeRef range,
-                                             KeyRef splitPoint,
+void MockStorageServer::twoWayShardSplitting(const KeyRangeRef& range,
+                                             const KeyRef& splitPoint,
                                              uint64_t rangeSize,
                                              bool restrictSize) {
+	if (splitPoint == range.begin || !range.contains(splitPoint)) {
+		return;
+	}
 	Key left = range.begin;
 	// random generate 3 shard sizes, the caller guarantee that the min, max parameters are always valid.
 	int leftSize = deterministicRandom()->randomInt(SERVER_KNOBS->MIN_SHARD_BYTES,
@@ -212,13 +290,17 @@ void MockStorageServer::twoWayShardSplitting(KeyRangeRef range,
 	serverKeys[left].shardSize = leftSize;
 }
 
-void MockStorageServer::removeShard(KeyRangeRef range) {
+void MockStorageServer::removeShard(const KeyRangeRef& range) {
 	auto ranges = serverKeys.containedRanges(range);
 	ASSERT(ranges.begin().range() == range);
+	auto rangeSize = sumRangeSize(range);
+	usedDiskSpace -= rangeSize;
 	serverKeys.rawErase(range);
+	byteSampleApplyClear(range);
+	metrics.notifyNotReadable(range);
 }
 
-uint64_t MockStorageServer::sumRangeSize(KeyRangeRef range) const {
+uint64_t MockStorageServer::sumRangeSize(const KeyRangeRef& range) const {
 	auto ranges = serverKeys.intersectingRanges(range);
 	uint64_t totalSize = 0;
 	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
@@ -246,8 +328,157 @@ Future<Void> MockStorageServer::run() {
 	                            Optional<Standalone<StringRef>>());
 	ssi.initEndpoints();
 	ssi.startAcceptingRequests();
+	IFailureMonitor::failureMonitor().setStatus(ssi.address(), FailureStatus(false));
+
 	TraceEvent("MockStorageServerStart").detail("Address", ssi.address());
-	return serveStorageMetricsRequests(this, ssi);
+	addActor(serveStorageMetricsRequests(this, ssi));
+	return actors.getResult();
+}
+
+void MockStorageServer::set(KeyRef const& key, int64_t bytes, int64_t oldBytes) {
+	notifyWriteMetrics(key, bytes);
+	byteSampleApplySet(key, bytes);
+	auto delta = bytes - oldBytes;
+	usedDiskSpace += delta;
+	serverKeys[key].shardSize += delta;
+}
+
+void MockStorageServer::clear(KeyRef const& key, int64_t bytes) {
+	notifyWriteMetrics(key, bytes);
+	KeyRange sr = singleKeyRange(key);
+	byteSampleApplyClear(sr);
+	usedDiskSpace -= bytes;
+	serverKeys[key].shardSize -= bytes;
+}
+
+int64_t MockStorageServer::clearRange(KeyRangeRef const& range, int64_t beginShardBytes, int64_t endShardBytes) {
+	notifyWriteMetrics(range.begin, range.begin.size() + range.end.size());
+	byteSampleApplyClear(range);
+	auto totalByteSize = estimateRangeTotalBytes(range, beginShardBytes, endShardBytes);
+	usedDiskSpace -= totalByteSize;
+	clearRangeTotalBytes(range, beginShardBytes, endShardBytes);
+	return totalByteSize;
+}
+
+void MockStorageServer::get(KeyRef const& key, int64_t bytes) {
+	// If the read yields no value, randomly sample the empty read.
+	int64_t bytesReadPerKSecond = std::max(bytes, SERVER_KNOBS->EMPTY_READ_PENALTY);
+	metrics.notifyBytesReadPerKSecond(key, bytesReadPerKSecond);
+}
+
+int64_t MockStorageServer::getRange(KeyRangeRef const& range, int64_t beginShardBytes, int64_t endShardBytes) {
+	int64_t totalByteSize = estimateRangeTotalBytes(range, beginShardBytes, endShardBytes);
+	// For performance concerns, the cost of a range read is billed to the start key and end key of the
+	// range.
+	if (totalByteSize > 0) {
+		int64_t bytesReadPerKSecond = std::max(totalByteSize, SERVER_KNOBS->EMPTY_READ_PENALTY) / 2;
+		metrics.notifyBytesReadPerKSecond(range.begin, bytesReadPerKSecond);
+		metrics.notifyBytesReadPerKSecond(range.end, bytesReadPerKSecond);
+	}
+	return totalByteSize;
+}
+
+int64_t MockStorageServer::estimateRangeTotalBytes(KeyRangeRef const& range,
+                                                   int64_t beginShardBytes,
+                                                   int64_t endShardBytes) {
+	int64_t totalByteSize = 0;
+	auto ranges = serverKeys.intersectingRanges(range);
+
+	// use the beginShardBytes as partial size
+	if (ranges.begin().begin() < range.begin) {
+		ranges.pop_front();
+		totalByteSize += beginShardBytes;
+	}
+	// use the endShardBytes as partial size
+	if (ranges.end().begin() < range.end) {
+		totalByteSize += endShardBytes;
+	}
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		totalByteSize += it->cvalue().shardSize;
+	}
+	return totalByteSize;
+}
+
+void MockStorageServer::clearRangeTotalBytes(KeyRangeRef const& range, int64_t beginShardBytes, int64_t endShardBytes) {
+	auto ranges = serverKeys.intersectingRanges(range);
+
+	// use the beginShardBytes as partial size
+	if (ranges.begin().begin() < range.begin) {
+		auto delta = std::min(ranges.begin().value().shardSize, (uint64_t)beginShardBytes);
+		ranges.begin().value().shardSize -= delta;
+		ranges.pop_front();
+	}
+	// use the endShardBytes as partial size
+	if (ranges.end().begin() < range.end) {
+		auto delta = std::min(ranges.end().value().shardSize, (uint64_t)endShardBytes);
+		ranges.end().value().shardSize -= delta;
+	}
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		it->value().shardSize = 0;
+	}
+}
+
+void MockStorageServer::notifyWriteMetrics(KeyRef const& key, int64_t size) {
+	// update write bandwidth and iops as mock the cost of writing a mutation
+	StorageMetrics s;
+	// FIXME: remove the / 2 and double the related knobs.
+	s.bytesWrittenPerKSecond = mvccStorageBytes(size) / 2;
+	s.iosPerKSecond = 1;
+	metrics.notify(key, s);
+}
+
+void MockStorageServer::signalFetchKeys(const KeyRangeRef& range, int64_t rangeTotalBytes) {
+	if (!allShardStatusEqual(range, MockShardStatus::COMPLETED)) {
+		actors.add(MockStorageServerImpl::waitFetchKeysFinish(this, { range, rangeTotalBytes }));
+	}
+}
+
+void MockStorageServer::byteSampleApplySet(KeyRef const& key, int64_t kvSize) {
+	// Update byteSample in memory and notify waiting metrics
+	ByteSampleInfo sampleInfo = isKeyValueInSample(key, kvSize);
+	auto& byteSample = metrics.byteSample.sample;
+
+	int64_t delta = 0;
+	auto old = byteSample.find(key);
+	if (old != byteSample.end())
+		delta = -byteSample.getMetric(old);
+
+	if (sampleInfo.inSample) {
+		delta += sampleInfo.sampledSize;
+		byteSample.insert(key, sampleInfo.sampledSize);
+	} else if (old != byteSample.end()) {
+		byteSample.erase(old);
+	}
+
+	if (delta)
+		metrics.notifyBytes(key, delta);
+}
+
+void MockStorageServer::byteSampleApplyClear(KeyRangeRef const& range) {
+	// Update byteSample and notify waiting metrics
+
+	auto& byteSample = metrics.byteSample.sample;
+	bool any = false;
+
+	if (range.begin < allKeys.end) {
+		// NotifyBytes should not be called for keys past allKeys.end
+		KeyRangeRef searchRange = KeyRangeRef(range.begin, std::min(range.end, allKeys.end));
+
+		auto r = metrics.waitMetricsMap.intersectingRanges(searchRange);
+		for (auto shard = r.begin(); shard != r.end(); ++shard) {
+			KeyRangeRef intersectingRange = shard.range() & range;
+			int64_t bytes = byteSample.sumRange(intersectingRange.begin, intersectingRange.end);
+			metrics.notifyBytes(shard, -bytes);
+			any = any || bytes > 0;
+		}
+	}
+
+	if (range.end > allKeys.end && byteSample.sumRange(std::max(allKeys.end, range.begin), range.end) > 0)
+		any = true;
+
+	if (any) {
+		byteSample.eraseAsync(range.begin, range.end);
+	}
 }
 
 void MockGlobalState::initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf, uint64_t defaultDiskSpace) {
@@ -289,12 +520,18 @@ bool MockGlobalState::serverIsSourceForShard(const UID& serverId, KeyRangeRef sh
 }
 
 bool MockGlobalState::serverIsDestForShard(const UID& serverId, KeyRangeRef shard) {
+	TraceEvent(SevDebug, "ServerIsDestForShard")
+	    .detail("ServerId", serverId)
+	    .detail("Keys", shard)
+	    .detail("Contains", allServers.count(serverId));
+
 	if (!allServers.count(serverId))
 		return false;
 
 	// check serverKeys
 	auto& mss = allServers.at(serverId);
-	if (!mss.allShardStatusEqual(shard, MockShardStatus::INFLIGHT)) {
+	if (!mss.allShardStatusIn(shard,
+	                          { MockShardStatus::INFLIGHT, MockShardStatus::COMPLETED, MockShardStatus::FETCHED })) {
 		return false;
 	}
 
@@ -351,10 +588,8 @@ Future<KeyRangeLocationInfo> MockGlobalState::getKeyLocation(TenantInfo tenant,
 	ASSERT_EQ(srcTeam.size(), 1);
 	rep.results.emplace_back(single, extractStorageServerInterfaces(srcTeam.front().servers));
 
-	return KeyRangeLocationInfo(
-	    rep.tenantEntry,
-	    KeyRange(toPrefixRelativeRange(rep.results[0].first, rep.tenantEntry.prefix), rep.arena),
-	    buildLocationInfo(rep.results[0].second));
+	return KeyRangeLocationInfo(KeyRange(toPrefixRelativeRange(rep.results[0].first, tenant.prefix), rep.arena),
+	                            buildLocationInfo(rep.results[0].second));
 }
 
 Future<std::vector<KeyRangeLocationInfo>> MockGlobalState::getKeyRangeLocations(
@@ -386,8 +621,7 @@ Future<std::vector<KeyRangeLocationInfo>> MockGlobalState::getKeyRangeLocations(
 
 	std::vector<KeyRangeLocationInfo> results;
 	for (int shard = 0; shard < rep.results.size(); shard++) {
-		results.emplace_back(rep.tenantEntry,
-		                     (toPrefixRelativeRange(rep.results[shard].first, rep.tenantEntry.prefix) & keys),
+		results.emplace_back((toPrefixRelativeRange(rep.results[shard].first, tenant.prefix) & keys),
 		                     buildLocationInfo(rep.results[shard].second));
 	}
 	return results;
@@ -406,6 +640,105 @@ Future<Standalone<VectorRef<KeyRef>>> MockGlobalState::splitStorageMetrics(const
                                                                            const StorageMetrics& estimated,
                                                                            const Optional<int>& minSplitBytes) {
 	return MockGlobalStateImpl::splitStorageMetrics(this, keys, limit, estimated, minSplitBytes);
+}
+
+std::vector<Future<Void>> MockGlobalState::runAllMockServers() {
+	std::vector<Future<Void>> futures;
+	futures.reserve(allServers.size());
+	for (auto& [id, _] : allServers) {
+		futures.emplace_back(runMockServer(id));
+	}
+	return futures;
+}
+Future<Void> MockGlobalState::runMockServer(const UID& id) {
+	return allServers.at(id).run();
+}
+
+int64_t MockGlobalState::get(KeyRef const& key) {
+	auto ids = shardMapping->getSourceServerIdsFor(key);
+	int64_t randomBytes = 0;
+	if (deterministicRandom()->random01() > emptyProb) {
+		randomBytes = deterministicRandom()->randomInt64(minByteSize, maxByteSize + 1);
+	}
+	// randomly choose 1 server
+	auto id = deterministicRandom()->randomChoice(ids);
+	allServers.at(id).get(key, randomBytes);
+	return randomBytes;
+}
+
+int64_t MockGlobalState::getRange(KeyRangeRef const& range) {
+	auto ranges = shardMapping->intersectingRanges(range);
+	int64_t totalSize = 0;
+	KeyRef begin, end;
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		auto ids = shardMapping->getSourceServerIdsFor(it->begin());
+		if (range.begin > it->begin()) {
+			begin = range.begin;
+		}
+		if (range.end < it->end()) {
+			end = range.end;
+		}
+
+		// randomly choose 1 server
+		auto id = deterministicRandom()->randomChoice(ids);
+		int64_t beginSize = deterministicRandom()->randomInt64(0, SERVER_KNOBS->MIN_SHARD_BYTES),
+		        endSize = deterministicRandom()->randomInt64(0, SERVER_KNOBS->MIN_SHARD_BYTES);
+		totalSize += allServers.at(id).getRange(KeyRangeRef(begin, end), beginSize, endSize);
+	}
+	return totalSize;
+}
+
+int64_t MockGlobalState::set(KeyRef const& key, int valueSize, bool insert) {
+	auto ids = shardMapping->getSourceServerIdsFor(key);
+	int64_t oldKvBytes = 0;
+	insert |= (deterministicRandom()->random01() < emptyProb);
+
+	if (!insert) {
+		oldKvBytes = key.size() + deterministicRandom()->randomInt64(minByteSize, maxByteSize + 1);
+	}
+
+	for (auto& id : ids) {
+		allServers.at(id).set(key, valueSize + key.size(), oldKvBytes);
+	}
+	return oldKvBytes;
+}
+
+int64_t MockGlobalState::clear(KeyRef const& key) {
+	auto ids = shardMapping->getSourceServerIdsFor(key);
+	int64_t randomBytes = 0;
+	if (deterministicRandom()->random01() > emptyProb) {
+		randomBytes = deterministicRandom()->randomInt64(minByteSize, maxByteSize + 1) + key.size();
+	}
+
+	for (auto& id : ids) {
+		allServers.at(id).clear(key, randomBytes);
+	}
+	return randomBytes;
+}
+
+int64_t MockGlobalState::clearRange(KeyRangeRef const& range) {
+	auto ranges = shardMapping->intersectingRanges(range);
+	int64_t totalSize = 0;
+	KeyRef begin, end;
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		auto ids = shardMapping->getSourceServerIdsFor(it->begin());
+		if (range.begin > it->begin()) {
+			begin = range.begin;
+		}
+		if (range.end < it->end()) {
+			end = range.end;
+		}
+
+		int64_t beginSize = deterministicRandom()->randomInt64(0, SERVER_KNOBS->MIN_SHARD_BYTES),
+		        endSize = deterministicRandom()->randomInt64(0, SERVER_KNOBS->MIN_SHARD_BYTES);
+		int64_t lastSize = -1;
+		for (auto& id : ids) {
+			int64_t size = allServers.at(id).clearRange(KeyRangeRef(begin, end), beginSize, endSize);
+			ASSERT(lastSize == size || lastSize == -1); // every server should return the same result
+		}
+		totalSize += lastSize;
+	}
+	return totalSize;
 }
 
 TEST_CASE("/MockGlobalState/initializeAsEmptyDatabaseMGS/SimpleThree") {
@@ -445,11 +778,13 @@ struct MockGlobalStateTester {
 		mss.threeWayShardSplitting(outerRange, KeyRangeRef(x1, x2), oldSize, false);
 		auto ranges = mss.serverKeys.containedRanges(outerRange);
 		ASSERT(ranges.begin().range() == KeyRangeRef(outerRange.begin, x1));
+		ASSERT(ranges.begin().cvalue().status == oldStatus);
 		ranges.pop_front();
 		ASSERT(ranges.begin().range() == KeyRangeRef(x1, x2));
 		ASSERT(ranges.begin().cvalue().status == oldStatus);
 		ranges.pop_front();
 		ASSERT(ranges.begin().range() == KeyRangeRef(x2, outerRange.end));
+		ASSERT(ranges.begin().cvalue().status == oldStatus);
 		ranges.pop_front();
 		ASSERT(ranges.empty());
 	}
@@ -468,6 +803,7 @@ struct MockGlobalStateTester {
 		mss.twoWayShardSplitting(it->range(), x1, oldSize, false);
 		auto ranges = mss.serverKeys.containedRanges(outerRange);
 		ASSERT(ranges.begin().range() == KeyRangeRef(outerRange.begin, x1));
+		ASSERT(ranges.begin().cvalue().status == oldStatus);
 		ranges.pop_front();
 		ASSERT(ranges.begin().range() == KeyRangeRef(x1, outerRange.end));
 		ASSERT(ranges.begin().cvalue().status == oldStatus);
@@ -516,6 +852,43 @@ TEST_CASE("/MockGlobalState/MockStorageServer/SplittingFunctions") {
 	std::cout << "Test 2-way splitting...\n";
 	mss.serverKeys.insert(allKeys, { MockShardStatus::COMPLETED, 0 }); // reset to empty
 	tester.testTwoWaySplitFirstRange(mss);
+
+	return Void();
+}
+
+TEST_CASE("/MockGlobalState/MockStorageServer/SetShardStatus") {
+	BasicTestConfig testConfig;
+	testConfig.simpleConfig = true;
+	testConfig.minimumReplication = 1;
+	testConfig.logAntiQuorum = 0;
+	DatabaseConfiguration dbConfig = generateNormalDatabaseConfiguration(testConfig);
+	TraceEvent("SetShardStatusUnitTestDbConfig").detail("Config", dbConfig.toString());
+
+	auto mgs = std::make_shared<MockGlobalState>();
+	mgs->initializeAsEmptyDatabaseMGS(dbConfig);
+
+	auto& mss = mgs->allServers.at(MockGlobalState::indexToUID(1));
+	mss.serverKeys.insert(allKeys, { MockShardStatus::UNSET, 0 }); // manually reset status
+
+	// split to 3 shards [allKeys.begin, a, b, allKeys.end]
+	KeyRange testRange(KeyRangeRef("a"_sr, "b"_sr));
+	mss.setShardStatus(testRange, MockShardStatus::INFLIGHT, false);
+	ASSERT(mss.allShardStatusEqual(testRange, MockShardStatus::INFLIGHT));
+
+	// [allKeys.begin, a, ac, b, bc, allKeys.end]
+	testRange = KeyRangeRef("ac"_sr, "bc"_sr);
+	mss.setShardStatus(testRange, MockShardStatus::INFLIGHT, false);
+	ASSERT(mss.allShardStatusEqual(testRange, MockShardStatus::INFLIGHT));
+
+	testRange = KeyRangeRef("b"_sr, "bc"_sr);
+	mss.setShardStatus(testRange, MockShardStatus::FETCHED, false);
+	ASSERT(mss.allShardStatusEqual(testRange, MockShardStatus::FETCHED));
+	mss.setShardStatus(testRange, MockShardStatus::COMPLETED, false);
+	ASSERT(mss.allShardStatusEqual(testRange, MockShardStatus::COMPLETED));
+	mss.setShardStatus(testRange, MockShardStatus::FETCHED, false);
+	ASSERT(mss.allShardStatusEqual(testRange, MockShardStatus::COMPLETED));
+
+	ASSERT(mss.serverKeys.size() == 5);
 
 	return Void();
 }
@@ -602,14 +975,11 @@ TEST_CASE("/MockGlobalState/MockStorageServer/WaitStorageMetricsRequest") {
 
 	state std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
 	mgs->initializeAsEmptyDatabaseMGS(dbConfig);
-	state ActorCollection actors;
-
-	ActorCollection* ptr = &actors; // get around ACTOR syntax restriction
-	std::for_each(mgs->allServers.begin(), mgs->allServers.end(), [ptr](auto& server) {
-		ptr->add(server.second.run());
-		IFailureMonitor::failureMonitor().setStatus(server.second.ssi.address(), FailureStatus(false));
+	std::for_each(mgs->allServers.begin(), mgs->allServers.end(), [](auto& server) {
 		server.second.metrics.byteSample.sample.insert("something"_sr, 500000);
 	});
+
+	state Future<Void> allServerFutures = waitForAll(mgs->runAllMockServers());
 
 	KeyRange testRange = allKeys;
 	ShardSizeBounds bounds = ShardSizeBounds::shardSizeBoundsBeforeTrack();
@@ -619,5 +989,39 @@ TEST_CASE("/MockGlobalState/MockStorageServer/WaitStorageMetricsRequest") {
 	// std::cout << "get byte "<< res.first.get().bytes << "\n";
 	ASSERT_EQ(res.second, -1); // the valid result always return -1, strange contraction though.
 	ASSERT_EQ(res.first.get().bytes, 500000);
+	return Void();
+}
+
+TEST_CASE("/MockGlobalState/MockStorageServer/DataOpsSet") {
+	BasicTestConfig testConfig;
+	testConfig.simpleConfig = true;
+	testConfig.minimumReplication = 1;
+	testConfig.logAntiQuorum = 0;
+	DatabaseConfiguration dbConfig = generateNormalDatabaseConfiguration(testConfig);
+	TraceEvent("DataOpsUnitTestConfig").detail("Config", dbConfig.toString());
+	state std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
+	mgs->initializeAsEmptyDatabaseMGS(dbConfig);
+	state Future<Void> allServerFutures = waitForAll(mgs->runAllMockServers());
+
+	// insert
+	{
+		mgs->set("a"_sr, 1 * SERVER_KNOBS->BYTES_WRITTEN_UNITS_PER_SAMPLE, true);
+		mgs->set("b"_sr, 2 * SERVER_KNOBS->BYTES_WRITTEN_UNITS_PER_SAMPLE, true);
+		mgs->set("c"_sr, 3 * SERVER_KNOBS->BYTES_WRITTEN_UNITS_PER_SAMPLE, true);
+		for (auto& server : mgs->allServers) {
+			ASSERT_EQ(server.second.usedDiskSpace, 3 + 6 * SERVER_KNOBS->BYTES_WRITTEN_UNITS_PER_SAMPLE);
+		}
+		ShardSizeBounds bounds = ShardSizeBounds::shardSizeBoundsBeforeTrack();
+		std::pair<Optional<StorageMetrics>, int> res = wait(
+		    mgs->waitStorageMetrics(KeyRangeRef("a"_sr, "bc"_sr), bounds.min, bounds.max, bounds.permittedError, 1, 1));
+
+		int64_t testSize = 2 + 3 * SERVER_KNOBS->BYTES_WRITTEN_UNITS_PER_SAMPLE;
+		// SOMEDAY: how to integrate with isKeyValueInSample() better?
+		if (res.first.get().bytes > 0) {
+			// If sampled
+			ASSERT_EQ(res.first.get().bytes, testSize);
+			ASSERT_GT(res.first.get().bytesWrittenPerKSecond, 0);
+		}
+	}
 	return Void();
 }

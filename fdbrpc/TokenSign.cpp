@@ -52,11 +52,11 @@
 
 namespace {
 
-// test-only constants for generating random tenant/key names
+// test-only constants for generating random tenant ID and key names
 constexpr int MinIssuerNameLen = 16;
 constexpr int MaxIssuerNameLenPlus1 = 25;
-constexpr int MinTenantNameLen = 8;
-constexpr int MaxTenantNameLenPlus1 = 17;
+constexpr authz::TenantId MinTenantId = 1;
+constexpr authz::TenantId MaxTenantIdPlus1 = 0xffffffffll;
 constexpr int MinKeyNameLen = 10;
 constexpr int MaxKeyNameLenPlus1 = 21;
 
@@ -139,15 +139,6 @@ namespace authz {
 
 using MessageDigestMethod = const EVP_MD*;
 
-Algorithm algorithmFromString(StringRef s) noexcept {
-	if (s == "RS256"_sr)
-		return Algorithm::RS256;
-	else if (s == "ES256"_sr)
-		return Algorithm::ES256;
-	else
-		return Algorithm::UNKNOWN;
-}
-
 std::pair<PKeyAlgorithm, MessageDigestMethod> getMethod(Algorithm alg) {
 	if (alg == Algorithm::RS256) {
 		return { PKeyAlgorithm::RSA, ::EVP_sha256() };
@@ -169,36 +160,6 @@ std::string_view getAlgorithmName(Algorithm alg) {
 
 } // namespace authz
 
-namespace authz::flatbuffers {
-
-SignedTokenRef signToken(Arena& arena, TokenRef token, StringRef keyName, PrivateKey privateKey) {
-	auto ret = SignedTokenRef{};
-	auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
-	writer.serialize(token);
-	auto tokenStr = writer.toStringRef();
-	auto sig = privateKey.sign(arena, tokenStr, *::EVP_sha256());
-	ret.token = tokenStr;
-	ret.signature = sig;
-	ret.keyName = StringRef(arena, keyName);
-	return ret;
-}
-
-bool verifyToken(SignedTokenRef signedToken, PublicKey publicKey) {
-	return publicKey.verify(signedToken.token, signedToken.signature, *::EVP_sha256());
-}
-
-TokenRef makeRandomTokenSpec(Arena& arena, IRandom& rng) {
-	auto token = TokenRef{};
-	token.expiresAt = timer_monotonic() * (0.5 + rng.random01());
-	const auto numTenants = rng.randomInt(1, 3);
-	for (auto i = 0; i < numTenants; i++) {
-		token.tenants.push_back(arena, genRandomAlphanumStringRef(arena, rng, MinTenantNameLen, MaxTenantNameLenPlus1));
-	}
-	return token;
-}
-
-} // namespace authz::flatbuffers
-
 namespace authz::jwt {
 
 template <class FieldType, size_t NameLen>
@@ -212,7 +173,15 @@ void appendField(fmt::memory_buffer& b, char const (&name)[NameLen], Optional<Fi
 		for (auto i = 0; i < f.size(); i++) {
 			if (i)
 				fmt::format_to(bi, ",");
-			fmt::format_to(bi, f[i].toStringView());
+			fmt::format_to(bi, fmt::runtime(f[i].toStringView()));
+		}
+		fmt::format_to(bi, "]");
+	} else if constexpr (std::is_same_v<FieldType, VectorRef<TenantId>>) {
+		fmt::format_to(bi, " {}=[", name);
+		for (auto i = 0; i < f.size(); i++) {
+			if (i)
+				fmt::format_to(bi, ",");
+			fmt::format_to(bi, "{:#x}", f[i]);
 		}
 		fmt::format_to(bi, "]");
 	} else if constexpr (std::is_same_v<FieldType, StringRef>) {
@@ -222,49 +191,53 @@ void appendField(fmt::memory_buffer& b, char const (&name)[NameLen], Optional<Fi
 	}
 }
 
-StringRef TokenRef::toStringRef(Arena& arena) {
+StringRef toStringRef(Arena& arena, const TokenRef& tokenSpec) {
 	auto buf = fmt::memory_buffer();
-	fmt::format_to(std::back_inserter(buf), "alg={} kid={}", getAlgorithmName(algorithm), keyId.toStringView());
-	appendField(buf, "iss", issuer);
-	appendField(buf, "sub", subject);
-	appendField(buf, "aud", audience);
-	appendField(buf, "iat", issuedAtUnixTime);
-	appendField(buf, "exp", expiresAtUnixTime);
-	appendField(buf, "nbf", notBeforeUnixTime);
-	appendField(buf, "jti", tokenId);
-	appendField(buf, "tenants", tenants);
+	fmt::format_to(std::back_inserter(buf),
+	               "alg={} kid={}",
+	               getAlgorithmName(tokenSpec.algorithm),
+	               tokenSpec.keyId.toStringView());
+	appendField(buf, "iss", tokenSpec.issuer);
+	appendField(buf, "sub", tokenSpec.subject);
+	appendField(buf, "aud", tokenSpec.audience);
+	appendField(buf, "iat", tokenSpec.issuedAtUnixTime);
+	appendField(buf, "exp", tokenSpec.expiresAtUnixTime);
+	appendField(buf, "nbf", tokenSpec.notBeforeUnixTime);
+	appendField(buf, "jti", tokenSpec.tokenId);
+	appendField(buf, "tenants", tokenSpec.tenants);
 	auto str = new (arena) uint8_t[buf.size()];
 	memcpy(str, buf.data(), buf.size());
 	return StringRef(str, buf.size());
 }
 
-template <class FieldType, class Writer, bool MakeStringArrayBase64 = false>
-void putField(Optional<FieldType> const& field,
-              Writer& wr,
-              const char* fieldName,
-              std::bool_constant<MakeStringArrayBase64> _ = std::bool_constant<false>{}) {
+template <class FieldType, class Writer>
+void putField(Optional<FieldType> const& field, Writer& wr, const char* fieldName) {
 	if (!field.present())
 		return;
 	wr.Key(fieldName);
 	auto const& value = field.get();
 	static_assert(std::is_same_v<StringRef, FieldType> || std::is_same_v<FieldType, uint64_t> ||
-	              std::is_same_v<FieldType, VectorRef<StringRef>>);
+	              std::is_same_v<FieldType, VectorRef<StringRef>> || std::is_same_v<FieldType, VectorRef<TenantId>>);
 	if constexpr (std::is_same_v<StringRef, FieldType>) {
 		wr.String(reinterpret_cast<const char*>(value.begin()), value.size());
 	} else if constexpr (std::is_same_v<FieldType, uint64_t>) {
 		wr.Uint64(value);
+	} else if constexpr (std::is_same_v<FieldType, VectorRef<TenantId>>) {
+		// "tenants" array = array of base64-encoded tenant key prefix
+		// key prefix = bytestring representation of big-endian tenant ID (int64_t)
+		Arena arena;
+		wr.StartArray();
+		for (auto elem : value) {
+			auto const bigEndianId = bigEndian64(elem);
+			auto encodedElem =
+			    base64::encode(arena, StringRef(reinterpret_cast<const uint8_t*>(&bigEndianId), sizeof(bigEndianId)));
+			wr.String(reinterpret_cast<const char*>(encodedElem.begin()), encodedElem.size());
+		}
+		wr.EndArray();
 	} else {
 		wr.StartArray();
-		if constexpr (MakeStringArrayBase64) {
-			Arena arena;
-			for (auto elem : value) {
-				auto encodedElem = base64::encode(arena, elem);
-				wr.String(reinterpret_cast<const char*>(encodedElem.begin()), encodedElem.size());
-			}
-		} else {
-			for (auto elem : value) {
-				wr.String(reinterpret_cast<const char*>(elem.begin()), elem.size());
-			}
+		for (auto elem : value) {
+			wr.String(reinterpret_cast<const char*>(elem.begin()), elem.size());
 		}
 		wr.EndArray();
 	}
@@ -295,7 +268,7 @@ StringRef makeSignInput(Arena& arena, const TokenRef& tokenSpec) {
 	putField(tokenSpec.expiresAtUnixTime, payload, "exp");
 	putField(tokenSpec.notBeforeUnixTime, payload, "nbf");
 	putField(tokenSpec.tokenId, payload, "jti");
-	putField(tokenSpec.tenants, payload, "tenants", std::bool_constant<true>{} /* encode tenants in base64 */);
+	putField(tokenSpec.tenants, payload, "tenants");
 	payload.EndObject();
 	auto const headerPartLen = base64::url::encodedLength(headerBuffer.GetSize());
 	auto const payloadPartLen = base64::url::encodedLength(payloadBuffer.GetSize());
@@ -375,7 +348,7 @@ Optional<StringRef> parseHeaderPart(Arena& arena, TokenRef& token, StringRef b64
 	if (typValue != "JWT"_sr)
 		return "'typ' is not 'JWT'"_sr;
 	auto algValue = StringRef(reinterpret_cast<const uint8_t*>(alg.GetString()), alg.GetStringLength());
-	auto algType = algorithmFromString(algValue);
+	auto algType = algorithmFromString(algValue.toStringView());
 	if (algType == Algorithm::UNKNOWN)
 		return "Unsupported algorithm"_sr;
 	token.algorithm = algType;
@@ -383,18 +356,17 @@ Optional<StringRef> parseHeaderPart(Arena& arena, TokenRef& token, StringRef b64
 	return {};
 }
 
-template <class FieldType, bool ExpectBase64StringArray = false>
+template <class FieldType>
 Optional<StringRef> parseField(Arena& arena,
                                Optional<FieldType>& out,
                                const rapidjson::Document& d,
-                               const char* fieldName,
-                               std::bool_constant<ExpectBase64StringArray> _ = std::bool_constant<false>{}) {
+                               const char* fieldName) {
 	auto fieldItr = d.FindMember(fieldName);
 	if (fieldItr == d.MemberEnd())
 		return {};
 	auto const& field = fieldItr->value;
 	static_assert(std::is_same_v<StringRef, FieldType> || std::is_same_v<FieldType, uint64_t> ||
-	              std::is_same_v<FieldType, VectorRef<StringRef>>);
+	              std::is_same_v<FieldType, VectorRef<StringRef>> || std::is_same_v<FieldType, VectorRef<TenantId>>);
 	if constexpr (std::is_same_v<FieldType, StringRef>) {
 		if (!field.IsString()) {
 			return StringRef(arena, fmt::format("'{}' is not a string", fieldName));
@@ -405,7 +377,7 @@ Optional<StringRef> parseField(Arena& arena,
 			return StringRef(arena, fmt::format("'{}' is not a number", fieldName));
 		}
 		out = static_cast<uint64_t>(field.GetDouble());
-	} else {
+	} else if constexpr (std::is_same_v<FieldType, VectorRef<StringRef>>) {
 		if (!field.IsArray()) {
 			return StringRef(arena, fmt::format("'{}' is not an array", fieldName));
 		}
@@ -415,25 +387,49 @@ Optional<StringRef> parseField(Arena& arena,
 				if (!field[i].IsString()) {
 					return StringRef(arena, fmt::format("{}th element of '{}' is not a string", i + 1, fieldName));
 				}
-				if constexpr (ExpectBase64StringArray) {
-					Optional<StringRef> decodedString = base64::decode(
-					    arena,
-					    StringRef(reinterpret_cast<const uint8_t*>(field[i].GetString()), field[i].GetStringLength()));
-					if (decodedString.present()) {
-						vector[i] = decodedString.get();
-					} else {
-						CODE_PROBE(true, "Base64 token field has failed to be parsed", probe::decoration::rare);
-						return StringRef(arena,
-						                 fmt::format("Failed to base64-decode {}th element of '{}'", i + 1, fieldName));
-					}
-				} else {
-					vector[i] = StringRef(
-					    arena, reinterpret_cast<const uint8_t*>(field[i].GetString()), field[i].GetStringLength());
-				}
+				vector[i] = StringRef(
+				    arena, reinterpret_cast<const uint8_t*>(field[i].GetString()), field[i].GetStringLength());
 			}
 			out = VectorRef<StringRef>(vector, field.Size());
 		} else {
 			out = VectorRef<StringRef>();
+		}
+	} else {
+		// tenant ids case: convert array of base64-encoded length-8 bytestring containing big-endian int64_t to
+		// local-endian int64_t
+		if (!field.IsArray()) {
+			return StringRef(arena, fmt::format("'{}' is not an array", fieldName));
+		}
+		if (field.Size() > 0) {
+			auto vector = new (arena) TenantId[field.Size()];
+			for (auto i = 0; i < field.Size(); i++) {
+				if (!field[i].IsString()) {
+					return StringRef(arena, fmt::format("{}th element of '{}' is not a string", i + 1, fieldName));
+				}
+				Optional<StringRef> decodedString = base64::decode(
+				    arena,
+				    StringRef(reinterpret_cast<const uint8_t*>(field[i].GetString()), field[i].GetStringLength()));
+				if (decodedString.present()) {
+					auto const tenantPrefix = decodedString.get();
+					if (tenantPrefix.size() != sizeof(TenantId)) {
+						CODE_PROBE(true, "Tenant prefix has an invalid length");
+						return StringRef(arena,
+						                 fmt::format("{}th element of '{}' has an invalid bytewise length of {}",
+						                             i + 1,
+						                             fieldName,
+						                             tenantPrefix.size()));
+					}
+					TenantId tenantId = *reinterpret_cast<const TenantId*>(tenantPrefix.begin());
+					vector[i] = fromBigEndian64(tenantId);
+				} else {
+					CODE_PROBE(true, "Tenant field has failed to be parsed");
+					return StringRef(arena,
+					                 fmt::format("Failed to base64-decode {}th element of '{}'", i + 1, fieldName));
+				}
+			}
+			out = VectorRef<TenantId>(vector, field.Size());
+		} else {
+			out = VectorRef<TenantId>();
 		}
 	}
 	return {};
@@ -467,12 +463,7 @@ Optional<StringRef> parsePayloadPart(Arena& arena, TokenRef& token, StringRef b6
 		return err;
 	if ((err = parseField(arena, token.notBeforeUnixTime, d, "nbf")).present())
 		return err;
-	if ((err = parseField(arena,
-	                      token.tenants,
-	                      d,
-	                      "tenants",
-	                      std::bool_constant<true>{} /* expect field elements encoded in base64 */))
-	        .present())
+	if ((err = parseField(arena, token.tenants, d, "tenants")).present())
 		return err;
 	return {};
 }
@@ -562,45 +553,22 @@ TokenRef makeRandomTokenSpec(Arena& arena, IRandom& rng, Algorithm alg) {
 	auto numAudience = rng.randomInt(1, 5);
 	auto aud = new (arena) StringRef[numAudience];
 	for (auto i = 0; i < numAudience; i++)
-		aud[i] = genRandomAlphanumStringRef(arena, rng, MinTenantNameLen, MaxTenantNameLenPlus1);
+		aud[i] = genRandomAlphanumStringRef(arena, rng, MinIssuerNameLen, MaxIssuerNameLenPlus1);
 	ret.audience = VectorRef<StringRef>(aud, numAudience);
 	ret.issuedAtUnixTime = g_network->timer();
 	ret.notBeforeUnixTime = ret.issuedAtUnixTime.get();
 	ret.expiresAtUnixTime = ret.issuedAtUnixTime.get() + rng.randomInt(360, 1080 + 1);
 	auto numTenants = rng.randomInt(1, 3);
-	auto tenants = new (arena) StringRef[numTenants];
+	auto tenants = new (arena) TenantId[numTenants];
 	for (auto i = 0; i < numTenants; i++)
-		tenants[i] = genRandomAlphanumStringRef(arena, rng, MinTenantNameLen, MaxTenantNameLenPlus1);
-	ret.tenants = VectorRef<StringRef>(tenants, numTenants);
+		tenants[i] = rng.randomInt64(MinTenantId, MaxTenantIdPlus1);
+	ret.tenants = VectorRef<TenantId>(tenants, numTenants);
 	return ret;
 }
 
 } // namespace authz::jwt
 
 void forceLinkTokenSignTests() {}
-
-TEST_CASE("/fdbrpc/TokenSign/FlatBuffer") {
-	const auto numIters = 100;
-	for (auto i = 0; i < numIters; i++) {
-		auto arena = Arena();
-		auto privateKey = mkcert::makeEcP256();
-		auto publicKey = privateKey.toPublic();
-		auto& rng = *deterministicRandom();
-		auto tokenSpec = authz::flatbuffers::makeRandomTokenSpec(arena, rng);
-		auto keyName = genRandomAlphanumStringRef(arena, rng, MinKeyNameLen, MaxKeyNameLenPlus1);
-		auto signedToken = authz::flatbuffers::signToken(arena, tokenSpec, keyName, privateKey);
-		ASSERT(authz::flatbuffers::verifyToken(signedToken, publicKey));
-		// try tampering with signed token by adding one more tenant
-		tokenSpec.tenants.push_back(arena,
-		                            genRandomAlphanumStringRef(arena, rng, MinTenantNameLen, MaxTenantNameLenPlus1));
-		auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
-		writer.serialize(tokenSpec);
-		signedToken.token = writer.toStringRef();
-		ASSERT(!authz::flatbuffers::verifyToken(signedToken, publicKey));
-	}
-	printf("%d runs OK\n", numIters);
-	return Void();
-}
 
 TEST_CASE("/fdbrpc/TokenSign/JWT") {
 	const auto numIters = 100;
@@ -643,8 +611,7 @@ TEST_CASE("/fdbrpc/TokenSign/JWT") {
 			ASSERT(verifyOk);
 		}
 		// try tampering with signed token by adding one more tenant
-		tokenSpec.tenants.get().push_back(
-		    arena, genRandomAlphanumStringRef(arena, rng, MinTenantNameLen, MaxTenantNameLenPlus1));
+		tokenSpec.tenants.get().push_back(arena, rng.randomInt64(MinTenantId, MaxTenantIdPlus1));
 		auto tamperedTokenPart = makeSignInput(arena, tokenSpec);
 		auto tamperedTokenString = fmt::format("{}.{}", tamperedTokenPart.toString(), signaturePart.toString());
 		std::tie(verifyOk, verifyErr) = authz::jwt::verifyToken(StringRef(tamperedTokenString), publicKey);
@@ -667,12 +634,12 @@ TEST_CASE("/fdbrpc/TokenSign/JWT/ToStringRef") {
 	t.notBeforeUnixTime = 789ul;
 	t.keyId = "keyId"_sr;
 	t.tokenId = "tokenId"_sr;
-	StringRef tenants[2]{ "tenant1"_sr, "tenant2"_sr };
-	t.tenants = VectorRef<StringRef>(tenants, 2);
+	authz::TenantId tenants[2]{ 0x1ll, 0xabcdefabcdefll };
+	t.tenants = VectorRef<authz::TenantId>(tenants, 2);
 	auto arena = Arena();
-	auto tokenStr = t.toStringRef(arena);
+	auto tokenStr = toStringRef(arena, t);
 	auto tokenStrExpected =
-	    "alg=ES256 kid=keyId iss=issuer sub=subject aud=[aud1,aud2,aud3] iat=123 exp=456 nbf=789 jti=tokenId tenants=[tenant1,tenant2]"_sr;
+	    "alg=ES256 kid=keyId iss=issuer sub=subject aud=[aud1,aud2,aud3] iat=123 exp=456 nbf=789 jti=tokenId tenants=[0x1,0xabcdefabcdef]"_sr;
 	if (tokenStr != tokenStrExpected) {
 		fmt::print("Expected: {}\nGot     : {}\n", tokenStrExpected.toStringView(), tokenStr.toStringView());
 		ASSERT(false);
@@ -682,73 +649,42 @@ TEST_CASE("/fdbrpc/TokenSign/JWT/ToStringRef") {
 	return Void();
 }
 
-// This unit test takes too long to run in RandomUnitTests.toml
-// FIXME: Move this to benchmark to flowbench
-/*
 TEST_CASE("/fdbrpc/TokenSign/bench") {
-    auto keyTypes = std::array<StringRef, 2>{ "EC"_sr, "RSA"_sr };
-    for (auto kty : keyTypes) {
-        constexpr auto repeat = 5;
-        constexpr auto numSamples = 10000;
-        fmt::print("=== {} keys case\n", kty.toString());
-        auto key = kty == "EC"_sr ? mkcert::makeEcP256() : mkcert::makeRsa4096Bit();
-        auto pubKey = key.toPublic();
-        auto& rng = *deterministicRandom();
-        auto arena = Arena();
-        auto jwtSpecs = new (arena) authz::jwt::TokenRef[numSamples];
-        auto fbSpecs = new (arena) authz::flatbuffers::TokenRef[numSamples];
-        auto jwts = new (arena) StringRef[numSamples];
-        auto fbs = new (arena) StringRef[numSamples];
-        for (auto i = 0; i < numSamples; i++) {
-            jwtSpecs[i] = authz::jwt::makeRandomTokenSpec(
-                arena, rng, kty == "EC"_sr ? authz::Algorithm::ES256 : authz::Algorithm::RS256);
-            fbSpecs[i] = authz::flatbuffers::makeRandomTokenSpec(arena, rng);
-        }
-        {
-            auto const jwtSignBegin = timer_monotonic();
-            for (auto i = 0; i < numSamples; i++) {
-                jwts[i] = authz::jwt::signToken(arena, jwtSpecs[i], key);
-            }
-            auto const jwtSignEnd = timer_monotonic();
-            fmt::print("JWT Sign   :         {:.2f} OPS\n", numSamples / (jwtSignEnd - jwtSignBegin));
-        }
-        {
-            auto const jwtVerifyBegin = timer_monotonic();
-            for (auto rep = 0; rep < repeat; rep++) {
-                for (auto i = 0; i < numSamples; i++) {
-                    auto verifyOk = authz::jwt::verifyToken(jwts[i], pubKey);
-                    ASSERT(verifyOk);
-                }
-            }
-            auto const jwtVerifyEnd = timer_monotonic();
-            fmt::print("JWT Verify :         {:.2f} OPS\n", repeat * numSamples / (jwtVerifyEnd - jwtVerifyBegin));
-        }
-        {
-            auto tmpArena = Arena();
-            auto const fbSignBegin = timer_monotonic();
-            for (auto i = 0; i < numSamples; i++) {
-                auto fbToken = authz::flatbuffers::signToken(tmpArena, fbSpecs[i], "defaultKey"_sr, key);
-                auto wr = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, Unversioned());
-                wr.serialize(fbToken);
-                fbs[i] = wr.toStringRef();
-            }
-            auto const fbSignEnd = timer_monotonic();
-            fmt::print("FlatBuffers Sign   : {:.2f} OPS\n", numSamples / (fbSignEnd - fbSignBegin));
-        }
-        {
-            auto const fbVerifyBegin = timer_monotonic();
-            for (auto rep = 0; rep < repeat; rep++) {
-                for (auto i = 0; i < numSamples; i++) {
-                    auto signedToken = ObjectReader::fromStringRef<Standalone<authz::flatbuffers::SignedTokenRef>>(
-                        fbs[i], Unversioned());
-                    auto verifyOk = authz::flatbuffers::verifyToken(signedToken, pubKey);
-                    ASSERT(verifyOk);
-                }
-            }
-            auto const fbVerifyEnd = timer_monotonic();
-            fmt::print("FlatBuffers Verify : {:.2f} OPS\n", repeat * numSamples / (fbVerifyEnd - fbVerifyBegin));
-        }
-    }
-    return Void();
+	auto keyTypes = std::array<StringRef, 1>{ "EC"_sr };
+	for (auto kty : keyTypes) {
+		constexpr auto repeat = 5;
+		constexpr auto numSamples = 10000;
+		fmt::print("=== {} keys case\n", kty.toString());
+		auto key = kty == "EC"_sr ? mkcert::makeEcP256() : mkcert::makeRsa4096Bit();
+		auto pubKey = key.toPublic();
+		auto& rng = *deterministicRandom();
+		auto arena = Arena();
+		auto jwtSpecs = new (arena) authz::jwt::TokenRef[numSamples];
+		auto jwts = new (arena) StringRef[numSamples];
+		for (auto i = 0; i < numSamples; i++) {
+			jwtSpecs[i] = authz::jwt::makeRandomTokenSpec(
+			    arena, rng, kty == "EC"_sr ? authz::Algorithm::ES256 : authz::Algorithm::RS256);
+		}
+		{
+			auto const jwtSignBegin = timer_monotonic();
+			for (auto i = 0; i < numSamples; i++) {
+				jwts[i] = authz::jwt::signToken(arena, jwtSpecs[i], key);
+			}
+			auto const jwtSignEnd = timer_monotonic();
+			fmt::print("JWT Sign   :         {:.2f} OPS\n", numSamples / (jwtSignEnd - jwtSignBegin));
+		}
+		{
+			auto const jwtVerifyBegin = timer_monotonic();
+			for (auto rep = 0; rep < repeat; rep++) {
+				for (auto i = 0; i < numSamples; i++) {
+					auto [verifyOk, errorMsg] = authz::jwt::verifyToken(jwts[i], pubKey);
+					ASSERT(!errorMsg.present());
+					ASSERT(verifyOk);
+				}
+			}
+			auto const jwtVerifyEnd = timer_monotonic();
+			fmt::print("JWT Verify :         {:.2f} OPS\n", repeat * numSamples / (jwtVerifyEnd - jwtVerifyBegin));
+		}
+	}
+	return Void();
 }
-*/

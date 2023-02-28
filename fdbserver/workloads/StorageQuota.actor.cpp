@@ -18,7 +18,10 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
@@ -33,18 +36,23 @@
 struct StorageQuotaWorkload : TestWorkload {
 	static constexpr auto NAME = "StorageQuota";
 	TenantGroupName group;
-	TenantName tenant;
+	TenantName tenantName;
+	Reference<Tenant> tenant;
 	int nodeCount;
-	TenantName emptyTenant;
+	TenantName emptyTenantName;
+	Reference<Tenant> emptyTenant;
 
 	StorageQuotaWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		group = getOption(options, "group"_sr, "DefaultGroup"_sr);
-		tenant = getOption(options, "tenant"_sr, "DefaultTenant"_sr);
+		tenantName = getOption(options, "tenant"_sr, "DefaultTenant"_sr);
 		nodeCount = getOption(options, "nodeCount"_sr, 10000);
-		emptyTenant = getOption(options, "emptyTenant"_sr, "DefaultTenant"_sr);
+		emptyTenantName = getOption(options, "emptyTenant"_sr, "DefaultTenant"_sr);
 	}
 
 	Future<Void> setup(Database const& cx) override {
+		tenant = makeReference<Tenant>(cx, tenantName);
+		emptyTenant = makeReference<Tenant>(cx, emptyTenantName);
+
 		// Use default values for arguments between (and including) postSetupWarming and endNodeIdx params.
 		return bulkSetup(cx,
 		                 this,
@@ -72,8 +80,8 @@ struct StorageQuotaWorkload : TestWorkload {
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(keyForIndex(n), value((n + 1) % nodeCount)); }
 
 	ACTOR Future<Void> _start(StorageQuotaWorkload* self, Database cx) {
-		state TenantMapEntry entry1 = wait(TenantAPI::getTenant(cx.getReference(), self->tenant));
-		state TenantMapEntry entry2 = wait(TenantAPI::getTenant(cx.getReference(), self->emptyTenant));
+		state TenantMapEntry entry1 = wait(TenantAPI::getTenant(cx.getReference(), self->tenantName));
+		state TenantMapEntry entry2 = wait(TenantAPI::getTenant(cx.getReference(), self->emptyTenantName));
 		ASSERT(entry1.tenantGroup.present() && entry1.tenantGroup.get() == self->group &&
 		       entry2.tenantGroup.present() && entry2.tenantGroup.get() == self->group);
 
@@ -83,8 +91,8 @@ struct StorageQuotaWorkload : TestWorkload {
 		state int64_t quota = size - 1;
 
 		// Check that the quota set/get functions work as expected.
-		wait(setStorageQuotaHelper(cx, self->group, quota));
-		state Optional<int64_t> quotaRead = wait(getStorageQuotaHelper(cx, self->group));
+		wait(setStorageQuota(cx, self->group, quota));
+		state Optional<int64_t> quotaRead = wait(getStorageQuota(cx, self->group));
 		ASSERT(quotaRead.present() && quotaRead.get() == quota);
 
 		if (!SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
@@ -104,9 +112,9 @@ struct StorageQuotaWorkload : TestWorkload {
 		// Increase the quota or clear the quota. Check that writes to both the tenants are now able to commit.
 		if (deterministicRandom()->coinflip()) {
 			quota = size * 2;
-			wait(setStorageQuotaHelper(cx, self->group, quota));
+			wait(setStorageQuota(cx, self->group, quota));
 		} else {
-			wait(clearStorageQuotaHelper(cx, self->group));
+			wait(clearStorageQuota(cx, self->group));
 		}
 		state bool committed1 = wait(tryWrite(self, cx, self->tenant, /*bypassQuota=*/false, /*expectOk=*/true));
 		ASSERT(committed1);
@@ -116,8 +124,8 @@ struct StorageQuotaWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<int64_t> getSize(Database cx, TenantName tenantName) {
-		state ReadYourWritesTransaction tr(cx, tenantName);
+	ACTOR static Future<int64_t> getSize(Database cx, Reference<Tenant> tenant) {
+		state ReadYourWritesTransaction tr(cx, tenant);
 		state double totalDelay = 0.0;
 		state int64_t previousSize = -1;
 
@@ -129,57 +137,45 @@ struct StorageQuotaWorkload : TestWorkload {
 					totalDelay += 5.0;
 					wait(delay(5.0));
 				} else {
-					TraceEvent(SevDebug, "GetSizeResult").detail("Tenant", tr.getTenant().get()).detail("Size", size);
+					TraceEvent(SevDebug, "GetSizeResult").detail("Tenant", tenant).detail("Size", size);
 					return size;
 				}
 			} catch (Error& e) {
-				TraceEvent(SevDebug, "GetSizeError").errorUnsuppressed(e).detail("Tenant", tr.getTenant().get());
+				TraceEvent(SevDebug, "GetSizeError").errorUnsuppressed(e).detail("Tenant", tenant);
 				wait(tr.onError(e));
 			}
 		}
 	}
 
-	ACTOR static Future<Void> setStorageQuotaHelper(Database cx, TenantGroupName tenantGroupName, int64_t quota) {
-		state Transaction tr(cx);
-		loop {
-			try {
-				setStorageQuota(tr, tenantGroupName, quota);
-				wait(tr.commit());
-				return Void();
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
+	static Future<Void> setStorageQuota(Database cx, TenantGroupName tenantGroupName, int64_t quota) {
+		return runRYWTransactionVoid(cx,
+		                             [tenantGroupName = tenantGroupName,
+		                              quota = quota](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			                             tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			                             TenantMetadata::storageQuota().set(tr, tenantGroupName, quota);
+			                             return Void();
+		                             });
 	}
 
-	ACTOR static Future<Void> clearStorageQuotaHelper(Database cx, TenantGroupName tenantGroupName) {
-		state Transaction tr(cx);
-		loop {
-			try {
-				clearStorageQuota(tr, tenantGroupName);
-				wait(tr.commit());
-				return Void();
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
+	static Future<Void> clearStorageQuota(Database cx, TenantGroupName tenantGroupName) {
+		return runRYWTransactionVoid(
+		    cx, [tenantGroupName = tenantGroupName](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			    TenantMetadata::storageQuota().erase(tr, tenantGroupName);
+			    return Void();
+		    });
 	}
 
-	ACTOR static Future<Optional<int64_t>> getStorageQuotaHelper(Database cx, TenantGroupName tenantGroupName) {
-		state Transaction tr(cx);
-		loop {
-			try {
-				state Optional<int64_t> quota = wait(getStorageQuota(&tr, tenantGroupName));
-				return quota;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
+	static Future<Optional<int64_t>> getStorageQuota(Database cx, TenantGroupName tenantGroupName) {
+		return runRYWTransaction(cx, [tenantGroupName = tenantGroupName](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			return TenantMetadata::storageQuota().get(tr, tenantGroupName);
+		});
 	}
 
 	ACTOR static Future<bool> tryWrite(StorageQuotaWorkload* self,
 	                                   Database cx,
-	                                   TenantName tenant,
+	                                   Reference<Tenant> tenant,
 	                                   bool bypassQuota,
 	                                   bool expectOk) {
 		state int i;

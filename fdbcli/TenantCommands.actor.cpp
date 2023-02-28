@@ -43,9 +43,9 @@ const KeyRangeRef tenantRenameSpecialKeyRange("\xff\xff/management/tenant/rename
                                               "\xff\xff/management/tenant/rename0"_sr);
 
 Optional<std::map<Standalone<StringRef>, Optional<Value>>>
-parseTenantConfiguration(std::vector<StringRef> const& tokens, int startIndex, bool allowUnset) {
+parseTenantConfiguration(std::vector<StringRef> const& tokens, int startIndex, int endIndex, bool allowUnset) {
 	std::map<Standalone<StringRef>, Optional<Value>> configParams;
-	for (int tokenNum = startIndex; tokenNum < tokens.size(); ++tokenNum) {
+	for (int tokenNum = startIndex; tokenNum < endIndex; ++tokenNum) {
 		Optional<Value> value;
 
 		StringRef token = tokens[tokenNum];
@@ -87,6 +87,56 @@ parseTenantConfiguration(std::vector<StringRef> const& tokens, int startIndex, b
 	return configParams;
 }
 
+bool parseTenantListOptions(std::vector<StringRef> const& tokens,
+                            int startIndex,
+                            int& limit,
+                            int& offset,
+                            std::vector<MetaclusterAPI::TenantState>& filters) {
+	for (int tokenNum = startIndex; tokenNum < tokens.size(); ++tokenNum) {
+		Optional<Value> value;
+		StringRef token = tokens[tokenNum];
+		StringRef param;
+		bool foundEquals;
+		param = token.eat("=", &foundEquals);
+		if (!foundEquals) {
+			fmt::print(stderr,
+			           "ERROR: invalid option string `{}'. String must specify a value using `='.\n",
+			           param.toString().c_str());
+			return false;
+		}
+		value = token;
+		if (tokencmp(param, "limit")) {
+			int n = 0;
+			if (sscanf(value.get().toString().c_str(), "%d%n", &limit, &n) != 1 || n != value.get().size() ||
+			    limit <= 0) {
+				fmt::print(stderr, "ERROR: invalid limit `{}'\n", token.toString().c_str());
+				return false;
+			}
+		} else if (tokencmp(param, "offset")) {
+			int n = 0;
+			if (sscanf(value.get().toString().c_str(), "%d%n", &offset, &n) != 1 || n != value.get().size() ||
+			    offset < 0) {
+				fmt::print(stderr, "ERROR: invalid offset `{}'\n", token.toString().c_str());
+				return false;
+			}
+		} else if (tokencmp(param, "state")) {
+			auto filterStrings = value.get().splitAny(","_sr);
+			try {
+				for (auto sref : filterStrings) {
+					filters.push_back(MetaclusterAPI::stringToTenantState(sref.toString()));
+				}
+			} catch (Error& e) {
+				fmt::print(stderr, "ERROR: unrecognized tenant state(s) `{}'.\n", value.get().toString());
+				return false;
+			}
+		} else {
+			fmt::print(stderr, "ERROR: unrecognized parameter `{}'.\n", param.toString().c_str());
+			return false;
+		}
+	}
+	return true;
+}
+
 Key makeConfigKey(TenantNameRef tenantName, StringRef configName) {
 	return tenantConfigSpecialKeyRange.begin.withSuffix(Tuple().append(tenantName).append(configName).pack());
 }
@@ -123,7 +173,7 @@ ACTOR Future<bool> tenantCreateCommand(Reference<IDatabase> db, std::vector<Stri
 	state bool doneExistenceCheck = false;
 
 	state Optional<std::map<Standalone<StringRef>, Optional<Value>>> configuration =
-	    parseTenantConfiguration(tokens, 3, false);
+	    parseTenantConfiguration(tokens, 3, tokens.size(), false);
 
 	if (!configuration.present()) {
 		return false;
@@ -135,11 +185,16 @@ ACTOR Future<bool> tenantCreateCommand(Reference<IDatabase> db, std::vector<Stri
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				TenantMapEntry tenantEntry;
+				MetaclusterTenantMapEntry tenantEntry;
+				AssignClusterAutomatically assignClusterAutomatically = AssignClusterAutomatically::True;
 				for (auto const& [name, value] : configuration.get()) {
+					if (name == "assigned_cluster"_sr) {
+						assignClusterAutomatically = AssignClusterAutomatically::False;
+					}
 					tenantEntry.configure(name, value);
 				}
-				wait(MetaclusterAPI::createTenant(db, tokens[2], tenantEntry));
+				tenantEntry.tenantName = tokens[2];
+				wait(MetaclusterAPI::createTenant(db, tenantEntry, assignClusterAutomatically));
 			} else {
 				if (!doneExistenceCheck) {
 					// Hold the reference to the standalone's memory
@@ -176,7 +231,7 @@ ACTOR Future<bool> tenantCreateCommand(Reference<IDatabase> db, std::vector<Stri
 ACTOR Future<bool> tenantDeleteCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() != 3) {
 		fmt::print("Usage: tenant delete <NAME>\n\n");
-		fmt::print("Deletes a tenant from the cluster.\n");
+		fmt::print("Deletes a tenant from the cluster by name.\n");
 		fmt::print("Deletion will be allowed only if the specified tenant contains no data.\n");
 		return false;
 	}
@@ -223,19 +278,66 @@ ACTOR Future<bool> tenantDeleteCommand(Reference<IDatabase> db, std::vector<Stri
 	return true;
 }
 
+// tenant deleteID command
+ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	if (tokens.size() != 3) {
+		fmt::print("Usage: tenant deleteId <ID>\n\n");
+		fmt::print("Deletes a tenant from the cluster by ID.\n");
+		fmt::print("Deletion will be allowed only if the specified tenant contains no data.\n");
+		return false;
+	}
+	state Reference<ITransaction> tr = db->createTransaction();
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
+			int64_t tenantId;
+			int n;
+			if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
+				fmt::print(stderr, "ERROR: delete by ID should only be run on a management cluster.\n");
+				return false;
+			}
+			if (sscanf(tokens[2].toString().c_str(), "%" PRId64 "%n", &tenantId, &n) != 1 || n != tokens[2].size() ||
+			    tenantId < 0) {
+				fmt::print(stderr, "ERROR: invalid ID `{}'\n", tokens[2].toString().c_str());
+				return false;
+			}
+			wait(MetaclusterAPI::deleteTenant(db, tenantId));
+
+			break;
+		} catch (Error& e) {
+			state Error err(e);
+			if (e.code() == error_code_special_keys_api_failure) {
+				std::string errorMsgStr = wait(getSpecialKeysFailureErrorMessage(tr));
+				fmt::print(stderr, "ERROR: {}\n", errorMsgStr.c_str());
+				return false;
+			}
+			wait(safeThreadFutureToFuture(tr->onError(err)));
+		}
+	}
+
+	fmt::print("The tenant with ID `{}' has been deleted\n", printable(tokens[2]).c_str());
+	return true;
+}
+
 // tenant list command
 ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() > 5) {
-		fmt::print("Usage: tenant list [BEGIN] [END] [LIMIT]\n\n");
+	if (tokens.size() > 7) {
+		fmt::print("Usage: tenant list [BEGIN] [END] [limit=LIMIT] [offset=OFFSET] [state=<STATE1>,<STATE2>,...]\n\n");
 		fmt::print("Lists the tenants in a cluster.\n");
 		fmt::print("Only tenants in the range BEGIN - END will be printed.\n");
 		fmt::print("An optional LIMIT can be specified to limit the number of results (default 100).\n");
+		fmt::print("Optionally skip over the first OFFSET results (default 0).\n");
+		fmt::print("Optional comma-separated tenant state(s) can be provided to filter the list.\n");
 		return false;
 	}
 
 	state StringRef beginTenant = ""_sr;
 	state StringRef endTenant = "\xff\xff"_sr;
 	state int limit = 100;
+	state int offset = 0;
+	state std::vector<MetaclusterAPI::TenantState> filters;
 
 	if (tokens.size() >= 3) {
 		beginTenant = tokens[2];
@@ -243,14 +345,12 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 	if (tokens.size() >= 4) {
 		endTenant = tokens[3];
 		if (endTenant <= beginTenant) {
-			fmt::print(stderr, "ERROR: end must be larger than begin");
+			fmt::print(stderr, "ERROR: end must be larger than begin\n");
 			return false;
 		}
 	}
-	if (tokens.size() == 5) {
-		int n = 0;
-		if (sscanf(tokens[4].toString().c_str(), "%d%n", &limit, &n) != 1 || n != tokens[4].size() || limit <= 0) {
-			fmt::print(stderr, "ERROR: invalid limit `{}'\n", tokens[4].toString().c_str());
+	if (tokens.size() >= 5) {
+		if (!parseTenantListOptions(tokens, 4, limit, offset, filters)) {
 			return false;
 		}
 	}
@@ -265,10 +365,18 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			state std::vector<TenantName> tenantNames;
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
-				    wait(MetaclusterAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit));
-				for (auto tenant : tenants) {
-					tenantNames.push_back(tenant.first);
+				if (filters.empty()) {
+					std::vector<std::pair<TenantName, int64_t>> tenants =
+					    wait(MetaclusterAPI::listTenants(db, beginTenant, endTenant, limit, offset));
+					for (auto tenant : tenants) {
+						tenantNames.push_back(tenant.first);
+					}
+				} else {
+					std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenants =
+					    wait(MetaclusterAPI::listTenantMetadata(db, beginTenant, endTenant, limit, offset, filters));
+					for (auto tenant : tenants) {
+						tenantNames.push_back(tenant.first);
+					}
 				}
 			} else {
 				// Hold the reference to the standalone's memory
@@ -325,7 +433,7 @@ ACTOR Future<bool> tenantGetCommand(Reference<IDatabase> db, std::vector<StringR
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			state std::string tenantJson;
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				TenantMapEntry entry = wait(MetaclusterAPI::getTenantTransaction(tr, tokens[2]));
+				MetaclusterTenantMapEntry entry = wait(MetaclusterAPI::getTenantTransaction(tr, tokens[2]));
 				tenantJson = entry.toJson();
 			} else {
 				// Hold the reference to the standalone's memory
@@ -353,24 +461,41 @@ ACTOR Future<bool> tenantGetCommand(Reference<IDatabase> db, std::vector<StringR
 				int64_t id;
 				std::string prefix;
 				std::string tenantState;
+				std::string tenantLockState;
+				std::string lockId;
 				std::string tenantGroup;
 				std::string assignedCluster;
+				std::string error;
 
 				doc.get("id", id);
 				doc.get("prefix.printable", prefix);
+				doc.get("lock_state", tenantLockState);
 
-				doc.get("tenant_state", tenantState);
+				bool hasTenantState = doc.tryGet("tenant_state", tenantState);
+				bool hasLockId = doc.tryGet("lock_id", lockId);
 				bool hasTenantGroup = doc.tryGet("tenant_group.printable", tenantGroup);
-				bool hasAssignedCluster = doc.tryGet("assigned_cluster", assignedCluster);
+				bool hasAssignedCluster = doc.tryGet("assigned_cluster.printable", assignedCluster);
+				bool hasError = doc.tryGet("error", error);
 
 				fmt::print("  id: {}\n", id);
-				fmt::print("  prefix: {}\n", printable(prefix).c_str());
-				fmt::print("  tenant state: {}\n", printable(tenantState).c_str());
+				fmt::print("  prefix: {}\n", printable(prefix));
+				if (hasTenantState) {
+					fmt::print("  tenant state: {}\n", printable(tenantState));
+				}
+
+				fmt::print("  lock state: {}\n", tenantLockState);
+				if (hasLockId) {
+					fmt::print("  lock id: {}\n", lockId);
+				}
+
 				if (hasTenantGroup) {
-					fmt::print("  tenant group: {}\n", tenantGroup.c_str());
+					fmt::print("  tenant group: {}\n", tenantGroup);
 				}
 				if (hasAssignedCluster) {
-					fmt::print("  assigned cluster: {}\n", printable(assignedCluster).c_str());
+					fmt::print("  assigned cluster: {}\n", printable(assignedCluster));
+				}
+				if (hasError) {
+					fmt::print("  error: {}\n", error);
 				}
 			}
 			return true;
@@ -408,16 +533,22 @@ ACTOR Future<bool> tenantGetCommand(Reference<IDatabase> db, std::vector<StringR
 // tenant configure command
 ACTOR Future<bool> tenantConfigureCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 4) {
-		fmt::print("Usage: tenant configure <TENANT_NAME> <[unset] tenant_group[=<GROUP_NAME>]> ...\n\n");
+		fmt::print(
+		    "Usage: tenant configure <TENANT_NAME> <[unset] tenant_group[=<GROUP_NAME>]> [ignore_capacity_limit]\n\n");
 		fmt::print("Updates the configuration for a tenant.\n");
 		fmt::print("Use `tenant_group=<GROUP_NAME>' to change the tenant group that a\n");
 		fmt::print("tenant is assigned to or `unset tenant_group' to remove a tenant from\n");
-		fmt::print("its tenant group.");
+		fmt::print("its tenant group.\n");
+		fmt::print("If `ignore_capacity_limit' is specified, a new tenant group can be\n");
+		fmt::print("created or the tenant can be ungrouped on a cluster with no tenant group\n");
+		fmt::print("capacity remaining\n");
 		return false;
 	}
 
+	state bool ignoreCapacityLimit = tokens.back() == "ignore_capacity_limit";
+	int configurationEndIndex = tokens.size() - (ignoreCapacityLimit ? 1 : 0);
 	state Optional<std::map<Standalone<StringRef>, Optional<Value>>> configuration =
-	    parseTenantConfiguration(tokens, 3, true);
+	    parseTenantConfiguration(tokens, 3, configurationEndIndex, true);
 
 	if (!configuration.present()) {
 		return false;
@@ -431,8 +562,8 @@ ACTOR Future<bool> tenantConfigureCommand(Reference<IDatabase> db, std::vector<S
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				TenantMapEntry tenantEntry;
-				wait(MetaclusterAPI::configureTenant(db, tokens[2], configuration.get()));
+				wait(MetaclusterAPI::configureTenant(
+				    db, tokens[2], configuration.get(), IgnoreCapacityLimit(ignoreCapacityLimit)));
 			} else {
 				applyConfigurationToSpecialKeys(tr, tokens[2], configuration.get());
 				wait(safeThreadFutureToFuture(tr->commit()));
@@ -543,6 +674,101 @@ ACTOR Future<bool> tenantRenameCommand(Reference<IDatabase> db, std::vector<Stri
 	return true;
 }
 
+ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	state UID uid;
+	state Reference<ITransaction> tr;
+	state StringRef name;
+	state Key nameKey;
+	state TenantAPI::TenantLockState desiredLockState;
+	state int uidIdx;
+	if (tokens[1] == "lock"_sr && (tokens.size() < 3 || tokens.size() > 5)) {
+		fmt::print("Usage: tenant lock <NAME> [w|rw] [UID]\n\n");
+		fmt::print("Locks a tenant for read-write or read-only with a given UID.\n");
+		fmt::print("By default a read-write lock is created.\n");
+		fmt::print("If no UID is passed, fdbcli will generate one.\n");
+		fmt::print("UID has to be a 16-byte number represented in hex.\n");
+		return false;
+	} else if (tokens[1] == "unlock"_sr && tokens.size() != 4) {
+		fmt::print("Usage: tenant unlock <NAME> <UID>\n\n");
+		return false;
+	}
+	name = tokens[2];
+	nameKey = tenantMapSpecialKeyRange.begin.withSuffix(name);
+	if (tokens[1] == "unlock"_sr) {
+		uidIdx = 3;
+		desiredLockState = TenantAPI::TenantLockState::UNLOCKED;
+	} else {
+		uidIdx = 4;
+		if (tokens.size() > 3) {
+			if (tokens[3] == "w"_sr) {
+				desiredLockState = TenantAPI::TenantLockState::READ_ONLY;
+			} else if (tokens[3] == "rw"_sr) {
+				desiredLockState = TenantAPI::TenantLockState::LOCKED;
+			} else {
+				fmt::print(stderr, "ERROR: Invalid lock type `{}'\n", tokens[3]);
+				return false;
+			}
+		} else {
+			desiredLockState = TenantAPI::TenantLockState::LOCKED;
+		}
+	}
+	if (tokens.size() > uidIdx) {
+		try {
+			auto uidStr = tokens[uidIdx].toString();
+			if (uidStr.size() < 32) {
+				// UID::fromString expects the string to be exactly 32 characters long, but the uid might be shorter
+				// if the most significant byte[s] are 0. So we need to pad
+				uidStr.insert(0, 32 - uidStr.size(), '0');
+			}
+			uid = UID::fromStringThrowsOnFailure(uidStr);
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_operation_failed);
+			fmt::print(stderr, "ERROR: Couldn't not parse `{}' as a valid UID", tokens[uidIdx].toString());
+			return false;
+		}
+	} else {
+		ASSERT(desiredLockState != TenantAPI::TenantLockState::UNLOCKED);
+		uid = deterministicRandom()->randomUniqueID();
+	}
+	tr = db->createTransaction();
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
+			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
+				wait(MetaclusterAPI::changeTenantLockState(db, name, desiredLockState, uid));
+			} else {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				auto f = tr->get(nameKey);
+				Optional<Value> entry = wait(safeThreadFutureToFuture(f));
+				if (!entry.present()) {
+					fmt::print(stderr, "ERROR: Tenant `{}' does not exist\n", name);
+					return false;
+				}
+				auto tenantId = getTenantId(entry.get());
+				wait(TenantAPI::changeLockState(tr.getPtr(), tenantId, desiredLockState, uid));
+				wait(safeThreadFutureToFuture(tr->commit()));
+			}
+			if (desiredLockState != TenantAPI::TenantLockState::UNLOCKED) {
+				fmt::print("Locked tenant `{}' with UID `{}'\n", name.toString(), uid.toString());
+			} else {
+				fmt::print("Unlocked tenant `{}'\n", name.toString());
+			}
+			return true;
+		} catch (Error& e) {
+			if (e.code() == error_code_tenant_locked) {
+				if (desiredLockState == TenantAPI::TenantLockState::UNLOCKED) {
+					fmt::print(stderr, "ERROR: Wrong lock UID\n");
+				} else {
+					fmt::print(stderr, "ERROR: Tenant locked with a different UID\n");
+				}
+				return false;
+			}
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
 // tenant command
 Future<bool> tenantCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() == 1) {
@@ -552,6 +778,8 @@ Future<bool> tenantCommand(Reference<IDatabase> db, std::vector<StringRef> token
 		return tenantCreateCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "delete")) {
 		return tenantDeleteCommand(db, tokens);
+	} else if (tokencmp(tokens[1], "deleteId")) {
+		return tenantDeleteIdCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "list")) {
 		return tenantListCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "get")) {
@@ -560,6 +788,10 @@ Future<bool> tenantCommand(Reference<IDatabase> db, std::vector<StringRef> token
 		return tenantConfigureCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "rename")) {
 		return tenantRenameCommand(db, tokens);
+	} else if (tokencmp(tokens[1], "lock")) {
+		return tenantLockCommand(db, tokens);
+	} else if (tokencmp(tokens[1], "unlock")) {
+		return tenantLockCommand(db, tokens);
 	} else {
 		printUsage(tokens[0]);
 		return true;
@@ -576,14 +808,15 @@ Future<bool> tenantCommandForwarder(Reference<IDatabase> db, std::vector<StringR
 	}
 
 	return tenantCommand(db, forwardedTokens);
-} // namespace fdb_cli
+}
 
 void tenantGenerator(const char* text,
                      const char* line,
                      std::vector<std::string>& lc,
                      std::vector<StringRef> const& tokens) {
 	if (tokens.size() == 1) {
-		const char* opts[] = { "create", "delete", "list", "get", "configure", "rename", nullptr };
+		const char* opts[] = { "create",    "delete", "deleteId", "list",   "get",
+			                   "configure", "rename", "lock",     "unlock", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokens.size() == 3 && tokencmp(tokens[1], "create")) {
 		const char* opts[] = { "tenant_group=", nullptr };
@@ -596,7 +829,15 @@ void tenantGenerator(const char* text,
 			const char* opts[] = { "tenant_group=", "unset", nullptr };
 			arrayGenerator(text, line, opts, lc);
 		} else if (tokens.size() == 4 && tokencmp(tokens[3], "unset")) {
-			const char* opts[] = { "tenant_group", nullptr };
+			const char* opts[] = { "tenant_group=", nullptr };
+			arrayGenerator(text, line, opts, lc);
+		} else if (tokens.size() == 4 + tokencmp(tokens[3], "unset")) {
+			const char* opts[] = { "ignore_capacity_limit", nullptr };
+			arrayGenerator(text, line, opts, lc);
+		}
+	} else if (tokencmp(tokens[1], "lock")) {
+		if (tokens.size() == 3) {
+			const char* opts[] = { "w", "rw", nullptr };
 			arrayGenerator(text, line, opts, lc);
 		}
 	}
@@ -604,7 +845,7 @@ void tenantGenerator(const char* text,
 
 std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& tokens, bool inArgument) {
 	if (tokens.size() == 1) {
-		return { "<create|delete|list|get|configure|rename>", "[ARGS]" };
+		return { "<create|delete|deleteId|list|get|configure|rename>", "[ARGS]" };
 	} else if (tokencmp(tokens[1], "create") && tokens.size() < 5) {
 		static std::vector<const char*> opts = { "<NAME>",
 			                                     "[tenant_group=<TENANT_GROUP>]",
@@ -613,23 +854,41 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 	} else if (tokencmp(tokens[1], "delete") && tokens.size() < 3) {
 		static std::vector<const char*> opts = { "<NAME>" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
-	} else if (tokencmp(tokens[1], "list") && tokens.size() < 5) {
-		static std::vector<const char*> opts = { "[BEGIN]", "[END]", "[LIMIT]" };
+	} else if (tokencmp(tokens[1], "deleteId") && tokens.size() < 3) {
+		static std::vector<const char*> opts = { "<ID>" };
+		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+	} else if (tokencmp(tokens[1], "list") && tokens.size() < 7) {
+		static std::vector<const char*> opts = {
+			"[BEGIN]", "[END]", "[limit=LIMIT]", "[offset=OFFSET]", "[state=<STATE1>,<STATE2>,...]"
+		};
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "get") && tokens.size() < 4) {
 		static std::vector<const char*> opts = { "<NAME>", "[JSON]" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "configure")) {
 		if (tokens.size() < 4) {
-			static std::vector<const char*> opts = { "<TENANT_NAME>", "<[unset] tenant_group[=<GROUP_NAME>]>" };
+			static std::vector<const char*> opts = { "<TENANT_NAME>",
+				                                     "<[unset] tenant_group[=<GROUP_NAME>]>",
+				                                     "[ignore_capacity_limit]" };
 			return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
-		} else if (tokens.size() == 4 && tokencmp(tokens[3], "unset")) {
-			static std::vector<const char*> opts = { "<tenant_group[=<GROUP_NAME>]>" };
-			return std::vector<const char*>(opts.begin() + tokens.size() - 4, opts.end());
+		} else if ("unset"_sr.startsWith(tokens[3]) && tokens[3].size() <= 5) {
+			if (tokens.size() < 6) {
+				static std::vector<const char*> opts = { "<tenant_group[=<GROUP_NAME>]>", "[ignore_capacity_limit]" };
+				return std::vector<const char*>(opts.begin() + tokens.size() - 4, opts.end());
+			}
+		} else if (tokens.size() == 4) {
+			static std::vector<const char*> opts = { "[ignore_capacity_limit]" };
+			return opts;
 		}
 		return {};
 	} else if (tokencmp(tokens[1], "rename") && tokens.size() < 4) {
 		static std::vector<const char*> opts = { "<OLD_NAME>", "<NEW_NAME>" };
+		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+	} else if (tokencmp(tokens[1], "lock") && tokens.size() < 5) {
+		static std::vector<const char*> opts = { "<NAME>", "[w|rw]", "[UID]" };
+		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+	} else if (tokencmp(tokens[1], "unlock") && tokens.size() < 4) {
+		static std::vector<const char*> opts = { "<NAME>", "<UID>" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else {
 		return {};
@@ -643,7 +902,9 @@ CommandFactory tenantRegisterFactory("tenant",
                                                  "`list' prints a list of tenants in the cluster.\n"
                                                  "`get' prints the metadata for a particular tenant.\n"
                                                  "`configure' modifies the configuration for a tenant.\n"
-                                                 "`rename' changes the name of a tenant.\n"),
+                                                 "`rename' changes the name of a tenant.\n"
+                                                 "`lock` locks a tenant.\n"
+                                                 "`unlock` unlocks a tenant.\n"),
                                      &tenantGenerator,
                                      &tenantHintGenerator);
 

@@ -256,6 +256,8 @@ class DDTxnProcessorImpl {
 			numDataMoves = 0;
 			server_dc.clear();
 			result->allServers.clear();
+			result->dataMoveMap = KeyRangeMap<std::shared_ptr<DataMove>>(std::make_shared<DataMove>());
+			result->auditStates.clear();
 			tss_servers.clear();
 			team_cache.clear();
 			succeeded = false;
@@ -341,6 +343,12 @@ class DDTxnProcessorImpl {
 					}
 					result->dataMoveMap.insert(meta.ranges.front(), std::move(dataMove));
 					++numDataMoves;
+				}
+
+				RangeResult ads = wait(tr.getRange(auditKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!ads.more && ads.size() < CLIENT_KNOBS->TOO_MANY);
+				for (int i = 0; i < ads.size(); ++i) {
+					result->auditStates.push_back(decodeAuditStorageState(ads[i].value));
 				}
 
 				succeeded = true;
@@ -693,27 +701,59 @@ Future<std::vector<ProcessData>> DDTxnProcessor::getWorkers() const {
 	return ::getWorkers(cx);
 }
 
-Future<Void> DDTxnProcessor::rawStartMovement(MoveKeysParams& params,
+Future<Void> DDTxnProcessor::rawStartMovement(const MoveKeysParams& params,
                                               std::map<UID, StorageServerInterface>& tssMapping) {
 	return ::rawStartMovement(cx, params, tssMapping);
 }
 
-Future<Void> DDTxnProcessor::rawFinishMovement(MoveKeysParams& params,
+Future<Void> DDTxnProcessor::rawFinishMovement(const MoveKeysParams& params,
                                                const std::map<UID, StorageServerInterface>& tssMapping) {
 	return ::rawFinishMovement(cx, params, tssMapping);
 }
 
 struct DDMockTxnProcessorImpl {
-	ACTOR static Future<Void> moveKeys(DDMockTxnProcessor* self, MoveKeysParams params) {
-		state std::map<UID, StorageServerInterface> tssMapping;
-		self->rawStartMovement(params, tssMapping);
-		ASSERT(tssMapping.empty());
-
+	// return when all status become FETCHED
+	ACTOR static Future<Void> checkFetchingState(DDMockTxnProcessor* self, std::vector<UID> ids, KeyRangeRef range) {
+		loop {
+			wait(delayJittered(1.0));
+			DDMockTxnProcessor* selfP = self;
+			KeyRangeRef cloneRef = range;
+			if (std::all_of(ids.begin(), ids.end(), [selfP, cloneRef](const UID& id) {
+				    auto& server = selfP->mgs->allServers.at(id);
+				    return server.allShardStatusIn(cloneRef, { MockShardStatus::FETCHED, MockShardStatus::COMPLETED });
+			    })) {
+				break;
+			}
+		}
 		if (BUGGIFY_WITH_PROB(0.5)) {
 			wait(delayJittered(5.0));
 		}
+		return Void();
+	}
 
-		self->rawFinishMovement(params, tssMapping);
+	static Future<Void> rawCheckFetchingState(DDMockTxnProcessor* self, const MoveKeysParams& params) {
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			ASSERT(params.ranges.present());
+			// TODO: make startMoveShards work with multiple ranges.
+			ASSERT(params.ranges.get().size() == 1);
+			return checkFetchingState(self, params.destinationTeam, params.ranges.get().at(0));
+		}
+		ASSERT(params.keys.present());
+		return checkFetchingState(self, params.destinationTeam, params.keys.get());
+	}
+
+	ACTOR static Future<Void> moveKeys(DDMockTxnProcessor* self, MoveKeysParams params) {
+		state std::map<UID, StorageServerInterface> tssMapping;
+		// Because SFBTF::Team requires the ID is ordered
+		std::sort(params.destinationTeam.begin(), params.destinationTeam.end());
+		std::sort(params.healthyDestinations.begin(), params.healthyDestinations.end());
+
+		wait(self->rawStartMovement(params, tssMapping));
+		ASSERT(tssMapping.empty());
+
+		wait(rawCheckFetchingState(self, params));
+
+		wait(self->rawFinishMovement(params, tssMapping));
 		if (!params.dataMovementComplete.isSet())
 			params.dataMovementComplete.send(Void());
 		return Void();
@@ -891,32 +931,84 @@ Future<std::vector<ProcessData>> DDMockTxnProcessor::getWorkers() const {
 	return Future<std::vector<ProcessData>>();
 }
 
-void DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
-	FlowLock::Releaser releaser(*params.startMoveKeysParallelismLock);
-	// Add wait(take) would always return immediately because there won’t be parallel rawStart or rawFinish in mock
-	// world due to the fact the following *mock* transaction code will always finish without coroutine switch.
-	ASSERT(params.startMoveKeysParallelismLock->take().isReady());
+ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
+                                    MoveKeysParams params,
+                                    std::map<UID, StorageServerInterface> tssMapping) {
+	state KeyRange keys;
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		ASSERT(params.ranges.present());
+		// TODO: make startMoveShards work with multiple ranges.
+		ASSERT(params.ranges.get().size() == 1);
+		keys = params.ranges.get().at(0);
+	} else {
+		ASSERT(params.keys.present());
+		keys = params.keys.get();
+	}
+	// There won’t be parallel rawStart or rawFinish in mock world due to the fact the following *mock* transaction code
+	// will always finish without coroutine switch.
+	ASSERT(params.startMoveKeysParallelismLock->activePermits() == 0);
+	wait(params.startMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
+	state FlowLock::Releaser releaser(*params.startMoveKeysParallelismLock);
 
 	std::vector<ShardsAffectedByTeamFailure::Team> destTeams;
 	destTeams.emplace_back(params.destinationTeam, true);
-	mgs->shardMapping->moveShard(params.keys, destTeams);
-
-	for (auto& id : params.destinationTeam) {
-		mgs->allServers.at(id).setShardStatus(params.keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
+	// invariant: the splitting and merge operation won't happen at the same moveKeys action. For example, if [a,c) [c,
+	// e) exists, the params.keys won't be [b, d).
+	auto intersectRanges = mgs->shardMapping->intersectingRanges(keys);
+	// 1. splitting or just move a range. The new boundary need to be defined in startMovement
+	if (intersectRanges.begin().range().contains(keys)) {
+		mgs->shardMapping->defineShard(keys);
 	}
+	// 2. merge ops will coalesce the boundary in finishMovement;
+	intersectRanges = mgs->shardMapping->intersectingRanges(keys);
+	ASSERT(keys.begin == intersectRanges.begin().begin());
+	ASSERT(keys.end == intersectRanges.end().begin());
+
+	for (auto it = intersectRanges.begin(); it != intersectRanges.end(); ++it) {
+		auto teamPair = mgs->shardMapping->getTeamsFor(it->begin());
+		auto& srcTeams = teamPair.second.empty() ? teamPair.first : teamPair.second;
+		mgs->shardMapping->rawMoveShard(it->range(), srcTeams, destTeams);
+	}
+
+	auto randomRangeSize =
+	    deterministicRandom()->randomInt64(SERVER_KNOBS->MIN_SHARD_BYTES, SERVER_KNOBS->MAX_SHARD_BYTES);
+	for (auto& id : params.destinationTeam) {
+		auto& server = mgs->allServers.at(id);
+		server.setShardStatus(keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
+		server.signalFetchKeys(keys, randomRangeSize);
+	}
+	return Void();
 }
 
-void DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
-                                           const std::map<UID, StorageServerInterface>& tssMapping) {
-	FlowLock::Releaser releaser(*params.finishMoveKeysParallelismLock);
-	// Add wait(take) would always return immediately because there won’t be parallel rawStart or rawFinish in mock
-	// world due to the fact the following *mock* transaction code will always finish without coroutine switch.
-	ASSERT(params.finishMoveKeysParallelismLock->take().isReady());
+Future<Void> DDMockTxnProcessor::rawStartMovement(const MoveKeysParams& params,
+                                                  std::map<UID, StorageServerInterface>& tssMapping) {
+	return ::rawStartMovement(mgs, params, tssMapping);
+}
+
+ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
+                                     MoveKeysParams params,
+                                     std::map<UID, StorageServerInterface> tssMapping) {
+	state KeyRange keys;
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		ASSERT(params.ranges.present());
+		// TODO: make startMoveShards work with multiple ranges.
+		ASSERT(params.ranges.get().size() == 1);
+		keys = params.ranges.get().at(0);
+	} else {
+		ASSERT(params.keys.present());
+		keys = params.keys.get();
+	}
+
+	// There won’t be parallel rawStart or rawFinish in mock world due to the fact the following *mock* transaction code
+	// will always finish without coroutine switch.
+	ASSERT(params.finishMoveKeysParallelismLock->activePermits() == 0);
+	wait(params.finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
+	state FlowLock::Releaser releaser(*params.finishMoveKeysParallelismLock);
 
 	// get source and dest teams
-	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsForFirstShard(params.keys);
+	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsForFirstShard(keys);
 
-	ASSERT_EQ(destTeams.size(), 0);
+	ASSERT_EQ(destTeams.size(), 1); // Will the multi-region or dynamic replica make destTeam.size() > 1?
 	if (destTeams.front() != ShardsAffectedByTeamFailure::Team{ params.destinationTeam, true }) {
 		TraceEvent(SevError, "MockRawFinishMovementError")
 		    .detail("Reason", "InconsistentDestinations")
@@ -926,12 +1018,23 @@ void DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
 	}
 
 	for (auto& id : params.destinationTeam) {
-		mgs->allServers.at(id).setShardStatus(params.keys, MockShardStatus::COMPLETED, mgs->restrictSize);
+		mgs->allServers.at(id).setShardStatus(keys, MockShardStatus::COMPLETED, mgs->restrictSize);
 	}
 
+	// remove destination servers from source servers
 	ASSERT_EQ(srcTeams.size(), 0);
 	for (auto& id : srcTeams.front().servers) {
-		mgs->allServers.at(id).removeShard(params.keys);
+		// the only caller moveKeys will always make sure the UID are sorted
+		if (!std::binary_search(params.destinationTeam.begin(), params.destinationTeam.end(), id)) {
+			mgs->allServers.at(id).removeShard(keys);
+		}
 	}
-	mgs->shardMapping->finishMove(params.keys);
+	mgs->shardMapping->finishMove(keys);
+	mgs->shardMapping->defineShard(keys); // coalesce for merge
+	return Void();
+}
+
+Future<Void> DDMockTxnProcessor::rawFinishMovement(const MoveKeysParams& params,
+                                                   const std::map<UID, StorageServerInterface>& tssMapping) {
+	return ::rawFinishMovement(mgs, params, tssMapping);
 }

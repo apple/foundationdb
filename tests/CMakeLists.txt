@@ -10,14 +10,14 @@ set(TEST_AGGREGATE_TRACES "NONE" CACHE STRING "Create aggregated trace files (NO
 set(TEST_LOG_FORMAT "xml" CACHE STRING "Format for test trace files (xml, json)")
 set(TEST_INCLUDE ".*" CACHE STRING "Include only tests that match the given regex")
 set(TEST_EXCLUDE ".^" CACHE STRING "Exclude all tests matching the given regex")
-set(SANITIZER_OPTIONS "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1;TSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/tsan.suppressions" CACHE STRING "Environment variables setting sanitizer options")
+set(SANITIZER_OPTIONS "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1;TSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/tsan.suppressions;LSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/lsan.suppressions" CACHE STRING "Environment variables setting sanitizer options")
 
 # for the restart test we optimally want to use the last stable fdbserver
 # to test upgrades
 if(WITH_PYTHON)
   find_program(OLD_FDBSERVER_BINARY
-    fdbserver fdbserver.exe
-    HINTS /opt/foundationdb/old /usr/sbin /usr/libexec /usr/local/sbin /usr/local/libexec)
+    fdbserver-7.1.23 fdbserver fdbserver.exe
+    HINTS /opt/foundationdb/old/7.1.23/bin/ /opt/foundationdb/old /usr/sbin /usr/libexec /usr/local/sbin /usr/local/libexec)
   if(OLD_FDBSERVER_BINARY)
     message(STATUS "Use old fdb at ${OLD_FDBSERVER_BINARY}")
   else()
@@ -28,11 +28,14 @@ if(WITH_PYTHON)
       set(fdbserver_location ${CMAKE_BINARY_DIR}/bin/fdbserver)
       set(OLD_FDBSERVER_BINARY ${fdbserver_location} CACHE FILEPATH "Old fdbserver binary" FORCE)
     endif()
+
     message(WARNING "\
   No old fdbserver binary found - using ${fdbserver_location} \
   It is recommended to install the current stable version from https://www.foundationdb.org/download/ \
   Or provide a path to another fdbserver")
   endif()
+
+  configure_file(${PROJECT_SOURCE_DIR}/tests/TestRunner/fdb_version.py.cmake ${PROJECT_BINARY_DIR}/tests/TestRunner/fdb_version.py)
 
   set(TestRunner "${PROJECT_SOURCE_DIR}/tests/TestRunner/TestRunner.py")
 
@@ -56,6 +59,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES BlobManagerUnit.toml)
   add_fdb_test(TEST_FILES ConsistencyCheck.txt IGNORE)
   add_fdb_test(TEST_FILES DDMetricsExclude.txt IGNORE)
+  add_fdb_test(TEST_FILES DDSketch.txt IGNORE)
   add_fdb_test(TEST_FILES DataDistributionMetrics.txt IGNORE)
   add_fdb_test(TEST_FILES DiskDurability.txt IGNORE)
   add_fdb_test(TEST_FILES FileSystem.txt IGNORE)
@@ -90,11 +94,13 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES RocksDBTest.txt IGNORE)
   add_fdb_test(TEST_FILES S3BlobStore.txt IGNORE)
   add_fdb_test(TEST_FILES SampleNoSimAttrition.txt IGNORE)
+
   if(NOT USE_UBSAN) # TODO re-enable in UBSAN after https://github.com/apple/foundationdb/issues/2410 is resolved
     add_fdb_test(TEST_FILES SimpleExternalTest.txt)
   else()
     add_fdb_test(TEST_FILES SimpleExternalTest.txt IGNORE)
   endif()
+
   add_fdb_test(TEST_FILES noSim/SlowTask.txt IGNORE)
   add_fdb_test(TEST_FILES SpecificUnitTest.txt IGNORE)
   add_fdb_test(TEST_FILES StorageMetricsSampleTests.txt IGNORE)
@@ -123,23 +129,31 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/AtomicBackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/AtomicOps.toml)
   add_fdb_test(TEST_FILES fast/AtomicOpsApiCorrectness.toml)
+  add_fdb_test(TEST_FILES fast/AuthzSecurity.toml)
+  add_fdb_test(TEST_FILES fast/AuthzSecurityWithBlobGranules.toml)
   add_fdb_test(TEST_FILES fast/AutomaticIdempotency.toml)
   add_fdb_test(TEST_FILES fast/BackupAzureBlobCorrectness.toml IGNORE)
   add_fdb_test(TEST_FILES fast/BackupS3BlobCorrectness.toml IGNORE)
   add_fdb_test(TEST_FILES fast/BackupCorrectness.toml)
+  add_fdb_test(TEST_FILES fast/BackupCorrectnessWithEKPKeyFetchFailures.toml)
+  add_fdb_test(TEST_FILES fast/BackupCorrectnessWithTenantDeletion.toml)
   add_fdb_test(TEST_FILES fast/EncryptedBackupCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectnessClean.toml)
+  add_fdb_test(TEST_FILES fast/BlobCipherUnitTest.toml)
   add_fdb_test(TEST_FILES fast/BlobGranuleVerifyAtomicOps.toml)
   add_fdb_test(TEST_FILES fast/BlobGranuleVerifyCycle.toml)
   add_fdb_test(TEST_FILES fast/BlobGranuleVerifySmall.toml)
   add_fdb_test(TEST_FILES fast/BlobGranuleVerifySmallClean.toml)
+
   # TODO: test occasionally times out due to too many change feed shard parts
   add_fdb_test(TEST_FILES fast/BlobGranuleMoveVerifyCycle.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/BlobRestoreBasic.toml)
+  add_fdb_test(TEST_FILES fast/BlobRestoreLarge.toml)
   add_fdb_test(TEST_FILES fast/CacheTest.toml)
   add_fdb_test(TEST_FILES fast/CloggedSideband.toml)
-  add_fdb_test(TEST_FILES fast/CompressionUtilsUnit.toml)
+  add_fdb_test(TEST_FILES fast/CompressionUtilsUnit.toml IGNORE)
   add_fdb_test(TEST_FILES fast/ConfigureLocked.toml)
   add_fdb_test(TEST_FILES fast/ConfigIncrement.toml)
   add_fdb_test(TEST_FILES fast/ConfigIncrementChangeCoordinators.toml)
@@ -156,6 +170,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackup.toml)
+  add_fdb_test(TEST_FILES fast/IncrementalBackupWithEKPKeyFetchFailures.toml)
+  add_fdb_test(TEST_FILES fast/IncrementalBackupWithTenantDeletion.toml)
   add_fdb_test(TEST_FILES fast/IncrementTest.toml)
   add_fdb_test(TEST_FILES fast/InventoryTestAlmostReadOnly.toml)
   add_fdb_test(TEST_FILES fast/InventoryTestSomeWrites.toml)
@@ -163,6 +179,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/LocalRatekeeper.toml)
   add_fdb_test(TEST_FILES fast/LongStackWriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/LowLatency.toml)
+
   # TODO: Fix failures and reenable this test:
   add_fdb_test(TEST_FILES fast/LowLatencySingleClog.toml IGNORE)
   add_fdb_test(TEST_FILES fast/MemoryLifetime.toml)
@@ -170,7 +187,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/MutationLogReaderCorrectness.toml)
   add_fdb_test(TEST_FILES fast/GetEstimatedRangeSize.toml)
   add_fdb_test(TEST_FILES fast/GetMappedRange.toml)
-  add_fdb_test(TEST_FILES fast/IDDTxnProcessorApiCorrectness.toml)
+  add_fdb_test(TEST_FILES fast/IDDTxnProcessorRawStartMovement.toml)
+  add_fdb_test(TEST_FILES fast/IDDTxnProcessorMoveKeys.toml IGNORE)
   add_fdb_test(TEST_FILES fast/PerpetualWiggleStats.toml)
   add_fdb_test(TEST_FILES fast/PrivateEndpoints.toml)
   add_fdb_test(TEST_FILES fast/ProtocolVersion.toml)
@@ -178,14 +196,15 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/RandomUnitTests.toml)
   add_fdb_test(TEST_FILES fast/ReadHotDetectionCorrectness.toml IGNORE) # TODO re-enable once read hot detection is enabled.
   add_fdb_test(TEST_FILES fast/ReportConflictingKeys.toml)
-  add_fdb_test(TEST_FILES fast/RESTKmsConnectorUnit.toml)
-  add_fdb_test(TEST_FILES fast/RESTUtilsUnit.toml)
+  add_fdb_test(TEST_FILES fast/RESTKmsConnectorUnit.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/RESTUtilsUnit.toml IGNORE)
   add_fdb_test(TEST_FILES fast/SelectorCorrectness.toml)
   add_fdb_test(TEST_FILES fast/Sideband.toml)
   add_fdb_test(TEST_FILES fast/SidebandSingle.toml)
   add_fdb_test(TEST_FILES fast/SidebandWithStatus.toml)
   add_fdb_test(TEST_FILES fast/SimpleAtomicAdd.toml)
   add_fdb_test(TEST_FILES fast/SpecialKeySpaceCorrectness.toml)
+  add_fdb_test(TEST_FILES fast/SpecialKeySpaceRobustness.toml)
   add_fdb_test(TEST_FILES fast/StreamingRangeRead.toml)
   add_fdb_test(TEST_FILES fast/SwizzledRollbackSideband.toml)
   add_fdb_test(TEST_FILES fast/SystemRebootTestCycle.toml)
@@ -193,6 +212,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/TenantCycle.toml)
   add_fdb_test(TEST_FILES fast/TenantCycleTokenless.toml)
   add_fdb_test(TEST_FILES fast/TenantEntryCache.toml)
+  add_fdb_test(TEST_FILES fast/TenantLock.toml)
+  add_fdb_test(TEST_FILES fast/RawTenantAccessClean.toml)
   add_fdb_test(TEST_FILES fast/TimeKeeperCorrectness.toml)
   add_fdb_test(TEST_FILES fast/TxnStateStoreCycleTest.toml)
   add_fdb_test(TEST_FILES fast/UDP.toml)
@@ -202,8 +223,9 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/WriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/WriteDuringReadClean.toml)
   add_fdb_test(TEST_FILES noSim/RandomUnitTests.toml UNIT)
+
   if(WITH_ROCKSDB_EXPERIMENTAL)
-    add_fdb_test(TEST_FILES fast/ValidateStorage.toml IGNORE)
+    add_fdb_test(TEST_FILES fast/ValidateStorage.toml)
     add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml)
@@ -215,8 +237,10 @@ if(WITH_PYTHON)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml IGNORE)
     add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml IGNORE)
   endif()
+
   add_fdb_test(TEST_FILES rare/BlobGranuleRanges.toml)
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
+  add_fdb_test(TEST_FILES rare/ClogTlog.toml)
   add_fdb_test(TEST_FILES rare/ClogUnclog.toml)
   add_fdb_test(TEST_FILES rare/CloggedCycleWithKills.toml)
   add_fdb_test(TEST_FILES rare/ConfigDBUnitTest.toml)
@@ -249,12 +273,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/StatusBuilderPerf.toml)
   add_fdb_test(TEST_FILES rare/TLogVersionMessagesOverheadFactor.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/SnapIncrementalRestore-1.txt
-    restarting/from_7.1.0/SnapIncrementalRestore-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/ConfigureTestRestart-1.toml
-    restarting/from_7.1.0/ConfigureTestRestart-2.toml)
-  add_fdb_test(
     TEST_FILES restarting/from_5.0.0_until_6.3.0/CycleTestRestart-1.txt
     restarting/from_5.0.0_until_6.3.0/CycleTestRestart-2.txt)
   add_fdb_test(
@@ -279,42 +297,98 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_6.3.13_until_7.2.0/DrUpgradeRestart-1.txt
     restarting/from_6.3.13_until_7.2.0/DrUpgradeRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
-    restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
+    TEST_FILES restarting/from_7.0.0_until_7.1.0/UpgradeAndBackupRestore-1.toml
+    restarting/from_7.0.0_until_7.1.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/to_7.1.0/CycleTestRestart-1.toml
-    restarting/to_7.1.0/CycleTestRestart-2.toml)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-1.toml
+    restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/SnapTestAttrition-1.txt
-    restarting/from_7.1.0/SnapTestAttrition-2.txt)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapCycleRestart-1.txt
+    restarting/from_7.1.0_until_7.2.0/SnapCycleRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/SnapTestSimpleRestart-1.txt
-    restarting/from_7.1.0/SnapTestSimpleRestart-2.txt)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-1.txt
+    restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/SnapTestRestart-1.txt
-    restarting/from_7.1.0/SnapTestRestart-2.txt)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapTestAttrition-1.txt
+    restarting/from_7.1.0_until_7.2.0/SnapTestAttrition-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/SnapCycleRestart-1.txt
-    restarting/from_7.1.0/SnapCycleRestart-2.txt)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapTestSimpleRestart-1.txt
+    restarting/from_7.1.0_until_7.2.0/SnapTestSimpleRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/to_7.1.0/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/to_7.1.0/ConfigureStorageMigrationTestRestart-2.toml)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapTestRestart-1.txt
+    restarting/from_7.1.0_until_7.2.0/SnapTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/from_7.1.0/ConfigureStorageMigrationTestRestart-2.toml)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
+    restarting/from_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/VersionVectorDisableRestart-1.toml
-    restarting/from_7.1.0/VersionVectorDisableRestart-2.toml)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/UpgradeAndBackupRestore-1.toml
+    restarting/from_7.1.0_until_7.2.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0/VersionVectorEnableRestart-1.toml
-    restarting/from_7.1.0/VersionVectorEnableRestart-2.toml)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/VersionVectorDisableRestart-1.toml
+    restarting/from_7.1.0_until_7.2.0/VersionVectorDisableRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.2.0/DrUpgradeRestart-1.txt
-    restarting/from_7.2.0/DrUpgradeRestart-2.txt)
+    TEST_FILES restarting/from_7.1.0_until_7.2.0/VersionVectorEnableRestart-1.toml
+    restarting/from_7.1.0_until_7.2.0/VersionVectorEnableRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/to_7.2.0/CycleTestRestart-1.toml
-    restarting/to_7.2.0/CycleTestRestart-2.toml)
-
+    TEST_FILES restarting/from_7.2.0_until_7.3.0/ConfigureTestRestart-1.toml
+    restarting/from_7.2.0_until_7.3.0/ConfigureTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
+    restarting/from_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
+    add_fdb_test(
+      TEST_FILES restarting/from_7.2.0_until_7.3.0/DrUpgradeRestart-1.toml
+      restarting/from_7.2.0_until_7.3.0/DrUpgradeRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.2.0_until_7.3.0/VersionVectorDisableRestart-1.toml
+    restarting/from_7.2.0_until_7.3.0/VersionVectorDisableRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.2.0_until_7.3.0/VersionVectorEnableRestart-1.toml
+    restarting/from_7.2.0_until_7.3.0/VersionVectorEnableRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.2.4_until_7.3.0/UpgradeAndBackupRestore-1.toml
+    restarting/from_7.2.4_until_7.3.0/UpgradeAndBackupRestore-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/ConfigureTestRestart-1.toml
+    restarting/from_7.3.0/ConfigureTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
+    restarting/from_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
+    add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/DrUpgradeRestart-1.toml
+    restarting/from_7.3.0/DrUpgradeRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/UpgradeAndBackupRestore-1.toml
+    restarting/from_7.3.0/UpgradeAndBackupRestore-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/VersionVectorDisableRestart-1.toml
+    restarting/from_7.3.0/VersionVectorDisableRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/VersionVectorEnableRestart-1.toml
+    restarting/from_7.3.0/VersionVectorEnableRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/BlobGranuleRestartCycle-1.toml
+    restarting/from_7.3.0/BlobGranuleRestartCycle-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/BlobGranuleRestartLarge-1.toml
+    restarting/from_7.3.0/BlobGranuleRestartLarge-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
+    restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_7.1.0_until_7.2.0/CycleTestRestart-1.toml
+    restarting/to_7.1.0_until_7.2.0/CycleTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
+    restarting/to_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_7.2.0_until_7.3.0/CycleTestRestart-1.toml
+    restarting/to_7.2.0_until_7.3.0/CycleTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
+    restarting/to_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_7.3.0/CycleTestRestart-1.toml
+    restarting/to_7.3.0/CycleTestRestart-2.toml)
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
@@ -340,6 +414,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/LongRunning.toml LONG_RUNNING)
   add_fdb_test(TEST_FILES slow/LowLatencyWithFailures.toml)
   add_fdb_test(TEST_FILES slow/MetaclusterManagement.toml)
+  add_fdb_test(TEST_FILES slow/MetaclusterManagementConcurrency.toml)
+  add_fdb_test(TEST_FILES slow/MetaclusterRecovery.toml)
   add_fdb_test(TEST_FILES slow/MoveKeysClean.toml)
   add_fdb_test(TEST_FILES slow/MoveKeysSideband.toml)
   add_fdb_test(TEST_FILES slow/RyowCorrectness.toml)
@@ -355,6 +431,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/SwizzledRollbackTimeLapseIncrement.toml)
   add_fdb_test(TEST_FILES slow/SwizzledTenantManagement.toml)
   add_fdb_test(TEST_FILES slow/SwizzledTenantManagementMetacluster.toml)
+  add_fdb_test(TEST_FILES slow/TenantCapacityLimits.toml)
   add_fdb_test(TEST_FILES slow/TenantManagement.toml)
   add_fdb_test(TEST_FILES slow/TenantManagementConcurrency.toml)
   add_fdb_test(TEST_FILES slow/VersionStampBackupToDB.toml)
@@ -371,6 +448,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessMultiCycles.toml)
   add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupWriteDuringReadAtomicRestore.toml)
   add_fdb_test(TEST_FILES ParallelRestoreOldBackupApiCorrectnessAtomicRestore.toml IGNORE)
+
   # Note that status tests are not deterministic.
   add_fdb_test(TEST_FILES status/invalid_proc_addresses.txt)
   add_fdb_test(TEST_FILES status/local_6_machine_no_replicas_remain.txt)
@@ -407,11 +485,14 @@ if(WITH_PYTHON)
   endif()
 
   verify_testing()
+
   if(NOT OPEN_FOR_IDE AND NOT WIN32)
     create_correctness_package()
+
     if(USE_VALGRIND)
       create_valgrind_correctness_package()
     endif()
+
     if(ENABLE_LONG_RUNNING_TESTS)
       create_long_running_correctness_package()
     endif()
@@ -424,6 +505,7 @@ if(WITH_PYTHON)
     else()
       set(ld_env_name "LD_LIBRARY_PATH")
     endif()
+
     set(authz_venv_dir ${CMAKE_CURRENT_BINARY_DIR}/authorization_test_venv)
     set(authz_venv_activate ". ${authz_venv_dir}/bin/activate")
     set(authz_venv_stamp_file ${authz_venv_dir}/venv.ready)
@@ -432,7 +514,7 @@ if(WITH_PYTHON)
     string(APPEND authz_venv_cmd "${Python3_EXECUTABLE} -m venv ${authz_venv_dir} ")
     string(APPEND authz_venv_cmd "&& ${authz_venv_activate} ")
     string(APPEND authz_venv_cmd "&& pip install --upgrade pip ")
-    string(APPEND authz_venv_cmd "&& pip install --upgrade -r ${CMAKE_SOURCE_DIR}/tests/authorization/requirements.txt ")
+    string(APPEND authz_venv_cmd "&& pip install -r ${CMAKE_SOURCE_DIR}/tests/authorization/requirements.txt ")
     string(APPEND authz_venv_cmd "&& (cd ${CMAKE_BINARY_DIR}/bindings/python && python3 setup.py install) ")
     string(APPEND authz_venv_cmd "&& touch ${authz_venv_stamp_file} ")
     string(APPEND authz_venv_cmd "|| echo 'venv already set up'")
@@ -443,14 +525,42 @@ if(WITH_PYTHON)
     set_tests_properties(authorization_venv_setup PROPERTIES FIXTURES_SETUP authz_virtual_env TIMEOUT 60)
 
     set(authz_script_dir ${CMAKE_SOURCE_DIR}/tests/authorization)
-    set(authz_test_cmd "${authz_venv_activate} && pytest ${authz_script_dir}/authz_test.py -rA --build-dir ${CMAKE_BINARY_DIR} -vvv")
-    add_test(
-      NAME token_based_tenant_authorization
-      WORKING_DIRECTORY ${authz_venv_dir}
-      COMMAND bash -c ${authz_test_cmd})
-    set_tests_properties(token_based_tenant_authorization PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/tests/TestRunner;${ld_env_name}=${CMAKE_BINARY_DIR}/lib")
-    set_tests_properties(token_based_tenant_authorization PROPERTIES FIXTURES_REQUIRED authz_virtual_env)
-    set_tests_properties(token_based_tenant_authorization PROPERTIES TIMEOUT 120)
+    set(enable_grv_cache 0 1)
+    set(force_mvc 0 1)
+
+    foreach(is_grv_cache_enabled IN LISTS enable_grv_cache)
+      foreach(is_mvc_forced IN LISTS force_mvc)
+        if(NOT is_mvc_forced AND is_grv_cache_enabled)
+          continue() # grv cache requires setting up of shared database state which is only available in MVC mode
+        endif()
+
+        set(authz_test_name "authz")
+        set(test_opt "")
+
+        if(is_grv_cache_enabled)
+          string(APPEND test_opt " --use-grv-cache")
+          string(APPEND authz_test_name "_with_grv_cache")
+        else()
+          string(APPEND authz_test_name "_no_grv_cache")
+        endif()
+
+        if(is_mvc_forced)
+          string(APPEND test_opt " --force-multi-version-client")
+          string(APPEND authz_test_name "_with_forced_mvc")
+        else()
+          string(APPEND authz_test_name "_no_forced_mvc")
+        endif()
+
+        set(authz_test_cmd "${authz_venv_activate} && pytest ${authz_script_dir}/authz_test.py -rA --build-dir ${CMAKE_BINARY_DIR} -vvv${test_opt}")
+        add_test(
+          NAME ${authz_test_name}
+          WORKING_DIRECTORY ${authz_venv_dir}
+          COMMAND bash -c ${authz_test_cmd})
+        set_tests_properties(${authz_test_name} PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/tests/TestRunner;${ld_env_name}=${CMAKE_BINARY_DIR}/lib")
+        set_tests_properties(${authz_test_name} PROPERTIES FIXTURES_REQUIRED authz_virtual_env)
+        set_tests_properties(${authz_test_name} PROPERTIES TIMEOUT 120)
+      endforeach()
+    endforeach()
   endif()
 else()
   message(WARNING "Python not found, won't configure ctest")

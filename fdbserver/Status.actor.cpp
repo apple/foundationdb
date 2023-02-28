@@ -19,6 +19,8 @@
  */
 
 #include <cinttypes>
+#include "fdbclient/BlobGranuleCommon.h"
+#include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
@@ -291,10 +293,19 @@ namespace {
 
 void reportCgroupCpuStat(JsonBuilderObject& object, const TraceEventFields& eventFields) {
 	JsonBuilderObject cgroupCpuStatObj;
-	cgroupCpuStatObj.setKeyRawNumber("nr_periods", eventFields.getValue("NrPeriods"));
-	cgroupCpuStatObj.setKeyRawNumber("nr_throttled", eventFields.getValue("NrThrottled"));
-	cgroupCpuStatObj.setKeyRawNumber("throttled_time", eventFields.getValue("ThrottledTime"));
-	object["cgroup_cpu_stat"] = cgroupCpuStatObj;
+	std::string val;
+	if (eventFields.tryGetValue("NrPeriods", val)) {
+		cgroupCpuStatObj.setKeyRawNumber("nr_periods", val);
+	}
+	if (eventFields.tryGetValue("NrThrottled", val)) {
+		cgroupCpuStatObj.setKeyRawNumber("nr_throttled", val);
+	}
+	if (eventFields.tryGetValue("ThrottledTime", val)) {
+		cgroupCpuStatObj.setKeyRawNumber("throttled_time", val);
+	}
+	if (!cgroupCpuStatObj.empty()) {
+		object["cgroup_cpu_stat"] = cgroupCpuStatObj;
+	}
 }
 
 JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
@@ -843,7 +854,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("consistency_scan", db->get().consistencyScan.get());
 	}
 
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION && db->get().encryptKeyProxy.present()) {
+	if (db->get().encryptKeyProxy.present()) {
 		roles.addRole("encrypt_key_proxy", db->get().encryptKeyProxy.get());
 	}
 
@@ -1427,6 +1438,37 @@ ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx,
 	}
 
 	return statusObj;
+}
+
+ACTOR static Future<JsonBuilderObject> versionEpochStatusFetcher(Database cx,
+                                                                 std::set<std::string>* incomplete_reasons) {
+	state JsonBuilderObject message;
+	try {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				Optional<Value> versionEpochVal = wait(timeoutError(BUGGIFY ? Never() : tr.get(versionEpochKey), 5.0));
+				message["enabled"] = versionEpochVal.present();
+				if (!versionEpochVal.present()) {
+					break;
+				}
+				int64_t versionEpoch = BinaryReader::fromStringRef<int64_t>(versionEpochVal.get(), Unversioned());
+				message["epoch"] = std::to_string(versionEpoch);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		incomplete_reasons->insert(format("Unable to retrieve version epoch information (%s).", e.what()));
+	}
+	return message;
 }
 
 ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx,
@@ -2443,6 +2485,53 @@ ACTOR static Future<JsonBuilderObject> blobWorkerStatusFetcher(
 	return statusObj;
 }
 
+ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std::set<std::string>* incompleteReason) {
+
+	state JsonBuilderObject statusObj;
+	state std::vector<Future<Optional<TraceEventFields>>> futures;
+
+	try {
+		Optional<BlobRestoreStatus> status = wait(getRestoreStatus(db, normalKeys));
+		if (status.present()) {
+			switch (status.get().phase) {
+			case BlobRestorePhase::INIT:
+				statusObj["blob_full_restore_phase"] = "Initializing";
+				break;
+			case BlobRestorePhase::STARTING_MIGRATOR:
+				statusObj["blob_full_restore_phase"] = "Starting migrator";
+				break;
+			case BlobRestorePhase::LOADING_MANIFEST:
+				statusObj["blob_full_restore_phase"] = "Loading manifest";
+				break;
+			case BlobRestorePhase::LOADED_MANIFEST:
+				statusObj["blob_full_restore_phase"] = "Manifest is loaded";
+				break;
+			case BlobRestorePhase::COPYING_DATA:
+				statusObj["blob_full_restore_phase"] = "Copying data";
+				statusObj["blob_full_restore_progress"] = status.get().status;
+				break;
+			case BlobRestorePhase::APPLYING_MLOGS:
+				statusObj["blob_full_restore_phase"] = "Applying mutation logs";
+				break;
+			case BlobRestorePhase::DONE:
+				statusObj["blob_full_restore_phase"] = "Completed successfully";
+				break;
+			case BlobRestorePhase::ERROR:
+				statusObj["blob_full_restore_phase"] =
+				    "Completed with fatal error: " + std::string(Error(status.get().status).what());
+				break;
+			default:
+				statusObj["blob_full_restore_phase"] = "Unexpected phase";
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		incompleteReason->insert("Unable to query blob restore status");
+	}
+	return statusObj;
+}
+
 static JsonBuilderObject tlogFetcher(int* logFaultTolerance,
                                      const std::vector<TLogSet>& tLogs,
                                      std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
@@ -2862,13 +2951,16 @@ ACTOR Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMet
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state Optional<StorageWiggleMetrics> primaryV;
 	state Optional<StorageWiggleMetrics> remoteV;
+	state StorageWiggleData wiggleState;
 	loop {
 		try {
 			if (use_system_priority) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			}
-			wait(store(primaryV, loadStorageWiggleMetrics(tr, PrimaryRegion(true))) &&
-			     store(remoteV, loadStorageWiggleMetrics(tr, PrimaryRegion(false))));
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			wait(store(primaryV, wiggleState.storageWiggleMetrics(PrimaryRegion(true)).get(tr)) &&
+			     store(remoteV, wiggleState.storageWiggleMetrics(PrimaryRegion(false)).get(tr)));
 			return std::make_pair(primaryV, remoteV);
 		} catch (Error& e) {
 			wait(tr->onError(e));
@@ -3069,8 +3161,20 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		// construct status information for cluster subsections
 		state int statusCode = (int)RecoveryStatus::END;
-		state JsonBuilderObject recoveryStateStatus = wait(
-		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
+		state Future<JsonBuilderObject> recoveryStateStatusFuture =
+		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode);
+
+		state Future<JsonBuilderObject> idmpKeyStatusFuture = getIdmpKeyStatus(cx);
+
+		state Future<JsonBuilderObject> versionEpochStatusFuture =
+		    versionEpochStatusFetcher(cx, &status_incomplete_reasons);
+
+		wait(waitForAll<JsonBuilderObject>(
+		    { recoveryStateStatusFuture, idmpKeyStatusFuture, versionEpochStatusFuture }));
+
+		state JsonBuilderObject recoveryStateStatus = recoveryStateStatusFuture.get();
+		state JsonBuilderObject idmpKeyStatus = idmpKeyStatusFuture.get();
+		state JsonBuilderObject versionEpochStatus = versionEpochStatusFuture.get();
 
 		// machine metrics
 		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
@@ -3304,6 +3408,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (!tenants.empty())
 				statusObj["tenants"] = tenants;
 
+			statusObj["version_epoch"] = versionEpochStatus;
+
 			// Merge dataOverlay into data
 			JsonBuilderObject& clusterDataSection = workerStatuses[0];
 
@@ -3409,6 +3515,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			JsonBuilderObject blobGranuelsStatus =
 			    wait(blobWorkerStatusFetcher(blobWorkers, address_workers, &status_incomplete_reasons));
 			statusObj["blob_granules"] = blobGranuelsStatus;
+			JsonBuilderObject blobRestoreStatus = wait(blobRestoreStatusFetcher(cx, &status_incomplete_reasons));
+			statusObj["blob_restore"] = blobRestoreStatus;
 		}
 
 		JsonBuilderArray incompatibleConnectionsArray;
@@ -3450,6 +3558,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		if (!recoveryStateStatus.empty())
 			statusObj["recovery_state"] = recoveryStateStatus;
+
+		statusObj["idempotency_ids"] = idmpKeyStatus;
 
 		// cluster messages subsection;
 		JsonBuilderArray clientIssuesArr = getClientIssuesAsMessages(clientStatus);

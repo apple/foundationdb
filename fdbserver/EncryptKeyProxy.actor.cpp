@@ -66,6 +66,7 @@ struct CipherKeyValidityTS {
 bool canReplyWith(Error e) {
 	switch (e.code()) {
 	case error_code_encrypt_key_not_found:
+	case error_code_encrypt_keys_fetch_failed:
 	// FDB <-> KMS connection may be observing transient issues
 	// Caller processes should consider reusing 'non-revocable' CipherKeys iff ONLY below error codes lead to CipherKey
 	// refresh failure
@@ -241,15 +242,15 @@ public:
 	    kmsLookupByIdsReqLatency("EKPKmsLookupByIdsReqLatency",
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                             SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    kmsLookupByDomainIdsReqLatency("EKPKmsLookupByDomainIdsReqLatency",
 	                                   id,
 	                                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                                   SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                                   SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    kmsBlobMetadataReqLatency("EKPKmsBlobMetadataReqLatency",
 	                              id,
 	                              SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                              SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {}
+	                              SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {}
 
 	EncryptBaseCipherDomainIdKeyIdCacheKey getBaseCipherDomainIdKeyIdCacheKey(
 	    const EncryptCipherDomainId domainId,

@@ -64,14 +64,19 @@ public:
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
 	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) override;
 	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
 
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+	ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
+
+	// Return a JSON string containing database client-side status information
+	ThreadFuture<Standalone<StringRef>> getClientStatus() override;
 
 private:
 	friend class ThreadSafeTenant;
@@ -88,27 +93,31 @@ public: // Internal use only
 
 class ThreadSafeTenant : public ITenant, ThreadSafeReferenceCounted<ThreadSafeTenant>, NonCopyable {
 public:
-	ThreadSafeTenant(Reference<ThreadSafeDatabase> db, StringRef name) : db(db), name(name) {}
+	ThreadSafeTenant(Reference<ThreadSafeDatabase> db, TenantName name);
 	~ThreadSafeTenant() override;
 
 	Reference<ITransaction> createTransaction() override;
 
+	ThreadFuture<int64_t> getId() override;
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
 	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) override;
 	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
 
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+	ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) override;
 
 	void addref() override { ThreadSafeReferenceCounted<ThreadSafeTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<ThreadSafeTenant>::delref(); }
 
 private:
 	Reference<ThreadSafeDatabase> db;
-	Standalone<StringRef> name;
+	TenantName name;
+	Tenant* tenant;
 };
 
 // An implementation of ITransaction that serializes operations onto the network thread and interacts with the
@@ -117,7 +126,8 @@ class ThreadSafeTransaction : public ITransaction, ThreadSafeReferenceCounted<Th
 public:
 	explicit ThreadSafeTransaction(DatabaseContext* cx,
 	                               ISingleThreadTransaction::Type type,
-	                               Optional<TenantName> tenant);
+	                               Optional<TenantName> tenantName,
+	                               Tenant* tenantPtr);
 	~ThreadSafeTransaction() override;
 
 	// Note: used while refactoring fdbcli, need to be removed later
@@ -205,6 +215,7 @@ public:
 	Version getCommittedVersion() override;
 	ThreadFuture<VersionVector> getVersionVector() override;
 	ThreadFuture<SpanContext> getSpanContext() override;
+	ThreadFuture<double> getTagThrottledDuration() override;
 	ThreadFuture<int64_t> getTotalCost() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 

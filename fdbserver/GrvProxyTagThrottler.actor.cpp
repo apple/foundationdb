@@ -49,7 +49,7 @@ bool GrvProxyTagThrottler::TagQueue::isMaxThrottled(double maxThrottleDuration) 
 }
 
 void GrvProxyTagThrottler::TagQueue::rejectRequests(LatencyBandsMap& latencyBandsMap) {
-	CODE_PROBE(true, "GrvProxyTagThrottler rejecting requests", probe::decoration::rare);
+	CODE_PROBE(true, "GrvProxyTagThrottler rejecting requests");
 	while (!requests.empty()) {
 		auto& delayedReq = requests.front();
 		delayedReq.updateProxyTagThrottledDuration(latencyBandsMap);
@@ -311,7 +311,6 @@ ACTOR static Future<Void> mockServer(GrvProxyTagThrottler* throttler) {
 			outBatchPriority.front().reply.send(GetReadVersionReply{});
 			outBatchPriority.pop_front();
 		}
-		TraceEvent("HERE_ServerProcessing").detail("Size", outDefaultPriority.size());
 		while (!outDefaultPriority.empty()) {
 			outDefaultPriority.front().reply.send(GetReadVersionReply{});
 			outDefaultPriority.pop_front();
@@ -376,6 +375,32 @@ TEST_CASE("/GrvProxyTagThrottler/MultiClient") {
 	wait(timeout(waitForAll(clients) && server, 60.0, Void()));
 	TraceEvent("TagQuotaTest_MultiClient").detail("Counter", counters["sampleTag"_sr]);
 	ASSERT(isNear(counters["sampleTag"_sr], 60.0 * 30.0));
+	return Void();
+}
+
+// Each tag receives 10 transaction/second budget
+TEST_CASE("/GrvProxyTagThrottler/MultiTag") {
+	state GrvProxyTagThrottler throttler(5.0);
+	state TagSet tagSet1;
+	state TagSet tagSet2;
+	state TransactionTagMap<uint32_t> counters;
+	{
+		TransactionTagMap<double> rates;
+		rates["sampleTag1"_sr] = 10.0;
+		rates["sampleTag2"_sr] = 10.0;
+		throttler.updateRates(rates);
+	}
+	tagSet1.addTag("sampleTag1"_sr);
+	tagSet2.addTag("sampleTag2"_sr);
+	state Future<Void> client1 = mockClient(&throttler, TransactionPriority::DEFAULT, tagSet1, 5, 20.0, &counters);
+	state Future<Void> client2 = mockClient(&throttler, TransactionPriority::DEFAULT, tagSet2, 5, 20.0, &counters);
+	state Future<Void> server = mockServer(&throttler);
+	wait(timeout(client1 && client2 && server, 60.0, Void()));
+	TraceEvent("TagQuotaTest_MultiTag")
+	    .detail("Counter1", counters["sampleTag1"_sr])
+	    .detail("Counter2", counters["sampleTag2"_sr]);
+	ASSERT(isNear(counters["sampleTag1"_sr], 60 * 10.0));
+	ASSERT(isNear(counters["sampleTag2"_sr], 60 * 10.0));
 	return Void();
 }
 

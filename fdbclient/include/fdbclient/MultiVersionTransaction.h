@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_MULTIVERSIONTRANSACTION_H
 #define FDBCLIENT_MULTIVERSIONTRANSACTION_H
+#include "flow/Arena.h"
 #pragma once
 
 #include "fdbclient/fdb_c_options.g.h"
@@ -29,6 +30,7 @@
 #include "flow/ApiVersion.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/WipedString.h"
 
 // FdbCApi is used as a wrapper around the FoundationDB C API that gets loaded from an external client library.
 // All of the required functions loaded from that external library are stored in function pointers in this struct.
@@ -80,7 +82,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 		 * and take the shortcut. */
 		FDBGetRangeReqAndResult getRange;
 		unsigned char buffer[32];
-		bool boundaryAndExist;
 	} FDBMappedKeyValue;
 
 #pragma pack(push, 4)
@@ -186,6 +187,12 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                    uint8_t const* end_key_name,
 	                                    int end_key_name_length);
 
+	FDBFuture* (*databaseBlobbifyRangeBlocking)(FDBDatabase* db,
+	                                            uint8_t const* begin_key_name,
+	                                            int begin_key_name_length,
+	                                            uint8_t const* end_key_name,
+	                                            int end_key_name_length);
+
 	FDBFuture* (*databaseUnblobbifyRange)(FDBDatabase* db,
 	                                      uint8_t const* begin_key_name,
 	                                      int begin_key_name_length,
@@ -205,6 +212,16 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                      uint8_t const* end_key_name,
 	                                      int end_key_name_length,
 	                                      int64_t version);
+
+	FDBFuture* (*databaseFlushBlobRange)(FDBDatabase* db,
+	                                     uint8_t const* begin_key_name,
+	                                     int begin_key_name_length,
+	                                     uint8_t const* end_key_name,
+	                                     int end_key_name_length,
+	                                     fdb_bool_t compact,
+	                                     int64_t version);
+
+	FDBFuture* (*databaseGetClientStatus)(FDBDatabase* db);
 
 	// Tenant
 	fdb_error_t (*tenantCreateTransaction)(FDBTenant* tenant, FDBTransaction** outTransaction);
@@ -227,6 +244,12 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                  uint8_t const* end_key_name,
 	                                  int end_key_name_length);
 
+	FDBFuture* (*tenantBlobbifyRangeBlocking)(FDBTenant* tenant,
+	                                          uint8_t const* begin_key_name,
+	                                          int begin_key_name_length,
+	                                          uint8_t const* end_key_name,
+	                                          int end_key_name_length);
+
 	FDBFuture* (*tenantUnblobbifyRange)(FDBTenant* tenant,
 	                                    uint8_t const* begin_key_name,
 	                                    int begin_key_name_length,
@@ -247,6 +270,15 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                    int end_key_name_length,
 	                                    int64_t version);
 
+	FDBFuture* (*tenantFlushBlobRange)(FDBTenant* db,
+	                                   uint8_t const* begin_key_name,
+	                                   int begin_key_name_length,
+	                                   uint8_t const* end_key_name,
+	                                   int end_key_name_length,
+	                                   fdb_bool_t compact,
+	                                   int64_t version);
+
+	FDBFuture* (*tenantGetId)(FDBTenant* tenant);
 	void (*tenantDestroy)(FDBTenant* tenant);
 
 	// Transaction
@@ -377,6 +409,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 
 	FDBFuture* (*transactionCommit)(FDBTransaction* tr);
 	fdb_error_t (*transactionGetCommittedVersion)(FDBTransaction* tr, int64_t* outVersion);
+	FDBFuture* (*transactionGetTagThrottledDuration)(FDBTransaction* tr);
 	FDBFuture* (*transactionGetTotalCost)(FDBTransaction* tr);
 	FDBFuture* (*transactionGetApproximateSize)(FDBTransaction* tr);
 	FDBFuture* (*transactionWatch)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength);
@@ -396,6 +429,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*futureGetInt64)(FDBFuture* f, int64_t* outValue);
 	fdb_error_t (*futureGetUInt64)(FDBFuture* f, uint64_t* outValue);
 	fdb_error_t (*futureGetBool)(FDBFuture* f, fdb_bool_t* outValue);
+	fdb_error_t (*futureGetDouble)(FDBFuture* f, double* outValue);
 	fdb_error_t (*futureGetError)(FDBFuture* f);
 	fdb_error_t (*futureGetKey)(FDBFuture* f, uint8_t const** outKey, int* outKeyLength);
 	fdb_error_t (*futureGetValue)(FDBFuture* f, fdb_bool_t* outPresent, uint8_t const** outValue, int* outValueLength);
@@ -506,6 +540,7 @@ public:
 	Version getCommittedVersion() override;
 	ThreadFuture<VersionVector> getVersionVector() override;
 	ThreadFuture<SpanContext> getSpanContext() override { return SpanContext(); };
+	ThreadFuture<double> getTagThrottledDuration() override;
 	ThreadFuture<int64_t> getTotalCost() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
@@ -538,15 +573,18 @@ public:
 
 	Reference<ITransaction> createTransaction() override;
 
+	ThreadFuture<int64_t> getId() override;
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
 	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) override;
 	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
 
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+	ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) override;
 
 	void addref() override { ThreadSafeReferenceCounted<DLTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLTenant>::delref(); }
@@ -592,14 +630,19 @@ public:
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
 	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) override;
 	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
 
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+	ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
+
+	// Return a JSON string containing database client-side status information
+	ThreadFuture<Standalone<StringRef>> getClientStatus() override;
 
 private:
 	const Reference<FdbCApi> api;
@@ -734,6 +777,7 @@ public:
 	Version getCommittedVersion() override;
 	ThreadFuture<VersionVector> getVersionVector() override;
 	ThreadFuture<SpanContext> getSpanContext() override;
+	ThreadFuture<double> getTagThrottledDuration() override;
 	ThreadFuture<int64_t> getTotalCost() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
@@ -758,6 +802,7 @@ private:
 	struct TransactionInfo {
 		Reference<ITransaction> transaction;
 		ThreadFuture<Void> onChange;
+		ErrorOr<Void> dbError = ErrorOr<Void>(Void());
 	};
 
 	// Timeout related variables for MultiVersionTransaction objects that do not have an underlying ITransaction
@@ -779,6 +824,8 @@ private:
 	// if we don't have an underlying database object to connect with.
 	void setTimeout(Optional<StringRef> value);
 
+	void resetTimeout();
+
 	// Creates a ThreadFuture<T> that will signal an error if the transaction times out.
 	template <class T>
 	ThreadFuture<T> makeTimeout();
@@ -792,10 +839,14 @@ private:
 	TransactionInfo transaction;
 
 	TransactionInfo getTransaction();
-	void updateTransaction();
+	void updateTransaction(bool setPersistentOptions);
 	void setDefaultOptions(UniqueOrderedOptionList<FDBTransactionOptions> options);
 
+	template <class T, class... Args>
+	ThreadFuture<T> executeOperation(ThreadFuture<T> (ITransaction::*func)(Args...), Args&&... args);
+
 	std::vector<std::pair<FDBTransactionOptions::Option, Optional<Standalone<StringRef>>>> persistentOptions;
+	std::vector<std::pair<FDBTransactionOptions::Option, Optional<WipedString>>> sensitivePersistentOptions;
 };
 
 struct ClientDesc {
@@ -843,14 +894,20 @@ public:
 
 	Reference<ITransaction> createTransaction() override;
 
+	template <class T, class... Args>
+	ThreadFuture<T> executeOperation(ThreadFuture<T> (ITenant::*func)(Args...), Args&&... args);
+
+	ThreadFuture<int64_t> getId() override;
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
 	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) override;
 	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+	ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) override;
 
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::delref(); }
@@ -964,6 +1021,9 @@ public:
 	// For internal use in testing
 	static Reference<IDatabase> debugCreateFromExistingDatabase(Reference<IDatabase> db);
 
+	template <class T, class... Args>
+	ThreadFuture<T> executeOperation(ThreadFuture<T> (IDatabase::*func)(Args...), Args&&... args);
+
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
@@ -972,17 +1032,25 @@ public:
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
 	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> blobbifyRangeBlocking(const KeyRangeRef& keyRange) override;
 	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+	ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
 
+	// Return a JSON string containing database client-side status information
+	ThreadFuture<Standalone<StringRef>> getClientStatus() override;
+
 	// private:
 
 	struct LegacyVersionMonitor;
+
+	// Database initialization state
+	enum class InitializationState { INITIALIZING, INITIALIZATION_FAILED, CREATED, INCOMPATIBLE, CLOSED };
 
 	// A struct that manages the current connection state of the MultiVersionDatabase. This wraps the underlying
 	// IDatabase object that is currently interacting with the cluster.
@@ -1007,6 +1075,15 @@ public:
 		// Must be called from the main thread
 		void startLegacyVersionMonitors();
 
+		// Set a new database connnection
+		void setDatabase(Reference<IDatabase> db);
+
+		// Get database intialization error if initialization failed
+		ErrorOr<Void> getInitializationError();
+
+		// Return a JSON string containing database client-side status information
+		Standalone<StringRef> getClientStatus(ErrorOr<Standalone<StringRef>> dbContextStatus);
+
 		// Cleans up state for the legacy version monitors to break reference cycles
 		void close();
 
@@ -1020,7 +1097,12 @@ public:
 		// this will be a specially created local db.
 		Reference<IDatabase> versionMonitorDb;
 
-		bool closed;
+		// The current database initialization state
+		std::atomic<InitializationState> initializationState;
+
+		// Last error received during database initialization
+		// Set on transition to INITIALIZATION_FAILED state, never changed afterwards
+		Error initializationError;
 
 		ThreadFuture<Void> changed;
 		ThreadFuture<Void> dbReady;
@@ -1156,6 +1238,7 @@ private:
 	volatile bool bypassMultiClientApi;
 	volatile bool externalClient;
 	bool ignoreExternalClientFailures;
+	bool failIncompatibleClient;
 	bool retainClientLibCopies;
 	ApiVersion apiVersion;
 
@@ -1169,6 +1252,8 @@ private:
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;
 	std::map<FDBNetworkOptions::Option, std::set<Standalone<StringRef>>> setEnvOptions;
 	volatile bool envOptionsLoaded;
+
+	friend struct MultiVersionDatabase::DatabaseState;
 };
 
 #endif

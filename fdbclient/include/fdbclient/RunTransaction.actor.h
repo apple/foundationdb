@@ -31,26 +31,7 @@
 #include <utility>
 
 #include "flow/flow.h"
-#include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-
-ACTOR template <class Function>
-Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue())> runRYWTransaction(
-    Database cx,
-    Function func) {
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	loop {
-		try {
-			// func should be idempotent; otherwise, retry will get undefined result
-			state decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result =
-			    wait(func(tr));
-			wait(tr->commit());
-			return result;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-}
 
 ACTOR template <class Function, class DB>
 Future<decltype(std::declval<Function>()(Reference<typename DB::TransactionT>()).getValue())> runTransaction(
@@ -70,32 +51,19 @@ Future<decltype(std::declval<Function>()(Reference<typename DB::TransactionT>())
 	}
 }
 
-ACTOR template <class Function>
-Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue())>
-runRYWTransactionFailIfLocked(Database cx, Function func) {
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+ACTOR template <class Function, class DB>
+Future<Void> runTransactionVoid(Reference<DB> db, Function func) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	loop {
 		try {
-			state decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result =
-			    wait(func(tr));
-			wait(tr->commit());
-			return result;
+			// func should be idempotent; otherwise, retry will get undefined result
+			wait(func(tr));
+			wait(safeThreadFutureToFuture(tr->commit()));
+			return Void();
 		} catch (Error& e) {
-			if (e.code() == error_code_database_locked)
-				throw;
-			wait(tr->onError(e));
+			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
-}
-
-ACTOR template <class Function>
-Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue())> runRYWTransactionNoRetry(
-    Database cx,
-    Function func) {
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result = wait(func(tr));
-	wait(tr->commit());
-	return result;
 }
 
 #include "flow/unactorcompiler.h"

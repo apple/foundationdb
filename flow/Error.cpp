@@ -77,17 +77,17 @@ Error internal_error_impl(const char* msg, const char* file, int line) {
 }
 
 Error internal_error_impl(const char* a_nm,
-                          long long a,
+                          std::string const& a,
                           const char* op_nm,
                           const char* b_nm,
-                          long long b,
+                          std::string const& b,
                           const char* file,
                           int line) {
 	fprintf(stderr, "Assertion failed @ %s %d:\n", file, line);
 	fprintf(stderr, "  expression:\n");
 	fprintf(stderr, "              %s %s %s\n", a_nm, op_nm, b_nm);
 	fprintf(stderr, "  expands to:\n");
-	fprintf(stderr, "              %lld %s %lld\n\n", a, op_nm, b);
+	fprintf(stderr, "              %s %s %s\n\n", a.c_str(), op_nm, b.c_str());
 	fprintf(stderr, "  %s\n", platform::get_backtrace().c_str());
 
 	TraceEvent(SevError, "InternalError")
@@ -208,7 +208,6 @@ const std::set<int> transactionRetryableErrors = { error_code_not_committed,
 	                                               error_code_process_behind,
 	                                               error_code_batch_transaction_throttled,
 	                                               error_code_tag_throttled,
-	                                               error_code_unknown_tenant,
 	                                               error_code_proxy_tag_throttled,
 	                                               // maybe committed error
 	                                               error_code_cluster_version_changed,

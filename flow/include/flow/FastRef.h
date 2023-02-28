@@ -24,7 +24,7 @@
 
 #include <atomic>
 #include <cstdint>
-#include <utility>
+#include "flow/Traceable.h"
 
 // The thread safety this class provides is that it's safe to call addref and
 // delref on the same object concurrently in different threads. Subclass does
@@ -179,6 +179,13 @@ public:
 
 private:
 	P* ptr;
+};
+
+template <class T>
+struct Traceable<Reference<T>> : std::bool_constant<Traceable<T>::value> {
+	static std::string toString(const Reference<T>& value) {
+		return value ? Traceable<T>::toString(*value) : "[not set]";
+	}
 };
 
 template <class P, class... Args>

@@ -20,6 +20,12 @@
 
 #ifndef FDBRPC_STATS_H
 #define FDBRPC_STATS_H
+#include "flow/Error.h"
+#include "flow/IRandom.h"
+#include "flow/Knobs.h"
+#include "flow/OTELMetrics.h"
+#include "flow/serialize.h"
+#include <string>
 #include <type_traits>
 #pragma once
 
@@ -38,10 +44,11 @@ MyCounters() : foo("foo", cc), bar("bar", cc), baz("baz", cc) {}
 #include <cstddef>
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 
-struct ICounter {
+struct ICounter : public IMetric {
 	// All counters have a name and value
+	ICounter() : IMetric(knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)) {}
 	virtual std::string const& getName() const = 0;
 	virtual int64_t getValue() const = 0;
 
@@ -74,8 +81,11 @@ class CounterCollection {
 	std::string id;
 	std::vector<struct ICounter*> counters, countersToRemove;
 
+	double logTime;
+
 public:
-	CounterCollection(std::string const& name, std::string const& id = std::string()) : name(name), id(id) {}
+	CounterCollection(std::string const& name, std::string const& id = std::string())
+	  : name(name), id(id), logTime(0) {}
 	~CounterCollection() {
 		for (auto c : countersToRemove)
 			c->remove();
@@ -90,7 +100,7 @@ public:
 
 	std::string const& getId() const { return id; }
 
-	void logToTraceEvent(TraceEvent& te) const;
+	void logToTraceEvent(TraceEvent& te);
 
 	Future<Void> traceCounters(
 	    std::string const& traceEventName,
@@ -100,7 +110,7 @@ public:
 	    std::function<void(TraceEvent&)> const& decorator = [](auto& te) {});
 };
 
-struct Counter final : ICounter, NonCopyable {
+struct Counter final : public ICounter, NonCopyable {
 public:
 	typedef int64_t Value;
 
@@ -214,44 +224,33 @@ public:
 	~LatencyBands();
 };
 
-class LatencySample {
+class LatencySample : public IMetric {
 public:
-	LatencySample(std::string name, UID id, double loggingInterval, int sampleSize)
-	  : name(name), id(id), sampleStart(now()), sample(sampleSize),
-	    latencySampleEventHolder(makeReference<EventCacheHolder>(id.toString() + "/" + name)) {
-		logger = recurring([this]() { logSample(); }, loggingInterval);
-	}
-
-	void addMeasurement(double measurement) { sample.addSample(measurement); }
+	LatencySample(std::string name, UID id, double loggingInterval, double accuracy);
+	void addMeasurement(double measurement);
 
 private:
 	std::string name;
 	UID id;
-	double sampleStart;
+	// These UIDs below are needed to emit the tail latencies as gauges
+	//
+	// If an OTEL aggregator is able to directly accept and process histograms
+	// the tail latency gauges won't necessarily be needed anymore since they can be
+	// calculated directly from the emitted buckets. To support users who have an aggregator
+	// who cannot accept histograms, the tails latencies are still directly emitted.
+	UID p50id;
+	UID p90id;
+	UID p95id;
+	UID p99id;
+	UID p999id;
+	double sampleEmit;
 
-	ContinuousSample<double> sample;
+	DDSketch<double> sketch;
 	Future<Void> logger;
 
 	Reference<EventCacheHolder> latencySampleEventHolder;
 
-	void logSample() {
-		TraceEvent(name.c_str(), id)
-		    .detail("Count", sample.getPopulationSize())
-		    .detail("Elapsed", now() - sampleStart)
-		    .detail("Min", sample.min())
-		    .detail("Max", sample.max())
-		    .detail("Mean", sample.mean())
-		    .detail("Median", sample.median())
-		    .detail("P25", sample.percentile(0.25))
-		    .detail("P90", sample.percentile(0.9))
-		    .detail("P95", sample.percentile(0.95))
-		    .detail("P99", sample.percentile(0.99))
-		    .detail("P99.9", sample.percentile(0.999))
-		    .trackLatest(latencySampleEventHolder->trackingKey);
-
-		sample.clear();
-		sampleStart = now();
-	}
+	void logSample();
 };
 
 #endif

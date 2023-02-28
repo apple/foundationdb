@@ -92,10 +92,10 @@ class ConfigBroadcasterImpl {
 
 	// Used to read a snapshot from the previous coordinators after a change
 	// coordinators command.
-	Version maxLastSeenVersion = ::invalidVersion;
 	Future<Optional<Value>> previousCoordinatorsFuture;
 	std::unique_ptr<IConfigConsumer> previousCoordinatorsConsumer;
 	Future<Void> previousCoordinatorsSnapshotFuture;
+	Version largestConfigNodeVersion{ ::invalidVersion };
 
 	UID id;
 	CounterCollection cc;
@@ -106,6 +106,7 @@ class ConfigBroadcasterImpl {
 	Future<Void> logger;
 
 	int coordinators = 0;
+	std::unordered_set<NetworkAddress> registeredConfigNodes;
 	std::unordered_set<NetworkAddress> activeConfigNodes;
 	std::unordered_set<NetworkAddress> registrationResponses;
 	std::unordered_set<NetworkAddress> registrationResponsesUnregistered;
@@ -268,7 +269,7 @@ class ConfigBroadcasterImpl {
 		// Ask the registering ConfigNode whether it has registered in the past.
 		state ConfigBroadcastRegisteredReply reply = wait(
 		    brokenPromiseToNever(configBroadcastInterface.registered.getReply(ConfigBroadcastRegisteredRequest{})));
-		self->maxLastSeenVersion = std::max(self->maxLastSeenVersion, reply.lastSeenVersion);
+		self->largestConfigNodeVersion = std::max(self->largestConfigNodeVersion, reply.lastSeenVersion);
 		state bool registered = reply.registered;
 		TraceEvent("ConfigBroadcasterRegisterNodeReceivedRegistrationReply", self->id)
 		    .detail("Address", address)
@@ -302,6 +303,7 @@ class ConfigBroadcasterImpl {
 		int nodesTillQuorum = self->coordinators / 2 + 1 - (int)self->activeConfigNodes.size();
 
 		if (registered) {
+			self->registeredConfigNodes.insert(address);
 			self->activeConfigNodes.insert(address);
 			self->disallowUnregistered = true;
 		} else if ((self->activeConfigNodes.size() < self->coordinators / 2 + 1 && !self->disallowUnregistered) ||
@@ -365,6 +367,52 @@ class ConfigBroadcasterImpl {
 
 		state bool sendSnapshot =
 		    self->previousCoordinatorsConsumer && reply.lastSeenVersion <= self->mostRecentVersion;
+
+		// If a coordinator change is ongoing, a quorum of ConfigNodes are
+		// already registered and the largest version at least one of those
+		// ConfigNodes knows about is greater than the version of the latest
+		// snapshot the broadcaster has, don't send a snapshot to any
+		// ConfigNodes. This could end up overwriting committed data. Consider
+		// the following scenario, with three ConfigNodes:
+		//
+		//   T=0:
+		//     A: v5
+		//   T=1:
+		//     change coordinators, new coordinators are B, C, D
+		//   T=2:
+		//     B: v5, C: v5, D: v5
+		//   T=3:
+		//     B: v5, C: v10, D: v10
+		//     (some commits happen on only C and D)
+		//     (previousCoordinatorsKey has not been cleared yet)
+		//   T=4:
+		//     D dies and loses its data
+		//   T=5:
+		//     D starts
+		//     B: v5 (registered=yes), C: v10 (registered=yes), D: v0 (registered=no)
+		//     Broadcaster: has an old snapshot, only knows about v5
+		//       self->mostRecentVersion=5
+		//   T=6:
+		//     B, C, D (re-)register with broadcaster
+		//
+		// At T=5, the broadcaster would send snapshots to B and D because the
+		// largest version they know about (5) is less than or equal to
+		// self->mostRecentVersion (5). But this would cause a majority of
+		// nodes to think v5 is the latest committed version, causing C to be
+		// rolled back, and losing commit data between versions 5 and 10.
+		//
+		// This is a special case where the coordinators are being changed.
+		// During a coordinator change, a majority of ConfigNodes being
+		// registered means the coordinator change already took place, and it
+		// is being retried due to some failure. In that case, we don't want to
+		// resend snapshots if a majority of the new ConfigNodes are
+		// registered, because they could have been accepting commits. Instead,
+		// let the rollback/rollforward algorithm update the out of date nodes.
+		if (self->previousCoordinatorsConsumer && self->largestConfigNodeVersion > self->mostRecentVersion &&
+		    self->registeredConfigNodes.size() >= self->coordinators / 2 + 1) {
+			sendSnapshot = false;
+		}
+
 		// Unregistered nodes need to wait for either:
 		//   1. A quorum of registered nodes to register and send their
 		//      snapshots, so the unregistered nodes can be rolled forward, or

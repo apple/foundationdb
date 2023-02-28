@@ -38,6 +38,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/network.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -1114,9 +1115,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("ReliableInfo", p->getReliableInfo())
 					    .detail("KillOrRebootProcess", p->address);
 					if (p->isReliable()) {
-						g_simulator->rebootProcess(p, ISimulator::RebootProcess);
+						g_simulator->rebootProcess(p, ISimulator::KillType::RebootProcess);
 					} else {
-						g_simulator->killProcess(p, ISimulator::KillInstantly);
+						g_simulator->killProcess(p, ISimulator::KillType::KillInstantly);
 					}
 				}
 
@@ -1565,7 +1566,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check EncryptKeyProxy
-		if (SERVER_KNOBS->ENABLE_ENCRYPTION && db.encryptKeyProxy.present() &&
+		if (config.encryptionAtRestMode.isEncryptionEnabled() && db.encryptKeyProxy.present() &&
 		    (!nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()].processClass.machineClassFitness(
 		         ProcessClass::EncryptKeyProxy) > fitnessLowerBound)) {

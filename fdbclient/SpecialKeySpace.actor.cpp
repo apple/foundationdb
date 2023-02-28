@@ -304,7 +304,9 @@ ACTOR Future<RangeResult> SpecialKeySpace::checkRYWValid(SpecialKeySpace* sks,
 		         wait(SpecialKeySpace::getRangeAggregationActor(sks, ryw, begin, end, limits, reverse))) {
 			return result;
 		}
-		when(wait(ryw->resetFuture())) { throw internal_error(); }
+		when(wait(ryw->resetFuture())) {
+			throw internal_error();
+		}
 	}
 }
 
@@ -971,9 +973,9 @@ ACTOR Future<bool> checkExclusion(Database db,
 	}
 	StatusObject status = wait(StatusClient::statusFetcher(db));
 	state std::string errorString =
-	    "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
+	    "ERROR: Could not calculate the impact of this exclude on the total available space in the cluster.\n"
 	    "Please try the exclude again in 30 seconds.\n"
-	    "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without checking free "
+	    "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without checking available "
 	    "space.\n";
 
 	StatusObjectReader statusObj(status);
@@ -995,8 +997,11 @@ ACTOR Future<bool> checkExclusion(Database db,
 
 	state std::unordered_set<std::string> diskLocalities;
 	state int64_t totalKvStoreFreeBytes = 0;
+	state int64_t totalKvStoreFreeBytesNotExcluded = 0;
 	state int64_t totalKvStoreUsedBytes = 0;
 	state int64_t totalKvStoreUsedBytesNonExcluded = 0;
+	state int64_t totalKvStoreAvailableBytes = 0;
+
 	try {
 		for (auto proc : processesMap.obj()) {
 			StatusObjectReader process(proc.second);
@@ -1034,13 +1039,22 @@ ACTOR Future<bool> checkExclusion(Database db,
 						return false;
 					}
 
+					int64_t available_bytes;
+					if (!role.get("kvstore_available_bytes", available_bytes)) {
+						*msg = ManagementAPIError::toJsonString(
+						    false, markFailed ? "exclude failed" : "exclude", errorString);
+						return false;
+					}
+
 					totalKvStoreUsedBytes += used_bytes;
+					totalKvStoreFreeBytes += free_bytes;
+					totalKvStoreAvailableBytes += available_bytes;
 
 					if (!excluded) {
 						totalKvStoreUsedBytesNonExcluded += used_bytes;
 
 						if (disk_id.empty() || diskLocalities.find(disk_id) == diskLocalities.end()) {
-							totalKvStoreFreeBytes += free_bytes;
+							totalKvStoreFreeBytesNotExcluded += free_bytes;
 							if (!disk_id.empty()) {
 								diskLocalities.insert(disk_id);
 							}
@@ -1059,11 +1073,17 @@ ACTOR Future<bool> checkExclusion(Database db,
 		return false;
 	}
 
-	double finalFreeRatio = 1 - (totalKvStoreUsedBytes / (totalKvStoreUsedBytesNonExcluded + totalKvStoreFreeBytes));
-	if (ssExcludedCount == ssTotalCount || finalFreeRatio <= 0.1) {
-		std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.\n"
+	// The numerator is the total space in use by FDB that is not immediately reusable.
+	// This is calculated as: used + free - available = used + free - (free - reusable) = used - reusable.
+	// The denominator is the total capacity usable by FDB (either used or unused currently).
+	double finalUnavailableRatio =
+	    (totalKvStoreUsedBytes + totalKvStoreFreeBytes - totalKvStoreAvailableBytes) /
+	    std::max((totalKvStoreUsedBytesNonExcluded + totalKvStoreFreeBytesNotExcluded), (int64_t)1);
+
+	if (ssExcludedCount == ssTotalCount || finalUnavailableRatio > 0.9) {
+		std::string temp = "ERROR: This exclude may cause the total available space in the cluster to drop below 10%.\n"
 		                   "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without "
-		                   "checking free space.\n";
+		                   "checking available space.\n";
 		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
 		return false;
 	}
@@ -1233,6 +1253,12 @@ ACTOR Future<RangeResult> getProcessClassActor(ReadYourWritesTransaction* ryw, K
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
 		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);
 	});
+	// Note: ProcessData can contain duplicate workers in corner cases
+	auto last = std::unique(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
+		return formatIpPort(lhs.address.ip, lhs.address.port) == formatIpPort(rhs.address.ip, rhs.address.port);
+	});
+	// remove duplicates
+	workers.erase(last, workers.end());
 	RangeResult result;
 	for (auto& w : workers) {
 		// exclude :tls in keys even the network addresss is TLS
@@ -1350,6 +1376,12 @@ ACTOR Future<RangeResult> getProcessClassSourceActor(ReadYourWritesTransaction* 
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
 		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);
 	});
+	// Note: ProcessData can contain duplicate workers in corner cases
+	auto last = std::unique(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
+		return formatIpPort(lhs.address.ip, lhs.address.port) == formatIpPort(rhs.address.ip, rhs.address.port);
+	});
+	// remove duplicates
+	workers.erase(last, workers.end());
 	RangeResult result;
 	for (auto& w : workers) {
 		// exclude :tls in keys even the network addresss is TLS

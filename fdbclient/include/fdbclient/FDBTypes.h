@@ -425,6 +425,22 @@ inline KeyRangeRef operator&(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
 	return KeyRangeRef(b, e);
 }
 
+// Calculates the complement of `lhs` from `rhs`.
+inline std::vector<KeyRangeRef> operator-(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
+	if ((lhs & rhs).empty()) {
+		return { lhs };
+	}
+
+	std::vector<KeyRangeRef> result;
+	if (lhs.begin < rhs.begin) {
+		result.push_back(KeyRangeRef(lhs.begin, rhs.begin));
+	}
+	if (lhs.end > rhs.end) {
+		result.push_back(KeyRangeRef(rhs.end, lhs.end));
+	}
+	return result;
+}
+
 struct KeyValueRef {
 	KeyRef key;
 	ValueRef value;
@@ -544,7 +560,12 @@ struct hash<KeyRange> {
 };
 } // namespace std
 
-enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
+enum {
+	invalidVersion = -1,
+	latestVersion = -2,
+	earliestVersion = -3,
+	MAX_VERSION = std::numeric_limits<int64_t>::max()
+};
 
 inline KeyRef keyAfter(const KeyRef& key, Arena& arena) {
 	// Don't include fdbclient/SystemData.h for the allKeys symbol to avoid a cyclic include
@@ -591,7 +612,10 @@ inline KeyRange prefixRange(KeyRef prefix) {
 // The returned reference is valid as long as keys is valid.
 KeyRef keyBetween(const KeyRangeRef& keys);
 
-KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, KeyRef prefix);
+// Returns a randomKey between keys. If it's impossible, return keys.end.
+Key randomKeyBetween(const KeyRangeRef& keys);
+
+KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, Optional<KeyRef> prefix);
 
 struct KeySelectorRef {
 private:
@@ -811,18 +835,9 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	MappedReqAndResultRef reqAndResult;
 
-	// boundary KVs are always returned so that caller can use it as a continuation,
-	// for non-boundary KV, it is always false.
-	// for boundary KV, it is true only when the secondary query succeeds(return non-empty).
-	// Note: only MATCH_INDEX_MATCHED_ONLY and MATCH_INDEX_UNMATCHED_ONLY modes can make use of it,
-	// to decide whether the boudnary is a match/unmatch.
-	// In the case of MATCH_INDEX_ALL and MATCH_INDEX_NONE, caller should not care if boundary has a match or not.
-	bool boundaryAndExist;
-
 	MappedKeyValueRef() = default;
 	MappedKeyValueRef(Arena& a, const MappedKeyValueRef& copyFrom) : KeyValueRef(a, copyFrom) {
 		const auto& reqAndResultCopyFrom = copyFrom.reqAndResult;
-		boundaryAndExist = copyFrom.boundaryAndExist;
 		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResultCopyFrom)) {
 			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResultCopyFrom);
 			reqAndResult = GetValueReqAndResultRef(a, getValue);
@@ -836,7 +851,7 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	bool operator==(const MappedKeyValueRef& rhs) const {
 		return static_cast<const KeyValueRef&>(*this) == static_cast<const KeyValueRef&>(rhs) &&
-		       reqAndResult == rhs.reqAndResult && boundaryAndExist == rhs.boundaryAndExist;
+		       reqAndResult == rhs.reqAndResult;
 	}
 	bool operator!=(const MappedKeyValueRef& rhs) const { return !(rhs == *this); }
 
@@ -846,7 +861,7 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ((KeyValueRef&)*this), reqAndResult, boundaryAndExist);
+		serializer(ar, ((KeyValueRef&)*this), reqAndResult);
 	}
 };
 
@@ -1053,9 +1068,9 @@ struct StorageBytes {
 	constexpr static FileIdentifier file_identifier = 3928581;
 	// Free space on the filesystem
 	int64_t free;
-	// Total space on the filesystem
+	// Total capacity on the filesystem usable by non-privileged users.
 	int64_t total;
-	// Used by *this* store, not total - free
+	// Total size of all files owned by *this* storage instance, not total - free
 	int64_t used;
 	// Amount of space available for use by the store, which includes free space on the filesystem
 	// and internal free space within the store data that is immediately reusable.
@@ -1123,45 +1138,6 @@ struct LogMessageVersion {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, version, sub);
-	}
-};
-
-struct AddressExclusion {
-	IPAddress ip;
-	int port;
-
-	AddressExclusion() : ip(0), port(0) {}
-	explicit AddressExclusion(const IPAddress& ip) : ip(ip), port(0) {}
-	explicit AddressExclusion(const IPAddress& ip, int port) : ip(ip), port(port) {}
-
-	bool operator<(AddressExclusion const& r) const {
-		if (ip != r.ip)
-			return ip < r.ip;
-		return port < r.port;
-	}
-	bool operator==(AddressExclusion const& r) const { return ip == r.ip && port == r.port; }
-
-	bool isWholeMachine() const { return port == 0; }
-	bool isValid() const { return ip.isValid() || port != 0; }
-
-	bool excludes(NetworkAddress const& addr) const {
-		if (isWholeMachine())
-			return ip == addr.ip;
-		return ip == addr.ip && port == addr.port;
-	}
-
-	// This is for debugging and IS NOT to be used for serialization to persistant state
-	std::string toString() const {
-		if (!isWholeMachine())
-			return formatIpPort(ip, port);
-		return ip.toString();
-	}
-
-	static AddressExclusion parse(StringRef const&);
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, ip, port);
 	}
 };
 
@@ -1458,10 +1434,15 @@ struct TenantMode {
 	uint32_t mode;
 };
 
+template <>
+struct Traceable<TenantMode> : std::true_type {
+	static std::string toString(const TenantMode& value) { return value.toString(); }
+};
+
 struct EncryptionAtRestMode {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
 	// just before END.
-	enum Mode { DISABLED = 0, AES_256_CTR = 1, END = 2 };
+	enum Mode { DISABLED = 0, DOMAIN_AWARE = 1, CLUSTER_AWARE = 2, END = 3 };
 
 	EncryptionAtRestMode() : mode(DISABLED) {}
 	EncryptionAtRestMode(Mode mode) : mode(mode) {
@@ -1480,12 +1461,28 @@ struct EncryptionAtRestMode {
 		switch (mode) {
 		case DISABLED:
 			return "disabled";
-		case AES_256_CTR:
-			return "aes_256_ctr";
+		case DOMAIN_AWARE:
+			return "domain_aware";
+		case CLUSTER_AWARE:
+			return "cluster_aware";
 		default:
 			ASSERT(false);
 		}
 		return "";
+	}
+
+	static EncryptionAtRestMode fromString(std::string mode) {
+		if (mode == "disabled") {
+			return EncryptionAtRestMode::DISABLED;
+		} else if (mode == "cluster_aware") {
+			return EncryptionAtRestMode::CLUSTER_AWARE;
+		} else if (mode == "domain_aware") {
+			return EncryptionAtRestMode::DOMAIN_AWARE;
+		} else {
+			TraceEvent(SevError, "UnknownEncryptMode").detail("EncryptMode", mode);
+			ASSERT(false);
+			throw internal_error();
+		}
 	}
 
 	Value toValue() const { return ValueRef(format("%d", (int)mode)); }
@@ -1494,6 +1491,10 @@ struct EncryptionAtRestMode {
 
 	bool operator==(const EncryptionAtRestMode& e) const { return isEquals(e); }
 	bool operator!=(const EncryptionAtRestMode& e) const { return !isEquals(e); }
+	bool operator==(Mode m) const { return mode == m; }
+	bool operator!=(Mode m) const { return mode != m; }
+
+	bool isEncryptionEnabled() const { return mode != EncryptionAtRestMode::DISABLED; }
 
 	static EncryptionAtRestMode fromValueRef(Optional<ValueRef> val) {
 		if (!val.present()) {
@@ -1518,6 +1519,11 @@ struct EncryptionAtRestMode {
 	}
 
 	uint32_t mode;
+};
+
+template <>
+struct Traceable<EncryptionAtRestMode> : std::true_type {
+	static std::string toString(const EncryptionAtRestMode& mode) { return mode.toString(); }
 };
 
 typedef StringRef ClusterNameRef;
@@ -1657,6 +1663,7 @@ struct ReadOptions {
 	ReadType type;
 	// Once CacheResult is serializable, change type from bool to CacheResult
 	bool cacheResult;
+	bool lockAware = false;
 	Optional<UID> debugID;
 	Optional<Version> consistencyCheckStartVersion;
 
@@ -1670,7 +1677,7 @@ struct ReadOptions {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, type, cacheResult, debugID, consistencyCheckStartVersion);
+		serializer(ar, type, cacheResult, debugID, consistencyCheckStartVersion, lockAware);
 	}
 };
 

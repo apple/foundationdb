@@ -19,16 +19,33 @@
  */
 
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/filesystem.hpp>
+#include <boost/filesystem/directory.hpp>
+#include <boost/filesystem/file_status.hpp>
+#include <boost/filesystem/path.hpp>
+#include <boost/range/iterator_range.hpp>
+#include <boost/range/iterator_range_core.hpp>
 #include <cinttypes>
 #include <fstream>
 #include <functional>
+#include <istream>
+#include <iterator>
 #include <map>
+#include <streambuf>
 #include <toml.hpp>
 
 #include "flow/ActorCollection.h"
+#include "flow/ChaosMetrics.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/Histogram.h"
+#include "flow/IAsyncFile.h"
+#include "flow/TDMetric.actor.h"
+#include "fdbrpc/Locality.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
+#include "fdbclient/Audit.h"
+#include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
@@ -44,6 +61,8 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "flow/Platform.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 FDB_DEFINE_BOOLEAN_PARAM(UntrustedMode);
@@ -251,6 +270,23 @@ std::vector<std::string> getOption(VectorRef<KeyValueRef> options, Key key, std:
 	return defaultValue;
 }
 
+std::vector<int> getOption(VectorRef<KeyValueRef> options, Key key, std::vector<int> defaultValue) {
+	for (int i = 0; i < options.size(); i++)
+		if (options[i].key == key) {
+			std::vector<int> v;
+			int begin = 0;
+			for (int c = 0; c < options[i].value.size(); c++)
+				if (options[i].value[c] == ',') {
+					v.push_back(atoi((char*)options[i].value.begin() + begin));
+					begin = c + 1;
+				}
+			v.push_back(atoi((char*)options[i].value.begin() + begin));
+			options[i].value = ""_sr;
+			return v;
+		}
+	return defaultValue;
+}
+
 bool hasOption(VectorRef<KeyValueRef> options, Key key) {
 	for (const auto& option : options) {
 		if (option.key == key) {
@@ -401,8 +437,18 @@ void CompoundWorkload::addFailureInjection(WorkloadRequest& work) {
 		if (disabledWorkloads.count(workload->description()) > 0) {
 			continue;
 		}
+		if (std::count(work.disabledFailureInjectionWorkloads.begin(),
+		               work.disabledFailureInjectionWorkloads.end(),
+		               workload->description()) > 0) {
+			continue;
+		}
 		while (shouldInjectFailure(random, work, workload)) {
 			workload->initFailureInjectionMode(random);
+			TraceEvent("AddFailureInjectionWorkload")
+			    .detail("Name", workload->description())
+			    .detail("ClientID", work.clientId)
+			    .detail("ClientCount", clientCount)
+			    .detail("Title", work.title);
 			failureInjection.push_back(workload);
 			workload = factory->create(*this);
 		}
@@ -835,7 +881,7 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 	}
 }
 
-ACTOR Future<Void> clearData(Database cx) {
+ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 	state Transaction tr(cx);
 	state UID debugID = debugRandom()->randomUniqueID();
 	tr.debugTransaction(debugID);
@@ -857,6 +903,42 @@ ACTOR Future<Void> clearData(Database cx) {
 			wait(tr.onError(e));
 			debugID = debugRandom()->randomUniqueID();
 			tr.debugTransaction(debugID);
+		}
+	}
+
+	tr = Transaction(cx);
+	loop {
+		try {
+			TraceEvent("TesterClearingTenantsStart", debugID);
+			state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants =
+			    wait(TenantMetadata::tenantMap().getRange(&tr, {}, {}, 1000));
+
+			TraceEvent("TesterClearingTenantsDeletingBatch", debugID)
+			    .detail("FirstTenant", tenants.results.empty() ? "<none>"_sr : tenants.results[0].second.tenantName)
+			    .detail("BatchSize", tenants.results.size());
+
+			std::vector<Future<Void>> deleteFutures;
+			for (auto const& [id, entry] : tenants.results) {
+				if (entry.tenantName != defaultTenant) {
+					deleteFutures.push_back(TenantAPI::deleteTenantTransaction(&tr, id));
+				}
+			}
+
+			wait(waitForAll(deleteFutures));
+			wait(tr.commit());
+
+			TraceEvent("TesterClearingTenantsDeletedBatch", debugID)
+			    .detail("FirstTenant", tenants.results.empty() ? "<none>"_sr : tenants.results[0].second.tenantName)
+			    .detail("BatchSize", tenants.results.size());
+
+			if (!tenants.more) {
+				TraceEvent("TesterClearingTenantsComplete", debugID).detail("AtVersion", tr.getCommittedVersion());
+				break;
+			}
+			tr.reset();
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "TesterClearingTenantsError", debugID).error(e);
+			wait(tr.onError(e));
 		}
 	}
 
@@ -985,6 +1067,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx,
 		req.clientCount = testers.size();
 		req.sharedRandomNumber = sharedRandom;
 		req.defaultTenant = defaultTenant.castTo<TenantNameRef>();
+		req.disabledFailureInjectionWorkloads = spec.disabledFailureInjectionWorkloads;
 		workRequests.push_back(testers[i].recruitments.getReply(req));
 	}
 
@@ -1077,6 +1160,44 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 	spec.options.push_back_deep(spec.options.arena(), options);
 
 	DistributedTestResults testResults = wait(runWorkload(cx, testers, spec, Optional<TenantName>()));
+
+	return Void();
+}
+
+ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+	state UID auditId;
+	TraceEvent("AuditStorageCorrectnessBegin");
+
+	loop {
+		try {
+			TriggerAuditRequest req(AuditType::ValidateHA, allKeys);
+			req.async = true;
+			UID auditId_ = wait(dbInfo->get().clusterInterface.clientInterface.triggerAudit.getReply(req));
+			auditId = auditId_;
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
+			wait(delay(1));
+		}
+	}
+
+	state Database cx = openDBOnServer(dbInfo);
+	loop {
+		try {
+			AuditStorageState auditState = wait(getAuditState(cx, AuditType::ValidateHA, auditId));
+			if (auditState.getPhase() != AuditPhase::Complete) {
+				ASSERT(auditState.getPhase() == AuditPhase::Running);
+				wait(delay(30));
+			} else {
+				TraceEvent(SevInfo, "AuditStorageResult").detail("AuditStorageState", auditState.toString());
+				ASSERT(auditState.getPhase() == AuditPhase::Complete);
+				break;
+			}
+		} catch (Error& e) {
+			TraceEvent("WaitAuditStorageError").errorUnsuppressed(e).detail("AuditID", auditId);
+			wait(delay(1));
+		}
+	}
 
 	return Void();
 }
@@ -1225,7 +1346,7 @@ ACTOR Future<bool> runTest(Database cx,
 	if (spec.useDB && spec.clearAfterTest) {
 		try {
 			TraceEvent("TesterClearingDatabase").log();
-			wait(timeoutError(clearData(cx), 1000.0));
+			wait(timeoutError(clearData(cx, defaultTenant), 1000.0));
 		} catch (Error& e) {
 			TraceEvent(SevError, "ErrorClearingDatabaseAfterTest").error(e);
 			throw; // If we didn't do this, we don't want any later tests to run on this DB
@@ -1277,8 +1398,6 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableHostname", ""); } },
 	{ "disableRemoteKVS",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } },
-	{ "disableEncryption",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedEncryption", ""); } },
 	{ "allowDefaultTenant",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDefaultTenant", ""); } }
 };
@@ -1415,6 +1534,21 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	  } },
 	{ "runFailureWorkloads",
 	  [](const std::string& value, TestSpec* spec) { spec->runFailureWorkloads = (value == "true"); } },
+	{ "disabledFailureInjectionWorkloads",
+	  [](const std::string& value, TestSpec* spec) {
+	      // Expects a comma separated list of workload names in "value".
+	      // This custom encoding is needed because both text and toml files need to be supported
+	      // and "value" is passed in as a string.
+	      std::stringstream ss(value);
+	      while (ss.good()) {
+		      std::string substr;
+		      getline(ss, substr, ',');
+		      substr = removeWhitespace(substr);
+		      if (!substr.empty()) {
+			      spec->disabledFailureInjectionWorkloads.push_back(substr);
+		      }
+	      }
+	  } },
 };
 
 std::vector<TestSpec> readTests(std::ifstream& ifs) {
@@ -1657,6 +1791,53 @@ ACTOR Future<Void> initializeSimConfig(Database db) {
 	}
 }
 
+void encryptionAtRestPlaintextMarkerCheck() {
+	if (!g_network->isSimulated() || !g_simulator->dataAtRestPlaintextMarker.present()) {
+		// Encryption at-rest was not enabled, do nothing
+		return;
+	}
+
+	namespace fs = boost::filesystem;
+
+	printf("EncryptionAtRestPlaintextMarkerCheckStart\n");
+	TraceEvent("EncryptionAtRestPlaintextMarkerCheckStart");
+	fs::path p("simfdb/");
+	fs::recursive_directory_iterator end;
+	int scanned = 0;
+	bool success = true;
+	// Enumerate all files in the "simfdb/" folder and look for "marker" string
+	for (fs::recursive_directory_iterator itr(p); itr != end; ++itr) {
+		if (boost::filesystem::is_regular_file(itr->path())) {
+			std::ifstream f(itr->path().string().c_str());
+			if (f) {
+				std::string buf;
+				int count = 0;
+				while (std::getline(f, buf)) {
+					// SOMEDAY: using 'std::boyer_moore_horspool_searcher' would significantly improve search
+					// time
+					if (buf.find(g_simulator->dataAtRestPlaintextMarker.get()) != std::string::npos) {
+						TraceEvent(SevError, "EncryptionAtRestPlaintextMarkerCheckPanic")
+						    .detail("Filename", itr->path().string())
+						    .detail("LineBuf", buf)
+						    .detail("Marker", g_simulator->dataAtRestPlaintextMarker.get());
+						success = false;
+					}
+					count++;
+				}
+				TraceEvent("EncryptionAtRestPlaintextMarkerCheckScanned")
+				    .detail("Filename", itr->path().string())
+				    .detail("NumLines", count);
+				scanned++;
+			} else {
+				TraceEvent(SevError, "FileOpenError").detail("Filename", itr->path().string());
+			}
+		}
+		ASSERT(success);
+	}
+	printf("EncryptionAtRestPlaintextMarkerCheckEnd NumFiles: %d\n", scanned);
+	TraceEvent("EncryptionAtRestPlaintextMarkerCheckEnd").detail("NumFiles", scanned);
+}
+
 /**
  * \brief Test orchestrator: sends test specification to testers in the right order and collects the results.
  *
@@ -1766,22 +1947,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	}
 
 	// Read cluster configuration
-	if (useDB) {
-		state Transaction tr = Transaction(cx);
-		state DatabaseConfiguration configuration;
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				RangeResult results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
-				configuration.fromKeyValues((VectorRef<KeyValueRef>)results);
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
+	if (useDB && g_network->isSimulated()) {
+		DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 
 		g_simulator->storagePolicy = configuration.storagePolicy;
 		g_simulator->tLogPolicy = configuration.tLogPolicy;
@@ -1837,7 +2004,6 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			if (deterministicRandom()->coinflip()) {
 				entry.tenantGroup = "TestTenantGroup"_sr;
 			}
-			entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
 			TraceEvent("CreatingTenant").detail("Tenant", tenant).detail("TenantGroup", entry.tenantGroup);
 			tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenant, entry)));
 		}
@@ -1899,6 +2065,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 	}
 	printf("\n");
+
+	encryptionAtRestPlaintextMarkerCheck();
 
 	return Void();
 }
@@ -2104,7 +2272,9 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 	}
 
 	choose {
-		when(wait(tests)) { return Void(); }
+		when(wait(tests)) {
+			return Void();
+		}
 		when(wait(quorum(actors, 1))) {
 			ASSERT(false);
 			throw internal_error();

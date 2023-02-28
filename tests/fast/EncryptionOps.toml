@@ -1,9 +1,10 @@
 [configuration]
 buggify = false
 testClass = "Encryption"
+encryptModes = ['disabled']
 
 [[knobs]]
-enable_encryption = false
+enable_configurable_encryption = true
 
 [[test]]
 testTitle = 'EncryptDecrypt'

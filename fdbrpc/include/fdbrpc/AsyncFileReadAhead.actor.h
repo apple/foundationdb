@@ -102,7 +102,7 @@ public:
 			// If not found, start the read.
 			if (i == f->m_blocks.end() || (i->second.isValid() && i->second.isError())) {
 				// printf("starting read of %s block %d\n", f->getFilename().c_str(), blockNum);
-				fblock = readBlock(f.getPtr(), f->m_block_size, f->m_block_size * blockNum);
+				fblock = readBlock(f.getPtr(), f->m_block_size, (int64_t)f->m_block_size * blockNum);
 				f->m_blocks[blockNum] = fblock;
 			} else
 				fblock = i->second;
@@ -121,16 +121,29 @@ public:
 			// Calculate the block-relative read range.  It's a given that the offset / length range touches this block
 			// so readStart will never be greater than blocksize (though it could be past the actual end of a short
 			// block).
-			int64_t blockStart = blockNum * f->m_block_size;
+			int64_t blockStart = (int64_t)blockNum * f->m_block_size;
 			int64_t readStart = std::max<int64_t>(0, offset - blockStart);
 			int64_t readEnd = std::min<int64_t>(f->m_block_size, offset + length - blockStart);
 			int rlen = readEnd - readStart;
 			memcpy((uint8_t*)data + wpos, block->data + readStart, rlen);
 			wpos += rlen;
+
+			// unpin this block
+			localCache.erase(blockNum);
+			if (f->m_blocks.size() > f->m_cache_block_limit) {
+				// make an attempt to free no-longer needed blocks as we go
+				// FIXME: could also expire previous blocks if above limit and they're also free
+				auto i = f->m_blocks.find(blockNum);
+				ASSERT(i != f->m_blocks.end() && i->first == blockNum);
+				if (i->second.getFutureReferenceCount() == 1) {
+					// printf("evicting block %d\n", i->first);
+					i = f->m_blocks.erase(i);
+				}
+			}
 		}
 
 		ASSERT(wpos == length);
-		localCache.clear();
+		ASSERT(localCache.empty());
 
 		// If the cache is too large then go through the cache in block number order and remove any entries whose future
 		// has a reference count of 1, stopping once the cache is no longer too big.  There is no point in removing

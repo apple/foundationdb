@@ -209,8 +209,12 @@ class GetGenerationQuorum {
 			}
 			try {
 				choose {
-					when(ConfigGeneration generation = wait(self->result.getFuture())) { return generation; }
-					when(wait(self->actors.getResult())) { ASSERT(false); }
+					when(ConfigGeneration generation = wait(self->result.getFuture())) {
+						return generation;
+					}
+					when(wait(self->actors.getResult())) {
+						ASSERT(false);
+					}
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_failed_to_reach_quorum) {
@@ -218,8 +222,12 @@ class GetGenerationQuorum {
 					if (self->coordinatorsChangedFuture.isReady()) {
 						throw coordinators_changed();
 					}
-					wait(delayJittered(std::clamp(
-					    0.005 * (1 << std::min(retries, 30)), 0.0, CLIENT_KNOBS->TIMEOUT_RETRY_UPPER_BOUND)));
+					if (deterministicRandom()->random01() < 0.95) {
+						// Add some random jitter to prevent clients from
+						// contending.
+						wait(delayJittered(std::clamp(
+						    0.006 * (1 << std::min(retries, 30)), 0.0, CLIENT_KNOBS->TIMEOUT_RETRY_UPPER_BOUND)));
+					}
 					if (deterministicRandom()->random01() < 0.05) {
 						// Randomly inject a delay of at least the generation
 						// reply timeout, to try to prevent contention between
@@ -562,6 +570,10 @@ Future<Void> PaxosConfigTransaction::commit() {
 
 Version PaxosConfigTransaction::getCommittedVersion() const {
 	return impl->getCommittedVersion();
+}
+
+double PaxosConfigTransaction::getTagThrottledDuration() const {
+	return 0.0;
 }
 
 int64_t PaxosConfigTransaction::getTotalCost() const {

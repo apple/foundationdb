@@ -19,6 +19,8 @@
  */
 
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupContainer.h"
+#include "flow/BooleanParam.h"
 #ifdef BUILD_AZURE_BACKUP
 #include "fdbclient/BackupContainerAzureBlobStore.h"
 #endif
@@ -33,6 +35,8 @@
 #include <cinttypes>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+FDB_DEFINE_BOOLEAN_PARAM(IncludeKeyRangeMap);
 
 class BackupContainerFileSystemImpl {
 public:
@@ -159,7 +163,8 @@ public:
 	ACTOR static Future<Void> writeKeyspaceSnapshotFile(Reference<BackupContainerFileSystem> bc,
 	                                                    std::vector<std::string> fileNames,
 	                                                    std::vector<std::pair<Key, Key>> beginEndKeys,
-	                                                    int64_t totalBytes) {
+	                                                    int64_t totalBytes,
+	                                                    IncludeKeyRangeMap includeKeyRangeMap) {
 		ASSERT(!fileNames.empty() && fileNames.size() == beginEndKeys.size());
 
 		state Version minVer = std::numeric_limits<Version>::max();
@@ -188,11 +193,13 @@ public:
 		doc.create("beginVersion") = minVer;
 		doc.create("endVersion") = maxVer;
 
-		auto ranges = doc.subDoc("keyRanges");
-		for (int i = 0; i < beginEndKeys.size(); i++) {
-			auto fileDoc = ranges.subDoc(fileNames[i], /*split=*/false);
-			fileDoc.create("beginKey") = beginEndKeys[i].first.toString();
-			fileDoc.create("endKey") = beginEndKeys[i].second.toString();
+		if (includeKeyRangeMap) {
+			auto ranges = doc.subDoc("keyRanges");
+			for (int i = 0; i < beginEndKeys.size(); i++) {
+				auto fileDoc = ranges.subDoc(fileNames[i], /*split=*/false);
+				fileDoc.create("beginKey") = beginEndKeys[i].first.toString();
+				fileDoc.create("endKey") = beginEndKeys[i].second.toString();
+			}
 		}
 
 		wait(yield());
@@ -906,7 +913,6 @@ public:
 	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet(Reference<BackupContainerFileSystem> bc,
 	                                                               Version targetVersion,
 	                                                               VectorRef<KeyRangeRef> keyRangesFilter,
-	                                                               Optional<Database> cx,
 	                                                               bool logsOnly = false,
 	                                                               Version beginVersion = invalidVersion) {
 		for (const auto& range : keyRangesFilter) {
@@ -915,6 +921,7 @@ public:
 
 		if (logsOnly) {
 			state RestorableFileSet restorableSet;
+			restorableSet.targetVersion = targetVersion;
 			state std::vector<LogFile> logFiles;
 			Version begin = beginVersion == invalidVersion ? 0 : beginVersion;
 			wait(store(logFiles, bc->listLogFiles(begin, targetVersion, false)));
@@ -941,13 +948,9 @@ public:
 			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
 			    wait(bc->readKeyspaceSnapshot(snapshots[i]));
 
-			// Old backup does not have metadata about key ranges and can not be filtered with key ranges.
-			if (keyRangesFilter.size() && results.second.empty() && !results.first.empty()) {
-				throw backup_not_filterable_with_key_ranges();
-			}
-
-			// Filter by keyRangesFilter.
-			if (keyRangesFilter.empty()) {
+			// If there is no key ranges filter for the restore OR if the snapshot contains no per-file key range info
+			// then return all of the range files
+			if (keyRangesFilter.empty() || results.second.empty()) {
 				restorable.ranges = std::move(results.first);
 				restorable.keyRanges = std::move(results.second);
 				minKeyRangeVersion = snapshots[i].beginVersion;
@@ -974,19 +977,6 @@ public:
 				continue;
 
 			restorable.snapshot = snapshots[i];
-			// TODO: Reenable the sanity check after TooManyFiles error is resolved
-			if (false && g_network->isSimulated()) {
-				// Sanity check key ranges
-				state std::map<std::string, KeyRange>::iterator rit;
-				for (rit = restorable.keyRanges.begin(); rit != restorable.keyRanges.end(); rit++) {
-					auto it = std::find_if(restorable.ranges.begin(),
-					                       restorable.ranges.end(),
-					                       [file = rit->first](const RangeFile f) { return f.fileName == file; });
-					ASSERT(it != restorable.ranges.end());
-					KeyRange result = wait(bc->getSnapshotFileKeyRange(*it, cx));
-					ASSERT(rit->second.begin <= result.begin && rit->second.end >= result.end);
-				}
-			}
 
 			// No logs needed if there is a complete filtered key space snapshot at the target version.
 			if (minKeyRangeVersion == maxKeyRangeVersion && maxKeyRangeVersion == restorable.targetVersion) {
@@ -1229,9 +1219,10 @@ BackupContainerFileSystem::readKeyspaceSnapshot(KeyspaceSnapshotFile snapshot) {
 
 Future<Void> BackupContainerFileSystem::writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
                                                                   const std::vector<std::pair<Key, Key>>& beginEndKeys,
-                                                                  int64_t totalBytes) {
+                                                                  int64_t totalBytes,
+                                                                  IncludeKeyRangeMap includeKeyRangeMap) {
 	return BackupContainerFileSystemImpl::writeKeyspaceSnapshotFile(
-	    Reference<BackupContainerFileSystem>::addRef(this), fileNames, beginEndKeys, totalBytes);
+	    Reference<BackupContainerFileSystem>::addRef(this), fileNames, beginEndKeys, totalBytes, includeKeyRangeMap);
 };
 
 Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beginVersion,
@@ -1362,7 +1353,7 @@ Future<Void> BackupContainerFileSystem::expireData(Version expireEndVersion,
 
 ACTOR static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem> bc,
                                                            RangeFile file,
-                                                           Optional<Database> cx) {
+                                                           Database cx) {
 	state int readFileRetries = 0;
 	state bool beginKeySet = false;
 	state Key beginKey;
@@ -1448,18 +1439,17 @@ ACTOR static Future<Optional<Version>> readVersionProperty(Reference<BackupConta
 	}
 }
 
-Future<KeyRange> BackupContainerFileSystem::getSnapshotFileKeyRange(const RangeFile& file, Optional<Database> cx) {
+Future<KeyRange> BackupContainerFileSystem::getSnapshotFileKeyRange(const RangeFile& file, Database cx) {
 	ASSERT(g_network->isSimulated());
 	return getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem>::addRef(this), file, cx);
 }
 
 Future<Optional<RestorableFileSet>> BackupContainerFileSystem::getRestoreSet(Version targetVersion,
-                                                                             Optional<Database> cx,
                                                                              VectorRef<KeyRangeRef> keyRangesFilter,
                                                                              bool logsOnly,
                                                                              Version beginVersion) {
 	return BackupContainerFileSystemImpl::getRestoreSet(
-	    Reference<BackupContainerFileSystem>::addRef(this), targetVersion, keyRangesFilter, cx, logsOnly, beginVersion);
+	    Reference<BackupContainerFileSystem>::addRef(this), targetVersion, keyRangesFilter, logsOnly, beginVersion);
 }
 
 Future<Optional<Version>> BackupContainerFileSystem::VersionProperty::get() {
@@ -1687,8 +1677,7 @@ ACTOR static Future<Void> testWriteSnapshotFile(Reference<IBackupFile> file, Key
 
 ACTOR Future<Void> testBackupContainer(std::string url,
                                        Optional<std::string> proxy,
-                                       Optional<std::string> encryptionKeyFileName,
-                                       Optional<Database> cx) {
+                                       Optional<std::string> encryptionKeyFileName) {
 	state FlowLock lock(100e6);
 
 	if (encryptionKeyFileName.present()) {
@@ -1753,8 +1742,10 @@ ACTOR Future<Void> testBackupContainer(std::string url,
 			wait(testWriteSnapshotFile(range, begin, end, blockSize));
 
 			if (deterministicRandom()->random01() < .2) {
-				writes.push_back(c->writeKeyspaceSnapshotFile(
-				    snapshots.rbegin()->second, snapshotBeginEndKeys.rbegin()->second, snapshotSizes.rbegin()->second));
+				writes.push_back(c->writeKeyspaceSnapshotFile(snapshots.rbegin()->second,
+				                                              snapshotBeginEndKeys.rbegin()->second,
+				                                              snapshotSizes.rbegin()->second,
+				                                              IncludeKeyRangeMap(BUGGIFY)));
 				snapshots[v] = {};
 				snapshotBeginEndKeys[v] = {};
 				snapshotSizes[v] = 0;
@@ -1795,13 +1786,13 @@ ACTOR Future<Void> testBackupContainer(std::string url,
 	for (; i < listing.snapshots.size(); ++i) {
 		{
 			// Ensure we can still restore to the latest version
-			Optional<RestorableFileSet> rest = wait(c->getRestoreSet(desc.maxRestorableVersion.get(), cx));
+			Optional<RestorableFileSet> rest = wait(c->getRestoreSet(desc.maxRestorableVersion.get()));
 			ASSERT(rest.present());
 		}
 
 		{
 			// Ensure we can restore to the end version of snapshot i
-			Optional<RestorableFileSet> rest = wait(c->getRestoreSet(listing.snapshots[i].endVersion, cx));
+			Optional<RestorableFileSet> rest = wait(c->getRestoreSet(listing.snapshots[i].endVersion));
 			ASSERT(rest.present());
 		}
 
@@ -1842,16 +1833,14 @@ ACTOR Future<Void> testBackupContainer(std::string url,
 }
 
 TEST_CASE("/backup/containers/localdir/unencrypted") {
-	wait(testBackupContainer(
-	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}, {}, {}));
+	wait(testBackupContainer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}, {}));
 	return Void();
 }
 
 TEST_CASE("/backup/containers/localdir/encrypted") {
 	wait(testBackupContainer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
 	                         {},
-	                         format("%s/test_encryption_key", params.getDataDir().c_str()),
-	                         {}));
+	                         format("%s/test_encryption_key", params.getDataDir().c_str())));
 	return Void();
 }
 
@@ -1859,7 +1848,7 @@ TEST_CASE("/backup/containers/url") {
 	if (!g_network->isSimulated()) {
 		const char* url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);
-		wait(testBackupContainer(url, {}, {}, {}));
+		wait(testBackupContainer(url, {}, {}));
 	}
 	return Void();
 }
