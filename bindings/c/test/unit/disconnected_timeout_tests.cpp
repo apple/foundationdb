@@ -20,7 +20,7 @@
 
 // Unit tests that test the timeouts for a disconnected cluster
 
-#define FDB_API_VERSION 730
+#define FDB_USE_LATEST_API_VERSION
 #include <foundationdb/fdb_c.h>
 
 #include <chrono>

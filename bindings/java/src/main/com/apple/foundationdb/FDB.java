@@ -36,8 +36,8 @@ import com.apple.foundationdb.tuple.ByteArrayUtil;
  *  The FoundationDB API is accessed with a call to {@link #selectAPIVersion(int)}.
  *   This call is required before using any other part of the API. The call allows
  *   an error to be thrown at this point to prevent client code from accessing a later library
- *   with incorrect assumptions from the current version. The API version documented here is version
- *   {@code 720}.<br><br>
+ *   with incorrect assumptions from the current version. The latest supported API version
+ *   is defined as {@link ApiVersion.LATEST}.<br><br>
  *  FoundationDB encapsulates multiple versions of its interface by requiring
  *   the client to explicitly specify the version of the API it uses. The purpose
  *   of this design is to allow you to upgrade the server, client libraries, or
@@ -185,8 +185,8 @@ public class FDB {
 		}
 		if(version < 510)
 			throw new IllegalArgumentException("API version not supported (minimum 510)");
-		if(version > 720)
-			throw new IllegalArgumentException("API version not supported (maximum 720)");
+		if(version > ApiVersion.LATEST)
+			throw new IllegalArgumentException(String.format("API version not supported (maximum %d)", ApiVersion.LATEST));
 
 		Select_API_version(version);
 		singleton = new FDB(version);
