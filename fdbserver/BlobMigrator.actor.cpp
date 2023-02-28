@@ -59,10 +59,8 @@ static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
 // StorageServerInterface APIs which are needed for DataDistributor to start data migration.
 class BlobMigrator : public NonCopyable, public ReferenceCounted<BlobMigrator> {
 public:
-	BlobMigrator(Reference<AsyncVar<ServerDBInfo> const> dbInfo, BlobMigratorInterface interf)
-	  : interf_(interf), actors_(false) {
+	BlobMigrator(Database db, BlobMigratorInterface interf) : interf_(interf), actors_(false), db_(db) {
 		blobConn_ = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
-		db_ = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 	~BlobMigrator() {}
 
@@ -73,11 +71,6 @@ public:
 		wait(prepare(self, normalKeys));
 		wait(advanceVersion(self));
 		wait(serverLoop(self));
-		return Void();
-	}
-
-	ACTOR static Future<Void> updateStatus(Reference<BlobMigrator> self, KeyRange keys, BlobRestoreStatus status) {
-		wait(updateRestoreStatus(self->db_, keys, status, {}));
 		return Void();
 	}
 
@@ -101,7 +94,9 @@ private:
 					}
 					wait(updateRestoreStatus(self->db_,
 					                         normalKeys,
-					                         BlobRestoreStatus(BlobRestorePhase::COPYING_DATA),
+					                         BlobRestorePhase::COPYING_DATA,
+					                         0,
+					                         {},
 					                         BlobRestorePhase::LOADED_MANIFEST));
 					return Void();
 				}
@@ -229,18 +224,14 @@ private:
 		loop {
 			bool done = wait(checkProgress(self));
 			if (done) {
-				wait(updateRestoreStatus(self->db_,
-				                         normalKeys,
-				                         BlobRestoreStatus(BlobRestorePhase::APPLYING_MLOGS),
-				                         BlobRestorePhase::COPYING_DATA));
+				wait(updateRestoreStatus(
+				    self->db_, normalKeys, BlobRestorePhase::APPLYING_MLOGS, 0, {}, BlobRestorePhase::COPYING_DATA));
 				wait(unlockDatabase(self->db_, self->interf_.id()));
 				TraceEvent("BlobMigratorCopied", self->interf_.id()).log();
 				wait(applyMutationLogs(self));
 
-				wait(updateRestoreStatus(self->db_,
-				                         normalKeys,
-				                         BlobRestoreStatus(BlobRestorePhase::DONE),
-				                         BlobRestorePhase::APPLYING_MLOGS));
+				wait(updateRestoreStatus(
+				    self->db_, normalKeys, BlobRestorePhase::DONE, 0, {}, BlobRestorePhase::APPLYING_MLOGS));
 				TraceEvent("BlobMigratorDone", self->interf_.id()).log();
 				return Void();
 			}
@@ -282,8 +273,12 @@ private:
 				state bool done = incompleted == 0;
 				dprint("Migration progress :{}%. done {}\n", progress, done);
 				TraceEvent("BlobMigratorProgress", self->interf_.id()).detail("Progress", progress);
-				BlobRestoreStatus status(BlobRestorePhase::COPYING_DATA, progress);
-				wait(updateRestoreStatus(self->db_, normalKeys, status, BlobRestorePhase::COPYING_DATA));
+				wait(updateRestoreStatus(self->db_,
+				                         normalKeys,
+				                         BlobRestorePhase::COPYING_DATA,
+				                         progress,
+				                         {},
+				                         BlobRestorePhase::COPYING_DATA));
 				return done;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -653,13 +648,15 @@ private:
 ACTOR Future<Void> blobMigrator(BlobMigratorInterface interf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	TraceEvent("StartBlobMigrator", interf.id()).detail("Interface", interf.id().toString());
 	dprint("Starting blob migrator {}\n", interf.id().toString());
-	state Reference<BlobMigrator> self = makeReference<BlobMigrator>(dbInfo, interf);
+	state Database db = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+	state Reference<BlobMigrator> self = makeReference<BlobMigrator>(db, interf);
 	try {
 		wait(BlobMigrator::start(self));
 	} catch (Error& e) {
 		dprint("Unexpected blob migrator error {}\n", e.what());
 		TraceEvent("BlobMigratorError", interf.id()).error(e);
-		wait(BlobMigrator::updateStatus(self, normalKeys, BlobRestoreStatus(BlobRestorePhase::ERROR, e.code())));
+		std::string errorMessage = fmt::format("Migrator failure '{}' on {}", e.what(), interf.address().toString());
+		wait(updateRestoreStatus(db, normalKeys, BlobRestorePhase::ERROR, 0, errorMessage, {}));
 	}
 	return Void();
 }
