@@ -107,6 +107,11 @@ void StorageServerMetrics::notify(KeyRef key, StorageMetrics& metrics) {
 	if (metrics.bytesReadPerKSecond)
 		notifyMetrics.bytesReadPerKSecond = bytesReadSample.addAndExpire(key, metrics.bytesReadPerKSecond, expire) *
 		                                    SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	if (metrics.opsReadPerKSecond) {
+		notifyMetrics.opsReadPerKSecond = opsReadSample.addAndExpire(key, metrics.opsReadPerKSecond, expire) *
+		                                  SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	}
+
 	if (!notifyMetrics.allZero()) {
 		auto& v = waitMetricsMap[key];
 		for (int i = 0; i < v.size(); i++) {
@@ -125,9 +130,13 @@ void StorageServerMetrics::notifyBytesReadPerKSecond(KeyRef key, int64_t in) {
 	double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
 	int64_t bytesReadPerKSecond =
 	    bytesReadSample.addAndExpire(key, in, expire) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
-	if (bytesReadPerKSecond > 0) {
+	int64_t opsReadPerKSecond =
+	    opsReadSample.addAndExpire(key, 1, expire) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+
+	if (bytesReadPerKSecond > 0 || opsReadPerKSecond > 0) {
 		StorageMetrics notifyMetrics;
 		notifyMetrics.bytesReadPerKSecond = bytesReadPerKSecond;
+		notifyMetrics.opsReadPerKSecond = opsReadPerKSecond;
 		auto& v = waitMetricsMap[key];
 		for (int i = 0; i < v.size(); i++) {
 			CODE_PROBE(true, "ShardNotifyMetrics");
