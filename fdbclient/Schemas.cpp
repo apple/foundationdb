@@ -810,6 +810,13 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
              "memory-2",
              "memory-radixtree-beta"
          ]},
+         "storage_engine_params":{
+            "default_page_size":"8192",
+            "histogram_interval":"30.0",
+            "kvstore_range_prefetch":"true",
+            "metrics_interval":"5.0",
+            "remote_kv_store":"false"
+         },
          "tss_count":1,
          "tss_storage_engine":{
          "$enum":[
