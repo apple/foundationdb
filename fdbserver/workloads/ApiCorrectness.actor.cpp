@@ -167,9 +167,11 @@ public:
 
 	ACTOR Future<Void> performSetup(Database cx, ApiCorrectnessWorkload* self) {
 		DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(cx));
-		if (dbConfig.encryptionAtRestMode.isEncryptionEnabled() && self->validateEncryptionAtRest) {
+		if (g_network->isSimulated() && dbConfig.encryptionAtRestMode.isEncryptionEnabled() &&
+		    self->validateEncryptionAtRest) {
 			TraceEvent("EncryptionAtRestPlainTextMarkerCheckEnabled")
-			    .detail("EncryptionMode", dbConfig.encryptionAtRestMode.toString());
+			    .detail("EncryptionMode", dbConfig.encryptionAtRestMode.toString())
+			    .detail("DataAtRestMarker", ENCRYPTION_AT_REST_MARKER_STRING);
 			g_simulator->dataAtRestPlaintextMarker = ENCRYPTION_AT_REST_MARKER_STRING;
 		}
 

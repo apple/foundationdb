@@ -1743,7 +1743,7 @@ ACTOR Future<Void> testBackupContainer(std::string url,
 				writes.push_back(c->writeKeyspaceSnapshotFile(snapshots.rbegin()->second,
 				                                              snapshotBeginEndKeys.rbegin()->second,
 				                                              snapshotSizes.rbegin()->second,
-				                                              IncludeKeyRangeMap::False));
+				                                              IncludeKeyRangeMap(BUGGIFY)));
 				snapshots[v] = {};
 				snapshotBeginEndKeys[v] = {};
 				snapshotSizes[v] = 0;

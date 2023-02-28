@@ -1792,12 +1792,10 @@ ACTOR Future<Void> initializeSimConfig(Database db) {
 }
 
 void encryptionAtRestPlaintextMarkerCheck() {
-	if (!g_simulator->dataAtRestPlaintextMarker.present()) {
+	if (!g_network->isSimulated() || !g_simulator->dataAtRestPlaintextMarker.present()) {
 		// Encryption at-rest was not enabled, do nothing
 		return;
 	}
-
-	ASSERT(g_simulator->isSimulated());
 
 	namespace fs = boost::filesystem;
 
@@ -1818,7 +1816,7 @@ void encryptionAtRestPlaintextMarkerCheck() {
 					// SOMEDAY: using 'std::boyer_moore_horspool_searcher' would significantly improve search
 					// time
 					if (buf.find(g_simulator->dataAtRestPlaintextMarker.get()) != std::string::npos) {
-						TraceEvent("EncryptionAtRestPlaintextMarkerCheckPanic")
+						TraceEvent(SevError, "EncryptionAtRestPlaintextMarkerCheckPanic")
 						    .detail("Filename", itr->path().string())
 						    .detail("LineBuf", buf)
 						    .detail("Marker", g_simulator->dataAtRestPlaintextMarker.get());

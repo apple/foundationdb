@@ -261,7 +261,7 @@ Key ApiWorkload::generateKey(VectorRef<KeyValueRef> const& data,
 	}
 
 	// If encryption validation is enabled; slip "marker pattern" at random location in generated key
-	if (g_simulator->dataAtRestPlaintextMarker.present() &&
+	if (g_network->isSimulated() && g_simulator->dataAtRestPlaintextMarker.present() &&
 	    keyLength + 1 > g_simulator->dataAtRestPlaintextMarker.get().size()) {
 		int len = keyLength - g_simulator->dataAtRestPlaintextMarker.get().size();
 		// Avoid updating the first byte of the key
@@ -302,7 +302,7 @@ Value ApiWorkload::generateValue(int minValueLength, int maxValueLength) {
 	std::string ret(std::string(valueLength, 'x'));
 
 	// If encryption validation is enabled; slip "marker pattern" at random location in generated key
-	if (g_simulator->dataAtRestPlaintextMarker.present() &&
+	if (g_network->isSimulated() && g_simulator->dataAtRestPlaintextMarker.present() &&
 	    valueLength > g_simulator->dataAtRestPlaintextMarker.get().size()) {
 		int len = valueLength - g_simulator->dataAtRestPlaintextMarker.get().size();
 		int idx = deterministicRandom()->randomInt(0, len);

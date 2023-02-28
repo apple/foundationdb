@@ -3148,6 +3148,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 	                                   Reference<Task> task) {
 		state BackupConfig config(task);
 		state Reference<IBackupContainer> bc;
+		state DatabaseConfiguration dbConfig;
 
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
@@ -3163,6 +3164,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				wait(taskBucket->keepRunning(tr, task));
+				wait(store(dbConfig, getDatabaseConfiguration(cx)));
 
 				if (!bc) {
 					// Backup container must be present if we're still here
@@ -3229,7 +3231,6 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 
 		Params.endVersion().set(task, maxVer);
 
-		DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(cx));
 		// Avoid keyRange filtering optimization for 'manifest' files
 		wait(bc->writeKeyspaceSnapshotFile(files,
 		                                   beginEndKeys,
