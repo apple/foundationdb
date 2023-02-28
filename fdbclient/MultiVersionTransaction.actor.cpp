@@ -1912,6 +1912,16 @@ bool MultiVersionTransaction::isValid() {
 	return tr.transaction.isValid();
 }
 
+void MultiVersionTransaction::debugTrace(BaseTraceEvent&& event) {
+	auto tr = getTransaction();
+	tr.transaction->debugTrace(std::move(event));
+}
+
+void MultiVersionTransaction::debugPrint(std::string const& message) {
+	auto tr = getTransaction();
+	tr.transaction->debugPrint(message);
+}
+
 // MultiVersionTenant
 MultiVersionTenant::MultiVersionTenant(Reference<MultiVersionDatabase> db, TenantNameRef tenantName)
   : tenantState(makeReference<TenantState>(db, tenantName)) {}

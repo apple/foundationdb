@@ -113,6 +113,16 @@ public:
 	virtual void checkDeferredError() const = 0;
 	virtual void getWriteConflicts(KeyRangeMap<bool>* result) = 0;
 
+	virtual void debugTrace(BaseTraceEvent&& event) {
+		event.detail("CommitResult", "Deferred logging unsupported").log();
+	};
+	virtual void debugPrint(std::string const& message) { fmt::print("[Deferred logging unsupported] {}\n", message); }
+
+	template <class... Args>
+	void debugFmtPrint(std::string const& message, Args&&... args) {
+		debugPrint(fmt::format(fmt::runtime(message), std::forward<Args>(args)...));
+	};
+
 	// Used by ThreadSafeTransaction for exceptions thrown in void methods
 	Error deferredError;
 };

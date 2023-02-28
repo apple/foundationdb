@@ -794,6 +794,12 @@ public:
 	// return true if the underlying transaction pointer is not empty
 	bool isValid() override;
 
+	// These currently only work for local clients. To support external clients,
+	// we would likely need to store the events/messages in the MVC layer and add a hook
+	// here to commit.
+	void debugTrace(BaseTraceEvent&& event) override;
+	void debugPrint(std::string const& message) override;
+
 private:
 	const Reference<MultiVersionDatabase> db;
 	const Optional<Reference<MultiVersionTenant>> tenant;
