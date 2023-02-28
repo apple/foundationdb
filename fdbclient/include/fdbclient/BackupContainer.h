@@ -344,6 +344,9 @@ public:
 	// Returns if the key-value pair matches any filter ranges.
 	bool match(const KeyValueRef& kv) const;
 
+	// Returns if the range intersects with any filter ranges.
+	bool match(const KeyRangeRef& range) const;
+
 private:
 	KeyRangeMap<int> rangeMap;
 };
