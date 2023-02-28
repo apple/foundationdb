@@ -113,18 +113,12 @@ public-address = {ip_address}:$ID{optional_tls}
 listen-address = public
 datadir = {datadir}/$ID
 logdir = {logdir}
-{bg_knob_line}
-{encrypt_knob_line1}
-{encrypt_knob_line2}
-{encrypt_knob_line3}
+{bg_config}
+{encrypt_config}
 {tls_config}
 {authz_public_key_config}
 {custom_config}
 {use_future_protocol_version}
-# configure smaller granules by default for local testing
-knob_bg_snapshot_file_target_bytes=1000000
-knob_bg_delta_file_target_bytes=50000
-knob_bg_delta_bytes_before_compact=500000
 # logsize = 10MiB
 # maxlogssize = 100MiB
 # machine-id =
@@ -261,17 +255,26 @@ knob_bg_delta_bytes_before_compact=500000
         new_conf_file = self.conf_file.parent / (self.conf_file.name + ".new")
         with open(new_conf_file, "x") as f:
             conf_template = LocalCluster.configuration_template
-            bg_knob_line = ""
-            encrypt_knob_line1 = ""
-            encrypt_knob_line2 = ""
-            encrypt_knob_line3 = ""
+            bg_config = ""
+            encrypt_config = ""
             if self.use_legacy_conf_syntax:
                 conf_template = conf_template.replace("-", "_")
             if self.blob_granules_enabled:
-                bg_knob_line = "knob_bg_url=file://" + str(self.data) + "/fdbblob/"
+                bg_config = "\n".join(
+                    [
+                        "knob_bg_url=file://" + str(self.data) + "/fdbblob/",
+                        "knob_bg_snapshot_file_target_bytes=100000",
+                        "knob_bg_delta_file_target_bytes=5000",
+                        "knob_bg_delta_bytes_before_compact=50000",
+                    ]
+                )
             if self.enable_encryption_at_rest:
-                encrypt_knob_line2 = "knob_kms_connector_type=FDBPerfKmsConnector"
-                encrypt_knob_line3 = "knob_enable_configurable_encryption=true"
+                encrypt_config = "\n".join(
+                    [
+                        "knob_kms_connector_type=FDBPerfKmsConnector",
+                        "knob_enable_configurable_encryption=true",
+                    ]
+                )
             f.write(
                 conf_template.format(
                     etcdir=self.etc,
@@ -279,10 +282,8 @@ knob_bg_delta_bytes_before_compact=500000
                     datadir=self.data,
                     logdir=self.log,
                     ip_address=self.ip_address,
-                    bg_knob_line=bg_knob_line,
-                    encrypt_knob_line1=encrypt_knob_line1,
-                    encrypt_knob_line2=encrypt_knob_line2,
-                    encrypt_knob_line3=encrypt_knob_line3,
+                    bg_config=bg_config,
+                    encrypt_config=encrypt_config,
                     tls_config=self.tls_conf_string(),
                     authz_public_key_config=self.authz_public_key_conf_string(),
                     optional_tls=":tls" if self.tls_config is not None else "",
@@ -717,8 +718,12 @@ knob_bg_delta_bytes_before_compact=500000
     def add_trace_check_from(self, check_func, time_begin, filename_substr: str = ""):
         self.trace_check_entries.append((check_func, time_begin, None, filename_substr))
 
-    def add_trace_check_from_to(self, check_func, time_begin, time_end, filename_substr: str = ""):
-        self.trace_check_entries.append((check_func, time_begin, time_end, filename_substr))
+    def add_trace_check_from_to(
+        self, check_func, time_begin, time_end, filename_substr: str = ""
+    ):
+        self.trace_check_entries.append(
+            (check_func, time_begin, time_end, filename_substr)
+        )
 
     # generator function that yields (filename, event_type, XML_trace_entry) that matches the parameter
     def __loop_through_trace(self, time_begin, time_end, filename_substr: str):
@@ -736,14 +741,17 @@ knob_bg_delta_bytes_before_compact=500000
                     if time_begin != None and ts < time_begin:
                         continue
                     if time_end != None and time_end < ts:
-                        break # no need to look further in this file
+                        break  # no need to look further in this file
                     yield (file, ev_type, entry)
-                except ET.ParseError as e:
-                    pass # ignore header, footer, or broken line
+                except ET.ParseError:
+                    pass  # ignore header, footer, or broken line
 
-    # applies user-provided check_func that takes a trace entry generator as the parameter 
+    # applies user-provided check_func that takes a trace entry generator as the parameter
     def check_trace(self):
-        for check_func, time_begin, time_end, filename_substr in self.trace_check_entries:
+        for (
+            check_func,
+            time_begin,
+            time_end,
+            filename_substr,
+        ) in self.trace_check_entries:
             check_func(self.__loop_through_trace(time_begin, time_end, filename_substr))
-
-
