@@ -36,8 +36,6 @@ namespace FdbApiTester {
 
 namespace {
 
-#define API_VERSION_CLIENT_TMP_DIR 720
-
 enum TesterOptionId {
 	OPT_CONNFILE,
 	OPT_HELP,
@@ -294,7 +292,7 @@ void fdb_check(fdb::Error e, std::string_view msg, fdb::Error::CodeType expected
 }
 
 void applyNetworkOptions(TesterOptions& options) {
-	if (!options.tmpDir.empty() && options.apiVersion >= API_VERSION_CLIENT_TMP_DIR) {
+	if (!options.tmpDir.empty() && options.apiVersion >= FDB_API_VERSION_CLIENT_TMP_DIR) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_TMP_DIR, options.tmpDir);
 	}
 	if (!options.externalClientLibrary.empty()) {
@@ -329,7 +327,7 @@ void applyNetworkOptions(TesterOptions& options) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_BUGGIFY_ENABLE);
 	}
 
-	if (options.testSpec.disableClientBypass && options.apiVersion >= 720) {
+	if (options.testSpec.disableClientBypass && options.apiVersion >= FDB_API_VERSION_DISABLE_CLIENT_BYPASS) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_CLIENT_BYPASS);
 	}
 

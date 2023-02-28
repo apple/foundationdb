@@ -479,14 +479,13 @@ struct GetKeyServerLocationsRequest {
 struct GetBlobGranuleLocationsReply {
 	constexpr static FileIdentifier file_identifier = 2923309;
 	Arena arena;
-	std::vector<std::pair<KeyRangeRef, BlobWorkerInterface>> results;
+	std::vector<std::pair<KeyRangeRef, UID>> results;
+	std::vector<BlobWorkerInterface> bwInterfs;
 	bool more;
-
-	// FIXME: change to vector of <KeyRangeRef, UID> and then separate map UID->BWInterf
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, results, more, arena);
+		serializer(ar, results, bwInterfs, more, arena);
 	}
 };
 
