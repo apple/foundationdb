@@ -113,9 +113,6 @@ public:
 	// Validate data at-rest encryption guarantees
 	int validateEncryptionAtRest;
 
-	int numTenants;
-	Optional<Reference<Tenant>> tenant;
-
 	ApiCorrectnessWorkload(WorkloadContext const& wcx)
 	  : ApiWorkload(wcx), numRandomOperations("Num Random Operations") {
 		numGets = getOption(options, "numGets"_sr, 1000);
