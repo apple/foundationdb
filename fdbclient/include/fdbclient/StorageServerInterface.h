@@ -796,20 +796,23 @@ struct ReadHotRangeWithMetrics {
 	// The density for key range [A,C) is 30 * 100 / 200 = 15
 	double density;
 	// How many bytes of data was sent in a period of time because of read requests.
-	double readBandwidth;
+	double readBandwidthKSec;
+
+	int64_t bytes; // storage bytes
+	double readOpsKSec; // an interpolated value of 1000 second
 
 	ReadHotRangeWithMetrics() = default;
 	ReadHotRangeWithMetrics(KeyRangeRef const& keys, double density, double readBandwidth)
-	  : keys(keys), density(density), readBandwidth(readBandwidth) {}
+	  : keys(keys), density(density), readBandwidthKSec(readBandwidth) {}
 
 	ReadHotRangeWithMetrics(Arena& arena, const ReadHotRangeWithMetrics& rhs)
-	  : keys(arena, rhs.keys), density(rhs.density), readBandwidth(rhs.readBandwidth) {}
+	  : keys(arena, rhs.keys), density(rhs.density), readBandwidthKSec(rhs.readBandwidthKSec) {}
 
-	int expectedSize() const { return keys.expectedSize() + sizeof(density) + sizeof(readBandwidth); }
+	int expectedSize() const { return keys.expectedSize() + sizeof(density) + sizeof(readBandwidthKSec); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, density, readBandwidth);
+		serializer(ar, keys, density, readBandwidthKSec, bytes, readOpsKSec);
 	}
 };
 
@@ -824,16 +827,22 @@ struct ReadHotSubRangeReply {
 };
 struct ReadHotSubRangeRequest {
 	constexpr static FileIdentifier file_identifier = 10259266;
+	enum SplitType : uint8_t { BYTES, READ_BYTES, READ_OPS };
+
 	Arena arena;
 	KeyRangeRef keys;
 	ReplyPromise<ReadHotSubRangeReply> reply;
 
+	uint8_t type = SplitType::BYTES;
+	int splitCount = 1;
+
 	ReadHotSubRangeRequest() {}
-	ReadHotSubRangeRequest(KeyRangeRef const& keys) : keys(arena, keys) {}
+	ReadHotSubRangeRequest(KeyRangeRef const& keys, SplitType type = SplitType::BYTES, int splitCount = 1)
+	  : keys(arena, keys), type(type), splitCount(splitCount) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, reply, arena);
+		serializer(ar, keys, reply, type, splitCount, arena);
 	}
 };
 
