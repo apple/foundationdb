@@ -138,7 +138,7 @@ struct StorageEngineParamsFactory {
 		return factories()[storeType][name].first;
 	}
 
-	static bool isSupported(KeyValueStoreType::StoreType storeType) { return factories().contains(storeType); }
+	static bool isSupported(KeyValueStoreType::StoreType storeType) { return !factories()[storeType].empty(); }
 };
 
 struct DatabaseConfiguration {
