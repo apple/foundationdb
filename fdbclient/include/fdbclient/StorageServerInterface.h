@@ -796,23 +796,30 @@ struct ReadHotRangeWithMetrics {
 	// The density for key range [A,C) is 30 * 100 / 200 = 15
 	double density;
 	// How many bytes of data was sent in a period of time because of read requests.
-	double readBandwidthKSec;
+	double readBandwidthSec;
 
 	int64_t bytes; // storage bytes
-	double readOpsKSec; // an interpolated value of 1000 second
+	double readOpsSec; // an interpolated value over sampling interval
 
 	ReadHotRangeWithMetrics() = default;
 	ReadHotRangeWithMetrics(KeyRangeRef const& keys, double density, double readBandwidth)
-	  : keys(keys), density(density), readBandwidthKSec(readBandwidth) {}
+	  : keys(keys), density(density), readBandwidthSec(readBandwidth) {}
+
+	ReadHotRangeWithMetrics(KeyRangeRef const& keys, int64_t bytes, double readBandwidth, double readOpsKSec)
+	  : keys(keys), density(readBandwidth / std::max((int64_t)1, bytes)), readBandwidthSec(readBandwidth), bytes(bytes),
+	    readOpsSec(readOpsKSec) {}
 
 	ReadHotRangeWithMetrics(Arena& arena, const ReadHotRangeWithMetrics& rhs)
-	  : keys(arena, rhs.keys), density(rhs.density), readBandwidthKSec(rhs.readBandwidthKSec) {}
+	  : keys(arena, rhs.keys), density(rhs.density), readBandwidthSec(rhs.readBandwidthSec), bytes(rhs.bytes),
+	    readOpsSec(rhs.readOpsSec) {}
 
-	int expectedSize() const { return keys.expectedSize() + sizeof(density) + sizeof(readBandwidthKSec); }
+	int expectedSize() const {
+		return keys.expectedSize() + sizeof(density) + sizeof(readBandwidthSec) + sizeof(bytes) + sizeof(readOpsSec);
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, density, readBandwidthKSec, bytes, readOpsKSec);
+		serializer(ar, keys, density, readBandwidthSec, bytes, readOpsSec);
 	}
 };
 

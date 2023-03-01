@@ -131,16 +131,19 @@ struct StorageServerMetrics {
 
 	Future<Void> waitMetrics(WaitMetricsRequest req, Future<Void> delay);
 
-	std::vector<ReadHotRangeWithMetrics> getReadHotRanges(KeyRangeRef shard,
-	                                                      double readDensityRatio,
-	                                                      int64_t baseChunkSize,
-	                                                      int64_t minShardReadBandwidthPerKSeconds) const;
+	std::vector<ReadHotRangeWithMetrics> getReadHotRanges(KeyRangeRef shard, int splitCount, uint8_t splitType) const;
 
 	void getReadHotRanges(ReadHotSubRangeRequest req) const;
 
 	std::vector<KeyRef> getSplitPoints(KeyRangeRef range, int64_t chunkSize, Optional<KeyRef> prefixToRemove) const;
 
 	void getSplitPoints(SplitRangeRequest req, Optional<KeyRef> prefix) const;
+
+	[[maybe_unused]] std::vector<ReadHotRangeWithMetrics> _getReadHotRanges(
+	    KeyRangeRef shard,
+	    double readDensityRatio,
+	    int64_t baseChunkSize,
+	    int64_t minShardReadBandwidthPerKSeconds) const;
 
 private:
 	static void collapse(KeyRangeMap<int>& map, KeyRef const& key);

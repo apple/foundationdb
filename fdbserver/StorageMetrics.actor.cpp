@@ -358,10 +358,55 @@ void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
 	req.reply.send(rep);
 }
 
+std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::getReadHotRanges(KeyRangeRef parentRange,
+                                                                            int splitCount,
+                                                                            uint8_t splitType) const {
+	const StorageMetricSample* sampler;
+	switch (splitType) {
+	case ReadHotSubRangeRequest::SplitType::BYTES:
+		sampler = &byteSample;
+		break;
+	case ReadHotSubRangeRequest::SplitType::READ_BYTES:
+		sampler = &bytesReadSample;
+		break;
+	case ReadHotSubRangeRequest::SplitType::READ_OPS:
+		sampler = &opsReadSample;
+		break;
+	default:
+		ASSERT(false);
+	}
+
+	std::vector<ReadHotRangeWithMetrics> toReturn;
+	double total = sampler->getEstimate(parentRange);
+	double splitChunk = total / splitCount;
+
+	KeyRef beginKey = parentRange.begin;
+	while (true) {
+		auto endKey = sampler->sample.index(sampler->sample.sumTo(sampler->sample.lower_bound(beginKey)) + splitChunk);
+		// Empty chunk
+		if (beginKey >= *endKey)
+			break;
+
+		// Don't round up the larger range for now.
+		KeyRangeRef range(beginKey, *endKey);
+
+		toReturn.emplace_back(
+		    range,
+		    byteSample.getEstimate(range),
+		    (double)bytesReadSample.getEstimate(range) / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL,
+		    (double)opsReadSample.getEstimate(range) / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
+
+		if (*endKey >= parentRange.end)
+			break;
+		beginKey = *endKey;
+	}
+	return toReturn;
+}
+
 // Given a read hot shard, this function will divide the shard into chunks and find those chunks whose
 // readBytes/sizeBytes exceeds the `readDensityRatio`. Please make sure to run unit tests
 // `StorageMetricsSampleTests.txt` after change made.
-std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::getReadHotRanges(
+std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::_getReadHotRanges(
     KeyRangeRef shard,
     double readDensityRatio,
     int64_t baseChunkSize,
@@ -420,10 +465,7 @@ std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::getReadHotRanges(
 
 void StorageServerMetrics::getReadHotRanges(ReadHotSubRangeRequest req) const {
 	ReadHotSubRangeReply reply;
-	auto _ranges = getReadHotRanges(req.keys,
-	                                SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO,
-	                                SERVER_KNOBS->READ_HOT_SUB_RANGE_CHUNK_SIZE,
-	                                SERVER_KNOBS->SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS);
+	auto _ranges = getReadHotRanges(req.keys, req.splitCount, req.type);
 	reply.readHotRanges = VectorRef(_ranges.data(), _ranges.size());
 	req.reply.send(reply);
 }
@@ -690,7 +732,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/simple") {
 	ssm.byteSample.sample.insert("Cat"_sr, 300 * sampleUnit);
 
 	std::vector<ReadHotRangeWithMetrics> t =
-	    ssm.getReadHotRanges(KeyRangeRef("A"_sr, "C"_sr), 2.0, 200 * sampleUnit, 0);
+	    ssm._getReadHotRanges(KeyRangeRef("A"_sr, "C"_sr), 2.0, 200 * sampleUnit, 0);
 
 	ASSERT(t.size() == 1 && (*t.begin()).keys.begin == "Bah"_sr && (*t.begin()).keys.end == "Bob"_sr);
 
@@ -720,7 +762,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/moreThanOneRange") {
 	ssm.byteSample.sample.insert("Dah"_sr, 300 * sampleUnit);
 
 	std::vector<ReadHotRangeWithMetrics> t =
-	    ssm.getReadHotRanges(KeyRangeRef("A"_sr, "D"_sr), 2.0, 200 * sampleUnit, 0);
+	    ssm._getReadHotRanges(KeyRangeRef("A"_sr, "D"_sr), 2.0, 200 * sampleUnit, 0);
 
 	ASSERT(t.size() == 2 && (*t.begin()).keys.begin == "Bah"_sr && (*t.begin()).keys.end == "Bob"_sr);
 	ASSERT(t.at(1).keys.begin == "Cat"_sr && t.at(1).keys.end == "Dah"_sr);
@@ -752,7 +794,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/consecutiveRanges") {
 	ssm.byteSample.sample.insert("Dah"_sr, 300 * sampleUnit);
 
 	std::vector<ReadHotRangeWithMetrics> t =
-	    ssm.getReadHotRanges(KeyRangeRef("A"_sr, "D"_sr), 2.0, 200 * sampleUnit, 0);
+	    ssm._getReadHotRanges(KeyRangeRef("A"_sr, "D"_sr), 2.0, 200 * sampleUnit, 0);
 
 	ASSERT(t.size() == 2 && (*t.begin()).keys.begin == "Bah"_sr && (*t.begin()).keys.end == "But"_sr);
 	ASSERT(t.at(1).keys.begin == "Cat"_sr && t.at(1).keys.end == "Dah"_sr);
