@@ -1770,7 +1770,7 @@ inline void load(Ar& ar, Versionstamp& value) {
 	value.serialize(ar);
 }
 
-struct StorageEngineParamSet {
+struct StorageEngineParamSet : public ReferenceCounted<StorageEngineParamSet> {
 
 	constexpr static FileIdentifier file_identifier = 2389372;
 
@@ -1778,6 +1778,12 @@ struct StorageEngineParamSet {
 
 	StorageEngineParamSet() {}
 	StorageEngineParamSet(const std::map<std::string, std::string>& params) : params(params) {}
+	StorageEngineParamSet(const StorageEngineParamSet& s) : params(s.params) {}
+
+	StorageEngineParamSet& operator=(const StorageEngineParamSet& rhs) {
+		params = rhs.params;
+		return *this;
+	}
 
 	void set(const std::string& name, const std::string& value) { params[name] = value; }
 

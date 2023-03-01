@@ -1212,7 +1212,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
-                                 std::shared_ptr<StorageEngineParamSet> storageEngineParams = nullptr);
+                                 Reference<StorageEngineParamSet> storageEngineParams);
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,
@@ -1220,7 +1220,7 @@ ACTOR Future<Void> storageServer(
     std::string folder,
     Promise<Void> recovered,
     Reference<IClusterConnectionRecord> connRecord, // changes pssi->id() to be the recovered ID
-    std::shared_ptr<StorageEngineParamSet> storageEngineParams = nullptr);
+    Reference<StorageEngineParamSet> storageEngineParams);
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,

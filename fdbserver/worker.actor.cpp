@@ -1357,7 +1357,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
                                                  IKeyValueStore* store,
                                                  bool validateDataFiles,
                                                  Optional<EncryptionAtRestMode> encryptionMode,
-                                                 std::shared_ptr<StorageEngineParamSet> storageEngineParams) {
+                                                 Reference<StorageEngineParamSet> storageEngineParams) {
 	state TrackRunningStorage _(id, storeType, runningStorages);
 	loop {
 		state Future<Void> kvClosed = store->onClosed();
@@ -1951,11 +1951,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				// TODO : add for the new interface
 
 				// When an exsiting storage rejoins, use the default parameter values to open the KVS
-				std::shared_ptr<StorageEngineParamSet> paramsPtr =
+				Reference<StorageEngineParamSet> paramsPtr =
 				    StorageEngineParamsFactory::isSupported(s.storeType)
-				        ? std::make_shared<StorageEngineParamSet>(
-				              StorageEngineParamsFactory::getParamsValue(s.storeType))
-				        : nullptr;
+				        ? makeReference<StorageEngineParamSet>(StorageEngineParamsFactory::getParamsValue(s.storeType))
+				        : Reference<StorageEngineParamSet>();
 				Promise<Void> recovery;
 				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connRecord, paramsPtr);
 				recoveries.push_back(recovery.getFuture());
@@ -2669,10 +2668,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					filesClosed.add(kvClosed);
 					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
 					storageCache.set(req.reqId, storageReady.getFuture());
-					std::shared_ptr<StorageEngineParamSet> paramsPtr =
+					Reference<StorageEngineParamSet> paramsPtr =
 					    req.storageEngineParams.present()
-					        ? std::make_shared<StorageEngineParamSet>(req.storageEngineParams.get())
-					        : nullptr;
+					        ? makeReference<StorageEngineParamSet>(req.storageEngineParams.get())
+					        : Reference<StorageEngineParamSet>();
 					Future<Void> s = storageServer(data,
 					                               recruited,
 					                               req.seedTag,

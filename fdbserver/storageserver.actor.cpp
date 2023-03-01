@@ -1444,12 +1444,12 @@ public:
 	// Connection to blob store for fetchKeys()
 	Reference<BlobConnectionProvider> blobConn;
 	// Storage engine parameters
-	std::shared_ptr<StorageEngineParamSet> storageEngineParams;
+	Reference<StorageEngineParamSet> storageEngineParams;
 
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
 	              StorageServerInterface const& ssi,
-	              std::shared_ptr<StorageEngineParamSet> storageEngineParams = nullptr)
+	              Reference<StorageEngineParamSet> storageEngineParams = {})
 	  : storageEngineParams(storageEngineParams), shardAware(false),
 	    tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                            TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
@@ -1781,7 +1781,7 @@ public:
 		metrics.getStorageMetrics(req, sb, counters.bytesInput.getRate(), versionLag, lastUpdate);
 	}
 
-	bool isUsingStorageEngineParams() const { return storageEngineParams != nullptr; }
+	bool isUsingStorageEngineParams() const { return storageEngineParams.isValid(); }
 };
 
 const StringRef StorageServer::CurrentRunningFetchKeys::emptyString = ""_sr;
@@ -11891,7 +11891,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
-                                 std::shared_ptr<StorageEngineParamSet> storageEngineParams) {
+                                 Reference<StorageEngineParamSet> storageEngineParams) {
 	state StorageServer self(persistentData, db, ssi, storageEngineParams);
 	state Future<Void> ssCore;
 	self.initialClusterVersion = startVersion;
@@ -11985,7 +11985,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  std::string folder,
                                  Promise<Void> recovered,
                                  Reference<IClusterConnectionRecord> connRecord,
-                                 std::shared_ptr<StorageEngineParamSet> storageEngineParams) {
+                                 Reference<StorageEngineParamSet> storageEngineParams) {
 	state StorageServer self(persistentData, db, ssi, storageEngineParams);
 	state Future<Void> ssCore;
 	self.folder = folder;
