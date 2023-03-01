@@ -153,6 +153,7 @@ private:
 			}
 		}
 
+		self->managementMetadata.clusterAllocatedMap.clear();
 		for (auto t : clusterCapacityTuples.results) {
 			ASSERT_EQ(t.size(), 2);
 			int64_t capacity = t.getInt(0);
@@ -160,6 +161,7 @@ private:
 			ASSERT(self->managementMetadata.clusterAllocatedMap.try_emplace(clusterName, capacity).second);
 		}
 
+		self->managementMetadata.clusterTenantMap.clear();
 		for (auto t : clusterTenantTuples.results) {
 			ASSERT_EQ(t.size(), 3);
 			TenantName tenantName = t.getString(1);
@@ -179,6 +181,7 @@ private:
 			}
 		}
 
+		self->managementMetadata.clusterTenantGroupMap.clear();
 		for (auto t : clusterTenantGroupTuples.results) {
 			ASSERT_EQ(t.size(), 2);
 			TenantGroupName tenantGroupName = t.getString(1);

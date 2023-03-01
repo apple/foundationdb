@@ -1767,7 +1767,11 @@ struct RestoreClusterImpl {
 		// If we had to break a rename cycle using temporary tenant names, use that in the updated
 		// entry here since the rename will be completed later.
 		if (existingEntry.tenantName != updatedEntry.tenantName) {
-			ASSERT(existingEntry.tenantName.startsWith(metaclusterTemporaryRenamePrefix));
+			if (!existingEntry.tenantName.startsWith(metaclusterTemporaryRenamePrefix)) {
+				// This transaction is going to fail due to the restore ID check, so we don't need to do anything
+				CODE_PROBE(true, "tenant restore rename mismatch due to concurrency", probe::decoration::rare);
+				return Void();
+			}
 			updatedEntry.tenantName = existingEntry.tenantName;
 		}
 
