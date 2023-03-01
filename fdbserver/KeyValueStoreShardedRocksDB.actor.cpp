@@ -2407,8 +2407,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				// s = a.shardManager->getDb()->Write(options, &writeBatch);
 				// TraceEvent(SevDebug, "ShardedRocksDBCheckpointMarkerPersisted", logId)
 				//     .detail("CheckpointID", a.request.checkpointID);
-
-				s = a.shardManager->getDb()->Flush(rocksdb::FlushOptions(), a.shardManager->getColumnFamilies());
+				// s = a.shardManager->getDb()->Flush(rocksdb::FlushOptions(), a.shardManager->getColumnFamilies());
 
 				// ASSERT(a.shardManager->getDb()->FlushWAL(true).ok());
 				// ASSERT(a.shardManager->getDb()->SyncWAL().ok());
@@ -2416,9 +2415,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				// flushOptions.wait = true;
 				// flushOptions.allow_write_stall = true;
 				// ASSERT(a.shardManager->getDb()->Flush(flushOptions, a.shardManager->getColumnFamilies()).ok());
-				// for (const auto& range : a.request.ranges) {
-				// rocksdb::Slice begin = toSlice(range.begin);
-				// rocksdb::Slice end = toSlice(range.end);
 				// rocksdb::CompactRangeOptions compactOpts;
 				// compactOpts.change_level = true;
 				// compactOpts.target_level = 6;
@@ -2427,6 +2423,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				// ASSERT(a.shardManager->getDb()
 				//            ->CompactRange(rocksdb::CompactRangeOptions(), ps->cf, nullptr, nullptr)
 				//            .ok());
+				// for (const auto& range : a.request.ranges) {
+				// rocksdb::Slice begin = toSlice(range.begin);
+				// rocksdb::Slice end = toSlice(range.end);
 				// }
 
 				s = rocksdb::Checkpoint::Create(a.shardManager->getDb(), &checkpoint);

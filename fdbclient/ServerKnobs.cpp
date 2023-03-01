@@ -857,7 +857,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// The enumeration is currently: eager, fetch, low, normal, high
 	init( STORAGESERVER_READTYPE_PRIORITY_MAP,           "0,1,2,3,4" );
 	init( SPLIT_METRICS_MAX_ROWS,                              10000 );
-	init( STORAGE_SERVER_PHYSICAL_SHARD_MOVE,                   true );
+	init( STORAGE_SERVER_PHYSICAL_SHARD_MOVE,                   false );
 	init( FETCH_SHARD_BUFFER_BYTE_LIMIT,                        20e6 );
 	init( PHYSICAL_SHARD_MOVE_VERBOSE_TRACKING,                 true );
 

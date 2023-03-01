@@ -8207,10 +8207,8 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 		for (auto b = batch->changes.begin() + startSize; b != batch->changes.end(); ++b) {
 			ASSERT(b->version >= checkv);
 			checkv = b->version;
-			if (MUTATION_TRACKING_ENABLED) {
-				for (auto& m : b->mutations) {
-					DEBUG_MUTATION("fetchShardFinalCommitInject", batch->changes[0].version, m, data->thisServerID);
-				}
+			for (auto& m : b->mutations) {
+				DEBUG_MUTATION("fetchShardFinalCommitInject", batch->changes[0].version, m, data->thisServerID);
 			}
 		}
 		// }
