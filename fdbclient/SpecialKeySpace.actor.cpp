@@ -21,10 +21,12 @@
 #include "boost/lexical_cast.hpp"
 #include "boost/algorithm/string.hpp"
 
+#include <string>
 #include <time.h>
 #include <msgpack.hpp>
 
 #include <exception>
+#include <unordered_set>
 
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -976,21 +978,13 @@ ACTOR Future<bool> checkExclusion(Database db,
 
 	state int ssTotalCount = 0;
 	state int ssExcludedCount = 0;
-	state double worstFreeSpaceRatio = 1.0;
+
+	state std::unordered_set<std::string> diskLocalities();
+	state int64_t totalKvStoreFreeBytes = 0;
+	state int64_t totalKvStoreUsedBytes = 0;
+	state int64_t totalKvStoreUsedBytesNonExcluded = 0;
 	try {
 		for (auto proc : processesMap.obj()) {
-			bool storageServer = false;
-			StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
-			for (StatusObjectReader role : rolesArray) {
-				if (role["role"].get_str() == "storage") {
-					storageServer = true;
-					break;
-				}
-			}
-			// Skip non-storage servers in free space calculation
-			if (!storageServer)
-				continue;
-
 			StatusObjectReader process(proc.second);
 			std::string addrStr;
 			if (!process.get("address", addrStr)) {
@@ -1000,33 +994,49 @@ ACTOR Future<bool> checkExclusion(Database db,
 			NetworkAddress addr = NetworkAddress::parse(addrStr);
 			bool excluded =
 			    (process.has("excluded") && process.last().get_bool()) || addressExcluded(*exclusions, addr);
-			ssTotalCount++;
-			if (excluded)
-				ssExcludedCount++;
 
-			if (!excluded) {
-				StatusObjectReader disk;
-				if (!process.get("disk", disk)) {
-					*msg =
-					    ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
-					return false;
+			StatusObjectReader localityObj;
+			std::string disk_id;
+			if (process.get("locality", localityObj)) {
+				process.get("disk_id", disk_id); // its ok if we don't have this field
+			}
+
+			StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
+			for (StatusObjectReader role : rolesArray) {
+				if (role["role"].get_str() == "storage") {
+					ssTotalCount++;
+
+					int64_t used_bytes;
+					if (!role.get("kvstore_used_bytes", used_bytes)) {
+						*msg = ManagementAPIError::toJsonString(
+						    false, markFailed ? "exclude failed" : "exclude", errorString);
+						return false;
+					}
+
+					int64_t free_bytes;
+					if (!role.get("kvstore_free_bytes", free_bytes)) {
+						*msg = ManagementAPIError::toJsonString(
+						    false, markFailed ? "exclude failed" : "exclude", errorString);
+						return false;
+					}
+
+					totalKvStoreUsedBytes += used_bytes;
+
+					if (!excluded) {
+						totalKvStoreUsedBytesNonExcluded += used_bytes;
+
+						if (disk_id.empty() || diskLocalities.find(disk_id) == diskLocalities.end()) {
+							totalKvStoreFreeBytes += free_bytes;
+							if (!disk_id.empty()) {
+								diskLocalities.insert(disk_id);
+							}
+						}
+					}
 				}
 
-				int64_t total_bytes;
-				if (!disk.get("total_bytes", total_bytes)) {
-					*msg =
-					    ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
-					return false;
+				if (excluded) {
+					ssExcludedCount++;
 				}
-
-				int64_t free_bytes;
-				if (!disk.get("free_bytes", free_bytes)) {
-					*msg =
-					    ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
-					return false;
-				}
-
-				worstFreeSpaceRatio = std::min(worstFreeSpaceRatio, double(free_bytes) / total_bytes);
 			}
 		}
 	} catch (...) // std::exception
@@ -1035,14 +1045,15 @@ ACTOR Future<bool> checkExclusion(Database db,
 		return false;
 	}
 
-	if (ssExcludedCount == ssTotalCount ||
-	    (1 - worstFreeSpaceRatio) * ssTotalCount / (ssTotalCount - ssExcludedCount) > 0.9) {
+	double finalFreeRatio = 1 - (totalKvStoreUsedBytes / (totalKvStoreUsedBytesNonExcluded + totalKvStoreFreeBytes));
+	if (ssExcludedCount == ssTotalCount || finalFreeRatio <= 0.1) {
 		std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.\n"
 		                   "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without "
 		                   "checking free space.\n";
 		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
 		return false;
 	}
+
 	return true;
 }
 
