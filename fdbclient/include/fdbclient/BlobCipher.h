@@ -54,9 +54,6 @@
 #include <unordered_map>
 #include <variant>
 #include <vector>
-#if defined(HAVE_WOLFSSL)
-#include <wolfssl/options.h>
-#endif
 
 #define AES_256_KEY_LENGTH 32
 #define AES_256_IV_LENGTH 16
