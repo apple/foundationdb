@@ -47,7 +47,7 @@ FDB_DEFINE_BOOLEAN_PARAM(CheckpointAsKeyValues);
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 // Enforcing rocksdb version to be 7.7.3.
-static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 7 && ROCKSDB_PATCH == 3),
+static_assert((ROCKSDB_MAJOR == 8 && ROCKSDB_MINOR == 1 && ROCKSDB_PATCH == 0),
               "Unsupported rocksdb version. Update the rocksdb to 7.7.3 version");
 
 namespace {
@@ -927,7 +927,7 @@ bool RocksDBCheckpointByteSampleReader::hasNext() const {
 }
 
 KeyValue RocksDBCheckpointByteSampleReader::next() {
-	KeyValueRef res(toStringRef(this->iter->key()), toStringRef(this->iter->value()));
+	KeyValue res(KeyValueRef(toStringRef(this->iter->key()), toStringRef(this->iter->value())));
 	iter->Next();
 	return res;
 }
@@ -1359,7 +1359,7 @@ int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints)
 		if (format == DataMoveRocksCF) {
 			// TODO: Returns the checkpoint size of a RocksDB Column Family.
 			const RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
-			for (const auto& file : rocksCF.files) {
+			for (const auto& file : rocksCF.sstFiles) {
 				totalBytes += file.size;
 			}
 		} else if (format == RocksDB) {

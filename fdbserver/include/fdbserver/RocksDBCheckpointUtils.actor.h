@@ -155,6 +155,12 @@ struct SstFileMetaData {
 	// "Unknown".
 	std::string file_checksum_func_name;
 
+	// These bounds define the effective key range for range tombstones
+	// in this file.
+	// Currently only used by CreateColumnFamilyWithImport().
+	std::string smallest{}; // Smallest internal key served by table
+	std::string largest{}; // Largest internal key served by table
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -175,7 +181,9 @@ struct SstFileMetaData {
 		           oldest_ancester_time,
 		           file_creation_time,
 		           file_checksum,
-		           file_checksum_func_name);
+		           file_checksum_func_name,
+		           smallest,
+		           largest);
 	}
 };
 
@@ -208,6 +216,8 @@ struct LiveFileMetaData : public SstFileMetaData {
 		           SstFileMetaData::file_creation_time,
 		           SstFileMetaData::file_checksum,
 		           SstFileMetaData::file_checksum_func_name,
+		           SstFileMetaData::smallest,
+		           SstFileMetaData::largest,
 		           column_family_name,
 		           level,
 		           fetched);
