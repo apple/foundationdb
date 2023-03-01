@@ -64,7 +64,7 @@ endif()
 
 
 if(WITH_AWS_BACKUP)
-  add_compile_definitions(BUILD_AWS_BACKUP)
+  add_compile_definitions(WITH_AWS_BACKUP)
   include(awssdk)
 endif()
 

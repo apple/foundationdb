@@ -370,6 +370,7 @@ struct TLogData : NonCopyable {
 	Reference<AsyncVar<bool>> degraded;
 	std::vector<TagsAndMessage> tempTagMessages;
 
+	// Distribution of end-to-end server latency of tlog commit requests.
 	Reference<Histogram> commitLatencyDist;
 
 	// Distribution of queue wait times, per request.
