@@ -47,7 +47,9 @@ inline bool canRetryWith(Error e) {
 } // namespace EncryptKeyProxy
 
 ACTOR template <class T>
-Future<T> kmsReqWithExponentialBackoff(std::function<Future<T>()> func, StringRef funcName) {
+Future<T> kmsReqWithExponentialBackoff(std::function<Future<T>()> func,
+                                       std::function<void()> retryTrace,
+                                       StringRef funcName) {
 	state int numRetries = 0;
 	state double kmsBackoff = FLOW_KNOBS->EKP_KMS_CONNECTION_BACKOFF;
 	TraceEvent(SevDebug, "KMSRequestStart").suppressFor(30).detail("Function", funcName);
@@ -65,9 +67,9 @@ Future<T> kmsReqWithExponentialBackoff(std::function<Future<T>()> func, StringRe
 				TraceEvent(SevWarnAlways, "KMSRequestRetryLimitExceeded")
 				    .detail("Function", funcName)
 				    .detail("ErrorCode", e.code());
-				// TODO: Should we throw a time out error here?
 				throw e;
 			}
+			retryTrace();
 			numRetries++;
 			wait(delay(kmsBackoff));
 			kmsBackoff = kmsBackoff * 2; // exponential backoff

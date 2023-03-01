@@ -389,8 +389,15 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 			std::function<Future<KmsConnLookupEKsByKeyIdsRep>()> keysByIdsRepF = [&]() {
 				return kmsConnectorInf.ekLookupByIds.getReply(keysByIdsReq);
 			};
+			std::function<void()> retryTrace = [&]() {
+				for (const auto& item : keysByIdsReq.encryptKeyInfos) {
+					TraceEvent(SevDebug, "GetCipherKeysByKeyIdsRetry")
+					    .suppressFor(30)
+					    .detail("DomainId", item.domainId);
+				}
+			};
 			KmsConnLookupEKsByKeyIdsRep keysByIdsRep =
-			    wait(kmsReqWithExponentialBackoff(keysByIdsRepF, "GetCipherKeysByKeyIds"_sr));
+			    wait(kmsReqWithExponentialBackoff(keysByIdsRepF, retryTrace, "GetCipherKeysByKeyIds"_sr));
 			ekpProxyData->kmsLookupByIdsReqLatency.addMeasurement(now() - startTime);
 
 			for (const auto& item : keysByIdsRep.cipherKeyDetails) {
@@ -528,8 +535,13 @@ ACTOR Future<Void> getLatestCipherKeys(Reference<EncryptKeyProxyData> ekpProxyDa
 			std::function<Future<KmsConnLookupEKsByDomainIdsRep>()> keysByDomainIdRepF = [&]() {
 				return kmsConnectorInf.ekLookupByDomainIds.getReply(keysByDomainIdReq);
 			};
+			std::function<void()> retryTrace = [&]() {
+				for (const auto& item : keysByDomainIdReq.encryptDomainIds) {
+					TraceEvent(SevDebug, "GetLatestCipherKeysRetry").suppressFor(30).detail("DomainId", item);
+				}
+			};
 			KmsConnLookupEKsByDomainIdsRep keysByDomainIdRep =
-			    wait(kmsReqWithExponentialBackoff(keysByDomainIdRepF, "GetLatestCipherKeys"_sr));
+			    wait(kmsReqWithExponentialBackoff(keysByDomainIdRepF, retryTrace, "GetLatestCipherKeys"_sr));
 			ekpProxyData->kmsLookupByDomainIdsReqLatency.addMeasurement(now() - startTime);
 
 			for (auto& item : keysByDomainIdRep.cipherKeyDetails) {
@@ -642,7 +654,12 @@ ACTOR Future<Void> refreshEncryptionKeysImpl(Reference<EncryptKeyProxyData> ekpP
 		std::function<Future<KmsConnLookupEKsByDomainIdsRep>()> repF = [&]() {
 			return kmsConnectorInf.ekLookupByDomainIds.getReply(req);
 		};
-		KmsConnLookupEKsByDomainIdsRep rep = wait(kmsReqWithExponentialBackoff(repF, "RefreshEKs"_sr));
+		std::function<void()> retryTrace = [&]() {
+			for (const auto& item : req.encryptDomainIds) {
+				TraceEvent(SevDebug, "RefreshEKsRetry").suppressFor(30).detail("DomainId", item);
+			}
+		};
+		KmsConnLookupEKsByDomainIdsRep rep = wait(kmsReqWithExponentialBackoff(repF, retryTrace, "RefreshEKs"_sr));
 		ekpProxyData->kmsLookupByDomainIdsReqLatency.addMeasurement(now() - startTime);
 		for (const auto& item : rep.cipherKeyDetails) {
 			const auto itr = ekpProxyData->baseCipherDomainIdCache.find(item.encryptDomainId);
@@ -741,7 +758,13 @@ ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxy
 			std::function<Future<KmsConnBlobMetadataRep>()> kmsRepF = [&]() {
 				return kmsConnectorInf.blobMetadataReq.getReply(kmsReq);
 			};
-			KmsConnBlobMetadataRep kmsRep = wait(kmsReqWithExponentialBackoff(kmsRepF, "GetLatestBlobMetadata"_sr));
+			std::function<void()> retryTrace = [&]() {
+				for (const auto& item : kmsReq.domainIds) {
+					TraceEvent(SevDebug, "GetLatestBlobMetadataRetry").suppressFor(30).detail("DomainId", item);
+				}
+			};
+			KmsConnBlobMetadataRep kmsRep =
+			    wait(kmsReqWithExponentialBackoff(kmsRepF, retryTrace, "GetLatestBlobMetadata"_sr));
 			ekpProxyData->kmsBlobMetadataReqLatency.addMeasurement(now() - startTime);
 			metadataDetails.arena().dependsOn(kmsRep.metadataDetails.arena());
 
@@ -807,7 +830,12 @@ ACTOR Future<Void> refreshBlobMetadataCore(Reference<EncryptKeyProxyData> ekpPro
 		std::function<Future<KmsConnBlobMetadataRep>()> repF = [&]() {
 			return kmsConnectorInf.blobMetadataReq.getReply(req);
 		};
-		KmsConnBlobMetadataRep rep = wait(kmsReqWithExponentialBackoff(repF, "RefreshBlobMetadata"_sr));
+		std::function<void()> retryTrace = [&]() {
+			for (const auto& item : req.domainIds) {
+				TraceEvent(SevDebug, "RefreshBlobMetadataRetry").suppressFor(30).detail("DomainId", item);
+			}
+		};
+		KmsConnBlobMetadataRep rep = wait(kmsReqWithExponentialBackoff(repF, retryTrace, "RefreshBlobMetadata"_sr));
 		ekpProxyData->kmsBlobMetadataReqLatency.addMeasurement(now() - startTime);
 		for (auto& item : rep.metadataDetails) {
 			ekpProxyData->insertIntoBlobMetadataCache(item.domainId, item);
@@ -919,7 +947,8 @@ TEST_CASE("/EncryptKeyProxy/ExponentialBackoff") {
 		callCount += 1;
 		throw deterministicRandom()->randomChoice(errors);
 	};
-	bool resp = wait(kmsReqWithExponentialBackoff(repF, "TestEKPBackoff1"_sr));
+	state std::function<void()> retryTrace = [&]() {};
+	bool resp = wait(kmsReqWithExponentialBackoff(repF, retryTrace, "TestEKPBackoff1"_sr));
 	ASSERT(resp);
 	ASSERT_EQ(callCount, 2);
 
@@ -930,7 +959,7 @@ TEST_CASE("/EncryptKeyProxy/ExponentialBackoff") {
 	alwaysThrow = true;
 	errors = { timed_out() };
 	try {
-		wait(success(kmsReqWithExponentialBackoff(repF, "TestEKPBackoff2"_sr)));
+		wait(success(kmsReqWithExponentialBackoff(repF, retryTrace, "TestEKPBackoff2"_sr)));
 		ASSERT(false);
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_timed_out);
@@ -942,7 +971,7 @@ TEST_CASE("/EncryptKeyProxy/ExponentialBackoff") {
 	alwaysThrow = false;
 	errors = { encrypt_key_not_found() };
 	try {
-		wait(success(kmsReqWithExponentialBackoff(repF, "TestEKPBackoff3"_sr)));
+		wait(success(kmsReqWithExponentialBackoff(repF, retryTrace, "TestEKPBackoff3"_sr)));
 		ASSERT(false);
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_encrypt_key_not_found);
