@@ -414,19 +414,19 @@ public:
 
 	const TraceEventFields& getFields() const { return fields; }
 
-	template <class Transaction>
-	void moveTo(Transaction& tr) {
-		tr.debugTrace(std::move(*this));
+	template <class Object>
+	void moveTo(Object& obj) {
+		obj.debugTrace(std::move(*this));
 	}
 
-	template <class Transaction>
-	void moveTo(Reference<Transaction> tr) {
-		tr->debugTrace(std::move(*this));
+	template <class Object>
+	void moveTo(Reference<Object> obj) {
+		obj->debugTrace(std::move(*this));
 	}
 
-	template <class Transaction>
-	void moveTo(Transaction* tr) {
-		tr->debugTrace(std::move(*this));
+	template <class Object>
+	void moveTo(Object* obj) {
+		obj->debugTrace(std::move(*this));
 	}
 
 protected:
