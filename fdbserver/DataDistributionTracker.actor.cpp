@@ -341,7 +341,7 @@ ACTOR Future<Void> readHotDetector(DataDistributionTracker* self) {
 					for (const auto& keyRange : readHotRanges) {
 						TraceEvent("ReadHotRangeLog")
 						    .detail("ReadDensity", keyRange.density)
-						    .detail("ReadBandwidth", keyRange.readBandwidthKSec)
+						    .detail("ReadBandwidth", keyRange.readBandwidthSec)
 						    .detail("ReadDensityThreshold", SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO)
 						    .detail("KeyRangeBegin", keyRange.keys.begin)
 						    .detail("KeyRangeEnd", keyRange.keys.end);
