@@ -125,6 +125,11 @@ struct scalar_traits<UID> : std::true_type {
 	}
 };
 
+template <>
+struct Traceable<UID> : std::true_type {
+	static std::string toString(const UID& value) { return format("%016llx", value.first()); }
+};
+
 namespace std {
 template <>
 class hash<UID> {

@@ -53,7 +53,7 @@ public:
 		std::map<ClusterName, std::set<TenantGroupName>> clusterTenantGroupMap;
 
 		Optional<int64_t> tenantIdPrefix;
-		TenantData<DB, MetaclusterTenantMapEntry> tenantData;
+		TenantData<DB, MetaclusterTenantTypes> tenantData;
 
 		// Similar to operator==, but useful in assertions for identifying which member is different
 		void assertEquals(ManagementClusterData const& other) const {
@@ -83,7 +83,7 @@ public:
 
 	struct DataClusterData {
 		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
-		TenantData<DB, TenantMapEntry> tenantData;
+		TenantData<DB, StandardTenantTypes> tenantData;
 
 		// Similar to operator==, but useful in assertions for identifying which member is different
 		void assertEquals(DataClusterData const& other) const {
@@ -114,7 +114,7 @@ private:
 		state KeyBackedRangeResult<Tuple> clusterTenantTuples;
 		state KeyBackedRangeResult<Tuple> clusterTenantGroupTuples;
 
-		self->managementMetadata.tenantData = TenantData<DB, MetaclusterTenantMapEntry>(
+		self->managementMetadata.tenantData = TenantData<DB, MetaclusterTenantTypes>(
 		    self->managementDb, &MetaclusterAPI::ManagementClusterMetadata::tenantMetadata());
 
 		loop {
@@ -164,14 +164,25 @@ private:
 			ASSERT_EQ(t.size(), 3);
 			TenantName tenantName = t.getString(1);
 			int64_t tenantId = t.getInt(2);
-			ASSERT(tenantName == self->managementMetadata.tenantData.tenantMap[tenantId].tenantName);
-			self->managementMetadata.clusterTenantMap[t.getString(0)].insert(tenantId);
+			bool renaming = tenantId == TenantInfo::INVALID_TENANT;
+			if (renaming) {
+				tenantId = self->managementMetadata.tenantData.tenantNameIndex[tenantName];
+			}
+			MetaclusterTenantMapEntry const& entry = self->managementMetadata.tenantData.tenantMap[tenantId];
+			if (renaming) {
+				ASSERT(entry.tenantState == MetaclusterAPI::TenantState::RENAMING ||
+				       entry.tenantState == MetaclusterAPI::TenantState::REMOVING);
+				ASSERT(entry.renameDestination == tenantName);
+			} else {
+				ASSERT(entry.tenantName == tenantName);
+				ASSERT(self->managementMetadata.clusterTenantMap[t.getString(0)].insert(tenantId).second);
+			}
 		}
 
 		for (auto t : clusterTenantGroupTuples.results) {
 			ASSERT_EQ(t.size(), 2);
 			TenantGroupName tenantGroupName = t.getString(1);
-			self->managementMetadata.clusterTenantGroupMap[t.getString(0)].insert(tenantGroupName);
+			ASSERT(self->managementMetadata.clusterTenantGroupMap[t.getString(0)].insert(tenantGroupName).second);
 		}
 
 		return Void();
@@ -188,7 +199,7 @@ private:
 			state Reference<ITransaction> tr = dataDb->createTransaction();
 
 			clusterItr.first->second.tenantData =
-			    TenantData<IDatabase, TenantMapEntry>(dataDb, &TenantMetadata::instance());
+			    TenantData<IDatabase, StandardTenantTypes>(dataDb, &TenantMetadata::instance());
 			loop {
 				try {
 					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);

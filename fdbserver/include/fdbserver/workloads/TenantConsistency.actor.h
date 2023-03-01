@@ -39,10 +39,10 @@
 #include "fdbserver/workloads/TenantData.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-template <class DB, class TenantMapEntryT>
+template <class DB, class TenantTypes>
 class TenantConsistencyCheck {
 private:
-	TenantData<DB, TenantMapEntryT> tenantData;
+	TenantData<DB, TenantTypes> tenantData;
 
 	// Note: this check can only be run on metaclusters with a reasonable number of tenants, as should be
 	// the case with the current metacluster simulation workloads
@@ -76,11 +76,13 @@ private:
 			} else {
 				ASSERT(!tenantsInTenantGroupIndex.count(tenantId));
 			}
+			ASSERT_NE(tenantMapEntry.tenantLockState == TenantAPI::TenantLockState::UNLOCKED,
+			          tenantMapEntry.tenantLockId.present());
 		}
 	}
 
 	// Specialization for TenantMapEntry, used on data and standalone clusters
-	void validateTenantMetadata(TenantData<DB, TenantMapEntry> tenantData) {
+	void validateTenantMetadata(TenantData<DB, StandardTenantTypes> tenantData) {
 		ASSERT(tenantData.clusterType == ClusterType::METACLUSTER_DATA ||
 		       tenantData.clusterType == ClusterType::STANDALONE);
 		ASSERT_LE(tenantData.tenantMap.size(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
@@ -90,7 +92,7 @@ private:
 	}
 
 	// Specialization for MetaclusterTenantMapEntry, used on management clusters
-	void validateTenantMetadata(TenantData<DB, MetaclusterTenantMapEntry> tenantData) {
+	void validateTenantMetadata(TenantData<DB, MetaclusterTenantTypes> tenantData) {
 		ASSERT(tenantData.clusterType == ClusterType::METACLUSTER_MANAGEMENT);
 		ASSERT_LE(tenantData.tenantMap.size(), metaclusterMaxTenants);
 
@@ -99,7 +101,7 @@ private:
 		for (auto [tenantId, tenantMapEntry] : tenantData.tenantMap) {
 			if (tenantMapEntry.tenantGroup.present()) {
 				auto tenantGroupMapItr = tenantData.tenantGroupMap.find(tenantMapEntry.tenantGroup.get());
-				ASSERT(tenantMapEntry.assignedCluster == tenantGroupMapItr->second.assignedCluster.get());
+				ASSERT(tenantMapEntry.assignedCluster == tenantGroupMapItr->second.assignedCluster);
 			}
 			if (tenantMapEntry.renameDestination.present()) {
 				ASSERT(tenantMapEntry.tenantState == MetaclusterAPI::TenantState::RENAMING ||
@@ -148,7 +150,7 @@ private:
 
 public:
 	TenantConsistencyCheck() {}
-	TenantConsistencyCheck(Reference<DB> db, TenantMetadataSpecification<TenantMapEntryT>* tenantMetadata)
+	TenantConsistencyCheck(Reference<DB> db, TenantMetadataSpecification<TenantTypes>* tenantMetadata)
 	  : tenantData(db, tenantMetadata) {}
 
 	Future<Void> run() { return run(this); }

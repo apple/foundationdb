@@ -26,11 +26,18 @@
 #define DLLEXPORT
 #endif
 
+#include "fdb_c_apiversion.g.h"
+#if (defined FDB_USE_LATEST_API_VERSION)
+#define FDB_API_VERSION FDB_LATEST_API_VERSION
+#elif (defined FDB_USE_LATEST_BINDINGS_API_VERSION)
+#define FDB_API_VERSION FDB_LATEST_BINDINGS_API_VERSION
+#endif
+
 #if !defined(FDB_API_VERSION)
-#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 730)
+#error You must #define FDB_API_VERSION prior to including fdb_c.h (the latest version is defined as FDB_LATEST_API_VERSION)
 #elif FDB_API_VERSION < 13
 #error API version no longer supported (upgrade to 13)
-#elif FDB_API_VERSION > 730
+#elif FDB_API_VERSION > FDB_LATEST_API_VERSION
 #error Requested API version requires a newer version of this header
 #endif
 

@@ -98,10 +98,11 @@ private:
 			auto allocatedItr = data.clusterAllocatedMap.find(clusterName);
 			if (!clusterMetadata.entry.hasCapacity()) {
 				ASSERT(allocatedItr == data.clusterAllocatedMap.end());
-			} else {
-				ASSERT(allocatedItr != data.clusterAllocatedMap.end());
+			} else if (allocatedItr != data.clusterAllocatedMap.end()) {
 				ASSERT_EQ(allocatedItr->second, clusterMetadata.entry.allocated.numTenantGroups);
 				++numFoundInAllocatedMap;
+			} else {
+				ASSERT_NE(clusterMetadata.entry.clusterState, DataClusterState::READY);
 			}
 
 			// Check that the number of tenant groups in the cluster is smaller than the allocated number of tenant
@@ -163,8 +164,7 @@ private:
 		// Each tenant group in the tenant group map should be present in the cluster tenant group map
 		// and have the correct cluster assigned to it.
 		for (auto const& [name, entry] : data.tenantData.tenantGroupMap) {
-			ASSERT(entry.assignedCluster.present());
-			auto clusterItr = data.clusterTenantGroupMap.find(entry.assignedCluster.get());
+			auto clusterItr = data.clusterTenantGroupMap.find(entry.assignedCluster);
 			ASSERT(clusterItr->second.count(name));
 		}
 
@@ -180,8 +180,8 @@ private:
 	                                              ClusterName clusterName,
 	                                              DataClusterMetadata clusterMetadata) {
 		state Reference<IDatabase> dataDb = wait(MetaclusterAPI::openDatabase(clusterMetadata.connectionString));
-		state TenantConsistencyCheck<IDatabase, TenantMapEntry> tenantConsistencyCheck(dataDb,
-		                                                                               &TenantMetadata::instance());
+		state TenantConsistencyCheck<IDatabase, StandardTenantTypes> tenantConsistencyCheck(
+		    dataDb, &TenantMetadata::instance());
 		wait(tenantConsistencyCheck.run());
 
 		auto dataClusterItr = self->metaclusterData.dataClusterMetadata.find(clusterName);
@@ -226,10 +226,12 @@ private:
 			ASSERT(tenantMapItr != managementData.tenantData.tenantMap.end());
 			MetaclusterTenantMapEntry const& metaclusterEntry = tenantMapItr->second;
 			ASSERT_EQ(entry.id, metaclusterEntry.id);
-			ASSERT(entry.tenantName == metaclusterEntry.tenantName);
 
 			if (!self->allowPartialMetaclusterOperations) {
 				ASSERT_EQ(metaclusterEntry.tenantState, MetaclusterAPI::TenantState::READY);
+				ASSERT(entry.tenantName == metaclusterEntry.tenantName);
+			} else if (entry.tenantName != metaclusterEntry.tenantName) {
+				ASSERT(entry.tenantName == metaclusterEntry.renameDestination);
 			}
 			if (metaclusterEntry.tenantState != MetaclusterAPI::TenantState::UPDATING_CONFIGURATION &&
 			    metaclusterEntry.tenantState != MetaclusterAPI::TenantState::REMOVING) {
@@ -240,6 +242,8 @@ private:
 
 			if (entry.configurationSequenceNum == metaclusterEntry.configurationSequenceNum) {
 				ASSERT(entry.tenantGroup == metaclusterEntry.tenantGroup);
+				ASSERT_EQ(entry.tenantLockState, metaclusterEntry.tenantLockState);
+				ASSERT(entry.tenantLockId == metaclusterEntry.tenantLockId);
 			}
 		}
 
@@ -261,7 +265,6 @@ private:
 		}
 		for (auto const& [name, entry] : data.tenantData.tenantGroupMap) {
 			ASSERT(expectedTenantGroups.count(name));
-			ASSERT(!entry.assignedCluster.present());
 			expectedTenantGroups.erase(name);
 		}
 
@@ -273,7 +276,7 @@ private:
 	}
 
 	ACTOR static Future<Void> run(MetaclusterConsistencyCheck* self) {
-		state TenantConsistencyCheck<DB, MetaclusterTenantMapEntry> managementTenantConsistencyCheck(
+		state TenantConsistencyCheck<DB, MetaclusterTenantTypes> managementTenantConsistencyCheck(
 		    self->managementDb, &MetaclusterAPI::ManagementClusterMetadata::tenantMetadata());
 
 		wait(managementTenantConsistencyCheck.run() && self->metaclusterData.load() && checkManagementSystemKeys(self));

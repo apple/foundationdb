@@ -560,7 +560,12 @@ struct hash<KeyRange> {
 };
 } // namespace std
 
-enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
+enum {
+	invalidVersion = -1,
+	latestVersion = -2,
+	earliestVersion = -3,
+	MAX_VERSION = std::numeric_limits<int64_t>::max()
+};
 
 inline KeyRef keyAfter(const KeyRef& key, Arena& arena) {
 	// Don't include fdbclient/SystemData.h for the allKeys symbol to avoid a cyclic include
@@ -1429,6 +1434,11 @@ struct TenantMode {
 	uint32_t mode;
 };
 
+template <>
+struct Traceable<TenantMode> : std::true_type {
+	static std::string toString(const TenantMode& value) { return value.toString(); }
+};
+
 struct EncryptionAtRestMode {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
 	// just before END.
@@ -1653,6 +1663,7 @@ struct ReadOptions {
 	ReadType type;
 	// Once CacheResult is serializable, change type from bool to CacheResult
 	bool cacheResult;
+	bool lockAware = false;
 	Optional<UID> debugID;
 	Optional<Version> consistencyCheckStartVersion;
 
@@ -1666,7 +1677,7 @@ struct ReadOptions {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, type, cacheResult, debugID, consistencyCheckStartVersion);
+		serializer(ar, type, cacheResult, debugID, consistencyCheckStartVersion, lockAware);
 	}
 };
 

@@ -171,7 +171,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARD_ENCODE_LOCATION_METADATA,                      true ); if( randomize && BUGGIFY )  SHARD_ENCODE_LOCATION_METADATA = true;
 	init( ENABLE_DD_PHYSICAL_SHARD,                            false ); // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true; When true, optimization of data move between DCs is disabled
 	init( ENABLE_DD_PHYSICAL_SHARD_MOVE,                        true ); // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true; When true, optimization of data move between DCs is disabled
-	init( MAX_PHYSICAL_SHARD_BYTES,                        500000000 ); // 500 MB; for ENABLE_DD_PHYSICAL_SHARD; smaller leads to larger number of physicalShard per storage server
+	init( MAX_PHYSICAL_SHARD_BYTES,                         10000000 ); // 10 MB; for ENABLE_DD_PHYSICAL_SHARD; smaller leads to larger number of physicalShard per storage server
  	init( PHYSICAL_SHARD_METRICS_DELAY,                        300.0 ); // 300 seconds; for ENABLE_DD_PHYSICAL_SHARD
 	init( ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME,            600.0 ); if( randomize && BUGGIFY )  ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME = 0.0; // 600 seconds; for ENABLE_DD_PHYSICAL_SHARD
 	init( READ_REBALANCE_CPU_THRESHOLD,                         15.0 );
@@ -476,6 +476,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	init( ROCKSDB_CHECKPOINT_MAX_RETRY,                            3 );
 	init( ROCKSDB_CREATE_SST_FILE_RETRY_COUNT_MAX,                50 );
+	init( ROCKSDB_EMPTY_RANGE_CHECK,              isSimulated ? true : false);
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
@@ -544,6 +545,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	bool buggfyUseResolverPrivateMutations = randomize && BUGGIFY && !ENABLE_VERSION_VECTOR_TLOG_UNICAST;
 	init( PROXY_USE_RESOLVER_PRIVATE_MUTATIONS,                 false ); if( buggfyUseResolverPrivateMutations ) PROXY_USE_RESOLVER_PRIVATE_MUTATIONS = deterministicRandom()->coinflip();
+
+	init( BURSTINESS_METRICS_ENABLED  ,                         false );
+	init( BURSTINESS_METRICS_LOG_INTERVAL,                        0.1 );
 
 	init( RESET_MASTER_BATCHES,                                   200 );
 	init( RESET_RESOLVER_BATCHES,                                 200 );
@@ -702,6 +706,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGE_DURABILITY_LAG_HARD_MAX,                    2000e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_HARD_MAX = 100e6;
 	init( STORAGE_DURABILITY_LAG_SOFT_MAX,                     250e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_SOFT_MAX = 10e6;
 	init( STORAGE_INCLUDE_FEED_STORAGE_QUEUE,                   true ); if ( randomize && BUGGIFY ) STORAGE_INCLUDE_FEED_STORAGE_QUEUE = false;
+	init( STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL,                     0.0); if ( isSimulated ) STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL = 5.0;
 
 	//FIXME: Low priority reads are disabled by assigning very high knob values, reduce knobs for 7.0
 	init( LOW_PRIORITY_STORAGE_QUEUE_BYTES,                    775e8 ); if( smallStorageTarget ) LOW_PRIORITY_STORAGE_QUEUE_BYTES = 1750e3;
@@ -791,7 +796,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( READ_HOT_SUB_RANGE_CHUNK_SIZE,                        10000000); // 10MB
 	init( EMPTY_READ_PENALTY,                                   20 ); // 20 bytes
 	init( DD_SHARD_COMPARE_LIMIT,                               1000 );
-	init( READ_SAMPLING_ENABLED,                                false ); if ( randomize && BUGGIFY ) READ_SAMPLING_ENABLED = true;// enable/disable read sampling
+	init( READ_SAMPLING_ENABLED,                                true ); if ( randomize && BUGGIFY ) READ_SAMPLING_ENABLED = false;// enable/disable read sampling
 
 	//Storage Server
 	init( STORAGE_LOGGING_DELAY,                                 5.0 );
@@ -804,7 +809,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( FETCH_BLOCK_BYTES,                                     2e6 );
 	init( FETCH_KEYS_PARALLELISM_BYTES,                          4e6 ); if( randomize && BUGGIFY ) FETCH_KEYS_PARALLELISM_BYTES = 3e6;
 	init( FETCH_KEYS_PARALLELISM,                                  2 );
-	init( FETCH_KEYS_PARALLELISM_FULL,                             6 );
+	init( FETCH_KEYS_PARALLELISM_CHANGE_FEED,                      6 );
 	init( FETCH_KEYS_LOWER_PRIORITY,                               0 );
 	init( SERVE_FETCH_CHECKPOINT_PARALLELISM,                      4 );
 	init( SERVE_AUDIT_STORAGE_PARALLELISM,                         1 );
@@ -856,7 +861,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// This exists for flexibility but assigning each ReadType to its own unique priority number makes the most sense
 	// The enumeration is currently: eager, fetch, low, normal, high
 	init( STORAGESERVER_READTYPE_PRIORITY_MAP,           "0,1,2,3,4" );
-	init( SPLIT_METRICS_MAX_ROWS,                              10000 );
+	init( SPLIT_METRICS_MAX_ROWS,                              10000 ); if( randomize && BUGGIFY ) SPLIT_METRICS_MAX_ROWS = 10;
 	init( STORAGE_SERVER_PHYSICAL_SHARD_MOVE,                   false );
 	init( FETCH_SHARD_BUFFER_BYTE_LIMIT,                        20e6 );
 	init( PHYSICAL_SHARD_MOVE_VERBOSE_TRACKING,                 true );
@@ -1049,6 +1054,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_WORKER_DO_REJECT_WHEN_FULL,                      true ); if ( randomize && BUGGIFY ) BLOB_WORKER_DO_REJECT_WHEN_FULL = false;
 	init( BLOB_WORKER_REJECT_WHEN_FULL_THRESHOLD,                0.9 );
 	init( BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY,                30.0 ); if ( randomize && BUGGIFY ) BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY = deterministicRandom()->randomInt(0, 10) - 1;
+	init( BLOB_WORKER_DISK_ENABLED,                            false ); if ( randomize && BUGGIFY ) BLOB_WORKER_DISK_ENABLED = true;
+	init( BLOB_WORKER_STORE_TYPE,                                  3 );
+	init( BLOB_WORKER_REJOIN_TIME,                              10.0 );
 
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN,                   0.1 );
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX,                   5.0 );

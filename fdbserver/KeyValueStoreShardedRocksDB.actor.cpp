@@ -846,13 +846,15 @@ public:
 					}
 					std::string propValue = "";
 					ASSERT(shard->db->GetProperty(shard->cf, rocksdb::DB::Properties::kCFStats, &propValue));
-					TraceEvent(SevInfo, "PhysicalShardCFStats").detail("ShardId", id).detail("Detail", propValue);
+					TraceEvent(SevInfo, "PhysicalShardCFStats")
+					    .detail("PhysicalShardID", id)
+					    .detail("Detail", propValue);
 
 					// Get compression ratio for each level.
 					rocksdb::ColumnFamilyMetaData cfMetadata;
 					shard->db->GetColumnFamilyMetaData(shard->cf, &cfMetadata);
 					TraceEvent e(SevInfo, "PhysicalShardLevelStats");
-					e.detail("ShardId", id);
+					e.detail("PhysicalShardID", id);
 					std::string levelProp;
 					for (auto it = cfMetadata.levels.begin(); it != cfMetadata.levels.end(); ++it) {
 						std::string propValue = "";
@@ -914,7 +916,8 @@ public:
 				}
 				physicalShards[shard->id] = shard;
 				columnFamilyMap[handle->GetID()] = handle;
-				TraceEvent(SevVerbose, "ShardedRocksInitPhysicalShard", this->logId).detail("PhysicalShard", shard->id);
+				TraceEvent(SevVerbose, "ShardedRocksInitPhysicalShard", this->logId)
+				    .detail("PhysicalShardID", shard->id);
 			}
 
 			std::set<std::string> unusedShards(columnFamilies.begin(), columnFamilies.end());
@@ -1093,7 +1096,7 @@ public:
 	}
 
 	PhysicalShard* addRange(KeyRange range, std::string id) {
-		TraceEvent(SevInfo, "ShardedRocksAddRangeBegin", this->logId)
+		TraceEvent(SevVerbose, "ShardedRocksAddRangeBegin", this->logId)
 		    .detail("Range", range)
 		    .detail("PhysicalShardID", id);
 
@@ -1101,11 +1104,23 @@ public:
 		auto ranges = dataShardMap.intersectingRanges(range);
 
 		for (auto it = ranges.begin(); it != ranges.end(); ++it) {
-			if (it.value() != nullptr && it.value()->physicalShard->id != id) {
-				TraceEvent(SevError, "ShardedRocksAddOverlappingRanges")
-				    .detail("IntersectingRange", it->range())
-				    .detail("DataShardRange", it->value()->range)
-				    .detail("PhysicalShard", it->value()->physicalShard->toString());
+			if (it.value()) {
+				if (it.value()->physicalShard->id == id) {
+					TraceEvent(SevError, "ShardedRocksDBAddRange")
+					    .detail("ErrorType", "RangeAlreadyExist")
+					    .detail("IntersectingRange", it->range())
+					    .detail("DataShardRange", it->value()->range)
+					    .detail("ExpectedShardId", id)
+					    .detail("PhysicalShardID", it->value()->physicalShard->toString());
+				} else {
+					TraceEvent(SevError, "ShardedRocksDBAddRange")
+					    .detail("ErrorType", "ConflictingRange")
+					    .detail("IntersectingRange", it->range())
+					    .detail("DataShardRange", it->value()->range)
+					    .detail("ExpectedShardId", id)
+					    .detail("PhysicalShardID", it->value()->physicalShard->toString());
+				}
+				return nullptr;
 			}
 		}
 
@@ -1121,7 +1136,7 @@ public:
 
 		validate();
 
-		TraceEvent(SevInfo, "ShardedRocksAddRangeEnd", this->logId)
+		TraceEvent(SevInfo, "ShardedRocksDBRangeAdded", this->logId)
 		    .detail("Range", range)
 		    .detail("PhysicalShardID", id);
 
@@ -1130,7 +1145,6 @@ public:
 
 	std::vector<std::string> removeRange(KeyRange range) {
 		TraceEvent(SevInfo, "ShardedRocksRemoveRangeBegin", this->logId).detail("Range", range);
-
 		std::vector<std::string> shardIds;
 
 		std::vector<DataShard*> newShards;
@@ -1147,6 +1161,22 @@ public:
 			auto existingShard = it.value()->physicalShard;
 			auto shardRange = it.range();
 
+			if (SERVER_KNOBS->ROCKSDB_EMPTY_RANGE_CHECK) {
+				// Enable consistency validation.
+				RangeResult rangeResult;
+				auto bytesRead = readRangeInDb(existingShard, range, 1, UINT16_MAX, &rangeResult);
+				if (bytesRead > 0) {
+					TraceEvent(SevError, "ShardedRocksDBRangeNotEmpty")
+					    .detail("PhysicalShard", existingShard->toString())
+					    .detail("Range", range)
+					    .detail("DataShardRange", shardRange);
+				}
+
+				// Force clear range.
+				writeBatch->DeleteRange(it.value()->physicalShard->cf, toSlice(range.begin), toSlice(range.end));
+				dirtyShards->insert(it.value()->physicalShard);
+			}
+
 			TraceEvent(SevDebug, "ShardedRocksRemoveRange")
 			    .detail("Range", range)
 			    .detail("IntersectingRange", shardRange)
@@ -1154,6 +1184,7 @@ public:
 			    .detail("PhysicalShard", existingShard->toString());
 
 			ASSERT(it.value()->range == shardRange); // Ranges should be consistent.
+
 			if (range.contains(shardRange)) {
 				existingShard->dataShards.erase(shardRange.begin.toString());
 				TraceEvent(SevInfo, "ShardedRocksRemovedRange")
@@ -1175,9 +1206,11 @@ public:
 			if (shardRange.begin < range.begin) {
 				auto dataShard =
 				    std::make_unique<DataShard>(KeyRange(KeyRangeRef(shardRange.begin, range.begin)), existingShard);
+
 				newShards.push_back(dataShard.get());
 				const std::string msg = "Shrink shard from " + Traceable<KeyRangeRef>::toString(shardRange) + " to " +
 				                        Traceable<KeyRangeRef>::toString(dataShard->range);
+
 				existingShard->dataShards[shardRange.begin.toString()] = std::move(dataShard);
 				logShardEvent(existingShard->id, shardRange, ShardOp::MODIFY_RANGE, SevInfo, msg);
 			}
@@ -1185,9 +1218,11 @@ public:
 			if (shardRange.end > range.end) {
 				auto dataShard =
 				    std::make_unique<DataShard>(KeyRange(KeyRangeRef(range.end, shardRange.end)), existingShard);
+
 				newShards.push_back(dataShard.get());
 				const std::string msg = "Shrink shard from " + Traceable<KeyRangeRef>::toString(shardRange) + " to " +
 				                        Traceable<KeyRangeRef>::toString(dataShard->range);
+
 				existingShard->dataShards[range.end.toString()] = std::move(dataShard);
 				logShardEvent(existingShard->id, shardRange, ShardOp::MODIFY_RANGE, SevInfo, msg);
 			}
@@ -1320,7 +1355,7 @@ public:
 					    .detail("Action", "PersistRangeMapping")
 					    .detail("BeginKey", it.range().begin)
 					    .detail("EndKey", it.range().end)
-					    .detail("ShardId", it.value()->physicalShard->id);
+					    .detail("PhysicalShardID", it.value()->physicalShard->id);
 
 				} else {
 					// Empty range.
@@ -1333,7 +1368,7 @@ public:
 					    .detail("Action", "PersistRangeMapping")
 					    .detail("BeginKey", it.range().begin)
 					    .detail("EndKey", it.range().end)
-					    .detail("ShardId", "None");
+					    .detail("PhysicalShardID", "None");
 				}
 				lastKey = it.range().end;
 			}
@@ -1444,6 +1479,23 @@ public:
 		return dataMap;
 	}
 
+	CoalescedKeyRangeMap<std::string> getExistingRanges() {
+		CoalescedKeyRangeMap<std::string> existingRanges;
+		existingRanges.insert(allKeys, "");
+		for (auto it : dataShardMap.intersectingRanges(allKeys)) {
+			if (!it.value()) {
+				continue;
+			}
+
+			if (it.value()->physicalShard->id == "kvs-metadata") {
+				continue;
+			}
+
+			existingRanges.insert(it.range(), it.value()->physicalShard->id);
+		}
+		return existingRanges;
+	}
+
 	void validate() {
 		TraceEvent(SevVerbose, "ShardedRocksValidateShardManager", this->logId);
 		for (auto s = dataShardMap.ranges().begin(); s != dataShardMap.ranges().end(); ++s) {
@@ -1457,6 +1509,10 @@ public:
 				e.detail("Shard", "Empty");
 			}
 			if (shard != nullptr) {
+				if (shard->range != static_cast<KeyRangeRef>(s->range())) {
+					TraceEvent(SevWarn, "ShardRangeMismatch").detail("Range", s->range());
+				}
+
 				ASSERT(shard->range == static_cast<KeyRangeRef>(s->range()));
 				ASSERT(shard->physicalShard != nullptr);
 				auto it = shard->physicalShard->dataShards.find(shard->range.begin.toString());
@@ -3523,11 +3579,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					break;
 				}
 				auto shards = shardManager->getPendingDeletionShards(cleanUpDelay);
-				auto a = new Writer::RemoveShardAction(shards);
-				Future<Void> f = a->done.getFuture();
-				writeThread->post(a);
-				TraceEvent(SevInfo, "ShardedRocksDB").detail("DeleteEmptyShards", shards.size());
-				wait(f);
+				if (shards.size() > 0) {
+					auto a = new Writer::RemoveShardAction(shards);
+					Future<Void> f = a->done.getFuture();
+					writeThread->post(a);
+					TraceEvent(SevInfo, "ShardedRocksDB").detail("DeleteEmptyShards", shards.size());
+					wait(f);
+				}
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
@@ -3573,6 +3631,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Future<EncryptionAtRestMode> encryptionMode() override {
 		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
 	}
+
+	CoalescedKeyRangeMap<std::string> getExistingRanges() override { return shardManager.getExistingRanges(); }
 
 	std::shared_ptr<ShardedRocksDBState> rState;
 	rocksdb::Options dbOptions;

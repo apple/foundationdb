@@ -487,6 +487,39 @@ Future<Void> configureTenantTransaction(Transaction tr,
 		}
 	}
 
+	ASSERT_EQ(updatedTenantEntry.tenantLockId.present(),
+	          updatedTenantEntry.tenantLockState != TenantLockState::UNLOCKED);
+
+	return Void();
+}
+
+template <class TenantMapEntryT>
+bool checkLockState(TenantMapEntryT entry, TenantLockState desiredLockState, UID lockId) {
+	if (entry.tenantLockId == lockId && entry.tenantLockState == desiredLockState) {
+		return true;
+	}
+
+	if (entry.tenantLockId.present() && entry.tenantLockId.get() != lockId) {
+		throw tenant_locked();
+	}
+
+	return false;
+}
+
+ACTOR template <class Transaction>
+Future<Void> changeLockState(Transaction tr, int64_t tenant, TenantLockState desiredLockState, UID lockId) {
+	state Future<Void> tenantModeCheck = TenantAPI::checkTenantMode(tr, ClusterType::STANDALONE);
+	state TenantMapEntry entry = wait(TenantAPI::getTenantTransaction(tr, tenant));
+
+	wait(tenantModeCheck);
+
+	if (!checkLockState(entry, desiredLockState, lockId)) {
+		TenantMapEntry newState = entry;
+		newState.tenantLockState = desiredLockState;
+		newState.tenantLockId = (desiredLockState == TenantLockState::UNLOCKED) ? Optional<UID>() : lockId;
+		wait(configureTenantTransaction(tr, entry, newState));
+	}
+
 	return Void();
 }
 

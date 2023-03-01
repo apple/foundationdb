@@ -25,8 +25,9 @@ import os
 sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
 
 import util
+from fdb import LATEST_API_VERSION
 
-FDB_API_VERSION = 720
+FDB_API_VERSION = LATEST_API_VERSION
 
 LOGGING = {
     'version': 1,

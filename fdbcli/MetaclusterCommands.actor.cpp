@@ -104,7 +104,7 @@ ACTOR Future<bool> metaclusterCreateCommand(Reference<IDatabase> db, std::vector
 		return false;
 	}
 
-	Optional<std::string> errorStr = wait(MetaclusterAPI::createMetacluster(db, tokens[2], tenantIdPrefix));
+	Optional<std::string> errorStr = wait(MetaclusterAPI::createMetacluster(db, tokens[2], tenantIdPrefix, true));
 	if (errorStr.present()) {
 		fmt::print("ERROR: {}.\n", errorStr.get());
 	} else {
@@ -171,14 +171,14 @@ ACTOR Future<bool> metaclusterRemoveCommand(Reference<IDatabase> db, std::vector
 	}
 
 	state ClusterNameRef clusterName = tokens[tokens.size() - 1];
-	state bool force = tokens.size() == 4;
 
 	state ClusterType clusterType = wait(runTransaction(db, [](Reference<ITransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		return TenantAPI::getClusterType(tr);
 	}));
 
-	if (clusterType == ClusterType::METACLUSTER_DATA && !force) {
+	ForceRemove forceRemove(tokens.size() == 4);
+	if (clusterType == ClusterType::METACLUSTER_DATA && !forceRemove) {
 		if (tokens[2] == "FORCE"_sr) {
 			fmt::print("ERROR: a cluster name must be specified.\n");
 		} else {
@@ -190,8 +190,7 @@ ACTOR Future<bool> metaclusterRemoveCommand(Reference<IDatabase> db, std::vector
 		return false;
 	}
 
-	bool updatedDataCluster =
-	    wait(MetaclusterAPI::removeCluster(db, clusterName, clusterType, tokens.size() == 4, 15.0));
+	bool updatedDataCluster = wait(MetaclusterAPI::removeCluster(db, clusterName, clusterType, forceRemove, 15.0));
 
 	if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 		fmt::print("The cluster `{}' has been removed\n", printable(clusterName).c_str());
@@ -211,7 +210,7 @@ ACTOR Future<bool> metaclusterRemoveCommand(Reference<IDatabase> db, std::vector
 
 void printRestoreUsage() {
 	fmt::print("Usage: metacluster restore <NAME> [dryrun] connection_string=<CONNECTION_STRING>\n"
-	           "<restore_known_data_cluster|repopulate_from_data_cluster> [force_join_new_metacluster]\n\n");
+	           "<restore_known_data_cluster|repopulate_from_data_cluster> [force_join]\n\n");
 
 	fmt::print("Add a restored data cluster back to a metacluster.\n\n");
 
@@ -223,8 +222,9 @@ void printRestoreUsage() {
 	fmt::print("that the metacluster is already tracking. This mode should be used if only data\n");
 	fmt::print("clusters are being restored, and any discrepancies between the management and\n");
 	fmt::print("data clusters will be resolved using the management cluster metadata.\n");
-	fmt::print("If `force_join_new_metacluster' is specified, the cluster will try to restore\n");
-	fmt::print("to a different metacluster than it was originally registered to.\n\n");
+	fmt::print("If `force_join' is specified, the cluster will try to restore to a different\n");
+	fmt::print("metacluster than it was originally registered to or with a different ID than\n");
+	fmt::print("is associated with the given cluster name.\n\n");
 
 	fmt::print("Use `repopulate_from_data_cluster' to rebuild a lost management cluster from the\n");
 	fmt::print("data clusters in a metacluster. This mode should be used if the management\n");
@@ -244,7 +244,7 @@ ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vecto
 	}
 
 	state bool dryRun = tokens[3] == "dryrun"_sr;
-	state bool forceJoin = tokens[tokens.size() - 1] == "force_join_new_metacluster"_sr;
+	state bool forceJoin = tokens[tokens.size() - 1] == "force_join"_sr;
 
 	if (tokens.size() < 5 + (int)dryRun + (int)forceJoin) {
 		printRestoreUsage();
@@ -274,7 +274,7 @@ ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vecto
 			                                    config.get().first.get(),
 			                                    ApplyManagementClusterUpdates::True,
 			                                    RestoreDryRun(dryRun),
-			                                    ForceJoinNewMetacluster(forceJoin),
+			                                    ForceJoin(forceJoin),
 			                                    &messages));
 		} else if (restoreType == "repopulate_from_data_cluster"_sr) {
 			wait(MetaclusterAPI::restoreCluster(db,
@@ -282,7 +282,7 @@ ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vecto
 			                                    config.get().first.get(),
 			                                    ApplyManagementClusterUpdates::False,
 			                                    RestoreDryRun(dryRun),
-			                                    ForceJoinNewMetacluster(forceJoin),
+			                                    ForceJoin(forceJoin),
 			                                    &messages));
 		} else {
 			fmt::print(stderr, "ERROR: unrecognized restore mode `{}'\n", printable(restoreType));
@@ -589,7 +589,7 @@ void metaclusterGenerator(const char* text,
 				const char* opts[] = { "restore_known_data_cluster", "repopulate_from_data_cluster", nullptr };
 				arrayGenerator(text, line, opts, lc);
 			} else if (tokens.size() == 5 + (int)dryrun) {
-				const char* opts[] = { "force_join_new_metacluster", nullptr };
+				const char* opts[] = { "force_join", nullptr };
 				arrayGenerator(text, line, opts, lc);
 			}
 		}
@@ -624,7 +624,7 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 			                                     "[dryrun]",
 			                                     "connection_string=<CONNECTION_STRING>",
 			                                     "<restore_known_data_cluster|repopulate_from_data_cluster>",
-			                                     "[force_join_new_metacluster]" };
+			                                     "[force_join]" };
 		if (tokens.size() < 4 || (tokens[3].size() <= 6 && "dryrun"_sr.startsWith(tokens[3]))) {
 			return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 		} else if (tokens.size() < 6) {

@@ -93,6 +93,12 @@ struct ProxyStats {
 	Reference<Histogram> tlogLoggingDist;
 	Reference<Histogram> replyCommitDist;
 
+	// These metrics are only logged as part of `ProxyDetailedMetrics`. Since
+	// the detailed proxy metrics combine data from different sources, we can't
+	// use a `Counter` along with a `CounterCollection` here, and instead have
+	// to reimplement the basic functionality.
+	std::unordered_set<NetworkAddress> uniqueClients;
+
 	int64_t getAndResetMaxCompute() {
 		int64_t r = maxComputeNS;
 		maxComputeNS = 0;
@@ -102,6 +108,12 @@ struct ProxyStats {
 	int64_t getAndResetMinCompute() {
 		int64_t r = minComputeNS;
 		minComputeNS = 1e12;
+		return r;
+	}
+
+	int64_t getSizeAndResetUniqueClients() {
+		int64_t r = uniqueClients.size();
+		uniqueClients.clear();
 		return r;
 	}
 
@@ -180,6 +192,7 @@ struct ProxyCommitData {
 	int64_t commitBatchesMemBytesCount;
 	std::unordered_map<TenantName, int64_t> tenantNameIndex;
 	std::map<int64_t, TenantName> tenantMap;
+	std::set<int64_t> lockedTenants;
 	std::unordered_set<int64_t> tenantsOverStorageQuota;
 	ProxyStats stats;
 	MasterInterface master;

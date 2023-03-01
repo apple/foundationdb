@@ -20,7 +20,9 @@
 
 import os
 
-MAX_API_VERSION = 720
+from bindingtester import FDB_API_VERSION
+
+MAX_API_VERSION = FDB_API_VERSION
 COMMON_TYPES = ['null', 'bytes', 'string', 'int', 'uuid', 'bool', 'float', 'double', 'tuple']
 ALL_TYPES = COMMON_TYPES + ['versionstamp']
 

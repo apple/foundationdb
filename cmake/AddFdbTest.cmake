@@ -270,7 +270,13 @@ function(stage_correctness_package)
     list(APPEND package_files "${out_file}")
   endforeach()
 
-  list(APPEND package_files ${test_files} ${external_files})
+  add_custom_command(
+    OUTPUT "${STAGE_OUT_DIR}/joshua_logtool.py"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/contrib/joshua_logtool.py" "${STAGE_OUT_DIR}/joshua_logtool.py"
+    DEPENDS "${CMAKE_SOURCE_DIR}/contrib/joshua_logtool.py"
+  )
+
+  list(APPEND package_files ${test_files} ${external_files} "${STAGE_OUT_DIR}/joshua_logtool.py")
   if(STAGE_OUT_FILES)
     set(${STAGE_OUT_FILES} ${package_files} PARENT_SCOPE)
   endif()
@@ -387,7 +393,7 @@ function(prepare_binding_test_files build_directory target_name target_dependenc
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_flow_tester> ${build_directory}/tests/flow/bin/fdb_flow_tester
     COMMENT "Copy Flow tester for bindingtester")
 
-  set(generated_binding_files python/fdb/fdboptions.py)
+  set(generated_binding_files python/fdb/fdboptions.py python/fdb/apiversion.py)
   if(WITH_JAVA_BINDING)
     if(NOT FDB_RELEASE)
       set(not_fdb_release_string "-SNAPSHOT")

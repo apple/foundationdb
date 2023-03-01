@@ -44,6 +44,9 @@ Future<std::vector<StorageServerInterface>> getStorageServers(Database const& cx
 Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database const& cx,
                                                         bool const& use_system_priority = false,
                                                         Version* const& grv = nullptr);
+Future<std::vector<std::pair<UID, UID>>> getBlobWorkerAffinity(Database const& cx,
+                                                               bool const& use_system_priority = false,
+                                                               Version* const& grv = nullptr);
 Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
                                               int const& flags = 0);
 Future<WorkerInterface> getMasterWorker(Database const& cx, Reference<AsyncVar<ServerDBInfo> const> const& dbInfo);

@@ -254,38 +254,34 @@ namespace ThrottleApi {
 // or using IClientAPI like IDatabase, ITransaction
 
 ACTOR template <class Tr>
-Future<bool> getValidAutoEnabled(Reference<Tr> tr) {
-	state bool result;
-	loop {
-		// hold the returned standalone object's memory
-		state typename Tr::template FutureT<Optional<Value>> valueF = tr->get(tagThrottleAutoEnabledKey);
-		Optional<Value> value = wait(safeThreadFutureToFuture(valueF));
-		if (!value.present()) {
-			tr->reset();
-			wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
-			continue;
-		} else if (value.get() == "1"_sr) {
-			result = true;
-		} else if (value.get() == "0"_sr) {
-			result = false;
-		} else {
-			TraceEvent(SevWarnAlways, "InvalidAutoTagThrottlingValue").detail("Value", value.get());
-			tr->reset();
-			wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
-			continue;
-		}
-		return result;
-	};
+Future<Optional<bool>> getValidAutoEnabled(Reference<Tr> tr) {
+	// hold the returned standalone object's memory
+	state typename Tr::template FutureT<Optional<Value>> valueF = tr->get(tagThrottleAutoEnabledKey);
+	Optional<Value> value = wait(safeThreadFutureToFuture(valueF));
+	if (!value.present()) {
+		return {};
+	} else if (value.get() == "1"_sr) {
+		return true;
+	} else if (value.get() == "0"_sr) {
+		return false;
+	} else {
+		TraceEvent(SevWarnAlways, "InvalidAutoTagThrottlingValue").detail("Value", value.get());
+		return {};
+	}
 }
 
 ACTOR template <class DB>
 Future<std::vector<TagThrottleInfo>> getRecommendedTags(Reference<DB> db, int limit) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	loop {
-		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		try {
-			bool enableAuto = wait(getValidAutoEnabled(tr));
-			if (enableAuto) {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			Optional<bool> enableAuto = wait(getValidAutoEnabled(tr));
+			if (!enableAuto.present()) {
+				tr->reset();
+				wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
+				continue;
+			} else if (enableAuto.get()) {
 				return std::vector<TagThrottleInfo>();
 			}
 			state typename DB::TransactionT::template FutureT<RangeResult> f =
@@ -307,15 +303,19 @@ ACTOR template <class DB>
 Future<std::vector<TagThrottleInfo>>
 getThrottledTags(Reference<DB> db, int limit, ContainsRecommended containsRecommended = ContainsRecommended::False) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
-	state bool reportAuto = containsRecommended;
+	state Optional<bool> reportAuto;
 	loop {
-		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		try {
-			if (!containsRecommended) {
-				wait(store(reportAuto, getValidAutoEnabled(tr)));
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			wait(store(reportAuto, getValidAutoEnabled(tr)));
+			if (!reportAuto.present()) {
+				tr->reset();
+				wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
+				continue;
 			}
 			state typename DB::TransactionT::template FutureT<RangeResult> f = tr->getRange(
-			    reportAuto ? tagThrottleKeys : KeyRangeRef(tagThrottleKeysPrefix, tagThrottleAutoKeysPrefix), limit);
+			    reportAuto.get() ? tagThrottleKeys : KeyRangeRef(tagThrottleKeysPrefix, tagThrottleAutoKeysPrefix),
+			    limit);
 			RangeResult throttles = wait(safeThreadFutureToFuture(f));
 			std::vector<TagThrottleInfo> results;
 			for (auto throttle : throttles) {
