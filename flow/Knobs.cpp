@@ -315,8 +315,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( ENCRYPT_HEADER_AUTH_TOKEN_ALGO,                        0 ); if ( randomize && ENCRYPT_HEADER_AUTH_TOKEN_ENABLED ) { ENCRYPT_HEADER_AUTH_TOKEN_ALGO = getRandomAuthTokenAlgo(); }
 	// start exponential backoff at 5s when reaching out to the KMS from EKP
 	init( EKP_KMS_CONNECTION_BACKOFF,                          5.0 );
-	// number of times to retry KMS requests from the EKP
-	init( EKP_KMS_CONNECTION_RETRIES,                          10 );
+	// number of times to retry KMS requests from the EKP (roughly attempt to reach out to the KMS for a total of 5 minutes)
+	init( EKP_KMS_CONNECTION_RETRIES,                          6 );
 
 	// REST Client
 	init( RESTCLIENT_MAX_CONNECTIONPOOL_SIZE,                   10 );
