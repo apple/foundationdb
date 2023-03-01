@@ -7323,11 +7323,12 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
 		}
 		for (auto& feedId : newFeedIds) {
 			auto feedIt = data->uidChangeFeed.find(feedId);
-			// we just read the change feed data map earlier in fetchKeys without yielding, so these feeds must exist
-			ASSERT(feedIt != data->uidChangeFeed.end());
-			ASSERT(!feedIt->second->removing);
-			ReadOptions fetchReadOptions = readOptionsForFeedFetch(readOptions, keys, feedIt->second->range);
-			feedFetches[feedIt->second->id] = fetchChangeFeed(data, feedIt->second, 0, endVersion, fetchReadOptions);
+			// feed may have been moved away or deleted while we took the feed lock, do nothing in that case
+			if (feedIt != data->uidChangeFeed.end() && !feedIt->second->removing) {
+				ReadOptions fetchReadOptions = readOptionsForFeedFetch(readOptions, keys, feedIt->second->range);
+				feedFetches[feedIt->second->id] =
+				    fetchChangeFeed(data, feedIt->second, 0, endVersion, fetchReadOptions);
+			}
 		}
 
 		loop {
