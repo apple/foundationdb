@@ -50,14 +50,14 @@ ACTOR template <class T>
 Future<T> kmsReqWithExponentialBackoff(std::function<Future<T>()> func, StringRef funcName) {
 	state int numRetries = 0;
 	state double kmsBackoff = FLOW_KNOBS->EKP_KMS_CONNECTION_BACKOFF;
-	TraceEvent("KMSRequestStart").detail("Function", funcName);
+	TraceEvent(SevDebug, "KMSRequestStart").suppressFor(30).detail("Function", funcName);
 
 	loop {
 		try {
 			T val = wait(func());
 			return val;
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "KMSRequestReceivedError").detail("Function", funcName).detail("ErrorCode", e.code());
+			TraceEvent("KMSRequestReceivedError").detail("Function", funcName).detail("ErrorCode", e.code());
 			if (!EncryptKeyProxy::canRetryWith(e)) {
 				throw e;
 			}
