@@ -1059,6 +1059,7 @@ BaseTraceEvent::State BaseTraceEvent::init() {
 BaseTraceEvent& BaseTraceEvent::errorUnsuppressed(class Error const& error) {
 	if (enabled) {
 		ASSERT(!logged);
+		err = error;
 		if (initialized) {
 			if (error.isInjectedFault()) {
 				detail("ErrorIsInjectedFault", true);
