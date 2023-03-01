@@ -26,6 +26,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbrpc/TimedRequest.h"
 #include <iterator>
 
 struct TLogInterface {
@@ -294,7 +295,7 @@ struct TLogCommitReply {
 	}
 };
 
-struct TLogCommitRequest {
+struct TLogCommitRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 4022206;
 	SpanContext spanContext;
 	Arena arena;
