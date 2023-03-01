@@ -2360,7 +2360,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			while (attempt++ < SERVER_KNOBS->ROCKSDB_CHECKPOINT_MAX_RETRY) {
 				PhysicalShard* ps = a.shardManager->getPhysicalShardForAllRanges(a.request.ranges);
 				if (ps == nullptr) {
-					TraceEvent(SevWarnAlways, "ShardedRocksCheckpointInvalidPhysicalShard", logId)
+					TraceEvent(SevInfo, "ShardedRocksCheckpointInvalidPhysicalShard", logId)
 					    .detail("CheckpointID", a.request.checkpointID)
 					    .detail("Version", a.request.version)
 					    .detail("Ranges", describe(a.request.ranges))
@@ -2408,8 +2408,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				// TraceEvent(SevDebug, "ShardedRocksDBCheckpointMarkerPersisted", logId)
 				//     .detail("CheckpointID", a.request.checkpointID);
 
-				// s = a.shardManager->getDb()->Flush(rocksdb::FlushOptions(),
-				//                                    a.shardManager->getColumnFamilies());
+				s = a.shardManager->getDb()->Flush(rocksdb::FlushOptions(), a.shardManager->getColumnFamilies());
 
 				// ASSERT(a.shardManager->getDb()->FlushWAL(true).ok());
 				// ASSERT(a.shardManager->getDb()->SyncWAL().ok());

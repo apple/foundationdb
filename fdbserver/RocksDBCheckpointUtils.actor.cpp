@@ -104,6 +104,8 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
 		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
 		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+		liveFileMetaData.smallest = fileMetaData.smallest;
+		liveFileMetaData.largest = fileMetaData.largest;
 		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
 		liveFileMetaData.level = fileMetaData.level;
 		metaData.files.push_back(liveFileMetaData);
