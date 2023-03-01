@@ -38,6 +38,7 @@
 #include "fdbbackup/FileConverter.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IKnobCollection.h"
@@ -166,6 +167,21 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 			}
 		}
 		ASSERT(!match);
+		return false;
+	}
+
+	bool matchFilters(const KeyRange& range) const {
+		bool match = filters.match(range);
+		if (!validate_filters) {
+			return match;
+		}
+
+		for (const auto& prefix : prefixes) {
+			if (range.intersects(prefixRange(StringRef(prefix)))) {
+				ASSERT(match);
+				return true;
+			}
+		}
 		return false;
 	}
 
@@ -735,6 +751,16 @@ public:
 	int lfd = -1; // local file descriptor
 };
 
+// convert a StringRef to Hex string
+std::string hexStringRef(const StringRef& s) {
+	std::string result;
+	result.reserve(s.size() * 2);
+	for (int i = 0; i < s.size(); i++) {
+		result.append(format("%02x", s[i]));
+	}
+	return result;
+}
+
 ACTOR Future<Void> process_range_file(Reference<IBackupContainer> container,
                                       RangeFile file,
                                       UID uid,
@@ -757,12 +783,11 @@ ACTOR Future<Void> process_range_file(Reference<IBackupContainer> container,
 			}
 
 			if (print) {
-				TraceEvent(SevVerbose, format("KVPair_%llu", file.version).c_str(), uid)
+				TraceEvent(format("KVPair_%llu", file.version).c_str(), uid)
 				    .detail("Version", file.version)
-				    .setMaxFieldLength(-1)
-				    .detail("Key", kv.key)
-				    .detail("Value", kv.value);
-				std::cout << file.version << " Key = " << printable(kv.key) << "  Value = " << printable(kv.value)
+				    .setMaxFieldLength(1000)
+				    .detail("KV", kv);
+				std::cout << file.version << " key: " << hexStringRef(kv.key) << "  value: " << hexStringRef(kv.value)
 				          << std::endl;
 			}
 		}
@@ -802,16 +827,45 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container,
 				print = params->matchFilters(m);
 			}
 			if (print) {
-				TraceEvent(SevVerbose, format("Mutation_%llu_%d", vms.version, sub).c_str(), uid)
+				TraceEvent(format("Mutation_%llu_%d", vms.version, sub).c_str(), uid)
 				    .detail("Version", vms.version)
-				    .setMaxFieldLength(-1)
+				    .setMaxFieldLength(1000)
 				    .detail("M", m.toString());
-				std::cout << vms.version << "." << sub << " " << m.toString() << "\n";
+				std::cout << vms.version << "." << sub << " " << typeString[(int)m.type]
+				          << " param1: " << hexStringRef(m.param1) << " param2: " << hexStringRef(m.param2) << "\n";
 			}
 		}
 	}
 	TraceEvent("ProcessFileDone", uid).detail("File", file.fileName);
 	return Void();
+}
+
+// Use the snapshot metadata to quickly identify relevant range files and
+// then filter by versions.
+ACTOR Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> bc, Reference<DecodeParams> params) {
+	state std::vector<KeyspaceSnapshotFile> snapshots =
+	    wait((dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))->listKeyspaceSnapshots());
+	state std::vector<RangeFile> files;
+
+	state int i = 0;
+	for (; i < snapshots.size(); i++) {
+		try {
+			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
+			    wait((dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))->readKeyspaceSnapshot(snapshots[i]));
+			for (const auto& rangeFile : results.first) {
+				const auto& keyRange = results.second.at(rangeFile.fileName);
+				if (params->matchFilters(keyRange)) {
+					files.push_back(rangeFile);
+				}
+			}
+		} catch (Error& e) {
+			TraceEvent("ReadKeyspaceSnapshotError").error(e).detail("I", i);
+			if (e.code() != error_code_restore_missing_data) {
+				throw;
+			}
+		}
+	}
+	return getRelevantRangeFiles(files, params);
 }
 
 ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
@@ -843,7 +897,9 @@ ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 	}
 
 	if (params->decode_range) {
-		rangeFiles = getRelevantRangeFiles(listing.ranges, params);
+		// rangeFiles = getRelevantRangeFiles(filteredRangeFiles, params);
+		std::vector<RangeFile> files = wait(getRangeFiles(container, params));
+		rangeFiles = files;
 		printLogFiles("Releavant range files are: ", rangeFiles);
 	}
 
