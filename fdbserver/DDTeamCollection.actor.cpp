@@ -2166,7 +2166,7 @@ public:
 	// This coroutine sets a watch to monitor the value change of `perpetualStorageWiggleKey` which is controlled by
 	// command `configure perpetual_storage_wiggle=$value` if the value is 1, this actor start 2 actors,
 	// `perpetualStorageWiggleIterator` and `perpetualStorageWiggler`. Otherwise, it sends stop signal to them.
-	ACTOR static Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* self) {
+	ACTOR static Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* self, Promise<Void> initializedSignal) {
 		state int speed = 0;
 		state PromiseStream<Void> finishStorageWiggleSignal;
 		state SignalableActorCollection collection;
@@ -2204,6 +2204,8 @@ public:
 						wait(self->storageWiggler->resetStats());
 						TraceEvent("PerpetualStorageWiggleClose", self->distributorId).detail("Primary", self->primary);
 					}
+					if (initializedSignal.canBeSet())
+						initializedSignal.send(Void());
 					wait(watchFuture);
 					break;
 				} catch (Error& e) {
@@ -2213,58 +2215,14 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> monitorStorageEngineParamsChange(DDTeamCollection* self) {
-		// always set the params from database configuration when DD starts
-		// it will handle the case where the watch actor did not respond when DD was rebooted
-		// there is no effect if it's consistent with storage servers
-		// TraceEvent(SevDebug, "MonitorStorageEngineChangeColdStart")
-		//     .detail("StoreType", self->configuration.storageServerStoreType.toString());
-		wait(self->storageParamsUpdater(self->configuration.storageEngineParams, false));
-		state SignalableActorCollection collection;
-		loop {
-			state ReadYourWritesTransaction tr(self->dbContext());
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				RangeResult paramsF = wait(tr.getRange(storageEngineParamsKeys, CLIENT_KNOBS->TOO_MANY));
-				StorageEngineParamSet newParams;
-				for (const auto& [k, v] : paramsF) {
-					// TraceEvent(SevDebug, "MonitorStorageEngineParamsChange").detail("Param", k).detail("Value", v);
-					auto paramK = k.removePrefix(storageEngineParamsPrefix).toString();
-					newParams.set(paramK, v.toString());
-				}
-				// TODO : compare the real value but not the casted string
-				// now it's okay as storage server will compare the real value not the string
-				// auto oldV = self->configuration.storageEngineParams.getParams().at(paramK);
-				// if (v.toString() != oldV) {
-				// 	TraceEvent("DDTCStorageEngineParamsChange")
-				// 	    .detail("Param", paramK)
-				// 	    .detail("OldV", oldV)
-				// 	    .detail("NewV", v);
-				// 	newParams.set(paramK, v.toString());
-				// }
-				if (newParams != self->configuration.storageEngineParams) {
-					TraceEvent("DDTCStorageEngineParamsChange")
-					    .detail("NewParam", describe(newParams.getParams()))
-					    .detail("OldParms", describe(self->configuration.storageEngineParams.getParams()));
-					collection.add(self->storageParamsUpdater(newParams));
-				}
-
-				state Future<Void> watchFuture = tr.watch(storageEngineParamsVersionKey);
-				wait(tr.commit());
-
-				wait(watchFuture);
-				TraceEvent(SevDebug, "StorageEngineParamsWatchAfter").log();
-				tr.reset();
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
 	ACTOR static Future<Void> storageParamsUpdater(DDTeamCollection* self,
 	                                               StorageEngineParamSet newParams,
-	                                               bool necessary) {
+	                                               Future<Void> wigglerInitialized) {
+		// always set the params from database configuration when DD starts
+		// there is no effect if it's consistent with storage servers
+		TraceEvent("DDTCStorageEngineParamsUpdaterStart")
+		    .detail("StoreType", self->configuration.storageServerStoreType.toString())
+		    .detail("NewParams", describe(newParams.getParams()));
 		// send update requests to all storages interfaces
 		std::vector<Future<ErrorOr<SetStorageEngineParamsReply>>> fs;
 		state std::map<UID, Future<ErrorOr<SetStorageEngineParamsReply>>> fmap;
@@ -2275,7 +2233,7 @@ public:
 			fs.push_back(f);
 			fmap[serverId] = f;
 		}
-		wait(waitForAll(fs));
+		wait(waitForAll(fs) && wigglerInitialized);
 		state std::vector<Future<Void>> collection;
 		for (const auto& [serverId, f] : fmap) {
 			if (!f.isReady() || f.get().isError()) {
@@ -2293,38 +2251,38 @@ public:
 				newParams.getParams().contains(k)
 				    ? self->configuration.storageEngineParams.set(k, newParams.getParams().at(k))
 				    : self->configuration.storageEngineParams.clear(k);
-				TraceEvent(necessary ? SevDebug : SevWarnAlways, "StorageEngineParamApplied")
+				TraceEvent(SevInfo, "StorageEngineParamApplied")
 				    .detail("ServerId", serverId)
 				    .detail("Param", k)
 				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
 			}
 			for (const auto& k : reply.result.needReplacement) {
-				TraceEvent(necessary ? SevDebug : SevWarnAlways, "StorageEngineParamUpdaterNeedReplacement")
+				TraceEvent(SevInfo, "StorageEngineParamUpdaterNeedReplacement")
 				    .detail("ServerId", serverId)
 				    .detail("Param", k)
 				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
 			}
 			for (const auto& k : reply.result.unknown) {
-				TraceEvent(SevWarn, "UnknownStorageEngineParam")
+				TraceEvent(SevInfo, "UnknownStorageEngineParam")
 				    .detail("ServerId", serverId)
 				    .detail("Param", k)
 				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
 			}
 			std::vector<std::string> noNeedReplacement;
-			if (necessary) {
-				for (const auto& k : reply.result.unchanged) {
-					TraceEvent(SevDebug, "StorageEngineParamUpdaterUnchanged")
-					    .detail("ServerId", serverId)
-					    .detail("Param", k)
-					    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
-					if (StorageEngineParamsFactory::getChangeType(self->configuration.storageServerStoreType, k) ==
-					    StorageEngineParamSet::CHANGETYPE::NEEDREPLACEMENT) {
-						// change back to old value, no need to wiggle now
-						// need to update the wiggle data
-						noNeedReplacement.push_back(k);
-					}
+
+			for (const auto& k : reply.result.unchanged) {
+				TraceEvent(SevInfo, "StorageEngineParamUpdaterUnchanged")
+				    .detail("ServerId", serverId)
+				    .detail("Param", k)
+				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
+				if (StorageEngineParamsFactory::getChangeType(self->configuration.storageServerStoreType, k) ==
+				    StorageEngineParamSet::CHANGETYPE::NEEDREPLACEMENT) {
+					// change back to old value, no need to wiggle now
+					// need to update the wiggle data
+					noNeedReplacement.push_back(k);
 				}
 			}
+
 			if (reply.result.needReplacement.size() || noNeedReplacement.size()) {
 				if (self->storageWiggler && !self->storageWiggler->isStopped()) {
 					// wiggle the storage
@@ -3115,6 +3073,7 @@ public:
 		state DDTeamCollection* self = teamCollection.getPtr();
 		state Future<Void> loggingTrigger = Void();
 		state PromiseStream<Void> serverRemoved;
+		state Promise<Void> storageWigglerInitialized;
 		state Future<Void> error = actorCollection(self->addActor.getFuture());
 
 		try {
@@ -3158,8 +3117,8 @@ public:
 			if (!self->db->isMocked()) {
 				self->addActor.send(self->trackExcludedServers());
 				self->addActor.send(self->waitHealthyZoneChange());
-				self->addActor.send(self->monitorPerpetualStorageWiggle());
-				self->addActor.send(self->monitorStorageEngineParamsChange());
+				self->addActor.send(self->monitorPerpetualStorageWiggle(storageWigglerInitialized));
+				self->addActor.send(self->storageParamsUpdater(storageWigglerInitialized.getFuture()));
 			}
 			// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 
@@ -3736,22 +3695,18 @@ Future<Void> DDTeamCollection::perpetualStorageWiggler(AsyncVar<bool>& stopSigna
 	return DDTeamCollectionImpl::perpetualStorageWiggler(this, &stopSignal, finishStorageWiggleSignal);
 }
 
-Future<Void> DDTeamCollection::monitorPerpetualStorageWiggle() {
+Future<Void> DDTeamCollection::monitorPerpetualStorageWiggle(Promise<Void> initializedSignal) {
 	ASSERT(!db->isMocked());
-	return DDTeamCollectionImpl::monitorPerpetualStorageWiggle(this);
+	return DDTeamCollectionImpl::monitorPerpetualStorageWiggle(this, initializedSignal);
 }
 
-Future<Void> DDTeamCollection::monitorStorageEngineParamsChange() {
+Future<Void> DDTeamCollection::storageParamsUpdater(Future<Void> wigglerInitialized) {
 	ASSERT(!db->isMocked());
 	// Storage type change is through storage migration and will reboot DD
 	// Thus, DD will start again with the new type and reevaluate here
 	return StorageEngineParamsFactory::isSupported(configuration.storageServerStoreType)
-	           ? DDTeamCollectionImpl::monitorStorageEngineParamsChange(this)
+	           ? DDTeamCollectionImpl::storageParamsUpdater(this, configuration.storageEngineParams, wigglerInitialized)
 	           : Never();
-}
-
-Future<Void> DDTeamCollection::storageParamsUpdater(StorageEngineParamSet newParams, bool necessary) {
-	return DDTeamCollectionImpl::storageParamsUpdater(this, newParams, necessary);
 }
 
 Future<StorageEngineParamSet> DDTeamCollection::getStorageEngineParams() {

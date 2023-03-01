@@ -559,15 +559,12 @@ protected:
 	// This coroutine sets a watch to monitor the value change of `perpetualStorageWiggleKey` which is controlled by
 	// command `configure perpetual_storage_wiggle=$value` if the value is 1, this actor start 2 actors,
 	// `perpetualStorageWiggleIterator` and `perpetualStorageWiggler`. Otherwise, it sends stop signal to them.
-	Future<Void> monitorPerpetualStorageWiggle();
+	Future<Void> monitorPerpetualStorageWiggle(Promise<Void> initializedSignal);
 
-	// The actor monitors the storage engine params' change and send requests to storage servers
-	Future<Void> monitorStorageEngineParamsChange();
-	// Update the storage engine parameters if requested
-	// Necessary means if the update is triggered by monitored changes
-	// Or it's a safety check(like dry run) when startup
-	// It is okay to run as there won't be any changes if parameters are matched on storages and DBConfig
-	Future<Void> storageParamsUpdater(StorageEngineParamSet newParams, bool necessary = true);
+	// Update the storage engine parameters using the params from the current DatabaseConfiguration
+	// This is a call started everytime DD initiates and after storage wiggler initialized
+	// It is safe to run as there won't be any changes if parameters are matched on storages and DatabaseConfiguration
+	Future<Void> storageParamsUpdater(Future<Void> wigglerInitialized);
 
 	Future<Void> waitHealthyZoneChange();
 
