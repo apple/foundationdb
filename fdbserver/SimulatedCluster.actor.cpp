@@ -266,6 +266,9 @@ class TestConfig {
 			if (attrib == "disableRemoteKVS") {
 				disableRemoteKVS = strcmp(value.c_str(), "true") == 0;
 			}
+			if (attrib == "disableSimSpeedup") {
+				disableSimSpeedup = strcmp(value.c_str(), "true") == 0;
+			}
 			if (attrib == "restartInfoLocation") {
 				isFirstTestInRestart = true;
 			}
@@ -303,6 +306,8 @@ public:
 	bool disableHostname = false;
 	// remote key value store is a child process spawned by the SS process to run the storage engine
 	bool disableRemoteKVS = false;
+	// Some gray failure workload, e.g., DcLag, needs to disable sim speedup
+	bool disableSimSpeedup = false;
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
 	//	0 = "ssd"
 	//	1 = "memory"
@@ -363,6 +368,7 @@ public:
 		    .add("disableTss", &disableTss)
 		    .add("disableHostname", &disableHostname)
 		    .add("disableRemoteKVS", &disableRemoteKVS)
+		    .add("disableSimSpeedup", &disableSimSpeedup)
 		    .add("simpleConfig", &simpleConfig)
 		    .add("generateFearless", &generateFearless)
 		    .add("datacenters", &datacenters)
@@ -1094,6 +1100,10 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			IKnobCollection::getMutableGlobalKnobCollection().setKnob("remote_kv_store",
 			                                                          KnobValueRef::create(bool{ false }));
 			TraceEvent(SevDebug, "DisaableRemoteKVS").log();
+		}
+		if (testConfig->disableSimSpeedup) {
+			g_knobs.setKnob("sim_speedup_after_seconds", KnobValueRef::create(double{ 5000.0 }));
+			TraceEvent("DisableSimSpeedup");
 		}
 		*pConnString = conn;
 		*pTesterCount = testerCount;
@@ -1849,6 +1859,10 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		IKnobCollection::getMutableGlobalKnobCollection().setKnob("remote_kv_store",
 		                                                          KnobValueRef::create(bool{ false }));
 		TraceEvent(SevDebug, "DisableRemoteKVS").log();
+	}
+	if (testConfig.disableSimSpeedup) {
+		g_knobs.setKnob("sim_speedup_after_seconds", KnobValueRef::create(double{ 5000.0 }));
+		TraceEvent("DisableSimSpeedup");
 	}
 	auto configDBType = testConfig.getConfigDBType();
 	for (auto kv : startingConfigJSON) {

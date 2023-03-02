@@ -1094,6 +1094,8 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	{ "disableHostname",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableHostname", ""); } },
 	{ "disableRemoteKVS", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } }
+	{ "disableSimSpeedup",
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableSimSpeedup", ""); } },
 };
 
 std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
