@@ -1,7 +1,7 @@
 if __name__ == '__main__':
     import re
     import sys
-    r = re.compile('DLLEXPORT[^(]*(fdb_[^(]*)[(]')
+    r = re.compile('DLLEXPORT[^(\n]*(fdb_[^(]*)[(]')
     header_files = sys.argv[1:-1]
     symbols_file = sys.argv[-1]
     symbols = set()
