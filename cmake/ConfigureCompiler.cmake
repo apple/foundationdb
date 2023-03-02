@@ -460,4 +460,8 @@ endif()
 
 # Setup the Swift compiler options.
 set(CLANG_MODULE_CACHE_PATH ${CMAKE_BINARY_DIR}/clang-module-cache)
-set(CMAKE_Swift_FLAGS "-Xcc -fmodules-cache-path=${CLANG_MODULE_CACHE_PATH}" CACHE STRING "" FORCE)
+set(SwiftOptions "-Xcc -fmodules-cache-path=${CLANG_MODULE_CACHE_PATH}")
+if (CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN)
+  set(SwiftOptions "${SwiftOptions} -Xcc --gcc-toolchain=${CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN}")
+endif()
+set(CMAKE_Swift_FLAGS "${SwiftOptions}" CACHE STRING "" FORCE)
