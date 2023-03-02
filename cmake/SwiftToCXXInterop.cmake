@@ -25,6 +25,15 @@ function(add_swift_to_cxx_header_gen_target target_name header_target_name heade
     get_target_property(target_source_dir ${target_name} SOURCE_DIR)
     list(TRANSFORM target_sources PREPEND "${target_source_dir}/")
   endif()
+
+  string(REGEX MATCHALL "-Xcc [-=/a-zA-Z0-9]+" SwiftXccOptionsFlags "${CMAKE_Swift_FLAGS}")
+  set (SwiftXccOptions )
+  foreach (flag ${SwiftXccOptionsFlags})
+    string(SUBSTRING ${flag} 5 -1 clangFlag)
+    list(APPEND SwiftXccOptions "-Xcc")
+    list(APPEND SwiftXccOptions "${clangFlag}")
+  endforeach()
+
   add_custom_command(
   OUTPUT
     "${header_path}"
@@ -36,6 +45,7 @@ function(add_swift_to_cxx_header_gen_target target_name header_target_name heade
     -emit-clang-header-path "${header_path}"
     "$<$<BOOL:${target_includes_expr}>:-I$<JOIN:${target_includes_expr},;-I>>"
     ${ARG_FLAGS}
+    ${SwiftXccOptions}
   DEPENDS
     "${target_sources}"
   COMMAND_EXPAND_LISTS
