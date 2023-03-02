@@ -311,6 +311,9 @@ public:
 	int ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION;
 	int ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION;
 
+	// REST KMS configurations
+	bool REST_KMS_ENABLE_NOT_SECURE_CONNECTION;
+
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
 };

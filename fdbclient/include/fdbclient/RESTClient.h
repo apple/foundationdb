@@ -21,7 +21,6 @@
 #ifndef FDBRPC_RESTCLIENT_H
 #define FDBRPC_RESTCLIENT_H
 
-#include <memory>
 #pragma once
 
 #include "fdbclient/JSONDoc.h"
@@ -31,6 +30,8 @@
 #include "flow/FastRef.h"
 #include "flow/flow.h"
 #include "flow/Net2Packet.h"
+
+#include <memory>
 
 // This interface enables sending REST HTTP requests and receiving REST HTTP responses from a resource identified by a
 // URI.
