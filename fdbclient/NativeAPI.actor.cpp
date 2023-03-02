@@ -8498,18 +8498,21 @@ ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAw
 
 ACTOR Future<Version> checkBlobSubrange(Database db, KeyRange keyRange, Optional<Version> version) {
 	state Transaction tr(db);
+	state Optional<Version> summaryVersion;
+	if (version.present()) {
+		summaryVersion = version.get();
+	}
 	loop {
 		try {
-			state Version summaryVersion;
-			if (version.present()) {
-				summaryVersion = version.get();
-			} else {
-				wait(store(summaryVersion, tr.getReadVersion()));
+			if (!summaryVersion.present()) {
+				// fill summary version at the start, so that retries use the same version
+				Version summaryVersion_ = wait(tr.getReadVersion());
+				summaryVersion = summaryVersion_;
 			}
 			// same properties as a read for validating granule is readable, just much less memory and network bandwidth
 			// used
 			wait(success(tr.summarizeBlobGranules(keyRange, summaryVersion, std::numeric_limits<int>::max())));
-			return summaryVersion;
+			return summaryVersion.get();
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
