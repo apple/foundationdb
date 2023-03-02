@@ -739,6 +739,20 @@ public:
 		// The mutex will be taken if locked is false.
 		// The next page will be waited for if load is true.
 		// Only mutex holders will wait on the page read.
+		ACTOR static Future<Optional<T>> waitThenReadNextImpl(Cursor* self,
+		                                                      Optional<T> inclusiveMaximum,
+		                                                      FlowMutex::Lock* lock,
+		                                                      bool load) {
+			if (load) {
+				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext waiting for page load\n",
+				             self->toString().c_str());
+				wait(success(self->nextPageReader));
+			}
+
+			Optional<T> result = wait(self->readNext(inclusiveMaximum, lock));
+			return result;
+		}
+
 		ACTOR static Future<Optional<T>> waitThenReadNext(Cursor* self,
 		                                                  Optional<T> inclusiveMaximum,
 		                                                  FlowMutex::Lock* lock,
@@ -752,13 +766,8 @@ public:
 				localLock = newLock;
 			}
 
-			if (load) {
-				debug_printf("FIFOQueue::Cursor(%s) waitThenReadNext waiting for page load\n",
-				             self->toString().c_str());
-				wait(success(self->nextPageReader));
-			}
-
-			state Optional<T> result = wait(self->readNext(inclusiveMaximum, &localLock));
+			state ErrorOr<Optional<T>> result = wait(
+			    errorOr(waitThenReadNextImpl(self, inclusiveMaximum, (lock == nullptr ? &localLock : lock), load)));
 
 			// If a lock was not passed in, so this actor locked the mutex above, then unlock it
 			if (lock == nullptr) {
@@ -774,7 +783,7 @@ public:
 				localLock.release();
 			}
 
-			return result;
+			return throwErrorOr(result);
 		}
 
 		// Read the next item from the cursor, possibly moving to and waiting for a new page if the prior page was

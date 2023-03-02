@@ -146,12 +146,17 @@ Future<ErrorOr<T>> errorOr(Future<T> f) {
 	}
 }
 
-ACTOR template <class T>
-Future<T> throwErrorOr(Future<ErrorOr<T>> f) {
-	ErrorOr<T> t = wait(f);
+template <class T>
+T throwErrorOr(ErrorOr<T> t) {
 	if (t.isError())
 		throw t.getError();
 	return t.get();
+}
+
+ACTOR template <class T>
+Future<T> throwErrorOr(Future<ErrorOr<T>> f) {
+	ErrorOr<T> t = wait(f);
+	return throwErrorOr(t);
 }
 
 ACTOR template <class T>
@@ -1428,6 +1433,9 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 // A low-overhead FIFO mutex made with no internal queue structure (no list, deque, vector, etc)
 // The lock is implemented as a Promise<Void>, which is returned to callers in a convenient wrapper
 // called Lock.
+//
+// Caller is responsible to explicitly call release() before discarding the Lock. Otherwise, the next call to take()
+// will result in a broken_promise, since it waits for the previous (discarded) lock.
 //
 // Usage:
 //   Lock lock = wait(mutex.take());
