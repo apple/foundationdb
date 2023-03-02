@@ -275,6 +275,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 	Promise<Void> doGRVCheck;
 	NotifiedVersion grvVersion;
+	std::deque<Version> prevGRVVersions;
 	Promise<Void> fatalError;
 	Promise<Void> simInjectFailure;
 	Promise<Void> doReadDrivenCompaction;
@@ -287,6 +288,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 	bool shuttingDown = false;
 
+	// FIXME: have cap on this independent of delta file size for larger granules
 	int changeFeedStreamReplyBufferSize = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 4;
 
 	EncryptionAtRestMode encryptMode;
@@ -382,6 +384,20 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 		Promise<Void> doRDC = doReadDrivenCompaction;
 		if (doRDC.canBeSet()) {
 			doRDC.send(Void());
+		}
+	}
+
+	void addGRVVersion(Version readVersion) {
+		if (grvVersion.get() < readVersion) {
+			prevGRVVersions.push_back(readVersion);
+			// TODO: could use grvs from other transactions BW does to also feed into this. In that case would probably
+			// want a minimum delta between versions just to not explode this deque though
+			while (prevGRVVersions.size() > SERVER_KNOBS->BLOB_WORKER_GRV_HISTORY_MAX_SIZE) {
+				prevGRVVersions.pop_front();
+			}
+
+			// set notified version last, so that all triggered waiters have prevGRVVersions populated too
+			grvVersion.set(readVersion);
 		}
 	}
 
@@ -2116,7 +2132,11 @@ ACTOR Future<Void> waitOnCFVersion(Reference<GranuleMetadata> metadata, Version 
 ACTOR Future<Void> waitCommittedGrv(Reference<BlobWorkerData> bwData,
                                     Reference<GranuleMetadata> metadata,
                                     Version version) {
+	state Version grvVersion;
+	// TODO could trigger GRV check even if we don't need a new one, just to keep the granularity of versions lower
+	// while delta files are being written
 	if (version > bwData->grvVersion.get()) {
+		CODE_PROBE(true, "Using new GRV for delta file committed version");
 		// this order is important, since we need to register a waiter on the notified version before waking the
 		// GRV actor
 		Future<Void> grvAtLeast = bwData->grvVersion.whenAtLeast(version);
@@ -2125,9 +2145,20 @@ ACTOR Future<Void> waitCommittedGrv(Reference<BlobWorkerData> bwData,
 			doGrvCheck.send(Void());
 		}
 		wait(grvAtLeast);
+		grvVersion = bwData->grvVersion.get();
+	} else {
+		CODE_PROBE(true, "Using previous GRV for delta file committed version");
+		ASSERT(!bwData->prevGRVVersions.empty());
+		auto nextLargestGRV = std::lower_bound(bwData->prevGRVVersions.begin(), bwData->prevGRVVersions.end(), version);
+		// TODO remove validation?
+		ASSERT(nextLargestGRV != bwData->prevGRVVersions.end());
+		grvVersion = *nextLargestGRV;
+		if (nextLargestGRV != bwData->prevGRVVersions.begin()) {
+			ASSERT(*(nextLargestGRV - 1) < version);
+		}
 	}
 
-	Version grvVersion = bwData->grvVersion.get();
+	ASSERT(grvVersion >= version);
 	wait(waitOnCFVersion(metadata, grvVersion));
 	return Void();
 }
@@ -4221,9 +4252,9 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 	choose {
 		when(wait(reqActor)) {}
 		when(wait(delay(SERVER_KNOBS->BLOB_WORKER_REQUEST_TIMEOUT))) {
-			CODE_PROBE(true, "Blob Worker request timeout hit", probe::decoration::rare);
+			CODE_PROBE(true, "Blob Worker request timeout hit");
 			if (BW_DEBUG) {
-				fmt::print("BW {0} request [{1} - {2}) @ {3} timed out, sending WSS\n",
+				fmt::print("BW {0} request [{1} - {2}) @ {3} timed out\n",
 				           bwData->id.toString().substr(0, 5),
 				           req.keyRange.begin.printable(),
 				           req.keyRange.end.printable(),
@@ -4982,14 +5013,15 @@ ACTOR Future<Void> monitorRemoval(Reference<BlobWorkerData> bwData) {
 ACTOR Future<Void> runGRVChecks(Reference<BlobWorkerData> bwData) {
 	state Transaction tr(bwData->db);
 	loop {
-		// only do grvs to get committed version if we need it to persist delta files
-		while (bwData->grvVersion.numWaiting() == 0) {
-			wait(bwData->doGRVCheck.getFuture());
+		// do periodic GRV even if no new delta files to write
+		state Future<Void> checkDelay = delay(SERVER_KNOBS->BLOB_WORKER_EMPTY_GRV_INTERVAL);
+		while (bwData->grvVersion.numWaiting() == 0 && !checkDelay.isReady()) {
+			wait(bwData->doGRVCheck.getFuture() || checkDelay);
 			bwData->doGRVCheck = Promise<Void>();
 		}
 
 		// batch potentially multiple delta files into one GRV, and also rate limit GRVs for this worker
-		wait(delay(SERVER_KNOBS->BLOB_WORKER_BATCH_GRV_INTERVAL));
+		wait(delay(SERVER_KNOBS->BLOB_WORKER_BATCH_GRV_INTERVAL) || checkDelay);
 
 		tr.reset();
 		try {
@@ -4997,7 +5029,7 @@ ACTOR Future<Void> runGRVChecks(Reference<BlobWorkerData> bwData) {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Version readVersion = wait(tr.getReadVersion());
 			ASSERT(readVersion >= bwData->grvVersion.get());
-			bwData->grvVersion.set(readVersion);
+			bwData->addGRVVersion(readVersion);
 
 			++bwData->stats.commitVersionChecks;
 		} catch (Error& e) {
