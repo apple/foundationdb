@@ -1638,14 +1638,16 @@ struct StorageMetadataType {
 
 	bool operator<(const StorageMetadataType& b) const {
 		if (wrongConfigured == b.wrongConfigured) {
-			if (needReplacement == b.needReplacement)
-				if (paramsNeedTobeReplaced.size() == b.paramsNeedTobeReplaced.size())
+			if (needReplacement == b.needReplacement) {
+				if (paramsNeedTobeReplaced.size() == b.paramsNeedTobeReplaced.size()) {
 					// the older SS has smaller createdTime
 					return createdTime < b.createdTime;
-				else
+				} else {
 					return paramsNeedTobeReplaced.size() > b.paramsNeedTobeReplaced.size();
-			else
+				}
+			} else {
 				return needReplacement > b.needReplacement;
+			}
 		}
 		return wrongConfigured > b.wrongConfigured;
 	}
