@@ -869,11 +869,6 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		    wait(getEncryptionDomainDetails(k, self->encryptMode, self->tenantCache, checkTenantCache));
 		state EncryptCipherDomainId prevKeyDomainId =
 		    wait(getEncryptionDomainDetails(self->lastKey, self->encryptMode, self->tenantCache, checkTenantCache));
-		// TraceEvent("Nim::here2")
-		//     .detail("PK", self->lastKey)
-		//     .detail("PDID", prevKeyDomainId)
-		//     .detail("CK", k)
-		//     .detail("CDID", curKeyDomainId);
 		if (curKeyDomainId != prevKeyDomainId) {
 			CODE_PROBE(true, "crossed tenant boundaries");
 			wait(handleTenantBondary(self, k, v, writeValue, curKeyDomainId, checkTenantCache));
@@ -1126,10 +1121,6 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 			}
 			// make sure that all keys (except the last key) in a block are encrypted using the correct key.;
 			if (blockDomainId.get() != FDB_DEFAULT_ENCRYPT_DOMAIN_ID && !prevKey.empty()) {
-				// TraceEvent("Nim::here1")
-				//     .detail("PK", prevKey)
-				//     .detail("PDID", prevDomainId.get())
-				//     .detail("BDID", blockDomainId.get());
 				ASSERT_EQ(prevDomainId.get(), blockDomainId.get());
 			}
 			prevKey = curKey;
