@@ -668,9 +668,11 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		return Void();
 	}
 
-	ACTOR static Future<Void> updateEncryptionKeysCtx(EncryptedRangeFileWriter* self, KeyRef key) {
+	ACTOR static Future<Void> updateEncryptionKeysCtx(EncryptedRangeFileWriter* self,
+	                                                  KeyRef key,
+	                                                  bool checkTenantCache) {
 		state EncryptCipherDomainId curDomainId =
-		    wait(getEncryptionDomainDetails(key, self->encryptMode, self->tenantCache));
+		    wait(getEncryptionDomainDetails(key, self->encryptMode, self->tenantCache, checkTenantCache));
 		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 
 		// Get text and header cipher key
@@ -712,7 +714,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	ACTOR static Future<EncryptCipherDomainId> getEncryptionDomainDetails(
 	    KeyRef key,
 	    EncryptionAtRestMode encryptMode,
-	    Optional<Reference<TenantEntryCache<Void>>> tenantCache) {
+	    Optional<Reference<TenantEntryCache<Void>>> tenantCache,
+	    bool checkTenantCache) {
 		if (isSystemKey(key)) {
 			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 		}
@@ -725,7 +728,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		// It's possible for the first and last key in a block (when writeKey is called) to not have a valid tenant
 		// prefix, since they mark the start and end of a range, in that case we denote them as having a default encrypt
 		// domain for the purpose of encrypting the block
-		if (tenantCache.present()) {
+		if (checkTenantCache && tenantCache.present()) {
 			Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache.get()->getById(tenantId));
 			if (!payload.present()) {
 				return FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
@@ -835,7 +838,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                                              Key k,
 	                                              Value v,
 	                                              bool writeValue,
-	                                              EncryptCipherDomainId curKeyDomainId) {
+	                                              EncryptCipherDomainId curKeyDomainId,
+	                                              bool checkTenantCache) {
 		state KeyRef endKey = k;
 		// If we are crossing a boundary with a key that has a tenant prefix then truncate it
 		if (curKeyDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && curKeyDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
@@ -848,25 +852,31 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		appendStringRefWithLenToBuffer(self, &endKey);
 		appendStringRefWithLenToBuffer(self, &newValue);
 		wait(newBlock(self, 0, endKey, writeValue));
-		wait(updateEncryptionKeysCtx(self, self->lastKey));
+		wait(updateEncryptionKeysCtx(self, self->lastKey, checkTenantCache));
 		return Void();
 	}
 
 	ACTOR static Future<bool> finishCurTenantBlockStartNewIfNeeded(EncryptedRangeFileWriter* self,
 	                                                               Key k,
 	                                                               Value v,
-	                                                               bool writeValue) {
+	                                                               bool writeValue,
+	                                                               bool checkTenantCache) {
 		// Don't want to start a new block if the current key or previous key is empty
 		if (self->lastKey.size() == 0 || k.size() == 0) {
 			return false;
 		}
 		state EncryptCipherDomainId curKeyDomainId =
-		    wait(getEncryptionDomainDetails(k, self->encryptMode, self->tenantCache));
+		    wait(getEncryptionDomainDetails(k, self->encryptMode, self->tenantCache, checkTenantCache));
 		state EncryptCipherDomainId prevKeyDomainId =
-		    wait(getEncryptionDomainDetails(self->lastKey, self->encryptMode, self->tenantCache));
+		    wait(getEncryptionDomainDetails(self->lastKey, self->encryptMode, self->tenantCache, checkTenantCache));
+		// TraceEvent("Nim::here2")
+		//     .detail("PK", self->lastKey)
+		//     .detail("PDID", prevKeyDomainId)
+		//     .detail("CK", k)
+		//     .detail("CDID", curKeyDomainId);
 		if (curKeyDomainId != prevKeyDomainId) {
 			CODE_PROBE(true, "crossed tenant boundaries");
-			wait(handleTenantBondary(self, k, v, writeValue, curKeyDomainId));
+			wait(handleTenantBondary(self, k, v, writeValue, curKeyDomainId, checkTenantCache));
 			return true;
 		}
 		return false;
@@ -876,11 +886,11 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	ACTOR static Future<Void> writeKV_impl(EncryptedRangeFileWriter* self, Key k, Value v) {
 		if (!self->cipherKeys.headerCipherKey.present() || !self->cipherKeys.headerCipherKey.get().isValid() ||
 		    !self->cipherKeys.textCipherKey.isValid()) {
-			wait(updateEncryptionKeysCtx(self, k));
+			wait(updateEncryptionKeysCtx(self, k, false));
 		}
 		state int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
 		wait(newBlockIfNeeded(self, toWrite));
-		bool createdNewBlock = wait(finishCurTenantBlockStartNewIfNeeded(self, k, v, true));
+		bool createdNewBlock = wait(finishCurTenantBlockStartNewIfNeeded(self, k, v, true, false));
 		if (createdNewBlock) {
 			return Void();
 		}
@@ -899,12 +909,14 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (k.size() > 0 &&
 		    (!self->cipherKeys.headerCipherKey.present() || !self->cipherKeys.headerCipherKey.get().isValid() ||
 		     !self->cipherKeys.textCipherKey.isValid())) {
-			wait(updateEncryptionKeysCtx(self, k));
+			wait(updateEncryptionKeysCtx(self, k, true));
 		}
 		// Need to account for extra "empty" value being written in the case of crossing tenant boundaries
 		int toWrite = sizeof(uint32_t) + k.size() + sizeof(uint32_t);
 		wait(newBlockIfNeeded(self, toWrite));
-		bool createdNewBlock = wait(finishCurTenantBlockStartNewIfNeeded(self, k, StringRef(), false));
+		// We want to check the tenant cache here since the first/last key for a block may not be a valid KV pair (in
+		// which case we use the default domain)
+		bool createdNewBlock = wait(finishCurTenantBlockStartNewIfNeeded(self, k, StringRef(), false, true));
 		if (createdNewBlock) {
 			return Void();
 		}
@@ -1091,27 +1103,34 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 
 		// make sure that all keys in a block belong to exactly one tenant,
 		// unless its the last key in which case it can be a truncated (different) tenant prefix
-		ASSERT(!encryptedBlock || blockDomainId.present());
-		if (CLIENT_KNOBS->SIMULATION_ENABLE_SNAPSHOT_ENCRYPTION_CHECKS && encryptedBlock && g_network &&
-		    g_network->isSimulated() && !isReservedEncryptDomain(blockDomainId.get())) {
+		if (encryptedBlock && g_network && g_network->isSimulated()) {
+			ASSERT(blockDomainId.present());
 			state KeyRef curKey = KeyRef(k, kLen);
 			if (!prevDomainId.present()) {
-				EncryptCipherDomainId domainId =
-				    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, encryptMode, tenantCache));
+				EncryptCipherDomainId domainId = wait(
+				    EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, encryptMode, tenantCache, false));
 				prevDomainId = domainId;
 			}
-			EncryptCipherDomainId curDomainId =
-			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, encryptMode, tenantCache));
+			state EncryptCipherDomainId curDomainId =
+			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, encryptMode, tenantCache, false));
 			if (!curKey.empty() && !prevKey.empty() && prevDomainId.get() != curDomainId) {
 				ASSERT(!done);
-				if (curDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && curDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
-					ASSERT(curKey.size() == TenantAPI::PREFIX_SIZE);
+				// Make sure that all tenant specific keys in a block have the correct prefix size
+				if (curDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID && curDomainId != FDB_DEFAULT_ENCRYPT_DOMAIN_ID &&
+				    curKey.size() != TenantAPI::PREFIX_SIZE) {
+					ASSERT(tenantCache.present());
+					Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache.get()->getById(curDomainId));
+					ASSERT(!payload.present());
 				}
 				done = true;
 			}
-			// make sure that all keys (except possibly the last key) in a block are encrypted using the correct key
-			if (!prevKey.empty()) {
-				ASSERT(prevDomainId.get() == blockDomainId.get());
+			// make sure that all keys (except the last key) in a block are encrypted using the correct key.;
+			if (blockDomainId.get() != FDB_DEFAULT_ENCRYPT_DOMAIN_ID && !prevKey.empty()) {
+				// TraceEvent("Nim::here1")
+				//     .detail("PK", prevKey)
+				//     .detail("PDID", prevDomainId.get())
+				//     .detail("BDID", blockDomainId.get());
+				ASSERT_EQ(prevDomainId.get(), blockDomainId.get());
 			}
 			prevKey = curKey;
 			prevDomainId = curDomainId;
