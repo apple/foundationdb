@@ -3148,6 +3148,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 	                                   Reference<Task> task) {
 		state BackupConfig config(task);
 		state Reference<IBackupContainer> bc;
+		state DatabaseConfiguration dbConfig;
 
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
@@ -3163,6 +3164,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				wait(taskBucket->keepRunning(tr, task));
+				wait(store(dbConfig, getDatabaseConfiguration(cx)));
 
 				if (!bc) {
 					// Backup container must be present if we're still here
@@ -3186,8 +3188,8 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 			}
 		}
 
-		std::vector<std::string> files;
-		std::vector<std::pair<Key, Key>> beginEndKeys;
+		state std::vector<std::string> files;
+		state std::vector<std::pair<Key, Key>> beginEndKeys;
 		state Version maxVer = 0;
 		state Version minVer = std::numeric_limits<Version>::max();
 		state int64_t totalBytes = 0;
@@ -3228,7 +3230,14 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 		}
 
 		Params.endVersion().set(task, maxVer);
-		wait(bc->writeKeyspaceSnapshotFile(files, beginEndKeys, totalBytes));
+
+		// Avoid keyRange filtering optimization for 'manifest' files
+		wait(bc->writeKeyspaceSnapshotFile(files,
+		                                   beginEndKeys,
+		                                   totalBytes,
+		                                   dbConfig.encryptionAtRestMode.isEncryptionEnabled()
+		                                       ? IncludeKeyRangeMap::False
+		                                       : IncludeKeyRangeMap::True));
 
 		TraceEvent(SevInfo, "FileBackupWroteSnapshotManifest")
 		    .detail("BackupUID", config.getUid())

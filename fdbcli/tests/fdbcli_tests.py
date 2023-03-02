@@ -1010,14 +1010,73 @@ def tenant_list(logger):
 
 
 @enable_logging()
+def tenant_lock(logger):
+    logger.debug("Create tenant")
+    setup_tenants(["tenant"])
+
+    logger.debug("Write test key")
+    run_fdbcli_command("usetenant tenant; writemode on; set foo bar")
+    logger.debug("Lock tenant in read-only mode")
+    output = run_fdbcli_command("tenant lock tenant w")
+    output = output.strip()
+    logger.debug("output: {}".format(output))
+    start_string = "Locked tenant `tenant' with UID `"
+    assert output.startswith(start_string)
+    assert output.endswith("'")
+    uid_str = output[len(start_string) : -1]
+    assert len(uid_str) == 32
+
+    logger.debug("Verify tenant is readable")
+    output = run_fdbcli_command("usetenant tenant; get foo").strip()
+    logger.debug("output: {}".format(output))
+    lines = output.split("\n")
+    assert lines[-1] == "`foo' is `bar'"
+
+    logger.debug("Verify tenant is NOT writeable")
+    output = run_fdbcli_command_and_get_error(
+        "usetenant tenant; writemode on; set foo bar2"
+    ).strip()
+    logger.debug("output: {}".format(output))
+    assert output == "ERROR: Tenant is locked (2144)"
+
+    logger.debug('Unlock tenant with UID "{}"'.format(uid_str))
+    output = run_fdbcli_command("tenant unlock tenant {}".format(uid_str))
+    logger.debug("output: {}".format(output.strip()))
+    assert output.strip() == "Unlocked tenant `tenant'"
+
+    logger.debug("Lock tenant in rw mode")
+    output = run_fdbcli_command("tenant lock tenant rw {}".format(uid_str)).strip()
+    logger.debug("output: {}".format(output))
+    assert output == "Locked tenant `tenant' with UID `{}'".format(uid_str)
+
+    logger.debug("Verify tenant is NOT readable")
+    output = run_fdbcli_command_and_get_error("usetenant tenant; get foo").strip()
+    logger.debug("output: {}".format(output))
+    assert output == "ERROR: Tenant is locked (2144)"
+
+    logger.debug("Verify tenant is NOT writeable")
+    output = run_fdbcli_command_and_get_error(
+        "usetenant tenant; writemode on; set foo bar2"
+    ).strip()
+    logger.debug("output: {}".format(output))
+    assert output == "ERROR: Tenant is locked (2144)"
+
+    logger.debug("Unlock tenant")
+    output = run_fdbcli_command("tenant unlock tenant {}".format(uid_str))
+    logger.debug("output: {}".format(output.strip()))
+    assert output.strip() == "Unlocked tenant `tenant'"
+
+
+@enable_logging()
 def tenant_get(logger):
     setup_tenants(["tenant", "tenant2 tenant_group=tenant_group2"])
 
     output = run_fdbcli_command("tenant get tenant")
     lines = output.split("\n")
-    assert len(lines) == 2
+    assert len(lines) == 3
     assert lines[0].strip().startswith("id: ")
     assert lines[1].strip().startswith("prefix: ")
+    assert lines[2].strip() == "lock state: unlocked"
 
     output = run_fdbcli_command("tenant get tenant JSON")
     json_output = json.loads(output, strict=False)
@@ -1034,13 +1093,16 @@ def tenant_get(logger):
     assert len(json_output["tenant"]["prefix"]) == 2
     assert "base64" in json_output["tenant"]["prefix"]
     assert "printable" in json_output["tenant"]["prefix"]
+    assert "lock_state" in json_output["tenant"]
+    assert json_output["tenant"]["lock_state"] == "unlocked"
 
     output = run_fdbcli_command("tenant get tenant2")
     lines = output.split("\n")
-    assert len(lines) == 3
+    assert len(lines) == 4
     assert lines[0].strip().startswith("id: ")
     assert lines[1].strip().startswith("prefix: ")
-    assert lines[2].strip() == "tenant group: tenant_group2"
+    assert lines[2].strip() == "lock state: unlocked"
+    assert lines[3].strip() == "tenant group: tenant_group2"
 
     output = run_fdbcli_command("tenant get tenant2 JSON")
     json_output = json.loads(output, strict=False)
@@ -1054,6 +1116,8 @@ def tenant_get(logger):
     assert "base64" in json_output["tenant"]["name"]
     assert "printable" in json_output["tenant"]["name"]
     assert "prefix" in json_output["tenant"]
+    assert "lock_state" in json_output["tenant"]
+    assert json_output["tenant"]["lock_state"] == "unlocked"
     assert "tenant_group" in json_output["tenant"]
     assert len(json_output["tenant"]["tenant_group"]) == 2
     assert "base64" in json_output["tenant"]["tenant_group"]
@@ -1074,8 +1138,8 @@ def tenant_configure(logger):
 
     output = run_fdbcli_command("tenant get tenant")
     lines = output.split("\n")
-    assert len(lines) == 3
-    assert lines[2].strip() == "tenant group: tenant_group1"
+    assert len(lines) == 4
+    assert lines[3].strip() == "tenant group: tenant_group1"
 
     output = run_fdbcli_command("tenant configure tenant unset tenant_group")
     assert output == "The configuration for tenant `tenant' has been updated"
@@ -1087,7 +1151,7 @@ def tenant_configure(logger):
 
     output = run_fdbcli_command("tenant get tenant")
     lines = output.split("\n")
-    assert len(lines) == 2
+    assert len(lines) == 3
 
     output = run_fdbcli_command_and_get_error(
         "tenant configure tenant tenant_group=tenant_group1 tenant_group=tenant_group2"
@@ -1330,6 +1394,7 @@ def tenants():
     run_tenant_test(tenant_old_commands)
     run_tenant_test(tenant_group_list)
     run_tenant_test(tenant_group_get)
+    run_tenant_test(tenant_lock)
 
 
 @enable_logging()

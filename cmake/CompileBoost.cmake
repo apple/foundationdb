@@ -154,7 +154,20 @@ endif()
 find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem iostreams serialization system CONFIG PATHS ${BOOST_HINT_PATHS})
 set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
 
-if(Boost_FOUND AND Boost_filesystem_FOUND AND Boost_context_FOUND AND Boost_iostreams_FOUND AND Boost_system_FOUND AND Boost_serialization_FOUND AND NOT FORCE_BOOST_BUILD)
+# The precompiled boost silently broke in CI.  While investigating, I considered extending
+# the old check with something like this, so that it would fail loudly if it found a bad
+# pre-existing boost.  It turns out the error messages we get from CMake explain what is
+# wrong with Boost.  Rather than reimplementing that, I just deleted this logic.  This
+# approach is simpler, has better ergonomics and should be easier to maintain.  If the build
+# is picking up your locally installed or partial version of boost, and you don't want
+# to / cannot fix it, pass in -DFORCE_BOOST_BUILD=on as a workaround.
+#
+#    if(Boost_FOUND AND Boost_filesystem_FOUND AND Boost_context_FOUND AND Boost_iostreams_FOUND AND Boost_system_FOUND AND Boost_serialization_FOUND AND NOT FORCE_BOOST_BUILD)
+#      ...
+#    elseif(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
+#      message(FATAL_ERROR "Unacceptable precompiled boost found")
+#
+if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
   add_library(boost_target INTERFACE)
   target_link_libraries(boost_target INTERFACE Boost::boost Boost::context Boost::filesystem Boost::iostreams Boost::serialization Boost::system)
 elseif(WIN32)
