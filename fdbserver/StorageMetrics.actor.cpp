@@ -384,11 +384,11 @@ std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::getReadHotRanges(KeyR
 		return toReturn;
 	}
 
-	double total = sampler->getEstimate(parentRange);
-	double splitChunk = total / chunkCount;
+	auto total = sampler->getEstimate(parentRange);
+	double splitChunk = std::max(1.0, (double)total / chunkCount);
 
 	KeyRef beginKey = parentRange.begin;
-	while (true) {
+	while (parentRange.contains(beginKey)) {
 		auto beginIt = sampler->sample.lower_bound(beginKey);
 		if (beginIt == sampler->sample.end()) {
 			break;
@@ -408,6 +408,7 @@ std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::getReadHotRanges(KeyR
 			break;
 		}
 
+		ASSERT_LT(beginKey, *endIt);
 		KeyRangeRef range(beginKey, *endIt);
 		toReturn.emplace_back(
 		    range,
