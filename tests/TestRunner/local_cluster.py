@@ -119,6 +119,7 @@ logdir = {logdir}
 {authz_public_key_config}
 {custom_config}
 {use_future_protocol_version}
+knob_min_trace_severity=5
 # logsize = 10MiB
 # maxlogssize = 100MiB
 # machine-id =
@@ -263,9 +264,9 @@ logdir = {logdir}
                 bg_config = "\n".join(
                     [
                         "knob_bg_url=file://" + str(self.data) + "/fdbblob/",
-                        "knob_bg_snapshot_file_target_bytes=100000",
-                        "knob_bg_delta_file_target_bytes=5000",
-                        "knob_bg_delta_bytes_before_compact=50000",
+                        "knob_bg_snapshot_file_target_bytes=200000",
+                        "knob_bg_delta_file_target_bytes=10000",
+                        "knob_bg_delta_bytes_before_compact=100000",
                     ]
                 )
             if self.enable_encryption_at_rest:
