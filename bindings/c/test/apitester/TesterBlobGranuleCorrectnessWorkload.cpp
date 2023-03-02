@@ -24,6 +24,8 @@
 #include <set>
 #include "fdb_api.hpp"
 #include <memory>
+#include <ctime>
+#include <chrono>
 #include <fmt/format.h>
 
 namespace FdbApiTester {
@@ -65,7 +67,10 @@ private:
 
 	void debugOp(std::string opName, fdb::KeyRange keyRange, std::optional<int> tenantId, std::string message) {
 		if (BG_API_DEBUG_VERBOSE) {
-			info(fmt::format("{0}: [{1} - {2}) {3}: {4}",
+			info(fmt::format("{0}) {1}: [{2} - {3}) {4}: {5}",
+			                 std::chrono::duration_cast<std::chrono::duration<double>>(
+			                     std::chrono::system_clock::now().time_since_epoch())
+			                     .count(),
 			                 opName,
 			                 fdb::toCharsRef(keyRange.beginKey),
 			                 fdb::toCharsRef(keyRange.endKey),
