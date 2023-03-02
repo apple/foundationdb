@@ -461,7 +461,18 @@ endif()
 # Setup the Swift compiler options.
 set(CLANG_MODULE_CACHE_PATH ${CMAKE_BINARY_DIR}/clang-module-cache)
 set(SwiftOptions "-Xcc -fmodules-cache-path=${CLANG_MODULE_CACHE_PATH}")
+# Let Swift know where to find the external GCC toolchain if such toolchain is used.
 if (CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN)
   set(SwiftOptions "${SwiftOptions} -Xcc --gcc-toolchain=${CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN}")
 endif()
+# Enable Swift <-> C++ interoperability.
+set(SwiftOptions "${SwiftOptions} -Xfrontend -enable-experimental-cxx-interop")
+
 set(CMAKE_Swift_FLAGS "${SwiftOptions}" CACHE STRING "" FORCE)
+
+# Verify that Swift can import C++ standard library.
+include(CompilerChecks)
+check_swift_source_compiles("import CxxStdlib" CanImportCxxStdlibIntoSwift)
+if (NOT CanImportCxxStdlibIntoSwift)
+  message(FATAL_ERROR "Swift compiler: can not import C++ standard library into Swift; did you forget to set 'CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN'?")
+endif()
