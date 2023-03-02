@@ -782,6 +782,19 @@ void ThreadSafeTransaction::reset() {
 	onMainThreadVoid([tr]() { tr->reset(); });
 }
 
+void ThreadSafeTransaction::debugTrace(BaseTraceEvent&& ev) {
+	if (ev.isEnabled()) {
+		ISingleThreadTransaction* tr = this->tr;
+		std::shared_ptr<BaseTraceEvent> evPtr = std::make_shared<BaseTraceEvent>(std::move(ev));
+		onMainThreadVoid([tr, evPtr]() { tr->debugTrace(std::move(*evPtr)); });
+	}
+};
+
+void ThreadSafeTransaction::debugPrint(std::string const& message) {
+	ISingleThreadTransaction* tr = this->tr;
+	onMainThreadVoid([tr, message]() { tr->debugPrint(message); });
+}
+
 extern const char* getSourceVersion();
 
 ThreadSafeApi::ThreadSafeApi() : apiVersion(-1), transportId(0) {}
