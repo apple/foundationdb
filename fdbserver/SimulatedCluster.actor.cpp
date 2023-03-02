@@ -332,6 +332,9 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "disableRemoteKVS") {
 				disableRemoteKVS = strcmp(value.c_str(), "true") == 0;
 			}
+			if (attrib == "disableSimSpeedup") {
+				disableSimSpeedup = strcmp(value.c_str(), "true") == 0;
+			}
 			if (attrib == "encryptModes") {
 				std::stringstream ss(value);
 				std::string token;
@@ -407,6 +410,8 @@ public:
 	bool disableHostname = false;
 	// remote key value store is a child process spawned by the SS process to run the storage engine
 	bool disableRemoteKVS = false;
+	// Some gray failure workload, e.g., DcLag, needs to disable sim speedup
+	bool disableSimSpeedup = false;
 	// By default, encryption mode is set randomly (based on the tenant mode)
 	// If provided, set using EncryptionAtRestMode::fromString
 	std::vector<std::string> encryptModes;
@@ -487,6 +492,7 @@ public:
 		    .add("disableTss", &disableTss)
 		    .add("disableHostname", &disableHostname)
 		    .add("disableRemoteKVS", &disableRemoteKVS)
+		    .add("disableSimSpeedup", &disableSimSpeedup)
 		    .add("encryptModes", &encryptModes)
 		    .add("simpleConfig", &simpleConfig)
 		    .add("generateFearless", &generateFearless)
@@ -1293,6 +1299,10 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		if (testConfig->disableRemoteKVS) {
 			g_knobs.setKnob("remote_kv_store", KnobValueRef::create(bool{ false }));
 			TraceEvent(SevDebug, "DisableRemoteKVS");
+		}
+		if (testConfig->disableSimSpeedup) {
+			g_knobs.setKnob("sim_speedup_after_seconds", KnobValueRef::create(double{ 5000.0 }));
+			TraceEvent("DisableSimSpeedup");
 		}
 		*pConnString = conn;
 		*pTesterCount = testerCount;
@@ -2149,6 +2159,10 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	if (testConfig.disableRemoteKVS) {
 		g_knobs.setKnob("remote_kv_store", KnobValueRef::create(bool{ false }));
 		TraceEvent(SevDebug, "DisableRemoteKVS");
+	}
+	if (testConfig.disableSimSpeedup) {
+		g_knobs.setKnob("sim_speedup_after_seconds", KnobValueRef::create(double{ 5000.0 }));
+		TraceEvent("DisableSimSpeedup");
 	}
 	auto configDBType = testConfig.getConfigDBType();
 	for (auto kv : startingConfigJSON) {

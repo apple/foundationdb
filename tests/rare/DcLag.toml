@@ -1,11 +1,9 @@
 [configuration]
 generateFearless = true
+disableSimSpeedup = true
 processesPerMachine = 1
 machineCount = 20
 config = 'triple'
-
-[[knob]]
-sim_speedup_after_seconds = 3000
 
 [[test]]
 testTitle = 'DcLag'
