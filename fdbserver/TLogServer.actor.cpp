@@ -2303,7 +2303,7 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 	wait(logData->version.whenAtLeast(req.prevVersion));
 
 	// Time until now has been spent waiting in the queue to do actual work.
-	state double queueWaitEndTime = g_network->timer();
+	state double queueWaitEndTime = timer();
 	self->queueWaitLatencyDist->sampleSeconds(queueWaitEndTime - req.requestTime());
 
 	// Calling check_yield instead of yield to avoid a destruction ordering problem in simulation
@@ -2370,7 +2370,7 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 	    timeoutWarning(logData->queueCommittedVersion.whenAtLeast(req.version) || stopped, 0.1, warningCollectorInput));
 
 	// This is the point at which the transaction is durable (unless it timed out, or the tlog stopped).
-	const double durableTime = g_network->timer();
+	const double durableTime = timer();
 
 	if (stopped.isReady()) {
 		ASSERT(logData->stopped());
