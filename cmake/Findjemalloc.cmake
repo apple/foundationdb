@@ -7,7 +7,7 @@ Findjemalloc
 
 Find jemalloc, the generic purpose malloc implementation that emphasizes fragmentation avoidance and scalable concurrency support.
 
-This module will first try jemalloc_config, then pkg_config and finally by find_path and find_library.
+This module will first try jemalloc_config, then find_path and find_library.
 
 jemalloc_ROOT variable can be used for HINTS for different version of jemalloc.
 
@@ -104,13 +104,16 @@ macro(_finalize_find_package_jemalloc)
 endmacro()
 
 if(NOT jemalloc_ROOT)
-	set(jemalloc_ROOT $ENV{jemalloc_ROOT})
+  set(jemalloc_ROOT $ENV{jemalloc_ROOT})
 endif()
 
 # First check if jemalloc_config.sh is available
 unset(_jemalloc_CONFIG_PATH)
 set(jemalloc_FOUND FALSE)
-find_program(_jemalloc_CONFIG_PATH NAMES jemalloc-config HINTS ${jemalloc_ROOT})
+find_program(
+  _jemalloc_CONFIG_PATH
+  NAMES jemalloc-config
+  HINTS ${jemalloc_ROOT})
 
 if(_jemalloc_CONFIG_PATH)
   _configure_use_jemalloc_config()
@@ -127,38 +130,28 @@ if(_jemalloc_CONFIG_PATH)
   endif()
 endif()
 
-# Try pkg-config
-find_package(PkgConfig REQUIRED)
-pkg_search_module(jemalloc jemalloc)
-if(jemalloc_FOUND)
-  set(jemalloc_LIBRARY "${jemalloc_LIBRARIES}")
-  find_package_message(
-    jemalloc "Found jemalloc by pkg-config: ${jemalloc_LIBRARY}"
-    "[${jemalloc_LIBRARY}][${jemalloc_INCLUDE_DIRS}]")
-  _configure_jemalloc_target()
-  # pkg-config will not find jemalloc_pic library
-  _finalize_find_package_jemalloc()
-  return()
-endif()
-
 # Manual find jemalloc by hand
-set(jemalloc_FOUND FALSE)
 find_path(
   jemalloc_INCLUDE_DIRS
   NAMES jemalloc.h
   PATH_SUFFIXES jemalloc jemalloc/include
-  HINTS ${jemalloc_ROOT}
-  )
+  HINTS ${jemalloc_ROOT})
 if(NOT jemalloc_INCLUDE_DIRS)
   _finalize_find_package_jemalloc()
   return()
 endif()
-find_library(jemalloc_LIBRARY NAMES libjemalloc.a HINTS ${jemalloc_ROOT})
+find_library(
+  jemalloc_LIBRARY
+  NAMES libjemalloc.a
+  HINTS ${jemalloc_ROOT})
 if(jemalloc_LIBRARY)
   set(jemalloc_FOUND TRUE)
   _configure_jemalloc_target()
 endif()
-find_library(jemalloc_pic_LIBRARY NAMES jemalloc_pic.a HINTS ${jemalloc_ROOT})
+find_library(
+  jemalloc_pic_LIBRARY
+  NAMES libjemalloc_pic.a
+  HINTS ${jemalloc_ROOT})
 if(jemalloc_pic_LIBRARY)
   _configure_jemalloc_pic_target()
 endif()
