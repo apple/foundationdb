@@ -870,14 +870,14 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	state std::string fname;
 	std::tie(writeBStore, fname) = bstore->createForWrite(fileName);
 
-	state double writeStartTimer = g_network->timer();
+	state double startTimer = g_network->timer();
 
 	wait(writeFile(writeBStore, fname, serialized));
 
 	++bwData->stats.s3PutReqs;
 	++bwData->stats.deltaFilesWritten;
 	bwData->stats.deltaBytesWritten += serializedSize;
-	double duration = g_network->timer() - writeStartTimer;
+	double duration = g_network->timer() - startTimer;
 	bwData->stats.deltaBlobWriteLatencySample.addMeasurement(duration);
 
 	// free serialized since it is persisted in blob
@@ -888,6 +888,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	holdingLock.release();
 
 	state int numIterations = 0;
+	startTimer = g_network->timer();
 	try {
 		// before updating FDB, wait for the delta file version to be committed and previous delta files to finish
 		wait(waitCommitted);
@@ -944,6 +945,9 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 					    .detail("Encrypted", cipherKeysCtx.present())
 					    .detail("Compressed", compressFilter.present());
 				}
+
+				double duration = g_network->timer() - startTimer;
+				bwData->stats.deltaUpdateSample.addMeasurement(duration);
 
 				// FIXME: change when we implement multiplexing
 				return BlobFileIndex(currentDeltaVersion, fname, 0, serializedSize, serializedSize, cipherKeysMeta);
@@ -3024,6 +3028,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						}
 						idx++;
 					}
+					if (waitIdx > 0) {
+						++bwData->stats.blockInFlightSnapshots;
+					}
 					while (waitIdx > 0) {
 						CODE_PROBE(true, "Granule blocking on previous snapshot");
 						// TODO don't duplicate code
@@ -3977,6 +3984,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 						           req.readVersion);
 					}
 				}
+
 				// if feed was popped by another worker and BW only got empty versions, it wouldn't itself see that it
 				// got popped, but we can still reject the in theory this should never happen with other protections but
 				// it's a useful and inexpensive sanity check
@@ -4208,25 +4216,20 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 	if (req.summarize) {
 		++bwData->stats.summaryReads;
 	}
+	// scope this actor outside of the choose-when so we do the timeout block before cancelling actor
+	state Future<Void> reqActor = doBlobGranuleFileRequest(bwData, req);
 	choose {
-		when(wait(doBlobGranuleFileRequest(bwData, req))) {}
+		when(wait(reqActor)) {}
 		when(wait(delay(SERVER_KNOBS->BLOB_WORKER_REQUEST_TIMEOUT))) {
-			if (!req.reply.isSet()) {
-				CODE_PROBE(true, "Blob Worker request timeout hit", probe::decoration::rare);
-				if (BW_DEBUG) {
-					fmt::print("BW {0} request [{1} - {2}) @ {3} timed out, sending WSS\n",
-					           bwData->id.toString().substr(0, 5),
-					           req.keyRange.begin.printable(),
-					           req.keyRange.end.printable(),
-					           req.readVersion);
-				}
-				--bwData->stats.activeReadRequests;
-				++bwData->stats.granuleRequestTimeouts;
-
-				// return wrong_shard_server because it's possible that someone else actually owns the
-				// granule now
-				req.reply.sendError(wrong_shard_server());
+			CODE_PROBE(true, "Blob Worker request timeout hit", probe::decoration::rare);
+			if (BW_DEBUG) {
+				fmt::print("BW {0} request [{1} - {2}) @ {3} timed out, sending WSS\n",
+				           bwData->id.toString().substr(0, 5),
+				           req.keyRange.begin.printable(),
+				           req.keyRange.end.printable(),
+				           req.readVersion);
 			}
+			++bwData->stats.granuleRequestTimeouts;
 		}
 	}
 	return Void();
