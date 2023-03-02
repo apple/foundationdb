@@ -3501,7 +3501,8 @@ ACTOR Future<Void> updateEpoch(Reference<BlobManagerData> bmData, int64_t epoch)
 ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	state double recoveryStartTime = now();
 	state Promise<Void> workerListReady;
-	state Future<Void> blobWorkerRejoin = delay(SERVER_KNOBS->BLOB_WORKER_REJOIN_TIME);
+	state Future<Void> blobWorkerRejoin =
+	    delay(SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED ? SERVER_KNOBS->BLOB_WORKER_REJOIN_TIME : 0);
 	bmData->addActor.send(checkBlobWorkerList(bmData, workerListReady));
 	wait(workerListReady.getFuture());
 
