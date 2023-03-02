@@ -27,8 +27,6 @@ target_include_directories(swifttestapp PUBLIC
 # TODO: We need a platform-agnostic way to find the C++ stdlib searchpaths
 target_include_directories(swifttestapp PRIVATE
     "/opt/boost_1_78_0_clang"
-    "/opt/rh/devtoolset-8/root/usr/include/c++/8/x86_64-redhat-linux/"
-    "/opt/rh/devtoolset-8/root/usr/lib/gcc/x86_64-redhat-linux/8/../../../../include/c++/8"
 )
 
 target_link_directories(swifttestapp PRIVATE
