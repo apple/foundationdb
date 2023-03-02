@@ -1610,7 +1610,10 @@ struct StorageMetadataType {
 	// when the SS is initialized, in epoch seconds, comes from currentTime()
 	double createdTime;
 	KeyValueStoreType storeType;
+	// unused for now, if true will wiggle the storage
+	// fit in the scenario where you just want the storage to be replaced without an underlying parameter change
 	bool needReplacement = false;
+	// storage engine parameters that need to be updated which let the storages to be wiggled
 	std::set<std::string> paramsNeedTobeReplaced;
 
 	// no need to serialize part (should be assigned after initialization)
@@ -1628,6 +1631,7 @@ struct StorageMetadataType {
 	static double currentTime() { return g_network->timer(); }
 
 	bool operator==(const StorageMetadataType& b) const {
+		// now treat all storage engine parameters same and we'll wiggle the one with more parameters to be replaced
 		return createdTime == b.createdTime && storeType == b.storeType && wrongConfigured == b.wrongConfigured &&
 		       needReplacement == b.needReplacement && paramsNeedTobeReplaced.size() == b.paramsNeedTobeReplaced.size();
 	}
