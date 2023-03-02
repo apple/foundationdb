@@ -139,9 +139,9 @@ struct OpenKVStoreRequest {
 	int64_t memoryLimit;
 	bool checkChecksums;
 	bool checkIntegrity;
+	ReplyPromise<struct IKVSInterface> reply;
 	EncryptionAtRestMode encryptionMode;
 	Optional<StorageEngineParamSet> params;
-	ReplyPromise<struct IKVSInterface> reply;
 
 	OpenKVStoreRequest(){};
 
@@ -159,7 +159,7 @@ struct OpenKVStoreRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(
-		    ar, storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity, encryptionMode, params, reply);
+		    ar, storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity, reply, encryptionMode, params);
 	}
 };
 

@@ -586,8 +586,8 @@ struct GetStorageServerRejoinInfoRequest {
 	constexpr static FileIdentifier file_identifier = 994279;
 	UID id;
 	Optional<Value> dcId;
-	bool checkStorageEngineParams;
 	ReplyPromise<GetStorageServerRejoinInfoReply> reply;
+	bool checkStorageEngineParams;
 
 	GetStorageServerRejoinInfoRequest() {}
 	explicit GetStorageServerRejoinInfoRequest(UID const& id,
@@ -597,7 +597,7 @@ struct GetStorageServerRejoinInfoRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, dcId, checkStorageEngineParams, reply);
+		serializer(ar, id, dcId, reply, checkStorageEngineParams);
 	}
 };
 
