@@ -389,11 +389,14 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 	void addGRVVersion(Version readVersion) {
 		if (grvVersion.get() < readVersion) {
-			prevGRVVersions.push_back(readVersion);
-			// TODO: could use grvs from other transactions BW does to also feed into this. In that case would probably
-			// want a minimum delta between versions just to not explode this deque though
-			while (prevGRVVersions.size() > SERVER_KNOBS->BLOB_WORKER_GRV_HISTORY_MAX_SIZE) {
-				prevGRVVersions.pop_front();
+			// We use GRVs from grv checker loop, plus other common BW transactions. To prevent the deque size from
+			// exploding or the effective version window from getting too small, only put GRVs in the deque if they are
+			// at least some small distance apart
+			if (grvVersion.get() + SERVER_KNOBS->BLOB_WORKER_GRV_HISTORY_MIN_VERSION_GRANULARITY <= readVersion) {
+				prevGRVVersions.push_back(readVersion);
+				while (prevGRVVersions.size() > SERVER_KNOBS->BLOB_WORKER_GRV_HISTORY_MAX_SIZE) {
+					prevGRVVersions.pop_front();
+				}
 			}
 
 			// set notified version last, so that all triggered waiters have prevGRVVersions populated too
@@ -935,6 +938,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 				}
 
 				wait(tr->commit());
+				bwData->addGRVVersion(tr->getReadVersion().get());
 				if (BW_DEBUG) {
 					fmt::print(
 					    "Granule {0} [{1} - {2}) updated fdb with delta file {3} of size {4} at version {5}, cv={6}\n",
@@ -1041,6 +1045,7 @@ ACTOR Future<BlobFileIndex> writeEmptyDeltaFile(Reference<BlobWorkerData> bwData
 			}
 
 			wait(tr->commit());
+			bwData->addGRVVersion(tr->getReadVersion().get());
 			if (BW_DEBUG) {
 				fmt::print(
 				    "Granule {0} [{1} - {2}) empty delta file bumped version last delta file from {3} -> {4}, cv={5}\n",
@@ -1231,6 +1236,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 					tr->set(historyKey, blobGranuleHistoryValueFor(historyValue));
 				}
 				wait(tr->commit());
+				bwData->addGRVVersion(tr->getReadVersion().get());
 				break;
 			} catch (Error& e) {
 				wait(tr->onError(e));
@@ -1306,6 +1312,8 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			Version rv = wait(tr->getReadVersion());
+			bwData->addGRVVersion(rv);
+
 			readVersion = rv;
 			ASSERT(lastReadVersion <= readVersion);
 			state PromiseStream<RangeResult> rowsStream;
@@ -2133,8 +2141,6 @@ ACTOR Future<Void> waitCommittedGrv(Reference<BlobWorkerData> bwData,
                                     Reference<GranuleMetadata> metadata,
                                     Version version) {
 	state Version grvVersion;
-	// TODO could trigger GRV check even if we don't need a new one, just to keep the granularity of versions lower
-	// while delta files are being written
 	if (version > bwData->grvVersion.get()) {
 		CODE_PROBE(true, "Using new GRV for delta file committed version");
 		// this order is important, since we need to register a waiter on the notified version before waking the
@@ -2148,13 +2154,27 @@ ACTOR Future<Void> waitCommittedGrv(Reference<BlobWorkerData> bwData,
 		grvVersion = bwData->grvVersion.get();
 	} else {
 		CODE_PROBE(true, "Using previous GRV for delta file committed version");
+
 		ASSERT(!bwData->prevGRVVersions.empty());
 		auto nextLargestGRV = std::lower_bound(bwData->prevGRVVersions.begin(), bwData->prevGRVVersions.end(), version);
 		// TODO remove validation?
-		ASSERT(nextLargestGRV != bwData->prevGRVVersions.end());
-		grvVersion = *nextLargestGRV;
-		if (nextLargestGRV != bwData->prevGRVVersions.begin()) {
-			ASSERT(*(nextLargestGRV - 1) < version);
+		if (nextLargestGRV == bwData->prevGRVVersions.end()) {
+			// This should be rare case so probably no sense optimizing for it by checking the last version in the deque
+			// before doing lower_bound
+			CODE_PROBE(true, "GRV difference less than min granularity");
+			grvVersion = bwData->grvVersion.get();
+		} else {
+			grvVersion = *nextLargestGRV;
+			if (nextLargestGRV != bwData->prevGRVVersions.begin()) {
+				ASSERT(*(nextLargestGRV - 1) < version);
+			}
+		}
+
+		// trigger GRV check anyway, just to keep the granularity of versions lower while delta files are actively being
+		// written
+		Promise<Void> doGrvCheck = bwData->doGRVCheck;
+		if (doGrvCheck.canBeSet()) {
+			doGrvCheck.send(Void());
 		}
 	}
 
@@ -4524,6 +4544,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				}
 			}
 			wait(tr.commit());
+			bwData->addGRVVersion(tr.getReadVersion().get());
 
 			if (info.changeFeedStartVersion == invalidVersion) {
 				info.changeFeedStartVersion = tr.getCommittedVersion();
@@ -5028,7 +5049,6 @@ ACTOR Future<Void> runGRVChecks(Reference<BlobWorkerData> bwData) {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Version readVersion = wait(tr.getReadVersion());
-			ASSERT(readVersion >= bwData->grvVersion.get());
 			bwData->addGRVVersion(readVersion);
 
 			++bwData->stats.commitVersionChecks;
@@ -5131,6 +5151,7 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 
 				state Future<Void> watchChange = tr->watch(TenantMetadata::lastTenantId().key);
 				wait(tr->commit());
+				bwData->addGRVVersion(tr->getReadVersion().get());
 				wait(watchChange);
 				tr->reset();
 			} catch (Error& e) {
