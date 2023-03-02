@@ -223,7 +223,7 @@ ACTOR Future<Void> blobMetadataLookup(KmsConnectorInterface interf, KmsConnBlobM
 	wait(delay(deterministicRandom()->random01())); // simulate network delay
 
 	// buggify errors or omitted tenants in response
-	if (!g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01)) {
+	if (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01)) {
 		if (deterministicRandom()->coinflip()) {
 			// remove some number of tenants from the response
 			int targetSize = deterministicRandom()->randomInt(0, rep.metadataDetails.size());

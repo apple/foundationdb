@@ -1517,7 +1517,6 @@ struct RestoreClusterImpl {
 	// Store the cluster entry for the restored cluster
 	ACTOR static Future<Void> registerRestoringClusterInManagementCluster(RestoreClusterImpl* self,
 	                                                                      Reference<typename DB::TransactionT> tr) {
-
 		state Optional<DataClusterMetadata> dataClusterMetadata = wait(tryGetClusterTransaction(tr, self->clusterName));
 		if (dataClusterMetadata.present() &&
 		    (dataClusterMetadata.get().entry.clusterState != DataClusterState::RESTORING ||
@@ -1528,7 +1527,10 @@ struct RestoreClusterImpl {
 			MetaclusterMetadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
 			MetaclusterMetadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
 
-			self->dataClusterId = deterministicRandom()->randomUniqueID();
+			if (!dataClusterMetadata.present()) {
+				self->dataClusterId = deterministicRandom()->randomUniqueID();
+			}
+
 			DataClusterEntry clusterEntry;
 			clusterEntry.id = self->dataClusterId;
 			clusterEntry.clusterState = DataClusterState::RESTORING;
@@ -1765,7 +1767,11 @@ struct RestoreClusterImpl {
 		// If we had to break a rename cycle using temporary tenant names, use that in the updated
 		// entry here since the rename will be completed later.
 		if (existingEntry.tenantName != updatedEntry.tenantName) {
-			ASSERT(existingEntry.tenantName.startsWith(metaclusterTemporaryRenamePrefix));
+			if (!existingEntry.tenantName.startsWith(metaclusterTemporaryRenamePrefix)) {
+				// This transaction is going to fail due to the restore ID check, so we don't need to do anything
+				CODE_PROBE(true, "tenant restore rename mismatch due to concurrency", probe::decoration::rare);
+				return Void();
+			}
 			updatedEntry.tenantName = existingEntry.tenantName;
 		}
 

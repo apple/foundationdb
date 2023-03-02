@@ -109,6 +109,7 @@ private:
 		self->storageQuotas =
 		    std::map<TenantGroupName, int64_t>(storageQuotaList.results.begin(), storageQuotaList.results.end());
 
+		self->tenantGroupIndex.clear();
 		for (auto t : tenantGroupTenantTuples.results) {
 			ASSERT_EQ(t.size(), 2);
 			TenantGroupName tenantGroupName = t.getString(0);
