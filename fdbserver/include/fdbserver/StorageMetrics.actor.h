@@ -84,11 +84,13 @@ struct StorageServerMetrics {
 	// FIXME: iops is not effectively tested, and is not used by data distribution
 	TransientStorageMetricSample iopsSample, bytesWriteSample;
 	TransientStorageMetricSample bytesReadSample;
+	TransientStorageMetricSample opsReadSample;
 
 	StorageServerMetrics()
 	  : byteSample(0), iopsSample(SERVER_KNOBS->IOPS_UNITS_PER_SAMPLE),
 	    bytesWriteSample(SERVER_KNOBS->BYTES_WRITTEN_UNITS_PER_SAMPLE),
-	    bytesReadSample(SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE) {}
+	    bytesReadSample(SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE),
+	    opsReadSample(SERVER_KNOBS->OPS_READ_UNITES_PER_SAMPLE) {}
 
 	StorageMetrics getMetrics(KeyRangeRef const& keys) const;
 
@@ -129,16 +131,19 @@ struct StorageServerMetrics {
 
 	Future<Void> waitMetrics(WaitMetricsRequest req, Future<Void> delay);
 
-	std::vector<ReadHotRangeWithMetrics> getReadHotRanges(KeyRangeRef shard,
-	                                                      double readDensityRatio,
-	                                                      int64_t baseChunkSize,
-	                                                      int64_t minShardReadBandwidthPerKSeconds) const;
+	std::vector<ReadHotRangeWithMetrics> getReadHotRanges(KeyRangeRef shard, int chunkCount, uint8_t splitType) const;
 
 	void getReadHotRanges(ReadHotSubRangeRequest req) const;
 
 	std::vector<KeyRef> getSplitPoints(KeyRangeRef range, int64_t chunkSize, Optional<KeyRef> prefixToRemove) const;
 
 	void getSplitPoints(SplitRangeRequest req, Optional<KeyRef> prefix) const;
+
+	[[maybe_unused]] std::vector<ReadHotRangeWithMetrics> _getReadHotRanges(
+	    KeyRangeRef shard,
+	    double readDensityRatio,
+	    int64_t baseChunkSize,
+	    int64_t minShardReadBandwidthPerKSeconds) const;
 
 private:
 	static void collapse(KeyRangeMap<int>& map, KeyRef const& key);
