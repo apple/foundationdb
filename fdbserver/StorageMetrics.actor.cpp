@@ -358,10 +358,13 @@ void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
 	req.reply.send(rep);
 }
 
+// Equally split the metrics (specified by splitType) of parentRange into splitCount and return all the sampled metrics
+// (bytes, readBytes and readOps) of each chunk
+// NOTE: update unit test "equalDivide" after change
 std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::getReadHotRanges(KeyRangeRef parentRange,
                                                                             int splitCount,
                                                                             uint8_t splitType) const {
-	const StorageMetricSample* sampler;
+	const StorageMetricSample* sampler = nullptr;
 	switch (splitType) {
 	case ReadHotSubRangeRequest::SplitType::BYTES:
 		sampler = &byteSample;
@@ -377,28 +380,42 @@ std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::getReadHotRanges(KeyR
 	}
 
 	std::vector<ReadHotRangeWithMetrics> toReturn;
+	if (sampler->sample.empty()) {
+		return toReturn;
+	}
+
 	double total = sampler->getEstimate(parentRange);
 	double splitChunk = total / splitCount;
 
 	KeyRef beginKey = parentRange.begin;
 	while (true) {
-		auto endKey = sampler->sample.index(sampler->sample.sumTo(sampler->sample.lower_bound(beginKey)) + splitChunk);
-		// Empty chunk
-		if (beginKey >= *endKey)
+		auto beginIt = sampler->sample.lower_bound(beginKey);
+		if (beginIt == sampler->sample.end()) {
 			break;
+		}
+		auto endIt = sampler->sample.index(sampler->sample.sumTo(beginIt) + splitChunk - 1);
+		// because index return x where sumTo(x+1) (that including sample at x) > metrics, we have to forward endIt here
+		if (endIt != sampler->sample.end())
+			++endIt;
 
-		// Don't round up the larger range for now.
-		KeyRangeRef range(beginKey, *endKey);
+		if (endIt == sampler->sample.end()) {
+			KeyRangeRef lastRange(beginKey, parentRange.end);
+			toReturn.emplace_back(
+			    lastRange,
+			    byteSample.getEstimate(lastRange),
+			    (double)bytesReadSample.getEstimate(lastRange) / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL,
+			    (double)opsReadSample.getEstimate(lastRange) / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
+			break;
+		}
 
+		KeyRangeRef range(beginKey, *endIt);
 		toReturn.emplace_back(
 		    range,
 		    byteSample.getEstimate(range),
 		    (double)bytesReadSample.getEstimate(range) / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL,
 		    (double)opsReadSample.getEstimate(range) / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
 
-		if (*endKey >= parentRange.end)
-			break;
-		beginKey = *endKey;
+		beginKey = *endIt;
 	}
 	return toReturn;
 }
@@ -799,5 +816,62 @@ TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/consecutiveRanges") {
 	ASSERT(t.size() == 2 && (*t.begin()).keys.begin == "Bah"_sr && (*t.begin()).keys.end == "But"_sr);
 	ASSERT(t.at(1).keys.begin == "Cat"_sr && t.at(1).keys.end == "Dah"_sr);
 
+	return Void();
+}
+
+TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/equalDivide") {
+
+	int64_t sampleUnit = SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
+	StorageServerMetrics ssm;
+
+	// 14000 / 7 = 2000 each chunk
+	// chunk 0
+	ssm.bytesReadSample.sample.insert("Apple"_sr, 1000 * sampleUnit);
+	ssm.bytesReadSample.sample.insert("Banana"_sr, 2000 * sampleUnit);
+	// chunk 1
+	ssm.bytesReadSample.sample.insert("Bucket"_sr, 2000 * sampleUnit);
+	// chunk 2
+	ssm.bytesReadSample.sample.insert("Cat"_sr, 1000 * sampleUnit);
+	ssm.bytesReadSample.sample.insert("Cathode"_sr, 1000 * sampleUnit);
+	// chunk 3
+	ssm.bytesReadSample.sample.insert("Dog"_sr, 5000 * sampleUnit);
+	// chunk 4
+	ssm.bytesReadSample.sample.insert("Final"_sr, 2000 * sampleUnit);
+
+	// chunk 0
+	ssm.byteSample.sample.insert("A"_sr, 20);
+	ssm.byteSample.sample.insert("Absolute"_sr, 80);
+	ssm.byteSample.sample.insert("Apple"_sr, 1000);
+	ssm.byteSample.sample.insert("Bah"_sr, 20);
+	ssm.byteSample.sample.insert("Banana"_sr, 80);
+	ssm.byteSample.sample.insert("Bob"_sr, 200);
+	// chunk 1
+	ssm.byteSample.sample.insert("But"_sr, 100);
+	// chunk 2
+	ssm.byteSample.sample.insert("Cat"_sr, 300);
+	ssm.byteSample.sample.insert("Dah"_sr, 300);
+
+	// edge case: no overlap
+	std::vector<ReadHotRangeWithMetrics> t =
+	    ssm.getReadHotRanges(KeyRangeRef("Y"_sr, "Z"_sr), 7, ReadHotSubRangeRequest::SplitType::READ_BYTES);
+	ASSERT_EQ(t.size(), 0);
+
+	// divide all keys
+	t = ssm.getReadHotRanges(KeyRangeRef(""_sr, "\xff"_sr), 7, ReadHotSubRangeRequest::SplitType::READ_BYTES);
+	ASSERT_EQ(t.size(), 5);
+	//	for(int i = 0; i < t.size(); ++ i) {
+	//		fmt::print("{} {}\n", t[i].keys.begin.toString(), t[i].readBandwidthSec);
+	//	}
+	ASSERT_EQ((*t.begin()).keys.begin,
+	          ""_sr); // Note since difference sampler is not aligned, so "A" is not the first key
+	ASSERT_EQ((*t.begin()).keys.end, "Bucket"_sr);
+	ASSERT_EQ(t[0].bytes, 1400);
+
+	ASSERT_EQ(t.at(1).keys.begin, "Bucket"_sr);
+	ASSERT_EQ(t.at(1).keys.end, "Cat"_sr);
+
+	ASSERT_EQ(t.at(2).bytes, 600);
+	ASSERT_EQ(t.at(3).readBandwidthSec, 5000 * sampleUnit / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
+	ASSERT_EQ(t.at(3).bytes, 0);
 	return Void();
 }
