@@ -956,7 +956,6 @@ std::string encodeFailedLocalityKey(std::string const& locality) {
 }
 
 const KeyRef storageEngineParamsPrefix = "\xff/conf/storage_engine_params/"_sr;
-const KeyRef storageEngineParamsVersionKey = "\xff/conf/storage_engine_params"_sr;
 const KeyRangeRef storageEngineParamsKeys("\xff/conf/storage_engine_params/"_sr, "\xff/conf/storage_engine_params0"_sr);
 
 // const KeyRangeRef globalConfigKeys( "\xff/globalConfig/"_sr, "\xff/globalConfig0"_sr );

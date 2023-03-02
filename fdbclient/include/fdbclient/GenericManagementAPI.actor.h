@@ -535,8 +535,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 			// everytime storage engine or parameter changes, it will reset
 			// make sure we clear before setting the new values
 			if (storageEngineParamsChange) {
-				tr->addReadConflictRange(singleKeyRange(storageEngineParamsVersionKey));
-				tr->set(storageEngineParamsVersionKey, versionKey);
 				tr->clear(storageEngineParamsKeys);
 			}
 

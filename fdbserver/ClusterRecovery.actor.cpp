@@ -613,7 +613,7 @@ ACTOR Future<Void> configurationMonitor(Reference<ClusterRecoveryData> self, Dat
 				state Future<Void> watchFuture =
 				    tr.watch(moveKeysLockOwnerKey) || tr.watch(excludedServersVersionKey) ||
 				    tr.watch(failedServersVersionKey) || tr.watch(excludedLocalityVersionKey) ||
-				    tr.watch(failedLocalityVersionKey) || tr.watch(storageEngineParamsVersionKey);
+				    tr.watch(failedLocalityVersionKey);
 				wait(tr.commit());
 				wait(watchFuture);
 				break;
