@@ -131,7 +131,7 @@ struct StorageServerMetrics {
 
 	Future<Void> waitMetrics(WaitMetricsRequest req, Future<Void> delay);
 
-	std::vector<ReadHotRangeWithMetrics> getReadHotRanges(KeyRangeRef shard, int splitCount, uint8_t splitType) const;
+	std::vector<ReadHotRangeWithMetrics> getReadHotRanges(KeyRangeRef shard, int chunkCount, uint8_t splitType) const;
 
 	void getReadHotRanges(ReadHotSubRangeRequest req) const;
 

@@ -358,11 +358,11 @@ void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
 	req.reply.send(rep);
 }
 
-// Equally split the metrics (specified by splitType) of parentRange into splitCount and return all the sampled metrics
+// Equally split the metrics (specified by splitType) of parentRange into chunkCount and return all the sampled metrics
 // (bytes, readBytes and readOps) of each chunk
 // NOTE: update unit test "equalDivide" after change
 std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::getReadHotRanges(KeyRangeRef parentRange,
-                                                                            int splitCount,
+                                                                            int chunkCount,
                                                                             uint8_t splitType) const {
 	const StorageMetricSample* sampler = nullptr;
 	switch (splitType) {
@@ -385,7 +385,7 @@ std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::getReadHotRanges(KeyR
 	}
 
 	double total = sampler->getEstimate(parentRange);
-	double splitChunk = total / splitCount;
+	double splitChunk = total / chunkCount;
 
 	KeyRef beginKey = parentRange.begin;
 	while (true) {
@@ -482,7 +482,7 @@ std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::_getReadHotRanges(
 
 void StorageServerMetrics::getReadHotRanges(ReadHotSubRangeRequest req) const {
 	ReadHotSubRangeReply reply;
-	auto _ranges = getReadHotRanges(req.keys, req.splitCount, req.type);
+	auto _ranges = getReadHotRanges(req.keys, req.chunkCount, req.type);
 	reply.readHotRanges = VectorRef(_ranges.data(), _ranges.size());
 	req.reply.send(reply);
 }

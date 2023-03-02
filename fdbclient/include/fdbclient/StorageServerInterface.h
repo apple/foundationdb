@@ -841,15 +841,15 @@ struct ReadHotSubRangeRequest {
 	ReplyPromise<ReadHotSubRangeReply> reply;
 
 	uint8_t type = SplitType::BYTES;
-	int splitCount = 1;
+	int chunkCount = 1;
 
 	ReadHotSubRangeRequest() {}
-	ReadHotSubRangeRequest(KeyRangeRef const& keys, SplitType type = SplitType::BYTES, int splitCount = 1)
-	  : keys(arena, keys), type(type), splitCount(splitCount) {}
+	ReadHotSubRangeRequest(KeyRangeRef const& keys, SplitType type = SplitType::BYTES, int chunkCount = 1)
+	  : keys(arena, keys), type(type), chunkCount(chunkCount) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, reply, type, splitCount, arena);
+		serializer(ar, keys, reply, type, chunkCount, arena);
 	}
 };
 
