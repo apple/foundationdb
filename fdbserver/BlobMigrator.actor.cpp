@@ -234,12 +234,14 @@ private:
 				                         BlobRestoreStatus(BlobRestorePhase::APPLYING_MLOGS),
 				                         BlobRestorePhase::COPYING_DATA));
 				wait(unlockDatabase(self->db_, self->interf_.id()));
+				TraceEvent("BlobMigratorCopied", self->interf_.id()).log();
 				wait(applyMutationLogs(self));
 
 				wait(updateRestoreStatus(self->db_,
 				                         normalKeys,
 				                         BlobRestoreStatus(BlobRestorePhase::DONE),
 				                         BlobRestorePhase::APPLYING_MLOGS));
+				TraceEvent("BlobMigratorDone", self->interf_.id()).log();
 				return Void();
 			}
 			wait(delay(SERVER_KNOBS->BLOB_MIGRATOR_CHECK_INTERVAL));
@@ -332,7 +334,7 @@ private:
 		// check last version in mutation logs
 		state std::string mlogsUrl = wait(getMutationLogUrl());
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
-		BackupDescription desc = wait(bc->describeBackup());
+		BackupDescription desc = wait(bc->describeBackup(true));
 		if (!desc.contiguousLogEnd.present()) {
 			TraceEvent("InvalidMutationLogs").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL);
 			throw blob_restore_missing_logs();
