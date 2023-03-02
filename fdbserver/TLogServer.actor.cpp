@@ -2358,7 +2358,7 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 
 	// Measure server-side RPC latency from the time a request was
 	// received to time the response was sent.
-	const double endTime = g_network->timer();
+	const double endTime = timer();
 
 	if (isNotDuplicate) {
 		self->commitLatencyDist->sampleSeconds(endTime - req.requestTime());
