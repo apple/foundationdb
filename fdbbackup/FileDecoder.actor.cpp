@@ -37,6 +37,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
+#include "fdbclient/BuildFlags.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IKnobCollection.h"
@@ -44,6 +45,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/versions.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
@@ -57,6 +59,7 @@
 #define SevDecodeInfo SevVerbose
 
 extern bool g_crashOnError;
+extern const char* getSourceVersion();
 
 namespace file_converter {
 
@@ -887,6 +890,8 @@ ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 		printLogFiles("Releavant range files are: ", rangeFiles);
 	}
 
+	TraceEvent("TotalFiles", uid).detail("LogFiles", logFiles.size()).detail("RangeFiles", rangeFiles.size());
+
 	if (params->list_only)
 		return Void();
 
@@ -918,6 +923,13 @@ ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 } // namespace file_converter
 
 int main(int argc, char** argv) {
+	std::string commandLine;
+	for (int a = 0; a < argc; a++) {
+		if (a)
+			commandLine += ' ';
+		commandLine += argv[a];
+	}
+
 	try {
 		std::unique_ptr<CSimpleOpt> args(
 		    new CSimpleOpt(argc, argv, file_converter::gConverterOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE));
@@ -959,6 +971,17 @@ int main(int argc, char** argv) {
 
 		// Must be called after setupNetwork() to be effective
 		param->updateKnobs();
+
+		TraceEvent("ProgramStart")
+		    .setMaxEventLength(12000)
+		    .detail("SourceVersion", getSourceVersion())
+		    .detail("Version", FDB_VT_VERSION)
+		    .detail("PackageName", FDB_VT_PACKAGE_NAME)
+		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+		    .setMaxFieldLength(10000)
+		    .detail("CommandLine", commandLine)
+		    .setMaxFieldLength(0)
+		    .trackLatest("ProgramStart");
 
 		TraceEvent::setNetworkThread();
 		openTraceFile({}, 10 << 20, 500 << 20, param->log_dir, "decode", param->trace_log_group);
