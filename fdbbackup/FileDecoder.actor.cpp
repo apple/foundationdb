@@ -783,6 +783,7 @@ ACTOR Future<Void> process_range_file(Reference<IBackupContainer> container,
 		}
 	}
 
+	TraceEvent("ProcessRangeFileDone", uid).detail("File", file.fileName);
 	return Void();
 }
 
@@ -892,6 +893,8 @@ ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 		rangeFiles = files;
 		printLogFiles("Releavant range files are: ", rangeFiles);
 	}
+
+	TraceEvent("TotalFiles", uid).detail("LogFiles", logFiles.size()).detail("RangeFiles", rangeFiles.size());
 
 	if (params->list_only)
 		return Void();
