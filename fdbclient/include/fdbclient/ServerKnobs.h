@@ -141,22 +141,27 @@ public:
 	//   is possible within but not between priority groups; fewer priority groups
 	//   mean better worst case time bounds
 	// Maximum allowable priority is 999.
-	int PRIORITY_RECOVER_MOVE;
-	int PRIORITY_REBALANCE_UNDERUTILIZED_TEAM;
-	int PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
-	int PRIORITY_REBALANCE_READ_OVERUTIL_TEAM;
-	int PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM;
-	int PRIORITY_PERPETUAL_STORAGE_WIGGLE;
-	int PRIORITY_TEAM_HEALTHY;
-	int PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
-	int PRIORITY_TEAM_REDUNDANT;
+	// Update the status json .data.team_tracker.state field when necessary
+	int PRIORITY_RECOVER_MOVE; // Priority for movement resume from previous unfinished in-flight movement when a new DD
+	                           // start
+	int PRIORITY_REBALANCE_UNDERUTILIZED_TEAM; // For disk valley filler
+	int PRIORITY_REBALANCE_OVERUTILIZED_TEAM; // For disk mountain chopper
+	int PRIORITY_REBALANCE_READ_OVERUTIL_TEAM; // For read valley filler
+	int PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM; // For read mountain chopper
+	int PRIORITY_PERPETUAL_STORAGE_WIGGLE; // Priority for wiggle a storage server
+	int PRIORITY_TEAM_HEALTHY; // Priority when all servers in a team are healthy
+	int PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER; // Priority when there's undesired servers in the team. (ex. same ip
+	                                             // address as other SS process, or SS is lagging too far ...)
+	int PRIORITY_TEAM_REDUNDANT; // Priority for removing redundant team to make the team count within a good range
 	int PRIORITY_MERGE_SHARD;
-	int PRIORITY_POPULATE_REGION;
-	int PRIORITY_TEAM_UNHEALTHY;
-	int PRIORITY_TEAM_2_LEFT;
-	int PRIORITY_TEAM_1_LEFT;
+	int PRIORITY_POPULATE_REGION; // Priority for populate remote region
+	int PRIORITY_TEAM_UNHEALTHY; // Priority when the replica > 3 and there's at least one unhealthy server in a team.
+	                             // Or when the team contains a server with wrong configuration (ex. storage engine,
+	                             // locality, excluded ...)
+	int PRIORITY_TEAM_2_LEFT; // Priority when the replica <= 3 and there's 2 healthy servers in a team
+	int PRIORITY_TEAM_1_LEFT; // Priority when the replica <= 3 and there's 1 healthy server in a team
 	int PRIORITY_TEAM_FAILED; // Priority when a server in the team is excluded as failed
-	int PRIORITY_TEAM_0_LEFT;
+	int PRIORITY_TEAM_0_LEFT; // Priority when the replica <= 3 and there's no healthy server in a team
 	int PRIORITY_SPLIT_SHARD;
 	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD; // Priority when a physical shard is oversize or anonymous
 
