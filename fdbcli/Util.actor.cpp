@@ -156,7 +156,6 @@ ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>*
 ACTOR Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
                                               std::map<std::string, StorageServerInterface>* interfaces) {
 	state Reference<ITransaction> tr = db->createTransaction();
-	state int i = 0;
 	loop {
 		interfaces->clear();
 		try {
@@ -169,7 +168,7 @@ ACTOR Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
 			ASSERT_LT(serverListF.get().size(), CLIENT_KNOBS->TOO_MANY);
 			RangeResult serverList = serverListF.get();
 			// decode server interfaces
-			for (i = 0; i < serverList.size(); i++) {
+			for (int i = 0; i < serverList.size(); i++) {
 				auto ssi = decodeServerListValue(serverList[i].value);
 				(*interfaces)[ssi.address().toString()] = ssi;
 			}
