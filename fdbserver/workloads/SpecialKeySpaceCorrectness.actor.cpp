@@ -315,14 +315,17 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	ACTOR Future<Void> testSpecialKeySpaceErrors(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
 		state Database cx = cx_->clone();
+		state int64_t tenantId;
 		try {
-			wait(success(TenantAPI::createTenant(cx.getReference(), TenantName("foo"_sr))));
+			Optional<TenantMapEntry> entry = wait(TenantAPI::createTenant(cx.getReference(), TenantName("foo"_sr)));
+			ASSERT(entry.present());
+			tenantId = entry.get().id;
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_tenant_already_exists || e.code() == error_code_actor_cancelled);
 		}
 		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
 		state Reference<ReadYourWritesTransaction> tenantTx =
-		    makeReference<ReadYourWritesTransaction>(cx, TenantName("foo"_sr));
+		    makeReference<ReadYourWritesTransaction>(cx, makeReference<Tenant>(tenantId));
 		// Use new transactions that may use default tenant rather than re-use tx
 		// This is because tx will reject raw access for later tests if default tenant is set
 		state Reference<ReadYourWritesTransaction> defaultTx1 = makeReference<ReadYourWritesTransaction>(cx);

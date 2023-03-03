@@ -83,6 +83,7 @@ endif()
 target_compile_definitions(fdbrpc_sampling PRIVATE -DENABLE_SAMPLING)
 if(WIN32)
   add_dependencies(fdbrpc_sampling_actors fdbrpc_actors)
+  add_dependencies(tokensign_actors fdbrpc_actors)
 endif()
 
 add_subdirectory(tests)

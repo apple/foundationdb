@@ -4,6 +4,7 @@ tenantModes = ['optional', 'required']
 
 [[test]]
 testTitle = 'TenantCreation'
+clearAfterTest = false
 
     [[test.workload]]
     testName = 'CreateTenant'

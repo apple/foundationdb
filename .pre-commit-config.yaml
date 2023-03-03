@@ -11,4 +11,3 @@ repos:
     rev: v1.5
     hooks:
     - id: secret-scanner
-

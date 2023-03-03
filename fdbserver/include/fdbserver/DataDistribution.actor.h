@@ -28,7 +28,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/TenantCache.h"
 #include "fdbserver/TCInfo.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/DDTxnProcessor.h"
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include "fdbserver/Knobs.h"
@@ -489,6 +489,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	std::vector<DDShardInfo> shards;
 	Optional<Key> initHealthyZoneValue; // set for maintenance mode
 	KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
+	std::vector<AuditStorageState> auditStates;
 };
 
 // Holds the permitted size and IO Bounds for a shard
@@ -573,6 +574,8 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	enum State : uint8_t { INVALID = 0, RUN = 1, PAUSE = 2 };
 
 	DDTeamCollection const* teamCollection;
+	StorageWiggleData wiggleData; // the wiggle related data persistent in database
+
 	StorageWiggleMetrics metrics;
 	AsyncVar<bool> stopWiggleSignal;
 	// data structures

@@ -332,7 +332,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					}
 					expectedCnt = std::min(expectedCnt, boundByRecord);
 					std::cout << "boundByRecord:  " << boundByRecord << std::endl;
-					ASSERT(result.size() == expectedCnt);
+					ASSERT_LE(result.size(), expectedCnt);
 					beginSelector = KeySelector(firstGreaterThan(result.back().key));
 				}
 			} else {

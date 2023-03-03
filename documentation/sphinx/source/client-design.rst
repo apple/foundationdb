@@ -28,6 +28,8 @@ FoundationDB supports language bindings for application development using the or
 
 * :doc:`tenants` describes the use of the tenants feature to define named transaction domains.
 
+* :doc:`automatic-idempotency` describes the use of a transaction option to prevent transactions from failing with ``commit_unknown_result``.
+
 .. toctree::
     :maxdepth: 1
     :titlesonly:
@@ -45,3 +47,4 @@ FoundationDB supports language bindings for application development using the or
     transaction-profiler-analyzer
     api-version-upgrade-guide
     tenants
+    automatic-idempotency

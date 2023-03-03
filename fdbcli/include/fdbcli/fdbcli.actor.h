@@ -39,6 +39,16 @@
 
 namespace fdb_cli {
 
+constexpr char msgTypeKey[] = "type";
+constexpr char msgClusterKey[] = "cluster";
+constexpr char msgClusterTypeKey[] = "cluster_type";
+constexpr char msgMetaclusterName[] = "metacluster_name";
+constexpr char msgMetaclusterKey[] = "metacluster";
+constexpr char msgDataClustersKey[] = "data_clusters";
+constexpr char msgCapacityKey[] = "capacity";
+constexpr char msgAllocatedKey[] = "allocated";
+constexpr char msgErrorKey[] = "error";
+
 struct CommandHelp {
 	std::string usage;
 	std::string short_desc;
@@ -183,6 +193,11 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
                                              std::string filePath,
                                              bool isNewDatabase,
                                              bool force);
+// Trigger audit storage
+ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> clusterFile,
+                                           std::vector<StringRef> tokens);
+// Retrieve audit storage status
+ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens);
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // include command
@@ -259,6 +274,8 @@ ACTOR Future<bool> tssqCommandActor(Reference<IDatabase> db, std::vector<StringR
 ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx, std::vector<StringRef> tokens);
 // targetversion command
 ACTOR Future<bool> targetVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// idempotencyids command
+ACTOR Future<bool> idempotencyIdsCommandActor(Database cx, std::vector<StringRef> tokens);
 
 } // namespace fdb_cli
 

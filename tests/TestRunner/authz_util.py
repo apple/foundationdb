@@ -1,6 +1,7 @@
 from authlib.jose import JsonWebKey, KeySet, jwt
 from typing import List
 import json
+import time
 
 def private_key_gen(kty: str, kid: str):
     assert kty == "EC" or kty == "RSA"
@@ -29,3 +30,17 @@ def token_gen(private_key, claims, headers={}):
             "kid": private_key.kid,
         }
     return jwt.encode(headers, claims, private_key)
+
+def token_claim_1h(tenant_id: int):
+    # JWT claim that is valid for 1 hour since time of invocation
+    now = time.time()
+    return {
+        "iss": "fdb-authz-tester",
+        "sub": "authz-test",
+        "aud": ["tmp-cluster"],
+        "iat": now,
+        "nbf": now - 1,
+        "exp": now + 60 * 60,
+        "jti": random_alphanum_str(10),
+        "tenants": [to_str(base64.b64encode(tenant_id.to_bytes(8, "big")))],
+    }

@@ -56,7 +56,6 @@ function(add_documentation_target)
             ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/${target}_done
     DEPENDS ${SRCS}
     WORKING_DIRECTORY ${venv_dir})
-  message(STATUS "add_custom_target(${target} DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target}_done)")
   add_custom_target(${target} DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target}_done)
   add_dependencies(${target} buildsphinx)
 endfunction()
@@ -85,7 +84,6 @@ else()
   string(MD5 username_hash ${username})
   # cmake math function can only use 64 bit signed integers - so we just truncate the string
   string(SUBSTRING "${username_hash}" 0 15 username_hash_small)
-  message(STATUS math(EXPR port "(0x${username_hash_small} % 8000) + 8000" OUTPUT_FORMAT DECIMAL))
   math(EXPR port "(0x${username_hash_small} % 8000) + 8000" OUTPUT_FORMAT DECIMAL)
   message(STATUS "Port is ${port}")
 endif()

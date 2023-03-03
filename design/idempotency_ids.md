@@ -6,12 +6,22 @@ As an intermediate goal, I plan to introduce this feature disabled by default. T
 
 # API
 
-Introduce a new transaction option `IDEMPOTENCY_ID`, which will be validated to be at most 255 bytes.
+Introduce a new transaction option `AUTOMATIC_IDEMPOTENCY`, which sets the transaction's idempotency id to 16 random bytes if there's no idempotency id yet. Setting this also instructs the fdb client to manage the full lifecycle of the idempotency id (expiring the id automatically after a commit acknowledgement).
+
+Introduce a new transaction option `IDEMPOTENCY_ID`, which will be validated to be at most 255 bytes. This option sets the idempotency id for the transaction, and also instructs the fdb client _not to_ expire this id automatically. The user is responsible for calling `fdb_database_expire_idempotency_id` to expire it.
+
 Add 
 ```
-FDBFuture* fdb_transaction_commit_result(FDBTransaction* tr, uint8_t const* idempotency_id, int idempotency_id_length)
+FDBFuture* fdb_database_commit_result(FDBDatabase* db, uint8_t const* idempotency_id, int idempotency_id_length, int64_t read_snapshot)
 ```
-, which can be used to determine the result of a commit that failed with `transaction_timed_out`.
+, which can be used to determine the result of a commit with the given read snapshot and idempotency id. Read snapshot is the read version of the last transaction attempt, and this is used to narrow down the keyspace that needs to be searched for the idempotency id.
+
+Add
+```
+void fdb_database_expire_idempotency_id(FDBDatabase* db, uint8_t const* idempotency_id, int idempotency_id_length)
+```
+
+This lets the client know that the caller is done with this idempotency id and that the cluster may purge it.
 
 Commits for transactions with idempotency ids would not fail with `commit_unknown_result`, but in (extremely) rare cases could fail with a new error that clients are expected to handle by restarting the process.
 # Background
@@ -49,10 +59,10 @@ in that id and the cluster can reclaim the space used to store the idempotency
 id. The commit proxy that committed a batch is responsible for cleaning all
 idempotency kv pairs from that batch, so clients must tell that specific proxy
 that they're done with the id. The first proxy will also periodically clean up
-the oldest idempotency ids, based on a policy determined by two knobs.  One knob
-will control the minimum lifetime of an idempotency id (i.e. don't delete
-anything younger than 1 day), and the other will control the target byte size of
-the idempotency keys (e.g. keep 100 MB of idempotency keys around).
+the oldest idempotency ids, based on a policy determined by knobs.  The knob
+`IDEMPOTENCY_IDS_MIN_AGE_SECONDS` controls the minimum lifetime of an
+idempotency id (i.e. don't delete anything younger than 1 day). More knobs may
+be considered in the future.
 
 # Commit protocol
 
@@ -74,14 +84,44 @@ If a transaction learns that it did in fact _not_ commit, the commit future will
 
 If a transaction learns that it has been in-flight so long that its idempotency id could have been expired, then it will fail with a new, non-retriable error. It is expected that this will be rare enough that crashing the application is acceptable.
 
+## Optimization to reduce storage server load
+
+Evan pointed out that in normal operation, idempotency id mutations wouldn't need to go to a storage server at all! They could be stored in the log system and only long-lived ids would need to be spilled to storage servers.
+
+The basic design would be something like this
+
+1. Add a new pseudo tag for idempotency id mutations
+1. Write idempotency ids to this new pseudo tag atomically with their transactions
+1. Maintain an in-memory map of idempotency ids on proxies. Clients who lose their connection while their commit request is in-flight can ask the proxy for the commit status.
+1. Clients know which proxy they sent their CommitTransactionRequest to, and so they know where to send the expire request. The expire request would simply remove the id from the in-memory map
+1. Proxies spill older ids to storage servers using the current design, to manage memory usage for the in-memory map. Proxies track the version they've spilled to.
+1. The first proxy would pop the pseudo tag according to the min version any proxy has spilled to
+1. On recovery, in-flight idempotency ids could be assigned to the first proxy, or they could be spilled to storage servers
+
 # Considerations
 
-- Additional storage space on the cluster. This can be controlled directly via an idempotency id target bytes knob/config.
-- Potential write hot spot.
+- Additional storage space on the cluster for the idempotency ids.
+- Potential write hot spot, since all idempotency id writes are adjacent and monotonically increasing.
 
 # Multi-version client
 
 The multi-version client will generate its own idempotency id for a transaction and manage its lifecycle. It will duplicate the logic in NativeApi to achieve the same guarantees. As part of this change we will also ensure that the previous commit attempt is no longer in-flight before allowing the commit future to become ready. This will fix a potential "causal-write-risky" issue if a commit attempt fails with `cluster_version_changed`.
+
+# Implementation
+
+```
+FDBFuture* fdb_database_commit_result(FDBDatabase* db, uint8_t const* idempotency_id, int idempotency_id_length, int64_t read_snapshot)
+```
+
+The implementation will commit a dummy transaction that conflicts with transactions that have this idempotency_id. (Recall that idempotency_id is added to the conflict ranges, so any transaction with the same idempotency id conflict with the dummy transaction.) This ensures that no transactions with this idempotency_id are in flight.
+
+The implementation would then search storage servers for the idempotency id to determine the commit result. The range of keys that need to be read is bounded by the range of possible commit versions for a transaction with `read_snapshot`.
+
+```
+void fdb_database_expire_idempotency_id(FDBDatabase* db, uint8_t const* idempotency_id, int idempotency_id_length)
+```
+
+The fdb client would need to keep track of which commit proxies are responsible for recently committed transactions with idempotency ids, so it knows where to direct the expire requests. Proactively expiring idempotency ids is done on a best-effort basis, but this needs to work well enough that the storage used by the cluster for idempotency ids is acceptable. Users who are not using `AUTOMATIC_IDEMPOTENCY` are expected to call `fdb_database_expire_idempotency_id` to do the proactive clean up.
 
 # Experiments
 

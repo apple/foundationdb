@@ -28,17 +28,21 @@
 
 struct LeakTLogInterfaceWorkload : TestWorkload {
 	static constexpr auto NAME = "LeakTLogInterface";
-	TenantName tenant;
+	TenantName tenantName;
+	Reference<Tenant> tenant;
 	Standalone<StringRef> fieldName;
 	double testDuration;
 
 	LeakTLogInterfaceWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		tenant = getOption(options, "tenant"_sr, "DefaultTenant"_sr);
+		tenantName = getOption(options, "tenant"_sr, "DefaultTenant"_sr);
 		fieldName = getOption(options, "key"_sr, "TLogInterface"_sr);
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 	}
 
-	Future<Void> setup(Database const& cx) override { return persistSerializedTLogInterface(this, cx); }
+	Future<Void> setup(Database const& cx) override {
+		tenant = makeReference<Tenant>(cx, tenantName);
+		return persistSerializedTLogInterface(this, cx);
+	}
 
 	Future<Void> start(Database const& cx) override { return timeout(updateLoop(this, cx), testDuration, Void()); }
 	Future<bool> check(Database const& cx) override { return true; }

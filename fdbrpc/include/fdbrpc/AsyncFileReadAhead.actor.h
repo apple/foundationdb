@@ -127,10 +127,23 @@ public:
 			int rlen = readEnd - readStart;
 			memcpy((uint8_t*)data + wpos, block->data + readStart, rlen);
 			wpos += rlen;
+
+			// unpin this block
+			localCache.erase(blockNum);
+			if (f->m_blocks.size() > f->m_cache_block_limit) {
+				// make an attempt to free no-longer needed blocks as we go
+				// FIXME: could also expire previous blocks if above limit and they're also free
+				auto i = f->m_blocks.find(blockNum);
+				ASSERT(i != f->m_blocks.end() && i->first == blockNum);
+				if (i->second.getFutureReferenceCount() == 1) {
+					// printf("evicting block %d\n", i->first);
+					i = f->m_blocks.erase(i);
+				}
+			}
 		}
 
 		ASSERT(wpos == length);
-		localCache.clear();
+		ASSERT(localCache.empty());
 
 		// If the cache is too large then go through the cache in block number order and remove any entries whose future
 		// has a reference count of 1, stopping once the cache is no longer too big.  There is no point in removing

@@ -36,8 +36,6 @@ namespace FdbApiTester {
 
 namespace {
 
-#define API_VERSION_CLIENT_TMP_DIR 720
-
 enum TesterOptionId {
 	OPT_CONNFILE,
 	OPT_HELP,
@@ -174,8 +172,7 @@ void processIntOption(const std::string& optionName, const std::string& value, i
 		throw TesterError(fmt::format("Invalid value {} for {}", value, optionName));
 	}
 	if (res < minValue || res > maxValue) {
-		throw TesterError(
-		    fmt::format("Value {} for {} must be between {} and {}", res, optionName, minValue, maxValue));
+		throw TesterError(fmt::format("Value for {} must be between {} and {}", optionName, minValue, maxValue));
 	}
 }
 
@@ -295,7 +292,7 @@ void fdb_check(fdb::Error e, std::string_view msg, fdb::Error::CodeType expected
 }
 
 void applyNetworkOptions(TesterOptions& options) {
-	if (!options.tmpDir.empty() && options.apiVersion >= API_VERSION_CLIENT_TMP_DIR) {
+	if (!options.tmpDir.empty() && options.apiVersion >= FDB_API_VERSION_CLIENT_TMP_DIR) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_TMP_DIR, options.tmpDir);
 	}
 	if (!options.externalClientLibrary.empty()) {
@@ -330,7 +327,7 @@ void applyNetworkOptions(TesterOptions& options) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_BUGGIFY_ENABLE);
 	}
 
-	if (options.testSpec.disableClientBypass && options.apiVersion >= 720) {
+	if (options.testSpec.disableClientBypass && options.apiVersion >= FDB_API_VERSION_DISABLE_CLIENT_BYPASS) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_CLIENT_BYPASS);
 	}
 

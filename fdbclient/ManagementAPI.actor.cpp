@@ -43,6 +43,7 @@
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"
 #include "fdbclient/Schemas.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -217,6 +218,23 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			out[p + key] = format("%d", mode);
 		}
 
+		if (key == "exclude") {
+			int p = 0;
+			while (p < value.size()) {
+				int end = value.find_first_of(',', p);
+				if (end == value.npos) {
+					end = value.size();
+				}
+				auto addrRef = StringRef(value).substr(p, end - p);
+				AddressExclusion addr = AddressExclusion::parse(addrRef);
+				if (addr.isValid()) {
+					out[encodeExcludedServersKey(addr)] = "";
+				} else {
+					printf("Error: invalid address format: %s\n", addrRef.toString().c_str());
+				}
+				p = end + 1;
+			}
+		}
 		return out;
 	}
 
@@ -2535,16 +2553,22 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 	}
 }
 
-ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile, KeyRange range, AuditType type) {
+ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
+                               KeyRange range,
+                               AuditType type,
+                               bool async) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+	TraceEvent(SevDebug, "ManagementAPIAuditStorageBegin");
 
 	loop {
 		while (!clusterInterface->get().present()) {
 			wait(clusterInterface->onChange());
 		}
 
-		UID auditId = wait(clusterInterface->get().get().triggerAudit.getReply(TriggerAuditRequest(type, range)));
+		TriggerAuditRequest req(type, range);
+		req.async = async;
+		UID auditId = wait(clusterInterface->get().get().triggerAudit.getReply(req));
 		TraceEvent(SevDebug, "ManagementAPIAuditStorageEnd").detail("AuditID", auditId);
 		return auditId;
 	}
@@ -2736,27 +2760,6 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 		    .detail("SchemaPath", schemaPath);
 		throw unknown_error();
 	}
-}
-
-void setStorageQuota(Transaction& tr, StringRef tenantGroupName, int64_t quota) {
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	auto key = storageQuotaKey(tenantGroupName);
-	tr.set(key, BinaryWriter::toValue<int64_t>(quota, Unversioned()));
-}
-
-void clearStorageQuota(Transaction& tr, StringRef tenantGroupName) {
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	auto key = storageQuotaKey(tenantGroupName);
-	tr.clear(key);
-}
-
-ACTOR Future<Optional<int64_t>> getStorageQuota(Transaction* tr, StringRef tenantGroupName) {
-	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	state Optional<Value> v = wait(tr->get(storageQuotaKey(tenantGroupName)));
-	if (!v.present()) {
-		return Optional<int64_t>();
-	}
-	return BinaryReader::fromStringRef<int64_t>(v.get(), Unversioned());
 }
 
 std::string ManagementAPI::generateErrorMessage(const CoordinatorsResult& res) {

@@ -79,6 +79,9 @@ struct MasterInterface {
 	}
 };
 
+extern template class ReplyPromise<MasterInterface>;
+extern template struct NetSAV<MasterInterface>;
+
 struct ChangeCoordinatorsRequest {
 	constexpr static FileIdentifier file_identifier = 13605416;
 	Standalone<StringRef> newConnectionString;

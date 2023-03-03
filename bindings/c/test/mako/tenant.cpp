@@ -28,7 +28,8 @@ namespace mako {
 
 std::map<std::string, std::string> generateAuthorizationTokenMap(int num_tenants,
                                                                  std::string public_key_id,
-                                                                 std::string private_key_pem) {
+                                                                 std::string private_key_pem,
+                                                                 const std::vector<int64_t>& tenant_ids) {
 	std::map<std::string, std::string> m;
 	auto t = authz::jwt::stdtypes::TokenSpec{};
 	auto const now = toIntegerSeconds(std::chrono::system_clock::now().time_since_epoch());
@@ -40,14 +41,14 @@ std::map<std::string, std::string> generateAuthorizationTokenMap(int num_tenants
 	t.issuedAtUnixTime = now;
 	t.expiresAtUnixTime = now + 60 * 60 * 12; // Good for 12 hours
 	t.notBeforeUnixTime = now - 60 * 5; // activated 5 mins ago
-	const int tokenIdLen = 36; // UUID length
-	auto tokenId = std::string(tokenIdLen, '\0');
+	const int tokenid_len = 36; // UUID length
+	auto tokenid = std::string(tokenid_len, '\0');
 	for (auto i = 0; i < num_tenants; i++) {
 		std::string tenant_name = getTenantNameByIndex(i);
 		// swap out only the token ids and tenant names
-		randomAlphanumString(tokenId.data(), tokenIdLen);
-		t.tokenId = tokenId;
-		t.tenants = std::vector<std::string>{ tenant_name };
+		randomAlphanumString(tokenid.data(), tokenid_len);
+		t.tokenId = tokenid;
+		t.tenants = std::vector<int64_t>{ tenant_ids[i] };
 		m[tenant_name] = authz::jwt::stdtypes::signToken(t, private_key_pem);
 	}
 	return m;

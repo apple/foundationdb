@@ -1,5 +1,3 @@
-disableEncryption=true
-
 [[test]]
 testTitle = 'SecondCycleTest'
 simBackupAgents = 'BackupToFile'
@@ -13,7 +11,7 @@ runConsistencyCheck=false
     testDuration = 30.0
     expectedRate = 0
     keyPrefix = 'AfterRestart'
-    
+
     [[test.workload]]
     testName = 'RandomClogging'
     testDuration = 90.0
@@ -36,7 +34,7 @@ runConsistencyCheck=false
     machinesToLeave = 3
     reboot = true
     testDuration = 90.0
-    
+
 [[test]]
 testTitle= 'RestoreBackup'
 simBackupAgents = 'BackupToFile'
@@ -55,7 +53,7 @@ checkOnly=true
     nodeCount=30000
     keyPrefix = 'AfterRestart'
     expectedRate=0
-     
+
     [[test.workload]]
     testName = 'Cycle'
     nodeCount = 30000

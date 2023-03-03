@@ -22,8 +22,10 @@
 
 #include "flow/flat_buffers.h"
 #include "flow/UnitTest.h"
+#include "flow/IConnection.h"
 
 #include <boost/algorithm/string.hpp>
+#include <queue>
 
 #include "flow/actorcompiler.h" // always the last include
 
@@ -65,12 +67,12 @@ RESTClientKnobs::RESTClientKnobs() {
 }
 
 void RESTClientKnobs::set(const std::unordered_map<std::string, int>& knobSettings) {
-	TraceEvent trace = TraceEvent("RESTClient_SetKnobs");
+	TraceEvent trace = TraceEvent("RESTClientSetKnobs");
 
 	for (const auto& itr : knobSettings) {
 		const auto& kItr = RESTClientKnobs::knobMap.find(itr.first);
 		if (kItr == RESTClientKnobs::knobMap.end()) {
-			trace.detail("RESTClient_InvalidKnobName", itr.first);
+			trace.detail("RESTClientInvalidKnobName", itr.first);
 			throw rest_invalid_rest_client_knob();
 		}
 		*(kItr->second) = itr.second;
@@ -97,28 +99,37 @@ ACTOR Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<REST
                                                                   bool isSecure,
                                                                   int maxConnLife) {
 	auto poolItr = connectionPool->connectionPoolMap.find(connectKey);
-	if (poolItr == connectionPool->connectionPoolMap.end()) {
-		throw rest_connectpool_key_not_found();
-	}
-
-	while (!poolItr->second.empty()) {
+	while (poolItr != connectionPool->connectionPoolMap.end() && !poolItr->second.empty()) {
 		RESTConnectionPool::ReusableConnection rconn = poolItr->second.front();
 		poolItr->second.pop();
 
 		if (rconn.expirationTime > now()) {
-			TraceEvent("RESTClient_ReusableConnection")
+			TraceEvent("RESTClientReuseConn")
 			    .suppressFor(60)
+			    .detail("Host", connectKey.first)
+			    .detail("Service", connectKey.second)
 			    .detail("RemoteEndpoint", rconn.conn->getPeerAddress())
 			    .detail("ExpireIn", rconn.expirationTime - now());
 			return rconn;
 		}
 	}
 
+	// No valid connection exists, create a new one
 	state Reference<IConnection> conn =
 	    wait(INetworkConnections::net()->connect(connectKey.first, connectKey.second, isSecure));
 	wait(conn->connectHandshake());
 
-	return RESTConnectionPool::ReusableConnection({ conn, now() + maxConnLife });
+	RESTConnectionPool::ReusableConnection reusableConn =
+	    RESTConnectionPool::ReusableConnection({ conn, now() + maxConnLife });
+	connectionPool->connectionPoolMap.insert(
+	    { connectKey, std::queue<RESTConnectionPool::ReusableConnection>({ reusableConn }) });
+
+	TraceEvent("RESTClientCreateNewConn")
+	    .suppressFor(60)
+	    .detail("Host", connectKey.first)
+	    .detail("Service", connectKey.second)
+	    .detail("RemoteEndpoint", conn->getPeerAddress());
+	return reusableConn;
 }
 
 Future<RESTConnectionPool::ReusableConnection> RESTConnectionPool::connect(RESTConnectionPoolKey connectKey,
@@ -187,14 +198,14 @@ void RESTUrl::parseUrl(const std::string& fullUrl, const bool isSecure) {
 		host = h.toString();
 		service = hRef.eat().toString();
 
-		TraceEvent("RESTClient_ParseURI")
+		TraceEvent("RESTClientParseURI")
 		    .detail("URI", fullUrl)
 		    .detail("Host", host)
 		    .detail("Service", service)
 		    .detail("Resource", resource)
 		    .detail("ReqParameters", reqParameters);
 	} catch (std::string& err) {
-		TraceEvent("RESTClient_ParseError").detail("URI", fullUrl).detail("Error", err);
+		TraceEvent("RESTClientParseError").detail("URI", fullUrl).detail("Error", err);
 		throw rest_invalid_uri();
 	}
 }

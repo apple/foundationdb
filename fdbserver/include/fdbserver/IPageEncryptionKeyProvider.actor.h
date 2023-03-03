@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Knobs.h"
+#include "fdbclient/TenantManagement.actor.h"
+#include "fdbrpc/TenantInfo.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_IPAGEENCRYPTIONKEYPROVIDER_ACTOR_G_H)
 #define FDBSERVER_IPAGEENCRYPTIONKEYPROVIDER_ACTOR_G_H
 #include "fdbserver/IPageEncryptionKeyProvider.actor.g.h"
@@ -29,7 +32,6 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 
-#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/IPager.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -42,6 +44,7 @@
 #include <functional>
 #include <limits>
 #include <tuple>
+#include <type_traits>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -68,12 +71,8 @@ public:
 	// Expected encoding type being used with the encryption key provider.
 	virtual EncodingType expectedEncodingType() const = 0;
 
-	// Checks whether encryption should be enabled. If not, the encryption key provider will not be used by
-	// the pager, and instead the default non-encrypted encoding type (XXHash64) is used.
-	virtual bool enableEncryption() const = 0;
-
 	// Whether encryption domain is enabled.
-	virtual bool enableEncryptionDomain() const { return false; }
+	virtual bool enableEncryptionDomain() const = 0;
 
 	// Get an encryption key from given encoding header.
 	virtual Future<EncryptionKey> getEncryptionKey(const void* encodingHeader) { throw not_implemented(); }
@@ -110,11 +109,11 @@ public:
 
 // The null key provider is useful to simplify page decoding.
 // It throws an error for any key info requested.
-class NullKeyProvider : public IPageEncryptionKeyProvider {
+class NullEncryptionKeyProvider : public IPageEncryptionKeyProvider {
 public:
-	virtual ~NullKeyProvider() {}
+	virtual ~NullEncryptionKeyProvider() {}
 	EncodingType expectedEncodingType() const override { return EncodingType::XXHash64; }
-	bool enableEncryption() const override { return false; }
+	bool enableEncryptionDomain() const override { return false; }
 };
 
 // Key provider for dummy XOR encryption scheme
@@ -139,7 +138,7 @@ public:
 
 	EncodingType expectedEncodingType() const override { return EncodingType::XOREncryption_TestOnly; }
 
-	bool enableEncryption() const override { return true; }
+	bool enableEncryptionDomain() const override { return false; }
 
 	Future<EncryptionKey> getEncryptionKey(const void* encodingHeader) override {
 
@@ -159,6 +158,22 @@ public:
 
 	uint8_t xorWith;
 };
+
+namespace {
+template <EncodingType encodingType>
+int64_t getEncryptionDomainIdFromAesEncryptionHeader(const void* encodingHeader) {
+	using Encoder = typename ArenaPage::AESEncryptionEncoder<encodingType>;
+	using EncodingHeader = typename Encoder::Header;
+	ASSERT(encodingHeader != nullptr);
+	if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+		BlobCipherEncryptHeaderRef headerRef = Encoder::getEncryptionHeaderRef(encodingHeader);
+		return headerRef.getCipherDetails().textCipherDetails.encryptDomainId;
+	} else {
+		const BlobCipherEncryptHeader& header = reinterpret_cast<const EncodingHeader*>(encodingHeader)->encryption;
+		return header.cipherTextDetails.encryptDomainId;
+	}
+}
+} // anonymous namespace
 
 // Key provider to provider cipher keys randomly from a pre-generated pool. It does not maintain encryption domains.
 // Use for testing.
@@ -188,27 +203,40 @@ public:
 
 	EncodingType expectedEncodingType() const override { return encodingType; }
 
-	bool enableEncryption() const override { return true; }
-
-	bool enableEncryptionDomain() const override { return mode > 1; }
+	bool enableEncryptionDomain() const override { return mode > 0; }
 
 	Future<EncryptionKey> getEncryptionKey(const void* encodingHeader) override {
-		using Header = typename ArenaPage::AESEncryptionEncoder<encodingType>::Header;
-		const Header* h = reinterpret_cast<const Header*>(encodingHeader);
+		using Encoder = typename ArenaPage::AESEncryptionEncoder<encodingType>;
 		EncryptionKey s;
-		s.aesKey.cipherTextKey =
-		    getCipherKey(h->encryption.cipherTextDetails.encryptDomainId, h->encryption.cipherTextDetails.baseCipherId);
-		s.aesKey.cipherHeaderKey = getCipherKey(h->encryption.cipherHeaderDetails.encryptDomainId,
-		                                        h->encryption.cipherHeaderDetails.baseCipherId);
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			const BlobCipherEncryptHeaderRef headerRef = Encoder::getEncryptionHeaderRef(encodingHeader);
+			EncryptHeaderCipherDetails details = headerRef.getCipherDetails();
+			ASSERT(details.textCipherDetails.isValid());
+			s.aesKey.cipherTextKey =
+			    getCipherKey(details.textCipherDetails.encryptDomainId, details.textCipherDetails.baseCipherId);
+			if (details.headerCipherDetails.present()) {
+				ASSERT(details.headerCipherDetails.get().isValid());
+				s.aesKey.cipherHeaderKey = getCipherKey(details.headerCipherDetails.get().encryptDomainId,
+				                                        details.headerCipherDetails.get().baseCipherId);
+			}
+		} else {
+			const typename Encoder::Header* h = reinterpret_cast<const typename Encoder::Header*>(encodingHeader);
+			s.aesKey.cipherTextKey = getCipherKey(h->encryption.cipherTextDetails.encryptDomainId,
+			                                      h->encryption.cipherTextDetails.baseCipherId);
+			if (h->encryption.cipherHeaderDetails.isValid()) {
+				s.aesKey.cipherHeaderKey = getCipherKey(h->encryption.cipherHeaderDetails.encryptDomainId,
+				                                        h->encryption.cipherHeaderDetails.baseCipherId);
+			}
+		}
 		return s;
 	}
 
 	Future<EncryptionKey> getLatestEncryptionKey(int64_t domainId) override {
 		domainId = checkDomainId(domainId);
 		EncryptionKey s;
-		s.aesKey.cipherTextKey = getCipherKey(domainId, deterministicRandom()->randomInt(0, NUM_CIPHER));
+		s.aesKey.cipherTextKey = getCipherKey(domainId, deterministicRandom()->randomInt(1, NUM_CIPHER + 1));
 		s.aesKey.cipherHeaderKey =
-		    getCipherKey(ENCRYPT_HEADER_DOMAIN_ID, deterministicRandom()->randomInt(0, NUM_CIPHER));
+		    getCipherKey(ENCRYPT_HEADER_DOMAIN_ID, deterministicRandom()->randomInt(1, NUM_CIPHER + 1));
 		return s;
 	}
 
@@ -226,10 +254,7 @@ public:
 	}
 
 	int64_t getEncryptionDomainIdFromHeader(const void* encodingHeader) override {
-		ASSERT(encodingHeader != nullptr);
-		using Header = typename ArenaPage::AESEncryptionEncoder<encodingType>::Header;
-		const Header* h = reinterpret_cast<const Header*>(encodingHeader);
-		return h->encryption.cipherTextDetails.encryptDomainId;
+		return getEncryptionDomainIdFromAesEncryptionHeader<encodingType>(encodingHeader);
 	}
 
 private:
@@ -264,11 +289,12 @@ private:
 
 	Reference<BlobCipherKey> getCipherKey(EncryptCipherDomainId domainId, EncryptCipherBaseKeyId cipherId) {
 		// Create a new cipher key by replacing the domain id.
+		ASSERT(cipherId > 0 && cipherId <= NUM_CIPHER);
 		return makeReference<BlobCipherKey>(domainId,
 		                                    cipherId,
-		                                    cipherKeys[cipherId]->rawBaseCipher(),
+		                                    cipherKeys[cipherId - 1]->rawBaseCipher(),
 		                                    AES_256_KEY_LENGTH,
-		                                    cipherKeys[cipherId]->getSalt(),
+		                                    cipherKeys[cipherId - 1]->getSalt(),
 		                                    std::numeric_limits<int64_t>::max() /* refreshAt */,
 		                                    std::numeric_limits<int64_t>::max() /* expireAt */);
 	}
@@ -284,29 +310,41 @@ private:
 template <EncodingType encodingType,
           typename std::enable_if<encodingType == AESEncryption || encodingType == AESEncryptionWithAuth, bool>::type =
               true>
-class TenantAwareEncryptionKeyProvider : public IPageEncryptionKeyProvider {
+class AESEncryptionKeyProvider : public IPageEncryptionKeyProvider {
 public:
-	using EncodingHeader = typename ArenaPage::AESEncryptionEncoder<encodingType>::Header;
+	using Encoder = typename ArenaPage::AESEncryptionEncoder<encodingType>;
+	using EncodingHeader = typename Encoder::Header;
 
 	const StringRef systemKeysPrefix = systemKeys.begin;
 
-	TenantAwareEncryptionKeyProvider(Reference<AsyncVar<ServerDBInfo> const> db) : db(db) {}
+	AESEncryptionKeyProvider(Reference<AsyncVar<ServerDBInfo> const> db, EncryptionAtRestMode encryptionMode)
+	  : db(db), encryptionMode(encryptionMode) {
+		ASSERT(encryptionMode != EncryptionAtRestMode::DISABLED);
+		ASSERT(db.isValid());
+	}
 
-	virtual ~TenantAwareEncryptionKeyProvider() = default;
+	virtual ~AESEncryptionKeyProvider() = default;
 
 	EncodingType expectedEncodingType() const override { return encodingType; }
 
-	bool enableEncryption() const override {
-		return isEncryptionOpSupported(EncryptOperationType::STORAGE_SERVER_ENCRYPTION);
+	bool enableEncryptionDomain() const override {
+		// Regardless of encryption mode, system keys always encrypted using system key space domain.
+		// Because of this, AESEncryptionKeyProvider always appears to be domain-aware.
+		return true;
 	}
 
-	bool enableEncryptionDomain() const override { return SERVER_KNOBS->REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT; }
-
-	ACTOR static Future<EncryptionKey> getEncryptionKey(TenantAwareEncryptionKeyProvider* self,
-	                                                    const void* encodingHeader) {
-		const BlobCipherEncryptHeader& header = reinterpret_cast<const EncodingHeader*>(encodingHeader)->encryption;
-		TextAndHeaderCipherKeys cipherKeys =
-		    wait(getEncryptCipherKeys(self->db, header, BlobCipherMetrics::KV_REDWOOD));
+	ACTOR static Future<EncryptionKey> getEncryptionKey(AESEncryptionKeyProvider* self, const void* encodingHeader) {
+		state TextAndHeaderCipherKeys cipherKeys;
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			BlobCipherEncryptHeaderRef headerRef = Encoder::getEncryptionHeaderRef(encodingHeader);
+			TextAndHeaderCipherKeys cks =
+			    wait(getEncryptCipherKeys(self->db, headerRef, BlobCipherMetrics::KV_REDWOOD));
+			cipherKeys = cks;
+		} else {
+			const BlobCipherEncryptHeader& header = reinterpret_cast<const EncodingHeader*>(encodingHeader)->encryption;
+			TextAndHeaderCipherKeys cks = wait(getEncryptCipherKeys(self->db, header, BlobCipherMetrics::KV_REDWOOD));
+			cipherKeys = cks;
+		}
 		EncryptionKey encryptionKey;
 		encryptionKey.aesKey = cipherKeys;
 		return encryptionKey;
@@ -320,9 +358,8 @@ public:
 		return getLatestEncryptionKey(getDefaultEncryptionDomainId());
 	}
 
-	ACTOR static Future<EncryptionKey> getLatestEncryptionKey(TenantAwareEncryptionKeyProvider* self,
-	                                                          int64_t domainId) {
-
+	ACTOR static Future<EncryptionKey> getLatestEncryptionKey(AESEncryptionKeyProvider* self, int64_t domainId) {
+		ASSERT(self->encryptionMode == EncryptionAtRestMode::DOMAIN_AWARE || domainId < 0);
 		TextAndHeaderCipherKeys cipherKeys =
 		    wait(getLatestEncryptCipherKeysForDomain(self->db, domainId, BlobCipherMetrics::KV_REDWOOD));
 		EncryptionKey encryptionKey;
@@ -341,27 +378,28 @@ public:
 		if (key.startsWith(systemKeysPrefix)) {
 			return { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, systemKeysPrefix.size() };
 		}
+		// Cluster-aware encryption.
+		if (encryptionMode == EncryptionAtRestMode::CLUSTER_AWARE) {
+			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
+		}
 		// Key smaller than tenant prefix in size belongs to the default domain.
 		if (key.size() < TenantAPI::PREFIX_SIZE) {
 			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
 		}
-		StringRef prefix = key.substr(0, TenantAPI::PREFIX_SIZE);
-		int64_t tenantId = TenantAPI::prefixToId(prefix, EnforceValidTenantId::False);
-		// Tenant id must be non-negative.
-		if (tenantId < 0) {
+		int64_t tenantId = TenantAPI::extractTenantIdFromKeyRef(key);
+		if (tenantId == TenantInfo::INVALID_TENANT) {
 			return { FDB_DEFAULT_ENCRYPT_DOMAIN_ID, 0 };
 		}
 		return { tenantId, TenantAPI::PREFIX_SIZE };
 	}
 
 	int64_t getEncryptionDomainIdFromHeader(const void* encodingHeader) override {
-		ASSERT(encodingHeader != nullptr);
-		const BlobCipherEncryptHeader& header = reinterpret_cast<const EncodingHeader*>(encodingHeader)->encryption;
-		return header.cipherTextDetails.encryptDomainId;
+		return getEncryptionDomainIdFromAesEncryptionHeader<encodingType>(encodingHeader);
 	}
 
 private:
 	Reference<AsyncVar<ServerDBInfo> const> db;
+	EncryptionAtRestMode encryptionMode;
 };
 
 #include "flow/unactorcompiler.h"

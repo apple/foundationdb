@@ -37,7 +37,6 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbrpc/simulator.h"
-#include "fdbrpc/TenantName.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 template <class T>
@@ -63,7 +62,7 @@ Future<bool> checkRangeSimpleValueSize(Database cx,
                                        T* workload,
                                        uint64_t begin,
                                        uint64_t end,
-                                       Optional<TenantName> tenant) {
+                                       Optional<Reference<Tenant>> tenant) {
 	loop {
 		state Transaction tr(cx, tenant);
 		setAuthToken(*workload, tr);
@@ -83,10 +82,14 @@ Future<bool> checkRangeSimpleValueSize(Database cx,
 
 // Returns true if the range was added
 ACTOR template <class T>
-Future<uint64_t> setupRange(Database cx, T* workload, uint64_t begin, uint64_t end, std::vector<TenantName> tenants) {
+Future<uint64_t> setupRange(Database cx,
+                            T* workload,
+                            uint64_t begin,
+                            uint64_t end,
+                            std::vector<Reference<Tenant>> tenants) {
 	state uint64_t bytesInserted = 0;
 	loop {
-		Optional<TenantName> tenant;
+		Optional<Reference<Tenant>> tenant;
 		if (tenants.size() > 0) {
 			tenant = deterministicRandom()->randomChoice(tenants);
 		}
@@ -138,7 +141,7 @@ Future<uint64_t> setupRangeWorker(Database cx,
                                   double maxKeyInsertRate,
                                   int keySaveIncrement,
                                   int actorId,
-                                  std::vector<TenantName> tenants) {
+                                  std::vector<Reference<Tenant>> tenants) {
 	state double nextStart;
 	state uint64_t loadedRanges = 0;
 	state int lastStoredKeysLoaded = 0;
@@ -152,7 +155,7 @@ Future<uint64_t> setupRangeWorker(Database cx,
 		if (numBytes > 0)
 			loadedRanges++;
 
-		Optional<TenantName> tenant;
+		Optional<Reference<Tenant>> tenant;
 		if (tenants.size() > 0) {
 			tenant = deterministicRandom()->randomChoice(tenants);
 		}
@@ -240,7 +243,7 @@ Future<Void> bulkSetup(Database cx,
                        double keyCheckInterval = 0.1,
                        uint64_t startNodeIdx = 0,
                        uint64_t endNodeIdx = 0,
-                       std::vector<TenantName> tenants = std::vector<TenantName>()) {
+                       std::vector<Reference<Tenant>> tenants = std::vector<Reference<Tenant>>()) {
 
 	state std::vector<std::pair<uint64_t, uint64_t>> jobs;
 	state uint64_t startNode = startNodeIdx ? startNodeIdx : (nodeCount * workload->clientId) / workload->clientCount;
@@ -258,7 +261,7 @@ Future<Void> bulkSetup(Database cx,
 	// For bulk data schemes where the value of the key is not critical to operation, check to
 	//  see if the database has already been set up.
 	if (valuesInconsequential) {
-		Optional<TenantName> tenant;
+		Optional<Reference<Tenant>> tenant;
 		if (tenants.size() > 0) {
 			tenant = deterministicRandom()->randomChoice(tenants);
 		}

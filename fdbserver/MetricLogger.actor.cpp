@@ -40,6 +40,8 @@
 #include "fdbserver/MetricClient.h"
 #include "flow/flow.h"
 #include "flow/network.h"
+#include "flow/IUDPSocket.h"
+#include "flow/IConnection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MetricsRule {

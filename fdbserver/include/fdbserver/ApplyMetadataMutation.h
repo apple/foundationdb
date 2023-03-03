@@ -95,19 +95,17 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             const VectorRef<MutationRef>& mutations,
                             LogPushData* pToCommit,
                             const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* pCipherKeys,
+                            EncryptionAtRestMode encryptMode,
                             bool& confChange,
                             Version version,
                             Version popVersion,
-                            bool initialCommit);
+                            bool initialCommit,
+                            bool provisionalCommitProxy);
 void applyMetadataMutations(SpanContext const& spanContext,
                             const UID& dbgid,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,
                             IKeyValueStore* txnStateStore);
-
-inline bool isSystemKey(KeyRef key) {
-	return key.size() && key[0] == systemKeys.begin[0];
-}
 
 inline bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 	for (auto const& m : mutations) {
@@ -145,6 +143,7 @@ inline bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 void applyMetadataMutations(SpanContext const& spanContext,
                             ResolverData& resolverData,
                             const VectorRef<MutationRef>& mutations,
-                            const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* pCipherKeys);
+                            const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* pCipherKeys,
+                            EncryptionAtRestMode encryptMode);
 
 #endif

@@ -48,23 +48,9 @@ class KeyFileReverter(object):
         print(f"key file reverted. waiting {self.refresh_delay * 2} seconds for the update to take effect...")
         time.sleep(self.refresh_delay * 2)
 
-# JWT claim that is valid for 1 hour since time of invocation
-def token_claim_1h(tenant_name):
-    now = time.time()
-    return {
-        "iss": "fdb-authz-tester",
-        "sub": "authz-test",
-        "aud": ["tmp-cluster"],
-        "iat": now,
-        "nbf": now - 1,
-        "exp": now + 60 * 60, 
-        "jti": random_alphanum_str(10),
-        "tenants": [to_str(base64.b64encode(tenant_name))],
-    }
-
 # repeat try-wait loop up to max_repeat times until both read and write tr fails for tenant with permission_denied
 # important: only use this function if you don't have any data dependencies to key "abc"
-def wait_until_tenant_tr_fails(tenant, private_key, tenant_tr_gen, max_repeat, delay):
+def wait_until_tenant_tr_fails(tenant, private_key, tenant_tr_gen, max_repeat, delay, token_claim_1h):
     repeat = 0
     read_blocked = False
     write_blocked = False
@@ -97,7 +83,7 @@ def wait_until_tenant_tr_fails(tenant, private_key, tenant_tr_gen, max_repeat, d
 
 # repeat try-wait loop up to max_repeat times until both read and write tr succeeds for tenant
 # important: only use this function if you don't have any data dependencies to key "abc"
-def wait_until_tenant_tr_succeeds(tenant, private_key, tenant_tr_gen, max_repeat, delay):
+def wait_until_tenant_tr_succeeds(tenant, private_key, tenant_tr_gen, max_repeat, delay, token_claim_1h):
     repeat = 0
     token = token_gen(private_key, token_claim_1h(tenant))
     while repeat < max_repeat:

@@ -17,11 +17,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+#ifndef METRIC_CLIENT_H
+#define METRIC_CLIENT_H
+
 #include "flow/TDMetric.actor.h"
 #include "flow/Msgpack.h"
 #include "flow/network.h"
-#ifndef METRIC_CLIENT_H
-#define METRIC_CLIENT_H
+#include "flow/IUDPSocket.h"
+
 class IMetricClient {
 protected:
 	MetricsDataModel model;

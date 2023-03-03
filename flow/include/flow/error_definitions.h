@@ -102,12 +102,14 @@ ERROR( blob_worker_full, 1077, "Blob worker cannot take on more granule assignme
 ERROR( grv_proxy_memory_limit_exceeded, 1078, "GetReadVersion proxy memory limit exceeded" )
 ERROR( blob_granule_request_failed, 1079, "BlobGranule request failed" )
 ERROR( storage_too_many_feed_streams, 1080, "Too many feed streams to a single storage server" )
+ERROR( storage_engine_not_initialized, 1081, "Storage engine was never successfully initialized." )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
 ERROR( future_released, 1102, "Future has been released" )
 ERROR( connection_leaked, 1103, "Connection object leaked" )
 ERROR( never_reply, 1104, "Never reply to the request" )
+ERROR( retry, 1105, "Retry operation" )
 
 ERROR( recruitment_failed, 1200, "Recruitment of a server failed" )   // Be careful, catching this will delete the data of a storage server or tlog permanently
 ERROR( move_to_removed_server, 1201, "Attempt to move keys to a storage server that was removed" )
@@ -135,6 +137,8 @@ ERROR( audit_storage_exceeded_request_limit, 1222, "Exceeded the max number of a
 ERROR( proxy_tag_throttled, 1223, "Exceeded maximum proxy tag throttling duration" )
 ERROR( key_value_store_deadline_exceeded, 1224, "Exceeded maximum time allowed to read or write.")
 ERROR( storage_quota_exceeded, 1225, "Exceeded the maximum storage quota allocated to the tenant.")
+ERROR( audit_storage_error, 1226, "Found data corruption" )
+ERROR( master_failed, 1227, "Cluster recovery terminating because master has failed")
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -248,13 +252,13 @@ ERROR( tenant_not_empty, 2133, "Cannot delete a non-empty tenant" )
 ERROR( invalid_tenant_name, 2134, "Tenant name cannot begin with \\xff" )
 ERROR( tenant_prefix_allocator_conflict, 2135, "The database already has keys stored at the prefix allocated for the tenant" )
 ERROR( tenants_disabled, 2136, "Tenants have been disabled in the cluster" )
-ERROR( unknown_tenant, 2137, "Tenant is not available from this server" )
 ERROR( illegal_tenant_access, 2138, "Illegal tenant access" )
 ERROR( invalid_tenant_group_name, 2139, "Tenant group name cannot begin with \\xff" )
 ERROR( invalid_tenant_configuration, 2140, "Tenant configuration is invalid" )
 ERROR( cluster_no_capacity, 2141, "Cluster does not have capacity to perform the specified operation" )
 ERROR( tenant_removed, 2142, "The tenant was removed" )
 ERROR( invalid_tenant_state, 2143, "Operation cannot be applied to tenant in its current state" )
+ERROR( tenant_locked, 2144, "Tenant is locked" )
 
 ERROR( invalid_cluster_name, 2160, "Data cluster name cannot begin with \\xff" )
 ERROR( invalid_metacluster_operation, 2161, "Metacluster operation performed on non-metacluster" )
@@ -266,6 +270,10 @@ ERROR( metacluster_no_capacity, 2166, "Metacluster does not have capacity to cre
 ERROR( management_cluster_invalid_access, 2167, "Standard transactions cannot be run against the management cluster" )
 ERROR( tenant_creation_permanently_failed, 2168, "The tenant creation did not complete in a timely manner and has permanently failed" )
 ERROR( cluster_removed, 2169, "The cluster is being removed from the metacluster" )
+ERROR( cluster_restoring, 2170, "The cluster is being restored to the metacluster" )
+ERROR( invalid_data_cluster, 2171, "The data cluster being restored has no record of its metacluster" )
+ERROR( metacluster_mismatch, 2172, "The cluster does not have the expected name or is associated with a different metacluster" )
+ERROR( conflicting_restore, 2173, "Another restore is running for the same data cluster" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
@@ -324,6 +332,11 @@ ERROR( restore_duplicate_uid, 2371, "Attempted to restore using a UID that had b
 ERROR( task_invalid_version, 2381, "Invalid task version")
 ERROR( task_interrupted, 2382, "Task execution stopped due to timeout, abort, or completion by another worker")
 ERROR( invalid_encryption_key_file, 2383, "The provided encryption key file has invalid contents" )
+ERROR( blob_restore_missing_logs, 2384, "Missing mutation logs" )
+ERROR( blob_restore_corrupted_logs, 2385, "Corrupted mutation logs" )
+ERROR( blob_restore_invalid_manifest_url, 2386, "Invalid manifest URL" )
+ERROR( blob_restore_corrupted_manifest, 2387, "Corrupted manifest" )
+ERROR( blob_restore_missing_manifest, 2388, "Missing manifest" )
 
 ERROR( key_not_found, 2400, "Expected key is missing")
 ERROR( json_malformed, 2401, "JSON string was malformed")
@@ -352,6 +365,7 @@ ERROR( encrypt_invalid_id, 2706, "Invalid encryption cipher details" )
 ERROR( encrypt_keys_fetch_failed, 2707, "Encryption keys fetch from external KMS failed" )
 ERROR( encrypt_invalid_kms_config, 2708, "Invalid encryption/kms configuration: discovery-url, validation-token, endpoint etc." )
 ERROR( encrypt_unsupported, 2709, "Encryption not supported" )
+ERROR( encrypt_mode_mismatch, 2710, "Encryption mode mismatch with configuration")
 
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error

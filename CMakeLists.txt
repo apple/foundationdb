@@ -28,7 +28,7 @@ if(POLICY CMP0135)
 endif()
 
 project(foundationdb
-  VERSION 71.3.0
+  VERSION 7.3.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
   LANGUAGES C CXX ASM)
@@ -97,7 +97,10 @@ else()
     set(FDB_VERSION ${PROJECT_VERSION})
 endif()
 if (NOT FDB_RELEASE)
-    string(TIMESTAMP FDB_BUILDTIME %Y%m%d%H%M%S)
+    string(TIMESTAMP FDB_BUILD_TIMESTMAP %Y%m%d%H%M%S)
+    # Adding support to pass custom fdb_build timestamp,
+    # required to achieve uniform naming across different builds
+    set(FDB_BUILDTIME "${FDB_BUILD_TIMESTMAP}" CACHE STRING "A timestamp for packages")
     set(FDB_BUILDTIME_STRING ".${FDB_BUILDTIME}")
     set(PRERELEASE_TAG "prerelease")
 endif()
@@ -111,10 +114,10 @@ configure_file(${CMAKE_SOURCE_DIR}/versions.target.cmake ${CMAKE_CURRENT_BINARY_
 file(WRITE ${CMAKE_BINARY_DIR}/version.txt ${FDB_VERSION})
 
 set(FDB_CURRENT_VERSION ${PROJECT_VERSION})
-set(FDB_FUTURE_VERSION "71.4.0")
-set(FDB_PREV_RELEASE_VERSION "71.2.0")
-set(FDB_PREV2_RELEASE_VERSION "7.1.4")
-set(FDB_PREV3_RELEASE_VERSION "7.0.1")
+set(FDB_FUTURE_VERSION "7.4.0")
+set(FDB_PREV_RELEASE_VERSION "7.1.25")
+set(FDB_PREV2_RELEASE_VERSION "7.0.0")
+set(FDB_PREV3_RELEASE_VERSION "6.3.25")
 
 ################################################################################
 # Flow

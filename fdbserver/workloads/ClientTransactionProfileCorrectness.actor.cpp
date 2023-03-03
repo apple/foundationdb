@@ -22,7 +22,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/Tuple.h"
 #include "flow/actorcompiler.h" // has to be last include
 

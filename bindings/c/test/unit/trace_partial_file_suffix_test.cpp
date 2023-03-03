@@ -26,7 +26,7 @@
 
 #include "flow/Platform.h"
 
-#define FDB_API_VERSION 710300
+#define FDB_USE_LATEST_API_VERSION
 #include "foundationdb/fdb_c.h"
 
 #undef NDEBUG

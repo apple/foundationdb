@@ -22,12 +22,12 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/NativeAPI.actor.h"
 
-KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, KeyRef prefix) {
-	if (prefix.empty()) {
+KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, Optional<KeyRef> prefix) {
+	if (!prefix.present() || prefix.get().empty()) {
 		return range;
 	} else {
-		KeyRef begin = range.begin.startsWith(prefix) ? range.begin.removePrefix(prefix) : allKeys.begin;
-		KeyRef end = range.end.startsWith(prefix) ? range.end.removePrefix(prefix) : allKeys.end;
+		KeyRef begin = range.begin.startsWith(prefix.get()) ? range.begin.removePrefix(prefix.get()) : allKeys.begin;
+		KeyRef end = range.end.startsWith(prefix.get()) ? range.end.removePrefix(prefix.get()) : allKeys.end;
 		return KeyRangeRef(begin, end);
 	}
 }

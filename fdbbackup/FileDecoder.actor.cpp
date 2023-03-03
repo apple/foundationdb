@@ -641,7 +641,7 @@ int main(int argc, char** argv) {
 		param.updateKnobs();
 
 		TraceEvent::setNetworkThread();
-		openTraceFile(NetworkAddress(), 10 << 20, 500 << 20, param.log_dir, "decode", param.trace_log_group);
+		openTraceFile({}, 10 << 20, 500 << 20, param.log_dir, "decode", param.trace_log_group);
 		param.tlsConfig.setupBlobCredentials();
 
 		auto f = stopAfter(decode_logs(param));

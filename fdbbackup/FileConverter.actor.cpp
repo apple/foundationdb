@@ -608,7 +608,7 @@ int main(int argc, char** argv) {
 		setupNetwork(0, UseMetrics::True);
 
 		TraceEvent::setNetworkThread();
-		openTraceFile(NetworkAddress(), 10 << 20, 10 << 20, param.log_dir, "convert", param.trace_log_group);
+		openTraceFile({}, 10 << 20, 10 << 20, param.log_dir, "convert", param.trace_log_group);
 
 		auto f = stopAfter(convert(param));
 

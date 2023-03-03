@@ -18,17 +18,29 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_AUDITUTILS_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_AUDITUTILS_ACTOR_G_H)
+#define FDBCLIENT_AUDITUTILS_ACTOR_G_H
+#include "fdbclient/AuditUtils.actor.g.h"
+#elif !defined(FDBCLIENT_AUDITUTILS_ACTOR_H)
 #define FDBCLIENT_AUDITUTILS_ACTOR_H
 #pragma once
 
 #include "fdbclient/Audit.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/fdbrpc.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
-ACTOR Future<Void> persistAuditStorageState(Key key, AuditStorageState auditState);
+ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState);
+ACTOR Future<Void> persistAuditState(Database cx, AuditStorageState auditState);
+ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID id);
+ACTOR Future<std::vector<AuditStorageState>> getLatestAuditStates(Database cx, AuditType type, int num);
+
+ACTOR Future<Void> persistAuditStateMap(Database cx, AuditStorageState auditState);
+ACTOR Future<std::vector<AuditStorageState>> getAuditStateForRange(Database cx, UID id, KeyRange range);
+
+StringRef auditTypeToString(const AuditType type);
 
 #include "flow/unactorcompiler.h"
 #endif

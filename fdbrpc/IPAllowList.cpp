@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <boost/asio.hpp>
+
 #include "flow/UnitTest.h"
 #include "flow/Error.h"
 #include "fdbrpc/IPAllowList.h"

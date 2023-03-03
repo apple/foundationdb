@@ -24,6 +24,7 @@
 #include "flow/IRandom.h"
 #include "flow/flow.h"
 #include "fdbclient/Knobs.h"
+#include "flow/IConnection.h"
 #include "fdbclient/S3BlobStore.h"
 
 std::string buildPartitionPath(const std::string& url, const std::string& partition) {

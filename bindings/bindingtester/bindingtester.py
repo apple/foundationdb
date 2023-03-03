@@ -22,10 +22,8 @@
 
 import sys
 import subprocess
-import struct
 import random
 import argparse
-import math
 import os
 import copy
 import traceback
@@ -56,9 +54,12 @@ API_VERSIONS = [
     400, 410, 420, 430, 440, 450, 460,
     500, 510, 520,
     600, 610, 620, 630,
-    700, 710, 710200, 710300,
+    700, 710, 720,
 ]
 
+assert (
+    API_VERSIONS[-1] == FDB_API_VERSION
+), "Bindingtester API version list must be updated to include all supported versions"
 
 fdb.api_version(FDB_API_VERSION)
 

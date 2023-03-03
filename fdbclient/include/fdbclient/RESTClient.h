@@ -86,11 +86,11 @@ public:
 private:
 	Future<Reference<HTTP::Response>> doGetHeadDeleteOrTrace(const std::string& verb,
 	                                                         Optional<HTTP::Headers> optHeaders,
-	                                                         RESTUrl* url,
+	                                                         RESTUrl& url,
 	                                                         std::set<unsigned int> successCodes);
 	Future<Reference<HTTP::Response>> doPutOrPost(const std::string& verb,
 	                                              Optional<HTTP::Headers> headers,
-	                                              RESTUrl* url,
+	                                              RESTUrl& url,
 	                                              std::set<unsigned int> successCodes);
 };
 

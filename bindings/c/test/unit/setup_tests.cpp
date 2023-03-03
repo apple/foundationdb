@@ -20,7 +20,7 @@
 
 // Unit tests for API setup, network initialization functions from the FDB C API.
 
-#define FDB_API_VERSION 710300
+#define FDB_USE_LATEST_API_VERSION
 #include <foundationdb/fdb_c.h>
 #include <iostream>
 #include <thread>
@@ -38,7 +38,7 @@ void fdb_check(fdb_error_t e) {
 TEST_CASE("setup") {
 	fdb_error_t err;
 	// Version passed here must be <= FDB_API_VERSION
-	err = fdb_select_api_version(9000000);
+	err = fdb_select_api_version(9000);
 	CHECK(err);
 
 	// Select current API version

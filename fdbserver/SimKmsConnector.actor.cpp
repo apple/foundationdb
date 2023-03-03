@@ -21,6 +21,7 @@
 #include "fdbclient/BlobCipher.h"
 
 #include "fdbrpc/sim_validation.h"
+#include "fdbrpc/simulator.h"
 
 #include "fdbserver/KmsConnectorInterface.h"
 #include "fdbserver/Knobs.h"
@@ -123,15 +124,20 @@ ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
 	for (const auto& item : req.encryptKeyInfos) {
 		const auto& itr = ctx->simEncryptKeyStore.find(item.baseCipherId);
 		if (itr != ctx->simEncryptKeyStore.end()) {
+			// TODO: Relax assert if EKP APIs are updated to make 'domain_id' optional for encryption keys point lookups
+			ASSERT(item.domainId.present());
 			rep.cipherKeyDetails.emplace_back_deep(
-			    rep.arena, item.domainId, itr->first, StringRef(itr->second.get()->key), refAtTS, expAtTS);
+			    rep.arena, item.domainId.get(), itr->first, StringRef(itr->second.get()->key), refAtTS, expAtTS);
 
 			if (dbgKIdTrace.present()) {
 				// {encryptDomainId, baseCipherId} forms a unique tuple across encryption domains
 				dbgKIdTrace.get().detail(
-				    getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_RESULT_PREFIX, item.domainId, itr->first), "");
+				    getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_RESULT_PREFIX, item.domainId.get(), itr->first), "");
 			}
 		} else {
+			TraceEvent("SimKmsEKLookupByIdsKeyNotFound")
+			    .detail("DomId", item.domainId)
+			    .detail("BaseCipherId", item.baseCipherId);
 			success = false;
 			break;
 		}
@@ -215,6 +221,20 @@ ACTOR Future<Void> blobMetadataLookup(KmsConnectorInterface interf, KmsConnBlobM
 	}
 
 	wait(delay(deterministicRandom()->random01())); // simulate network delay
+
+	// buggify errors or omitted tenants in response
+	if (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01)) {
+		if (deterministicRandom()->coinflip()) {
+			// remove some number of tenants from the response
+			int targetSize = deterministicRandom()->randomInt(0, rep.metadataDetails.size());
+			while (rep.metadataDetails.size() > targetSize) {
+				swapAndPop(&rep.metadataDetails, deterministicRandom()->randomInt(0, rep.metadataDetails.size()));
+			}
+		} else {
+			req.reply.sendError(operation_failed());
+			return Void();
+		}
+	}
 
 	req.reply.send(rep);
 
