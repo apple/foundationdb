@@ -153,6 +153,7 @@ private:
 			}
 		}
 
+		self->managementMetadata.clusterAllocatedMap.clear();
 		for (auto t : clusterCapacityTuples.results) {
 			ASSERT_EQ(t.size(), 2);
 			int64_t capacity = t.getInt(0);
@@ -160,19 +161,27 @@ private:
 			ASSERT(self->managementMetadata.clusterAllocatedMap.try_emplace(clusterName, capacity).second);
 		}
 
+		self->managementMetadata.clusterTenantMap.clear();
 		for (auto t : clusterTenantTuples.results) {
 			ASSERT_EQ(t.size(), 3);
 			TenantName tenantName = t.getString(1);
 			int64_t tenantId = t.getInt(2);
+			bool renaming = tenantId == TenantInfo::INVALID_TENANT;
+			if (renaming) {
+				tenantId = self->managementMetadata.tenantData.tenantNameIndex[tenantName];
+			}
 			MetaclusterTenantMapEntry const& entry = self->managementMetadata.tenantData.tenantMap[tenantId];
-			bool renaming =
-			    entry.tenantState == MetaclusterAPI::TenantState::RENAMING && entry.renameDestination == tenantName;
-			ASSERT(tenantName == entry.tenantName || renaming);
-			if (!renaming) {
+			if (renaming) {
+				ASSERT(entry.tenantState == MetaclusterAPI::TenantState::RENAMING ||
+				       entry.tenantState == MetaclusterAPI::TenantState::REMOVING);
+				ASSERT(entry.renameDestination == tenantName);
+			} else {
+				ASSERT(entry.tenantName == tenantName);
 				ASSERT(self->managementMetadata.clusterTenantMap[t.getString(0)].insert(tenantId).second);
 			}
 		}
 
+		self->managementMetadata.clusterTenantGroupMap.clear();
 		for (auto t : clusterTenantGroupTuples.results) {
 			ASSERT_EQ(t.size(), 2);
 			TenantGroupName tenantGroupName = t.getString(1);

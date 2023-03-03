@@ -2928,7 +2928,14 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 				// Wait on delta file starting here. If we have too many pending delta file writes, we need to not
 				// continue to consume from the change feed, as that will pile on even more delta files to write
-				wait(startDeltaFileWrite);
+				if (!startDeltaFileWrite.isReady()) {
+					wait(startDeltaFileWrite);
+					// If we were waiting on a lock callback, ensure the writeDeltaFile callback goes first with a
+					// delay(0) here, to create the flow lock releaser, before returning control to this actor which
+					// could cancel the writeDeltaFile actor and leak the flow lock
+					wait(delay(0));
+				}
+
 			} else if (metadata->doEarlyReSnapshot()) {
 				ASSERT(metadata->currentDeltas.empty());
 				snapshotEligible = true;
@@ -4833,8 +4840,19 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 			}
 		}
 
+		if (isSelfReassign && e.code() == error_code_granule_assignment_conflict) {
+			// can happen because another granule owns it, or the range is force purged. Either way, we have a revoke
+			// incoming and should drop it
+			TraceEvent(SevWarn, "BlobWorkerConflictOnReassign")
+			    .detail("Range", req.keyRange)
+			    .detail("ManagerEpoch", req.managerEpoch)
+			    .detail("SeqNo", req.managerSeqno);
+			return Void();
+		}
+
 		TraceEvent(SevError, "BlobWorkerUnexpectedErrorRangeAssign", bwData->id)
 		    .error(e)
+		    .detail("IsSelfReassign", isSelfReassign)
 		    .detail("Range", req.keyRange)
 		    .detail("ManagerEpoch", req.managerEpoch)
 		    .detail("SeqNo", req.managerSeqno);

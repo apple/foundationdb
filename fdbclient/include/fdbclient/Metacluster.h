@@ -140,6 +140,7 @@ struct MetaclusterTenantMapEntry {
 	TenantName tenantName;
 	MetaclusterAPI::TenantState tenantState = MetaclusterAPI::TenantState::READY;
 	TenantAPI::TenantLockState tenantLockState = TenantAPI::TenantLockState::UNLOCKED;
+	Optional<UID> tenantLockId;
 	Optional<TenantGroupName> tenantGroup;
 	ClusterName assignedCluster;
 	int64_t configurationSequenceNum = 0;
@@ -180,6 +181,7 @@ struct MetaclusterTenantMapEntry {
 		           tenantName,
 		           tenantState,
 		           tenantLockState,
+		           tenantLockId,
 		           tenantGroup,
 		           assignedCluster,
 		           configurationSequenceNum,

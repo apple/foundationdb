@@ -480,7 +480,7 @@ Future<Void> filter(FutureStream<T> input, F pred, PromiseStream<T> output) {
 	loop {
 		try {
 			T nextInput = waitNext(input);
-			if (func(nextInput))
+			if (pred(nextInput))
 				output.send(nextInput);
 		} catch (Error& e) {
 			if (e.code() == error_code_end_of_stream) {

@@ -142,7 +142,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( ALLOW_TOKENLESS_TENANT_ACCESS,                     false );
 	init( AUDIT_LOGGING_ENABLED,                              true );
 	init( PUBLIC_KEY_FILE_MAX_SIZE,                    1024 * 1024 );
-	init( PUBLIC_KEY_FILE_REFRESH_INTERVAL_SECONDS,             30 );
+	init( PUBLIC_KEY_FILE_REFRESH_INTERVAL_SECONDS,            300 );
 	init( AUDIT_TIME_WINDOW,                                   5.0 );
 	init( TOKEN_CACHE_SIZE,                                   2000 );
 

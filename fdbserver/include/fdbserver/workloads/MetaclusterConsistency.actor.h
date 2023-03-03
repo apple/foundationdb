@@ -226,10 +226,12 @@ private:
 			ASSERT(tenantMapItr != managementData.tenantData.tenantMap.end());
 			MetaclusterTenantMapEntry const& metaclusterEntry = tenantMapItr->second;
 			ASSERT_EQ(entry.id, metaclusterEntry.id);
-			ASSERT(entry.tenantName == metaclusterEntry.tenantName);
 
 			if (!self->allowPartialMetaclusterOperations) {
 				ASSERT_EQ(metaclusterEntry.tenantState, MetaclusterAPI::TenantState::READY);
+				ASSERT(entry.tenantName == metaclusterEntry.tenantName);
+			} else if (entry.tenantName != metaclusterEntry.tenantName) {
+				ASSERT(entry.tenantName == metaclusterEntry.renameDestination);
 			}
 			if (metaclusterEntry.tenantState != MetaclusterAPI::TenantState::UPDATING_CONFIGURATION &&
 			    metaclusterEntry.tenantState != MetaclusterAPI::TenantState::REMOVING) {
@@ -240,6 +242,8 @@ private:
 
 			if (entry.configurationSequenceNum == metaclusterEntry.configurationSequenceNum) {
 				ASSERT(entry.tenantGroup == metaclusterEntry.tenantGroup);
+				ASSERT_EQ(entry.tenantLockState, metaclusterEntry.tenantLockState);
+				ASSERT(entry.tenantLockId == metaclusterEntry.tenantLockId);
 			}
 		}
 

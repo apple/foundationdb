@@ -86,6 +86,7 @@ class CoalescedKeyRefRangeMap : public RangeMap<KeyRef, Val, KeyRangeRef, Metric
 public:
 	explicit CoalescedKeyRefRangeMap(Val v = Val(), Key endKey = allKeys.end)
 	  : RangeMap<KeyRef, Val, KeyRangeRef, Metric, MetricFunc>(endKey, v), mapEnd(endKey) {}
+
 	void operator=(CoalescedKeyRefRangeMap&& r) noexcept {
 		mapEnd = std::move(r.mapEnd);
 		RangeMap<KeyRef, Val, KeyRangeRef, Metric, MetricFunc>::operator=(std::move(r));
@@ -100,10 +101,14 @@ class CoalescedKeyRangeMap : public RangeMap<Key, Val, KeyRangeRef, Metric, Metr
 public:
 	explicit CoalescedKeyRangeMap(Val v = Val(), Key endKey = allKeys.end)
 	  : RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>(endKey, v), mapEnd(endKey) {}
+
 	void operator=(CoalescedKeyRangeMap&& r) noexcept {
 		mapEnd = std::move(r.mapEnd);
 		RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::operator=(std::move(r));
 	}
+
+	CoalescedKeyRangeMap(CoalescedKeyRangeMap&& source) = default;
+
 	void insert(const KeyRangeRef& keys, const Val& value);
 	void insert(const KeyRef& key, const Val& value);
 	Key mapEnd;
