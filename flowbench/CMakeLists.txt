@@ -8,11 +8,11 @@ fdb_find_sources(FLOWBENCH_SRCS)
 if(EXISTS /opt/googlebenchmark-f91b6b AND CLANG)
   add_flow_target(EXECUTABLE NAME flowbench SRCS ${FLOWBENCH_SRCS})
   target_include_directories(flowbench PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include" /opt/googlebenchmark-f91b6b/include)
-  target_link_directories(flowbench PRIVATE /opt/googlebenchmark-f91b6b/src)
+  target_link_directories(flowbench PRIVATE /opt/googlebenchmark-f91b6b/lib64)
 elseif(EXISTS /opt/googlebenchmark-f91b6b-g++ AND NOT CLANG)
   add_flow_target(EXECUTABLE NAME flowbench SRCS ${FLOWBENCH_SRCS})
   target_include_directories(flowbench PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include" /opt/googlebenchmark-f91b6b-g++/include)
-  target_link_directories(flowbench PRIVATE /opt/googlebenchmark-f91b6b-g++/src)
+  target_link_directories(flowbench PRIVATE /opt/googlebenchmark-f91b6b-g++/lib64)
 else()
   ## This seems to be copy-pasted from the the google benchmark documentation.
   ## It breaks if you attempt to re-use a build of googlebenchmark across FDB
