@@ -2,6 +2,13 @@
 buggify = false
 
 [[test]]
+testTitle = 'Cached'
+
+    [[test.workload]]
+    testName = 'Cache'
+    keyPrefix = 'RCK'
+
+[[test]]
 testTitle = 'ReportConflictingKeysTest'
 connectionFailuresDisableDuration = 100000
 
