@@ -24,6 +24,8 @@
 
 #include "fdbclient/FDBTypes.h"
 
+const std::string checkpointBytesSampleFileName = "metadata_bytes.sst";
+
 // FDB storage checkpoint format.
 enum CheckpointFormat {
 	InvalidFormat = 0,

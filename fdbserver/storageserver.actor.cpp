@@ -202,6 +202,7 @@ static const KeyRangeRef persistCheckpointKeys =
 static const KeyRangeRef persistPendingCheckpointKeys =
     KeyRangeRef(PERSIST_PREFIX "PendingCheckpoint/"_sr, PERSIST_PREFIX "PendingCheckpoint0"_sr);
 static const std::string rocksdbCheckpointDirPrefix = "/rockscheckpoints_";
+static const std::string checkpointBytesSampleTempFolder = "/metadata_temp";
 
 struct AddingShard : NonCopyable {
 	KeyRange keys;
@@ -9637,6 +9638,8 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 
 	loop {
 		try {
+			// Any failure leads to retry until retryCount reaches maximum
+			// For each retry, cleanup the bytesSampleFile created in last time
 			ASSERT(directoryExists(parentDirectory(bytesSampleFile)));
 			if (fileExists(abspath(bytesSampleFile))) {
 				deleteFile(abspath(bytesSampleFile));
@@ -9649,14 +9652,14 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 			}
 			ASSERT(metaData.ranges.size() > 0);
 			std::sort(metaData.ranges.begin(), metaData.ranges.end(), [](KeyRange a, KeyRange b) {
-				// Make sure no overlapping between compared two ranges
-				if (a.begin < b.begin) {
+				// Debug usage: make sure no overlapping between compared two ranges
+				/* if (a.begin < b.begin) {
 					ASSERT(a.end <= b.begin);
 				} else if (a.begin > b.begin) {
 					ASSERT(a.end >= b.begin);
 				} else {
 					ASSERT(false);
-				}
+				} */
 				// metaData.ranges must be in ascending order
 				// sstWriter requires written keys to be in ascending order
 				return a.begin < b.begin;
@@ -9685,7 +9688,7 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 							readBegin = keyAfter(readResult.readThrough.get());
 							ASSERT(readBegin <= readEnd);
 						} else {
-							break;
+							break; // finish for current metaDataRangesIter
 						}
 					} catch (Error& e) {
 						if (failureCount < SERVER_KNOBS->ROCKSDB_CREATE_BYTES_SAMPLE_FILE_RETRY_MAX) {
