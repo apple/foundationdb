@@ -1429,13 +1429,19 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 // The lock is implemented as a Promise<Void>, which is returned to callers in a convenient wrapper
 // called Lock.
 //
+// The default behavior is that if a Lock is droppped without error or release, existing and future
+// waiters will see a broken_promise exception.
+//
+// If hangOnDroppedMutex is true, then if a Lock is dropped without error or release, existing and
+// future waiters will never be signaled or see an error, equivalent to waiting on Never().
+//
 // Usage:
 //   Lock lock = wait(mutex.take());
 //   lock.release();  // Next waiter will get the lock, OR
 //   lock.error(e);   // Next waiter will get e, future waiters will see broken_promise
 //   lock = Lock();   // Or let Lock and any copies go out of scope.  All waiters will see broken_promise.
 struct FlowMutex {
-	FlowMutex() { lastPromise.send(Void()); }
+	FlowMutex(bool hangOnDroppedMutex = false) : hangOnDroppedMutex(hangOnDroppedMutex) { lastPromise.send(Void()); }
 
 	bool available() const { return lastPromise.isSet(); }
 
@@ -1452,10 +1458,14 @@ struct FlowMutex {
 		Lock newLock;
 		Future<Lock> f = lastPromise.isSet() ? newLock : tag(lastPromise.getFuture(), newLock);
 		lastPromise = newLock.promise;
+		if (hangOnDroppedMutex) {
+			return brokenPromiseToNever(f);
+		}
 		return f;
 	}
 
 private:
+	bool hangOnDroppedMutex;
 	Promise<Void> lastPromise;
 };
 

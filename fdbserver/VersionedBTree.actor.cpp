@@ -364,7 +364,7 @@ public:
 
 		FlowMutex mutex;
 
-		Cursor() : mode(NONE) {}
+		Cursor() : mode(NONE), mutex(true) {}
 
 		// Initialize a cursor.
 		void init(FIFOQueue* q = nullptr,
