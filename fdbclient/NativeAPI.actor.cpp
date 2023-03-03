@@ -10182,6 +10182,30 @@ Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges
 	return listBlobbifiedRangesActor(Reference<DatabaseContext>::addRef(this), range, rangeLimit);
 }
 
+ACTOR static Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>>
+getHotRangeMetricsActor(Reference<DatabaseContext> db, StorageServerInterface ssi, ReadHotSubRangeRequest req) {
+
+	ErrorOr<ReadHotSubRangeReply> fs = wait(ssi.getReadHotRanges.tryGetReply(req));
+	if (fs.isError()) {
+		fmt::print("Error({}): cannot get read hot metrics from storage server {}.\n",
+		           fs.getError().what(),
+		           ssi.address().toString());
+		return Standalone<VectorRef<ReadHotRangeWithMetrics>>();
+	} else {
+		return fs.get().readHotRanges;
+	}
+}
+
+Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> DatabaseContext::getHotRangeMetrics(
+    StorageServerInterface ssi,
+    const KeyRange& keys,
+    ReadHotSubRangeRequest::SplitType type,
+    int splitCount) {
+
+	return getHotRangeMetricsActor(
+	    Reference<DatabaseContext>::addRef(this), ssi, ReadHotSubRangeRequest(keys, type, splitCount));
+}
+
 int64_t getMaxKeySize(KeyRef const& key) {
 	return getMaxWriteKeySize(key, true);
 }
