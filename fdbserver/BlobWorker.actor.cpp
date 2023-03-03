@@ -5627,30 +5627,18 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 			printf("Initializing blob worker s3 stuff\n");
 		}
 
-		try {
-			if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
-				if (BW_DEBUG) {
-					fmt::print("BW constructing backup container from {0}\n", SERVER_KNOBS->BG_URL);
-				}
-				self->bstore = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BG_URL);
-				if (BW_DEBUG) {
-					printf("BW constructed backup container\n");
-				}
-			}
-
-			// register the blob worker to the system keyspace
-			wait(registerBlobWorker(self, bwInterf, Optional<UID>()));
-		} catch (Error& e) {
+		if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
 			if (BW_DEBUG) {
-				fmt::print("BW got init error {0}\n", e.name());
+				fmt::print("BW constructing backup container from {0}\n", SERVER_KNOBS->BG_URL);
 			}
-			// if any errors came up while initializing the blob worker, let the blob manager know
-			// that recruitment failed
-			if (!recruitReply.isSet()) {
-				recruitReply.sendError(recruitment_failed());
+			self->bstore = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BG_URL);
+			if (BW_DEBUG) {
+				printf("BW constructed backup container\n");
 			}
-			throw e;
 		}
+
+		// register the blob worker to the system keyspace
+		wait(registerBlobWorker(self, bwInterf, Optional<UID>()));
 
 		// By now, we know that initialization was successful, so
 		// respond to the initialization request with the interface itself
@@ -5667,6 +5655,14 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		wait(blobWorkerCore(bwInterf, self));
 		return Void();
 	} catch (Error& e) {
+		if (!recruitReply.isSet()) {
+			// if any errors came up while initializing the blob worker, let the blob manager know
+			// that recruitment failed
+			if (BW_DEBUG) {
+				fmt::print("BW got init error {0}\n", e.name());
+			}
+			recruitReply.sendError(recruitment_failed());
+		}
 		if (blobWorkerTerminated(self, persistentData, e)) {
 			return Void();
 		}
