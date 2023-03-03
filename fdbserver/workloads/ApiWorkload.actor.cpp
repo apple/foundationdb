@@ -18,10 +18,21 @@
  * limitations under the License.
  */
 
+#include "fdbserver/workloads/ApiWorkload.h"
+
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/MultiVersionTransaction.h"
+
+#include "fdbrpc/simulator.h"
+#include "fdbrpc/TenantInfo.h"
+
+#include "flow/Arena.h"
+#include "flow/FastRef.h"
+#include "flow/IRandom.h"
+
 #include <cinttypes>
 #include "fmt/format.h"
-#include "fdbserver/workloads/ApiWorkload.h"
-#include "fdbclient/MultiVersionTransaction.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Clears the keyspace used by this test
@@ -249,6 +260,18 @@ Key ApiWorkload::generateKey(VectorRef<KeyValueRef> const& data,
 			keyBuffer[0] = deterministicRandom()->randomInt(0, 255);
 	}
 
+	// If encryption validation is enabled; slip "marker pattern" at random location in generated key
+	if (g_network->isSimulated() && g_simulator->dataAtRestPlaintextMarker.present() &&
+	    keyLength + 1 > g_simulator->dataAtRestPlaintextMarker.get().size()) {
+		int len = keyLength - g_simulator->dataAtRestPlaintextMarker.get().size();
+		// Avoid updating the first byte of the key
+		int idx = len > 1 ? deterministicRandom()->randomInt(1, len) : 1;
+		memcpy(&keyBuffer[idx],
+		       g_simulator->dataAtRestPlaintextMarker.get().c_str(),
+		       g_simulator->dataAtRestPlaintextMarker.get().size());
+		//TraceEvent(SevDebug, "ModifiedKey").suppressFor(5).detail("Key", keyBuffer);
+	}
+
 	keyBuffer[keyLength] = '\0';
 
 	Key key(prefix + keyBuffer);
@@ -276,7 +299,19 @@ Key ApiWorkload::selectRandomKey(VectorRef<KeyValueRef> const& data, double prob
 // Generates a random value
 Value ApiWorkload::generateValue(int minValueLength, int maxValueLength) {
 	int valueLength = deterministicRandom()->randomInt(minValueLength, maxValueLength + 1);
-	return Value(std::string(valueLength, 'x'));
+	std::string ret(std::string(valueLength, 'x'));
+
+	// If encryption validation is enabled; slip "marker pattern" at random location in generated key
+	if (g_network->isSimulated() && g_simulator->dataAtRestPlaintextMarker.present() &&
+	    valueLength > g_simulator->dataAtRestPlaintextMarker.get().size()) {
+		int len = valueLength - g_simulator->dataAtRestPlaintextMarker.get().size();
+		int idx = deterministicRandom()->randomInt(0, len);
+		memcpy(&ret[idx],
+		       g_simulator->dataAtRestPlaintextMarker.get().c_str(),
+		       g_simulator->dataAtRestPlaintextMarker.get().size());
+		//TraceEvent("ModifiedValue").suppressFor(5).detail("Value", ret);
+	}
+	return Value(ret);
 }
 
 // Generates a random value

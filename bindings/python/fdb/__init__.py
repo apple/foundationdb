@@ -23,6 +23,10 @@
 """Documentation for this API can be found at
 https://apple.github.io/foundationdb/api-python.html"""
 
+import fdb.apiversion
+
+LATEST_API_VERSION = fdb.apiversion.LATEST_API_VERSION
+
 
 def open(*args, **kwargs):
     raise RuntimeError("You must call api_version() before using any fdb methods")
@@ -52,7 +56,7 @@ def get_api_version():
 
 
 def api_version(ver):
-    header_version = 720
+    header_version = LATEST_API_VERSION
 
     if "_version" in globals():
         if globals()["_version"] != ver:

@@ -1,3 +1,4 @@
+import glob
 import json
 from pathlib import Path
 import random
@@ -8,6 +9,7 @@ import socket
 import time
 import fcntl
 import sys
+import xml.etree.ElementTree as ET
 import tempfile
 from authz_util import private_key_gen, public_keyset_from_keys
 from test_util import random_alphanum_string
@@ -111,10 +113,8 @@ public-address = {ip_address}:$ID{optional_tls}
 listen-address = public
 datadir = {datadir}/$ID
 logdir = {logdir}
-{bg_knob_line}
-{encrypt_knob_line1}
-{encrypt_knob_line2}
-{encrypt_knob_line3}
+{bg_config}
+{encrypt_config}
 {tls_config}
 {authz_public_key_config}
 {custom_config}
@@ -177,6 +177,7 @@ logdir = {logdir}
         self.custom_config = custom_config
         self.blob_granules_enabled = blob_granules_enabled
         self.enable_encryption_at_rest = enable_encryption_at_rest
+        self.trace_check_entries = []
         if blob_granules_enabled:
             # add extra process for blob_worker
             self.process_number += 1
@@ -254,17 +255,26 @@ logdir = {logdir}
         new_conf_file = self.conf_file.parent / (self.conf_file.name + ".new")
         with open(new_conf_file, "x") as f:
             conf_template = LocalCluster.configuration_template
-            bg_knob_line = ""
-            encrypt_knob_line1 = ""
-            encrypt_knob_line2 = ""
-            encrypt_knob_line3 = ""
+            bg_config = ""
+            encrypt_config = ""
             if self.use_legacy_conf_syntax:
                 conf_template = conf_template.replace("-", "_")
             if self.blob_granules_enabled:
-                bg_knob_line = "knob_bg_url=file://" + str(self.data) + "/fdbblob/"
+                bg_config = "\n".join(
+                    [
+                        "knob_bg_url=file://" + str(self.data) + "/fdbblob/",
+                        "knob_bg_snapshot_file_target_bytes=100000",
+                        "knob_bg_delta_file_target_bytes=5000",
+                        "knob_bg_delta_bytes_before_compact=50000",
+                    ]
+                )
             if self.enable_encryption_at_rest:
-                encrypt_knob_line2 = "knob_kms_connector_type=FDBPerfKmsConnector"
-                encrypt_knob_line3 = "knob_enable_configurable_encryption=true"
+                encrypt_config = "\n".join(
+                    [
+                        "knob_kms_connector_type=FDBPerfKmsConnector",
+                        "knob_enable_configurable_encryption=true",
+                    ]
+                )
             f.write(
                 conf_template.format(
                     etcdir=self.etc,
@@ -272,10 +282,8 @@ logdir = {logdir}
                     datadir=self.data,
                     logdir=self.log,
                     ip_address=self.ip_address,
-                    bg_knob_line=bg_knob_line,
-                    encrypt_knob_line1=encrypt_knob_line1,
-                    encrypt_knob_line2=encrypt_knob_line2,
-                    encrypt_knob_line3=encrypt_knob_line3,
+                    bg_config=bg_config,
+                    encrypt_config=encrypt_config,
                     tls_config=self.tls_conf_string(),
                     authz_public_key_config=self.authz_public_key_conf_string(),
                     optional_tls=":tls" if self.tls_config is not None else "",
@@ -375,8 +383,12 @@ logdir = {logdir}
         return self
 
     def __exit__(self, xc_type, exc_value, traceback):
+        if self.trace_check_entries:
+            # sleep a while before checking trace to make sure everything has flushed out
+            time.sleep(3)
         self.stop_cluster()
         self.release_ports()
+        self.check_trace()
 
     def release_ports(self):
         self.port_provider.release_locks()
@@ -694,3 +706,52 @@ logdir = {logdir}
         else:
             print("No errors found in logs")
         return err_cnt == 0
+
+    # Add trace check callback function to be called once the cluster terminates.
+    # _from() and _from_to() variants offer pre-filtering by time window, using epoch seconds as timestamps
+    # Consider using ScopedTraceChecker to simplify timestamp management
+    # Caveat: the checker assumes the traces to be in XML and to have .xml file extensions,
+    # which prevents fdbmonitor.log from being considered and parsed.
+    def add_trace_check(self, check_func, filename_substr: str = ""):
+        self.trace_check_entries.append((check_func, None, None, filename_substr))
+
+    def add_trace_check_from(self, check_func, time_begin, filename_substr: str = ""):
+        self.trace_check_entries.append((check_func, time_begin, None, filename_substr))
+
+    def add_trace_check_from_to(
+        self, check_func, time_begin, time_end, filename_substr: str = ""
+    ):
+        self.trace_check_entries.append(
+            (check_func, time_begin, time_end, filename_substr)
+        )
+
+    # generator function that yields (filename, event_type, XML_trace_entry) that matches the parameter
+    def __loop_through_trace(self, time_begin, time_end, filename_substr: str):
+        glob_pattern = str(self.log.joinpath("*.xml"))
+        for file in glob.glob(glob_pattern):
+            if filename_substr and file.find(filename_substr) == -1:
+                continue
+            print(f"### considering file {file}")
+            for line in open(file):
+                try:
+                    entry = ET.fromstring(line)
+                    # Below fields always exist. If not, their access throws to be skipped over
+                    ev_type = entry.attrib["Type"]
+                    ts = float(entry.attrib["Time"])
+                    if time_begin != None and ts < time_begin:
+                        continue
+                    if time_end != None and time_end < ts:
+                        break  # no need to look further in this file
+                    yield (file, ev_type, entry)
+                except ET.ParseError:
+                    pass  # ignore header, footer, or broken line
+
+    # applies user-provided check_func that takes a trace entry generator as the parameter
+    def check_trace(self):
+        for (
+            check_func,
+            time_begin,
+            time_end,
+            filename_substr,
+        ) in self.trace_check_entries:
+            check_func(self.__loop_through_trace(time_begin, time_end, filename_substr))

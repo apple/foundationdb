@@ -139,12 +139,16 @@ std::string TenantMapEntry::toJson() const {
 	}
 
 	tenantEntry["lock_state"] = TenantAPI::tenantLockStateToString(tenantLockState);
+	if (tenantLockId.present()) {
+		tenantEntry["lock_id"] = tenantLockId.get().toString();
+	}
 
 	return json_spirit::write_string(json_spirit::mValue(tenantEntry));
 }
 
 bool TenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const {
-	return tenantGroup == other.tenantGroup;
+	return tenantGroup == other.tenantGroup && tenantLockState == other.tenantLockState &&
+	       tenantLockId == other.tenantLockId;
 }
 
 void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> value) {
@@ -158,7 +162,8 @@ void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> 
 
 bool TenantMapEntry::operator==(TenantMapEntry const& other) const {
 	return id == other.id && tenantName == other.tenantName && tenantLockState == other.tenantLockState &&
-	       tenantGroup == other.tenantGroup && configurationSequenceNum == other.configurationSequenceNum;
+	       tenantLockId == other.tenantLockId && tenantGroup == other.tenantGroup &&
+	       configurationSequenceNum == other.configurationSequenceNum;
 }
 
 bool TenantMapEntry::operator!=(TenantMapEntry const& other) const {

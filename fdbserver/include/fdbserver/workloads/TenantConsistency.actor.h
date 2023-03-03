@@ -76,6 +76,8 @@ private:
 			} else {
 				ASSERT(!tenantsInTenantGroupIndex.count(tenantId));
 			}
+			ASSERT_NE(tenantMapEntry.tenantLockState == TenantAPI::TenantLockState::UNLOCKED,
+			          tenantMapEntry.tenantLockId.present());
 		}
 	}
 

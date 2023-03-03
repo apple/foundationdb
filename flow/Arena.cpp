@@ -1030,7 +1030,7 @@ TEST_CASE("/flow/Arena/Secure") {
 				} else {
 					newBuf = new (arena) uint8_t[len];
 				}
-				ASSERT_EQ(newBuf, buf);
+				ASSERT(newBuf == buf);
 				// there's no hard guarantee about the above equality and the result could vary by platform,
 				// malloc implementation, and tooling instrumentation (e.g. ASAN, valgrind)
 				// but it is practically likely because of

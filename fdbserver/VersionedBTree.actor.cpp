@@ -2156,6 +2156,14 @@ public:
 					    .error(e)
 					    .detail("Filename", self->filename)
 					    .detail("PageID", backupHeaderPageID);
+
+					// If this is a restarted sim test, assume this situation was created by the first phase being
+					// killed during initialization so the second phase found the file on disk but it is not
+					// recoverable.
+					if (g_network->isSimulated() && g_simulator->restarted) {
+						throw e.asInjectedFault();
+					}
+
 					throw;
 				}
 			}
@@ -3524,8 +3532,15 @@ public:
 	ACTOR static Future<Void> commit_impl(DWALPager* self, Version v, Value commitRecord) {
 		debug_printf("DWALPager(%s) commit begin %s\n", self->filename.c_str(), ::toString(v).c_str());
 
-		// Write old committed header to Page 1
-		self->writeHeaderPage(backupHeaderPageID, self->lastCommittedHeaderPage);
+		// Write old committed header to backupHeaderPageID if its user commit record is not empty.
+		// If its user commit record is empty, then we would not want to fall back to recover to the
+		// commit represented by the lastCommittedHeader (which is a bit of a misnomer as it was NOT
+		// actually written to disk yet) so don't write it to the backup header page which is what
+		// enables that recovery to the previously committed state.
+		state bool firstCommitRecord = self->lastCommittedHeader.userCommitRecord.empty();
+		if (!firstCommitRecord) {
+			self->writeHeaderPage(backupHeaderPageID, self->lastCommittedHeaderPage);
+		}
 
 		// Trigger the remap eraser to stop and then wait for it.
 		self->remapCleanupStop = true;
@@ -3561,6 +3576,22 @@ public:
 		// Update new commit header to the primary header page
 		self->header.userCommitRecord = commitRecord;
 		self->updateHeaderPage();
+
+		// If the last commit header didn't have a commit record (and so was never actually committed to disk)
+		// then this new commit is the first one we would want to recover to.  Since all writes that the new
+		// pager header and user commit record depend on have been sync'd above, and the existing backup
+		// header has no recovery value (meaning we would NOT want to recover with it), we can write the new
+		// header with the latest commit record to the backup header now as part of the second sync.
+		// The outcomes from here forward, if we exit before the second sync, are:
+		//   - Neither header update is written to disk, so the pager remains effectively uninitialized on disk
+		//     and would be recovered as a new instance
+		//   - One, both, or neither of the updated primary or backup headers are written to disk.  In
+		//     either case, the pager will recover to this latest commited version which contains the first
+		//     user CommitRecord given to pager->commit()
+		if (firstCommitRecord) {
+			self->updateLastCommittedHeader();
+			self->writeHeaderPage(backupHeaderPageID, self->lastCommittedHeaderPage);
+		}
 
 		// Update primary header page on disk and sync again.
 		wait(self->writeHeaderPage(primaryHeaderPageID, self->headerPage));
@@ -5223,7 +5254,23 @@ public:
 		if (btreeHeader.size() == 0) {
 			// Create new BTree
 
-			ASSERT(self->m_expectedEncryptionMode.present());
+			if (!self->m_expectedEncryptionMode.present()) {
+				// We can only create a new BTree if the encryption mode is known.
+				// If it is not know, then this init() was on a Redwood instance that already exited on disk but
+				// which had not completed its first BTree commit so it recovered to a state before the BTree
+				// existed in the Pager.  We must treat this case as error as the file is not usable via this open
+				// path.
+				Error err = storage_engine_not_initialized();
+
+				// The current version of FDB should not produce this scenario on disk so it should not be observed
+				// during recovery.  However, previous versions can produce it so in a restarted simulation test
+				// we will assume that is what happened and throw the error as an injected fault.
+				if (g_network->isSimulated() && g_simulator->restarted) {
+					err = err.asInjectedFault();
+				}
+				throw err;
+			}
+
 			self->m_encryptionMode.send(self->m_expectedEncryptionMode.get());
 			self->checkOrUpdateEncodingType("NewBTree", self->m_expectedEncryptionMode.get(), self->m_encodingType);
 			self->initEncryptionKeyProvider();
