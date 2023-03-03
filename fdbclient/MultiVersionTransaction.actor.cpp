@@ -488,6 +488,14 @@ void DLTransaction::reset() {
 	api->transactionReset(tr);
 }
 
+void DLTransaction::debugTrace(BaseTraceEvent&& event) {
+	event.detail("CommitResult", "Deferred logging unsupported").log();
+};
+
+void DLTransaction::debugPrint(std::string const& message) {
+	fmt::print("[Deferred logging unsupported] {}\n", message);
+}
+
 ThreadFuture<VersionVector> DLTransaction::getVersionVector() {
 	return VersionVector(); // not implemented
 }
@@ -1914,6 +1922,16 @@ MultiVersionTransaction::~MultiVersionTransaction() {
 bool MultiVersionTransaction::isValid() {
 	auto tr = getTransaction();
 	return tr.transaction.isValid();
+}
+
+void MultiVersionTransaction::debugTrace(BaseTraceEvent&& event) {
+	auto tr = getTransaction();
+	tr.transaction->debugTrace(std::move(event));
+}
+
+void MultiVersionTransaction::debugPrint(std::string const& message) {
+	auto tr = getTransaction();
+	tr.transaction->debugPrint(message);
 }
 
 // MultiVersionTenant

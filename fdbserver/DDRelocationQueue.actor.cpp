@@ -2138,8 +2138,10 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 	// randomly choose topK shards
 	int topK = std::max(1, std::min(int(0.1 * shards.size()), SERVER_KNOBS->READ_REBALANCE_SHARD_TOPK));
 	state Future<HealthMetrics> healthMetrics = self->txnProcessor->getHealthMetrics(true);
-	state GetTopKMetricsRequest req(
-	    shards, topK, (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC, srcLoad / shards.size());
+	state GetTopKMetricsRequest req(shards,
+	                                topK,
+	                                (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC,
+	                                std::min(srcLoad / shards.size(), SERVER_KNOBS->READ_REBALANCE_MIN_READ_BYTES_KS));
 	state GetTopKMetricsReply reply = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
 	wait(ready(healthMetrics));
 	auto cpu = getWorstCpu(healthMetrics.get(), sourceTeam->getServerIDs());

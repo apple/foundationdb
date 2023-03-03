@@ -238,6 +238,9 @@ public:
 	void addref() override { ThreadSafeReferenceCounted<ThreadSafeTransaction>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<ThreadSafeTransaction>::delref(); }
 
+	void debugTrace(BaseTraceEvent&&) override;
+	void debugPrint(std::string const& message) override;
+
 private:
 	ISingleThreadTransaction* tr;
 	const Optional<TenantName> tenantName;

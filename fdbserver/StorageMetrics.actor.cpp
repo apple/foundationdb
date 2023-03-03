@@ -107,6 +107,11 @@ void StorageServerMetrics::notify(KeyRef key, StorageMetrics& metrics) {
 	if (metrics.bytesReadPerKSecond)
 		notifyMetrics.bytesReadPerKSecond = bytesReadSample.addAndExpire(key, metrics.bytesReadPerKSecond, expire) *
 		                                    SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	if (metrics.opsReadPerKSecond) {
+		notifyMetrics.opsReadPerKSecond = opsReadSample.addAndExpire(key, metrics.opsReadPerKSecond, expire) *
+		                                  SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	}
+
 	if (!notifyMetrics.allZero()) {
 		auto& v = waitMetricsMap[key];
 		for (int i = 0; i < v.size(); i++) {
@@ -125,9 +130,13 @@ void StorageServerMetrics::notifyBytesReadPerKSecond(KeyRef key, int64_t in) {
 	double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
 	int64_t bytesReadPerKSecond =
 	    bytesReadSample.addAndExpire(key, in, expire) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
-	if (bytesReadPerKSecond > 0) {
+	int64_t opsReadPerKSecond =
+	    opsReadSample.addAndExpire(key, 1, expire) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+
+	if (bytesReadPerKSecond > 0 || opsReadPerKSecond > 0) {
 		StorageMetrics notifyMetrics;
 		notifyMetrics.bytesReadPerKSecond = bytesReadPerKSecond;
+		notifyMetrics.opsReadPerKSecond = opsReadPerKSecond;
 		auto& v = waitMetricsMap[key];
 		for (int i = 0; i < v.size(); i++) {
 			CODE_PROBE(true, "ShardNotifyMetrics");
@@ -349,10 +358,73 @@ void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
 	req.reply.send(rep);
 }
 
+// Equally split the metrics (specified by splitType) of parentRange into chunkCount and return all the sampled metrics
+// (bytes, readBytes and readOps) of each chunk
+// NOTE: update unit test "equalDivide" after change
+std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::getReadHotRanges(KeyRangeRef parentRange,
+                                                                            int chunkCount,
+                                                                            uint8_t splitType) const {
+	const StorageMetricSample* sampler = nullptr;
+	switch (splitType) {
+	case ReadHotSubRangeRequest::SplitType::BYTES:
+		sampler = &byteSample;
+		break;
+	case ReadHotSubRangeRequest::SplitType::READ_BYTES:
+		sampler = &bytesReadSample;
+		break;
+	case ReadHotSubRangeRequest::SplitType::READ_OPS:
+		sampler = &opsReadSample;
+		break;
+	default:
+		ASSERT(false);
+	}
+
+	std::vector<ReadHotRangeWithMetrics> toReturn;
+	if (sampler->sample.empty()) {
+		return toReturn;
+	}
+
+	auto total = sampler->getEstimate(parentRange);
+	double splitChunk = std::max(1.0, (double)total / chunkCount);
+
+	KeyRef beginKey = parentRange.begin;
+	while (parentRange.contains(beginKey)) {
+		auto beginIt = sampler->sample.lower_bound(beginKey);
+		if (beginIt == sampler->sample.end()) {
+			break;
+		}
+		auto endIt = sampler->sample.index(sampler->sample.sumTo(beginIt) + splitChunk - 1);
+		// because index return x where sumTo(x+1) (that including sample at x) > metrics, we have to forward endIt here
+		if (endIt != sampler->sample.end())
+			++endIt;
+
+		if (endIt == sampler->sample.end()) {
+			KeyRangeRef lastRange(beginKey, parentRange.end);
+			toReturn.emplace_back(
+			    lastRange,
+			    byteSample.getEstimate(lastRange),
+			    (double)bytesReadSample.getEstimate(lastRange) / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL,
+			    (double)opsReadSample.getEstimate(lastRange) / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
+			break;
+		}
+
+		ASSERT_LT(beginKey, *endIt);
+		KeyRangeRef range(beginKey, *endIt);
+		toReturn.emplace_back(
+		    range,
+		    byteSample.getEstimate(range),
+		    (double)bytesReadSample.getEstimate(range) / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL,
+		    (double)opsReadSample.getEstimate(range) / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
+
+		beginKey = *endIt;
+	}
+	return toReturn;
+}
+
 // Given a read hot shard, this function will divide the shard into chunks and find those chunks whose
 // readBytes/sizeBytes exceeds the `readDensityRatio`. Please make sure to run unit tests
 // `StorageMetricsSampleTests.txt` after change made.
-std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::getReadHotRanges(
+std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::_getReadHotRanges(
     KeyRangeRef shard,
     double readDensityRatio,
     int64_t baseChunkSize,
@@ -411,10 +483,7 @@ std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::getReadHotRanges(
 
 void StorageServerMetrics::getReadHotRanges(ReadHotSubRangeRequest req) const {
 	ReadHotSubRangeReply reply;
-	auto _ranges = getReadHotRanges(req.keys,
-	                                SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO,
-	                                SERVER_KNOBS->READ_HOT_SUB_RANGE_CHUNK_SIZE,
-	                                SERVER_KNOBS->SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS);
+	auto _ranges = getReadHotRanges(req.keys, req.chunkCount, req.type);
 	reply.readHotRanges = VectorRef(_ranges.data(), _ranges.size());
 	req.reply.send(reply);
 }
@@ -681,7 +750,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/simple") {
 	ssm.byteSample.sample.insert("Cat"_sr, 300 * sampleUnit);
 
 	std::vector<ReadHotRangeWithMetrics> t =
-	    ssm.getReadHotRanges(KeyRangeRef("A"_sr, "C"_sr), 2.0, 200 * sampleUnit, 0);
+	    ssm._getReadHotRanges(KeyRangeRef("A"_sr, "C"_sr), 2.0, 200 * sampleUnit, 0);
 
 	ASSERT(t.size() == 1 && (*t.begin()).keys.begin == "Bah"_sr && (*t.begin()).keys.end == "Bob"_sr);
 
@@ -711,7 +780,7 @@ TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/moreThanOneRange") {
 	ssm.byteSample.sample.insert("Dah"_sr, 300 * sampleUnit);
 
 	std::vector<ReadHotRangeWithMetrics> t =
-	    ssm.getReadHotRanges(KeyRangeRef("A"_sr, "D"_sr), 2.0, 200 * sampleUnit, 0);
+	    ssm._getReadHotRanges(KeyRangeRef("A"_sr, "D"_sr), 2.0, 200 * sampleUnit, 0);
 
 	ASSERT(t.size() == 2 && (*t.begin()).keys.begin == "Bah"_sr && (*t.begin()).keys.end == "Bob"_sr);
 	ASSERT(t.at(1).keys.begin == "Cat"_sr && t.at(1).keys.end == "Dah"_sr);
@@ -743,10 +812,67 @@ TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/consecutiveRanges") {
 	ssm.byteSample.sample.insert("Dah"_sr, 300 * sampleUnit);
 
 	std::vector<ReadHotRangeWithMetrics> t =
-	    ssm.getReadHotRanges(KeyRangeRef("A"_sr, "D"_sr), 2.0, 200 * sampleUnit, 0);
+	    ssm._getReadHotRanges(KeyRangeRef("A"_sr, "D"_sr), 2.0, 200 * sampleUnit, 0);
 
 	ASSERT(t.size() == 2 && (*t.begin()).keys.begin == "Bah"_sr && (*t.begin()).keys.end == "But"_sr);
 	ASSERT(t.at(1).keys.begin == "Cat"_sr && t.at(1).keys.end == "Dah"_sr);
 
+	return Void();
+}
+
+TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/equalDivide") {
+
+	int64_t sampleUnit = SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
+	StorageServerMetrics ssm;
+
+	// 14000 / 7 = 2000 each chunk
+	// chunk 0
+	ssm.bytesReadSample.sample.insert("Apple"_sr, 1000 * sampleUnit);
+	ssm.bytesReadSample.sample.insert("Banana"_sr, 2000 * sampleUnit);
+	// chunk 1
+	ssm.bytesReadSample.sample.insert("Bucket"_sr, 2000 * sampleUnit);
+	// chunk 2
+	ssm.bytesReadSample.sample.insert("Cat"_sr, 1000 * sampleUnit);
+	ssm.bytesReadSample.sample.insert("Cathode"_sr, 1000 * sampleUnit);
+	// chunk 3
+	ssm.bytesReadSample.sample.insert("Dog"_sr, 5000 * sampleUnit);
+	// chunk 4
+	ssm.bytesReadSample.sample.insert("Final"_sr, 2000 * sampleUnit);
+
+	// chunk 0
+	ssm.byteSample.sample.insert("A"_sr, 20);
+	ssm.byteSample.sample.insert("Absolute"_sr, 80);
+	ssm.byteSample.sample.insert("Apple"_sr, 1000);
+	ssm.byteSample.sample.insert("Bah"_sr, 20);
+	ssm.byteSample.sample.insert("Banana"_sr, 80);
+	ssm.byteSample.sample.insert("Bob"_sr, 200);
+	// chunk 1
+	ssm.byteSample.sample.insert("But"_sr, 100);
+	// chunk 2
+	ssm.byteSample.sample.insert("Cat"_sr, 300);
+	ssm.byteSample.sample.insert("Dah"_sr, 300);
+
+	// edge case: no overlap
+	std::vector<ReadHotRangeWithMetrics> t =
+	    ssm.getReadHotRanges(KeyRangeRef("Y"_sr, "Z"_sr), 7, ReadHotSubRangeRequest::SplitType::READ_BYTES);
+	ASSERT_EQ(t.size(), 0);
+
+	// divide all keys
+	t = ssm.getReadHotRanges(KeyRangeRef(""_sr, "\xff"_sr), 7, ReadHotSubRangeRequest::SplitType::READ_BYTES);
+	ASSERT_EQ(t.size(), 5);
+	//	for(int i = 0; i < t.size(); ++ i) {
+	//		fmt::print("{} {}\n", t[i].keys.begin.toString(), t[i].readBandwidthSec);
+	//	}
+	ASSERT_EQ((*t.begin()).keys.begin,
+	          ""_sr); // Note since difference sampler is not aligned, so "A" is not the first key
+	ASSERT_EQ((*t.begin()).keys.end, "Bucket"_sr);
+	ASSERT_EQ(t[0].bytes, 1400);
+
+	ASSERT_EQ(t.at(1).keys.begin, "Bucket"_sr);
+	ASSERT_EQ(t.at(1).keys.end, "Cat"_sr);
+
+	ASSERT_EQ(t.at(2).bytes, 600);
+	ASSERT_EQ(t.at(3).readBandwidthSec, 5000 * sampleUnit / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
+	ASSERT_EQ(t.at(3).bytes, 0);
 	return Void();
 }
