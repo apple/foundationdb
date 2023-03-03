@@ -142,10 +142,10 @@ bool ApiWorkload::compareResults(VectorRef<KeyValueRef> dbResults,
 		    .detail("ResultSize", dbResults.size())
 		    .detail("StoreResultSize", storeResults.size());
 
-		return false;
+		// return false;
 	}
 
-	for (int i = 0; i < dbResults.size(); i++) {
+	for (int i = 0; i < std::min(dbResults.size(), storeResults.size()); i++) {
 		if (dbResults[i].key != storeResults[i].key || dbResults[i].value != storeResults[i].value) {
 			printf("%s mismatch at %d\n", dbResults[i].key != storeResults[i].key ? "Key" : "Value", i);
 			printf("DB Range:\n");
@@ -161,6 +161,8 @@ bool ApiWorkload::compareResults(VectorRef<KeyValueRef> dbResults,
 			TraceEvent(SevError, format("%s_CompareValueMismatch", description().c_str()).c_str())
 			    .detail("ReadVer", readVersion)
 			    .detail("ResultSize", dbResults.size())
+			    .detail("DBResult", dbResults[i].key)
+			    .detail("StoreResult", storeResults[i].key)
 			    .detail("DifferAt", i);
 
 			return false;

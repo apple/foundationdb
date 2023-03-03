@@ -8016,10 +8016,9 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 			// }
 			for (const auto& [range, record] : records) {
 				// ASSERT(!checkpointRangeMap[record.checkpointID].empty());
-				const std::string checkpointDir = joinPath(dir, record.checkpointID.toString());
-				if (!directoryExists(checkpointDir)) {
-					ASSERT(platform::createDirectory(checkpointDir));
-				}
+				const std::string checkpointDir = joinPath(dir, deterministicRandom()->randomAlphaNumeric(8));
+				ASSERT(!directoryExists(checkpointDir));
+				ASSERT(platform::createDirectory(checkpointDir));
 				fCheckpointMetaData.push_back(fetchCheckpointRanges(data->cx, record, checkpointDir, { range }));
 			}
 			wait(store(localRecords, getAll(fCheckpointMetaData)));
@@ -8244,7 +8243,9 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 			ASSERT(b->version >= checkv);
 			checkv = b->version;
 			for (auto& m : b->mutations) {
-				DEBUG_MUTATION("fetchShardFinalCommitInject", batch->changes[0].version, m, data->thisServerID);
+				TraceEvent(SevDebug, "FetchShardFinalCommitInject", data->thisServerID)
+				    .detail("Mutation", m)
+				    .detail("Version", batch->changes[0].version);
 			}
 		}
 		// }
@@ -9737,7 +9738,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	    .detail("Range", keys)
 	    .detail("NowAssigned", nowAssigned)
 	    .detail("Version", version)
-	    .detail("PhysicalShardMove", SERVER_KNOBS->STORAGE_SERVER_PHYSICAL_SHARD_MOVE)
+	    .detail("PhysicalShardMove", static_cast<bool>(enablePSM))
 	    .detail("Context", changeServerKeysContextName(context));
 
 	validate(data);

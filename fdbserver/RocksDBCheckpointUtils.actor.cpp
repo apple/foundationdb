@@ -33,6 +33,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/MutationTracking.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/Knobs.h"
@@ -1144,6 +1145,10 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 					TraceEvent(SevVerbose, "FetchCheckpointRangeData", metaData->checkpointID)
 					    .detail("Key", rep.data[i].key)
 					    .detail("Value", rep.data[i].value);
+					DEBUG_MUTATION("FetchCheckpointData",
+					               metaData->version,
+					               MutationRef(MutationRef::SetValue, rep.data[i].key, rep.data[i].value),
+					               metaData->checkpointID);
 					status = writer->Put(toSlice(rep.data[i].key), toSlice(rep.data[i].value));
 					if (!status.ok()) {
 						Error e = statusToError(status);
