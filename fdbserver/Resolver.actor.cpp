@@ -295,14 +295,14 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 	}
 
 	// Time until now has been spent waiting in the queue to do actual work.
-	double queueWaitEndTime = g_network->timer();
+	const double queueWaitEndTime = timer();
 	self->queueWaitLatencyDist->sampleSeconds(queueWaitEndTime - req.requestTime());
 
 	if (self->version.get() ==
 	    req.prevVersion) { // Not a duplicate (check relies on no waiting between here and self->version.set() below!)
 		// This is the beginning of the compute phase of the
 		// resolver. There's no wait before it's done.
-		const double beginComputeTime = g_network->timer();
+		const double beginComputeTime = timer();
 
 		++self->resolveBatchStart;
 		self->resolvedTransactions += req.transactions.size();
@@ -502,7 +502,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		}
 
 		// Measure the time spent doing actual work in the resolver.
-		const double endComputeTime = g_network->timer();
+		const double endComputeTime = timer();
 		self->computeTimeDist->sampleSeconds(endComputeTime - beginComputeTime);
 
 		if (req.debugID.present())
@@ -531,7 +531,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 
 	// Measure server-side RPC latency from the time a request was
 	// received to time the response was sent.
-	const double endTime = g_network->timer();
+	const double endTime = timer();
 	self->resolverLatencyDist->sampleSeconds(endTime - req.requestTime());
 
 	++self->resolveBatchOut;

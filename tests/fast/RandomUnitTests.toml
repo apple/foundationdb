@@ -1,3 +1,6 @@
+[[knobs]]
+rocksdb_empty_range_check=false
+
 [[test]]
 testTitle = 'UnitTests'
 useDB = false
