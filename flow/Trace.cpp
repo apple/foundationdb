@@ -1056,9 +1056,9 @@ BaseTraceEvent::State BaseTraceEvent::init() {
 	return enabled;
 }
 
-TraceEvent& TraceEvent::errorImpl(class Error const& error, bool includeCancelled) {
-	ASSERT(!logged);
-	if (error.code() != error_code_actor_cancelled || includeCancelled) {
+BaseTraceEvent& BaseTraceEvent::errorUnsuppressed(class Error const& error) {
+	if (enabled) {
+		ASSERT(!logged);
 		err = error;
 		if (initialized) {
 			if (error.isInjectedFault()) {
@@ -1070,19 +1070,31 @@ TraceEvent& TraceEvent::errorImpl(class Error const& error, bool includeCancelle
 			detail("ErrorDescription", error.what());
 			detail("ErrorCode", error.code());
 		}
-		if (err.isDiskError()) {
+		if (error.isDiskError()) {
 			setErrorKind(ErrorKind::DiskIssue);
 		}
-	} else {
-		if (initialized) {
-			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways,
-			           std::string(TRACE_EVENT_INVALID_SUPPRESSION).append(type).c_str())
-			    .suppressFor(5);
+	}
+
+	return *this;
+}
+
+BaseTraceEvent& TraceEvent::error(class Error const& error) {
+	if (enabled) {
+		if (error.code() != error_code_actor_cancelled) {
+			BaseTraceEvent::errorUnsuppressed(error);
 		} else {
-			// even force-enabled events should respect suppression by error type
-			enabled = BaseTraceEvent::State::disabled();
+			ASSERT(!logged);
+			if (initialized) {
+				TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways,
+				           std::string(TRACE_EVENT_INVALID_SUPPRESSION).append(type).c_str())
+				    .suppressFor(5);
+			} else {
+				// even force-enabled events should respect suppression by error type
+				enabled = BaseTraceEvent::State::disabled();
+			}
 		}
 	}
+
 	return *this;
 }
 
