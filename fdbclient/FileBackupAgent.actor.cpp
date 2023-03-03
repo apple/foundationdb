@@ -584,6 +584,49 @@ private:
 	Key lastValue;
 };
 
+Standalone<VectorRef<KeyValueRef>> decodeRangeFileBlock(const Standalone<StringRef>& buf) {
+	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
+	StringRefReader reader(buf, restore_corrupted_data());
+
+	// Read header, currently only decoding BACKUP_AGENT_SNAPSHOT_FILE_VERSION
+	if (reader.consume<int32_t>() != BACKUP_AGENT_SNAPSHOT_FILE_VERSION)
+		throw restore_unsupported_file_version();
+
+	// Read begin key, if this fails then block was invalid.
+	uint32_t kLen = reader.consumeNetworkUInt32();
+	const uint8_t* k = reader.consume(kLen);
+	results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
+
+	// Read kv pairs and end key
+	while (1) {
+		// Read a key.
+		kLen = reader.consumeNetworkUInt32();
+		k = reader.consume(kLen);
+
+		// If eof reached or first value len byte is 0xFF then a valid block end was reached.
+		if (reader.eof() || *reader.rptr == 0xFF) {
+			results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
+			break;
+		}
+
+		// Read a value, which must exist or the block is invalid
+		uint32_t vLen = reader.consumeNetworkUInt32();
+		const uint8_t* v = reader.consume(vLen);
+		results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
+
+		// If eof reached or first byte of next key len is 0xFF then a valid block end was reached.
+		if (reader.eof() || *reader.rptr == 0xFF)
+			break;
+	}
+
+	// Make sure any remaining bytes in the block are 0xFF
+	for (auto b : reader.remainder())
+		if (b != 0xFF)
+			throw restore_corrupted_data_padding();
+
+	return results;
+}
+
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
                                                                       int len) {
@@ -594,56 +637,14 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 
 	simulateBlobFailure();
 
-	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
-	state StringRefReader reader(buf, restore_corrupted_data());
-
 	try {
-		// Read header, currently only decoding BACKUP_AGENT_SNAPSHOT_FILE_VERSION
-		if (reader.consume<int32_t>() != BACKUP_AGENT_SNAPSHOT_FILE_VERSION)
-			throw restore_unsupported_file_version();
-
-		// Read begin key, if this fails then block was invalid.
-		uint32_t kLen = reader.consumeNetworkUInt32();
-		const uint8_t* k = reader.consume(kLen);
-		results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
-
-		// Read kv pairs and end key
-		while (1) {
-			// Read a key.
-			kLen = reader.consumeNetworkUInt32();
-			k = reader.consume(kLen);
-
-			// If eof reached or first value len byte is 0xFF then a valid block end was reached.
-			if (reader.eof() || *reader.rptr == 0xFF) {
-				results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
-				break;
-			}
-
-			// Read a value, which must exist or the block is invalid
-			uint32_t vLen = reader.consumeNetworkUInt32();
-			const uint8_t* v = reader.consume(vLen);
-			results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
-
-			// If eof reached or first byte of next key len is 0xFF then a valid block end was reached.
-			if (reader.eof() || *reader.rptr == 0xFF)
-				break;
-		}
-
-		// Make sure any remaining bytes in the block are 0xFF
-		for (auto b : reader.remainder())
-			if (b != 0xFF)
-				throw restore_corrupted_data_padding();
-
-		return results;
-
+		return decodeRangeFileBlock(buf);
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "FileRestoreDecodeRangeFileBlockFailed")
 		    .error(e)
 		    .detail("Filename", file->getFilename())
 		    .detail("BlockOffset", offset)
-		    .detail("BlockLen", len)
-		    .detail("ErrorRelativeOffset", reader.rptr - buf.begin())
-		    .detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset);
+		    .detail("BlockLen", len);
 		throw;
 	}
 }
@@ -692,6 +693,37 @@ private:
 	int64_t blockEnd;
 };
 
+Standalone<VectorRef<KeyValueRef>> decodeMutationLogFileBlock(const Standalone<StringRef>& buf) {
+	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
+	StringRefReader reader(buf, restore_corrupted_data());
+
+	// Read header, currently only decoding version BACKUP_AGENT_MLOG_VERSION
+	if (reader.consume<int32_t>() != BACKUP_AGENT_MLOG_VERSION)
+		throw restore_unsupported_file_version();
+
+	// Read k/v pairs.  Block ends either at end of last value exactly or with 0xFF as first key len byte.
+	while (1) {
+		// If eof reached or first key len bytes is 0xFF then end of block was reached.
+		if (reader.eof() || *reader.rptr == 0xFF)
+			break;
+
+		// Read key and value.  If anything throws then there is a problem.
+		uint32_t kLen = reader.consumeNetworkUInt32();
+		const uint8_t* k = reader.consume(kLen);
+		uint32_t vLen = reader.consumeNetworkUInt32();
+		const uint8_t* v = reader.consume(vLen);
+
+		results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
+	}
+
+	// Make sure any remaining bytes in the block are 0xFF
+	for (auto b : reader.remainder())
+		if (b != 0xFF)
+			throw restore_corrupted_data_padding();
+
+	return results;
+}
+
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Reference<IAsyncFile> file,
                                                                             int64_t offset,
                                                                             int len) {
@@ -700,44 +732,14 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Refe
 	if (rLen != len)
 		throw restore_bad_read();
 
-	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
-	state StringRefReader reader(buf, restore_corrupted_data());
-
 	try {
-		// Read header, currently only decoding version BACKUP_AGENT_MLOG_VERSION
-		if (reader.consume<int32_t>() != BACKUP_AGENT_MLOG_VERSION)
-			throw restore_unsupported_file_version();
-
-		// Read k/v pairs.  Block ends either at end of last value exactly or with 0xFF as first key len byte.
-		while (1) {
-			// If eof reached or first key len bytes is 0xFF then end of block was reached.
-			if (reader.eof() || *reader.rptr == 0xFF)
-				break;
-
-			// Read key and value.  If anything throws then there is a problem.
-			uint32_t kLen = reader.consumeNetworkUInt32();
-			const uint8_t* k = reader.consume(kLen);
-			uint32_t vLen = reader.consumeNetworkUInt32();
-			const uint8_t* v = reader.consume(vLen);
-
-			results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
-		}
-
-		// Make sure any remaining bytes in the block are 0xFF
-		for (auto b : reader.remainder())
-			if (b != 0xFF)
-				throw restore_corrupted_data_padding();
-
-		return results;
-
+		return decodeMutationLogFileBlock(buf);
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "FileRestoreCorruptLogFileBlock")
 		    .error(e)
 		    .detail("Filename", file->getFilename())
 		    .detail("BlockOffset", offset)
-		    .detail("BlockLen", len)
-		    .detail("ErrorRelativeOffset", reader.rptr - buf.begin())
-		    .detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset);
+		    .detail("BlockLen", len);
 		throw;
 	}
 }

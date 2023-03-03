@@ -579,6 +579,12 @@ public:
 	ACTOR static Future<Void> openFileImpl(DecodeProgress* self, Reference<IBackupContainer> container) {
 		Reference<IAsyncFile> fd = wait(container->readFile(self->file.fileName));
 		self->fd = fd;
+		state Standalone<StringRef> buf = makeString(self->file.fileSize);
+		int rLen = wait(self->fd->read(mutateString(buf), self->file.fileSize, 0));
+		if (rLen != self->file.fileSize) {
+			throw restore_bad_read();
+		}
+
 		if (self->save) {
 			std::string dir = self->file.fileName;
 			std::size_t found = self->file.fileName.find_last_of('/');
@@ -593,10 +599,17 @@ public:
 				TraceEvent(SevError, "OpenLocalFileFailed").detail("File", self->file.fileName);
 				throw platform_error();
 			}
+			int wlen = write(self->lfd, buf.begin(), self->file.fileSize);
+			if (wlen != self->file.fileSize) {
+				TraceEvent(SevError, "WriteLocalFileFailed")
+				    .detail("File", self->file.fileName)
+				    .detail("Len", self->file.fileSize);
+				throw platform_error();
+			}
+			TraceEvent("WriteLocalFile").detail("Name", self->file.fileName).detail("Len", self->file.fileSize);
 		}
-		while (!self->eof) {
-			wait(readAndDecodeFile(self));
-		}
+
+		self->decodeFile(buf);
 		return Void();
 	}
 
@@ -608,58 +621,28 @@ public:
 		}
 	}
 
-	// Reads a file block, decodes it into key/value pairs, and stores these pairs.
-	ACTOR static Future<Void> readAndDecodeFile(DecodeProgress* self) {
+	// Reads a file a file content in the buffer, decodes it into key/value pairs, and stores these pairs.
+	void decodeFile(const Standalone<StringRef>& buf) {
 		try {
-			state int64_t len = std::min<int64_t>(self->file.blockSize, self->file.fileSize - self->offset);
-			if (len == 0) {
-				self->eof = true;
-				return Void();
-			}
-
-			// Decode a file block into log_key and log_value chunks
-			state Standalone<VectorRef<KeyValueRef>> chunks =
-			    wait(fileBackup::decodeMutationLogFileBlock(self->fd, self->offset, len));
-			self->blocks.push_back(chunks);
-
-			if (self->save) {
-				ASSERT(self->lfd != -1);
-
-				// Read the chunck one more time
-				state Standalone<StringRef> buf = makeString(len);
-				int rLen = wait(self->fd->read(mutateString(buf), len, self->offset));
-				if (rLen != len)
-					throw restore_bad_read();
-
-				int wlen = write(self->lfd, buf.begin(), len);
-				if (wlen != len) {
-					TraceEvent(SevError, "WriteLocalFileFailed")
-					    .detail("File", self->file.fileName)
-					    .detail("Offset", self->offset)
-					    .detail("Len", len)
-					    .detail("Wrote", wlen);
-					throw platform_error();
+			loop {
+				int64_t len = std::min<int64_t>(file.blockSize, file.fileSize - offset);
+				if (len == 0) {
+					return;
 				}
-				TraceEvent("WriteLocalFile")
-				    .detail("Name", self->file.fileName)
-				    .detail("Len", len)
-				    .detail("Offset", self->offset);
+
+				// Decode a file block into log_key and log_value chunks
+				Standalone<VectorRef<KeyValueRef>> chunks =
+				    fileBackup::decodeMutationLogFileBlock(buf.substr(offset, len));
+				blocks.push_back(chunks);
+				addBlockKVPairs(chunks);
+				offset += len;
 			}
-
-			TraceEvent("ReadFile")
-			    .detail("Name", self->file.fileName)
-			    .detail("Len", len)
-			    .detail("Offset", self->offset);
-			self->addBlockKVPairs(chunks);
-			self->offset += len;
-
-			return Void();
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "CorruptLogFileBlock")
 			    .error(e)
-			    .detail("Filename", self->file.fileName)
-			    .detail("BlockOffset", self->offset)
-			    .detail("BlockLen", self->file.blockSize);
+			    .detail("Filename", file.fileName)
+			    .detail("BlockOffset", offset)
+			    .detail("BlockLen", file.blockSize);
 			throw;
 		}
 	}
@@ -688,8 +671,16 @@ public:
 	Future<Void> openFile(Reference<IBackupContainer> container) { return openFileImpl(this, container); }
 
 	ACTOR static Future<Void> openFileImpl(DecodeRangeProgress* self, Reference<IBackupContainer> container) {
+		TraceEvent("ReadFile").detail("Name", self->file.fileName).detail("Len", self->file.fileSize);
+
 		Reference<IAsyncFile> fd = wait(container->readFile(self->file.fileName));
 		self->fd = fd;
+		state Standalone<StringRef> buf = makeString(self->file.fileSize);
+		int rLen = wait(self->fd->read(mutateString(buf), self->file.fileSize, 0));
+		if (rLen != self->file.fileSize) {
+			throw restore_bad_read();
+		}
+
 		if (self->save) {
 			std::string dir = self->file.fileName;
 			std::size_t found = self->file.fileName.find_last_of('/');
@@ -705,49 +696,48 @@ public:
 				TraceEvent(SevError, "OpenLocalFileFailed").detail("File", self->file.fileName);
 				throw platform_error();
 			}
+			int wlen = write(self->lfd, buf.begin(), self->file.fileSize);
+			if (wlen != self->file.fileSize) {
+				TraceEvent(SevError, "WriteLocalFileFailed")
+				    .detail("File", self->file.fileName)
+				    .detail("Len", self->file.fileSize);
+				throw platform_error();
+			}
+			TraceEvent("WriteLocalFile").detail("Name", self->file.fileName).detail("Len", self->file.fileSize);
 		}
-		while (!self->eof) {
-			wait(readAndDecodeFile(self));
-		}
+
+		self->decodeFile(buf);
 		return Void();
 	}
 
-	// Reads a file block, decodes it into key/value pairs, and stores these pairs.
-	ACTOR static Future<Void> readAndDecodeFile(DecodeRangeProgress* self) {
+	// Reads a file content in the buffer, decodes it into key/value pairs, and stores these pairs.
+	void decodeFile(const Standalone<StringRef>& buf) {
 		try {
-			state int64_t len = std::min<int64_t>(self->file.blockSize, self->file.fileSize - self->offset);
-			if (len == 0) {
-				self->eof = true;
-				return Void();
+			loop {
+				// process one block at a time
+				int64_t len = std::min<int64_t>(file.blockSize, file.fileSize - offset);
+				if (len == 0) {
+					return;
+				}
+
+				Standalone<VectorRef<KeyValueRef>> chunks = fileBackup::decodeRangeFileBlock(buf.substr(offset, len));
+				blocks.push_back(chunks);
+				offset += len;
 			}
-
-			state Standalone<VectorRef<KeyValueRef>> chunks =
-			    wait(fileBackup::decodeRangeFileBlock(self->fd, self->offset, len));
-			self->blocks.push_back(chunks);
-
-			TraceEvent("ReadFile")
-			    .detail("Name", self->file.fileName)
-			    .detail("Len", len)
-			    .detail("Offset", self->offset);
-			self->offset += len;
-
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "CorruptRangeFileBlock")
 			    .error(e)
-			    .detail("Filename", self->file.fileName)
-			    .detail("BlockOffset", self->offset)
-			    .detail("BlockLen", self->file.blockSize);
+			    .detail("Filename", file.fileName)
+			    .detail("BlockOffset", offset)
+			    .detail("BlockLen", file.blockSize);
 			throw;
 		}
-
-		return Void();
 	}
 
 	RangeFile file;
 	Reference<IAsyncFile> fd;
 	int64_t offset = 0;
 	bool save = false;
-	bool eof = false;
 	int lfd = -1; // local file descriptor
 };
 
