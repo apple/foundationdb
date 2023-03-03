@@ -1071,6 +1071,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state bool writeMode = false;
 
 	state std::map<Key, std::pair<Value, ClientLeaderRegInterface>> address_interface;
+	state std::map<std::string, StorageServerInterface> storage_interface;
 
 	state FdbOptions globalOptions;
 	state FdbOptions activeOptions;
@@ -1948,6 +1949,15 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					bool _result = wait(makeInterruptable(metaclusterCommand(db, tokens)));
 					if (!_result)
 						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "hotrange")) {
+					bool _result =
+					    wait(makeInterruptable(hotRangeCommandActor(localDb, db, tokens, &storage_interface)));
+					if (!_result) {
+						is_error = true;
+					}
 					continue;
 				}
 
