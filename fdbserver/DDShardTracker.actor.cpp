@@ -1580,13 +1580,6 @@ ACTOR Future<Void> dataDistributionTracker(Reference<DDSharedContext> context,
                                            Database cx,
                                            KeyRangeMap<ShardTrackedData>* shards);
 
-// Methods for PhysicalShardCollection
-FDB_DEFINE_BOOLEAN_PARAM(InAnonymousPhysicalShard);
-FDB_DEFINE_BOOLEAN_PARAM(PhysicalShardHasMoreThanKeyRange);
-FDB_DEFINE_BOOLEAN_PARAM(InOverSizePhysicalShard);
-FDB_DEFINE_BOOLEAN_PARAM(PhysicalShardAvailable);
-FDB_DEFINE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
-
 // Tracks storage metrics for `keys` and updates `physicalShardStats` which is the stats for the physical shard owning
 // this key range. This function is similar to `trackShardMetrics()` and altered for physical shard. This meant to be
 // temporary. Eventually, we want a new interface to track physical shard metrics more efficiently.

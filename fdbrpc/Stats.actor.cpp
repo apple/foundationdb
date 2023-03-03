@@ -174,8 +174,6 @@ void LatencyBands::insertBand(double value) {
 	bands.emplace(std::make_pair(value, std::make_unique<Counter>(format("Band%f", value), *cc)));
 }
 
-FDB_DEFINE_BOOLEAN_PARAM(Filtered);
-
 LatencyBands::LatencyBands(std::string const& name,
                            UID id,
                            double loggingInterval,

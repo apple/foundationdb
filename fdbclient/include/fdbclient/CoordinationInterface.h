@@ -109,7 +109,7 @@ public:
 	}
 };
 
-FDB_DECLARE_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
+FDB_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
 
 // A record that stores the connection string used to connect to a cluster. This record can be updated when a cluster
 // notifies a connected party that the connection string has changed.

@@ -23,19 +23,6 @@
 #include "libb64/decode.h"
 #include "libb64/encode.h"
 
-FDB_DEFINE_BOOLEAN_PARAM(ApplyManagementClusterUpdates);
-FDB_DEFINE_BOOLEAN_PARAM(RemoveMissingTenants);
-FDB_DEFINE_BOOLEAN_PARAM(AssignClusterAutomatically);
-FDB_DEFINE_BOOLEAN_PARAM(GroupAlreadyExists);
-FDB_DEFINE_BOOLEAN_PARAM(IsRestoring);
-FDB_DEFINE_BOOLEAN_PARAM(RunOnDisconnectedCluster);
-FDB_DEFINE_BOOLEAN_PARAM(RunOnMismatchedCluster);
-FDB_DEFINE_BOOLEAN_PARAM(RestoreDryRun);
-FDB_DEFINE_BOOLEAN_PARAM(ForceJoin);
-FDB_DEFINE_BOOLEAN_PARAM(ForceReuseTenantIdPrefix);
-FDB_DEFINE_BOOLEAN_PARAM(ForceRemove);
-FDB_DEFINE_BOOLEAN_PARAM(IgnoreCapacityLimit);
-
 namespace MetaclusterAPI {
 
 std::string tenantStateToString(TenantState tenantState) {
