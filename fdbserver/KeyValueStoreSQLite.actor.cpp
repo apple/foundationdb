@@ -1895,14 +1895,11 @@ private:
 				readThreads[i].clear();
 		}
 		void checkFreePages() {
-			int iterations = 0;
-
 			int64_t freeListSize = freeListPages;
 			while (!freeTableEmpty && freeListSize < SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT) {
 				int deletedPages = cursor->lazyDelete(SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT);
 				freeTableEmpty = (deletedPages != SERVER_KNOBS->CHECK_FREE_PAGE_AMOUNT);
 				springCleaningStats.lazyDeletePages += deletedPages;
-				++iterations;
 
 				freeListSize = conn.freePages();
 			}

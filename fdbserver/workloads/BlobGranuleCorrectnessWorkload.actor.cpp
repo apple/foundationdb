@@ -671,8 +671,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				} else {
 					int targetQueryBytes = (deterministicRandom()->randomInt(1, 20) * targetBytesReadPerQuery) / 10;
 					int estimatedQueryBytes = 0;
-					for (int i = 0; estimatedQueryBytes < targetQueryBytes && endKeyIt != threadData->keyData.end();
-					     i++, endKeyIt++) {
+					for (; estimatedQueryBytes < targetQueryBytes && endKeyIt != threadData->keyData.end();
+					     endKeyIt++) {
 						// iterate forward until end or target keys have passed
 						estimatedQueryBytes += (1 + endKeyIt->second.writes.size() - endKeyIt->second.nextClearIdx) *
 						                       threadData->targetValLength;
