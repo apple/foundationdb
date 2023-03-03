@@ -387,7 +387,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 		}
 	}
 
-	void addGRVVersion(Version readVersion) {
+	void addGRVHistory(Version readVersion) {
 		if (grvVersion.get() < readVersion) {
 			// We use GRVs from grv checker loop, plus other common BW transactions. To prevent the deque size from
 			// exploding or the effective version window from getting too small, only put GRVs in the deque if they are
@@ -938,7 +938,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 				}
 
 				wait(tr->commit());
-				bwData->addGRVVersion(tr->getReadVersion().get());
+				bwData->addGRVHistory(tr->getReadVersion().get());
 				if (BW_DEBUG) {
 					fmt::print(
 					    "Granule {0} [{1} - {2}) updated fdb with delta file {3} of size {4} at version {5}, cv={6}\n",
@@ -1045,7 +1045,7 @@ ACTOR Future<BlobFileIndex> writeEmptyDeltaFile(Reference<BlobWorkerData> bwData
 			}
 
 			wait(tr->commit());
-			bwData->addGRVVersion(tr->getReadVersion().get());
+			bwData->addGRVHistory(tr->getReadVersion().get());
 			if (BW_DEBUG) {
 				fmt::print(
 				    "Granule {0} [{1} - {2}) empty delta file bumped version last delta file from {3} -> {4}, cv={5}\n",
@@ -1236,7 +1236,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 					tr->set(historyKey, blobGranuleHistoryValueFor(historyValue));
 				}
 				wait(tr->commit());
-				bwData->addGRVVersion(tr->getReadVersion().get());
+				bwData->addGRVHistory(tr->getReadVersion().get());
 				break;
 			} catch (Error& e) {
 				wait(tr->onError(e));
@@ -1312,7 +1312,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			Version rv = wait(tr->getReadVersion());
-			bwData->addGRVVersion(rv);
+			bwData->addGRVHistory(rv);
 
 			readVersion = rv;
 			ASSERT(lastReadVersion <= readVersion);
@@ -4544,7 +4544,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				}
 			}
 			wait(tr.commit());
-			bwData->addGRVVersion(tr.getReadVersion().get());
+			bwData->addGRVHistory(tr.getReadVersion().get());
 
 			if (info.changeFeedStartVersion == invalidVersion) {
 				info.changeFeedStartVersion = tr.getCommittedVersion();
@@ -5049,7 +5049,7 @@ ACTOR Future<Void> runGRVChecks(Reference<BlobWorkerData> bwData) {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Version readVersion = wait(tr.getReadVersion());
-			bwData->addGRVVersion(readVersion);
+			bwData->addGRVHistory(readVersion);
 
 			++bwData->stats.commitVersionChecks;
 		} catch (Error& e) {
@@ -5151,7 +5151,7 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 
 				state Future<Void> watchChange = tr->watch(TenantMetadata::lastTenantId().key);
 				wait(tr->commit());
-				bwData->addGRVVersion(tr->getReadVersion().get());
+				bwData->addGRVHistory(tr->getReadVersion().get());
 				wait(watchChange);
 				tr->reset();
 			} catch (Error& e) {

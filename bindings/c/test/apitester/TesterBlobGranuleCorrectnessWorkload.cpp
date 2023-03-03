@@ -67,10 +67,11 @@ private:
 
 	void debugOp(std::string opName, fdb::KeyRange keyRange, std::optional<int> tenantId, std::string message) {
 		if (BG_API_DEBUG_VERBOSE) {
+			double now = std::chrono::duration_cast<std::chrono::duration<double>>(
+			                 std::chrono::system_clock::now().time_since_epoch())
+			                 .count();
 			info(fmt::format("{0}) {1}: [{2} - {3}) {4}: {5}",
-			                 std::chrono::duration_cast<std::chrono::duration<double>>(
-			                     std::chrono::system_clock::now().time_since_epoch())
-			                     .count(),
+			                 now,
 			                 opName,
 			                 fdb::toCharsRef(keyRange.beginKey),
 			                 fdb::toCharsRef(keyRange.endKey),
