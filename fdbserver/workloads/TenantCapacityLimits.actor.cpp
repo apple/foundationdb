@@ -113,6 +113,23 @@ struct TenantCapacityLimits : TestWorkload {
 			return Void();
 		}
 	}
+
+	ACTOR static Future<Void> setLastTenantId(Database dataDb, int64_t tenantId) {
+		// set the max tenant id for the standalone cluster
+		state Reference<ReadYourWritesTransaction> dataTr = makeReference<ReadYourWritesTransaction>(dataDb);
+		loop {
+			try {
+				dataTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				TenantMetadata::lastTenantId().set(dataTr, tenantId);
+				wait(dataTr->commit());
+				break;
+			} catch (Error& e) {
+				wait(dataTr->onError(e));
+			}
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> _start(Database cx, TenantCapacityLimits* self) {
 		if (self->useMetacluster) {
 			// Set the max tenant id for the metacluster
@@ -139,18 +156,7 @@ struct TenantCapacityLimits : TestWorkload {
 			}
 		} else {
 			// set the max tenant id for the standalone cluster
-			state Reference<ReadYourWritesTransaction> dataTr = makeReference<ReadYourWritesTransaction>(self->dataDb);
-			loop {
-				try {
-					dataTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					int64_t maxTenantId = TenantAPI::getMaxAllowableTenantId(0);
-					TenantMetadata::lastTenantId().set(dataTr, maxTenantId);
-					wait(dataTr->commit());
-					break;
-				} catch (Error& e) {
-					wait(dataTr->onError(e));
-				}
-			}
+			wait(setLastTenantId(self->dataDb, TenantAPI::getMaxAllowableTenantId(0)));
 			// Use the management database api to create a tenant which should fail since the cluster is at capacity
 			try {
 				wait(success(TenantAPI::createTenant(self->dataDb.getReference(), "test_tenant_management_api"_sr)));
@@ -159,14 +165,17 @@ struct TenantCapacityLimits : TestWorkload {
 				ASSERT(e.code() == error_code_cluster_no_capacity);
 			}
 
+			wait(setLastTenantId(self->dataDb, TenantAPI::getMaxAllowableTenantId(0) - 2));
 			// use special keys to create a tenant which should fail since the cluster is at capacity
+			state Reference<ReadYourWritesTransaction> dataTr = makeReference<ReadYourWritesTransaction>(self->dataDb);
 			loop {
 				try {
 					dataTr->reset();
 					dataTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					dataTr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-					TenantMapEntry entry;
-					dataTr->set(self->specialKeysTenantMapPrefix.withSuffix("test_tenant_special_keys"_sr), ""_sr);
+					dataTr->set(self->specialKeysTenantMapPrefix.withSuffix("test_tenant_special_keys_1"_sr), ""_sr);
+					dataTr->set(self->specialKeysTenantMapPrefix.withSuffix("test_tenant_special_keys_2"_sr), ""_sr);
+					dataTr->set(self->specialKeysTenantMapPrefix.withSuffix("test_tenant_special_keys_3"_sr), ""_sr);
 					wait(dataTr->commit());
 					ASSERT(false);
 				} catch (Error& e) {
