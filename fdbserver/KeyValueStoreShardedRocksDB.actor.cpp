@@ -2342,6 +2342,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			std::vector<std::pair<uint32_t, KeyRange>> deletes;
 			auto s = doCommit(a.writeBatch.get(), a.db, &deletes, a.getHistograms);
 			if (!s.ok()) {
+				std::string columnFamilies;
+				for (const auto* shard : *(a.dirtyShards)) {
+					columnFamilies += (shard->id + " ");
+					ASSERT(shard->cf != nullptr);
+				}
+				TraceEvent(SevError, "CommitError", logId).detail("ColumnFamilies", columnFamilies);
 				a.done.sendError(statusToError(s));
 				return;
 			}

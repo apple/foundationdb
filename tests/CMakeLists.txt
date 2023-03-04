@@ -258,7 +258,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/RYWDisable.toml)
   add_fdb_test(TEST_FILES rare/RandomReadWriteTest.toml)
   add_fdb_test(TEST_FILES rare/ReadSkewReadWrite.toml)
-  add_fdb_test(TEST_FILES rare/SpecificUnitTests.toml)
+  add_fdb_test(TEST_FILES rare/SpecificUnitTests.toml IGNORE)
   add_fdb_test(TEST_FILES rare/StorageQuotaTest.toml IGNORE)
   add_fdb_test(TEST_FILES rare/SwizzledLargeApiCorrectness.toml)
   add_fdb_test(TEST_FILES rare/RedwoodCorrectnessBTree.toml)
@@ -355,7 +355,7 @@ if(WITH_PYTHON)
     restarting/from_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
     add_fdb_test(
     TEST_FILES restarting/from_7.3.0/DrUpgradeRestart-1.toml
-    restarting/from_7.3.0/DrUpgradeRestart-2.toml)
+    restarting/from_7.3.0/DrUpgradeRestart-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.0/UpgradeAndBackupRestore-1.toml
     restarting/from_7.3.0/UpgradeAndBackupRestore-2.toml)

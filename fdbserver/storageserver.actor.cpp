@@ -454,6 +454,8 @@ struct MoveInShard {
 	Promise<Void> readWrite;
 	PromiseStream<Key> changeFeedRemovals;
 
+	Severity logSev = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
+
 	MoveInShard() = default;
 	MoveInShard(StorageServer* server, const UID& id, const UID& dataMoveId, const Version version, MoveInPhase phase);
 	MoveInShard(StorageServer* server, const UID& id, const UID& dataMoveId, const Version version);
@@ -7858,9 +7860,7 @@ ACTOR Future<Void> fallBackToAddingShard(StorageServer* data, MoveInShard* moveI
 	// state std::vector<StorageServerShard> newShards;
 	// moveInShard->setPhase(MoveInPhase::Fail);
 	auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-	TraceEvent(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_VERBOSE_TRACKING ? SevInfo : SevDebug,
-	           "FallBackToAddingShardBegin",
-	           data->thisServerID)
+	TraceEvent(SevInfo, "FallBackToAddingShardBegin", data->thisServerID)
 	    .detail("Version", mLV.version)
 	    .detail("MoveInShard", moveInShard->meta->toString());
 	moveInShard->cancel();
@@ -7908,7 +7908,8 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 	state Severity sevDm = SERVER_KNOBS->PHYSICAL_SHARD_MOVE_VERBOSE_TRACKING ? SevInfo : SevDebug;
 	ASSERT(shard->getPhase() == MoveInPhase::Fetching);
 
-	TraceEvent(sevDm, "FetchShardCheckpointMetaDataBegin", data->thisServerID).detail("MoveInShard", shard->toString());
+	TraceEvent(SevInfo, "FetchShardCheckpointMetaDataBegin", data->thisServerID)
+	    .detail("MoveInShard", shard->toString());
 
 	// TODO: use shard->meta->checkpoints to continue the fetch.
 	state int attempt = 0;
@@ -7965,17 +7966,12 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 		}
 	}
 
-	// std::cout << "Got checkpoint metadata:" << std::endl;
-	// for (const auto& record : records) {
-	// 	std::cout << record.toString() << std::endl;
-	// }
-	// {
-	// 	TraceEvent te(sevDm, "FetchShardCheckpointMetaData", data->thisServerID);
-	// 	te.detail("MoveInShard", shard->toString());
-	// 	for (int i = 0; i < records.size(); ++i) {
-	// 		te.detail("CheckpointMetaData-" + std::to_string(i), records[i].second.toString());
-	// 	}
-	// }
+	for (const auto& [range, record] : records) {
+		TraceEvent(moveInShard->logSev, "FetchShardCheckpointMetaData", data->thisServerID)
+		    .detail("MoveInShardID", moveInShard->id())
+		    .detail("Range", range)
+		    .detail("CheckpointMetaData", record.toString());
+	}
 
 	wait(delay(0));
 	if (moveInShard->getPhase() == MoveInPhase::Fail) {
@@ -7994,7 +7990,8 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 
 		++attempt;
 		try {
-			TraceEvent(sevDm, "FetchShardFetchCheckpointsBegin", data->thisServerID).detail("MoveInShardID", shard->id);
+			TraceEvent(SevInfo, "FetchShardFetchCheckpointsBegin", data->thisServerID)
+			    .detail("MoveInShardID", shard->id);
 			// .detail("CheckpointMetaData", describe(records));
 			// TODO: Persist the progress, for restarts, and fetch checkpoints in parallel.
 			// std::unordered_map<UID, std::vector<KeyRange>> checkpointRangeMap;
@@ -8067,7 +8064,7 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 
 	wait(updateMoveInShardMetaData(data, shard.get()));
 
-	TraceEvent(sevDm, "FetchShardCheckpointsEnd", data->thisServerID).detail("MoveInShard", shard->toString());
+	TraceEvent(SevInfo, "FetchShardCheckpointsEnd", data->thisServerID).detail("MoveInShard", shard->toString());
 	return Void();
 }
 
@@ -8083,7 +8080,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 	ASSERT(shard->getPhase() == MoveInPhase::Ingesting);
 	state Severity sevDm = SERVER_KNOBS->PHYSICAL_SHARD_MOVE_VERBOSE_TRACKING ? SevInfo : SevDebug;
 
-	TraceEvent(sevDm, "FetchShardIngestCheckpointBegin", data->thisServerID)
+	TraceEvent(SevInfo, "FetchShardIngestCheckpointBegin", data->thisServerID)
 	    .detail("Checkpoints", describe(shard->checkpoints));
 
 	try {
@@ -8106,7 +8103,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 		throw err;
 	}
 
-	TraceEvent(sevDm, "FetchShardIngestedCheckpoint", data->thisServerID)
+	TraceEvent(SevInfo, "FetchShardIngestedCheckpoint", data->thisServerID)
 	    .detail("MoveInShard", shard->toString())
 	    .detail("Checkpoints", describe(shard->checkpoints));
 
@@ -8128,7 +8125,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 			int64_t size = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
 			KeyRef key = kv.key.removePrefix(persistByteSampleKeys.begin);
 			// data->byteSampleApplySet(kv, data->data().getLatestVersion());
-			TraceEvent(SevDebug, "StorageRestoreCheckpointKeySample", data->thisServerID)
+			TraceEvent(moveInShard->logSev, "StorageRestoreCheckpointKeySample", data->thisServerID)
 			    .detail("Checkpoint", checkpoint.checkpointID.toString())
 			    .detail("SampleKey", key)
 			    .detail("Size", size);
@@ -8142,7 +8139,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 				checkpointBytes += data->metrics.byteSample.getEstimate(range);
 			}
 			ASSERT(checkpoint.estimatedSize.present());
-			TraceEvent(SevDebug, "StorageRestoreCheckpointStats", data->thisServerID)
+			TraceEvent(moveInShard->logSev, "StorageRestoreCheckpointStats", data->thisServerID)
 			    .detail("Checkpoint", checkpoint.toString())
 			    .detail("Bytes", checkpointBytes)
 			    .detail("CheckpointEstimatedSize", checkpoint.estimatedSize.get());
@@ -8154,7 +8151,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 
 	// shard->fetchComplete.send(Void());
 
-	TraceEvent(sevDm, "FetchShardIngestCheckpointEnd", data->thisServerID)
+	TraceEvent(SevInfo, "FetchShardIngestCheckpointEnd", data->thisServerID)
 	    .detail("Checkpoints", describe(shard->checkpoints));
 
 	return Void();
@@ -8164,16 +8161,14 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
                                           MoveInShard* moveInShard,
                                           std::shared_ptr<MoveInShardMetaData> shard,
                                           std::shared_ptr<MoveInUpdates> moveInUpdates) {
-	state Severity sevDm = SERVER_KNOBS->PHYSICAL_SHARD_MOVE_VERBOSE_TRACKING ? SevInfo : SevDebug;
-
-	TraceEvent(sevDm, "FetchShardApplyUpdatesBegin", data->thisServerID).detail("MoveInShard", shard->toString());
+	TraceEvent(SevInfo, "FetchShardApplyUpdatesBegin", data->thisServerID).detail("MoveInShard", shard->toString());
 	try {
 		// wait(delay(0, TaskPriority::FetchKeys));
 		wait(moveInUpdates->restore(shard->highWatermark));
 		if (moveInShard->getPhase() == MoveInPhase::Fail) {
 			return Void();
 		}
-		TraceEvent(sevDm, "FetchShardApplyingUpdatesRestored", data->thisServerID)
+		TraceEvent(moveInShard->logSev, "FetchShardApplyingUpdatesRestored", data->thisServerID)
 		    .detail("MoveInShard", shard->toString());
 		// state Version version = data->version.get() + 1;
 		// while (shard->updates.hasNext()) {
@@ -8209,7 +8204,7 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 		ASSERT(!moveInUpdates->hasNext());
 		// Version newHighWatermark = invalidVersion;
 		if (!updates.empty()) {
-			TraceEvent(sevDm, "FetchShardApplyingUpdates", data->thisServerID)
+			TraceEvent(moveInShard->logSev, "FetchShardApplyingUpdates", data->thisServerID)
 			    .detail("MoveInShard", moveInShard->toString())
 			    .detail("MinVerion", updates.front().version)
 			    .detail("MaxVerion", updates.back().version)
@@ -8243,7 +8238,7 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 			ASSERT(b->version >= checkv);
 			checkv = b->version;
 			for (auto& m : b->mutations) {
-				TraceEvent(SevDebug, "FetchShardFinalCommitInject", data->thisServerID)
+				TraceEvent(moveInShard->logSev, "FetchShardFinalCommitInject", data->thisServerID)
 				    .detail("Mutation", m)
 				    .detail("Version", batch->changes[0].version);
 			}
@@ -8263,7 +8258,7 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 		std::sort(shard->ranges.begin(), shard->ranges.end(), KeyRangeRef::ArbitraryOrder());
 		ASSERT(std::is_sorted(shard->ranges.begin(), shard->ranges.end(), KeyRangeRef::ArbitraryOrder()));
 		for (const auto& range : shard->ranges) {
-			TraceEvent("UpdateLocationMetadata").detail("Range", range);
+			TraceEvent(moveInShard->logSev, "UpdateLocationMetadata").detail("Range", range);
 			ASSERT(data->shards[range.begin]->keys == range);
 			// data->shards[range.begin]->phase = AddingShard::Waiting;
 			StorageServerShard newShard = data->shards[range.begin]->toStorageServerShard();
@@ -8281,7 +8276,8 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 		}
 		shard->setPhase(MoveInPhase::Complete);
 
-		TraceEvent(sevDm, "FetchShardApplyUpdatesSuccess", data->thisServerID).detail("MoveInShard", shard->toString());
+		TraceEvent(moveInShard->logSev, "FetchShardApplyUpdatesSuccess", data->thisServerID)
+		    .detail("MoveInShard", shard->toString());
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "FetchShardApplyUpdatesFailure", data->thisServerID)
 		    .errorUnsuppressed(e)
@@ -8293,9 +8289,7 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 }
 
 ACTOR Future<Void> cleanUpMoveInShard(StorageServer* data, Version version, MoveInShard* moveInShard) {
-	TraceEvent(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_VERBOSE_TRACKING ? SevInfo : SevDebug,
-	           "CleanUpMoveInShardBegin",
-	           data->thisServerID)
+	TraceEvent(moveInShard->logSev, "CleanUpMoveInShardBegin", data->thisServerID)
 	    .detail("MoveInShard", moveInShard->meta->toString())
 	    .detail("Version", version);
 	wait(data->durableVersion.whenAtLeast(version));
@@ -8345,7 +8339,7 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	loop {
 		++attempt;
 		phase = shard->getPhase();
-		TraceEvent(SevInfo, "FetchShardLoop", data->thisServerID).detail("MoveInShard", shard->toString());
+		TraceEvent(moveInShard->logSev, "FetchShardLoop", data->thisServerID).detail("MoveInShard", shard->toString());
 		try {
 			// Pending = 0, Fetching = 1, Ingesting = 2, ApplyingUpdates = 3, Complete = 4, Deleting = 4, Fail = 6,
 			if (phase == MoveInPhase::Fetching) {
@@ -8487,7 +8481,7 @@ void MoveInUpdates::addMutation(Version version,
 
 	auto& mLV = data->addVersionToMutationLog(version);
 	Key pk = getPersistKey(version, updates.back().mutations.size());
-	TraceEvent(SevDebug, "MoveInUpdatesPersistKey")
+	TraceEvent(SevVerbose, "MoveInUpdatesPersistKey")
 	    .detail("Key", pk)
 	    .detail("Version", version)
 	    .detail("Mutation", mutation);
