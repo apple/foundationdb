@@ -453,6 +453,7 @@ public:
 	bool ROCKSDB_CHECKPOINT_REPLAY_MARKER;
 	bool ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE;
 	bool ROCKSDB_ENABLE_CHECKPOINT_VALIDATION;
+	bool ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -696,6 +697,7 @@ public:
 	int64_t STORAGE_DURABILITY_LAG_HARD_MAX;
 	int64_t STORAGE_DURABILITY_LAG_SOFT_MAX;
 	bool STORAGE_INCLUDE_FEED_STORAGE_QUEUE;
+	double STORAGE_FETCH_KEYS_DELAY;
 
 	int64_t LOW_PRIORITY_STORAGE_QUEUE_BYTES;
 	int64_t LOW_PRIORITY_DURABILITY_LAG;
@@ -844,6 +846,7 @@ public:
 	double STORAGE_DURABILITY_LAG_MIN_RATE;
 	int STORAGE_COMMIT_BYTES;
 	int STORAGE_FETCH_BYTES;
+	int STORAGE_ROCKSDB_FETCH_BYTES;
 	double STORAGE_COMMIT_INTERVAL;
 	int BYTE_SAMPLING_FACTOR;
 	int BYTE_SAMPLING_OVERHEAD;
@@ -926,6 +929,7 @@ public:
 	                                          // want to restart the SS, which increases risk of data corruption.
 	int STORAGE_DISK_CLEANUP_MAX_RETRIES; // Max retries to cleanup left-over disk files from last storage server
 	int STORAGE_DISK_CLEANUP_RETRY_INTERVAL; // Sleep interval between cleanup retries
+	double WORKER_START_STORAGE_DELAY;
 
 	// Test harness
 	double WORKER_POLL_DELAY;
