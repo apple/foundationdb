@@ -60,7 +60,7 @@ setup=true
 clear=false
 count=false
 useDB=false
-storeType=ssd-redwood-1-experimental
+storeType=ssd-redwood-1
 filename=bttest-redwood
 
 testTitle=Scan
@@ -76,7 +76,7 @@ setup=false
 clear=false
 count=true
 useDB=false
-storeType=ssd-redwood-1-experimental
+storeType=ssd-redwood-1
 filename=bttest-redwood
 
 testTitle=RandomWriteSaturation
@@ -93,5 +93,5 @@ setup=false
 clear=false
 count=false
 useDB=false
-storeType=ssd-redwood-1-experimental
+storeType=ssd-redwood-1
 filename=bttest-redwood
