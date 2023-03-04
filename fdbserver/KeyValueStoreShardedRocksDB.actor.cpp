@@ -816,6 +816,15 @@ public:
 	rocksdb::Status init() {
 		// Open instance.
 		TraceEvent(SevInfo, "ShardedRocksShardManagerInitBegin", this->logId).detail("DataPath", path);
+		if (SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0) {
+			// Set rate limiter to a higher rate to avoid blocking storage engine initialization.
+			auto rateLimiter = rocksdb::NewGenericRateLimiter((int64_t)5 << 30, // 5GB
+			                                                  100 * 1000, // refill_period_us
+			                                                  10, // fairness
+			                                                  rocksdb::RateLimiter::Mode::kWritesOnly,
+			                                                  SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE);
+			dbOptions.rate_limiter = std::shared_ptr<rocksdb::RateLimiter>(rateLimiter);
+		}
 		std::vector<std::string> columnFamilies;
 		rocksdb::Status status = rocksdb::DB::ListColumnFamilies(dbOptions, path, &columnFamilies);
 
@@ -967,6 +976,9 @@ public:
 		writeBatch = std::make_unique<rocksdb::WriteBatch>();
 		dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
 
+		if (SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0) {
+			dbOptions.rate_limiter->SetBytesPerSecond(SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC);
+		}
 		TraceEvent(SevInfo, "ShardedRocksShardManagerInitEnd", this->logId).detail("DataPath", path);
 		return status;
 	}
@@ -1324,6 +1336,9 @@ public:
 	}
 
 	void closeAllShards() {
+		if (dbOptions.rate_limiter != nullptr) {
+			dbOptions.rate_limiter->SetBytesPerSecond((int64_t)5 << 30);
+		}
 		columnFamilyMap.clear();
 		physicalShards.clear();
 		// Close DB.
@@ -1336,6 +1351,9 @@ public:
 	}
 
 	void destroyAllShards() {
+		if (dbOptions.rate_limiter != nullptr) {
+			dbOptions.rate_limiter->SetBytesPerSecond((int64_t)5 << 30);
+		}
 		columnFamilyMap.clear();
 		for (auto& [_, shard] : physicalShards) {
 			shard->deletePending = true;
@@ -1347,7 +1365,7 @@ public:
 			logRocksDBError(s, "Close");
 			return;
 		}
-		s = rocksdb::DestroyDB(path, getOptions());
+		s = rocksdb::DestroyDB(path, dbOptions);
 		if (!s.ok()) {
 			logRocksDBError(s, "DestroyDB");
 		}
@@ -2048,7 +2066,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		int threadIndex;
 		std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*>* columnFamilyMap;
 		std::shared_ptr<RocksDBMetrics> rocksDBMetrics;
-		std::shared_ptr<rocksdb::RateLimiter> rateLimiter;
 		double sampleStartTime;
 
 		explicit Writer(UID logId,
@@ -2056,14 +2073,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		                std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*>* columnFamilyMap,
 		                std::shared_ptr<RocksDBMetrics> rocksDBMetrics)
 		  : logId(logId), threadIndex(threadIndex), columnFamilyMap(columnFamilyMap), rocksDBMetrics(rocksDBMetrics),
-		    rateLimiter(SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0
-		                    ? rocksdb::NewGenericRateLimiter(
-		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC, // rate_bytes_per_sec
-		                          100 * 1000, // refill_period_us
-		                          10, // fairness
-		                          rocksdb::RateLimiter::Mode::kWritesOnly,
-		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE)
-		                    : nullptr),
 		    sampleStartTime(now()) {}
 
 		~Writer() override {}
@@ -2734,7 +2743,11 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				    .detail("Error", "Read value request timedout")
 				    .detail("Method", "ReadValueAction")
 				    .detail("Timeout value", readValueTimeout);
-				a.result.sendError(key_value_store_deadline_exceeded());
+				if (SERVER_KNOBS->ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT) {
+					a.result.sendError(server_overloaded());
+				} else {
+					a.result.sendError(key_value_store_deadline_exceeded());
+				}
 				return;
 			}
 
@@ -2814,7 +2827,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				    .detail("Error", "Read value prefix request timedout")
 				    .detail("Method", "ReadValuePrefixAction")
 				    .detail("Timeout value", readValuePrefixTimeout);
-				a.result.sendError(key_value_store_deadline_exceeded());
+
+				if (SERVER_KNOBS->ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT) {
+					a.result.sendError(server_overloaded());
+				} else {
+					a.result.sendError(key_value_store_deadline_exceeded());
+				}
 				return;
 			}
 
@@ -2897,7 +2915,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				    .detail("Error", "Read range request timedout")
 				    .detail("Method", "ReadRangeAction")
 				    .detail("Timeout value", readRangeTimeout);
-				a.result.sendError(key_value_store_deadline_exceeded());
+
+				if (SERVER_KNOBS->ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT) {
+					a.result.sendError(server_overloaded());
+				} else {
+					a.result.sendError(key_value_store_deadline_exceeded());
+				}
 				return;
 			}
 
@@ -2944,7 +2967,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					    .detail("Action", "ReadRange")
 					    .detail("ShardsRead", numShards)
 					    .detail("BytesRead", accumulatedBytes);
-					a.result.sendError(key_value_store_deadline_exceeded());
+
+					if (SERVER_KNOBS->ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT) {
+						a.result.sendError(server_overloaded());
+					} else {
+						a.result.sendError(key_value_store_deadline_exceeded());
+					}
 					return;
 				}
 			}
