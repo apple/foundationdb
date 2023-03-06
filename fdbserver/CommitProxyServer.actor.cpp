@@ -1600,33 +1600,32 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
-		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
-			Error e = validateAndProcessTenantAccess(trs[t], pProxyCommitData, rawAccessTenantIds);
-			if (e.code() != error_code_success) {
-				trs[t].reply.sendError(e);
-				self->committed[t] = ConflictBatch::TransactionTenantFailure;
-			} else {
-				self->commitCount++;
-				applyMetadataMutations(trs[t].spanContext,
-				                       *pProxyCommitData,
-				                       self->arena,
-				                       pProxyCommitData->logSystem,
-				                       trs[t].transaction.mutations,
-				                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
-				                       &self->cipherKeys,
-				                       pProxyCommitData->encryptMode,
-				                       self->forceRecovery,
-				                       self->commitVersion,
-				                       self->commitVersion + 1,
-				                       /* initialCommit= */ false,
-				                       /* provisionalCommitProxy */ self->pProxyCommitData->provisional);
-			}
+		Error e = validateAndProcessTenantAccess(trs[t], pProxyCommitData, rawAccessTenantIds);
+		if (e.code() != error_code_success) {
+			trs[t].reply.sendError(e);
+			self->committed[t] = ConflictBatch::TransactionTenantFailure;
+		} else if (self->committed[t] == ConflictBatch::TransactionCommitted &&
+		           (!self->locked || trs[t].isLockAware())) {
+			self->commitCount++;
+			applyMetadataMutations(trs[t].spanContext,
+			                       *pProxyCommitData,
+			                       self->arena,
+			                       pProxyCommitData->logSystem,
+			                       trs[t].transaction.mutations,
+			                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
+			                       &self->cipherKeys,
+			                       pProxyCommitData->encryptMode,
+			                       self->forceRecovery,
+			                       self->commitVersion,
+			                       self->commitVersion + 1,
+			                       /* initialCommit= */ false,
+			                       /* provisionalCommitProxy */ self->pProxyCommitData->provisional);
+		}
 
-			if (self->firstStateMutations) {
-				ASSERT(self->committed[t] == ConflictBatch::TransactionCommitted);
-				self->firstStateMutations = false;
-				self->forceRecovery = false;
-			}
+		if (self->firstStateMutations) {
+			ASSERT(self->committed[t] == ConflictBatch::TransactionCommitted);
+			self->firstStateMutations = false;
+			self->forceRecovery = false;
 		}
 	}
 

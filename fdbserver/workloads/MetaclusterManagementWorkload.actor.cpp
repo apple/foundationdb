@@ -358,8 +358,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 				state std::vector<Future<Void>> deleteFutures;
 				for (auto const& f : getFutures) {
-					ASSERT(f.get().present());
-					deleteFutures.push_back(TenantAPI::deleteTenantTransaction(tr, f.get().get()));
+					if (f.get().present()) {
+						deleteFutures.push_back(TenantAPI::deleteTenantTransaction(tr, f.get().get()));
+					}
 				}
 
 				wait(waitForAll(deleteFutures));
