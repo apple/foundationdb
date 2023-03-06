@@ -530,6 +530,35 @@ struct DDQueue : public IDDRelocationQueue {
 		Future<Void> cancel;
 	};
 
+	struct MovingAverage {
+		int64_t previous;
+		int64_t total;
+		double interval;
+		Deque<std::pair<double, int64_t>> updates; // std::pair<time, bytes>
+
+		int64_t getTotal() { return total; }
+
+		double getAverage() {
+			while (!updates.empty() && updates.front().first < now() - interval) {
+				previous += updates.front().second;
+				updates.pop_front();
+			}
+			return (total - previous) / interval;
+		}
+
+		void sumBytes(int64_t bytes) {
+			total += bytes;
+			updates.push_back(std::make_pair(now(), bytes));
+		}
+
+		MovingAverage() {
+			previous = 0;
+			total = 0;
+			interval = SERVER_KNOBS->BYTES_AVERAGE_INTERVAL;
+			updates.clear();
+		}
+	};
+
 	struct ServerCounter {
 		enum CountType : uint8_t { ProposedSource = 0, QueuedSource, LaunchedSource, LaunchedDest, __COUNT };
 
@@ -705,6 +734,8 @@ struct DDQueue : public IDDRelocationQueue {
 	};
 	std::vector<int> retryFindDstReasonCount;
 
+	MovingAverage moveAverage;
+
 	void startRelocation(int priority, int healthPriority) {
 		// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
 		// we must count it into unhealthyRelocations; because team removers relies on unhealthyRelocations to
@@ -769,8 +800,8 @@ struct DDQueue : public IDDRelocationQueue {
 	    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
 	    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
 	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")), moveReusePhysicalShard(0),
-	    moveCreateNewPhysicalShard(0), retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0) {
-	}
+	    moveCreateNewPhysicalShard(0), retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0),
+	    moveAverage() {}
 	DDQueue() = default;
 
 	void validate() {
@@ -2015,6 +2046,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 
 					self->bytesWritten += metrics.bytes;
+					self->moveAverage.sumBytes(metrics.bytes);
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
 
@@ -2550,7 +2582,8 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 					    .detail("AverageShardSize", req.getFuture().isReady() ? req.getFuture().get() : -1)
 					    .detail("UnhealthyRelocations", self.unhealthyRelocations)
 					    .detail("HighestPriority", highestPriorityRelocation)
-					    .detail("BytesWritten", self.bytesWritten)
+					    .detail("BytesWritten", self.moveAverage.getTotal())
+					    .detail("BytesAverage", self.moveAverage.getAverage())
 					    .detail("PriorityRecoverMove", self.priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
 					    .detail("PriorityRebalanceUnderutilizedTeam",
 					            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM])
