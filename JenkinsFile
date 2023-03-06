@@ -3,7 +3,7 @@ timestamps {
 
         scmInfo = null
         stage('checkout') {
-            def repo_url = "https://github.com/snowflakedb/frostdb.git"
+            repo_url = "https://github.com/snowflakedb/frostdb.git"
             scmInfo = checkout scm
             println("${scmInfo}")
             script {
