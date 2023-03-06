@@ -800,6 +800,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( EMPTY_READ_PENALTY,                                   20 ); // 20 bytes
 	init( DD_SHARD_COMPARE_LIMIT,                               1000 );
 	init( READ_SAMPLING_ENABLED,                                true ); if ( randomize && BUGGIFY ) READ_SAMPLING_ENABLED = false;// enable/disable read sampling
+	init( BYTES_AVERAGE_INTERVAL,                                 120);
 
 	//Storage Server
 	init( STORAGE_LOGGING_DELAY,                                 5.0 );
