@@ -3533,6 +3533,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				wait(updateEpoch(bmData, epoc + 1));
 				BlobRestoreStatus completedStatus(BlobRestorePhase::LOADED_MANIFEST);
 				wait(updateRestoreStatus(bmData->db, normalKeys, completedStatus, BlobRestorePhase::LOADING_MANIFEST));
+				TraceEvent("BlobManifestLoaded", bmData->id).log();
 			} catch (Error& e) {
 				if (e.code() != error_code_restore_missing_data &&
 				    e.code() != error_code_blob_restore_missing_manifest) {
@@ -5181,7 +5182,7 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 						// These should not get an error that then causes a transaction retry loop. All error handling
 						// should be done in the purge calls
 						if (e.code() == error_code_operation_cancelled ||
-						    e.code() == error_code_blob_manager_replaced) {
+						    e.code() == error_code_blob_manager_replaced || e.code() == error_code_platform_error) {
 							throw e;
 						}
 						// FIXME: refactor this into a function on BlobManagerData
