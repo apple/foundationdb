@@ -545,6 +545,75 @@ ACTOR Future<Void> RocksDBCheckpointReader::doClose(RocksDBCheckpointReader* sel
 	return Void();
 }
 
+class RocksDBSstFileWriter : public IRocksDBSstFileWriter {
+public:
+	RocksDBSstFileWriter()
+	  : writer(std::make_unique<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options())), hasData(false){};
+
+	void open(const std::string localFile) override;
+
+	void write(const KeyRef key, const ValueRef value) override;
+
+	bool finish() override;
+
+private:
+	std::unique_ptr<rocksdb::SstFileWriter> writer;
+	std::string localFile;
+	bool hasData;
+};
+
+void RocksDBSstFileWriter::open(const std::string localFile) {
+	try {
+		this->localFile = abspath(localFile);
+		rocksdb::Status status = this->writer->Open(this->localFile);
+		if (!status.ok()) {
+			TraceEvent(SevError, "RocksDBSstFileWriterWrapperOpenFileError")
+			    .detail("LocalFile", this->localFile)
+			    .detail("Status", status.ToString());
+			throw failed_to_create_checkpoint_shard_metadata();
+		}
+	} catch (Error& e) {
+		throw e;
+	}
+}
+
+void RocksDBSstFileWriter::write(const KeyRef key, const ValueRef value) {
+	try {
+		rocksdb::Status status = this->writer->Put(toSlice(key), toSlice(value));
+		if (!status.ok()) {
+			TraceEvent(SevError, "RocksDBSstFileWriterWrapperWriteError")
+			    .detail("LocalFile", this->localFile)
+			    .detail("Key", key)
+			    .detail("Value", value)
+			    .detail("Status", status.ToString());
+			throw failed_to_create_checkpoint_shard_metadata();
+		}
+		this->hasData = true;
+	} catch (Error& e) {
+		throw e;
+	}
+}
+
+bool RocksDBSstFileWriter::finish() {
+	try {
+		if (!this->hasData) {
+			// writer->finish() cannot create sst file with no entries
+			// So, we have to check whether any data set to be written to sst file before writer->finish()
+			return false;
+		}
+		rocksdb::Status status = this->writer->Finish();
+		if (!status.ok()) {
+			TraceEvent(SevError, "RocksDBSstFileWriterWrapperCloseError")
+			    .detail("LocalFile", this->localFile)
+			    .detail("Status", status.ToString());
+			throw failed_to_create_checkpoint_shard_metadata();
+		}
+		return true;
+	} catch (Error& e) {
+		throw e;
+	}
+}
+
 // RocksDBCFCheckpointReader reads an exported RocksDB Column Family checkpoint, and returns the serialized
 // checkpoint via nextChunk.
 class RocksDBCFCheckpointReader : public ICheckpointReader {
@@ -1034,6 +1103,14 @@ ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoi
 	} else {
 		return new RocksDBCheckpointReader(checkpoint, logID);
 	}
+#endif // SSD_ROCKSDB_EXPERIMENTAL
+	return nullptr;
+}
+
+std::unique_ptr<IRocksDBSstFileWriter> newRocksDBSstFileWriter() {
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
+	std::unique_ptr<IRocksDBSstFileWriter> sstWriter = std::make_unique<RocksDBSstFileWriter>();
+	return sstWriter;
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 	return nullptr;
 }
