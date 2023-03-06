@@ -48,6 +48,8 @@ struct DcLagWorkload : TestWorkload {
 		startDelay = getOption(options, "startDelay"_sr, 10.0);
 	}
 
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
+
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (g_network->isSimulated() && enabled)
@@ -105,33 +107,33 @@ struct DcLagWorkload : TestWorkload {
 		cloggedPairs.clear();
 	}
 
-	ACTOR static Future<Void> fetchDatacenterLag(DcLagWorkload* self, Database cx) {
+	ACTOR static Future<Optional<double>> fetchDatacenterLag(DcLagWorkload* self, Database cx) {
 		StatusObject result = wait(StatusClient::statusFetcher(cx));
 		StatusObjectReader statusObj(result);
 		StatusObjectReader statusObjCluster;
 		if (!statusObj.get("cluster", statusObjCluster)) {
 			TraceEvent("DcLagNoCluster");
-			return Void();
+			return Optional<double>();
 		}
 
 		StatusObjectReader dcLag;
 		if (!statusObjCluster.get("datacenter_lag", dcLag)) {
 			TraceEvent("DcLagNoLagData");
-			return Void();
+			return Optional<double>();
 		}
 
 		Version versions = 0;
 		double seconds = 0;
 		if (!dcLag.get("versions", versions)) {
 			TraceEvent("DcLagNoVersions");
-			return Void();
+			return Optional<double>();
 		}
 		if (!dcLag.get("seconds", seconds)) {
 			TraceEvent("DcLagNoSeconds");
-			return Void();
+			return Optional<double>();
 		}
 		TraceEvent("DcLag").detail("Versions", versions).detail("Seconds", seconds);
-		return Void();
+		return seconds;
 	}
 
 	ACTOR Future<Void> clogClient(DcLagWorkload* self, Database cx) {
@@ -148,7 +150,7 @@ struct DcLagWorkload : TestWorkload {
 		// Clog and wait for recovery to happen
 		self->clogTlog(workloadEnd - now());
 
-		state Future<Void> status;
+		state Future<Optional<double>> status;
 		loop choose {
 			when(wait(delayUntil(workloadEnd))) {
 				// Expect to reach fully recovered state before workload ends
