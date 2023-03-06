@@ -3,7 +3,7 @@ timestamps {
 
         scmInfo = null
         stage('checkout') {
-            def repo_url = "https://github.com/snowflakedb/frostdb.git"
+            repo_url = "https://github.com/snowflakedb/frostdb.git"
             scmInfo = checkout scm
             println("${scmInfo}")
             script {
@@ -13,6 +13,7 @@ timestamps {
 
         stage('clang format check') {
             println("**** Starting Clang format check  **** ")
+            println("${repo_url}")
 
             setBuildStatus("clang format check", "clang format check", "PENDING", currentBuild.absoluteUrl);
 
