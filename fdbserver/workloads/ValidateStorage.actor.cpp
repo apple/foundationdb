@@ -125,12 +125,15 @@ struct ValidateStorage : TestWorkload {
 					throw audit_storage_failed();
 				}
 				ASSERT(auditId_ != auditId);
+				TraceEvent("TestValidateEnd").detail("AuditID", auditId_);
 				break;
 			} catch (Error& e) {
 				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
 				wait(delay(1));
 			}
 		}
+
+		TraceEvent("TestValidateEndAll");
 
 		return Void();
 	}
