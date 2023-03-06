@@ -132,14 +132,12 @@ struct ClogTlogWorkload : TestWorkload {
 				// recovery state hasn't changed in 30s, exclude the failed tlog
 				std::vector<StringRef> tokens;
 				state Optional<ConfigureAutoResult> conf;
-				state std::vector<std::string> holder;
 
 				CODE_PROBE(true, "Exclude failed tlog");
 				TraceEvent("ExcludeFailedLog")
 				    .detail("TLog", self->tlog.get())
 				    .detail("RecoveryState", self->dbInfo->get().recoveryState);
-				std::string addr = "exclude=" + formatIpPort(self->tlog.get().ip, self->tlog.get().port);
-				holder.push_back(addr);
+				state std::string addr = "exclude=" + formatIpPort(self->tlog.get().ip, self->tlog.get().port);
 				tokens.push_back(StringRef(addr));
 				ConfigurationResult r =
 				    wait(ManagementAPI::changeConfig(cx.getReference(), tokens, conf, /*force=*/true));
