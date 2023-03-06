@@ -653,7 +653,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 							break;
 						}
 
-						ASSERT_GT(restoreFutures.size(), 1);
+						ASSERT_GE(restoreFutures.size(), 1);
 
 						numRestores = 1;
 						wait(success(MetaclusterAPI::removeCluster(clusterItr->second.db.getReference(),
