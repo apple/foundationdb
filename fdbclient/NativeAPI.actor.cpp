@@ -8498,18 +8498,21 @@ ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAw
 
 ACTOR Future<Version> checkBlobSubrange(Database db, KeyRange keyRange, Optional<Version> version) {
 	state Transaction tr(db);
+	state Optional<Version> summaryVersion;
+	if (version.present()) {
+		summaryVersion = version.get();
+	}
 	loop {
 		try {
-			state Version summaryVersion;
-			if (version.present()) {
-				summaryVersion = version.get();
-			} else {
-				wait(store(summaryVersion, tr.getReadVersion()));
+			if (!summaryVersion.present()) {
+				// fill summary version at the start, so that retries use the same version
+				Version summaryVersion_ = wait(tr.getReadVersion());
+				summaryVersion = summaryVersion_;
 			}
 			// same properties as a read for validating granule is readable, just much less memory and network bandwidth
 			// used
 			wait(success(tr.summarizeBlobGranules(keyRange, summaryVersion, std::numeric_limits<int>::max())));
-			return summaryVersion;
+			return summaryVersion.get();
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -11174,6 +11177,30 @@ ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange rang
 
 Future<bool> DatabaseContext::blobRestore(KeyRange range, Optional<Version> version) {
 	return blobRestoreActor(Reference<DatabaseContext>::addRef(this), range, version);
+}
+
+ACTOR static Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>>
+getHotRangeMetricsActor(Reference<DatabaseContext> db, StorageServerInterface ssi, ReadHotSubRangeRequest req) {
+
+	ErrorOr<ReadHotSubRangeReply> fs = wait(ssi.getReadHotRanges.tryGetReply(req));
+	if (fs.isError()) {
+		fmt::print("Error({}): cannot get read hot metrics from storage server {}.\n",
+		           fs.getError().what(),
+		           ssi.address().toString());
+		return Standalone<VectorRef<ReadHotRangeWithMetrics>>();
+	} else {
+		return fs.get().readHotRanges;
+	}
+}
+
+Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> DatabaseContext::getHotRangeMetrics(
+    StorageServerInterface ssi,
+    const KeyRange& keys,
+    ReadHotSubRangeRequest::SplitType type,
+    int splitCount) {
+
+	return getHotRangeMetricsActor(
+	    Reference<DatabaseContext>::addRef(this), ssi, ReadHotSubRangeRequest(keys, type, splitCount));
 }
 
 int64_t getMaxKeySize(KeyRef const& key) {

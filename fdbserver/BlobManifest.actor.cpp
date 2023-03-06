@@ -27,6 +27,7 @@
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobGranuleFiles.h"
 #include "fdbserver/Knobs.h"
+#include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
@@ -884,7 +885,9 @@ ACTOR Future<std::pair<KeyRange, BlobRestoreStatus>> getRestoreRangeStatus(Datab
 // Update restore status
 ACTOR Future<Void> updateRestoreStatus(Database db,
                                        KeyRangeRef range,
-                                       BlobRestoreStatus status,
+                                       BlobRestorePhase phase,
+                                       int progress,
+                                       Optional<StringRef> error,
                                        Optional<BlobRestorePhase> expectedPhase) {
 	state Transaction tr(db);
 	loop {
@@ -894,21 +897,31 @@ ACTOR Future<Void> updateRestoreStatus(Database db,
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			state Key key = blobRestoreCommandKeyFor(range);
 
-			// check if current phase is expected
-			if (expectedPhase.present()) {
-				Optional<Value> oldValue = wait(tr.get(key));
-				if (oldValue.present()) {
-					Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(oldValue.get());
-					if (status.phase != expectedPhase.get()) {
-						TraceEvent("BlobRestoreUnexpectedPhase")
-						    .detail("Expected", expectedPhase.get())
-						    .detail("Current", status.phase);
-						throw restore_error();
-					}
+			state Standalone<BlobRestoreStatus> restoreStatus;
+			if (error.present()) {
+				restoreStatus.error = StringRef(restoreStatus.arena(), error.get());
+			}
+			Optional<Value> oldValue = wait(tr.get(key));
+			if (oldValue.present()) {
+				Standalone<BlobRestoreStatus> oldStatus = decodeBlobRestoreStatus(oldValue.get());
+				// check if current phase is expected
+				if (expectedPhase.present() && oldStatus.phase != expectedPhase.get()) {
+					TraceEvent("BlobRestoreUnexpectedPhase")
+					    .detail("Expected", expectedPhase.get())
+					    .detail("Current", oldStatus.phase);
+					throw restore_error();
 				}
+				restoreStatus.phaseStartTs = VectorRef<int64_t>(restoreStatus.arena(), oldStatus.phaseStartTs);
 			}
 
-			Value value = blobRestoreCommandValueFor(status);
+			if (restoreStatus.phase != phase) {
+				restoreStatus.phaseStartTs.resize(restoreStatus.arena(), BlobRestorePhase::MAX);
+				restoreStatus.phaseStartTs[phase] = now();
+			}
+			restoreStatus.phase = phase;
+			restoreStatus.progress = progress;
+
+			Value value = blobRestoreCommandValueFor(restoreStatus);
 			tr.set(key, value);
 			wait(tr.commit());
 			return Void();

@@ -19,7 +19,9 @@
  */
 
 #include "fdbcli/fdbcli.actor.h"
-
+#include "fmt/chrono.h"
+#include "fmt/core.h"
+#include "fmt/format.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
@@ -1118,20 +1120,68 @@ void printStatus(StatusObjectReader statusObj,
 
 				if (blobGranuleEnabled) {
 					outputString += "\n\nBlob Granules:";
-					StatusObjectReader statusObjBlobGranules = statusObjCluster["blob_granules"];
-					auto numWorkers = statusObjBlobGranules["number_of_blob_workers"].get_int();
-					outputString += "\n  Number of Workers      - " + format("%d", numWorkers);
-					auto numKeyRanges = statusObjBlobGranules["number_of_key_ranges"].get_int();
-					outputString += "\n  Number of Key Ranges   - " + format("%d", numKeyRanges);
+					if (statusObjCluster.has("blob_granules")) {
+						StatusObjectReader statusObjBlobGranules = statusObjCluster["blob_granules"];
+						if (statusObjBlobGranules.has("number_of_blob_workers")) {
+							auto numWorkers = statusObjBlobGranules["number_of_blob_workers"].get_int();
+							outputString += "\n  Number of Workers      - " + format("%d", numWorkers);
+						}
+						if (statusObjBlobGranules.has("number_of_key_ranges")) {
+							auto numKeyRanges = statusObjBlobGranules["number_of_key_ranges"].get_int();
+							outputString += "\n  Number of Key Ranges   - " + format("%d", numKeyRanges);
+						}
+					}
+
 					if (statusObjCluster.has("blob_restore")) {
 						StatusObjectReader statusObjBlobRestore = statusObjCluster["blob_restore"];
 						if (statusObjBlobRestore.has("blob_full_restore_phase")) {
-							std::string restoreStatus = statusObjBlobRestore["blob_full_restore_phase"].get_str();
-							if (statusObjBlobRestore.has("blob_full_restore_progress")) {
-								auto progress = statusObjBlobRestore["blob_full_restore_progress"].get_int();
-								restoreStatus += " " + format("%d%%", progress);
+							std::string statusStr;
+							int progress = statusObjBlobRestore["blob_full_restore_phase_progress"].get_int();
+							std::string error = statusObjBlobRestore["blob_full_restore_error"].get_str();
+							int64_t startTs = statusObjBlobRestore["blob_full_restore_start_ts"].get_int64();
+							int64_t phaseStartTs = statusObjBlobRestore["blob_full_restore_phase_start_ts"].get_int64();
+							std::string tsShortStr = fmt::format("{:%H:%M}", fmt::localtime(phaseStartTs));
+							std::string tsLongStr = fmt::format("{:%m/%d/%y %H:%M:%S}", fmt::localtime(phaseStartTs));
+
+							switch (statusObjBlobRestore["blob_full_restore_phase"].get_int()) {
+							case BlobRestorePhase::INIT:
+								statusStr = "Initializing";
+								break;
+							case BlobRestorePhase::STARTING_MIGRATOR:
+								statusStr = "Starting migrator";
+								break;
+							case BlobRestorePhase::LOADING_MANIFEST:
+								statusStr = fmt::format("Loading manifest. Started at {}", progress, tsShortStr);
+								break;
+							case BlobRestorePhase::LOADED_MANIFEST:
+								statusStr = "Manifest is loaded";
+								break;
+							case BlobRestorePhase::COPYING_DATA:
+								statusStr = fmt::format("Copying data {}%. Started at {}", progress, tsShortStr);
+								if (progress > 0) {
+									int eta = (100 - progress) * (now() - phaseStartTs) / progress / 60;
+									if (eta > 1) {
+										statusStr += fmt::format(". ETA {} minutes", eta);
+									} else {
+										statusStr += fmt::format(". ETA about one minute");
+									}
+								}
+								break;
+							case BlobRestorePhase::APPLYING_MLOGS:
+								statusStr = fmt::format("Applying mutation logs. Started at {}", progress, tsShortStr);
+								break;
+							case BlobRestorePhase::DONE:
+								statusStr = fmt::format(
+								    "Completed at {}. Total {} minutes used", tsLongStr, int(now() - startTs) / 60);
+								break;
+							case BlobRestorePhase::ERROR:
+								statusStr = fmt::format("Aborted with fatal error at {}. {}", tsLongStr, error);
+								break;
+							default:
+								statusStr = "Unexpected phase";
 							}
-							outputString += "\n  Full Restore           - " + restoreStatus;
+
+							outputString += "\n  Full Restore           - " + statusStr;
 						}
 					}
 				}
