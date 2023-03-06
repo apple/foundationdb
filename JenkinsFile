@@ -13,7 +13,6 @@ timestamps {
 
         stage('clang format check') {
             println("**** Starting Clang format check  **** ")
-            println("${repo_url}")
 
             setBuildStatus("clang format check", "clang format check", "PENDING", currentBuild.absoluteUrl);
 
