@@ -22,7 +22,7 @@
 #define MAKO_HPP
 
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 730
+#define FDB_USE_LATEST_API_VERSION
 #endif
 
 #include <array>

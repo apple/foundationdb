@@ -42,7 +42,6 @@
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/DataDistributorInterface.h"
-#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -420,6 +419,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 					}
 
 					++commitData->stats.txnCommitIn;
+					commitData->stats.uniqueClients.insert(req.reply.getEndpoint().getPrimaryAddress());
 
 					if (req.debugID.present()) {
 						g_traceBatch.addEvent("CommitDebug", req.debugID.get().first(), "CommitProxyServer.batcher");
@@ -1440,6 +1440,9 @@ Error validateAndProcessTenantAccess(CommitTransactionRequest& tr,
 	if (!isValid) {
 		return tenant_not_found();
 	}
+	if (!tr.isLockAware() && pProxyCommitData->lockedTenants.count(tr.tenantInfo.tenantId) > 0) {
+		return tenant_locked();
+	}
 
 	// only do the mutation check when the transaction use raw_access option and the tenant mode is required
 	if (pProxyCommitData->getTenantMode() != TenantMode::REQUIRED || tr.tenantInfo.hasTenant()) {
@@ -1597,33 +1600,32 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
-		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
-			Error e = validateAndProcessTenantAccess(trs[t], pProxyCommitData, rawAccessTenantIds);
-			if (e.code() != error_code_success) {
-				trs[t].reply.sendError(e);
-				self->committed[t] = ConflictBatch::TransactionTenantFailure;
-			} else {
-				self->commitCount++;
-				applyMetadataMutations(trs[t].spanContext,
-				                       *pProxyCommitData,
-				                       self->arena,
-				                       pProxyCommitData->logSystem,
-				                       trs[t].transaction.mutations,
-				                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
-				                       &self->cipherKeys,
-				                       pProxyCommitData->encryptMode,
-				                       self->forceRecovery,
-				                       self->commitVersion,
-				                       self->commitVersion + 1,
-				                       /* initialCommit= */ false,
-				                       /* provisionalCommitProxy */ self->pProxyCommitData->provisional);
-			}
+		Error e = validateAndProcessTenantAccess(trs[t], pProxyCommitData, rawAccessTenantIds);
+		if (e.code() != error_code_success) {
+			trs[t].reply.sendError(e);
+			self->committed[t] = ConflictBatch::TransactionTenantFailure;
+		} else if (self->committed[t] == ConflictBatch::TransactionCommitted &&
+		           (!self->locked || trs[t].isLockAware())) {
+			self->commitCount++;
+			applyMetadataMutations(trs[t].spanContext,
+			                       *pProxyCommitData,
+			                       self->arena,
+			                       pProxyCommitData->logSystem,
+			                       trs[t].transaction.mutations,
+			                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
+			                       &self->cipherKeys,
+			                       pProxyCommitData->encryptMode,
+			                       self->forceRecovery,
+			                       self->commitVersion,
+			                       self->commitVersion + 1,
+			                       /* initialCommit= */ false,
+			                       /* provisionalCommitProxy */ self->pProxyCommitData->provisional);
+		}
 
-			if (self->firstStateMutations) {
-				ASSERT(self->committed[t] == ConflictBatch::TransactionCommitted);
-				self->firstStateMutations = false;
-				self->forceRecovery = false;
-			}
+		if (self->firstStateMutations) {
+			ASSERT(self->committed[t] == ConflictBatch::TransactionCommitted);
+			self->firstStateMutations = false;
+			self->forceRecovery = false;
 		}
 	}
 
@@ -1807,11 +1809,11 @@ void pushToBackupMutations(CommitBatchContext* self,
 			    .detail("TenantMap", pProxyCommitData->tenantMap.size());
 			ASSERT(TenantAPI::withinSingleTenant(KeyRangeRef(m.param1, m.param2)));
 		}
+		ASSERT(!pProxyCommitData->encryptMode.isEncryptionEnabled() || writtenMutation.isEncrypted());
 
 		// Add the mutation to the relevant backup tag
 		for (auto backupName : pProxyCommitData->vecBackupKeys[m.param1]) {
 			// If encryption is enabled make sure the mutation we are writing is also encrypted
-			ASSERT(!pProxyCommitData->encryptMode.isEncryptionEnabled() || writtenMutation.isEncrypted());
 			CODE_PROBE(writtenMutation.isEncrypted(), "using encrypted backup mutation");
 			self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, writtenMutation);
 		}
@@ -1843,8 +1845,8 @@ void pushToBackupMutations(CommitBatchContext* self,
 					backupMutation =
 					    backupMutation.encrypt(self->cipherKeys, domainId, arena, BlobCipherMetrics::BACKUP);
 				}
-				ASSERT(backupMutation.isEncrypted());
 			}
+			ASSERT(!pProxyCommitData->encryptMode.isEncryptionEnabled() || backupMutation.isEncrypted());
 
 			// Add the mutation to the relevant backup tag
 			for (auto backupName : backupRange.value()) {
@@ -2131,6 +2133,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			                                getEncryptDetailsFromMutationRef(self->pProxyCommitData, idempotencyIdSet);
 			                            MutationRef encryptedMutation = idempotencyIdSet.encrypt(
 			                                self->cipherKeys, domainId, self->arena, BlobCipherMetrics::TLOG);
+			                            ASSERT(encryptedMutation.isEncrypted());
 			                            self->toCommit.writeTypedMessage(encryptedMutation);
 		                            } else {
 			                            self->toCommit.writeTypedMessage(idempotencyIdSet);
@@ -2676,7 +2679,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 			ssis.push_back(it->interf);
 			maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 		}
-		rep.results.emplace_back(r.range(), ssis);
+		rep.results.emplace_back(TenantAPI::clampRangeToTenant(r.range(), req.tenant, req.arena), ssis);
 	} else if (!req.reverse) {
 		int count = 0;
 		for (auto r = commitData->keyInfo.rangeContaining(req.begin);
@@ -2688,7 +2691,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 				ssis.push_back(it->interf);
 				maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 			}
-			rep.results.emplace_back(r.range(), ssis);
+			rep.results.emplace_back(TenantAPI::clampRangeToTenant(r.range(), req.tenant, req.arena), ssis);
 			count++;
 		}
 	} else {
@@ -2701,7 +2704,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 				ssis.push_back(it->interf);
 				maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 			}
-			rep.results.emplace_back(r.range(), ssis);
+			rep.results.emplace_back(TenantAPI::clampRangeToTenant(r.range(), req.tenant, req.arena), ssis);
 			if (r == commitData->keyInfo.ranges().begin()) {
 				break;
 			}
@@ -2730,6 +2733,175 @@ ACTOR static Future<Void> readRequestServer(CommitProxyInterface proxy,
 		} else {
 			++commitData->stats.keyServerLocationIn;
 			addActor.send(doKeyServerLocationRequest(req, commitData));
+		}
+	}
+}
+
+// Right now this just proxies a call to read the system keyspace for tenant+authorization purposes, but this will
+// eventually be extended to have this mapping in the transaction state store
+ACTOR static Future<Void> doBlobGranuleLocationRequest(GetBlobGranuleLocationsRequest req,
+                                                       ProxyCommitData* commitData) {
+	if (req.reverse) {
+		// FIXME: support! currently unused
+		++commitData->stats.blobGranuleLocationOut;
+		req.reply.sendError(unsupported_operation());
+		return Void();
+	}
+	if (req.end.present() && req.end.get() <= req.begin) {
+		++commitData->stats.blobGranuleLocationOut;
+		req.reply.sendError(unsupported_operation());
+		return Void();
+	}
+	// We can't respond to these requests until we have valid txnStateStore
+	wait(commitData->validState.getFuture());
+	state int i = 0;
+
+	state Version minVersion =
+	    req.minTenantVersion == latestVersion ? commitData->stats.lastCommitVersionAssigned + 1 : req.minTenantVersion;
+
+	wait(delay(0, TaskPriority::DefaultEndpoint));
+
+	bool validTenant = wait(checkTenant(commitData, req.tenant.tenantId, minVersion, "GetBlobGranuleLocation"));
+
+	if (!validTenant) {
+		++commitData->stats.blobGranuleLocationOut;
+		req.reply.sendError(tenant_not_found());
+		return Void();
+	}
+
+	state GetBlobGranuleLocationsReply rep;
+	state KeyRange keyRange;
+	if (req.end.present()) {
+		keyRange = KeyRangeRef(req.begin, req.end.get());
+	} else {
+		keyRange = KeyRangeRef(req.begin, keyAfter(req.begin, req.arena));
+	}
+	if (req.tenant.hasTenant()) {
+		keyRange = keyRange.withPrefix(req.tenant.prefix.get(), req.arena);
+	}
+
+	req.limit = std::min(req.limit, CLIENT_KNOBS->BG_TOO_MANY_GRANULES);
+
+	ASSERT(!keyRange.empty());
+
+	state Transaction tr(commitData->cx);
+	try {
+		// TODO: could skip GRV, and keeps consistent with tenant mapping? Appears to be other issues though
+		// tr.setVersion(minVersion);
+		// FIXME: could use streaming range read for large mappings?
+		state RangeResult blobGranuleMapping;
+		// add +1 to convert from range limit to boundary limit, 3 to allow for sequnce of:
+		// end of previous range - query begin key - start of granule - query end key - end of granule
+		// to pick up the intersecting granule
+		req.limit = std::max(3, req.limit + 1);
+		if (req.justGranules) {
+			// use krm unaligned for granules
+			wait(store(
+			    blobGranuleMapping,
+			    krmGetRangesUnaligned(
+			        &tr, blobGranuleMappingKeys.begin, keyRange, req.limit, GetRangeLimits::BYTE_LIMIT_UNLIMITED)));
+		} else {
+			// use aligned mapping for reads
+			wait(store(
+			    blobGranuleMapping,
+			    krmGetRanges(
+			        &tr, blobGranuleMappingKeys.begin, keyRange, req.limit, GetRangeLimits::BYTE_LIMIT_UNLIMITED)));
+		}
+		rep.arena.dependsOn(blobGranuleMapping.arena());
+		ASSERT(blobGranuleMapping.empty() || blobGranuleMapping.size() >= 2);
+
+		// load and decode worker interfaces if not cached
+		// FIXME: potentially remove duplicate racing requests for same BW interface? Should only happen at CP startup
+		// or when BW joins cluster
+		std::unordered_set<UID> bwiLookedUp;
+		state std::vector<Future<Optional<Value>>> bwiLookupFutures;
+		for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
+			if (!blobGranuleMapping[i].value.size()) {
+				if (req.justGranules) {
+					// skip non-blobbified ranges if justGranules
+					continue;
+				}
+				throw blob_granule_transaction_too_old();
+			}
+
+			UID workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
+			if (workerId == UID() && !req.justGranules) {
+				// range with no worker but set for blobbification counts for granule boundaries but not readability
+				throw blob_granule_transaction_too_old();
+			}
+
+			if (!req.justGranules && !commitData->blobWorkerInterfCache.count(workerId) &&
+			    !bwiLookedUp.count(workerId)) {
+				bwiLookedUp.insert(workerId);
+				bwiLookupFutures.push_back(tr.get(blobWorkerListKeyFor(workerId)));
+			}
+		}
+
+		wait(waitForAll(bwiLookupFutures));
+
+		for (auto& f : bwiLookupFutures) {
+			Optional<Value> workerInterface = f.get();
+			// from the time the mapping was read from the db, the associated blob worker
+			// could have died and so its interface wouldn't be present as part of the blobWorkerList
+			// we persist in the db. So throw blob_granule_request_failed to have client retry to get the new mapping
+			if (!workerInterface.present()) {
+				throw blob_granule_request_failed();
+			}
+
+			BlobWorkerInterface bwInterf = decodeBlobWorkerListValue(workerInterface.get());
+			commitData->blobWorkerInterfCache[bwInterf.id()] = bwInterf;
+		}
+
+		// Mapping is valid, all worker interfaces are cached, we can populate response
+		std::unordered_set<UID> interfsIncluded;
+		for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
+			KeyRangeRef granule(blobGranuleMapping[i].key, blobGranuleMapping[i + 1].key);
+			if (req.justGranules) {
+				if (!blobGranuleMapping[i].value.size()) {
+					continue;
+				}
+				rep.results.push_back({ granule, UID() });
+			} else {
+				// FIXME: avoid duplicate decode?
+				UID workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
+				rep.results.push_back({ granule, workerId });
+				if (interfsIncluded.insert(workerId).second) {
+					rep.bwInterfs.push_back(commitData->blobWorkerInterfCache[workerId]);
+				}
+			}
+		}
+
+		rep.more = blobGranuleMapping.more;
+	} catch (Error& e) {
+		++commitData->stats.blobGranuleLocationOut;
+		if (e.code() == error_code_operation_cancelled) {
+			throw;
+		}
+		// TODO: only specific error types?
+		req.reply.sendError(e);
+		return Void();
+	}
+
+	req.reply.send(rep);
+	++commitData->stats.blobGranuleLocationOut;
+	return Void();
+}
+
+ACTOR static Future<Void> bgReadRequestServer(CommitProxyInterface proxy,
+                                              PromiseStream<Future<Void>> addActor,
+                                              ProxyCommitData* commitData) {
+	loop {
+		GetBlobGranuleLocationsRequest req = waitNext(proxy.getBlobGranuleLocations.getFuture());
+		// WARNING: this code is run at a high priority, so it needs to do as little work as possible
+		if ((commitData->stats.blobGranuleLocationIn.getValue() - commitData->stats.blobGranuleLocationOut.getValue() >
+		     SERVER_KNOBS->BLOB_GRANULE_LOCATION_MAX_QUEUE_SIZE) ||
+		    (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.0001))) {
+			++commitData->stats.blobGranuleLocationErrors;
+			req.reply.sendError(commit_proxy_memory_limit_exceeded());
+			TraceEvent(SevWarnAlways, "ProxyBGLocationRequestThresholdExceeded", commitData->dbgid).suppressFor(60);
+		} else {
+			++commitData->stats.blobGranuleLocationIn;
+			addActor.send(doBlobGranuleLocationRequest(req, commitData));
 		}
 	}
 }
@@ -3357,6 +3529,66 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 
 } // anonymous namespace
 
+//
+// Metrics related to the commit proxy are logged on a five second interval in
+// the `ProxyMetrics` trace. However, it can be hard to determine workload
+// burstiness when looking at such a large time range. This function adds much
+// more frequent logging for certain metrics to provide fine-grained insight
+// into workload patterns. The metrics logged by this function break down into
+// two categories:
+//
+//   * existing counters reported by `ProxyMetrics`
+//   * new counters that are only reported by this function
+//
+// Neither is implemented optimally, but the data collected should be helpful
+// in identifying workload patterns on the server.
+//
+// Metrics reporting by this function can be disabled by setting the
+// `BURSTINESS_METRICS_ENABLED` knob to false. The reporting interval can be
+// adjusted by modifying the knob `BURSTINESS_METRICS_LOG_INTERVAL`.
+//
+ACTOR Future<Void> logDetailedMetrics(ProxyCommitData* commitData) {
+	state double startTime = 0;
+	state int64_t commitBatchInBaseline = 0;
+	state int64_t txnCommitInBaseline = 0;
+	state int64_t mutationsBaseline = 0;
+	state int64_t mutationBytesBaseline = 0;
+
+	loop {
+		if (!SERVER_KNOBS->BURSTINESS_METRICS_ENABLED) {
+			return Void();
+		}
+
+		startTime = now();
+		commitBatchInBaseline = commitData->stats.commitBatchIn.getValue();
+		txnCommitInBaseline = commitData->stats.txnCommitIn.getValue();
+		mutationsBaseline = commitData->stats.mutations.getValue();
+		mutationBytesBaseline = commitData->stats.mutationBytes.getValue();
+
+		wait(delay(SERVER_KNOBS->BURSTINESS_METRICS_LOG_INTERVAL));
+
+		int64_t commitBatchInReal = commitData->stats.commitBatchIn.getValue();
+		int64_t txnCommitInReal = commitData->stats.txnCommitIn.getValue();
+		int64_t mutationsReal = commitData->stats.mutations.getValue();
+		int64_t mutationBytesReal = commitData->stats.mutationBytes.getValue();
+
+		// Don't log anything if any of the counters got reset during the wait
+		// interval. Assume that typically all the counters get reset at once.
+		if (commitBatchInReal < commitBatchInBaseline || txnCommitInReal < txnCommitInBaseline ||
+		    mutationsReal < mutationsBaseline || mutationBytesReal < mutationBytesBaseline) {
+			continue;
+		}
+
+		TraceEvent("ProxyDetailedMetrics")
+		    .detail("Elapsed", now() - startTime)
+		    .detail("CommitBatchIn", commitBatchInReal - commitBatchInBaseline)
+		    .detail("TxnCommitIn", txnCommitInReal - txnCommitInBaseline)
+		    .detail("Mutations", mutationsReal - mutationsBaseline)
+		    .detail("MutationBytes", mutationBytesReal - mutationBytesBaseline)
+		    .detail("UniqueClients", commitData->stats.getSizeAndResetUniqueClients());
+	}
+}
+
 ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
                                          MasterInterface master,
                                          LifetimeToken masterLifetime,
@@ -3444,9 +3676,11 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	addActor.send(monitorRemoteCommitted(&commitData));
 	addActor.send(tenantIdServer(proxy, addActor, &commitData));
 	addActor.send(readRequestServer(proxy, addActor, &commitData));
+	addActor.send(bgReadRequestServer(proxy, addActor, &commitData));
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(ddMetricsRequestServer(proxy, db));
 	addActor.send(reportTxnTagCommitCost(proxy.id(), db, &commitData.ssTrTagCommitCost));
+	addActor.send(logDetailedMetrics(&commitData));
 
 	auto openDb = openDBOnServer(db);
 

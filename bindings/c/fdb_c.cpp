@@ -23,7 +23,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "flow/ProtocolVersion.h"
 #include <cstdint>
-#define FDB_API_VERSION 730
+#define FDB_USE_LATEST_API_VERSION
 #define FDB_INCLUDE_LEGACY_TYPES
 
 #include "fdbclient/MultiVersionTransaction.h"
@@ -256,6 +256,10 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_int64(FDBFuture* f, int64_t* out
 
 extern "C" DLLEXPORT fdb_error_t fdb_future_get_uint64(FDBFuture* f, uint64_t* out) {
 	CATCH_AND_RETURN(*out = TSAV(uint64_t, f)->get(););
+}
+
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_double(FDBFuture* f, double* out) {
+	CATCH_AND_RETURN(*out = TSAV(double, f)->get(););
 }
 
 extern "C" DLLEXPORT fdb_error_t fdb_future_get_key(FDBFuture* f, uint8_t const** out_key, int* out_key_length) {
@@ -768,6 +772,25 @@ extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_verify_blob_rang
 	                        .extractPtr());
 }
 
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_flush_blob_range(FDBDatabase* db,
+                                                                                 uint8_t const* begin_key_name,
+                                                                                 int begin_key_name_length,
+                                                                                 uint8_t const* end_key_name,
+                                                                                 int end_key_name_length,
+                                                                                 fdb_bool_t compact,
+                                                                                 int64_t version) {
+	Optional<Version> rv;
+	if (version != latestVersion) {
+		rv = version;
+	}
+	return (FDBFuture*)(DB(db)
+	                        ->flushBlobRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                     StringRef(end_key_name, end_key_name_length)),
+	                                         compact,
+	                                         rv)
+	                        .extractPtr());
+}
+
 extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_client_status(FDBDatabase* db) {
 	return (FDBFuture*)(DB(db)->getClientStatus().extractPtr());
 }
@@ -858,6 +881,25 @@ extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_verify_blob_range(
 	                        ->verifyBlobRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
 	                                                      StringRef(end_key_name, end_key_name_length)),
 	                                          rv)
+	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_flush_blob_range(FDBTenant* tenant,
+                                                                               uint8_t const* begin_key_name,
+                                                                               int begin_key_name_length,
+                                                                               uint8_t const* end_key_name,
+                                                                               int end_key_name_length,
+                                                                               fdb_bool_t compact,
+                                                                               int64_t version) {
+	Optional<Version> rv;
+	if (version != latestVersion) {
+		rv = version;
+	}
+	return (FDBFuture*)(TENANT(tenant)
+	                        ->flushBlobRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                     StringRef(end_key_name, end_key_name_length)),
+	                                         compact,
+	                                         rv)
 	                        .extractPtr());
 }
 
@@ -1131,6 +1173,10 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_commit(FDBTransaction* tr) {
 
 extern "C" DLLEXPORT fdb_error_t fdb_transaction_get_committed_version(FDBTransaction* tr, int64_t* out_version) {
 	CATCH_AND_RETURN(*out_version = TXN(tr)->getCommittedVersion(););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_tag_throttled_duration(FDBTransaction* tr) {
+	return (FDBFuture*)TXN(tr)->getTagThrottledDuration().extractPtr();
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_total_cost(FDBTransaction* tr) {

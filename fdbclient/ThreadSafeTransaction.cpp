@@ -204,6 +204,17 @@ ThreadFuture<Version> ThreadSafeDatabase::verifyBlobRange(const KeyRangeRef& key
 	});
 }
 
+ThreadFuture<bool> ThreadSafeDatabase::flushBlobRange(const KeyRangeRef& keyRange,
+                                                      bool compact,
+                                                      Optional<Version> version) {
+	DatabaseContext* db = this->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		return db->flushBlobRange(range, compact, version);
+	});
+}
+
 ThreadSafeDatabase::ThreadSafeDatabase(ConnectionRecordType connectionRecordType,
                                        std::string connectionRecordString,
                                        int apiVersion) {
@@ -324,6 +335,18 @@ ThreadFuture<Version> ThreadSafeTenant::verifyBlobRange(const KeyRangeRef& keyRa
 		db->checkDeferredError();
 		db->addref();
 		return db->verifyBlobRange(range, version, Reference<Tenant>::addRef(tenant));
+	});
+}
+
+ThreadFuture<bool> ThreadSafeTenant::flushBlobRange(const KeyRangeRef& keyRange,
+                                                    bool compact,
+                                                    Optional<Version> version) {
+	DatabaseContext* db = this->db->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> {
+		db->checkDeferredError();
+		db->addref();
+		return db->flushBlobRange(range, compact, version, Reference<Tenant>::addRef(tenant));
 	});
 }
 
@@ -673,6 +696,14 @@ ThreadFuture<SpanContext> ThreadSafeTransaction::getSpanContext() {
 	});
 }
 
+ThreadFuture<double> ThreadSafeTransaction::getTagThrottledDuration() {
+	ISingleThreadTransaction* tr = this->tr;
+	return onMainThread([tr]() -> Future<double> {
+		tr->checkDeferredError();
+		return tr->getTagThrottledDuration();
+	});
+}
+
 ThreadFuture<int64_t> ThreadSafeTransaction::getTotalCost() {
 	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr]() -> Future<int64_t> {
@@ -749,6 +780,19 @@ ThreadSafeTransaction::ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept
 void ThreadSafeTransaction::reset() {
 	ISingleThreadTransaction* tr = this->tr;
 	onMainThreadVoid([tr]() { tr->reset(); });
+}
+
+void ThreadSafeTransaction::debugTrace(BaseTraceEvent&& ev) {
+	if (ev.isEnabled()) {
+		ISingleThreadTransaction* tr = this->tr;
+		std::shared_ptr<BaseTraceEvent> evPtr = std::make_shared<BaseTraceEvent>(std::move(ev));
+		onMainThreadVoid([tr, evPtr]() { tr->debugTrace(std::move(*evPtr)); });
+	}
+};
+
+void ThreadSafeTransaction::debugPrint(std::string const& message) {
+	ISingleThreadTransaction* tr = this->tr;
+	onMainThreadVoid([tr, message]() { tr->debugPrint(message); });
 }
 
 extern const char* getSourceVersion();

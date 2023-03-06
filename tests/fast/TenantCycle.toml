@@ -3,7 +3,7 @@ allowDefaultTenant = false
 tenantModes = ['optional', 'required']
 
 [[knobs]]
-audit_logging_enabled = false
+audit_logging_enabled = true
 max_trace_lines = 2000000
 
 [[test]]

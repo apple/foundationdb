@@ -42,6 +42,10 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 		super(cPtr);
 		this.executor = executor;
 		this.options = new DatabaseOptions(this);
+		// Automatically set the UsedDuringCommitProtectionDisable option
+		// This is because the Java bindings disallow use of Transaction objects after
+		// Transaction#onError is called.
+		this.options.setTransactionUsedDuringCommitProtectionDisable();
 		this.eventKeeper = eventKeeper;
 	}
 
@@ -166,7 +170,6 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 		Transaction tr = null;
 		try {
 			tr = new FDBTransaction(Database_createTransaction(getPtr()), this, e, eventKeeper);
-			tr.options().setUsedDuringCommitProtectionDisable();
 			return tr;
 		} catch (RuntimeException err) {
 			if (tr != null) {
@@ -270,6 +273,16 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	}
 
 	@Override
+	public CompletableFuture<Boolean> flushBlobRange(byte[] beginKey, byte[] endKey, boolean compact, long version, Executor e) {
+		pointerReadLock.lock();
+		try {
+			return new FutureBool(Database_flushBlobRange(getPtr(), beginKey, endKey, compact, version), e);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
 	public Executor getExecutor() {
 		return executor;
 	}
@@ -301,5 +314,6 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	private native long Database_unblobbifyRange(long cPtr, byte[] beginKey, byte[] endKey);
 	private native long Database_listBlobbifiedRanges(long cPtr, byte[] beginKey, byte[] endKey, int rangeLimit);
 	private native long Database_verifyBlobRange(long cPtr, byte[] beginKey, byte[] endKey, long version);
+	private native long Database_flushBlobRange(long cPtr, byte[] beginKey, byte[] endKey, boolean compact, long version);
 	private native long Database_getClientStatus(long cPtr);
 }

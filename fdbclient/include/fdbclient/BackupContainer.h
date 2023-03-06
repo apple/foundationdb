@@ -29,6 +29,8 @@
 #include "fdbclient/ReadYourWrites.h"
 #include <vector>
 
+FDB_DECLARE_BOOLEAN_PARAM(IncludeKeyRangeMap);
+
 class ReadYourWritesTransaction;
 
 Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version const& v, Reference<ReadYourWritesTransaction> const& tr);
@@ -246,7 +248,8 @@ public:
 	// snapshot of the key ranges this backup is targeting.
 	virtual Future<Void> writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
 	                                               const std::vector<std::pair<Key, Key>>& beginEndKeys,
-	                                               int64_t totalBytes) = 0;
+	                                               int64_t totalBytes,
+	                                               IncludeKeyRangeMap includeKeyRangeMap) = 0;
 
 	// Open a file for read by name
 	virtual Future<Reference<IAsyncFile>> readFile(const std::string& name) = 0;

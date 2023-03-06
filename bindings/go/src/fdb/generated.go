@@ -422,6 +422,16 @@ func (o DatabaseOptions) SetTransactionBypassUnreadable() error {
 	return o.setOpt(700, nil)
 }
 
+// By default, operations that are performed on a transaction while it is being committed will not only fail themselves, but they will attempt to fail other in-flight operations (such as the commit) as well. This behavior is intended to help developers discover situations where operations could be unintentionally executed after the transaction has been reset. Setting this option removes that protection, causing only the offending operation to fail.
+func (o DatabaseOptions) SetTransactionUsedDuringCommitProtectionDisable() error {
+	return o.setOpt(701, nil)
+}
+
+// Enables conflicting key reporting on all transactions, allowing them to retrieve the keys that are conflicting with other transactions.
+func (o DatabaseOptions) SetTransactionReportConflictingKeys() error {
+	return o.setOpt(702, nil)
+}
+
 // Use configuration database.
 func (o DatabaseOptions) SetUseConfigDatabase() error {
 	return o.setOpt(800, nil)
@@ -467,6 +477,31 @@ func (o TransactionOptions) SetReadYourWritesDisable() error {
 // Deprecated
 func (o TransactionOptions) SetReadAheadDisable() error {
 	return o.setOpt(52, nil)
+}
+
+// Storage server should cache disk blocks needed for subsequent read requests in this transaction.  This is the default behavior.
+func (o TransactionOptions) SetReadServerSideCacheEnable() error {
+	return o.setOpt(507, nil)
+}
+
+// Storage server should not cache disk blocks needed for subsequent read requests in this transaction.  This can be used to avoid cache pollution for reads not expected to be repeated.
+func (o TransactionOptions) SetReadServerSideCacheDisable() error {
+	return o.setOpt(508, nil)
+}
+
+// Use normal read priority for subsequent read requests in this transaction.  This is the default read priority.
+func (o TransactionOptions) SetReadPriorityNormal() error {
+	return o.setOpt(509, nil)
+}
+
+// Use low read priority for subsequent read requests in this transaction.
+func (o TransactionOptions) SetReadPriorityLow() error {
+	return o.setOpt(510, nil)
+}
+
+// Use high read priority for subsequent read requests in this transaction.
+func (o TransactionOptions) SetReadPriorityHigh() error {
+	return o.setOpt(511, nil)
 }
 
 // Not yet implemented.

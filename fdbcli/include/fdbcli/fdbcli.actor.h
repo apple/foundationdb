@@ -274,6 +274,8 @@ ACTOR Future<bool> tssqCommandActor(Reference<IDatabase> db, std::vector<StringR
 ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx, std::vector<StringRef> tokens);
 // targetversion command
 ACTOR Future<bool> targetVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// idempotencyids command
+ACTOR Future<bool> idempotencyIdsCommandActor(Database cx, std::vector<StringRef> tokens);
 
 } // namespace fdb_cli
 

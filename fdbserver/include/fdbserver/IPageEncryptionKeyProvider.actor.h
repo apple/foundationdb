@@ -32,7 +32,6 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 
-#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/IPager.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.h"

@@ -47,7 +47,7 @@ struct TenantInfo {
 	// Helper function for most endpoints that read/write data. This returns true iff
 	// the client is either a) a trusted peer or b) is accessing keyspace belonging to a tenant,
 	// for which it has a valid authorization token.
-	// NOTE: In a cluster where TenantMode is OPTIONAL or DISABLED, tenant name may be unset.
+	// NOTE: In a cluster where TenantMode is OPTIONAL or DISABLED, tenant ID may be invalid.
 	//       In such case, the request containing such TenantInfo is valid iff the requesting peer is trusted.
 	bool isAuthorized() const { return trusted || tenantAuthorized; }
 	bool hasTenant() const { return tenantId != INVALID_TENANT; }

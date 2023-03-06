@@ -33,8 +33,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
  */
 @ExtendWith(RequiresDatabase.class)
 class BlobGranuleIntegrationTest {
-    public static final int API_VERSION = 720;
-    private static final FDB fdb = FDB.selectAPIVersion(API_VERSION);
+    private static final FDB fdb = FDB.selectAPIVersion(ApiVersion.LATEST);
 
     @BeforeEach
     @AfterEach
@@ -78,6 +77,21 @@ class BlobGranuleIntegrationTest {
             Assertions.assertArrayEquals(blobRange.begin, blobRanges.getKeyRanges().get(0).begin);
             Assertions.assertArrayEquals(blobRange.end, blobRanges.getKeyRanges().get(0).end);
 
+            boolean flushSuccess = db.flushBlobRange(blobRange.begin, blobRange.end, false).join();
+            Assertions.assertTrue(flushSuccess);
+
+            // verify after flush
+            Long verifyVersionAfterFlush = db.verifyBlobRange(blobRange.begin, blobRange.end).join();
+            Assertions.assertTrue(verifyVersionAfterFlush >= 0);
+            Assertions.assertTrue(verifyVersionAfterFlush >= verifyVersion);
+
+            boolean compactSuccess = db.flushBlobRange(blobRange.begin, blobRange.end, true).join();
+            Assertions.assertTrue(compactSuccess);
+
+            Long verifyVersionAfterCompact = db.verifyBlobRange(blobRange.begin, blobRange.end).join();
+            Assertions.assertTrue(verifyVersionAfterCompact >= 0);
+            Assertions.assertTrue(verifyVersionAfterCompact >= verifyVersionAfterFlush);
+
             // purge/wait
             byte[] purgeKey = db.purgeBlobGranules(blobRange.begin, blobRange.end, -2, false).join();
             db.waitPurgeGranulesComplete(purgeKey).join();
@@ -85,7 +99,7 @@ class BlobGranuleIntegrationTest {
             // verify again
             Long verifyVersionAfterPurge = db.verifyBlobRange(blobRange.begin, blobRange.end).join();
             Assertions.assertTrue(verifyVersionAfterPurge >= 0);
-            Assertions.assertTrue(verifyVersionAfterPurge >= verifyVersion);
+            Assertions.assertTrue(verifyVersionAfterPurge >= verifyVersionAfterCompact);
 
             // force purge/wait
             byte[] forcePurgeKey = db.purgeBlobGranules(blobRange.begin, blobRange.end, -2, true).join();
@@ -100,6 +114,84 @@ class BlobGranuleIntegrationTest {
             Assertions.assertTrue(unblobbifySuccess);
 
             System.out.println("Blob granule management tests complete!");
+        }
+    }
+
+    @Test
+    void blobManagementFunctionsTenantTest() throws Exception {
+        /*
+         * A test that runs a blob range through the lifecycle of blob management.
+         * Identical to the above test, but everything is scoped to a tenant instead of a database
+         */
+        Random rand = new Random();
+        byte[] key = new byte[16];
+        byte[] value = new byte[8];
+
+        rand.nextBytes(key);
+        key[0] = (byte)0x30;
+        rand.nextBytes(value);
+
+        Range blobRange = Range.startsWith(key);
+        byte[] tenantName = "BGManagementTenant".getBytes();
+        try (Database db = fdb.open()) {
+            TenantManagement.createTenant(db, tenantName).join();
+
+            System.out.println("Created tenant for test");
+
+            try (Tenant tenant = db.openTenant(tenantName)) {
+                System.out.println("Opened tenant for test");
+
+                boolean blobbifySuccess = tenant.blobbifyRangeBlocking(blobRange.begin, blobRange.end).join();
+                Assertions.assertTrue(blobbifySuccess);
+
+                Long verifyVersion = tenant.verifyBlobRange(blobRange.begin, blobRange.end).join();
+
+                Assertions.assertTrue(verifyVersion >= 0);
+
+                // list blob ranges
+                KeyRangeArrayResult blobRanges = tenant.listBlobbifiedRanges(blobRange.begin, blobRange.end, 2).join();
+                Assertions.assertEquals(1, blobRanges.getKeyRanges().size());
+                Assertions.assertArrayEquals(blobRange.begin, blobRanges.getKeyRanges().get(0).begin);
+                Assertions.assertArrayEquals(blobRange.end, blobRanges.getKeyRanges().get(0).end);
+
+                boolean flushSuccess = tenant.flushBlobRange(blobRange.begin, blobRange.end, false).join();
+                Assertions.assertTrue(flushSuccess);
+
+                // verify after flush
+                Long verifyVersionAfterFlush = tenant.verifyBlobRange(blobRange.begin, blobRange.end).join();
+                Assertions.assertTrue(verifyVersionAfterFlush >= 0);
+                Assertions.assertTrue(verifyVersionAfterFlush >= verifyVersion);
+
+                boolean compactSuccess = tenant.flushBlobRange(blobRange.begin, blobRange.end, true).join();
+                Assertions.assertTrue(compactSuccess);
+
+                Long verifyVersionAfterCompact = tenant.verifyBlobRange(blobRange.begin, blobRange.end).join();
+                Assertions.assertTrue(verifyVersionAfterCompact >= 0);
+                Assertions.assertTrue(verifyVersionAfterCompact >= verifyVersionAfterFlush);
+
+                // purge/wait
+                byte[] purgeKey = tenant.purgeBlobGranules(blobRange.begin, blobRange.end, -2, false).join();
+                db.waitPurgeGranulesComplete(purgeKey).join();
+
+                // verify again
+                Long verifyVersionAfterPurge = tenant.verifyBlobRange(blobRange.begin, blobRange.end).join();
+                Assertions.assertTrue(verifyVersionAfterPurge >= 0);
+                Assertions.assertTrue(verifyVersionAfterPurge >= verifyVersionAfterCompact);
+
+                // force purge/wait
+                byte[] forcePurgeKey = tenant.purgeBlobGranules(blobRange.begin, blobRange.end, -2, true).join();
+                tenant.waitPurgeGranulesComplete(forcePurgeKey).join();
+
+                // check verify fails
+                Long verifyVersionLast = tenant.verifyBlobRange(blobRange.begin, blobRange.end).join();
+                Assertions.assertEquals(-1, verifyVersionLast);
+
+                // unblobbify
+                boolean unblobbifySuccess = tenant.unblobbifyRange(blobRange.begin, blobRange.end).join();
+                Assertions.assertTrue(unblobbifySuccess);
+
+                System.out.println("Blob granule management tenant tests complete!");
+            }
         }
     }
 }

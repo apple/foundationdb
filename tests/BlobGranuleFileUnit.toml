@@ -2,8 +2,6 @@
 encryptModes = ['domain_aware', 'cluster_aware']
 
 [[knobs]]
-enable_encryption = true
-enable_blob_file_encryption = true
 enable_blob_file_compression = true
 
 [[test]]

@@ -241,6 +241,8 @@ public:
 		}
 	}
 
+	int64_t totalBytes() { return totalBytes_; }
+
 	// Close the splitter. No more data should be added after
 	ACTOR static Future<Void> close(Reference<BlobManifestFileSplitter> self) {
 		self->flushNext();
@@ -260,6 +262,7 @@ public:
 		self->segmentNo_ = 1;
 		self->totalRows_ = 0;
 		self->logicalSize_ = 0;
+		self->totalBytes_ = 0;
 		wait(waitForAll(self->pendingFutures_));
 		self->pendingFutures_.clear();
 		self->deleteSegmentFiles();
@@ -350,19 +353,20 @@ public:
 	virtual ~BlobManifestDumper() {}
 
 	// Execute the dumper
-	ACTOR static Future<Void> execute(Reference<BlobManifestDumper> self) {
+	ACTOR static Future<int64_t> execute(Reference<BlobManifestDumper> self) {
 		try {
-			wait(dump(self));
+			state int64_t bytes = wait(dump(self));
 			wait(cleanup(self));
+			return bytes;
 		} catch (Error& e) {
 			dprint("WARNING: unexpected blob manifest dumper error {}\n", e.what()); // skip error handling for now
+			return 0;
 		}
-		return Void();
 	}
 
 private:
 	// Read system keys and write to manifest files
-	ACTOR static Future<Void> dump(Reference<BlobManifestDumper> self) {
+	ACTOR static Future<int64_t> dump(Reference<BlobManifestDumper> self) {
 		state Reference<BlobManifestFileSplitter> splitter = self->fileSplitter_;
 		state Transaction tr(self->db_);
 		loop {
@@ -411,7 +415,7 @@ private:
 
 				// last flush for in-memory data
 				wait(BlobManifestFileSplitter::close(splitter));
-				return Void();
+				return splitter->totalBytes();
 			} catch (Error& e) {
 				TraceEvent("BlobManfiestDumpError").error(e).log();
 				dprint("Manifest dumping error {}\n", e.what());
@@ -794,10 +798,13 @@ private:
 };
 
 // API to dump a manifest copy to external storage
-ACTOR Future<Void> dumpManifest(Database db, Reference<BlobConnectionProvider> blobConn, int64_t epoch, int64_t seqNo) {
+ACTOR Future<int64_t> dumpManifest(Database db,
+                                   Reference<BlobConnectionProvider> blobConn,
+                                   int64_t epoch,
+                                   int64_t seqNo) {
 	Reference<BlobManifestDumper> dumper = makeReference<BlobManifestDumper>(db, blobConn, epoch, seqNo);
-	wait(BlobManifestDumper::execute(dumper));
-	return Void();
+	int64_t bytes = wait(BlobManifestDumper::execute(dumper));
+	return bytes;
 }
 
 // API to load manifest from external blob storage
@@ -997,5 +1004,18 @@ ACTOR Future<Version> getManifestVersion(Database db) {
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
+	}
+}
+
+ACTOR Future<std::string> getMutationLogUrl() {
+	state std::string baseUrl = SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL;
+	if (baseUrl.starts_with("file://")) {
+		state std::vector<std::string> containers = wait(IBackupContainer::listContainers(baseUrl, {}));
+		if (containers.size() == 0) {
+			throw blob_restore_missing_logs();
+		}
+		return containers.back();
+	} else {
+		return baseUrl;
 	}
 }

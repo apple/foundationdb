@@ -24,7 +24,6 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/BlobGranuleRequest.actor.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
@@ -90,17 +89,16 @@ ACTOR Future<Void> doBlobCheck(Database db, Key startKey, Key endKey, Optional<V
 }
 
 ACTOR Future<Void> doBlobFlush(Database db, Key startKey, Key endKey, Optional<Version> version, bool compact) {
-	// TODO make DB function?
-	state Version flushVersion;
-	if (version.present()) {
-		flushVersion = version.get();
-	} else {
-		wait(store(flushVersion, getLatestReadVersion(db)));
-	}
+	state double elapsed = -timer_monotonic();
+	state KeyRange keyRange(KeyRangeRef(startKey, endKey));
+	bool result = wait(db->flushBlobRange(keyRange, compact, version));
+	elapsed += timer_monotonic();
 
-	KeyRange range(KeyRangeRef(startKey, endKey));
-	FlushGranuleRequest req(-1, range, flushVersion, compact);
-	wait(success(doBlobGranuleRequests(db, range, req, &BlobWorkerInterface::flushGranuleRequest)));
+	fmt::print("Blob Flush [{0} - {1}) {2} in {3:.6f} seconds\n",
+	           startKey.printable(),
+	           endKey.printable(),
+	           result ? "succeeded" : "failed",
+	           elapsed);
 
 	return Void();
 }

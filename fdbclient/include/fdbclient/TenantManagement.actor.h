@@ -193,9 +193,6 @@ createTenantTransaction(Transaction tr, TenantMapEntry tenantEntry, ClusterType 
 		throw tenant_prefix_allocator_conflict();
 	}
 
-	tenantEntry.tenantState = TenantState::READY;
-	tenantEntry.assignedCluster = Optional<ClusterName>();
-
 	TenantMetadata::tenantMap().set(tr, tenantEntry.id, tenantEntry);
 	TenantMetadata::tenantNameIndex().set(tr, tenantEntry.tenantName, tenantEntry.id);
 	TenantMetadata::lastTenantModification().setVersionstamp(tr, Versionstamp(), 0);
@@ -449,7 +446,6 @@ Future<Void> configureTenantTransaction(Transaction tr,
                                         TenantMapEntry originalEntry,
                                         TenantMapEntry updatedTenantEntry) {
 	ASSERT(updatedTenantEntry.id == originalEntry.id);
-	ASSERT(!updatedTenantEntry.assignedCluster.present());
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	TenantMetadata::tenantMap().set(tr, updatedTenantEntry.id, updatedTenantEntry);
@@ -489,6 +485,39 @@ Future<Void> configureTenantTransaction(Transaction tr,
 			TenantMetadata::tenantGroupTenantIndex().insert(
 			    tr, Tuple::makeTuple(updatedTenantEntry.tenantGroup.get(), updatedTenantEntry.id));
 		}
+	}
+
+	ASSERT_EQ(updatedTenantEntry.tenantLockId.present(),
+	          updatedTenantEntry.tenantLockState != TenantLockState::UNLOCKED);
+
+	return Void();
+}
+
+template <class TenantMapEntryT>
+bool checkLockState(TenantMapEntryT entry, TenantLockState desiredLockState, UID lockId) {
+	if (entry.tenantLockId == lockId && entry.tenantLockState == desiredLockState) {
+		return true;
+	}
+
+	if (entry.tenantLockId.present() && entry.tenantLockId.get() != lockId) {
+		throw tenant_locked();
+	}
+
+	return false;
+}
+
+ACTOR template <class Transaction>
+Future<Void> changeLockState(Transaction tr, int64_t tenant, TenantLockState desiredLockState, UID lockId) {
+	state Future<Void> tenantModeCheck = TenantAPI::checkTenantMode(tr, ClusterType::STANDALONE);
+	state TenantMapEntry entry = wait(TenantAPI::getTenantTransaction(tr, tenant));
+
+	wait(tenantModeCheck);
+
+	if (!checkLockState(entry, desiredLockState, lockId)) {
+		TenantMapEntry newState = entry;
+		newState.tenantLockState = desiredLockState;
+		newState.tenantLockId = (desiredLockState == TenantLockState::UNLOCKED) ? Optional<UID>() : lockId;
+		wait(configureTenantTransaction(tr, entry, newState));
 	}
 
 	return Void();

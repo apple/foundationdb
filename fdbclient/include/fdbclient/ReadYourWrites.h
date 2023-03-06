@@ -151,6 +151,7 @@ public:
 	VersionVector getVersionVector() const override { return tr.getVersionVector(); }
 	SpanContext getSpanContext() const override { return tr.getSpanContext(); }
 
+	double getTagThrottledDuration() const override { return tr.getTagThrottledDuration(); }
 	int64_t getTotalCost() const override { return tr.getTotalCost(); }
 	int64_t getApproximateSize() const override { return approximateSize; }
 	[[nodiscard]] Future<Standalone<StringRef>> getVersionstamp() override;
@@ -220,6 +221,12 @@ public:
 	// used in template functions as returned Future type
 	template <typename Type>
 	using FutureT = Future<Type>;
+
+	virtual void debugTrace(BaseTraceEvent&& event) override;
+	void debugPrint(std::string const& message) override;
+
+	std::vector<BaseTraceEvent> debugTraces;
+	std::vector<std::string> debugMessages;
 
 private:
 	friend class RYWImpl;

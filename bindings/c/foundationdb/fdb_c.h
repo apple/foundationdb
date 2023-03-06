@@ -26,11 +26,18 @@
 #define DLLEXPORT
 #endif
 
+#include "fdb_c_apiversion.g.h"
+#if (defined FDB_USE_LATEST_API_VERSION)
+#define FDB_API_VERSION FDB_LATEST_API_VERSION
+#elif (defined FDB_USE_LATEST_BINDINGS_API_VERSION)
+#define FDB_API_VERSION FDB_LATEST_BINDINGS_API_VERSION
+#endif
+
 #if !defined(FDB_API_VERSION)
-#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 730)
+#error You must #define FDB_API_VERSION prior to including fdb_c.h (the latest version is defined as FDB_LATEST_API_VERSION)
 #elif FDB_API_VERSION < 13
 #error API version no longer supported (upgrade to 13)
-#elif FDB_API_VERSION > 730
+#elif FDB_API_VERSION > FDB_LATEST_API_VERSION
 #error Requested API version requires a newer version of this header
 #endif
 
@@ -295,6 +302,8 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_int64(FDBFuture* f, int6
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_uint64(FDBFuture* f, uint64_t* out);
 
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_double(FDBFuture* f, double* out);
+
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_key(FDBFuture* f, uint8_t const** out_key, int* out_key_length);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_value(FDBFuture* f,
@@ -443,6 +452,14 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_verify_blob_range(FDBDataba
                                                                        int end_key_name_length,
                                                                        int64_t version);
 
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_flush_blob_range(FDBDatabase* db,
+                                                                      uint8_t const* begin_key_name,
+                                                                      int begin_key_name_length,
+                                                                      uint8_t const* end_key_name,
+                                                                      int end_key_name_length,
+                                                                      fdb_bool_t compact,
+                                                                      int64_t version);
+
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_client_status(FDBDatabase* db);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant,
@@ -498,6 +515,14 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_verify_blob_range(FDBTenant* 
                                                                      uint8_t const* end_key_name,
                                                                      int end_key_name_length,
                                                                      int64_t version);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_flush_blob_range(FDBTenant* tenant,
+                                                                    uint8_t const* begin_key_name,
+                                                                    int begin_key_name_length,
+                                                                    uint8_t const* end_key_name,
+                                                                    int end_key_name_length,
+                                                                    fdb_bool_t compact,
+                                                                    int64_t version);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_get_id(FDBTenant* tenant);
 
@@ -606,12 +631,14 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_transaction_get_committed_version(F
                                                                                int64_t* out_version);
 
 /*
- * These functions intentionally return an FDBFuture instead of an integer
+ * These functions intentionally return an FDBFuture instead of a numeric value
  * directly, so that calling the API can see the effect of previous
  * mutations on the transaction. Specifically, mutations are applied
  * asynchronously by the main thread. In order to see them, this call has to
  * be serviced by the main thread too.
  */
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_tag_throttled_duration(FDBTransaction* tr);
+
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_total_cost(FDBTransaction* tr);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* tr);

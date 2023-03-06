@@ -854,7 +854,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("consistency_scan", db->get().consistencyScan.get());
 	}
 
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION && db->get().encryptKeyProxy.present()) {
+	if (db->get().encryptKeyProxy.present()) {
 		roles.addRole("encrypt_key_proxy", db->get().encryptKeyProxy.get());
 	}
 

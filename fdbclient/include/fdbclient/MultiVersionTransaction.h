@@ -213,6 +213,14 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                      int end_key_name_length,
 	                                      int64_t version);
 
+	FDBFuture* (*databaseFlushBlobRange)(FDBDatabase* db,
+	                                     uint8_t const* begin_key_name,
+	                                     int begin_key_name_length,
+	                                     uint8_t const* end_key_name,
+	                                     int end_key_name_length,
+	                                     fdb_bool_t compact,
+	                                     int64_t version);
+
 	FDBFuture* (*databaseGetClientStatus)(FDBDatabase* db);
 
 	// Tenant
@@ -261,6 +269,14 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                    uint8_t const* end_key_name,
 	                                    int end_key_name_length,
 	                                    int64_t version);
+
+	FDBFuture* (*tenantFlushBlobRange)(FDBTenant* db,
+	                                   uint8_t const* begin_key_name,
+	                                   int begin_key_name_length,
+	                                   uint8_t const* end_key_name,
+	                                   int end_key_name_length,
+	                                   fdb_bool_t compact,
+	                                   int64_t version);
 
 	FDBFuture* (*tenantGetId)(FDBTenant* tenant);
 	void (*tenantDestroy)(FDBTenant* tenant);
@@ -393,6 +409,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 
 	FDBFuture* (*transactionCommit)(FDBTransaction* tr);
 	fdb_error_t (*transactionGetCommittedVersion)(FDBTransaction* tr, int64_t* outVersion);
+	FDBFuture* (*transactionGetTagThrottledDuration)(FDBTransaction* tr);
 	FDBFuture* (*transactionGetTotalCost)(FDBTransaction* tr);
 	FDBFuture* (*transactionGetApproximateSize)(FDBTransaction* tr);
 	FDBFuture* (*transactionWatch)(FDBTransaction* tr, uint8_t const* keyName, int keyNameLength);
@@ -412,6 +429,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*futureGetInt64)(FDBFuture* f, int64_t* outValue);
 	fdb_error_t (*futureGetUInt64)(FDBFuture* f, uint64_t* outValue);
 	fdb_error_t (*futureGetBool)(FDBFuture* f, fdb_bool_t* outValue);
+	fdb_error_t (*futureGetDouble)(FDBFuture* f, double* outValue);
 	fdb_error_t (*futureGetError)(FDBFuture* f);
 	fdb_error_t (*futureGetKey)(FDBFuture* f, uint8_t const** outKey, int* outKeyLength);
 	fdb_error_t (*futureGetValue)(FDBFuture* f, fdb_bool_t* outPresent, uint8_t const** outValue, int* outValueLength);
@@ -522,6 +540,7 @@ public:
 	Version getCommittedVersion() override;
 	ThreadFuture<VersionVector> getVersionVector() override;
 	ThreadFuture<SpanContext> getSpanContext() override { return SpanContext(); };
+	ThreadFuture<double> getTagThrottledDuration() override;
 	ThreadFuture<int64_t> getTotalCost() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
@@ -534,6 +553,9 @@ public:
 		ASSERT(false);
 		throw internal_error();
 	}
+
+	void debugTrace(BaseTraceEvent&& event) override;
+	void debugPrint(std::string const& message) override;
 
 	void addref() override { ThreadSafeReferenceCounted<DLTransaction>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLTransaction>::delref(); }
@@ -565,6 +587,7 @@ public:
 	                                                                      int rangeLimit) override;
 
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+	ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) override;
 
 	void addref() override { ThreadSafeReferenceCounted<DLTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLTenant>::delref(); }
@@ -616,6 +639,7 @@ public:
 	                                                                      int rangeLimit) override;
 
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+	ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
@@ -756,6 +780,7 @@ public:
 	Version getCommittedVersion() override;
 	ThreadFuture<VersionVector> getVersionVector() override;
 	ThreadFuture<SpanContext> getSpanContext() override;
+	ThreadFuture<double> getTagThrottledDuration() override;
 	ThreadFuture<int64_t> getTotalCost() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
@@ -771,6 +796,12 @@ public:
 
 	// return true if the underlying transaction pointer is not empty
 	bool isValid() override;
+
+	// These currently only work for local clients. To support external clients,
+	// we would likely need to store the events/messages in the MVC layer and add a hook
+	// here to commit.
+	void debugTrace(BaseTraceEvent&& event) override;
+	void debugPrint(std::string const& message) override;
 
 private:
 	const Reference<MultiVersionDatabase> db;
@@ -885,6 +916,7 @@ public:
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+	ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) override;
 
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::delref(); }
@@ -1014,6 +1046,7 @@ public:
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
 	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+	ThreadFuture<bool> flushBlobRange(const KeyRangeRef& keyRange, bool compact, Optional<Version> version) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;

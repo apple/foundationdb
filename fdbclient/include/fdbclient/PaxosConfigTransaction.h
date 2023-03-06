@@ -64,6 +64,7 @@ public:
 	void clear(KeyRef const&) override;
 	Future<Void> commit() override;
 	Version getCommittedVersion() const override;
+	double getTagThrottledDuration() const override;
 	int64_t getTotalCost() const override;
 	int64_t getApproximateSize() const override;
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;

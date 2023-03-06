@@ -83,7 +83,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CHANGE_FEED_POP_TIMEOUT,                10.0 );
 	init( CHANGE_FEED_STREAM_MIN_BYTES,            1e4 ); if( randomize && BUGGIFY ) CHANGE_FEED_STREAM_MIN_BYTES = 1;
 	init( CHANGE_FEED_START_INTERVAL,             20.0 ); if( randomize && BUGGIFY ) CHANGE_FEED_START_INTERVAL = 10.0;
-	init( CHANGE_FEED_COALESCE_LOCATIONS,         true ); if( randomize && BUGGIFY ) CHANGE_FEED_COALESCE_LOCATIONS = false;
+	init( CHANGE_FEED_COALESCE_LOCATIONS,        false ); if( randomize && BUGGIFY ) CHANGE_FEED_COALESCE_LOCATIONS = false;
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1;
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && BUGGIFY ) GRV_BATCH_TIMEOUT = 0.1;
@@ -277,6 +277,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( TAG_THROTTLE_EXPIRATION_INTERVAL,        60.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_EXPIRATION_INTERVAL = 1.0;
 	init( TAG_THROTTLING_PAGE_SIZE,               16384 ); if( randomize && BUGGIFY ) TAG_THROTTLING_PAGE_SIZE = 4096;
 	init( GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO,            5.0 );
+	init( PROXY_MAX_TAG_THROTTLE_DURATION,          5.0 ); if( randomize && BUGGIFY ) PROXY_MAX_TAG_THROTTLE_DURATION = 0.5;
 
 	// busyness reporting
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );

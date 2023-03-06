@@ -4,9 +4,6 @@ tenantModes = ['required']
 allowCreatingTenants = false
 encryptModes = ['domain_aware']
 
-[[knobs]]
-enable_encryption = true
-
 [[test]]
 testTitle = 'BackupAndRestoreWithEKPKeyFetchFailures'
 clearAfterTest = false

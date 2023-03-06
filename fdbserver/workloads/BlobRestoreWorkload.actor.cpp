@@ -25,7 +25,6 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/Knobs.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
@@ -73,6 +72,10 @@ struct BlobRestoreWorkload : TestWorkload {
 
 		if (self->performRestore_) {
 			fmt::print("Perform blob restore\n");
+			// disable manifest backup and log truncation
+			KnobValueRef knobFalse = KnobValueRef::create(bool{ false });
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob("blob_manifest_backup", knobFalse);
+
 			wait(store(result, self->extraDb_->blobRestore(normalKeys, {})));
 
 			state std::vector<Future<Void>> futures;
@@ -178,8 +181,9 @@ struct BlobRestoreWorkload : TestWorkload {
 			if (src[i].value != dest[i].value) {
 				fmt::print("Value mismatch at {}\n", i);
 				TraceEvent(SevError, "TestFailure")
-				    .detail("Reason", "Key Mismatch")
+				    .detail("Reason", "Value Mismatch")
 				    .detail("Index", i)
+				    .detail("Key", src[i].key.printable())
 				    .detail("SrcValue", src[i].value.printable())
 				    .detail("DestValue", dest[i].value.printable());
 				return false;

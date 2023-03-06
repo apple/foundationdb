@@ -465,6 +465,7 @@ class Summary:
                 self.out.append(child)
 
         self.out.attributes['Ok'] = '1' if self.ok() else '0'
+        self.out.attributes['Runtime'] = str(self.runtime)
         if not self.ok():
             reason = 'Unknown'
             if self.error:
@@ -527,6 +528,11 @@ class Summary:
                 self.out.attributes['FaultInjectionEnabled'] = attrs['FaultInjectionEnabled']
 
         self.handler.add_handler(('Type', 'ProgramStart'), program_start)
+
+        def config_string(attrs: Dict[str, str]):
+            self.out.attributes['ConfigString'] = attrs['ConfigString']
+
+        self.handler.add_handler(('Type', 'SimulatorConfig'), config_string)
 
         def set_test_file(attrs: Dict[str, str]):
             test_file = Path(attrs['TestFile'])

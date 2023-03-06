@@ -23,7 +23,7 @@
 #pragma once
 
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 730
+#define FDB_USE_LATEST_API_VERSION
 #endif
 
 #include <cassert>
@@ -45,8 +45,6 @@ namespace fdb {
 namespace native {
 #include <foundationdb/fdb_c.h>
 }
-
-#define TENANT_API_VERSION_GUARD 720
 
 using ByteString = std::basic_string<uint8_t>;
 using BytesRef = std::basic_string_view<uint8_t>;
@@ -837,6 +835,7 @@ public:
 	                                                                       KeyRef end,
 	                                                                       int rangeLimit) = 0;
 	virtual TypedFuture<future_var::Int64> verifyBlobRange(KeyRef begin, KeyRef end, int64_t version) = 0;
+	virtual TypedFuture<future_var::Bool> flushBlobRange(KeyRef begin, KeyRef end, bool compact, int64_t version) = 0;
 	virtual TypedFuture<future_var::KeyRef> purgeBlobGranules(KeyRef begin,
 	                                                          KeyRef end,
 	                                                          int64_t version,
@@ -930,6 +929,13 @@ public:
 			throw std::runtime_error("verifyBlobRange() from null tenant");
 		return native::fdb_tenant_verify_blob_range(
 		    tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end), version);
+	}
+
+	TypedFuture<future_var::Bool> flushBlobRange(KeyRef begin, KeyRef end, bool compact, int64_t version) override {
+		if (!tenant)
+			throw std::runtime_error("flushBlobRange() from null tenant");
+		return native::fdb_tenant_flush_blob_range(
+		    tenant.get(), begin.data(), intSize(begin), end.data(), intSize(end), compact, version);
 	}
 
 	TypedFuture<future_var::Int64> getId() {
@@ -1036,6 +1042,13 @@ public:
 		    db.get(), begin.data(), intSize(begin), end.data(), intSize(end), version);
 	}
 
+	TypedFuture<future_var::Bool> flushBlobRange(KeyRef begin, KeyRef end, bool compact, int64_t version) override {
+		if (!db)
+			throw std::runtime_error("flushBlobRange from null database");
+		return native::fdb_database_flush_blob_range(
+		    db.get(), begin.data(), intSize(begin), end.data(), intSize(end), compact, version);
+	}
+
 	TypedFuture<future_var::Bool> blobbifyRange(KeyRef begin, KeyRef end) override {
 		if (!db)
 			throw std::runtime_error("blobbifyRange from null database");
@@ -1073,7 +1086,7 @@ public:
 };
 
 inline Error selectApiVersionNothrow(int version) {
-	if (version < TENANT_API_VERSION_GUARD) {
+	if (version < FDB_API_VERSION_TENANT_API_RELEASED) {
 		Tenant::tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
 	}
 	return Error(native::fdb_select_api_version(version));
@@ -1086,7 +1099,7 @@ inline void selectApiVersion(int version) {
 }
 
 inline Error selectApiVersionCappedNothrow(int version) {
-	if (version < TENANT_API_VERSION_GUARD) {
+	if (version < FDB_API_VERSION_TENANT_API_RELEASED) {
 		Tenant::tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
 	}
 	return Error(

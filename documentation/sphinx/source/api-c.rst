@@ -302,6 +302,12 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
    |future-get-return1| |future-get-return2|.
 
+.. function:: fdb_error_t fdb_future_get_double(FDBFuture* future, double* out)
+
+   Extracts a double from a pointer to :type:`FDBFuture` into a caller-provided variable of type ``double``. |future-warning|
+
+   |future-get-return1| |future-get-return2|.
+
 .. function:: fdb_error_t fdb_future_get_key_array( FDBFuture* f, FDBKey const** out_key_array, int* out_count)
 
    Extracts an array of :type:`FDBKey` from an ``FDBFuture*`` into a caller-provided variable of type ``FDBKey*``. The size of the array will also be extracted and passed back by a caller-provided variable of type ``int`` |future-warning|
@@ -497,6 +503,57 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 .. function:: double fdb_database_get_main_thread_busyness(FDBDatabase* database)
 
    Returns a value where 0 indicates that the client is idle and 1 (or larger) indicates that the client is saturated. By default, this value is updated every second.
+
+.. function:: FDBFuture* fdb_database_get_client_status(FDBDatabase* db)
+
+   Returns a JSON string containing database client-side status information. At the top level the report describes the status of the 
+   Multi-Version Client database - its initialization state, the protocol version, the available client versions. The report schema is:
+
+   .. code-block::
+
+      {  "Healthy": <overall health status, true or false>,
+         "InitializationState": <initializing|initialization_failed|created|incompatible|closed>,
+         "InitializationError": <initialization error code, present if initialization failed>,
+         "ProtocolVersion" : <determined protocol version of the cluster, present if determined>,
+         "ConnectionRecord" : <connection file name or connection string>,
+         "DatabaseStatus" : <Native Database status report, present if successfully retrieved>,
+         "ErrorRetrievingDatabaseStatus" : <error code of retrieving status of the Native Database, present if failed>,
+         "AvailableClients" : [
+            { "ProtocolVersion" : <protocol version of the client>,
+               "ReleaseVersion" : <release version of the client>,
+               "ThreadIndex" : <the index of the client thread serving this database>
+            },  ...
+         ]
+      }
+
+   The status of the actual version-specific database is embedded within the ``DatabaseStatus`` attribute. It lists the addresses of various FDB 
+   server roles the client is aware of and their connection status. The schema of the ``DatabaseStatus`` object is:
+   
+   .. code-block::
+
+      {  "Healthy" : <overall health status: true or false>,
+         "ClusterID" : <UUID>,
+         "Coordinators" : [ <address>, ...  ],
+         "CurrentCoordinator" : <address>
+         "GrvProxies" : [ <address>, ...  ],
+         "CommitProxies" : [ <address>, ... ],
+         "StorageServers" : [ { "Address" : <address>, "SSID" : <Storage Server ID> }, ... ],
+         "Connections" : [
+         { "Address" : <address>,
+            "Status" : <failed|connected|connecting|disconnected>,
+            "Compatible" : <is protocol version compatible with the client>,
+            "ConnectFailedCount" : <number of failed connection attempts>,
+            "LastConnectTime" : <elapsed time in seconds since the last connection attempt>,
+            "PingCount" : <total ping count>,
+            "PingTimeoutCount" : <number of ping timeouts>,
+            "BytesSampleTime" : <elapsed time of the reported the bytes received and sent values>,
+            "BytesReceived" : <bytes received>,
+            "BytesSent" : <bytes sent>,
+            "ProtocolVersion" : <protocol version of the server, missing if unknown>
+         },
+         ...
+         ]
+      }
 
 Tenant
 ======
@@ -842,6 +899,14 @@ Applications must provide error handling and an appropriate retry loop around th
    Note that database versions are not necessarily unique to a given transaction and so cannot be used to determine in what order two transactions completed. The only use for this function is to manually enforce causal consistency when calling :func:`fdb_transaction_set_read_version()` on another subsequent transaction.
 
    Most applications will not call this function.
+
+.. function:: FDBFuture* fdb_transaction_get_tag_throttled_duration(FDBTransaction* transaction)
+
+  |future-return0| the time (in seconds) that the transaction was throttled by the tag throttler in the returned future. |future-return1| call :func:`fdb_future_get_double()` to extract the duration, |future-return2|
+
+.. function:: FDBFuture* fdb_transaction_get_total_cost(FDBTransaction* transaction)
+
+  |future-return0| the cost of the transaction so far (in bytes) in the returned future, as computed by the tag throttler, and used for tag throttling if throughput quotas are specified. |future-return1| call :func:`fdb_future_get_int64()` to extract the cost, |future-return2|
 
 .. function:: FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* transaction)
 

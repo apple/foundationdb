@@ -26,8 +26,8 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/TimedRequest.h"
-#include "fdbclient/StorageServerInterface.h" // for TenantInfo - should we refactor that elsewhere?
 
 struct BlobWorkerInterface {
 	constexpr static FileIdentifier file_identifier = 8358753;

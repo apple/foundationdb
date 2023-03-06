@@ -659,6 +659,8 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		blobGranulesEnabled = (type != 0);
 	} else if (ck == "encryption_at_rest_mode"_sr) {
 		encryptionAtRestMode = EncryptionAtRestMode::fromValueRef(Optional<ValueRef>(value));
+	} else if (ck.startsWith("excluded/"_sr)) {
+		// excluded servers: don't keep the state internally
 	} else {
 		return false;
 	}
