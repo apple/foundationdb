@@ -167,6 +167,7 @@ ERROR( rest_invalid_rest_client_knob, 1527, "Invalid RESTClient knob")
 ERROR( rest_connectpool_key_not_found, 1528, "ConnectKey not found in connection pool")
 ERROR( lock_file_failure, 1529, "Unable to lock the file")
 ERROR( rest_unsupported_protocol, 1530, "Unsupported REST protocol")
+ERROR( rest_malformed_response, 1531, "Malformed REST response")
 
 
 // 2xxx Attempt (presumably by a _client_) to do something illegal.  If an error is known to
