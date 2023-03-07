@@ -20,26 +20,23 @@
 
 #include <cinttypes>
 #include <vector>
-#include <type_traits>
+#include <map>
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/SystemData.h"
-#include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
+#include "flow/flow.h"
+#include "flow/ProcessEvents.h"
 #include "flow/Trace.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/Status.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include <boost/lexical_cast.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include "flow/flow.h"
 
 ACTOR Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags = 0) {
 	loop {
@@ -648,7 +645,7 @@ ACTOR Future<bool> getStorageServersRecruiting(Database cx, WorkerInterface dist
 				return true;
 			}
 		}
-		return false;
+		return now() > 500;
 	} catch (Error& e) {
 		TraceEvent("QuietDatabaseFailure", distributorWorker.id())
 		    .detail("Reason", "Failed to extract StorageServersRecruiting")
@@ -796,19 +793,35 @@ ACTOR Future<Void> reconfigureAfter(Database cx,
 }
 
 struct QuietDatabaseChecker {
+	ProcessEvents::Callback timeoutCallback = [this](StringRef name, StringRef msg, Error const& e) {
+		logFailure(name, msg, e);
+	};
 	double start = now();
 	double maxDDRunTime;
+	ProcessEvents::Event timeoutEvent;
+	std::vector<std::string> lastFailReasons;
 
-	QuietDatabaseChecker(double maxDDRunTime) : maxDDRunTime(maxDDRunTime) {}
+	QuietDatabaseChecker(double maxDDRunTime)
+	  : maxDDRunTime(maxDDRunTime), timeoutEvent({ "Timeout"_sr, "TracedTooManyLines"_sr }, timeoutCallback) {}
+
+	void logFailure(StringRef name, StringRef msg, Error const& e) {
+		std::string reasons = fmt::format("{}", fmt::join(lastFailReasons, ", "));
+		TraceEvent(SevError, "QuietDatabaseFailure")
+		    .error(e)
+		    .detail("EventName", name)
+		    .detail("EventMessage", msg)
+		    .detail("Reasons", lastFailReasons)
+		    .log();
+	};
 
 	struct Impl {
 		double start;
 		std::string const& phase;
 		double maxDDRunTime;
-		std::vector<std::string> failReasons;
+		std::vector<std::string>& failReasons;
 
-		Impl(double start, const std::string& phase, const double maxDDRunTime)
-		  : start(start), phase(phase), maxDDRunTime(maxDDRunTime) {}
+		Impl(double start, const std::string& phase, const double maxDDRunTime, std::vector<std::string>& failReasons)
+		  : start(start), phase(phase), maxDDRunTime(maxDDRunTime), failReasons(failReasons) {}
 
 		template <class T, class Comparison = std::less_equal<>>
 		Impl& add(BaseTraceEvent& evt,
@@ -847,8 +860,9 @@ struct QuietDatabaseChecker {
 		}
 	};
 
-	Impl startIteration(std::string const& phase) const {
-		Impl res(start, phase, maxDDRunTime);
+	Impl startIteration(std::string const& phase) {
+		lastFailReasons.clear();
+		Impl res(start, phase, maxDDRunTime, lastFailReasons);
 		return res;
 	}
 };
@@ -864,7 +878,8 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
                                         int64_t maxDataDistributionQueueSize = 0,
                                         int64_t maxPoppedVersionLag = 30e6,
                                         int64_t maxVersionOffset = 1e6) {
-	state QuietDatabaseChecker checker(isBuggifyEnabled(BuggifyType::General) ? 4000.0 : 1000.0);
+	// state QuietDatabaseChecker checker(isBuggifyEnabled(BuggifyType::General) ? 4000.0 : 1000.0);
+	state QuietDatabaseChecker checker(1000000);
 	state Future<Void> reconfig =
 	    reconfigureAfter(cx, 100 + (deterministicRandom()->random01() * 100), dbInfo, "QuietDatabase");
 	state Future<int64_t> dataInFlight;
@@ -877,7 +892,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	state Future<int64_t> versionOffset;
 	state Future<Version> dcLag;
 	state Version maxDcLag = 30e6;
-	auto traceMessage = "QuietDatabase" + phase + "Begin";
+	state std::string traceMessage = "QuietDatabase" + phase + "Begin";
 	TraceEvent(traceMessage.c_str()).log();
 
 	// In a simulated environment, wait 5 seconds so that workers can move to their optimal locations
