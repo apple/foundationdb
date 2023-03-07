@@ -4341,7 +4341,9 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				throw granule_assignment_conflict();
 			}
 
-			bool isFullRestore = wait(isFullRestoreMode(bwData->db, req.keyRange));
+			Reference<BlobRestoreController> restoreController =
+			    makeReference<BlobRestoreController>(bwData->db, req.keyRange);
+			bool isFullRestore = wait(BlobRestoreController::isRestoring(restoreController));
 			bwData->isFullRestoreMode = isFullRestore;
 
 			Optional<Value> prevLockValue = wait(fLockValue);
