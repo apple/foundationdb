@@ -382,7 +382,7 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 	}
 
 	rapidjson::Document doc;
-	doc.Parse(resp->content.c_str());
+	doc.Parse(resp->content.data());
 
 	checkResponseForError(ctx, doc, true);
 
@@ -474,7 +474,7 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 	}
 
 	rapidjson::Document doc;
-	doc.Parse(resp->content.c_str());
+	doc.Parse(resp->content.data());
 
 	checkResponseForError(ctx, doc, false);
 
@@ -580,13 +580,13 @@ void addValidationTokensSectionToJsonDoc(Reference<RESTKmsConnectorCtx> ctx, rap
 
 		// Add "name" - token name
 		rapidjson::Value key(VALIDATION_TOKEN_NAME_TAG, doc.GetAllocator());
-		rapidjson::Value tokenName(token.second.name.c_str(), doc.GetAllocator());
+		rapidjson::Value tokenName(token.second.name.data(), doc.GetAllocator());
 		validationToken.AddMember(key, tokenName, doc.GetAllocator());
 
 		// Add "value" - token value
 		key.SetString(VALIDATION_TOKEN_VALUE_TAG, doc.GetAllocator());
 		rapidjson::Value tokenValue;
-		tokenValue.SetString(token.second.value.c_str(), token.second.value.size(), doc.GetAllocator());
+		tokenValue.SetString(token.second.value.data(), token.second.value.size(), doc.GetAllocator());
 		validationToken.AddMember(key, tokenValue, doc.GetAllocator());
 
 		validationTokens.PushBack(validationToken, doc.GetAllocator());
@@ -616,7 +616,7 @@ void addDebugUidSectionToJsonDoc(Reference<RESTKmsConnectorCtx> ctx, rapidjson::
 	rapidjson::Value key(DEBUG_UID_TAG, doc.GetAllocator());
 	rapidjson::Value debugIdVal;
 	const std::string dbgIdStr = dbgId.get().toString();
-	debugIdVal.SetString(dbgIdStr.c_str(), dbgIdStr.size(), doc.GetAllocator());
+	debugIdVal.SetString(dbgIdStr.data(), dbgIdStr.size(), doc.GetAllocator());
 
 	// Append 'debug_uid' object to the parent document
 	doc.AddMember(key, debugIdVal, doc.GetAllocator());
@@ -730,8 +730,11 @@ Future<T> kmsRequestImpl(Reference<RESTKmsConnectorCtx> ctx,
 				TraceEvent(SevDebug, "KmsRequestStart", ctx->uid)
 				    .detail("RequestID", requestID)
 				    .detail("FullUrl", kmsEncryptionFullUrl);
+				HTTP::Headers headers;
+				headers["Content-type"] = "application/json";
+				headers["Accept"] = "application/json";
 				Reference<HTTP::Response> resp =
-				    wait(ctx->restClient.doPost(kmsEncryptionFullUrl, requestBodyRef.toString()));
+				    wait(ctx->restClient.doPost(kmsEncryptionFullUrl, requestBodyRef.toString(), headers));
 				curUrl->nRequests++;
 
 				try {
@@ -1291,7 +1294,7 @@ void getFakeEncryptCipherResponse(StringRef jsonReqRef,
                                   const bool baseCipherIdPresent,
                                   Reference<HTTP::Response> httpResponse) {
 	rapidjson::Document reqDoc;
-	reqDoc.Parse(jsonReqRef.toString().c_str());
+	reqDoc.Parse(jsonReqRef.toString().data());
 
 	rapidjson::Document resDoc;
 	resDoc.SetObject();
@@ -1348,7 +1351,7 @@ void getFakeBlobMetadataResponse(StringRef jsonReqRef,
                                  const bool baseCipherIdPresent,
                                  Reference<HTTP::Response> httpResponse) {
 	rapidjson::Document reqDoc;
-	reqDoc.Parse(jsonReqRef.toString().c_str());
+	reqDoc.Parse(jsonReqRef.toString().data());
 
 	rapidjson::Document resDoc;
 	resDoc.SetObject();
@@ -1722,7 +1725,7 @@ ACTOR Future<Void> testParseDiscoverKmsUrlFile(Reference<RESTKmsConnectorCtx> ct
 		content.append(url);
 		content.push_back(DISCOVER_URL_FILE_URL_SEP);
 	}
-	tmpFile->write((const uint8_t*)content.c_str(), content.size());
+	tmpFile->write((const uint8_t*)content.data(), content.size());
 	wait(parseDiscoverKmsUrlFile(ctx, tmpFile->getFileName()));
 
 	ASSERT_EQ(ctx->kmsUrlHeap.size(), urls.size());
