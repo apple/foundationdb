@@ -25,6 +25,8 @@
 
 namespace ProcessEvents {
 
+// A callback is never allowed to throw. Since std::function can't
+// take noexcept signatures, this is enforced at runtime
 using Callback = std::function<void(StringRef, StringRef, Error const&)>;
 
 class Event : NonCopyable {
