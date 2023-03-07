@@ -36,6 +36,12 @@
 #include "flow/network.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// This workload tests a gray failure scenario: a satellite TLog is have network issue
+// for sending packets to the remote data center's log routers. This will cause these
+// log routers to fail to progress, and causing data center lag, i.e., lag between the
+// primary and remote DC's tlags. With changes to log routers, they can detect that the
+// peek is taking a long time (> LOG_ROUTER_PEEK_SWITCH_DC_TIME) and swith to use
+// another DC to get data, thus recoverying from the data center lag.
 struct DcLagWorkload : TestWorkload {
 	static constexpr auto NAME = "DcLag";
 	bool enabled;
@@ -152,7 +158,7 @@ struct DcLagWorkload : TestWorkload {
 		self->clogTlog(workloadEnd - now());
 
 		state Future<Optional<double>> status = Never();
-		state bool clogged = false;
+		state bool lagged = false;
 		loop choose {
 			when(wait(delayUntil(workloadEnd))) {
 				// Expect to reach fully recovered state before workload ends
@@ -165,10 +171,10 @@ struct DcLagWorkload : TestWorkload {
 				status = fetchDatacenterLag(self, cx);
 			}
 			when(Optional<double> lag = wait(status)) {
-				if (lag.present() && lag.get() >= SERVER_KNOBS->LOG_ROUTER_PEEK_SWITCH_DC_TIME - 5.0) {
-					clogged = true;
+				if (lag.present() && lag.get() >= SERVER_KNOBS->LOG_ROUTER_PEEK_SWITCH_DC_TIME) {
+					lagged = true;
 				}
-				if (clogged && lag < 5.0) {
+				if (lagged && lag.present() && lag.get() < 5.0) {
 					TraceEvent("DcLagRecovered");
 					self->unclogAll();
 					return Void();
