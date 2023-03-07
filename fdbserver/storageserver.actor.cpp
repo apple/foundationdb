@@ -8275,9 +8275,33 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 			return Void();
 		}
 		shard->setPhase(MoveInPhase::Complete);
-
 		TraceEvent(moveInShard->logSev, "FetchShardApplyUpdatesSuccess", data->thisServerID)
 		    .detail("MoveInShard", shard->toString());
+
+		const double duration = now() - shard->startTime;
+		const int64_t totalBytes = getTotalFetchedBytes(shard->checkpoints);
+		TraceEvent(SevInfo, "FetchShardStats", data->thisServerID)
+		    .detail("MoveInShardID", shard->id)
+		    .detail("MoveInShard", shard->toString())
+		    .detail("Duration", duration)
+		    .detail("TotalBytes", totalBytes)
+		    .detail("Rate", (double)totalBytes / duration);
+		for (const auto& range : shard->ranges) {
+			const Reference<ShardInfo>& currentShard = data->shards[range.begin];
+			if (!currentShard->moveInShard || currentShard->moveInShard->id() != shard->id) {
+				TraceEvent(SevWarn, "MoveInShardChanged", data->thisServerID)
+				    .detail("CurrentShard", currentShard->debugDescribeState())
+				    .detail("MoveInShard", shard->toString());
+				throw operation_cancelled();
+			}
+			StorageServerShard newShard = currentShard->toStorageServerShard();
+			ASSERT(newShard.range == range);
+			newShard.setShardState(StorageServerShard::ReadWrite);
+			data->addShard(ShardInfo::newShard(data, newShard)); // invalidates shard!
+			data->newestAvailableVersion.insert(range, latestVersion);
+			coalescePhysicalShards(data, range);
+		}
+		moveInShard->readWrite.send(Void());
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "FetchShardApplyUpdatesFailure", data->thisServerID)
 		    .errorUnsuppressed(e)
@@ -8352,32 +8376,6 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 				wait(fetchShardApplyUpdates(data, moveInShard, shard, moveInUpdates));
 				attempt = 0;
 			} else if (phase == MoveInPhase::Complete) {
-				const double duration = now() - shard->startTime;
-				const int64_t totalBytes = getTotalFetchedBytes(shard->checkpoints);
-				TraceEvent(SevInfo, "FetchShardStats", data->thisServerID)
-				    .detail("MoveInShardID", shard->id)
-				    .detail("MoveInShard", shard->toString())
-				    .detail("Duration", duration)
-				    .detail("TotalBytes", totalBytes)
-				    .detail("Rate", (double)totalBytes / duration);
-				for (const auto& range : shard->ranges) {
-					const Reference<ShardInfo>& currentShard = data->shards[range.begin];
-					if (!currentShard->moveInShard || currentShard->moveInShard->id() != shard->id) {
-						TraceEvent(SevWarn, "MoveInShardChanged", data->thisServerID)
-						    .detail("CurrentShard", currentShard->debugDescribeState())
-						    .detail("MoveInShard", shard->toString());
-						throw operation_cancelled();
-					}
-					StorageServerShard newShard = currentShard->toStorageServerShard();
-					// ASSERT(newShard.getShardState() == StorageServerShard::ReadWritePending);
-					ASSERT(newShard.range == range);
-					newShard.setShardState(StorageServerShard::ReadWrite);
-					data->addShard(ShardInfo::newShard(data, newShard)); // invalidates shard!
-					data->newestAvailableVersion.insert(range, latestVersion);
-					coalescePhysicalShards(data, range);
-					// coalesceShards(data, range);
-				}
-				moveInShard->readWrite.send(Void());
 				wait(cleanUpMoveInShard(data, data->version.get(), moveInShard));
 				break;
 			} else if (phase == MoveInPhase::Fail) {
@@ -9368,7 +9366,7 @@ ACTOR Future<Void> restoreShards(StorageServer* data,
 	state int moveInLoc;
 	for (moveInLoc = 0; moveInLoc < moveInShards.size(); ++moveInLoc) {
 		MoveInShardMetaData meta = decodeMoveInShardValue(moveInShards[moveInLoc].value);
-		TraceEvent(SevVerbose, "RestoreMoveInShard", data->thisServerID).detail("MoveInShard", meta.toString());
+		TraceEvent(SevInfo, "RestoreMoveInShard", data->thisServerID).detail("MoveInShard", meta.toString());
 		data->moveInShards.emplace(meta.id, std::make_shared<MoveInShard>(data, meta));
 		wait(yield());
 	}

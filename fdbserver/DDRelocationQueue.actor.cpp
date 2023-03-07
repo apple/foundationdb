@@ -1259,6 +1259,7 @@ struct DDQueue : public IDDRelocationQueue {
 							                  EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
 							TraceEvent(SevInfo, "DDDataMoveInitiatedWithRandomDestID")
 							    .detail("DataMoveID", rrs.dataMoveId.toString())
+							    .detail("Range", rrs.keys)
 							    .detail("Reason", rrs.reason.toString());
 						}
 					} else {

@@ -1170,11 +1170,10 @@ public:
 					    .detail("PhysicalShard", existingShard->toString())
 					    .detail("Range", range)
 					    .detail("DataShardRange", shardRange);
+					// Force clear range.
+					writeBatch->DeleteRange(it.value()->physicalShard->cf, toSlice(range.begin), toSlice(range.end));
+					dirtyShards->insert(it.value()->physicalShard);
 				}
-
-				// Force clear range.
-				writeBatch->DeleteRange(it.value()->physicalShard->cf, toSlice(range.begin), toSlice(range.end));
-				dirtyShards->insert(it.value()->physicalShard);
 			}
 
 			TraceEvent(SevDebug, "ShardedRocksRemoveRange")
@@ -2345,7 +2344,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				std::string columnFamilies;
 				for (const auto* shard : *(a.dirtyShards)) {
 					columnFamilies += (shard->id + " ");
-					ASSERT(shard->cf != nullptr);
+					if (shard->cf == nullptr) {
+						TraceEvent(SevError, "DirtyShardWithNullCF", logId).detail("PhysicalShard", shard->id);
+					}
 				}
 				TraceEvent(SevError, "CommitError", logId).detail("ColumnFamilies", columnFamilies);
 				a.done.sendError(statusToError(s));

@@ -902,11 +902,12 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 	//	fprintf(stderr, "   %s\n", printable(splitKeys[i]).c_str());
 	//}
 	int numShards = splitKeys.size() - 1;
-
+	std::vector<KeyRef> logKeys (splitKeys.begin(), splitKeys.end());
 	TraceEvent("RelocateShardStartSplit", self->distributorId)
-	    .suppressFor(1.0)
+	    // .suppressFor(1.0)
 	    .detail("Begin", keys.begin)
 	    .detail("End", keys.end)
+	    .detail("SplitKeys", describe(logKeys))
 	    .detail("MaxBytes", shardBounds.max.bytes)
 	    .detail("MetricsBytes", metrics.bytes)
 	    .detail("Bandwidth",
