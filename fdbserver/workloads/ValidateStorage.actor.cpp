@@ -90,6 +90,7 @@ struct ValidateStorage : TestWorkload {
 				Optional<UID> auditId_ = wait(timeout(
 				    auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA, /*async=*/true), 30));
 				if (!auditId_.present()) {
+					TraceEvent("AuditIdNotPresent");
 					throw audit_storage_failed();
 				}
 				auditId = auditId_.get();
@@ -122,6 +123,7 @@ struct ValidateStorage : TestWorkload {
 				Optional<UID> auditId_ = wait(timeout(
 				    auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA, /*async=*/true), 30));
 				if (!auditId_.present()) {
+					TraceEvent("AuditIdNotPresent");
 					throw audit_storage_failed();
 				}
 				ASSERT(auditId_ != auditId);

@@ -26,6 +26,7 @@
 #include <tuple>
 #include <vector>
 
+#include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
@@ -1927,15 +1928,56 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 			wait(self->db.serverInfo->onChange());
 		}
 
+		TraceEvent(SevInfo, "CCTriggerAuditStorageRequest", self->id);
 		TriggerAuditRequest fReq(req.getType(), req.range);
-		UID auditId_ = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
-		auditId = auditId_;
-		TraceEvent(SevDebug, "CCTriggerAuditStorageEnd", self->id)
-		    .detail("AuditID", auditId)
-		    .detail("Range", req.range)
-		    .detail("AuditType", req.type);
-		if (!req.reply.isSet()) {
-			req.reply.send(auditId);
+		state ErrorOr<UID> auditId_ = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReplyUnlessFailedFor(fReq, 30, 0));
+		if (auditId_.present()) {
+			auditId = auditId_.get();
+			TraceEvent(SevDebug, "CCTriggerAuditStorageEnd", self->id)
+			    .detail("AuditID", auditId)
+			    .detail("Range", req.range)
+			    .detail("AuditType", req.type);
+			if (!req.reply.isSet()) {
+				req.reply.send(auditId);
+			}
+		/* } else {
+			std::vector<AuditStorageState> auditStates = wait(getLatestAuditStates(self->cx, static_cast<AuditType>(req.type), 5));
+			Optional<AuditStorageState> result;
+			for (const auto& auditState : auditStates) {
+				if (auditState.range.contains(req.range)) {
+					if (!result.present() || (result.present() && auditState.id > result.get().id)) {
+						result = auditState;
+					}
+				}
+			}
+			if (result.present()) {
+				TraceEvent(SevDebug, "CCTriggerAuditStorageReadLatestAuditId", self->id)
+					.detail("AuditId", result.get().id)
+					.detail("Range", req.range)
+				    .detail("AuditType", req.type);
+				if (!req.reply.isSet()) {
+					req.reply.send(result.get().id);
+				}
+			} else {
+				ASSERT(auditId_.isError());
+				TraceEvent(SevDebug, "CCTriggerAuditStorageFailedToGetAuditID", self->id)
+				    .errorUnsuppressed(auditId_.getError())
+				    .detail("Range", req.range)
+				    .detail("AuditType", req.type);
+				if (!req.reply.isSet()) {
+					req.reply.sendError(audit_storage_failed());
+				}
+			}
+		} */
+		} else {
+			ASSERT(auditId_.isError());
+			TraceEvent(SevDebug, "CCTriggerAuditStorageFailedToGetAuditID", self->id)
+				    .errorUnsuppressed(auditId_.getError())
+				    .detail("Range", req.range)
+				    .detail("AuditType", req.type);
+			if (!req.reply.isSet()) {
+				req.reply.sendError(audit_storage_failed());
+			}
 		}
 	} catch (Error& e) {
 		TraceEvent(SevDebug, "CCTriggerAuditStorageError", self->id)
