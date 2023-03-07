@@ -69,7 +69,7 @@ struct DcLagWorkload : TestWorkload {
 
 	// Clog a satellite tlog with all remote processes so that this triggers high
 	// data center lag.
-	void clogTlog(double seconds) {
+	bool clogTlog(double seconds) {
 		ASSERT(dbInfo->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION);
 
 		std::vector<IPAddress> ips; // all remote process IPs
@@ -92,7 +92,10 @@ struct DcLagWorkload : TestWorkload {
 				logs.push_back(addr);
 			}
 		}
-		ASSERT(logs.size() > 0);
+		if (logs.empty()) {
+			// No satellite tlog found: fearless config may not have satellites
+			return false;
+		}
 
 		// clog pairs
 		auto tlog = logs[0].ip;
@@ -104,6 +107,7 @@ struct DcLagWorkload : TestWorkload {
 				cloggedPairs.emplace_back(tlog, ip);
 			}
 		}
+		return true;
 	}
 
 	void unclogAll() {
@@ -155,7 +159,9 @@ struct DcLagWorkload : TestWorkload {
 		TraceEvent("DcLag").detail("StartTime", startTime).detail("EndTime", workloadEnd);
 
 		// Clog and wait for recovery to happen
-		self->clogTlog(workloadEnd - now());
+		if (!self->clogTlog(self->testDuration)) {
+			return Void(); // skip the test if no satellite found
+		}
 
 		state Future<Optional<double>> status = Never();
 		state bool lagged = false;

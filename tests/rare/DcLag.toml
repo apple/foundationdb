@@ -3,7 +3,7 @@ generateFearless = true
 disableSimSpeedup = true
 processesPerMachine = 1
 machineCount = 20
-config = 'triple'
+minimumRegions = 2
 
 [[test]]
 testTitle = 'DcLag'
