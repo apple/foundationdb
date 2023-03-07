@@ -1212,7 +1212,10 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekSingle(UID dbgid
 	}
 }
 
-Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID dbgid, Version begin, Tag tag) {
+Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID dbgid,
+                                                                          Version begin,
+                                                                          Tag tag,
+                                                                          bool useSatellite) {
 	bool found = false;
 	for (const auto& log : tLogs) {
 		found = log->hasLogRouter(dbgid) || log->hasBackupWorker(dbgid);
@@ -1240,8 +1243,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID db
 				}
 			}
 			int bestSet = bestPrimarySet;
-			if (SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED && bestSatelliteSet != -1 &&
-			    tLogs[bestSatelliteSet]->tLogVersion >= TLogVersion::V4) {
+			if (useSatellite && bestSatelliteSet != -1 && tLogs[bestSatelliteSet]->tLogVersion >= TLogVersion::V4) {
 				bestSet = bestSatelliteSet;
 			}
 
@@ -1266,8 +1268,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID db
 				}
 			}
 			int bestSet = bestPrimarySet;
-			if (SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED && bestSatelliteSet != -1 &&
-			    tLogs[bestSatelliteSet]->tLogVersion >= TLogVersion::V4) {
+			if (useSatellite && bestSatelliteSet != -1 && tLogs[bestSatelliteSet]->tLogVersion >= TLogVersion::V4) {
 				bestSet = bestSatelliteSet;
 			}
 			const auto& log = tLogs[bestSet];
@@ -1307,8 +1308,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(UID db
 				}
 			}
 			int bestSet = bestPrimarySet;
-			if (SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED && bestSatelliteSet != -1 &&
-			    old.tLogs[bestSatelliteSet]->tLogVersion >= TLogVersion::V4) {
+			if (useSatellite && bestSatelliteSet != -1 && old.tLogs[bestSatelliteSet]->tLogVersion >= TLogVersion::V4) {
 				bestSet = bestSatelliteSet;
 			}
 
