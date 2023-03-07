@@ -2157,7 +2157,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	startingConfigString += DatabaseConfiguration::configureStringFromJSON(startingConfigJSON);
 
 	// Set a random locality for the perpetual wiggle if any locality is set in the config
-	// This behavior is preserved in a refactor but makes no senseUnclear why this is
+	// This behavior is preserved in a refactor but it unclear why the source configuration JSON
+	// is translated to a random locality instead of something matching the source.
 	auto ipwLocality = startingConfigJSON.find("perpetual_storage_wiggle_locality");
 	if (ipwLocality != startingConfigJSON.end()) {
 		if (deterministicRandom()->random01() < 0.25) {
