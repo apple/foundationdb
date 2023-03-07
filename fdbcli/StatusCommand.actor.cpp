@@ -436,6 +436,9 @@ void printStatus(StatusObjectReader statusObj,
 				} else
 					outputString += "unknown";
 
+				outputString +=
+				    "\n  Log engine             - " + (statusObjConfig.get("log_engine", strVal) ? strVal : "unknown");
+
 				int intVal = 0;
 				if (statusObjConfig.get("blob_granules_enabled", intVal) && intVal) {
 					blobGranuleEnabled = true;
