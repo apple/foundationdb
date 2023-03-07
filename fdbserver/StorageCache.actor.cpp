@@ -1949,7 +1949,8 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 
 				if (collectingCipherKeys) {
 					std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> result =
-					    wait(getEncryptCipherKeys(data->db, cipherDetails, BlobCipherMetrics::TLOG));
+					    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+					        data->db, cipherDetails, BlobCipherMetrics::TLOG));
 					cipherKeys = result;
 					collectingCipherKeys = false;
 				} else {

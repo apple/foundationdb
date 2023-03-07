@@ -30,6 +30,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -793,7 +794,8 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self,
 	// Fetch cipher keys if any of the messages are encrypted.
 	if (!cipherDetails.empty()) {
 		std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-		    wait(getEncryptCipherKeys(self->db, cipherDetails, BlobCipherMetrics::BLOB_GRANULE));
+		    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+		        self->db, cipherDetails, BlobCipherMetrics::BLOB_GRANULE));
 		cipherKeys = getCipherKeysResult;
 	}
 

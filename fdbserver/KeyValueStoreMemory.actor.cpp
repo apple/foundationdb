@@ -599,8 +599,8 @@ private:
 		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 			state BlobCipherEncryptHeaderRef cipherHeaderRef =
 			    BlobCipherEncryptHeaderRef::fromStringRef(StringRef(data.begin(), encryptHeaderSize));
-			TextAndHeaderCipherKeys cipherKeys =
-			    wait(getEncryptCipherKeys(self->db, cipherHeaderRef, BlobCipherMetrics::KV_MEMORY));
+			TextAndHeaderCipherKeys cipherKeys = wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+			    self->db, cipherHeaderRef, BlobCipherMetrics::KV_MEMORY));
 			DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey,
 			                                  cipherKeys.cipherHeaderKey,
 			                                  cipherHeaderRef.getIV(),
@@ -608,8 +608,8 @@ private:
 			plaintext = cipher.decrypt(data.begin() + encryptHeaderSize, h.len1 + h.len2, cipherHeaderRef, arena);
 		} else {
 			state BlobCipherEncryptHeader cipherHeader = *(BlobCipherEncryptHeader*)data.begin();
-			TextAndHeaderCipherKeys cipherKeys =
-			    wait(getEncryptCipherKeys(self->db, cipherHeader, BlobCipherMetrics::KV_MEMORY));
+			TextAndHeaderCipherKeys cipherKeys = wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+			    self->db, cipherHeader, BlobCipherMetrics::KV_MEMORY));
 			DecryptBlobCipherAes256Ctr cipher(
 			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, cipherHeader.iv, BlobCipherMetrics::KV_MEMORY);
 			plaintext =
@@ -1051,8 +1051,8 @@ private:
 	}
 
 	ACTOR static Future<Void> updateCipherKeys(KeyValueStoreMemory* self) {
-		TextAndHeaderCipherKeys cipherKeys =
-		    wait(getLatestSystemEncryptCipherKeys(self->db, BlobCipherMetrics::KV_MEMORY));
+		TextAndHeaderCipherKeys cipherKeys = wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestSystemEncryptCipherKeys(
+		    self->db, BlobCipherMetrics::KV_MEMORY));
 		self->cipherKeys = cipherKeys;
 		return Void();
 	}
