@@ -747,7 +747,8 @@ public:
 	int64_t EMPTY_READ_PENALTY;
 	int DD_SHARD_COMPARE_LIMIT; // when read-aware DD is enabled, at most how many shards are compared together
 	bool READ_SAMPLING_ENABLED;
-	int64_t BYTES_AVERAGE_INTERVAL;
+	// Rolling window duration over which the average bytes moved by DD is calculated for the 'MovingData' trace event.
+	double DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL;
 
 	// Storage Server
 	double STORAGE_LOGGING_DELAY;

@@ -44,6 +44,33 @@
 typedef Reference<IDataDistributionTeam> ITeamRef;
 typedef std::pair<ITeamRef, ITeamRef> SrcDestTeamPair;
 
+// Perfomed as the rolling window to calculate average moving bytes rate by DD.
+struct MovingAverage {
+	int64_t previous;
+	int64_t total;
+	double interval;
+	Deque<std::pair<double, int64_t>> updates; // std::pair<time, bytes>
+
+	int64_t getTotal() const { return total; }
+
+	double getAverage() {
+		while (!updates.empty() && updates.front().first < now() - interval) {
+			previous += updates.front().second;
+			updates.pop_front();
+		}
+		return (total - previous) / interval;
+	}
+
+	void addSample(int64_t bytes) {
+		total += bytes;
+		updates.push_back(std::make_pair(now(), bytes));
+	}
+
+	MovingAverage() : previous(0), total(0), interval(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL) {
+		// updates.push_back(std::make_pair(now(), 0));
+	}
+};
+
 inline bool isDataMovementForDiskBalancing(DataMovementReason reason) {
 	return reason == DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM ||
 	       reason == DataMovementReason::REBALANCE_OVERUTILIZED_TEAM;
@@ -529,35 +556,6 @@ struct DDQueue : public IDDRelocationQueue {
 
 		UID id;
 		Future<Void> cancel;
-	};
-
-	struct MovingAverage {
-		int64_t previous;
-		int64_t total;
-		int64_t interval;
-		Deque<std::pair<double, int64_t>> updates; // std::pair<time, bytes>
-
-		int64_t getTotal() { return total; }
-
-		double getAverage() {
-			while (!updates.empty() && updates.front().first < now() - interval) {
-				previous += updates.front().second;
-				updates.pop_front();
-			}
-			return 1.0 * (total - previous) / interval;
-		}
-
-		void sumBytes(int64_t bytes) {
-			total += bytes;
-			updates.push_back(std::make_pair(now(), bytes));
-		}
-
-		MovingAverage() {
-			previous = 0;
-			total = 0;
-			interval = SERVER_KNOBS->BYTES_AVERAGE_INTERVAL;
-			updates.clear();
-		}
 	};
 
 	struct ServerCounter {
@@ -2047,7 +2045,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 
 					self->bytesWritten += metrics.bytes;
-					self->moveAverage.sumBytes(metrics.bytes);
+					self->moveAverage.addSample(metrics.bytes);
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
 
@@ -2580,7 +2578,7 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 					    .detail("UnhealthyRelocations", self.unhealthyRelocations)
 					    .detail("HighestPriority", highestPriorityRelocation)
 					    .detail("BytesWritten", self.moveAverage.getTotal())
-					    .detail("BytesAverage", self.moveAverage.getAverage())
+					    .detail("BytesWrittenAverageRate", self.moveAverage.getAverage())
 					    .detail("PriorityRecoverMove", self.priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
 					    .detail("PriorityRebalanceUnderutilizedTeam",
 					            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM])
