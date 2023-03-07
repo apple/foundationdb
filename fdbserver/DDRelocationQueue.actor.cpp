@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "flow/ActorCollection.h"
+#include "flow/Deque.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
@@ -533,7 +534,7 @@ struct DDQueue : public IDDRelocationQueue {
 	struct MovingAverage {
 		int64_t previous;
 		int64_t total;
-		double interval;
+		int64_t interval;
 		Deque<std::pair<double, int64_t>> updates; // std::pair<time, bytes>
 
 		int64_t getTotal() { return total; }
@@ -543,7 +544,7 @@ struct DDQueue : public IDDRelocationQueue {
 				previous += updates.front().second;
 				updates.pop_front();
 			}
-			return (total - previous) / interval;
+			return 1.0 * (total - previous) / interval;
 		}
 
 		void sumBytes(int64_t bytes) {
