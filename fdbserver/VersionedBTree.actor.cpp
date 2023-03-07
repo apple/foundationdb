@@ -364,7 +364,7 @@ public:
 
 		FlowMutex mutex;
 
-		Cursor() : mode(NONE) {}
+		Cursor() : mode(NONE), mutex(true) {}
 
 		// Initialize a cursor.
 		void init(FIFOQueue* q = nullptr,
@@ -2016,12 +2016,11 @@ public:
 	          int64_t pageCacheSizeBytes,
 	          int64_t remapCleanupWindowBytes,
 	          int concurrentExtentReads,
-	          bool memoryOnly,
-	          Promise<Void> errorPromise = {})
+	          bool memoryOnly)
 	  : ioLock(makeReference<PriorityMultiLock>(FLOW_KNOBS->MAX_OUTSTANDING, SERVER_KNOBS->REDWOOD_IO_PRIORITIES)),
 	    pageCacheBytes(pageCacheSizeBytes), desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize),
-	    filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
-	    remapCleanupWindowBytes(remapCleanupWindowBytes), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
+	    filename(filename), memoryOnly(memoryOnly), remapCleanupWindowBytes(remapCleanupWindowBytes),
+	    concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
 
 		// This sets the page cache size for all PageCacheT instances using the same evictor
 		pageCache.evictor().sizeLimit = pageCacheBytes;
@@ -2274,7 +2273,7 @@ public:
 			// Reset the remapQueue head reader for normal reads
 			self->remapQueue.resetHeadReader();
 
-			self->remapCleanupFuture = remapCleanup(self);
+			self->remapCleanupFuture = forwardError(remapCleanup(self), self->errorPromise);
 		} else {
 			// Note: If the file contains less than 2 pages but more than 0 bytes then the pager was never successfully
 			// committed. A new pager will be created in its place.
@@ -2673,7 +2672,6 @@ public:
 			return pageID;
 		});
 
-		// No need for forwardError here because newPageID() is already wrapped in forwardError
 		return f;
 	}
 
@@ -3615,7 +3613,7 @@ public:
 		self->expireSnapshots(self->header.oldestVersion);
 
 		// Start unmapping pages for expired versions
-		self->remapCleanupFuture = remapCleanup(self);
+		self->remapCleanupFuture = forwardError(remapCleanup(self), self->errorPromise);
 
 		// If there are prioritized evictions queued, flush them to the regular eviction order.
 		self->pageCache.flushPrioritizedEvictions();
@@ -4973,7 +4971,7 @@ public:
 
 	// All async opts on the btree are based on pager reads, writes, and commits, so
 	// we can mostly forward these next few functions to the pager
-	Future<Void> getError() const { return m_pager->getError(); }
+	Future<Void> getError() const { return m_errorPromise.getFuture() || m_pager->getError(); }
 
 	Future<Void> onClosed() const { return m_pager->onClosed(); }
 
@@ -5670,6 +5668,7 @@ private:
 	Version m_newOldestVersion;
 	Future<Void> m_latestCommit;
 	Future<Void> m_init;
+	Promise<Void> m_errorPromise;
 	std::string m_name;
 	UID m_logID;
 	int m_blockSize;
@@ -7641,7 +7640,7 @@ private:
 		debug_printf("%s: Committed version %" PRId64 "\n", self->m_name.c_str(), writeVersion);
 
 		++g_redwoodMetrics.metric.opCommit;
-		self->m_lazyClearActor = incrementalLazyClear(self);
+		self->m_lazyClearActor = forwardError(incrementalLazyClear(self), self->m_errorPromise);
 
 		return Void();
 	}
@@ -8036,8 +8035,7 @@ public:
 		                               pageCacheBytes,
 		                               remapCleanupWindowBytes,
 		                               SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
-		                               false,
-		                               m_error);
+		                               false);
 		m_tree = new VersionedBTree(pager, filename, logID, db, encryptionMode, encodingType, keyProvider);
 		m_init = catchError(init_impl(this));
 	}
@@ -8078,8 +8076,8 @@ public:
 			self->m_lastCommit = Void();
 		}
 
-		if (self->m_error.canBeSet()) {
-			self->m_error.sendError(actor_cancelled()); // Ideally this should be shutdown_in_progress
+		if (self->m_errorPromise.canBeSet()) {
+			self->m_errorPromise.sendError(actor_cancelled()); // Ideally this should be shutdown_in_progress
 		}
 		self->m_init.cancel();
 		Future<Void> closedFuture = self->m_tree->onClosed();
@@ -8111,7 +8109,7 @@ public:
 
 	StorageBytes getStorageBytes() const override { return m_tree->getStorageBytes(); }
 
-	Future<Void> getError() const override { return delayed(m_error.getFuture()); };
+	Future<Void> getError() const override { return delayed(m_errorPromise.getFuture() || m_tree->getError()); };
 
 	void clear(KeyRangeRef range,
 	           const StorageServerMetrics* storageMetrics = nullptr,
@@ -8319,7 +8317,7 @@ private:
 	VersionedBTree* m_tree;
 	Future<Void> m_init;
 	Promise<Void> m_closed;
-	Promise<Void> m_error;
+	Promise<Void> m_errorPromise;
 	bool prefetch;
 	Version m_nextCommitVersion;
 	Reference<IPageEncryptionKeyProvider> m_keyProvider;
@@ -8327,7 +8325,7 @@ private:
 
 	template <typename T>
 	inline Future<T> catchError(Future<T> f) {
-		return forwardError(f, m_error);
+		return forwardError(f, m_errorPromise);
 	}
 };
 
