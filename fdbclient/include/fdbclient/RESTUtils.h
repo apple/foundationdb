@@ -64,13 +64,26 @@ public:
 	}
 };
 
-// Util interface facilitating management and update for RESTClient knob parameters
-struct RESTClientKnobs {
-	int connection_pool_size, secure_connection, connect_timeout, connect_tries, max_connection_life, request_tries,
-	    request_timeout_secs;
+struct RESTConnectionType {
+	std::string protocol;
+	int secure;
 
 	constexpr static int SECURE_CONNECTION = 1;
 	constexpr static int NOT_SECURE_CONNECTION = 0;
+
+	RESTConnectionType() : protocol("https"), secure(RESTConnectionType::SECURE_CONNECTION) {}
+	explicit RESTConnectionType(const std::string& p, const int s) : protocol(p), secure(s) {}
+	std::string toString() const { return format("%s:%d", this->protocol.c_str(), this->secure); }
+
+	static const std::unordered_map<std::string, RESTConnectionType> supportedConnTypes;
+	static RESTConnectionType getConnectionType(const std::string&);
+	static bool isProtocolSupported(const std::string&);
+	static bool isSecure(const std::string&);
+};
+
+// Util interface facilitating management and update for RESTClient knob parameters
+struct RESTClientKnobs {
+	int connection_pool_size, connect_timeout, connect_tries, max_connection_life, request_tries, request_timeout_secs;
 
 	RESTClientKnobs();
 
@@ -81,7 +94,6 @@ struct RESTClientKnobs {
 	static std::vector<std::string> getKnobDescriptions() {
 		return {
 			"connection_pool_size (pz)             Maximum numbers of active connections in the connection-pool",
-			"secure_connection (or sc)             Set 1 for secure connection and 0 for insecure connection.",
 			"connect_tries (or ct)                 Number of times to try to connect for each request.",
 			"connect_timeout (or cto)              Number of seconds to wait for a connect request to succeed.",
 			"max_connection_life (or mcl)          Maximum number of seconds to use a single TCP connection.",
@@ -105,9 +117,11 @@ public:
 	std::string reqParameters;
 	// Request 'body' payload
 	std::string body;
+	// URL connection type
+	RESTConnectionType connType;
 
-	explicit RESTUrl(const std::string& fullUrl, const bool isSecure);
-	explicit RESTUrl(const std::string& fullUrl, const std::string& body, const bool isSecure);
+	explicit RESTUrl(const std::string& fullUrl);
+	explicit RESTUrl(const std::string& fullUrl, const std::string& body);
 
 	std::string toString() const {
 		return fmt::format(
@@ -115,7 +129,7 @@ public:
 	}
 
 private:
-	void parseUrl(const std::string& fullUrl, bool isSecure);
+	void parseUrl(const std::string& fullUrl);
 };
 
 #endif
