@@ -635,9 +635,9 @@ struct GetShardStateRequest {
 struct StorageMetrics {
 	constexpr static FileIdentifier file_identifier = 13622226;
 	int64_t bytes = 0; // total storage
-	// FIXME: currently, neither of bytesPerKSecond or iosPerKSecond are actually used in DataDistribution calculations.
+	// FIXME: currently, neither of bytesWrittenPerKSecond or iosPerKSecond are actually used in DataDistribution calculations.
 	// This may change in the future, but this comment is left here to avoid any confusion for the time being.
-	int64_t bytesPerKSecond = 0; // network bandwidth (average over 10s)
+	int64_t bytesWrittenPerKSecond = 0; // network bandwidth (average over 10s)
 	int64_t iosPerKSecond = 0;
 	int64_t bytesReadPerKSecond = 0;
 	int64_t opsReadPerKSecond = 0;
@@ -645,20 +645,20 @@ struct StorageMetrics {
 	static const int64_t infinity = 1LL << 60;
 
 	bool allLessOrEqual(const StorageMetrics& rhs) const {
-		return bytes <= rhs.bytes && bytesPerKSecond <= rhs.bytesPerKSecond && iosPerKSecond <= rhs.iosPerKSecond &&
+		return bytes <= rhs.bytes && bytesWrittenPerKSecond <= rhs.bytesWrittenPerKSecond && iosPerKSecond <= rhs.iosPerKSecond &&
 		       bytesReadPerKSecond <= rhs.bytesReadPerKSecond &&
 		       opsReadPerKSecond <= rhs.opsReadPerKSecond;
 	}
 	void operator+=(const StorageMetrics& rhs) {
 		bytes += rhs.bytes;
-		bytesPerKSecond += rhs.bytesPerKSecond;
+		bytesWrittenPerKSecond += rhs.bytesWrittenPerKSecond;
 		iosPerKSecond += rhs.iosPerKSecond;
 		bytesReadPerKSecond += rhs.bytesReadPerKSecond;
 		opsReadPerKSecond += rhs.opsReadPerKSecond;
 	}
 	void operator-=(const StorageMetrics& rhs) {
 		bytes -= rhs.bytes;
-		bytesPerKSecond -= rhs.bytesPerKSecond;
+		bytesWrittenPerKSecond -= rhs.bytesWrittenPerKSecond;
 		iosPerKSecond -= rhs.iosPerKSecond;
 		bytesReadPerKSecond -= rhs.bytesReadPerKSecond;
 		opsReadPerKSecond -= rhs.opsReadPerKSecond;
@@ -666,18 +666,18 @@ struct StorageMetrics {
 	template <class F>
 	void operator*=(F f) {
 		bytes *= f;
-		bytesPerKSecond *= f;
+		bytesWrittenPerKSecond *= f;
 		iosPerKSecond *= f;
 		bytesReadPerKSecond *= f;
 		opsReadPerKSecond *= f;
 	}
 	bool allZero() const {
-		return !bytes && !bytesPerKSecond && !iosPerKSecond && !bytesReadPerKSecond && !opsReadPerKSecond;
+		return !bytes && !bytesWrittenPerKSecond && !iosPerKSecond && !bytesReadPerKSecond && !opsReadPerKSecond;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, bytes, bytesPerKSecond, iosPerKSecond, bytesReadPerKSecond, opsReadPerKSecond);
+		serializer(ar, bytes, bytesWrittenPerKSecond, iosPerKSecond, bytesReadPerKSecond, opsReadPerKSecond);
 	}
 
 	void negate() { operator*=(-1.0); }
@@ -705,7 +705,7 @@ struct StorageMetrics {
 	}
 
 	bool operator==(StorageMetrics const& rhs) const {
-		return bytes == rhs.bytes && bytesPerKSecond == rhs.bytesPerKSecond && iosPerKSecond == rhs.iosPerKSecond &&
+		return bytes == rhs.bytes && bytesWrittenPerKSecond == rhs.bytesWrittenPerKSecond && iosPerKSecond == rhs.iosPerKSecond &&
 		       bytesReadPerKSecond == rhs.bytesReadPerKSecond &&
 		       opsReadPerKSecond == rhs.opsReadPerKSecond;
 	}
@@ -713,7 +713,7 @@ struct StorageMetrics {
 	std::string toString() const {
 		return format("Bytes: %lld, BPerKSec: %lld, iosPerKSec: %lld, BReadPerKSec: %lld, OpReadPerKSec: %lld",
 		              bytes,
-		              bytesPerKSecond,
+		              bytesWrittenPerKSecond,
 		              iosPerKSecond,
 		              bytesReadPerKSecond,
 		              opsReadPerKSecond);
