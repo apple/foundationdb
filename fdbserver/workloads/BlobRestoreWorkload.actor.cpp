@@ -107,7 +107,7 @@ struct BlobRestoreWorkload : TestWorkload {
 				}
 				// TODO need to define more specific error handling
 				if (s.phase == BlobRestorePhase::ERROR) {
-					fmt::print("Unexpected restore error code = {}\n", s.status);
+					fmt::print("Unexpected restore error code = {}\n", s.error.get());
 					return Void();
 				}
 			}
