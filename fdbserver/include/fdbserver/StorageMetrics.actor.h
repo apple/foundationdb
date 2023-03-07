@@ -74,6 +74,8 @@ struct TransientStorageMetricSample : StorageMetricSample {
 
 private:
 	bool roll(int64_t metric) const;
+
+	// return the sampled metric delta
 	int64_t add(const Key& key, int64_t metric);
 };
 
