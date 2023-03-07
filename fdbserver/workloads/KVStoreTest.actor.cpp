@@ -383,8 +383,6 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 		test.store = keyValueStoreSQLite(fn, id, KeyValueStoreType::SSD_BTREE_V2);
 	} else if (workload->storeType == KeyValueStoreType::SSD_BTREE_V1) {
 		test.store = keyValueStoreSQLite(fn, id, KeyValueStoreType::SSD_BTREE_V1);
-	} else if (workload->storeType == KeyValueStoreType::SSD_BTREE_V2) {
-		test.store = keyValueStoreSQLite(fn, id, KeyValueStoreType::SSD_BTREE_V2);
 	} else if (workload->storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
 		test.store = keyValueStoreRedwoodV1(fn, id);
 	} else if (workload->storeType == KeyValueStoreType::SSD_ROCKSDB_V1) {
