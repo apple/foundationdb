@@ -545,9 +545,9 @@ void StorageServerMetrics::add(KeyRangeMap<int>& map, KeyRangeRef const& keys, i
 
 // Returns the sampled metric value (possibly 0, possibly increased by the sampling factor)
 int64_t TransientStorageMetricSample::addAndExpire(const Key& key, int64_t metric, double expiration) {
-	int64_t x = add(key, metric);
+	auto x = add(key, metric);
 	if (x)
-		queue.emplace_back(expiration, std::make_pair(*sample.find(key), -x));
+		queue.emplace_back(expiration, std::make_pair(key, -x));
 	return x;
 }
 
@@ -571,17 +571,18 @@ bool TransientStorageMetricSample::roll(int64_t metric) const {
 }
 
 void TransientStorageMetricSample::poll(KeyRangeMap<std::vector<PromiseStream<StorageMetrics>>>& waitMap,
-                                        StorageMetrics m) {
+                                        StorageMetrics metrics) {
 	double now = ::now();
 	while (queue.size() && queue.front().first <= now) {
 		KeyRef key = queue.front().second.first;
 		int64_t delta = queue.front().second.second;
 		ASSERT(delta != 0);
 
-		if (sample.addMetric(key, delta) == 0)
-			sample.erase(key);
+		auto [m, it] = sample.addMetric(key, delta);
+		if (m == 0)
+			sample.erase(it);
 
-		StorageMetrics deltaM = m * delta;
+		StorageMetrics deltaM = metrics * delta;
 		auto v = waitMap[key];
 		for (int i = 0; i < v.size(); i++) {
 			CODE_PROBE(true, "TransientStorageMetricSample poll update");
@@ -599,8 +600,9 @@ void TransientStorageMetricSample::poll() {
 		int64_t delta = queue.front().second.second;
 		ASSERT(delta != 0);
 
-		if (sample.addMetric(key, delta) == 0)
-			sample.erase(key);
+		auto [m, it] = sample.addMetric(key, delta);
+		if (m == 0)
+			sample.erase(it);
 
 		queue.pop_front();
 	}
@@ -617,8 +619,9 @@ int64_t TransientStorageMetricSample::add(const Key& key, int64_t metric) {
 		metric = metric < 0 ? -metricUnitsPerSample : metricUnitsPerSample;
 	}
 
-	if (sample.addMetric(key, metric) == 0)
-		sample.erase(key);
+	auto [m, it] = sample.addMetric(key, metric);
+	if (m == 0)
+		sample.erase(it);
 
 	return metric;
 }
