@@ -44,9 +44,6 @@ const StringRef TLOG_MSGS_PTREE_UPDATES_LATENCY_HISTOGRAM = "TLogMsgsPTreeUpdate
 const StringRef STORAGE_UPDATES_DURABLE_LATENCY_HISTOGRAM = "StorageUpdatesDurableLatency"_sr;
 const StringRef STORAGE_COMMIT_LATENCY_HISTOGRAM = "StorageCommitLatency"_sr;
 const StringRef SS_DURABLE_VERSION_UPDATE_LATENCY_HISTOGRAM = "SSDurableVersionUpdateLatency"_sr;
-const StringRef SS_READ_RANGE_BYTES_RETURNED_HISTOGRAM = "SSReadRangeBytesReturned"_sr;
-const StringRef SS_READ_RANGE_BYTES_LIMIT_HISTOGRAM = "SSReadRangeBytesLimit"_sr;
-const StringRef SS_READ_RANGE_KV_PAIRS_RETURNED_HISTOGRAM = "SSReadRangeKVPairsReturned"_sr;
 
 struct StorageMetricSample {
 	IndexedSet<Key, int64_t> sample;
@@ -135,9 +132,9 @@ struct StorageServerMetrics {
 
 	void getReadHotRanges(ReadHotSubRangeRequest req) const;
 
-	std::vector<KeyRef> getSplitPoints(KeyRangeRef range, int64_t chunkSize, Optional<KeyRef> prefixToRemove) const;
+	std::vector<KeyRef> getSplitPoints(KeyRangeRef range, int64_t chunkSize, Optional<Key> prefixToRemove) const;
 
-	void getSplitPoints(SplitRangeRequest req, Optional<KeyRef> prefix) const;
+	void getSplitPoints(SplitRangeRequest req, Optional<Key> prefix) const;
 
 	[[maybe_unused]] std::vector<ReadHotRangeWithMetrics> _getReadHotRanges(
 	    KeyRangeRef shard,
@@ -164,79 +161,7 @@ struct ByteSampleInfo {
 
 // Determines whether a key-value pair should be included in a byte sample
 // Also returns size information about the sample
-ByteSampleInfo isKeyValueInSample(KeyRef key, int64_t totalKvSize);
-inline ByteSampleInfo isKeyValueInSample(KeyValueRef keyValue) {
-	return isKeyValueInSample(keyValue.key, keyValue.key.size() + keyValue.value.size());
-}
+ByteSampleInfo isKeyValueInSample(KeyValueRef keyValue);
 
-class IStorageMetricsService {
-public:
-	StorageServerMetrics metrics;
-
-	// penalty used by loadBalance() to balance requests among service instances
-	virtual double getPenalty() const { return 1; }
-
-	virtual bool isReadable(KeyRangeRef const& keys) const { return true; }
-
-	virtual void addActor(Future<Void> future) = 0;
-
-	virtual void getSplitPoints(SplitRangeRequest const& req) = 0;
-
-	virtual Future<Void> waitMetricsTenantAware(const WaitMetricsRequest& req) = 0;
-
-	virtual void getStorageMetrics(const GetStorageMetricsRequest& req) = 0;
-
-	// NOTE: also need to have this function but template can't be a virtual so...
-	// template <class Reply>
-	// void sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double penalty);
-};
-
-ACTOR template <class ServiceType>
-Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterface ssi) {
-	state Future<Void> doPollMetrics = Void();
-	loop {
-		choose {
-			when(state WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
-				if (!req.tenantInfo.hasTenant() && !self->isReadable(req.keys)) {
-					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()");
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->addActor(self->waitMetricsTenantAware(req));
-				}
-			}
-			when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {
-				if (!self->isReadable(req.keys)) {
-					CODE_PROBE(true, "splitMetrics immediate wrong_shard_server()");
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->metrics.splitMetrics(req);
-				}
-			}
-			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
-				self->getStorageMetrics(req);
-			}
-			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
-				if (!self->isReadable(req.keys)) {
-					CODE_PROBE(true, "readHotSubRanges immediate wrong_shard_server()", probe::decoration::rare);
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->metrics.getReadHotRanges(req);
-				}
-			}
-			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
-				if (!self->isReadable(req.keys)) {
-					CODE_PROBE(true, "getSplitPoints immediate wrong_shard_server()");
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->getSplitPoints(req);
-				}
-			}
-			when(wait(doPollMetrics)) {
-				self->metrics.poll();
-				doPollMetrics = delay(SERVER_KNOBS->STORAGE_SERVER_POLL_METRICS_DELAY);
-			}
-		}
-	}
-}
 #include "flow/unactorcompiler.h"
 #endif // FDBSERVER_STORAGEMETRICS_H

@@ -90,7 +90,7 @@ void StorageServerMetrics::notify(KeyRef key, StorageMetrics& metrics) {
 	if (g_network->isSimulated()) {
 		CODE_PROBE(metrics.bytesWrittenPerKSecond != 0, "ShardNotifyMetrics bytes");
 		CODE_PROBE(metrics.iosPerKSecond != 0, "ShardNotifyMetrics ios");
-		CODE_PROBE(metrics.bytesReadPerKSecond != 0, "ShardNotifyMetrics bytesRead", probe::decoration::rare);
+		CODE_PROBE(metrics.bytesReadPerKSecond != 0, "ShardNotifyMetrics bytesRead");
 	}
 
 	double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
@@ -301,10 +301,6 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 			if (key == req.keys.end)
 				break;
 			reply.splits.push_back_deep(reply.splits.arena(), key);
-			if (reply.splits.size() > SERVER_KNOBS->SPLIT_METRICS_MAX_ROWS) {
-				reply.more = true;
-				break;
-			}
 
 			StorageMetrics diff = (getMetrics(KeyRangeRef(lastKey, key)) + used);
 			remaining -= diff;
@@ -314,7 +310,7 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 			lastKey = key;
 		}
 
-		reply.used = reply.more ? StorageMetrics() : getMetrics(KeyRangeRef(lastKey, req.keys.end)) + used;
+		reply.used = getMetrics(KeyRangeRef(lastKey, req.keys.end)) + used;
 		req.reply.send(reply);
 	} catch (Error& e) {
 		req.reply.sendError(e);
@@ -408,7 +404,7 @@ std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::getReadHotRanges(KeyR
 			break;
 		}
 
-		ASSERT_LT(beginKey, *endIt);
+		ASSERT(beginKey < *endIt);
 		KeyRangeRef range(beginKey, *endIt);
 		toReturn.emplace_back(
 		    range,
@@ -488,7 +484,7 @@ void StorageServerMetrics::getReadHotRanges(ReadHotSubRangeRequest req) const {
 	req.reply.send(reply);
 }
 
-void StorageServerMetrics::getSplitPoints(SplitRangeRequest req, Optional<KeyRef> prefix) const {
+void StorageServerMetrics::getSplitPoints(SplitRangeRequest req, Optional<Key> prefix) const {
 	SplitRangeReply reply;
 	KeyRangeRef range = req.keys;
 	if (prefix.present()) {
@@ -502,7 +498,7 @@ void StorageServerMetrics::getSplitPoints(SplitRangeRequest req, Optional<KeyRef
 
 std::vector<KeyRef> StorageServerMetrics::getSplitPoints(KeyRangeRef range,
                                                          int64_t chunkSize,
-                                                         Optional<KeyRef> prefixToRemove) const {
+                                                         Optional<Key> prefixToRemove) const {
 	std::vector<KeyRef> toReturn;
 	KeyRef beginKey = range.begin;
 	IndexedSet<Key, int64_t>::const_iterator endKey =
@@ -871,13 +867,13 @@ TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/equalDivide") {
 	//	for(int i = 0; i < t.size(); ++ i) {
 	//		fmt::print("{} {}\n", t[i].keys.begin.toString(), t[i].readBandwidthSec);
 	//	}
-	ASSERT_EQ((*t.begin()).keys.begin,
-	          ""_sr); // Note since difference sampler is not aligned, so "A" is not the first key
-	ASSERT_EQ((*t.begin()).keys.end, "Bucket"_sr);
-	ASSERT_EQ(t[0].bytes, 1400);
+	ASSERT((*t.begin()).keys.begin ==
+	       ""_sr); // Note since difference sampler is not aligned, so "A" is not the first key
+	ASSERT((*t.begin()).keys.end == "Bucket"_sr);
+	ASSERT(t[0].bytes == 1400);
 
-	ASSERT_EQ(t.at(1).keys.begin, "Bucket"_sr);
-	ASSERT_EQ(t.at(1).keys.end, "Cat"_sr);
+	ASSERT(t.at(1).keys.begin == "Bucket"_sr);
+	ASSERT(t.at(1).keys.end == "Cat"_sr);
 
 	ASSERT_EQ(t.at(2).bytes, 600);
 	ASSERT_EQ(t.at(3).readBandwidthSec, 5000 * sampleUnit / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
