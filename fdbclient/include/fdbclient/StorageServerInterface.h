@@ -635,8 +635,9 @@ struct GetShardStateRequest {
 struct StorageMetrics {
 	constexpr static FileIdentifier file_identifier = 13622226;
 	int64_t bytes = 0; // total storage
-	// FIXME: currently, neither of bytesWrittenPerKSecond or iosPerKSecond are actually used in DataDistribution calculations.
-	// This may change in the future, but this comment is left here to avoid any confusion for the time being.
+	// FIXME: currently, neither of bytesWrittenPerKSecond or iosPerKSecond are actually used in DataDistribution
+	// calculations. This may change in the future, but this comment is left here to avoid any confusion for the time
+	// being.
 	int64_t bytesWrittenPerKSecond = 0; // network bandwidth (average over 10s)
 	int64_t iosPerKSecond = 0;
 	int64_t bytesReadPerKSecond = 0;
@@ -645,8 +646,8 @@ struct StorageMetrics {
 	static const int64_t infinity = 1LL << 60;
 
 	bool allLessOrEqual(const StorageMetrics& rhs) const {
-		return bytes <= rhs.bytes && bytesWrittenPerKSecond <= rhs.bytesWrittenPerKSecond && iosPerKSecond <= rhs.iosPerKSecond &&
-		       bytesReadPerKSecond <= rhs.bytesReadPerKSecond &&
+		return bytes <= rhs.bytes && bytesWrittenPerKSecond <= rhs.bytesWrittenPerKSecond &&
+		       iosPerKSecond <= rhs.iosPerKSecond && bytesReadPerKSecond <= rhs.bytesReadPerKSecond &&
 		       opsReadPerKSecond <= rhs.opsReadPerKSecond;
 	}
 	void operator+=(const StorageMetrics& rhs) {
@@ -705,8 +706,8 @@ struct StorageMetrics {
 	}
 
 	bool operator==(StorageMetrics const& rhs) const {
-		return bytes == rhs.bytes && bytesWrittenPerKSecond == rhs.bytesWrittenPerKSecond && iosPerKSecond == rhs.iosPerKSecond &&
-		       bytesReadPerKSecond == rhs.bytesReadPerKSecond &&
+		return bytes == rhs.bytes && bytesWrittenPerKSecond == rhs.bytesWrittenPerKSecond &&
+		       iosPerKSecond == rhs.iosPerKSecond && bytesReadPerKSecond == rhs.bytesReadPerKSecond &&
 		       opsReadPerKSecond == rhs.opsReadPerKSecond;
 	}
 

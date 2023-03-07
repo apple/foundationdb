@@ -9742,12 +9742,13 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 						//  all the messages for one clear or set have been dispatched.
 
 						/*StorageMetrics m = getMetrics( data, req.keys );
-						  bool b = ( m.bytes != metrics.bytes || m.bytesWrittenPerKSecond != metrics.bytesWrittenPerKSecond ||
-						  m.iosPerKSecond != metrics.iosPerKSecond ); if (b) { printf("keys: '%s' - '%s' @%p\n",
-						  printable(req.keys.begin).c_str(), printable(req.keys.end).c_str(), this);
-						  printf("waitMetrics: desync %d (%lld %lld %lld) != (%lld %lld %lld); +(%lld %lld %lld)\n",
-						  b, m.bytes, m.bytesWrittenPerKSecond, m.iosPerKSecond, metrics.bytes, metrics.bytesWrittenPerKSecond,
-						  metrics.iosPerKSecond, c.bytes, c.bytesWrittenPerKSecond, c.iosPerKSecond);
+						  bool b = ( m.bytes != metrics.bytes || m.bytesWrittenPerKSecond !=
+						  metrics.bytesWrittenPerKSecond || m.iosPerKSecond != metrics.iosPerKSecond ); if (b) {
+						  printf("keys: '%s' - '%s' @%p\n", printable(req.keys.begin).c_str(),
+						  printable(req.keys.end).c_str(), this); printf("waitMetrics: desync %d (%lld %lld %lld) !=
+						  (%lld %lld %lld); +(%lld %lld %lld)\n", b, m.bytes, m.bytesWrittenPerKSecond, m.iosPerKSecond,
+						  metrics.bytes, metrics.bytesWrittenPerKSecond, metrics.iosPerKSecond, c.bytes,
+						  c.bytesWrittenPerKSecond, c.iosPerKSecond);
 
 						  }*/
 					}
