@@ -403,6 +403,7 @@ public:
 			    .detail("UnhealthyRelocations", 0)
 			    .detail("HighestPriority", 0)
 			    .detail("BytesWritten", 0)
+			    .detail("BytesAverage", 0)
 			    .detail("PriorityRecoverMove", 0)
 			    .detail("PriorityRebalanceUnderutilizedTeam", 0)
 			    .detail("PriorityRebalannceOverutilizedTeam", 0)
