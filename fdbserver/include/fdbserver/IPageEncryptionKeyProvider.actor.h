@@ -28,7 +28,7 @@
 #define FDBSERVER_IPAGEENCRYPTIONKEYPROVIDER_ACTOR_H
 
 #include "fdbclient/BlobCipher.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 

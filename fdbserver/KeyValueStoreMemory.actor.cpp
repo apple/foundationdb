@@ -24,7 +24,7 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DeltaTree.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbserver/IDiskQueue.h"
 #include "fdbserver/IKeyValueContainer.h"
 #include "fdbserver/IKeyValueStore.h"

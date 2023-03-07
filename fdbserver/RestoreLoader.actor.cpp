@@ -26,7 +26,7 @@
 #include "flow/UnitTest.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupAgent.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"

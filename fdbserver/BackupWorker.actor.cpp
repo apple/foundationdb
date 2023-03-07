@@ -26,7 +26,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/BackupProgress.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"

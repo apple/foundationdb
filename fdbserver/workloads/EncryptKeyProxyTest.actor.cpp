@@ -20,7 +20,7 @@
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/EncryptKeyProxyInterface.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 
 #include "fdbrpc/Locality.h"
 

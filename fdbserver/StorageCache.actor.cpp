@@ -25,7 +25,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbclient/StorageServerInterface.h"

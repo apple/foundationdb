@@ -33,7 +33,7 @@
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/KeyRangeMap.h"

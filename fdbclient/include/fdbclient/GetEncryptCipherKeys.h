@@ -1,5 +1,5 @@
 /*
- * GetEncryptCipherKeys.actor.h
+ * GetEncryptCipherKeys.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -17,15 +17,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+#ifndef FDBCLIENT_GETCIPHERKEYS_H
+#define FDBCLIENT_GETCIPHERKEYS_H
 #pragma once
+
 #include "flow/EncryptUtils.h"
 #include "flow/genericactors.actor.h"
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_GETCIPHERKEYS_ACTOR_G_H)
-#define FDBCLIENT_GETCIPHERKEYS_ACTOR_G_H
-#include "fdbclient/GetEncryptCipherKeys.actor.g.h"
-#elif !defined(FDBCLIENT_GETCIPHERKEYS_ACTOR_H)
-#define FDBCLIENT_GETCIPHERKEYS_ACTOR_H
-
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbclient/Knobs.h"
@@ -37,8 +35,6 @@
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 using BaseCipherIndex = std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>;
 
@@ -89,5 +85,4 @@ public:
 	                                                            BlobCipherMetrics::UsageType usageType);
 };
 
-#include "flow/unactorcompiler.h"
 #endif

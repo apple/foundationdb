@@ -26,7 +26,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Metacluster.h"
