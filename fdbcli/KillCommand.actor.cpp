@@ -105,6 +105,7 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 				        "fetch latest addresses.\n",
 				        addressesStr.c_str());
 			} else {
+				wait(delay(3.0));
 				printf("Attempted to kill %zu processes\n", tokens.size() - 1);
 			}
 		}
