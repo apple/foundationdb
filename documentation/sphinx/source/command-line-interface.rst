@@ -483,8 +483,6 @@ status json
 
 ``status json`` will provide the cluster status in its JSON format. For a detailed description of this format, see :doc:`mr-status`.
 
-.. _cli-throttle:
-
 tenant
 ------
 
@@ -625,6 +623,8 @@ In the event of an error, the JSON output will include an error message::
         "error": "...",
         "type": "error"
     }
+
+.. _cli-throttle:
 
 throttle
 --------
