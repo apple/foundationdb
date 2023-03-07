@@ -167,7 +167,9 @@ ACTOR Future<int64_t> lastBlobEpoc(Database db, Reference<BlobConnectionProvider
 ACTOR Future<bool> isFullRestoreMode(Database db, KeyRangeRef range);
 ACTOR Future<Void> updateRestoreStatus(Database db,
                                        KeyRangeRef range,
-                                       BlobRestoreStatus status,
+                                       BlobRestorePhase phase,
+                                       int progress,
+                                       Optional<StringRef> error,
                                        Optional<BlobRestorePhase> expectedPhase);
 ACTOR Future<std::pair<KeyRange, BlobRestoreStatus>> getRestoreRangeStatus(Database db, KeyRangeRef keys);
 ACTOR Future<Optional<BlobRestoreStatus>> getRestoreStatus(Database db, KeyRangeRef range);
