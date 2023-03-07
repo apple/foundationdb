@@ -19,6 +19,7 @@
  */
 
 #include "flow/ProcessEvents.h"
+#include "flow/UnitTest.h"
 
 #include <unordered_map>
 #include <vector>
@@ -111,14 +112,14 @@ struct ProcessEventsImpl {
 	}
 };
 
-ProcessEventsImpl impl;
+ProcessEventsImpl processEventsImpl;
 
 void EventImpl::addEvent() {
-	impl.add(names, this);
+	processEventsImpl.add(names, this);
 }
 
 void EventImpl::removeEvent() {
-	impl.remove(names, this->id());
+	processEventsImpl.remove(names, this->id());
 }
 
 } // namespace
@@ -126,7 +127,7 @@ void EventImpl::removeEvent() {
 namespace ProcessEvents {
 
 void trigger(StringRef name, StringRef msg, Error const& e) {
-	impl.trigger(name, msg, e);
+	processEventsImpl.trigger(name, msg, e);
 }
 
 Event::Event(StringRef name, Callback callback) {
@@ -139,6 +140,82 @@ Event::~Event() {
 	auto ptr = reinterpret_cast<EventImpl*>(impl);
 	ptr->removeEvent();
 	delete ptr;
+}
+
+TEST_CASE("/flow/ProcessEvents") {
+	{
+		// Basic test
+		unsigned numHits = 0;
+		Event _("basic"_sr, [&numHits](StringRef n, StringRef, Error const& e) {
+			ASSERT_EQ(n, "basic"_sr);
+			ASSERT_EQ(e.code(), error_code_success);
+			++numHits;
+		});
+		trigger("basic"_sr, ""_sr, success());
+		ASSERT(numHits == 1);
+		trigger("basic"_sr, ""_sr, success());
+	}
+	{
+		// Test that Events can be added during a trigger
+		unsigned hits1 = 0;
+		std::vector<std::shared_ptr<Event>> createdEvents;
+		std::vector<unsigned> numHits;
+		numHits.reserve(2);
+		Event _("create"_sr, [&](StringRef n, StringRef, Error const& e) {
+			ASSERT_EQ(n, "create"_sr);
+			ASSERT_EQ(e.code(), error_code_success);
+			++hits1;
+			numHits.push_back(0);
+			createdEvents.push_back(
+			    std::make_shared<Event>(std::vector<StringRef>{ "create"_sr, "secondaries"_sr },
+			                            [&numHits, idx = numHits.size() - 1](StringRef n, StringRef, Error const& e) {
+				                            ASSERT(n == "create"_sr || n == "secondaries");
+				                            ASSERT_EQ(e.code(), error_code_success);
+				                            ++numHits[idx];
+			                            }));
+		});
+		trigger("create"_sr, ""_sr, success());
+		ASSERT_EQ(hits1, 1);
+		ASSERT_EQ(createdEvents.size(), 1);
+		ASSERT_EQ(numHits.size(), 1);
+		// an event that is created in a callback mustn't be called in the same trigger
+		ASSERT_EQ(numHits[0], 0);
+		trigger("create"_sr, ""_sr, success());
+		ASSERT_EQ(hits1, 2);
+		ASSERT_EQ(createdEvents.size(), 2);
+		ASSERT_EQ(numHits.size(), 2);
+		ASSERT_EQ(numHits[0], 1);
+		ASSERT_EQ(numHits[1], 0);
+		trigger("secondaries"_sr, ""_sr, success());
+		ASSERT_EQ(hits1, 2);
+		ASSERT_EQ(createdEvents.size(), 2);
+		ASSERT_EQ(numHits.size(), 2);
+		ASSERT_EQ(numHits[0], 2);
+		ASSERT_EQ(numHits[1], 1);
+	}
+	{
+		// Remove self
+		unsigned called_self_delete = 0, called_non_delete = 0;
+		std::unique_ptr<Event> ev;
+		auto callback_del = [&](StringRef n, StringRef, Error const& e) {
+			ASSERT_EQ(n, "deletion"_sr);
+			ASSERT_EQ(e.code(), error_code_success);
+			++called_self_delete;
+			// remove Event
+			ev.reset();
+		};
+		ev.reset(new Event("deletion"_sr, callback_del));
+		Event _("deletion"_sr, [&](StringRef n, StringRef, Error const& e) {
+			ASSERT_EQ(n, "deletion"_sr);
+			ASSERT_EQ(e.code(), error_code_success);
+			++called_non_delete;
+		});
+		trigger("deletion"_sr, ""_sr, success());
+		trigger("deletion"_sr, ""_sr, success());
+		ASSERT_EQ(called_self_delete, 1);
+		ASSERT_EQ(called_non_delete, 2);
+	}
+	return Void();
 }
 
 } // namespace ProcessEvents
