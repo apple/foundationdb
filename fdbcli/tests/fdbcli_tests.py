@@ -50,14 +50,10 @@ def run_fdbcli_command(*args):
         string: Console output from fdbcli
     """
     commands = command_template + ["{}".format(" ".join(args))]
-    try:
-        # if the fdbcli command is stuck for more than 20 seconds, the database is definitely unavailable
-        process = subprocess.run(
-            commands, stdout=subprocess.PIPE, env=fdbcli_env, timeout=20
-        )
-        return process.stdout.decode("utf-8").strip()
-    except subprocess.TimeoutExpired:
-        raise Exception("The fdbcli command is stuck, database is unavailable")
+    process = subprocess.run(
+        commands, stdout=subprocess.PIPE, env=fdbcli_env
+    )
+    return process.stdout.decode("utf-8").strip()
 
 
 def run_fdbcli_command_and_get_error(*args):
