@@ -119,6 +119,10 @@ struct DatabaseConfiguration {
 	StatusObject toJSON(bool noPolicies = false) const;
 	StatusArray getRegionJSON() const;
 
+	// Given a JSON object representing a DatabaseConfiguration, generate a configuration command
+	// that would set a database to those options.
+	static std::string configureStringFromJSON(const StatusObject& json);
+
 	RegionInfo getRegion(Optional<Key> dcId) const {
 		if (!dcId.present()) {
 			return RegionInfo();

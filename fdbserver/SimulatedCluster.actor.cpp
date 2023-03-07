@@ -24,6 +24,7 @@
 #include <sstream>
 #include <string_view>
 #include <toml.hpp>
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/simulator.h"
@@ -47,6 +48,7 @@
 #include "flow/MkCert.h"
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/flow.h"
 #include "flow/network.h"
 #include "flow/TypeTraits.h"
 #include "flow/FaultInjection.h"
@@ -414,7 +416,7 @@ public:
 	//	0 = "ssd"
 	//	1 = "memory"
 	//	2 = "memory-radixtree-beta"
-	//	3 = "ssd-redwood-1-experimental"
+	//	3 = "ssd-redwood-1"
 	//	4 = "ssd-rocksdb-v1"
 	//	5 = "ssd-sharded-rocksdb"
 	// Requires a comma-separated list of numbers WITHOUT whitespaces
@@ -1672,7 +1674,8 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	}
 	case 3: {
 		CODE_PROBE(true, "Simulated cluster using redwood storage engine");
-		set_config("ssd-redwood-1-experimental");
+		// The experimental suffix is still supported so test it randomly
+		set_config(BUGGIFY ? "ssd-redwood-1" : "ssd-redwood-1-experimental");
 		break;
 	}
 	case 4: {
@@ -2151,33 +2154,16 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		TraceEvent(SevDebug, "DisableRemoteKVS");
 	}
 	auto configDBType = testConfig.getConfigDBType();
-	for (auto kv : startingConfigJSON) {
-		if ("tss_storage_engine" == kv.first) {
-			continue;
-		}
-		if ("perpetual_storage_wiggle_locality" == kv.first) {
-			if (deterministicRandom()->random01() < 0.25) {
-				int dcId = deterministicRandom()->randomInt(0, simconfig.datacenters);
-				startingConfigString += " " + kv.first + "=" + "data_hall:" + std::to_string(dcId);
-			}
-			continue;
-		}
-		startingConfigString += " ";
-		if (kv.second.type() == json_spirit::int_type) {
-			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int());
-		} else if (kv.second.type() == json_spirit::str_type) {
-			if ("storage_migration_type" == kv.first || "tenant_mode" == kv.first ||
-			    "encryption_at_rest_mode" == kv.first) {
-				startingConfigString += kv.first + "=" + kv.second.get_str();
-			} else {
-				startingConfigString += kv.second.get_str();
-			}
-		} else if (kv.second.type() == json_spirit::array_type) {
-			startingConfigString += kv.first + "=" +
-			                        json_spirit::write_string(json_spirit::mValue(kv.second.get_array()),
-			                                                  json_spirit::Output_options::none);
-		} else {
-			ASSERT(false);
+	startingConfigString += DatabaseConfiguration::configureStringFromJSON(startingConfigJSON);
+
+	// Set a random locality for the perpetual wiggle if any locality is set in the config
+	// This behavior is preserved in a refactor but it unclear why the source configuration JSON
+	// is translated to a random locality instead of something matching the source.
+	auto ipwLocality = startingConfigJSON.find("perpetual_storage_wiggle_locality");
+	if (ipwLocality != startingConfigJSON.end()) {
+		if (deterministicRandom()->random01() < 0.25) {
+			int dcId = deterministicRandom()->randomInt(0, simconfig.datacenters);
+			startingConfigString += " " + ipwLocality->first + "=" + "data_hall:" + std::to_string(dcId);
 		}
 	}
 
