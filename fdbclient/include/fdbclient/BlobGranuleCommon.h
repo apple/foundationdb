@@ -356,20 +356,24 @@ enum BlobRestorePhase {
 	COPYING_DATA = 4,
 	APPLYING_MLOGS = 5,
 	DONE = 6,
-	ERROR = 7
+	ERROR = 7,
+	MAX = 8
 };
 struct BlobRestoreStatus {
 	constexpr static FileIdentifier file_identifier = 378657;
 	BlobRestorePhase phase;
-	int status;
+	int progress;
+	VectorRef<int64_t> phaseStartTs;
+	Optional<StringRef> error;
 
 	BlobRestoreStatus() : phase(BlobRestorePhase::INIT){};
-	BlobRestoreStatus(BlobRestorePhase pha) : phase(pha), status(0){};
-	BlobRestoreStatus(BlobRestorePhase pha, int prog) : phase(pha), status(prog){};
+	BlobRestoreStatus(BlobRestorePhase phase) : phase(phase), progress(0){};
+	BlobRestoreStatus(BlobRestorePhase phase, int progress) : phase(phase), progress(progress){};
+	BlobRestoreStatus(BlobRestorePhase phase, Optional<StringRef> error) : phase(phase), error(error){};
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, phase, status);
+		serializer(ar, phase, progress, phaseStartTs, error);
 	}
 };
 
