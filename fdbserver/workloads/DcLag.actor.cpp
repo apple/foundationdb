@@ -22,6 +22,7 @@
 #include "fdbclient/StatusClient.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -91,9 +92,9 @@ struct DcLagWorkload : TestWorkload {
 		auto tlog = logs[0].ip;
 		for (const auto& ip : ips) {
 			if (tlog != ip) {
-				g_simulator->clogPair(ip, tlog, seconds);
+				// Clog TLogReply messages, but allow peek/pop requests
+				// g_simulator->clogPair(ip, tlog, seconds);
 				g_simulator->clogPair(tlog, ip, seconds);
-				cloggedPairs.emplace_back(ip, tlog);
 				cloggedPairs.emplace_back(tlog, ip);
 			}
 		}
@@ -150,17 +151,29 @@ struct DcLagWorkload : TestWorkload {
 		// Clog and wait for recovery to happen
 		self->clogTlog(workloadEnd - now());
 
-		state Future<Optional<double>> status;
+		state Future<Optional<double>> status = Never();
+		state bool clogged = false;
 		loop choose {
 			when(wait(delayUntil(workloadEnd))) {
 				// Expect to reach fully recovered state before workload ends
-				TraceEvent("DcLagEnd");
+				TraceEvent(SevError, "DcLagEnd");
 				self->unclogAll();
 				return Void();
 			}
 			when(wait(delay(5.0))) {
-				// check DC lag
+				// Fetch DC lag every 5s
 				status = fetchDatacenterLag(self, cx);
+			}
+			when(Optional<double> lag = wait(status)) {
+				if (lag.present() && lag.get() >= SERVER_KNOBS->LOG_ROUTER_PEEK_SWITCH_DC_TIME - 5.0) {
+					clogged = true;
+				}
+				if (clogged && lag < 5.0) {
+					TraceEvent("DcLagRecovered");
+					self->unclogAll();
+					return Void();
+				}
+				status = Never();
 			}
 		}
 	}

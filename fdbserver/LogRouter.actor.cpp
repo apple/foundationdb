@@ -300,6 +300,7 @@ ACTOR Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(LogRouterData
                                                                    Reference<ILogSystem::IPeekCursor> r,
                                                                    Version startVersion) {
 	state Reference<ILogSystem::IPeekCursor> result = r;
+	state bool useSatellite = SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED;
 	loop {
 		Future<Void> getMoreF = Never();
 		if (result) {
@@ -320,7 +321,8 @@ ACTOR Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(LogRouterData
 			}
 			when(wait(self->logSystemChanged)) { // FIXME: does this actually happen?
 				if (self->logSystem->get()) {
-					result = self->logSystem->get()->peekLogRouter(self->dbgid, startVersion, self->routerTag);
+					result =
+					    self->logSystem->get()->peekLogRouter(self->dbgid, startVersion, self->routerTag, useSatellite);
 					self->primaryPeekLocation = result->getPrimaryPeekLocation();
 					TraceEvent("LogRouterPeekLocation", self->dbgid)
 					    .detail("LogID", result->getPrimaryPeekLocation())
@@ -329,6 +331,17 @@ ACTOR Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(LogRouterData
 					result = Reference<ILogSystem::IPeekCursor>();
 				}
 				self->logSystemChanged = self->logSystem->onChange();
+			}
+			when(wait(result ? delay(SERVER_KNOBS->LOG_ROUTER_PEEK_SWITCH_DC_TIME) : Never())) {
+				// Peek has become stuck for a while, trying switching between primary DC and satellite
+				TraceEvent("LogRouterSlowPeek", self->dbgid).detail("NextTrySatellite", !useSatellite);
+				useSatellite = !useSatellite;
+				result =
+				    self->logSystem->get()->peekLogRouter(self->dbgid, startVersion, self->routerTag, useSatellite);
+				self->primaryPeekLocation = result->getPrimaryPeekLocation();
+				TraceEvent("LogRouterPeekLocation", self->dbgid)
+				    .detail("LogID", result->getPrimaryPeekLocation())
+				    .trackLatest(self->eventCacheHolder->trackingKey);
 			}
 		}
 	}
