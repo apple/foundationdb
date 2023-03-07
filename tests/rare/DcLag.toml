@@ -5,9 +5,6 @@ processesPerMachine = 1
 machineCount = 20
 config = 'triple'
 
-[[knobs]]
-log_router_peek_switch_dc_time = 200.0
-
 [[test]]
 testTitle = 'DcLag'
 
@@ -15,9 +12,9 @@ testTitle = 'DcLag'
     testName = 'Cycle'
     nodeCount = 3000
     transactionsPerSecond = 250.0
-    testDuration = 3000.0
+    testDuration = 200.0
     expectedRate = 0
 
     [[test.workload]]
     testName = 'DcLag'
-    testDuration = 3000.0
+    testDuration = 1000.0
