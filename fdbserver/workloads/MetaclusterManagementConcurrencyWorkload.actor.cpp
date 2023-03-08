@@ -50,7 +50,7 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 	double testDuration;
 
 	MetaclusterManagementConcurrencyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		testDuration = getOption(options, "testDuration"_sr, 120.0);
+		testDuration = getOption(options, "testDuration"_sr, 90.0);
 	}
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
@@ -82,11 +82,6 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 	}
 
 	ClusterName chooseClusterName() { return dataDbIndex[deterministicRandom()->randomInt(0, dataDbIndex.size())]; }
-
-	static Future<Void> verifyClusterRecovered(Database db) {
-		return success(runTransaction(db.getReference(),
-		                              [](Reference<ReadYourWritesTransaction> tr) { return tr->getReadVersion(); }));
-	}
 
 	ACTOR static Future<Void> registerCluster(MetaclusterManagementConcurrencyWorkload* self) {
 		state ClusterName clusterName = self->chooseClusterName();
@@ -120,22 +115,27 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 			    .error(e)
 			    .detail("ClusterName", clusterName);
 			if (e.code() != error_code_cluster_already_exists && e.code() != error_code_cluster_not_empty &&
-			    e.code() != error_code_cluster_already_registered && e.code() != error_code_cluster_removed) {
+			    e.code() != error_code_cluster_already_registered && e.code() != error_code_cluster_removed &&
+			    e.code() != error_code_cluster_restoring) {
 				TraceEvent(SevError, "MetaclusterManagementConcurrencyRegisterClusterFailure", debugId)
 				    .error(e)
 				    .detail("ClusterName", clusterName);
 				ASSERT(false);
 			}
+
+			wait(success(errorOr(MetaclusterAPI::removeCluster(
+			    self->managementDb, clusterName, ClusterType::METACLUSTER_MANAGEMENT, ForceRemove::True))));
+
 			return Void();
 		}
 
-		wait(verifyClusterRecovered(dataDb));
 		return Void();
 	}
 
 	ACTOR static Future<Void> removeCluster(MetaclusterManagementConcurrencyWorkload* self) {
 		state ClusterName clusterName = self->chooseClusterName();
 		state Database dataDb = self->dataDbs[clusterName];
+		state ForceRemove forceRemove(deterministicRandom()->coinflip());
 
 		state UID debugId = deterministicRandom()->randomUniqueID();
 
@@ -166,7 +166,6 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 			return Void();
 		}
 
-		wait(verifyClusterRecovered(dataDb));
 		return Void();
 	}
 
@@ -307,12 +306,103 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 			    .detail("NewNumTenantGroups", newNumTenantGroups.orDefault(-1))
 			    .detail("NewConnectionString", connectionString.map(&ClusterConnectionString::toString).orDefault(""));
 			if (e.code() != error_code_cluster_not_found && e.code() != error_code_cluster_removed &&
-			    e.code() != error_code_invalid_metacluster_operation) {
+			    e.code() != error_code_invalid_metacluster_operation && e.code() != error_code_cluster_restoring) {
 				TraceEvent(SevError, "MetaclusterManagementConcurrencyConfigureClusterFailure")
 				    .error(e)
 				    .detail("ClusterName", clusterName);
 				ASSERT(false);
 			}
+		}
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> restoreCluster(MetaclusterManagementConcurrencyWorkload* self) {
+		state ClusterName clusterName = self->chooseClusterName();
+		state Database db = self->dataDbs[clusterName];
+		state ApplyManagementClusterUpdates applyManagementClusterUpdates(deterministicRandom()->coinflip());
+		state ForceJoin forceJoin(deterministicRandom()->coinflip());
+		state bool removeFirst = !applyManagementClusterUpdates && deterministicRandom()->coinflip();
+
+		state UID debugId = deterministicRandom()->randomUniqueID();
+
+		try {
+			TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestore", debugId)
+			    .detail("ClusterName", clusterName)
+			    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
+
+			if (removeFirst) {
+				TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreRemoveDataCluster", debugId)
+				    .detail("ClusterName", clusterName)
+				    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
+
+				wait(success(MetaclusterAPI::removeCluster(
+				    self->managementDb, clusterName, ClusterType::METACLUSTER_MANAGEMENT, ForceRemove::True)));
+
+				TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreRemovedDataCluster", debugId)
+				    .detail("ClusterName", clusterName)
+				    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
+			}
+
+			state std::vector<std::string> messages;
+			if (deterministicRandom()->coinflip()) {
+				TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreDryRun", debugId)
+				    .detail("ClusterName", clusterName)
+				    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
+
+				wait(MetaclusterAPI::restoreCluster(self->managementDb,
+				                                    clusterName,
+				                                    db->getConnectionRecord()->getConnectionString(),
+				                                    applyManagementClusterUpdates,
+				                                    RestoreDryRun::True,
+				                                    forceJoin,
+				                                    &messages));
+
+				TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreDryRunDone", debugId)
+				    .detail("ClusterName", clusterName)
+				    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
+
+				messages.clear();
+			}
+
+			wait(MetaclusterAPI::restoreCluster(self->managementDb,
+			                                    clusterName,
+			                                    db->getConnectionRecord()->getConnectionString(),
+			                                    applyManagementClusterUpdates,
+			                                    RestoreDryRun::False,
+			                                    forceJoin,
+			                                    &messages));
+
+			TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreComplete", debugId)
+			    .detail("ClusterName", clusterName)
+			    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
+		} catch (Error& e) {
+			TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreError", debugId)
+			    .error(e)
+			    .detail("ClusterName", clusterName)
+			    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
+
+			if (e.code() == error_code_cluster_already_registered) {
+				ASSERT(!forceJoin || applyManagementClusterUpdates == ApplyManagementClusterUpdates::False);
+			} else if (applyManagementClusterUpdates == ApplyManagementClusterUpdates::True &&
+			           e.code() == error_code_invalid_data_cluster) {
+				// Restoring a data cluster can fail if the cluster is not actually a data cluster registered with
+				// the metacluster
+			} else if (applyManagementClusterUpdates == ApplyManagementClusterUpdates::False &&
+			           (e.code() == error_code_cluster_already_exists || e.code() == error_code_tenant_already_exists ||
+			            e.code() == error_code_invalid_tenant_configuration)) {
+				// Repopulating a management cluster can fail if the cluster is already in the metacluster
+			} else if (e.code() != error_code_cluster_not_found && e.code() != error_code_cluster_removed &&
+			           e.code() != error_code_conflicting_restore) {
+				TraceEvent(SevError, "MetaclusterManagementConcurrencyRestoreFailure", debugId)
+				    .error(e)
+				    .detail("ClusterName", clusterName)
+				    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
+				ASSERT(false);
+			}
+
+			wait(success(errorOr(MetaclusterAPI::removeCluster(
+			    self->managementDb, clusterName, ClusterType::METACLUSTER_MANAGEMENT, ForceRemove::True))));
 		}
 
 		return Void();
@@ -324,7 +414,7 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 
 		// Run a random sequence of metacluster management operations for the duration of the test
 		while (now() < start + self->testDuration) {
-			state int operation = deterministicRandom()->randomInt(0, 5);
+			state int operation = deterministicRandom()->randomInt(0, 6);
 			if (operation == 0) {
 				wait(registerCluster(self));
 			} else if (operation == 1) {
@@ -335,6 +425,8 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 				wait(getCluster(self));
 			} else if (operation == 4) {
 				wait(configureCluster(self));
+			} else if (operation == 5) {
+				wait(restoreCluster(self));
 			}
 		}
 

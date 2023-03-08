@@ -152,6 +152,7 @@ TenantMapEntry MetaclusterTenantMapEntry::toTenantMapEntry() const {
 	TenantMapEntry entry;
 	entry.tenantName = tenantName;
 	entry.tenantLockState = tenantLockState;
+	entry.tenantLockId = tenantLockId;
 	entry.tenantGroup = tenantGroup;
 	entry.configurationSequenceNum = configurationSequenceNum;
 	if (id >= 0) {
@@ -165,6 +166,7 @@ MetaclusterTenantMapEntry MetaclusterTenantMapEntry::fromTenantMapEntry(TenantMa
 	MetaclusterTenantMapEntry entry;
 	entry.tenantName = source.tenantName;
 	entry.tenantLockState = source.tenantLockState;
+	entry.tenantLockId = source.tenantLockId;
 	entry.tenantGroup = source.tenantGroup;
 	entry.configurationSequenceNum = source.configurationSequenceNum;
 	if (source.id >= 0) {
@@ -195,6 +197,10 @@ std::string MetaclusterTenantMapEntry::toJson() const {
 	}
 
 	tenantEntry["lock_state"] = TenantAPI::tenantLockStateToString(tenantLockState);
+	if (tenantLockId.present()) {
+		tenantEntry["lock_id"] = tenantLockId.get().toString();
+	}
+
 	if (tenantState == MetaclusterAPI::TenantState::RENAMING) {
 		ASSERT(renameDestination.present());
 		tenantEntry["rename_destination"] = binaryToJson(renameDestination.get());
@@ -206,11 +212,13 @@ std::string MetaclusterTenantMapEntry::toJson() const {
 }
 
 bool MetaclusterTenantMapEntry::matchesConfiguration(MetaclusterTenantMapEntry const& other) const {
-	return tenantGroup == other.tenantGroup;
+	return tenantGroup == other.tenantGroup && tenantLockState == other.tenantLockState &&
+	       tenantLockId == other.tenantLockId;
 }
 
 bool MetaclusterTenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const {
-	return tenantGroup == other.tenantGroup;
+	return tenantGroup == other.tenantGroup && tenantLockState == other.tenantLockState &&
+	       tenantLockId == other.tenantLockId;
 }
 
 void MetaclusterTenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> value) {
@@ -226,9 +234,10 @@ void MetaclusterTenantMapEntry::configure(Standalone<StringRef> parameter, Optio
 
 bool MetaclusterTenantMapEntry::operator==(MetaclusterTenantMapEntry const& other) const {
 	return id == other.id && tenantName == other.tenantName && tenantState == other.tenantState &&
-	       tenantLockState == other.tenantLockState && tenantGroup == other.tenantGroup &&
-	       assignedCluster == other.assignedCluster && configurationSequenceNum == other.configurationSequenceNum &&
-	       renameDestination == other.renameDestination && error == other.error;
+	       tenantLockState == other.tenantLockState && tenantLockId == other.tenantLockId &&
+	       tenantGroup == other.tenantGroup && assignedCluster == other.assignedCluster &&
+	       configurationSequenceNum == other.configurationSequenceNum && renameDestination == other.renameDestination &&
+	       error == other.error;
 }
 
 bool MetaclusterTenantMapEntry::operator!=(MetaclusterTenantMapEntry const& other) const {

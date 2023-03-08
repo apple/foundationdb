@@ -98,16 +98,17 @@ struct BlobRestoreWorkload : TestWorkload {
 	// Monitor restore progress and copy data back to original db after successful restore
 	ACTOR Future<Void> monitorProgress(Database cx, BlobRestoreWorkload* self) {
 		loop {
-			Optional<BlobRestoreStatus> status = wait(getRestoreStatus(self->extraDb_, normalKeys));
-			if (status.present()) {
-				state BlobRestoreStatus s = status.get();
+			auto controller = makeReference<BlobRestoreController>(self->extraDb_, normalKeys);
+			Optional<BlobRestoreState> restoreState = wait(BlobRestoreController::getState(controller));
+			if (restoreState.present()) {
+				state BlobRestoreState s = restoreState.get();
 				if (s.phase == BlobRestorePhase::DONE) {
 					wait(verify(cx, self));
 					return Void();
 				}
 				// TODO need to define more specific error handling
 				if (s.phase == BlobRestorePhase::ERROR) {
-					fmt::print("Unexpected restore error code = {}\n", s.status);
+					fmt::print("Unexpected restore error code = {}\n", s.error.get());
 					return Void();
 				}
 			}

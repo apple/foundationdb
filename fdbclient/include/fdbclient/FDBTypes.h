@@ -560,7 +560,12 @@ struct hash<KeyRange> {
 };
 } // namespace std
 
-enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
+enum {
+	invalidVersion = -1,
+	latestVersion = -2,
+	earliestVersion = -3,
+	MAX_VERSION = std::numeric_limits<int64_t>::max()
+};
 
 inline KeyRef keyAfter(const KeyRef& key, Arena& arena) {
 	// Don't include fdbclient/SystemData.h for the allKeys symbol to avoid a cyclic include
@@ -921,26 +926,13 @@ struct KeyValueStoreType {
 		serializer(ar, type);
 	}
 
-	static std::string getStoreTypeStr(const StoreType& storeType) {
-		switch (storeType) {
-		case SSD_BTREE_V1:
-			return "ssd-1";
-		case SSD_BTREE_V2:
-			return "ssd-2";
-		case SSD_REDWOOD_V1:
-			return "ssd-redwood-1-experimental";
-		case SSD_ROCKSDB_V1:
-			return "ssd-rocksdb-v1";
-		case SSD_SHARDED_ROCKSDB:
-			return "ssd-sharded-rocksdb";
-		case MEMORY:
-			return "memory";
-		case MEMORY_RADIXTREE:
-			return "memory-radixtree-beta";
-		default:
-			return "unknown";
-		}
-	}
+	// Get string representation of engine type.  Each enum has one canonical string
+	// representation, but the reverse is not true (see fromString() below)
+	static std::string getStoreTypeStr(const StoreType& storeType);
+
+	// Convert a string to a KeyValueStoreType
+	// This is a many-to-one mapping as there are aliases for some storage engines
+	static KeyValueStoreType fromString(const std::string& str);
 	std::string toString() const { return getStoreTypeStr((StoreType)type); }
 
 private:

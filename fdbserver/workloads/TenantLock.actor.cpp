@@ -85,9 +85,9 @@ struct TenantLock : TestWorkload {
 	                                          UID lockID) {
 		state Reference<Tenant> tenant = makeReference<Tenant>(db, name);
 		state ReadYourWritesTransaction tr(db);
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				wait(tenant->ready());
 				wait(TenantAPI::changeLockState(&tr, tenant->id(), desiredState, lockID));
 				wait(tr.commit());

@@ -168,9 +168,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,           960 ); if( randomize && BUGGIFY ) PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD = 360; // Set as the lowest priority
 
 	// Data distribution
-	init( SHARD_ENCODE_LOCATION_METADATA,                      false ); if( randomize && BUGGIFY )  SHARD_ENCODE_LOCATION_METADATA = true;
-	init( ENABLE_DD_PHYSICAL_SHARD,                            false ); // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true; When true, optimization of data move between DCs is disabled
-	init( MAX_PHYSICAL_SHARD_BYTES,                        500000000 ); // 500 MB; for ENABLE_DD_PHYSICAL_SHARD; smaller leads to larger number of physicalShard per storage server
+	init( SHARD_ENCODE_LOCATION_METADATA,                       false ); if( randomize && BUGGIFY )  SHARD_ENCODE_LOCATION_METADATA = true;
+	init( ENABLE_DD_PHYSICAL_SHARD,                             false ); // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true; When true, optimization of data move between DCs is disabled
+	init( MAX_PHYSICAL_SHARD_BYTES,                         10000000 ); // 10 MB; for ENABLE_DD_PHYSICAL_SHARD; smaller leads to larger number of physicalShard per storage server
  	init( PHYSICAL_SHARD_METRICS_DELAY,                        300.0 ); // 300 seconds; for ENABLE_DD_PHYSICAL_SHARD
 	init( ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME,            600.0 ); if( randomize && BUGGIFY )  ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME = 0.0; // 600 seconds; for ENABLE_DD_PHYSICAL_SHARD
 	init( READ_REBALANCE_CPU_THRESHOLD,                         15.0 );
@@ -178,6 +178,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( READ_REBALANCE_SHARD_TOPK,  READ_REBALANCE_SRC_PARALLELISM * 2 );
 	init( READ_REBALANCE_DIFF_FRAC,                               0.3);
 	init( READ_REBALANCE_MAX_SHARD_FRAC,                          0.2); // FIXME: add buggify here when we have DD test, seems DD is pretty sensitive to this parameter
+
+	// TODO: now we set it to a large number  so that the shard average traffic can guard this change. Consider change it to a lower value in the future.
+	init( READ_REBALANCE_MIN_READ_BYTES_KS, std::numeric_limits<double>::max() );
 	init( RETRY_RELOCATESHARD_DELAY,                             0.1 );
 	init( DATA_DISTRIBUTION_FAILURE_REACTION_TIME,              60.0 ); if( randomize && BUGGIFY ) DATA_DISTRIBUTION_FAILURE_REACTION_TIME = 1.0;
 	bool buggifySmallShards = randomize && BUGGIFY;
@@ -188,6 +191,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARD_BYTES_PER_SQRT_BYTES,                             45 ); if( buggifySmallShards ) SHARD_BYTES_PER_SQRT_BYTES = 0;//Approximately 10000 bytes per shard
 	init( MAX_SHARD_BYTES,                                 500000000 );
 	init( KEY_SERVER_SHARD_BYTES,                          500000000 );
+	init( SHARD_MAX_READ_OPS_PER_KSEC,                  45000 * 1000 );
+ 	/*
+ 	 * The assumption is when the read ops reach to 45k/s the Storage Server instance will be CPU-saturated.
+ 	 */
 	init( SHARD_MAX_READ_DENSITY_RATIO,                           8.0); if (randomize && BUGGIFY) SHARD_MAX_READ_DENSITY_RATIO = 2.0;
 	/*
 		The bytesRead/byteSize radio. Will be declared as read hot when larger than this. 8.0 was chosen to avoid reporting table scan as read hot.
@@ -471,6 +478,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_MAX_BACKGROUND_JOBS,                             2 ); // RocksDB default.
 	init( ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD,                 21600 ); // 6h, RocksDB default.
 	init( ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY, isSimulated ? 10.0 : 300.0 ); // Delays shard clean up, must be larger than ROCKSDB_READ_VALUE_TIMEOUT to prevent reading deleted shard.
+	init( ROCKSDB_EMPTY_RANGE_CHECK,              isSimulated ? true : false);
+	init( ROCKSDB_CREATE_BYTES_SAMPLE_FILE_RETRY_MAX,             50 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
@@ -539,6 +548,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	bool buggfyUseResolverPrivateMutations = randomize && BUGGIFY && !ENABLE_VERSION_VECTOR_TLOG_UNICAST;
 	init( PROXY_USE_RESOLVER_PRIVATE_MUTATIONS,                 false ); if( buggfyUseResolverPrivateMutations ) PROXY_USE_RESOLVER_PRIVATE_MUTATIONS = deterministicRandom()->coinflip();
+
+	init( BURSTINESS_METRICS_ENABLED  ,                         false );
+	init( BURSTINESS_METRICS_LOG_INTERVAL,                        0.1 );
 
 	init( RESET_MASTER_BATCHES,                                   200 );
 	init( RESET_RESOLVER_BATCHES,                                 200 );
@@ -697,6 +709,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGE_DURABILITY_LAG_HARD_MAX,                    2000e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_HARD_MAX = 100e6;
 	init( STORAGE_DURABILITY_LAG_SOFT_MAX,                     250e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_SOFT_MAX = 10e6;
 	init( STORAGE_INCLUDE_FEED_STORAGE_QUEUE,                   true ); if ( randomize && BUGGIFY ) STORAGE_INCLUDE_FEED_STORAGE_QUEUE = false;
+	init( STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL,                     0.0); if ( isSimulated ) STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL = 5.0;
 
 	//FIXME: Low priority reads are disabled by assigning very high knob values, reduce knobs for 7.0
 	init( LOW_PRIORITY_STORAGE_QUEUE_BYTES,                    775e8 ); if( smallStorageTarget ) LOW_PRIORITY_STORAGE_QUEUE_BYTES = 1750e3;
@@ -783,10 +796,11 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( IOPS_UNITS_PER_SAMPLE,                                10000 * 1000 / STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS / 100 );
 	init( BYTES_WRITTEN_UNITS_PER_SAMPLE,                           SHARD_MIN_BYTES_PER_KSEC / STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS / 25 );
 	init( BYTES_READ_UNITS_PER_SAMPLE,                          100000 ); // 100K bytes
+	init( OPS_READ_UNITES_PER_SAMPLE, 100 * STORAGE_METRICS_AVERAGE_INTERVAL ); // during a sampling interval, in average every 100 op being sampled once
 	init( READ_HOT_SUB_RANGE_CHUNK_SIZE,                        10000000); // 10MB
 	init( EMPTY_READ_PENALTY,                                   20 ); // 20 bytes
 	init( DD_SHARD_COMPARE_LIMIT,                               1000 );
-	init( READ_SAMPLING_ENABLED,                                false ); if ( randomize && BUGGIFY ) READ_SAMPLING_ENABLED = true;// enable/disable read sampling
+	init( READ_SAMPLING_ENABLED,                                true ); if ( randomize && BUGGIFY ) READ_SAMPLING_ENABLED = false;// enable/disable read sampling
 
 	//Storage Server
 	init( STORAGE_LOGGING_DELAY,                                 5.0 );
@@ -812,6 +826,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGE_COMMIT_INTERVAL,                               0.5 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_INTERVAL = 2.0;
 	init( BYTE_SAMPLING_FACTOR,                                  250 ); //cannot buggify because of differences in restarting tests
 	init( BYTE_SAMPLING_OVERHEAD,                                100 );
+	init( MIN_BYTE_SAMPLING_PROBABILITY,                           0 ); // Adjustable only for test of PhysicalShardMove. should be always zero for other cases
 	init( MAX_STORAGE_SERVER_WATCH_BYTES,                      100e6 ); if( randomize && BUGGIFY ) MAX_STORAGE_SERVER_WATCH_BYTES = 10e3;
 	init( MAX_BYTE_SAMPLE_CLEAR_MAP_SIZE,                        1e9 ); if( randomize && BUGGIFY ) MAX_BYTE_SAMPLE_CLEAR_MAP_SIZE = 1e3;
 	init( LONG_BYTE_SAMPLE_RECOVERY_DELAY,                      60.0 );
@@ -1035,9 +1050,13 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_WORKER_RESNAPSHOT_BUDGET_BYTES,        1024*1024*1024 ); if( randomize && BUGGIFY ) BLOB_WORKER_RESNAPSHOT_BUDGET_BYTES = deterministicRandom()->random01() * 10 * BG_SNAPSHOT_FILE_TARGET_BYTES;
 	init( BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES,       1024*1024*1024 ); if( randomize && BUGGIFY ) BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES = (5 + 45*deterministicRandom()->random01()) * BG_DELTA_FILE_TARGET_BYTES;
 	init( BLOB_WORKER_TIMEOUT,                                  10.0 ); if( randomize && BUGGIFY ) BLOB_WORKER_TIMEOUT = 1.0;
-	init( BLOB_WORKER_REQUEST_TIMEOUT,                           5.0 ); if( randomize && BUGGIFY ) BLOB_WORKER_REQUEST_TIMEOUT = 1.0;
+	// more than MVCC window since behind delta files can block for that window for committed check
+	init( BLOB_WORKER_REQUEST_TIMEOUT,                          10.0 ); if( randomize && BUGGIFY ) BLOB_WORKER_REQUEST_TIMEOUT = 1.0;
 	init( BLOB_WORKERLIST_FETCH_INTERVAL,                        1.0 );
 	init( BLOB_WORKER_BATCH_GRV_INTERVAL,                        0.1 );
+	init( BLOB_WORKER_EMPTY_GRV_INTERVAL,                        0.5 );
+	init( BLOB_WORKER_GRV_HISTORY_MAX_SIZE,                    10000 ); if ( randomize && BUGGIFY ) BLOB_WORKER_GRV_HISTORY_MAX_SIZE = deterministicRandom()->randomInt(1, 20);
+	init( BLOB_WORKER_GRV_HISTORY_MIN_VERSION_GRANULARITY,    100000 ); if ( randomize && BUGGIFY ) BLOB_WORKER_GRV_HISTORY_MIN_VERSION_GRANULARITY = deterministicRandom()->randomSkewedUInt32(1, 1000000);
 	init( BLOB_WORKER_DO_REJECT_WHEN_FULL,                      true ); if ( randomize && BUGGIFY ) BLOB_WORKER_DO_REJECT_WHEN_FULL = false;
 	init( BLOB_WORKER_REJECT_WHEN_FULL_THRESHOLD,                0.9 );
 	init( BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY,                30.0 ); if ( randomize && BUGGIFY ) BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY = deterministicRandom()->randomInt(0, 10) - 1;
@@ -1088,7 +1107,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// NOTE: 'token-name" can NOT contain '#' character
 	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS,             "");
 	init( REST_KMS_CURRENT_BLOB_METADATA_REQUEST_VERSION,           1);
+	init( REST_KMS_MAX_BLOB_METADATA_REQUEST_VERSION,               1);
 	init( REST_KMS_CURRENT_CIPHER_REQUEST_VERSION,                  1);
+	init( REST_KMS_MAX_CIPHER_REQUEST_VERSION,                      1);
 
 	// Drop in-memory state associated with an idempotency id after this many seconds. Once dropped, this id cannot be
 	// expired proactively, but will eventually get cleaned up by the idempotency id cleaner.

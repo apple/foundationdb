@@ -82,4 +82,12 @@ public:
 
 	// Implemented:
 	void getWriteConflicts(KeyRangeMap<bool>* result) override{};
+
+	void debugTrace(BaseTraceEvent&& event) override {
+		event.detail("CommitResult", "Deferred logging unsupported").log();
+	};
+
+	virtual void debugPrint(std::string const& message) override {
+		fmt::print("[Deferred logging unsupported] {}\n", message);
+	}
 };

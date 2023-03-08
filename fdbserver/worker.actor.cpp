@@ -2980,6 +2980,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		endRole(Role::WORKER, interf.id(), "WorkerError", ok, e);
 		errorForwarders.clear(false);
 		sharedLogs.clear();
+		// blobWorkerFuture is also in errorForwarders so it's double refcounted. If we don't cancel it, it'll never
+		// close it's IKVS and this will hang, leaving a zombie worker
+		blobWorkerFuture.cancel();
 
 		if (e.code() != error_code_actor_cancelled) {
 			// actor_cancelled:

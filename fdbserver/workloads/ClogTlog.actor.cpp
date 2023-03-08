@@ -36,6 +36,12 @@
 #include "flow/network.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// This workload tests a gray failure scenario: a single TLog is network-partitioned from
+// the rest of the cluster, except the cluster controller. This will cause proxies to
+// fail to progress, and trigger a recovery. During the recovery, if this TLog is again
+// recruited, the recovery can become stuck in the initializing_transaction_servers state.
+// If that happens, the workload will start a "configure force exclude=IP:PORT" for the
+// TLog, which would unblock the recovery to reach fully_recovered state.
 struct ClogTlogWorkload : TestWorkload {
 	static constexpr auto NAME = "ClogTlog";
 	bool enabled;
@@ -124,19 +130,13 @@ struct ClogTlogWorkload : TestWorkload {
 			}
 			when(wait(timeout)) {
 				// recovery state hasn't changed in 30s, exclude the failed tlog
-				std::vector<StringRef> tokens;
-				state Optional<ConfigureAutoResult> conf;
-
 				CODE_PROBE(true, "Exclude failed tlog");
 				TraceEvent("ExcludeFailedLog")
 				    .detail("TLog", self->tlog.get())
 				    .detail("RecoveryState", self->dbInfo->get().recoveryState);
-				tokens.push_back(StringRef("exclude=" + formatIpPort(self->tlog.get().ip, self->tlog.get().port)));
-				ConfigurationResult r =
-				    wait(ManagementAPI::changeConfig(cx.getReference(), tokens, conf, /*force=*/true));
-				TraceEvent("ExcludeFailedLog")
-				    .detail("Result", r)
-				    .detail("ConfigIsValid", conf.present() && conf.get().isValid());
+				std::string modes = "exclude=" + formatIpPort(self->tlog.get().ip, self->tlog.get().port);
+				ConfigurationResult r = wait(ManagementAPI::changeConfig(cx.getReference(), modes, /*force=*/true));
+				TraceEvent("ExcludeFailedLog").detail("Result", r);
 				return Void();
 			}
 		}
