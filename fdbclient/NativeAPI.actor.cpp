@@ -8986,7 +8986,7 @@ static Future<Void> createCheckpointImpl(T tr,
 		for (const auto& [srcId, ranges] : rangeMap) {
 			// The checkpoint request is sent to all replicas, in case any of them is unhealthy.
 			// An alternative is to choose a healthy replica.
-			const UID checkpointID = UID(srcId.first(), deterministicRandom()->randomUInt64());
+			const UID checkpointID = UID(deterministicRandom()->randomUInt64(), srcId.first());
 			CheckpointMetaData checkpoint(ranges, format, srcMap[srcId], checkpointID, actionId.get());
 			checkpoint.setState(CheckpointMetaData::Pending);
 			tr->set(checkpointKeyFor(checkpointID), checkpointValue(checkpoint));
@@ -9072,12 +9072,13 @@ ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(KeyRange r
 	throw error.get();
 }
 
-ACTOR static Future<std::vector<CheckpointMetaData>> getCheckpointMetaDataForRange(Database cx,
-                                                                                   KeyRange range,
-                                                                                   Version version,
-                                                                                   CheckpointFormat format,
-                                                                                   Optional<UID> actionId,
-                                                                                   double timeout) {
+ACTOR static Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaDataForRange(
+    Database cx,
+    KeyRange range,
+    Version version,
+    CheckpointFormat format,
+    Optional<UID> actionId,
+    double timeout) {
 	state Span span("NAPI:GetCheckpointMetaDataForRange"_loc);
 	state int index = 0;
 	state std::vector<Future<CheckpointMetaData>> futures;
