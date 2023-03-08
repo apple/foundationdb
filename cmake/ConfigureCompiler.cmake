@@ -168,7 +168,7 @@ else()
 
   add_compile_options(-fno-omit-frame-pointer)
 
-  if(FDB_RELEASE OR FULL_DEBUG_SYMBOLS OR CMAKE_BUILD_TYPE STREQUAL "Debug")
+  if(FULL_DEBUG_SYMBOLS OR CMAKE_BUILD_TYPE STREQUAL "Debug")
     # Configure with FULL_DEBUG_SYMBOLS=ON to generate all symbols for debugging with gdb
     # Also generating full debug symbols in release builds. CPack will strip them out
     # and create a debuginfo rpm
