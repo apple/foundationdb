@@ -10488,19 +10488,36 @@ private:
 			return;
 		}
 		CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
-		ASSERT(checkpoint.getState() == CheckpointMetaData::Pending);
+		const CheckpointMetaData::CheckpointState cState = checkpoint.getState();
 		const UID checkpointID = decodeCheckpointKey(m.param1.substr(1));
-		checkpoint.version = ver;
-		data->pendingCheckpoints[ver].push_back(checkpoint);
-
 		auto& mLV = data->addVersionToMutationLog(ver);
-		const Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpointID.toString());
-		data->addMutationToMutationLog(
-		    mLV, MutationRef(MutationRef::SetValue, pendingCheckpointKey, checkpointValue(checkpoint)));
+		if (cState == CheckpointMetaData::Pending) {
+			checkpoint.version = ver;
+			data->pendingCheckpoints[ver].push_back(checkpoint);
+			const Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpointID.toString());
+			data->addMutationToMutationLog(
+			    mLV, MutationRef(MutationRef::SetValue, pendingCheckpointKey, checkpointValue(checkpoint)));
 
-		TraceEvent("RegisterPendingCheckpoint", data->thisServerID)
-		    .detail("Key", pendingCheckpointKey)
-		    .detail("Checkpoint", checkpoint.toString());
+			TraceEvent(SevInfo, "RegisterPendingCheckpoint", data->thisServerID)
+			    .detail("Key", pendingCheckpointKey)
+			    .detail("Checkpoint", checkpoint.toString());
+		} else if (cState == CheckpointMetaData::Deleting) {
+			auto it = data->checkpoints.find(checkpointID);
+			if (it == data->checkpoints.end()) {
+				return;
+			} else {
+                checkpoint = it->second;
+                checkpoint.setState(CheckpointMetaData::Deleting);
+				const Key persistCheckpointKey(persistCheckpointKeys.begin.toString() +
+				                               checkpoint.checkpointID.toString());
+				data->addMutationToMutationLog(
+				    mLV, MutationRef(MutationRef::SetValue, persistCheckpointKey, checkpointValue(checkpoint)));
+				data->actors.add(deleteCheckpointQ(data, ver, checkpoint));
+				TraceEvent(SevInfo, "DeleteCheckpointScheduled", data->thisServerID)
+				    .detail("Source", "PrivateMutation")
+				    .detail("Checkpoint", checkpoint.toString());
+			}
+		}
 	}
 };
 
@@ -11724,7 +11741,8 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 	}
 
 	// When a shard is moved out, delete all related checkpoints created for data move.
-	if (!available) {
+	if (false) {
+		// if (!available) {
 		for (auto& [id, checkpoint] : self->checkpoints) {
 			if (!checkpoint.ranges.empty() && checkpoint.ranges.front().intersects(keys)) {
 				Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());

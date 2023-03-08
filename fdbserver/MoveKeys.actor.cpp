@@ -155,6 +155,25 @@ ACTOR Future<Void> unassignServerKeys(Transaction* tr, UID ssId, KeyRange range,
 	return Void();
 }
 
+ACTOR Future<Void> deleteCheckpoints(Transaction* tr, std::set<UID> checkpointIds, UID logId) {
+	TraceEvent(SevDebug, "DataMoveDeleteCheckpoints", logId).detail("Checkpoints", describe(checkpointIds));
+	state std::set<UID>::iterator it = checkpointIds.begin();
+	for (; it != checkpointIds.end(); ++it) {
+		state Key key = checkpointKeyFor(*it);
+		Optional<Value> readVal = wait(tr->get(key));
+		if (!readVal.present()) {
+			TraceEvent(SevWarnAlways, "CheckpointNotFound", logId).detail("CheckpointID", logId);
+			continue;
+		}
+		CheckpointMetaData checkpoint = decodeCheckpointValue(readVal.get());
+		checkpoint.setState(CheckpointMetaData::Deleting);
+		tr->set(key, checkpointValue(checkpoint));
+		tr->clear(singleKeyRange(key));
+		TraceEvent(SevDebug, "DataMoveDeleteCheckpoint", logId).detail("Checkpoint", checkpoint.toString());
+	}
+
+	return Void();
+}
 } // namespace
 
 bool DDEnabledState::isDDEnabled() const {
@@ -1458,6 +1477,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 
 						// for (const UID& ssId : src) {
 						dataMove.src.insert(src.begin(), src.end());
+						dataMove.checkpoints.insert(checkpointId);
 						// }
 					}
 
@@ -1819,6 +1839,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					wait(waitForAll(actors));
 
 					if (range.end == dataMove.ranges.front().end) {
+						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
 						tr.clear(dataMoveKeyFor(dataMoveId));
 						complete = true;
 						TraceEvent(SevDebug, "FinishMoveShardsDeleteMetaData", dataMoveId)
@@ -2483,6 +2504,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				}
 
 				if (range.end == dataMove.ranges.front().end) {
+					wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
 					tr.clear(dataMoveKeyFor(dataMoveId));
 					complete = true;
 					TraceEvent(SevVerbose, "CleanUpDataMoveDeleteMetaData", dataMoveId)

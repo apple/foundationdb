@@ -378,6 +378,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 								//TraceEvent("WDRInitBatch").detail("I", i).detail("CommittedVersion", tr->getCommittedVersion());
 								break;
 							} catch (Error& e) {
+								TraceEvent(SevWarnAlways, "FuzzApiLoadAndRanError").error(e);
 								if (e.code() == error_code_illegal_tenant_access) {
 									ASSERT(!self->writeSystemKeys);
 									ASSERT_EQ(tenantNum, -1);
