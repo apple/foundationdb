@@ -53,7 +53,7 @@ target_include_directories(fdbserver_swift PUBLIC
     "${CMAKE_SOURCE_DIR}/contrib/libb64/include"
     "${CMAKE_SOURCE_DIR}/contrib/sqlite"
     "${CMAKE_BINARY_DIR}/boost_install/include"
-    "${CMAKE_BINARY_DIR}/msgpackProject-prefix/src/msgpackProject/include"
+    "${msgpack_DIR}/include"
 )
 
 # TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?

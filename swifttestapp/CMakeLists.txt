@@ -21,7 +21,7 @@ target_include_directories(swifttestapp PUBLIC
     "${CMAKE_SOURCE_DIR}/contrib/fmt-8.1.1/include"
     "${CMAKE_SOURCE_DIR}/contrib/sqlite"
     "${CMAKE_BINARY_DIR}/boost_install/include"
-    "${CMAKE_BINARY_DIR}/msgpackProject-prefix/src/msgpackProject/include"
+    "${msgpack_DIR}/include"
 )
 
 # TODO: We need a platform-agnostic way to find the C++ stdlib searchpaths
