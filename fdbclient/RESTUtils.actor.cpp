@@ -119,12 +119,13 @@ ACTOR Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<REST
 		poolItr->second.pop();
 
 		if (rconn.expirationTime > now()) {
-			TraceEvent("RESTClientReuseConn")
-			    .suppressFor(60)
-			    .detail("Host", connectKey.first)
-			    .detail("Service", connectKey.second)
-			    .detail("RemoteEndpoint", rconn.conn->getPeerAddress())
-			    .detail("ExpireIn", rconn.expirationTime - now());
+			if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
+				TraceEvent("RESTClientReuseConn")
+				    .detail("Host", connectKey.first)
+				    .detail("Service", connectKey.second)
+				    .detail("RemoteEndpoint", rconn.conn->getPeerAddress())
+				    .detail("ExpireIn", rconn.expirationTime - now());
+			}
 			return rconn;
 		}
 	}
@@ -161,6 +162,10 @@ void RESTConnectionPool::returnConnection(RESTConnectionPoolKey connectKey,
 		throw rest_connectpool_key_not_found();
 	}
 
+	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
+		TraceEvent("RESTClientReturnConn").detail("Host", connectKey.first).detail("Service", connectKey.second);
+	}
+
 	// If it expires in the future then add it to the pool in the front iff connection pool size is not maxed
 	if (rconn.expirationTime > now() && poolItr->second.size() < maxConnections) {
 		poolItr->second.push(rconn);
@@ -182,14 +187,18 @@ void RESTUrl::parseUrl(const std::string& fullUrl) {
 	// 2. With 'host', 'service' & 'resource' := '<protocol>://<host>:port/<resource>'
 	// 3. With 'host', 'service', 'resource' & 'reqParameters' := '<protocol>://<host>:port/<resource>?<parameter-list>'
 
+	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
+		TraceEvent("RESTParseURI").detail("URI", fullUrl);
+	}
+
 	try {
 		StringRef t(fullUrl);
 		StringRef p = t.eat("://");
 		std::string protocol = p.toString();
 		boost::algorithm::to_lower(protocol);
 		this->connType = RESTConnectionType::getConnectionType(protocol);
-		if (!this->connType.secure && !CLIENT_KNOBS->REST_KMS_ENABLE_NOT_SECURE_CONNECTION) {
-			TraceEvent("RESTUtilsNotSecureConnNotSupported").detail("Protocol", protocol);
+		if (!this->connType.secure && !CLIENT_KNOBS->REST_KMS_ALLOW_NOT_SECURE_CONNECTION) {
+			TraceEvent(SevWarnAlways, "RESTUtilsUnSupportedNotSecureConn").detail("Protocol", protocol);
 			CODE_PROBE(true, "REST URI not-secure connection not supported");
 			throw rest_unsupported_protocol();
 		}
@@ -212,13 +221,15 @@ void RESTUrl::parseUrl(const std::string& fullUrl) {
 		this->host = h.toString();
 		this->service = hRef.eat().toString();
 
-		TraceEvent(SevDebug, "RESTClientParseURI")
-		    .detail("URI", fullUrl)
-		    .detail("Host", this->host)
-		    .detail("Service", this->service)
-		    .detail("Resource", this->resource)
-		    .detail("ReqParameters", this->reqParameters)
-		    .detail("ConnectionType", this->connType.toString());
+		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
+			TraceEvent("RESTClientParseURI")
+			    .detail("URI", fullUrl)
+			    .detail("Host", this->host)
+			    .detail("Service", this->service)
+			    .detail("Resource", this->resource)
+			    .detail("ReqParameters", this->reqParameters)
+			    .detail("ConnectionType", this->connType.toString());
+		}
 	} catch (std::string& err) {
 		TraceEvent(SevWarnAlways, "RESTClientParseError").detail("URI", fullUrl).detail("Error", err);
 		throw rest_invalid_uri();
