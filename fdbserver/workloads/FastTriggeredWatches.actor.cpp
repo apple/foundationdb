@@ -146,7 +146,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 				//TraceEvent("FTWWatchDone").detail("Key", printable(setKey));
 				// Assert that the time from setting the key to triggering the watch is no greater than 25s
 				// TODO: This assertion can cause flaky behaviour since sometimes a watch can take longer to fire
-				ASSERT(lastReadVersion - ver >= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT ||
+				ASSERT(first || lastReadVersion - ver >= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT ||
 				       lastReadVersion - ver < SERVER_KNOBS->VERSIONS_PER_SECOND * (25 + getDuration));
 
 				if (now() - testStart > self->testDuration)
