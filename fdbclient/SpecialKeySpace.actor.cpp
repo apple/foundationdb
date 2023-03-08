@@ -1025,9 +1025,9 @@ ACTOR Future<bool> checkExclusion(Database db,
 				if (role["role"].get_str() == "storage") {
 					ssTotalCount++;
 
-					// Check if we are excluding a process that serves the storage role. If this check was true once, we don't have to check any further
-					// since we don't case in this variable about the count of excluded storage servers but only about if we exclude any storage server with the
-					// provided addresses.
+					// Check if we are excluding a process that serves the storage role. If this check was true once, we
+					// don't have to check any further since we don't case in this variable about the count of excluded
+					// storage servers but only about if we exclude any storage server with the provided addresses.
 					if (!excludedAddressesContainsStorageRole && excluded) {
 						excludedAddressesContainsStorageRole = true;
 						break;
@@ -1072,8 +1072,8 @@ ACTOR Future<bool> checkExclusion(Database db,
 		return false;
 	}
 
-	// If the exclusion command only contains processes that serve a non storage role we can skip the free capacity check in order to not
-	// block those exclusions.
+	// If the exclusion command only contains processes that serve a non storage role we can skip the free capacity
+	// check in order to not block those exclusions.
 	if (!excludedAddressesContainsStorageRole) {
 		return true;
 	}
