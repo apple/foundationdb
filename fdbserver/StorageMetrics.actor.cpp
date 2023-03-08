@@ -85,7 +85,7 @@ StorageMetrics StorageServerMetrics::getMetrics(KeyRangeRef const& keys) const {
 
 // Called when metrics should change (IO for a given key)
 // Notifies waiting WaitMetricsRequests through waitMetricsMap, and updates metricsAverageQueue and metricsSampleMap
-void StorageServerMetrics::notify(KeyRef key, StorageMetrics& metrics) {
+void StorageServerMetrics::notify(const Key& key, StorageMetrics& metrics) {
 	ASSERT(metrics.bytes == 0); // ShardNotifyMetrics
 	if (g_network->isSimulated()) {
 		CODE_PROBE(metrics.bytesWrittenPerKSecond != 0, "ShardNotifyMetrics bytes");
@@ -121,7 +121,7 @@ void StorageServerMetrics::notify(KeyRef key, StorageMetrics& metrics) {
 
 // Due to the fact that read sampling will be called on all reads, use this specialized function to avoid overhead
 // around branch misses and unnecessary stack allocation which eventually addes up under heavy load.
-void StorageServerMetrics::notifyBytesReadPerKSecond(KeyRef key, int64_t in) {
+void StorageServerMetrics::notifyBytesReadPerKSecond(const Key& key, int64_t in) {
 	double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
 	int64_t bytesReadPerKSecond =
 	    bytesReadSample.addAndExpire(key, in, expire) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
@@ -152,7 +152,7 @@ void StorageServerMetrics::notifyBytes(
 }
 
 // Called by StorageServerDisk when the size of a key in byteSample changes, to notify WaitMetricsRequest
-void StorageServerMetrics::notifyBytes(KeyRef key, int64_t bytes) {
+void StorageServerMetrics::notifyBytes(const KeyRef& key, int64_t bytes) {
 	if (key >= allKeys.end) // Do not notify on changes to internal storage server state
 		return;
 
@@ -479,10 +479,10 @@ void StorageServerMetrics::add(KeyRangeMap<int>& map, KeyRangeRef const& keys, i
 }
 
 // Returns the sampled metric value (possibly 0, possibly increased by the sampling factor)
-int64_t TransientStorageMetricSample::addAndExpire(KeyRef key, int64_t metric, double expiration) {
-	int64_t x = add(key, metric);
+int64_t TransientStorageMetricSample::addAndExpire(const Key& key, int64_t metric, double expiration) {
+	auto x = add(key, metric);
 	if (x)
-		queue.emplace_back(expiration, std::make_pair(*sample.find(key), -x));
+		queue.emplace_back(expiration, std::make_pair(key, -x));
 	return x;
 }
 
@@ -501,22 +501,23 @@ void TransientStorageMetricSample::erase(KeyRangeRef keys) {
 	sample.erase(keys.begin, keys.end);
 }
 
-bool TransientStorageMetricSample::roll(KeyRef key, int64_t metric) const {
+bool TransientStorageMetricSample::roll(int64_t metric) const {
 	return deterministicRandom()->random01() < (double)metric / metricUnitsPerSample; //< SOMEDAY: Better randomInt64?
 }
 
 void TransientStorageMetricSample::poll(KeyRangeMap<std::vector<PromiseStream<StorageMetrics>>>& waitMap,
-                                        StorageMetrics m) {
+                                        StorageMetrics metrics) {
 	double now = ::now();
 	while (queue.size() && queue.front().first <= now) {
 		KeyRef key = queue.front().second.first;
 		int64_t delta = queue.front().second.second;
 		ASSERT(delta != 0);
 
-		if (sample.addMetric(key, delta) == 0)
-			sample.erase(key);
+		auto [m, it] = sample.addMetric(key, delta);
+		if (m == 0)
+			sample.erase(it);
 
-		StorageMetrics deltaM = m * delta;
+		StorageMetrics deltaM = metrics * delta;
 		auto v = waitMap[key];
 		for (int i = 0; i < v.size(); i++) {
 			CODE_PROBE(true, "TransientStorageMetricSample poll update");
@@ -534,26 +535,28 @@ void TransientStorageMetricSample::poll() {
 		int64_t delta = queue.front().second.second;
 		ASSERT(delta != 0);
 
-		if (sample.addMetric(key, delta) == 0)
-			sample.erase(key);
+		auto [m, it] = sample.addMetric(key, delta);
+		if (m == 0)
+			sample.erase(it);
 
 		queue.pop_front();
 	}
 }
 
-int64_t TransientStorageMetricSample::add(KeyRef key, int64_t metric) {
+int64_t TransientStorageMetricSample::add(const Key& key, int64_t metric) {
 	if (!metric)
 		return 0;
 	int64_t mag = metric < 0 ? -metric : metric;
 
 	if (mag < metricUnitsPerSample) {
-		if (!roll(key, mag))
+		if (!roll(mag))
 			return 0;
 		metric = metric < 0 ? -metricUnitsPerSample : metricUnitsPerSample;
 	}
 
-	if (sample.addMetric(key, metric) == 0)
-		sample.erase(key);
+	auto [m, it] = sample.addMetric(key, metric);
+	if (m == 0)
+		sample.erase(it);
 
 	return metric;
 }
