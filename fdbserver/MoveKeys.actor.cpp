@@ -2385,6 +2385,12 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
                                    PromiseStream<Future<Void>> addCleanUpDataMoveActor,
                                    bool asBackgroundCleanUp,
                                    UID debugID) {
+	if (asBackgroundCleanUp) {
+		// If this function behaves as a background cleanup
+		// Delay 10 seconds to make sure the older relocator's mutation take effect
+		wait(delay(10));
+	}
+
 	state KeyRange range;
 	TraceEvent(SevDebug, "CleanUpDataMoveBegin", dataMoveId)
 	    .detail("DataMoveID", dataMoveId)
@@ -2413,12 +2419,6 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 			range = KeyRange();
 
 			try {
-				if (asBackgroundCleanUp) {
-					// If this function behaves as a background cleanup
-					// Delay 10 seconds to make sure the older relocator's mutation take effect
-					wait(delay(10));
-				}
-
 				tr.trState->taskID = TaskPriority::MoveKeys;
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);

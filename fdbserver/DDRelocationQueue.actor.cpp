@@ -1240,14 +1240,11 @@ struct DDQueue : public IDDRelocationQueue {
 			// update both inFlightActors and inFlight key range maps, cancelling deleted RelocateShards
 			std::vector<KeyRange> ranges;
 			inFlightActors.getRangesAffectedByInsertion(rd.keys, ranges);
-			auto rangesInDDMove = dataMoves.getAffectedRangesAfterInsertion(rd.keys);
 			TraceEvent(SevDebug, "CancelInFlightActorsInRelocator")
 			    .detail("DebugID", debugID)
 			    .detail("Range", rd.keys)
 			    .detail("AffectRange", KeyRangeRef(ranges.front().begin, ranges.back().end))
-			    .detail("AffectRanges", ranges)
-			    .detail("AffectRangeSeenByDDMove", KeyRangeRef(rangesInDDMove.front().begin, rangesInDDMove.back().end))
-			    .detail("AffectRangesSeenByDDMove", rangesInDDMove);
+			    .detail("AffectRanges", ranges);
 
 			inFlightActors.cancel(KeyRangeRef(ranges.front().begin, ranges.back().end));
 
@@ -1406,24 +1403,21 @@ ACTOR Future<Void> cancelDataMove(struct DDQueue* self,
 			newCleanedupDataMoves.clear();
 			lastObservedDataMoves.clear();
 
-			auto rangesSeenByDDM = self->dataMoves.getAffectedRangesAfterInsertion(range);
 			TraceEvent(SevDebug, "CancelDataMoveStart", self->distributorId)
 			    .detail("DebugID", debugID)
-			    .detail("RangeSeensByDDM", KeyRangeRef(rangesSeenByDDM.front().begin, rangesSeenByDDM.back().end))
-			    .detail("RangesSeenByDDM", rangesSeenByDDM)
 			    .detail("Range", range);
 
 			auto f = self->dataMoves.intersectingRanges(range);
 			for (auto it = f.begin(); it != f.end(); ++it) {
 				if (!it->value().isValid()) {
-					TraceEvent("CancelDataMoveInvalid")
+					TraceEvent(SevDebug, "CancelDataMoveSkipInvalid")
 					    .detail("DebugID", debugID)
 					    .detail("DataMoveID", it->value().id)
 					    .detail("Range", range);
 					continue;
 				}
 				KeyRange keys = KeyRangeRef(it->range().begin, it->range().end);
-				TraceEvent(SevInfo, "DDQueueCancelDataMove", self->distributorId)
+				TraceEvent(SevDebug, "DDQueueCancelDataMove", self->distributorId)
 				    .detail("DebugID", debugID)
 				    .detail("DataMoveID", it->value().id)
 				    .detail("DataMoveRange", keys)
@@ -1447,24 +1441,20 @@ ACTOR Future<Void> cancelDataMove(struct DDQueue* self,
 				cleanup.push_back(it->value().cancel);
 			}
 
-			rangesSeenByDDM = self->dataMoves.getAffectedRangesAfterInsertion(range);
 			TraceEvent(SevDebug, "CancelDataMoveWaitForAll", self->distributorId)
 			    .detail("DebugID", debugID)
-			    .detail("RangeSeenByDDM", KeyRangeRef(rangesSeenByDDM.front().begin, rangesSeenByDDM.back().end))
-			    .detail("RangesSeenByDDM", rangesSeenByDDM)
 			    .detail("Range", range)
 			    .detail("WaitForNewCleanUp", newCleanedupDataMoves)
 			    .detail("WaitForExistingCleanUp", existingCleanedupDataMoves);
 			wait(waitForAll(cleanup));
 
-			auto rangesSeenByDDM = self->dataMoves.getAffectedRangesAfterInsertion(range);
 			TraceEvent(SevDebug, "CancelDataMoveCheck", self->distributorId)
 			    .detail("DebugID", debugID)
 			    .detail("Range", range);
-			for (auto observedDataMove : lastObservedDataMoves) {
-				auto f = self->dataMoves.intersectingRanges(observedDataMove.first);
+			for (auto& [lastRange, lastId] : lastObservedDataMoves) {
+				auto f = self->dataMoves.intersectingRanges(lastRange);
 				for (auto it = f.begin(); it != f.end(); ++it) {
-					if (it->value().id != observedDataMove.second) {
+					if (it->value().id != lastId) {
 						// Invariant: When two concurrent cleanups/relocations try to modify on the same range,
 						// the one who set ddQueue->dataMoves at first win the race
 						// others do backoff and retry cleanup later
@@ -1473,12 +1463,9 @@ ACTOR Future<Void> cancelDataMove(struct DDQueue* self,
 						TraceEvent(SevDebug, "DataMoveConcurrentCleanUpFound", self->distributorId)
 						    .detail("DebugID", debugID)
 						    .detail("Range", range)
-						    .detail("OldRange", observedDataMove.first)
-						    .detail("LastObservedDataMoveID", observedDataMove.second)
-						    .detail("CurrentDataMoveID", it->value().id)
-						    .detail("RangeSeenByDDM",
-						            KeyRangeRef(rangesSeenByDDM.front().begin, rangesSeenByDDM.back().end))
-						    .detail("RangesSeenByDDM", rangesSeenByDDM);
+						    .detail("OldRange", lastRange)
+						    .detail("LastObservedDataMoveID", lastId)
+						    .detail("CurrentDataMoveID", it->value().id);
 						throw retry();
 					}
 				}
@@ -1603,6 +1590,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					ASSERT(rd.dataMoveId.isValid());
 				}
 				auto f = self->dataMoves.intersectingRanges(rd.keys);
+				// TODO: split-brain issue for physical shard move
+				// the update of inflightActor and the update of dataMoves is not atomic
+				// Currently, the relocator is triggered based on the inflightActor info.
+				// In future, we should assert at here that the intersecting DataMove in self->dataMoves are all invalid
+				// i.e. the range of new relocators is match to the range of prevCleanup.
 				TraceEvent e(SevDebug, "InsertDataMoveByRelocator", distributorId);
 				e.setMaxEventLength(20000);
 				int cc = 0;
