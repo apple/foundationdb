@@ -207,7 +207,7 @@ void extractKmsUrls(Reference<RESTKmsConnectorCtx> ctx,
 	for (const auto& url : doc[KMS_URLS_TAG].GetArray()) {
 		if (!url.IsString()) {
 			// TODO: We need to log only the kms section of the document
-			TraceEvent(SevWarn, "RESTDiscoverKmsUrlsMalformedResp", ctx->uid).detail("UrlType", url.GetType());
+			TraceEvent(SevWarnAlways, "RESTDiscoverKmsUrlsMalformedResp", ctx->uid).detail("UrlType", url.GetType());
 			throw operation_failed();
 		}
 
@@ -303,8 +303,8 @@ void checkResponseForError(Reference<RESTKmsConnectorCtx> ctx,
 	}
 
 	const int version = doc[REQUEST_VERSION_TAG].GetInt();
-	const int maxSupportedVersion = isCipherType ? SERVER_KNOBS->REST_KMS_CURRENT_CIPHER_REQUEST_VERSION
-	                                             : SERVER_KNOBS->REST_KMS_CURRENT_BLOB_METADATA_REQUEST_VERSION;
+	const int maxSupportedVersion = isCipherType ? SERVER_KNOBS->REST_KMS_MAX_CIPHER_REQUEST_VERSION
+	                                             : SERVER_KNOBS->REST_KMS_MAX_BLOB_METADATA_REQUEST_VERSION;
 	if (version == INVALID_REQUEST_VERSION || version > maxSupportedVersion) {
 		TraceEvent(SevWarnAlways, "RESTKMSResponseInvalidVersion", ctx->uid)
 		    .detail("Version", version)
