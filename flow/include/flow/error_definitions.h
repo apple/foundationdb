@@ -139,6 +139,7 @@ ERROR( key_value_store_deadline_exceeded, 1224, "Exceeded maximum time allowed t
 ERROR( storage_quota_exceeded, 1225, "Exceeded the maximum storage quota allocated to the tenant.")
 ERROR( audit_storage_error, 1226, "Found data corruption" )
 ERROR( master_failed, 1227, "Cluster recovery terminating because master has failed")
+ERROR( audit_storage_timed_out, 1228, "Validate storage consistency operation timed out" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )

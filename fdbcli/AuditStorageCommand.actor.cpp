@@ -58,7 +58,8 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 		return UID();
 	}
 
-	UID auditId = wait(auditStorage(clusterFile, KeyRangeRef(begin, end), type, true));
+	UID auditId = wait(auditStorage(
+	    clusterFile, KeyRangeRef(begin, end), type, /*timeoutSeconds*/ 30, /*retryLimit*/ 5, /*async=*/true));
 	return auditId;
 }
 

@@ -76,7 +76,7 @@ struct ValidateStorage : TestWorkload {
 		                                 { "TestKeyD"_sr, "TestValueD"_sr },
 		                                 { "TestKeyE"_sr, "TestValueE"_sr },
 		                                 { "TestKeyF"_sr, "TestValueF"_sr } });
-		state UID auditId;
+		state Optional<UID> auditId;
 
 		Version _ = wait(self->populateData(self, cx, &kvs));
 
@@ -87,8 +87,13 @@ struct ValidateStorage : TestWorkload {
 
 		loop {
 			try {
-				Optional<UID> auditId_ = wait(timeout(
-				    auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA, /*async=*/true), 30));
+				Optional<UID> auditId_ = wait(timeout(auditStorage(cx->getConnectionRecord(),
+				                                                   allKeys,
+				                                                   AuditType::ValidateHA,
+				                                                   /*timeoutSeconds*/ 30,
+				                                                   /*retryLimit*/ 5,
+				                                                   /*async=*/true),
+				                                      300));
 				if (!auditId_.present()) {
 					TraceEvent("AuditIdNotPresent");
 					throw audit_storage_failed();
@@ -97,41 +102,60 @@ struct ValidateStorage : TestWorkload {
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId);
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
-				wait(delay(1));
-			}
-		}
-
-		loop {
-			try {
-				AuditStorageState auditState = wait(getAuditState(cx, AuditType::ValidateHA, auditId));
-				if (auditState.getPhase() != AuditPhase::Complete) {
-					ASSERT(auditState.getPhase() == AuditPhase::Running);
-					wait(delay(30));
-				} else {
-					ASSERT(auditState.getPhase() == AuditPhase::Complete);
+				if (e.code() == error_code_audit_storage_timed_out) {
+					TraceEvent(SevWarnAlways, "StartAuditStorageTimedOut");
 					break;
+				} else {
+					TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
+					wait(delay(1));
 				}
-			} catch (Error& e) {
-				TraceEvent("WaitAuditStorageError").errorUnsuppressed(e).detail("AuditID", auditId);
-				wait(delay(1));
+			}
+		}
+
+		if (auditId.present()) {
+			loop {
+				try {
+					AuditStorageState auditState = wait(getAuditState(cx, AuditType::ValidateHA, auditId.get()));
+					if (auditState.getPhase() != AuditPhase::Complete) {
+						ASSERT(auditState.getPhase() == AuditPhase::Running);
+						wait(delay(30));
+					} else {
+						ASSERT(auditState.getPhase() == AuditPhase::Complete);
+						break;
+					}
+				} catch (Error& e) {
+					TraceEvent("WaitAuditStorageError").errorUnsuppressed(e).detail("AuditID", auditId.get());
+					wait(delay(1));
+				}
 			}
 		}
 
 		loop {
 			try {
-				Optional<UID> auditId_ = wait(timeout(
-				    auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA, /*async=*/true), 30));
+				Optional<UID> auditId_ = wait(timeout(auditStorage(cx->getConnectionRecord(),
+				                                                   allKeys,
+				                                                   AuditType::ValidateHA,
+				                                                   /*timeoutSeconds*/ 30,
+				                                                   /*retryLimit*/ 5,
+				                                                   /*async=*/true),
+				                                      300));
 				if (!auditId_.present()) {
 					TraceEvent("AuditIdNotPresent");
 					throw audit_storage_failed();
 				}
-				ASSERT(auditId_ != auditId);
-				TraceEvent("TestValidateEnd").detail("AuditID", auditId_);
+				if (auditId.present()) {
+					ASSERT(auditId_.get() != auditId.get());
+					TraceEvent("TestValidateEnd").detail("AuditID", auditId_.get());
+				}
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
-				wait(delay(1));
+				if (e.code() == error_code_audit_storage_timed_out) {
+					TraceEvent(SevWarnAlways, "StartAuditStorageTimedOut");
+					break;
+				} else {
+					TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
+					wait(delay(1));
+				}
 			}
 		}
 

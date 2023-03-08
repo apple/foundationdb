@@ -142,6 +142,8 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
                                KeyRange range,
                                AuditType type,
+                               double timeoutSeconds,
+                               int retryLimit,
                                bool async = false);
 
 ACTOR Future<Void> printHealthyZone(Database cx);
