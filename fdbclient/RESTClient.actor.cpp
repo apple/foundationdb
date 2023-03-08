@@ -40,13 +40,11 @@
 
 #include "flow/actorcompiler.h" // always the last include
 
-#define ENABLE_VERBOSE_DEBUG true
-
 #define TRACE_REST_OP(opName, url)                                                                                     \
 	do {                                                                                                               \
-		if (ENABLE_VERBOSE_DEBUG) {                                                                                    \
+		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {                                                    \
 			const std::string urlStr = url.toString();                                                                 \
-			TraceEvent(SevDebug, "RESTClientOp")                                                                       \
+			TraceEvent("RESTClientOp")                                                                                 \
 			    .detail("Op", #opName)                                                                                 \
 			    .detail("Url", urlStr)                                                                                 \
 			    .detail("IsSecure", url.connType.secure);                                                              \
@@ -97,8 +95,8 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<RESTClient> cli
 	state UnsentPacketQueue content;
 	state int contentLen = url.body.size();
 
-	if (ENABLE_VERBOSE_DEBUG) {
-		TraceEvent(SevDebug, "DoRequestImpl").detail("Url", url.toString());
+	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
+		TraceEvent("RESTDoRequestImpl").detail("Url", url.toString());
 	}
 
 	if (url.body.size() > 0) {
@@ -119,7 +117,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<RESTClient> cli
 	state int thisTry = 1;
 	state double nextRetryDelay = 2.0;
 	state Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
-	state double reqTimeout = (client->knobs.request_timeout_secs * 1.0) / 60;
+	state double reqTimeout = (client->knobs.request_timeout_secs * 1.0);
 	state RESTConnectionPoolKey connectPoolKey = RESTConnectionPool::getConnectionPoolKey(url.host, url.service);
 	state RESTClient::Stats* statsPtr = client->statsMap[statsKey].get();
 
