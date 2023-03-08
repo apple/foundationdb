@@ -24,9 +24,26 @@
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"
 
-ACTOR Future<Void> disableConnectionFailuresAfter(double time, std::string context) {
+void enableConnectionFailures(std::string const& context) {
 	if (g_network->isSimulated()) {
-		wait(delayUntil(time));
+		g_simulator.connectionFailuresDisableDuration = 0;
+		g_simulator.speedUpSimulation = false;
+		TraceEvent(SevWarnAlways, ("EnableConnectionFailures_" + context).c_str());
+	}
+}
+
+void disableConnectionFailures(std::string const& context) {
+	if (g_network->isSimulated()) {
+		g_simulator.connectionFailuresDisableDuration = 1e6;
+		g_simulator.speedUpSimulation = true;
+		TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
+	}
+}
+
+ACTOR Future<Void> disableConnectionFailuresAfter(double seconds, std::string context) {
+	if (g_network->isSimulated()) {
+		TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str()).detail("At", now() + seconds);
+		wait(delay(seconds));
 		g_simulator.connectionFailuresDisableDuration = 1e6;
 		g_simulator.speedUpSimulation = true;
 		TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());

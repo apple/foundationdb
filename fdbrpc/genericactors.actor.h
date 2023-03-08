@@ -418,7 +418,14 @@ Future<X> reportEndpointFailure(Future<X> value, Endpoint endpoint) {
 	}
 }
 
-Future<Void> disableConnectionFailuresAfter(double const& time, std::string const& context);
+// Enables connection failures, i.e., clogging, in simulation
+void enableConnectionFailures(std::string const& context);
+
+// Disables connection failures, i.e., clogging, in simulation
+void disableConnectionFailures(std::string const& context);
+
+// Disables connection failures after the giving time seconds
+Future<Void> disableConnectionFailuresAfter(double const& seconds, std::string const& context);
 
 #include "flow/unactorcompiler.h"
 
