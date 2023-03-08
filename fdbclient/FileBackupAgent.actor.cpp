@@ -1117,7 +1117,7 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 				    curKey.size() != TenantAPI::PREFIX_SIZE) {
 					ASSERT(tenantCache.present());
 					Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache.get()->getById(curDomainId));
-					ASSERT(!payload.present() && blockDomainId.get() == FDB_DEFAULT_ENCRYPT_DOMAIN_ID);
+					ASSERT(!payload.present());
 				}
 				done = true;
 			}
