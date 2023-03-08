@@ -1028,13 +1028,9 @@ ACTOR Future<bool> checkExclusion(Database db,
 					// Check if we are excluding a process that serves the storage role. If this check was true once, we don't have to check any further
 					// since we don't case in this variable about the count of excluded storage servers but only about if we exclude any storage server with the
 					// provided addresses.
-					if (!excludedAddressesContainsStorageRole) {
-						for (auto exclusion : addresses) {
-							if (exclusion.excludes(addr)) {
-								excludedAddressesContainsStorageRole = true;
-								break;
-							}
-						}
+					if (!excludedAddressesContainsStorageRole && excluded) {
+						excludedAddressesContainsStorageRole = true;
+						break;
 					}
 
 					int64_t used_bytes;
