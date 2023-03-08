@@ -51,7 +51,6 @@
 #include "fdbrpc/AsyncFileChaos.h"
 #include "crc32/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
-#include "flow/FaultInjection.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
@@ -60,6 +59,7 @@
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
+#include "fdbrpc/genericactors.actor.h"
 #include "flow/FaultInjection.h"
 #include "flow/TaskQueue.h"
 #include "flow/IUDPSocket.h"
@@ -603,9 +603,7 @@ public:
 		}
 
 		if (openCount == 4000) {
-			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyFiles").log();
-			g_simulator->speedUpSimulation = true;
-			g_simulator->connectionFailuresDisableDuration = 1e6;
+			disableConnectionFailures("TooManyFiles");
 		}
 
 		// Filesystems on average these days seem to start to have limits of around 255 characters for a
