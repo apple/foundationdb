@@ -1,6 +1,6 @@
 # API Versions
 set(FDB_AV_LATEST_VERSION                   "710300")
-set(FDB_AV_LATEST_BINDINGS_VERSION          "710200")
+set(FDB_AV_LATEST_BINDINGS_VERSION          "710300")
 
 # Features
 set(FDB_AV_SNAPSHOT_RYW                     "300")
