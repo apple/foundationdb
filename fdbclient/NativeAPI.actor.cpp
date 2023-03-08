@@ -11154,13 +11154,13 @@ ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange rang
 			state Key key = blobRestoreCommandKeyFor(range);
 			Optional<Value> value = wait(tr->get(key));
 			if (value.present()) {
-				Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(value.get());
-				if (status.phase < BlobRestorePhase::DONE) {
+				Standalone<BlobRestoreState> restoreState = decodeBlobRestoreState(value.get());
+				if (restoreState.phase < BlobRestorePhase::DONE) {
 					return false; // stop if there is in-progress restore.
 				}
 			}
-			BlobRestoreStatus status(BlobRestorePhase::INIT);
-			Value newValue = blobRestoreCommandValueFor(status);
+			BlobRestoreState restoreState(BlobRestorePhase::INIT);
+			Value newValue = blobRestoreCommandValueFor(restoreState);
 			tr->set(key, newValue);
 
 			BlobRestoreArg arg(version);
