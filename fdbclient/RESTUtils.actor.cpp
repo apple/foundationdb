@@ -298,7 +298,7 @@ TEST_CASE("/RESTUtils/ValidURIWithParamsSecure") {
 
 TEST_CASE("/RESTUtils/ValidURIWithParamsKnobNotEnabled") {
 	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-	g_knobs.setKnob("rest_kms_enable_not_secure_connection", KnobValueRef::create(bool{ false }));
+	g_knobs.setKnob("rest_kms_allow_not_secure_connection", KnobValueRef::create(bool{ false }));
 	std::string uri("http://host/foo/bar?param1,param2");
 	try {
 		RESTUrl r(uri);
@@ -311,7 +311,7 @@ TEST_CASE("/RESTUtils/ValidURIWithParamsKnobNotEnabled") {
 
 TEST_CASE("/RESTUtils/ValidURIWithParams") {
 	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-	g_knobs.setKnob("rest_kms_enable_not_secure_connection", KnobValueRef::create(bool{ true }));
+	g_knobs.setKnob("rest_kms_allow_not_secure_connection", KnobValueRef::create(bool{ true }));
 	std::string uri("http://host/foo/bar?param1,param2");
 	RESTUrl r(uri);
 	ASSERT_EQ(r.connType.secure, RESTConnectionType::NOT_SECURE_CONNECTION);
