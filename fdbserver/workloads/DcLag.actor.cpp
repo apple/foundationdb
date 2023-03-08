@@ -155,7 +155,7 @@ struct DcLagWorkload : TestWorkload {
 		}
 
 		double startTime = now();
-		state double workloadEnd = now() + self->testDuration;
+		double workloadEnd = now() + self->testDuration;
 		TraceEvent("DcLag").detail("StartTime", startTime).detail("EndTime", workloadEnd);
 
 		// Clog and wait for recovery to happen
@@ -166,12 +166,6 @@ struct DcLagWorkload : TestWorkload {
 		state Future<Optional<double>> status = Never();
 		state bool lagged = false;
 		loop choose {
-			when(wait(delayUntil(workloadEnd))) {
-				// Expect to reach fully recovered state before workload ends
-				TraceEvent(SevError, "DcLagEnd");
-				self->unclogAll();
-				return Void();
-			}
 			when(wait(delay(5.0))) {
 				// Fetch DC lag every 5s
 				status = fetchDatacenterLag(self, cx);
