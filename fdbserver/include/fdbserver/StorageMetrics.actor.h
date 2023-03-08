@@ -63,7 +63,7 @@ struct TransientStorageMetricSample : StorageMetricSample {
 
 	explicit TransientStorageMetricSample(int64_t metricUnitsPerSample) : StorageMetricSample(metricUnitsPerSample) {}
 
-	int64_t addAndExpire(KeyRef key, int64_t metric, double expiration);
+	int64_t addAndExpire(const Key& key, int64_t metric, double expiration);
 
 	int64_t erase(KeyRef key);
 	void erase(KeyRangeRef keys);
@@ -73,8 +73,10 @@ struct TransientStorageMetricSample : StorageMetricSample {
 	void poll();
 
 private:
-	bool roll(KeyRef key, int64_t metric) const;
-	int64_t add(KeyRef key, int64_t metric);
+	bool roll(int64_t metric) const;
+
+	// return the sampled metric delta
+	int64_t add(const Key& key, int64_t metric);
 };
 
 struct StorageServerMetrics {
@@ -94,14 +96,14 @@ struct StorageServerMetrics {
 
 	StorageMetrics getMetrics(KeyRangeRef const& keys) const;
 
-	void notify(KeyRef key, StorageMetrics& metrics);
+	void notify(const Key& key, StorageMetrics& metrics);
 
-	void notifyBytesReadPerKSecond(KeyRef key, int64_t in);
+	void notifyBytesReadPerKSecond(const Key& key, int64_t in);
 
 	void notifyBytes(RangeMap<Key, std::vector<PromiseStream<StorageMetrics>>, KeyRangeRef>::iterator shard,
 	                 int64_t bytes);
 
-	void notifyBytes(KeyRef key, int64_t bytes);
+	void notifyBytes(const KeyRef& key, int64_t bytes);
 
 	void notifyNotReadable(KeyRangeRef keys);
 
@@ -216,12 +218,7 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 				self->getStorageMetrics(req);
 			}
 			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
-				if (!self->isReadable(req.keys)) {
-					CODE_PROBE(true, "readHotSubRanges immediate wrong_shard_server()", probe::decoration::rare);
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->metrics.getReadHotRanges(req);
-				}
+				self->metrics.getReadHotRanges(req);
 			}
 			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
 				if (!self->isReadable(req.keys)) {

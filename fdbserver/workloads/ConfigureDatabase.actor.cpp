@@ -448,7 +448,8 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 					storeTypeStr = "memory-radixtree-beta";
 					break;
 				case 3:
-					storeTypeStr = "ssd-redwood-1-experimental";
+					// Experimental suffix is still supported so test it
+					storeTypeStr = BUGGIFY ? "ssd-redwood-1" : "ssd-redwood-1-experimental";
 					break;
 				default:
 					ASSERT(false);
