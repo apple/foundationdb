@@ -324,7 +324,8 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 // tenant list command
 ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() > 7) {
-		fmt::print("Usage: tenant list [BEGIN] [END] [limit=LIMIT] [offset=OFFSET] [state=<STATE1>,<STATE2>,...]\n\n");
+		fmt::print(
+		    "Usage: tenant list [BEGIN] [END] [limit=<LIMIT>|offset=<OFFSET>|state=<STATE1>,<STATE2>,...] ...\n\n");
 		fmt::print("Lists the tenants in a cluster.\n");
 		fmt::print("Only tenants in the range BEGIN - END will be printed.\n");
 		fmt::print("An optional LIMIT can be specified to limit the number of results (default 100).\n");
@@ -896,7 +897,7 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 }
 
 CommandFactory tenantRegisterFactory("tenant",
-                                     CommandHelp("tenant <create|delete|list|get|configure|rename> [ARGS]",
+                                     CommandHelp("tenant <create|delete|list|get|configure|rename|lock|unlock> [ARGS]",
                                                  "view and manage tenants in a cluster or metacluster",
                                                  "`create' and `delete' add and remove tenants from the cluster.\n"
                                                  "`list' prints a list of tenants in the cluster.\n"
