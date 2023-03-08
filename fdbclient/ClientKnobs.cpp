@@ -312,6 +312,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION, 1 );
 	init( ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION, 1 );
 
+	init( REST_KMS_ENABLE_NOT_SECURE_CONNECTION,    false ); if ( randomize && BUGGIFY ) REST_KMS_ENABLE_NOT_SECURE_CONNECTION = !REST_KMS_ENABLE_NOT_SECURE_CONNECTION;
+
 	// clang-format on
 }
 
