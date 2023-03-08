@@ -18,8 +18,10 @@
  * limitations under the License.
  */
 
+#include <climits>
 #include <limits>
 #include <numeric>
+#include <utility>
 #include <vector>
 
 #include "flow/ActorCollection.h"
@@ -30,6 +32,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/DDMovingAverageRate.h"
 #include "fdbserver/DDSharedContext.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/MoveKeys.actor.h"
@@ -43,33 +46,6 @@
 
 typedef Reference<IDataDistributionTeam> ITeamRef;
 typedef std::pair<ITeamRef, ITeamRef> SrcDestTeamPair;
-
-// Perfomed as the rolling window to calculate average moving bytes rate by DD.
-struct MovingAverage {
-	int64_t previous;
-	int64_t total;
-	double interval;
-	Deque<std::pair<double, int64_t>> updates; // std::pair<time, bytes>
-
-	int64_t getTotal() const { return total; }
-
-	double getAverage() {
-		while (!updates.empty() && updates.front().first < now() - interval) {
-			previous += updates.front().second;
-			updates.pop_front();
-		}
-		return (total - previous) / interval;
-	}
-
-	void addSample(int64_t bytes) {
-		total += bytes;
-		updates.push_back(std::make_pair(now(), bytes));
-	}
-
-	MovingAverage() : previous(0), total(0), interval(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL) {
-		// updates.push_back(std::make_pair(now(), 0));
-	}
-};
 
 inline bool isDataMovementForDiskBalancing(DataMovementReason reason) {
 	return reason == DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM ||
@@ -733,7 +709,7 @@ struct DDQueue : public IDDRelocationQueue {
 	};
 	std::vector<int> retryFindDstReasonCount;
 
-	MovingAverage moveAverage;
+	MovingAverageRate<int64_t> moveBytesRate;
 
 	void startRelocation(int priority, int healthPriority) {
 		// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
@@ -800,7 +776,7 @@ struct DDQueue : public IDDRelocationQueue {
 	    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
 	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")), moveReusePhysicalShard(0),
 	    moveCreateNewPhysicalShard(0), retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0),
-	    moveAverage() {}
+	    moveBytesRate() {}
 	DDQueue() = default;
 
 	void validate() {
@@ -2045,7 +2021,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 
 					self->bytesWritten += metrics.bytes;
-					self->moveAverage.addSample(metrics.bytes);
+					self->moveBytesRate.addSample(metrics.bytes);
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
 
@@ -2581,8 +2557,8 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 					    .detail("AverageShardSize", req.getFuture().isReady() ? req.getFuture().get() : -1)
 					    .detail("UnhealthyRelocations", self.unhealthyRelocations)
 					    .detail("HighestPriority", highestPriorityRelocation)
-					    .detail("BytesWritten", self.moveAverage.getTotal())
-					    .detail("BytesWrittenAverageRate", self.moveAverage.getAverage())
+					    .detail("BytesWritten", self.moveBytesRate.getTotal())
+					    .detail("BytesWrittenAverageRate", self.moveBytesRate.getAverage())
 					    .detail("PriorityRecoverMove", self.priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
 					    .detail("PriorityRebalanceUnderutilizedTeam",
 					            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM])
