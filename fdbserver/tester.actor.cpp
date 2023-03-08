@@ -21,9 +21,7 @@
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/directory.hpp>
-#include <boost/filesystem/file_status.hpp>
 #include <boost/filesystem/path.hpp>
-#include <boost/range/iterator_range.hpp>
 #include <boost/range/iterator_range_core.hpp>
 #include <cinttypes>
 #include <fstream>
@@ -35,11 +33,9 @@
 #include <toml.hpp>
 
 #include "flow/ActorCollection.h"
-#include "flow/ChaosMetrics.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Histogram.h"
-#include "flow/IAsyncFile.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/ProcessEvents.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/sim_validation.h"
@@ -54,13 +50,10 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/Status.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbclient/MonitorLeader.h"
-#include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/WorkerInterface.actor.h"
 #include "flow/Platform.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -1343,6 +1336,8 @@ ACTOR Future<bool> runTest(Database cx,
 		testResults = _testResults;
 		logMetrics(testResults.metrics);
 	} catch (Error& e) {
+		auto msg = fmt::format("Process timed out after {} seconds", spec.timeout);
+		ProcessEvents::trigger("Timeout"_sr, StringRef(msg), e);
 		if (e.code() == error_code_timed_out) {
 			TraceEvent(SevError, "TestFailure")
 			    .error(e)

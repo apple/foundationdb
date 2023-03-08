@@ -59,10 +59,8 @@ static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
 // StorageServerInterface APIs which are needed for DataDistributor to start data migration.
 class BlobMigrator : public NonCopyable, public ReferenceCounted<BlobMigrator> {
 public:
-	BlobMigrator(Reference<AsyncVar<ServerDBInfo> const> dbInfo, BlobMigratorInterface interf)
-	  : interf_(interf), actors_(false) {
+	BlobMigrator(Database db, BlobMigratorInterface interf) : interf_(interf), actors_(false), db_(db) {
 		blobConn_ = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
-		db_ = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 	~BlobMigrator() {}
 
@@ -76,18 +74,15 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> updateStatus(Reference<BlobMigrator> self, KeyRange keys, BlobRestoreStatus status) {
-		wait(updateRestoreStatus(self->db_, keys, status, {}));
-		return Void();
-	}
-
 private:
 	// Check if blob manifest is loaded so that blob migration can start
 	ACTOR static Future<Void> checkIfReadyForMigration(Reference<BlobMigrator> self) {
 		loop {
-			Optional<BlobRestoreStatus> status = wait(getRestoreStatus(self->db_, normalKeys));
-			ASSERT(status.present());
-			BlobRestorePhase phase = status.get().phase;
+			state Reference<BlobRestoreController> restoreController =
+			    makeReference<BlobRestoreController>(self->db_, normalKeys);
+			Optional<BlobRestoreState> restoreState = wait(BlobRestoreController::getState(restoreController));
+			ASSERT(restoreState.present());
+			state BlobRestorePhase phase = restoreState.get().phase;
 			if (phase == BlobRestorePhase::LOADED_MANIFEST) {
 				BlobGranuleRestoreVersionVector granules = wait(listBlobGranules(self->db_, self->blobConn_));
 				if (!granules.empty()) {
@@ -99,14 +94,11 @@ private:
 						    .detail("Version", granule.version)
 						    .detail("SizeInBytes", granule.sizeInBytes);
 					}
-					wait(updateRestoreStatus(self->db_,
-					                         normalKeys,
-					                         BlobRestoreStatus(BlobRestorePhase::COPYING_DATA),
-					                         BlobRestorePhase::LOADED_MANIFEST));
+					wait(BlobRestoreController::updateState(restoreController, COPYING_DATA, LOADED_MANIFEST));
 					return Void();
 				}
 			} else if (phase >= BlobRestorePhase::COPYING_DATA && phase < BlobRestorePhase::DONE) {
-				TraceEvent("BlobMigratorUnexpectedPhase", self->interf_.id()).detail("Phase", status.get().phase);
+				TraceEvent("BlobMigratorUnexpectedPhase", self->interf_.id()).detail("Phase", phase);
 				throw restore_error();
 			}
 			wait(delay(SERVER_KNOBS->BLOB_MIGRATOR_CHECK_INTERVAL));
@@ -226,21 +218,18 @@ private:
 
 	// Print migration progress periodically
 	ACTOR static Future<Void> logProgress(Reference<BlobMigrator> self) {
+		state Reference<BlobRestoreController> restoreController =
+		    makeReference<BlobRestoreController>(self->db_, normalKeys);
+
 		loop {
 			bool done = wait(checkProgress(self));
 			if (done) {
-				wait(updateRestoreStatus(self->db_,
-				                         normalKeys,
-				                         BlobRestoreStatus(BlobRestorePhase::APPLYING_MLOGS),
-				                         BlobRestorePhase::COPYING_DATA));
+				wait(BlobRestoreController::updateState(restoreController, APPLYING_MLOGS, COPYING_DATA));
 				wait(unlockDatabase(self->db_, self->interf_.id()));
 				TraceEvent("BlobMigratorCopied", self->interf_.id()).log();
 				wait(applyMutationLogs(self));
 
-				wait(updateRestoreStatus(self->db_,
-				                         normalKeys,
-				                         BlobRestoreStatus(BlobRestorePhase::DONE),
-				                         BlobRestorePhase::APPLYING_MLOGS));
+				wait(BlobRestoreController::updateState(restoreController, DONE, APPLYING_MLOGS));
 				TraceEvent("BlobMigratorDone", self->interf_.id()).log();
 				return Void();
 			}
@@ -250,6 +239,8 @@ private:
 
 	// Check key ranges that are migrated. Return true if all ranges are done
 	ACTOR static Future<bool> checkProgress(Reference<BlobMigrator> self) {
+		state Reference<BlobRestoreController> restoreController =
+		    makeReference<BlobRestoreController>(self->db_, normalKeys);
 		state Transaction tr(self->db_);
 		loop {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -282,8 +273,10 @@ private:
 				state bool done = incompleted == 0;
 				dprint("Migration progress :{}%. done {}\n", progress, done);
 				TraceEvent("BlobMigratorProgress", self->interf_.id()).detail("Progress", progress);
-				BlobRestoreStatus status(BlobRestorePhase::COPYING_DATA, progress);
-				wait(updateRestoreStatus(self->db_, normalKeys, status, BlobRestorePhase::COPYING_DATA));
+				Standalone<BlobRestoreState> restoreState;
+				restoreState.phase = BlobRestorePhase::COPYING_DATA;
+				restoreState.progress = progress;
+				wait(BlobRestoreController::updateState(restoreController, restoreState, COPYING_DATA));
 				return done;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -345,7 +338,9 @@ private:
 		}
 		state Version minLogVersion = desc.minLogBegin.get();
 		state Version maxLogVersion = desc.contiguousLogEnd.get() - 1;
-		state Version targetVersion = wait(getRestoreTargetVersion(self->db_, normalKeys, maxLogVersion));
+		Reference<BlobRestoreController> restoreController =
+		    makeReference<BlobRestoreController>(self->db_, normalKeys);
+		state Version targetVersion = wait(BlobRestoreController::getTargetVersion(restoreController, maxLogVersion));
 		if (targetVersion < maxLogVersion) {
 			if (!needApplyLogs(self, targetVersion)) {
 				TraceEvent("SkipMutationLogs").detail("TargetVersion", targetVersion);
@@ -653,13 +648,16 @@ private:
 ACTOR Future<Void> blobMigrator(BlobMigratorInterface interf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	TraceEvent("StartBlobMigrator", interf.id()).detail("Interface", interf.id().toString());
 	dprint("Starting blob migrator {}\n", interf.id().toString());
-	state Reference<BlobMigrator> self = makeReference<BlobMigrator>(dbInfo, interf);
+	state Database db = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+	state Reference<BlobMigrator> self = makeReference<BlobMigrator>(db, interf);
 	try {
 		wait(BlobMigrator::start(self));
 	} catch (Error& e) {
 		dprint("Unexpected blob migrator error {}\n", e.what());
 		TraceEvent("BlobMigratorError", interf.id()).error(e);
-		wait(BlobMigrator::updateStatus(self, normalKeys, BlobRestoreStatus(BlobRestorePhase::ERROR, e.code())));
+		std::string errorMessage = fmt::format("Migrator failure '{}' on {}", e.what(), interf.address().toString());
+		Reference<BlobRestoreController> restoreController = makeReference<BlobRestoreController>(db, normalKeys);
+		wait(BlobRestoreController::updateError(restoreController, errorMessage));
 	}
 	return Void();
 }

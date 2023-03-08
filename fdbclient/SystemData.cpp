@@ -1754,17 +1754,17 @@ const KeyRange decodeBlobRestoreCommandKeyFor(const KeyRef key) {
 	return range;
 }
 
-const Value blobRestoreCommandValueFor(BlobRestoreStatus status) {
+const Value blobRestoreCommandValueFor(BlobRestoreState restoreState) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
-	wr << status;
+	wr << restoreState;
 	return wr.toValue();
 }
 
-Standalone<BlobRestoreStatus> decodeBlobRestoreStatus(ValueRef const& value) {
-	Standalone<BlobRestoreStatus> status;
+Standalone<BlobRestoreState> decodeBlobRestoreState(ValueRef const& value) {
+	Standalone<BlobRestoreState> restoreState;
 	BinaryReader reader(value, IncludeVersion());
-	reader >> status;
-	return status;
+	reader >> restoreState;
+	return restoreState;
 }
 
 const KeyRangeRef blobRestoreArgKeys("\xff\x02/blobRestoreArgs/"_sr, "\xff\x02/blobRestoreArgs0"_sr);

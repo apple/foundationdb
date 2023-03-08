@@ -235,18 +235,41 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 				p = end + 1;
 			}
 		}
+
+		if (key == "storage_engine" || key == "log_engine") {
+			StringRef s = value;
+
+			// Parse as engine_name[:p=v]... to handle future storage engine params
+			Value engine = s.eat(":");
+			std::map<Key, Value> params;
+			while (!s.empty()) {
+				params[s.eat("=")] = s.eat(":");
+			}
+
+			try {
+				out[p + key] = format("%d", KeyValueStoreType::fromString(engine.toString()).storeType());
+			} catch (Error& e) {
+				printf("Error: Invalid value for %s (%s): %s\n", key.c_str(), value.c_str(), e.what());
+			}
+			return out;
+		}
+
 		return out;
 	}
 
 	Optional<KeyValueStoreType> logType;
 	Optional<KeyValueStoreType> storeType;
+
+	// These are legacy shorthand commands to set a specific log engine and storage engine
+	// based only on the storage engine name.  Most of them assume SQLite should be the
+	// log engine.
 	if (mode == "ssd-1") {
 		logType = KeyValueStoreType::SSD_BTREE_V1;
 		storeType = KeyValueStoreType::SSD_BTREE_V1;
 	} else if (mode == "ssd" || mode == "ssd-2") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_BTREE_V2;
-	} else if (mode == "ssd-redwood-1-experimental") {
+	} else if (mode == "ssd-redwood-1" || mode == "ssd-redwood-1-experimental") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_REDWOOD_V1;
 	} else if (mode == "ssd-rocksdb-v1") {
@@ -269,7 +292,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 
 	if (storeType.present()) {
 		out[p + "log_engine"] = format("%d", logType.get().storeType());
-		out[p + "storage_engine"] = format("%d", KeyValueStoreType::StoreType(storeType.get()));
+		out[p + "storage_engine"] = format("%d", storeType.get().storeType());
 		return out;
 	}
 
@@ -406,7 +429,10 @@ ConfigurationResult buildConfiguration(std::vector<StringRef> const& modeTokens,
 
 		for (auto t = m.begin(); t != m.end(); ++t) {
 			if (outConf.count(t->first)) {
-				TraceEvent(SevWarnAlways, "ConflictingOption").detail("Option", t->first);
+				TraceEvent(SevWarnAlways, "ConflictingOption")
+				    .detail("Option", t->first)
+				    .detail("Value", t->second)
+				    .detail("ExistingValue", outConf[t->first]);
 				return ConfigurationResult::CONFLICTING_OPTIONS;
 			}
 			outConf[t->first] = t->second;
