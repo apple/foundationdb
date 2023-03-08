@@ -1766,9 +1766,9 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						readyServers.push_back(storageServerInterfaces[s].uniqueID);
 					} else {
 						TraceEvent(SevVerbose, "FinishMoveShardsFailedToAddReadyServers", relocationIntervalId)
-							.detail("ServerInterfaceID", storageServerInterfaces[s].uniqueID)
-							.detail("ServerReady", serverReady[s].isReady())
-							.detail("ServerError", serverReady[s].isError() ? serverReady[s].getError().what() : "N/A");
+						    .detail("ServerInterfaceID", storageServerInterfaces[s].uniqueID)
+						    .detail("ServerReady", serverReady[s].isReady())
+						    .detail("ServerError", serverReady[s].isError() ? serverReady[s].getError().what() : "N/A");
 					}
 				}
 

@@ -1452,7 +1452,8 @@ ACTOR Future<Void> resumeAuditStorage(Reference<DataDistributor> self, AuditStor
 		}
 		break;
 	}
-	ASSERT(audit->state.getPhase()==AuditPhase::Failed || audit->state.getPhase()==AuditPhase::Error || audit->state.getPhase()==AuditPhase::Complete);
+	ASSERT(audit->state.getPhase() == AuditPhase::Failed || audit->state.getPhase() == AuditPhase::Error ||
+	       audit->state.getPhase() == AuditPhase::Complete);
 	audit->actors.clear(true);
 	self->audits[audit->state.getType()].erase(audit->state.id);
 	return Void();
@@ -1574,7 +1575,8 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 				continue;
 			}
 		}
-		ASSERT(audit->state.getPhase()==AuditPhase::Failed || audit->state.getPhase()==AuditPhase::Error || audit->state.getPhase()==AuditPhase::Complete);
+		ASSERT(audit->state.getPhase() == AuditPhase::Failed || audit->state.getPhase() == AuditPhase::Error ||
+		       audit->state.getPhase() == AuditPhase::Complete);
 		audit->actors.clear(true);
 		self->audits[audit->state.getType()].erase(audit->state.id);
 		break;
