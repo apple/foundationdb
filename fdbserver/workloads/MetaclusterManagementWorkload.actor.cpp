@@ -154,6 +154,10 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		state Reference<DataClusterData> dataDb = self->dataDbs[clusterName];
 		state bool retried = false;
 
+		if (deterministicRandom()->random01() < 0.1) {
+			clusterName = "\xff"_sr.withSuffix(clusterName);
+		}
+
 		try {
 			state DataClusterEntry entry;
 			entry.capacity.numTenantGroups = deterministicRandom()->randomInt(0, 4);
@@ -198,6 +202,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				}
 			}
 
+			ASSERT(!clusterName.startsWith("\xff"_sr));
 			ASSERT(!dataDb->registered);
 			ASSERT(!dataDb->detached || dataDb->tenants.empty());
 
@@ -215,6 +220,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				return Void();
 			} else if (e.code() == error_code_cluster_not_empty) {
 				ASSERT(dataDb->detached && !dataDb->tenants.empty());
+				return Void();
+			} else if (e.code() == error_code_invalid_cluster_name) {
+				ASSERT(clusterName.startsWith("\xff"_sr));
 				return Void();
 			}
 
