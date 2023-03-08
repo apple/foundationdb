@@ -168,7 +168,7 @@ struct RESTKmsConnectorCtx : public ReferenceCounted<RESTKmsConnectorCtx> {
 
 std::string getFullRequestUrl(Reference<RESTKmsConnectorCtx> ctx, const std::string& url, const std::string& suffix) {
 	if (suffix.empty()) {
-		TraceEvent(SevWarn, "RESTGetFullUrlEmptyEndpoint", ctx->uid).log();
+		TraceEvent(SevWarn, "RESTGetFullUrlEmptyEndpoint", ctx->uid);
 		throw encrypt_invalid_kms_config();
 	}
 	std::string fullUrl(url);
@@ -442,11 +442,15 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 		StringRef cipher = StringRef(cipherKey.get(), cipherKeyLen);
 
 		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
-			TraceEvent("RESTParseEncryptCipherResponse", ctx->uid)
-			    .detail("DomainId", domainId)
-			    .detail("BaseCipherId", baseCipherId)
-			    .detail("RefreshAt", refreshAfterSec.get())
-			    .detail("ExpireAt", expireAfterSec.get());
+			TraceEvent event("RESTParseEncryptCipherResponse", ctx->uid);
+			event.detail("DomainId", domainId);
+			event.detail("BaseCipherId", baseCipherId);
+			if (refreshAfterSec.present()) {
+				event.detail("RefreshAt", refreshAfterSec.get());
+			}
+			if (expireAfterSec.present()) {
+				event.detail("ExpireAt", expireAfterSec.get());
+			}
 		}
 
 		result.emplace_back_deep(result.arena(), domainId, baseCipherId, cipher, refreshAfterSec, expireAfterSec);
@@ -1587,7 +1591,7 @@ void testMissingOrInvalidVersion(Reference<RESTKmsConnectorCtx> ctx, bool isCiph
 			parseBlobMetadataResponse(ctx, httpResp);
 		}
 	} catch (Error& e) {
-		ASSERT_EQ(e.code(), error_code_operation_failed);
+		ASSERT_EQ(e.code(), error_code_rest_malformed_response);
 	}
 }
 
@@ -1615,7 +1619,7 @@ void testMissingDetailsTag(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 			parseBlobMetadataResponse(ctx, httpResp);
 		}
 	} catch (Error& e) {
-		ASSERT_EQ(e.code(), error_code_operation_failed);
+		ASSERT_EQ(e.code(), error_code_rest_malformed_response);
 	}
 }
 
@@ -1643,7 +1647,7 @@ void testMalformedDetails(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 			parseBlobMetadataResponse(ctx, httpResp);
 		}
 	} catch (Error& e) {
-		ASSERT_EQ(e.code(), error_code_operation_failed);
+		ASSERT_EQ(e.code(), error_code_rest_malformed_response);
 	}
 }
 
@@ -1676,7 +1680,7 @@ void testMalformedDetailObj(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 			parseBlobMetadataResponse(ctx, httpResp);
 		}
 	} catch (Error& e) {
-		ASSERT_EQ(e.code(), error_code_operation_failed);
+		ASSERT_EQ(e.code(), error_code_rest_malformed_response);
 	}
 }
 
@@ -1768,11 +1772,20 @@ ACTOR Future<Void> testParseDiscoverKmsUrlFile(Reference<RESTKmsConnectorCtx> ct
 	return Void();
 }
 
+void setKnobs() {
+	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+	g_knobs.setKnob("rest_kms_current_cipher_request_version", KnobValueRef::create(int{ 1 }));
+	g_knobs.setKnob("rest_kms_current_blob_metadata_request_version", KnobValueRef::create(int{ 1 }));
+	g_knobs.setKnob("rest_log_level", KnobValueRef::create(int{ 3 }));
+}
+
 } // namespace
 
 TEST_CASE("/KmsConnector/REST/ParseKmsDiscoveryUrls") {
 	state Reference<RESTKmsConnectorCtx> ctx = makeReference<RESTKmsConnectorCtx>();
 	state Arena arena;
+
+	setKnobs();
 
 	// initialize cipher key used for testing
 	deterministicRandom()->randomBytes(&BASE_CIPHER_KEY_TEST[0], 32);
@@ -1786,6 +1799,8 @@ TEST_CASE("/KmsConnector/REST/ParseKmsDiscoveryUrls") {
 TEST_CASE("/KmsConnector/REST/ParseValidationTokenFile") {
 	state Reference<RESTKmsConnectorCtx> ctx = makeReference<RESTKmsConnectorCtx>();
 	state Arena arena;
+
+	setKnobs();
 
 	// initialize cipher key used for testing
 	deterministicRandom()->randomBytes(&BASE_CIPHER_KEY_TEST[0], 32);
@@ -1804,6 +1819,8 @@ TEST_CASE("/KmsConnector/REST/ParseEncryptCipherResponse") {
 	state Reference<RESTKmsConnectorCtx> ctx = makeReference<RESTKmsConnectorCtx>();
 	state Arena arena;
 
+	setKnobs();
+
 	// initialize cipher key used for testing
 	deterministicRandom()->randomBytes(&BASE_CIPHER_KEY_TEST[0], 32);
 
@@ -1819,6 +1836,8 @@ TEST_CASE("/KmsConnector/REST/ParseBlobMetadataResponse") {
 	state Reference<RESTKmsConnectorCtx> ctx = makeReference<RESTKmsConnectorCtx>();
 	state Arena arena;
 
+	setKnobs();
+
 	testMissingOrInvalidVersion(ctx, true);
 	testMissingDetailsTag(ctx, false);
 	testMalformedDetails(ctx, false);
@@ -1830,6 +1849,8 @@ TEST_CASE("/KmsConnector/REST/ParseBlobMetadataResponse") {
 TEST_CASE("/KmsConnector/REST/GetEncryptionKeyOps") {
 	state Reference<RESTKmsConnectorCtx> ctx = makeReference<RESTKmsConnectorCtx>();
 	state Arena arena;
+
+	setKnobs();
 
 	// initialize cipher key used for testing
 	deterministicRandom()->randomBytes(&BASE_CIPHER_KEY_TEST[0], 32);
