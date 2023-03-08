@@ -3501,7 +3501,8 @@ ACTOR Future<Void> updateEpoch(Reference<BlobManagerData> bmData, int64_t epoch)
 ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	state double recoveryStartTime = now();
 	state Promise<Void> workerListReady;
-	state Future<Void> blobWorkerRejoin = delay(SERVER_KNOBS->BLOB_WORKER_REJOIN_TIME);
+	state Future<Void> blobWorkerRejoin =
+	    delay(SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED ? SERVER_KNOBS->BLOB_WORKER_REJOIN_TIME : 0);
 	bmData->addActor.send(checkBlobWorkerList(bmData, workerListReady));
 	wait(workerListReady.getFuture());
 
@@ -3526,13 +3527,17 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		ASSERT(status.present());
 		state BlobRestorePhase phase = status.get().phase;
 		if (phase == BlobRestorePhase::STARTING_MIGRATOR || phase == BlobRestorePhase::LOADING_MANIFEST) {
-			wait(updateRestoreStatus(bmData->db, normalKeys, BlobRestoreStatus(LOADING_MANIFEST), {}));
+			wait(updateRestoreStatus(bmData->db, normalKeys, LOADING_MANIFEST, 0, {}, {}));
 			try {
 				wait(loadManifest(bmData->db, bmData->manifestStore));
 				int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->manifestStore));
 				wait(updateEpoch(bmData, epoc + 1));
-				BlobRestoreStatus completedStatus(BlobRestorePhase::LOADED_MANIFEST);
-				wait(updateRestoreStatus(bmData->db, normalKeys, completedStatus, BlobRestorePhase::LOADING_MANIFEST));
+				wait(updateRestoreStatus(bmData->db,
+				                         normalKeys,
+				                         BlobRestorePhase::LOADED_MANIFEST,
+				                         0,
+				                         {},
+				                         BlobRestorePhase::LOADING_MANIFEST));
 				TraceEvent("BlobManifestLoaded", bmData->id).log();
 			} catch (Error& e) {
 				if (e.code() != error_code_restore_missing_data &&
@@ -3541,8 +3546,8 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				}
 				// terminate blob restore for non-retryable errors
 				TraceEvent("ManifestLoadError", bmData->id).error(e).detail("Phase", phase);
-				BlobRestoreStatus error(BlobRestorePhase::ERROR, e.code());
-				wait(updateRestoreStatus(bmData->db, normalKeys, error, {}));
+				std::string errorMessage = fmt::format("Manifest loading error '{}'", e.what());
+				wait(updateRestoreStatus(bmData->db, normalKeys, BlobRestorePhase::ERROR, 0, errorMessage, {}));
 			}
 		}
 	}

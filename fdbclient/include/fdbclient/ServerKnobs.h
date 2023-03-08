@@ -180,6 +180,9 @@ public:
 	int64_t SHARD_MAX_BYTES_PER_KSEC, // Shards with more than this bandwidth will be split immediately
 	    SHARD_MIN_BYTES_PER_KSEC, // Shards with more than this bandwidth will not be merged
 	    SHARD_SPLIT_BYTES_PER_KSEC; // When splitting a shard, it is split into pieces with less than this bandwidth
+	int64_t SHARD_MAX_READ_OPS_PER_KSEC; // When the read operations count is larger than this threshold, a range will
+	                                     // be considered hot
+
 	double SHARD_MAX_READ_DENSITY_RATIO;
 	int64_t SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS;
 	double SHARD_MAX_BYTES_READ_PER_KSEC_JITTER;
@@ -737,6 +740,7 @@ public:
 	int64_t IOPS_UNITS_PER_SAMPLE;
 	int64_t BYTES_WRITTEN_UNITS_PER_SAMPLE;
 	int64_t BYTES_READ_UNITS_PER_SAMPLE;
+	int64_t OPS_READ_UNITES_PER_SAMPLE;
 	int64_t READ_HOT_SUB_RANGE_CHUNK_SIZE;
 	int64_t EMPTY_READ_PENALTY;
 	int DD_SHARD_COMPARE_LIMIT; // when read-aware DD is enabled, at most how many shards are compared together
@@ -1020,6 +1024,9 @@ public:
 	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
 	double BLOB_WORKERLIST_FETCH_INTERVAL;
 	double BLOB_WORKER_BATCH_GRV_INTERVAL;
+	double BLOB_WORKER_EMPTY_GRV_INTERVAL;
+	int BLOB_WORKER_GRV_HISTORY_MAX_SIZE;
+	int64_t BLOB_WORKER_GRV_HISTORY_MIN_VERSION_GRANULARITY;
 	bool BLOB_WORKER_DO_REJECT_WHEN_FULL;
 	double BLOB_WORKER_REJECT_WHEN_FULL_THRESHOLD;
 	double BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY;
