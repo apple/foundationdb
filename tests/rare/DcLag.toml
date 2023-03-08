@@ -1,6 +1,5 @@
 [configuration]
 generateFearless = true
-disableSimSpeedup = true
 processesPerMachine = 1
 machineCount = 20
 minimumRegions = 2

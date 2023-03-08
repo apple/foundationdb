@@ -1101,10 +1101,6 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			                                                          KnobValueRef::create(bool{ false }));
 			TraceEvent(SevDebug, "DisaableRemoteKVS").log();
 		}
-		if (testConfig->disableSimSpeedup) {
-			g_knobs.setKnob("sim_speedup_after_seconds", KnobValueRef::create(double{ 5000.0 }));
-			TraceEvent("DisableSimSpeedup");
-		}
 		*pConnString = conn;
 		*pTesterCount = testerCount;
 		bool usingSSL = conn.toString().find(":tls") != std::string::npos || listenersPerProcess > 1;
@@ -1859,10 +1855,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		IKnobCollection::getMutableGlobalKnobCollection().setKnob("remote_kv_store",
 		                                                          KnobValueRef::create(bool{ false }));
 		TraceEvent(SevDebug, "DisableRemoteKVS").log();
-	}
-	if (testConfig.disableSimSpeedup) {
-		g_knobs.setKnob("sim_speedup_after_seconds", KnobValueRef::create(double{ 5000.0 }));
-		TraceEvent("DisableSimSpeedup");
 	}
 	auto configDBType = testConfig.getConfigDBType();
 	for (auto kv : startingConfigJSON) {
