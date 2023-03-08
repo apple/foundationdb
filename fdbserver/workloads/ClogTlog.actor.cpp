@@ -130,17 +130,13 @@ struct ClogTlogWorkload : TestWorkload {
 			}
 			when(wait(timeout)) {
 				// recovery state hasn't changed in 30s, exclude the failed tlog
-				state Optional<ConfigureAutoResult> conf;
-
 				CODE_PROBE(true, "Exclude failed tlog");
 				TraceEvent("ExcludeFailedLog")
 				    .detail("TLog", self->tlog.get())
 				    .detail("RecoveryState", self->dbInfo->get().recoveryState);
 				std::string modes = "exclude=" + formatIpPort(self->tlog.get().ip, self->tlog.get().port);
 				ConfigurationResult r = wait(ManagementAPI::changeConfig(cx.getReference(), modes, /*force=*/true));
-				TraceEvent("ExcludeFailedLog")
-				    .detail("Result", r)
-				    .detail("ConfigIsValid", conf.present() && conf.get().isValid());
+				TraceEvent("ExcludeFailedLog").detail("Result", r);
 				return Void();
 			}
 		}
