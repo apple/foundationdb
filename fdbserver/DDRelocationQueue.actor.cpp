@@ -1589,26 +1589,16 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 					ASSERT(rd.dataMoveId.isValid());
 				}
-				auto f = self->dataMoves.intersectingRanges(rd.keys);
 				// TODO: split-brain issue for physical shard move
 				// the update of inflightActor and the update of dataMoves is not atomic
 				// Currently, the relocator is triggered based on the inflightActor info.
 				// In future, we should assert at here that the intersecting DataMove in self->dataMoves are all invalid
 				// i.e. the range of new relocators is match to the range of prevCleanup.
-				TraceEvent e(SevDebug, "InsertDataMoveByRelocator", distributorId);
-				e.setMaxEventLength(20000);
-				int cc = 0;
-				for (auto it = f.begin(); it != f.end(); ++it) {
-					KeyRangeRef ikr(it->range().begin, it->range().end);
-					e.detail("CurrentIntersectRange" + std::to_string(cc), ikr);
-					e.detail("CurrentIntersectDataMoveId" + std::to_string(cc), it->value().id);
-					cc++;
-				}
-				e.detail("DebugID", debugID);
-				e.detail("NewDataMoveID", rd.dataMoveId);
-				e.detail("NewRange", rd.keys);
-				e.detail("Range", rd.keys);
-				e.detail("RelocatorID", relocatorDebugID);
+				TraceEvent(SevDebug, "InsertDataMoveByRelocator", distributorId)
+					.detail("DebugID", debugID)
+					.detail("NewDataMoveID", rd.dataMoveId)
+					.detail("NewRange", rd.keys)
+					.detail("RelocatorID", relocatorDebugID);
 				self->dataMoves.insert(rd.keys, DDQueue::DDDataMove(rd.dataMoveId));
 			}
 		}
