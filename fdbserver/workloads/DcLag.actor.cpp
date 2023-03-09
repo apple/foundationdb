@@ -170,8 +170,10 @@ struct DcLagWorkload : TestWorkload {
 				status = fetchDatacenterLag(self, cx);
 			}
 			when(Optional<double> lag = wait(status)) {
-				if (lag.present() && lag.get() >= SERVER_KNOBS->LOG_ROUTER_PEEK_SWITCH_DC_TIME) {
+				if (lag.present() && lag.get() >= SERVER_KNOBS->LOG_ROUTER_PEEK_SWITCH_DC_TIME - 10.0) {
+					// Detect DC Lag happened before Log router switch DC reactions
 					lagged = true;
+					TraceEvent("DcLagDetected");
 				}
 				if (lagged && lag.present() && lag.get() < 5.0) {
 					TraceEvent("DcLagRecovered");
