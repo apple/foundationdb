@@ -9040,9 +9040,9 @@ private:
 		}
 	}
 
-	// Handles checkpoint private mutations: 
-    // 1. Registers a pending checkpoint request, it will be fullfilled when the desired version is durable.
-    // 2. Schedule deleting a checkpoint.
+	// Handles checkpoint private mutations:
+	// 1. Registers a pending checkpoint request, it will be fullfilled when the desired version is durable.
+	// 2. Schedule deleting a checkpoint.
 	void handleCheckpointPrivateMutation(StorageServer* data, const MutationRef& m, Version ver) {
 		if (!data->shardAware) {
 			return;

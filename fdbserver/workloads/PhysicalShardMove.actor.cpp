@@ -270,17 +270,11 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state std::vector<CheckpointMetaData> fetchedCheckpoints;
 		loop {
 			fetchedCheckpoints.clear();
-			// TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", describe(records));
 			try {
 				std::vector<Future<CheckpointMetaData>> fCheckpointMetaData;
 				if (asKeyValues) {
 					TraceEvent(SevDebug, "FetchCheckpointAsKeyValues");
-					// std::unordered_map<UID, std::vector<KeyRange>> checkpointRangeMap;
-					// for (const auto& [range, record] : records) {
-					// 	checkpointRangeMap[record.checkpointID].push_back(range);
-					// }
 					for (const auto& [range, record] : records) {
-						// ASSERT(!checkpointRangeMap[record.checkpointID].empty());
 						fCheckpointMetaData.push_back(fetchCheckpointRanges(cx, record, checkpointDir, { range }));
 					}
 				} else {
@@ -501,7 +495,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 		state std::vector<UID> dests(includes.begin(), includes.end());
 		state UID owner = deterministicRandom()->randomUniqueID();
-		// state Key ownerKey = "\xff/moveKeysLock/Owner"_sr;
 		state DDEnabledState ddEnabledState;
 
 		state Transaction tr(cx);
