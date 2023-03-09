@@ -2780,6 +2780,22 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 	return delayUntil(diskParameters->nextOperation + randomLatency);
 }
 
+void enableConnectionFailures(std::string const& context) {
+	if (g_network->isSimulated()) {
+		g_simulator.connectionFailuresDisableDuration = 0;
+		g_simulator.speedUpSimulation = false;
+		TraceEvent(SevWarnAlways, ("EnableConnectionFailures_" + context).c_str());
+	}
+}
+
+void disableConnectionFailures(std::string const& context) {
+	if (g_network->isSimulated()) {
+		g_simulator.connectionFailuresDisableDuration = 1e6;
+		g_simulator.speedUpSimulation = true;
+		TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
+	}
+}
+
 #if defined(_WIN32)
 
 /* Opening with FILE_SHARE_DELETE lets simulation actually work on windows - previously renames were always failing.
