@@ -121,8 +121,10 @@ ACTOR Future<Void> persistAuditStateMap(Database cx, AuditStorageState auditStat
 
 	loop {
 		try {
-			wait(krmSetRange(
-			    &tr, auditRangePrefixFor(auditState.id), auditState.range, auditStorageStateValue(auditState)));
+			wait(krmSetRange(&tr,
+			                 auditRangePrefixFor(auditState.getType(), auditState.id),
+			                 auditState.range,
+			                 auditStorageStateValue(auditState)));
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -132,14 +134,17 @@ ACTOR Future<Void> persistAuditStateMap(Database cx, AuditStorageState auditStat
 	return Void();
 }
 
-ACTOR Future<std::vector<AuditStorageState>> getAuditStateForRange(Database cx, UID id, KeyRange range) {
+ACTOR Future<std::vector<AuditStorageState>> getAuditStateForRange(Database cx,
+                                                                   AuditType type,
+                                                                   UID id,
+                                                                   KeyRange range) {
 	state RangeResult auditStates;
 	state Transaction tr(cx);
 
 	loop {
 		try {
 			RangeResult res_ = wait(krmGetRanges(&tr,
-			                                     auditRangePrefixFor(id),
+			                                     auditRangePrefixFor(type, id),
 			                                     range,
 			                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
 			                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
@@ -170,8 +175,10 @@ ACTOR Future<Void> persistAuditMetadataState(Database cx, UID id, AuditStorageSt
 
 	loop {
 		try {
-			wait(krmSetRange(
-			    &tr, auditRangePrefixFor(auditState.id), auditState.range, auditStorageStateValue(auditState)));
+			wait(krmSetRange(&tr,
+			                 auditRangePrefixFor(auditState.getType(), auditState.id),
+			                 auditState.range,
+			                 auditStorageStateValue(auditState)));
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));

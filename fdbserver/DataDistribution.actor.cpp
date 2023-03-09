@@ -1406,7 +1406,7 @@ ACTOR Future<Void> resumeAuditStorage(Reference<DataDistributor> self, AuditStor
 	audit->retryCount = retryCount;
 	ASSERT(!self->audits[audit->state.getType()].contains(audit->state.id));
 	self->audits[audit->state.getType()][audit->state.id] = audit;
-	if (audit->state.getType() == AuditType::ValidateHA) {
+	if (audit->state.getType() == AuditType::ValidateHA || audit->state.getType() == AuditType::ValidateReplica) {
 		audit->actors.add(loadAndDispatchAuditRange(self, audit, audit->state.range));
 	} else {
 		self->audits[audit->state.getType()].erase(audit->state.id);
@@ -1460,7 +1460,7 @@ ACTOR Future<Void> resumeAuditStorage(Reference<DataDistributor> self, AuditStor
 }
 
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req) {
-	if (req.getType() != AuditType::ValidateHA) {
+	if (req.getType() != AuditType::ValidateHA && req.getType() != AuditType::ValidateReplica) {
 		throw not_implemented();
 	}
 
@@ -1516,7 +1516,8 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 				audit = std::make_shared<DDAudit>(auditId, req.range, req.getType());
 				audit->state.setPhase(AuditPhase::Running);
 				self->audits[req.getType()][audit->state.id] = audit;
-				ASSERT(req.getType() == AuditType::ValidateHA); // currently, we only support ValidateHA
+				// Currently, we only support ValidateHA and ValidateReplica
+				ASSERT(req.getType() == AuditType::ValidateHA || req.getType() == AuditType::ValidateReplica);
 				audit->actors.add(loadAndDispatchAuditRange(self, audit, req.range));
 				TraceEvent(SevDebug, "AuditNew", self->ddId)
 				    .detail("AuditType", req.getType())
@@ -1596,8 +1597,8 @@ ACTOR Future<Void> loadAndDispatchAuditRange(Reference<DataDistributor> self,
 
 	while (begin < range.end) {
 		currentRange = KeyRangeRef(begin, range.end);
-		std::vector<AuditStorageState> auditStates =
-		    wait(getAuditStateForRange(self->txnProcessor->context(), audit->state.id, currentRange));
+		std::vector<AuditStorageState> auditStates = wait(getAuditStateForRange(
+		    self->txnProcessor->context(), audit->state.getType(), audit->state.id, currentRange));
 		ASSERT(!auditStates.empty());
 		begin = auditStates.back().range.end;
 		for (const auto& auditState : auditStates) {
@@ -1609,6 +1610,7 @@ ACTOR Future<Void> loadAndDispatchAuditRange(Reference<DataDistributor> self,
 			} else if (phase == AuditPhase::Error) {
 				audit->foundError = true;
 			} else {
+				ASSERT(phase == AuditPhase::Invalid);
 				audit->actors.add(scheduleAuditForRange(self, audit, auditState.range));
 			}
 		}
@@ -1638,13 +1640,29 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
 			for (i = 0; i < rangeLocations.size(); ++i) {
 				AuditStorageRequest req(audit->state.id, rangeLocations[i].range, audit->state.getType());
 				if (audit->state.getType() == AuditType::ValidateHA && rangeLocations[i].servers.size() >= 2) {
+					// pick a server from primary DC
 					auto it = rangeLocations[i].servers.begin();
 					const int idx = deterministicRandom()->randomInt(0, it->second.size());
 					StorageServerInterface& targetServer = it->second[idx];
 					++it;
+					// pick a server from remote DC
 					for (; it != rangeLocations[i].servers.end(); ++it) {
 						const int idx = deterministicRandom()->randomInt(0, it->second.size());
 						req.targetServers.push_back(it->second[idx].id());
+					}
+					audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
+				} else if (audit->state.getType() == AuditType::ValidateReplica) {
+					auto it = rangeLocations[i].servers.begin();
+					ASSERT(it->second.size() > 1);
+					bool picked = false;
+					StorageServerInterface targetServer;
+					for (auto& ssi : it->second) {
+						if (picked == false) {
+							targetServer = ssi;
+							picked = true;
+						} else {
+							req.targetServers.push_back(ssi.id());
+						}
 					}
 					audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
 				}

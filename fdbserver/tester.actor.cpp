@@ -1211,8 +1211,7 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 		loop {
 			try {
 				cx = openDBOnServer(dbInfo);
-				std::vector<AuditStorageState> auditStates =
-				    wait(getLatestAuditStates(cx, static_cast<AuditType>(req.type), 30));
+				std::vector<AuditStorageState> auditStates = wait(getLatestAuditStates(cx, req.getType(), 30));
 				state Optional<AuditStorageState> readLatestResult;
 				for (const auto& auditState : auditStates) {
 					if (auditState.range.contains(req.range)) {

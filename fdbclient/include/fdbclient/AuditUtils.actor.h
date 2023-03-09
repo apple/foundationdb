@@ -38,9 +38,9 @@ ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID i
 ACTOR Future<std::vector<AuditStorageState>> getLatestAuditStates(Database cx, AuditType type, int num);
 
 ACTOR Future<Void> persistAuditStateMap(Database cx, AuditStorageState auditState);
-ACTOR Future<std::vector<AuditStorageState>> getAuditStateForRange(Database cx, UID id, KeyRange range);
+ACTOR Future<std::vector<AuditStorageState>> getAuditStateForRange(Database cx, AuditType type, UID id, KeyRange range);
 
 ACTOR Future<Void> persistAuditMetadataState(Database cx, UID id, AuditStorageState auditState);
-ACTOR Future<std::vector<AuditStorageState>> getAuditMetadataState(Database cx, UID id);
+ACTOR Future<std::vector<AuditStorageState>> getAuditMetadataState(Database cx, AuditType type, UID id);
 #include "flow/unactorcompiler.h"
 #endif

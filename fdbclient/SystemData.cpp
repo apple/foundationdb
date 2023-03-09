@@ -320,9 +320,11 @@ const Key auditRangeKey(const UID& auditId, const KeyRef& key) {
 	return wr.toValue();
 }
 
-const Key auditRangePrefixFor(const UID& auditId) {
+const Key auditRangePrefixFor(const AuditType type, const UID& auditId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(auditPrefix);
+	wr << static_cast<uint8_t>(type);
+	wr.serializeBytes("/"_sr);
 	wr << auditId;
 	wr.serializeBytes("/"_sr);
 	return wr.toValue();

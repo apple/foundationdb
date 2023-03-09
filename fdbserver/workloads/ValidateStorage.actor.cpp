@@ -68,45 +68,31 @@ struct ValidateStorage : TestWorkload {
 		return _start(this, cx);
 	}
 
-	ACTOR Future<Void> _start(ValidateStorage* self, Database cx) {
-		TraceEvent("ValidateStorageTestBegin");
-		state std::map<Key, Value> kvs({ { "TestKeyA"_sr, "TestValueA"_sr },
-		                                 { "TestKeyB"_sr, "TestValueB"_sr },
-		                                 { "TestKeyC"_sr, "TestValueC"_sr },
-		                                 { "TestKeyD"_sr, "TestValueD"_sr },
-		                                 { "TestKeyE"_sr, "TestValueE"_sr },
-		                                 { "TestKeyF"_sr, "TestValueF"_sr } });
+	ACTOR Future<Void> auditStorageForType(Database cx, AuditType type) {
 		state Optional<UID> auditId;
-
-		Version _ = wait(self->populateData(self, cx, &kvs));
-
-		TraceEvent("TestValueWritten");
-
-		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
-		TraceEvent("TestValueVerified");
 
 		loop {
 			try {
 				Optional<UID> auditId_ = wait(timeout(auditStorage(cx->getConnectionRecord(),
 				                                                   allKeys,
-				                                                   AuditType::ValidateHA,
+				                                                   type,
 				                                                   /*timeoutSeconds*/ 30,
 				                                                   /*retryLimit*/ 5,
 				                                                   /*async=*/true),
 				                                      300));
 				if (!auditId_.present()) {
-					TraceEvent("AuditIdNotPresent");
+					TraceEvent("AuditIdNotPresent").detail("AuditType", type);
 					throw audit_storage_failed();
 				}
 				auditId = auditId_.get();
-				TraceEvent("TestValidateEnd").detail("AuditID", auditId);
+				TraceEvent("TestValidateEnd").detail("AuditID", auditId).detail("AuditType", type);
 				break;
 			} catch (Error& e) {
 				if (e.code() == error_code_audit_storage_timed_out) {
-					TraceEvent(SevWarnAlways, "StartAuditStorageTimedOut");
+					TraceEvent(SevWarnAlways, "StartAuditStorageTimedOut").detail("AuditType", type);
 					break;
 				} else {
-					TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
+					TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e).detail("AuditType", type);
 					wait(delay(1));
 				}
 			}
@@ -115,7 +101,7 @@ struct ValidateStorage : TestWorkload {
 		if (auditId.present()) {
 			loop {
 				try {
-					AuditStorageState auditState = wait(getAuditState(cx, AuditType::ValidateHA, auditId.get()));
+					AuditStorageState auditState = wait(getAuditState(cx, type, auditId.get()));
 					if (auditState.getPhase() != AuditPhase::Complete) {
 						ASSERT(auditState.getPhase() == AuditPhase::Running);
 						wait(delay(30));
@@ -124,7 +110,10 @@ struct ValidateStorage : TestWorkload {
 						break;
 					}
 				} catch (Error& e) {
-					TraceEvent("WaitAuditStorageError").errorUnsuppressed(e).detail("AuditID", auditId.get());
+					TraceEvent("WaitAuditStorageError")
+					    .errorUnsuppressed(e)
+					    .detail("AuditID", auditId.get())
+					    .detail("AuditType", type);
 					wait(delay(1));
 				}
 			}
@@ -134,32 +123,55 @@ struct ValidateStorage : TestWorkload {
 			try {
 				Optional<UID> auditId_ = wait(timeout(auditStorage(cx->getConnectionRecord(),
 				                                                   allKeys,
-				                                                   AuditType::ValidateHA,
+				                                                   type,
 				                                                   /*timeoutSeconds*/ 30,
 				                                                   /*retryLimit*/ 5,
 				                                                   /*async=*/true),
 				                                      300));
 				if (!auditId_.present()) {
-					TraceEvent("AuditIdNotPresent");
+					TraceEvent("AuditIdNotPresent").detail("AuditType", type);
 					throw audit_storage_failed();
 				}
 				if (auditId.present()) {
 					ASSERT(auditId_.get() != auditId.get());
-					TraceEvent("TestValidateEnd").detail("AuditID", auditId_.get());
+					TraceEvent("TestValidateEnd").detail("AuditID", auditId_.get()).detail("AuditType", type);
 				}
 				break;
 			} catch (Error& e) {
 				if (e.code() == error_code_audit_storage_timed_out) {
-					TraceEvent(SevWarnAlways, "StartAuditStorageTimedOut");
+					TraceEvent(SevWarnAlways, "StartAuditStorageTimedOut").detail("AuditType", type);
 					break;
 				} else {
-					TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
+					TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e).detail("AuditType", type);
 					wait(delay(1));
 				}
 			}
 		}
 
-		TraceEvent("TestValidateEndAll");
+		return Void();
+	}
+
+	ACTOR Future<Void> _start(ValidateStorage* self, Database cx) {
+		TraceEvent("ValidateStorageTestBegin");
+		state std::map<Key, Value> kvs({ { "TestKeyA"_sr, "TestValueA"_sr },
+		                                 { "TestKeyB"_sr, "TestValueB"_sr },
+		                                 { "TestKeyC"_sr, "TestValueC"_sr },
+		                                 { "TestKeyD"_sr, "TestValueD"_sr },
+		                                 { "TestKeyE"_sr, "TestValueE"_sr },
+		                                 { "TestKeyF"_sr, "TestValueF"_sr } });
+
+		Version _ = wait(self->populateData(self, cx, &kvs));
+
+		TraceEvent("TestValueWritten");
+
+		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
+		TraceEvent("TestValueVerified");
+
+		wait(self->auditStorageForType(cx, AuditType::ValidateHA));
+		TraceEvent("TestValidateHADone");
+		
+		wait(self->auditStorageForType(cx, AuditType::ValidateReplica));
+		TraceEvent("TestValidatReplicaDone");
 
 		return Void();
 	}

@@ -4882,7 +4882,7 @@ ACTOR Future<Void> validateRangeAgainstServers(StorageServer* data,
 	std::vector<Future<Void>> fs;
 	for (const auto& v : serverListValues) {
 		if (!v.present()) {
-			TraceEvent(SevWarn, "ValidateRangeRemoteServerNotFound", data->thisServerID)
+			TraceEvent(SevWarn, "ValidateRangeServerNotFound", data->thisServerID)
 			    .detail("AuditID", auditState.id)
 			    .detail("Range", auditState.range);
 			throw audit_storage_failed();
