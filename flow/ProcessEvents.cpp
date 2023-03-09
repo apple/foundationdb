@@ -42,23 +42,36 @@ struct EventImpl {
 
 struct ProcessEventsImpl {
 	struct Triggering {
-		bool& value;
-		explicit Triggering(bool& value) : value(value) {
-			if (value) {
-				ASSERT(false);
-			}
-			value = true;
+		unsigned& value;
+		ProcessEventsImpl& processEvents;
+		explicit Triggering(unsigned& value, ProcessEventsImpl& processEvents)
+		  : value(value), processEvents(processEvents) {
+			++value;
 		}
-		~Triggering() { value = false; }
+		~Triggering() {
+			if (--value == 0) {
+				// merge modifications back into the event map
+				for (auto const& p : processEvents.toRemove) {
+					for (auto const& n : p.second) {
+						processEvents.events[n].erase(p.first);
+					}
+				}
+				processEvents.toRemove.clear();
+				for (auto const& p : processEvents.toInsert) {
+					processEvents.events[p.first].insert(p.second.begin(), p.second.end());
+				}
+				processEvents.toInsert.clear();
+			}
+		}
 	};
 	using EventMap = std::unordered_map<StringRef, std::unordered_map<EventImpl::Id, EventImpl*>>;
-	bool triggering = false;
+	unsigned triggering = 0;
 	EventMap events;
 	std::map<EventImpl::Id, std::vector<StringRef>> toRemove;
 	EventMap toInsert;
 
 	void trigger(StringRef name, std::any const& data, Error const& e) {
-		Triggering _(triggering);
+		Triggering _(triggering, *this);
 		auto iter = events.find(name);
 		// strictly speaking this isn't a bug, but having callbacks that aren't caught
 		// by anyone could mean that something was misspelled. Therefore, the safe thing
@@ -66,7 +79,7 @@ struct ProcessEventsImpl {
 		if (iter == events.end()) {
 			return;
 		}
-		std::unordered_map<EventImpl::Id, EventImpl*> callbacks = iter->second;
+		std::unordered_map<EventImpl::Id, EventImpl*>& callbacks = iter->second;
 		// after we collected all unique callbacks we can call each
 		for (auto const& c : callbacks) {
 			try {
@@ -81,17 +94,6 @@ struct ProcessEventsImpl {
 				UNSTOPPABLE_ASSERT(false);
 			}
 		}
-		// merge modifications back into the event map
-		for (auto const& p : toRemove) {
-			for (auto const& n : p.second) {
-				events[n].erase(p.first);
-			}
-		}
-		toRemove.clear();
-		for (auto const& p : toInsert) {
-			events[p.first].insert(p.second.begin(), p.second.end());
-		}
-		toInsert.clear();
 	}
 
 	void add(StringRef const& name, EventImpl* event) {
@@ -107,7 +109,30 @@ struct ProcessEventsImpl {
 
 	void remove(std::vector<StringRef> names, EventImpl::Id id) {
 		if (triggering) {
-			toRemove.emplace(id, std::move(names));
+			// it's possible that the event hasn't been added yet
+			bool inInsertMap = false;
+			for (auto const& name : names) {
+				auto it = toInsert.find(name);
+				if (it == toInsert.end()) {
+					// either all are in the insert map or none
+					ASSERT(!inInsertMap);
+					break;
+				}
+				auto it2 = it->second.find(id);
+				if (it2 == it->second.end()) {
+					// either all are in the insert map or none
+					ASSERT(!inInsertMap);
+					break;
+				}
+				inInsertMap = true;
+				it->second.erase(it2);
+				if (it->second.empty()) {
+					toInsert.erase(it);
+				}
+			}
+			if (!inInsertMap) {
+				toRemove.emplace(id, std::move(names));
+			}
 		} else {
 			for (auto const& name : names) {
 				events[name].erase(id);
@@ -218,6 +243,21 @@ TEST_CASE("/flow/ProcessEvents") {
 		trigger("deletion"_sr, ""_sr, success());
 		ASSERT_EQ(called_self_delete, 1);
 		ASSERT_EQ(called_non_delete, 2);
+	}
+	{
+		// Reentrant safe
+		Event ev("reentrant"_sr, [](StringRef, std::any const& data, Error const&) {
+			// call depth of 5
+			auto v = std::any_cast<int>(data);
+			if (v < 5) {
+				Event doNotCall("reentrant"_sr, [](StringRef, std::any const&, Error const&) {
+					// should never be called
+					ASSERT(false);
+				});
+				trigger("reentrant"_sr, v + 1, success());
+			}
+		});
+		trigger("reentrant"_sr, 0, success());
 	}
 	return Void();
 }
