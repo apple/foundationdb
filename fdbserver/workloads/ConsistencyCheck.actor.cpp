@@ -49,11 +49,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	struct OnTimeout {
 		ConsistencyCheckWorkload& self;
 		explicit OnTimeout(ConsistencyCheckWorkload& self) : self(self) {}
-		void operator()(StringRef name, StringRef msg, Error const& e) {
+		void operator()(StringRef name, std::any const& msg, Error const& e) {
 			TraceEvent(SevError, "ConsistencyCheckFailure")
 			    .error(e)
 			    .detail("EventName", name)
-			    .detail("EventMessage", msg)
+			    .detail("EventMessage", std::any_cast<StringRef>(msg))
 			    .log();
 		}
 	};

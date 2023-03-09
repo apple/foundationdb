@@ -1,5 +1,5 @@
 /*
- * ProcessEvents.h
+ * ResolverBug.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -17,31 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "fdbserver/ResolverBug.h"
 
-#ifndef FLOW_PROCESS_EVENTS_H
-#define FLOW_PROCESS_EVENTS_H
-#include <functional>
-#include <any>
-
-#include "flow/flow.h"
-
-namespace ProcessEvents {
-
-// A callback is never allowed to throw. Since std::function can't
-// take noexcept signatures, this is enforced at runtime
-using Callback = std::function<void(StringRef, std::any const&, Error const&)>;
-
-class Event : NonCopyable {
-	void* impl;
-
-public:
-	Event(StringRef name, Callback callback);
-	Event(std::vector<StringRef> name, Callback callback);
-	~Event();
-};
-
-void trigger(StringRef name, std::any const& data, Error const& e);
-
-} // namespace ProcessEvents
-
-#endif // FLOW_PROCESS_EVENTS_H
+std::shared_ptr<ISimBug> ResolverBugID::create() const {
+	return std::make_shared<ResolverBug>();
+}

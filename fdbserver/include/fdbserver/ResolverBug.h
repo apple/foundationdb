@@ -1,5 +1,5 @@
 /*
- * ProcessEvents.h
+ * ResolverBug.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,30 +18,27 @@
  * limitations under the License.
  */
 
-#ifndef FLOW_PROCESS_EVENTS_H
-#define FLOW_PROCESS_EVENTS_H
-#include <functional>
-#include <any>
+#ifndef FDBSERVER_RESOLVER_BUG_H
+#define FDBSERVER_RESOLVER_BUG_H
+#pragma once
 
-#include "flow/flow.h"
+#include "flow/SimBugInjector.h"
+#include <vector>
 
-namespace ProcessEvents {
+struct ResolverBug : public ISimBug {
+	double ignoreTooOldProbability = 0.0;
+	double ignoreWriteSetProbability = 0.0;
+	double ignoreReadSetProbability = 0.0;
 
-// A callback is never allowed to throw. Since std::function can't
-// take noexcept signatures, this is enforced at runtime
-using Callback = std::function<void(StringRef, std::any const&, Error const&)>;
-
-class Event : NonCopyable {
-	void* impl;
-
-public:
-	Event(StringRef name, Callback callback);
-	Event(std::vector<StringRef> name, Callback callback);
-	~Event();
+	// data used to control lifetime of cycle clients
+	bool bugFound = false;
+	unsigned currentPhase = 0;
+	std::vector<unsigned> cycleState;
 };
 
-void trigger(StringRef name, std::any const& data, Error const& e);
+class ResolverBugID : public IBugIdentifier {
+public:
+	std::shared_ptr<ISimBug> create() const override;
+};
 
-} // namespace ProcessEvents
-
-#endif // FLOW_PROCESS_EVENTS_H
+#endif // FDBSERVER_RESOLVER_BUG_H
