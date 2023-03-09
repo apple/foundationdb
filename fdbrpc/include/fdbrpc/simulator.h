@@ -55,6 +55,8 @@ struct ProcessInfo;
 struct MachineInfo;
 } // namespace simulator
 
+constexpr double DISABLE_CONNECTION_FAILURE_FOREVER = 1e6;
+
 class ISimulator : public INetwork {
 
 public:

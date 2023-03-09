@@ -319,7 +319,7 @@ ACTOR Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(LogRouterData
 				self->maxGetMoreTime = std::max(self->maxGetMoreTime, peekTime);
 				return result;
 			}
-			when(wait(self->logSystemChanged)) { // FIXME: does this actually happen?
+			when(wait(self->logSystemChanged)) {
 				if (self->logSystem->get()) {
 					result =
 					    self->logSystem->get()->peekLogRouter(self->dbgid, startVersion, self->routerTag, useSatellite);

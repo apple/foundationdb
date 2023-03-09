@@ -2678,7 +2678,8 @@ Future<Reference<IUDPSocket>> Sim2::createUDPSocket(bool isV6) {
 void startNewSimulator(bool printSimTime) {
 	ASSERT(!g_network);
 	g_network = g_simulator = new Sim2(printSimTime);
-	g_simulator->connectionFailuresDisableDuration = deterministicRandom()->random01() < 0.5 ? 0 : 1e6;
+	g_simulator->connectionFailuresDisableDuration =
+	    deterministicRandom()->coinflip() ? 0 : DISABLE_CONNECTION_FAILURE_FOREVER;
 }
 
 ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
@@ -2782,16 +2783,16 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 
 void enableConnectionFailures(std::string const& context) {
 	if (g_network->isSimulated()) {
-		g_simulator.connectionFailuresDisableDuration = 0;
-		g_simulator.speedUpSimulation = false;
+		g_simulator->connectionFailuresDisableDuration = 0;
+		g_simulator->speedUpSimulation = false;
 		TraceEvent(SevWarnAlways, ("EnableConnectionFailures_" + context).c_str());
 	}
 }
 
 void disableConnectionFailures(std::string const& context) {
 	if (g_network->isSimulated()) {
-		g_simulator.connectionFailuresDisableDuration = 1e6;
-		g_simulator.speedUpSimulation = true;
+		g_simulator->connectionFailuresDisableDuration = DISABLE_CONNECTION_FAILURE_FOREVER;
+		g_simulator->speedUpSimulation = true;
 		TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
 	}
 }
