@@ -117,7 +117,7 @@ class MasterData;
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // FIXME(swift): remove those
-extern "C" void swiftCallMeFuture(Promise<int>* promise);
+extern "C" void swiftCallMeFuture(void * _Nonnull opaqueResultPromisePtr) noexcept;
 
 using namespace std::literals;
 
