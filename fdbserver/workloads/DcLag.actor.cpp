@@ -78,11 +78,10 @@ struct DcLagWorkload : TestWorkload {
 		}
 		ASSERT(ips.size() > 0);
 
-		// Find all satellite tlogs
-		std::vector<NetworkAddress> logs; // all satellite logs
-		for (int i = 1; i < dbInfo->get().logSystemConfig.tLogs.size(); i++) {
-			const auto& tlogset = dbInfo->get().logSystemConfig.tLogs[i];
-			if (!tlogset.isLocal)
+		// Find all primary satellite tlogs
+		std::vector<NetworkAddress> logs; // all primary satellite logs
+		for (const auto& tlogset : dbInfo->get().logSystemConfig.tLogs) {
+			if (!tlogset.isLocal || tlogset.locality != tagLocalitySatellite)
 				continue;
 			for (const auto& log : tlogset.tLogs) {
 				const NetworkAddress& addr = log.interf().address();
