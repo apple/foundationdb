@@ -385,6 +385,7 @@ public:
 	int RESTCLIENT_MAX_CONNECTION_LIFE;
 	int RESTCLIENT_REQUEST_TRIES;
 	int RESTCLIENT_REQUEST_TIMEOUT_SEC;
+	int REST_LOG_LEVEL;
 
 	FlowKnobs(class Randomize, class IsSimulated);
 	void initialize(class Randomize, class IsSimulated);
