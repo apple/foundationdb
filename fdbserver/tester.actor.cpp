@@ -1453,6 +1453,17 @@ ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterContro
 	}
 }
 
+// Disables connection failures after the given time seconds
+ACTOR Future<Void> disableConnectionFailuresAfter(double seconds, std::string context) {
+	if (g_network->isSimulated()) {
+		TraceEvent(SevWarnAlways, ("ScheduleDisableConnectionFailures_" + context).c_str())
+		    .detail("At", now() + seconds);
+		wait(delay(seconds));
+		disableConnectionFailures(context);
+	}
+	return Void();
+}
+
 /**
  * \brief Test orchestrator: sends test specification to testers in the right order and collects the results.
  *
