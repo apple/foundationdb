@@ -146,13 +146,12 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 						wait(tr.onError(e));
 					}
 				}
-				Version ver = wait(setFuture);
+				Version keySetVersion = wait(setFuture);
+				int64_t versionDelta = lastReadVersion - std::max(keySetVersion, watchCommitVersion);
 				//TraceEvent("FTWWatchDone").detail("Key", printable(setKey));
 				// Assert that the time from setting the key to triggering the watch is no greater than 25s
-				ASSERT(!watchCommitted ||
-				       lastReadVersion - std::max(ver, watchCommitVersion) >= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT ||
-				       lastReadVersion - std::max(ver, watchCommitVersion) <
-				           SERVER_KNOBS->VERSIONS_PER_SECOND * (25 + getDuration));
+				ASSERT(!watchCommitted || versionDelta >= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT ||
+				       versionDelta < SERVER_KNOBS->VERSIONS_PER_SECOND * (25 + getDuration));
 
 				if (now() - testStart > self->testDuration)
 					break;
