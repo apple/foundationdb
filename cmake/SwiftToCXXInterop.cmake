@@ -46,6 +46,9 @@ function(add_swift_to_cxx_header_gen_target target_name header_target_name heade
     "$<$<BOOL:${target_includes_expr}>:-I$<JOIN:${target_includes_expr},;-I>>"
     ${ARG_FLAGS}
     ${SwiftXccOptions}
+
+    # FIXME (Alex): remove once issue with _Concurrency exposed is fixed.
+    -clang-header-expose-decls=has-expose-attr-or-stdlib
   DEPENDS
     "${target_sources}"
   COMMAND_EXPAND_LISTS
