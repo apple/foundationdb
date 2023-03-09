@@ -21,15 +21,12 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbrpc/Locality.h"
-#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
-#include "flow/CodeProbe.h"
-#include "flow/NetworkAddress.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
@@ -55,7 +52,7 @@ struct DcLagWorkload : TestWorkload {
 		startDelay = getOption(options, "startDelay"_sr, 10.0);
 	}
 
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
+	std::string description() const override { return "DcLagWorkload"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
@@ -75,7 +72,7 @@ struct DcLagWorkload : TestWorkload {
 		std::vector<IPAddress> ips; // all remote process IPs
 		for (const auto& process : g_simulator.getAllProcesses()) {
 			const auto& ip = process->address.ip;
-			if (process->locality.dcId().present() && process->locality.dcId().get() == g_simulator.remoteDcId) {
+			if (process->locality.dcId().present() && process->locality.dcId() == g_simulator.remoteDcId) {
 				ips.push_back(ip);
 			}
 		}
@@ -185,4 +182,4 @@ struct DcLagWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<DcLagWorkload> DcLagWorkloadFactory;
+WorkloadFactory<DcLagWorkload> DcLagWorkloadFactory("DcLag");
