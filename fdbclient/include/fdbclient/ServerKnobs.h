@@ -166,6 +166,7 @@ public:
 	int64_t MAX_PHYSICAL_SHARD_BYTES;
 	double PHYSICAL_SHARD_METRICS_DELAY;
 	double ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME;
+	bool PHYSICAL_SHARD_MOVE_VERBOSE_TRACKING;
 
 	double READ_REBALANCE_CPU_THRESHOLD; // read rebalance only happens if the source servers' CPU > threshold
 	int READ_REBALANCE_SRC_PARALLELISM; // the max count a server become a source server within a certain interval

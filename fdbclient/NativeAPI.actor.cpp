@@ -9082,8 +9082,10 @@ ACTOR static Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getChe
 	state Span span("NAPI:GetCheckpointMetaDataForRange"_loc);
 	state int index = 0;
 	state std::vector<Future<CheckpointMetaData>> futures;
+	state std::vector<KeyRangeLocationInfo> locations;
 
 	loop {
+		locations.clear();
 		TraceEvent(SevDebug, "GetCheckpointMetaDataForRangeBegin")
 		    .detail("Range", range.toString())
 		    .detail("Version", version)
@@ -9091,17 +9093,17 @@ ACTOR static Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getChe
 		futures.clear();
 
 		try {
-			state std::vector<KeyRangeLocationInfo> locations =
-			    wait(getKeyRangeLocations(cx,
-			                              TenantInfo(),
-			                              range,
-			                              CLIENT_KNOBS->TOO_MANY,
-			                              Reverse::False,
-			                              &StorageServerInterface::checkpoint,
-			                              span.context,
-			                              Optional<UID>(),
-			                              UseProvisionalProxies::False,
-			                              latestVersion));
+			wait(store(locations,
+			           getKeyRangeLocations(cx,
+			                                TenantInfo(),
+			                                range,
+			                                CLIENT_KNOBS->TOO_MANY,
+			                                Reverse::False,
+			                                &StorageServerInterface::checkpoint,
+			                                span.context,
+			                                Optional<UID>(),
+			                                UseProvisionalProxies::False,
+			                                latestVersion)));
 
 			for (index = 0; index < locations.size(); ++index) {
 				futures.push_back(getCheckpointMetaDataInternal(
@@ -9135,36 +9137,38 @@ ACTOR static Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getChe
 		}
 	}
 
-	std::vector<CheckpointMetaData> res;
+	std::vector<std::pair<KeyRange, CheckpointMetaData>> res;
 	for (index = 0; index < futures.size(); ++index) {
-		TraceEvent(SevDebug, "GetCheckpointShardEnd").detail("Checkpoint", futures[index].get().toString());
-		res.push_back(futures[index].get());
+		TraceEvent(SevDebug, "GetCheckpointShardEnd")
+		    .detail("Range", locations[index].range)
+		    .detail("Checkpoint", futures[index].get().toString());
+		res.push_back(std::make_pair(locations[index].range, futures[index].get()));
 	}
 	return res;
 }
-
-ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
-                                                                    std::vector<KeyRange> ranges,
-                                                                    Version version,
-                                                                    CheckpointFormat format,
-                                                                    Optional<UID> actionId,
-                                                                    double timeout) {
-	state std::vector<Future<std::vector<CheckpointMetaData>>> futures;
+ACTOR Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(Database cx,
+                                                                                         std::vector<KeyRange> ranges,
+                                                                                         Version version,
+                                                                                         CheckpointFormat format,
+                                                                                         Optional<UID> actionId,
+                                                                                         double timeout) {
+	state std::vector<Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>>> futures;
 
 	// TODO(heliu): Avoid send requests to the same shard.
 	for (const auto& range : ranges) {
 		futures.push_back(getCheckpointMetaDataForRange(cx, range, version, format, actionId, timeout));
 	}
 
-	std::vector<std::vector<CheckpointMetaData>> results = wait(getAll(futures));
+	std::vector<std::vector<std::pair<KeyRange, CheckpointMetaData>>> results = wait(getAll(futures));
 
-	std::unordered_set<CheckpointMetaData> checkpoints;
+	std::vector<std::pair<KeyRange, CheckpointMetaData>> res;
 
 	for (const auto& r : results) {
-		checkpoints.insert(r.begin(), r.end());
+		ASSERT(!r.empty());
+		res.insert(res.end(), r.begin(), r.end());
 	}
 
-	return std::vector<CheckpointMetaData>(checkpoints.begin(), checkpoints.end());
+	return res;
 }
 
 ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions) {

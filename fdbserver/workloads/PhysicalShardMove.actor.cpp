@@ -240,7 +240,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		}
 
 		// Fetch checkpoint meta data.
-		state std::vector<CheckpointMetaData> records;
+		state std::vector<std::pair<KeyRange, CheckpointMetaData>> records;
 		loop {
 			records.clear();
 			try {
@@ -248,8 +248,8 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				           getCheckpointMetaData(cx, checkpointRanges, version, format, Optional<UID>(dataMoveId))));
 				TraceEvent(SevDebug, "TestCheckpointMetaDataFetched")
 				    .detail("Range", describe(checkpointRanges))
-				    .detail("Version", version)
-				    .detail("Checkpoints", describe(records));
+				    .detail("Version", version);
+				// .detail("Checkpoints", describe(records));
 
 				break;
 			} catch (Error& e) {
@@ -263,43 +263,37 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			}
 		}
 
-		// Fetch checkpoint.
+		// Fetch checkpoints.
 		state std::string checkpointDir = abspath("checkpoints");
 		platform::eraseDirectoryRecursive(checkpointDir);
 		ASSERT(platform::createDirectory(checkpointDir));
 		state std::vector<CheckpointMetaData> fetchedCheckpoints;
-		state int i = 0;
-		for (; i < records.size(); ++i) {
-			loop {
-				TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", records[i].toString());
-				try {
-					state CheckpointMetaData record;
-					if (asKeyValues) {
-						std::vector<KeyRange> fetchRanges;
-						for (const auto& range : restoreRanges) {
-							for (const auto& cRange : records[i].ranges) {
-								if (cRange.contains(range)) {
-									fetchRanges.push_back(range);
-									break;
-								}
-							}
-						}
-						ASSERT(!fetchRanges.empty());
-						wait(store(record, fetchCheckpointRanges(cx, records[i], checkpointDir, fetchRanges)));
-						ASSERT(record.getFormat() == RocksDBKeyValues);
-					} else {
-						wait(store(record, fetchCheckpoint(cx, records[i], checkpointDir)));
-						ASSERT(record.getFormat() == format);
+		loop {
+			fetchedCheckpoints.clear();
+			// TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", describe(records));
+			try {
+				std::vector<Future<CheckpointMetaData>> fCheckpointMetaData;
+				if (asKeyValues) {
+					TraceEvent(SevDebug, "FetchCheckpointAsKeyValues");
+					// std::unordered_map<UID, std::vector<KeyRange>> checkpointRangeMap;
+					// for (const auto& [range, record] : records) {
+					// 	checkpointRangeMap[record.checkpointID].push_back(range);
+					// }
+					for (const auto& [range, record] : records) {
+						// ASSERT(!checkpointRangeMap[record.checkpointID].empty());
+						fCheckpointMetaData.push_back(fetchCheckpointRanges(cx, record, checkpointDir, { range }));
 					}
-					fetchedCheckpoints.push_back(record);
-					TraceEvent(SevDebug, "TestCheckpointFetched").detail("Checkpoint", record.toString());
-					break;
-				} catch (Error& e) {
-					TraceEvent(SevWarn, "TestFetchCheckpointError")
-					    .errorUnsuppressed(e)
-					    .detail("Checkpoint", records[i].toString());
-					wait(delay(1));
+				} else {
+					for (const auto& [range, record] : records) {
+						fCheckpointMetaData.push_back(fetchCheckpoint(cx, record, checkpointDir));
+					}
 				}
+				wait(store(fetchedCheckpoints, getAll(fCheckpointMetaData)));
+				TraceEvent(SevDebug, "TestCheckpointFetched").detail("Checkpoints", describe(fetchedCheckpoints));
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevWarn, "TestFetchCheckpointError").errorUnsuppressed(e);
+				wait(delay(1));
 			}
 		}
 
