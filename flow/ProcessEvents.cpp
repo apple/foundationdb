@@ -55,13 +55,15 @@ struct ProcessEventsImpl {
 	std::map<EventImpl::Id, std::vector<StringRef>> toRemove;
 	EventMap toInsert;
 
-	void trigger(StringRef name, StringRef msg, Error const& e) {
+	void trigger(StringRef name, std::any const& data, Error const& e) {
 		Triggering _(triggering);
 		auto iter = events.find(name);
 		// strictly speaking this isn't a bug, but having callbacks that aren't caught
 		// by anyone could mean that something was misspelled. Therefore, the safe thing
 		// to do is to abort.
-		ASSERT(iter != events.end());
+		if (iter == events.end()) {
+			return;
+		}
 		std::unordered_map<EventImpl::Id, EventImpl*> callbacks = iter->second;
 		// after we collected all unique callbacks we can call each
 		for (auto const& c : callbacks) {
@@ -70,7 +72,7 @@ struct ProcessEventsImpl {
 				// which case attempting to call it will be undefined
 				// behavior.
 				if (toRemove.count(c.first) == 0) {
-					c.second->callback(name, msg, e);
+					c.second->callback(name, data, e);
 				}
 			} catch (...) {
 				// callbacks are not allowed to throw
@@ -126,8 +128,8 @@ void EventImpl::removeEvent() {
 
 namespace ProcessEvents {
 
-void trigger(StringRef name, StringRef msg, Error const& e) {
-	processEventsImpl.trigger(name, msg, e);
+void trigger(StringRef name, std::any const& data, Error const& e) {
+	processEventsImpl.trigger(name, data, e);
 }
 
 Event::Event(StringRef name, Callback callback) {
@@ -146,7 +148,7 @@ TEST_CASE("/flow/ProcessEvents") {
 	{
 		// Basic test
 		unsigned numHits = 0;
-		Event _("basic"_sr, [&numHits](StringRef n, StringRef, Error const& e) {
+		Event _("basic"_sr, [&numHits](StringRef n, std::any const&, Error const& e) {
 			ASSERT_EQ(n, "basic"_sr);
 			ASSERT_EQ(e.code(), error_code_success);
 			++numHits;
@@ -161,18 +163,18 @@ TEST_CASE("/flow/ProcessEvents") {
 		std::vector<std::shared_ptr<Event>> createdEvents;
 		std::vector<unsigned> numHits;
 		numHits.reserve(2);
-		Event _("create"_sr, [&](StringRef n, StringRef, Error const& e) {
+		Event _("create"_sr, [&](StringRef n, std::any const&, Error const& e) {
 			ASSERT_EQ(n, "create"_sr);
 			ASSERT_EQ(e.code(), error_code_success);
 			++hits1;
 			numHits.push_back(0);
-			createdEvents.push_back(
-			    std::make_shared<Event>(std::vector<StringRef>{ "create"_sr, "secondaries"_sr },
-			                            [&numHits, idx = numHits.size() - 1](StringRef n, StringRef, Error const& e) {
-				                            ASSERT(n == "create"_sr || n == "secondaries");
-				                            ASSERT_EQ(e.code(), error_code_success);
-				                            ++numHits[idx];
-			                            }));
+			createdEvents.push_back(std::make_shared<Event>(
+			    std::vector<StringRef>{ "create"_sr, "secondaries"_sr },
+			    [&numHits, idx = numHits.size() - 1](StringRef n, std::any const&, Error const& e) {
+				    ASSERT(n == "create"_sr || n == "secondaries");
+				    ASSERT_EQ(e.code(), error_code_success);
+				    ++numHits[idx];
+			    }));
 		});
 		trigger("create"_sr, ""_sr, success());
 		ASSERT_EQ(hits1, 1);
@@ -197,7 +199,7 @@ TEST_CASE("/flow/ProcessEvents") {
 		// Remove self
 		unsigned called_self_delete = 0, called_non_delete = 0;
 		std::unique_ptr<Event> ev;
-		auto callback_del = [&](StringRef n, StringRef, Error const& e) {
+		auto callback_del = [&](StringRef n, std::any const&, Error const& e) {
 			ASSERT_EQ(n, "deletion"_sr);
 			ASSERT_EQ(e.code(), error_code_success);
 			++called_self_delete;
@@ -205,7 +207,7 @@ TEST_CASE("/flow/ProcessEvents") {
 			ev.reset();
 		};
 		ev.reset(new Event("deletion"_sr, callback_del));
-		Event _("deletion"_sr, [&](StringRef n, StringRef, Error const& e) {
+		Event _("deletion"_sr, [&](StringRef n, std::any const&, Error const& e) {
 			ASSERT_EQ(n, "deletion"_sr);
 			ASSERT_EQ(e.code(), error_code_success);
 			++called_non_delete;

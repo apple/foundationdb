@@ -1,0 +1,6 @@
+[[test]]
+testTitle = "ResolverIgnoreTooOld"
+
+[[test.workload]]
+testName = "ResolverBug"
+ignoreTooOldProbability = 0.1
