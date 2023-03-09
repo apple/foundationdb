@@ -2045,7 +2045,8 @@ ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> t
 	// than one result
 	UID teamId;
 	bool assigned, emptyRange;
-	decodeServerKeysValue(keys[0].value, assigned, emptyRange, teamId);
+	EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
+	decodeServerKeysValue(keys[0].value, assigned, emptyRange, enablePSM, teamId);
 	TraceEvent(SevVerbose, "CanRemoveStorageServer")
 	    .detail("ServerID", serverID)
 	    .detail("Key1", keys[0].key)
