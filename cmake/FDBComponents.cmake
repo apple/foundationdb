@@ -20,8 +20,12 @@ endif()
 # SSL
 ################################################################################
 
-find_package(OpenSSL REQUIRED)
 set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
+set(OPENSSL_USE_STATIC_LIBS TRUE)
+if (WIN32)
+  set(OPENSSL_MSVC_STATIC_RT ON)
+endif()
+find_package(OpenSSL REQUIRED)
 add_compile_options(-DHAVE_OPENSSL)
 
 ################################################################################
