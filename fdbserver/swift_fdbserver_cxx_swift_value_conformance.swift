@@ -20,6 +20,7 @@
 
 import FDBClient
 import FDBServer
+import flow_swift
 
 @_expose(Cxx)
 public struct ExposeTypeConf<T> {
