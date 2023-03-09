@@ -73,9 +73,9 @@ struct DcLagWorkload : TestWorkload {
 		ASSERT(dbInfo->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION);
 
 		std::vector<IPAddress> ips; // all remote process IPs
-		for (const auto& process : g_simulator->getAllProcesses()) {
+		for (const auto& process : g_simulator.getAllProcesses()) {
 			const auto& ip = process->address.ip;
-			if (process->locality.dcId().present() && process->locality.dcId().get() == g_simulator->remoteDcId) {
+			if (process->locality.dcId().present() && process->locality.dcId().get() == g_simulator.remoteDcId) {
 				ips.push_back(ip);
 			}
 		}
@@ -102,8 +102,8 @@ struct DcLagWorkload : TestWorkload {
 		for (const auto& ip : ips) {
 			if (tlog != ip) {
 				// Clog TLogReply messages, but allow peek/pop requests
-				// g_simulator->clogPair(ip, tlog, seconds);
-				g_simulator->clogPair(tlog, ip, seconds);
+				// g_simulator.clogPair(ip, tlog, seconds);
+				g_simulator.clogPair(tlog, ip, seconds);
 				cloggedPairs.emplace_back(tlog, ip);
 			}
 		}
@@ -113,7 +113,7 @@ struct DcLagWorkload : TestWorkload {
 	void unclogAll() {
 		// unclog previously clogged connections
 		for (const auto& pair : cloggedPairs) {
-			g_simulator->unclogPair(pair.first, pair.second);
+			g_simulator.unclogPair(pair.first, pair.second);
 		}
 		cloggedPairs.clear();
 	}

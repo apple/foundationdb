@@ -983,8 +983,8 @@ ACTOR Future<bool> runTest(Database cx,
 	try {
 		Future<DistributedTestResults> fTestResults = runWorkload(cx, testers, spec, defaultTenant);
 		if (g_network->isSimulated() && spec.simConnectionFailuresDisableDuration > 0) {
-			savedDisableDuration = g_simulator->connectionFailuresDisableDuration;
-			g_simulator->connectionFailuresDisableDuration = spec.simConnectionFailuresDisableDuration;
+			savedDisableDuration = g_simulator.connectionFailuresDisableDuration;
+			g_simulator.connectionFailuresDisableDuration = spec.simConnectionFailuresDisableDuration;
 		}
 		if (spec.timeout > 0) {
 			fTestResults = timeoutError(fTestResults, spec.timeout);
@@ -993,7 +993,7 @@ ACTOR Future<bool> runTest(Database cx,
 		testResults = _testResults;
 		logMetrics(testResults.metrics);
 		if (g_network->isSimulated() && savedDisableDuration > 0) {
-			g_simulator->connectionFailuresDisableDuration = savedDisableDuration;
+			g_simulator.connectionFailuresDisableDuration = savedDisableDuration;
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_timed_out) {
@@ -1102,8 +1102,6 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	{ "disableHostname",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableHostname", ""); } },
 	{ "disableRemoteKVS", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } }
-	{ "disableSimSpeedup",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableSimSpeedup", ""); } },
 };
 
 std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
