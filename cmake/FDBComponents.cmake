@@ -21,6 +21,9 @@ endif()
 ################################################################################
 
 set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
+# Statically link OpenSSL to FDB, see
+#    https://cmake.org/cmake/help/v3.24/module/FindOpenSSL.html
+# Without the flags, OpenSSL is dynamically linked.
 set(OPENSSL_USE_STATIC_LIBS TRUE)
 if (WIN32)
   set(OPENSSL_MSVC_STATIC_RT ON)
