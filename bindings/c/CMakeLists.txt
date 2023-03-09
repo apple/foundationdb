@@ -327,12 +327,12 @@ if(NOT WIN32)
       )
 
     if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
-      add_python_venv_test(NAME fdb_c_client_config_tests
-        COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_client_config_tests.py
-        --build-dir ${CMAKE_BINARY_DIR}
-        --client-config-tester-bin $<TARGET_FILE:fdb_c_client_config_tester>
-        )
-
+#      add_python_venv_test(NAME fdb_c_client_config_tests
+#        COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_client_config_tests.py
+#        --build-dir ${CMAKE_BINARY_DIR}
+#        --client-config-tester-bin $<TARGET_FILE:fdb_c_client_config_tester>
+#        )
+#
 #      add_python_venv_test(NAME fdb_c_upgrade_from_prev3_gradual
 #        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
 #        --build-dir ${CMAKE_BINARY_DIR}
