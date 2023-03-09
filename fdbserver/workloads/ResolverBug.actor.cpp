@@ -32,6 +32,7 @@ struct ResolverBugWorkload : TestWorkload {
 	ResolverBug resolverBug;
 	Standalone<VectorRef<KeyValueRef>> cycleOptions;
 	KeyRef controlKey = "workload_control"_sr;
+	Promise<Void> bugFound;
 
 	ResolverBugWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		disableFailureInjections = getOption(options, "disableFailureInjections"_sr, true);
@@ -103,7 +104,6 @@ struct ResolverBugWorkload : TestWorkload {
 			BaseTraceEvent* trace = std::any_cast<BaseTraceEvent*>(data);
 			if (trace->getSeverity() == SevError) {
 				bug->bugFound = true;
-				TraceEvent("NegativeTestSuccess").log();
 			}
 		}
 	};
@@ -126,13 +126,8 @@ struct ResolverBugWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(ResolverBugWorkload* self, Database cx) {
 		state Reference<TestWorkload> cycle;
-		state std::shared_ptr<ResolverBug> bug = SimBugInjector().get<ResolverBug>(ResolverBugID());
-		state Future<Void> f = Never();
-		if (self->clientId == 0) {
-			f = driveWorkload(bug, self->clientCount);
-		}
-		while (!bug->bugFound) {
-			ASSERT(!f.isReady());
+		state std::shared_ptr<ResolverBug> bug = SimBugInjector().get<ResolverBug>(ResolverBugID(), true);
+		loop {
 			wait(waitForPhase(bug, 1));
 			cycle = self->createCycle();
 			wait(cycle->setup(cx));
@@ -144,10 +139,27 @@ struct ResolverBugWorkload : TestWorkload {
 			wait(success(cycle->check(cx)));
 			bug->cycleState[self->clientId] = 3;
 		}
-		return Void();
 	}
 
-	Future<Void> start(const Database& cx) override { return _start(this, cx->clone()); }
+	ACTOR static Future<Void> onBug(std::shared_ptr<ResolverBug> bug) {
+		loop {
+			if (bug->bugFound) {
+				TraceEvent("NegativeTestSuccess").log();
+				return Void();
+			}
+			wait(delay(0.5));
+		}
+	}
+
+	Future<Void> start(const Database& cx) override {
+		std::vector<Future<Void>> futures;
+		auto bug = SimBugInjector().get<ResolverBug>(ResolverBugID(), true);
+		if (clientId == 0) {
+			futures.push_back(driveWorkload(bug, clientCount));
+		}
+		futures.push_back(_start(this, cx->clone()));
+		return onBug(bug) || waitForAll(futures);
+	}
 	Future<bool> check(Database const& cx) override { return true; };
 
 private:

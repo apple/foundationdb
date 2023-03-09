@@ -834,16 +834,25 @@ void ConflictBatch::addTransaction(const CommitTransactionRef& tr, Version newOl
 	Arena& arena = transactionInfo.arena();
 	TransactionInfo* info = new (arena) TransactionInfo;
 	info->reportConflictingKeys = tr.report_conflicting_keys;
+	bool tooOld = tr.read_snapshot < newOldestVersion && tr.read_conflict_ranges.size();
+	if (tooOld && ignoreTooOld()) {
+		bugs->hit();
+		tooOld = false;
+	}
 
-	if (tr.read_snapshot < newOldestVersion && tr.read_conflict_ranges.size() && !ignoreTooOld()) {
+	if (tooOld) {
 		info->tooOld = true;
 	} else {
 		info->tooOld = false;
 		if (!ignoreReadSet()) {
 			info->readRanges.resize(arena, tr.read_conflict_ranges.size());
+		} else {
+			bugs->hit();
 		}
 		if (!ignoreWriteSet()) {
 			info->writeRanges.resize(arena, tr.write_conflict_ranges.size());
+		} else {
+			bugs->hit();
 		}
 
 		for (int r = 0; r < info->readRanges.size(); r++) {
