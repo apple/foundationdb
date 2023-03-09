@@ -37,9 +37,10 @@
 #include "fdbclient/Notified.h"
 
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MutationTracking.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -503,14 +504,16 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 	std::unordered_set<EncryptCipherDomainId> domainIds;
 	domainIds.emplace(domainId);
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> domainKeyMap =
-	    wait(getLatestEncryptCipherKeys(bwData->dbInfo, domainIds, BlobCipherMetrics::BLOB_GRANULE));
+	    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestEncryptCipherKeys(
+	        bwData->dbInfo, domainIds, BlobCipherMetrics::BLOB_GRANULE));
 
 	auto domainKeyItr = domainKeyMap.find(domainId);
 	ASSERT(domainKeyItr != domainKeyMap.end());
 	cipherKeysCtx.textCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(domainKeyItr->second, *arena);
 
 	TextAndHeaderCipherKeys systemCipherKeys =
-	    wait(getLatestSystemEncryptCipherKeys(bwData->dbInfo, BlobCipherMetrics::BLOB_GRANULE));
+	    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestSystemEncryptCipherKeys(bwData->dbInfo,
+	                                                                              BlobCipherMetrics::BLOB_GRANULE));
 	ASSERT(systemCipherKeys.cipherHeaderKey.isValid());
 	cipherKeysCtx.headerCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(systemCipherKeys.cipherHeaderKey, *arena);
 
@@ -537,7 +540,8 @@ ACTOR Future<BlobGranuleCipherKey> lookupCipherKey(Reference<BlobWorkerData> bwD
 	std::unordered_set<BlobCipherDetails> cipherDetailsSet;
 	cipherDetailsSet.emplace(cipherDetails);
 	state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeyMap =
-	    wait(getEncryptCipherKeys(bwData->dbInfo, cipherDetailsSet, BlobCipherMetrics::BLOB_GRANULE));
+	    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+	        bwData->dbInfo, cipherDetailsSet, BlobCipherMetrics::BLOB_GRANULE));
 
 	ASSERT(cipherKeyMap.size() == 1);
 
@@ -1028,6 +1032,14 @@ ACTOR Future<BlobFileIndex> writeEmptyDeltaFile(Reference<BlobWorkerData> bwData
 			if (!dfValue.present()) {
 				// Only check if not seen yet. If we get commit unknown result and then retry, we'd see our own delete
 				wait(store(dfValue, tr->get(oldDFKey)));
+				if (!dfValue.present()) {
+					TraceEvent("MissingFileEmptyWrite", bwData->id)
+					    .detail("Granule", keyRange)
+					    .detail("PrevVersion", previousVersion)
+					    .detail("CurrentVersion", currentDeltaVersion)
+					    .detail("PrevKey", oldDFKey)
+					    .detail("NewKey", newDFKey);
+				}
 				ASSERT(dfValue.present());
 			} else {
 				tr->addReadConflictRange(singleKeyRange(oldDFKey));
@@ -1962,7 +1974,9 @@ Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 		cfRollbackVersion = metadata->durableDeltaVersion.get();
 		metadata->pendingSnapshotVersion = metadata->durableSnapshotVersion.get();
 		int toPop = 0;
-		bool pendingSnapshot = false;
+		// keep bytes in delta files pending here, then add back already durable delta files at end
+		metadata->bytesInNewDeltaFiles = 0;
+
 		for (auto& f : inFlightFiles) {
 			if (f.snapshot) {
 				if (f.version > rollbackVersion) {
@@ -1978,14 +1992,10 @@ Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 				} else {
 					metadata->pendingSnapshotVersion = f.version;
 					metadata->bytesInNewDeltaFiles = 0;
-					pendingSnapshot = true;
 				}
 			} else {
 				if (f.version > rollbackVersion) {
 					f.future.cancel();
-					if (!pendingSnapshot) {
-						metadata->bytesInNewDeltaFiles -= f.bytes;
-					}
 					toPop++;
 					CODE_PROBE(true, "Granule rollback cancelling delta file");
 					if (BW_DEBUG) {
@@ -1997,9 +2007,7 @@ Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 				} else {
 					ASSERT(f.version > cfRollbackVersion);
 					cfRollbackVersion = f.version;
-					if (pendingSnapshot) {
-						metadata->bytesInNewDeltaFiles += f.bytes;
-					}
+					metadata->bytesInNewDeltaFiles += f.bytes;
 				}
 			}
 		}
@@ -2025,6 +2033,14 @@ Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 		metadata->currentDeltas = Standalone<GranuleDeltas>();
 		metadata->bufferedDeltaBytes = 0;
 		metadata->bufferedDeltaVersion = cfRollbackVersion;
+
+		// calculate number of bytes in durable delta files after last snapshot
+		// FIXME: this assumes delta file serialized size ~= logical size, which is false with compression
+		for (int i = metadata->files.deltaFiles.size() - 1;
+		     i >= 0 && metadata->files.deltaFiles[i].version > metadata->pendingSnapshotVersion;
+		     i--) {
+			metadata->bytesInNewDeltaFiles += metadata->files.deltaFiles[i].length;
+		}
 
 		// Track that this rollback happened, since we have to re-read mutations up to the rollback
 		// Add this rollback to in progress, and put all completed ones back in progress
@@ -2359,6 +2375,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				Version snapshotVersion = files.snapshotFiles.back().version;
 				for (int i = files.deltaFiles.size() - 1; i >= 0; i--) {
 					if (files.deltaFiles[i].version > snapshotVersion) {
+						// FIXME: this assumes delta file serialized size ~= logical size, which is false with
+						// compression
 						metadata->bytesInNewDeltaFiles += files.deltaFiles[i].length;
 					}
 				}

@@ -1706,7 +1706,7 @@ private:
 			}
 			case OPT_KMS_REST_ALLOW_NOT_SECURE_CONECTION: {
 				TraceEvent("RESTKmsConnAllowNotSecureConnection");
-				knobs.emplace_back("rest_kms_enable_not_secure_connection", "true");
+				knobs.emplace_back("rest_kms_allow_not_secure_connection", "true");
 				break;
 			}
 			case OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS: {
