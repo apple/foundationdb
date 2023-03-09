@@ -1278,9 +1278,9 @@ ACTOR Future<bool> runTest(Database cx,
 		testResults = _testResults;
 		logMetrics(testResults.metrics);
 	} catch (Error& e) {
-		auto msg = fmt::format("Process timed out after {} seconds", spec.timeout);
-		ProcessEvents::trigger("Timeout"_sr, StringRef(msg), e);
 		if (e.code() == error_code_timed_out) {
+			auto msg = fmt::format("Process timed out after {} seconds", spec.timeout);
+			ProcessEvents::trigger("Timeout"_sr, StringRef(msg), e);
 			TraceEvent(SevError, "TestFailure")
 			    .error(e)
 			    .detail("Reason", "Test timed out")
