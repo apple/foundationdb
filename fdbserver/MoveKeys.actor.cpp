@@ -2274,7 +2274,8 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 							}
 						}
 
-						const UID shardId = newShardId(deterministicRandom()->randomUInt64(), AssignEmptyRange::True);
+						const UID shardId =
+						    newDataMoveId(deterministicRandom()->randomUInt64(), AssignEmptyRange::True);
 
 						// Assign the shard to teamForDroppedRange in keyServer space.
 						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
