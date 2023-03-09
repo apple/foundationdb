@@ -27,6 +27,7 @@
 #include "fdbserver/TLogInterface.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
+#include "flow/CodeProbe.h"
 #include "flow/Histogram.h"
 #include "flow/Trace.h"
 #include "flow/network.h"
@@ -334,7 +335,8 @@ ACTOR Future<Reference<ILogSystem::IPeekCursor>> getPeekCursorData(LogRouterData
 			}
 			when(wait(result ? delay(SERVER_KNOBS->LOG_ROUTER_PEEK_SWITCH_DC_TIME) : Never())) {
 				// Peek has become stuck for a while, trying switching between primary DC and satellite
-				TraceEvent("LogRouterSlowPeek", self->dbgid).detail("NextTrySatellite", !useSatellite);
+				CODE_PROBE(true, "Detect log router slow peeks");
+				TraceEvent(SevWarnAlways, "LogRouterSlowPeek", self->dbgid).detail("NextTrySatellite", !useSatellite);
 				useSatellite = !useSatellite;
 				result =
 				    self->logSystem->get()->peekLogRouter(self->dbgid, startVersion, self->routerTag, useSatellite);
