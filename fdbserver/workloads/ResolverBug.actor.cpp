@@ -40,7 +40,6 @@ struct ResolverBugWorkload : TestWorkload {
 		resolverBug.ignoreReadSetProbability = getOption(options, "ignoreReadSetProbability"_sr, 0.0);
 
 		for (auto& o : options) {
-			bool hadPrefix = false;
 			if (o.key.startsWith("cycle_"_sr)) {
 				KeyValueRef option;
 				option.key = o.key.removePrefix("cycle_"_sr);
@@ -149,6 +148,7 @@ struct ResolverBugWorkload : TestWorkload {
 	}
 
 	Future<Void> start(const Database& cx) override { return _start(this, cx->clone()); }
+	Future<bool> check(Database const& cx) override { return true; };
 
 private:
 	void getMetrics(std::vector<PerfMetric>& m) override {}
