@@ -22,6 +22,7 @@
 #include "flow/network.h"
 
 #include <typeindex>
+#include <boost/core/demangle.hpp>
 
 namespace {
 
@@ -30,11 +31,38 @@ struct SimBugInjectorImpl {
 	std::unordered_map<std::type_index, std::shared_ptr<ISimBug>> bugs;
 };
 
+struct ISimBugImpl {
+	unsigned numHits = 0;
+	static ISimBugImpl* get(void* self) { return reinterpret_cast<ISimBugImpl*>(self); }
+};
+
 SimBugInjectorImpl* simBugInjector = nullptr;
 
 } // namespace
 
-ISimBug::~ISimBug() {}
+ISimBug::ISimBug() : impl(new ISimBugImpl()) {}
+
+ISimBug::~ISimBug() {
+	delete ISimBugImpl::get(impl);
+}
+
+std::string ISimBug::name() const {
+	auto const& typeInfo = typeid(*this);
+	return boost::core::demangle(typeInfo.name());
+}
+
+void ISimBug::hit() {
+	++ISimBugImpl::get(impl)->numHits;
+	TraceEvent(SevWarnAlways, "BugInjected").detail("Name", name()).detail("NumHits", numHits()).log();
+	this->onHit();
+}
+
+void ISimBug::onHit() {}
+
+unsigned ISimBug::numHits() const {
+	return ISimBugImpl::get(impl)->numHits;
+}
+
 IBugIdentifier::~IBugIdentifier() {}
 
 bool SimBugInjector::isEnabled() const {
@@ -63,8 +91,11 @@ void SimBugInjector::reset() {
 	}
 }
 
-std::shared_ptr<ISimBug> SimBugInjector::getImpl(const IBugIdentifier& id) const {
-	if (!isEnabled()) {
+std::shared_ptr<ISimBug> SimBugInjector::getImpl(const IBugIdentifier& id, bool getDisabled /* = false */) const {
+	if (!simBugInjector) {
+		return {};
+	}
+	if (!getDisabled && !isEnabled()) {
 		return {};
 	}
 	auto it = simBugInjector->bugs.find(std::type_index(typeid(id)));

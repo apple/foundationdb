@@ -44,7 +44,9 @@ struct ProcessEventsImpl {
 	struct Triggering {
 		bool& value;
 		explicit Triggering(bool& value) : value(value) {
-			ASSERT(!value);
+			if (value) {
+				ASSERT(false);
+			}
 			value = true;
 		}
 		~Triggering() { value = false; }

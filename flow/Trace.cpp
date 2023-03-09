@@ -1307,10 +1307,6 @@ BaseTraceEvent& BaseTraceEvent::backtrace(const std::string& prefix) {
 }
 
 void BaseTraceEvent::log() {
-	if (g_traceProcessEvents) {
-		auto name = fmt::format("TraceEvent::{}", type);
-		ProcessEvents::trigger(StringRef(name), this, success());
-	}
 	if (!logged) {
 		init();
 		++g_allocation_tracing_disabled;
@@ -1335,6 +1331,10 @@ void BaseTraceEvent::log() {
 
 				if (isNetworkThread()) {
 					TraceEvent::eventCounts[severity / 10]++;
+				}
+				if (g_traceProcessEvents) {
+					auto name = fmt::format("TraceEvent::{}", type);
+					ProcessEvents::trigger(StringRef(name), this, success());
 				}
 				g_traceLog.writeEvent(fields, trackingKey, severity > SevWarnAlways);
 

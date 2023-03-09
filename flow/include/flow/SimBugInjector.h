@@ -38,8 +38,28 @@
  * SimBugInjector.
  */
 class ISimBug : std::enable_shared_from_this<ISimBug> {
+	void* impl;
+	virtual void onHit();
+
 public:
+	ISimBug();
 	virtual ~ISimBug();
+	/**
+	 * The name of the bug. By default this will return the class name (using typeid and boost::core::demangle). This is
+	 * supposed to be a human-readable string which can be used to identify the bug when it appears in traces.
+	 *
+	 * @return A human readable string for this bug.
+	 */
+	virtual std::string name() const;
+	/**
+	 * Should be called every time this bug is hit. This method can't be overridden. However, it will call `onHit` which
+	 * can be overriden by a child.
+	 */
+	void hit();
+	/**
+	 * @return Number of times this bug has been hit (since last call to `SimBugInjector::reset`
+	 */
+	unsigned numHits() const;
 };
 
 /*
@@ -95,15 +115,15 @@ public:
 	 * @post enabled(bug(id)) -> result is valid else result is nullptr
 	 */
 	template <class T>
-	std::shared_ptr<T> get(IBugIdentifier const& id) {
-		auto res = getImpl(id);
+	std::shared_ptr<T> get(IBugIdentifier const& id, bool getDisabled = false) {
+		auto res = getImpl(id, getDisabled);
 		if (!res) {
 			return {};
 		}
 		return std::dynamic_pointer_cast<T>(res);
 	}
 
-	std::shared_ptr<ISimBug> getImpl(IBugIdentifier const& id) const;
+	std::shared_ptr<ISimBug> getImpl(IBugIdentifier const& id, bool getDisabled = false) const;
 
 	/**
 	 * Returns the ISimBug instance associated with id if it already exists. Otherwise it will first create it. It is a
