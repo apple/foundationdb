@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/TenantEntryCache.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
@@ -32,7 +33,7 @@
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -585,8 +586,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
 		if (std::holds_alternative<BlobCipherEncryptHeaderRef>(headerVariant)) { // configurable encryption
 			state BlobCipherEncryptHeaderRef headerRef = std::get<BlobCipherEncryptHeaderRef>(headerVariant);
-			TextAndHeaderCipherKeys cipherKeys =
-			    wait(getEncryptCipherKeys(dbInfo, headerRef, BlobCipherMetrics::RESTORE));
+			TextAndHeaderCipherKeys cipherKeys = wait(GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(
+			    dbInfo, headerRef, BlobCipherMetrics::RESTORE));
 			EncryptHeaderCipherDetails cipherDetails = headerRef.getCipherDetails();
 			cipherDetails.textCipherDetails.validateCipherDetailsWithCipherKey(cipherKeys.cipherTextKey);
 			if (cipherDetails.headerCipherDetails.present()) {
@@ -597,7 +598,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 			return decryptor.decrypt(dataP, dataLen, headerRef, *arena);
 		} else {
 			state BlobCipherEncryptHeader header = std::get<BlobCipherEncryptHeader>(headerVariant);
-			TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, header, BlobCipherMetrics::RESTORE));
+			TextAndHeaderCipherKeys cipherKeys = wait(
+			    GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(dbInfo, header, BlobCipherMetrics::RESTORE));
 			header.cipherTextDetails.validateCipherDetailsWithCipherKey(cipherKeys.cipherTextKey);
 			if (header.cipherHeaderDetails.isValid()) {
 				header.cipherHeaderDetails.validateCipherDetailsWithCipherKey(cipherKeys.cipherHeaderKey);
@@ -620,7 +622,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                                                         EncryptCipherDomainId domainId) {
 		Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 		TextAndHeaderCipherKeys cipherKeys =
-		    wait(getLatestEncryptCipherKeysForDomain(dbInfo, domainId, BlobCipherMetrics::BACKUP));
+		    wait(GetEncryptCipherKeys<ClientDBInfo>::getLatestEncryptCipherKeysForDomain(
+		        dbInfo, domainId, BlobCipherMetrics::BACKUP));
 		return cipherKeys.cipherTextKey;
 	}
 
@@ -678,7 +681,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 		// Get text and header cipher key
 		TextAndHeaderCipherKeys textAndHeaderCipherKeys =
-		    wait(getLatestEncryptCipherKeysForDomain(dbInfo, curDomainId, BlobCipherMetrics::BACKUP));
+		    wait(GetEncryptCipherKeys<ClientDBInfo>::getLatestEncryptCipherKeysForDomain(
+		        dbInfo, curDomainId, BlobCipherMetrics::BACKUP));
 		self->cipherKeys.textCipherKey = textAndHeaderCipherKeys.cipherTextKey;
 		self->cipherKeys.headerCipherKey = textAndHeaderCipherKeys.cipherHeaderKey;
 
