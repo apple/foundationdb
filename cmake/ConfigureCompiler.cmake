@@ -458,17 +458,48 @@ else()
   endif()
 endif()
 
-# Setup the Swift compiler options.
-set(CLANG_MODULE_CACHE_PATH ${CMAKE_BINARY_DIR}/clang-module-cache)
-set(SwiftOptions "-Xcc -fmodules-cache-path=${CLANG_MODULE_CACHE_PATH}")
+#####################################
+## Setup the Swift compiler options.
+#####################################
+set(SwiftOptions "")
+
 # Let Swift know where to find the external GCC toolchain if such toolchain is used.
 if (CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN)
-  set(SwiftOptions "${SwiftOptions} -Xcc --gcc-toolchain=${CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN}")
+    # FIXME: adopt driver flag once it lands:
+    # https://github.com/apple/swift-driver/pull/1307.
+    set(SwiftOptions "${SwiftOptions} -Xcc --gcc-toolchain=${CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN}")
+    set(SwiftOptions "${SwiftOptions} -Xclang-linker --gcc-toolchain=${CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN}")
 endif()
+
+# Set the module cache path.
+set(SWIFT_MODULE_CACHE_PATH ${CMAKE_BINARY_DIR}/module-cache)
+set(SwiftOptions "${SwiftOptions} -module-cache-path ${SWIFT_MODULE_CACHE_PATH}")
+
 # Enable Swift <-> C++ interoperability.
 set(SwiftOptions "${SwiftOptions} -cxx-interoperability-mode=swift-5.9")
 
+if (FOUNDATIONDB_CROSS_COMPILING)
+    # Cross-compilation options.
+    # For some reason we need to specify -sdk explictly to pass config-time
+    # cmake checks, even though Swift does tend to pass it by itself for the
+    # actual compilation.
+    string(TOLOWER ${CMAKE_SYSTEM_PROCESSOR} TripleArch)
+    set(SwiftOptions "${SwiftOptions} -target ${TripleArch}-unknown-linux-gnu -sdk ${CMAKE_SYSROOT} -resource-dir ${CMAKE_SYSROOT}/usr/lib/swift")
+    if (CMAKE_LINKER)
+        set(SwiftOptions "${SwiftOptions} -use-ld=${CMAKE_LINKER}")
+    endif()
+    # C++ files need path to swift resources to find C++ interoperability
+    # Swift builtin headers.
+    add_compile_options($<${is_cxx_compile}:-I${CMAKE_SYSROOT}/usr/lib/swift>)
+endif()
+
 set(CMAKE_Swift_FLAGS "${SwiftOptions}" CACHE STRING "" FORCE)
+
+if (FOUNDATIONDB_CROSS_COMPILING)
+    # For cross-compilation: make sure the Stdlib .swiftmodule files are available.
+    include(SwiftCrossCompileForceModuleRebuild)
+    swift_force_import_rebuild_of_stdlib()
+endif()
 
 # Verify that Swift can import C++ standard library.
 include(CompilerChecks)

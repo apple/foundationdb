@@ -181,15 +181,15 @@ add_subdirectory(fdbclient)
 add_subdirectory(fdbserver)
 add_subdirectory(fdbcli)
 if(NOT WIN32)
-  add_subdirectory(fdbmonitor)
+  # add_subdirectory(fdbmonitor)
 else()
   add_subdirectory(fdbservice)
 endif()
 add_subdirectory(fdbbackup)
 add_subdirectory(tests)
-add_subdirectory(flowbench EXCLUDE_FROM_ALL)
+# add_subdirectory(flowbench EXCLUDE_FROM_ALL)
 if(WITH_PYTHON AND WITH_C_BINDING)
-  add_subdirectory(bindings)
+  # add_subdirectory(bindings)
 endif()
 if(WITH_DOCUMENTATION)
   add_subdirectory(documentation)
@@ -217,6 +217,9 @@ if (CMAKE_EXPORT_COMPILE_COMMANDS AND WITH_PYTHON)
 	  COMMENT "Build compile commands for IDE"
 	)
   add_custom_target(processed_compile_commands ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json)
+
+  # A prebuild target ensures that all actors, Swift-generated headers, and Swift modules are built.
+  add_custom_target(prebuild_for_ide ALL DEPENDS fdbserver_swift processed_compile_commands)
 endif()
 
 ################################################################################

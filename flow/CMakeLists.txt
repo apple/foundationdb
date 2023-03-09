@@ -124,6 +124,7 @@ add_library(flow_swift STATIC
 
 target_include_directories(flow_swift PUBLIC
     "${CMAKE_BINARY_DIR}/flow/include"
+    "${CMAKE_SOURCE_DIR}/flow/include"
     "${CMAKE_BINARY_DIR}/flow/"
     "${CMAKE_BINARY_DIR}/fdbclient/include"
     "${CMAKE_BINARY_DIR}/fdbserver/include"
