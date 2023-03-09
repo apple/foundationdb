@@ -29,6 +29,8 @@ def version_from_str(ver_str):
 
 def api_version_from_str(ver_str):
     ver_tuple = version_from_str(ver_str)
+    if (ver_tuple[0] > 70):
+        return ver_tuple[0] * 10000 + ver_tuple[1] * 100
     return ver_tuple[0] * 100 + ver_tuple[1] * 10
 
 
