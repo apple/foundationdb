@@ -131,7 +131,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 						if (val == setValue)
 							break;
 						ASSERT(!watchCommitted);
-						tr.addWriteConflictRange(singleKeyRange(StringRef()));
+						tr.addWriteConflictRange(singleKeyRange(""_sr));
 						// set a watch and wait for it to be triggered (i.e for self->setter to set the value)
 						state Future<Void> watchFuture = tr.watch(setKey);
 						wait(tr.commit());
