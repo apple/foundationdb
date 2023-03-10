@@ -919,9 +919,9 @@ ACTOR Future<Void> checkConsistency(Database cx,
 
 	state double connectionFailures;
 	if (g_network->isSimulated()) {
+		// NOTE: the value will be reset after consistency check
 		connectionFailures = g_simulator.connectionFailuresDisableDuration;
-		g_simulator.connectionFailuresDisableDuration = 1e6;
-		g_simulator.speedUpSimulation = true;
+		disableConnectionFailures("ConsistencyCheck");
 	}
 
 	Standalone<VectorRef<KeyValueRef>> options;
@@ -978,15 +978,23 @@ ACTOR Future<bool> runTest(Database cx,
                            Reference<AsyncVar<ServerDBInfo>> dbInfo,
                            Optional<TenantName> defaultTenant) {
 	state DistributedTestResults testResults;
+	state double savedDisableDuration = 0;
 
 	try {
 		Future<DistributedTestResults> fTestResults = runWorkload(cx, testers, spec, defaultTenant);
+		if (g_network->isSimulated() && spec.simConnectionFailuresDisableDuration > 0) {
+			savedDisableDuration = g_simulator.connectionFailuresDisableDuration;
+			g_simulator.connectionFailuresDisableDuration = spec.simConnectionFailuresDisableDuration;
+		}
 		if (spec.timeout > 0) {
 			fTestResults = timeoutError(fTestResults, spec.timeout);
 		}
 		DistributedTestResults _testResults = wait(fTestResults);
 		testResults = _testResults;
 		logMetrics(testResults.metrics);
+		if (g_network->isSimulated() && savedDisableDuration > 0) {
+			g_simulator.connectionFailuresDisableDuration = savedDisableDuration;
+		}
 	} catch (Error& e) {
 		if (e.code() == error_code_timed_out) {
 			TraceEvent(SevError, "TestFailure")
@@ -1197,8 +1205,6 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	      sscanf(value.c_str(), "%lf", &connectionFailuresDisableDuration);
 	      ASSERT(connectionFailuresDisableDuration >= 0);
 	      spec->simConnectionFailuresDisableDuration = connectionFailuresDisableDuration;
-	      if (g_network->isSimulated())
-		      g_simulator.connectionFailuresDisableDuration = spec->simConnectionFailuresDisableDuration;
 	      TraceEvent("TestParserTest")
 	          .detail("ParsedSimConnectionFailuresDisableDuration", spec->simConnectionFailuresDisableDuration);
 	  } },
@@ -1447,6 +1453,17 @@ ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterContro
 	}
 }
 
+// Disables connection failures after the given time seconds
+ACTOR Future<Void> disableConnectionFailuresAfter(double seconds, std::string context) {
+	if (g_network->isSimulated()) {
+		TraceEvent(SevWarnAlways, ("ScheduleDisableConnectionFailures_" + context).c_str())
+		    .detail("At", now() + seconds);
+		wait(delay(seconds));
+		disableConnectionFailures(context);
+	}
+	return Void();
+}
+
 /**
  * \brief Test orchestrator: sends test specification to testers in the right order and collects the results.
  *
@@ -1522,7 +1539,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		cx->defaultTenant = defaultTenant;
 	}
 
-	state Future<Void> disabler = disableConnectionFailuresAfter(FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, "Tester");
+	disableConnectionFailures("Tester");
 
 	// Change the configuration (and/or create the database) if necessary
 	printf("startingConfiguration:%s start\n", startingConfiguration.toString().c_str());
@@ -1571,6 +1588,14 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
 			printf("Set perpetual_storage_wiggle=1 Done.\n");
 		}
+	}
+
+	enableConnectionFailures("Tester");
+	state Future<Void> disabler = disableConnectionFailuresAfter(FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, "Tester");
+	state Future<Void> repairDataCenter;
+	if (useDB) {
+		Future<Void> reconfigure = reconfigureAfter(cx, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, dbInfo, "Tester");
+		repairDataCenter = reconfigure;
 	}
 
 	TraceEvent("TestsExpectedToPass").detail("Count", tests.size());

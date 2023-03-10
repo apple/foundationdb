@@ -42,7 +42,6 @@
 #include "fdbrpc/AsyncFileChaos.actor.h"
 #include "flow/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
-#include "flow/FaultInjection.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
@@ -51,6 +50,7 @@
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
+#include "fdbrpc/genericactors.actor.h"
 #include "flow/FaultInjection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -522,9 +522,7 @@ public:
 		}
 
 		if (openCount == 2000) {
-			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyFiles").log();
-			g_simulator.speedUpSimulation = true;
-			g_simulator.connectionFailuresDisableDuration = 1e6;
+			disableConnectionFailures("TooManyFiles");
 		}
 
 		// Filesystems on average these days seem to start to have limits of around 255 characters for a
@@ -2463,7 +2461,8 @@ Future<Reference<IUDPSocket>> Sim2::createUDPSocket(bool isV6) {
 void startNewSimulator(bool printSimTime) {
 	ASSERT(!g_network);
 	g_network = g_pSimulator = new Sim2(printSimTime);
-	g_simulator.connectionFailuresDisableDuration = deterministicRandom()->random01() < 0.5 ? 0 : 1e6;
+	g_simulator.connectionFailuresDisableDuration =
+	    deterministicRandom()->coinflip() ? 0 : DISABLE_CONNECTION_FAILURE_FOREVER;
 }
 
 ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
@@ -2546,6 +2545,22 @@ Future<Void> waitUntilDiskReady(Reference<DiskParameters> diskParameters, int64_
 		randomLatency = 10 * deterministicRandom()->random01() / diskParameters->iops;
 
 	return delayUntil(diskParameters->nextOperation + randomLatency);
+}
+
+void enableConnectionFailures(std::string const& context) {
+	if (g_network->isSimulated()) {
+		g_simulator.connectionFailuresDisableDuration = 0;
+		g_simulator.speedUpSimulation = false;
+		TraceEvent(SevWarnAlways, ("EnableConnectionFailures_" + context).c_str());
+	}
+}
+
+void disableConnectionFailures(std::string const& context) {
+	if (g_network->isSimulated()) {
+		g_simulator.connectionFailuresDisableDuration = DISABLE_CONNECTION_FAILURE_FOREVER;
+		g_simulator.speedUpSimulation = true;
+		TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
+	}
 }
 
 #if defined(_WIN32)

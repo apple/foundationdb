@@ -418,8 +418,6 @@ Future<X> reportEndpointFailure(Future<X> value, Endpoint endpoint) {
 	}
 }
 
-Future<Void> disableConnectionFailuresAfter(double const& time, std::string const& context);
-
 #include "flow/unactorcompiler.h"
 
 #endif

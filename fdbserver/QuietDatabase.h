@@ -47,6 +47,11 @@ Future<Void> repairDeadDatacenter(Database const& cx,
                                   Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
                                   std::string const& context);
 
+Future<Void> reconfigureAfter(Database const& cx,
+                              double const& time,
+                              Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
+                              std::string const& context);
+
 // Returns list of worker interfaces for available storage servers and the number of unavailable
 // storage servers
 Future<std::pair<std::vector<WorkerInterface>, int>>

@@ -1452,9 +1452,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 			           (self->cstate.myDBState.oldTLogData.size() - CLIENT_KNOBS->RECOVERY_DELAY_START_GENERATION)));
 		}
 		if (g_network->isSimulated() && self->cstate.myDBState.oldTLogData.size() > CLIENT_KNOBS->MAX_GENERATIONS_SIM) {
-			g_simulator.connectionFailuresDisableDuration = 1e6;
-			g_simulator.speedUpSimulation = true;
-			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyGenerations").log();
+			disableConnectionFailures("TooManyGenerations");
 		}
 	}
 
