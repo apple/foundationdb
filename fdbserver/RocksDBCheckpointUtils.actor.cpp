@@ -465,9 +465,9 @@ void RocksDBColumnFamilyReader::Reader::action(RocksDBColumnFamilyReader::Reader
 
 	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
 	ASSERT(!rocksCF.sstFiles.empty());
-	auto files = platform::listFiles(rocksCF.sstFiles.front().db_path);
-	TraceEvent(SevDebug, "RocksDBCheckpointReaderFiles", logId).detail("Files", describe(files));
-	const std::string path = rocksCF.sstFiles.empty() ? "" : rocksCF.sstFiles.front().db_path + checkpointReaderSubDir;
+	const std::vector<std::string> files = platform::listFiles(rocksCF.sstFiles.front().db_path);
+	TraceEvent(SevDebug, "RocksDBColumnFamilyReaderInputFiles", logId).detail("Files", describe(files));
+	const std::string path = joinPath(rocksCF.sstFiles.front().db_path, checkpointReaderSubDir);
 
 	rocksdb::Status status = tryOpenForRead(path);
 	if (!status.ok()) {
@@ -906,10 +906,10 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 		return Void();
 	}
 
-	std::string remoteFile = rocksCF.sstFiles[idx].name;
-	std::string localFile = dir + rocksCF.sstFiles[idx].name;
-	ASSERT(!metaData->src.empty());
-	state UID ssId = metaData->src.front();
+	const std::string remoteFile = rocksCF.sstFiles[idx].name;
+	const std::string localFile = dir + rocksCF.sstFiles[idx].name;
+	ASSERT_EQ(metaData->src.size(), 1);
+	const UID ssId = metaData->src.front();
 
 	int64_t fileSize = wait(doFetchCheckpointFile(cx, remoteFile, localFile, ssId, metaData->checkpointID));
 	rocksCF.sstFiles[idx].db_path = dir;
@@ -923,6 +923,7 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 
 // TODO: Return when a file exceeds a limit.
 ACTOR Future<Void> fetchCheckpointRange(Database cx,
+
                                         std::shared_ptr<CheckpointMetaData> metaData,
                                         KeyRange range,
                                         std::string dir,
@@ -1007,9 +1008,6 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 			loop {
 				FetchCheckpointKeyValuesStreamReply rep = waitNext(stream.getFuture());
 				for (int i = 0; i < rep.data.size(); ++i) {
-					TraceEvent(SevVerbose, "FetchCheckpointRangeData", metaData->checkpointID)
-					    .detail("Key", rep.data[i].key)
-					    .detail("Value", rep.data[i].value);
 					DEBUG_MUTATION("FetchCheckpointData",
 					               metaData->version,
 					               MutationRef(MutationRef::SetValue, rep.data[i].key, rep.data[i].value),
@@ -1134,6 +1132,7 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 	ASSERT(!initialState.ranges.empty());
 
 	state std::shared_ptr<CheckpointMetaData> metaData = std::make_shared<CheckpointMetaData>(initialState);
+	state std::vector<Future<Void>> futures;
 
 	if (metaData->getFormat() == DataMoveRocksCF) {
 		state RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(initialState);
@@ -1149,10 +1148,11 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 		}
 		wait(waitForAll(fs));
 	} else if (metaData->getFormat() == RocksDBKeyValues) {
-		wait(fetchCheckpointRanges(cx, metaData, dir, cFun));
+		futures.push_back(fetchCheckpointRanges(cx, metaData, dir, cFun));
 		if (metaData->bytesSampleFile.present()) {
-			wait(fetchCheckpointBytesSampleFile(cx, metaData, dir, cFun));
+			futures.push_back(fetchCheckpointBytesSampleFile(cx, metaData, dir, cFun));
 		}
+		wait(waitForAll(futures));
 	} else if (metaData->getFormat() == RocksDB) {
 		throw not_implemented();
 	}
