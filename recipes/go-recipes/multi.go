@@ -30,7 +30,7 @@ import (
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
 
-const API_VERSION int = 720
+const API_VERSION int = 710300
 
 func clear_subspace(db fdb.Transactor, ss subspace.Subspace) {
 	db.Transact(func(tr fdb.Transaction) (interface{}, error) {
