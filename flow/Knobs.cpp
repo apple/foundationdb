@@ -325,6 +325,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( RESTCLIENT_MAX_CONNECTION_LIFE,                      120 );
 	init( RESTCLIENT_REQUEST_TRIES,                             10 );
 	init( RESTCLIENT_REQUEST_TIMEOUT_SEC,                      120 );
+	init( REST_LOG_LEVEL,                                        3 );
 }
 // clang-format on
 

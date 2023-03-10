@@ -2490,14 +2490,15 @@ ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std
 	state JsonBuilderObject statusObj;
 
 	try {
-		Optional<BlobRestoreStatus> status = wait(getRestoreStatus(db, normalKeys));
-		if (status.present()) {
-			BlobRestoreStatus restoreStatus = status.get();
-			statusObj["blob_full_restore_phase"] = restoreStatus.phase;
-			statusObj["blob_full_restore_phase_progress"] = restoreStatus.progress;
-			statusObj["blob_full_restore_phase_start_ts"] = restoreStatus.phaseStartTs[restoreStatus.phase];
-			statusObj["blob_full_restore_start_ts"] = restoreStatus.phaseStartTs[BlobRestorePhase::STARTING_MIGRATOR];
-			statusObj["blob_full_restore_error"] = restoreStatus.error.present() ? restoreStatus.error.get() : ""_sr;
+		Reference<BlobRestoreController> restoreController = makeReference<BlobRestoreController>(db, normalKeys);
+		Optional<BlobRestoreState> restoreState = wait(BlobRestoreController::getState(restoreController));
+		if (restoreState.present()) {
+			statusObj["blob_full_restore_phase"] = restoreState.get().phase;
+			statusObj["blob_full_restore_phase_progress"] = restoreState.get().progress;
+			statusObj["blob_full_restore_phase_start_ts"] = restoreState.get().phaseStartTs[restoreState.get().phase];
+			statusObj["blob_full_restore_start_ts"] = restoreState.get().phaseStartTs[STARTING_MIGRATOR];
+			Optional<StringRef> error = restoreState.get().error;
+			statusObj["blob_full_restore_error"] = error.present() ? error.get() : ""_sr;
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)

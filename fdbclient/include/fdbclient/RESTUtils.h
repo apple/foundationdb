@@ -39,6 +39,8 @@
 
 using RESTConnectionPoolKey = std::pair<std::string, std::string>;
 
+enum RESTLogSeverity { INFO = 1, DEBUG = 2, VERBOSE = 3 };
+
 class IConnection;
 
 class RESTConnectionPool : public ReferenceCounted<RESTConnectionPool> {
