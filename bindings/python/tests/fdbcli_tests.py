@@ -488,8 +488,8 @@ def exclude(logger):
             assert len(coordinator_list) == 1
             assert coordinator_list[0]['address'] == excluded_address
             break
-        elif 'ERROR: This exclude may cause the total free space in the cluster to drop below 10%.' in error_message:
-            # exclude the process may cause the free space not enough
+        elif 'ERROR: This exclude may cause the total available space in the cluster to drop below 10%.' in error_message:
+            # exclude the process may cause the available space not enough
             # use FORCE option to ignore it and proceed
             assert not force
             force = True
