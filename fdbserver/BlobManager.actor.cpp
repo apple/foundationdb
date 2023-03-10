@@ -3545,7 +3545,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				// terminate blob restore for non-retryable errors
 				TraceEvent("ManifestLoadError", bmData->id).error(e).detail("Phase", phase);
 				std::string errorMessage = fmt::format("Manifest loading error '{}'", e.what());
-				wait(BlobRestoreController::updateError(restoreController, errorMessage));
+				wait(BlobRestoreController::updateError(restoreController, StringRef(errorMessage)));
 			}
 		}
 	}
