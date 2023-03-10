@@ -739,8 +739,8 @@ ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<String
 				wait(MetaclusterAPI::changeTenantLockState(db, name, desiredLockState, uid));
 			} else {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				auto f = tr->get(nameKey);
-				Optional<Value> entry = wait(safeThreadFutureToFuture(f));
+				state ThreadFuture<Optional<Value>> tenantFuture = tr->get(nameKey);
+				Optional<Value> entry = wait(safeThreadFutureToFuture(tenantFuture));
 				if (!entry.present()) {
 					fmt::print(stderr, "ERROR: Tenant `{}' does not exist\n", name);
 					return false;
