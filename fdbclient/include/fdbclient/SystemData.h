@@ -157,10 +157,10 @@ std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key);
 bool serverHasKey(ValueRef storedValue);
 const Value serverKeysValue(const UID& id);
 void decodeServerKeysValue(const ValueRef& value,
-                            bool& assigned,
-                            bool& emptyRange,
-                            EnablePhysicalShardMove& enablePSM,
-                            UID& id);
+                           bool& assigned,
+                           bool& emptyRange,
+                           EnablePhysicalShardMove& enablePSM,
+                           UID& id);
 
 extern const KeyRangeRef conflictingKeysRange;
 extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;

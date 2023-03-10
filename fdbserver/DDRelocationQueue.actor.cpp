@@ -1254,13 +1254,13 @@ struct DDQueue : public IDDRelocationQueue {
 							rrs.dataMoveId = UID();
 						} else {
 							rrs.dataMoveId =
- 							    newDataMoveId(deterministicRandom()->randomUInt64(),
- 							                  AssignEmptyRange::False,
- 							                  EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
- 							TraceEvent(SevInfo, "DDDataMoveInitiatedWithRandomDestID")
- 							    .detail("DataMoveID", rrs.dataMoveId.toString())
- 							    .detail("Range", rrs.keys)
- 							    .detail("Reason", rrs.reason.toString());
+							    newDataMoveId(deterministicRandom()->randomUInt64(),
+							                  AssignEmptyRange::False,
+							                  EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
+							TraceEvent(SevInfo, "DDDataMoveInitiatedWithRandomDestID")
+							    .detail("DataMoveID", rrs.dataMoveId.toString())
+							    .detail("Range", rrs.keys)
+							    .detail("Reason", rrs.reason.toString());
 						}
 					} else {
 						rrs.dataMoveId = anonymousShardId;
@@ -1754,11 +1754,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						self->moveCreateNewPhysicalShard++;
 					}
 					rd.dataMoveId = newDataMoveId(physicalShardIDCandidate,
- 					                              AssignEmptyRange::False,
- 					                              EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
- 					TraceEvent(SevInfo, "DDDataMoveInitiated")
- 					    .detail("DataMoveID", rd.dataMoveId.toString())
- 					    .detail("Reason", rd.reason.toString());
+					                              AssignEmptyRange::False,
+					                              EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
+					TraceEvent(SevInfo, "DDDataMoveInitiated")
+					    .detail("DataMoveID", rd.dataMoveId.toString())
+					    .detail("Reason", rd.reason.toString());
 					auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
 					inFlightRange.value().dataMoveId = rd.dataMoveId;
 					auto f = self->dataMoves.intersectingRanges(rd.keys);

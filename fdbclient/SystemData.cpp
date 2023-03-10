@@ -561,8 +561,8 @@ void decodeServerKeysValue(const ValueRef& value,
 		assigned = id.second() != 0;
 		emptyRange = id.second() == emptyShardId;
 		if (id.second() & 1U) {
- 			enablePSM = EnablePhysicalShardMove::True;
- 		}
+			enablePSM = EnablePhysicalShardMove::True;
+		}
 	}
 }
 
