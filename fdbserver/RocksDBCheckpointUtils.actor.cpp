@@ -124,9 +124,9 @@ rocksdb::ReadOptions getReadOptions() {
 	return options;
 }
 
-void logRocksDBError(const rocksdb::Status& status, const std::string& method) {
+void logRocksDBError(const rocksdb::Status& status, const std::string& method, const UID& logId) {
 	auto level = status.IsTimedOut() ? SevWarn : SevError;
-	TraceEvent e(level, "RocksDBCheckpointReaderError");
+	TraceEvent e(level, "RocksDBCheckpointReaderError", logId);
 	e.detail("Error", status.ToString()).detail("Method", method).detail("RocksDBSeverity", status.severity());
 	if (status.IsIOError()) {
 		e.detail("SubCode", status.subcode());
