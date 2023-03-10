@@ -2043,10 +2043,10 @@ ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> t
 
 	// Return true if the entire range is false.  Since these values are coalesced, we can return false if there is more
 	// than one result
-	UID teamId;
+	UID shardId;
 	bool assigned, emptyRange;
 	EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
-	decodeServerKeysValue(keys[0].value, assigned, emptyRange, enablePSM, teamId);
+	decodeServerKeysValue(keys[0].value, assigned, emptyRange, enablePSM, shardId);
 	TraceEvent(SevVerbose, "CanRemoveStorageServer")
 	    .detail("ServerID", serverID)
 	    .detail("Key1", keys[0].key)
@@ -2655,13 +2655,13 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 	// to a specific
 	//   key (keyServersKeyServersKey)
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		const UID teamId = deterministicRandom()->randomUniqueID();
-		ksValue = keyServersValue(serverSrcUID, /*dest=*/std::vector<UID>(), teamId, UID());
+		const UID shardId = deterministicRandom()->randomUniqueID();
+		ksValue = keyServersValue(serverSrcUID, /*dest=*/std::vector<UID>(), shardId, UID());
 		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());
 
 		for (auto& s : servers) {
 			krmSetPreviouslyEmptyRange(
-			    tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysValue(teamId), serverKeysFalse);
+			    tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysValue(shardId), serverKeysFalse);
 		}
 	} else {
 		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());

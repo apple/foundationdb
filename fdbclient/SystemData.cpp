@@ -515,10 +515,10 @@ std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key) {
 }
 
 bool serverHasKey(ValueRef storedValue) {
-	UID teamId;
+	UID shardId;
 	bool assigned, emptyRange;
 	EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
-	decodeServerKeysValue(storedValue, assigned, emptyRange, enablePSM, teamId);
+	decodeServerKeysValue(storedValue, assigned, emptyRange, enablePSM, shardId);
 	return assigned;
 }
 
