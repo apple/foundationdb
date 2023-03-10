@@ -8,5 +8,4 @@ testTitle = "ResolverIgnoreTooOld"
 
 [[test.workload]]
 testName = "ResolverBug"
-# old transactions are rare in the first place, so we ignore all of them to make corruptions likely
-ignoreTooOldProbability = 1.0
+ignoreTooOldProbability = 0.2
