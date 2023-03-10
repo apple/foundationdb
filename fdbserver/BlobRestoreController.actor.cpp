@@ -120,7 +120,8 @@ ACTOR Future<Void> BlobRestoreController::updateState(Reference<BlobRestoreContr
 	return Void();
 }
 
-ACTOR Future<Void> BlobRestoreController::updateError(Reference<BlobRestoreController> self, StringRef errorMessage) {
+ACTOR Future<Void> BlobRestoreController::updateError(Reference<BlobRestoreController> self,
+                                                      Standalone<StringRef> errorMessage) {
 	Standalone<BlobRestoreState> newState;
 	newState.error = StringRef(newState.arena(), errorMessage);
 	newState.phase = BlobRestorePhase::ERROR;
