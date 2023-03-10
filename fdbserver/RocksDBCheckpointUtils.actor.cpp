@@ -48,7 +48,7 @@ FDB_DEFINE_BOOLEAN_PARAM(CheckpointAsKeyValues);
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 // Enforcing rocksdb version to be 7.7.3.
-static_assert((ROCKSDB_MAJOR == 8 && ROCKSDB_MINOR == 1 && ROCKSDB_PATCH == 0),
+static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 7 && ROCKSDB_PATCH == 3),
               "Unsupported rocksdb version. Update the rocksdb to 7.7.3 version");
 
 namespace {
@@ -69,28 +69,14 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 	}
 
 	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
-	TraceEvent(SevInfo, "RocksDBCF").detail("RocksDBCF", rocksCF.toString());
 	metaData.db_comparator_name = rocksCF.dbComparatorName;
 
 	for (const LiveFileMetaData& fileMetaData : rocksCF.sstFiles) {
 		rocksdb::LiveFileMetaData liveFileMetaData;
-		if (!fileMetaData.name.empty()) {
-			if (fileMetaData.name[0] == '/') {
-				liveFileMetaData.relative_filename = fileMetaData.name.substr(1);
-				liveFileMetaData.name = fileMetaData.name;
-			} else {
-				liveFileMetaData.relative_filename = fileMetaData.name;
-				liveFileMetaData.name = std::string("/") + fileMetaData.name;
-			}
-			ASSERT(liveFileMetaData.relative_filename.size() + 1 == liveFileMetaData.name.size());
-			ASSERT(liveFileMetaData.relative_filename[0] != '/');
-			ASSERT(liveFileMetaData.name[0] == '/');
-		}
-		liveFileMetaData.file_type = rocksdb::kTableFile;
 		liveFileMetaData.size = fileMetaData.size;
+		liveFileMetaData.name = fileMetaData.name;
 		liveFileMetaData.file_number = fileMetaData.file_number;
 		liveFileMetaData.db_path = fileMetaData.db_path;
-		liveFileMetaData.directory = fileMetaData.db_path;
 		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
 		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
 		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
@@ -105,8 +91,6 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
 		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
 		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
-		liveFileMetaData.smallest = fileMetaData.smallest;
-		liveFileMetaData.largest = fileMetaData.largest;
 		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
 		liveFileMetaData.level = fileMetaData.level;
 		metaData.files.push_back(liveFileMetaData);
