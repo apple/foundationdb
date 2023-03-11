@@ -40,6 +40,7 @@ public:
 	~Event();
 };
 
+void uncancellableEvent(StringRef name, Callback callback);
 void trigger(StringRef name, std::any const& data, Error const& e);
 
 } // namespace ProcessEvents
