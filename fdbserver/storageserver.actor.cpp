@@ -11978,6 +11978,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	state StorageServer self(persistentData, db, ssi);
 	state Future<Void> ssCore;
 	self.folder = folder;
+	self.checkpointFolder = joinPath(self.folder, serverCheckpointFolder);
+	self.fetchedCheckpointFolder = joinPath(self.folder, fetchedCheckpointFolder);
 
 	try {
 		state double start = now();
