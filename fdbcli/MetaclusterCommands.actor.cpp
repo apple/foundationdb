@@ -641,7 +641,7 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 		} else {
 			return {};
 		}
-	} else if (tokencmp(tokens[1], "restore") && tokens.size() < 7) {
+	} else if (tokencmp(tokens[1], "restore") && tokens.size() < 8) {
 		static std::vector<const char*> opts = { "<NAME>",
 			                                     "[dryrun]",
 			                                     "connection_string=<CONNECTION_STRING>",
