@@ -159,6 +159,10 @@ void trigger(StringRef name, std::any const& data, Error const& e) {
 	processEventsImpl.trigger(name, data, e);
 }
 
+void uncancellableEvent(StringRef name, Callback callback) {
+	new EventImpl({ name }, std::move(callback));
+}
+
 Event::Event(StringRef name, Callback callback) {
 	impl = new EventImpl({ std::move(name) }, std::move(callback));
 }
