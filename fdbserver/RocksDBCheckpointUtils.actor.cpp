@@ -237,7 +237,7 @@ ACTOR Future<Void> fetchCheckpointBytesSampleFile(Database cx,
                                                   std::function<Future<Void>(const CheckpointMetaData&)> cFun,
                                                   int maxRetries = 3) {
 	ASSERT(metaData->bytesSampleFile.present());
-	state std::string localFile = dir + "/metadata_bytes.sst";
+	state std::string localFile = joinPath(dir, metaData->checkpointID.toString() + "_metadata_bytes.sst");
 	TraceEvent(SevDebug, "FetchCheckpointByteSampleBegin")
 	    .detail("Checkpoint", metaData->toString())
 	    .detail("LocalFile", localFile);
@@ -907,7 +907,7 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 	}
 
 	const std::string remoteFile = rocksCF.sstFiles[idx].name;
-	const std::string localFile = dir + rocksCF.sstFiles[idx].name;
+	const std::string localFile = joinPath(dir, rocksCF.sstFiles[idx].name);
 	ASSERT_EQ(metaData->src.size(), 1);
 	const UID ssId = metaData->src.front();
 
@@ -931,7 +931,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
                                         std::function<Future<Void>(const CheckpointMetaData&)> cFun,
                                         int maxRetries = 3) {
 	state std::string localFile =
-	    dir + "/" + UID(metaData->checkpointID.first(), deterministicRandom()->randomUInt64()).toString() + ".sst";
+	    joinPath(dir, UID(metaData->checkpointID.first(), deterministicRandom()->randomUInt64()).toString() + ".sst");
 	RocksDBCheckpointKeyValues rkv = getRocksKeyValuesCheckpoint(*metaData);
 	TraceEvent("FetchCheckpointRange", metaData->checkpointID)
 	    .detail("InitialState", metaData->toString())
@@ -1139,14 +1139,16 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 		TraceEvent(SevDebug, "RocksDBCheckpointMetaData").detail("RocksCF", rocksCF.toString());
 
 		state int i = 0;
-		state std::vector<Future<Void>> fs;
 		for (; i < rocksCF.sstFiles.size(); ++i) {
-			fs.push_back(fetchCheckpointFile(cx, metaData, i, dir, cFun));
+			futures.push_back(fetchCheckpointFile(cx, metaData, i, dir, cFun));
 			TraceEvent(SevDebug, "GetCheckpointFetchingFile")
 			    .detail("FileName", rocksCF.sstFiles[i].name)
 			    .detail("Server", describe(metaData->src));
 		}
-		wait(waitForAll(fs));
+		if (metaData->bytesSampleFile.present()) {
+			futures.push_back(fetchCheckpointBytesSampleFile(cx, metaData, dir, cFun));
+		}
+		wait(waitForAll(futures));
 	} else if (metaData->getFormat() == RocksDBKeyValues) {
 		futures.push_back(fetchCheckpointRanges(cx, metaData, dir, cFun));
 		if (metaData->bytesSampleFile.present()) {
