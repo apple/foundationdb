@@ -183,7 +183,7 @@ public:
 	ACTOR static Future<Void> updateState(Reference<BlobRestoreController> self,
 	                                      BlobRestorePhase newPhase,
 	                                      Optional<BlobRestorePhase> expectedPhase);
-	ACTOR static Future<Void> updateError(Reference<BlobRestoreController> self, StringRef errorMessage);
+	ACTOR static Future<Void> updateError(Reference<BlobRestoreController> self, Standalone<StringRef> errorMessage);
 
 private:
 	Database db_;

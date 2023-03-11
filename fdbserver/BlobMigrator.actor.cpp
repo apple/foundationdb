@@ -657,7 +657,7 @@ ACTOR Future<Void> blobMigrator(BlobMigratorInterface interf, Reference<AsyncVar
 		TraceEvent("BlobMigratorError", interf.id()).error(e);
 		std::string errorMessage = fmt::format("Migrator failure '{}' on {}", e.what(), interf.address().toString());
 		Reference<BlobRestoreController> restoreController = makeReference<BlobRestoreController>(db, normalKeys);
-		wait(BlobRestoreController::updateError(restoreController, errorMessage));
+		wait(BlobRestoreController::updateError(restoreController, StringRef(errorMessage)));
 	}
 	return Void();
 }
