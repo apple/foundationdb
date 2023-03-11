@@ -438,7 +438,7 @@ void tenantGetCmdOutput(json_spirit::mValue jsonObject, bool useJson) {
 		doc.get("prefix.printable", prefix);
 		doc.get("lock_state", tenantLockState);
 
-		bool hasName = doc.tryGet("name", name);
+		bool hasName = doc.tryGet("name.printable", name);
 		bool hasTenantState = doc.tryGet("tenant_state", tenantState);
 		bool hasLockId = doc.tryGet("lock_id", lockId);
 		bool hasTenantGroup = doc.tryGet("tenant_group.printable", tenantGroup);
@@ -538,7 +538,7 @@ ACTOR Future<bool> tenantGetCommand(Reference<IDatabase> db, std::vector<StringR
 	}
 }
 
-// tenant get command
+// tenant getId command
 ACTOR Future<bool> tenantGetIdCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 3 || tokens.size() > 4 || (tokens.size() == 4 && tokens[3] != "JSON"_sr)) {
 		fmt::print("Usage: tenant getId <ID> [JSON]\n\n");
@@ -563,11 +563,12 @@ ACTOR Future<bool> tenantGetIdCommand(Reference<IDatabase> db, std::vector<Strin
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			state std::string tenantJson;
 			if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
-				fmt::print(stderr, "ERROR: get by ID should only be run on a management cluster.\n");
-				return false;
+				TenantMapEntry entry = wait(TenantAPI::getTenantTransaction(tr, tenantId));
+				tenantJson = entry.toJson();
+			} else {
+				MetaclusterTenantMapEntry mEntry = wait(MetaclusterAPI::getTenantTransaction(tr, tenantId));
+				tenantJson = mEntry.toJson();
 			}
-			MetaclusterTenantMapEntry entry = wait(MetaclusterAPI::getTenantTransaction(tr, tenantId));
-			tenantJson = entry.toJson();
 
 			json_spirit::mValue jsonObject;
 			json_spirit::read_string(tenantJson, jsonObject);
@@ -898,6 +899,9 @@ void tenantGenerator(const char* text,
 		const char* opts[] = { "tenant_group=", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokens.size() == 3 && tokencmp(tokens[1], "get")) {
+		const char* opts[] = { "JSON", nullptr };
+		arrayGenerator(text, line, opts, lc);
+	} else if (tokens.size() == 3 && tokencmp(tokens[1], "getId")) {
 		const char* opts[] = { "JSON", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokencmp(tokens[1], "configure")) {

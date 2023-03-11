@@ -1069,10 +1069,15 @@ def tenant_get(logger):
 
     output = run_fdbcli_command("tenant get tenant")
     lines = output.split("\n")
-    assert len(lines) == 3
+    assert len(lines) == 4
     assert lines[0].strip().startswith("id: ")
     assert lines[1].strip().startswith("prefix: ")
-    assert lines[2].strip() == "lock state: unlocked"
+    assert lines[2].strip().startswith("name: ")
+    assert lines[3].strip() == "lock state: unlocked"
+    id = lines[0].strip().removeprefix("id: ")
+    
+    id_output = run_fdbcli_command("tenant getId {}".format(id))
+    assert id_output == output
 
     output = run_fdbcli_command("tenant get tenant JSON")
     json_output = json.loads(output, strict=False)
@@ -1092,13 +1097,21 @@ def tenant_get(logger):
     assert "lock_state" in json_output["tenant"]
     assert json_output["tenant"]["lock_state"] == "unlocked"
 
+    id_output = run_fdbcli_command("tenant getId {} JSON".format(id))
+    assert id_output == output
+
     output = run_fdbcli_command("tenant get tenant2")
     lines = output.split("\n")
-    assert len(lines) == 4
+    assert len(lines) == 5
     assert lines[0].strip().startswith("id: ")
     assert lines[1].strip().startswith("prefix: ")
-    assert lines[2].strip() == "lock state: unlocked"
-    assert lines[3].strip() == "tenant group: tenant_group2"
+    assert lines[2].strip().startswith("name: ")
+    assert lines[3].strip() == "lock state: unlocked"
+    assert lines[4].strip() == "tenant group: tenant_group2"
+    id2 = lines[0].strip().removeprefix("id: ")
+
+    id_output = run_fdbcli_command("tenant getId {}".format(id2))
+    assert id_output == output
 
     output = run_fdbcli_command("tenant get tenant2 JSON")
     json_output = json.loads(output, strict=False)
@@ -1119,6 +1132,8 @@ def tenant_get(logger):
     assert "base64" in json_output["tenant"]["tenant_group"]
     assert json_output["tenant"]["tenant_group"]["printable"] == "tenant_group2"
 
+    id_output = run_fdbcli_command("tenant getId {} JSON".format(id2))
+    assert id_output == output
 
 @enable_logging()
 def tenant_configure(logger):
@@ -1134,8 +1149,8 @@ def tenant_configure(logger):
 
     output = run_fdbcli_command("tenant get tenant")
     lines = output.split("\n")
-    assert len(lines) == 4
-    assert lines[3].strip() == "tenant group: tenant_group1"
+    assert len(lines) == 5
+    assert lines[4].strip() == "tenant group: tenant_group1"
 
     output = run_fdbcli_command("tenant configure tenant unset tenant_group")
     assert output == "The configuration for tenant `tenant' has been updated"
@@ -1147,7 +1162,7 @@ def tenant_configure(logger):
 
     output = run_fdbcli_command("tenant get tenant")
     lines = output.split("\n")
-    assert len(lines) == 3
+    assert len(lines) == 4
 
     output = run_fdbcli_command_and_get_error(
         "tenant configure tenant tenant_group=tenant_group1 tenant_group=tenant_group2"
