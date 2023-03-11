@@ -30,6 +30,8 @@
 
 #include "flow/actorcompiler.h" // always the last include
 
+const std::string forwardSlash = "/";
+
 const std::unordered_map<std::string, RESTConnectionType> RESTConnectionType::supportedConnTypes = {
 	{ "http", RESTConnectionType("http", RESTConnectionType::NOT_SECURE_CONNECTION) },
 	{ "https", RESTConnectionType("https", RESTConnectionType::SECURE_CONNECTION) }
@@ -113,6 +115,15 @@ ACTOR Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<REST
                                                                   RESTConnectionPoolKey connectKey,
                                                                   bool isSecure,
                                                                   int maxConnLife) {
+
+	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
+		TraceEvent("RESTUtilConnectStart")
+		    .detail("Host", connectKey.first)
+		    .detail("Service", connectKey.second)
+		    .detail("IsSecure", isSecure)
+		    .detail("ConnectPoolNumKeys", connectionPool->connectionPoolMap.size());
+	}
+
 	auto poolItr = connectionPool->connectionPoolMap.find(connectKey);
 	while (poolItr != connectionPool->connectionPoolMap.end() && !poolItr->second.empty()) {
 		RESTConnectionPool::ReusableConnection rconn = poolItr->second.front();
@@ -120,32 +131,32 @@ ACTOR Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<REST
 
 		if (rconn.expirationTime > now()) {
 			if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
-				TraceEvent("RESTClientReuseConn")
+				TraceEvent("RESTUtilReuseConn")
 				    .detail("Host", connectKey.first)
 				    .detail("Service", connectKey.second)
 				    .detail("RemoteEndpoint", rconn.conn->getPeerAddress())
-				    .detail("ExpireIn", rconn.expirationTime - now());
+				    .detail("ExpireIn", rconn.expirationTime - now())
+				    .detail("NumConnsInPool", poolItr->second.size());
 			}
 			return rconn;
 		}
 	}
+
+	ASSERT(poolItr == connectionPool->connectionPoolMap.end() || poolItr->second.empty());
 
 	// No valid connection exists, create a new one
 	state Reference<IConnection> conn =
 	    wait(INetworkConnections::net()->connect(connectKey.first, connectKey.second, isSecure));
 	wait(conn->connectHandshake());
 
-	RESTConnectionPool::ReusableConnection reusableConn =
-	    RESTConnectionPool::ReusableConnection({ conn, now() + maxConnLife });
-	connectionPool->connectionPoolMap.insert(
-	    { connectKey, std::queue<RESTConnectionPool::ReusableConnection>({ reusableConn }) });
-
-	TraceEvent("RESTClientCreateNewConn")
+	TraceEvent("RESTTUilCreateNewConn")
 	    .suppressFor(60)
 	    .detail("Host", connectKey.first)
 	    .detail("Service", connectKey.second)
-	    .detail("RemoteEndpoint", conn->getPeerAddress());
-	return reusableConn;
+	    .detail("RemoteEndpoint", conn->getPeerAddress())
+	    .detail("ConnPoolSize", connectionPool->connectionPoolMap.size());
+
+	return RESTConnectionPool::ReusableConnection({ conn, now() + maxConnLife });
 }
 
 Future<RESTConnectionPool::ReusableConnection> RESTConnectionPool::connect(RESTConnectionPoolKey connectKey,
@@ -157,18 +168,35 @@ Future<RESTConnectionPool::ReusableConnection> RESTConnectionPool::connect(RESTC
 void RESTConnectionPool::returnConnection(RESTConnectionPoolKey connectKey,
                                           ReusableConnection& rconn,
                                           const int maxConnections) {
+	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
+		TraceEvent("RESTUtilReturnConnStart")
+		    .detail("Host", connectKey.first)
+		    .detail("Service", connectKey.second)
+		    .detail("ConnectPoolNumKeys", connectionPoolMap.size());
+	}
+
 	auto poolItr = connectionPoolMap.find(connectKey);
-	if (poolItr == connectionPoolMap.end()) {
-		throw rest_connectpool_key_not_found();
-	}
-
-	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
-		TraceEvent("RESTClientReturnConn").detail("Host", connectKey.first).detail("Service", connectKey.second);
-	}
-
 	// If it expires in the future then add it to the pool in the front iff connection pool size is not maxed
-	if (rconn.expirationTime > now() && poolItr->second.size() < maxConnections) {
-		poolItr->second.push(rconn);
+	if (rconn.expirationTime > now()) {
+		bool returned = true;
+		if (poolItr == connectionPoolMap.end()) {
+			connectionPoolMap.insert({ connectKey, std::queue<RESTConnectionPool::ReusableConnection>({ rconn }) });
+		} else if (poolItr->second.size() < maxConnections) {
+			poolItr->second.push(rconn);
+		} else {
+			// Connection pool at its capacity; do nothing
+			returned = false;
+		}
+
+		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG && returned) {
+			poolItr = connectionPoolMap.find(connectKey);
+			TraceEvent("RESTUtilReturnConnToPool")
+			    .detail("Host", connectKey.first)
+			    .detail("Service", connectKey.second)
+			    .detail("ConnPoolSize", connectionPoolMap.size())
+			    .detail("CachedConns", poolItr->second.size())
+			    .detail("TimeToExpire", rconn.expirationTime - now());
+		}
 	}
 	rconn.conn = Reference<IConnection>();
 }
@@ -207,7 +235,14 @@ void RESTUrl::parseUrl(const std::string& fullUrl) {
 		uint8_t foundSeparator = 0;
 		StringRef hostPort = t.eatAny("/?", &foundSeparator);
 		if (foundSeparator == '/') {
-			this->resource = t.eat("?").toString();
+			StringRef resourceRef = t.eat("?");
+			if (!resourceRef.empty()) {
+				// Resource needs to starts with '/'
+				if (!resourceRef.startsWith(forwardSlash)) {
+					this->resource = forwardSlash;
+				}
+				this->resource.append(resourceRef.toString());
+			}
 			this->reqParameters = t.eat().toString();
 		}
 
@@ -222,7 +257,7 @@ void RESTUrl::parseUrl(const std::string& fullUrl) {
 		this->service = hRef.eat().toString();
 
 		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
-			TraceEvent("RESTClientParseURI")
+			TraceEvent("RESTUtilParseURI")
 			    .detail("URI", fullUrl)
 			    .detail("Host", this->host)
 			    .detail("Service", this->service)
@@ -231,7 +266,7 @@ void RESTUrl::parseUrl(const std::string& fullUrl) {
 			    .detail("ConnectionType", this->connType.toString());
 		}
 	} catch (std::string& err) {
-		TraceEvent(SevWarnAlways, "RESTClientParseError").detail("URI", fullUrl).detail("Error", err);
+		TraceEvent(SevWarnAlways, "RESTUtilParseError").detail("URI", fullUrl).detail("Error", err);
 		throw rest_invalid_uri();
 	}
 }
@@ -271,7 +306,7 @@ TEST_CASE("/RESTUtils/ValidURIWithService") {
 	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
 	ASSERT_EQ(r.host.compare("host"), 0);
 	ASSERT_EQ(r.service.compare("80"), 0);
-	ASSERT_EQ(r.resource.compare("foo/bar"), 0);
+	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
 	return Void();
 }
 
@@ -281,7 +316,17 @@ TEST_CASE("/RESTUtils/ValidURIWithoutService") {
 	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
 	ASSERT_EQ(r.host.compare("host"), 0);
 	ASSERT(r.service.empty());
-	ASSERT_EQ(r.resource.compare("foo/bar"), 0);
+	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
+	return Void();
+}
+
+TEST_CASE("/RESTUtils/ValidURIWithExtraForwardSlash") {
+	std::string uri("https://host//foo/bar");
+	RESTUrl r(uri);
+	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
+	ASSERT_EQ(r.host.compare("host"), 0);
+	ASSERT(r.service.empty());
+	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
 	return Void();
 }
 
@@ -291,7 +336,7 @@ TEST_CASE("/RESTUtils/ValidURIWithParamsSecure") {
 	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
 	ASSERT_EQ(r.host.compare("host"), 0);
 	ASSERT(r.service.empty());
-	ASSERT_EQ(r.resource.compare("foo/bar"), 0);
+	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
 	ASSERT_EQ(r.reqParameters.compare("param1,param2"), 0);
 	return Void();
 }
@@ -317,7 +362,7 @@ TEST_CASE("/RESTUtils/ValidURIWithParams") {
 	ASSERT_EQ(r.connType.secure, RESTConnectionType::NOT_SECURE_CONNECTION);
 	ASSERT_EQ(r.host.compare("host"), 0);
 	ASSERT(r.service.empty());
-	ASSERT_EQ(r.resource.compare("foo/bar"), 0);
+	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
 	ASSERT_EQ(r.reqParameters.compare("param1,param2"), 0);
 	return Void();
 }
