@@ -425,6 +425,9 @@ Optional<CompressionFilter> getBlobFileCompressFilter() {
 	Optional<CompressionFilter> compFilter;
 	if (SERVER_KNOBS->ENABLE_BLOB_GRANULE_COMPRESSION) {
 		compFilter = CompressionUtils::fromFilterString(SERVER_KNOBS->BLOB_GRANULE_COMPRESSION_FILTER);
+		if (BUGGIFY_WITH_PROB(0.1)) {
+			compFilter = CompressionUtils::getRandomFilter();
+		}
 	}
 	return compFilter;
 }
