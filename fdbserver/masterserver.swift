@@ -432,7 +432,7 @@ public actor MasterDataActor {
 
 extension MasterData {
     var swiftActorImpl: MasterDataActor {
-        UnsafeRawPointer(self.getSwiftImpl()).load(as: MasterDataActor.self)
+        UnsafeRawPointer(self.__getSwiftImplUnsafe()).load(as: MasterDataActor.self)
     }
 }
 
