@@ -174,7 +174,7 @@ FDB_DECLARE_BOOLEAN_PARAM(IsBadTeam);
 FDB_DECLARE_BOOLEAN_PARAM(WaitWiggle);
 
 struct DDTeamCollectionInitParams {
-	Reference<Database> db;
+	Database db;
 	UID distributorId;
 	MoveKeysLock const& lock;
 	PromiseStream<RelocateShard> const& output;
