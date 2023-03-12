@@ -56,7 +56,7 @@ ACTOR Future<bool> IssueConfigurationChange(Database cx, std::string config, boo
 
 // a wrapper for test protected method
 struct DDTeamCollectionTester : public DDTeamCollection {
-	ActorCollection actors;
+	ActorCollection actors{ false };
 	void resetStorageWiggleState() {
 		wigglingId.reset();
 		storageWiggler = makeReference<StorageWiggler>(this);
@@ -67,8 +67,8 @@ struct DDTeamCollectionTester : public DDTeamCollection {
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
 		// disable PW
 		{
-			bool success = wait(IssueConfigurationChange(
-			    self->cx, "perpetual_storage_wiggle=0", deterministicRandom()->coinflip()));
+			bool success = wait(
+			    IssueConfigurationChange(self->cx, "perpetual_storage_wiggle=0", deterministicRandom()->coinflip()));
 			if (!success)
 				return Void();
 		}
@@ -87,15 +87,15 @@ struct DDTeamCollectionTester : public DDTeamCollection {
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
 		// disable PW
 		{
-			bool success = wait(IssueConfigurationChange(
-			    self->cx, "perpetual_storage_wiggle=0", deterministicRandom()->coinflip()));
+			bool success = wait(
+			    IssueConfigurationChange(self->cx, "perpetual_storage_wiggle=0", deterministicRandom()->coinflip()));
 			if (!success)
 				return Void();
 		}
 		// enable PW
 		{
-			bool success = wait(IssueConfigurationChange(
-			    self->cx, "perpetual_storage_wiggle=1", deterministicRandom()->coinflip()));
+			bool success = wait(
+			    IssueConfigurationChange(self->cx, "perpetual_storage_wiggle=1", deterministicRandom()->coinflip()));
 			if (!success)
 				return Void();
 		}
@@ -113,8 +113,8 @@ struct DDTeamCollectionTester : public DDTeamCollection {
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
 		// disable PW
 		{
-			bool success = wait(IssueConfigurationChange(
-			    self->cx, "perpetual_storage_wiggle=0", deterministicRandom()->coinflip()));
+			bool success = wait(
+			    IssueConfigurationChange(self->cx, "perpetual_storage_wiggle=0", deterministicRandom()->coinflip()));
 			if (!success)
 				return Void();
 		}
@@ -122,8 +122,8 @@ struct DDTeamCollectionTester : public DDTeamCollection {
 
 		// restart perpetual wiggle
 		{
-			bool success = wait(IssueConfigurationChange(
-			    self->cx, "perpetual_storage_wiggle=1", deterministicRandom()->coinflip()));
+			bool success = wait(
+			    IssueConfigurationChange(self->cx, "perpetual_storage_wiggle=1", deterministicRandom()->coinflip()));
 			if (!success)
 				return Void();
 		}
