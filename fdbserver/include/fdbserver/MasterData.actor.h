@@ -143,8 +143,8 @@ struct SWIFT_CXX_REF_MASTERDATA MasterData :
 
     ~MasterData();
 
-    inline ResolutionBalancer &getResolutionBalancer() {
-        return resolutionBalancer;
+    inline ResolutionBalancer *getResolutionBalancer() {
+        return &resolutionBalancer;
     }
 };
 
