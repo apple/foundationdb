@@ -1221,7 +1221,7 @@ public:
 	bool operator==(const FutureStream& rhs) { return rhs.queue == queue; }
 	bool operator!=(const FutureStream& rhs) { return rhs.queue != queue; }
 
-	T pop() { return queue->pop(); }
+    T pop() __attribute__((swift_attr("import_unsafe"))) { return queue->pop(); }
 
 	Error getError() {
 		ASSERT(queue->isError());
