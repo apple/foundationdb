@@ -475,7 +475,7 @@ public func masterServerSwift(
                         return
                     }
 
-                    guard lifetime.isStillValid(db.get().pointee.masterLifetime, mi.id() == db.get().pointee.master.id()) else {
+                    guard lifetime.isStillValid(db.getCopy().masterLifetime, mi.id() == db.getCopy().master.id()) else {
                         // CODE_PROBE(true, "Master replaced, dying")
                         if BUGGIFY() {
                             try? await FlowClock.sleep(for: .seconds(5))
