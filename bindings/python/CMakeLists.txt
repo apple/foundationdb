@@ -83,9 +83,13 @@ add_custom_target(python_package DEPENDS ${package_file})
 add_dependencies(python_package python_binding)
 add_dependencies(packages python_package)
 
-add_fdbclient_test(
-  NAME python_unit_tests
-  COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/tests/unit_tests.py
-          --cluster-file @CLUSTER_FILE@ --verbose
-  DISABLE_LOG_DUMP
-)
+if(NOT OPEN_FOR_IDE AND NOT USE_SANITIZER)
+
+  add_fdbclient_test(
+    NAME python_unit_tests
+    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/tests/unit_tests.py
+            --cluster-file @CLUSTER_FILE@ --verbose
+    DISABLE_LOG_DUMP
+  )
+
+endif() # NOT OPEN_FOR_IDE AND NOT USE_SANITIZER
