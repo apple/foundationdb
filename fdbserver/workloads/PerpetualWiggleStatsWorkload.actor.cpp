@@ -21,7 +21,6 @@
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbserver/DDSharedContext.h"
 #include "fdbserver/DDTxnProcessor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -58,8 +57,8 @@ struct DDTeamCollectionTester : public DDTeamCollection {
 		wait(delay(5.0)); // wait for restore txn finish
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
 		// disable PW
-		wait(success(IssueConfigurationChange(
-		    self->dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip())));
+		wait(success(
+		    IssueConfigurationChange(self->cx, "perpetual_storage_wiggle=0", deterministicRandom()->coinflip())));
 
 		// restore from FDB
 		metrics.reset();
@@ -77,11 +76,11 @@ struct DDTeamCollectionTester : public DDTeamCollection {
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
 		wiggleFuture.cancel(); // mock dead DD
 		// disable PW
-		wait(success(IssueConfigurationChange(
-		    self->dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip())));
+		wait(success(
+		    IssueConfigurationChange(self->cx, "perpetual_storage_wiggle=0", deterministicRandom()->coinflip())));
 		// enable PW
-		wait(success(IssueConfigurationChange(
-		    self->dbContext(), "perpetual_storage_wiggle=1", deterministicRandom()->coinflip())));
+		wait(success(
+		    IssueConfigurationChange(self->cx, "perpetual_storage_wiggle=1", deterministicRandom()->coinflip())));
 		// restart
 		wiggleFuture = self->monitorPerpetualStorageWiggle();
 		wait(delay(5.0)); // wait for reset txn finish
@@ -97,13 +96,13 @@ struct DDTeamCollectionTester : public DDTeamCollection {
 		wait(delay(5.0)); // wait for restore txn finish
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
 		// disable PW
-		wait(success(IssueConfigurationChange(
-		    self->dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip())));
+		wait(success(
+		    IssueConfigurationChange(self->cx, "perpetual_storage_wiggle=0", deterministicRandom()->coinflip())));
 		wait(self->storageWiggler->finishWiggle());
 
 		// restart perpetual wiggle
-		wait(success(IssueConfigurationChange(
-		    self->dbContext(), "perpetual_storage_wiggle=1", deterministicRandom()->coinflip())));
+		wait(success(
+		    IssueConfigurationChange(self->cx, "perpetual_storage_wiggle=1", deterministicRandom()->coinflip())));
 		wiggleFuture = self->monitorPerpetualStorageWiggle();
 		wait(delay(5.0)); // wait for reset txn finish
 		metrics.reset();
@@ -129,6 +128,8 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 	StorageWiggleMetrics lastMetrics;
 
 	PerpetualWiggleStatsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+
+	std::string description() const override { return NAME; }
 
 	ACTOR static Future<Void> _setup(PerpetualWiggleStatsWorkload* self, Database cx) {
 		int oldMode = wait(setDDMode(cx, 0));
@@ -165,24 +166,23 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 	Future<bool> check(Database const& cx) override { return true; };
 
 	ACTOR static Future<Void> _start(PerpetualWiggleStatsWorkload* self, Database cx) {
-		state Reference<IDDTxnProcessor> db = makeReference<DDTxnProcessor>(cx);
 		state DatabaseConfiguration conf;
-		state DDTeamCollectionTester tester({ db,
-		                                      UID(8, 6),
-		                                      MoveKeysLock(),
-		                                      PromiseStream<RelocateShard>(),
-		                                      makeReference<ShardsAffectedByTeamFailure>(),
-		                                      conf,
-		                                      {},
-		                                      {},
-		                                      Future<Void>(Void()),
-		                                      makeReference<AsyncVar<bool>>(true),
-		                                      IsPrimary::True,
-		                                      makeReference<AsyncVar<bool>>(false),
-		                                      makeReference<AsyncVar<bool>>(false),
-		                                      PromiseStream<GetMetricsRequest>(),
-		                                      Promise<UID>(),
-		                                      PromiseStream<Promise<int>>() });
+		state DDTeamCollectionTester tester(DDTeamCollectionInitParams{ cx,
+		                                                                UID(8, 6),
+		                                                                MoveKeysLock(),
+		                                                                PromiseStream<RelocateShard>(),
+		                                                                makeReference<ShardsAffectedByTeamFailure>(),
+		                                                                conf,
+		                                                                {},
+		                                                                {},
+		                                                                Future<Void>(Void()),
+		                                                                makeReference<AsyncVar<bool>>(true),
+		                                                                IsPrimary::True,
+		                                                                makeReference<AsyncVar<bool>>(false),
+		                                                                makeReference<AsyncVar<bool>>(false),
+		                                                                PromiseStream<GetMetricsRequest>(),
+		                                                                Promise<UID>(),
+		                                                                PromiseStream<Promise<int>>() });
 		tester.configuration.storageTeamSize = 3;
 		tester.configuration.perpetualStorageWiggleSpeed = 1;
 
@@ -202,4 +202,4 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override { return; }
 };
 
-WorkloadFactory<PerpetualWiggleStatsWorkload> PerpetualWiggleStatsWorkload;
+WorkloadFactory<PerpetualWiggleStatsWorkload> PerpetualWiggleStatsWorkload("PerpetualWiggleStatsWorkload");

@@ -49,7 +49,7 @@
 #include "flow/serialize.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
-#include "StorageWiggleMetrics.actor.h"
+#include "fdbclient/StorageWiggleMetrics.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int priority) {
@@ -154,10 +154,9 @@ Optional<UID> StorageWiggler::getNextServerId(bool necessaryOnly) {
 
 Future<Void> StorageWiggler::resetStats() {
 	metrics.reset();
-	return runRYWTransaction(
-	    teamCollection->cx, [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		    return resetStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()), metrics);
-	    });
+	return runRYWTransaction(teamCollection->cx, [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		return resetStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()), metrics);
+	});
 }
 
 Future<Void> StorageWiggler::restoreStats() {
@@ -168,11 +167,10 @@ Future<Void> StorageWiggler::restoreStats() {
 		}
 		return Void();
 	};
-	auto readFuture =
-	    runRYWTransaction(teamCollection->cx,
-	                      [this](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<StorageWiggleMetrics>> {
-		                      return loadStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()));
-	                      });
+	auto readFuture = runRYWTransaction(
+	    teamCollection->cx, [this](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<StorageWiggleMetrics>> {
+		    return loadStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()));
+	    });
 	return map(readFuture, assignFunc);
 }
 
@@ -181,10 +179,9 @@ Future<Void> StorageWiggler::startWiggle() {
 	if (shouldStartNewRound()) {
 		metrics.last_round_start = metrics.last_wiggle_start;
 	}
-	return runRYWTransaction(
-	    teamCollection->cx, [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		    return updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
-	    });
+	return runRYWTransaction(teamCollection->cx, [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		return updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
+	});
 }
 
 Future<Void> StorageWiggler::finishWiggle() {
@@ -199,10 +196,9 @@ Future<Void> StorageWiggler::finishWiggle() {
 		duration = metrics.last_round_finish - metrics.last_round_start;
 		metrics.smoothed_round_duration.setTotal((double)duration);
 	}
-	return runRYWTransaction(
-	    teamCollection->cx, [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		    return updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
-	    });
+	return runRYWTransaction(teamCollection->cx, [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		return updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
+	});
 }
 
 ACTOR Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
