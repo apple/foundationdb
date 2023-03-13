@@ -1057,7 +1057,7 @@ void EncryptBlobCipherAes265Ctr::encryptInplace(uint8_t* plaintext,
 
 	int bytes{ 0 };
 	if (EVP_EncryptUpdate(ctx, plaintext, &bytes, plaintext, plaintextLen) != 1) {
-		TraceEvent(SevWarn, "BlobCipherEncryptUpdateFailed")
+		TraceEvent(SevWarn, "BlobCipherInplaceEncryptUpdateFailed")
 		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
 		    .detail("EncryptDomainId", textCipherKey->getDomainId());
 		throw encrypt_ops_error();
@@ -1065,14 +1065,14 @@ void EncryptBlobCipherAes265Ctr::encryptInplace(uint8_t* plaintext,
 
 	// Padding should be 0 for AES CTR mode, so encryptUpdate() should encrypt all the data
 	if (bytes != plaintextLen) {
-		TraceEvent(SevWarn, "BlobCipherEncryptUnexpectedCipherLen")
+		TraceEvent(SevWarn, "BlobCipherInplaceEncryptUnexpectedCipherLen")
 		    .detail("PlaintextLen", plaintextLen)
 		    .detail("EncryptedBufLen", bytes);
 		throw encrypt_ops_error();
 	}
 
 	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
-		TraceEvent(SevWarn, "BlobCipherEncryptCTXResetFailed")
+		TraceEvent(SevWarn, "BlobCipherInplaceEncryptCTXResetFailed")
 		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
 		    .detail("EncryptDomainId", textCipherKey->getDomainId());
 		throw encrypt_ops_error();
@@ -1165,7 +1165,7 @@ void EncryptBlobCipherAes265Ctr::encryptInplace(uint8_t* plaintext,
 
 	int bytes{ 0 };
 	if (EVP_EncryptUpdate(ctx, plaintext, &bytes, plaintext, plaintextLen) != 1) {
-		TraceEvent(SevWarn, "BlobCipherEncryptUpdateFailed")
+		TraceEvent(SevWarn, "BlobCipherInplaceEncryptUpdateFailed")
 		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
 		    .detail("EncryptDomainId", textCipherKey->getDomainId());
 		throw encrypt_ops_error();
@@ -1173,14 +1173,14 @@ void EncryptBlobCipherAes265Ctr::encryptInplace(uint8_t* plaintext,
 
 	// Padding should be 0 for AES CTR mode, so encryptUpdate() should encrypt all the data
 	if (bytes != plaintextLen) {
-		TraceEvent(SevWarn, "BlobCipherEncryptUnexpectedCipherLen")
+		TraceEvent(SevWarn, "BlobCipherInplaceEncryptUnexpectedCipherLen")
 		    .detail("PlaintextLen", plaintextLen)
 		    .detail("EncryptedBufLen", bytes);
 		throw encrypt_ops_error();
 	}
 
 	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
-		TraceEvent(SevWarn, "BlobCipherEncryptCTXResetFailed")
+		TraceEvent(SevWarn, "BlobCipherInplaceEncryptCTXResetFailed")
 		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
 		    .detail("EncryptDomainId", textCipherKey->getDomainId());
 		throw encrypt_ops_error();
@@ -2597,10 +2597,12 @@ void testEncryptInplaceNoAuthMode(const int minDomainId) {
 	Reference<BlobCipherKey> cipherKey = cipherKeyCache->getLatestCipherKey(minDomainId);
 	Reference<BlobCipherKey> headerCipherKey = cipherKeyCache->getLatestCipherKey(ENCRYPT_HEADER_DOMAIN_ID);
 	const int bufLen = deterministicRandom()->randomInt(786, 2127) + 512;
-	alignas(AES_BLOCK_SIZE) uint8_t orgData[bufLen];
-	deterministicRandom()->randomBytes(&orgData[0], bufLen);
+	// allocate the data align with AES_BLOCK_SIZE, encryption starts from orgData[1] so it's not aligned.
+	alignas(AES_BLOCK_SIZE) uint8_t orgData[bufLen + 1];
+	uint8_t* plaintext = &orgData[1];
+	deterministicRandom()->randomBytes(plaintext, bufLen);
 	uint8_t dataClone[bufLen];
-	memcpy(dataClone, orgData, bufLen);
+	memcpy(dataClone, plaintext, bufLen);
 
 	Arena arena;
 	uint8_t iv[AES_256_IV_LENGTH];
@@ -2614,7 +2616,7 @@ void testEncryptInplaceNoAuthMode(const int minDomainId) {
 	                                     BlobCipherMetrics::TEST);
 
 	BlobCipherEncryptHeaderRef headerRef;
-	encryptor.encryptInplace(&orgData[0], bufLen, &headerRef);
+	encryptor.encryptInplace(plaintext, bufLen, &headerRef);
 
 	// validate header version details
 	AesCtrNoAuth noAuth = std::get<AesCtrNoAuth>(headerRef.algoHeader);
@@ -2625,15 +2627,8 @@ void testEncryptInplaceNoAuthMode(const int minDomainId) {
 	DecryptBlobCipherAes256Ctr decryptor(
 	    tCipherKeyKey, Reference<BlobCipherKey>(), &noAuth.v1.iv[0], BlobCipherMetrics::TEST);
 
-	decryptor.decryptInplace(&orgData[0], bufLen, headerRef);
-	ASSERT_EQ(memcmp(dataClone, &orgData[0], bufLen), 0);
-
-	// try to encrypt/decrypt un-aligned data (start from the offset 1), which should still work but fall back to
-	// non-inplace encrypt/decrypt.
-	encryptor.encryptInplace(&orgData[1], bufLen - 1, &headerRef);
-
-	decryptor.decryptInplace(&orgData[1], bufLen - 1, headerRef);
-	ASSERT_EQ(memcmp(&dataClone[1], &orgData[1], bufLen - 1), 0);
+	decryptor.decryptInplace(plaintext, bufLen, headerRef);
+	ASSERT_EQ(memcmp(dataClone, plaintext, bufLen), 0);
 
 	TraceEvent("EncryptInplaceDone");
 }
