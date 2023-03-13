@@ -466,7 +466,7 @@ if (CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN)
   set(SwiftOptions "${SwiftOptions} -Xcc --gcc-toolchain=${CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN}")
 endif()
 # Enable Swift <-> C++ interoperability.
-set(SwiftOptions "${SwiftOptions} -Xfrontend -enable-experimental-cxx-interop")
+set(SwiftOptions "${SwiftOptions} -cxx-interoperability-mode=swift-5.9")
 
 set(CMAKE_Swift_FLAGS "${SwiftOptions}" CACHE STRING "" FORCE)
 

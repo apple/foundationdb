@@ -10,7 +10,7 @@ function(add_swift_to_cxx_header_gen_target target_name header_target_name heade
   if (EXISTS ${SwiftInteropVersionFile})
     file(READ ${SwiftInteropVersionFile} SwiftInteropVersion)
     message(STATUS "Swift: Experimental C++ interop version is ${SwiftInteropVersion}")
-    if (${SwiftInteropVersion} VERSION_LESS 10)
+    if (${SwiftInteropVersion} VERSION_LESS 14)
       message(FATAL_ERROR "Swift: reverse interop support is too old. Update your toolchain.")
     endif()
   else()
@@ -26,12 +26,19 @@ function(add_swift_to_cxx_header_gen_target target_name header_target_name heade
     list(TRANSFORM target_sources PREPEND "${target_source_dir}/")
   endif()
 
-  string(REGEX MATCHALL "-Xcc [-=/a-zA-Z0-9]+" SwiftXccOptionsFlags "${CMAKE_Swift_FLAGS}")
-  set (SwiftXccOptions )
+  set (SwiftFrontendOpts )
+
+  string(REGEX MATCHALL "-Xcc [-=/a-zA-Z0-9.]+" SwiftXccOptionsFlags "${CMAKE_Swift_FLAGS}")
   foreach (flag ${SwiftXccOptionsFlags})
     string(SUBSTRING ${flag} 5 -1 clangFlag)
-    list(APPEND SwiftXccOptions "-Xcc")
-    list(APPEND SwiftXccOptions "${clangFlag}")
+    list(APPEND SwiftFrontendOpts "-Xcc")
+    list(APPEND SwiftFrontendOpts "${clangFlag}")
+  endforeach()
+
+  set(FlagName "-cxx-interoperability-mode")
+  string(REGEX MATCHALL "${FlagName}=[-_/a-zA-Z0-9.]+" SwiftEqFlags "${CMAKE_Swift_FLAGS}")
+  foreach (flag ${SwiftEqFlags})
+    list(APPEND SwiftFrontendOpts "${flag}")
   endforeach()
 
   add_custom_command(
@@ -40,15 +47,11 @@ function(add_swift_to_cxx_header_gen_target target_name header_target_name heade
   COMMAND
     ${CMAKE_Swift_COMPILER} -frontend -typecheck
     ${target_sources}
-    -enable-experimental-cxx-interop
     -module-name "${target_name}"
     -emit-clang-header-path "${header_path}"
     "$<$<BOOL:${target_includes_expr}>:-I$<JOIN:${target_includes_expr},;-I>>"
     ${ARG_FLAGS}
-    ${SwiftXccOptions}
-
-    # FIXME (Alex): remove once issue with _Concurrency exposed is fixed.
-    -clang-header-expose-decls=has-expose-attr-or-stdlib
+    ${SwiftFrontendOpts}
   DEPENDS
     "${target_sources}"
   COMMAND_EXPAND_LISTS

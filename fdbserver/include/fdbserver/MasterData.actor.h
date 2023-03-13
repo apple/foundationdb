@@ -143,6 +143,7 @@ struct SWIFT_CXX_REF_MASTERDATA MasterData :
 
     ~MasterData();
 
+    // FIXME: return a reference once https://github.com/apple/swift/issues/64315 is fixed.
     inline ResolutionBalancer *getResolutionBalancer() {
         return &resolutionBalancer;
     }
