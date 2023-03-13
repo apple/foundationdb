@@ -1071,15 +1071,12 @@ void EncryptBlobCipherAes265Ctr::encryptInplace(uint8_t* plaintext,
 		throw encrypt_ops_error();
 	}
 
-	// we still call EncryptFinal() to be consistent with encrypt() API. It may not be needed.
-	int finalBytes{ 0 };
-	if (EVP_EncryptFinal_ex(ctx, plaintext + bytes, &finalBytes) != 1) {
-		TraceEvent(SevWarn, "BlobCipherEncryptFinalFailed")
+	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
+		TraceEvent(SevWarn, "BlobCipherEncryptCTXResetFailed")
 		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
 		    .detail("EncryptDomainId", textCipherKey->getDomainId());
 		throw encrypt_ops_error();
 	}
-	ASSERT(finalBytes == 0);
 
 	// Ensure encryption header authToken details sanity
 	ASSERT(isEncryptHeaderAuthTokenDetailsValid(authTokenMode, authTokenAlgo));
@@ -1182,15 +1179,12 @@ void EncryptBlobCipherAes265Ctr::encryptInplace(uint8_t* plaintext,
 		throw encrypt_ops_error();
 	}
 
-	// we still call EncryptFinal() to be consistent with encrypt() API. It may not be needed.
-	int finalBytes{ 0 };
-	if (EVP_EncryptFinal_ex(ctx, plaintext + bytes, &finalBytes) != 1) {
-		TraceEvent(SevWarn, "BlobCipherEncryptFinalFailed")
+	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
+		TraceEvent(SevWarn, "BlobCipherEncryptCTXResetFailed")
 		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
 		    .detail("EncryptDomainId", textCipherKey->getDomainId());
 		throw encrypt_ops_error();
 	}
-	ASSERT(finalBytes == 0);
 
 	updateEncryptHeader(plaintext, plaintextLen, header);
 
@@ -1582,15 +1576,12 @@ void DecryptBlobCipherAes256Ctr::decryptInplace(uint8_t* ciphertext,
 		throw encrypt_ops_error();
 	}
 
-	// we still call DecryptFinal() to be consistent with decrypt() API. It may not be needed.
-	int finalBlobBytes{ 0 };
-	if (EVP_DecryptFinal_ex(ctx, ciphertext + bytesDecrypted, &finalBlobBytes) <= 0) {
-		TraceEvent(SevWarn, "BlobCipherDecryptFinalFailed")
-		    .detail("BaseCipherId", header.cipherTextDetails.baseCipherId)
-		    .detail("EncryptDomainId", header.cipherTextDetails.encryptDomainId);
+	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
+		TraceEvent(SevWarn, "BlobCipherDecryptCTXResetFailed")
+		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
+		    .detail("EncryptDomainId", textCipherKey->getDomainId());
 		throw encrypt_ops_error();
 	}
-	ASSERT(finalBlobBytes == 0);
 
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
 		BlobCipherMetrics::counters(usageType).decryptCPUTimeNS += int64_t((timer_monotonic() - startTime) * 1e9);
@@ -1633,15 +1624,12 @@ void DecryptBlobCipherAes256Ctr::decryptInplace(uint8_t* ciphertext,
 		throw encrypt_ops_error();
 	}
 
-	// we still call DecryptFinal() to be consistent with decrypt() API. It may not be needed.
-	int finalBlobBytes{ 0 };
-	if (EVP_DecryptFinal_ex(ctx, ciphertext + bytesDecrypted, &finalBlobBytes) <= 0) {
-		TraceEvent(SevWarn, "BlobCipherDecryptFinalFailed")
+	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
+		TraceEvent(SevWarn, "BlobCipherDecryptCTXResetFailed")
 		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
 		    .detail("EncryptDomainId", textCipherKey->getDomainId());
 		throw encrypt_ops_error();
 	}
-	ASSERT(finalBlobBytes == 0);
 
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
 		BlobCipherMetrics::counters(usageType).decryptCPUTimeNS += int64_t((timer_monotonic() - startTime) * 1e9);
