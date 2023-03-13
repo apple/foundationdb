@@ -26,12 +26,19 @@ function(add_swift_to_cxx_header_gen_target target_name header_target_name heade
     list(TRANSFORM target_sources PREPEND "${target_source_dir}/")
   endif()
 
-  string(REGEX MATCHALL "-Xcc [-=/a-zA-Z0-9]+" SwiftXccOptionsFlags "${CMAKE_Swift_FLAGS}")
-  set (SwiftXccOptions )
+  set (SwiftFrontendOpts )
+
+  string(REGEX MATCHALL "-Xcc [-=/a-zA-Z0-9.]+" SwiftXccOptionsFlags "${CMAKE_Swift_FLAGS}")
   foreach (flag ${SwiftXccOptionsFlags})
     string(SUBSTRING ${flag} 5 -1 clangFlag)
-    list(APPEND SwiftXccOptions "-Xcc")
-    list(APPEND SwiftXccOptions "${clangFlag}")
+    list(APPEND SwiftFrontendOpts "-Xcc")
+    list(APPEND SwiftFrontendOpts "${clangFlag}")
+  endforeach()
+
+  set(FlagName "-cxx-interoperability-mode")
+  string(REGEX MATCHALL "${FlagName}=[-_/a-zA-Z0-9.]+" SwiftEqFlags "${CMAKE_Swift_FLAGS}")
+  foreach (flag ${SwiftEqFlags})
+    list(APPEND SwiftFrontendOpts "${flag}")
   endforeach()
 
   add_custom_command(
@@ -40,12 +47,11 @@ function(add_swift_to_cxx_header_gen_target target_name header_target_name heade
   COMMAND
     ${CMAKE_Swift_COMPILER} -frontend -typecheck
     ${target_sources}
-    -enable-experimental-cxx-interop
     -module-name "${target_name}"
     -emit-clang-header-path "${header_path}"
     "$<$<BOOL:${target_includes_expr}>:-I$<JOIN:${target_includes_expr},;-I>>"
     ${ARG_FLAGS}
-    ${SwiftXccOptions}
+    ${SwiftFrontendOpts}
   DEPENDS
     "${target_sources}"
   COMMAND_EXPAND_LISTS
