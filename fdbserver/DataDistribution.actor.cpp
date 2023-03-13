@@ -154,10 +154,9 @@ Optional<UID> StorageWiggler::getNextServerId(bool necessaryOnly) {
 
 Future<Void> StorageWiggler::resetStats() {
 	metrics.reset();
-	return runRYWTransaction(
-	    teamCollection->cx, [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		    return wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()), metrics);
-	    });
+	return runRYWTransaction(teamCollection->cx, [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		return wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()), metrics);
+	});
 }
 
 Future<Void> StorageWiggler::restoreStats() {

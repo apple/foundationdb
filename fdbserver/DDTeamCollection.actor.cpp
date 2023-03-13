@@ -1981,11 +1981,11 @@ public:
 			wait(delay(nextDelay));
 
 			double totalDelay = wait(self->storageWiggler->wiggleData.addPerpetualWiggleDelay(
-			    self->dbContext().getReference(), PrimaryRegion(self->primary), nextDelay));
+			    self->cx.getReference(), PrimaryRegion(self->primary), nextDelay));
 			nextDelay = std::min(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY - totalDelay, 60.0);
 
 			if (totalDelay >= SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY) {
-				wait(self->storageWiggler->wiggleData.clearPerpetualWiggleDelay(self->dbContext().getReference(),
+				wait(self->storageWiggler->wiggleData.clearPerpetualWiggleDelay(self->cx.getReference(),
 				                                                                PrimaryRegion(self->primary)));
 				return Void();
 			}
@@ -3677,7 +3677,7 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
     restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), healthyTeamCount(0),
     zeroHealthyTeams(params.zeroHealthyTeams), optimalTeamCount(0), zeroOptimalTeams(true), isTssRecruiting(false),
     includedDCs(params.includedDCs), otherTrackedDCs(params.otherTrackedDCs),
-    processingUnhealthy(params.processingUnhealthy),
+    processingUnhealthy(params.processingUnhealthy), readyToStart(params.readyToStart),
     checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)), badTeamRemover(Void()),
     checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()), clearHealthyZoneFuture(true),
     medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastMedianAvailableSpaceUpdate(0),

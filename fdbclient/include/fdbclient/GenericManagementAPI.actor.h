@@ -522,7 +522,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 				}
 			}
 
-			if (resetPPWStats) {
+			if (!creating && resetPPWStats) {
 				state StorageWiggleData wiggleData;
 				wait(wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(true)));
 				wait(wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(false)));
