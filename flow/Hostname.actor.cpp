@@ -34,7 +34,12 @@ const static std::regex ipv4Validation("^([\\d]{1,3}\\.?){4,}:([\\d]+){1,}(:tls)
 } // anonymous namespace
 
 bool Hostname::isHostname(const std::string& str) {
-	return !std::regex_match(str, ipv4Validation) && std::regex_match(str, validation);
+	try {
+		return !std::regex_match(str, ipv4Validation) && std::regex_match(str, validation);
+	} catch (std::exception e) {
+		TraceEvent(SevWarn, "AddressParseError").detail("StdException", e.what()).detail("String", str);
+		throw address_parse_error();
+	}
 }
 
 Hostname Hostname::parse(const std::string& s) {
