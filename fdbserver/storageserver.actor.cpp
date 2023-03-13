@@ -4895,6 +4895,189 @@ ACTOR Future<Void> validateRangeAgainstServers(StorageServer* data,
 	return Void();
 }
 
+ACTOR Future<Void> auditStorageMetadataQ(StorageServer* data, AuditStorageRequest req) {
+	ASSERT(req.getType() == AuditType::ValidateMetadata);
+	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
+	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
+
+	state std::vector<std::string> errors;
+	state AuditStorageState res(req.id, req.range, req.getType());
+	state std::vector<Future<Void>> actors;
+	state int i = 0;
+	state int retryCount = 0;
+	state RangeResult keyServers;
+	state RangeResult serverKeys;
+	state RangeResult UIDtoTagMap;
+	state Version version;
+	state Transaction tr(data->cx);
+	tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	loop {
+		try {
+			wait(store(version, tr.getReadVersion()));
+			actors.push_back(store(keyServers, tr.getRange(keyServersKeys, CLIENT_KNOBS->TOO_MANY)));
+			actors.push_back(store(serverKeys, tr.getRange(serverKeysRange, CLIENT_KNOBS->TOO_MANY)));
+			actors.push_back(store(UIDtoTagMap, tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(!keyServers.more && keyServers.size() < CLIENT_KNOBS->TOO_MANY);
+			ASSERT(!serverKeys.more && serverKeys.size() < CLIENT_KNOBS->TOO_MANY);
+			ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+			wait(waitForAll(actors));
+			break;
+		} catch (Error& e) {
+			if (retryCount > 5) {
+				req.reply.sendError(audit_storage_failed());
+				break;
+			}
+			wait(tr.onError(e));
+			tr.fullReset();
+			actors.clear();
+			retryCount++;
+		}
+	}
+	try {
+		/* std::cout << "keyServer size = " << keyServers.size() << "\n";
+		std::cout << "serverKeys size = " << serverKeys.size() << "\n"; */
+		std::unordered_map<UID, std::vector<KeyRange>> serverKeysMap;
+		for (i = 0; i < serverKeys.size() - 1; ++i) { // TODO: what about the last key ~
+			if (serverHasKey(serverKeys[i].value)) {
+				auto [ssidThis, keyThis] = serverKeysDecodeServerBegin(serverKeys[i].key);
+				auto [ssidNext, keyNext] = serverKeysDecodeServerBegin(serverKeys[i + 1].key);
+				KeyRange shardRange = Standalone(KeyRangeRef(keyThis, keyNext));
+				/* std::cout << format("serverKeysMap add range: Server(%016llx) - %s ~ %s\n",
+									ssidThis.first(),
+									Traceable<StringRef>::toString(shardRange.begin).c_str(),
+									Traceable<StringRef>::toString(shardRange.end).c_str()); */
+				serverKeysMap[ssidThis].push_back(shardRange);
+			}
+		}
+		KeyRangeMap<std::vector<UID>> keyServersMap;
+		// check: given server x = keyServers[keyRange], then the keyRange is fully covered by serverKeys[src x]
+		for (i = 0; i < keyServers.size() - 1; ++i) { // TODO: what about the last shard?
+			std::vector<UID> src;
+			std::vector<UID> dest;
+			decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
+			KeyRangeRef shardRange(keyServers[i].key.removePrefix(keyServersPrefix),
+								keyServers[i + 1].key.removePrefix(keyServersPrefix));
+			ASSERT(src.size() > 0); 
+			for (auto& ssid : src) {
+				// serverKeysMap may not contain ssid, for this case, simply skip?
+				if (!serverKeysMap.contains(ssid)) {
+					continue;
+				}
+				std::sort(serverKeysMap[ssid].begin(), serverKeysMap[ssid].end(), [](KeyRangeRef a, KeyRangeRef b) {
+					return a.begin < b.begin;
+				});
+				std::vector<KeyRangeRef> ranges; // something wrong there
+				for (auto range : serverKeysMap[ssid]) {
+					ranges.push_back(KeyRangeRef(range.begin, range.end));
+				}
+				std::string toPrint = "";
+				for (auto r : ranges) {
+					toPrint = toPrint + format(" %s~%s", 
+					Traceable<StringRef>::toString(r.begin).c_str(),
+					Traceable<StringRef>::toString(r.end).c_str());
+				}
+				if (!shardRange.isCovered(ranges)) {
+					std::string error = format("KeyServers Mismatch:\t RangeBegin(%s), RangeEnd(%s) is not fully covered "
+											"by serverKeys[Server(%016llx)]: %s, %s",
+											Traceable<StringRef>::toString(shardRange.begin).c_str(),
+											Traceable<StringRef>::toString(shardRange.end).c_str(),
+											ssid.first(),
+											toPrint.c_str());
+					errors.push_back(error);
+					TraceEvent(SevError, "ValidateMetadataErrorKeyServers", data->thisServerID)
+						.detail("ErrorMessage", error)
+						.detail("Range", req.range)
+						.detail("Version", version)
+						.detail("AuditServer", data->thisServerID.first());
+					std::cout << error << "\n";
+				} else {
+					std::string status = format(
+						"KeyServers Match:\t RangeBegin(%s), RangeEnd(%s) is fully covered by serverKeys[Server(%016llx)]: %s",
+						Traceable<StringRef>::toString(shardRange.begin).c_str(),
+						Traceable<StringRef>::toString(shardRange.end).c_str(),
+						ssid.first(),
+						toPrint.c_str());
+					// std::cout << status << "\n";
+				}
+			}
+			// generate keyServersMap for the next check
+			std::vector<UID> servers(src.size() + dest.size());
+			std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
+			ASSERT(servers.size() > 0);
+			/* std::string toPrintServers = "";
+			for (auto ssid : servers) {
+				toPrintServers = toPrintServers + format(" %016llx ", ssid.first());
+			}
+			std::cout << format("keyServersMap add range: servers(%s) - %s ~ %s\n",
+									toPrintServers.c_str(),
+									Traceable<StringRef>::toString(shardRange.begin).c_str(),
+									Traceable<StringRef>::toString(shardRange.end).c_str()); */
+			keyServersMap.insert(shardRange, servers);
+		}
+		/* for (auto [server, ranges] : serverKeysMap) {
+			for (auto range : ranges) {
+				std::cout << format("range in serverKeysMap: %s ~ %s\n",
+				Traceable<StringRef>::toString(range.begin).c_str(), 
+				Traceable<StringRef>::toString(range.end).c_str());
+			}
+		}*/ 
+		// check: given a keyRange of serverKeys[server, say x], we have server keyServers[keyRange] contains x
+		for (auto& [server, ranges] : serverKeysMap) { // TODO: what about the last key ~ ?
+			for (auto& range : ranges) {
+				auto servers = keyServersMap.rangeContaining(range.begin).value();
+				if (std::find(servers.begin(), servers.end(), server) == servers.end()) { // not found
+					std::string error = format("ServerKeys Mismatch:\t keyServers[RangeBegin(%s), RangeEnd(%s)] = "
+											"Servers(%s) not find Server(%016llx)",
+											Traceable<StringRef>::toString(range.begin).c_str(),
+											Traceable<StringRef>::toString(range.end).c_str(),
+											describe(servers).c_str(),
+											server.first());
+					errors.push_back(error);
+					TraceEvent(SevError, "ValidateMetadataErrorServerKeys", data->thisServerID)
+						.detail("ErrorMessage", error)
+						.detail("Range", req.range)
+						.detail("Version", version)
+						.detail("AuditServer", data->thisServerID.first());
+					std::cout << error << "\n";
+				} else {
+					std::string status = format(
+						"ServerKeys Match:\t keyServers[RangeBegin(%s), RangeEnd(%s)] = Servers(%s) find Server(%016llx)",
+						Traceable<StringRef>::toString(range.begin).c_str(),
+						Traceable<StringRef>::toString(range.end).c_str(),
+						describe(servers).c_str(),
+						server.first());
+					// std::cout << status << "\n";
+				}
+			}
+		}
+		if (!errors.empty()) {
+			TraceEvent(SevError, "ValidateMetadataError", data->thisServerID)
+				.detail("NumErrors", errors.size())
+				.detail("Range", req.range)
+				.detail("Version", version)
+				.detail("AuditServer", data->thisServerID.first());
+			res.setPhase(AuditPhase::Error);
+			wait(persistAuditStateMap(data->cx, res));
+			if (!req.reply.isSet()) { // Why this can be set??
+				req.reply.sendError(audit_storage_error());
+			}
+		} else {
+			TraceEvent(SevInfo, "ValidateMetadataComplete", data->thisServerID)
+				.detail("Range", req.range)
+				.detail("Version", version)
+				.detail("AuditServer", data->thisServerID.first());
+			res.setPhase(AuditPhase::Complete);
+			wait(persistAuditStateMap(data->cx, res));
+			if (!req.reply.isSet()) { // Why this can be set??
+				req.reply.send(res);
+			}
+		}
+	} catch (Error& e) {
+		req.reply.sendError(audit_storage_failed());
+	}
+	return Void();
+}
+
 ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
@@ -11589,7 +11772,11 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				self->actors.add(fetchCheckpointKeyValuesQ(self, req));
 			}
 			when(AuditStorageRequest req = waitNext(ssi.auditStorage.getFuture())) {
-				self->actors.add(auditStorageQ(self, req));
+				if (req.getType() == AuditType::ValidateMetadata) {
+					self->actors.add(auditStorageMetadataQ(self, req));
+				} else {
+					self->actors.add(auditStorageQ(self, req));
+				}
 			}
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);

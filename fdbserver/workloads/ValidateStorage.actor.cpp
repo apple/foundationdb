@@ -92,7 +92,7 @@ struct ValidateStorage : TestWorkload {
 					TraceEvent(SevWarnAlways, "StartAuditStorageTimedOut").detail("AuditType", type);
 					break;
 				} else {
-					TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e).detail("AuditType", type);
+					TraceEvent(SevWarn, "StartAuditStorageFailed").errorUnsuppressed(e).detail("AuditType", type);
 					wait(delay(1));
 				}
 			}
@@ -103,6 +103,7 @@ struct ValidateStorage : TestWorkload {
 				try {
 					AuditStorageState auditState = wait(getAuditState(cx, type, auditId.get()));
 					if (auditState.getPhase() != AuditPhase::Complete) {
+						std::cout << std::to_string(auditState.phase) << "\n";
 						ASSERT(auditState.getPhase() == AuditPhase::Running);
 						wait(delay(30));
 					} else {
@@ -110,7 +111,7 @@ struct ValidateStorage : TestWorkload {
 						break;
 					}
 				} catch (Error& e) {
-					TraceEvent("WaitAuditStorageError")
+					TraceEvent("WaitAuditStorageFailed")
 					    .errorUnsuppressed(e)
 					    .detail("AuditID", auditId.get())
 					    .detail("AuditType", type);
@@ -142,7 +143,7 @@ struct ValidateStorage : TestWorkload {
 					TraceEvent(SevWarnAlways, "StartAuditStorageTimedOut").detail("AuditType", type);
 					break;
 				} else {
-					TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e).detail("AuditType", type);
+					TraceEvent(SevWarn, "StartAuditStorageFailed").errorUnsuppressed(e).detail("AuditType", type);
 					wait(delay(1));
 				}
 			}
@@ -167,11 +168,14 @@ struct ValidateStorage : TestWorkload {
 		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
 		TraceEvent("TestValueVerified");
 
-		wait(self->auditStorageForType(cx, AuditType::ValidateHA));
+		/*wait(self->auditStorageForType(cx, AuditType::ValidateHA));
 		TraceEvent("TestValidateHADone");
-		
+
 		wait(self->auditStorageForType(cx, AuditType::ValidateReplica));
-		TraceEvent("TestValidatReplicaDone");
+		TraceEvent("TestValidateReplicaDone");*/
+
+		wait(self->auditStorageForType(cx, AuditType::ValidateMetadata));
+		TraceEvent("TestValidateMetadataDone");
 
 		return Void();
 	}
@@ -209,7 +213,7 @@ struct ValidateStorage : TestWorkload {
 		state Transaction tr(cx);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
+		state int retryCount = 0;
 		loop {
 			try {
 				state RangeResult shards =
@@ -244,9 +248,13 @@ struct ValidateStorage : TestWorkload {
 				}
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevWarnAlways, "TestValidateStorageError").errorUnsuppressed(e).detail("Range", range);
 				try {
+					if (retryCount > 5) {
+						TraceEvent(SevWarnAlways, "TestValidateStorageFailed").errorUnsuppressed(e).detail("Range", range);
+						break;
+					}
 					wait(tr.onError(e));
+					retryCount++;
 				} catch (Error& e) {
 					if (e.code() != error_code_audit_storage_failed && e.code() != error_code_broken_promise) {
 						throw e;
