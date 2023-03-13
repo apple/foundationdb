@@ -432,7 +432,7 @@ public actor MasterDataActor {
 
 extension MasterData {
     var swiftActorImpl: MasterDataActor {
-        UnsafeRawPointer(self.getSwiftImpl()).load(as: MasterDataActor.self)
+        UnsafeRawPointer(self.__getSwiftImplUnsafe()).load(as: MasterDataActor.self)
     }
 }
 
@@ -475,7 +475,7 @@ public func masterServerSwift(
                         return
                     }
 
-                    guard lifetime.isStillValid(db.get().pointee.masterLifetime, mi.id() == db.get().pointee.master.id()) else {
+                    guard lifetime.isStillValid(db.getCopy().masterLifetime, mi.id() == db.getCopy().master.id()) else {
                         // CODE_PROBE(true, "Master replaced, dying")
                         if BUGGIFY() {
                             try? await FlowClock.sleep(for: .seconds(5))
