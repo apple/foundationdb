@@ -104,6 +104,16 @@ struct CheckpointMetaData {
 		return true;
 	}
 
+	bool containsKey(const KeyRef key) const {
+		for (const auto& range : ranges) {
+			if (range.contains(key)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	bool operator==(const CheckpointMetaData& r) const { return checkpointID == r.checkpointID; }
 
 	std::string toString() const {

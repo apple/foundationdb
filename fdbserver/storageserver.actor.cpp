@@ -8124,7 +8124,9 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 			KeyValue kv = reader->next();
 			int64_t size = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
 			KeyRef key = kv.key.removePrefix(persistByteSampleKeys.begin);
-			// data->byteSampleApplySet(kv, data->data().getLatestVersion());
+            if (!checkpoint.containsKey(key)) {
+                continue;
+            }
 			TraceEvent(moveInShard->logSev, "StorageRestoreCheckpointKeySample", data->thisServerID)
 			    .detail("Checkpoint", checkpoint.checkpointID.toString())
 			    .detail("SampleKey", key)

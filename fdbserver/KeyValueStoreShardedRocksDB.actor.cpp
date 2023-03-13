@@ -2607,8 +2607,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				// ASSERT(tmh != nullptr);
 				// ASSERT(tmpDb != nullptr);
 
-				// CheckpointMetaData res(ps->getAllRanges(), version, a.request.format, a.request.checkpointID);
-				CheckpointMetaData res(a.request.ranges, version, a.request.format, a.request.checkpointID);
+				CheckpointMetaData res(ps->getAllRanges(), version, a.request.format, a.request.checkpointID);
+				// CheckpointMetaData res(a.request.ranges, version, a.request.format, a.request.checkpointID);
 				platform::eraseDirectoryRecursive(checkpointDir);
 
 				if (a.request.format == DataMoveRocksCF) {
