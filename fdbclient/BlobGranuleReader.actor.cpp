@@ -193,5 +193,15 @@ TEST_CASE("/fdbserver/blobgranule/isRangeCoveredByBlob") {
 		testAddChunkRange("key_b1"_sr, "key_b9"_sr, continuedChunks);
 		ASSERT(isRangeFullyCovered(KeyRangeRef("key_a1"_sr, "key_b9"_sr), continuedChunks));
 	}
+
+	// check functionality of isCovered()
+	{
+		std::vector<KeyRangeRef> ranges;
+		ranges.push_back(KeyRangeRef("key_a"_sr, "key_b"_sr));
+		ranges.push_back(KeyRangeRef("key_x"_sr, "key_y"_sr));
+		KeyRangeRef keyRange = KeyRangeRef("key_x"_sr, "key_y"_sr);
+		ASSERT(keyRange.isCovered(ranges));
+	}
+
 	return Void();
 }
