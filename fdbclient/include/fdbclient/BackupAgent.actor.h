@@ -638,7 +638,7 @@ protected:
 
 public:
 	static struct {
-		static TaskParam<UID> uid() { return __FUNCTION__sr; }
+		static TaskParam<UID> uid() { return LiteralStringRef(__FUNCTION__); }
 	} TaskParams;
 
 	KeyBackedTaskConfig(StringRef prefix, UID uid = UID())
@@ -647,7 +647,7 @@ public:
 	KeyBackedTaskConfig(StringRef prefix, Reference<Task> task)
 	  : KeyBackedTaskConfig(prefix, TaskParams.uid().get(task)) {}
 
-	KeyBackedProperty<std::string> tag() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<std::string> tag() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 
 	UID getUid() { return uid; }
 
@@ -659,10 +659,12 @@ public:
 	}
 
 	// lastError is a pair of error message and timestamp expressed as an int64_t
-	KeyBackedProperty<std::pair<std::string, Version>> lastError() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<std::pair<std::string, Version>> lastError() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
 
 	KeyBackedMap<int64_t, std::pair<std::string, Version>> lastErrorPerType() {
-		return configSpace.pack(__FUNCTION__sr);
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
 	Future<Void> toTask(Reference<ReadYourWritesTransaction> tr,
