@@ -1443,8 +1443,6 @@ ACTOR Future<Void> resumeAuditStorage(Reference<DataDistributor> self, AuditStor
 			} else if (audit->retryCount > 30) {
 				audit->state.setPhase(AuditPhase::Failed);
 				wait(persistAuditState(self->txnProcessor->context(), audit->state));
-				// ASSERT(self->audits[audit->state.getType()].contains(audit->state.id));
-				// self->audits[audit->state.getType()].erase(audit->state.id);
 				// throw audit_storage_failed();
 			} else {
 				wait(delay(5));
@@ -1571,7 +1569,6 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
-
 			audit->actors.clear(true);
 			self->audits[audit->state.getType()].erase(audit->state.id);
 			if (audit->retryCount > 10) {
@@ -1592,8 +1589,6 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 				continue;
 			}
 		}
-		ASSERT(audit->state.getPhase() == AuditPhase::Failed || audit->state.getPhase() == AuditPhase::Error ||
-		       audit->state.getPhase() == AuditPhase::Complete);
 		break;
 	}
 	return Void();
