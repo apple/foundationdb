@@ -1221,6 +1221,7 @@ public:
 	bool operator==(const FutureStream& rhs) { return rhs.queue == queue; }
 	bool operator!=(const FutureStream& rhs) { return rhs.queue != queue; }
 
+    // FIXME: remove annotation after https://github.com/apple/swift/issues/64316 is fixed.
     T pop() __attribute__((swift_attr("import_unsafe"))) { return queue->pop(); }
 
 	Error getError() {
