@@ -1558,6 +1558,8 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 				req.reply.send(audit->state.id);
 				TraceEvent(SevInfo, "DDAuditStorageReply", self->ddId).detail("AuditState", audit->state.toString());
 			}
+			audit->actors.clear(true);
+			self->audits[audit->state.getType()].erase(audit->state.id);
 
 		} catch (Error& e) {
 			TraceEvent(SevInfo, "DDAuditStorageError", self->ddId)
@@ -1568,17 +1570,21 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			    .detail("RetryCount", (audit == nullptr ? 0 : audit->retryCount));
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
-			} else if (audit->retryCount > 10) {
+			}
+
+			audit->actors.clear(true);
+			self->audits[audit->state.getType()].erase(audit->state.id);
+			if (audit->retryCount > 10) {
 				if (!req.async && !req.reply.isSet()) {
 					req.reply.sendError(audit_storage_failed());
 				}
+				TraceEvent(SevDebug, "DDAuditStorageFailed", self->ddId)
+						.detail("AuditID", (audit == nullptr ? UID() : audit->state.id))
+						.detail("Range", req.range)
+						.detail("AuditType", req.type)
+						.detail("RetryCount", (audit == nullptr ? 0 : audit->retryCount));
 				audit->state.setPhase(AuditPhase::Failed);
 				wait(persistAuditState(self->txnProcessor->context(), audit->state));
-				TraceEvent(SevDebug, "DDAuditStorageFailed", self->ddId)
-				    .detail("AuditID", (audit == nullptr ? UID() : audit->state.id))
-				    .detail("Range", req.range)
-				    .detail("AuditType", req.type)
-				    .detail("RetryCount", (audit == nullptr ? 0 : audit->retryCount));
 				// throw audit_storage_failed();
 			} else {
 				wait(delay(5));
@@ -1588,8 +1594,6 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		}
 		ASSERT(audit->state.getPhase() == AuditPhase::Failed || audit->state.getPhase() == AuditPhase::Error ||
 		       audit->state.getPhase() == AuditPhase::Complete);
-		audit->actors.clear(true);
-		self->audits[audit->state.getType()].erase(audit->state.id);
 		break;
 	}
 	return Void();
