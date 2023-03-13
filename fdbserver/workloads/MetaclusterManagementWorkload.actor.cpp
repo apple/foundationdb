@@ -388,6 +388,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		state Reference<DataClusterData> dataDb = self->dataDbs[clusterName];
 		state bool dryRun = deterministicRandom()->coinflip();
 		state bool forceJoin = deterministicRandom()->coinflip();
+		state bool forceReuseTenantIdPrefix = deterministicRandom()->coinflip();
 
 		state std::vector<std::string> messages;
 		state bool retried = false;
@@ -411,6 +412,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				                                   ApplyManagementClusterUpdates(!dataDb->detached),
 				                                   RestoreDryRun(dryRun),
 				                                   ForceJoin(forceJoin),
+				                                   ForceReuseTenantIdPrefix(forceReuseTenantIdPrefix),
 				                                   &messages);
 				Optional<Void> result = wait(timeout(restoreFuture, deterministicRandom()->randomInt(1, 30)));
 				if (!result.present()) {
@@ -419,6 +421,12 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				}
 
 				ASSERT(dataDb->registered || dataDb->detached);
+
+				// Since we are not creating a new management cluster with updated tenant ID prefix, it will
+				// fail to repopulate a management cluster unless we force reuse of the tenant ID prefix or in
+				// some cases if the cluster is empty
+				ASSERT(forceReuseTenantIdPrefix || !dataDb->detached || dataDb->tenants.empty());
+
 				if (dataDb->detached && !dryRun) {
 					dataDb->detached = false;
 					dataDb->registered = true;
@@ -453,7 +461,13 @@ struct MetaclusterManagementWorkload : TestWorkload {
 					wait(removeFailedRestoredCluster(self, clusterName));
 					wait(resolveCollisions(self, clusterName, dataDb));
 					continue;
+				} else if (error.code() == error_code_invalid_metacluster_configuration) {
+					ASSERT(!forceReuseTenantIdPrefix && dataDb->detached);
+					wait(removeFailedRestoredCluster(self, clusterName));
+					forceReuseTenantIdPrefix = true;
+					continue;
 				}
+
 				TraceEvent(SevError, "RestoreClusterFailure").error(error).detail("ClusterName", clusterName);
 				ASSERT(false);
 			}
