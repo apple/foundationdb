@@ -30,8 +30,6 @@
 
 #include "flow/actorcompiler.h" // always the last include
 
-const std::string forwardSlash = "/";
-
 const std::unordered_map<std::string, RESTConnectionType> RESTConnectionType::supportedConnTypes = {
 	{ "http", RESTConnectionType("http", RESTConnectionType::NOT_SECURE_CONNECTION) },
 	{ "https", RESTConnectionType("https", RESTConnectionType::SECURE_CONNECTION) }
@@ -234,15 +232,9 @@ void RESTUrl::parseUrl(const std::string& fullUrl) {
 		// extract 'resource' and optional 'parameter list' if supplied in the URL
 		uint8_t foundSeparator = 0;
 		StringRef hostPort = t.eatAny("/?", &foundSeparator);
+		this->resource = "/";
 		if (foundSeparator == '/') {
-			StringRef resourceRef = t.eat("?");
-			if (!resourceRef.empty()) {
-				// Resource needs to starts with '/'
-				if (!resourceRef.startsWith(forwardSlash)) {
-					this->resource = forwardSlash;
-				}
-				this->resource.append(resourceRef.toString());
-			}
+			this->resource += t.eat("?").toString();
 			this->reqParameters = t.eat().toString();
 		}
 
