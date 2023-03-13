@@ -1074,7 +1074,9 @@ def tenant_get(logger):
     assert lines[1].strip().startswith("prefix: ")
     assert lines[2].strip().startswith("name: ")
     assert lines[3].strip() == "lock state: unlocked"
-    id = lines[0].strip().removeprefix("id: ")
+    # id = lines[0].strip().removeprefix("id: ")
+    # Workaround until Python 3.9+ for removeprefix
+    id = lines[0].strip()[len("id: "):]
     
     id_output = run_fdbcli_command("tenant getId {}".format(id))
     assert id_output == output
@@ -1108,7 +1110,9 @@ def tenant_get(logger):
     assert lines[2].strip().startswith("name: ")
     assert lines[3].strip() == "lock state: unlocked"
     assert lines[4].strip() == "tenant group: tenant_group2"
-    id2 = lines[0].strip().removeprefix("id: ")
+    # id2 = lines[0].strip().removeprefix("id: ")
+    # Workaround until Python 3.9+ for removeprefix
+    id2 = lines[0].strip()[len("id: "):]
 
     id_output = run_fdbcli_command("tenant getId {}".format(id2))
     assert id_output == output
