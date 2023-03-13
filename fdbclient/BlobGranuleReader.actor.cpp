@@ -199,8 +199,39 @@ TEST_CASE("/fdbserver/blobgranule/isRangeCoveredByBlob") {
 		std::vector<KeyRangeRef> ranges;
 		ranges.push_back(KeyRangeRef("key_a"_sr, "key_b"_sr));
 		ranges.push_back(KeyRangeRef("key_x"_sr, "key_y"_sr));
-		KeyRangeRef keyRange = KeyRangeRef("key_x"_sr, "key_y"_sr);
-		ASSERT(keyRange.isCovered(ranges));
+		ASSERT(KeyRangeRef("key_x"_sr, "key_y"_sr).isCovered(ranges));
+
+		ranges.clear();
+		ranges.push_back(KeyRangeRef("key_a"_sr, "key_b"_sr));
+		ranges.push_back(KeyRangeRef("key_v"_sr, "key_y"_sr));
+		ASSERT(KeyRangeRef("key_x"_sr, "key_y"_sr).isCovered(ranges));
+
+		ranges.clear();
+		ranges.push_back(KeyRangeRef("key_a"_sr, "key_b"_sr));
+		ranges.push_back(KeyRangeRef("key_x"_sr, "key_xa"_sr));
+		ranges.push_back(KeyRangeRef("key_xa"_sr, "key_ya"_sr));
+		ASSERT(KeyRangeRef("key_x"_sr, "key_y"_sr).isCovered(ranges));
+
+		ranges.clear();
+		ranges.push_back(KeyRangeRef("key_a"_sr, "key_b"_sr));
+		ranges.push_back(KeyRangeRef("key_x"_sr, "key_xa"_sr));
+		ranges.push_back(KeyRangeRef("key_xa"_sr, "key_xb"_sr));
+		ASSERT(!KeyRangeRef("key_x"_sr, "key_y"_sr).isCovered(ranges));
+		
+		ranges.clear();
+		ranges.push_back(KeyRangeRef("key_a"_sr, "key_b"_sr));
+		ranges.push_back(KeyRangeRef("key_x"_sr, "key_xa"_sr));
+		ASSERT(!KeyRangeRef("key_x"_sr, "key_y"_sr).isCovered(ranges));
+
+		ranges.clear();
+		ranges.push_back(KeyRangeRef("key_a"_sr, "key_b"_sr));
+		ranges.push_back(KeyRangeRef("key_xa"_sr, "key_y"_sr));
+		ASSERT(!KeyRangeRef("key_x"_sr, "key_y"_sr).isCovered(ranges));
+		
+		ranges.clear();
+		ranges.push_back(KeyRangeRef("key_a"_sr, "key_b"_sr));
+		ranges.push_back(KeyRangeRef("key_x"_sr, "key_y"_sr));
+		ASSERT(!KeyRangeRef("key_a"_sr, "key_y"_sr).isCovered(ranges));
 	}
 
 	return Void();
