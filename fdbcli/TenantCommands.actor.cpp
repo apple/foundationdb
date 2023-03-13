@@ -979,18 +979,19 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 	}
 }
 
-CommandFactory tenantRegisterFactory("tenant",
-                                     CommandHelp("tenant <create|delete|list|get|getId|configure|rename|lock|unlock> [ARGS]",
-                                                 "view and manage tenants in a cluster or metacluster",
-                                                 "`create' and `delete' add and remove tenants from the cluster.\n"
-                                                 "`list' prints a list of tenants in the cluster.\n"
-                                                 "`get' prints the metadata for a particular tenant.\n"
-                                                 "`configure' modifies the configuration for a tenant.\n"
-                                                 "`rename' changes the name of a tenant.\n"
-                                                 "`lock` locks a tenant.\n"
-                                                 "`unlock` unlocks a tenant.\n"),
-                                     &tenantGenerator,
-                                     &tenantHintGenerator);
+CommandFactory tenantRegisterFactory(
+    "tenant",
+    CommandHelp("tenant <create|delete|list|get|getId|configure|rename|lock|unlock> [ARGS]",
+                "view and manage tenants in a cluster or metacluster",
+                "`create' and `delete' add and remove tenants from the cluster.\n"
+                "`list' prints a list of tenants in the cluster.\n"
+                "`get' prints the metadata for a particular tenant.\n"
+                "`configure' modifies the configuration for a tenant.\n"
+                "`rename' changes the name of a tenant.\n"
+                "`lock` locks a tenant.\n"
+                "`unlock` unlocks a tenant.\n"),
+    &tenantGenerator,
+    &tenantHintGenerator);
 
 // Generate hidden commands for the old versions of the tenant commands
 CommandFactory createTenantFactory("createtenant");
