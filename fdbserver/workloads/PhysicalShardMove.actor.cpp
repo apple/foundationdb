@@ -286,7 +286,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 						}
 						ASSERT(!fetchRanges.empty());
 						wait(store(record, fetchCheckpointRanges(cx, records[i], checkpointDir, fetchRanges)));
-						ASSERT(record.getFormat() == RocksDBKeyValues);
+						ASSERT(record.getFormat() == FetchedRocksDBKeyValues);
 					} else {
 						wait(store(record, fetchCheckpoint(cx, records[i], checkpointDir)));
 						ASSERT(record.getFormat() == format);
@@ -307,8 +307,9 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state std::string rocksDBTestDir = "rocksdb-kvstore-test-restored-db";
 		platform::eraseDirectoryRecursive(rocksDBTestDir);
 		state std::string shardId = "restored-shard";
-		state IKeyValueStore* kvStore = keyValueStoreShardedRocksDB(
-		    rocksDBTestDir, deterministicRandom()->randomUniqueID(), KeyValueStoreType::SSD_SHARDED_ROCKSDB);
+		state UID logId = deterministicRandom()->randomUniqueID();
+		state IKeyValueStore* kvStore =
+		    keyValueStoreShardedRocksDB(rocksDBTestDir, logId, KeyValueStoreType::SSD_SHARDED_ROCKSDB);
 		wait(kvStore->init());
 		try {
 			wait(kvStore->restore(shardId, restoreRanges, fetchedCheckpoints));
@@ -318,7 +319,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			    .detail("Checkpoint", describe(fetchedCheckpoints));
 		}
 
-		TraceEvent(SevDebug, "TestCheckpointRestored").detail("Checkpoint", describe(fetchedCheckpoints));
+		TraceEvent(SevDebug, "TestCheckpointRestored", logId).detail("Checkpoint", describe(fetchedCheckpoints));
 
 		// Validate the restored kv-store.
 		RangeResult kvRange = wait(kvStore->readRange(normalKeys));

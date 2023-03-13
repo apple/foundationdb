@@ -24,6 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 
+const std::string emptySstFilePath = "Dummy Empty SST File Path";
 const std::string checkpointBytesSampleFileName = "metadata_bytes.sst";
 
 // FDB storage checkpoint format.
@@ -31,10 +32,12 @@ enum CheckpointFormat {
 	InvalidFormat = 0,
 	// For RocksDB, checkpoint generated via rocksdb::Checkpoint::ExportColumnFamily().
 	DataMoveRocksCF = 1,
+	// Same as `DataMoveRocksCF`, but intended to be fetched as key-value pairs.
+	DataMoveRocksCFKeyValues = 2,
 	// For RocksDB, checkpoint generated via rocksdb::Checkpoint::CreateCheckpoint().
-	RocksDB = 2,
+	RocksDB = 3,
 	// Checkpoint fetched as key-value pairs.
-	RocksDBKeyValues = 3,
+	FetchedRocksDBKeyValues = 4,
 };
 
 // Metadata of a FDB checkpoint.

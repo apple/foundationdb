@@ -8982,7 +8982,7 @@ static Future<Void> createCheckpointImpl(T tr,
 		}
 	}
 
-	if (format == DataMoveRocksCF) {
+	if (format == DataMoveRocksCF || format == DataMoveRocksCFKeyValues) {
 		for (const auto& [srcId, ranges] : rangeMap) {
 			// The checkpoint request is sent to all replicas, in case any of them is unhealthy.
 			// An alternative is to choose a healthy replica.

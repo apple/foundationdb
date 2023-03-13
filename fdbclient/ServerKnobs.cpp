@@ -482,7 +482,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_EMPTY_RANGE_CHECK,              isSimulated ? true : false);
 	init( ROCKSDB_CREATE_BYTES_SAMPLE_FILE_RETRY_MAX,             50 );
 	init( ROCKSDB_ATOMIC_FLUSH,                                false ); if( randomize && BUGGIFY )  ROCKSDB_ATOMIC_FLUSH = deterministicRandom()->coinflip();
-	init( ROCKSDB_IMPORT_MOVE_FILES,                          false );
+	init( ROCKSDB_IMPORT_MOVE_FILES,                           false );
+	init( ROCKSDB_CHECKPOINT_REPLAY_MARKER,                    false );
+	init( ROCKSDB_ENABLE_CHECKPOINT_VALIDATION,                false ); if( randomize && BUGGIFY )   ROCKSDB_ENABLE_CHECKPOINT_VALIDATION = deterministicRandom()->coinflip();
+
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;

@@ -262,10 +262,10 @@ struct RocksDBCheckpointKeyValues {
 	RocksDBCheckpointKeyValues(std::vector<KeyRange> ranges) : ranges(ranges) {}
 	RocksDBCheckpointKeyValues() = default;
 
-	CheckpointFormat format() const { return RocksDBKeyValues; }
+	CheckpointFormat format() const { return FetchedRocksDBKeyValues; }
 
 	std::string toString() const {
-		std::string res = "RocksDBKeyValuesCheckpoint: [Target Ranges]: " + describe(ranges) + " [Fetched Files]: ";
+		std::string res = "FetchedRocksDBKeyValuesCheckpoint: [Target Ranges]: " + describe(ranges) + " [Fetched Files]: ";
 		for (const auto& file : fetchedFiles) {
 			res += file.toString();
 		}
