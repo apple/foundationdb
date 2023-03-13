@@ -71,7 +71,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LatencyBandConfig.h"
@@ -3051,7 +3051,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherMap;
 		if (cipherDetails.size()) {
 			std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-			    wait(getEncryptCipherKeys(data->db, cipherDetails, BlobCipherMetrics::TLOG));
+			    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+			        data->db, cipherDetails, BlobCipherMetrics::TLOG));
 			cipherMap = getCipherKeysResult;
 		}
 
@@ -7467,7 +7468,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// We must also ensure we have fetched all change feed metadata BEFORE changing the phase to fetching to ensure
 		// change feed mutations get applied correctly
 		state std::vector<Key> changeFeedsToFetch;
-		state bool isFullRestore = wait(isFullRestoreMode(data->cx, keys));
+		state Reference<BlobRestoreController> restoreController = makeReference<BlobRestoreController>(data->cx, keys);
+		state bool isFullRestore = wait(BlobRestoreController::isRestoring(restoreController));
 		if (!isFullRestore) {
 			std::vector<Key> _cfToFetch = wait(fetchCFMetadata);
 			changeFeedsToFetch = _cfToFetch;
@@ -7547,13 +7549,13 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold;
 			if (isFullRestore) {
-				state std::pair<KeyRange, BlobRestoreStatus> rangeStatus = wait(getRestoreRangeStatus(data->cx, keys));
+				state BlobRestoreRangeState rangeStatus = wait(BlobRestoreController::getRangeState(restoreController));
 				// Read from blob only when it's copying data for full restore. Otherwise it may cause data corruptions
 				// e.g we don't want to copy from blob any more when it's applying mutation logs(APPLYING_MLOGS)
 				if (rangeStatus.second.phase == BlobRestorePhase::COPYING_DATA ||
 				    rangeStatus.second.phase == BlobRestorePhase::ERROR) {
-					Version targetVersion = wait(getRestoreTargetVersion(data->cx, keys, fetchVersion));
-					hold = tryGetRangeFromBlob(results, &tr, rangeStatus.first, targetVersion, data->blobConn);
+					Version version = wait(BlobRestoreController::getTargetVersion(restoreController, fetchVersion));
+					hold = tryGetRangeFromBlob(results, &tr, rangeStatus.first, version, data->blobConn);
 				} else {
 					hold = tryGetRange(results, &tr, keys);
 				}
@@ -9296,7 +9298,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			if (collectingCipherKeys) {
 				std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-				    wait(getEncryptCipherKeys(data->db, cipherDetails, BlobCipherMetrics::TLOG));
+				    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+				        data->db, cipherDetails, BlobCipherMetrics::TLOG));
 				cipherKeys = getCipherKeysResult;
 				collectingCipherKeys = false;
 				eager = UpdateEagerReadInfo(enableClearRangeEagerReads);

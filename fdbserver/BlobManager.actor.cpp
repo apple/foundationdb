@@ -32,6 +32,7 @@
 #include "fdbclient/ServerKnobs.h"
 #include "fdbrpc/simulator.h"
 #include "flow/CodeProbe.h"
+#include "flow/FastRef.h"
 #include "flow/serialize.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupContainerFileSystem.h"
@@ -3516,28 +3517,25 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 	bmData->initBStore();
 
-	bool isFullRestore = wait(isFullRestoreMode(bmData->db, normalKeys));
+	state Reference<BlobRestoreController> restoreController =
+	    makeReference<BlobRestoreController>(bmData->db, normalKeys);
+	bool isFullRestore = wait(BlobRestoreController::isRestoring(restoreController));
 	bmData->isFullRestoreMode = isFullRestore;
 	if (bmData->isFullRestoreMode) {
 		if (!bmData->manifestStore.isValid()) {
 			TraceEvent(SevError, "InvalidBlobManifestUrl").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
 			throw blob_restore_invalid_manifest_url();
 		}
-		Optional<BlobRestoreStatus> status = wait(getRestoreStatus(bmData->db, normalKeys));
-		ASSERT(status.present());
-		state BlobRestorePhase phase = status.get().phase;
-		if (phase == BlobRestorePhase::STARTING_MIGRATOR || phase == BlobRestorePhase::LOADING_MANIFEST) {
-			wait(updateRestoreStatus(bmData->db, normalKeys, LOADING_MANIFEST, 0, {}, {}));
+		Optional<BlobRestoreState> restoreState = wait(BlobRestoreController::getState(restoreController));
+		ASSERT(restoreState.present());
+		state BlobRestorePhase phase = restoreState.get().phase;
+		if (phase == STARTING_MIGRATOR || phase == LOADING_MANIFEST) {
+			wait(BlobRestoreController::updateState(restoreController, LOADING_MANIFEST, {}));
 			try {
 				wait(loadManifest(bmData->db, bmData->manifestStore));
 				int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->manifestStore));
 				wait(updateEpoch(bmData, epoc + 1));
-				wait(updateRestoreStatus(bmData->db,
-				                         normalKeys,
-				                         BlobRestorePhase::LOADED_MANIFEST,
-				                         0,
-				                         {},
-				                         BlobRestorePhase::LOADING_MANIFEST));
+				wait(BlobRestoreController::updateState(restoreController, LOADED_MANIFEST, LOADING_MANIFEST));
 				TraceEvent("BlobManifestLoaded", bmData->id).log();
 			} catch (Error& e) {
 				if (e.code() != error_code_restore_missing_data &&
@@ -3547,7 +3545,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				// terminate blob restore for non-retryable errors
 				TraceEvent("ManifestLoadError", bmData->id).error(e).detail("Phase", phase);
 				std::string errorMessage = fmt::format("Manifest loading error '{}'", e.what());
-				wait(updateRestoreStatus(bmData->db, normalKeys, BlobRestorePhase::ERROR, 0, errorMessage, {}));
+				wait(BlobRestoreController::updateError(restoreController, StringRef(errorMessage)));
 			}
 		}
 	}

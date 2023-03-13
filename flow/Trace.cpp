@@ -25,7 +25,7 @@
 #include "flow/JsonTraceLogFormatter.h"
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
-#include "flow/UnitTest.h"
+#include "flow/ProcessEvents.h"
 #include <exception>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -1361,6 +1361,8 @@ BaseTraceEvent::~BaseTraceEvent() {
 	log();
 	if (failedLineOverflow == 1) {
 		failedLineOverflow = 2;
+		auto msg = fmt::format("Traced {} lines", tracedLines);
+		ProcessEvents::trigger("TracedTooManyLines"_sr, StringRef(msg), unknown_error());
 		TraceEvent(SevError, "TracedTooManyLines").log();
 		crashAndDie();
 	}

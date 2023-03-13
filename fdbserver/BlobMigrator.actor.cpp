@@ -78,9 +78,11 @@ private:
 	// Check if blob manifest is loaded so that blob migration can start
 	ACTOR static Future<Void> checkIfReadyForMigration(Reference<BlobMigrator> self) {
 		loop {
-			Optional<BlobRestoreStatus> status = wait(getRestoreStatus(self->db_, normalKeys));
-			ASSERT(status.present());
-			BlobRestorePhase phase = status.get().phase;
+			state Reference<BlobRestoreController> restoreController =
+			    makeReference<BlobRestoreController>(self->db_, normalKeys);
+			Optional<BlobRestoreState> restoreState = wait(BlobRestoreController::getState(restoreController));
+			ASSERT(restoreState.present());
+			state BlobRestorePhase phase = restoreState.get().phase;
 			if (phase == BlobRestorePhase::LOADED_MANIFEST) {
 				BlobGranuleRestoreVersionVector granules = wait(listBlobGranules(self->db_, self->blobConn_));
 				if (!granules.empty()) {
@@ -92,16 +94,11 @@ private:
 						    .detail("Version", granule.version)
 						    .detail("SizeInBytes", granule.sizeInBytes);
 					}
-					wait(updateRestoreStatus(self->db_,
-					                         normalKeys,
-					                         BlobRestorePhase::COPYING_DATA,
-					                         0,
-					                         {},
-					                         BlobRestorePhase::LOADED_MANIFEST));
+					wait(BlobRestoreController::updateState(restoreController, COPYING_DATA, LOADED_MANIFEST));
 					return Void();
 				}
 			} else if (phase >= BlobRestorePhase::COPYING_DATA && phase < BlobRestorePhase::DONE) {
-				TraceEvent("BlobMigratorUnexpectedPhase", self->interf_.id()).detail("Phase", status.get().phase);
+				TraceEvent("BlobMigratorUnexpectedPhase", self->interf_.id()).detail("Phase", phase);
 				throw restore_error();
 			}
 			wait(delay(SERVER_KNOBS->BLOB_MIGRATOR_CHECK_INTERVAL));
@@ -221,17 +218,18 @@ private:
 
 	// Print migration progress periodically
 	ACTOR static Future<Void> logProgress(Reference<BlobMigrator> self) {
+		state Reference<BlobRestoreController> restoreController =
+		    makeReference<BlobRestoreController>(self->db_, normalKeys);
+
 		loop {
 			bool done = wait(checkProgress(self));
 			if (done) {
-				wait(updateRestoreStatus(
-				    self->db_, normalKeys, BlobRestorePhase::APPLYING_MLOGS, 0, {}, BlobRestorePhase::COPYING_DATA));
+				wait(BlobRestoreController::updateState(restoreController, APPLYING_MLOGS, COPYING_DATA));
 				wait(unlockDatabase(self->db_, self->interf_.id()));
 				TraceEvent("BlobMigratorCopied", self->interf_.id()).log();
 				wait(applyMutationLogs(self));
 
-				wait(updateRestoreStatus(
-				    self->db_, normalKeys, BlobRestorePhase::DONE, 0, {}, BlobRestorePhase::APPLYING_MLOGS));
+				wait(BlobRestoreController::updateState(restoreController, DONE, APPLYING_MLOGS));
 				TraceEvent("BlobMigratorDone", self->interf_.id()).log();
 				return Void();
 			}
@@ -241,6 +239,8 @@ private:
 
 	// Check key ranges that are migrated. Return true if all ranges are done
 	ACTOR static Future<bool> checkProgress(Reference<BlobMigrator> self) {
+		state Reference<BlobRestoreController> restoreController =
+		    makeReference<BlobRestoreController>(self->db_, normalKeys);
 		state Transaction tr(self->db_);
 		loop {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -273,12 +273,10 @@ private:
 				state bool done = incompleted == 0;
 				dprint("Migration progress :{}%. done {}\n", progress, done);
 				TraceEvent("BlobMigratorProgress", self->interf_.id()).detail("Progress", progress);
-				wait(updateRestoreStatus(self->db_,
-				                         normalKeys,
-				                         BlobRestorePhase::COPYING_DATA,
-				                         progress,
-				                         {},
-				                         BlobRestorePhase::COPYING_DATA));
+				Standalone<BlobRestoreState> restoreState;
+				restoreState.phase = BlobRestorePhase::COPYING_DATA;
+				restoreState.progress = progress;
+				wait(BlobRestoreController::updateState(restoreController, restoreState, COPYING_DATA));
 				return done;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -340,7 +338,9 @@ private:
 		}
 		state Version minLogVersion = desc.minLogBegin.get();
 		state Version maxLogVersion = desc.contiguousLogEnd.get() - 1;
-		state Version targetVersion = wait(getRestoreTargetVersion(self->db_, normalKeys, maxLogVersion));
+		Reference<BlobRestoreController> restoreController =
+		    makeReference<BlobRestoreController>(self->db_, normalKeys);
+		state Version targetVersion = wait(BlobRestoreController::getTargetVersion(restoreController, maxLogVersion));
 		if (targetVersion < maxLogVersion) {
 			if (!needApplyLogs(self, targetVersion)) {
 				TraceEvent("SkipMutationLogs").detail("TargetVersion", targetVersion);
@@ -656,7 +656,8 @@ ACTOR Future<Void> blobMigrator(BlobMigratorInterface interf, Reference<AsyncVar
 		dprint("Unexpected blob migrator error {}\n", e.what());
 		TraceEvent("BlobMigratorError", interf.id()).error(e);
 		std::string errorMessage = fmt::format("Migrator failure '{}' on {}", e.what(), interf.address().toString());
-		wait(updateRestoreStatus(db, normalKeys, BlobRestorePhase::ERROR, 0, errorMessage, {}));
+		Reference<BlobRestoreController> restoreController = makeReference<BlobRestoreController>(db, normalKeys);
+		wait(BlobRestoreController::updateError(restoreController, StringRef(errorMessage)));
 	}
 	return Void();
 }

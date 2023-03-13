@@ -21,9 +21,7 @@
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/directory.hpp>
-#include <boost/filesystem/file_status.hpp>
 #include <boost/filesystem/path.hpp>
-#include <boost/range/iterator_range.hpp>
 #include <boost/range/iterator_range_core.hpp>
 #include <cinttypes>
 #include <fstream>
@@ -35,11 +33,9 @@
 #include <toml.hpp>
 
 #include "flow/ActorCollection.h"
-#include "flow/ChaosMetrics.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Histogram.h"
-#include "flow/IAsyncFile.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/ProcessEvents.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/sim_validation.h"
@@ -54,13 +50,10 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/Status.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbclient/MonitorLeader.h"
-#include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/WorkerInterface.actor.h"
 #include "flow/Platform.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -1218,8 +1211,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	if (g_network->isSimulated()) {
 		// NOTE: the value will be reset after consistency check
 		connectionFailures = g_simulator->connectionFailuresDisableDuration;
-		g_simulator->connectionFailuresDisableDuration = 1e6;
-		g_simulator->speedUpSimulation = true;
+		disableConnectionFailures("ConsistencyCheck");
 	}
 
 	Standalone<VectorRef<KeyValueRef>> options;
@@ -1275,16 +1267,26 @@ ACTOR Future<bool> runTest(Database cx,
                            Reference<AsyncVar<ServerDBInfo>> dbInfo,
                            Optional<TenantName> defaultTenant) {
 	state DistributedTestResults testResults;
+	state double savedDisableDuration = 0;
 
 	try {
 		Future<DistributedTestResults> fTestResults = runWorkload(cx, testers, spec, defaultTenant);
+		if (g_network->isSimulated() && spec.simConnectionFailuresDisableDuration > 0) {
+			savedDisableDuration = g_simulator->connectionFailuresDisableDuration;
+			g_simulator->connectionFailuresDisableDuration = spec.simConnectionFailuresDisableDuration;
+		}
 		if (spec.timeout > 0) {
 			fTestResults = timeoutError(fTestResults, spec.timeout);
 		}
 		DistributedTestResults _testResults = wait(fTestResults);
 		testResults = _testResults;
 		logMetrics(testResults.metrics);
+		if (g_network->isSimulated() && savedDisableDuration > 0) {
+			g_simulator->connectionFailuresDisableDuration = savedDisableDuration;
+		}
 	} catch (Error& e) {
+		auto msg = fmt::format("Process timed out after {} seconds", spec.timeout);
+		ProcessEvents::trigger("Timeout"_sr, StringRef(msg), e);
 		if (e.code() == error_code_timed_out) {
 			TraceEvent(SevError, "TestFailure")
 			    .error(e)
@@ -1503,8 +1505,6 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	      sscanf(value.c_str(), "%lf", &connectionFailuresDisableDuration);
 	      ASSERT(connectionFailuresDisableDuration >= 0);
 	      spec->simConnectionFailuresDisableDuration = connectionFailuresDisableDuration;
-	      if (g_network->isSimulated())
-		      g_simulator->connectionFailuresDisableDuration = spec->simConnectionFailuresDisableDuration;
 	      TraceEvent("TestParserTest")
 	          .detail("ParsedSimConnectionFailuresDisableDuration", spec->simConnectionFailuresDisableDuration);
 	  } },
@@ -1838,6 +1838,17 @@ void encryptionAtRestPlaintextMarkerCheck() {
 	TraceEvent("EncryptionAtRestPlaintextMarkerCheckEnd").detail("NumFiles", scanned);
 }
 
+// Disables connection failures after the given time seconds
+ACTOR Future<Void> disableConnectionFailuresAfter(double seconds, std::string context) {
+	if (g_network->isSimulated()) {
+		TraceEvent(SevWarnAlways, ("ScheduleDisableConnectionFailures_" + context).c_str())
+		    .detail("At", now() + seconds);
+		wait(delay(seconds));
+		disableConnectionFailures(context);
+	}
+	return Void();
+}
+
 /**
  * \brief Test orchestrator: sends test specification to testers in the right order and collects the results.
  *
@@ -1915,12 +1926,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		cx->defaultTenant = defaultTenant;
 	}
 
-	state Future<Void> disabler = disableConnectionFailuresAfter(FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, "Tester");
-	state Future<Void> repairDataCenter;
-	if (useDB) {
-		Future<Void> reconfigure = reconfigureAfter(cx, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, dbInfo, "Tester");
-		repairDataCenter = reconfigure;
-	}
+	disableConnectionFailures("Tester");
 
 	// Change the configuration (and/or create the database) if necessary
 	printf("startingConfiguration:%s start\n", startingConfiguration.toString().c_str());
@@ -2034,6 +2040,14 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			(void)cVer;
 			printf("Set perpetual_storage_wiggle=1 Done.\n");
 		}
+	}
+
+	enableConnectionFailures("Tester");
+	state Future<Void> disabler = disableConnectionFailuresAfter(FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, "Tester");
+	state Future<Void> repairDataCenter;
+	if (useDB) {
+		Future<Void> reconfigure = reconfigureAfter(cx, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, dbInfo, "Tester");
+		repairDataCenter = reconfigure;
 	}
 
 	TraceEvent("TestsExpectedToPass").detail("Count", tests.size());

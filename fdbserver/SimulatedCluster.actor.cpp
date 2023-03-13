@@ -46,6 +46,7 @@
 #include "fdbclient/versions.h"
 #include "flow/IRandom.h"
 #include "flow/MkCert.h"
+#include "flow/ProcessEvents.h"
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
@@ -2793,6 +2794,10 @@ ACTOR void setupAndRun(std::string dataFolder,
 		                                                   ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
 		                                                   : testConfig.simulationNormalRunTestsTimeoutSeconds));
 	} catch (Error& e) {
+		auto timeoutVal = isBuggifyEnabled(BuggifyType::General) ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
+		                                                         : testConfig.simulationNormalRunTestsTimeoutSeconds;
+		auto msg = fmt::format("Timeout after {} simulated seconds", timeoutVal);
+		ProcessEvents::trigger("Timeout"_sr, StringRef(msg), e);
 		TraceEvent(SevError, "SetupAndRunError").error(e);
 	}
 
