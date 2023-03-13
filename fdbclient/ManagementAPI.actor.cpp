@@ -2583,36 +2583,25 @@ ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
                                KeyRange range,
                                AuditType type,
                                double timeoutSeconds,
-                               int retryLimit,
                                bool async) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
 	TraceEvent(SevDebug, "ManagementAPIAuditStorageBegin");
-	state int retryCount = 0;
 
-	loop {
-		try {
-			while (!clusterInterface->get().present()) {
-				wait(clusterInterface->onChange());
-			}
-			TriggerAuditRequest req(type, range);
-			req.async = async;
-			state UID auditId =
-			    wait(timeoutError(clusterInterface->get().get().triggerAudit.getReply(req), timeoutSeconds));
-			TraceEvent(SevDebug, "ManagementAPIAuditStorageEnd").detail("AuditID", auditId);
-			break;
-		} catch (Error& e) {
-			if (retryCount > retryLimit) {
-				throw audit_storage_timed_out();
-			} else {
-				TraceEvent(SevDebug, "ManagementAPIAuditStorageError")
-				    .errorUnsuppressed(e)
-				    .detail("RetryCount", retryCount);
-				wait(delay(1));
-				retryCount++;
-			}
+	try {
+		while (!clusterInterface->get().present()) {
+			wait(clusterInterface->onChange());
 		}
+		TriggerAuditRequest req(type, range);
+		req.async = async;
+		state UID auditId =
+		    wait(timeoutError(clusterInterface->get().get().triggerAudit.getReply(req), timeoutSeconds));
+		TraceEvent(SevDebug, "ManagementAPIAuditStorageEnd").detail("AuditID", auditId);
+	} catch (Error& e) {
+		TraceEvent(SevDebug, "ManagementAPIAuditStorageError").errorUnsuppressed(e);
+		throw e;
 	}
+
 	return auditId;
 }
 

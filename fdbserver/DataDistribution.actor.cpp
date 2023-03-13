@@ -1575,10 +1575,10 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 				audit->state.setPhase(AuditPhase::Failed);
 				wait(persistAuditState(self->txnProcessor->context(), audit->state));
 				TraceEvent(SevDebug, "DDAuditStorageFailed", self->ddId)
-					.detail("AuditID", (audit == nullptr ? UID() : audit->state.id))
-					.detail("Range", req.range)
-					.detail("AuditType", req.type)
-					.detail("RetryCount", (audit == nullptr ? 0 : audit->retryCount));
+				    .detail("AuditID", (audit == nullptr ? UID() : audit->state.id))
+				    .detail("Range", req.range)
+				    .detail("AuditType", req.type)
+				    .detail("RetryCount", (audit == nullptr ? 0 : audit->retryCount));
 				// throw audit_storage_failed();
 			} else {
 				wait(delay(5));
@@ -1699,12 +1699,12 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
 				} else if (audit->state.getType() == AuditType::ValidateReplica) {
 					auto it = rangeLocations[i].servers.begin();
 					ASSERT(it->second.size() >= 2);
-					bool picked = false;
+					const int pickedIdx = deterministicRandom()->randomInt(0, it->second.size());
 					StorageServerInterface targetServer;
-					for (auto& ssi : it->second) {
-						if (picked == false) {
+					for (int i = 0; i < it->second.size(); ++i) {
+						auto ssi = it->second[i];
+						if (i == pickedIdx) {
 							targetServer = ssi;
-							picked = true;
 						} else {
 							req.targetServers.push_back(ssi.id());
 						}

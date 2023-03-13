@@ -76,10 +76,9 @@ struct ValidateStorage : TestWorkload {
 				Optional<UID> auditId_ = wait(timeout(auditStorage(cx->getConnectionRecord(),
 				                                                   allKeys,
 				                                                   type,
-				                                                   /*timeoutSeconds*/ 30,
-				                                                   /*retryLimit*/ 5,
+				                                                   /*timeoutSecond=*/60,
 				                                                   /*async=*/true),
-				                                      300));
+				                                      120));
 				if (!auditId_.present()) {
 					TraceEvent("AuditIdNotPresent").detail("AuditType", type);
 					throw audit_storage_failed();
@@ -88,7 +87,7 @@ struct ValidateStorage : TestWorkload {
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId).detail("AuditType", type);
 				break;
 			} catch (Error& e) {
-				if (e.code() == error_code_audit_storage_timed_out) {
+				if (e.code() == error_code_timed_out) {
 					TraceEvent(SevWarnAlways, "StartAuditStorageTimedOut").detail("AuditType", type);
 					break;
 				} else {
@@ -125,10 +124,9 @@ struct ValidateStorage : TestWorkload {
 				Optional<UID> auditId_ = wait(timeout(auditStorage(cx->getConnectionRecord(),
 				                                                   allKeys,
 				                                                   type,
-				                                                   /*timeoutSeconds*/ 30,
-				                                                   /*retryLimit*/ 5,
+				                                                   /*timeoutSeconds=*/60,
 				                                                   /*async=*/true),
-				                                      300));
+				                                      120));
 				if (!auditId_.present()) {
 					TraceEvent("AuditIdNotPresent").detail("AuditType", type);
 					throw audit_storage_failed();
@@ -139,7 +137,7 @@ struct ValidateStorage : TestWorkload {
 				}
 				break;
 			} catch (Error& e) {
-				if (e.code() == error_code_audit_storage_timed_out) {
+				if (e.code() == error_code_timed_out) {
 					TraceEvent(SevWarnAlways, "StartAuditStorageTimedOut").detail("AuditType", type);
 					break;
 				} else {
@@ -168,11 +166,11 @@ struct ValidateStorage : TestWorkload {
 		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
 		TraceEvent("TestValueVerified");
 
-		/*wait(self->auditStorageForType(cx, AuditType::ValidateHA));
+		wait(self->auditStorageForType(cx, AuditType::ValidateHA));
 		TraceEvent("TestValidateHADone");
 
 		wait(self->auditStorageForType(cx, AuditType::ValidateReplica));
-		TraceEvent("TestValidateReplicaDone");*/
+		TraceEvent("TestValidateReplicaDone");
 
 		wait(self->auditStorageForType(cx, AuditType::ValidateMetadata));
 		TraceEvent("TestValidateMetadataDone");
@@ -250,7 +248,9 @@ struct ValidateStorage : TestWorkload {
 			} catch (Error& e) {
 				try {
 					if (retryCount > 5) {
-						TraceEvent(SevWarnAlways, "TestValidateStorageFailed").errorUnsuppressed(e).detail("Range", range);
+						TraceEvent(SevWarnAlways, "TestValidateStorageFailed")
+						    .errorUnsuppressed(e)
+						    .detail("Range", range);
 						break;
 					}
 					wait(tr.onError(e));
