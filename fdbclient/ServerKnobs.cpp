@@ -1063,7 +1063,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_WORKER_DISK_ENABLED,                            false ); if ( randomize && BUGGIFY ) BLOB_WORKER_DISK_ENABLED = true;
 	init( BLOB_WORKER_STORE_TYPE,                                  3 );
 	init( BLOB_WORKER_REJOIN_TIME,                              10.0 );
-
+	init( BLOB_WORKER_FLUSH_POLICY,                                1 );
+	init( BLOB_WORKER_FLUSH_TOPK_GRANULE,                          2 );
+	init( BLOB_WORKER_MEMORY_PROVISION,                10*1024*1024  );
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN,                   0.1 );
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX,                   5.0 );
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT,              1.5 );

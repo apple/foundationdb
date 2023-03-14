@@ -23,6 +23,7 @@
 #include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/ServerKnobs.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BlobConnectionProvider.h"
@@ -48,8 +49,10 @@
 #include "flow/CompressionUtils.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"
+#include "flow/FastRef.h"
 #include "flow/flow.h"
 #include "flow/IRandom.h"
+#include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/Trace.h"
 #include "flow/xxhash.h"
@@ -57,6 +60,8 @@
 #include "fmt/format.h"
 
 #include <limits>
+#include <queue>
+#include <set>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -125,6 +130,7 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	Promise<Void> historyLoaded;
 
 	Promise<Void> resumeSnapshot;
+	AsyncTrigger topMemoryFlush;
 
 	AsyncVar<Reference<ChangeFeedData>> activeCFData;
 
@@ -203,6 +209,26 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	}
 };
 
+struct GranuleMemoryBufferedEntry {
+	int64_t memoryBuffered;
+	Reference<GranuleMetadata> granule;
+	GranuleMemoryBufferedEntry(int64_t memoryBuffered, Reference<GranuleMetadata> granule)
+	  : memoryBuffered(memoryBuffered), granule(granule) {}
+};
+
+// we need to find the granules that are using the most memory
+struct OrderForTopKMemory {
+	bool operator()(GranuleMemoryBufferedEntry const& a, GranuleMemoryBufferedEntry const& b) const {
+		return a.memoryBuffered > b.memoryBuffered;
+	}
+};
+
+// struct OrderForTopKGranule {
+// 	bool operator()(const Reference<GranuleMetadata>& a, const Reference<GranuleMetadata>& b) const {
+// 		return a->bufferedDeltaBytes - b->bufferedDeltaBytes;
+// 	}
+// };
+
 struct GranuleRangeMetadata {
 	int64_t lastEpoch;
 	int64_t lastSeqno;
@@ -246,6 +272,34 @@ struct GranuleHistoryEntry : NonCopyable, ReferenceCounted<GranuleHistoryEntry> 
 	  : range(range), granuleID(granuleID), startVersion(startVersion), endVersion(endVersion) {}
 };
 
+struct PolicyEngine {
+	// belong to bwData;
+	enum FlushPolicy { singleGranuleFlush = 0, topMemoryGranuleFlush = 1, END };
+
+	PolicyEngine() : globleMutationBytesBuffered(0) {
+		flushPolicy = (FlushPolicy)(SERVER_KNOBS->BLOB_WORKER_FLUSH_POLICY);
+		if (flushPolicy == 1) {
+			topK = SERVER_KNOBS->BLOB_WORKER_FLUSH_TOPK_GRANULE;
+			fullMemoryProvision = SERVER_KNOBS->BLOB_WORKER_MEMORY_PROVISION;
+		}
+	}
+
+	int getFlushPolicy() { return flushPolicy; }
+	void addBufferedBytes(int64_t bufferedMutationBytes) {
+		globleMutationBytesBuffered += bufferedMutationBytes;
+		if (globleMutationBytesBuffered >= fullMemoryProvision) {
+			// todo add log here
+		}
+	}
+	void removeBufferedBytes(int64_t bufferedMutationBytes) { globleMutationBytesBuffered -= bufferedMutationBytes; }
+
+private:
+	int64_t globleMutationBytesBuffered;
+	int topK;
+	int64_t fullMemoryProvision;
+	uint32_t flushPolicy;
+};
+
 struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	UID id;
 	Database db;
@@ -265,12 +319,10 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	KeyRangeMap<GranuleRangeMetadata> granuleMetadata;
 	BGTenantMap tenantData;
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
-
 	// contains the history of completed granules before the existing ones. Maps to the latest one, and has
 	// back-pointers to earlier granules
 	// FIXME: expire from map after a delay when granule is revoked and the history is no longer needed
 	KeyRangeMap<Reference<GranuleHistoryEntry>> granuleHistory;
-	Reference<GranuleMetadata> topMemoryUsingGranule;
 
 	PromiseStream<AssignBlobRangeRequest> granuleUpdateErrors;
 
@@ -280,6 +332,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	Promise<Void> fatalError;
 	Promise<Void> simInjectFailure;
 	Promise<Void> doReadDrivenCompaction;
+	PolicyEngine policyEngine;
 	Promise<Void> memoryFull;
 
 	Reference<FlowLock> initialSnapshotLock;
@@ -338,7 +391,6 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 			return true;
 		}
 	}
-
 	bool isFull() {
 		if (!SERVER_KNOBS->BLOB_WORKER_DO_REJECT_WHEN_FULL) {
 			return false;
@@ -381,7 +433,6 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 		return stats.estimatedMaxResidentMemory >= memoryFullThreshold;
 	}
-
 	void triggerReadDrivenCompaction() {
 		Promise<Void> doRDC = doReadDrivenCompaction;
 		if (doRDC.canBeSet()) {
@@ -2317,6 +2368,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 	state bool snapshotEligible; // just wrote a delta file or just took granule over from another worker
 	state bool justDidRollback = false;
+	state bool flushTopMemory = false;
 
 	try {
 		// set resume snapshot so it's not valid until we pause to ask the blob manager for a re-snapshot
@@ -2586,6 +2638,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							throw change_feed_popped();
 						}
 					}
+					when(wait(metadata->topMemoryFlush.onTrigger())) {
+						flushTopMemory = true;
+					}
 					when(wait(inFlightFiles.empty() ? Never() : success(inFlightFiles.front().future))) {}
 					when(wait(nextForceFlush)) {
 						Version nextForceFlushVersion = metadata->forceFlushVersion.get();
@@ -2610,10 +2665,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							lastForceFlushVersion = nextForceFlushVersion;
 						}
 						nextForceFlush = metadata->forceFlushVersion.whenAtLeast(lastForceFlushVersion + 1);
-					}
-					when(wait(bwData->memoryFull.getFuture())) {
-						// todo check anything to add here
-						//  bwData->memoryFull.reset();
 					}
 					when(wait(metadata->runRDC.getFuture())) {
 						// return control flow back to the triggering actor before continuing
@@ -2835,6 +2886,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 								metadata->bufferedDeltaBytes += delta.totalSize();
 								bwData->stats.changeFeedInputBytes += delta.totalSize();
 								bwData->stats.mutationBytesBuffered += delta.totalSize();
+								bwData->policyEngine.addBufferedBytes(delta.totalSize());
 
 								DEBUG_MUTATION("BlobWorkerBuffer", deltas.version, delta, bwData->id)
 								    .detail("Granule", metadata->keyRange)
@@ -2870,32 +2922,19 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			// is already whenAtLeast that version
 			// FIXME: with non-uniform delta file sizes, we could potentially over-shoot target write amp
 			bool forceFlush = !forceFlushVersions.empty() && forceFlushVersions.back() > metadata->pendingDeltaVersion;
-			bool topMemoryFlush = bwData->isFull() && metadata == bwData->topMemoryUsingGranule;
 			bool doEarlyFlush = !metadata->currentDeltas.empty() && metadata->doEarlyReSnapshot();
 			CODE_PROBE(forceFlush, "Force flushing granule");
-			// how we find the metadata here? should try to change metadata to bwdata ans: I think keyrange is always
-			// this
 
-			CODE_PROBE(topMemoryFlush, "Flush the granule using the most memory");
+			CODE_PROBE(flushTopMemory, "Flush top granules using the most memory");
 
-			// this is not correct, just a demo
-			if (metadata->bufferedDeltaBytes >= bwData->topMemoryUsingGranule->bufferedDeltaBytes) {
-				bwData->topMemoryUsingGranule = metadata;
-			}
-
-			if (bwData->isFull()) {
-				bwData->memoryFull.send(Void());
-			}
-
-			// todo add the limit in writeAmpTarget?
-			if ((processedAnyMutations && metadata->bufferedDeltaBytes >= writeAmpTarget.getDeltaFileBytes()) ||
-			    topMemoryFlush || forceFlush || doEarlyFlush) {
+			if ((processedAnyMutations && metadata->bufferedDeltaBytes >= writeAmpTarget.bytesBeforeCompact) ||
+			    flushTopMemory || forceFlush || doEarlyFlush) {
 				TraceEvent(SevDebug, "BlobGranuleDeltaFile", bwData->id)
 				    .detail("Granule", metadata->keyRange)
 				    .detail("Version", lastDeltaVersion);
 
 				// sanity check for version order
-				if (forceFlush || doEarlyFlush) {
+				if (forceFlush || doEarlyFlush || flushTopMemory) {
 					if (lastDeltaVersion == invalidVersion) {
 						lastDeltaVersion = metadata->bufferedDeltaVersion;
 					}
@@ -2909,6 +2948,14 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						}
 						lastDeltaVersion = forceFlushVersions.back();
 					}
+				}
+				if (flushTopMemory) {
+					TraceEvent(SevDebug, "XCH::TestBigDeltaFilesBlobGranuleDeltaFile", bwData->id)
+					    .detail("BlobGranuleDeltaFile", bwData->id)
+					    .detail("Granule", metadata->keyRange)
+					    .detail("Version", lastDeltaVersion)
+					    .detail("GranuleSize", metadata->bufferedDeltaBytes);
+					flushTopMemory = false;
 				}
 				if (!metadata->currentDeltas.empty()) {
 					ASSERT(lastDeltaVersion >= metadata->currentDeltas.back().version);
@@ -2963,6 +3010,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				} else {
 					int64_t deltaFileBudget = std::min((int64_t)metadata->bufferedDeltaBytes,
 					                                   SERVER_KNOBS->BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES);
+					// toask
 					startDeltaFileWrite = bwData->deltaWritesBudget->take(TaskPriority::DefaultYield, deltaFileBudget);
 					dfFuture = writeDeltaFile(bwData,
 					                          bstore,
@@ -2989,6 +3037,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				metadata->bytesInNewDeltaFiles += metadata->bufferedDeltaBytes;
 
 				bwData->stats.mutationBytesBuffered -= metadata->bufferedDeltaBytes;
+				bwData->policyEngine.removeBufferedBytes(metadata->bufferedDeltaBytes);
 
 				// reset current deltas
 				metadata->currentDeltas = Standalone<GranuleDeltas>();
@@ -3016,6 +3065,16 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			} else if (metadata->doEarlyReSnapshot()) {
 				ASSERT(metadata->currentDeltas.empty());
 				snapshotEligible = true;
+			}
+
+			if (bwData->policyEngine.getFlushPolicy() == 1) {
+				if (bwData->stats.mutationBytesBuffered > bwData->policyEngine.fullMemoryProvision) {
+					TraceEvent(SevDebug, "XCH::BlobwokerBufferedDeltaFile", bwData->id)
+					    .detail("BlobWorkerBufferedBytes", bwData->stats.mutationBytesBuffered);
+					if (bwData->memoryFull.canBeSet()) {
+						bwData->memoryFull.send(Void());
+					}
+				}
 			}
 
 			// FIXME: if we're still reading from old change feed, we should probably compact if we're
@@ -5147,6 +5206,52 @@ ACTOR Future<Void> runReadDrivenCompaction(Reference<BlobWorkerData> bwData) {
 	}
 }
 
+ACTOR Future<Void> flushTopKMemory(Reference<BlobWorkerData> bwData) {
+	loop {
+		wait(bwData->memoryFull.getFuture());
+		TraceEvent("XCH::EnterFunctionFlushTopKMemory");
+
+		auto allRanges = bwData->granuleMetadata.intersectingRanges(normalKeys);
+		std::vector<GranuleMemoryBufferedEntry> granuleMetadataEntrys;
+		for (auto& it : allRanges) {
+			if (it.value().activeMetadata.isValid() && it.value().activeMetadata->cancelled.canBeSet()) {
+				auto metadata = it.value().activeMetadata;
+				granuleMetadataEntrys.push_back(GranuleMemoryBufferedEntry(metadata->bufferedDeltaBytes, metadata));
+			}
+		}
+		sort(granuleMetadataEntrys.begin(), granuleMetadataEntrys.end(), OrderForTopKMemory());
+
+		for (auto& it : granuleMetadataEntrys) {
+			TraceEvent(SevDebug, "XCH::BlobGranuleDeltaFile", bwData->id)
+			    .detail("BlobGranuleDeltaFile", it.memoryBuffered);
+		}
+
+		std::vector<Future<Void>> futures;
+		int topK = bwData->policyEngine.topK;
+		int topNonEmptyGranule = std::min(topK, int(granuleMetadataEntrys.size()));
+		for (int i = 0; i < topK; i++) {
+			if (granuleMetadataEntrys[i].memoryBuffered == 0) {
+				topNonEmptyGranule = i;
+				break;
+			}
+		}
+		ASSERT(topNonEmptyGranule > 0);
+		futures.reserve(topNonEmptyGranule);
+		for (int i = 0; i < topNonEmptyGranule; i++) {
+			granuleMetadataEntrys[i].granule->topMemoryFlush.trigger();
+
+			Future<Void> waitForTopMemoryFlushComplete =
+			    granuleMetadataEntrys[i].granule->durableDeltaVersion.whenAtLeast(
+			        granuleMetadataEntrys[i].granule->bufferedDeltaVersion);
+			futures.push_back(waitForTopMemoryFlushComplete);
+		}
+		ASSERT(futures.size() > 0);
+		wait(waitForAll(futures) && delay(1.0));
+
+		bwData->memoryFull.reset();
+	}
+}
+
 // FIXME: better way to do this?
 // monitor system keyspace for new tenants
 ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
@@ -5487,6 +5592,9 @@ ACTOR Future<Void> blobWorkerCore(BlobWorkerInterface bwInterf, Reference<BlobWo
 	self->addActor.send(runGRVChecks(self));
 	self->addActor.send(monitorTenants(self));
 	self->addActor.send(runReadDrivenCompaction(self));
+	if (self->policyEngine.getFlushPolicy() == 1) {
+		self->addActor.send(flushTopKMemory(self));
+	}
 	state Future<Void> selfRemoved = monitorRemoval(self);
 	if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.25)) {
 		self->addActor.send(simForceFileWriteContention(self));
