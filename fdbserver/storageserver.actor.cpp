@@ -201,8 +201,9 @@ static const KeyRangeRef persistCheckpointKeys =
     KeyRangeRef(PERSIST_PREFIX "Checkpoint/"_sr, PERSIST_PREFIX "Checkpoint0"_sr);
 static const KeyRangeRef persistPendingCheckpointKeys =
     KeyRangeRef(PERSIST_PREFIX "PendingCheckpoint/"_sr, PERSIST_PREFIX "PendingCheckpoint0"_sr);
-static const std::string rocksdbCheckpointDirPrefix = "/rockscheckpoints_";
+static const std::string serverCheckpointFolder = "serverCheckpoints";
 static const std::string checkpointBytesSampleTempFolder = "/metadata_temp";
+static const std::string fetchedCheckpointFolder = "fetchedCheckpoints";
 
 struct AddingShard : NonCopyable {
 	KeyRange keys;
@@ -1133,6 +1134,8 @@ public:
 	double lastUpdate;
 
 	std::string folder;
+	std::string checkpointFolder;
+	std::string fetchedCheckpointFolder;
 
 	// defined only during splitMutations()/addMutation()
 	UpdateEagerReadInfo* updateEagerReads;
@@ -9732,8 +9735,8 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData metaData) {
 	ASSERT(std::find(metaData.src.begin(), metaData.src.end(), data->thisServerID) != metaData.src.end() &&
 	       !metaData.ranges.empty());
-	state std::string checkpointDir = data->folder + rocksdbCheckpointDirPrefix + metaData.checkpointID.toString();
-	state std::string bytesSampleFile = checkpointDir + "/" + checkpointBytesSampleFileName;
+	state std::string checkpointDir = serverCheckpointDir(data->checkpointFolder, metaData.checkpointID);
+	state std::string bytesSampleFile = joinPath(checkpointDir, checkpointBytesSampleFileName);
 	state std::string bytesSampleTempDir = data->folder + checkpointBytesSampleTempFolder;
 	state std::string bytesSampleTempFile =
 	    bytesSampleTempDir + "/" + metaData.checkpointID.toString() + "_" + checkpointBytesSampleFileName;
@@ -11885,11 +11888,16 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
 	              .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
 	self.folder = folder;
+	self.checkpointFolder = joinPath(self.folder, serverCheckpointFolder);
+	self.fetchedCheckpointFolder = joinPath(self.folder, fetchedCheckpointFolder);
 
 	try {
 		wait(self.storage.init());
 		wait(self.storage.commit());
 		++self.counters.kvCommits;
+
+		platform::createDirectory(self.checkpointFolder);
+		platform::createDirectory(self.fetchedCheckpointFolder);
 
 		EncryptionAtRestMode encryptionMode = wait(self.storage.encryptionMode());
 		self.encryptionMode = encryptionMode;
@@ -11970,6 +11978,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	state StorageServer self(persistentData, db, ssi);
 	state Future<Void> ssCore;
 	self.folder = folder;
+	self.checkpointFolder = joinPath(self.folder, serverCheckpointFolder);
+	self.fetchedCheckpointFolder = joinPath(self.folder, fetchedCheckpointFolder);
 
 	try {
 		state double start = now();
