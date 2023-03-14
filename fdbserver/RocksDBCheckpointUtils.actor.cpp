@@ -1231,7 +1231,6 @@ int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints)
 	for (const auto& checkpoint : checkpoints) {
 		const CheckpointFormat format = checkpoint.getFormat();
 		if (format == DataMoveRocksCF) {
-			// TODO: Returns the checkpoint size of a RocksDB Column Family.
 			const RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
 			for (const auto& file : rocksCF.sstFiles) {
 				totalBytes += file.size;
