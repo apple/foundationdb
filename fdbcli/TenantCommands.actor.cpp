@@ -324,7 +324,8 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 // tenant list command
 ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() > 7) {
-		fmt::print("Usage: tenant list [BEGIN] [END] [limit=LIMIT] [offset=OFFSET] [state=<STATE1>,<STATE2>,...]\n\n");
+		fmt::print(
+		    "Usage: tenant list [BEGIN] [END] [limit=<LIMIT>|offset=<OFFSET>|state=<STATE1>,<STATE2>,...] ...\n\n");
 		fmt::print("Lists the tenants in a cluster.\n");
 		fmt::print("Only tenants in the range BEGIN - END will be printed.\n");
 		fmt::print("An optional LIMIT can be specified to limit the number of results (default 100).\n");
@@ -978,18 +979,19 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 	}
 }
 
-CommandFactory tenantRegisterFactory("tenant",
-                                     CommandHelp("tenant <create|delete|list|get|getId|configure|rename> [ARGS]",
-                                                 "view and manage tenants in a cluster or metacluster",
-                                                 "`create' and `delete' add and remove tenants from the cluster.\n"
-                                                 "`list' prints a list of tenants in the cluster.\n"
-                                                 "`get' prints the metadata for a particular tenant.\n"
-                                                 "`configure' modifies the configuration for a tenant.\n"
-                                                 "`rename' changes the name of a tenant.\n"
-                                                 "`lock` locks a tenant.\n"
-                                                 "`unlock` unlocks a tenant.\n"),
-                                     &tenantGenerator,
-                                     &tenantHintGenerator);
+CommandFactory tenantRegisterFactory(
+    "tenant",
+    CommandHelp("tenant <create|delete|list|get|getId|configure|rename|lock|unlock> [ARGS]",
+                "view and manage tenants in a cluster or metacluster",
+                "`create' and `delete' add and remove tenants from the cluster.\n"
+                "`list' prints a list of tenants in the cluster.\n"
+                "`get' prints the metadata for a particular tenant.\n"
+                "`configure' modifies the configuration for a tenant.\n"
+                "`rename' changes the name of a tenant.\n"
+                "`lock` locks a tenant.\n"
+                "`unlock` unlocks a tenant.\n"),
+    &tenantGenerator,
+    &tenantHintGenerator);
 
 // Generate hidden commands for the old versions of the tenant commands
 CommandFactory createTenantFactory("createtenant");
