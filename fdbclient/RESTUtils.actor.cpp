@@ -318,7 +318,7 @@ TEST_CASE("/RESTUtils/ValidURIWithExtraForwardSlash") {
 	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
 	ASSERT_EQ(r.host.compare("host"), 0);
 	ASSERT(r.service.empty());
-	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
+	ASSERT_EQ(r.resource.compare("//foo/bar"), 0);
 	return Void();
 }
 
