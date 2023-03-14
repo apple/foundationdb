@@ -26,6 +26,8 @@
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/BlobGranuleReader.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "flow/Error.h"
@@ -52,7 +54,11 @@ struct BlobRestoreWorkload : TestWorkload {
 		extraDb_ = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
 		setupBlob_ = getOption(options, "setupBlob"_sr, false);
 		performRestore_ = getOption(options, "performRestore"_sr, false);
+		restoreToVersion_ = getOption(options, "restoreToVersion"_sr, false);
 		readBatchSize_ = getOption(options, "readBatchSize"_sr, 3000);
+		if (!blobConn_.isValid() && SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
+			blobConn_ = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BG_URL);
+		}
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
@@ -76,7 +82,15 @@ struct BlobRestoreWorkload : TestWorkload {
 			KnobValueRef knobFalse = KnobValueRef::create(bool{ false });
 			IKnobCollection::getMutableGlobalKnobCollection().setKnob("blob_manifest_backup", knobFalse);
 
-			wait(store(result, self->extraDb_->blobRestore(normalKeys, {})));
+			wait(store(self->restoreTargetVersion_, getRestoreVersion(cx, self)));
+			fmt::print("Restore target version {}\n", self->restoreTargetVersion_);
+
+			// Only need to pass the version if we are trying to restore to a previous version
+			Optional<Version> targetVersion;
+			if (self->restoreToVersion_) {
+				targetVersion = self->restoreTargetVersion_;
+			}
+			wait(store(result, self->extraDb_->blobRestore(normalKeys, targetVersion)));
 
 			state std::vector<Future<Void>> futures;
 			futures.push_back(self->runBackupAgent(self));
@@ -84,6 +98,28 @@ struct BlobRestoreWorkload : TestWorkload {
 			wait(waitForAny(futures));
 		}
 		return Void();
+	}
+
+	ACTOR static Future<Version> getRestoreVersion(Database cx, BlobRestoreWorkload* self) {
+		state Version targetVersion;
+		state std::string baseUrl = SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL;
+		state std::vector<std::string> containers = wait(IBackupContainer::listContainers(baseUrl, {}));
+		if (containers.size() == 0) {
+			fmt::print("missing mutation logs {}\n", baseUrl);
+			throw restore_missing_data();
+		}
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(containers.front(), {}, {});
+		BackupDescription desc = wait(bc->describeBackup(true));
+		if (!desc.contiguousLogEnd.present()) {
+			fmt::print("missing mutation logs {}\n", baseUrl);
+			throw restore_missing_data();
+		}
+		targetVersion = desc.contiguousLogEnd.get() - 1;
+		if (self->restoreToVersion_) {
+			// restore to a previous version
+			targetVersion -= deterministicRandom()->randomInt(1, 100000);
+		}
+		return targetVersion;
 	}
 
 	// Start backup agent on the extra db
@@ -116,13 +152,14 @@ struct BlobRestoreWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Standalone<VectorRef<KeyValueRef>>> read(Database cx,
-	                                                             KeySelectorRef begin,
-	                                                             BlobRestoreWorkload* self) {
+	ACTOR static Future<Standalone<VectorRef<KeyValueRef>>> readFromStorageServer(Database cx,
+	                                                                              KeySelectorRef begin,
+	                                                                              BlobRestoreWorkload* self) {
 		state Standalone<VectorRef<KeyValueRef>> data;
 		state Transaction tr(cx);
 		state KeySelectorRef end = firstGreaterOrEqual(normalKeys.end);
 		state Arena arena;
+
 		loop {
 			try {
 				GetRangeLimits limits(self->readBatchSize_ - data.size());
@@ -147,6 +184,41 @@ struct BlobRestoreWorkload : TestWorkload {
 			}
 		}
 		return data;
+	}
+
+	ACTOR static Future<Standalone<VectorRef<KeyValueRef>>> readFromBlob(Database cx,
+	                                                                     KeySelectorRef begin,
+	                                                                     Version readVersion,
+	                                                                     BlobRestoreWorkload* self) {
+		state Transaction tr(cx);
+		state Standalone<VectorRef<KeyValueRef>> data;
+		state KeyRangeRef keys(begin.getKey(), normalKeys.end);
+		state int count = 0;
+
+		loop {
+			try {
+				state Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
+				    wait(tr.readBlobGranules(keys, 0, readVersion));
+				state int i;
+				for (i = 0; i < chunks.size(); ++i) {
+					state RangeResult rows = wait(readBlobGranule(chunks[i], keys, 0, readVersion, self->blobConn_));
+					for (auto& r : rows) {
+						if (begin.isDefinitelyGreater(r.key)) {
+							continue;
+						}
+						data.push_back_deep(data.arena(), r);
+						count++;
+						if (count >= self->readBatchSize_) {
+							return data;
+						}
+					}
+				}
+				return data;
+			} catch (Error& e) {
+				fmt::print("read blob error {} \n", e.what());
+				wait(tr.onError(e));
+			}
+		}
 	}
 
 	static bool compare(VectorRef<KeyValueRef> src, VectorRef<KeyValueRef> dest) {
@@ -198,11 +270,20 @@ struct BlobRestoreWorkload : TestWorkload {
 		state Arena arena;
 		state KeySelectorRef srcBegin = firstGreaterOrEqual(normalKeys.begin);
 		state KeySelectorRef destBegin = firstGreaterOrEqual(normalKeys.begin);
+		// flush src db
+		bool flush = wait(cx->flushBlobRange(normalKeys, false, self->restoreTargetVersion_));
+		if (!flush) {
+			fmt::print("Cannot flush to version {} \n", self->restoreTargetVersion_);
+			throw internal_error();
+		}
+
 		loop {
 			// restore src. data before restore
-			state Standalone<VectorRef<KeyValueRef>> src = wait(read(cx, srcBegin, self));
-			// restore dest. data after restore
-			state Standalone<VectorRef<KeyValueRef>> dest = wait(read(self->extraDb_, destBegin, self));
+			state Standalone<VectorRef<KeyValueRef>> src =
+			    wait(readFromBlob(cx, srcBegin, self->restoreTargetVersion_, self));
+			//  restore dest. data after restore
+			state Standalone<VectorRef<KeyValueRef>> dest =
+			    wait(readFromStorageServer(self->extraDb_, destBegin, self));
 			if (src.size() == 0 && dest.size() == 0) {
 				break;
 			}
@@ -225,6 +306,9 @@ private:
 	bool setupBlob_;
 	bool performRestore_;
 	int readBatchSize_;
+	bool restoreToVersion_;
+	Version restoreTargetVersion_;
+	Reference<BlobConnectionProvider> blobConn_;
 };
 
 WorkloadFactory<BlobRestoreWorkload> BlobRestoreWorkloadFactory;
