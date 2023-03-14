@@ -69,81 +69,56 @@ struct ValidateStorage : TestWorkload {
 	}
 
 	ACTOR Future<Void> auditStorageForType(Database cx, AuditType type) {
-		state Optional<UID> auditId;
+		state UID auditId;
 
 		loop {
 			try {
-				Optional<UID> auditId_ = wait(timeout(auditStorage(cx->getConnectionRecord(),
-				                                                   allKeys,
-				                                                   type,
-				                                                   /*timeoutSecond=*/60,
-				                                                   /*async=*/true),
-				                                      120));
-				if (!auditId_.present()) {
-					TraceEvent("AuditIdNotPresent").detail("AuditType", type);
-					throw audit_storage_failed();
-				}
-				auditId = auditId_.get();
+				UID auditId_ = wait(auditStorage(cx->getConnectionRecord(),
+				                                 allKeys,
+				                                 type,
+				                                 /*timeoutSecond=*/60,
+				                                 /*async=*/true));
+				auditId = auditId_;
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId).detail("AuditType", type);
 				break;
 			} catch (Error& e) {
-				if (e.code() == error_code_timed_out) {
-					TraceEvent(SevWarnAlways, "StartAuditStorageTimedOut").detail("AuditType", type);
-					break;
-				} else {
-					TraceEvent(SevWarn, "StartAuditStorageFailed").errorUnsuppressed(e).detail("AuditType", type);
-					wait(delay(1));
-				}
-			}
-		}
-
-		if (auditId.present()) {
-			loop {
-				try {
-					AuditStorageState auditState = wait(getAuditState(cx, type, auditId.get()));
-					if (auditState.getPhase() != AuditPhase::Complete) {
-						std::cout << std::to_string(auditState.phase) << "\n";
-						ASSERT(auditState.getPhase() == AuditPhase::Running);
-						wait(delay(30));
-					} else {
-						ASSERT(auditState.getPhase() == AuditPhase::Complete);
-						break;
-					}
-				} catch (Error& e) {
-					TraceEvent("WaitAuditStorageFailed")
-					    .errorUnsuppressed(e)
-					    .detail("AuditID", auditId.get())
-					    .detail("AuditType", type);
-					wait(delay(1));
-				}
+				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e).detail("AuditType", type);
+				wait(delay(1));
 			}
 		}
 
 		loop {
 			try {
-				Optional<UID> auditId_ = wait(timeout(auditStorage(cx->getConnectionRecord(),
-				                                                   allKeys,
-				                                                   type,
-				                                                   /*timeoutSeconds=*/60,
-				                                                   /*async=*/true),
-				                                      120));
-				if (!auditId_.present()) {
-					TraceEvent("AuditIdNotPresent").detail("AuditType", type);
-					throw audit_storage_failed();
+				AuditStorageState auditState = wait(getAuditState(cx, type, auditId));
+				if (auditState.getPhase() != AuditPhase::Complete) {
+					ASSERT(auditState.getPhase() == AuditPhase::Running);
+					wait(delay(30));
+				} else {
+					ASSERT(auditState.getPhase() == AuditPhase::Complete);
+					break;
 				}
-				if (auditId.present()) {
-					ASSERT(auditId_.get() != auditId.get());
-					TraceEvent("TestValidateEnd").detail("AuditID", auditId_.get()).detail("AuditType", type);
-				}
+			} catch (Error& e) {
+				TraceEvent("WaitAuditStorageError")
+				    .errorUnsuppressed(e)
+				    .detail("AuditID", auditId)
+				    .detail("AuditType", type);
+				wait(delay(1));
+			}
+		}
+
+		loop {
+			try {
+				UID auditId_ = wait(auditStorage(cx->getConnectionRecord(),
+				                                 allKeys,
+				                                 type,
+				                                 /*timeoutSeconds=*/60,
+				                                 /*async=*/true));
+				ASSERT(auditId_ != auditId);
+				TraceEvent("TestValidateEnd").detail("AuditID", auditId_).detail("AuditType", type);
 				break;
 			} catch (Error& e) {
-				if (e.code() == error_code_timed_out) {
-					TraceEvent(SevWarnAlways, "StartAuditStorageTimedOut").detail("AuditType", type);
-					break;
-				} else {
-					TraceEvent(SevWarn, "StartAuditStorageFailed").errorUnsuppressed(e).detail("AuditType", type);
-					wait(delay(1));
-				}
+				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e).detail("AuditType", type);
+				wait(delay(1));
 			}
 		}
 
