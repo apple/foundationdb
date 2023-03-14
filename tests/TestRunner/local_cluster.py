@@ -263,10 +263,7 @@ knob_min_trace_severity=5
             if self.blob_granules_enabled:
                 bg_config = "\n".join(
                     [
-                        "knob_bg_url=file://" + str(self.data) + "/fdbblob/",
-                        "knob_bg_snapshot_file_target_bytes=200000",
-                        "knob_bg_delta_file_target_bytes=10000",
-                        "knob_bg_delta_bytes_before_compact=100000",
+                        "knob_bg_url=file://" + str(self.data) + "/fdbblob/"
                     ]
                 )
             if self.enable_encryption_at_rest:
