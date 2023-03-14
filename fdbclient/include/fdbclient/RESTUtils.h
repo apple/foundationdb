@@ -27,6 +27,7 @@
 #include "flow/FastRef.h"
 #include "flow/Net2Packet.h"
 
+#include <boost/functional/hash.hpp>
 #include <fmt/format.h>
 #include <unordered_map>
 #include <utility>
@@ -52,7 +53,8 @@ public:
 
 	// Maximum number of connections cached in the connection-pool.
 	int maxConnPerConnectKey;
-	std::map<RESTConnectionPoolKey, std::queue<ReusableConnection>> connectionPoolMap;
+	std::unordered_map<RESTConnectionPoolKey, std::queue<ReusableConnection>, boost::hash<RESTConnectionPoolKey>>
+	    connectionPoolMap;
 
 	RESTConnectionPool(const int maxConnsPerKey) : maxConnPerConnectKey(maxConnsPerKey) {}
 

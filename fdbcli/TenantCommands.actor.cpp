@@ -324,7 +324,8 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 // tenant list command
 ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() > 7) {
-		fmt::print("Usage: tenant list [BEGIN] [END] [limit=LIMIT] [offset=OFFSET] [state=<STATE1>,<STATE2>,...]\n\n");
+		fmt::print(
+		    "Usage: tenant list [BEGIN] [END] [limit=<LIMIT>|offset=<OFFSET>|state=<STATE1>,<STATE2>,...] ...\n\n");
 		fmt::print("Lists the tenants in a cluster.\n");
 		fmt::print("Only tenants in the range BEGIN - END will be printed.\n");
 		fmt::print("An optional LIMIT can be specified to limit the number of results (default 100).\n");
@@ -438,7 +439,7 @@ void tenantGetCmdOutput(json_spirit::mValue jsonObject, bool useJson) {
 		doc.get("prefix.printable", prefix);
 		doc.get("lock_state", tenantLockState);
 
-		bool hasName = doc.tryGet("name", name);
+		bool hasName = doc.tryGet("name.printable", name);
 		bool hasTenantState = doc.tryGet("tenant_state", tenantState);
 		bool hasLockId = doc.tryGet("lock_id", lockId);
 		bool hasTenantGroup = doc.tryGet("tenant_group.printable", tenantGroup);
@@ -538,7 +539,7 @@ ACTOR Future<bool> tenantGetCommand(Reference<IDatabase> db, std::vector<StringR
 	}
 }
 
-// tenant get command
+// tenant getId command
 ACTOR Future<bool> tenantGetIdCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 3 || tokens.size() > 4 || (tokens.size() == 4 && tokens[3] != "JSON"_sr)) {
 		fmt::print("Usage: tenant getId <ID> [JSON]\n\n");
@@ -563,11 +564,12 @@ ACTOR Future<bool> tenantGetIdCommand(Reference<IDatabase> db, std::vector<Strin
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			state std::string tenantJson;
 			if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
-				fmt::print(stderr, "ERROR: get by ID should only be run on a management cluster.\n");
-				return false;
+				TenantMapEntry entry = wait(TenantAPI::getTenantTransaction(tr, tenantId));
+				tenantJson = entry.toJson();
+			} else {
+				MetaclusterTenantMapEntry mEntry = wait(MetaclusterAPI::getTenantTransaction(tr, tenantId));
+				tenantJson = mEntry.toJson();
 			}
-			MetaclusterTenantMapEntry entry = wait(MetaclusterAPI::getTenantTransaction(tr, tenantId));
-			tenantJson = entry.toJson();
 
 			json_spirit::mValue jsonObject;
 			json_spirit::read_string(tenantJson, jsonObject);
@@ -813,8 +815,8 @@ ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<String
 				wait(MetaclusterAPI::changeTenantLockState(db, name, desiredLockState, uid));
 			} else {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				auto f = tr->get(nameKey);
-				Optional<Value> entry = wait(safeThreadFutureToFuture(f));
+				state ThreadFuture<Optional<Value>> tenantFuture = tr->get(nameKey);
+				Optional<Value> entry = wait(safeThreadFutureToFuture(tenantFuture));
 				if (!entry.present()) {
 					fmt::print(stderr, "ERROR: Tenant `{}' does not exist\n", name);
 					return false;
@@ -900,6 +902,9 @@ void tenantGenerator(const char* text,
 	} else if (tokens.size() == 3 && tokencmp(tokens[1], "get")) {
 		const char* opts[] = { "JSON", nullptr };
 		arrayGenerator(text, line, opts, lc);
+	} else if (tokens.size() == 3 && tokencmp(tokens[1], "getId")) {
+		const char* opts[] = { "JSON", nullptr };
+		arrayGenerator(text, line, opts, lc);
 	} else if (tokencmp(tokens[1], "configure")) {
 		if (tokens.size() == 3) {
 			const char* opts[] = { "tenant_group=", "unset", nullptr };
@@ -974,18 +979,19 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 	}
 }
 
-CommandFactory tenantRegisterFactory("tenant",
-                                     CommandHelp("tenant <create|delete|list|get|getId|configure|rename> [ARGS]",
-                                                 "view and manage tenants in a cluster or metacluster",
-                                                 "`create' and `delete' add and remove tenants from the cluster.\n"
-                                                 "`list' prints a list of tenants in the cluster.\n"
-                                                 "`get' prints the metadata for a particular tenant.\n"
-                                                 "`configure' modifies the configuration for a tenant.\n"
-                                                 "`rename' changes the name of a tenant.\n"
-                                                 "`lock` locks a tenant.\n"
-                                                 "`unlock` unlocks a tenant.\n"),
-                                     &tenantGenerator,
-                                     &tenantHintGenerator);
+CommandFactory tenantRegisterFactory(
+    "tenant",
+    CommandHelp("tenant <create|delete|list|get|getId|configure|rename|lock|unlock> [ARGS]",
+                "view and manage tenants in a cluster or metacluster",
+                "`create' and `delete' add and remove tenants from the cluster.\n"
+                "`list' prints a list of tenants in the cluster.\n"
+                "`get' prints the metadata for a particular tenant.\n"
+                "`configure' modifies the configuration for a tenant.\n"
+                "`rename' changes the name of a tenant.\n"
+                "`lock` locks a tenant.\n"
+                "`unlock` unlocks a tenant.\n"),
+    &tenantGenerator,
+    &tenantHintGenerator);
 
 // Generate hidden commands for the old versions of the tenant commands
 CommandFactory createTenantFactory("createtenant");
