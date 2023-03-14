@@ -43,7 +43,7 @@
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
@@ -1014,7 +1014,8 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 				}
 			}
 		}
-		getCipherKeys = getLatestEncryptCipherKeys(pProxyCommitData->db, encryptDomainIds, BlobCipherMetrics::TLOG);
+		getCipherKeys = GetEncryptCipherKeys<ServerDBInfo>::getLatestEncryptCipherKeys(
+		    pProxyCommitData->db, encryptDomainIds, BlobCipherMetrics::TLOG);
 	}
 
 	self->releaseFuture = releaseResolvingAfter(pProxyCommitData, self->releaseDelay, self->localBatchNumber);
@@ -1600,33 +1601,32 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
-		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
-			Error e = validateAndProcessTenantAccess(trs[t], pProxyCommitData, rawAccessTenantIds);
-			if (e.code() != error_code_success) {
-				trs[t].reply.sendError(e);
-				self->committed[t] = ConflictBatch::TransactionTenantFailure;
-			} else {
-				self->commitCount++;
-				applyMetadataMutations(trs[t].spanContext,
-				                       *pProxyCommitData,
-				                       self->arena,
-				                       pProxyCommitData->logSystem,
-				                       trs[t].transaction.mutations,
-				                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
-				                       &self->cipherKeys,
-				                       pProxyCommitData->encryptMode,
-				                       self->forceRecovery,
-				                       self->commitVersion,
-				                       self->commitVersion + 1,
-				                       /* initialCommit= */ false,
-				                       /* provisionalCommitProxy */ self->pProxyCommitData->provisional);
-			}
+		Error e = validateAndProcessTenantAccess(trs[t], pProxyCommitData, rawAccessTenantIds);
+		if (e.code() != error_code_success) {
+			trs[t].reply.sendError(e);
+			self->committed[t] = ConflictBatch::TransactionTenantFailure;
+		} else if (self->committed[t] == ConflictBatch::TransactionCommitted &&
+		           (!self->locked || trs[t].isLockAware())) {
+			self->commitCount++;
+			applyMetadataMutations(trs[t].spanContext,
+			                       *pProxyCommitData,
+			                       self->arena,
+			                       pProxyCommitData->logSystem,
+			                       trs[t].transaction.mutations,
+			                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
+			                       &self->cipherKeys,
+			                       pProxyCommitData->encryptMode,
+			                       self->forceRecovery,
+			                       self->commitVersion,
+			                       self->commitVersion + 1,
+			                       /* initialCommit= */ false,
+			                       /* provisionalCommitProxy */ self->pProxyCommitData->provisional);
+		}
 
-			if (self->firstStateMutations) {
-				ASSERT(self->committed[t] == ConflictBatch::TransactionCommitted);
-				self->firstStateMutations = false;
-				self->forceRecovery = false;
-			}
+		if (self->firstStateMutations) {
+			ASSERT(self->committed[t] == ConflictBatch::TransactionCommitted);
+			self->firstStateMutations = false;
+			self->forceRecovery = false;
 		}
 	}
 
@@ -1678,7 +1678,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		}
 		if (!extraDomainIds.empty()) {
 			std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> extraCipherKeys =
-			    wait(getLatestEncryptCipherKeys(
+			    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestEncryptCipherKeys(
 			        pProxyCommitData->db, extraDomainIds, BlobCipherMetrics::TLOG_POST_RESOLUTION));
 			self->cipherKeys.insert(extraCipherKeys.begin(), extraCipherKeys.end());
 		}
@@ -1705,11 +1705,13 @@ ACTOR Future<WriteMutationRefVar> writeMutationEncryptedMutation(CommitBatchCont
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo = self->pProxyCommitData->db;
 	if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 		headerRef = encryptedMutation.configurableEncryptionHeader();
-		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, headerRef, BlobCipherMetrics::TLOG));
+		TextAndHeaderCipherKeys cipherKeys =
+		    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(dbInfo, headerRef, BlobCipherMetrics::TLOG));
 		decryptedMutation = encryptedMutation.decrypt(cipherKeys, *arena, BlobCipherMetrics::TLOG);
 	} else {
 		header = encryptedMutation.encryptionHeader();
-		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, *header, BlobCipherMetrics::TLOG));
+		TextAndHeaderCipherKeys cipherKeys =
+		    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(dbInfo, *header, BlobCipherMetrics::TLOG));
 		decryptedMutation = encryptedMutation.decrypt(cipherKeys, *arena, BlobCipherMetrics::TLOG);
 	}
 
@@ -3395,8 +3397,9 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 
 	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> systemCipherKeys;
 	if (pContext->pCommitData->encryptMode.isEncryptionEnabled()) {
-		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks = wait(getLatestEncryptCipherKeys(
-		    pContext->pCommitData->db, ENCRYPT_CIPHER_SYSTEM_DOMAINS, BlobCipherMetrics::TLOG));
+		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
+		    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestEncryptCipherKeys(
+		        pContext->pCommitData->db, ENCRYPT_CIPHER_SYSTEM_DOMAINS, BlobCipherMetrics::TLOG));
 		systemCipherKeys = cks;
 	}
 

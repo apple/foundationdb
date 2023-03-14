@@ -324,7 +324,8 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 // tenant list command
 ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() > 7) {
-		fmt::print("Usage: tenant list [BEGIN] [END] [limit=LIMIT] [offset=OFFSET] [state=<STATE1>,<STATE2>,...]\n\n");
+		fmt::print(
+		    "Usage: tenant list [BEGIN] [END] [limit=<LIMIT>|offset=<OFFSET>|state=<STATE1>,<STATE2>,...] ...\n\n");
 		fmt::print("Lists the tenants in a cluster.\n");
 		fmt::print("Only tenants in the range BEGIN - END will be printed.\n");
 		fmt::print("An optional LIMIT can be specified to limit the number of results (default 100).\n");
@@ -414,6 +415,65 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 	}
 }
 
+void tenantGetCmdOutput(json_spirit::mValue jsonObject, bool useJson) {
+	if (useJson) {
+		json_spirit::mObject resultObj;
+		resultObj["tenant"] = jsonObject;
+		resultObj["type"] = "success";
+		fmt::print("{}\n",
+		           json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print).c_str());
+	} else {
+		JSONDoc doc(jsonObject);
+
+		int64_t id;
+		std::string name;
+		std::string prefix;
+		std::string tenantState;
+		std::string tenantLockState;
+		std::string lockId;
+		std::string tenantGroup;
+		std::string assignedCluster;
+		std::string error;
+
+		doc.get("id", id);
+		doc.get("prefix.printable", prefix);
+		doc.get("lock_state", tenantLockState);
+
+		bool hasName = doc.tryGet("name.printable", name);
+		bool hasTenantState = doc.tryGet("tenant_state", tenantState);
+		bool hasLockId = doc.tryGet("lock_id", lockId);
+		bool hasTenantGroup = doc.tryGet("tenant_group.printable", tenantGroup);
+		bool hasAssignedCluster = doc.tryGet("assigned_cluster.printable", assignedCluster);
+		bool hasError = doc.tryGet("error", error);
+
+		fmt::print("  id: {}\n", id);
+		fmt::print("  prefix: {}\n", printable(prefix));
+
+		if (hasName) {
+			fmt::print("  name: {}\n", name);
+		}
+
+		if (hasTenantState) {
+			fmt::print("  tenant state: {}\n", printable(tenantState));
+		}
+
+		fmt::print("  lock state: {}\n", tenantLockState);
+		if (hasLockId) {
+			fmt::print("  lock id: {}\n", lockId);
+		}
+
+		if (hasTenantGroup) {
+			fmt::print("  tenant group: {}\n", tenantGroup);
+		}
+		if (hasAssignedCluster) {
+			fmt::print("  assigned cluster: {}\n", printable(assignedCluster));
+		}
+		if (hasError) {
+			fmt::print("  error: {}\n", error);
+		}
+	}
+}
+
 // tenant get command
 ACTOR Future<bool> tenantGetCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 3 || tokens.size() > 4 || (tokens.size() == 4 && tokens[3] != "JSON"_sr)) {
@@ -444,60 +504,76 @@ ACTOR Future<bool> tenantGetCommand(Reference<IDatabase> db, std::vector<StringR
 				}
 				tenantJson = tenant.get().toString();
 			}
+			json_spirit::mValue jsonObject;
+			json_spirit::read_string(tenantJson, jsonObject);
+			tenantGetCmdOutput(jsonObject, useJson);
+			return true;
+		} catch (Error& e) {
+			try {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
+			} catch (Error& finalErr) {
+				state std::string errorStr;
+				if (finalErr.code() == error_code_special_keys_api_failure) {
+					std::string str = wait(getSpecialKeysFailureErrorMessage(tr));
+					errorStr = str;
+				} else if (useJson) {
+					errorStr = finalErr.what();
+				} else {
+					throw finalErr;
+				}
+
+				if (useJson) {
+					json_spirit::mObject resultObj;
+					resultObj["type"] = "error";
+					resultObj["error"] = errorStr;
+					fmt::print(
+					    "{}\n",
+					    json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print).c_str());
+				} else {
+					fmt::print(stderr, "ERROR: {}\n", errorStr.c_str());
+				}
+
+				return false;
+			}
+		}
+	}
+}
+
+// tenant getId command
+ACTOR Future<bool> tenantGetIdCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	if (tokens.size() < 3 || tokens.size() > 4 || (tokens.size() == 4 && tokens[3] != "JSON"_sr)) {
+		fmt::print("Usage: tenant getId <ID> [JSON]\n\n");
+		fmt::print("Prints metadata associated with the given tenant ID.\n");
+		fmt::print("If JSON is specified, then the output will be in JSON format.\n");
+		return false;
+	}
+
+	state bool useJson = tokens.size() == 4;
+	state int64_t tenantId;
+	int n = 0;
+	if (sscanf(tokens[2].toString().c_str(), "%" PRId64 "%n", &tenantId, &n) != 1 || n != tokens[2].size() ||
+	    tenantId < 0) {
+		fmt::print(stderr, "ERROR: invalid ID `{}'\n", tokens[2].toString().c_str());
+		return false;
+	}
+	state Reference<ITransaction> tr = db->createTransaction();
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
+			state std::string tenantJson;
+			if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
+				TenantMapEntry entry = wait(TenantAPI::getTenantTransaction(tr, tenantId));
+				tenantJson = entry.toJson();
+			} else {
+				MetaclusterTenantMapEntry mEntry = wait(MetaclusterAPI::getTenantTransaction(tr, tenantId));
+				tenantJson = mEntry.toJson();
+			}
 
 			json_spirit::mValue jsonObject;
 			json_spirit::read_string(tenantJson, jsonObject);
-
-			if (useJson) {
-				json_spirit::mObject resultObj;
-				resultObj["tenant"] = jsonObject;
-				resultObj["type"] = "success";
-				fmt::print(
-				    "{}\n",
-				    json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print).c_str());
-			} else {
-				JSONDoc doc(jsonObject);
-
-				int64_t id;
-				std::string prefix;
-				std::string tenantState;
-				std::string tenantLockState;
-				std::string lockId;
-				std::string tenantGroup;
-				std::string assignedCluster;
-				std::string error;
-
-				doc.get("id", id);
-				doc.get("prefix.printable", prefix);
-				doc.get("lock_state", tenantLockState);
-
-				bool hasTenantState = doc.tryGet("tenant_state", tenantState);
-				bool hasLockId = doc.tryGet("lock_id", lockId);
-				bool hasTenantGroup = doc.tryGet("tenant_group.printable", tenantGroup);
-				bool hasAssignedCluster = doc.tryGet("assigned_cluster.printable", assignedCluster);
-				bool hasError = doc.tryGet("error", error);
-
-				fmt::print("  id: {}\n", id);
-				fmt::print("  prefix: {}\n", printable(prefix));
-				if (hasTenantState) {
-					fmt::print("  tenant state: {}\n", printable(tenantState));
-				}
-
-				fmt::print("  lock state: {}\n", tenantLockState);
-				if (hasLockId) {
-					fmt::print("  lock id: {}\n", lockId);
-				}
-
-				if (hasTenantGroup) {
-					fmt::print("  tenant group: {}\n", tenantGroup);
-				}
-				if (hasAssignedCluster) {
-					fmt::print("  assigned cluster: {}\n", printable(assignedCluster));
-				}
-				if (hasError) {
-					fmt::print("  error: {}\n", error);
-				}
-			}
+			tenantGetCmdOutput(jsonObject, useJson);
 			return true;
 		} catch (Error& e) {
 			try {
@@ -739,8 +815,8 @@ ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<String
 				wait(MetaclusterAPI::changeTenantLockState(db, name, desiredLockState, uid));
 			} else {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				auto f = tr->get(nameKey);
-				Optional<Value> entry = wait(safeThreadFutureToFuture(f));
+				state ThreadFuture<Optional<Value>> tenantFuture = tr->get(nameKey);
+				Optional<Value> entry = wait(safeThreadFutureToFuture(tenantFuture));
 				if (!entry.present()) {
 					fmt::print(stderr, "ERROR: Tenant `{}' does not exist\n", name);
 					return false;
@@ -784,6 +860,8 @@ Future<bool> tenantCommand(Reference<IDatabase> db, std::vector<StringRef> token
 		return tenantListCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "get")) {
 		return tenantGetCommand(db, tokens);
+	} else if (tokencmp(tokens[1], "getId")) {
+		return tenantGetIdCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "configure")) {
 		return tenantConfigureCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "rename")) {
@@ -824,6 +902,9 @@ void tenantGenerator(const char* text,
 	} else if (tokens.size() == 3 && tokencmp(tokens[1], "get")) {
 		const char* opts[] = { "JSON", nullptr };
 		arrayGenerator(text, line, opts, lc);
+	} else if (tokens.size() == 3 && tokencmp(tokens[1], "getId")) {
+		const char* opts[] = { "JSON", nullptr };
+		arrayGenerator(text, line, opts, lc);
 	} else if (tokencmp(tokens[1], "configure")) {
 		if (tokens.size() == 3) {
 			const char* opts[] = { "tenant_group=", "unset", nullptr };
@@ -845,7 +926,7 @@ void tenantGenerator(const char* text,
 
 std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& tokens, bool inArgument) {
 	if (tokens.size() == 1) {
-		return { "<create|delete|deleteId|list|get|configure|rename>", "[ARGS]" };
+		return { "<create|delete|deleteId|list|get|getId|configure|rename>", "[ARGS]" };
 	} else if (tokencmp(tokens[1], "create") && tokens.size() < 5) {
 		static std::vector<const char*> opts = { "<NAME>",
 			                                     "[tenant_group=<TENANT_GROUP>]",
@@ -864,6 +945,9 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "get") && tokens.size() < 4) {
 		static std::vector<const char*> opts = { "<NAME>", "[JSON]" };
+		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+	} else if (tokencmp(tokens[1], "getId") && tokens.size() < 4) {
+		static std::vector<const char*> opts = { "<ID>", "[JSON]" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "configure")) {
 		if (tokens.size() < 4) {
@@ -895,18 +979,19 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 	}
 }
 
-CommandFactory tenantRegisterFactory("tenant",
-                                     CommandHelp("tenant <create|delete|list|get|configure|rename> [ARGS]",
-                                                 "view and manage tenants in a cluster or metacluster",
-                                                 "`create' and `delete' add and remove tenants from the cluster.\n"
-                                                 "`list' prints a list of tenants in the cluster.\n"
-                                                 "`get' prints the metadata for a particular tenant.\n"
-                                                 "`configure' modifies the configuration for a tenant.\n"
-                                                 "`rename' changes the name of a tenant.\n"
-                                                 "`lock` locks a tenant.\n"
-                                                 "`unlock` unlocks a tenant.\n"),
-                                     &tenantGenerator,
-                                     &tenantHintGenerator);
+CommandFactory tenantRegisterFactory(
+    "tenant",
+    CommandHelp("tenant <create|delete|list|get|getId|configure|rename|lock|unlock> [ARGS]",
+                "view and manage tenants in a cluster or metacluster",
+                "`create' and `delete' add and remove tenants from the cluster.\n"
+                "`list' prints a list of tenants in the cluster.\n"
+                "`get' prints the metadata for a particular tenant.\n"
+                "`configure' modifies the configuration for a tenant.\n"
+                "`rename' changes the name of a tenant.\n"
+                "`lock` locks a tenant.\n"
+                "`unlock` unlocks a tenant.\n"),
+    &tenantGenerator,
+    &tenantHintGenerator);
 
 // Generate hidden commands for the old versions of the tenant commands
 CommandFactory createTenantFactory("createtenant");

@@ -342,7 +342,11 @@ struct KeyRangeRef {
 				return false; // uncovered gap between clone.begin and r.begin
 			if (clone.end <= r.end)
 				return true; // range is fully covered
-			if (clone.end > r.begin)
+			// If a range of ranges is totally at the left of clone,
+			// clone needs not update
+			// If a range of ranges is partially at the left of clone,
+			// clone = clone - the overlap
+			if (clone.end > r.end && r.end > clone.begin)
 				// {clone.begin, r.end} is covered. need to check coverage for {r.end, clone.end}
 				clone = KeyRangeRef(r.end, clone.end);
 		}
@@ -926,26 +930,13 @@ struct KeyValueStoreType {
 		serializer(ar, type);
 	}
 
-	static std::string getStoreTypeStr(const StoreType& storeType) {
-		switch (storeType) {
-		case SSD_BTREE_V1:
-			return "ssd-1";
-		case SSD_BTREE_V2:
-			return "ssd-2";
-		case SSD_REDWOOD_V1:
-			return "ssd-redwood-1-experimental";
-		case SSD_ROCKSDB_V1:
-			return "ssd-rocksdb-v1";
-		case SSD_SHARDED_ROCKSDB:
-			return "ssd-sharded-rocksdb";
-		case MEMORY:
-			return "memory";
-		case MEMORY_RADIXTREE:
-			return "memory-radixtree-beta";
-		default:
-			return "unknown";
-		}
-	}
+	// Get string representation of engine type.  Each enum has one canonical string
+	// representation, but the reverse is not true (see fromString() below)
+	static std::string getStoreTypeStr(const StoreType& storeType);
+
+	// Convert a string to a KeyValueStoreType
+	// This is a many-to-one mapping as there are aliases for some storage engines
+	static KeyValueStoreType fromString(const std::string& str);
 	std::string toString() const { return getStoreTypeStr((StoreType)type); }
 
 private:

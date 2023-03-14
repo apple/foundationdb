@@ -472,8 +472,8 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 					// both of them should be grabbed when changing dd mode
 					wait(success(
 					    tr2->get(deterministicRandom()->coinflip() ? moveKeysLockOwnerKey : moveKeysLockWriteKey)));
-					// tr2 shoulde never succeed, just write to a key to make it not a read-only transaction
-					tr2->set("unused_key"_sr, ""_sr);
+					// tr2 should never succeed, just write to a key to make it not a read-only transaction
+					tr2->addWriteConflictRange(singleKeyRange(""_sr));
 					wait(tr2->commit());
 					ASSERT(false); // commit should always fail due to conflict
 				} catch (Error& e) {

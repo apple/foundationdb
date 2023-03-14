@@ -222,6 +222,12 @@ public:
 	template <typename Type>
 	using FutureT = Future<Type>;
 
+	virtual void debugTrace(BaseTraceEvent&& event) override;
+	void debugPrint(std::string const& message) override;
+
+	std::vector<BaseTraceEvent> debugTraces;
+	std::vector<std::string> debugMessages;
+
 private:
 	friend class RYWImpl;
 

@@ -304,13 +304,14 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CLIENT_ENABLE_USING_CLUSTER_ID_KEY,     false );
 
 	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,       false );
-	init( SIMULATION_ENABLE_SNAPSHOT_ENCRYPTION_CHECKS,        true );
 	init( SIMULATION_EKP_TENANT_IDS_TO_DROP,         "-1" );
 	init( ENABLE_CONFIGURABLE_ENCRYPTION,            true );
 	init( ENCRYPT_HEADER_FLAGS_VERSION,                 1 );
 	init( ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION,       1 );
 	init( ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION, 1 );
 	init( ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION, 1 );
+
+	init( REST_KMS_ALLOW_NOT_SECURE_CONNECTION,     false ); if ( randomize && BUGGIFY ) REST_KMS_ALLOW_NOT_SECURE_CONNECTION = !REST_KMS_ALLOW_NOT_SECURE_CONNECTION;
 
 	// clang-format on
 }

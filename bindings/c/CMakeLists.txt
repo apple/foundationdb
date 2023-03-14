@@ -490,7 +490,7 @@ elseif(NOT WIN32 AND NOT APPLE) # Linux Only
     ${SHIM_LIB_TEST_EXTRA_OPTIONS}
     )
 
-endif() # End Linux only, non-sanitizer only
+endif() # End Linux only
 
 # TODO: re-enable once the old vcxproj-based build system is removed.
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
@@ -536,7 +536,7 @@ fdb_install(
   DESTINATION_SUFFIX "/cmake/${targets_export_name}"
   COMPONENT clients)
 
-if(NOT WIN32 AND NOT APPLE AND NOT USE_SANITIZER) # Linux Only, non-sanitizer only
+if(NOT WIN32 AND NOT APPLE) # Linux Only
 
   fdb_install(
     FILES foundationdb/fdb_c_shim.h
@@ -550,4 +550,4 @@ if(NOT WIN32 AND NOT APPLE AND NOT USE_SANITIZER) # Linux Only, non-sanitizer on
     DESTINATION lib
     COMPONENT clients)
 
-endif() # End Linux only, non-ubsan only
+endif() # End Linux only

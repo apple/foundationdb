@@ -2366,6 +2366,8 @@ ACTOR Future<int64_t> getNextBMEpoch(ClusterControllerData* self) {
 
 ACTOR Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	state Reference<BlobRestoreController> restoreController =
+	    makeReference<BlobRestoreController>(self->cx, normalKeys);
 	state Key blobRestoreCommandKey = blobRestoreCommandKeyFor(normalKeys);
 	loop {
 		try {
@@ -2374,12 +2376,11 @@ ACTOR Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			Optional<Value> blobRestoreCommand = wait(tr->get(blobRestoreCommandKey));
 			if (blobRestoreCommand.present()) {
-				state Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(blobRestoreCommand.get());
-				TraceEvent("WatchBlobRestore", self->id).detail("Phase", status.phase);
-				if (status.phase == BlobRestorePhase::INIT) {
+				state Standalone<BlobRestoreState> restoreState = decodeBlobRestoreState(blobRestoreCommand.get());
+				TraceEvent("WatchBlobRestore", self->id).detail("Phase", restoreState.phase);
+				if (restoreState.phase == BlobRestorePhase::INIT) {
 					if (self->db.blobGranulesEnabled.get()) {
-						wait(updateRestoreStatus(
-						    self->cx, normalKeys, BlobRestoreStatus(BlobRestorePhase::STARTING_MIGRATOR), {}));
+						wait(BlobRestoreController::updateState(restoreController, STARTING_MIGRATOR, {}));
 						const auto& blobManager = self->db.serverInfo->get().blobManager;
 						if (blobManager.present()) {
 							BlobManagerSingleton(blobManager)
@@ -2391,12 +2392,12 @@ ACTOR Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
 						}
 					} else {
 						TraceEvent("SkipBlobRestoreInitCommand", self->id).log();
-						BlobRestoreStatus error(BlobRestorePhase::ERROR, error_code_restore_error);
+						BlobRestoreState error("Blob granules should be enabled first."_sr);
 						Value value = blobRestoreCommandValueFor(error);
 						tr->set(blobRestoreCommandKey, value);
 					}
 				}
-				self->db.blobRestoreEnabled.set(status.phase < BlobRestorePhase::DONE);
+				self->db.blobRestoreEnabled.set(restoreState.phase < BlobRestorePhase::DONE);
 			}
 
 			state Future<Void> watch = tr->watch(blobRestoreCommandKey);
