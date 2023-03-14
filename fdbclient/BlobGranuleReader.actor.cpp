@@ -217,7 +217,7 @@ TEST_CASE("/fdbserver/blobgranule/isRangeCoveredByBlob") {
 		ranges.push_back(KeyRangeRef("key_x"_sr, "key_xa"_sr));
 		ranges.push_back(KeyRangeRef("key_xa"_sr, "key_xb"_sr));
 		ASSERT(!KeyRangeRef("key_x"_sr, "key_y"_sr).isCovered(ranges));
-		
+
 		ranges.clear();
 		ranges.push_back(KeyRangeRef("key_a"_sr, "key_b"_sr));
 		ranges.push_back(KeyRangeRef("key_x"_sr, "key_xa"_sr));
@@ -227,7 +227,7 @@ TEST_CASE("/fdbserver/blobgranule/isRangeCoveredByBlob") {
 		ranges.push_back(KeyRangeRef("key_a"_sr, "key_b"_sr));
 		ranges.push_back(KeyRangeRef("key_xa"_sr, "key_y"_sr));
 		ASSERT(!KeyRangeRef("key_x"_sr, "key_y"_sr).isCovered(ranges));
-		
+
 		ranges.clear();
 		ranges.push_back(KeyRangeRef("key_a"_sr, "key_b"_sr));
 		ranges.push_back(KeyRangeRef("key_x"_sr, "key_y"_sr));
