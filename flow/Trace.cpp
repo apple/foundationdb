@@ -1362,7 +1362,7 @@ BaseTraceEvent::~BaseTraceEvent() {
 	if (failedLineOverflow == 1) {
 		failedLineOverflow = 2;
 		auto msg = fmt::format("Traced {} lines", tracedLines);
-		ProcessEvents::trigger("TracedTooManyLines"_sr, StringRef(msg), unknown_error());
+		ProcessEvents::trigger("TracedTooManyLines"_sr, StringRef(msg), test_failed());
 		TraceEvent(SevError, "TracedTooManyLines").log();
 		crashAndDie();
 	}
