@@ -32,7 +32,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
-#include "fdbserver/DDMovingAverageRate.h"
+#include "fdbserver/MovingWindow.h"
 #include "fdbserver/DDSharedContext.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/MoveKeys.actor.h"
@@ -709,7 +709,7 @@ struct DDQueue : public IDDRelocationQueue {
 	};
 	std::vector<int> retryFindDstReasonCount;
 
-	MovingAverageRate<int64_t> moveBytesRate;
+	MovingWindow<int64_t> moveBytesRate;
 
 	void startRelocation(int priority, int healthPriority) {
 		// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,

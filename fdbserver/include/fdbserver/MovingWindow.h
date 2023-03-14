@@ -1,5 +1,5 @@
 /*
- * DDMovingAverageRate.h
+ * MovingWindow.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,8 +20,8 @@
 
 #pragma once
 
-#ifndef FOUNDATIONDB_DDMOVINGAVERAGERATE_H
-#define FOUNDATIONDB_DDMOVINGAVERAGERATE_H
+#ifndef FOUNDATIONDB_MOVINGWINDOW_H
+#define FOUNDATIONDB_MOVINGWINDOW_H
 
 #include <limits.h>
 #include "flow/Deque.h"
@@ -30,7 +30,7 @@
 // Perfomed as the rolling window to calculate average change rates in the past <interval>
 // e.g., we may use it in "MovingData" Trace to show average moving bytes rate by DD.
 template <class T>
-class MovingAverageRate {
+class MovingWindow {
 private:
 	T previous;
 	T total;
@@ -40,7 +40,7 @@ private:
 	int maxSize;
 	Deque<std::pair<double, T>> updates; // pair{time, numeric}
 	double interval;
-	// Updated when initlization Or pop() due to full Deque
+	// Updated when initlization initialization Or pop() due to full Deque
 	double previousPopTime;
 
 	void pop() {
@@ -49,7 +49,7 @@ private:
 	}
 
 public:
-	MovingAverageRate()
+	MovingWindow()
 	  : previous(0), total(0), maxSize(SHRT_MAX), interval(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL),
 	    previousPopTime(now()) {}
 
@@ -60,7 +60,7 @@ public:
 			pop();
 		}
 
-		if (now() - interval <= previousPopTime) { // DD just initialized Or just pop() due to full
+		if (now() - interval <= previousPopTime) { // struct is just initialization Or pop() due to full
 			return (total - previous) / (now() - previousPopTime);
 		} else {
 			return (total - previous) / interval;
@@ -78,4 +78,4 @@ public:
 	}
 };
 
-#endif // FOUNDATIONDB_DDMOVINGAVERAGERATE_H
+#endif // FOUNDATIONDB_MOVINGWINDOW_H
