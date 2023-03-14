@@ -336,12 +336,17 @@ struct KeyRangeRef {
 	bool isCovered(std::vector<KeyRangeRef>& ranges) {
 		ASSERT(std::is_sorted(ranges.begin(), ranges.end(), KeyRangeRef::ArbitraryOrder()));
 		KeyRangeRef clone(begin, end);
+
 		for (auto r : ranges) {
-			if (begin < r.begin)
+			if (clone.begin < r.begin)
 				return false; // uncovered gap between clone.begin and r.begin
-			if (end <= r.end)
+			if (clone.end <= r.end)
 				return true; // range is fully covered
-			if (end > r.begin)
+			// If a range of ranges is totally at the left of clone,
+			// clone needs not update
+			// If a range of ranges is partially at the left of clone,
+			// clone = clone - the overlap
+			if (clone.end > r.end && r.end > clone.begin)
 				// {clone.begin, r.end} is covered. need to check coverage for {r.end, clone.end}
 				clone = KeyRangeRef(r.end, clone.end);
 		}
