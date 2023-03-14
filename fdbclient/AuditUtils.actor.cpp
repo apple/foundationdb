@@ -27,20 +27,19 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-ACTOR static Future<std::vector<AuditStorageState>> getLatestAuditStatesImpl(Database cx, AuditType type, int num) {
+ACTOR static Future<std::vector<AuditStorageState>> getLatestAuditStatesImpl(Transaction* tr, AuditType type, int num) {
 	state std::vector<AuditStorageState> auditStates;
-	state Transaction tr(cx);
 	loop {
 		auditStates.clear();
 		try {
-			RangeResult res = wait(tr.getRange(auditKeyRange(type), num, Snapshot::False, Reverse::True));
+			RangeResult res = wait(tr->getRange(auditKeyRange(type), num, Snapshot::False, Reverse::True));
 			for (int i = 0; i < res.size(); ++i) {
 				auditStates.push_back(decodeAuditStorageState(res[i].value));
 			}
 			break;
 		} catch (Error& e) {
-			wait(tr.onError(e));
-			tr.fullReset();
+			wait(tr->onError(e));
+			tr->fullReset();
 		}
 	}
 
@@ -54,7 +53,7 @@ ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState
 
 	loop {
 		try {
-			std::vector<AuditStorageState> auditStates = wait(getLatestAuditStatesImpl(cx, auditState.getType(), 1));
+			std::vector<AuditStorageState> auditStates = wait(getLatestAuditStatesImpl(&tr, auditState.getType(), 1));
 			uint64_t nextId = 1;
 			if (!auditStates.empty()) {
 				nextId = auditStates.front().id.first() + 1;
@@ -67,6 +66,7 @@ ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
+			tr.fullReset();
 		}
 	}
 
@@ -113,7 +113,7 @@ ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID i
 
 ACTOR Future<std::vector<AuditStorageState>> getLatestAuditStates(Database cx, AuditType type, int num) {
 	Transaction tr(cx);
-	std::vector<AuditStorageState> auditStates = wait(getLatestAuditStatesImpl(cx, type, num));
+	std::vector<AuditStorageState> auditStates = wait(getLatestAuditStatesImpl(&tr, type, num));
 	return auditStates;
 }
 

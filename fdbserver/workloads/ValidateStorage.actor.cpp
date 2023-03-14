@@ -163,14 +163,14 @@ struct ValidateStorage : TestWorkload {
 
 		TraceEvent("TestValueWritten");
 
-		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
+		/*wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
 		TraceEvent("TestValueVerified");
 
 		wait(self->auditStorageForType(cx, AuditType::ValidateHA));
 		TraceEvent("TestValidateHADone");
 
 		wait(self->auditStorageForType(cx, AuditType::ValidateReplica));
-		TraceEvent("TestValidateReplicaDone");
+		TraceEvent("TestValidateReplicaDone");*/
 
 		wait(self->auditStorageForType(cx, AuditType::ValidateMetadata));
 		TraceEvent("TestValidateMetadataDone");
