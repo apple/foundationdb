@@ -1045,9 +1045,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
-				wait(::success(tr.getReadVersion()));
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(::success(tr.getReadVersion()));
 				tr.makeSelfConflicting();
 				wait(tr.commit());
 				return Void();
