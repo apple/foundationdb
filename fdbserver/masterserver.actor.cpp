@@ -38,9 +38,6 @@
 template class ReplyPromise<MasterInterface>;
 template struct NetSAV<MasterInterface>;
 
-// Instantiate ServerDBInfo related tempates
-template class GetEncryptCipherKeys<struct ServerDBInfo>;
-
 struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	UID dbgid;
 

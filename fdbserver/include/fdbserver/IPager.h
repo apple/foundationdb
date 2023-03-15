@@ -25,7 +25,7 @@
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/GetEncryptCipherKeys.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/Tenant.h"
 #include "fdbserver/IClosable.h"
 #include "flow/EncryptUtils.h"
