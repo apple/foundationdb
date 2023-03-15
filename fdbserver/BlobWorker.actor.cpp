@@ -883,8 +883,9 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	                                                   SERVER_KNOBS->BG_DELTA_FILE_TARGET_CHUNK_BYTES,
 	                                                   compressFilter,
 	                                                   cipherKeysCtx);
+	state size_t logicalSize = deltasToWrite.expectedSize();
 	state size_t serializedSize = serialized.size();
-	bwData->stats.compressionBytesRaw += deltasToWrite.expectedSize();
+	bwData->stats.compressionBytesRaw += logicalSize;
 	bwData->stats.compressionBytesFinal += serializedSize;
 
 	// Free up deltasToWrite here to reduce memory
@@ -931,7 +932,8 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 
 				Key dfKey = blobGranuleFileKeyFor(granuleID, currentDeltaVersion, 'D');
 				// TODO change once we support file multiplexing
-				Value dfValue = blobGranuleFileValueFor(fname, 0, serializedSize, serializedSize, cipherKeysMeta);
+				Value dfValue =
+				    blobGranuleFileValueFor(fname, 0, serializedSize, serializedSize, logicalSize, cipherKeysMeta);
 				tr->set(dfKey, dfValue);
 
 				if (oldGranuleComplete.present()) {
@@ -975,7 +977,8 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 				bwData->stats.deltaUpdateSample.addMeasurement(duration);
 
 				// FIXME: change when we implement multiplexing
-				return BlobFileIndex(currentDeltaVersion, fname, 0, serializedSize, serializedSize, cipherKeysMeta);
+				return BlobFileIndex(
+				    currentDeltaVersion, fname, 0, serializedSize, serializedSize, logicalSize, cipherKeysMeta);
 			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
@@ -1078,7 +1081,7 @@ ACTOR Future<BlobFileIndex> writeEmptyDeltaFile(Reference<BlobWorkerData> bwData
 				wait(delay(deterministicRandom()->random01()));
 			}
 
-			return BlobFileIndex(currentDeltaVersion, "", 0, 0, 0, {});
+			return BlobFileIndex(currentDeltaVersion, "", 0, 0, 0, 0, {});
 		} catch (Error& e) {
 			wait(tr->onError(e));
 		}
@@ -1187,8 +1190,9 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	                                                  SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES,
 	                                                  compressFilter,
 	                                                  cipherKeysCtx);
+	state size_t logicalSize = snapshot.expectedSize();
 	state size_t serializedSize = serialized.size();
-	bwData->stats.compressionBytesRaw += snapshot.expectedSize();
+	bwData->stats.compressionBytesRaw += logicalSize;
 	bwData->stats.compressionBytesFinal += serializedSize;
 
 	// free snapshot to reduce memory
@@ -1239,7 +1243,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 				Key snapshotFileKey = blobGranuleFileKeyFor(granuleID, version, 'S');
 				// TODO change once we support file multiplexing
 				Key snapshotFileValue =
-				    blobGranuleFileValueFor(fname, 0, serializedSize, serializedSize, cipherKeysMeta);
+				    blobGranuleFileValueFor(fname, 0, serializedSize, serializedSize, logicalSize, cipherKeysMeta);
 				tr->set(snapshotFileKey, snapshotFileValue);
 				// create granule history at version if this is a new granule with the initial dump from FDB
 				if (initialSnapshot) {
@@ -1296,7 +1300,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	}
 
 	// FIXME: change when we implement multiplexing
-	return BlobFileIndex(version, fname, 0, serializedSize, serializedSize, cipherKeysMeta);
+	return BlobFileIndex(version, fname, 0, serializedSize, serializedSize, logicalSize, cipherKeysMeta);
 }
 
 ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData> bwData,
@@ -2036,11 +2040,10 @@ Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 		metadata->bufferedDeltaVersion = cfRollbackVersion;
 
 		// calculate number of bytes in durable delta files after last snapshot
-		// FIXME: this assumes delta file serialized size ~= logical size, which is false with compression
 		for (int i = metadata->files.deltaFiles.size() - 1;
 		     i >= 0 && metadata->files.deltaFiles[i].version > metadata->pendingSnapshotVersion;
 		     i--) {
-			metadata->bytesInNewDeltaFiles += metadata->files.deltaFiles[i].length;
+			metadata->bytesInNewDeltaFiles += metadata->files.deltaFiles[i].logicalSize;
 		}
 
 		// Track that this rollback happened, since we have to re-read mutations up to the rollback
@@ -2378,9 +2381,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				Version snapshotVersion = files.snapshotFiles.back().version;
 				for (int i = files.deltaFiles.size() - 1; i >= 0; i--) {
 					if (files.deltaFiles[i].version > snapshotVersion) {
-						// FIXME: this assumes delta file serialized size ~= logical size, which is false with
-						// compression
-						metadata->bytesInNewDeltaFiles += files.deltaFiles[i].length;
+						metadata->bytesInNewDeltaFiles += files.deltaFiles[i].logicalSize;
 					}
 				}
 			}
