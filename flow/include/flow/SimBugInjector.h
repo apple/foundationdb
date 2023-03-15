@@ -23,6 +23,7 @@
 #pragma once
 #include <cstddef>
 #include <memory>
+#include <string>
 
 /*
  * This file provides a general framework to control how bugs should be injected into FDB. This must not be confused
