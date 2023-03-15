@@ -301,7 +301,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 		if (key == "storage_engine" || key == "log_engine") {
 			StringRef s = value;
 
-			// Parse as engine_name[:p=v]... to handle future storage engine params
+			
 			Value engine = s.eat(":");
 
 			try {
@@ -310,8 +310,8 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 				printf("Error: Invalid value for %s (%s): %s\n", key.c_str(), value.c_str(), e.what());
 			}
 
+			// Parse as engine_name[:p=v]... to handle future storage engine params
 			while (!s.empty()) {
-				// params[s.eat("=")] = s.eat(":");
 				auto k = s.eat("=");
 				auto v = s.eat(":");
 				out[p + fmt::format("{}_params/{}", key, k.toString())] = v.toString();
