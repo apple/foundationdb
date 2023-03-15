@@ -72,15 +72,15 @@ FDB_DECLARE_BOOLEAN_PARAM(FindTeamByServers);
 // TODO@MUZHI: NAMING?
 class TeamSelect {
 public:
-    enum Value: int8_t {
-        INVALID = 0,
-        AVOIDMOVEMENT,      // Avoid data movement by selecting srcTeam if it's not busy
-        WANTSRCSERVERS,     // Ask for srcTeam
-        WANTTRUEBEST,       // Ask for the most or least utilized team
-        OTHER
-    };
-    TeamSelect(): value(INVALID) {}
-    TeamSelect(Value v) : value(v) {ASSERT(v != INVALID);}
+	enum Value : int8_t {
+		INVALID = 0,
+		AVOIDMOVEMENT, // Avoid data movement by selecting srcTeam if it's not busy
+		WANTSRCSERVERS, // Ask for srcTeam
+		WANTTRUEBEST, // Ask for the most or least utilized team
+		OTHER
+	};
+	TeamSelect() : value(INVALID) {}
+	TeamSelect(Value v) : value(v) { ASSERT(v != INVALID); }
 	std::string toString() const {
 		switch (value) {
 		case AVOIDMOVEMENT:
@@ -89,17 +89,15 @@ public:
 			return "Want_SrcServers";
 		case WANTTRUEBEST:
 			return "Want_TrueBest";
-        case OTHER:
+		case OTHER:
 			return "Other";
-        default:
+		default:
 			ASSERT(false);
 		}
-        return "";
+		return "";
 	}
 
-    bool operator== (const TeamSelect& tmpTeamSelect) {
-        return (int) value == (int) tmpTeamSelect.value;
-    }
+	bool operator==(const TeamSelect& tmpTeamSelect) { return (int)value == (int)tmpTeamSelect.value; }
 
 private:
 	Value value;
@@ -109,7 +107,7 @@ struct GetTeamRequest {
 	// bool wantsNewServers; // In additional to servers in completeSources, try to find teams with new server
 	// bool wantsTrueBest;
 
-    TeamSelect teamSelect;
+	TeamSelect teamSelect;
 	bool preferLowerDiskUtil; // if true, lower utilized team has higher score
 	bool teamMustHaveShards;
 	bool forReadBalance;
@@ -129,14 +127,13 @@ struct GetTeamRequest {
 	               ForReadBalance forReadBalance = ForReadBalance::False,
 	               PreferLowerReadUtil preferLowerReadUtil = PreferLowerReadUtil::False,
 	               double inflightPenalty = 1.0)
-	  : teamSelect(teamSelectRequest), preferLowerDiskUtil(preferLowerDiskUtil),
-	    teamMustHaveShards(teamMustHaveShards), forReadBalance(forReadBalance),
-	    preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty),
+	  : teamSelect(teamSelectRequest), preferLowerDiskUtil(preferLowerDiskUtil), teamMustHaveShards(teamMustHaveShards),
+	    forReadBalance(forReadBalance), preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty),
 	    findTeamByServers(FindTeamByServers::False) {}
 	GetTeamRequest(std::vector<UID> servers)
-	  : teamSelect(TeamSelect::WANTSRCSERVERS),
-	    preferLowerDiskUtil(PreferLowerDiskUtil::False), teamMustHaveShards(TeamMustHaveShards::False),
-	    forReadBalance(ForReadBalance::False), preferLowerReadUtil(PreferLowerReadUtil::False), inflightPenalty(1.0),
+	  : teamSelect(TeamSelect::WANTSRCSERVERS), preferLowerDiskUtil(PreferLowerDiskUtil::False),
+	    teamMustHaveShards(TeamMustHaveShards::False), forReadBalance(ForReadBalance::False),
+	    preferLowerReadUtil(PreferLowerReadUtil::False), inflightPenalty(1.0),
 	    findTeamByServers(FindTeamByServers::True), src(std::move(servers)) {}
 
 	// return true if a.score < b.score
@@ -151,10 +148,9 @@ struct GetTeamRequest {
 	std::string getDesc() const {
 		std::stringstream ss;
 
-		ss << "TeamSelect:" << teamSelect.toString()
-		   << " PreferLowerDiskUtil:" << preferLowerDiskUtil << " teamMustHaveShards:" << teamMustHaveShards
-		   << " forReadBalance:" << forReadBalance << " inflightPenalty:" << inflightPenalty
-		   << " findTeamByServers:" << findTeamByServers << ";";
+		ss << "TeamSelect:" << teamSelect.toString() << " PreferLowerDiskUtil:" << preferLowerDiskUtil
+		   << " teamMustHaveShards:" << teamMustHaveShards << " forReadBalance:" << forReadBalance
+		   << " inflightPenalty:" << inflightPenalty << " findTeamByServers:" << findTeamByServers << ";";
 		ss << "CompleteSources:";
 		for (const auto& cs : completeSources) {
 			ss << cs.toString() << ",";

@@ -1534,7 +1534,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
 							inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
-                        // TODO@MUZHI: MOVE TO AVOIDMOVEMENT
+						// TODO@MUZHI: MOVE TO AVOIDMOVEMENT
 						auto req = GetTeamRequest(TeamSelect::AVOIDMOVEMENT,
 						                          PreferLowerDiskUtil::True,
 						                          TeamMustHaveShards::False,
@@ -2372,18 +2372,16 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 
 			if (self->priority_relocations[ddPriority] < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				bool mcMove = isDataMovementForMountainChopper(reason);
-				GetTeamRequest srcReq = GetTeamRequest(
-                                        mcMove? TeamSelect::WANTTRUEBEST: TeamSelect::OTHER,
-				                        PreferLowerDiskUtil::False,
-				                        TeamMustHaveShards::True,
-				                        ForReadBalance(readRebalance),
-				                        PreferLowerReadUtil::False);
-				GetTeamRequest destReq = GetTeamRequest(
-                                        !mcMove? TeamSelect::WANTTRUEBEST: TeamSelect::OTHER,
-				                        PreferLowerDiskUtil::True,
-				                        TeamMustHaveShards::False,
-				                        ForReadBalance(readRebalance),
-				                        PreferLowerReadUtil::True);
+				GetTeamRequest srcReq = GetTeamRequest(mcMove ? TeamSelect::WANTTRUEBEST : TeamSelect::OTHER,
+				                                       PreferLowerDiskUtil::False,
+				                                       TeamMustHaveShards::True,
+				                                       ForReadBalance(readRebalance),
+				                                       PreferLowerReadUtil::False);
+				GetTeamRequest destReq = GetTeamRequest(!mcMove ? TeamSelect::WANTTRUEBEST : TeamSelect::OTHER,
+				                                        PreferLowerDiskUtil::True,
+				                                        TeamMustHaveShards::False,
+				                                        ForReadBalance(readRebalance),
+				                                        PreferLowerReadUtil::True);
 				state Future<SrcDestTeamPair> getTeamFuture =
 				    self->getSrcDestTeams(teamCollectionIndex, srcReq, destReq, ddPriority, &traceEvent);
 				wait(ready(getTeamFuture));

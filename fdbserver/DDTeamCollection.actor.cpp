@@ -178,7 +178,7 @@ public:
 	ACTOR static Future<Void> getTeam(DDTeamCollection* self, GetTeamRequest req) {
 		try {
 			wait(self->checkBuildTeams());
-            TraceEvent("MUZHI DEBUG").detail("GetTeamRequest", req.getDesc());
+			TraceEvent("MUZHI DEBUG").detail("GetTeamRequest", req.getDesc());
 
 			if (!self->primary && !self->readyToStart.isReady()) {
 				// When remote DC is not ready, DD shouldn't reply with a new team because
@@ -5430,8 +5430,7 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-            TeamSelect::WANTSRCSERVERS, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(TeamSelect::WANTSRCSERVERS, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5482,8 +5481,7 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0), UID(4, 0) };
 
-		state GetTeamRequest req(
-            TeamSelect::WANTSRCSERVERS, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(TeamSelect::WANTSRCSERVERS, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5532,8 +5530,7 @@ public:
 
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-            TeamSelect::WANTTRUEBEST, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(TeamSelect::WANTTRUEBEST, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5581,8 +5578,7 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-            TeamSelect::WANTTRUEBEST, PreferLowerDiskUtil::False, TeamMustHaveShards::False);
+		state GetTeamRequest req(TeamSelect::WANTTRUEBEST, PreferLowerDiskUtil::False, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5632,8 +5628,7 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-            TeamSelect::WANTTRUEBEST, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(TeamSelect::WANTTRUEBEST, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5688,8 +5683,7 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    TeamSelect::WANTTRUEBEST, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(TeamSelect::WANTTRUEBEST, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5802,8 +5796,7 @@ public:
 
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-            TeamSelect::WANTTRUEBEST, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(TeamSelect::WANTTRUEBEST, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
