@@ -56,13 +56,13 @@ struct BlobMetadataDetailsRef {
 
 	explicit BlobMetadataDetailsRef(Arena& ar,
 	                                BlobMetadataDomainId domainId,
-	                                Optional<StringRef> base,
+	                                Optional<StringRef> baseLocation,
 	                                VectorRef<StringRef> partitions,
 	                                double refreshAt,
 	                                double expireAt)
 	  : domainId(domainId), partitions(ar, partitions), refreshAt(refreshAt), expireAt(expireAt) {
-		if (base.present()) {
-			base = StringRef(ar, base.get());
+		if (baseLocation.present()) {
+			base = StringRef(ar, baseLocation.get());
 		}
 	}
 
