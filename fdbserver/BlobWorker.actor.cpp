@@ -393,7 +393,8 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 			// We use GRVs from grv checker loop, plus other common BW transactions. To prevent the deque size from
 			// exploding or the effective version window from getting too small, only put GRVs in the deque if they are
 			// at least some small distance apart
-			if (grvVersion.get() + SERVER_KNOBS->BLOB_WORKER_GRV_HISTORY_MIN_VERSION_GRANULARITY <= readVersion) {
+			if (prevGRVVersions.empty() ||
+			    prevGRVVersions.back() + SERVER_KNOBS->BLOB_WORKER_GRV_HISTORY_MIN_VERSION_GRANULARITY <= readVersion) {
 				prevGRVVersions.push_back(readVersion);
 				while (prevGRVVersions.size() > SERVER_KNOBS->BLOB_WORKER_GRV_HISTORY_MAX_SIZE) {
 					prevGRVVersions.pop_front();
@@ -2195,17 +2196,19 @@ ACTOR Future<Void> waitCommittedGrv(Reference<BlobWorkerData> bwData,
 	}
 
 	ASSERT(grvVersion >= version);
-	wait(waitOnCFVersion(metadata, grvVersion));
+
+	// If GRV is way in the future, we know we can't roll back more than 5 seconds (or whatever this knob is set
+	// to) worth of versions
+	Version waitVersion = std::min(grvVersion, version + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS);
+
+	wait(waitOnCFVersion(metadata, waitVersion));
 	return Void();
 }
 
 ACTOR Future<Void> waitVersionCommitted(Reference<BlobWorkerData> bwData,
                                         Reference<GranuleMetadata> metadata,
                                         Version version) {
-	// If GRV is way in the future, we know we can't roll back more than 5 seconds (or whatever this knob is set
-	// to) worth of versions
-	wait(waitCommittedGrv(bwData, metadata, version) ||
-	     waitOnCFVersion(metadata, version + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS));
+	wait(waitCommittedGrv(bwData, metadata, version));
 	if (version > metadata->knownCommittedVersion) {
 		metadata->knownCommittedVersion = version;
 	}
