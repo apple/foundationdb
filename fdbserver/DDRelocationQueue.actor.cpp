@@ -1534,7 +1534,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
 							inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
-						// TODO@MUZHI: MOVE TO AVOIDMOVEMENT
 						auto req = GetTeamRequest(TeamSelect::AVOIDMOVEMENT,
 						                          PreferLowerDiskUtil::True,
 						                          TeamMustHaveShards::False,

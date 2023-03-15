@@ -69,7 +69,6 @@ FDB_DECLARE_BOOLEAN_PARAM(ForReadBalance);
 FDB_DECLARE_BOOLEAN_PARAM(PreferLowerReadUtil);
 FDB_DECLARE_BOOLEAN_PARAM(FindTeamByServers);
 
-// TODO@MUZHI: NAMING?
 class TeamSelect {
 public:
 	enum Value : int8_t {

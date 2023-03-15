@@ -178,7 +178,6 @@ public:
 	ACTOR static Future<Void> getTeam(DDTeamCollection* self, GetTeamRequest req) {
 		try {
 			wait(self->checkBuildTeams());
-			TraceEvent("MUZHI DEBUG").detail("GetTeamRequest", req.getDesc());
 
 			if (!self->primary && !self->readyToStart.isReady()) {
 				// When remote DC is not ready, DD shouldn't reply with a new team because
