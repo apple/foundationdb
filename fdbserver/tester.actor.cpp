@@ -1323,7 +1323,7 @@ ACTOR Future<bool> runTest(Database cx,
 				                                   spec.runConsistencyCheckOnCache,
 				                                   spec.runConsistencyCheckOnTSS,
 				                                   10000.0,
-				                                   18000,
+				                                   5000,
 				                                   spec.databasePingDelay,
 				                                   dbInfo),
 				                  20000.0));
