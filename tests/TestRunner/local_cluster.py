@@ -426,7 +426,7 @@ knob_min_trace_severity=5
     def create_database(self, storage="ssd", enable_tenants=True):
         if self.enable_encryption_at_rest:
             # only redwood supports EAR
-            storage = "ssd-redwood-1-experimental"
+            storage = "ssd-redwood-1"
         db_config = "configure new {} {}".format(self.redundancy, storage)
         if enable_tenants:
             db_config += " tenant_mode=optional_experimental"
@@ -732,7 +732,6 @@ knob_min_trace_severity=5
         for file in glob.glob(glob_pattern):
             if filename_substr and file.find(filename_substr) == -1:
                 continue
-            print(f"### considering file {file}")
             for line in open(file):
                 try:
                     entry = ET.fromstring(line)

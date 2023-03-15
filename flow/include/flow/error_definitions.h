@@ -103,6 +103,7 @@ ERROR( grv_proxy_memory_limit_exceeded, 1078, "GetReadVersion proxy memory limit
 ERROR( blob_granule_request_failed, 1079, "BlobGranule request failed" )
 ERROR( storage_too_many_feed_streams, 1080, "Too many feed streams to a single storage server" )
 ERROR( storage_engine_not_initialized, 1081, "Storage engine was never successfully initialized." )
+ERROR( unknown_storage_engine, 1082, "Storage engine type is not recognized." )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -167,6 +168,7 @@ ERROR( rest_invalid_rest_client_knob, 1527, "Invalid RESTClient knob")
 ERROR( rest_connectpool_key_not_found, 1528, "ConnectKey not found in connection pool")
 ERROR( lock_file_failure, 1529, "Unable to lock the file")
 ERROR( rest_unsupported_protocol, 1530, "Unsupported REST protocol")
+ERROR( rest_malformed_response, 1531, "Malformed REST response")
 
 
 // 2xxx Attempt (presumably by a _client_) to do something illegal.  If an error is known to
@@ -218,6 +220,7 @@ ERROR( invalid_checkpoint_format, 2044, "Invalid checkpoint format" )
 ERROR( invalid_throttle_quota_value, 2045, "Invalid quota value. Note that reserved_throughput cannot exceed total_throughput" )
 ERROR( failed_to_create_checkpoint, 2046, "Failed to create a checkpoint" )
 ERROR( failed_to_restore_checkpoint, 2047, "Failed to restore a checkpoint" )
+ERROR( address_parse_error, 2049, "Failed to parse address" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )
@@ -275,6 +278,7 @@ ERROR( cluster_restoring, 2170, "The cluster is being restored to the metacluste
 ERROR( invalid_data_cluster, 2171, "The data cluster being restored has no record of its metacluster" )
 ERROR( metacluster_mismatch, 2172, "The cluster does not have the expected name or is associated with a different metacluster" )
 ERROR( conflicting_restore, 2173, "Another restore is running for the same data cluster" )
+ERROR( invalid_metacluster_configuration, 2174, "Metacluster configuration is invalid" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

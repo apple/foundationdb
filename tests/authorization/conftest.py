@@ -228,8 +228,14 @@ def tenant_tr_gen(db, use_grv_cache):
 @pytest.fixture
 def tenant_id_from_name(db):
     def fn(tenant_name):
-        tenant = db.open_tenant(to_bytes(tenant_name))
-        return tenant.get_id().wait() # returns int
+        while True:
+            try:
+                tenant = db.open_tenant(to_bytes(tenant_name))
+                return tenant.get_id().wait()  # returns int
+            except fdb.FDBError as e:
+                print("retrying tenant id fetch after 0.5 second backoff due to {}".format(e))
+                time.sleep(0.5)
+
     return fn
 
 @pytest.fixture

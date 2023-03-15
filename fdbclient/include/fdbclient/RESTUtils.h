@@ -27,6 +27,7 @@
 #include "flow/FastRef.h"
 #include "flow/Net2Packet.h"
 
+#include <boost/functional/hash.hpp>
 #include <fmt/format.h>
 #include <unordered_map>
 #include <utility>
@@ -39,6 +40,8 @@
 
 using RESTConnectionPoolKey = std::pair<std::string, std::string>;
 
+enum RESTLogSeverity { INFO = 1, DEBUG = 2, VERBOSE = 3 };
+
 class IConnection;
 
 class RESTConnectionPool : public ReferenceCounted<RESTConnectionPool> {
@@ -50,7 +53,8 @@ public:
 
 	// Maximum number of connections cached in the connection-pool.
 	int maxConnPerConnectKey;
-	std::map<RESTConnectionPoolKey, std::queue<ReusableConnection>> connectionPoolMap;
+	std::unordered_map<RESTConnectionPoolKey, std::queue<ReusableConnection>, boost::hash<RESTConnectionPoolKey>>
+	    connectionPoolMap;
 
 	RESTConnectionPool(const int maxConnsPerKey) : maxConnPerConnectKey(maxConnsPerKey) {}
 

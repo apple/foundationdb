@@ -347,7 +347,7 @@ struct BlobManifestTailer {
 	}
 };
 
-// Defines blob restore status
+// Defines blob restore state
 enum BlobRestorePhase {
 	INIT = 0,
 	STARTING_MIGRATOR = 1,
@@ -359,17 +359,17 @@ enum BlobRestorePhase {
 	ERROR = 7,
 	MAX = 8
 };
-struct BlobRestoreStatus {
+struct BlobRestoreState {
 	constexpr static FileIdentifier file_identifier = 378657;
 	BlobRestorePhase phase;
 	int progress;
 	VectorRef<int64_t> phaseStartTs;
 	Optional<StringRef> error;
 
-	BlobRestoreStatus() : phase(BlobRestorePhase::INIT){};
-	BlobRestoreStatus(BlobRestorePhase phase) : phase(phase), progress(0){};
-	BlobRestoreStatus(BlobRestorePhase phase, int progress) : phase(phase), progress(progress){};
-	BlobRestoreStatus(BlobRestorePhase phase, Optional<StringRef> error) : phase(phase), error(error){};
+	BlobRestoreState() : phase(BlobRestorePhase::INIT), progress(0){};
+	BlobRestoreState(BlobRestorePhase phase) : phase(phase), progress(0){};
+	BlobRestoreState(BlobRestorePhase phase, int progress) : phase(phase), progress(progress){};
+	BlobRestoreState(StringRef errorMessage) : phase(BlobRestorePhase::ERROR), progress(0), error(errorMessage){};
 
 	template <class Ar>
 	void serialize(Ar& ar) {

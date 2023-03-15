@@ -1,6 +1,6 @@
 find_package(Threads REQUIRED)
 
-option(FLOW_USE_ZSTD "Enable zstd compression in flow" OFF)
+option(FLOW_USE_ZSTD "Enable zstd compression in flow" ON)
 
 fdb_find_sources(FLOW_SRCS)
 

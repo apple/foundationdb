@@ -17,9 +17,9 @@ function(compile_zstd)
     add_subdirectory(${zstd_SOURCE_DIR}/build/cmake ${zstd_BINARY_DIR})
 
     if (CLANG)
-      target_compile_options(zstd PRIVATE -Wno-array-bounds -Wno-tautological-compare)
-      target_compile_options(libzstd_static PRIVATE -Wno-array-bounds -Wno-tautological-compare)
-      target_compile_options(zstd-frugal PRIVATE -Wno-array-bounds -Wno-tautological-compare)
+      target_compile_options(zstd PRIVATE -Wno-array-bounds -Wno-tautological-compare -Wno-strict-prototypes)
+      target_compile_options(libzstd_static PRIVATE -Wno-array-bounds -Wno-tautological-compare -Wno-strict-prototypes)
+      target_compile_options(zstd-frugal PRIVATE -Wno-array-bounds -Wno-tautological-compare -Wno-strict-prototypes)
     endif()
   endif()
 
