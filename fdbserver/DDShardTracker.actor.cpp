@@ -130,6 +130,7 @@ struct DataDistributionTracker : public IDDShardTracker {
 	};
 
 	Optional<Reference<TenantCache>> ddTenantCache;
+	Reference<KeyRangeMap<int>> customReplication;
 
 	DataDistributionTracker() = default;
 
@@ -142,12 +143,14 @@ struct DataDistributionTracker : public IDDShardTracker {
 	                        Reference<AsyncVar<bool>> anyZeroHealthyTeams,
 	                        KeyRangeMap<ShardTrackedData>* shards,
 	                        bool* trackerCancelled,
-	                        Optional<Reference<TenantCache>> ddTenantCache)
+	                        Optional<Reference<TenantCache>> ddTenantCache,
+	                        Reference<KeyRangeMap<int>> customReplication)
 	  : IDDShardTracker(), db(db), distributorId(distributorId), shards(shards), sizeChanges(false),
 	    systemSizeEstimate(0), dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()),
 	    output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
 	    physicalShardCollection(physicalShardCollection), readyToStart(readyToStart),
-	    anyZeroHealthyTeams(anyZeroHealthyTeams), trackerCancelled(trackerCancelled), ddTenantCache(ddTenantCache) {}
+	    anyZeroHealthyTeams(anyZeroHealthyTeams), trackerCancelled(trackerCancelled), ddTenantCache(ddTenantCache),
+	    customReplication(customReplication) {}
 
 	~DataDistributionTracker() override {
 		if (trackerCancelled) {
@@ -537,6 +540,7 @@ void executeShardSplit(DataDistributionTracker* self,
 
 	for (int i = 0; i < skipRange; i++) {
 		KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
+		TraceEvent("DDMoveShardDefine1").detail("Keys", r);
 		self->shardsAffectedByTeamFailure->defineShard(r);
 		if (relocate) {
 			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, reason));
@@ -544,6 +548,7 @@ void executeShardSplit(DataDistributionTracker* self,
 	}
 	for (int i = numShards - 1; i > skipRange; i--) {
 		KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
+		TraceEvent("DDMoveShardDefine2").detail("Keys", r);
 		self->shardsAffectedByTeamFailure->defineShard(r);
 		if (relocate) {
 			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, reason));
@@ -962,11 +967,19 @@ static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange co
 		return false;
 	}
 
+	if (self->customReplication->rangeContaining(keys.begin).range().end < nextRange.end) {
+		return false;
+	}
+
 	return shardMergeFeasible(self, keys, nextRange);
 }
 
 static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef prevRange) {
 	if (keys.begin == allKeys.begin) {
+		return false;
+	}
+
+	if (self->customReplication->rangeContaining(keys.begin).range().begin > prevRange.begin) {
 		return false;
 	}
 
@@ -1118,6 +1131,7 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 		self->systemSizeEstimate -= systemBytes;
 	}
 	restartShardTrackers(self, mergeRange, ShardMetrics(endingStats, lastLowBandwidthStartTime, shardCount));
+	TraceEvent("DDMoveShardDefine3").detail("Keys", mergeRange);
 	self->shardsAffectedByTeamFailure->defineShard(mergeRange);
 	self->output.send(RelocateShard(mergeRange, DataMovementReason::MERGE_SHARD, RelocateReason::MERGE_SHARD));
 
@@ -1276,10 +1290,26 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 	// SOMEDAY: Figure out what this priority should actually be
 	wait(delay(0.0, TaskPriority::DataDistribution));
 
+	state std::vector<Key> customBoundaries;
+	for (auto& it : self->customReplication->ranges()) {
+		customBoundaries.push_back(it->range().begin);
+	}
+
 	state int s;
+	state int customBoundary = 0;
 	for (s = 0; s < initData->shards.size() - 1; s++) {
-		restartShardTrackers(
-		    self, KeyRangeRef(initData->shards[s].key, initData->shards[s + 1].key), Optional<ShardMetrics>(), true);
+		Key beginKey = initData->shards[s].key;
+		Key endKey = initData->shards[s + 1].key;
+		while (customBoundary < customBoundaries.size() && customBoundaries[customBoundary] <= beginKey) {
+			customBoundary++;
+		}
+		while (customBoundary < customBoundaries.size() && customBoundaries[customBoundary] < endKey) {
+			restartShardTrackers(
+			    self, KeyRangeRef(beginKey, customBoundaries[customBoundary]), Optional<ShardMetrics>(), true);
+			beginKey = customBoundaries[customBoundary];
+			customBoundary++;
+		}
+		restartShardTrackers(self, KeyRangeRef(beginKey, endKey), Optional<ShardMetrics>(), true);
 		wait(yield(TaskPriority::DataDistribution));
 	}
 
@@ -1479,7 +1509,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            UID distributorId,
                                            KeyRangeMap<ShardTrackedData>* shards,
                                            bool* trackerCancelled,
-                                           Optional<Reference<TenantCache>> ddTenantCache) {
+                                           Optional<Reference<TenantCache>> ddTenantCache,
+                                           Reference<KeyRangeMap<int>> customReplication) {
 	state DataDistributionTracker self(db,
 	                                   distributorId,
 	                                   readyToStart,
@@ -1489,7 +1520,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	                                   zeroHealthyTeams,
 	                                   shards,
 	                                   trackerCancelled,
-	                                   ddTenantCache);
+	                                   ddTenantCache,
+	                                   customReplication);
 	state Future<Void> loggingTrigger = Void();
 	state Future<Void> readHotDetect = readHotDetector(&self);
 	state Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");

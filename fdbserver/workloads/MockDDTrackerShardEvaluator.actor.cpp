@@ -166,7 +166,8 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 		                                   ddcx.id(),
 		                                   &shards,
 		                                   &ddcx.trackerCancelled,
-		                                   {}));
+		                                   {},
+		                                   initData->customReplication));
 		actors.add(relocateShardReporter(this, output.getFuture()));
 
 		return timeout(reportErrors(actors.getResult(), "MockDDTrackerShardEvaluatorWorkload"), testDuration, Void());

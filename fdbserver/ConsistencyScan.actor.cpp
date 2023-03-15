@@ -37,6 +37,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Trace.h"
+#include "fdbserver/QuietDatabase.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Core of the data consistency checking (checkDataConsistency) and many of the supporting functions are shared between
@@ -400,10 +401,18 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 	state bool resume = !(restart || shuffleShards);
 
 	state double dbSize = 100e12;
+	state int ssCount = 1e6;
 	if (g_network->isSimulated()) {
 		// This call will get all shard ranges in the database, which is too expensive on real clusters.
 		int64_t _dbSize = wait(getDatabaseSize(cx));
 		dbSize = _dbSize;
+		std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+		ssCount = 0;
+		for (auto& it : storageServers) {
+			if (!it.isTss()) {
+				++ssCount;
+			}
+		}
 	}
 
 	state std::vector<KeyRangeRef> ranges;
@@ -447,16 +456,47 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 		// If the destStorageServers is non-empty, then this shard is being relocated
 		state bool isRelocating = destStorageServers.size() > 0;
 
+		state int customReplication = configuration.storageTeamSize;
+		if (g_network->isSimulated() && SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAMS > 0 &&
+		    !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			for (auto& it : g_simulator->customReplicas) {
+				if (range.begin < std::get<1>(it) && std::get<0>(it) < range.end) {
+					TraceEvent("ConsistencyCheck_CheckCustomReplica")
+					    .detail("ShardBegin", printable(range.begin))
+					    .detail("ShardEnd", printable(range.end))
+					    .detail("SourceTeamSize", sourceStorageServers.size())
+					    .detail("DestServerSize", destStorageServers.size())
+					    .detail("ConfigStorageTeamSize", configuration.storageTeamSize)
+					    .detail("CustomBegin", std::get<0>(it))
+					    .detail("CustomEnd", std::get<1>(it))
+					    .detail("CustomReplicas", std::get<2>(it))
+					    .detail("UsableRegions", configuration.usableRegions)
+					    .detail("First", firstClient)
+					    .detail("Perform", performQuiescentChecks);
+					if (range.begin < std::get<0>(it) || range.end > std::get<1>(it)) {
+						testFailure("Custom shard boundary violated", performQuiescentChecks, success, failureIsError);
+						return Void();
+					}
+					customReplication = std::max(customReplication, std::get<2>(it));
+				}
+			}
+		}
+
 		// In a quiescent database, check that the team size is the same as the desired team size
 		if (firstClient && performQuiescentChecks &&
-		    sourceStorageServers.size() != configuration.usableRegions * configuration.storageTeamSize) {
+		    ((configuration.usableRegions == 1 &&
+		      sourceStorageServers.size() != std::min(ssCount, customReplication)) ||
+		     sourceStorageServers.size() < configuration.usableRegions * configuration.storageTeamSize ||
+		     sourceStorageServers.size() > configuration.usableRegions * customReplication)) {
 			TraceEvent("ConsistencyCheck_InvalidTeamSize")
 			    .detail("ShardBegin", printable(range.begin))
 			    .detail("ShardEnd", printable(range.end))
 			    .detail("SourceTeamSize", sourceStorageServers.size())
 			    .detail("DestServerSize", destStorageServers.size())
 			    .detail("ConfigStorageTeamSize", configuration.storageTeamSize)
-			    .detail("UsableRegions", configuration.usableRegions);
+			    .detail("CustomReplicas", customReplication)
+			    .detail("UsableRegions", configuration.usableRegions)
+			    .detail("SSCount", ssCount);
 			// Record the server reponsible for the problematic shards
 			int k = 0;
 			for (auto& id : sourceStorageServers) {

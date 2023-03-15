@@ -261,6 +261,13 @@ class DDTxnProcessorImpl {
 			tss_servers.clear();
 			team_cache.clear();
 			succeeded = false;
+			result->customReplication->insert(allKeys, -1);
+			if (g_network->isSimulated() && SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAMS > 0 &&
+			    !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+				for (auto& it : g_simulator->customReplicas) {
+					result->customReplication->insert(KeyRangeRef(std::get<0>(it), std::get<1>(it)), std::get<2>(it));
+				}
+			}
 			try {
 				// Read healthyZone value which is later used to determine on/off of failure triggered DD
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);

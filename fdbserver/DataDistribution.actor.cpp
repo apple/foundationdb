@@ -451,41 +451,79 @@ public:
 			}
 		}
 
+		state std::vector<Key> customBoundaries;
+		for (auto& it : self->initData->customReplication->ranges()) {
+			customBoundaries.push_back(it->range().begin);
+			TraceEvent(SevDebug, "DDInitCustomReplicas", self->ddId)
+			    .detail("Range", it->range())
+			    .detail("Replication", it->value());
+		}
+
 		state int shard = 0;
+		state int customBoundary = 0;
 		for (; shard < self->initData->shards.size() - 1; shard++) {
 			const DDShardInfo& iShard = self->initData->shards[shard];
-			KeyRangeRef keys = KeyRangeRef(iShard.key, self->initData->shards[shard + 1].key);
+			std::vector<KeyRangeRef> ranges;
 
-			self->shardsAffectedByTeamFailure->defineShard(keys);
-			std::vector<ShardsAffectedByTeamFailure::Team> teams;
-			teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.primarySrc, true));
-			if (self->configuration.usableRegions > 1) {
-				teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteSrc, false));
+			Key beginKey = iShard.key;
+			Key endKey = self->initData->shards[shard + 1].key;
+			while (customBoundary < customBoundaries.size() && customBoundaries[customBoundary] <= beginKey) {
+				customBoundary++;
 			}
-			if (traceShard) {
-				TraceEvent(SevDebug, "DDInitShard", self->ddId)
-				    .detail("Keys", keys)
-				    .detail("PrimarySrc", describe(iShard.primarySrc))
-				    .detail("RemoteSrc", describe(iShard.remoteSrc))
-				    .detail("PrimaryDest", describe(iShard.primaryDest))
-				    .detail("RemoteDest", describe(iShard.remoteDest))
-				    .detail("SrcID", iShard.srcId)
-				    .detail("DestID", iShard.destId);
+			while (customBoundary < customBoundaries.size() && customBoundaries[customBoundary] < endKey) {
+				ranges.push_back(KeyRangeRef(beginKey, customBoundaries[customBoundary]));
+				beginKey = customBoundaries[customBoundary];
+				customBoundary++;
 			}
+			ranges.push_back(KeyRangeRef(beginKey, endKey));
 
-			self->shardsAffectedByTeamFailure->moveShard(keys, teams);
-			if (iShard.hasDest && iShard.destId == anonymousShardId) {
-				// This shard is already in flight.  Ideally we should use dest in ShardsAffectedByTeamFailure and
-				// generate a dataDistributionRelocator directly in DataDistributionQueue to track it, but it's
-				// easier to just (with low priority) schedule it for movement.
-				bool unhealthy = iShard.primarySrc.size() != self->configuration.storageTeamSize;
-				if (!unhealthy && self->configuration.usableRegions > 1) {
-					unhealthy = iShard.remoteSrc.size() != self->configuration.storageTeamSize;
+			for (auto& keys : ranges) {
+				TraceEvent("DDMoveShardDefine4").detail("Keys", keys);
+				self->shardsAffectedByTeamFailure->defineShard(keys);
+				std::vector<ShardsAffectedByTeamFailure::Team> teams;
+				teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.primarySrc, true));
+				if (self->configuration.usableRegions > 1) {
+					teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteSrc, false));
 				}
-				self->relocationProducer.send(
-				    RelocateShard(keys,
-				                  unhealthy ? DataMovementReason::TEAM_UNHEALTHY : DataMovementReason::RECOVER_MOVE,
-				                  RelocateReason::OTHER));
+
+				int customReplicas = self->configuration.storageTeamSize;
+				for (auto& it : self->initData->customReplication->intersectingRanges(keys)) {
+					customReplicas = std::max(customReplicas, it.value());
+				}
+
+				bool unhealthy = iShard.primarySrc.size() != customReplicas || ranges.size() > 1;
+				if (!unhealthy && self->configuration.usableRegions > 1) {
+					unhealthy = iShard.remoteSrc.size() != customReplicas;
+				}
+
+				if (traceShard) {
+					TraceEvent(SevDebug, "DDInitShard", self->ddId)
+					    .detail("Keys", keys)
+					    .detail("PrimarySrc", describe(iShard.primarySrc))
+					    .detail("RemoteSrc", describe(iShard.remoteSrc))
+					    .detail("PrimaryDest", describe(iShard.primaryDest))
+					    .detail("RemoteDest", describe(iShard.remoteDest))
+					    .detail("SrcID", iShard.srcId)
+					    .detail("DestID", iShard.destId)
+					    .detail("CustomReplicas", customReplicas)
+					    .detail("StorageTeamSize", self->configuration.storageTeamSize)
+					    .detail("Unhealthy", unhealthy);
+				}
+
+				TraceEvent("DDMoveShard2").detail("Keys", keys);
+				self->shardsAffectedByTeamFailure->moveShard(keys, teams);
+				if ((SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAMS > 0 && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
+				     unhealthy) ||
+				    (iShard.hasDest && iShard.destId == anonymousShardId)) {
+					// This shard is already in flight.  Ideally we should use dest in ShardsAffectedByTeamFailure and
+					// generate a dataDistributionRelocator directly in DataDistributionQueue to track it, but it's
+					// easier to just (with low priority) schedule it for movement.
+
+					self->relocationProducer.send(
+					    RelocateShard(keys,
+					                  unhealthy ? DataMovementReason::TEAM_UNHEALTHY : DataMovementReason::RECOVER_MOVE,
+					                  RelocateReason::OTHER));
+				}
 			}
 
 			wait(yield(TaskPriority::DataDistribution));
@@ -526,11 +564,13 @@ public:
 
 				// Since a DataMove could cover more than one keyrange, e.g., during merge, we need to define
 				// the target shard and restart the shard tracker.
+				TraceEvent("DDMoveShardDefine5").detail("Keys", rs.keys);
 				self->shardsAffectedByTeamFailure->restartShardTracker.send(rs.keys);
 				self->shardsAffectedByTeamFailure->defineShard(rs.keys);
 
 				// When restoring a DataMove, the destination team is determined, and hence we need to register
 				// the data move now, so that team failures can be captured.
+				TraceEvent("DDMoveShard3").detail("Keys", rs.keys);
 				self->shardsAffectedByTeamFailure->moveShard(rs.keys, teams);
 				self->relocationProducer.send(rs);
 				wait(yield(TaskPriority::DataDistribution));
@@ -694,7 +734,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                                            self->ddId,
 			                                                            &shards,
 			                                                            &trackerCancelled,
-			                                                            self->ddTenantCache),
+			                                                            self->ddTenantCache,
+			                                                            self->initData->customReplication),
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));

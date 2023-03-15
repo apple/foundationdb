@@ -347,6 +347,7 @@ public:
 	// inserted into FDB by the workload. On shutdown, all test generated files (under simfdb/) are scanned to find if
 	// 'plaintext marker' is present.
 	Optional<std::string> dataAtRestPlaintextMarker;
+	std::vector<std::tuple<std::string, std::string, int>> customReplicas;
 
 	flowGlobalType global(int id) const final;
 	void setGlobal(size_t id, flowGlobalType v) final;
