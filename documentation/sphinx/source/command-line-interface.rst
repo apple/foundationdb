@@ -755,3 +755,16 @@ Removes a TSS process from quarantine, disposing of the TSS and allowing Data Di
 
 Lists the storage UIDs of all TSS processes currently in quarantine.
 
+hotrange
+--------
+
+Utility commands for fetching sampled read bytes/ops metrics from the specified storage server.
+
+``hotrange``
+
+It will populate a list of available storage servers' network addresses. Users need to run this first before fetching metrics from a specific storage server. Otherwise, the address is not recognized.
+
+``hotrange <IP:PORT> <bytes|readBytes|readOps> <begin> <end> <splitCount>``
+
+Fetch read metrics from the given storage server to find the hot range. Run ``help hotrange`` to read the guide.
+

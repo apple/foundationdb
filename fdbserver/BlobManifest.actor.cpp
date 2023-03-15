@@ -163,11 +163,10 @@ public:
 			const BlobManifestFile& firstFile = *iter;
 			result.push_back(firstFile);
 			// search all following files belonging to same manifest
-			for (auto it = iter + 1; it != allFiles.end(); ++it) {
-				if (it->belongToSameManifest(firstFile)) {
-					result.push_back(*it);
+			for (++iter; iter != allFiles.end(); ++iter) {
+				if (iter->belongToSameManifest(firstFile)) {
+					result.push_back(*iter);
 				} else {
-					iter = it; // start point for next search
 					break;
 				}
 			}
@@ -673,6 +672,29 @@ private:
 		return Void();
 	}
 
+	// Get manifest backup version
+	ACTOR static Future<Version> getManifestVersion(Database db) {
+		state Transaction tr(db);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<Value> value = wait(tr.get(blobManifestVersionKey));
+				if (value.present()) {
+					Version version;
+					BinaryReader reader(value.get(), Unversioned());
+					reader >> version;
+					return version;
+				}
+				TraceEvent("MissingBlobManifestVersion").log();
+				throw blob_restore_corrupted_manifest();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	// Find the newest granule for a key range. The newest granule has the max version and relevant files
 	ACTOR static Future<Standalone<BlobGranuleRestoreVersion>> getGranule(Transaction* tr, KeyRangeRef range) {
 		state Standalone<BlobGranuleRestoreVersion> granuleVersion;
@@ -835,189 +857,6 @@ ACTOR Future<int64_t> lastBlobEpoc(Database db, Reference<BlobConnectionProvider
 	Reference<BlobManifestLoader> loader = makeReference<BlobManifestLoader>(db, blobConn);
 	int64_t epoc = wait(BlobManifestLoader::lastBlobEpoc(loader));
 	return epoc;
-}
-
-// Return true if the given key range is restoring
-ACTOR Future<bool> isFullRestoreMode(Database db, KeyRangeRef keys) {
-	std::pair<KeyRange, BlobRestoreStatus> rangeStatus = wait(getRestoreRangeStatus(db, keys));
-	return !rangeStatus.first.empty() && rangeStatus.second.phase != BlobRestorePhase::DONE;
-}
-
-// Check the given key range and return subrange that is doing restore. Returns empty range if no restoring
-// for any portion of the given range.
-ACTOR Future<std::pair<KeyRange, BlobRestoreStatus>> getRestoreRangeStatus(Database db, KeyRangeRef keys) {
-	state Transaction tr(db);
-	loop {
-		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		try {
-			state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
-			limits.minRows = 0;
-			state KeySelectorRef begin = firstGreaterOrEqual(blobRestoreCommandKeys.begin);
-			state KeySelectorRef end = firstGreaterOrEqual(blobRestoreCommandKeys.end);
-			loop {
-				RangeResult ranges = wait(tr.getRange(begin, end, limits, Snapshot::True));
-				for (auto& r : ranges) {
-					KeyRange keyRange = decodeBlobRestoreCommandKeyFor(r.key);
-					if (keys.intersects(keyRange)) {
-						Standalone<BlobRestoreStatus> status = decodeBlobRestoreStatus(r.value);
-						KeyRangeRef intersected(std::max(keys.begin, keyRange.begin), std::min(keys.end, keyRange.end));
-						return std::make_pair(intersected, status);
-					}
-				}
-				if (!ranges.more) {
-					break;
-				}
-				if (ranges.readThrough.present()) {
-					begin = firstGreaterOrEqual(ranges.readThrough.get());
-				} else {
-					begin = firstGreaterThan(ranges.end()[-1].key);
-				}
-			}
-			return std::make_pair(KeyRangeRef(), BlobRestoreStatus(BlobRestorePhase::DONE));
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
-// Update restore status
-ACTOR Future<Void> updateRestoreStatus(Database db,
-                                       KeyRangeRef range,
-                                       BlobRestorePhase phase,
-                                       int progress,
-                                       Optional<StringRef> error,
-                                       Optional<BlobRestorePhase> expectedPhase) {
-	state Transaction tr(db);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			state Key key = blobRestoreCommandKeyFor(range);
-
-			state Standalone<BlobRestoreStatus> restoreStatus;
-			if (error.present()) {
-				restoreStatus.error = StringRef(restoreStatus.arena(), error.get());
-			}
-			Optional<Value> oldValue = wait(tr.get(key));
-			if (oldValue.present()) {
-				Standalone<BlobRestoreStatus> oldStatus = decodeBlobRestoreStatus(oldValue.get());
-				// check if current phase is expected
-				if (expectedPhase.present() && oldStatus.phase != expectedPhase.get()) {
-					TraceEvent("BlobRestoreUnexpectedPhase")
-					    .detail("Expected", expectedPhase.get())
-					    .detail("Current", oldStatus.phase);
-					throw restore_error();
-				}
-				restoreStatus.phaseStartTs = VectorRef<int64_t>(restoreStatus.arena(), oldStatus.phaseStartTs);
-			}
-
-			if (restoreStatus.phase != phase) {
-				restoreStatus.phaseStartTs.resize(restoreStatus.arena(), BlobRestorePhase::MAX);
-				restoreStatus.phaseStartTs[phase] = now();
-			}
-			restoreStatus.phase = phase;
-			restoreStatus.progress = progress;
-
-			Value value = blobRestoreCommandValueFor(restoreStatus);
-			tr.set(key, value);
-			wait(tr.commit());
-			return Void();
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
-// Get restore status
-ACTOR Future<Optional<BlobRestoreStatus>> getRestoreStatus(Database db, KeyRangeRef keys) {
-	state Optional<BlobRestoreStatus> result;
-	std::pair<KeyRange, BlobRestoreStatus> rangeStatus = wait(getRestoreRangeStatus(db, keys));
-	if (!rangeStatus.first.empty()) {
-		result = rangeStatus.second;
-	}
-	return result;
-}
-
-// Get restore argument
-ACTOR Future<Optional<BlobRestoreArg>> getRestoreArg(Database db, KeyRangeRef keys) {
-	state Transaction tr(db);
-	state Optional<BlobRestoreArg> result;
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			try {
-				state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
-				limits.minRows = 0;
-				state KeySelectorRef begin = firstGreaterOrEqual(blobRestoreArgKeys.begin);
-				state KeySelectorRef end = firstGreaterOrEqual(blobRestoreArgKeys.end);
-				loop {
-					RangeResult ranges = wait(tr.getRange(begin, end, limits, Snapshot::True));
-					for (auto& r : ranges) {
-						KeyRange keyRange = decodeBlobRestoreArgKeyFor(r.key);
-						if (keys.intersects(keyRange)) {
-							Standalone<BlobRestoreArg> arg = decodeBlobRestoreArg(r.value);
-							result = arg;
-							return result;
-						}
-					}
-					if (!ranges.more) {
-						break;
-					}
-					if (ranges.readThrough.present()) {
-						begin = firstGreaterOrEqual(ranges.readThrough.get());
-					} else {
-						begin = firstGreaterThan(ranges.back().key);
-					}
-				}
-				return result;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
-// Get restore target version. Return defaultVersion if no restore argument available for the range
-ACTOR Future<Version> getRestoreTargetVersion(Database db, KeyRangeRef range, Version defaultVersion) {
-	Optional<BlobRestoreArg> arg = wait(getRestoreArg(db, range));
-	Version expected = defaultVersion;
-	if (arg.present()) {
-		if (arg.get().version.present()) {
-			return arg.get().version.get();
-		}
-	}
-	return expected;
-}
-
-// Get manifest backup version
-ACTOR Future<Version> getManifestVersion(Database db) {
-	state Transaction tr(db);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> value = wait(tr.get(blobManifestVersionKey));
-			if (value.present()) {
-				Version version;
-				BinaryReader reader(value.get(), Unversioned());
-				reader >> version;
-				return version;
-			}
-			TraceEvent("MissingBlobManifestVersion").log();
-			throw blob_restore_corrupted_manifest();
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
 }
 
 ACTOR Future<std::string> getMutationLogUrl() {
