@@ -1851,6 +1851,23 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		return true;
 	}
 
+	// Run an empty commit through the system.
+	ACTOR static Future<Void> doEmptyCommit(Database cx) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				wait(::success(tr.getReadVersion()));
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.makeSelfConflicting();
+				wait(tr.commit());
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR Future<bool> checkForExtraDataStores(Database cx, ConsistencyCheckWorkload* self) {
 		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
@@ -1953,6 +1970,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		if (foundExtraDataStore) {
+			// Let the cluster fully recover after rebooting/killing storage servers with extra stores.
+			//
+			// This requires an end-to-end comitting transaction to ensure recovery has started in case
+			// any stateless processes, like the commit proxy, were killed.
+			wait(::success(doEmptyCommit(cx)));
+			while (self->dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
+				wait(self->dbInfo->onChange());
+			}
 			self->testFailure("Extra data stores present on workers");
 			return false;
 		}
