@@ -33,6 +33,7 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/StatusClient.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "flow/Arena.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -136,6 +137,9 @@ inline const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/managemen
 
 // get all workers' info
 ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers);
+// get all storages' interface
+ACTOR Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
+                                              std::map<std::string, StorageServerInterface>* interfaces);
 
 // compare StringRef with the given c string
 bool tokencmp(StringRef token, const char* command);
@@ -237,6 +241,11 @@ ACTOR Future<bool> blobKeyCommandActor(Database localDb,
                                        std::vector<StringRef> tokens);
 // blobrestore command
 ACTOR Future<bool> blobRestoreCommandActor(Database localDb, std::vector<StringRef> tokens);
+// hotrange command
+ACTOR Future<bool> hotRangeCommandActor(Database localDb,
+                                        Reference<IDatabase> db,
+                                        std::vector<StringRef> tokens,
+                                        std::map<std::string, StorageServerInterface>* storage_interface);
 
 // maintenance command
 ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);

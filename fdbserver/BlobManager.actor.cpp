@@ -32,6 +32,7 @@
 #include "fdbclient/ServerKnobs.h"
 #include "fdbrpc/simulator.h"
 #include "flow/CodeProbe.h"
+#include "flow/FastRef.h"
 #include "flow/serialize.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupContainerFileSystem.h"
@@ -3103,7 +3104,9 @@ ACTOR Future<Void> monitorBlobWorker(Reference<BlobManagerData> bmData, BlobWork
 
 		choose {
 			when(wait(waitFailure)) {
-				wait(delay(SERVER_KNOBS->BLOB_WORKER_REJOIN_TIME));
+				if (SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED) {
+					wait(delay(SERVER_KNOBS->BLOB_WORKER_REJOIN_TIME));
+				}
 				if (BM_DEBUG) {
 					fmt::print("BM {0} detected BW {1} is dead\n", bmData->epoch, bwInterf.id().toString());
 				}
@@ -3499,7 +3502,8 @@ ACTOR Future<Void> updateEpoch(Reference<BlobManagerData> bmData, int64_t epoch)
 ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	state double recoveryStartTime = now();
 	state Promise<Void> workerListReady;
-	state Future<Void> blobWorkerRejoin = delay(SERVER_KNOBS->BLOB_WORKER_REJOIN_TIME);
+	state Future<Void> blobWorkerRejoin =
+	    delay(SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED ? SERVER_KNOBS->BLOB_WORKER_REJOIN_TIME : 0);
 	bmData->addActor.send(checkBlobWorkerList(bmData, workerListReady));
 	wait(workerListReady.getFuture());
 
@@ -3513,24 +3517,26 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 	bmData->initBStore();
 
-	bool isFullRestore = wait(isFullRestoreMode(bmData->db, normalKeys));
+	state Reference<BlobRestoreController> restoreController =
+	    makeReference<BlobRestoreController>(bmData->db, normalKeys);
+	bool isFullRestore = wait(BlobRestoreController::isRestoring(restoreController));
 	bmData->isFullRestoreMode = isFullRestore;
 	if (bmData->isFullRestoreMode) {
 		if (!bmData->manifestStore.isValid()) {
 			TraceEvent(SevError, "InvalidBlobManifestUrl").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
 			throw blob_restore_invalid_manifest_url();
 		}
-		Optional<BlobRestoreStatus> status = wait(getRestoreStatus(bmData->db, normalKeys));
-		ASSERT(status.present());
-		state BlobRestorePhase phase = status.get().phase;
-		if (phase == BlobRestorePhase::STARTING_MIGRATOR || phase == BlobRestorePhase::LOADING_MANIFEST) {
-			wait(updateRestoreStatus(bmData->db, normalKeys, BlobRestoreStatus(LOADING_MANIFEST), {}));
+		Optional<BlobRestoreState> restoreState = wait(BlobRestoreController::getState(restoreController));
+		ASSERT(restoreState.present());
+		state BlobRestorePhase phase = restoreState.get().phase;
+		if (phase == STARTING_MIGRATOR || phase == LOADING_MANIFEST) {
+			wait(BlobRestoreController::updateState(restoreController, LOADING_MANIFEST, {}));
 			try {
 				wait(loadManifest(bmData->db, bmData->manifestStore));
 				int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->manifestStore));
 				wait(updateEpoch(bmData, epoc + 1));
-				BlobRestoreStatus completedStatus(BlobRestorePhase::LOADED_MANIFEST);
-				wait(updateRestoreStatus(bmData->db, normalKeys, completedStatus, BlobRestorePhase::LOADING_MANIFEST));
+				wait(BlobRestoreController::updateState(restoreController, LOADED_MANIFEST, LOADING_MANIFEST));
+				TraceEvent("BlobManifestLoaded", bmData->id).log();
 			} catch (Error& e) {
 				if (e.code() != error_code_restore_missing_data &&
 				    e.code() != error_code_blob_restore_missing_manifest) {
@@ -3538,8 +3544,8 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				}
 				// terminate blob restore for non-retryable errors
 				TraceEvent("ManifestLoadError", bmData->id).error(e).detail("Phase", phase);
-				BlobRestoreStatus error(BlobRestorePhase::ERROR, e.code());
-				wait(updateRestoreStatus(bmData->db, normalKeys, error, {}));
+				std::string errorMessage = fmt::format("Manifest loading error '{}'", e.what());
+				wait(BlobRestoreController::updateError(restoreController, StringRef(errorMessage)));
 			}
 		}
 	}
@@ -5179,7 +5185,7 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 						// These should not get an error that then causes a transaction retry loop. All error handling
 						// should be done in the purge calls
 						if (e.code() == error_code_operation_cancelled ||
-						    e.code() == error_code_blob_manager_replaced) {
+						    e.code() == error_code_blob_manager_replaced || e.code() == error_code_platform_error) {
 							throw e;
 						}
 						// FIXME: refactor this into a function on BlobManagerData

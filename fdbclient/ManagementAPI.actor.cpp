@@ -18,8 +18,10 @@
  * limitations under the License.
  */
 
+#include <boost/algorithm/string/join.hpp>
 #include <cinttypes>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <boost/algorithm/string.hpp>
@@ -57,12 +59,9 @@ bool isInteger(const std::string& s) {
 	return (*p == 0);
 }
 
-// Check if the specified params supported for the given storage type.
-// It will return false if invalid parameters are given.
 bool parseStorageEngineParams(KeyValueStoreType::StoreType storeType,
                               std::string const& kvPairsStr,
-                              std::map<std::string, std::string>& out,
-                              bool creating) {
+                              std::map<std::string, std::string>& out) {
 	auto& paramsInitMap = StorageEngineParamsFactory::getParams(storeType);
 
 	if (kvPairsStr.empty()) {
@@ -92,17 +91,30 @@ bool parseStorageEngineParams(KeyValueStoreType::StoreType storeType,
 	return true;
 }
 
-bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bool& paramsChange, bool creating) {
-	auto storageEngineParamsKey = configKeysPrefix.toString() + "storage_engine_params";
-	if (!m.contains(storageEngineParamsKey))
-		return true; // no storage engine params change
-	paramsChange = true;
-	auto storeType =
-	    static_cast<KeyValueStoreType::StoreType>(std::stoi(m[configKeysPrefix.toString() + "storage_engine"]));
-	auto paramStr = m[storageEngineParamsKey];
-	// erase the raw value string delimitered by ","
-	m.erase(storageEngineParamsKey);
-	return parseStorageEngineParams(storeType, paramStr, m, creating);
+// Check if there's any storage engine params change,
+// storage engine params changes always set the storage_engine explicitly even it's not changed.
+// When there's no params specified, it will clear any existing params
+// return false if not supported params are found
+bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bool& paramsChange) {
+	if (m.contains(configKeysPrefix.toString() + "storage_engine")) {
+		paramsChange = true;
+		auto storeType =
+		    static_cast<KeyValueStoreType::StoreType>(std::stoi(m[configKeysPrefix.toString() + "storage_engine"]));
+		auto& paramsInitMap = StorageEngineParamsFactory::getParams(storeType);
+
+		for (const auto& [k, v] : m) {
+			if (!KeyRef(k).startsWith(storageEngineParamsPrefix))
+				continue;
+			std::string paramKeyStr = KeyRef(k).removePrefix(storageEngineParamsPrefix).toString();
+			if (!paramsInitMap.contains(paramKeyStr)) {
+				fmt::print("Warning: {} is not a supported parameter for storage engine {}.\n",
+				           paramKeyStr,
+				           KeyValueStoreType::getStoreTypeStr(storeType));
+				return false;
+			}
+		}
+	}
+	return true;
 }
 
 // Defines the mapping between configuration names (as exposed by fdbcli, buildConfiguration()) and actual configuration
@@ -131,8 +143,6 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 	}
 
 	size_t pos;
-	Optional<KeyValueStoreType> logType;
-	Optional<KeyValueStoreType> storeType;
 
 	// key:=value is unvalidated and unchecked
 	pos = mode.find(":=");
@@ -270,27 +280,6 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			out[p + key] = format("%d", mode);
 		}
 
-		if (key == "storage_engine" || key == "log_engine") {
-			std::string storeTypeStr = value;
-			pos = value.find(":");
-			if (pos != std::string::npos) {
-				storeTypeStr = value.substr(0, pos);
-				auto paramsStr = value.substr(pos + 1);
-				auto storeType = KeyValueStoreType::fromStoreTypeStr(storeTypeStr);
-				if (storeType != KeyValueStoreType::SSD_REDWOOD_V1) {
-					fmt::print("Error: storage parameter change is not supported for storage engine {}\n",
-					           storeType.toString());
-					return out;
-				}
-				out[p + fmt::format("{}_params", key)] = paramsStr;
-			} else {
-				// set an empty string which will be overwritten by default values later
-				// now log_engine_params is not used
-				out[p + fmt::format("{}_params", key)] = "";
-			}
-			out[p + key] = format("%d", KeyValueStoreType::fromStoreTypeStr(storeTypeStr));
-		}
-
 		if (key == "exclude") {
 			int p = 0;
 			while (p < value.size()) {
@@ -308,16 +297,45 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 				p = end + 1;
 			}
 		}
+
+		if (key == "storage_engine" || key == "log_engine") {
+			StringRef s = value;
+
+			// Parse as engine_name[:p=v]... to handle future storage engine params
+			Value engine = s.eat(":");
+
+			try {
+				out[p + key] = format("%d", KeyValueStoreType::fromString(engine.toString()).storeType());
+			} catch (Error& e) {
+				printf("Error: Invalid value for %s (%s): %s\n", key.c_str(), value.c_str(), e.what());
+			}
+
+			while (!s.empty()) {
+				// params[s.eat("=")] = s.eat(":");
+				auto k = s.eat("=");
+				auto v = s.eat(":");
+				out[p + fmt::format("{}_params/{}", key, k.toString())] = v.toString();
+			}
+
+			return out;
+		}
+
 		return out;
 	}
 
+	Optional<KeyValueStoreType> logType;
+	Optional<KeyValueStoreType> storeType;
+
+	// These are legacy shorthand commands to set a specific log engine and storage engine
+	// based only on the storage engine name.  Most of them assume SQLite should be the
+	// log engine.
 	if (mode == "ssd-1") {
 		logType = KeyValueStoreType::SSD_BTREE_V1;
 		storeType = KeyValueStoreType::SSD_BTREE_V1;
 	} else if (mode == "ssd" || mode == "ssd-2") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_BTREE_V2;
-	} else if (mode == "ssd-redwood-1-experimental") {
+	} else if (mode == "ssd-redwood-1" || mode == "ssd-redwood-1-experimental") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_REDWOOD_V1;
 	} else if (mode == "ssd-rocksdb-v1") {
@@ -340,10 +358,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 
 	if (storeType.present()) {
 		out[p + "log_engine"] = format("%d", logType.get().storeType());
-		out[p + "storage_engine"] = format("%d", KeyValueStoreType::StoreType(storeType.get()));
-		// if "new", it will be overwritten to default values for supported types
-		// for unsupported storage types, it will clear the storage engine params system keys
-		out[p + "storage_engine_params"] = "";
+		out[p + "storage_engine"] = format("%d", storeType.get().storeType());
 		return out;
 	}
 
@@ -480,7 +495,10 @@ ConfigurationResult buildConfiguration(std::vector<StringRef> const& modeTokens,
 
 		for (auto t = m.begin(); t != m.end(); ++t) {
 			if (outConf.count(t->first)) {
-				TraceEvent(SevWarnAlways, "ConflictingOption").detail("Option", t->first);
+				TraceEvent(SevWarnAlways, "ConflictingOption")
+				    .detail("Option", t->first)
+				    .detail("Value", t->second)
+				    .detail("ExistingValue", outConf[t->first]);
 				return ConfigurationResult::CONFLICTING_OPTIONS;
 			}
 			outConf[t->first] = t->second;

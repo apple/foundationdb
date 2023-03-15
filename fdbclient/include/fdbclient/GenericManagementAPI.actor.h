@@ -133,7 +133,7 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 
 ConfigureAutoResult parseConfig(StatusObject const& status);
 
-bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bool& paramsChange, bool creating);
+bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bool& paramsChange);
 
 bool isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration> oldConfiguration,
                                        std::map<std::string, std::string> newConfig,
@@ -279,7 +279,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 		}
 	}
 	state bool storageEngineParamsChange = false;
-	if (!checkForStorageEngineParamsChange(m, storageEngineParamsChange, creating)) {
+	if (!checkForStorageEngineParamsChange(m, storageEngineParamsChange)) {
 		fmt::print("Error: Invalid configuration for storage engine params\n");
 		return ConfigurationResult::INVALID_CONFIGURATION;
 	}

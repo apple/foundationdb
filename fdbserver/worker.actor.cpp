@@ -27,6 +27,7 @@
 #include "flow/ApiVersion.h"
 #include "flow/IAsyncFile.h"
 #include "fdbrpc/Locality.h"
+#include "fdbclient/GetEncryptCipherKeys_impl.actor.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ProcessInterface.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -114,6 +115,7 @@ template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
 
 template class RequestStream<GetServerDBInfoRequest, false>;
 template struct NetNotifiedQueue<GetServerDBInfoRequest, false>;
+template class GetEncryptCipherKeys<ServerDBInfo>;
 
 namespace {
 RoleLineageCollector roleLineageCollector;
@@ -2994,6 +2996,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		endRole(Role::WORKER, interf.id(), "WorkerError", ok, e);
 		errorForwarders.clear(false);
 		sharedLogs.clear();
+		// blobWorkerFuture is also in errorForwarders so it's double refcounted. If we don't cancel it, it'll never
+		// close it's IKVS and this will hang, leaving a zombie worker
+		blobWorkerFuture.cancel();
 
 		if (e.code() != error_code_actor_cancelled) {
 			// actor_cancelled:

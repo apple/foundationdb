@@ -28,6 +28,7 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/StatusClient.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/IKnobCollection.h"
@@ -1090,6 +1091,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 	state bool writeMode = false;
 
 	state std::map<Key, std::pair<Value, ClientLeaderRegInterface>> address_interface;
+	state std::map<std::string, StorageServerInterface> storage_interface;
 
 	state FdbOptions globalOptions;
 	state FdbOptions activeOptions;
@@ -2147,6 +2149,15 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 
 				if (tokencmp(tokens[0], "idempotencyids")) {
 					bool _result = wait(makeInterruptable(idempotencyIdsCommandActor(localDb, tokens)));
+					if (!_result) {
+						is_error = true;
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "hotrange")) {
+					bool _result =
+					    wait(makeInterruptable(hotRangeCommandActor(localDb, db, tokens, &storage_interface)));
 					if (!_result) {
 						is_error = true;
 					}

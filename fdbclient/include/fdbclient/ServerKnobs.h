@@ -81,6 +81,7 @@ public:
 	double DESIRED_GET_MORE_DELAY;
 	int CONCURRENT_LOG_ROUTER_READS;
 	int LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED; // 0==peek from primary, non-zero==peek from satellites
+	double LOG_ROUTER_PEEK_SWITCH_DC_TIME;
 	double DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME;
 	double DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME;
 	int64_t TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES;
@@ -173,6 +174,8 @@ public:
 	double
 	    READ_REBALANCE_DIFF_FRAC; // only when (srcLoad - destLoad)/srcLoad > DIFF_FRAC the read rebalance will happen
 	double READ_REBALANCE_MAX_SHARD_FRAC; // only move shard whose readLoad < (srcLoad - destLoad) * MAX_SHARD_FRAC
+	double
+	    READ_REBALANCE_MIN_READ_BYTES_KS; // only move shard whose readLoad > min(MIN_READ_BYTES_KS, shard avg traffic);
 
 	double RETRY_RELOCATESHARD_DELAY;
 	double DATA_DISTRIBUTION_FAILURE_REACTION_TIME;
@@ -180,6 +183,9 @@ public:
 	int64_t SHARD_MAX_BYTES_PER_KSEC, // Shards with more than this bandwidth will be split immediately
 	    SHARD_MIN_BYTES_PER_KSEC, // Shards with more than this bandwidth will not be merged
 	    SHARD_SPLIT_BYTES_PER_KSEC; // When splitting a shard, it is split into pieces with less than this bandwidth
+	int64_t SHARD_MAX_READ_OPS_PER_KSEC; // When the read operations count is larger than this threshold, a range will
+	                                     // be considered hot
+
 	double SHARD_MAX_READ_DENSITY_RATIO;
 	int64_t SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS;
 	double SHARD_MAX_BYTES_READ_PER_KSEC_JITTER;
@@ -386,6 +392,7 @@ public:
 	int64_t ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD;
 	double ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY;
 	bool ROCKSDB_EMPTY_RANGE_CHECK;
+	int ROCKSDB_CREATE_BYTES_SAMPLE_FILE_RETRY_MAX;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -737,6 +744,7 @@ public:
 	int64_t IOPS_UNITS_PER_SAMPLE;
 	int64_t BYTES_WRITTEN_UNITS_PER_SAMPLE;
 	int64_t BYTES_READ_UNITS_PER_SAMPLE;
+	int64_t OPS_READ_UNITES_PER_SAMPLE;
 	int64_t READ_HOT_SUB_RANGE_CHUNK_SIZE;
 	int64_t EMPTY_READ_PENALTY;
 	int DD_SHARD_COMPARE_LIMIT; // when read-aware DD is enabled, at most how many shards are compared together
@@ -766,6 +774,8 @@ public:
 	double STORAGE_COMMIT_INTERVAL;
 	int BYTE_SAMPLING_FACTOR;
 	int BYTE_SAMPLING_OVERHEAD;
+	double MIN_BYTE_SAMPLING_PROBABILITY; // Adjustable only for test of PhysicalShardMove. Should always be 0 for other
+	                                      // cases
 	int MAX_STORAGE_SERVER_WATCH_BYTES;
 	int MAX_BYTE_SAMPLE_CLEAR_MAP_SIZE;
 	double LONG_BYTE_SAMPLE_RECOVERY_DELAY;
@@ -1020,6 +1030,9 @@ public:
 	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
 	double BLOB_WORKERLIST_FETCH_INTERVAL;
 	double BLOB_WORKER_BATCH_GRV_INTERVAL;
+	double BLOB_WORKER_EMPTY_GRV_INTERVAL;
+	int BLOB_WORKER_GRV_HISTORY_MAX_SIZE;
+	int64_t BLOB_WORKER_GRV_HISTORY_MIN_VERSION_GRANULARITY;
 	bool BLOB_WORKER_DO_REJECT_WHEN_FULL;
 	double BLOB_WORKER_REJECT_WHEN_FULL_THRESHOLD;
 	double BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY;
@@ -1061,7 +1074,9 @@ public:
 	std::string REST_KMS_CONNECTOR_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT;
 	std::string REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT;
 	int REST_KMS_CURRENT_BLOB_METADATA_REQUEST_VERSION;
+	int REST_KMS_MAX_BLOB_METADATA_REQUEST_VERSION;
 	int REST_KMS_CURRENT_CIPHER_REQUEST_VERSION;
+	int REST_KMS_MAX_CIPHER_REQUEST_VERSION;
 
 	// Idempotency ids
 	double IDEMPOTENCY_ID_IN_MEMORY_LIFETIME;

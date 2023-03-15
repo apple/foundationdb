@@ -927,41 +927,14 @@ struct KeyValueStoreType {
 		serializer(ar, type);
 	}
 
-	static std::string getStoreTypeStr(const StoreType& storeType) {
-		switch (storeType) {
-		case SSD_BTREE_V1:
-			return "ssd-1";
-		case SSD_BTREE_V2:
-			return "ssd-2";
-		case SSD_REDWOOD_V1:
-			return "ssd-redwood-1-experimental";
-		case SSD_ROCKSDB_V1:
-			return "ssd-rocksdb-v1";
-		case SSD_SHARDED_ROCKSDB:
-			return "ssd-sharded-rocksdb";
-		case MEMORY:
-			return "memory";
-		case MEMORY_RADIXTREE:
-			return "memory-radixtree-beta";
-		default:
-			return "unknown";
-		}
-	}
-	std::string toString() const { return getStoreTypeStr((StoreType)type); }
+	// Get string representation of engine type.  Each enum has one canonical string
+	// representation, but the reverse is not true (see fromString() below)
+	static std::string getStoreTypeStr(const StoreType& storeType);
 
-	static KeyValueStoreType fromStoreTypeStr(const std::string& storeTypeStr) {
-		if (storeTypeStr == "ssd-1") {
-			return KeyValueStoreType::SSD_BTREE_V1;
-		} else if (storeTypeStr == "ssd" || storeTypeStr == "ssd-2") {
-			return KeyValueStoreType::SSD_BTREE_V2;
-		} else if (storeTypeStr == "redwood" || storeTypeStr == "ssd-redwood-1-experimental") {
-			return KeyValueStoreType::SSD_REDWOOD_V1;
-		} else if (storeTypeStr == "memory" || storeTypeStr == "memory-1" || storeTypeStr == "memory-2") {
-			return KeyValueStoreType::MEMORY;
-		} else {
-			return KeyValueStoreType::END;
-		}
-	}
+	// Convert a string to a KeyValueStoreType
+	// This is a many-to-one mapping as there are aliases for some storage engines
+	static KeyValueStoreType fromString(const std::string& str);
+	std::string toString() const { return getStoreTypeStr((StoreType)type); }
 
 private:
 	uint32_t type;
