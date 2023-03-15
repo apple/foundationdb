@@ -1569,6 +1569,10 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		    .detail("RetryCount", (audit == nullptr ? 0 : audit->retryCount));
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
+		} else {
+			if (!req.reply.isSet()) {
+				req.reply.sendError(e);
+			}
 		}
 		throw audit_storage_failed(); // kill dd
 	}

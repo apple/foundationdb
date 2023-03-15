@@ -4923,19 +4923,19 @@ ACTOR Future<Void> auditStorageMetadataQ(StorageServer* data, AuditStorageReques
 			wait(waitForAll(actors));
 			break;
 		} catch (Error& e) {
-			if (retryCount > 5) {
+			if (retryCount > 10) {
 				req.reply.sendError(audit_storage_failed());
-				break;
+				return Void();
 			}
+			actors.clear();
 			wait(tr.onError(e));
 			tr.fullReset();
-			actors.clear();
 			retryCount++;
 		}
 	}
 	try {
-		/* std::cout << "keyServer size = " << keyServers.size() << "\n";
-		std::cout << "serverKeys size = " << serverKeys.size() << "\n"; */
+		/*std::cout << "keyServer size = " << keyServers.size() << "\n";
+		std::cout << "serverKeys size = " << serverKeys.size() << "\n";*/
 		std::unordered_map<UID, std::vector<KeyRange>> serverKeysMap;
 		for (i = 0; i < serverKeys.size() - 1; ++i) { // TODO: what about the last key ~
 			if (serverHasKey(serverKeys[i].value)) {
@@ -8355,12 +8355,12 @@ void changeServerKeys(StorageServer* data,
                       ChangeServerKeysContext context) {
 	ASSERT(!keys.empty());
 
-	// TraceEvent("ChangeServerKeys", data->thisServerID)
-	//     .detail("KeyBegin", keys.begin)
-	//     .detail("KeyEnd", keys.end)
-	//     .detail("NowAssigned", nowAssigned)
-	//     .detail("Version", version)
-	//     .detail("Context", changeServerKeysContextName(context));
+	TraceEvent(SevDebug, "ChangeServerKeys", data->thisServerID)
+	     .detail("KeyBegin", keys.begin)
+	     .detail("KeyEnd", keys.end)
+	     .detail("NowAssigned", nowAssigned)
+	     .detail("Version", version)
+	     .detail("Context", changeServerKeysContextName(context));
 	validate(data);
 
 	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
@@ -8417,13 +8417,13 @@ void changeServerKeys(StorageServer* data,
 	for (auto r = vr.begin(); r != vr.end(); ++r) {
 		KeyRangeRef range = keys & r->range();
 		bool dataAvailable = r->value() == latestVersion || r->value() >= version;
-		// TraceEvent("CSKRange", data->thisServerID)
-		//     .detail("KeyBegin", range.begin)
-		//     .detail("KeyEnd", range.end)
-		//     .detail("Available", dataAvailable)
-		//     .detail("NowAssigned", nowAssigned)
-		//     .detail("NewestAvailable", r->value())
-		//     .detail("ShardState0", data->shards[range.begin]->debugDescribeState());
+		TraceEvent(SevDebug, "CSKRange", data->thisServerID)
+		     .detail("KeyBegin", range.begin)
+		     .detail("KeyEnd", range.end)
+		     .detail("Available", dataAvailable)
+		     .detail("NowAssigned", nowAssigned)
+		     .detail("NewestAvailable", r->value())
+		     .detail("ShardState0", data->shards[range.begin]->debugDescribeState());
 		if (context == CSK_ASSIGN_EMPTY && !dataAvailable) {
 			ASSERT(nowAssigned);
 			TraceEvent("ChangeServerKeysAddEmptyRange", data->thisServerID)
@@ -8482,6 +8482,9 @@ void changeServerKeys(StorageServer* data,
 
 	// Clear the moving-in empty range, and set it available at the latestVersion.
 	for (const auto& range : newEmptyRanges) {
+		TraceEvent(SevDebug, "ClearForNewEmptyRanges", data->thisServerID)
+			    .detail("KeyBegin", range.begin)
+			    .detail("KeyEnd", range.end);
 		MutationRef clearRange(MutationRef::ClearRange, range.begin, range.end);
 		data->addMutation(data->data().getLatestVersion(),
 		                  true,

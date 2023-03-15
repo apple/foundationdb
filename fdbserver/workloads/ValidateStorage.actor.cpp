@@ -70,6 +70,7 @@ struct ValidateStorage : TestWorkload {
 
 	ACTOR Future<Void> auditStorageForType(Database cx, AuditType type) {
 		state UID auditId;
+		state int numSuccessiveTimedout = 0;
 
 		loop {
 			try {
@@ -82,10 +83,20 @@ struct ValidateStorage : TestWorkload {
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId).detail("AuditType", type);
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e).detail("AuditType", type);
+				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e).detail("AuditType", type).detail("SuccessiveTimedOut", numSuccessiveTimedout);
+				if (e.code()==error_code_timed_out) {
+					numSuccessiveTimedout++;
+				} else {
+					numSuccessiveTimedout = 0;
+				}
+				if (numSuccessiveTimedout>1) {
+					return Void();
+				}
 				wait(delay(1));
 			}
 		}
+
+		numSuccessiveTimedout = 0;
 
 		loop {
 			try {
@@ -101,10 +112,21 @@ struct ValidateStorage : TestWorkload {
 				TraceEvent("WaitAuditStorageError")
 				    .errorUnsuppressed(e)
 				    .detail("AuditID", auditId)
-				    .detail("AuditType", type);
+				    .detail("AuditType", type)
+					.detail("SuccessiveTimedOut", numSuccessiveTimedout);
+				if (e.code()==error_code_timed_out) {
+					numSuccessiveTimedout++;
+				} else {
+					numSuccessiveTimedout = 0;
+				}
+				if (numSuccessiveTimedout>1) {
+					return Void();
+				}
 				wait(delay(1));
 			}
 		}
+
+		numSuccessiveTimedout = 0;
 
 		loop {
 			try {
@@ -117,7 +139,15 @@ struct ValidateStorage : TestWorkload {
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId_).detail("AuditType", type);
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e).detail("AuditType", type);
+				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e).detail("AuditType", type).detail("SuccessiveTimedOut", numSuccessiveTimedout);
+				if (e.code()==error_code_timed_out) {
+					numSuccessiveTimedout++;
+				} else {
+					numSuccessiveTimedout = 0;
+				}
+				if (numSuccessiveTimedout>1) {
+					return Void();
+				}
 				wait(delay(1));
 			}
 		}
@@ -138,14 +168,14 @@ struct ValidateStorage : TestWorkload {
 
 		TraceEvent("TestValueWritten");
 
-		/*wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
+		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
 		TraceEvent("TestValueVerified");
 
 		wait(self->auditStorageForType(cx, AuditType::ValidateHA));
 		TraceEvent("TestValidateHADone");
 
 		wait(self->auditStorageForType(cx, AuditType::ValidateReplica));
-		TraceEvent("TestValidateReplicaDone");*/
+		TraceEvent("TestValidateReplicaDone");
 
 		wait(self->auditStorageForType(cx, AuditType::ValidateMetadata));
 		TraceEvent("TestValidateMetadataDone");
