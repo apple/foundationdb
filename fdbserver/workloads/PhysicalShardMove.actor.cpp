@@ -249,7 +249,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				TraceEvent(SevDebug, "TestCheckpointMetaDataFetched")
 				    .detail("Range", describe(checkpointRanges))
 				    .detail("Version", version);
-				// .detail("Checkpoints", describe(records));
 
 				break;
 			} catch (Error& e) {
@@ -263,31 +262,56 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			}
 		}
 
-		// Fetch checkpoints.
-		state std::string checkpointDir = abspath("checkpoints");
+		// Fetch checkpoint.
+		state std::string checkpointDir = abspath("fetchedCheckpoints");
 		platform::eraseDirectoryRecursive(checkpointDir);
 		ASSERT(platform::createDirectory(checkpointDir));
 		state std::vector<CheckpointMetaData> fetchedCheckpoints;
-		loop {
-			fetchedCheckpoints.clear();
-			try {
-				std::vector<Future<CheckpointMetaData>> fCheckpointMetaData;
-				if (asKeyValues) {
-					TraceEvent(SevDebug, "FetchCheckpointAsKeyValues");
-					for (const auto& [range, record] : records) {
-						fCheckpointMetaData.push_back(fetchCheckpointRanges(cx, record, checkpointDir, { range }));
+		state int i = 0;
+		for (; i < records.size(); ++i) {
+			loop {
+				TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", records[i].second.toString());
+				state std::string currentDir = fetchedCheckpointDir(checkpointDir, records[i].second.checkpointID);
+				platform::eraseDirectoryRecursive(currentDir);
+				ASSERT(platform::createDirectory(currentDir));
+				try {
+					state CheckpointMetaData record;
+					if (asKeyValues) {
+						std::vector<KeyRange> fetchRanges;
+						for (const auto& range : restoreRanges) {
+							for (const auto& cRange : records[i].second.ranges) {
+								if (cRange.contains(range)) {
+									fetchRanges.push_back(range);
+									break;
+								}
+							}
+						}
+						ASSERT(!fetchRanges.empty());
+						wait(store(record, fetchCheckpointRanges(cx, records[i].second, currentDir, fetchRanges)));
+						ASSERT(record.getFormat() == RocksDBKeyValues);
+					} else {
+						wait(store(record, fetchCheckpoint(cx, records[i].second, currentDir)));
+						ASSERT(record.getFormat() == format);
 					}
-				} else {
-					for (const auto& [range, record] : records) {
-						fCheckpointMetaData.push_back(fetchCheckpoint(cx, record, checkpointDir));
+					if (records[i].second.bytesSampleFile.present()) {
+						ASSERT(record.bytesSampleFile.present());
+						ASSERT(fileExists(record.bytesSampleFile.get()));
+						TraceEvent(SevDebug, "TestCheckpointByteSampleFile")
+						    .detail("RemoteFile", records[i].second.bytesSampleFile.get())
+						    .detail("LocalFile", record.bytesSampleFile.get());
 					}
+					fetchedCheckpoints.push_back(record);
+					TraceEvent(SevDebug, "TestCheckpointFetched").detail("Checkpoint", record.toString());
+					break;
+				} catch (Error& e) {
+					TraceEvent(SevWarn, "TestFetchCheckpointError")
+					    .errorUnsuppressed(e)
+					    .detail("Checkpoint", records[i].second.toString());
+					wait(delay(1));
 				}
 				wait(store(fetchedCheckpoints, getAll(fCheckpointMetaData)));
 				TraceEvent(SevDebug, "TestCheckpointFetched").detail("Checkpoints", describe(fetchedCheckpoints));
 				break;
-			} catch (Error& e) {
-				TraceEvent(SevWarn, "TestFetchCheckpointError").errorUnsuppressed(e);
-				wait(delay(1));
 			}
 		}
 

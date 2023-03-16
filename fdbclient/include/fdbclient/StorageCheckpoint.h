@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 
 const std::string checkpointBytesSampleFileName = "metadata_bytes.sst";
+const std::string emptySstFilePath = "Dummy Empty SST File Path";
 
 // FDB storage checkpoint format.
 enum CheckpointFormat {
@@ -60,6 +61,8 @@ struct CheckpointMetaData {
 	Standalone<StringRef> serializedCheckpoint;
 
 	Optional<UID> actionId; // Unique ID defined by the application.
+
+	std::string dir;
 
 	CheckpointMetaData() = default;
 	CheckpointMetaData(const std::vector<KeyRange>& ranges,
@@ -118,8 +121,17 @@ struct CheckpointMetaData {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, version, ranges, format, state, checkpointID, src, serializedCheckpoint, actionId, bytesSampleFile);
+		serializer(ar,
+		           version,
+		           ranges,
+		           format,
+		           state,
+		           checkpointID,
+		           src,
+		           serializedCheckpoint,
+		           actionId,
+		           bytesSampleFile,
+		           dir);
 	}
 };
 

@@ -50,7 +50,7 @@ public:
 					        std::optional<fdb::Value> res = copyValueRef(future.get());
 					        if (res != value) {
 						        error(fmt::format(
-						            "expected: {} actual: {}", fdb::toCharsRef(value), fdb::toCharsRef(res.value())));
+						            "expected: {} actual: {}", fdb::toCharsRef(value), fdb::toCharsRef(res)));
 					        }
 					        ctx->done();
 				        });
