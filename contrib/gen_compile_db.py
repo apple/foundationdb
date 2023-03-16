@@ -61,9 +61,6 @@ if len(args.ninjatool) > 0:
             # Figure out which files are actually using this command.
             filesInCmd = [x for x in transformedSubCmd if x.endswith('.swift')]
             for cmdFile in filesInCmd:
-                if cmdFile in swiftCompilationCommands:
-                    print("warning: duplicate Swift compilation entry for {}".format(cmdFile))
-                    continue
                 swiftCompilationCommands[cmdFile] = {'file': cmdFile, 'command': cmd, 'directory': fileCmd['directory']}
     except:
         print("error: failed to aquire Swift compilation commands")
