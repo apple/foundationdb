@@ -92,6 +92,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
+#include "fdbserver/StorageCorruptionBug.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
@@ -458,6 +459,7 @@ private:
 	struct StorageServer* data;
 	IKeyValueStore* storage;
 	void writeMutations(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
+	void writeMutationsBuggy(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
 
 	ACTOR static Future<Key> readFirstKey(IKeyValueStore* storage, KeyRangeRef range, Optional<ReadOptions> options) {
 		RangeResult r = wait(storage->readRange(range, 1, 1 << 30, options));
@@ -10367,6 +10369,29 @@ void StorageServerDisk::writeMutation(MutationRef mutation) {
 		ASSERT(false);
 }
 
+void StorageServerDisk::writeMutationsBuggy(const VectorRef<MutationRef>& mutations,
+                                            Version debugVersion,
+                                            const char* debugContext) {
+	auto bug = SimBugInjector().get<StorageCorruptionBug>(StorageCorruptionBugID());
+	if (!bug) {
+		writeMutations(mutations, debugVersion, debugContext);
+	}
+	int begin = 0;
+	while (begin < mutations.size()) {
+		int i;
+		for (i = begin; i < mutations.size(); ++i) {
+			if (deterministicRandom()->random01() < bug->corruptionProbability) {
+				bug->hit();
+				break;
+			}
+		}
+		writeMutations(mutations.slice(begin, i), debugVersion, debugContext);
+		// we want to drop the mutation at i (unless i == mutations.size(), in which case this will just finish the
+		// loop)
+		begin = i + 1;
+	}
+}
+
 void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
                                        Version debugVersion,
                                        const char* debugContext) {
@@ -10399,7 +10424,11 @@ bool StorageServerDisk::makeVersionMutationsDurable(Version& prevStorageVersion,
 		ASSERT(v.version > prevStorageVersion && v.version <= newStorageVersion);
 		// TODO(alexmiller): Update to version tracking.
 		// DEBUG_KEY_RANGE("makeVersionMutationsDurable", v.version, KeyRangeRef());
-		writeMutations(v.mutations, v.version, "makeVersionDurable");
+		if (!SimBugInjector().isEnabled()) {
+			writeMutations(v.mutations, v.version, "makeVersionDurable");
+		} else {
+			writeMutationsBuggy(v.mutations, v.version, "makeVersionDurable");
+		}
 		for (const auto& m : v.mutations)
 			bytesLeft -= mvccStorageBytes(m);
 		prevStorageVersion = v.version;
