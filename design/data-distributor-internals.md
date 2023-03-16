@@ -82,7 +82,13 @@ Actors are created to monitor the reasons of key movement:
 (4) `teamTracker` actor monitors a team’s healthiness. When a server in the team becomes unhealthy, it issues the `RelocateShard` request to repair the replication factor. The less servers a team has, the higher priority the `RelocateShard` request will be.
 
 #### Movement Priority
-Each shard movement has a priority associating with the move attempt, which is depended on the priority of the source team. The explanation of each priority knob (`PRIORITY_<XXX>`) is in `ServerKnobs.h`.
+There are roughly 4 class of movement priorities
+* Healthy priority. The movement is for maintain the cluster healthy status, and the priority is depended on the healthy status of the source team.
+* Load balance priority. The movement is for balance cluster workload.
+* Boundary change priority. The movement will change current shard boundaries.
+* Others. Like resuming a in-flight movement.
+
+Each shard movement has a priority associating with the move attempt,  The explanation of each priority knob (`PRIORITY_<XXX>`) is in `ServerKnobs.h`.
 
 In `status json` output, please look at field `.data.team_tracker.state` for team priority state.
 
