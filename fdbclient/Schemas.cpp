@@ -933,6 +933,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                           "healthy_repartitioning",
                           "healthy_removing_server",
                           "healthy_rebalancing",
+                          "healthy_perpetual_wiggle",
                           "healthy"
                        ]
                     },
