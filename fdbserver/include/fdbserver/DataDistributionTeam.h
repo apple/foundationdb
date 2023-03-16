@@ -103,7 +103,7 @@ private:
 };
 
 struct GetTeamRequest {
-    TeamSelect teamSelect;
+	TeamSelect teamSelect;
 	bool preferLowerDiskUtil; // if true, lower utilized team has higher score
 	bool teamMustHaveShards;
 	bool forReadBalance;
