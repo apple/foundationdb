@@ -1782,8 +1782,43 @@ ACTOR Future<Void> initializeSimConfig(Database db) {
 			g_simulator->storagePolicy = dbConfig.storagePolicy;
 			g_simulator->tLogPolicy = dbConfig.tLogPolicy;
 			g_simulator->tLogWriteAntiQuorum = dbConfig.tLogWriteAntiQuorum;
-			g_simulator->remoteTLogPolicy = dbConfig.getRemoteTLogPolicy();
 			g_simulator->usableRegions = dbConfig.usableRegions;
+
+			// If the same region is being shared between the remote and a satellite, then our simulated policy checking
+			// may fail to account for the total number of needed machines when deciding what can be killed. To work
+			// around this, we increase the required transaction logs in the remote policy to include the number of
+			// satellite logs that may get recruited there
+			bool foundSharedDcId = false;
+			std::set<Key> dcIds;
+			int maxSatelliteReplication = 0;
+			for (auto const& r : dbConfig.regions) {
+				if (!dcIds.insert(r.dcId).second) {
+					foundSharedDcId = true;
+				}
+				if (!r.satellites.empty()) {
+					for (auto const& s : r.satellites) {
+						if (!dcIds.insert(s.dcId).second) {
+							foundSharedDcId = true;
+						}
+					}
+
+					maxSatelliteReplication =
+					    std::max(maxSatelliteReplication, r.satelliteTLogReplicationFactor / r.satelliteTLogUsableDcs);
+				}
+			}
+
+			if (foundSharedDcId) {
+				int totalRequired = std::max(dbConfig.tLogReplicationFactor, dbConfig.remoteTLogReplicationFactor) +
+				                    maxSatelliteReplication;
+				g_simulator->remoteTLogPolicy = Reference<IReplicationPolicy>(
+				    new PolicyAcross(totalRequired, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+				TraceEvent("ChangingSimTLogPolicyForSharedRemote")
+				    .detail("TotalRequired", totalRequired)
+				    .detail("MaxSatelliteReplication", maxSatelliteReplication);
+			} else {
+				g_simulator->remoteTLogPolicy = dbConfig.getRemoteTLogPolicy();
+			}
+
 			return Void();
 		} catch (Error& e) {
 			wait(tr.onError(e));
