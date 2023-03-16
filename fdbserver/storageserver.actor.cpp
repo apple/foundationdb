@@ -9598,6 +9598,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				ErrorOr<Void> e = wait(errorOr(data->interfaceRegistered));
 				if (e.isError()) {
 					TraceEvent(SevWarn, "StorageInterfaceRegistrationFailed", data->thisServerID).error(e.getError());
+					throw e.getError();
 				}
 			}
 		}
