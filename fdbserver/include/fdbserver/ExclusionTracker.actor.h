@@ -46,6 +46,11 @@ struct ExclusionTracker {
 	ExclusionTracker() {}
 	ExclusionTracker(Database db) : db(db) { trackerFuture = tracker(this); }
 
+	bool isFailedOrExcluded(NetworkAddress addr) {
+		AddressExclusion addrExclusion(addr.ip, addr.port);
+		return excluded.count(addrExclusion) || failed.count(addrExclusion);
+	}
+
 	ACTOR static Future<Void> tracker(ExclusionTracker* self) {
 		// Fetch the list of excluded servers
 		state ReadYourWritesTransaction tr(self->db);

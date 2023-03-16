@@ -1243,6 +1243,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						return false;
 					}
 				}
+			} else if (blobWorkersByAddr[addr] > 0) {
+				TraceEvent("ConsistencyCheck_BWOnExcludedAddr").detail("Address", addr);
+				return false;
 			}
 		}
 		return numBlobWorkerProcesses > 0;
