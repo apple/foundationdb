@@ -1795,7 +1795,7 @@ ACTOR Future<Void> initializeSimConfig(Database db) {
 				if (!dcIds.insert(r.dcId).second) {
 					foundSharedDcId = true;
 				}
-				if (!r.satellites.empty()) {
+				if (!r.satellites.empty() && r.satelliteTLogReplicationFactor > 0 && r.satelliteTLogUsableDcs > 0) {
 					for (auto const& s : r.satellites) {
 						if (!dcIds.insert(s.dcId).second) {
 							foundSharedDcId = true;
@@ -1814,7 +1814,9 @@ ACTOR Future<Void> initializeSimConfig(Database db) {
 				    new PolicyAcross(totalRequired, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 				TraceEvent("ChangingSimTLogPolicyForSharedRemote")
 				    .detail("TotalRequired", totalRequired)
-				    .detail("MaxSatelliteReplication", maxSatelliteReplication);
+				    .detail("MaxSatelliteReplication", maxSatelliteReplication)
+				    .detail("ActualPolicy", dbConfig.getRemoteTLogPolicy()->info())
+				    .detail("SimulatorPolicy", g_simulator->remoteTLogPolicy->info());
 			} else {
 				g_simulator->remoteTLogPolicy = dbConfig.getRemoteTLogPolicy();
 			}
