@@ -635,42 +635,50 @@ struct GetShardStateRequest {
 struct StorageMetrics {
 	constexpr static FileIdentifier file_identifier = 13622226;
 	int64_t bytes = 0; // total storage
-	// FIXME: currently, neither of bytesPerKSecond or iosPerKSecond are actually used in DataDistribution calculations.
-	// This may change in the future, but this comment is left here to avoid any confusion for the time being.
-	int64_t bytesPerKSecond = 0; // network bandwidth (average over 10s)
+	// FIXME: currently, neither of bytesWrittenPerKSecond or iosPerKSecond are actually used in DataDistribution
+	// calculations. This may change in the future, but this comment is left here to avoid any confusion for the time
+	// being.
+	int64_t bytesWrittenPerKSecond = 0; // network bandwidth (average over 10s)
 	int64_t iosPerKSecond = 0;
 	int64_t bytesReadPerKSecond = 0;
+	int64_t opsReadPerKSecond = 0;
 
 	static const int64_t infinity = 1LL << 60;
 
 	bool allLessOrEqual(const StorageMetrics& rhs) const {
-		return bytes <= rhs.bytes && bytesPerKSecond <= rhs.bytesPerKSecond && iosPerKSecond <= rhs.iosPerKSecond &&
-		       bytesReadPerKSecond <= rhs.bytesReadPerKSecond;
+		return bytes <= rhs.bytes && bytesWrittenPerKSecond <= rhs.bytesWrittenPerKSecond &&
+		       iosPerKSecond <= rhs.iosPerKSecond && bytesReadPerKSecond <= rhs.bytesReadPerKSecond &&
+		       opsReadPerKSecond <= rhs.opsReadPerKSecond;
 	}
 	void operator+=(const StorageMetrics& rhs) {
 		bytes += rhs.bytes;
-		bytesPerKSecond += rhs.bytesPerKSecond;
+		bytesWrittenPerKSecond += rhs.bytesWrittenPerKSecond;
 		iosPerKSecond += rhs.iosPerKSecond;
 		bytesReadPerKSecond += rhs.bytesReadPerKSecond;
+		opsReadPerKSecond += rhs.opsReadPerKSecond;
 	}
 	void operator-=(const StorageMetrics& rhs) {
 		bytes -= rhs.bytes;
-		bytesPerKSecond -= rhs.bytesPerKSecond;
+		bytesWrittenPerKSecond -= rhs.bytesWrittenPerKSecond;
 		iosPerKSecond -= rhs.iosPerKSecond;
 		bytesReadPerKSecond -= rhs.bytesReadPerKSecond;
+		opsReadPerKSecond -= rhs.opsReadPerKSecond;
 	}
 	template <class F>
 	void operator*=(F f) {
 		bytes *= f;
-		bytesPerKSecond *= f;
+		bytesWrittenPerKSecond *= f;
 		iosPerKSecond *= f;
 		bytesReadPerKSecond *= f;
+		opsReadPerKSecond *= f;
 	}
-	bool allZero() const { return !bytes && !bytesPerKSecond && !iosPerKSecond && !bytesReadPerKSecond; }
+	bool allZero() const {
+		return !bytes && !bytesWrittenPerKSecond && !iosPerKSecond && !bytesReadPerKSecond && !opsReadPerKSecond;
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, bytes, bytesPerKSecond, iosPerKSecond, bytesReadPerKSecond);
+		serializer(ar, bytes, bytesWrittenPerKSecond, iosPerKSecond, bytesReadPerKSecond, opsReadPerKSecond);
 	}
 
 	void negate() { operator*=(-1.0); }
@@ -698,16 +706,18 @@ struct StorageMetrics {
 	}
 
 	bool operator==(StorageMetrics const& rhs) const {
-		return bytes == rhs.bytes && bytesPerKSecond == rhs.bytesPerKSecond && iosPerKSecond == rhs.iosPerKSecond &&
-		       bytesReadPerKSecond == rhs.bytesReadPerKSecond;
+		return bytes == rhs.bytes && bytesWrittenPerKSecond == rhs.bytesWrittenPerKSecond &&
+		       iosPerKSecond == rhs.iosPerKSecond && bytesReadPerKSecond == rhs.bytesReadPerKSecond &&
+		       opsReadPerKSecond == rhs.opsReadPerKSecond;
 	}
 
 	std::string toString() const {
-		return format("Bytes: %lld, BPerKSec: %lld, iosPerKSec: %lld, BReadPerKSec: %lld",
+		return format("Bytes: %lld, BPerKSec: %lld, iosPerKSec: %lld, BReadPerKSec: %lld, OpReadPerKSec: %lld",
 		              bytes,
-		              bytesPerKSecond,
+		              bytesWrittenPerKSecond,
 		              iosPerKSecond,
-		              bytesReadPerKSecond);
+		              bytesReadPerKSecond,
+		              opsReadPerKSecond);
 	}
 };
 
@@ -777,20 +787,30 @@ struct ReadHotRangeWithMetrics {
 	// The density for key range [A,C) is 30 * 100 / 200 = 15
 	double density;
 	// How many bytes of data was sent in a period of time because of read requests.
-	double readBandwidth;
+	double readBandwidthSec;
+
+	int64_t bytes; // storage bytes
+	double readOpsSec; // an interpolated value over sampling interval
 
 	ReadHotRangeWithMetrics() = default;
 	ReadHotRangeWithMetrics(KeyRangeRef const& keys, double density, double readBandwidth)
-	  : keys(keys), density(density), readBandwidth(readBandwidth) {}
+	  : keys(keys), density(density), readBandwidthSec(readBandwidth) {}
+
+	ReadHotRangeWithMetrics(KeyRangeRef const& keys, int64_t bytes, double readBandwidth, double readOpsKSec)
+	  : keys(keys), density(readBandwidth / std::max((int64_t)1, bytes)), readBandwidthSec(readBandwidth), bytes(bytes),
+	    readOpsSec(readOpsKSec) {}
 
 	ReadHotRangeWithMetrics(Arena& arena, const ReadHotRangeWithMetrics& rhs)
-	  : keys(arena, rhs.keys), density(rhs.density), readBandwidth(rhs.readBandwidth) {}
+	  : keys(arena, rhs.keys), density(rhs.density), readBandwidthSec(rhs.readBandwidthSec), bytes(rhs.bytes),
+	    readOpsSec(rhs.readOpsSec) {}
 
-	int expectedSize() const { return keys.expectedSize() + sizeof(density) + sizeof(readBandwidth); }
+	int expectedSize() const {
+		return keys.expectedSize() + sizeof(density) + sizeof(readBandwidthSec) + sizeof(bytes) + sizeof(readOpsSec);
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, density, readBandwidth);
+		serializer(ar, keys, density, readBandwidthSec, bytes, readOpsSec);
 	}
 };
 
@@ -805,16 +825,22 @@ struct ReadHotSubRangeReply {
 };
 struct ReadHotSubRangeRequest {
 	constexpr static FileIdentifier file_identifier = 10259266;
+	enum SplitType : uint8_t { BYTES, READ_BYTES, READ_OPS };
+
 	Arena arena;
 	KeyRangeRef keys;
 	ReplyPromise<ReadHotSubRangeReply> reply;
 
+	uint8_t type = SplitType::BYTES;
+	int chunkCount = 1;
+
 	ReadHotSubRangeRequest() {}
-	ReadHotSubRangeRequest(KeyRangeRef const& keys) : keys(arena, keys) {}
+	ReadHotSubRangeRequest(KeyRangeRef const& keys, SplitType type = SplitType::BYTES, int chunkCount = 1)
+	  : keys(arena, keys), type(type), chunkCount(chunkCount) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, reply, arena);
+		serializer(ar, keys, reply, type, chunkCount, arena);
 	}
 };
 
