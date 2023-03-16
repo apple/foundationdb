@@ -369,6 +369,7 @@ public:
 	int64_t ROCKSDB_MAX_BACKGROUND_JOBS;
 	int64_t ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD;
 	double ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY;
+	bool ROCKSDB_RETURN_OVERLOADED_ON_TIMEOUT;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -601,6 +602,7 @@ public:
 	int64_t STORAGE_DURABILITY_LAG_HARD_MAX;
 	int64_t STORAGE_DURABILITY_LAG_SOFT_MAX;
 	bool STORAGE_INCLUDE_FEED_STORAGE_QUEUE;
+	double STORAGE_FETCH_KEYS_DELAY;
 
 	int64_t LOW_PRIORITY_STORAGE_QUEUE_BYTES;
 	int64_t LOW_PRIORITY_DURABILITY_LAG;
@@ -735,6 +737,7 @@ public:
 	double STORAGE_DURABILITY_LAG_MIN_RATE;
 	int STORAGE_COMMIT_BYTES;
 	int STORAGE_FETCH_BYTES;
+	int STORAGE_ROCKSDB_FETCH_BYTES;
 	double STORAGE_COMMIT_INTERVAL;
 	int BYTE_SAMPLING_FACTOR;
 	int BYTE_SAMPLING_OVERHEAD;
@@ -809,6 +812,7 @@ public:
 	                                          // Enabling this can reduce toil of manually restarting the SS.
 	                                          // Enable with caution: If io_timeout is caused by disk failure, we won't
 	                                          // want to restart the SS, which increases risk of data corruption.
+	double WORKER_START_STORAGE_DELAY;
 
 	// Test harness
 	double WORKER_POLL_DELAY;
