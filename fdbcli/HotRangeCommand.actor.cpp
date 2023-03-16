@@ -29,7 +29,6 @@
 #include "fdbclient/json_spirit/json_spirit_value.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
-#include "flow/NetworkAddress.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
