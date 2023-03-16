@@ -40,7 +40,7 @@ private:
 	int maxSize;
 	Deque<std::pair<double, T>> updates; // pair{time, numeric}
 	double interval;
-	// Updated when initlization initialization Or pop() due to full Deque
+	// Updated when initialization Or pop() due to full Deque
 	double previousPopTime;
 
 	void pop() {
@@ -56,13 +56,12 @@ public:
 	T getTotal() const { return total; }
 
 	double getAverage() {
-		while (!updates.empty() && updates.front().first < now() - interval) {
-			pop();
-		}
-
-		if (now() - interval <= previousPopTime) { // struct is just initialization Or pop() due to full
+		if (now() - interval <= previousPopTime) { // struct is just initialized Or pop() due to full
 			return (total - previous) / (now() - previousPopTime);
 		} else {
+			while (!updates.empty() && updates.front().first < now() - interval) {
+				pop();
+			}
 			return (total - previous) / interval;
 		}
 	}
@@ -72,8 +71,8 @@ public:
 		updates.push_back(std::make_pair(now(), sample));
 		// If so, we would pop the front element from the Deque.
 		while (updates.size() > maxSize) {
+			previousPopTime = updates.front().first;
 			pop();
-			previousPopTime = now();
 		}
 	}
 };
