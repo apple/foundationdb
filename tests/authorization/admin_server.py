@@ -23,8 +23,9 @@ from multiprocessing import Pipe, Process
 from typing import Union, List
 from util import to_str, to_bytes, cleanup_tenant
 
+
 class _admin_request(object):
-    def __init__(self, op: str, args: List[Union[str, bytes]]=[]):
+    def __init__(self, op: str, args: List[Union[str, bytes]] = []):
         self.op = op
         self.args = args
 
@@ -33,6 +34,7 @@ class _admin_request(object):
 
     def __repr__(self):
         return f"admin_request({self.op}, {self.args})"
+
 
 def main_loop(main_pipe, pipe):
     main_pipe.close()
@@ -85,9 +87,18 @@ def main_loop(main_pipe, pipe):
                     resp = Exception("db not open")
                 else:
                     tr = db.create_transaction()
-                    del tr[b'':b'\xff']
+                    del tr[b"":b"\xff"]
                     tr.commit().wait()
-                    tenants = list(map(lambda x: x.key, list(fdb.tenant_management.list_tenants(db, b'', b'\xff', 0).to_list())))
+                    tenants = list(
+                        map(
+                            lambda x: x.key,
+                            list(
+                                fdb.tenant_management.list_tenants(
+                                    db, b"", b"\xff", 0
+                                ).to_list()
+                            ),
+                        )
+                    )
                     for tenant in tenants:
                         fdb.tenant_management.delete_tenant(db, tenant)
             elif op == "terminate":
@@ -99,10 +110,13 @@ def main_loop(main_pipe, pipe):
             resp = e
         pipe.send(resp)
 
+
 _admin_server = None
+
 
 def get():
     return _admin_server
+
 
 # server needs to be a singleton running in subprocess, because FDB network layer (including active TLS config) is a global var
 class Server(object):
@@ -111,7 +125,9 @@ class Server(object):
         assert _admin_server is None, "admin server may be setup once per process"
         _admin_server = self
         self._main_pipe, self._admin_pipe = Pipe(duplex=True)
-        self._admin_proc = Process(target=main_loop, args=(self._main_pipe, self._admin_pipe))
+        self._admin_proc = Process(
+            target=main_loop, args=(self._main_pipe, self._admin_pipe)
+        )
 
     def start(self):
         self._admin_proc.start()

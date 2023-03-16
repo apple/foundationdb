@@ -264,7 +264,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		}
 
 		// Fetch checkpoint.
-		state std::string checkpointDir = abspath("checkpoints");
+		state std::string checkpointDir = abspath("fetchedCheckpoints");
 		platform::eraseDirectoryRecursive(checkpointDir);
 		ASSERT(platform::createDirectory(checkpointDir));
 		state std::vector<CheckpointMetaData> fetchedCheckpoints;
@@ -272,6 +272,9 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		for (; i < records.size(); ++i) {
 			loop {
 				TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", records[i].toString());
+				state std::string currentDir = fetchedCheckpointDir(checkpointDir, records[i].checkpointID);
+				platform::eraseDirectoryRecursive(currentDir);
+				ASSERT(platform::createDirectory(currentDir));
 				try {
 					state CheckpointMetaData record;
 					if (asKeyValues) {
@@ -285,11 +288,18 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 							}
 						}
 						ASSERT(!fetchRanges.empty());
-						wait(store(record, fetchCheckpointRanges(cx, records[i], checkpointDir, fetchRanges)));
+						wait(store(record, fetchCheckpointRanges(cx, records[i], currentDir, fetchRanges)));
 						ASSERT(record.getFormat() == RocksDBKeyValues);
 					} else {
-						wait(store(record, fetchCheckpoint(cx, records[i], checkpointDir)));
+						wait(store(record, fetchCheckpoint(cx, records[i], currentDir)));
 						ASSERT(record.getFormat() == format);
+					}
+					if (records[i].bytesSampleFile.present()) {
+						ASSERT(record.bytesSampleFile.present());
+						ASSERT(fileExists(record.bytesSampleFile.get()));
+						TraceEvent(SevDebug, "TestCheckpointByteSampleFile")
+						    .detail("RemoteFile", records[i].bytesSampleFile.get())
+						    .detail("LocalFile", record.bytesSampleFile.get());
 					}
 					fetchedCheckpoints.push_back(record);
 					TraceEvent(SevDebug, "TestCheckpointFetched").detail("Checkpoint", record.toString());

@@ -62,11 +62,8 @@ private:
 			ASSERT_EQ(tenantId, tenantMapEntry.id);
 			ASSERT_EQ(tenantData.tenantNameIndex[tenantMapEntry.tenantName], tenantId);
 
-			// Data clusters do not keep their last tenant ID up to date while part of a metacluster
-			if (tenantData.clusterType != ClusterType::METACLUSTER_DATA) {
-				if (TenantAPI::getTenantIdPrefix(tenantId) == TenantAPI::getTenantIdPrefix(tenantData.lastTenantId)) {
-					ASSERT_LE(tenantId, tenantData.lastTenantId);
-				}
+			if (TenantAPI::getTenantIdPrefix(tenantId) == TenantAPI::getTenantIdPrefix(tenantData.lastTenantId)) {
+				ASSERT_LE(tenantId, tenantData.lastTenantId);
 			}
 
 			if (tenantMapEntry.tenantGroup.present()) {

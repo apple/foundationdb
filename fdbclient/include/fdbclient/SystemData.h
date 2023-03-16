@@ -671,8 +671,9 @@ const Value blobGranuleFileValueFor(
     int64_t offset,
     int64_t length,
     int64_t fullFileLength,
+    int64_t logicalSize,
     Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta = Optional<BlobGranuleCipherKeysMeta>());
-std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t, Optional<BlobGranuleCipherKeysMeta>>
+std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t, int64_t, Optional<BlobGranuleCipherKeysMeta>>
 decodeBlobGranuleFileValue(ValueRef const& value);
 
 const Value blobGranulePurgeValueFor(Version version, KeyRange range, bool force);
@@ -737,8 +738,8 @@ UID decodeBlobWorkerAffinityValue(ValueRef const& value);
 extern const KeyRangeRef blobRestoreCommandKeys;
 const Value blobRestoreCommandKeyFor(const KeyRangeRef range);
 const KeyRange decodeBlobRestoreCommandKeyFor(const KeyRef key);
-const Value blobRestoreCommandValueFor(BlobRestoreStatus status);
-Standalone<BlobRestoreStatus> decodeBlobRestoreStatus(ValueRef const& value);
+const Value blobRestoreCommandValueFor(BlobRestoreState restoreState);
+Standalone<BlobRestoreState> decodeBlobRestoreState(ValueRef const& value);
 extern const KeyRangeRef blobRestoreArgKeys;
 const Value blobRestoreArgKeyFor(const KeyRangeRef range);
 const KeyRange decodeBlobRestoreArgKeyFor(const KeyRef key);

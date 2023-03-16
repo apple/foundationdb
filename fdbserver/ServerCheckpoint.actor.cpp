@@ -94,3 +94,11 @@ ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(Database cx,
 	    .detail("Ranges", describe(ranges));
 	return result;
 }
+
+std::string serverCheckpointDir(const std::string& baseDir, const UID& checkpointId) {
+	return joinPath(baseDir, checkpointId.toString());
+}
+
+std::string fetchedCheckpointDir(const std::string& baseDir, const UID& checkpointId) {
+	return joinPath(baseDir, checkpointId.toString());
+}
