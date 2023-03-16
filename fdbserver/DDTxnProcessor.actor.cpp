@@ -262,8 +262,7 @@ class DDTxnProcessorImpl {
 			team_cache.clear();
 			succeeded = false;
 			result->customReplication->insert(allKeys, -1);
-			if (g_network->isSimulated() && SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAMS > 0 &&
-			    !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			if (g_network->isSimulated() && ddLargeTeamEnabled()) {
 				for (auto& it : g_simulator->customReplicas) {
 					result->customReplication->insert(KeyRangeRef(std::get<0>(it), std::get<1>(it)), std::get<2>(it));
 				}

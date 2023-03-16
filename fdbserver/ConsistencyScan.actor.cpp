@@ -457,8 +457,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 		state bool isRelocating = destStorageServers.size() > 0;
 
 		state int customReplication = configuration.storageTeamSize;
-		if (g_network->isSimulated() && SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAMS > 0 &&
-		    !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		if (g_network->isSimulated() && ddLargeTeamEnabled()) {
 			for (auto& it : g_simulator->customReplicas) {
 				if (range.begin < std::get<1>(it) && std::get<0>(it) < range.end) {
 					TraceEvent("ConsistencyCheck_CheckCustomReplica")
@@ -483,6 +482,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 		}
 
 		// In a quiescent database, check that the team size is the same as the desired team size
+		// FIXME: when usable_regions=2, we need to determine how many storage servers are alive in each DC
 		if (firstClient && performQuiescentChecks &&
 		    ((configuration.usableRegions == 1 &&
 		      sourceStorageServers.size() != std::min(ssCount, customReplication)) ||

@@ -513,6 +513,8 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
 // Determines the maximum shard size based on the size of the database
 int64_t getMaxShardSize(double dbSizeEstimate);
 
+bool ddLargeTeamEnabled();
+
 #ifndef __INTEL_COMPILER
 #pragma endregion
 #endif

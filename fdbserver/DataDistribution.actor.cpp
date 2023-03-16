@@ -477,8 +477,8 @@ public:
 			}
 			ranges.push_back(KeyRangeRef(beginKey, endKey));
 
-			for (auto& keys : ranges) {
-				TraceEvent("DDMoveShardDefine4").detail("Keys", keys);
+			for (int r = 0; r < ranges.size(); r++) {
+				auto& keys = ranges[r];
 				self->shardsAffectedByTeamFailure->defineShard(keys);
 				std::vector<ShardsAffectedByTeamFailure::Team> teams;
 				teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.primarySrc, true));
@@ -486,12 +486,11 @@ public:
 					teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteSrc, false));
 				}
 
-				int customReplicas = self->configuration.storageTeamSize;
-				for (auto& it : self->initData->customReplication->intersectingRanges(keys)) {
-					customReplicas = std::max(customReplicas, it.value());
-				}
+				auto customRange = self->initData->customReplication->rangeContaining(keys.begin);
+				int customReplicas = std::max(self->configuration.storageTeamSize, customRange.value());
+				ASSERT_WE_THINK(customRange.range().contains(keys));
 
-				bool unhealthy = iShard.primarySrc.size() != customReplicas || ranges.size() > 1;
+				bool unhealthy = iShard.primarySrc.size() != customReplicas;
 				if (!unhealthy && self->configuration.usableRegions > 1) {
 					unhealthy = iShard.remoteSrc.size() != customReplicas;
 				}
@@ -510,19 +509,19 @@ public:
 					    .detail("Unhealthy", unhealthy);
 				}
 
-				TraceEvent("DDMoveShard2").detail("Keys", keys);
 				self->shardsAffectedByTeamFailure->moveShard(keys, teams);
-				if ((SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAMS > 0 && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
-				     unhealthy) ||
+				if ((ddLargeTeamEnabled() && (unhealthy || r > 0)) ||
 				    (iShard.hasDest && iShard.destId == anonymousShardId)) {
 					// This shard is already in flight.  Ideally we should use dest in ShardsAffectedByTeamFailure and
 					// generate a dataDistributionRelocator directly in DataDistributionQueue to track it, but it's
 					// easier to just (with low priority) schedule it for movement.
-
-					self->relocationProducer.send(
-					    RelocateShard(keys,
-					                  unhealthy ? DataMovementReason::TEAM_UNHEALTHY : DataMovementReason::RECOVER_MOVE,
-					                  RelocateReason::OTHER));
+					DataMovementReason reason = DataMovementReason::RECOVER_MOVE;
+					if (unhealthy) {
+						reason = DataMovementReason::TEAM_UNHEALTHY;
+					} else if (r > 0) {
+						reason = DataMovementReason::SPLIT_SHARD;
+					}
+					self->relocationProducer.send(RelocateShard(keys, reason, RelocateReason::OTHER));
 				}
 			}
 
@@ -564,13 +563,11 @@ public:
 
 				// Since a DataMove could cover more than one keyrange, e.g., during merge, we need to define
 				// the target shard and restart the shard tracker.
-				TraceEvent("DDMoveShardDefine5").detail("Keys", rs.keys);
 				self->shardsAffectedByTeamFailure->restartShardTracker.send(rs.keys);
 				self->shardsAffectedByTeamFailure->defineShard(rs.keys);
 
 				// When restoring a DataMove, the destination team is determined, and hence we need to register
 				// the data move now, so that team failures can be captured.
-				TraceEvent("DDMoveShard3").detail("Keys", rs.keys);
 				self->shardsAffectedByTeamFailure->moveShard(rs.keys, teams);
 				self->relocationProducer.send(rs);
 				wait(yield(TaskPriority::DataDistribution));

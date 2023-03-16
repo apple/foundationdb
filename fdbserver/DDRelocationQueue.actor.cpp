@@ -1824,7 +1824,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			}
 
 			if (!rd.isRestore()) {
-				TraceEvent("DDMoveShard", distributorId).detail("Keys", rd.keys);
 				self->shardsAffectedByTeamFailure->moveShard(rd.keys, destinationTeams);
 			}
 
@@ -2019,7 +2018,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 
 					self->bytesWritten += metrics.bytes;
-					TraceEvent("DDMoveShardFinish", distributorId).detail("Keys", rd.keys);
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
 

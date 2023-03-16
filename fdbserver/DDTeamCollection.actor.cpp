@@ -248,8 +248,7 @@ public:
 			Optional<Reference<IDataDistributionTeam>> bestOption;
 			std::vector<Reference<TCTeamInfo>> randomTeams;
 
-			if (SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAMS > 0 && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
-			    req.keys.present()) {
+			if (ddLargeTeamEnabled() && req.keys.present()) {
 				req.forReadBalance = true;
 				int customReplicas = self->configuration.storageTeamSize;
 				for (auto& it : self->customReplication->intersectingRanges(req.keys.get())) {
@@ -2977,7 +2976,7 @@ public:
 
 			self->addActor.send(self->machineTeamRemover());
 			self->addActor.send(self->serverTeamRemover());
-			if (SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAMS > 0 && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			if (ddLargeTeamEnabled()) {
 				self->addActor.send(self->fixWrongReplicas());
 			}
 
@@ -3971,21 +3970,21 @@ void DDTeamCollection::cleanupLargeTeams() {
 	}
 }
 
-int DDTeamCollection::maxLargeTeamSize(int teamSize) {
-	std::vector<UID> used_server;
+int DDTeamCollection::maxLargeTeamSize(int teamSize) const {
+	std::vector<Reference<TCServerInfo>> healthy;
 	for (auto& [serverID, server] : server_info) {
 		if (!server_status.get(serverID).isUnhealthy()) {
-			used_server.push_back(serverID);
+			healthy.push_back(server);
 		}
 	}
 
 	std::set<UID> serverIds;
 	std::vector<Reference<TCServerInfo>> candidateTeam;
-	for (int i = 0; i < used_server.size(); i++) {
+	for (int i = 0; i < healthy.size(); i++) {
 		if (candidateTeam.size() >= teamSize && satisfiesPolicy(candidateTeam)) {
 			break;
 		}
-		candidateTeam.push_back(server_info[used_server[i]]);
+		candidateTeam.push_back(healthy[i]);
 	}
 	if (!satisfiesPolicy(candidateTeam)) {
 		return -1;
@@ -4106,10 +4105,8 @@ void DDTeamCollection::addTeam(const std::vector<Reference<TCServerInfo>>& newTe
 	auto teamInfo = makeReference<TCTeamInfo>(newTeamServers, no_tenant);
 
 	// Move satisfiesPolicy to the end for performance benefit
-	auto badTeam =
-	    IsBadTeam{ redundantTeam || !satisfiesPolicy(teamInfo->getServers()) ||
-		           ((SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAMS == 0 || SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) &&
-		            teamInfo->size() != configuration.storageTeamSize) };
+	auto badTeam = IsBadTeam{ redundantTeam || !satisfiesPolicy(teamInfo->getServers()) ||
+		                      (!ddLargeTeamEnabled() && teamInfo->size() != configuration.storageTeamSize) };
 
 	teamInfo->tracker = teamTracker(teamInfo, badTeam, redundantTeam);
 	// ASSERT( teamInfo->serverIDs.size() > 0 ); //team can be empty at DB initialization

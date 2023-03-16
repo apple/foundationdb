@@ -637,7 +637,7 @@ protected:
 
 	void cleanupLargeTeams();
 
-	int maxLargeTeamSize(int size);
+	int maxLargeTeamSize(int size) const;
 
 	Reference<TCTeamInfo> buildLargeTeam(int size);
 

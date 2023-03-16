@@ -211,6 +211,10 @@ int64_t getMaxShardSize(double dbSizeEstimate) {
 	                (int64_t)SERVER_KNOBS->MAX_SHARD_BYTES);
 }
 
+bool ddLargeTeamEnabled() {
+	return SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAMS > 0 && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
+}
+
 // Returns the shard size bounds as well as whether `keys` a read hot shard.
 std::pair<ShardSizeBounds, bool> calculateShardSizeBounds(
     const KeyRange& keys,
@@ -540,7 +544,6 @@ void executeShardSplit(DataDistributionTracker* self,
 
 	for (int i = 0; i < skipRange; i++) {
 		KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
-		TraceEvent("DDMoveShardDefine1").detail("Keys", r);
 		self->shardsAffectedByTeamFailure->defineShard(r);
 		if (relocate) {
 			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, reason));
@@ -548,7 +551,6 @@ void executeShardSplit(DataDistributionTracker* self,
 	}
 	for (int i = numShards - 1; i > skipRange; i--) {
 		KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
-		TraceEvent("DDMoveShardDefine2").detail("Keys", r);
 		self->shardsAffectedByTeamFailure->defineShard(r);
 		if (relocate) {
 			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, reason));
@@ -1131,7 +1133,6 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 		self->systemSizeEstimate -= systemBytes;
 	}
 	restartShardTrackers(self, mergeRange, ShardMetrics(endingStats, lastLowBandwidthStartTime, shardCount));
-	TraceEvent("DDMoveShardDefine3").detail("Keys", mergeRange);
 	self->shardsAffectedByTeamFailure->defineShard(mergeRange);
 	self->output.send(RelocateShard(mergeRange, DataMovementReason::MERGE_SHARD, RelocateReason::MERGE_SHARD));
 
