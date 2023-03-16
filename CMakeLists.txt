@@ -212,7 +212,7 @@ if (CMAKE_EXPORT_COMPILE_COMMANDS AND WITH_PYTHON)
   add_custom_command(
 	  OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
 	  COMMAND $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/contrib/gen_compile_db.py
-	  ARGS -b ${CMAKE_CURRENT_BINARY_DIR} -s ${CMAKE_CURRENT_SOURCE_DIR} -o ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
+	  ARGS -b ${CMAKE_CURRENT_BINARY_DIR} -s ${CMAKE_CURRENT_SOURCE_DIR} -o ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json -ninjatool ${CMAKE_MAKE_PROGRAM} ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
 	  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/contrib/gen_compile_db.py ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
 	  COMMENT "Build compile commands for IDE"
 	)
