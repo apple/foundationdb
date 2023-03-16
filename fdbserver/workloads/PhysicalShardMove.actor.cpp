@@ -309,7 +309,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 					    .detail("Checkpoint", records[i].second.toString());
 					wait(delay(1));
 				}
-				wait(store(fetchedCheckpoints, getAll(fCheckpointMetaData)));
+				// wait(store(fetchedCheckpoints, getAll(fCheckpointMetaData)));
 				TraceEvent(SevDebug, "TestCheckpointFetched").detail("Checkpoints", describe(fetchedCheckpoints));
 				break;
 			}

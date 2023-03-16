@@ -38,7 +38,7 @@ ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint,
 
 ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint) {
 	wait(delay(0, TaskPriority::FetchKeys));
-	state CheckpointFormat format = checkpoint.getFormat();
+	const CheckpointFormat format = checkpoint.getFormat();
 	if (format == DataMoveRocksCF || format == RocksDB) {
 		if (!checkpoint.dir.empty()) {
 			platform::eraseDirectoryRecursive(checkpoint.dir);

@@ -9065,21 +9065,17 @@ private:
 			    .detail("Key", pendingCheckpointKey)
 			    .detail("Checkpoint", checkpoint.toString());
 		} else if (cState == CheckpointMetaData::Deleting) {
-			auto it = data->checkpoints.find(checkpointID);
-			if (it == data->checkpoints.end()) {
-				return;
-			} else {
-				checkpoint = it->second;
-				checkpoint.setState(CheckpointMetaData::Deleting);
-				const Key persistCheckpointKey(persistCheckpointKeys.begin.toString() +
-				                               checkpoint.checkpointID.toString());
-				data->addMutationToMutationLog(
-				    mLV, MutationRef(MutationRef::SetValue, persistCheckpointKey, checkpointValue(checkpoint)));
-				data->actors.add(deleteCheckpointQ(data, ver, checkpoint));
-				TraceEvent(SevInfo, "DeleteCheckpointScheduled", data->thisServerID)
-				    .detail("Source", "PrivateMutation")
-				    .detail("Checkpoint", checkpoint.toString());
-			}
+			ASSERT(std::find(checkpoint.src.begin(), checkpoint.src.end(), data->thisServerID) != checkpoint.src.end());
+            checkpoint.src.clear();
+            checkpoint.src.push_back(data->thisServerID);
+            checkpoint.dir = serverCheckpointDir(data->checkpointFolder, checkpoint.checkpointID);
+			const Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
+			data->addMutationToMutationLog(
+			    mLV, MutationRef(MutationRef::SetValue, persistCheckpointKey, checkpointValue(checkpoint)));
+			data->actors.add(deleteCheckpointQ(data, ver, checkpoint));
+			TraceEvent(SevInfo, "DeleteCheckpointScheduled", data->thisServerID)
+			    .detail("Source", "PrivateMutation")
+			    .detail("Checkpoint", checkpoint.toString());
 		}
 	} // Registers a pending checkpoint request, it will be fullfilled when the desired version is durable.
 };
