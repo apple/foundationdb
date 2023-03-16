@@ -232,8 +232,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		static const std::unordered_set<EncryptCipherDomainId> metadataDomainIds = { SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
 			                                                                         ENCRYPT_HEADER_DOMAIN_ID };
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
-		    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestEncryptCipherKeys(
-		        db, metadataDomainIds, BlobCipherMetrics::TLOG));
+		    wait(getLatestEncryptCipherKeys(db, metadataDomainIds, BlobCipherMetrics::TLOG));
 		cipherKeys = cks;
 	}
 
@@ -690,8 +689,7 @@ ACTOR Future<Void> processTransactionStateRequestPart(Reference<Resolver> self,
 				SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, ENCRYPT_HEADER_DOMAIN_ID
 			};
 			std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
-			    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestEncryptCipherKeys(
-			        db, metadataDomainIds, BlobCipherMetrics::TLOG));
+			    wait(getLatestEncryptCipherKeys(db, metadataDomainIds, BlobCipherMetrics::TLOG));
 			cipherKeys = cks;
 		}
 		wait(processCompleteTransactionStateRequest(

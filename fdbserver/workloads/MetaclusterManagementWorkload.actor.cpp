@@ -154,6 +154,10 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		state Reference<DataClusterData> dataDb = self->dataDbs[clusterName];
 		state bool retried = false;
 
+		if (deterministicRandom()->random01() < 0.1) {
+			clusterName = "\xff"_sr.withSuffix(clusterName);
+		}
+
 		try {
 			state DataClusterEntry entry;
 			entry.capacity.numTenantGroups = deterministicRandom()->randomInt(0, 4);
@@ -198,6 +202,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				}
 			}
 
+			ASSERT(!clusterName.startsWith("\xff"_sr));
 			ASSERT(!dataDb->registered);
 			ASSERT(!dataDb->detached || dataDb->tenants.empty());
 
@@ -215,6 +220,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				return Void();
 			} else if (e.code() == error_code_cluster_not_empty) {
 				ASSERT(dataDb->detached && !dataDb->tenants.empty());
+				return Void();
+			} else if (e.code() == error_code_invalid_cluster_name) {
+				ASSERT(clusterName.startsWith("\xff"_sr));
 				return Void();
 			}
 
@@ -380,6 +388,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		state Reference<DataClusterData> dataDb = self->dataDbs[clusterName];
 		state bool dryRun = deterministicRandom()->coinflip();
 		state bool forceJoin = deterministicRandom()->coinflip();
+		state bool forceReuseTenantIdPrefix = deterministicRandom()->coinflip();
 
 		state std::vector<std::string> messages;
 		state bool retried = false;
@@ -403,6 +412,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				                                   ApplyManagementClusterUpdates(!dataDb->detached),
 				                                   RestoreDryRun(dryRun),
 				                                   ForceJoin(forceJoin),
+				                                   ForceReuseTenantIdPrefix(forceReuseTenantIdPrefix),
 				                                   &messages);
 				Optional<Void> result = wait(timeout(restoreFuture, deterministicRandom()->randomInt(1, 30)));
 				if (!result.present()) {
@@ -411,6 +421,12 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				}
 
 				ASSERT(dataDb->registered || dataDb->detached);
+
+				// Since we are not creating a new management cluster with updated tenant ID prefix, it will
+				// fail to repopulate a management cluster unless we force reuse of the tenant ID prefix or in
+				// some cases if the cluster is empty
+				ASSERT(forceReuseTenantIdPrefix || !dataDb->detached || dataDb->tenants.empty());
+
 				if (dataDb->detached && !dryRun) {
 					dataDb->detached = false;
 					dataDb->registered = true;
@@ -445,7 +461,13 @@ struct MetaclusterManagementWorkload : TestWorkload {
 					wait(removeFailedRestoredCluster(self, clusterName));
 					wait(resolveCollisions(self, clusterName, dataDb));
 					continue;
+				} else if (error.code() == error_code_invalid_metacluster_configuration) {
+					ASSERT(!forceReuseTenantIdPrefix && dataDb->detached);
+					wait(removeFailedRestoredCluster(self, clusterName));
+					forceReuseTenantIdPrefix = true;
+					continue;
 				}
+
 				TraceEvent(SevError, "RestoreClusterFailure").error(error).detail("ClusterName", clusterName);
 				ASSERT(false);
 			}

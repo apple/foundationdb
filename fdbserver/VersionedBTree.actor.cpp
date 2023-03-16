@@ -3666,7 +3666,10 @@ public:
 		if (dispose) {
 			if (!self->memoryOnly) {
 				debug_printf("DWALPager(%s) shutdown deleting file\n", self->filename.c_str());
-				wait(IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename, true));
+				// We wrap this with ready() because we don't care if incrementalDeleteFile throws an error because:
+				// - if the file was unlinked, the file will be cleaned up by the filesystem after the process exits
+				// - if the file was not unlinked, the worker will restart and pick it up and it'll be removed later
+				wait(ready(IAsyncFileSystem::filesystem()->incrementalDeleteFile(self->filename, true)));
 			}
 		}
 

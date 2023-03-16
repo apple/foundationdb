@@ -36,44 +36,49 @@ waitForQuiescence = false
     waitForBackup = true
 
 [[test]]
-testTitle = 'CycleTest'
+testTitle = 'WriteTest'
 simBackupAgents = 'BackupToFile'
 runConsistencyCheck = false
 waitForQuiescence = false
 clearAfterTest = false
 
     [[test.workload]]
-    testName = 'Cycle'
-    nodeCount = 3000
-    transactionsPerSecond = 3000.0
-    testDuration = 30.0
-    expectedRate = 0
+    testName = 'ReadWrite'
+    testDuration = 60.0
+    transactionsPerSecond = 200
+    writesPerTransactionA = 5
+    readsPerTransactionA = 1
+    writesPerTransactionB = 10
+    readsPerTransactionB = 1
+    alpha = 0.5
+    nodeCount = 10000
+    valueBytes = 128
+    discardEdgeMeasurements = false
+    warmingDelay = 10.0
+    setup = false
+
+[[test]]
+testTitle = 'StopBackup'
+simBackupAgents = 'BackupToFile'
+clearAfterTest = false
+runConsistencyCheck = false
+waitForQuiescence = false
 
     [[test.workload]]
     testName = 'IncrementalBackup'
     tag = 'default'
-    waitForBackup = true
     stopBackup = true
+    waitForBackup = true
 
 [[test]]
 testTitle = 'BlobRestore'
 simBackupAgents = 'BackupToFile'
-runConsistencyCheck = false
 clearAfterTest = false
+runConsistencyCheck = false
 waitForQuiescence = false
 
     [[test.workload]]
     testName = 'BlobRestoreWorkload'
     performRestore = true
+    restoreToVersion = true
 
-
-[[test]]
-testTitle = 'VerifyCycle'
-checkOnly = true
-
-    [[test.workload]]
-    testName = 'Cycle'
-    nodeCount = 3000
-    transactionsPerSecond = 3000.0
-    testDuration = 30.0
-    expectedRate = 0

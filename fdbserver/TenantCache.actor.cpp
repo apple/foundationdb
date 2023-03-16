@@ -385,8 +385,9 @@ public:
 		uint16_t tenantNumber = deterministicRandom()->randomInt(0, std::numeric_limits<uint16_t>::max());
 
 		for (uint16_t i = 0; i < tenantCount; i++) {
-			TenantName tenantName(format("%s_%08d", "ddtc_test_tenant", tenantNumber + i));
-			TenantMapEntry tenant(tenantNumber + i, tenantName);
+			uint16_t tenantOrdinal = tenantNumber + i;
+			TenantName tenantName(format("%s_%08d", "ddtc_test_tenant", tenantOrdinal));
+			TenantMapEntry tenant(tenantOrdinal, tenantName);
 
 			tenantCache.insert(tenant);
 		}
