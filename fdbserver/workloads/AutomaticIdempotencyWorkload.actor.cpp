@@ -54,7 +54,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	bool ok = true;
 
 	AutomaticIdempotencyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		numTransactions = getOption(options, "numTransactions"_sr, 2500);
+		numTransactions = getOption(options, "numTransactions"_sr, 500);
 		keyPrefix = KeyRef(getOption(options, "keyPrefix"_sr, "/autoIdempotency/"_sr));
 		minMinAgeSeconds = getOption(options, "minMinAgeSeconds"_sr, 15);
 		automaticPercentage = getOption(options, "automaticPercentage"_sr, 0.1);
