@@ -677,8 +677,9 @@ const Value blobGranuleFileValueFor(
     int64_t offset,
     int64_t length,
     int64_t fullFileLength,
+    int64_t logicalSize,
     Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta = Optional<BlobGranuleCipherKeysMeta>());
-std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t, Optional<BlobGranuleCipherKeysMeta>>
+std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t, int64_t, Optional<BlobGranuleCipherKeysMeta>>
 decodeBlobGranuleFileValue(ValueRef const& value);
 
 const Value blobGranulePurgeValueFor(Version version, KeyRange range, bool force);

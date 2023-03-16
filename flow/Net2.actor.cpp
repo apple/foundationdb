@@ -1826,7 +1826,10 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 			    auto endpoint = iter->endpoint();
 			    auto addr = endpoint.address();
 			    if (addr.is_v6()) {
-				    addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+				    // IPV6 loopback might not be supported, only return IPV6 address
+				    if (!addr.is_loopback()) {
+					    addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+				    }
 			    } else {
 				    addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
 			    }

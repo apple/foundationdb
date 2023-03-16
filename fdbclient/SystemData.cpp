@@ -1443,22 +1443,30 @@ const Value blobGranuleFileValueFor(StringRef const& filename,
                                     int64_t offset,
                                     int64_t length,
                                     int64_t fullFileLength,
+                                    int64_t logicalSize,
                                     Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
+	auto protocolVersion = CLIENT_KNOBS->ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE
+	                           ? ProtocolVersion::withBlobGranuleFileLogicalSize()
+	                           : ProtocolVersion::withBlobGranule();
+	BinaryWriter wr(IncludeVersion(protocolVersion));
 	wr << filename;
 	wr << offset;
 	wr << length;
 	wr << fullFileLength;
 	wr << cipherKeysMeta;
+	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE) {
+		wr << logicalSize;
+	}
 	return wr.toValue();
 }
 
-std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t, Optional<BlobGranuleCipherKeysMeta>>
+std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t, int64_t, Optional<BlobGranuleCipherKeysMeta>>
 decodeBlobGranuleFileValue(ValueRef const& value) {
 	StringRef filename;
 	int64_t offset;
 	int64_t length;
 	int64_t fullFileLength;
+	int64_t logicalSize;
 	Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 
 	BinaryReader reader(value, IncludeVersion());
@@ -1467,7 +1475,13 @@ decodeBlobGranuleFileValue(ValueRef const& value) {
 	reader >> length;
 	reader >> fullFileLength;
 	reader >> cipherKeysMeta;
-	return std::tuple(filename, offset, length, fullFileLength, cipherKeysMeta);
+	if (reader.protocolVersion().hasBlobGranuleFileLogicalSize()) {
+		reader >> logicalSize;
+	} else {
+		// fall back to estimating logical size as physical size
+		logicalSize = length;
+	}
+	return std::tuple(filename, offset, length, fullFileLength, logicalSize, cipherKeysMeta);
 }
 
 const Value blobGranulePurgeValueFor(Version version, KeyRange range, bool force) {
