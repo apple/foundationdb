@@ -767,10 +767,11 @@ private:
 				int64_t offset;
 				int64_t length;
 				int64_t fullFileLength;
+				int64_t logicalSize;
 				Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 
 				std::tie(gid, version, fileType) = decodeBlobGranuleFileKey(row.key);
-				std::tie(filename, offset, length, fullFileLength, cipherKeysMeta) =
+				std::tie(filename, offset, length, fullFileLength, logicalSize, cipherKeysMeta) =
 				    decodeBlobGranuleFileValue(row.value);
 				GranuleFileVersion vs = { version, fileType, filename.toString(), length };
 				files.push_back(vs);
