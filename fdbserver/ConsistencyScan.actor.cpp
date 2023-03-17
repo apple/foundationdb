@@ -59,6 +59,7 @@ struct ConsistencyScanData {
 	int finishedRounds = 0;
 	KeyRef progressKey;
 	AsyncVar<bool> consistencyScanEnabled = false;
+	bool success = true;
 
 	ConsistencyScanData(UID id, Database db) : id(id), db(db) {}
 };
@@ -77,7 +78,8 @@ ACTOR Future<Version> getVersion(Database cx) {
 	}
 }
 
-void testFailure(std::string message, bool performQuiescentChecks, bool isError) {
+void testFailure(std::string message, bool performQuiescentChecks, bool* success, bool isError) {
+	*success = false;
 	TraceEvent failEvent(isError ? SevError : SevWarn, "TestFailure");
 	if (performQuiescentChecks)
 		failEvent.detail("Workload", "QuiescentCheck");
@@ -94,7 +96,8 @@ ACTOR Future<bool> getKeyServers(
     Database cx,
     Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise,
     KeyRangeRef kr,
-    bool performQuiescentChecks) {
+    bool performQuiescentChecks,
+    bool* success) {
 	state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers;
 
 	// Try getting key server locations from the master proxies
@@ -131,7 +134,7 @@ ACTOR Future<bool> getKeyServers(
 						TraceEvent("ConsistencyCheck_CommitProxyUnavailable")
 						    .error(shards.getError())
 						    .detail("CommitProxyID", commitProxyInfo->getId(i));
-						testFailure("Commit proxy unavailable", performQuiescentChecks, true);
+						testFailure("Commit proxy unavailable", performQuiescentChecks, success, true);
 						return false;
 					}
 
@@ -164,7 +167,8 @@ ACTOR Future<bool> getKeyServers(
 ACTOR Future<bool> getKeyLocations(Database cx,
                                    std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> shards,
                                    Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise,
-                                   bool performQuiescentChecks) {
+                                   bool performQuiescentChecks,
+                                   bool* success) {
 	state Standalone<VectorRef<KeyValueRef>> keyLocations;
 	state Key beginKey = allKeys.begin.withPrefix(keyServersPrefix);
 	state Key endKey = allKeys.end.withPrefix(keyServersPrefix);
@@ -221,7 +225,7 @@ ACTOR Future<bool> getKeyLocations(Database cx,
 						TraceEvent("ConsistencyCheck_InconsistentKeyServers")
 						    .detail("StorageServer1", shards[i].second[firstValidStorageServer].id())
 						    .detail("StorageServer2", shards[i].second[j].id());
-						testFailure("Key servers inconsistent", performQuiescentChecks, true);
+						testFailure("Key servers inconsistent", performQuiescentChecks, success, true);
 						return false;
 					}
 				}
@@ -353,7 +357,7 @@ ACTOR Future<int64_t> getDatabaseSize(Database cx) {
 // Checks that the data in each shard is the same on each storage server that it resides on.  Also performs some
 // sanity checks on the sizes of shards and storage servers. Returns false if there is a failure
 // TODO: Future optimization: Use streaming reads
-ACTOR Future<bool> checkDataConsistency(Database cx,
+ACTOR Future<Void> checkDataConsistency(Database cx,
                                         VectorRef<KeyValueRef> keyLocations,
                                         DatabaseConfiguration configuration,
                                         std::map<UID, StorageServerInterface> tssMapping,
@@ -372,7 +376,8 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
                                         int restart,
                                         int64_t maxRate,
                                         int64_t targetInterval,
-                                        KeyRef progressKey) {
+                                        KeyRef progressKey,
+                                        bool* success) {
 	// Stores the total number of bytes on each storage server
 	// In a distributed test, this will be an estimated size
 	state std::map<UID, int64_t> storageServerSizes;
@@ -393,7 +398,6 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 	state double rateLimiterStartTime = now();
 	state int64_t bytesReadInthisRound = 0;
 	state bool resume = !(restart || shuffleShards);
-	state bool testResult = true;
 
 	state double dbSize = 100e12;
 	if (g_network->isSimulated()) {
@@ -458,8 +462,8 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 			for (auto& id : sourceStorageServers) {
 				TraceEvent("IncorrectSizeTeamInfo").detail("ServerUID", id).detail("TeamIndex", k++);
 			}
-			testFailure("Invalid team size", performQuiescentChecks, failureIsError);
-			return false;
+			testFailure("Invalid team size", performQuiescentChecks, success, failureIsError);
+			return Void();
 		}
 
 		state std::vector<UID> storageServers = (isRelocating) ? destStorageServers : sourceStorageServers;
@@ -476,8 +480,10 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 					if (serverListValues[s].present())
 						storageServerInterfaces.push_back(decodeServerListValue(serverListValues[s].get()));
 					else if (performQuiescentChecks)
-						testFailure(
-						    "/FF/serverList changing in a quiescent database", performQuiescentChecks, failureIsError);
+						testFailure("/FF/serverList changing in a quiescent database",
+						            performQuiescentChecks,
+						            success,
+						            failureIsError);
 				}
 
 				break;
@@ -508,7 +514,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 		if (firstClient) {
 			// If there was an error retrieving shard estimated size
 			if (performQuiescentChecks && estimatedBytes.size() == 0)
-				testFailure("Error fetching storage metrics", performQuiescentChecks, failureIsError);
+				testFailure("Error fetching storage metrics", performQuiescentChecks, success, failureIsError);
 
 			// If running a distributed test, storage server size is an accumulation of shard estimates
 			else if (distributed && firstClient)
@@ -709,8 +715,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 									     g_simulator->tssMode != ISimulator::TSSMode::EnabledDropMutations) ||
 									    (!storageServerInterfaces[j].isTss() &&
 									     !storageServerInterfaces[firstValidServer].isTss())) {
-										testFailure("Data inconsistent", performQuiescentChecks, true);
-										testResult = false;
+										testFailure("Data inconsistent", performQuiescentChecks, success, true);
 									}
 								}
 							}
@@ -735,12 +740,14 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 
 							if (e.code() == error_code_request_maybe_delivered) {
 								// SS in the team may be removed and we get this error.
-								return false;
+								*success = false;
+								return Void();
 							}
 							// All shards should be available in quiscence
 							if (performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
-								testFailure("Storage server unavailable", performQuiescentChecks, failureIsError);
-								return false;
+								testFailure(
+								    "Storage server unavailable", performQuiescentChecks, success, failureIsError);
+								return Void();
 							}
 						}
 					}
@@ -878,6 +885,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 						if (!storageServerInterfaces[j].isTss()) {
 							testFailure("Storage servers had incorrect sampled estimate",
 							            performQuiescentChecks,
+							            success,
 							            failureIsError);
 						}
 
@@ -918,6 +926,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 
 				testFailure(format("Shard size is more than %f std dev from estimate", failErrorNumStdDev),
 				            performQuiescentChecks,
+				            success,
 				            failureIsError);
 			}
 
@@ -940,8 +949,9 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 				testFailure(format("Shard size in quiescent database is too %s",
 				                   (sampledBytes < shardBounds.min.bytes) ? "small" : "large"),
 				            performQuiescentChecks,
+				            success,
 				            failureIsError);
-				return false;
+				return Void();
 			}
 		}
 
@@ -954,7 +964,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 	}
 
 	*bytesReadInPrevRound = bytesReadInthisRound;
-	return testResult;
+	return Void();
 }
 
 ACTOR Future<Void> runDataValidationCheck(ConsistencyScanData* self) {
@@ -969,38 +979,40 @@ ACTOR Future<Void> runDataValidationCheck(ConsistencyScanData* self) {
 		// Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
 		state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
 		state std::map<UID, StorageServerInterface> tssMapping;
-		bool keyServerResult = wait(getKeyServers(self->db, keyServerPromise, keyServersKeys, false));
+		bool keyServerResult = wait(getKeyServers(self->db, keyServerPromise, keyServersKeys, false, &self->success));
 		if (keyServerResult) {
 			state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
 			    keyServerPromise.getFuture().get();
 
 			// Get the locations of all the shards in the database
 			state Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise;
-			bool keyLocationResult = wait(getKeyLocations(self->db, keyServers, keyLocationPromise, false));
+			bool keyLocationResult =
+			    wait(getKeyLocations(self->db, keyServers, keyLocationPromise, false, &self->success));
 			if (keyLocationResult) {
 				state Standalone<VectorRef<KeyValueRef>> keyLocations = keyLocationPromise.getFuture().get();
 
 				// Check that each shard has the same data on all storage servers that it resides on
-				wait(::success(checkDataConsistency(self->db,
-				                                    keyLocations,
-				                                    self->configuration,
-				                                    tssMapping,
-				                                    false /* quiescentCheck */,
-				                                    false /* tssCheck */,
-				                                    true /* firstClient */,
-				                                    false /* failureIsError */,
-				                                    0 /* clientId */,
-				                                    1 /* clientCount */,
-				                                    false /* distributed */,
-				                                    false /* shuffleShards */,
-				                                    1 /* shardSampleFactor */,
-				                                    deterministicRandom()->randomInt64(0, 10000000),
-				                                    self->finishedRounds /* repetitions */,
-				                                    &(self->bytesReadInPrevRound),
-				                                    self->restart,
-				                                    self->maxRate,
-				                                    self->targetInterval,
-				                                    self->progressKey)));
+				wait(checkDataConsistency(self->db,
+				                          keyLocations,
+				                          self->configuration,
+				                          tssMapping,
+				                          false /* quiescentCheck */,
+				                          false /* tssCheck */,
+				                          true /* firstClient */,
+				                          false /* failureIsError */,
+				                          0 /* clientId */,
+				                          1 /* clientCount */,
+				                          false /* distributed */,
+				                          false /* shuffleShards */,
+				                          1 /* shardSampleFactor */,
+				                          deterministicRandom()->randomInt64(0, 10000000),
+				                          self->finishedRounds /* repetitions */,
+				                          &(self->bytesReadInPrevRound),
+				                          self->restart,
+				                          self->maxRate,
+				                          self->targetInterval,
+				                          self->progressKey,
+				                          &self->success));
 			}
 		}
 	} catch (Error& e) {
@@ -1072,7 +1084,6 @@ ACTOR Future<Void> watchConsistencyScanInfoKey(ConsistencyScanData* self) {
 ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	state ConsistencyScanData self(csInterf.id(),
 	                               openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
-	state Promise<Void> err;
 	state Future<Void> collection = actorCollection(self.addActor.getFuture());
 	state ConsistencyScanInfo csInfo = ConsistencyScanInfo();
 
@@ -1115,15 +1126,20 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 			try {
 				loop choose {
 					when(wait(runDataValidationCheck(&self))) {
-						TraceEvent("ConsistencyScan_Done", csInterf.id()).log();
-						return Void();
+						if (self.success) {
+							TraceEvent("ConsistencyScan_Done", csInterf.id()).log();
+							return Void();
+						} else {
+							self.success = true;
+							TraceEvent("ConsistencyScan_Failed", csInterf.id()).log();
+							wait(delay(1.0));
+						}
 					}
 					when(HaltConsistencyScanRequest req = waitNext(csInterf.haltConsistencyScan.getFuture())) {
 						req.reply.send(Void());
 						TraceEvent("ConsistencyScan_Halted", csInterf.id()).detail("ReqID", req.requesterID);
 						break;
 					}
-					when(wait(err.getFuture())) {}
 					when(wait(collection)) {
 						ASSERT(false);
 						throw internal_error();
