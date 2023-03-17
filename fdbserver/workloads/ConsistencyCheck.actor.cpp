@@ -1045,23 +1045,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		return true;
 	}
 
-	// Run an empty commit through the system.
-	ACTOR static Future<Void> doEmptyCommit(Database cx) {
-		state Transaction tr(cx);
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				wait(::success(tr.getReadVersion()));
-				tr.makeSelfConflicting();
-				wait(tr.commit());
-				return Void();
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
 	ACTOR Future<bool> checkForExtraDataStores(Database cx, ConsistencyCheckWorkload* self) {
 		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
