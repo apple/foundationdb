@@ -9366,6 +9366,11 @@ void DatabaseContext::setSharedState(DatabaseSharedState* p) {
 	sharedStatePtr->refCount++;
 }
 
+// FIXME: this has undesired head-of-line-blocking behavior in the case of large version jumps.
+// For example, say that The current feed version is 100, and one waiter wants to wait for the feed version >= 1000.
+// This will send a request with minVersion=1000. Then say someone wants to wait for feed version >= 200. Because we've
+// already blocked this updater on version 1000, even if the feed would already be at version 200+, we won't get an
+// empty version response until version 1000.
 ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, ChangeFeedStorageData* self) {
 	loop {
 		if (self->version.get() < self->desired.get()) {
