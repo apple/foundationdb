@@ -895,7 +895,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 		if (autoPublicAddress) {
 			try {
 				const NetworkAddress& parsedAddress = NetworkAddress::parse("0.0.0.0:" + publicAddressStr.substr(5));
-				const IPAddress publicIP = determinePublicIPAutomatically(connectionRecord.getConnectionString());
+				const IPAddress publicIP = connectionRecord.getConnectionString().determineLocalSourceIP();
 				currentPublicAddress = NetworkAddress(publicIP, parsedAddress.port, true, parsedAddress.isTLS());
 			} catch (Error& e) {
 				fprintf(stderr,
@@ -1112,7 +1112,7 @@ struct CLIOptions {
 				printHelpTeaser(name);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
-			auto publicIP = determinePublicIPAutomatically(connectionFile->getConnectionString());
+			auto publicIP = connectionFile->getConnectionString().determineLocalSourceIP();
 			publicAddresses.address = NetworkAddress(publicIP, ::getpid());
 		}
 	}

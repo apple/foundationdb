@@ -2254,7 +2254,7 @@ void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Opt
 
 	Optional<NetworkAddress> localAddress;
 	if (connRecord) {
-		auto publicIP = determinePublicIPAutomatically(connRecord->getConnectionString());
+		auto publicIP = connRecord->getConnectionString().determineLocalSourceIP();
 		localAddress = NetworkAddress(publicIP, ::getpid());
 	}
 	platform::ImageInfo imageInfo = platform::getImageInfo();
