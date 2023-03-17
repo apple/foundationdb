@@ -97,6 +97,7 @@ ACTOR Future<bool> getKeyServers(
     Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise,
     KeyRangeRef kr,
     bool performQuiescentChecks,
+    bool failureIsError,
     bool* success) {
 	state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers;
 
@@ -134,7 +135,7 @@ ACTOR Future<bool> getKeyServers(
 						TraceEvent("ConsistencyCheck_CommitProxyUnavailable")
 						    .error(shards.getError())
 						    .detail("CommitProxyID", commitProxyInfo->getId(i));
-						testFailure("Commit proxy unavailable", performQuiescentChecks, success, true);
+						testFailure("Commit proxy unavailable", performQuiescentChecks, success, failureIsError);
 						return false;
 					}
 
@@ -980,7 +981,8 @@ ACTOR Future<Void> runDataValidationCheck(ConsistencyScanData* self) {
 		// Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
 		state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
 		state std::map<UID, StorageServerInterface> tssMapping;
-		bool keyServerResult = wait(getKeyServers(self->db, keyServerPromise, keyServersKeys, false, &self->success));
+		bool keyServerResult =
+		    wait(getKeyServers(self->db, keyServerPromise, keyServersKeys, false, false, &self->success));
 		if (keyServerResult) {
 			state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
 			    keyServerPromise.getFuture().get();

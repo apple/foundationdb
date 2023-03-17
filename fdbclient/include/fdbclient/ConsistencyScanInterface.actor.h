@@ -166,6 +166,7 @@ ACTOR Future<bool> getKeyServers(
     Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise,
     KeyRangeRef kr,
     bool performQuiescentChecks,
+    bool failureIsError,
     bool* success);
 ACTOR Future<bool> getKeyLocations(Database cx,
                                    std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> shards,
