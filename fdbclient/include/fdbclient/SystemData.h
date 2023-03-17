@@ -36,6 +36,7 @@
 
 FDB_DECLARE_BOOLEAN_PARAM(AssignEmptyRange);
 FDB_DECLARE_BOOLEAN_PARAM(UnassignShard);
+FDB_DECLARE_BOOLEAN_PARAM(EnablePhysicalShardMove);
 
 struct RestoreLoaderInterface;
 struct RestoreApplierInterface;
@@ -145,16 +146,21 @@ void decodeStorageCacheValue(const ValueRef& value, std::vector<uint16_t>& serve
 extern const KeyRangeRef serverKeysRange;
 extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
-const UID newShardId(const uint64_t physicalShardId,
-                     AssignEmptyRange assignEmptyRange,
-                     UnassignShard unassignShard = UnassignShard::False);
+const UID newDataMoveId(const uint64_t physicalShardId,
+                        AssignEmptyRange assignEmptyRange,
+                        EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False,
+                        UnassignShard unassignShard = UnassignShard::False);
 const Key serverKeysKey(UID serverID, const KeyRef& keys);
 const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);
 std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key);
 bool serverHasKey(ValueRef storedValue);
 const Value serverKeysValue(const UID& id);
-void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRange, UID& id);
+void decodeServerKeysValue(const ValueRef& value,
+                           bool& assigned,
+                           bool& emptyRange,
+                           EnablePhysicalShardMove& enablePSM,
+                           UID& id);
 
 extern const KeyRangeRef conflictingKeysRange;
 extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;
