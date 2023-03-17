@@ -189,8 +189,8 @@ struct DataMoveMetaData {
 	std::string toString() const {
 		std::string res = "DataMoveMetaData: [ID]: " + id.shortString() + ", [Range]: " + describe(ranges) +
 		                  ", [Phase]: " + std::to_string(static_cast<int>(phase)) +
-		                  ", [Source Servers]: " + describe(src) + ", [Destination Servers]: " + describe(dest)  +
- 		                  ", [Checkpoints]: " + describe(checkpoints);
+		                  ", [Source Servers]: " + describe(src) + ", [Destination Servers]: " + describe(dest) +
+		                  ", [Checkpoints]: " + describe(checkpoints);
 		return res;
 	}
 
