@@ -2223,8 +2223,6 @@ void DatabaseContext::expireThrottles() {
 	}
 }
 
-extern IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs);
-
 // Initialize tracing for FDB client
 //
 // connRecord is necessary for determining the local IP, which is then included in the trace

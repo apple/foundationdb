@@ -350,4 +350,6 @@ struct CheckDescriptorMutableRequest {
 	}
 };
 
+IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs);
+
 #endif
