@@ -43,5 +43,5 @@ set(CMAKE_SYSROOT "${FOUNDATIONDB_LINUX_CONTAINER_ROOT}" CACHE STRING "" FORCE)
 set(CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN "${CMAKE_SYSROOT}/opt/rh/devtoolset-11/root/usr" CACHE STRING "" FORCE)
 
 string(TOLOWER ${CMAKE_SYSTEM_PROCESSOR} TripleArch)
-set(CMAKE_C_FLAGS "-target ${TripleArch}-linux-gnu -fuse-ld=${CMAKE_LINKER} --gcc-toolchain=${CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN}" CACHE STRING "" FORCE)
-set(CMAKE_CXX_FLAGS "-target ${TripleArch}-linux-gnu -fuse-ld=${CMAKE_LINKER} --gcc-toolchain=${CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN}" CACHE STRING "" FORCE)
+set(CMAKE_C_FLAGS "-target ${TripleArch}-unknown-linux-gnu -fuse-ld=${CMAKE_LINKER} --gcc-toolchain=${CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN}" CACHE STRING "" FORCE)
+set(CMAKE_CXX_FLAGS "-target ${TripleArch}-unknown-linux-gnu -fuse-ld=${CMAKE_LINKER} --gcc-toolchain=${CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN}" CACHE STRING "" FORCE)
