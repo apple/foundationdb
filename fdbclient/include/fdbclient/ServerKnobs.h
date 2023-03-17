@@ -156,7 +156,8 @@ public:
 	int PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM;
 	// A team healthy priority for wiggle a storage server
 	int PRIORITY_PERPETUAL_STORAGE_WIGGLE;
-	// A team healthy priority when all servers in a team are healthy
+	// A team healthy priority when all servers in a team are healthy. When a team changes from any unhealthy states to
+	// healthy, the unfinished relocations will be overriden to healthy priority
 	int PRIORITY_TEAM_HEALTHY;
 	// A team healthy priority when there's undesired servers in the team. (ex. same ip
 	// address as other SS process, or SS is lagging too far ...)
@@ -171,17 +172,18 @@ public:
 	// Or when the team contains a server with wrong configuration (ex. storage engine,
 	// locality, excluded ...)
 	int PRIORITY_TEAM_UNHEALTHY;
-	// A team healthy priority when the replica <= 3 and there's 2 healthy servers in a team
+	// A team healthy priority when there should be >= 3 replicas and there's 2 healthy servers in a team
 	int PRIORITY_TEAM_2_LEFT;
-	// A team healthy priority when the replica <= 3 and there's 1 healthy server in a team
+	// A team healthy priority when there should be >= 2 replicas and there's 1 healthy server in a team
 	int PRIORITY_TEAM_1_LEFT;
 	// A team healthy priority when a server in the team is excluded as failed
 	int PRIORITY_TEAM_FAILED;
-	// A team healthy priority when the replica <= 3 and there's no healthy server in a team
+	// A team healthy priority when there's no healthy server in a team
 	int PRIORITY_TEAM_0_LEFT;
 	// A shard boundary priority for split large or write hot shard.
 	int PRIORITY_SPLIT_SHARD;
-	// Priority when a physical shard is oversize or anonymous
+	// Priority when a physical shard is oversize or anonymous. When DD enable physical shard, the shard created before
+	// it are default to be 'anonymous' for compatibility.
 	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD;
 
 	// Data distribution
