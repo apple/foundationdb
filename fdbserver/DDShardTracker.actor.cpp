@@ -944,11 +944,11 @@ ACTOR Future<Void> brokenPromiseToReady(Future<Void> f) {
 }
 
 static bool shardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef adjRange) {
-	bool honorTenantKeyspaceBoundaries = self->ddTenantCache.present();
-
-	if (!honorTenantKeyspaceBoundaries) {
+	if (!SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED) {
 		return true;
 	}
+
+	ASSERT(self->ddTenantCache.present());
 
 	Optional<Reference<TCTenantInfo>> tenantOwningRange = {};
 	Optional<Reference<TCTenantInfo>> tenantOwningAdjRange = {};
@@ -1531,7 +1531,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 		initData.clear(); // Release reference count.
 
 		state PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
-		if (self.ddTenantCache.present()) {
+		if (SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED) {
+			ASSERT(self.ddTenantCache.present());
 			tenantCreationSignal = self.ddTenantCache.get()->tenantCreationSignal;
 		}
 

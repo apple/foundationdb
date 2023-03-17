@@ -49,11 +49,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	struct OnTimeout {
 		ConsistencyCheckWorkload& self;
 		explicit OnTimeout(ConsistencyCheckWorkload& self) : self(self) {}
-		void operator()(StringRef name, StringRef msg, Error const& e) {
+		void operator()(StringRef name, std::any const& msg, Error const& e) {
 			TraceEvent(SevError, "ConsistencyCheckFailure")
 			    .error(e)
 			    .detail("EventName", name)
-			    .detail("EventMessage", msg)
+			    .detail("EventMessage", std::any_cast<StringRef>(msg))
 			    .log();
 		}
 	};
@@ -1041,6 +1041,23 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		return true;
 	}
 
+	// Run an empty commit through the system.
+	ACTOR static Future<Void> doEmptyCommit(Database cx) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(::success(tr.getReadVersion()));
+				tr.makeSelfConflicting();
+				wait(tr.commit());
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR Future<bool> checkForExtraDataStores(Database cx, ConsistencyCheckWorkload* self) {
 		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
@@ -1143,7 +1160,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		if (foundExtraDataStore) {
-			wait(delay(10)); // let the cluster get to fully_recovered after the reboot before retrying
+			// Let the cluster fully recover after rebooting/killing storage servers with extra stores.
+			//
+			// This requires an end-to-end comitting transaction to ensure recovery has started in case
+			// any stateless processes, like the commit proxy, were killed.
+			wait(::success(doEmptyCommit(cx)));
+			while (self->dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
+				wait(self->dbInfo->onChange());
+			}
 			self->testFailure("Extra data stores present on workers");
 			return false;
 		}
@@ -1219,6 +1243,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						return false;
 					}
 				}
+			} else if (blobWorkersByAddr[addr] > 0) {
+				TraceEvent("ConsistencyCheck_BWOnExcludedAddr").detail("Address", addr);
+				return false;
 			}
 		}
 		return numBlobWorkerProcesses > 0;

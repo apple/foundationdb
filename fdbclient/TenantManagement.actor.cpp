@@ -77,17 +77,16 @@ bool tenantMapChanging(MutationRef const& mutation, KeyRangeRef const& tenantMap
 	return false;
 }
 
-// validates whether the lastTenantId and the nextTenantId share the same 2 byte prefix
-bool nextTenantIdPrefixMatches(int64_t lastTenantId, int64_t nextTenantId) {
-	if (getTenantIdPrefix(nextTenantId) != getTenantIdPrefix(lastTenantId)) {
-		TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "TenantIdPrefixMismatch")
-		    .detail("CurrentTenantId", lastTenantId)
-		    .detail("NewTenantId", nextTenantId)
-		    .detail("CurrentTenantIdPrefix", getTenantIdPrefix(lastTenantId))
-		    .detail("NewTenantIdPrefix", getTenantIdPrefix(nextTenantId));
-		return false;
+// validates whether the the ID created by adding delta to baseID is a valid ID in the same tenant prefix
+int64_t computeNextTenantId(int64_t baseId, int64_t delta) {
+	if ((baseId & 0xFFFFFFFFFFFF) + delta > 0xFFFFFFFFFFFF) {
+		TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "NoMoreTenantIds")
+		    .detail("LastTenantId", baseId)
+		    .detail("TenantIdPrefix", getTenantIdPrefix(baseId));
+		throw cluster_no_capacity();
 	}
-	return true;
+
+	return baseId + delta;
 }
 
 // returns the maximum allowable tenant id in which the 2 byte prefix is not overriden

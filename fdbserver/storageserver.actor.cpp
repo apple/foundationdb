@@ -71,7 +71,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LatencyBandConfig.h"
@@ -92,6 +92,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
+#include "fdbserver/StorageCorruptionBug.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
@@ -458,6 +459,7 @@ private:
 	struct StorageServer* data;
 	IKeyValueStore* storage;
 	void writeMutations(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
+	void writeMutationsBuggy(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
 
 	ACTOR static Future<Key> readFirstKey(IKeyValueStore* storage, KeyRangeRef range, Optional<ReadOptions> options) {
 		RangeResult r = wait(storage->readRange(range, 1, 1 << 30, options));
@@ -3054,8 +3056,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherMap;
 		if (cipherDetails.size()) {
 			std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-			    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
-			        data->db, cipherDetails, BlobCipherMetrics::TLOG));
+			    wait(getEncryptCipherKeys(data->db, cipherDetails, BlobCipherMetrics::TLOG));
 			cipherMap = getCipherKeysResult;
 		}
 
@@ -8712,7 +8713,8 @@ private:
 			// We can also ignore clearRanges, because they are always accompanied by such a pair of sets with the same
 			// keys
 			startKey = m.param1;
-			decodeServerKeysValue(m.param2, nowAssigned, emptyRange, dataMoveId);
+			EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
+			decodeServerKeysValue(m.param2, nowAssigned, emptyRange, enablePSM, dataMoveId);
 			processedStartKey = true;
 		} else if (m.type == MutationRef::SetValue && m.param1 == lastEpochEndPrivateKey) {
 			// lastEpochEnd transactions are guaranteed by the master to be alone in their own batch (version)
@@ -9301,8 +9303,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			if (collectingCipherKeys) {
 				std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-				    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
-				        data->db, cipherDetails, BlobCipherMetrics::TLOG));
+				    wait(getEncryptCipherKeys(data->db, cipherDetails, BlobCipherMetrics::TLOG));
 				cipherKeys = getCipherKeysResult;
 				collectingCipherKeys = false;
 				eager = UpdateEagerReadInfo(enableClearRangeEagerReads);
@@ -9600,6 +9601,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				ErrorOr<Void> e = wait(errorOr(data->interfaceRegistered));
 				if (e.isError()) {
 					TraceEvent(SevWarn, "StorageInterfaceRegistrationFailed", data->thisServerID).error(e.getError());
+					throw e.getError();
 				}
 			}
 		}
@@ -10368,6 +10370,29 @@ void StorageServerDisk::writeMutation(MutationRef mutation) {
 		ASSERT(false);
 }
 
+void StorageServerDisk::writeMutationsBuggy(const VectorRef<MutationRef>& mutations,
+                                            Version debugVersion,
+                                            const char* debugContext) {
+	auto bug = SimBugInjector().get<StorageCorruptionBug>(StorageCorruptionBugID());
+	if (!bug) {
+		writeMutations(mutations, debugVersion, debugContext);
+	}
+	int begin = 0;
+	while (begin < mutations.size()) {
+		int i;
+		for (i = begin; i < mutations.size(); ++i) {
+			if (deterministicRandom()->random01() < bug->corruptionProbability) {
+				bug->hit();
+				break;
+			}
+		}
+		writeMutations(mutations.slice(begin, i), debugVersion, debugContext);
+		// we want to drop the mutation at i (unless i == mutations.size(), in which case this will just finish the
+		// loop)
+		begin = i + 1;
+	}
+}
+
 void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
                                        Version debugVersion,
                                        const char* debugContext) {
@@ -10400,7 +10425,11 @@ bool StorageServerDisk::makeVersionMutationsDurable(Version& prevStorageVersion,
 		ASSERT(v.version > prevStorageVersion && v.version <= newStorageVersion);
 		// TODO(alexmiller): Update to version tracking.
 		// DEBUG_KEY_RANGE("makeVersionMutationsDurable", v.version, KeyRangeRef());
-		writeMutations(v.mutations, v.version, "makeVersionDurable");
+		if (!SimBugInjector().isEnabled()) {
+			writeMutations(v.mutations, v.version, "makeVersionDurable");
+		} else {
+			writeMutationsBuggy(v.mutations, v.version, "makeVersionDurable");
+		}
 		for (const auto& m : v.mutations)
 			bytesLeft -= mvccStorageBytes(m);
 		prevStorageVersion = v.version;

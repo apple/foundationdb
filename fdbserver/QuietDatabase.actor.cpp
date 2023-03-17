@@ -793,8 +793,8 @@ ACTOR Future<Void> reconfigureAfter(Database cx,
 }
 
 struct QuietDatabaseChecker {
-	ProcessEvents::Callback timeoutCallback = [this](StringRef name, StringRef msg, Error const& e) {
-		logFailure(name, msg, e);
+	ProcessEvents::Callback timeoutCallback = [this](StringRef name, std::any const& msg, Error const& e) {
+		logFailure(name, std::any_cast<StringRef>(msg), e);
 	};
 	double start = now();
 	double maxDDRunTime;

@@ -1785,31 +1785,43 @@ ACTOR Future<Void> initializeSimConfig(Database db) {
 			g_simulator->tLogWriteAntiQuorum = dbConfig.tLogWriteAntiQuorum;
 			g_simulator->usableRegions = dbConfig.usableRegions;
 
-			bool foundSharedDcID = false;
+			// If the same region is being shared between the remote and a satellite, then our simulated policy checking
+			// may fail to account for the total number of needed machines when deciding what can be killed. To work
+			// around this, we increase the required transaction logs in the remote policy to include the number of
+			// satellite logs that may get recruited there
+			bool foundSharedDcId = false;
 			std::set<Key> dcIds;
-			int satelliteReplication = 0;
-			for (auto& r : dbConfig.regions) {
-				if (dcIds.count(r.dcId)) {
-					foundSharedDcID = true;
+			int maxSatelliteReplication = 0;
+			for (auto const& r : dbConfig.regions) {
+				if (!dcIds.insert(r.dcId).second) {
+					foundSharedDcId = true;
 				}
-				dcIds.insert(r.dcId);
-				for (auto& s : r.satellites) {
-					satelliteReplication =
-					    std::max(satelliteReplication, r.satelliteTLogReplicationFactor / r.satelliteTLogUsableDcs);
-					if (dcIds.count(s.dcId)) {
-						foundSharedDcID = true;
+				if (!r.satellites.empty() && r.satelliteTLogReplicationFactor > 0 && r.satelliteTLogUsableDcs > 0) {
+					for (auto const& s : r.satellites) {
+						if (!dcIds.insert(s.dcId).second) {
+							foundSharedDcId = true;
+						}
 					}
-					dcIds.insert(s.dcId);
+
+					maxSatelliteReplication =
+					    std::max(maxSatelliteReplication, r.satelliteTLogReplicationFactor / r.satelliteTLogUsableDcs);
 				}
 			}
-			if (foundSharedDcID) {
+
+			if (foundSharedDcId) {
 				int totalRequired = std::max(dbConfig.tLogReplicationFactor, dbConfig.remoteTLogReplicationFactor) +
-				                    satelliteReplication;
+				                    maxSatelliteReplication;
 				g_simulator->remoteTLogPolicy = Reference<IReplicationPolicy>(
 				    new PolicyAcross(totalRequired, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+				TraceEvent("ChangingSimTLogPolicyForSharedRemote")
+				    .detail("TotalRequired", totalRequired)
+				    .detail("MaxSatelliteReplication", maxSatelliteReplication)
+				    .detail("ActualPolicy", dbConfig.getRemoteTLogPolicy()->info())
+				    .detail("SimulatorPolicy", g_simulator->remoteTLogPolicy->info());
 			} else {
 				g_simulator->remoteTLogPolicy = dbConfig.getRemoteTLogPolicy();
 			}
+
 			return Void();
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -2320,9 +2332,7 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 	}
 
 	choose {
-		when(wait(tests)) {
-			return Void();
-		}
+		when(wait(tests)) { return Void(); }
 		when(wait(quorum(actors, 1))) {
 			ASSERT(false);
 			throw internal_error();
