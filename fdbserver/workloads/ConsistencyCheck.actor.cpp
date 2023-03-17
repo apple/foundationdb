@@ -345,8 +345,12 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 				// Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
 				state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
-				bool keyServerResult = wait(
-				    getKeyServers(cx, keyServerPromise, keyServersKeys, self->performQuiescentChecks, &self->success));
+				bool keyServerResult = wait(getKeyServers(cx,
+				                                          keyServerPromise,
+				                                          keyServersKeys,
+				                                          self->performQuiescentChecks,
+				                                          self->failureIsError,
+				                                          &self->success));
 				if (keyServerResult) {
 					state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
 					    keyServerPromise.getFuture().get();
@@ -797,8 +801,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	                                        bool removePrefix) {
 		// get shards paired with corresponding storage servers
 		state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
-		bool keyServerResult =
-		    wait(getKeyServers(cx, keyServerPromise, range, self->performQuiescentChecks, &self->success));
+		bool keyServerResult = wait(getKeyServers(
+		    cx, keyServerPromise, range, self->performQuiescentChecks, self->failureIsError, &self->success));
 		if (!keyServerResult)
 			return false;
 		state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> shards =
@@ -1160,14 +1164,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		if (foundExtraDataStore) {
-			// Let the cluster fully recover after rebooting/killing storage servers with extra stores.
-			//
-			// This requires an end-to-end comitting transaction to ensure recovery has started in case
-			// any stateless processes, like the commit proxy, were killed.
-			wait(::success(doEmptyCommit(cx)));
-			while (self->dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
-				wait(self->dbInfo->onChange());
-			}
 			self->testFailure("Extra data stores present on workers");
 			return false;
 		}
