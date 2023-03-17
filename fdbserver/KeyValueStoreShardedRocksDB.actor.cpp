@@ -3291,22 +3291,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> restore(const std::string& shardId,
 	                     const std::vector<KeyRange>& ranges,
 	                     const std::vector<CheckpointMetaData>& checkpoints) override {
-		for (const KeyRange& range : ranges) {
-			std::vector<DataShard*> shards = shardManager.getDataShardsByRange(range);
-			if (!shards.empty()) {
-				TraceEvent(SevWarnAlways, "RestoreRangesNotEmpty", id)
-				    .detail("Range", range)
-				    .detail("RestoreShardID", shardId);
-				throw failed_to_restore_checkpoint();
-			}
-		}
-		for (const KeyRange& range : ranges) {
-			shardManager.addRange(range, shardId);
-		}
-		auto a = new Writer::RestoreAction(&shardManager, path, shardId, ranges, checkpoints);
-		auto res = a->done.getFuture();
-		writeThread->post(a);
-		return res;
+		return doRestore(this, shardId, ranges, checkpoints);
 	}
 
 	std::vector<std::string> removeRange(KeyRangeRef range) override { return shardManager.removeRange(range); }
