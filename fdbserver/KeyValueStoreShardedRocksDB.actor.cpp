@@ -14,6 +14,7 @@
 #include <rocksdb/options.h>
 #include <rocksdb/perf_context.h>
 #include <rocksdb/rate_limiter.h>
+#include <rocksdb/advanced_options.h>
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/statistics.h>
 #include <rocksdb/table.h>
@@ -320,6 +321,24 @@ Error statusToError(const rocksdb::Status& s) {
 	}
 }
 
+rocksdb::CompactionPri getCompactionPriority() {
+	switch (SERVER_KNOBS->ROCKSDB_COMPACTION_PRI) {
+	case 0:
+		return rocksdb::CompactionPri::kByCompensatedSize;
+	case 1:
+		return rocksdb::CompactionPri::kOldestLargestSeqFirst;
+	case 2:
+		return rocksdb::CompactionPri::kOldestSmallestSeqFirst;
+	case 3:
+		return rocksdb::CompactionPri::kMinOverlappingRatio;
+	case 4:
+		return rocksdb::CompactionPri::kRoundRobin;
+	default:
+		TraceEvent(SevWarn, "InvalidCompactionPriority").detail("KnobValue", SERVER_KNOBS->ROCKSDB_COMPACTION_PRI);
+		return rocksdb::CompactionPri::kMinOverlappingRatio;
+	}
+}
+
 rocksdb::ColumnFamilyOptions getCFOptions() {
 	rocksdb::ColumnFamilyOptions options;
 	options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
@@ -330,8 +349,33 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	}
 	options.paranoid_file_checks = SERVER_KNOBS->ROCKSDB_PARANOID_FILE_CHECKS;
 
+	options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
+	if (SERVER_KNOBS->SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT > 0) {
+		options.soft_pending_compaction_bytes_limit = SERVER_KNOBS->SHARD_SOFT_PENDING_COMPACT_BYTES_LIMIT;
+	}
+	if (SERVER_KNOBS->SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT > 0) {
+		options.hard_pending_compaction_bytes_limit = SERVER_KNOBS->SHARD_HARD_PENDING_COMPACT_BYTES_LIMIT;
+	}
+
 	// Compact sstables when there's too much deleted stuff.
-	options.table_properties_collector_factories = { rocksdb::NewCompactOnDeletionCollectorFactory(128, 1) };
+	if (SERVER_KNOBS->ROCKSDB_ENABLE_COMPACT_ON_DELETION) {
+		// Creates a factory of a table property collector that marks a SST
+		// file as need-compaction when it observe at least "D" deletion
+		// entries in any "N" consecutive entries, or the ratio of tombstone
+		// entries >= deletion_ratio.
+
+		// @param sliding_window_size "N". Note that this number will be
+		//     round up to the smallest multiple of 128 that is no less
+		//     than the specified size.
+		// @param deletion_trigger "D".  Note that even when "N" is changed,
+		//     the specified number for "D" will not be changed.
+		// @param deletion_ratio, if <= 0 or > 1, disable triggering compaction
+		//     based on deletion ratio. Disabled by default.
+		options.table_properties_collector_factories = { rocksdb::NewCompactOnDeletionCollectorFactory(
+			SERVER_KNOBS->ROCKSDB_CDCF_SLIDING_WINDOW_SIZE,
+			SERVER_KNOBS->ROCKSDB_CDCF_DELETION_TRIGGER,
+			SERVER_KNOBS->ROCKSDB_CDCF_DELETION_RATIO) };
+	}
 
 	rocksdb::BlockBasedTableOptions bbOpts;
 	// TODO: Add a knob for the block cache size. (Default is 8 MB)
@@ -365,6 +409,8 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	bbOpts.block_cache = rocksdb_block_cache;
 
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
+
+	options.compaction_pri = getCompactionPriority();
 
 	return options;
 }
@@ -814,6 +860,7 @@ public:
 	}
 
 	rocksdb::Status init() {
+		const double start = now();
 		// Open instance.
 		TraceEvent(SevInfo, "ShardedRocksShardManagerInitBegin", this->logId).detail("DataPath", path);
 		if (SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0) {
@@ -979,7 +1026,9 @@ public:
 		if (SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0) {
 			dbOptions.rate_limiter->SetBytesPerSecond(SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC);
 		}
-		TraceEvent(SevInfo, "ShardedRocksShardManagerInitEnd", this->logId).detail("DataPath", path);
+		TraceEvent(SevInfo, "ShardedRocksShardManagerInitEnd", this->logId)
+		    .detail("DataPath", path)
+		    .detail("Duration", now() - start);
 		return status;
 	}
 
@@ -1253,6 +1302,8 @@ public:
 				TraceEvent(SevDebug, "ShardedRocksDB").detail("ClearNonExistentRange", it.range());
 				continue;
 			}
+
+			// TODO: Skip clear range and compaction when entire CF is cleared.
 			writeBatch->DeleteRange(it.value()->physicalShard->cf, toSlice(range.begin), toSlice(range.end));
 			dirtyShards->insert(it.value()->physicalShard);
 		}
