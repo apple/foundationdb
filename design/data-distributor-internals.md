@@ -81,6 +81,17 @@ Actors are created to monitor the reasons of key movement:
 (3) `serverTeamRemover` and `machineTeamRemover` actors periodically evaluate if the number of server teams and machine teams is larger than the desired number. If so, they respectively pick a server team or a machine team to remove based on predefined criteria;
 (4) `teamTracker` actor monitors a team’s healthiness. When a server in the team becomes unhealthy, it issues the `RelocateShard` request to repair the replication factor. The less servers a team has, the higher priority the `RelocateShard` request will be.
 
+#### Movement Priority
+There are roughly 4 class of movement priorities
+* Healthy priority. The movement is for maintain the cluster healthy status, and the priority is depended on the healthy status of the source team.
+* Load balance priority. The movement is for balance cluster workload.
+* Boundary change priority. The movement will change current shard boundaries.
+* Others. Like resuming a in-flight movement.
+
+Each shard movement has a priority associating with the move attempt,  The explanation of each priority knob (`PRIORITY_<XXX>`) is in `ServerKnobs.h`.
+
+In `status json` output, please look at field `.data.team_tracker.state` for team priority state.
+
 ### How to move keys?
 
 A key range is a shard. A shard is the minimum unit of moving data. The storage server’s ownership of a shard -- which SS owns which shard -- is stored in the system keyspace *serverKeys* (`\xff/serverKeys/`) and *keyServers* (`\xff/keyServers/`). To simplify the explanation, we refer to the storage server’s ownership of a shard as a shard’s ownership.
@@ -152,11 +163,11 @@ CPU utilization. This metric is in a positive relationship with “FinishedQueri
 * Read-aware DD will balance the read workload under the read-skew scenario. Starting from an imbalance `STD(FinishedQueries per minute)=16k`,the best result it can achieve is `STD(FinishedQueries per minute) = 2k`.
 * The typical movement size under a read-skew scenario is 100M ~ 600M under default KNOB value `READ_REBALANCE_MAX_SHARD_FRAC=0.2, READ_REBALANCE_SRC_PARALLELISM = 20`. Increasing those knobs may accelerate the converge speed with the risk of data movement churn, which overwhelms the destination and over-cold the source.
 * The upper bound of `READ_REBALANCE_MAX_SHARD_FRAC` is 0.5. Any value larger than 0.5 can result in hot server switching.
-* When needing a deeper diagnosis of the read aware DD, `BgDDMountainChopper_New`, and `BgDDValleyFiller_New` trace events are where to go.
+* When needing a deeper diagnosis of the read aware DD, `BgDDMountainChopper`, and `BgDDValleyFiller` trace events are where to go.
 
 ## Data Distribution Diagnosis Q&A
 * Why Read-aware DD hasn't been triggered when there's a read imbalance? 
-  * Check `BgDDMountainChopper_New`, `BgDDValleyFiller_New` `SkipReason` field.
+  * Check `BgDDMountainChopper`, `BgDDValleyFiller` `SkipReason` field.
 * The Read-aware DD is triggered, and some data movement happened, but it doesn't help the read balance. Why? 
   * Need to figure out which server is selected as the source and destination. The information is in `BgDDMountainChopper*`, `BgDDValleyFiller*`  `DestTeam` and `SourceTeam` field.
   * Also, the `DDQueueServerCounter` event tells how many times a server being a source or destination (defined in 
