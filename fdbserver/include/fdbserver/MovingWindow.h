@@ -36,8 +36,7 @@ private:
 	T total;
 	// To avoid having a super large Deque which may lead OOM, we set a maxSize for it.
 	// Actually, Deque has its own Deque::max_size = 1 << 30, We may narrow it down here.
-	// = 100MB / sizeof(pair<double, int64_t>) = 100MB / 16B ~ 2^16 ~ SHRT_MAX
-	int maxSize;
+	int maxDequeSize;
 	Deque<std::pair<double, T>> updates; // pair{time, numeric}
 	double interval;
 	// Updated when initialization Or pop() due to full Deque
@@ -49,8 +48,9 @@ private:
 	}
 
 public:
-	MovingWindow()
-	  : previous(0), total(0), maxSize(SHRT_MAX), interval(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL),
+	MovingWindow() = default;
+	explicit MovingWindow(double timeWindow, int64_t sampleMaxSize)
+	  : previous(0), total(0), maxDequeSize(sampleMaxSize / sizeof(std::pair<double, T>)), interval(timeWindow),
 	    previousPopTime(now()) {}
 
 	T getTotal() const { return total; }
@@ -70,7 +70,7 @@ public:
 		total += sample;
 		updates.push_back(std::make_pair(now(), sample));
 		// If so, we would pop the front element from the Deque.
-		while (updates.size() > maxSize) {
+		while (updates.size() > maxDequeSize) {
 			previousPopTime = updates.front().first;
 			pop();
 		}

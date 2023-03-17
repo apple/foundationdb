@@ -751,6 +751,7 @@ public:
 	bool READ_SAMPLING_ENABLED;
 	// Rolling window duration over which the average bytes moved by DD is calculated for the 'MovingData' trace event.
 	double DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL;
+	int64_t DD_TRACE_MOVE_BYTES_SAMPLE_SIZE;
 
 	// Storage Server
 	double STORAGE_LOGGING_DELAY;
