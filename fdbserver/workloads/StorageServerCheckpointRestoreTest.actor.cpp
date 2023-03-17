@@ -124,7 +124,6 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		}
 
 		TraceEvent("TestCheckpointFetched").detail("Range", testRange).detail("Version", version);
-		// .detail("Checkpoints", describe(records));
 
 		state std::string pwd = platform::getWorkingDirectory();
 		state std::string folder = pwd + "/checkpoints";
@@ -162,7 +161,6 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 			wait(kvStore->restore(fetchedCheckpoints));
 		} catch (Error& e) {
 			TraceEvent(SevError, "TestRestoreCheckpointError").errorUnsuppressed(e);
-			// .detail("Checkpoint", describe(records));
 		}
 
 		// Compare the keyrange between the original database and the one restored from checkpoint.

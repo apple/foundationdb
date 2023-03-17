@@ -123,8 +123,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state std::vector<KeyRange> checkpointRanges;
 		checkpointRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyAC"_sr));
 		wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::True, &kvs));
-		// wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::False,
-		// &kvs));
+		wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::False, &kvs));
 
 		// Move range [TestKeyD, TestKeyF) to sh0;
 		includes.insert(teamA.begin(), teamA.end());
@@ -153,8 +152,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		checkpointRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
 		checkpointRanges.push_back(KeyRangeRef("TestKeyD"_sr, "TestKeyE"_sr));
 		wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::True, &kvs));
-		// wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::False,
-		// &kvs));
+		wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::False, &kvs));
 
 		// Move range [TestKeyB, TestKeyC) to sh1, on the same server.
 		includes.insert(teamA.begin(), teamA.end());
@@ -268,45 +266,22 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state std::string checkpointDir = abspath("fetchedCheckpoints");
 		platform::eraseDirectoryRecursive(checkpointDir);
 		ASSERT(platform::createDirectory(checkpointDir));
-		state std::vector<CheckpointMetaData> fetchedCheckpoints;
-		state int i = 0;
-		for (; i < records.size(); ++i) {
-			loop {
-				TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", records[i].second.toString());
-				state std::string currentDir = fetchedCheckpointDir(checkpointDir, records[i].second.checkpointID);
-				platform::eraseDirectoryRecursive(currentDir);
-				ASSERT(platform::createDirectory(currentDir));
-				try {
-					state CheckpointMetaData record;
-					if (asKeyValues) {
-						wait(store(record,
-						           fetchCheckpointRanges(cx, records[i].second, currentDir, { records[i].first })));
-						ASSERT(record.getFormat() == RocksDBKeyValues);
-					} else {
-						wait(store(record, fetchCheckpoint(cx, records[i].second, currentDir)));
-						ASSERT(record.getFormat() == format);
-					}
-					if (records[i].second.bytesSampleFile.present()) {
-						ASSERT(record.bytesSampleFile.present());
-						ASSERT(fileExists(record.bytesSampleFile.get()));
-						TraceEvent(SevDebug, "TestCheckpointByteSampleFile")
-						    .detail("RemoteFile", records[i].second.bytesSampleFile.get())
-						    .detail("LocalFile", record.bytesSampleFile.get());
-					}
-					fetchedCheckpoints.push_back(record);
-					TraceEvent(SevDebug, "TestCheckpointFetched").detail("Checkpoint", record.toString());
-					break;
-				} catch (Error& e) {
-					TraceEvent(SevWarn, "TestFetchCheckpointError")
-					    .errorUnsuppressed(e)
-					    .detail("Checkpoint", records[i].second.toString());
-					wait(delay(1));
-				}
-				// wait(store(fetchedCheckpoints, getAll(fCheckpointMetaData)));
-				TraceEvent(SevDebug, "TestCheckpointFetched").detail("Checkpoints", describe(fetchedCheckpoints));
-				break;
+		state std::vector<Future<CheckpointMetaData>> checkpointFutures;
+		for (int i = 0; i < records.size(); ++i) {
+			TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", records[i].second.toString());
+			state std::string currentDir = fetchedCheckpointDir(checkpointDir, records[i].second.checkpointID);
+			platform::eraseDirectoryRecursive(currentDir);
+			ASSERT(platform::createDirectory(currentDir));
+			if (asKeyValues) {
+				checkpointFutures.push_back(
+				    fetchCheckpointRanges(cx, records[i].second, currentDir, { records[i].first }));
+			} else {
+				checkpointFutures.push_back(fetchCheckpoint(cx, records[i].second, currentDir));
 			}
 		}
+
+		state std::vector<CheckpointMetaData> fetchedCheckpoints = wait(getAll(checkpointFutures));
+		TraceEvent(SevDebug, "TestCheckpointFetched").detail("Checkpoints", describe(fetchedCheckpoints));
 
 		// Restore KVS.
 		state std::string rocksDBTestDir = "rocksdb-kvstore-test-restored-db";

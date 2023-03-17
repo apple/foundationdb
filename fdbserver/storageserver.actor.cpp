@@ -9079,7 +9079,7 @@ private:
 			    .detail("Source", "PrivateMutation")
 			    .detail("Checkpoint", checkpoint.toString());
 		}
-	} // Registers a pending checkpoint request, it will be fullfilled when the desired version is durable.
+	}
 };
 
 void StorageServer::insertTenant(TenantMapEntry const& tenant, Version version, bool persist) {
