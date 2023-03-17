@@ -256,11 +256,6 @@ public:
 				if (customReplicas > self->configuration.storageTeamSize) {
 					auto newTeam = self->buildLargeTeam(customReplicas);
 					if (newTeam) {
-						self->firstLargeTeamFailure = Optional<double>();
-						TraceEvent("ReplicatingToLargeTeam", self->distributorId)
-						    .detail("Team", newTeam->getDesc())
-						    .detail("Healthy", newTeam->isHealthy());
-						req.reply.send(std::make_pair(newTeam, foundSrc));
 						if (newTeam->size() < customReplicas) {
 							if (!self->firstLargeTeamFailure.present()) {
 								self->firstLargeTeamFailure = now();
@@ -270,7 +265,13 @@ public:
 								return Void();
 							}
 							self->wrongReplication.insert(req.keys.get(), true);
+						} else {
+							self->firstLargeTeamFailure = Optional<double>();
 						}
+						TraceEvent("ReplicatingToLargeTeam", self->distributorId)
+						    .detail("Team", newTeam->getDesc())
+						    .detail("Healthy", newTeam->isHealthy());
+						req.reply.send(std::make_pair(newTeam, foundSrc));
 						return Void();
 					} else {
 						if (!self->firstLargeTeamFailure.present()) {
