@@ -1544,6 +1544,19 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 	o.create("main_thread_cpu_seconds") = getProcessorTimeThread();
 	o.create("process_cpu_seconds") = getProcessorTimeProcess();
 	o.create("configured_workers") = CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT;
+	o.create("processID") = ::getpid();
+	o.create("locality") = tr->getDatabase()->clientLocality.toJSON<json_spirit::mObject>();
+
+	// Try to determine the public address used to talk to the cluster
+	state IPAddress ip;
+	try {
+		ip = determinePublicIPAutomatically(tr->getDatabase()->getConnectionRecord()->getConnectionString());
+	} catch (Error& e) {
+		// Output an error into the doc and fall back to localAddress()
+		o.create("networkAddressError") = e.what();
+		ip = g_network->getLocalAddress().ip;
+	}
+	o.create("networkAddress") = ip.toString();
 
 	if (exe == ProgramExe::AGENT) {
 		static S3BlobStoreEndpoint::Stats last_stats;
