@@ -323,7 +323,7 @@ public:
 	}
 
 	// Convert locality fields to a JSON object.  This is a template because it works with JSONBuilder, StatusObject,
-	// and json_spirit::mObject, but none of these types are in the fdbrpc/ project.
+	// and json_spirit::mObject, and none of these types are in the fdbrpc/ project.
 	template <typename JSONType>
 	JSONType toJSON() const {
 		JSONType obj;
