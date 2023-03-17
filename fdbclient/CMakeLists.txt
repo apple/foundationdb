@@ -103,7 +103,7 @@ generate_modulemap("${CMAKE_BINARY_DIR}/fdbclient/include" "FDBClient" fdbclient
 # TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?
 target_compile_options(fdbclient_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++17 -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml>")
 
-add_dependencies(fdbclient_swift flow_swift)
+add_dependencies(fdbclient_swift flow_swift fdbclient_actors fdbrpc_actors fdboptions)
 # This does not work! (see rdar://99107402)
 # target_link_libraries(flow PRIVATE flow_swift)
 add_dependencies(fdbclient fdbclient_swift)
