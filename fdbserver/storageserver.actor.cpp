@@ -9066,9 +9066,9 @@ private:
 			    .detail("Checkpoint", checkpoint.toString());
 		} else if (cState == CheckpointMetaData::Deleting) {
 			ASSERT(std::find(checkpoint.src.begin(), checkpoint.src.end(), data->thisServerID) != checkpoint.src.end());
-            checkpoint.src.clear();
-            checkpoint.src.push_back(data->thisServerID);
-            checkpoint.dir = serverCheckpointDir(data->checkpointFolder, checkpoint.checkpointID);
+			checkpoint.src.clear();
+			checkpoint.src.push_back(data->thisServerID);
+			checkpoint.dir = serverCheckpointDir(data->checkpointFolder, checkpoint.checkpointID);
 			const Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
 			data->addMutationToMutationLog(
 			    mLV, MutationRef(MutationRef::SetValue, persistCheckpointKey, checkpointValue(checkpoint)));

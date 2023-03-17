@@ -157,15 +157,21 @@ ACTOR Future<Void> unassignServerKeys(Transaction* tr, UID ssId, KeyRange range,
 
 ACTOR Future<Void> deleteCheckpoints(Transaction* tr, std::set<UID> checkpointIds, UID logId) {
 	TraceEvent(SevDebug, "DataMoveDeleteCheckpoints", logId).detail("Checkpoints", describe(checkpointIds));
-	state std::set<UID>::iterator it = checkpointIds.begin();
-	for (; it != checkpointIds.end(); ++it) {
-		state Key key = checkpointKeyFor(*it);
-		Optional<Value> readVal = wait(tr->get(key));
-		if (!readVal.present()) {
-			TraceEvent(SevWarnAlways, "CheckpointNotFound", logId).detail("CheckpointID", logId);
+	std::vector<Future<Optional<Value>>> checkpointEntries;
+	for (const UID& id : checkpointIds) {
+		checkpointEntries.push_back(tr->get(checkpointKeyFor(id)));
+	}
+	std::vector<Optional<Value>> checkpointValues = wait(getAll(checkpointEntries));
+
+	for (int i = 0; i < checkpointIds.size(); ++i) {
+		const auto& value = checkpointValues[i];
+		if (!value.present()) {
+			TraceEvent(SevWarnAlways, "CheckpointNotFound", logId);
 			continue;
 		}
-		CheckpointMetaData checkpoint = decodeCheckpointValue(readVal.get());
+		CheckpointMetaData checkpoint = decodeCheckpointValue(value.get());
+		ASSERT(checkpointIds.find(checkpoint.checkpointID) != checkpointIds.end());
+		const Key key = checkpointKeyFor(checkpoint.checkpointID);
 		checkpoint.setState(CheckpointMetaData::Deleting);
 		tr->set(key, checkpointValue(checkpoint));
 		tr->clear(singleKeyRange(key));
