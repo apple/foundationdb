@@ -29,6 +29,7 @@
 #include "fdbclient/BlobConnectionProvider.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"
 
@@ -197,6 +198,7 @@ private:
 	Database db_;
 	Standalone<KeyRangeRef> range_;
 };
+
 #include "flow/unactorcompiler.h"
 
 #endif
