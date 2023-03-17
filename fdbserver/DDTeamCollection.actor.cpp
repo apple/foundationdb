@@ -264,7 +264,7 @@ public:
 								req.reply.send(std::make_pair(Optional<Reference<IDataDistributionTeam>>(), foundSrc));
 								return Void();
 							}
-							self->wrongReplication.insert(req.keys.get(), true);
+							self->underReplication.insert(req.keys.get(), true);
 						} else {
 							self->firstLargeTeamFailure = Optional<double>();
 						}
@@ -286,7 +286,7 @@ public:
 						    .detail("Replicas", customReplicas)
 						    .detail("StorageTeamSize", self->configuration.storageTeamSize)
 						    .detail("LargeTeamDiff", now() - self->firstLargeTeamFailure.get());
-						self->wrongReplication.insert(req.keys.get(), true);
+						self->underReplication.insert(req.keys.get(), true);
 					}
 				}
 			}
@@ -422,12 +422,12 @@ public:
 		state std::vector<UID> serverIds;
 		state Reference<LocalitySet> tempSet = Reference<LocalitySet>(new LocalityMap<UID>());
 		state LocalityMap<UID>* tempMap = (LocalityMap<UID>*)tempSet.getPtr();
-		state std::vector<Reference<TCTeamInfo>> largeAndBadTeams = self->badTeams;
-		largeAndBadTeams.insert(largeAndBadTeams.end(), self->largeTeams.begin(), self->largeTeams.end());
+		state std::vector<Reference<TCTeamInfo>> largeOrBadTeams = self->badTeams;
+		largeOrBadTeams.insert(largeOrBadTeams.end(), self->largeTeams.begin(), self->largeTeams.end());
 
-		for (; idx < largeAndBadTeams.size(); idx++) {
+		for (; idx < largeOrBadTeams.size(); idx++) {
 			servers.clear();
-			for (const auto& server : largeAndBadTeams[idx]->getServers()) {
+			for (const auto& server : largeOrBadTeams[idx]->getServers()) {
 				if (server->isInDesiredDC() && !self->server_status.get(server->getId()).isUnhealthy()) {
 					servers.push_back(server);
 				}
@@ -999,6 +999,7 @@ public:
 
 							self->output.send(rs);
 							TraceEvent("SendRelocateToDDQueue", self->distributorId)
+							    .suppressFor(1.0)
 							    .detail("TraceId", rs.traceId)
 							    .detail("ServerPrimary", self->primary)
 							    .detail("ServerTeam", team->getDesc())
@@ -1527,7 +1528,6 @@ public:
 			it->tracker.cancel();
 		}
 		self->badTeams.clear();
-		self->cleanupLargeTeams();
 		return Void();
 	}
 
@@ -1876,57 +1876,11 @@ public:
 		}
 	}
 
-	static void fixWrongReplicasImpl(DDTeamCollection* self) {
-		int checkCount = 0;
-		for (auto& it : self->wrongReplication.ranges()) {
-			if (it.value()) {
-				for (auto& r : self->shardsAffectedByTeamFailure->intersectingRanges(it.range())) {
-					auto& teams = r.value();
-					if (teams.second.empty()) {
-						int customReplicas = self->configuration.storageTeamSize;
-						for (auto& c : self->customReplication->intersectingRanges(r.range())) {
-							customReplicas = std::max(customReplicas, c.value());
-						}
-						int currentSize = 0;
-						for (auto& c : teams.first) {
-							if (c.primary == self->primary) {
-								currentSize = c.servers.size();
-							}
-						}
-
-						if (currentSize < customReplicas) {
-							// check if a larger team exists
-							int maxTeamSize = self->maxLargeTeamSize(customReplicas);
-							if (maxTeamSize > currentSize) {
-								TraceEvent("FixWrongReplicas", self->distributorId)
-								    .suppressFor(1.0)
-								    .detail("MaxTeamSize", maxTeamSize)
-								    .detail("Current", currentSize);
-								RelocateShard rs(r.range(),
-								                 SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY,
-								                 RelocateReason::OTHER,
-								                 deterministicRandom()->randomUniqueID());
-								self->output.send(rs);
-								self->wrongReplication.insert(r.range(), false);
-								return;
-							}
-						} else {
-							self->wrongReplication.insert(r.range(), false);
-							return;
-						}
-					}
-					if (++checkCount > SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAM_CLEANUP) {
-						return;
-					}
-				}
-			}
-		}
-	}
-
-	ACTOR static Future<Void> fixWrongReplicas(DDTeamCollection* self) {
+	ACTOR static Future<Void> fixWrongReplicasLoop(DDTeamCollection* self) {
 		loop {
 			wait(delay(SERVER_KNOBS->DD_FIX_WRONG_REPLICAS_DELAY));
-			fixWrongReplicasImpl(self);
+			self->cleanupLargeTeams();
+			self->fixWrongReplicas();
 		}
 	}
 
@@ -2984,7 +2938,7 @@ public:
 			self->addActor.send(self->machineTeamRemover());
 			self->addActor.send(self->serverTeamRemover());
 			if (ddLargeTeamEnabled()) {
-				self->addActor.send(self->fixWrongReplicas());
+				self->addActor.send(self->fixWrongReplicasLoop());
 			}
 
 			if (self->wrongStoreTypeRemover.isReady()) {
@@ -3562,8 +3516,62 @@ Future<Void> DDTeamCollection::serverTeamRemover() {
 	return DDTeamCollectionImpl::serverTeamRemover(this);
 }
 
-Future<Void> DDTeamCollection::fixWrongReplicas() {
-	return DDTeamCollectionImpl::fixWrongReplicas(this);
+Future<Void> DDTeamCollection::fixWrongReplicasLoop() {
+	return DDTeamCollectionImpl::fixWrongReplicasLoop(this);
+}
+
+void DDTeamCollection::fixWrongReplicas() {
+	int maxTeamSize = maxLargeTeamSize();
+	int checkCount = 0;
+	for (auto& it : underReplication.ranges()) {
+		if (!it.value()) {
+			// The key range is not under-replicated
+			continue;
+		}
+		for (auto& r : shardsAffectedByTeamFailure->intersectingRanges(it.range())) {
+			if (++checkCount > SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAM_CLEANUP) {
+				return;
+			}
+
+			auto& teams = r.value();
+			if (!teams.second.empty()) {
+				// The key range is currently being moved
+				continue;
+			}
+
+			int customReplicas = configuration.storageTeamSize;
+			for (auto& c : customReplication->intersectingRanges(r.range())) {
+				customReplicas = std::max(customReplicas, c.value());
+			}
+
+			int currentSize = 0;
+			for (auto& c : teams.first) {
+				if (c.primary == primary) {
+					currentSize = c.servers.size();
+				}
+			}
+
+			if (currentSize < customReplicas) {
+				// check if a larger team exists
+				if (maxTeamSize > currentSize) {
+					TraceEvent("FixWrongReplicas", distributorId)
+					    .suppressFor(1.0)
+					    .detail("MaxTeamSize", maxTeamSize)
+					    .detail("Current", currentSize);
+					RelocateShard rs(r.range(),
+					                 SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY,
+					                 RelocateReason::OTHER,
+					                 deterministicRandom()->randomUniqueID());
+					output.send(rs);
+					underReplication.insert(r.range(), false);
+					return;
+				}
+			} else {
+				underReplication.insert(r.range(), false);
+				return;
+			}
+		}
+	}
 }
 
 Future<Void> DDTeamCollection::trackExcludedServers() {
@@ -3707,7 +3715,7 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
     teamCollectionInfoEventHolder(makeReference<EventCacheHolder>("TeamCollectionInfo")),
     storageServerRecruitmentEventHolder(
         makeReference<EventCacheHolder>("StorageServerRecruitment_" + params.distributorId.toString())),
-    primary(params.primary), distributorId(params.distributorId), wrongReplication(false),
+    primary(params.primary), distributorId(params.distributorId), underReplication(false),
     configuration(params.configuration), storageServerSet(new LocalityMap<UID>()) {
 
 	if (!primary || configuration.usableRegions == 1) {
@@ -3977,7 +3985,7 @@ void DDTeamCollection::cleanupLargeTeams() {
 	}
 }
 
-int DDTeamCollection::maxLargeTeamSize(int teamSize) const {
+int DDTeamCollection::maxLargeTeamSize() const {
 	std::vector<Reference<TCServerInfo>> healthy;
 	for (auto& [serverID, server] : server_info) {
 		if (!server_status.get(serverID).isUnhealthy()) {
@@ -3985,18 +3993,10 @@ int DDTeamCollection::maxLargeTeamSize(int teamSize) const {
 		}
 	}
 
-	std::set<UID> serverIds;
-	std::vector<Reference<TCServerInfo>> candidateTeam;
-	for (int i = 0; i < healthy.size(); i++) {
-		if (candidateTeam.size() >= teamSize && satisfiesPolicy(candidateTeam)) {
-			break;
-		}
-		candidateTeam.push_back(healthy[i]);
-	}
-	if (!satisfiesPolicy(candidateTeam)) {
+	if (!satisfiesPolicy(healthy)) {
 		return -1;
 	}
-	return std::min<int>(teamSize, candidateTeam.size());
+	return healthy.size();
 }
 
 struct ServerPriority {

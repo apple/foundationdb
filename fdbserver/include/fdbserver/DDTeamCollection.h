@@ -305,7 +305,7 @@ protected:
 	LocalityMap<UID> machineLocalityMap; // locality info of machines
 
 	Reference<KeyRangeMap<int>> customReplication;
-	CoalescedKeyRangeMap<bool> wrongReplication;
+	CoalescedKeyRangeMap<bool> underReplication;
 
 	// A mechanism to tell actors that reference a DDTeamCollection object through a direct
 	// pointer (without doing reference counting) that the object is being destroyed.
@@ -537,7 +537,9 @@ protected:
 
 	Future<Void> removeWrongStoreType();
 
-	Future<Void> fixWrongReplicas();
+	Future<Void> fixWrongReplicasLoop();
+
+	void fixWrongReplicas();
 
 	// Check if the number of server (and machine teams) is larger than the maximum allowed number
 	void traceTeamCollectionInfo() const;
@@ -637,7 +639,7 @@ protected:
 
 	void cleanupLargeTeams();
 
-	int maxLargeTeamSize(int size) const;
+	int maxLargeTeamSize() const;
 
 	Reference<TCTeamInfo> buildLargeTeam(int size);
 
