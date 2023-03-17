@@ -459,7 +459,8 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 		state int customReplication = configuration.storageTeamSize;
 		if (g_network->isSimulated() && ddLargeTeamEnabled()) {
 			for (auto& it : g_simulator->customReplicas) {
-				if (range.begin < std::get<1>(it) && std::get<0>(it) < range.end) {
+				KeyRangeRef replicaRange(std::get<0>(it), std::get<1>(it));
+				if (range.intersects(replicaRange)) {
 					TraceEvent("ConsistencyCheck_CheckCustomReplica")
 					    .detail("ShardBegin", printable(range.begin))
 					    .detail("ShardEnd", printable(range.end))
@@ -472,7 +473,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 					    .detail("UsableRegions", configuration.usableRegions)
 					    .detail("First", firstClient)
 					    .detail("Perform", performQuiescentChecks);
-					if (range.begin < std::get<0>(it) || range.end > std::get<1>(it)) {
+					if (!replicaRange.contains(range)) {
 						testFailure("Custom shard boundary violated", performQuiescentChecks, success, failureIsError);
 						return Void();
 					}

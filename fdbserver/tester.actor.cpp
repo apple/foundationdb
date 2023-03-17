@@ -1783,8 +1783,33 @@ ACTOR Future<Void> initializeSimConfig(Database db) {
 			g_simulator->storagePolicy = dbConfig.storagePolicy;
 			g_simulator->tLogPolicy = dbConfig.tLogPolicy;
 			g_simulator->tLogWriteAntiQuorum = dbConfig.tLogWriteAntiQuorum;
-			g_simulator->remoteTLogPolicy = dbConfig.getRemoteTLogPolicy();
 			g_simulator->usableRegions = dbConfig.usableRegions;
+
+			bool foundSharedDcID = false;
+			std::set<Key> dcIds;
+			int satelliteReplication = 0;
+			for (auto& r : dbConfig.regions) {
+				if (dcIds.count(r.dcId)) {
+					foundSharedDcID = true;
+				}
+				dcIds.insert(r.dcId);
+				for (auto& s : r.satellites) {
+					satelliteReplication =
+					    std::max(satelliteReplication, r.satelliteTLogReplicationFactor / r.satelliteTLogUsableDcs);
+					if (dcIds.count(s.dcId)) {
+						foundSharedDcID = true;
+					}
+					dcIds.insert(s.dcId);
+				}
+			}
+			if (foundSharedDcID) {
+				int totalRequired = std::max(dbConfig.tLogReplicationFactor, dbConfig.remoteTLogReplicationFactor) +
+				                    satelliteReplication;
+				g_simulator->remoteTLogPolicy = Reference<IReplicationPolicy>(
+				    new PolicyAcross(totalRequired, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+			} else {
+				g_simulator->remoteTLogPolicy = dbConfig.getRemoteTLogPolicy();
+			}
 			return Void();
 		} catch (Error& e) {
 			wait(tr.onError(e));
