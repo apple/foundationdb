@@ -2405,15 +2405,12 @@ struct DDQueueImpl {
 	}
 };
 
-Future<Void> DDQueue::run(Reference<AsyncVar<bool>> processingUnhealthy,
+Future<Void> DDQueue::run(Reference<DDQueue> self,
+                          Reference<AsyncVar<bool>> processingUnhealthy,
                           Reference<AsyncVar<bool>> processingWiggle,
                           FutureStream<Promise<int>> getUnhealthyRelocationCount,
                           const DDEnabledState* ddEnabledState) {
-	return DDQueueImpl::run(Reference<DDQueue>::addRef(this),
-	                        processingUnhealthy,
-	                        processingWiggle,
-	                        getUnhealthyRelocationCount,
-	                        ddEnabledState);
+	return DDQueueImpl::run(self, processingUnhealthy, processingWiggle, getUnhealthyRelocationCount, ddEnabledState);
 }
 
 TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {

@@ -111,11 +111,12 @@ struct DataDistributionTracker : public IDDShardTracker, ReferenceCounted<DataDi
 
 	double getAverageShardBytes() override { return maxShardSize->get().get() / 2.0; }
 
-	Future<Void> run(Reference<InitialDataDistribution> const& initData,
-	                 FutureStream<GetMetricsRequest> const& getShardMetrics,
-	                 FutureStream<GetTopKMetricsRequest> const& getTopKMetrics,
-	                 FutureStream<GetMetricsListRequest> const& getShardMetricsList,
-	                 FutureStream<Promise<int64_t>> const& getAverageShardBytes);
+	static Future<Void> run(Reference<DataDistributionTracker> self,
+	                        Reference<InitialDataDistribution> const& initData,
+	                        FutureStream<GetMetricsRequest> const& getShardMetrics,
+	                        FutureStream<GetTopKMetricsRequest> const& getTopKMetrics,
+	                        FutureStream<GetMetricsListRequest> const& getShardMetricsList,
+	                        FutureStream<Promise<int64_t>> const& getAverageShardBytes);
 
 	explicit DataDistributionTracker(DataDistributionTrackerInitParams const& params);
 };

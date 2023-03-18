@@ -1475,16 +1475,17 @@ struct DataDistributionTrackerImpl {
 	}
 };
 
-Future<Void> DataDistributionTracker::run(const Reference<InitialDataDistribution>& initData,
+Future<Void> DataDistributionTracker::run(Reference<DataDistributionTracker> self,
+                                          const Reference<InitialDataDistribution>& initData,
                                           const FutureStream<GetMetricsRequest>& getShardMetrics,
                                           const FutureStream<GetTopKMetricsRequest>& getTopKMetrics,
                                           const FutureStream<GetMetricsListRequest>& getShardMetricsList,
                                           const FutureStream<Promise<int64_t>>& getAverageShardBytes) {
-	this->getShardMetrics = getShardMetrics;
-	this->getTopKMetrics = getTopKMetrics;
-	this->getShardMetricsList = getShardMetricsList;
-	this->averageShardBytes = getAverageShardBytes;
-	return DataDistributionTrackerImpl::run(this, initData);
+	self->getShardMetrics = getShardMetrics;
+	self->getTopKMetrics = getTopKMetrics;
+	self->getShardMetricsList = getShardMetricsList;
+	self->averageShardBytes = getAverageShardBytes;
+	return holdWhile(self, DataDistributionTrackerImpl::run(self.getPtr(), initData));
 }
 
 // Tracks storage metrics for `keys` and updates `physicalShardStats` which is the stats for the physical shard owning

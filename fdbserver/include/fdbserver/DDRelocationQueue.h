@@ -350,10 +350,11 @@ struct DDQueue : public IDDRelocationQueue, ReferenceCounted<DDQueue> {
 	                            bool primary,
 	                            TraceEvent* traceEvent);
 
-	Future<Void> run(Reference<AsyncVar<bool>> processingUnhealthy,
-	                 Reference<AsyncVar<bool>> processingWiggle,
-	                 FutureStream<Promise<int>> getUnhealthyRelocationCount,
-	                 const DDEnabledState* ddEnabledState);
+	static Future<Void> run(Reference<DDQueue> self,
+	                        Reference<AsyncVar<bool>> processingUnhealthy,
+	                        Reference<AsyncVar<bool>> processingWiggle,
+	                        FutureStream<Promise<int>> getUnhealthyRelocationCount,
+	                        const DDEnabledState* ddEnabledState);
 
 	explicit DDQueue(DDQueueInitParams const& params);
 };

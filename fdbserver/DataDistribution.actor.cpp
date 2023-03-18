@@ -664,12 +664,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 	// FIXME: wrap the bootstrap process into class DataDistributor
 	state Reference<DDTeamCollection> primaryTeamCollection;
 	state Reference<DDTeamCollection> remoteTeamCollection;
-	state Reference<DataDistributionTracker> shardTracker;
-	state Reference<DDQueue> ddQueue;
 	state bool trackerCancelled;
 
 	loop {
 		trackerCancelled = false;
+		// whether all initial shard are tracked
 		self->initialized = Promise<Void>();
 		self->auditInitialized = Promise<Void>();
 
@@ -723,7 +722,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			actors.push_back(self->pollMoveKeysLock());
 
-			shardTracker = makeReference<DataDistributionTracker>(
+			auto shardTracker = makeReference<DataDistributionTracker>(
 			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
 			                                       .distributorId = self->ddId,
 			                                       .readyToStart = self->initialized,
@@ -734,16 +733,17 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                       .shards = &shards,
 			                                       .trackerCancelled = &trackerCancelled,
 			                                       .ddTenantCache = self->ddTenantCache });
-			actors.push_back(reportErrorsExcept(shardTracker->run(self->initData,
-			                                                      getShardMetrics.getFuture(),
-			                                                      getTopKShardMetrics.getFuture(),
-			                                                      getShardMetricsList.getFuture(),
-			                                                      getAverageShardBytes.getFuture()),
+			actors.push_back(reportErrorsExcept(DataDistributionTracker::run(shardTracker,
+			                                                                 self->initData,
+			                                                                 getShardMetrics.getFuture(),
+			                                                                 getTopKShardMetrics.getFuture(),
+			                                                                 getShardMetricsList.getFuture(),
+			                                                                 getAverageShardBytes.getFuture()),
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
 
-			ddQueue = makeReference<DDQueue>(
+			auto ddQueue = makeReference<DDQueue>(
 			    DDQueueInitParams{ .id = self->ddId,
 			                       .lock = self->lock,
 			                       .db = self->txnProcessor,
@@ -757,7 +757,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                       .relocationConsumer = self->relocationConsumer.getFuture(),
 			                       .getShardMetrics = getShardMetrics,
 			                       .getTopKMetrics = getTopKShardMetrics });
-			actors.push_back(reportErrorsExcept(ddQueue->run(processingUnhealthy,
+			actors.push_back(reportErrorsExcept(DDQueue::run(ddQueue,
+			                                                 processingUnhealthy,
 			                                                 processingWiggle,
 			                                                 getUnhealthyRelocationCount.getFuture(),
 			                                                 self->context->ddEnabledState.get()),
