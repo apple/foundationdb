@@ -226,7 +226,7 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 	++(*clientCount);
 	hasConnectedClients->set(true);
 
-	if (req.supportedVersions.size() > 0) {
+	if (req.supportedVersions.size() > 0 && !req.internal) {
 		db->clientStatusInfoMap[req.reply.getEndpoint().getPrimaryAddress()] =
 		    ClientStatusInfo(req.traceLogGroup, req.supportedVersions, req.issues);
 	}
@@ -252,7 +252,7 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 		}
 	}
 
-	if (req.supportedVersions.size() > 0) {
+	if (req.supportedVersions.size() > 0 && !req.internal) {
 		db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
 	}
 
@@ -402,7 +402,6 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				notify[i].send(newInfo);
 			notify.clear();
 			ClientDBInfo outInfo;
-			outInfo.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 			outInfo.id = deterministicRandom()->randomUniqueID();
 			outInfo.forward = req.conn.toString();
 			clientData.clientInfo->set(CachedSerialization<ClientDBInfo>(outInfo));
@@ -642,7 +641,6 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 			Optional<LeaderInfo> forward = regs.getForward(req.clusterKey);
 			if (forward.present()) {
 				ClientDBInfo info;
-				info.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 				info.id = deterministicRandom()->randomUniqueID();
 				info.forward = forward.get().serializedInfo;
 				req.reply.send(CachedSerialization<ClientDBInfo>(info));

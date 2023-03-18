@@ -41,21 +41,35 @@ enum class AuditType : uint8_t {
 struct AuditStorageState {
 	constexpr static FileIdentifier file_identifier = 13804340;
 
-	AuditStorageState() = default;
-	AuditStorageState(UID id, AuditType type) : id(id), type(static_cast<uint8_t>(type)) {}
+	AuditStorageState() : type(0), phase(0) {}
+	AuditStorageState(UID id, AuditType type) : id(id), type(static_cast<uint8_t>(type)), phase(0) {}
+	AuditStorageState(UID id, KeyRange range, AuditType type)
+	  : id(id), range(range), type(static_cast<uint8_t>(type)), phase(0) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, type, phase, error);
+		serializer(ar, id, range, type, phase, error);
 	}
 
-	void setType(AuditType type) { this->type = static_cast<uint8_t>(this->type); }
+	void setType(AuditType type) { this->type = static_cast<uint8_t>(type); }
 	AuditType getType() const { return static_cast<AuditType>(this->type); }
 
 	void setPhase(AuditPhase phase) { this->phase = static_cast<uint8_t>(phase); }
 	AuditPhase getPhase() const { return static_cast<AuditPhase>(this->phase); }
 
+	std::string toString() const {
+		std::string res = "AuditStorageState: [ID]: " + id.toString() +
+		                  ", [Range]: " + Traceable<KeyRangeRef>::toString(range) +
+		                  ", [Type]: " + std::to_string(type) + ", [Phase]: " + std::to_string(phase);
+		if (!error.empty()) {
+			res += "[Error]: " + error;
+		}
+
+		return res;
+	}
+
 	UID id;
+	KeyRange range;
 	uint8_t type;
 	uint8_t phase;
 	std::string error;

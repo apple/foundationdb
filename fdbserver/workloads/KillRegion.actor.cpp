@@ -89,16 +89,16 @@ struct KillRegionWorkload : TestWorkload {
 		// FIXME: killDataCenter breaks simulation if forceKill=false, since some processes can survive and
 		// partially complete a recovery
 		g_simulator->killDataCenter("0"_sr,
-		                            deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
-		                                                                    : ISimulator::RebootAndDelete,
+		                            deterministicRandom()->random01() < 0.5 ? ISimulator::KillType::KillInstantly
+		                                                                    : ISimulator::KillType::RebootAndDelete,
 		                            true);
 		g_simulator->killDataCenter("2"_sr,
-		                            deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
-		                                                                    : ISimulator::RebootAndDelete,
+		                            deterministicRandom()->random01() < 0.5 ? ISimulator::KillType::KillInstantly
+		                                                                    : ISimulator::KillType::RebootAndDelete,
 		                            true);
 		g_simulator->killDataCenter("4"_sr,
-		                            deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
-		                                                                    : ISimulator::RebootAndDelete,
+		                            deterministicRandom()->random01() < 0.5 ? ISimulator::KillType::KillInstantly
+		                                                                    : ISimulator::KillType::RebootAndDelete,
 		                            true);
 
 		TraceEvent("ForceRecovery_Begin").log();

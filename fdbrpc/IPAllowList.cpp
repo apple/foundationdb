@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <boost/asio.hpp>
+
 #include "flow/UnitTest.h"
 #include "flow/Error.h"
 #include "fdbrpc/IPAllowList.h"
@@ -216,7 +218,7 @@ struct SubNetTest {
 			return IPAddress(arr[0]);
 		} else {
 			std::array<unsigned char, 16> res;
-			memcpy(res.data(), arr, 4);
+			memcpy(res.data(), arr, 16);
 			return IPAddress(res);
 		}
 	}

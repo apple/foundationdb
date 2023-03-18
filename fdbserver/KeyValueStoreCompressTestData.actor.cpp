@@ -81,6 +81,10 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 		return doReadRange(store, keys, rowLimit, byteLimit, options);
 	}
 
+	Future<EncryptionAtRestMode> encryptionMode() override {
+		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
+	}
+
 private:
 	ACTOR static Future<Optional<Value>> doReadValue(IKeyValueStore* store, Key key, Optional<ReadOptions> options) {
 		Optional<Value> v = wait(store->readValue(key, options));

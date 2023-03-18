@@ -26,9 +26,15 @@
 #include "flow/Trace.h"
 #include <algorithm>
 #include <memory>
+#ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
+#endif
+#ifndef BOOST_DATE_TIME_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
+#endif
+#ifndef BOOST_REGEX_NO_LIB
 #define BOOST_REGEX_NO_LIB
+#endif
 #include <boost/asio.hpp>
 #if defined(HAVE_WOLFSSL)
 #include <wolfssl/options.h>
@@ -44,6 +50,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/TaskQueue.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/ChaosMetrics.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/AsioReactor.h"
 #include "flow/Profiler.h"
@@ -55,6 +62,8 @@
 #include "flow/Util.h"
 #include "flow/UnitTest.h"
 #include "flow/ScopeExit.h"
+#include "flow/IUDPSocket.h"
+#include "flow/IConnection.h"
 
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
@@ -334,11 +343,12 @@ static udp::endpoint udpEndpoint(NetworkAddress const& n) {
 
 class BindPromise {
 	Promise<Void> p;
-	const char* errContext;
+	std::variant<const char*, AuditedEvent> errContext;
 	UID errID;
 
 public:
 	BindPromise(const char* errContext, UID errID) : errContext(errContext), errID(errID) {}
+	BindPromise(AuditedEvent auditedEvent, UID errID) : errContext(auditedEvent), errID(errID) {}
 	BindPromise(BindPromise const& r) : p(r.p), errContext(r.errContext), errID(r.errID) {}
 	BindPromise(BindPromise&& r) noexcept : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
 
@@ -349,7 +359,12 @@ public:
 			if (error) {
 				// Log the error...
 				{
-					TraceEvent evt(SevWarn, errContext, errID);
+					std::optional<TraceEvent> traceEvent;
+					if (std::holds_alternative<AuditedEvent>(errContext))
+						traceEvent.emplace(SevWarn, std::get<AuditedEvent>(errContext), errID);
+					else
+						traceEvent.emplace(SevWarn, std::get<const char*>(errContext), errID);
+					TraceEvent& evt = *traceEvent;
 					evt.suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
 					// There is no function in OpenSSL to use to check if an error code is from OpenSSL,
 					// but all OpenSSL errors have a non-zero "library" code set in bits 24-32, and linux
@@ -520,6 +535,7 @@ private:
 		if (error)
 			TraceEvent(SevWarn, "N2_CloseError", id)
 			    .suppressFor(1.0)
+			    .detail("PeerAddr", peer_address)
 			    .detail("ErrorCode", error.value())
 			    .detail("Message", error.message());
 	}
@@ -527,6 +543,7 @@ private:
 	void onReadError(const boost::system::error_code& error) {
 		TraceEvent(SevWarn, "N2_ReadError", id)
 		    .suppressFor(1.0)
+		    .detail("PeerAddr", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
@@ -534,6 +551,7 @@ private:
 	void onWriteError(const boost::system::error_code& error) {
 		TraceEvent(SevWarn, "N2_WriteError", id)
 		    .suppressFor(1.0)
+		    .detail("PeerAddr", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
@@ -792,8 +810,8 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 			}
 			if (h.err.failed()) {
 				TraceEvent(SevWarn,
-				           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError"
-				                                                        : "N2_AcceptHandshakeError")
+				           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError"_audit
+				                                                        : "N2_AcceptHandshakeError"_audit)
 				    .detail("ErrorCode", h.err.value())
 				    .detail("ErrorMsg", h.err.message().c_str())
 				    .detail("BackgroundThread", true);
@@ -803,8 +821,8 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 			}
 		} catch (...) {
 			TraceEvent(SevWarn,
-			           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeUnknownError"
-			                                                        : "N2_AcceptHandshakeUnknownError")
+			           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeUnknownError"_audit
+			                                                        : "N2_AcceptHandshakeUnknownError"_audit)
 			    .detail("BackgroundThread", true);
 			h.done.sendError(connection_failed());
 		}
@@ -895,7 +913,7 @@ public:
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
 				// Otherwise use flow network thread
-				BindPromise p("N2_AcceptHandshakeError", UID());
+				BindPromise p("N2_AcceptHandshakeError"_audit, UID());
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::server, std::move(p));
 			}
@@ -977,7 +995,7 @@ public:
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
 				// Otherwise use flow network thread
-				BindPromise p("N2_ConnectHandshakeError", self->id);
+				BindPromise p("N2_ConnectHandshakeError"_audit, self->id);
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::client, std::move(p));
 			}
@@ -1140,6 +1158,7 @@ private:
 	void onReadError(const boost::system::error_code& error) {
 		TraceEvent(SevWarn, "N2_ReadError", id)
 		    .suppressFor(1.0)
+		    .detail("PeerAddr", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
@@ -1147,6 +1166,7 @@ private:
 	void onWriteError(const boost::system::error_code& error) {
 		TraceEvent(SevWarn, "N2_WriteError", id)
 		    .suppressFor(1.0)
+		    .detail("PeerAddr", peer_address)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
@@ -1806,7 +1826,10 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 			    auto endpoint = iter->endpoint();
 			    auto addr = endpoint.address();
 			    if (addr.is_v6()) {
-				    addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+				    // IPV6 loopback might not be supported, only return IPV6 address
+				    if (!addr.is_loopback()) {
+					    addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+				    }
 			    } else {
 				    addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
 			    }

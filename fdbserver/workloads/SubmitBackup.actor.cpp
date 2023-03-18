@@ -55,7 +55,6 @@ struct SubmitBackupWorkload : TestWorkload {
 		wait(delay(self->delayFor));
 		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
 		addDefaultBackupRanges(backupRanges);
-		state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 		try {
 			wait(self->backupAgent.submitBackup(cx,
 			                                    self->backupDir,
@@ -64,8 +63,7 @@ struct SubmitBackupWorkload : TestWorkload {
 			                                    self->snapshotInterval,
 			                                    self->tag.toString(),
 			                                    backupRanges,
-			                                    SERVER_KNOBS->ENABLE_ENCRYPTION &&
-			                                        configuration.tenantMode != TenantMode::OPTIONAL_TENANT,
+			                                    true,
 			                                    self->stopWhenDone,
 			                                    UsePartitionedLog::False,
 			                                    self->incremental));

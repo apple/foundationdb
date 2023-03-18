@@ -299,14 +299,13 @@ struct RequestData : NonCopyable {
 		requestStarted = false;
 
 		if (backoff > 0) {
-			response = mapAsync<Void, std::function<Future<Reply>(Void)>, Reply>(
-			    delay(backoff), [this, stream, &request, model, alternatives, channel](Void _) {
-				    requestStarted = true;
-				    modelHolder = Reference<ModelHolder>(new ModelHolder(model, stream->getEndpoint().token.first()));
-				    Future<Reply> resp = stream->tryGetReply(request);
-				    maybeDuplicateTSSRequest(stream, request, model, resp, alternatives, channel);
-				    return resp;
-			    });
+			response = mapAsync(delay(backoff), [this, stream, &request, model, alternatives, channel](Void _) {
+				requestStarted = true;
+				modelHolder = Reference<ModelHolder>(new ModelHolder(model, stream->getEndpoint().token.first()));
+				Future<Reply> resp = stream->tryGetReply(request);
+				maybeDuplicateTSSRequest(stream, request, model, resp, alternatives, channel);
+				return resp;
+			});
 		} else {
 			requestStarted = true;
 			modelHolder = Reference<ModelHolder>(new ModelHolder(model, stream->getEndpoint().token.first()));

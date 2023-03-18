@@ -734,14 +734,26 @@
          "storage_replication_policy":"(zoneid^3x1)",
          "logs":2, // this field will be absent if a value has not been explicitly set
          "log_version":2,
-         "log_engine":1,
+         "log_engine":{
+         "$enum":[
+             "ssd",
+             "ssd-1",
+             "ssd-2",
+             "ssd-redwood-1",
+             "ssd-rocksdb-v1",
+             "ssd-sharded-rocksdb",
+             "memory",
+             "memory-1",
+             "memory-2",
+             "memory-radixtree-beta"
+         ]},
          "log_spill":1,
          "storage_engine":{
          "$enum":[
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-1-experimental",
+             "ssd-redwood-1",
              "ssd-rocksdb-v1",
              "ssd-sharded-rocksdb",
              "memory",
@@ -755,7 +767,7 @@
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-1-experimental",
+             "ssd-redwood-1",
              "ssd-rocksdb-v1",
              "ssd-sharded-rocksdb",
              "memory",
@@ -902,6 +914,17 @@
          "num_tenants" : 1, // on data cluster, local count; on management cluster, total metacluster count
          "num_tenant_groups" : 10,
          "tenant_group_capacity" : 20,
+      },
+      "idempotency_ids" : {
+         "size_bytes" : 0, // An estimate of the current number of bytes used in the database to store idempotency ids.
+         "expired_version" : 0, // The commit status of a transaction whose commit version could be <= expired_version can no longer be determined.
+         "expired_age" : 0, // The age in seconds of expired_version.
+         "oldest_id_version" : 0, // The version of the oldest idempotency id still stored in the database.
+         "oldest_id_age" : 0 // The age in seconds of the oldest_id_version.
+      },
+      "version_epoch":{
+         "enabled": true,
+         "epoch": 0 // The version epoch, as an offset from the Unix epoch. This field will be excluded if enabled is false.
       }
    },
    "client":{

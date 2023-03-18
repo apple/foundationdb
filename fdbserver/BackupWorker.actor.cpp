@@ -105,9 +105,7 @@ struct VersionedMessage {
 			ArenaReader reader(arena, message, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 			MutationRef m;
 			reader >> m;
-			const BlobCipherEncryptHeader* header = m.encryptionHeader();
-			cipherDetails.insert(header->cipherTextDetails);
-			cipherDetails.insert(header->cipherHeaderDetails);
+			m.updateEncryptCipherDetails(cipherDetails);
 		}
 	}
 };
@@ -967,7 +965,8 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 			}
 			when(wait(logSystemChange)) {
 				if (self->logSystem.get()) {
-					r = self->logSystem.get()->peekLogRouter(self->myId, tagAt, self->tag);
+					r = self->logSystem.get()->peekLogRouter(
+					    self->myId, tagAt, self->tag, SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED);
 				} else {
 					r = Reference<ILogSystem::IPeekCursor>();
 				}

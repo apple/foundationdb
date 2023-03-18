@@ -29,6 +29,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/JsonBuilder.h"
 #include "fdbclient/PImpl.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
@@ -46,10 +47,11 @@ struct IdempotencyIdsExpiredVersion {
 	// Any version at or below expired might have had its idempotency id expired. Any version greater than `expired`
 	// definitely has not had it's idempotency id expired.
 	Version expired = 0;
+	int64_t expiredTime = 0;
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, expired);
+		serializer(ar, expired, expiredTime);
 	}
 };
 
@@ -186,6 +188,8 @@ Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const Idem
 KeyRangeRef makeIdempotencySingleKeyRange(Arena& arena, Version version, uint8_t highOrderBatchIndex);
 
 void decodeIdempotencyKey(KeyRef key, Version& commitVersion, uint8_t& highOrderBatchIndex);
+
+ACTOR Future<JsonBuilderObject> getIdmpKeyStatus(Database db);
 
 // Delete zero or more idempotency ids older than minAgeSeconds
 //

@@ -24,7 +24,6 @@
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupProgress.actor.h"
 #include "fdbserver/ClusterRecovery.actor.h"
-#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
@@ -213,6 +212,7 @@ ACTOR Future<Void> newCommitProxies(Reference<ClusterRecoveryData> self, Recruit
 	}
 
 	std::vector<CommitProxyInterface> newRecruits = wait(getAll(initializationReplies));
+	TraceEvent("CommitProxyInitializationComplete", self->dbgid).log();
 	// It is required for the correctness of COMMIT_ON_FIRST_PROXY that self->commitProxies[0] is the firstCommitProxy.
 	self->commitProxies = newRecruits;
 
@@ -234,6 +234,7 @@ ACTOR Future<Void> newGrvProxies(Reference<ClusterRecoveryData> self, RecruitFro
 	}
 
 	std::vector<GrvProxyInterface> newRecruits = wait(getAll(initializationReplies));
+	TraceEvent("GrvProxyInitializationComplete", self->dbgid).log();
 	self->grvProxies = newRecruits;
 	return Void();
 }
@@ -246,6 +247,7 @@ ACTOR Future<Void> newResolvers(Reference<ClusterRecoveryData> self, RecruitFrom
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
 		req.commitProxyCount = recr.commitProxies.size();
 		req.resolverCount = recr.resolvers.size();
+		req.encryptMode = getEncryptionAtRest(self->configuration);
 		TraceEvent("ResolverReplies", self->dbgid).detail("WorkerID", recr.resolvers[i].id());
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.resolvers[i].resolver.getReplyUnlessFailedFor(
@@ -254,6 +256,7 @@ ACTOR Future<Void> newResolvers(Reference<ClusterRecoveryData> self, RecruitFrom
 	}
 
 	std::vector<ResolverInterface> newRecruits = wait(getAll(initializationReplies));
+	TraceEvent("ResolverInitializationComplete", self->dbgid).log();
 	self->resolvers = newRecruits;
 
 	return Void();
@@ -359,6 +362,7 @@ ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
 		isr.initialClusterVersion = self->recoveryTransactionVersion;
+		isr.encryptMode = self->configuration.encryptionAtRestMode;
 
 		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
 
@@ -515,11 +519,6 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 			    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 		}
 
-		if (newState.oldTLogData.size() && configuration.repopulateRegionAntiQuorum > 0 &&
-		    self->logSystem->remoteStorageRecovered()) {
-			TraceEvent(SevWarnAlways, "RecruitmentStalled_RemoteStorageRecovered", self->dbgid).log();
-			self->recruitmentStalled->set(true);
-		}
 		self->registrationTrigger.trigger();
 
 		if (finalUpdate) {
@@ -921,6 +920,10 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 		         waitNext(parent->provisionalCommitProxies[0].getKeyServersLocations.getFuture())) {
 			req.reply.send(Never());
 		}
+		when(GetBlobGranuleLocationsRequest req =
+		         waitNext(parent->provisionalCommitProxies[0].getBlobGranuleLocations.getFuture())) {
+			req.reply.send(Never());
+		}
 		when(wait(waitCommitProxyFailure)) {
 			throw worker_removed();
 		}
@@ -960,6 +963,7 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	} else {
 		TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
 		           self->dbgid)
+		    .setMaxFieldLength(-1)
 		    .detail("StatusCode", RecoveryStatus::recruiting_transaction_servers)
 		    .detail("Status", RecoveryStatus::names[RecoveryStatus::recruiting_transaction_servers])
 		    .detail("Conf", self->configuration.toString())
@@ -967,7 +971,6 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 		    .detail("RequiredGrvProxies", 1)
 		    .detail("RequiredResolvers", 1)
 		    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
-
 		// The cluster's EncryptionAtRest status is now readable.
 		if (self->controllerData->encryptionAtRestMode.canBeSet()) {
 			self->controllerData->encryptionAtRestMode.send(getEncryptionAtRest(self->configuration));
@@ -1080,7 +1083,13 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// Sets self->configuration to the configuration (FF/conf/ keys) at self->lastEpochEnd
 
 	// Recover transaction state store
-	bool enableEncryptionForTxnStateStore = isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION);
+	// If it's the first recovery the encrypt mode is not yet avilable so create the txn state store with encryption
+	// disabled. This is fine since we will not write any data to disk using this txn store.
+	state bool enableEncryptionForTxnStateStore = false;
+	if (self->controllerData->encryptionAtRestMode.getFuture().isReady()) {
+		EncryptionAtRestMode encryptMode = wait(self->controllerData->encryptionAtRestMode.getFuture());
+		enableEncryptionForTxnStateStore = encryptMode.isEncryptionEnabled();
+	}
 	CODE_PROBE(enableEncryptionForTxnStateStore, "Enable encryption for txnStateStore");
 	if (self->txnStateStore)
 		self->txnStateStore->close();
@@ -1107,7 +1116,6 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// transactions will be committed at a lower version.
 	Optional<Standalone<StringRef>> requiredCommitVersion =
 	    wait(self->txnStateStore->readValue(minRequiredCommitVersionKey));
-
 	Version minRequiredCommitVersion = -1;
 	if (requiredCommitVersion.present()) {
 		minRequiredCommitVersion = BinaryReader::fromStringRef<Version>(requiredCommitVersion.get(), Unversioned());
@@ -1525,9 +1533,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 			           (self->cstate.myDBState.oldTLogData.size() - CLIENT_KNOBS->RECOVERY_DELAY_START_GENERATION)));
 		}
 		if (g_network->isSimulated() && self->cstate.myDBState.oldTLogData.size() > CLIENT_KNOBS->MAX_GENERATIONS_SIM) {
-			g_simulator->connectionFailuresDisableDuration = 1e6;
-			g_simulator->speedUpSimulation = true;
-			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyGenerations").log();
+			disableConnectionFailures("TooManyGenerations");
 		}
 	}
 

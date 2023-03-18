@@ -35,6 +35,16 @@
 
 namespace mako {
 
+inline uint64_t byteswapHelper(uint64_t input) {
+	uint64_t output = 0;
+	for (int i = 0; i < 8; ++i) {
+		output <<= 8;
+		output += input & 0xFF;
+		input >>= 8;
+	}
+	return output;
+}
+
 /* uniform-distribution random */
 /* return a uniform random number between low and high, both inclusive */
 force_inline int urand(int low, int high) {
@@ -51,6 +61,21 @@ force_inline int nextKey(Arguments const& args) {
 
 force_inline int intSize(std::string_view sv) {
 	return static_cast<int>(sv.size());
+}
+
+template <typename Char>
+inline void randomAlphanumString(Char* str, int len) {
+	constexpr auto chars_per_alpha = 26;
+	constexpr auto range = chars_per_alpha * 2 + 10; // uppercase, lowercase, digits
+	for (auto i = 0; i < len; i++) {
+		auto value = urand(0, range - 1);
+		if (value < chars_per_alpha)
+			str[i] = 'a' + value;
+		else if (value < 2 * chars_per_alpha)
+			str[i] = 'A' + value - chars_per_alpha;
+		else
+			str[i] = '0' + value - 2 * chars_per_alpha;
+	}
 }
 
 /* random string */

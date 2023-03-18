@@ -206,6 +206,7 @@ class Ratekeeper {
 	std::map<Version, Ratekeeper::VersionInfo> version_transactions;
 	std::map<Version, std::pair<double, Optional<double>>> version_recovery;
 	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
+	bool anyBlobRanges;
 	Optional<Key> remoteDC;
 
 	double getRecoveryDuration(Version ver) const {

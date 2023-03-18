@@ -24,7 +24,7 @@
 #include "flow/IThreadPool.h"
 
 #include <pthread.h>
-#include <ostream>
+#include <iostream>
 
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include

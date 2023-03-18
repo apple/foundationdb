@@ -127,15 +127,23 @@ struct KmsConnLookupEKsByKeyIdsRep {
 
 struct KmsConnLookupKeyIdsReqInfo {
 	constexpr static FileIdentifier file_identifier = 3092256;
-	EncryptCipherDomainId domainId;
+	// Encryption at-rest relies on partioning database to define encryption domains, one such possible domain is
+	// "Tenants". It is possible that KMS assigned 'baseCipherId' embedded 'encryption domain information', hence, make
+	// the field optional.
+	Optional<EncryptCipherDomainId> domainId;
 	EncryptCipherBaseKeyId baseCipherId;
 
 	KmsConnLookupKeyIdsReqInfo() : domainId(INVALID_ENCRYPT_DOMAIN_ID), baseCipherId(INVALID_ENCRYPT_CIPHER_KEY_ID) {}
-	explicit KmsConnLookupKeyIdsReqInfo(const EncryptCipherDomainId dId, const EncryptCipherBaseKeyId bCId)
+	explicit KmsConnLookupKeyIdsReqInfo(const Optional<EncryptCipherDomainId> dId, const EncryptCipherBaseKeyId bCId)
 	  : domainId(dId), baseCipherId(bCId) {}
 
 	bool operator==(const KmsConnLookupKeyIdsReqInfo& info) const {
-		return domainId == info.domainId && baseCipherId == info.baseCipherId;
+		if (domainId.present()) {
+			if (!info.domainId.present() || domainId.get() != info.domainId.get()) {
+				return false;
+			}
+		}
+		return baseCipherId == info.baseCipherId;
 	}
 
 	template <class Ar>

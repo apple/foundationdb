@@ -29,6 +29,8 @@
 #include "fdbclient/ReadYourWrites.h"
 #include <vector>
 
+FDB_DECLARE_BOOLEAN_PARAM(IncludeKeyRangeMap);
+
 class ReadYourWritesTransaction;
 
 Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version const& v, Reference<ReadYourWritesTransaction> const& tr);
@@ -246,14 +248,15 @@ public:
 	// snapshot of the key ranges this backup is targeting.
 	virtual Future<Void> writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
 	                                               const std::vector<std::pair<Key, Key>>& beginEndKeys,
-	                                               int64_t totalBytes) = 0;
+	                                               int64_t totalBytes,
+	                                               IncludeKeyRangeMap includeKeyRangeMap) = 0;
 
 	// Open a file for read by name
 	virtual Future<Reference<IAsyncFile>> readFile(const std::string& name) = 0;
 
 	// Returns the key ranges in the snapshot file. This is an expensive function
 	// and should only be used in simulation for sanity check.
-	virtual Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file, Optional<Database> cx) = 0;
+	virtual Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file, Database cx) = 0;
 
 	struct ExpireProgress {
 		std::string step;
@@ -292,7 +295,6 @@ public:
 	// If logsOnly is set, only use log files in [beginVersion, targetVervions) in restore set.
 	// Returns non-present if restoring to the given version is not possible.
 	virtual Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
-	                                                          Optional<Database> cx,
 	                                                          VectorRef<KeyRangeRef> keyRangesFilter = {},
 	                                                          bool logsOnly = false,
 	                                                          Version beginVersion = -1) = 0;
@@ -319,6 +321,39 @@ protected:
 };
 
 namespace fileBackup {
+// Use RangeMap to store a list of ranges for efficient query if a mutation
+// matches to any of the range.
+class RangeMapFilters {
+public:
+	RangeMapFilters() = default;
+
+	explicit RangeMapFilters(const std::vector<KeyRange>& ranges) {
+		for (const auto& range : ranges) {
+			rangeMap.insert(range, 1);
+		}
+		rangeMap.coalesce(allKeys);
+	}
+
+	void updateFilters(std::vector<std::string>& prefixes) {
+		for (const auto& prefix : prefixes) {
+			rangeMap.insert(prefixRange(StringRef(prefix)), 1);
+		}
+		rangeMap.coalesce(allKeys);
+	}
+
+	// Returns if the mutation matches any filter ranges.
+	bool match(const MutationRef& m) const;
+
+	// Returns if the key-value pair matches any filter ranges.
+	bool match(const KeyValueRef& kv) const;
+
+	// Returns if the range intersects with any filter ranges.
+	bool match(const KeyRangeRef& range) const;
+
+private:
+	KeyRangeMap<int> rangeMap;
+};
+
 // Accumulates mutation log value chunks, as both a vector of chunks and as a combined chunk,
 // in chunk order, and can check the chunk set for completion or intersection with a set
 // of ranges.
@@ -339,7 +374,7 @@ struct AccumulatedMutations {
 	// Returns true if a complete chunk contains any MutationRefs which intersect with any
 	// range in ranges.
 	// It is undefined behavior to run this if isComplete() does not return true.
-	bool matchesAnyRange(const std::vector<KeyRange>& ranges) const;
+	bool matchesAnyRange(const RangeMapFilters& rangeMap) const;
 
 	std::vector<KeyValueRef> kvs;
 	std::string serializedMutations;

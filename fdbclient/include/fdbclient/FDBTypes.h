@@ -342,7 +342,11 @@ struct KeyRangeRef {
 				return false; // uncovered gap between clone.begin and r.begin
 			if (clone.end <= r.end)
 				return true; // range is fully covered
-			if (clone.end > r.begin)
+			// If a range of ranges is totally at the left of clone,
+			// clone needs not update
+			// If a range of ranges is partially at the left of clone,
+			// clone = clone - the overlap
+			if (clone.end > r.end && r.end > clone.begin)
 				// {clone.begin, r.end} is covered. need to check coverage for {r.end, clone.end}
 				clone = KeyRangeRef(r.end, clone.end);
 		}
@@ -560,7 +564,12 @@ struct hash<KeyRange> {
 };
 } // namespace std
 
-enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
+enum {
+	invalidVersion = -1,
+	latestVersion = -2,
+	earliestVersion = -3,
+	MAX_VERSION = std::numeric_limits<int64_t>::max()
+};
 
 inline KeyRef keyAfter(const KeyRef& key, Arena& arena) {
 	// Don't include fdbclient/SystemData.h for the allKeys symbol to avoid a cyclic include
@@ -610,7 +619,7 @@ KeyRef keyBetween(const KeyRangeRef& keys);
 // Returns a randomKey between keys. If it's impossible, return keys.end.
 Key randomKeyBetween(const KeyRangeRef& keys);
 
-KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, KeyRef prefix);
+KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, Optional<KeyRef> prefix);
 
 struct KeySelectorRef {
 private:
@@ -921,26 +930,13 @@ struct KeyValueStoreType {
 		serializer(ar, type);
 	}
 
-	static std::string getStoreTypeStr(const StoreType& storeType) {
-		switch (storeType) {
-		case SSD_BTREE_V1:
-			return "ssd-1";
-		case SSD_BTREE_V2:
-			return "ssd-2";
-		case SSD_REDWOOD_V1:
-			return "ssd-redwood-1-experimental";
-		case SSD_ROCKSDB_V1:
-			return "ssd-rocksdb-v1";
-		case SSD_SHARDED_ROCKSDB:
-			return "ssd-sharded-rocksdb";
-		case MEMORY:
-			return "memory";
-		case MEMORY_RADIXTREE:
-			return "memory-radixtree-beta";
-		default:
-			return "unknown";
-		}
-	}
+	// Get string representation of engine type.  Each enum has one canonical string
+	// representation, but the reverse is not true (see fromString() below)
+	static std::string getStoreTypeStr(const StoreType& storeType);
+
+	// Convert a string to a KeyValueStoreType
+	// This is a many-to-one mapping as there are aliases for some storage engines
+	static KeyValueStoreType fromString(const std::string& str);
 	std::string toString() const { return getStoreTypeStr((StoreType)type); }
 
 private:
@@ -1063,9 +1059,9 @@ struct StorageBytes {
 	constexpr static FileIdentifier file_identifier = 3928581;
 	// Free space on the filesystem
 	int64_t free;
-	// Total space on the filesystem
+	// Total capacity on the filesystem usable by non-privileged users.
 	int64_t total;
-	// Used by *this* store, not total - free
+	// Total size of all files owned by *this* storage instance, not total - free
 	int64_t used;
 	// Amount of space available for use by the store, which includes free space on the filesystem
 	// and internal free space within the store data that is immediately reusable.
@@ -1133,45 +1129,6 @@ struct LogMessageVersion {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, version, sub);
-	}
-};
-
-struct AddressExclusion {
-	IPAddress ip;
-	int port;
-
-	AddressExclusion() : ip(0), port(0) {}
-	explicit AddressExclusion(const IPAddress& ip) : ip(ip), port(0) {}
-	explicit AddressExclusion(const IPAddress& ip, int port) : ip(ip), port(port) {}
-
-	bool operator<(AddressExclusion const& r) const {
-		if (ip != r.ip)
-			return ip < r.ip;
-		return port < r.port;
-	}
-	bool operator==(AddressExclusion const& r) const { return ip == r.ip && port == r.port; }
-
-	bool isWholeMachine() const { return port == 0; }
-	bool isValid() const { return ip.isValid() || port != 0; }
-
-	bool excludes(NetworkAddress const& addr) const {
-		if (isWholeMachine())
-			return ip == addr.ip;
-		return ip == addr.ip && port == addr.port;
-	}
-
-	// This is for debugging and IS NOT to be used for serialization to persistant state
-	std::string toString() const {
-		if (!isWholeMachine())
-			return formatIpPort(ip, port);
-		return ip.toString();
-	}
-
-	static AddressExclusion parse(StringRef const&);
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, ip, port);
 	}
 };
 
@@ -1468,6 +1425,11 @@ struct TenantMode {
 	uint32_t mode;
 };
 
+template <>
+struct Traceable<TenantMode> : std::true_type {
+	static std::string toString(const TenantMode& value) { return value.toString(); }
+};
+
 struct EncryptionAtRestMode {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
 	// just before END.
@@ -1520,6 +1482,8 @@ struct EncryptionAtRestMode {
 
 	bool operator==(const EncryptionAtRestMode& e) const { return isEquals(e); }
 	bool operator!=(const EncryptionAtRestMode& e) const { return !isEquals(e); }
+	bool operator==(Mode m) const { return mode == m; }
+	bool operator!=(Mode m) const { return mode != m; }
 
 	bool isEncryptionEnabled() const { return mode != EncryptionAtRestMode::DISABLED; }
 
@@ -1546,6 +1510,11 @@ struct EncryptionAtRestMode {
 	}
 
 	uint32_t mode;
+};
+
+template <>
+struct Traceable<EncryptionAtRestMode> : std::true_type {
+	static std::string toString(const EncryptionAtRestMode& mode) { return mode.toString(); }
 };
 
 typedef StringRef ClusterNameRef;
@@ -1685,6 +1654,7 @@ struct ReadOptions {
 	ReadType type;
 	// Once CacheResult is serializable, change type from bool to CacheResult
 	bool cacheResult;
+	bool lockAware = false;
 	Optional<UID> debugID;
 	Optional<Version> consistencyCheckStartVersion;
 
@@ -1698,7 +1668,7 @@ struct ReadOptions {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, type, cacheResult, debugID, consistencyCheckStartVersion);
+		serializer(ar, type, cacheResult, debugID, consistencyCheckStartVersion, lockAware);
 	}
 };
 

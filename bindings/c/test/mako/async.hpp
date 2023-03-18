@@ -41,7 +41,7 @@ struct ResumableStateForPopulate : std::enable_shared_from_this<ResumableStateFo
 	fdb::Transaction tx;
 	boost::asio::io_context& io_context;
 	Arguments const& args;
-	ThreadStatistics& stats;
+	WorkflowStatistics& stats;
 	std::atomic<int>& stopcount;
 	int key_begin;
 	int key_end;
@@ -57,7 +57,7 @@ struct ResumableStateForPopulate : std::enable_shared_from_this<ResumableStateFo
 	                          fdb::Transaction tx,
 	                          boost::asio::io_context& io_context,
 	                          Arguments const& args,
-	                          ThreadStatistics& stats,
+	                          WorkflowStatistics& stats,
 	                          std::atomic<int>& stopcount,
 	                          int key_begin,
 	                          int key_end)
@@ -79,7 +79,7 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 	fdb::Transaction tx;
 	boost::asio::io_context& io_context;
 	Arguments const& args;
-	ThreadStatistics& stats;
+	WorkflowStatistics& stats;
 	int64_t total_xacts;
 	std::atomic<int>& stopcount;
 	std::atomic<int> const& signal;
@@ -99,7 +99,7 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 	                             fdb::Transaction tx,
 	                             boost::asio::io_context& io_context,
 	                             Arguments const& args,
-	                             ThreadStatistics& stats,
+	                             WorkflowStatistics& stats,
 	                             std::atomic<int>& stopcount,
 	                             std::atomic<int> const& signal,
 	                             int max_iters,

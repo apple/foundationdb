@@ -45,8 +45,10 @@ void forceLinkCompressionUtilsTest();
 void forceLinkAtomicTests();
 void forceLinkIdempotencyIdTests();
 void forceLinkBlobConnectionProviderTests();
+void forceLinkArenaStringTests();
 void forceLinkActorCollectionTests();
 void forceLinkDDSketchTests();
+void forceLinkCommitProxyTests();
 
 struct UnitTestWorkload : TestWorkload {
 	static constexpr auto NAME = "UnitTests";
@@ -108,6 +110,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkAtomicTests();
 		forceLinkIdempotencyIdTests();
 		forceLinkBlobConnectionProviderTests();
+		forceLinkArenaStringTests();
 		forceLinkActorCollectionTests();
 		forceLinkDDSketchTests();
 	}

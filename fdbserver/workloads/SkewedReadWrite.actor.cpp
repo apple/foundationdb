@@ -31,7 +31,7 @@
 #include "fdbserver/workloads/ReadWriteWorkload.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TDMetric.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct SkewedReadWriteWorkload : ReadWriteCommon {
@@ -99,21 +99,26 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 	}
 
 	ACTOR static Future<Void> updateServerShards(Database cx, SkewedReadWriteWorkload* self) {
-		state Future<RangeResult> serverList =
-		    runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<RangeResult> {
-			    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			    return tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-		    });
-		state RangeResult range =
-		    wait(runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<RangeResult> {
-			    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			    return tr->getRange(serverKeysRange, CLIENT_KNOBS->TOO_MANY);
-		    }));
-		wait(success(serverList));
+		state RangeResult serverList;
+		state RangeResult range;
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		loop {
+			// read in transaction to ensure two key ranges are transactionally consistent
+			try {
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				state Future<RangeResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeResult> rangeF = tr->getRange(serverKeysRange, CLIENT_KNOBS->TOO_MANY);
+				wait(store(serverList, serverListF));
+				wait(store(range, rangeF));
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
 		// decode server interfaces
 		self->serverInterfaces.clear();
-		for (int i = 0; i < serverList.get().size(); i++) {
-			auto ssi = decodeServerListValue(serverList.get()[i].value);
+		for (int i = 0; i < serverList.size(); i++) {
+			auto ssi = decodeServerListValue(serverList[i].value);
 			self->serverInterfaces.emplace(ssi.id(), ssi);
 		}
 		// clear self->serverShards

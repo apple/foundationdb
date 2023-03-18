@@ -41,7 +41,12 @@ else()
   target_link_libraries(fdbserver PRIVATE fdbclient sqlite)
 endif()
 
-target_link_libraries(fdbserver PRIVATE toml11_target jemalloc rapidjson)
+if(USE_JEMALLOC)
+  target_include_directories(fdbserver INTERFACE $<TARGET_PROPERTY:jemalloc::jemalloc, INTERFACE_INCLUDE_DIRECTORIES>)
+  target_link_libraries(fdbserver PRIVATE jemalloc::jemalloc)
+endif()
+
+target_link_libraries(fdbserver PRIVATE toml11_target rapidjson)
 if(WITH_ROCKSDB_EXPERIMENTAL)
   target_compile_definitions(fdbserver PRIVATE SSD_ROCKSDB_EXPERIMENTAL)
 endif()

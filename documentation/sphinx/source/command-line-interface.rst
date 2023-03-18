@@ -131,12 +131,35 @@ The default is ``disabled``, which means changing the storage engine will not be
 ``aggressive`` tries to replace as many storages as it can at once, and will recruit a new storage server on the same process as the old one. This will be faster, but can potentially hit degraded performance or OOM with two storages on the same process. The main benefit over ``gradual`` is that this doesn't need to take one storage out of rotation, so it works for small or development clusters that have the same number of storage processes as the replication factor. Note that ``aggressive`` is not exclusive to running the perpetual wiggle.
 ``disabled`` means that if the storage engine is changed, fdb will not move the cluster over to the new storage engine. This will disable the perpetual wiggle from rewriting storage files.
 
+consistencyscan
+----------------
+
+This command controls a native data consistency scan role that is automatically recruited in the FDB cluster.  The consistency scan reads all replicas of each shard to verify data consistency.  It is useful for finding corrupt cold data by ensuring that all data is read periodically.  Any errors found will be logged as TraceEvents with Severity = 40.
+
+The syntax is
+
+``consistencyscan [ off | on [maxRate <RATE>] [targetInterval <INTERVAL>] [restart <RESTART>] ]``
+
+* ``off`` will disable the consistency scan
+
+* ``on`` will enable the scan and can be accompanied by additional options shown above
+
+  * ``RATE`` - sets the maximum read speed of the scan in bytes/s.
+
+  * ``INTERVAL`` - sets the target completion time, in seconds, for each full pass over all data in the cluster.  Scan speed will target this interval with a hard limit of RATE.
+
+  * ``RESTART`` - a 1 or 0 and controls whether the process should restart from the beginning of userspace on startup or not.  This should normally be set to 0 which will resume progress from the last time the scan was running.
+
+The consistency scan role publishes its configuration and metrics in Status JSON under the path ``.cluster.consistency_scan_info``.
+
 consistencycheck
 ----------------
 
-The ``consistencycheck`` command enables or disables consistency checking. Its syntax is ``consistencycheck [on|off]``. Calling it with ``on`` enables consistency checking, and ``off`` disables it. Calling it with no arguments displays whether consistency checking is currently enabled.
+Note: This command exists for backward compatibility, it is suggested to use the ``consistencyscan`` command to control FDB's internal consistency scan role instead.
 
-You must be running an ``fdbserver`` process with the ``consistencycheck`` role to perform consistency checking.
+This command controls a key which controls behavior of any externally configured consistency check roles.  You must be running an ``fdbserver`` process with the ``consistencycheck`` role to perform consistency checking.
+
+The ``consistencycheck`` command enables or disables consistency checking. Its syntax is ``consistencycheck [on|off]``. Calling it with ``on`` enables consistency checking, and ``off`` disables it. Calling it with no arguments displays whether consistency checking is currently enabled.
 
 coordinators
 ------------
@@ -159,6 +182,23 @@ defaulttenant
 The ``defaulttenant`` command configures ``fdbcli`` to run its commands without a tenant. This is the default behavior.
 
 The active tenant cannot be changed while a transaction (using ``begin``) is open.
+
+datadistribution
+----------------
+
+The ``datadistribution`` command is used to enable or disable functionalities of data distributor.
+Its syntax is
+- ``datadistribution <on|off>``. Fully enable or disable the data distributor.
+- ``datadistribution <enable|disable> <ssfailure|rebalance|rebalance_disk|rebalance_read>``. Enable or disable part of data distribution features.
+
+ssfailure
+    Whether storage server failure will trigger data movement for replica repairing.
+rebalance_disk
+    If enabled, data distributor will do data movement to make sure every storage server use similar disk space.
+rebalance_read
+    If enabled, data distributor will do data movement to balance the read bytes bandwidth among storage servers. This feature needs ``knob_read_sampling_enabled=true``.
+rebalance
+    Control both rebalance_disk and rebalance_read.
 
 exclude
 -------
@@ -405,7 +445,7 @@ The available process classes are ``unset``, ``storage``, ``transaction``, ``res
 setknob
 -------
 
-The ``setknob`` command can be used to set knobs dynamically. Its syntax is ``setknob <KNOBNAME> <KNOBVALUE> [CONFIGCLASS]``. If not present in a ``begin\commit`` block, the CLI will prompt for a description of the change. 
+The ``setknob`` command can be used to set knobs dynamically. Its syntax is ``setknob <KNOBNAME> <KNOBVALUE> [CONFIGCLASS]``. If not present in a ``begin\commit`` block, the CLI will prompt for a description of the change.
 
 Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
 
@@ -443,8 +483,6 @@ status json
 
 ``status json`` will provide the cluster status in its JSON format. For a detailed description of this format, see :doc:`mr-status`.
 
-.. _cli-throttle:
-
 tenant
 ------
 
@@ -457,7 +495,7 @@ create
 
 Creates a new tenant in the cluster.
 
-``NAME`` - The desired name of the tenant. The name can be any byte string that does not begin with the ``\xff`` byte. 
+``NAME`` - The desired name of the tenant. The name can be any byte string that does not begin with the ``\xff`` byte.
 
 ``TENANT_GROUP`` - The tenant group the tenant will be placed in.
 
@@ -585,6 +623,8 @@ In the event of an error, the JSON output will include an error message::
         "error": "...",
         "type": "error"
     }
+
+.. _cli-throttle:
 
 throttle
 --------
@@ -714,4 +754,17 @@ Removes a TSS process from quarantine, disposing of the TSS and allowing Data Di
 ``tssq list``:
 
 Lists the storage UIDs of all TSS processes currently in quarantine.
+
+hotrange
+--------
+
+Utility commands for fetching sampled read bytes/ops metrics from the specified storage server.
+
+``hotrange``
+
+It will populate a list of available storage servers' network addresses. Users need to run this first before fetching metrics from a specific storage server. Otherwise, the address is not recognized.
+
+``hotrange <IP:PORT> <bytes|readBytes|readOps> <begin> <end> <splitCount>``
+
+Fetch read metrics from the given storage server to find the hot range. Run ``help hotrange`` to read the guide.
 

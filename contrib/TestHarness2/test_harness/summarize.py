@@ -316,6 +316,8 @@ class Summary:
         self.stderr_severity: str = '40'
         self.will_restart: bool = will_restart
         self.test_dir: Path | None = None
+        self.is_negative_test = False
+        self.negative_test_success = False
 
         if uid is not None:
             self.out.attributes['TestUID'] = str(uid)
@@ -323,6 +325,7 @@ class Summary:
             self.out.attributes['Statistics'] = stats
         self.out.attributes['JoshuaSeed'] = str(config.joshua_seed)
         self.out.attributes['WillRestart'] = '1' if self.will_restart else '0'
+        self.out.attributes['NegativeTest'] = '1' if self.is_negative_test else '0'
 
         self.handler = ParseHandler(self.out)
         self.register_handlers()
@@ -371,7 +374,8 @@ class Summary:
         return res
 
     def ok(self):
-        return not self.error
+        # logical xor -- a test is successful if there was either no error or we expected errors (negative test)
+        return (not self.error) != self.is_negative_test
 
     def done(self):
         if config.print_coverage:
@@ -465,6 +469,7 @@ class Summary:
                 self.out.append(child)
 
         self.out.attributes['Ok'] = '1' if self.ok() else '0'
+        self.out.attributes['Runtime'] = str(self.runtime)
         if not self.ok():
             reason = 'Unknown'
             if self.error:
@@ -527,6 +532,22 @@ class Summary:
                 self.out.attributes['FaultInjectionEnabled'] = attrs['FaultInjectionEnabled']
 
         self.handler.add_handler(('Type', 'ProgramStart'), program_start)
+
+        def negative_test_success(attrs: Dict[str, str]):
+            self.negative_test_success = True
+            child = SummaryTree(attrs['Type'])
+            for k, v in attrs:
+                if k != 'Type':
+                    child.attributes[k] = v
+            self.out.append(child)
+            pass
+
+        self.handler.add_handler(('Type', 'NegativeTestSuccess'), negative_test_success)
+
+        def config_string(attrs: Dict[str, str]):
+            self.out.attributes['ConfigString'] = attrs['ConfigString']
+
+        self.handler.add_handler(('Type', 'SimulatorConfig'), config_string)
 
         def set_test_file(attrs: Dict[str, str]):
             test_file = Path(attrs['TestFile'])

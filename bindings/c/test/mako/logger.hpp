@@ -40,6 +40,7 @@ using ProcKindConstant = std::integral_constant<ProcKind, P>;
 using MainProcess = ProcKindConstant<ProcKind::MAIN>;
 using StatsProcess = ProcKindConstant<ProcKind::STATS>;
 using WorkerProcess = ProcKindConstant<ProcKind::WORKER>;
+using AdminProcess = ProcKindConstant<ProcKind::ADMIN>;
 
 class Logger {
 	ProcKind proc;
@@ -49,9 +50,11 @@ class Logger {
 
 	void putHeader(fmt::memory_buffer& buf, std::string_view category) {
 		if (proc == ProcKind::MAIN) {
-			fmt::format_to(std::back_inserter(buf), "[MAIN] {}: ", category);
+			fmt::format_to(std::back_inserter(buf), "[ MAIN] {}: ", category);
 		} else if (proc == ProcKind::STATS) {
 			fmt::format_to(std::back_inserter(buf), "[STATS] {}: ", category);
+		} else if (proc == ProcKind::ADMIN) {
+			fmt::format_to(std::back_inserter(buf), "[ADMIN] {}: ", category);
 		} else {
 			if (thread_id == -1) {
 				fmt::format_to(std::back_inserter(buf), "[WORKER{:3d}] {}: ", process_id + 1, category);
@@ -66,6 +69,8 @@ public:
 	Logger(MainProcess, int verbosity) noexcept : proc(MainProcess::value), verbosity(verbosity) {}
 
 	Logger(StatsProcess, int verbosity) noexcept : proc(StatsProcess::value), verbosity(verbosity) {}
+
+	Logger(AdminProcess, int verbosity) noexcept : proc(AdminProcess::value), verbosity(verbosity) {}
 
 	Logger(WorkerProcess, int verbosity, int process_id, int thread_id = -1) noexcept
 	  : proc(WorkerProcess::value), verbosity(verbosity), process_id(process_id), thread_id(thread_id) {}
@@ -113,6 +118,13 @@ public:
 	void debug(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
 		printWithLogLevel(VERBOSE_DEBUG, "DEBUG", fmt_str, std::forward<Args>(args)...);
 	}
+
+	template <typename... Args>
+	void imm(Args&&... args) {
+		printWithLogLevel(VERBOSE_NONE, "IMMEDIATE", std::forward<Args>(args)...);
+	}
+
+	bool isFor(ProcKind procKind) const noexcept { return proc == procKind; }
 };
 
 } // namespace mako

@@ -294,7 +294,7 @@ int main(int argc, char** argv) {
 		Error::init();
 		g_network = newNet2(TLSConfig());
 		if (enableTrace)
-			openTraceFile(NetworkAddress(), 10 << 20, 10 << 20, ".", "mkcert");
+			openTraceFile({}, 10 << 20, 10 << 20, ".", "mkcert");
 		auto thread = std::thread([]() { g_network->run(); });
 		auto cleanUpGuard = ScopeExit([&thread, enableTrace]() {
 			g_network->stop();

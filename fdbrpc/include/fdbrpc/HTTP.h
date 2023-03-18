@@ -27,6 +27,8 @@
 #include "flow/Net2Packet.h"
 #include "flow/IRateControl.h"
 
+class IConnection;
+
 namespace HTTP {
 struct is_iless {
 	bool operator()(const std::string& a, const std::string& b) const { return strcasecmp(a.c_str(), b.c_str()) < 0; }

@@ -43,6 +43,7 @@
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"
 #include "fdbclient/Schemas.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -217,18 +218,58 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			out[p + key] = format("%d", mode);
 		}
 
+		if (key == "exclude") {
+			int p = 0;
+			while (p < value.size()) {
+				int end = value.find_first_of(',', p);
+				if (end == value.npos) {
+					end = value.size();
+				}
+				auto addrRef = StringRef(value).substr(p, end - p);
+				AddressExclusion addr = AddressExclusion::parse(addrRef);
+				if (addr.isValid()) {
+					out[encodeExcludedServersKey(addr)] = "";
+				} else {
+					printf("Error: invalid address format: %s\n", addrRef.toString().c_str());
+				}
+				p = end + 1;
+			}
+		}
+
+		if (key == "storage_engine" || key == "log_engine") {
+			StringRef s = value;
+
+			// Parse as engine_name[:p=v]... to handle future storage engine params
+			Value engine = s.eat(":");
+			std::map<Key, Value> params;
+			while (!s.empty()) {
+				params[s.eat("=")] = s.eat(":");
+			}
+
+			try {
+				out[p + key] = format("%d", KeyValueStoreType::fromString(engine.toString()).storeType());
+			} catch (Error& e) {
+				printf("Error: Invalid value for %s (%s): %s\n", key.c_str(), value.c_str(), e.what());
+			}
+			return out;
+		}
+
 		return out;
 	}
 
 	Optional<KeyValueStoreType> logType;
 	Optional<KeyValueStoreType> storeType;
+
+	// These are legacy shorthand commands to set a specific log engine and storage engine
+	// based only on the storage engine name.  Most of them assume SQLite should be the
+	// log engine.
 	if (mode == "ssd-1") {
 		logType = KeyValueStoreType::SSD_BTREE_V1;
 		storeType = KeyValueStoreType::SSD_BTREE_V1;
 	} else if (mode == "ssd" || mode == "ssd-2") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_BTREE_V2;
-	} else if (mode == "ssd-redwood-1-experimental") {
+	} else if (mode == "ssd-redwood-1" || mode == "ssd-redwood-1-experimental") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_REDWOOD_V1;
 	} else if (mode == "ssd-rocksdb-v1") {
@@ -251,7 +292,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 
 	if (storeType.present()) {
 		out[p + "log_engine"] = format("%d", logType.get().storeType());
-		out[p + "storage_engine"] = format("%d", KeyValueStoreType::StoreType(storeType.get()));
+		out[p + "storage_engine"] = format("%d", storeType.get().storeType());
 		return out;
 	}
 
@@ -388,7 +429,10 @@ ConfigurationResult buildConfiguration(std::vector<StringRef> const& modeTokens,
 
 		for (auto t = m.begin(); t != m.end(); ++t) {
 			if (outConf.count(t->first)) {
-				TraceEvent(SevWarnAlways, "ConflictingOption").detail("Option", t->first);
+				TraceEvent(SevWarnAlways, "ConflictingOption")
+				    .detail("Option", t->first)
+				    .detail("Value", t->second)
+				    .detail("ExistingValue", outConf[t->first]);
 				return ConfigurationResult::CONFLICTING_OPTIONS;
 			}
 			outConf[t->first] = t->second;
@@ -2535,16 +2579,22 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 	}
 }
 
-ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile, KeyRange range, AuditType type) {
+ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
+                               KeyRange range,
+                               AuditType type,
+                               bool async) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+	TraceEvent(SevDebug, "ManagementAPIAuditStorageBegin");
 
 	loop {
 		while (!clusterInterface->get().present()) {
 			wait(clusterInterface->onChange());
 		}
 
-		UID auditId = wait(clusterInterface->get().get().triggerAudit.getReply(TriggerAuditRequest(type, range)));
+		TriggerAuditRequest req(type, range);
+		req.async = async;
+		UID auditId = wait(clusterInterface->get().get().triggerAudit.getReply(req));
 		TraceEvent(SevDebug, "ManagementAPIAuditStorageEnd").detail("AuditID", auditId);
 		return auditId;
 	}
@@ -2736,27 +2786,6 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 		    .detail("SchemaPath", schemaPath);
 		throw unknown_error();
 	}
-}
-
-void setStorageQuota(Transaction& tr, StringRef tenantGroupName, int64_t quota) {
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	auto key = storageQuotaKey(tenantGroupName);
-	tr.set(key, BinaryWriter::toValue<int64_t>(quota, Unversioned()));
-}
-
-void clearStorageQuota(Transaction& tr, StringRef tenantGroupName) {
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	auto key = storageQuotaKey(tenantGroupName);
-	tr.clear(key);
-}
-
-ACTOR Future<Optional<int64_t>> getStorageQuota(Transaction* tr, StringRef tenantGroupName) {
-	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	state Optional<Value> v = wait(tr->get(storageQuotaKey(tenantGroupName)));
-	if (!v.present()) {
-		return Optional<int64_t>();
-	}
-	return BinaryReader::fromStringRef<int64_t>(v.get(), Unversioned());
 }
 
 std::string ManagementAPI::generateErrorMessage(const CoordinatorsResult& res) {

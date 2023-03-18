@@ -2,8 +2,13 @@
 allowDefaultTenant = false
 tenantModes = ['optional', 'required']
 
+[[knobs]]
+audit_logging_enabled = true
+max_trace_lines = 2000000
+
 [[test]]
 testTitle = 'TenantCreation'
+clearAfterTest = false
 
     [[test.workload]]
     testName = 'CreateTenant'

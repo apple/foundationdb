@@ -151,7 +151,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                      "ssd",
                      "ssd-1",
                      "ssd-2",
-                     "ssd-redwood-1-experimental",
+                     "ssd-redwood-1",
                      "ssd-rocksdb-v1",
                      "ssd-sharded-rocksdb",
                      "memory",
@@ -602,8 +602,6 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
             "description":"abc"
          }
       ],
-)statusSchema"
-                                         R"statusSchema(
       "recovery_state":{
          "seconds_since_last_recovered":1,
          "required_resolvers":1,
@@ -793,14 +791,26 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "storage_replication_policy":"(zoneid^3x1)",
          "logs":2,
          "log_version":2,
-         "log_engine":1,
+         "log_engine":{
+         "$enum":[
+             "ssd",
+             "ssd-1",
+             "ssd-2",
+             "ssd-redwood-1",
+             "ssd-rocksdb-v1",
+             "ssd-sharded-rocksdb",
+             "memory",
+             "memory-1",
+             "memory-2",
+             "memory-radixtree-beta"
+         ]},
          "log_spill":1,
          "storage_engine":{
          "$enum":[
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-1-experimental",
+             "ssd-redwood-1",
              "ssd-rocksdb-v1",
              "ssd-sharded-rocksdb",
              "memory",
@@ -814,7 +824,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-1-experimental",
+             "ssd-redwood-1",
              "ssd-rocksdb-v1",
              "ssd-sharded-rocksdb",
              "memory",
@@ -976,6 +986,17 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "num_tenants":0,
          "num_tenant_groups":10,
          "tenant_group_capacity":20
+      },
+      "idempotency_ids":{
+         "size_bytes": 0,
+         "expired_version": 0,
+         "expired_age": 0,
+         "oldest_id_version": 0,
+         "oldest_id_age": 0
+      },
+      "version_epoch":{
+         "enabled": false,
+         "epoch": 0
       }
    },
    "client":{

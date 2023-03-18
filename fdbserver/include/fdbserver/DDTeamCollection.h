@@ -30,7 +30,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbrpc/Replication.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
@@ -198,6 +198,7 @@ struct DDTeamCollectionInitParams {
 	PromiseStream<GetMetricsRequest> getShardMetrics;
 	Promise<UID> removeFailedServer;
 	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
+	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 };
 
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
@@ -235,6 +236,7 @@ protected:
 	Reference<AsyncVar<bool>> pauseWiggle;
 	Reference<AsyncVar<bool>> processingWiggle; // track whether wiggling relocation is being processed
 	PromiseStream<StorageWiggleValue> nextWiggleInfo;
+	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 
 	std::vector<Reference<TCTeamInfo>> badTeams;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
@@ -309,6 +311,10 @@ protected:
 	// Randomly choose one machine team that has chosenServer and has the correct size
 	// When configuration is changed, we may have machine teams with old storageTeamSize
 	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(TCServerInfo const& chosenServer) const;
+
+	// Returns a server team from given "servers", empty team if not found.
+	// When "wantHealthy" is true, only return if the team is healthy.
+	Optional<Reference<IDataDistributionTeam>> findTeamFromServers(const std::vector<UID>& servers, bool wantHealthy);
 
 	Future<Void> logOnCompletion(Future<Void> signal);
 
@@ -462,6 +468,10 @@ protected:
 	Future<Void> storageServerFailureTracker(TCServerInfo* server, ServerStatus* status, Version addedVersion);
 
 	Future<Void> waitForAllDataRemoved(UID serverID, Version addedVersion) const;
+
+	// calculate minLoadBytes / avgLoadBytes among servers. An unhealthy server's load is considered as 0. If the
+	// average load of each storage server is less than smallLoadThreshold, return 1 always.
+	double loadBytesBalanceRatio(int64_t smallLoadThreshold) const;
 
 	// Create a transaction updating `perpetualStorageWiggleIDPrefix` to the next serverID according to a sorted
 	// wiggle_pq maintained by the wiggler.

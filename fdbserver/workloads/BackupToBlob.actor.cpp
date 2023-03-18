@@ -58,7 +58,6 @@ struct BackupToBlobWorkload : TestWorkload {
 		addDefaultBackupRanges(backupRanges);
 
 		wait(delay(self->backupAfter));
-		state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 		wait(backupAgent.submitBackup(cx,
 		                              self->backupURL,
 		                              {},
@@ -66,8 +65,7 @@ struct BackupToBlobWorkload : TestWorkload {
 		                              self->snapshotInterval,
 		                              self->backupTag.toString(),
 		                              backupRanges,
-		                              SERVER_KNOBS->ENABLE_ENCRYPTION &&
-		                                  configuration.tenantMode != TenantMode::OPTIONAL_TENANT));
+		                              true));
 		EBackupState backupStatus = wait(backupAgent.waitBackup(cx, self->backupTag.toString(), StopWhenDone::True));
 		TraceEvent("BackupToBlob_BackupStatus").detail("Status", BackupAgentBase::getStateText(backupStatus));
 		return Void();

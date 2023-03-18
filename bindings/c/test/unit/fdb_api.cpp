@@ -60,6 +60,12 @@ void Future::cancel() {
 	return fdb_future_get_int64(future_, out);
 }
 
+// DoubleFuture
+
+[[nodiscard]] fdb_error_t DoubleFuture::get(double* out) {
+	return fdb_future_get_double(future_, out);
+}
+
 // ValueFuture
 
 [[nodiscard]] fdb_error_t ValueFuture::get(fdb_bool_t* out_present, const uint8_t** out_value, int* out_value_length) {
@@ -233,6 +239,10 @@ Int64Future Transaction::get_approximate_size() {
 
 Int64Future Transaction::get_total_cost() {
 	return Int64Future(fdb_transaction_get_total_cost(tr_));
+}
+
+DoubleFuture Transaction::get_tag_throttled_duration() {
+	return DoubleFuture(fdb_transaction_get_tag_throttled_duration(tr_));
 }
 
 KeyFuture Transaction::get_versionstamp() {

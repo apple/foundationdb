@@ -26,6 +26,7 @@
 #include "flow/network.h"
 #include <utility>
 #include <functional>
+#include <unordered_set>
 #if defined(NO_INTELLISENSE) && !defined(FLOW_GENERICACTORS_ACTOR_G_H)
 #define FLOW_GENERICACTORS_ACTOR_G_H
 #include "flow/genericactors.actor.g.h"
@@ -111,6 +112,21 @@ std::vector<T> parseStringToVector(std::string str, char delim) {
 		T item;
 		tokenStream >> item;
 		result.push_back(item);
+	}
+	return result;
+}
+
+template <class T>
+std::unordered_set<T> parseStringToUnorderedSet(std::string str, char delim) {
+	std::unordered_set<T> result;
+	std::stringstream stream(str);
+	std::string token;
+	while (stream.good()) {
+		getline(stream, token, delim);
+		std::istringstream tokenStream(token);
+		T item;
+		tokenStream >> item;
+		result.emplace(item);
 	}
 	return result;
 }
@@ -344,10 +360,10 @@ Future<Void> storeOrThrow(T& out, Future<Optional<T>> what, Error e = key_not_fo
 }
 
 // Waits for a future to be ready, and then applies an asynchronous function to it.
-ACTOR template <class T, class F, class U = decltype(std::declval<F>()(std::declval<T>()).getValue())>
-Future<U> mapAsync(Future<T> what, F actorFunc) {
+ACTOR template <class T, class F>
+Future<decltype(std::declval<F>()(std::declval<T>()).getValue())> mapAsync(Future<T> what, F actorFunc) {
 	T val = wait(what);
-	U ret = wait(actorFunc(val));
+	decltype(std::declval<F>()(std::declval<T>()).getValue()) ret = wait(actorFunc(val));
 	return ret;
 }
 
@@ -464,7 +480,7 @@ Future<Void> filter(FutureStream<T> input, F pred, PromiseStream<T> output) {
 	loop {
 		try {
 			T nextInput = waitNext(input);
-			if (func(nextInput))
+			if (pred(nextInput))
 				output.send(nextInput);
 		} catch (Error& e) {
 			if (e.code() == error_code_end_of_stream) {
@@ -571,26 +587,26 @@ public:
 			setUnconditional(k, v, i);
 	}
 	void setUnconditional(K const& k, V const& v) { setUnconditional(k, v, items[k]); }
+
+	void sendError(K const& begin, K const& end, Error const& e) {
+		if (begin >= end)
+			return;
+		std::vector<Promise<Void>> ps = swapRangePromises(items.lower_bound(begin), items.lower_bound(end));
+		sendError(ps, e);
+	}
+
 	void triggerAll() {
-		std::vector<Promise<Void>> ps;
-		for (auto it = items.begin(); it != items.end(); ++it) {
-			ps.resize(ps.size() + 1);
-			ps.back().swap(it->second.change);
-		}
-		std::vector<Promise<Void>> noDestroy = ps; // See explanation of noDestroy in setUnconditional()
-		for (auto p = ps.begin(); p != ps.end(); ++p)
-			p->send(Void());
+		std::vector<Promise<Void>> ps = swapRangePromises(items.begin(), items.end());
+		send(ps);
 	}
+
 	void triggerRange(K const& begin, K const& end) {
-		std::vector<Promise<Void>> ps;
-		for (auto it = items.lower_bound(begin); it != items.end() && it->first < end; ++it) {
-			ps.resize(ps.size() + 1);
-			ps.back().swap(it->second.change);
-		}
-		std::vector<Promise<Void>> noDestroy = ps; // See explanation of noDestroy in setUnconditional()
-		for (auto p = ps.begin(); p != ps.end(); ++p)
-			p->send(Void());
+		if (begin >= end)
+			return;
+		std::vector<Promise<Void>> ps = swapRangePromises(items.lower_bound(begin), items.lower_bound(end));
+		send(ps);
 	}
+
 	void trigger(K const& key) {
 		if (items.count(key) != 0) {
 			auto& i = items[key];
@@ -648,6 +664,30 @@ protected:
 	std::map<K, P> items;
 	const V defaultValue;
 	bool destructing;
+
+	template <typename Iterator>
+	std::vector<Promise<Void>> swapRangePromises(Iterator begin, Iterator end) {
+		std::vector<Promise<Void>> ps;
+		for (auto it = begin; it != end; ++it) {
+			ps.resize(ps.size() + 1);
+			ps.back().swap(it->second.change);
+		}
+		return ps;
+	}
+
+	// ps can't be a reference. See explanation of noDestroy in setUnconditional()
+	void send(std::vector<Promise<Void>> ps) {
+		for (auto& p : ps) {
+			p.send(Void());
+		}
+	}
+
+	// ps can't be a reference. See explanation of noDestroy in setUnconditional()
+	void sendError(std::vector<Promise<Void>> ps, Error const& e) {
+		for (auto& p : ps) {
+			p.sendError(e);
+		}
+	}
 
 	void setUnconditional(K const& k, V const& v, P& i) {
 		Promise<Void> trigger;
@@ -1269,6 +1309,13 @@ inline Future<Void> operator||(Future<Void> const& lhs, Future<Void> const& rhs)
 	return chooseActor(lhs, rhs);
 }
 
+ACTOR template <class T>
+Future<T> joinWith(Future<T> f, Future<Void> other) {
+	wait(other);
+	T t = wait(f);
+	return t;
+}
+
 // wait <interval> then call what() in a loop forever
 ACTOR template <class Func>
 Future<Void> recurring(Func what, double interval, TaskPriority taskID = TaskPriority::DefaultDelay) {
@@ -1382,13 +1429,19 @@ Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
 // The lock is implemented as a Promise<Void>, which is returned to callers in a convenient wrapper
 // called Lock.
 //
+// The default behavior is that if a Lock is droppped without error or release, existing and future
+// waiters will see a broken_promise exception.
+//
+// If hangOnDroppedMutex is true, then if a Lock is dropped without error or release, existing and
+// future waiters will never be signaled or see an error, equivalent to waiting on Never().
+//
 // Usage:
 //   Lock lock = wait(mutex.take());
 //   lock.release();  // Next waiter will get the lock, OR
 //   lock.error(e);   // Next waiter will get e, future waiters will see broken_promise
 //   lock = Lock();   // Or let Lock and any copies go out of scope.  All waiters will see broken_promise.
 struct FlowMutex {
-	FlowMutex() { lastPromise.send(Void()); }
+	FlowMutex(bool hangOnDroppedMutex = false) : hangOnDroppedMutex(hangOnDroppedMutex) { lastPromise.send(Void()); }
 
 	bool available() const { return lastPromise.isSet(); }
 
@@ -1405,10 +1458,14 @@ struct FlowMutex {
 		Lock newLock;
 		Future<Lock> f = lastPromise.isSet() ? newLock : tag(lastPromise.getFuture(), newLock);
 		lastPromise = newLock.promise;
+		if (hangOnDroppedMutex) {
+			return brokenPromiseToNever(f);
+		}
 		return f;
 	}
 
 private:
+	bool hangOnDroppedMutex;
 	Promise<Void> lastPromise;
 };
 

@@ -35,8 +35,10 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbrpc/sim_validation.h"
 #include "flow/IRandom.h"
+#include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/genericactors.actor.h"
 
 struct GrvProxyStats {
 	CounterCollection cc;
@@ -217,7 +219,7 @@ struct GrvProxyData {
 	                                SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                                SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    updateCommitRequests(0), lastCommitTime(0), version(0), minKnownCommittedVersion(invalidVersion),
-	    tagThrottler(SERVER_KNOBS->PROXY_MAX_TAG_THROTTLE_DURATION) {}
+	    tagThrottler(CLIENT_KNOBS->PROXY_MAX_TAG_THROTTLE_DURATION) {}
 };
 
 ACTOR Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
@@ -638,7 +640,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContex
 	    TaskPriority::GetLiveCommittedVersionReply);
 
 	if (!SERVER_KNOBS->ALWAYS_CAUSAL_READ_RISKY && !(flags & GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {
-		wait(updateLastCommit(grvProxyData, debugID));
+		wait(transformError(updateLastCommit(grvProxyData, debugID), broken_promise(), tlog_failed()));
 	} else if (SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > 0 &&
 	           now() - SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > grvProxyData->lastCommitTime.get()) {
 		wait(grvProxyData->lastCommitTime.whenAtLeast(now() - SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION));
@@ -651,7 +653,8 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContex
 		    "TransactionDebug", debugID.get().first(), "GrvProxyServer.getLiveCommittedVersion.confirmEpochLive");
 	}
 
-	GetRawCommittedVersionReply repFromMaster = wait(replyFromMasterFuture);
+	GetRawCommittedVersionReply repFromMaster =
+	    wait(transformError(replyFromMasterFuture, broken_promise(), master_failed()));
 	grvProxyData->version = std::max(grvProxyData->version, repFromMaster.version);
 	grvProxyData->minKnownCommittedVersion =
 	    std::max(grvProxyData->minKnownCommittedVersion, repFromMaster.minKnownCommittedVersion);
@@ -1066,7 +1069,7 @@ ACTOR Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
 	state GrvProxyData grvProxyData(proxy.id(), master, proxy.getConsistentReadVersion, db);
 
 	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> onError = transformError(actorCollection(addActor.getFuture()), broken_promise(), tlog_failed());
+	state Future<Void> onError = actorCollection(addActor.getFuture());
 
 	state GetHealthMetricsReply healthMetricsReply;
 	state GetHealthMetricsReply detailedHealthMetricsReply;
@@ -1134,10 +1137,14 @@ ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy,
 		wait(core || checkRemoved(db, req.recoveryCount, proxy));
 	} catch (Error& e) {
 		TraceEvent("GrvProxyTerminated", proxy.id()).errorUnsuppressed(e);
-
+		ASSERT(e.code() !=
+		       error_code_broken_promise); // all broken_promise should be transformed to the correct error code
+		CODE_PROBE(e.code() == error_code_master_failed, "GrvProxyServer master failed");
+		CODE_PROBE(e.code() == error_code_tlog_failed, "GrvProxyServer tlog failed");
 		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
 		    e.code() != error_code_tlog_failed && e.code() != error_code_coordinators_changed &&
-		    e.code() != error_code_coordinated_state_conflict && e.code() != error_code_new_coordinators_timed_out) {
+		    e.code() != error_code_coordinated_state_conflict && e.code() != error_code_new_coordinators_timed_out &&
+		    e.code() != error_code_master_failed) {
 			throw;
 		}
 	}

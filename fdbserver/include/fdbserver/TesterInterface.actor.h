@@ -85,6 +85,7 @@ struct WorkloadRequest {
 	int clientId; // the "id" of the client receiving the request (0 indexed)
 	int clientCount; // the total number of test clients participating in the workload
 	ReplyPromise<struct WorkloadInterface> reply;
+	std::vector<std::string> disabledFailureInjectionWorkloads;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -100,6 +101,7 @@ struct WorkloadRequest {
 		           reply,
 		           defaultTenant,
 		           runFailureWorkloads,
+		           disabledFailureInjectionWorkloads,
 		           arena);
 	}
 };

@@ -35,6 +35,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
 #include "flow/FileIdentifier.h"
+#include "flow/Knobs.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
@@ -69,6 +70,8 @@
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/serialize.h"
+#include "flow/ChaosMetrics.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -96,6 +99,21 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #else
 #define KV_STORE(filename, uid) keyValueStoreMemory(filename, uid)
 #endif
+
+template class RequestStream<RecruitMasterRequest, false>;
+template struct NetNotifiedQueue<RecruitMasterRequest, false>;
+
+template class RequestStream<RegisterMasterRequest, false>;
+template struct NetNotifiedQueue<RegisterMasterRequest, false>;
+
+template class RequestStream<InitializeCommitProxyRequest, false>;
+template struct NetNotifiedQueue<InitializeCommitProxyRequest, false>;
+
+template class RequestStream<InitializeGrvProxyRequest, false>;
+template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
+
+template class RequestStream<GetServerDBInfoRequest, false>;
+template struct NetNotifiedQueue<GetServerDBInfoRequest, false>;
 
 namespace {
 RoleLineageCollector roleLineageCollector;
@@ -247,7 +265,7 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 				CODE_PROBE(true, "Worker terminated with file_not_found error");
 				return Void();
 			} else if (e.getError().code() == error_code_lock_file_failure) {
-				CODE_PROBE(true, "Unable to lock file", probe::decoration::rare);
+				CODE_PROBE(true, "Unable to lock file", probe::context::net2, probe::assert::noSim);
 				throw please_reboot_kv_store();
 			}
 			throw e.getError();
@@ -314,6 +332,7 @@ StringRef fileLogDataPrefix = "log-"_sr;
 StringRef fileVersionedLogDataPrefix = "log2-"_sr;
 StringRef fileLogQueuePrefix = "logqueue-"_sr;
 StringRef tlogQueueExtension = "fdq"_sr;
+StringRef fileBlobWorkerPrefix = "bw-"_sr;
 
 enum class FilesystemCheck {
 	FILES_ONLY,
@@ -465,7 +484,7 @@ TLogFn tLogFnForOptions(TLogOptions options) {
 }
 
 struct DiskStore {
-	enum COMPONENT { TLogData, Storage, UNSET };
+	enum COMPONENT { TLogData, Storage, BlobWorker, UNSET };
 
 	UID storeID = UID();
 	std::string filename = ""; // For KVStoreMemory just the base filename to be passed to IDiskQueue
@@ -524,6 +543,9 @@ std::vector<DiskStore> getDiskStores(std::string folder,
 			store.tLogOptions.version = TLogVersion::V2;
 			store.tLogOptions.spillType = TLogSpillType::VALUE;
 			prefix = fileLogDataPrefix;
+		} else if (filename.startsWith(fileBlobWorkerPrefix)) {
+			store.storedComponent = DiskStore::BlobWorker;
+			prefix = fileBlobWorkerPrefix;
 		} else {
 			continue;
 		}
@@ -1045,6 +1067,9 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 					}
 					bool degradedPeer = false;
 					bool disconnectedPeer = false;
+
+					// If peer->lastLoggedTime == 0, we just started monitor this peer and haven't logged it once yet.
+					double lastLoggedTime = peer->lastLoggedTime <= 0.0 ? peer->lastConnectTime : peer->lastLoggedTime;
 					if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
 					    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo))) {
 						// Monitors intra DC latencies between servers that in the primary or remote DC's transaction
@@ -1062,7 +1087,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 						if (disconnectedPeer || degradedPeer) {
 							TraceEvent("HealthMonitorDetectDegradedPeer")
 							    .detail("Peer", address)
-							    .detail("Elapsed", now() - peer->lastLoggedTime)
+							    .detail("Elapsed", now() - lastLoggedTime)
 							    .detail("Disconnected", disconnectedPeer)
 							    .detail("MinLatency", peer->pingLatencies.min())
 							    .detail("MaxLatency", peer->pingLatencies.max())
@@ -1093,7 +1118,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 							TraceEvent("HealthMonitorDetectDegradedPeer")
 							    .detail("Peer", address)
 							    .detail("Satellite", true)
-							    .detail("Elapsed", now() - peer->lastLoggedTime)
+							    .detail("Elapsed", now() - lastLoggedTime)
 							    .detail("Disconnected", disconnectedPeer)
 							    .detail("MinLatency", peer->pingLatencies.min())
 							    .detail("MaxLatency", peer->pingLatencies.max())
@@ -1329,8 +1354,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
                                                  int64_t memoryLimit,
                                                  IKeyValueStore* store,
                                                  bool validateDataFiles,
-                                                 Promise<Void>* rebootKVStore,
-                                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider) {
+                                                 Promise<Void>* rebootKVStore) {
 	state TrackRunningStorage _(id, storeType, runningStorages);
 	loop {
 		ErrorOr<Void> e = wait(errorOr(prevStorageServer));
@@ -1360,7 +1384,8 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 			        (g_network->isSimulated()
 			             ? (/* Disable for RocksDB */ storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
 			                deterministicRandom()->coinflip())
-			             : true));
+			             : true),
+			    db);
 			Promise<Void> nextRebootKVStorePromise;
 			filesClosed->add(store->onClosed() ||
 			                 nextRebootKVStorePromise
@@ -1397,13 +1422,8 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		DUMPTOKEN(recruited.changeFeedPop);
 		DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
-		prevStorageServer = storageServer(store,
-		                                  recruited,
-		                                  db,
-		                                  folder,
-		                                  Promise<Void>(),
-		                                  Reference<IClusterConnectionRecord>(nullptr),
-		                                  encryptionKeyProvider);
+		prevStorageServer =
+		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<IClusterConnectionRecord>(nullptr));
 		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
 	}
 }
@@ -1728,7 +1748,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 int64_t memoryLimit,
                                 std::string metricsConnFile,
                                 std::string metricsPrefix,
-                                Promise<Void> recoveredDiskFiles,
                                 int64_t memoryProfileThreshold,
                                 std::string _coordFolder,
                                 std::string whitelistBinPaths,
@@ -1771,7 +1790,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state std::map<SharedLogsKey, std::vector<SharedLogsValue>> sharedLogs;
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
 	state WorkerCache<InitializeBackupReply> backupWorkerCache;
-	state WorkerCache<InitializeBlobWorkerReply> blobWorkerCache;
+	state Future<Void> blobWorkerFuture = Void();
 
 	state WorkerSnapRequest lastSnapReq;
 	// Here the key is UID+role, as we still send duplicate requests to a process which is both storage and tlog
@@ -1833,6 +1852,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	                                                              locality.dcId(),
 	                                                              locality.zoneId(),
 	                                                              locality.machineId(),
+	                                                              locality.dataHallId(),
 	                                                              g_network->getLocalAddress().ip,
 	                                                              FDB_VT_VERSION));
 
@@ -1866,8 +1886,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			if (s.storedComponent == DiskStore::Storage) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
-				Reference<IPageEncryptionKeyProvider> encryptionKeyProvider =
-				    makeReference<TenantAwareEncryptionKeyProvider>(dbInfo);
+
 				IKeyValueStore* kv = openKVStore(
 				    s.storeType,
 				    s.filename,
@@ -1881,7 +1900,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                s.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 				                deterministicRandom()->coinflip())
 				             : true),
-				    encryptionKeyProvider);
+				    dbInfo);
 				Future<Void> kvClosed =
 				    kv->onClosed() ||
 				    rebootKVSPromise.getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
@@ -1929,8 +1948,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
 				Promise<Void> recovery;
-				Future<Void> f =
-				    storageServer(kv, recruited, dbInfo, folder, recovery, connRecord, encryptionKeyProvider);
+				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connRecord);
 				recoveries.push_back(recovery.getFuture());
 				f = handleIOErrors(f, kv, s.storeID, kvClosed);
 				f = storageServerRollbackRebooter(&runningStorages,
@@ -1946,8 +1964,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                                  memoryLimit,
 				                                  kv,
 				                                  validateDataFiles,
-				                                  &rebootKVSPromise,
-				                                  encryptionKeyProvider);
+				                                  &rebootKVSPromise);
 				errorForwarders.add(forwardError(errors, ssRole, recruited.id(), f));
 			} else if (s.storedComponent == DiskStore::TLogData) {
 				LocalLineage _;
@@ -1961,7 +1978,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					logQueueBasename = fileLogQueuePrefix.toString() + optionsString.toString() + "-";
 				}
 				ASSERT_WE_THINK(abspath(parentDirectory(s.filename)) == folder);
-				IKeyValueStore* kv = openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles);
+				IKeyValueStore* kv = openKVStore(s.storeType,
+				                                 s.filename,
+				                                 s.storeID,
+				                                 memoryLimit,
+				                                 validateDataFiles,
+				                                 false,
+				                                 false,
+				                                 dbInfo,
+				                                 EncryptionAtRestMode());
 				const DiskQueueVersion dqv = s.tLogOptions.getDiskQueueVersion();
 				const int64_t diskQueueWarnSize =
 				    s.tLogOptions.spillType == TLogSpillType::VALUE ? 10 * SERVER_KNOBS->TARGET_BYTES_PER_TLOG : -1;
@@ -2005,6 +2030,57 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				logData.back().actor = oldLog.getFuture() || tl;
 				logData.back().uid = s.storeID;
 				errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, s.storeID, tl));
+			} else if (s.storedComponent == DiskStore::BlobWorker) {
+				if (blobWorkerFuture.isReady()) {
+					LocalLineage _;
+					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobWorker;
+
+					BlobWorkerInterface recruited(locality, deterministicRandom()->randomUniqueID());
+					recruited.initEndpoints();
+
+					std::map<std::string, std::string> details;
+					details["StorageEngine"] = s.storeType.toString();
+					startRole(Role::BLOB_WORKER, recruited.id(), interf.id(), details, "Restored");
+
+					DUMPTOKEN(recruited.waitFailure);
+					DUMPTOKEN(recruited.blobGranuleFileRequest);
+					DUMPTOKEN(recruited.assignBlobRangeRequest);
+					DUMPTOKEN(recruited.revokeBlobRangeRequest);
+					DUMPTOKEN(recruited.granuleAssignmentsRequest);
+					DUMPTOKEN(recruited.granuleStatusStreamRequest);
+					DUMPTOKEN(recruited.haltBlobWorker);
+					DUMPTOKEN(recruited.minBlobVersionRequest);
+
+					IKeyValueStore* data = openKVStore(s.storeType,
+					                                   s.filename,
+					                                   recruited.id(),
+					                                   memoryLimit,
+					                                   false,
+					                                   false,
+					                                   false,
+					                                   dbInfo,
+					                                   EncryptionAtRestMode());
+					filesClosed.add(data->onClosed());
+
+					Promise<Void> recovery;
+					Future<Void> bw = blobWorker(recruited, recovery, dbInfo, data);
+					recoveries.push_back(recovery.getFuture());
+					bw = handleIOErrors(bw, data, recruited.id());
+					blobWorkerFuture = bw;
+					errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
+				} else {
+					CODE_PROBE(true, "Multiple blob workers after reboot", probe::decoration::rare);
+					IKeyValueStore* data = openKVStore(s.storeType,
+					                                   s.filename,
+					                                   UID(),
+					                                   memoryLimit,
+					                                   false,
+					                                   false,
+					                                   false,
+					                                   dbInfo,
+					                                   EncryptionAtRestMode());
+					data->dispose();
+				}
 			}
 		}
 
@@ -2053,24 +2129,18 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		// However, the worker server can still serve stateless roles, and if encryption is on, it is crucial to have
 		// some worker available to serve the EncryptKeyProxy role, before opening encrypted storage files.
 		//
-		// When encryption-at-rest is enabled, the follow code allows a worker to first register with the
-		// cluster controller to be recruited only as a stateless process i.e. it can't be recruited as a SS or TLog
-		// process; once the local disk recovery is complete (if applicable), the process re-registers with cluster
-		// controller as a stateful process role.
-		//
-		// TODO(yiwu): Unify behavior for encryption and non-encryption once the change is stable.
+		// To achieve it, registrationClient allows a worker to first register with the cluster controller to be
+		// recruited only as a stateless process i.e. it can't be recruited as a SS or TLog process; once the local disk
+		// recovery is complete (if applicable), the process re-registers with cluster controller as a stateful process
+		// role.
+		Promise<Void> recoveredDiskFiles;
 		Future<Void> recoverDiskFiles = trigger(
 		    [=]() {
-			    TraceEvent("RecoveriesComplete", interf.id());
+			    TraceEvent("DiskFileRecoveriesComplete", interf.id());
 			    recoveredDiskFiles.send(Void());
-			    return Void();
 		    },
 		    waitForAll(recoveries));
-		if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
-			wait(recoverDiskFiles);
-		} else {
-			errorForwarders.add(recoverDiskFiles);
-		}
+		errorForwarders.add(recoverDiskFiles);
 
 		errorForwarders.add(registrationClient(ccInterface,
 		                                       interf,
@@ -2130,9 +2200,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						    .detail("BlobMigratorID",
 						            localInfo.blobMigrator.present() ? localInfo.blobMigrator.get().id() : UID())
 						    .detail("EncryptKeyProxyID",
-						            localInfo.encryptKeyProxy.present() ? localInfo.encryptKeyProxy.get().id() : UID())
-						    .detail("IsEncryptionEnabled", localInfo.client.isEncryptionEnabled);
-
+						            localInfo.encryptKeyProxy.present() ? localInfo.encryptKeyProxy.get().id() : UID());
 						dbInfo->set(localInfo);
 					}
 					errorForwarders.add(
@@ -2410,7 +2478,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					ReplyPromise<InitializeBackupReply> backupReady = req.reply;
 					backupWorkerCache.set(req.reqId, backupReady.getFuture());
 					Future<Void> backupProcess = backupWorker(recruited, req, dbInfo);
-					backupProcess = storageCache.removeOnReady(req.reqId, backupProcess);
+					backupProcess = backupWorkerCache.removeOnReady(req.reqId, backupProcess);
 					errorForwarders.add(forwardError(errors, Role::BACKUP, recruited.id(), backupProcess));
 					TraceEvent("BackupInitRequest", req.reqId).detail("BackupId", recruited.id());
 					InitializeBackupReply reply(recruited, req.backupEpoch);
@@ -2476,7 +2544,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
 					std::string filename =
 					    filenameFromId(req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId);
-					IKeyValueStore* data = openKVStore(req.storeType, filename, logId, memoryLimit);
+					IKeyValueStore* data = openKVStore(req.storeType,
+					                                   filename,
+					                                   logId,
+					                                   memoryLimit,
+					                                   false,
+					                                   false,
+					                                   false,
+					                                   dbInfo,
+					                                   EncryptionAtRestMode());
 					const DiskQueueVersion dqv = tLogOptions.getDiskQueueVersion();
 					IDiskQueue* queue = openDiskQueue(
 					    joinPath(folder,
@@ -2561,8 +2637,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                   folder,
 					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
-					Reference<IPageEncryptionKeyProvider> encryptionKeyProvider =
-					    makeReference<TenantAwareEncryptionKeyProvider>(dbInfo);
 					IKeyValueStore* data = openKVStore(
 					    req.storeType,
 					    filename,
@@ -2576,7 +2650,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                req.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 					                deterministicRandom()->coinflip())
 					             : true),
-					    encryptionKeyProvider);
+					    dbInfo,
+					    req.encryptMode);
 
 					Future<Void> kvClosed =
 					    data->onClosed() ||
@@ -2592,8 +2667,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                               isTss ? req.tssPairIDAndVersion.get().second : 0,
 					                               storageReady,
 					                               dbInfo,
-					                               folder,
-					                               encryptionKeyProvider);
+					                               folder);
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(&runningStorages,
@@ -2609,8 +2683,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                                  memoryLimit,
 					                                  data,
 					                                  false,
-					                                  &rebootKVSPromise2,
-					                                  encryptionKeyProvider);
+					                                  &rebootKVSPromise2);
 					errorForwarders.add(forwardError(errors, ssRole, recruited.id(), s));
 				} else if (storageCache.exists(req.reqId)) {
 					forwardPromise(req.reply, storageCache.get(req.reqId));
@@ -2623,7 +2696,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				}
 			}
 			when(InitializeBlobWorkerRequest req = waitNext(interf.blobWorker.getFuture())) {
-				if (!blobWorkerCache.exists(req.reqId)) {
+				if (blobWorkerFuture.isReady()) {
+					LocalLineage _;
+					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobWorker;
+
 					BlobWorkerInterface recruited(locality, req.interfaceId);
 					recruited.initEndpoints();
 					startRole(Role::BLOB_WORKER, recruited.id(), interf.id());
@@ -2637,12 +2713,31 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.haltBlobWorker);
 					DUMPTOKEN(recruited.minBlobVersionRequest);
 
-					ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady = req.reply;
-					Future<Void> bw = blobWorker(recruited, blobWorkerReady, dbInfo);
-					errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
+					IKeyValueStore* data = nullptr;
+					if (SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED && req.storeType != KeyValueStoreType::END) {
+						std::string filename =
+						    filenameFromId(req.storeType, folder, fileBlobWorkerPrefix.toString(), recruited.id());
+						data = openKVStore(req.storeType,
+						                   filename,
+						                   recruited.id(),
+						                   memoryLimit,
+						                   false,
+						                   false,
+						                   false,
+						                   dbInfo,
+						                   EncryptionAtRestMode());
+						filesClosed.add(data->onClosed());
+					}
 
+					ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady = req.reply;
+					Future<Void> bw = blobWorker(recruited, blobWorkerReady, dbInfo, data);
+					if (SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED && req.storeType != KeyValueStoreType::END) {
+						bw = handleIOErrors(bw, data, recruited.id());
+					}
+					blobWorkerFuture = bw;
+					errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
 				} else {
-					forwardPromise(req.reply, blobWorkerCache.get(req.reqId));
+					req.reply.sendError(recruitment_failed());
 				}
 			}
 			when(InitializeCommitProxyRequest req = waitNext(interf.commitProxy.getFuture())) {
@@ -2663,8 +2758,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.getStorageServerRejoinInfo);
 				DUMPTOKEN(recruited.waitFailure);
 				DUMPTOKEN(recruited.txnState);
+				DUMPTOKEN(recruited.getTenantId);
 
-				// printf("Recruited as commitProxyServer\n");
 				errorForwarders.add(zombie(recruited,
 				                           forwardError(errors,
 				                                        Role::COMMIT_PROXY,
@@ -2885,6 +2980,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		endRole(Role::WORKER, interf.id(), "WorkerError", ok, e);
 		errorForwarders.clear(false);
 		sharedLogs.clear();
+		// blobWorkerFuture is also in errorForwarders so it's double refcounted. If we don't cancel it, it'll never
+		// close it's IKVS and this will hang, leaving a zombie worker
+		blobWorkerFuture.cancel();
 
 		if (e.code() != error_code_actor_cancelled) {
 			// actor_cancelled:
@@ -3473,15 +3571,12 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
     Reference<IClusterConnectionRecord> connRecord,
     Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
     Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-    Future<Void> recoveredDiskFiles,
     LocalityData locality,
     Reference<AsyncVar<ServerDBInfo>> dbInfo,
     ConfigDBType configDBType,
     Reference<AsyncVar<Optional<UID>>> clusterId) {
 	state Future<Void> monitor = monitorLeaderWithDelayedCandidacyImpl(connRecord, currentCC);
 	state Future<Void> timeout;
-
-	wait(recoveredDiskFiles);
 
 	loop {
 		if (currentCC->get().present() && dbInfo->get().clusterInterface == currentCC->get().get() &&
@@ -3503,8 +3598,7 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
 			                                     : Never())) {}
 			when(wait(timeout.isValid() ? timeout : Never())) {
 				monitor.cancel();
-				wait(clusterController(
-				    connRecord, currentCC, asyncPriorityInfo, recoveredDiskFiles, locality, configDBType, clusterId));
+				wait(clusterController(connRecord, currentCC, asyncPriorityInfo, locality, configDBType, clusterId));
 				return Void();
 			}
 		}
@@ -3514,7 +3608,7 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
 extern void setupStackSignal();
 
 ACTOR Future<Void> serveProtocolInfo() {
-	state RequestStream<ProtocolInfoRequest> protocolInfo(
+	state PublicRequestStream<ProtocolInfoRequest> protocolInfo(
 	    PeerCompatibilityPolicy{ RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() });
 	protocolInfo.makeWellKnownEndpoint(WLTOKEN_PROTOCOL_INFO, TaskPriority::DefaultEndpoint);
 	loop {
@@ -3579,7 +3673,6 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
                         std::map<std::string, std::string> manualKnobOverrides,
                         ConfigDBType configDBType) {
 	state std::vector<Future<Void>> actors;
-	state Promise<Void> recoveredDiskFiles;
 	state Reference<ConfigNode> configNode;
 	state Reference<LocalConfiguration> localConfig;
 	if (configDBType != ConfigDBType::DISABLED) {
@@ -3636,7 +3729,6 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		auto asyncPriorityInfo =
 		    makeReference<AsyncVar<ClusterControllerPriorityInfo>>(getCCPriorityInfo(fitnessFilePath, processClass));
 		auto serverDBInfo = ServerDBInfo();
-		serverDBInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 		serverDBInfo.myLocality = localities;
 		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>(serverDBInfo);
 		Reference<AsyncVar<Optional<UID>>> clusterId(
@@ -3649,24 +3741,14 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 			actors.push_back(reportErrors(monitorLeader(connRecord, cc), "ClusterController"));
 		} else if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::WorstFit &&
 		           SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS > 0) {
-			actors.push_back(reportErrors(monitorLeaderWithDelayedCandidacy(connRecord,
-			                                                                cc,
-			                                                                asyncPriorityInfo,
-			                                                                recoveredDiskFiles.getFuture(),
-			                                                                localities,
-			                                                                dbInfo,
-			                                                                configDBType,
-			                                                                clusterId),
-			                              "ClusterController"));
+			actors.push_back(
+			    reportErrors(monitorLeaderWithDelayedCandidacy(
+			                     connRecord, cc, asyncPriorityInfo, localities, dbInfo, configDBType, clusterId),
+			                 "ClusterController"));
 		} else {
-			actors.push_back(reportErrors(clusterController(connRecord,
-			                                                cc,
-			                                                asyncPriorityInfo,
-			                                                recoveredDiskFiles.getFuture(),
-			                                                localities,
-			                                                configDBType,
-			                                                clusterId),
-			                              "ClusterController"));
+			actors.push_back(
+			    reportErrors(clusterController(connRecord, cc, asyncPriorityInfo, localities, configDBType, clusterId),
+			                 "ClusterController"));
 		}
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
 		actors.push_back(reportErrorsExcept(workerServer(connRecord,
@@ -3678,7 +3760,6 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		                                                 memoryLimit,
 		                                                 metricsConnFile,
 		                                                 metricsPrefix,
-		                                                 recoveredDiskFiles,
 		                                                 memoryProfileThreshold,
 		                                                 coordFolder,
 		                                                 whitelistBinPaths,

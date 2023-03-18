@@ -23,6 +23,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -307,8 +308,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			processesLeft.insert(processesLeft.end(), killProcArray.begin(), killProcArray.end());
 
 			// Check if we can kill the added process
-			bCanKillProcess =
-			    g_simulator->canKillProcesses(processesLeft, processesDead, ISimulator::KillInstantly, nullptr);
+			bCanKillProcess = g_simulator->canKillProcesses(
+			    processesLeft, processesDead, ISimulator::KillType::KillInstantly, nullptr);
 
 			// Remove the added processes
 			processesLeft.resize(processesLeft.size() - killProcArray.size());
@@ -467,7 +468,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 					    .detail("ClusterAvailable", g_simulator->isAvailable())
 					    .detail("Protected", g_simulator->protectedAddresses.count(killProcess->address));
 				else if (removeViaClear) {
-					g_simulator->rebootProcess(killProcess, ISimulator::RebootProcessAndDelete);
+					g_simulator->rebootProcess(killProcess, ISimulator::KillType::RebootProcessAndDelete);
 					TraceEvent("RemoveAndKill", functionId)
 					    .detail("Step", "Clear Process")
 					    .detail("Process", describe(*killProcess))
@@ -478,7 +479,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				}
 				/*
 				                else {
-				                    g_simulator->killProcess( killProcess, ISimulator::KillInstantly );
+				                    g_simulator->killProcess( killProcess, ISimulator::KillType::KillInstantly );
 				                    TraceEvent("RemoveAndKill", functionId).detail("Step", "Kill Process").detail("Process", describe(*killProcess)).detail("Failed", killProcess->failed).detail("Rebooting", killProcess->rebooting).detail("ClusterAvailable", g_simulator->isAvailable()).detail("Protected", g_simulator->protectedAddresses.count(killProcess->address));
 				                }
 				*/
@@ -496,8 +497,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("Zones", zoneIds.size())
 			    .detail("ClusterAvailable", g_simulator->isAvailable());
 			for (auto& zoneId : zoneIds) {
-				killedMachine = g_simulator->killZone(
-				    zoneId, removeViaClear ? ISimulator::RebootAndDelete : ISimulator::KillInstantly);
+				killedMachine = g_simulator->killZone(zoneId,
+				                                      removeViaClear ? ISimulator::KillType::RebootAndDelete
+				                                                     : ISimulator::KillType::KillInstantly);
 				TraceEvent(killedMachine ? SevInfo : SevWarn, "RemoveAndKill")
 				    .detail("Step", removeViaClear ? "Clear Machine" : "Kill Machine")
 				    .detail("ZoneId", zoneId)

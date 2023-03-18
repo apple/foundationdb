@@ -1253,7 +1253,14 @@ struct DDQueue : public IDDRelocationQueue {
 						if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 							rrs.dataMoveId = UID();
 						} else {
-							rrs.dataMoveId = deterministicRandom()->randomUniqueID();
+							rrs.dataMoveId =
+							    newDataMoveId(deterministicRandom()->randomUInt64(),
+							                  AssignEmptyRange::False,
+							                  EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
+							TraceEvent(SevInfo, "DDDataMoveInitiatedWithRandomDestID")
+							    .detail("DataMoveID", rrs.dataMoveId.toString())
+							    .detail("Range", rrs.keys)
+							    .detail("Reason", rrs.reason.toString());
 						}
 					} else {
 						rrs.dataMoveId = anonymousShardId;
@@ -1746,7 +1753,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					} else {
 						self->moveCreateNewPhysicalShard++;
 					}
-					rd.dataMoveId = newShardId(physicalShardIDCandidate, AssignEmptyRange::False);
+					rd.dataMoveId = newDataMoveId(physicalShardIDCandidate,
+					                              AssignEmptyRange::False,
+					                              EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
+					TraceEvent(SevInfo, "DDDataMoveInitiated")
+					    .detail("DataMoveID", rd.dataMoveId.toString())
+					    .detail("Reason", rd.reason.toString());
 					auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
 					inFlightRange.value().dataMoveId = rd.dataMoveId;
 					auto f = self->dataMoves.intersectingRanges(rd.keys);
@@ -2044,7 +2056,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
 				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
 
-				completeDest(rd, self->destBusymap);
+				if (!signalledTransferComplete) {
+					// signalling transferComplete calls completeDest() in complete(), so doing so here would
+					// double-complete the work
+					completeDest(rd, self->destBusymap);
+				}
 				rd.completeDests.clear();
 
 				wait(delay(SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskPriority::DataDistributionLaunch));
@@ -2138,8 +2154,10 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 	// randomly choose topK shards
 	int topK = std::max(1, std::min(int(0.1 * shards.size()), SERVER_KNOBS->READ_REBALANCE_SHARD_TOPK));
 	state Future<HealthMetrics> healthMetrics = self->txnProcessor->getHealthMetrics(true);
-	state GetTopKMetricsRequest req(
-	    shards, topK, (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC, srcLoad / shards.size());
+	state GetTopKMetricsRequest req(shards,
+	                                topK,
+	                                (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC,
+	                                std::min(srcLoad / shards.size(), SERVER_KNOBS->READ_REBALANCE_MIN_READ_BYTES_KS));
 	state GetTopKMetricsReply reply = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
 	wait(ready(healthMetrics));
 	auto cpu = getWorstCpu(healthMetrics.get(), sourceTeam->getServerIDs());
@@ -2267,16 +2285,13 @@ ACTOR Future<SrcDestTeamPair> getSrcDestTeams(DDQueue* self,
 
 	state std::pair<Optional<ITeamRef>, bool> randomTeam =
 	    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(destReq)));
-	traceEvent->detail(
-	    "DestTeam", printable(randomTeam.first.map<std::string>([](const ITeamRef& team) { return team->getDesc(); })));
+	traceEvent->detail("DestTeam", printable(randomTeam.first.mapRef(&IDataDistributionTeam::getDesc)));
 
 	if (randomTeam.first.present()) {
 		state std::pair<Optional<ITeamRef>, bool> loadedTeam =
 		    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(srcReq)));
 
-		traceEvent->detail("SourceTeam", printable(loadedTeam.first.map<std::string>([](const ITeamRef& team) {
-			                   return team->getDesc();
-		                   })));
+		traceEvent->detail("SourceTeam", printable(loadedTeam.first.mapRef(&IDataDistributionTeam::getDesc)));
 
 		if (loadedTeam.first.present()) {
 			return std::make_pair(loadedTeam.first.get(), randomTeam.first.get());

@@ -169,7 +169,8 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 		self->lastMetrics = getRandomWiggleMetrics();
 		auto& lastMetrics = self->lastMetrics;
 		wait(success(runRYWTransaction(cx, [&lastMetrics](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			return updateStorageWiggleMetrics(tr, lastMetrics, PrimaryRegion(true));
+			StorageWiggleData wiggleData;
+			return wiggleData.updateStorageWiggleMetrics(tr, lastMetrics, PrimaryRegion(true));
 		})));
 		return Void();
 	}
@@ -208,7 +209,8 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 		                                      makeReference<AsyncVar<bool>>(false),
 		                                      PromiseStream<GetMetricsRequest>(),
 		                                      Promise<UID>(),
-		                                      PromiseStream<Promise<int>>() });
+		                                      PromiseStream<Promise<int>>(),
+		                                      PromiseStream<Promise<int64_t>>() });
 		tester.configuration.storageTeamSize = 3;
 		tester.configuration.perpetualStorageWiggleSpeed = 1;
 

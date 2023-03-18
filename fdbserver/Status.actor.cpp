@@ -240,20 +240,6 @@ protected:
 	int64_t counter;
 };
 
-static JsonBuilderObject getLocalityInfo(const LocalityData& locality) {
-	JsonBuilderObject localityObj;
-
-	for (auto it = locality._data.begin(); it != locality._data.end(); it++) {
-		if (it->second.present()) {
-			localityObj[it->first] = it->second.get();
-		} else {
-			localityObj[it->first] = JsonBuilder();
-		}
-	}
-
-	return localityObj;
-}
-
 static JsonBuilderObject getError(const TraceEventFields& errorFields) {
 	JsonBuilderObject statusObj;
 	try {
@@ -352,7 +338,7 @@ JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 				}
 
 				if (locality.count(it->first)) {
-					statusObj["locality"] = getLocalityInfo(locality[it->first]);
+					statusObj["locality"] = locality[it->first].toJSON<JsonBuilderObject>();
 				}
 
 				statusObj["address"] = address;
@@ -854,7 +840,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("consistency_scan", db->get().consistencyScan.get());
 	}
 
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION && db->get().encryptKeyProxy.present()) {
+	if (db->get().encryptKeyProxy.present()) {
 		roles.addRole("encrypt_key_proxy", db->get().encryptKeyProxy.get());
 	}
 
@@ -949,7 +935,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				std::string MachineID = processMetrics.getValue("MachineID");
 				statusObj["machine_id"] = MachineID;
 
-				statusObj["locality"] = getLocalityInfo(workerItr->interf.locality);
+				statusObj["locality"] = workerItr->interf.locality.toJSON<JsonBuilderObject>();
 
 				statusObj.setKeyRawNumber("uptime_seconds", processMetrics.getValue("UptimeSeconds"));
 
@@ -1438,6 +1424,37 @@ ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx,
 	}
 
 	return statusObj;
+}
+
+ACTOR static Future<JsonBuilderObject> versionEpochStatusFetcher(Database cx,
+                                                                 std::set<std::string>* incomplete_reasons) {
+	state JsonBuilderObject message;
+	try {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				Optional<Value> versionEpochVal = wait(timeoutError(BUGGIFY ? Never() : tr.get(versionEpochKey), 5.0));
+				message["enabled"] = versionEpochVal.present();
+				if (!versionEpochVal.present()) {
+					break;
+				}
+				int64_t versionEpoch = BinaryReader::fromStringRef<int64_t>(versionEpochVal.get(), Unversioned());
+				message["epoch"] = std::to_string(versionEpoch);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		incomplete_reasons->insert(format("Unable to retrieve version epoch information (%s).", e.what()));
+	}
+	return message;
 }
 
 ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx,
@@ -2457,35 +2474,17 @@ ACTOR static Future<JsonBuilderObject> blobWorkerStatusFetcher(
 ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std::set<std::string>* incompleteReason) {
 
 	state JsonBuilderObject statusObj;
-	state std::vector<Future<Optional<TraceEventFields>>> futures;
 
 	try {
-		Optional<BlobRestoreStatus> status = wait(getRestoreStatus(db, normalKeys));
-		if (status.present()) {
-			switch (status.get().phase) {
-			case BlobRestorePhase::INIT:
-				statusObj["blob_full_restore_phase"] = "Initializing";
-				break;
-			case BlobRestorePhase::LOAD_MANIFEST:
-				statusObj["blob_full_restore_phase"] = "Loading manifest";
-				break;
-			case BlobRestorePhase::MANIFEST_DONE:
-				statusObj["blob_full_restore_phase"] = "Manifest loaded";
-				break;
-			case BlobRestorePhase::MIGRATE:
-				statusObj["blob_full_restore_phase"] = "Copying data";
-				statusObj["blob_full_restore_progress"] = status.get().progress;
-				break;
-			case BlobRestorePhase::APPLY_MLOGS:
-				statusObj["blob_full_restore_phase"] = "Applying mutation logs";
-				statusObj["blob_full_restore_progress"] = status.get().progress;
-				break;
-			case BlobRestorePhase::DONE:
-				statusObj["blob_full_restore_phase"] = "Completed";
-				break;
-			default:
-				statusObj["blob_full_restore_phase"] = "Unexpected phase";
-			}
+		Reference<BlobRestoreController> restoreController = makeReference<BlobRestoreController>(db, normalKeys);
+		Optional<BlobRestoreState> restoreState = wait(BlobRestoreController::getState(restoreController));
+		if (restoreState.present()) {
+			statusObj["blob_full_restore_phase"] = restoreState.get().phase;
+			statusObj["blob_full_restore_phase_progress"] = restoreState.get().progress;
+			statusObj["blob_full_restore_phase_start_ts"] = restoreState.get().phaseStartTs[restoreState.get().phase];
+			statusObj["blob_full_restore_start_ts"] = restoreState.get().phaseStartTs[STARTING_MIGRATOR];
+			Optional<StringRef> error = restoreState.get().error;
+			statusObj["blob_full_restore_error"] = error.present() ? error.get() : ""_sr;
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
@@ -2914,13 +2913,16 @@ ACTOR Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMet
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state Optional<StorageWiggleMetrics> primaryV;
 	state Optional<StorageWiggleMetrics> remoteV;
+	state StorageWiggleData wiggleState;
 	loop {
 		try {
 			if (use_system_priority) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			}
-			wait(store(primaryV, loadStorageWiggleMetrics(tr, PrimaryRegion(true))) &&
-			     store(remoteV, loadStorageWiggleMetrics(tr, PrimaryRegion(false))));
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			wait(store(primaryV, wiggleState.storageWiggleMetrics(PrimaryRegion(true)).get(tr)) &&
+			     store(remoteV, wiggleState.storageWiggleMetrics(PrimaryRegion(false)).get(tr)));
 			return std::make_pair(primaryV, remoteV);
 		} catch (Error& e) {
 			wait(tr->onError(e));
@@ -3121,8 +3123,20 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		// construct status information for cluster subsections
 		state int statusCode = (int)RecoveryStatus::END;
-		state JsonBuilderObject recoveryStateStatus = wait(
-		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
+		state Future<JsonBuilderObject> recoveryStateStatusFuture =
+		    recoveryStateStatusFetcher(cx, ccWorker, mWorker, workers.size(), &status_incomplete_reasons, &statusCode);
+
+		state Future<JsonBuilderObject> idmpKeyStatusFuture = getIdmpKeyStatus(cx);
+
+		state Future<JsonBuilderObject> versionEpochStatusFuture =
+		    versionEpochStatusFetcher(cx, &status_incomplete_reasons);
+
+		wait(waitForAll<JsonBuilderObject>(
+		    { recoveryStateStatusFuture, idmpKeyStatusFuture, versionEpochStatusFuture }));
+
+		state JsonBuilderObject recoveryStateStatus = recoveryStateStatusFuture.get();
+		state JsonBuilderObject idmpKeyStatus = idmpKeyStatusFuture.get();
+		state JsonBuilderObject versionEpochStatus = versionEpochStatusFuture.get();
 
 		// machine metrics
 		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
@@ -3356,6 +3370,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (!tenants.empty())
 				statusObj["tenants"] = tenants;
 
+			statusObj["version_epoch"] = versionEpochStatus;
+
 			// Merge dataOverlay into data
 			JsonBuilderObject& clusterDataSection = workerStatuses[0];
 
@@ -3504,6 +3520,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		if (!recoveryStateStatus.empty())
 			statusObj["recovery_state"] = recoveryStateStatus;
+
+		statusObj["idempotency_ids"] = idmpKeyStatus;
 
 		// cluster messages subsection;
 		JsonBuilderArray clientIssuesArr = getClientIssuesAsMessages(clientStatus);

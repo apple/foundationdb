@@ -21,7 +21,6 @@
 #ifndef FDBRPC_RESTCLIENT_H
 #define FDBRPC_RESTCLIENT_H
 
-#include <memory>
 #pragma once
 
 #include "fdbclient/JSONDoc.h"
@@ -31,6 +30,8 @@
 #include "flow/FastRef.h"
 #include "flow/flow.h"
 #include "flow/Net2Packet.h"
+
+#include <memory>
 
 // This interface enables sending REST HTTP requests and receiving REST HTTP responses from a resource identified by a
 // URI.
@@ -86,11 +87,11 @@ public:
 private:
 	Future<Reference<HTTP::Response>> doGetHeadDeleteOrTrace(const std::string& verb,
 	                                                         Optional<HTTP::Headers> optHeaders,
-	                                                         RESTUrl* url,
+	                                                         RESTUrl& url,
 	                                                         std::set<unsigned int> successCodes);
 	Future<Reference<HTTP::Response>> doPutOrPost(const std::string& verb,
 	                                              Optional<HTTP::Headers> headers,
-	                                              RESTUrl* url,
+	                                              RESTUrl& url,
 	                                              std::set<unsigned int> successCodes);
 };
 

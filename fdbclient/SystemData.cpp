@@ -21,7 +21,6 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/Arena.h"
 #include "flow/TDMetric.actor.h"
@@ -30,6 +29,7 @@
 
 FDB_DEFINE_BOOLEAN_PARAM(AssignEmptyRange);
 FDB_DEFINE_BOOLEAN_PARAM(UnassignShard);
+FDB_DEFINE_BOOLEAN_PARAM(EnablePhysicalShardMove);
 
 const KeyRef systemKeysPrefix = "\xff"_sr;
 const KeyRangeRef normalKeys(KeyRef(), systemKeysPrefix);
@@ -48,8 +48,9 @@ const KeyRangeRef keyServersKeyServersKeys("\xff/keyServers/\xff/keyServers/"_sr
 const KeyRef keyServersKeyServersKey = keyServersKeyServersKeys.begin;
 
 // These constants are selected to be easily recognized during debugging.
+// Note that the last bit of the follwing constants is 0, indicating that physical shard move is disabled.
 const UID anonymousShardId = UID(0x666666, 0x88888888);
-const uint64_t emptyShardId = 0x7777777;
+const uint64_t emptyShardId = 0x2222222;
 
 const Key keyServersKey(const KeyRef& k) {
 	return k.withPrefix(keyServersPrefix);
@@ -273,6 +274,10 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
 	std::sort(dest.begin(), dest.end());
 }
 
+bool isSystemKey(KeyRef key) {
+	return key.size() && key[0] == systemKeys.begin[0];
+}
+
 const KeyRangeRef conflictingKeysRange =
     KeyRangeRef("\xff\xff/transaction/conflicting_keys/"_sr, "\xff\xff/transaction/conflicting_keys/\xff\xff"_sr);
 const ValueRef conflictingKeysTrue = "1"_sr;
@@ -284,25 +289,40 @@ const KeyRangeRef readConflictRangeKeysRange =
 const KeyRangeRef writeConflictRangeKeysRange = KeyRangeRef("\xff\xff/transaction/write_conflict_range/"_sr,
                                                             "\xff\xff/transaction/write_conflict_range/\xff\xff"_sr);
 
-const KeyRangeRef auditRange = KeyRangeRef("\xff/audit/"_sr, "\xff/audit0"_sr);
-const KeyRef auditPrefix = auditRange.begin;
+const KeyRangeRef auditKeys = KeyRangeRef("\xff/audits/"_sr, "\xff/audits0"_sr);
+const KeyRef auditPrefix = auditKeys.begin;
+const KeyRangeRef auditRanges = KeyRangeRef("\xff/auditRanges/"_sr, "\xff/auditRanges0"_sr);
+const KeyRef auditRangePrefix = auditRanges.begin;
 
-const Key auditRangeKey(const AuditType type, const UID& auditId, const KeyRef& key) {
+const Key auditKey(const AuditType type, const UID& auditId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(auditPrefix);
 	wr << static_cast<uint8_t>(type);
 	wr.serializeBytes("/"_sr);
+	wr << bigEndian64(auditId.first());
+	return wr.toValue();
+}
+
+const KeyRange auditKeyRange(const AuditType type) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(auditPrefix);
+	wr << static_cast<uint8_t>(type);
+	wr.serializeBytes("/"_sr);
+	return prefixRange(wr.toValue());
+}
+
+const Key auditRangeKey(const UID& auditId, const KeyRef& key) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(auditRangePrefix);
 	wr << auditId;
 	wr.serializeBytes("/"_sr);
 	wr.serializeBytes(key);
 	return wr.toValue();
 }
 
-const Key auditRangePrefix(const AuditType type, const UID& auditId) {
+const Key auditRangePrefixFor(const UID& auditId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(auditPrefix);
-	wr << static_cast<uint8_t>(type);
-	wr.serializeBytes("/"_sr);
 	wr << auditId;
 	wr.serializeBytes("/"_sr);
 	return wr.toValue();
@@ -439,7 +459,10 @@ const ValueRef serverKeysTrue = "1"_sr, // compatible with what was serverKeysTr
     serverKeysTrueEmptyRange = "3"_sr, // the server treats the range as empty.
     serverKeysFalse;
 
-const UID newShardId(const uint64_t physicalShardId, AssignEmptyRange assignEmptyRange, UnassignShard unassignShard) {
+const UID newDataMoveId(const uint64_t physicalShardId,
+                        AssignEmptyRange assignEmptyRange,
+                        EnablePhysicalShardMove enablePSM,
+                        UnassignShard unassignShard) {
 	uint64_t split = 0;
 	if (assignEmptyRange) {
 		split = emptyShardId;
@@ -448,6 +471,11 @@ const UID newShardId(const uint64_t physicalShardId, AssignEmptyRange assignEmpt
 	} else {
 		do {
 			split = deterministicRandom()->randomUInt64();
+			if (enablePSM) {
+				split |= 1U;
+			} else {
+				split &= ~1U;
+			}
 		} while (split == anonymousShardId.second() || split == 0 || split == emptyShardId);
 	}
 	return UID(physicalShardId, split);
@@ -487,9 +515,10 @@ std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key) {
 }
 
 bool serverHasKey(ValueRef storedValue) {
-	UID teamId;
+	UID shardId;
 	bool assigned, emptyRange;
-	decodeServerKeysValue(storedValue, assigned, emptyRange, teamId);
+	EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
+	decodeServerKeysValue(storedValue, assigned, emptyRange, enablePSM, shardId);
 	return assigned;
 }
 
@@ -503,7 +532,12 @@ const Value serverKeysValue(const UID& id) {
 	return wr.toValue();
 }
 
-void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRange, UID& id) {
+void decodeServerKeysValue(const ValueRef& value,
+                           bool& assigned,
+                           bool& emptyRange,
+                           EnablePhysicalShardMove& enablePSM,
+                           UID& id) {
+	enablePSM = EnablePhysicalShardMove::False;
 	if (value.size() == 0) {
 		assigned = false;
 		emptyRange = false;
@@ -526,6 +560,9 @@ void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRan
 		rd >> id;
 		assigned = id.second() != 0;
 		emptyRange = id.second() == emptyShardId;
+		if (id.second() & 1U) {
+			enablePSM = EnablePhysicalShardMove::True;
+		}
 	}
 }
 
@@ -868,8 +905,11 @@ const KeyRef configKeysPrefix = configKeys.begin;
 
 const KeyRef perpetualStorageWiggleKey("\xff/conf/perpetual_storage_wiggle"_sr);
 const KeyRef perpetualStorageWiggleLocalityKey("\xff/conf/perpetual_storage_wiggle_locality"_sr);
-const KeyRef perpetualStorageWiggleIDPrefix("\xff/storageWiggleID/"_sr); // withSuffix /primary or /remote
+// The below two are there for compatible upgrade and downgrade. After 7.3, the perpetual wiggle related keys should use
+// format "\xff/storageWiggle/[primary | remote]/[fieldName]". See class StorageWiggleData for the data schema.
+const KeyRef perpetualStorageWiggleIDPrefix("\xff/storageWiggleID/"_sr); // withSuffix /primary/ or /remote/
 const KeyRef perpetualStorageWiggleStatsPrefix("\xff/storageWiggleStats/"_sr); // withSuffix /primary or /remote
+const KeyRef perpetualStorageWigglePrefix("\xff/storageWiggle/"_sr);
 
 const KeyRef triggerDDTeamInfoPrintKey("\xff/triggerDDTeamInfoPrint"_sr);
 
@@ -1021,6 +1061,10 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 	return ids;
 }
 
+bool mutationForKey(const MutationRef& m, const KeyRef& key) {
+	return isSingleKeyMutation((MutationRef::Type)m.type) && m.param1 == key;
+}
+
 const KeyRef previousCoordinatorsKey = "\xff/previousCoordinators"_sr;
 const KeyRef coordinatorsKey = "\xff/coordinators"_sr;
 const KeyRef logsKey = "\xff/logs"_sr;
@@ -1082,6 +1126,10 @@ const KeyRef clusterIdKey = "\xff/clusterIdKey"_sr;
 const KeyRef backupEnabledKey = "\xff/backupEnabled"_sr;
 const KeyRangeRef backupLogKeys("\xff\x02/blog/"_sr, "\xff\x02/blog0"_sr);
 const KeyRangeRef applyLogKeys("\xff\x02/alog/"_sr, "\xff\x02/alog0"_sr);
+bool isBackupLogMutation(const MutationRef& m) {
+	return isSingleKeyMutation((MutationRef::Type)m.type) &&
+	       (backupLogKeys.contains(m.param1) || applyLogKeys.contains(m.param1));
+}
 // static_assert( backupLogKeys.begin.size() == backupLogPrefixBytes, "backupLogPrefixBytes incorrect" );
 const KeyRef backupVersionKey = "\xff/backupDataFormat"_sr;
 const ValueRef backupVersionValue = "4"_sr;
@@ -1395,22 +1443,30 @@ const Value blobGranuleFileValueFor(StringRef const& filename,
                                     int64_t offset,
                                     int64_t length,
                                     int64_t fullFileLength,
+                                    int64_t logicalSize,
                                     Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
+	auto protocolVersion = CLIENT_KNOBS->ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE
+	                           ? ProtocolVersion::withBlobGranuleFileLogicalSize()
+	                           : ProtocolVersion::withBlobGranule();
+	BinaryWriter wr(IncludeVersion(protocolVersion));
 	wr << filename;
 	wr << offset;
 	wr << length;
 	wr << fullFileLength;
 	wr << cipherKeysMeta;
+	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE) {
+		wr << logicalSize;
+	}
 	return wr.toValue();
 }
 
-std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t, Optional<BlobGranuleCipherKeysMeta>>
+std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t, int64_t, Optional<BlobGranuleCipherKeysMeta>>
 decodeBlobGranuleFileValue(ValueRef const& value) {
 	StringRef filename;
 	int64_t offset;
 	int64_t length;
 	int64_t fullFileLength;
+	int64_t logicalSize;
 	Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 
 	BinaryReader reader(value, IncludeVersion());
@@ -1419,7 +1475,13 @@ decodeBlobGranuleFileValue(ValueRef const& value) {
 	reader >> length;
 	reader >> fullFileLength;
 	reader >> cipherKeysMeta;
-	return std::tuple(filename, offset, length, fullFileLength, cipherKeysMeta);
+	if (reader.protocolVersion().hasBlobGranuleFileLogicalSize()) {
+		reader >> logicalSize;
+	} else {
+		// fall back to estimating logical size as physical size
+		logicalSize = length;
+	}
+	return std::tuple(filename, offset, length, fullFileLength, logicalSize, cipherKeysMeta);
 }
 
 const Value blobGranulePurgeValueFor(Version version, KeyRange range, bool force) {
@@ -1661,6 +1723,34 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 	return interf;
 }
 
+const KeyRangeRef blobWorkerAffinityKeys("\xff\x02/bwa/"_sr, "\xff\x02/bwa0"_sr);
+
+const Key blobWorkerAffinityKeyFor(UID workerID) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobWorkerAffinityKeys.begin);
+	wr << workerID;
+	return wr.toValue();
+}
+
+UID decodeBlobWorkerAffinityKey(KeyRef const& key) {
+	UID workerID;
+	BinaryReader reader(key.removePrefix(blobWorkerAffinityKeys.begin),
+	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
+	reader >> workerID;
+	return workerID;
+}
+
+const Value blobWorkerAffinityValue(UID const& id) {
+	return ObjectWriter::toValue(id, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
+}
+
+UID decodeBlobWorkerAffinityValue(ValueRef const& value) {
+	UID id;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(id);
+	return id;
+}
+
 const KeyRangeRef blobRestoreCommandKeys("\xff\x02/blobRestoreCommand/"_sr, "\xff\x02/blobRestoreCommand0"_sr);
 
 const Value blobRestoreCommandKeyFor(const KeyRangeRef range) {
@@ -1678,25 +1768,50 @@ const KeyRange decodeBlobRestoreCommandKeyFor(const KeyRef key) {
 	return range;
 }
 
-const Value blobRestoreCommandValueFor(BlobRestoreStatus status) {
+const Value blobRestoreCommandValueFor(BlobRestoreState restoreState) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
-	wr << status;
+	wr << restoreState;
 	return wr.toValue();
 }
 
-Standalone<BlobRestoreStatus> decodeBlobRestoreStatus(ValueRef const& value) {
-	Standalone<BlobRestoreStatus> status;
+Standalone<BlobRestoreState> decodeBlobRestoreState(ValueRef const& value) {
+	Standalone<BlobRestoreState> restoreState;
 	BinaryReader reader(value, IncludeVersion());
-	reader >> status;
-	return status;
+	reader >> restoreState;
+	return restoreState;
 }
 
-const KeyRangeRef storageQuotaKeys("\xff/storageQuota/"_sr, "\xff/storageQuota0"_sr);
-const KeyRef storageQuotaPrefix = storageQuotaKeys.begin;
+const KeyRangeRef blobRestoreArgKeys("\xff\x02/blobRestoreArgs/"_sr, "\xff\x02/blobRestoreArgs0"_sr);
 
-Key storageQuotaKey(StringRef tenantGroupName) {
-	return tenantGroupName.withPrefix(storageQuotaPrefix);
+const Value blobRestoreArgKeyFor(const KeyRangeRef range) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobRestoreArgKeys.begin);
+	wr << range;
+	return wr.toValue();
 }
+
+const KeyRange decodeBlobRestoreArgKeyFor(const KeyRef key) {
+	KeyRange range;
+	BinaryReader reader(key.removePrefix(blobRestoreArgKeys.begin), AssumeVersion(ProtocolVersion::withBlobGranule()));
+	reader >> range;
+	return range;
+}
+
+const Value blobRestoreArgValueFor(BlobRestoreArg args) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
+	wr << args;
+	return wr.toValue();
+}
+
+Standalone<BlobRestoreArg> decodeBlobRestoreArg(ValueRef const& value) {
+	Standalone<BlobRestoreArg> args;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> args;
+	return args;
+}
+
+const Key blobManifestVersionKey = "\xff\x02/blobManifestVersion"_sr;
+const Key blobGranulesLastFlushKey = "\xff\x02/blobGranulesLastFlushTs"_sr;
 
 const KeyRangeRef idempotencyIdKeys("\xff\x02/idmp/"_sr, "\xff\x02/idmp0"_sr);
 const KeyRef idempotencyIdsExpiredVersion("\xff\x02/idmpExpiredVersion"_sr);
