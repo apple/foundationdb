@@ -803,7 +803,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_SHARD_COMPARE_LIMIT,                               1000 );
 	init( READ_SAMPLING_ENABLED,                                true ); if ( randomize && BUGGIFY ) READ_SAMPLING_ENABLED = false;// enable/disable read sampling
 	init( DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL,                   120);
-    init( DD_TRACE_MOVE_BYTES_SAMPLE_SIZE,                   10000000); // 10MB
+	init( MOVING_WINDOW_SAMPLE_SIZE,                   		 10000000); // 10MB
 
 	//Storage Server
 	init( STORAGE_LOGGING_DELAY,                                 5.0 );

@@ -776,8 +776,7 @@ struct DDQueue : public IDDRelocationQueue {
 	    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
 	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")), moveReusePhysicalShard(0),
 	    moveCreateNewPhysicalShard(0), retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0),
-	    moveBytesRate(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL,
-	                  SERVER_KNOBS->DD_TRACE_MOVE_BYTES_SAMPLE_SIZE) {}
+	    moveBytesRate(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL) {}
 	DDQueue() = default;
 
 	void validate() {
