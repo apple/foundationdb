@@ -29,7 +29,7 @@ import json
 import fdb
 
 if __name__ == "__main__":
-    fdb.api_version(720)
+    fdb.api_version(fdb.LATEST_API_VERSION)
 
 from cancellation_timeout_tests import test_timeouts
 from cancellation_timeout_tests import test_db_timeouts

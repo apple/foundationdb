@@ -29,8 +29,6 @@ import "C"
 import (
 	"errors"
 	"runtime"
-
-	"golang.org/x/xerrors"
 )
 
 // Database is a handle to a FoundationDB database. Database is a lightweight
@@ -143,7 +141,7 @@ func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNi
 		// Check if the error chain contains an
 		// fdb.Error
 		var ep Error
-		if xerrors.As(e, &ep) {
+		if errors.As(e, &ep) {
 			e = onError(ep).Get()
 		}
 
@@ -167,8 +165,7 @@ func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNi
 // error.
 //
 // The transaction is retried if the error is or wraps a retryable Error.
-// The error is unwrapped with the xerrors.Wrapper. See https://godoc.org/golang.org/x/xerrors#Wrapper
-// for details.
+// The error is unwrapped.
 //
 // Do not return Future objects from the function provided to Transact. The
 // Transaction created by Transact may be finalized at any point after Transact
@@ -211,8 +208,7 @@ func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{
 // transaction or return the error.
 //
 // The transaction is retried if the error is or wraps a retryable Error.
-// The error is unwrapped with the xerrors.Wrapper. See https://godoc.org/golang.org/x/xerrors#Wrapper
-// for details.
+// The error is unwrapped.
 //
 // Do not return Future objects from the function provided to ReadTransact. The
 // Transaction created by ReadTransact may be finalized at any point after

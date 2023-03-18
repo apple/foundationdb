@@ -296,7 +296,7 @@ ACTOR Future<Void> readHotDetector(DataDistributionTracker* self) {
 			for (const auto& keyRange : readHotRanges) {
 				TraceEvent("ReadHotRangeLog")
 				    .detail("ReadDensity", keyRange.density)
-				    .detail("ReadBandwidth", keyRange.readBandwidth)
+				    .detail("ReadBandwidth", keyRange.readBandwidthSec)
 				    .detail("ReadDensityThreshold", SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO)
 				    .detail("KeyRangeBegin", keyRange.keys.begin)
 				    .detail("KeyRangeEnd", keyRange.keys.end);
@@ -807,7 +807,7 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 	splitMetrics.bytesWrittenPerKSecond =
 	    keys.begin >= keyServersKeys.begin ? splitMetrics.infinity : SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
 	splitMetrics.iosPerKSecond = splitMetrics.infinity;
-	splitMetrics.bytesReadPerKSecond = splitMetrics.infinity; // Don't split by readBandwidth
+	splitMetrics.bytesReadPerKSecond = splitMetrics.infinity; // Don't split by readBandwidthSec
 
 	state Standalone<VectorRef<KeyRef>> splitKeys =
 	    wait(self->db->splitStorageMetrics(keys, splitMetrics, metrics, SERVER_KNOBS->MIN_SHARD_BYTES));
@@ -851,11 +851,11 @@ ACTOR Future<Void> brokenPromiseToReady(Future<Void> f) {
 }
 
 static bool shardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef adjRange) {
-	bool honorTenantKeyspaceBoundaries = self->ddTenantCache.present();
-
-	if (!honorTenantKeyspaceBoundaries) {
+	if (!SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED) {
 		return true;
 	}
+
+	ASSERT(self->ddTenantCache.present());
 
 	Optional<Reference<TCTenantInfo>> tenantOwningRange = {};
 	Optional<Reference<TCTenantInfo>> tenantOwningAdjRange = {};
@@ -1405,7 +1405,8 @@ struct DataDistributionTrackerImpl {
 			initData.clear(); // Release reference count.
 
 			state PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
-			if (self->ddTenantCache.present()) {
+			if (SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED) {
+				ASSERT(self->ddTenantCache.present());
 				tenantCreationSignal = self->ddTenantCache.get()->tenantCreationSignal;
 			}
 

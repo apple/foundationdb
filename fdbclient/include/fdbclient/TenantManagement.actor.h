@@ -127,7 +127,7 @@ TenantMode tenantModeForClusterType(ClusterType clusterType, TenantMode tenantMo
 int64_t extractTenantIdFromMutation(MutationRef m);
 int64_t extractTenantIdFromKeyRef(StringRef s);
 bool tenantMapChanging(MutationRef const& mutation, KeyRangeRef const& tenantMapRange);
-bool nextTenantIdPrefixMatches(int64_t lastTenantId, int64_t nextTenantId);
+int64_t computeNextTenantId(int64_t tenantId, int64_t delta);
 int64_t getMaxAllowableTenantId(int64_t curTenantId);
 int64_t getTenantIdPrefix(int64_t tenantId);
 
@@ -230,14 +230,13 @@ Future<int64_t> getNextTenantId(Transaction tr) {
 		// Shift by 6 bytes to make the prefix the first two bytes of the tenant id
 		lastId = tenantIdPrefix << 48;
 	}
-	int64_t tenantId = lastId.get() + 1;
+
+	int64_t delta = 1;
 	if (BUGGIFY) {
-		tenantId += deterministicRandom()->randomSkewedUInt32(1, 1e9);
+		delta += deterministicRandom()->randomSkewedUInt32(1, 1e9);
 	}
-	if (!TenantAPI::nextTenantIdPrefixMatches(lastId.get(), tenantId)) {
-		throw cluster_no_capacity();
-	}
-	return tenantId;
+
+	return TenantAPI::computeNextTenantId(lastId.get(), delta);
 }
 
 ACTOR template <class DB>
@@ -372,7 +371,6 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 
 		// This is idempotent because we only erase an entry from the tenant map if it is present
 		TenantMetadata::tenantMap().erase(tr, tenantId);
-		TenantMetadata::tenantLockId().erase(tr, tenantId);
 		TenantMetadata::tenantNameIndex().erase(tr, tenantEntry.get().tenantName);
 		TenantMetadata::tenantCount().atomicOp(tr, -1, MutationRef::AddValue);
 		TenantMetadata::lastTenantModification().setVersionstamp(tr, Versionstamp(), 0);
@@ -488,35 +486,39 @@ Future<Void> configureTenantTransaction(Transaction tr,
 		}
 	}
 
+	ASSERT_EQ(updatedTenantEntry.tenantLockId.present(),
+	          updatedTenantEntry.tenantLockState != TenantLockState::UNLOCKED);
+
 	return Void();
 }
 
+template <class TenantMapEntryT>
+bool checkLockState(TenantMapEntryT entry, TenantLockState desiredLockState, UID lockId) {
+	if (entry.tenantLockId == lockId && entry.tenantLockState == desiredLockState) {
+		return true;
+	}
+
+	if (entry.tenantLockId.present() && entry.tenantLockId.get() != lockId) {
+		throw tenant_locked();
+	}
+
+	return false;
+}
+
 ACTOR template <class Transaction>
-Future<Void> changeLockState(Transaction* tr, int64_t tenant, TenantLockState desiredLockState, UID lockID) {
-	state TenantMapEntry entry;
-	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-	wait(store(entry, TenantAPI::getTenantTransaction(tr, tenant)));
-	Optional<UID> currLockID = wait(TenantMetadata::tenantLockId().get(tr, tenant));
-	if (currLockID.present()) {
-		if (currLockID.get() != lockID) {
-			throw tenant_locked();
-		} else if (desiredLockState != TenantLockState::UNLOCKED) {
-			// already executed -- this can happen if we're in a retry loop
-			return Void();
-		}
-		// otherwise we can now continue with unlock
+Future<Void> changeLockState(Transaction tr, int64_t tenant, TenantLockState desiredLockState, UID lockId) {
+	state Future<Void> tenantModeCheck = TenantAPI::checkTenantMode(tr, ClusterType::STANDALONE);
+	state TenantMapEntry entry = wait(TenantAPI::getTenantTransaction(tr, tenant));
+
+	wait(tenantModeCheck);
+
+	if (!checkLockState(entry, desiredLockState, lockId)) {
+		TenantMapEntry newState = entry;
+		newState.tenantLockState = desiredLockState;
+		newState.tenantLockId = (desiredLockState == TenantLockState::UNLOCKED) ? Optional<UID>() : lockId;
+		wait(configureTenantTransaction(tr, entry, newState));
 	}
-	TenantMapEntry newState = entry;
-	newState.tenantLockState = desiredLockState;
-	wait(configureTenantTransaction(tr, entry, newState));
-	if (desiredLockState == TenantLockState::UNLOCKED) {
-		TenantMetadata::tenantLockId().erase(tr, tenant);
-	} else {
-		TenantMetadata::tenantLockId().set(tr, tenant, lockID);
-	}
+
 	return Void();
 }
 

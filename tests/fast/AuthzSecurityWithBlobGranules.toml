@@ -21,6 +21,7 @@ clearAfterTest = false
     [[test.workload]]
     testName = 'CreateTenant'
     name = 'AnotherAuthzSecurityTenant'
+    blobbify = true
 
 [[test]]
 testTitle = 'AuthzSecurityCheck'
@@ -30,12 +31,12 @@ clearAfterTest = false
     testName = 'LeakTLogInterface'
     tenant = 'AuthzSecurityTenant'
     key = 'TLogInterface'
-    testDuration = 10.0
+    testDuration = 20.0
 
     [[test.workload]]
     testName = 'AuthzSecurity'
     tenantA = 'AuthzSecurityTenant'
     tenantB = 'AnotherAuthzSecurityTenant'
     tLogConfigKey = 'TLogInterface'
-    testDuration = 10.0
+    testDuration = 20.0
     checkBlobGranules = true

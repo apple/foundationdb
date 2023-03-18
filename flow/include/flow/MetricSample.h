@@ -127,14 +127,14 @@ struct TransientThresholdMetricSample : MetricSample<T> {
 			int64_t delta = std::get<2>(queue.front());
 			ASSERT(delta != 0);
 
-			int64_t val = this->sample.addMetric(T(key), delta);
+			auto [val, it] = this->sample.addMetric(T(key), delta);
 			if (val < thresholdLimit && (val + std::abs(delta)) >= thresholdLimit) {
 				auto iter = thresholdCrossedSet.find(key);
 				ASSERT(iter != thresholdCrossedSet.end());
 				thresholdCrossedSet.erase(iter);
 			}
 			if (val == 0)
-				this->sample.erase(key);
+				this->sample.erase(it);
 
 			queue.pop_front();
 		}
@@ -159,7 +159,7 @@ private:
 			metric = metric < 0 ? -this->metricUnitsPerSample : this->metricUnitsPerSample;
 		}
 
-		int64_t val = this->sample.addMetric(T(key), metric);
+		auto [val, it] = this->sample.addMetric(T(key), metric);
 		if (val >= thresholdLimit) {
 			ASSERT((val - metric) < thresholdLimit ? thresholdCrossedSet.find(key) == thresholdCrossedSet.end()
 			                                       : thresholdCrossedSet.find(key) != thresholdCrossedSet.end());
@@ -167,7 +167,7 @@ private:
 		}
 
 		if (val == 0)
-			this->sample.erase(key);
+			this->sample.erase(it);
 
 		return metric;
 	}

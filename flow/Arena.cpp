@@ -1000,7 +1000,7 @@ TEST_CASE("/flow/Arena/OptionalMap") {
 }
 
 TEST_CASE("/flow/Arena/Secure") {
-#ifndef USE_SANITIZER
+#if !defined(USE_SANITIZER) && !defined(VALGRIND)
 	// Note: Assumptions underlying this unit test are speculative.
 	//       Disable for a build configuration or entirely if deemed flaky.
 	//       As of writing, below equivalency of (buf == newBuf) holds except for ASAN builds.
@@ -1030,7 +1030,7 @@ TEST_CASE("/flow/Arena/Secure") {
 				} else {
 					newBuf = new (arena) uint8_t[len];
 				}
-				ASSERT_EQ(newBuf, buf);
+				ASSERT(newBuf == buf);
 				// there's no hard guarantee about the above equality and the result could vary by platform,
 				// malloc implementation, and tooling instrumentation (e.g. ASAN, valgrind)
 				// but it is practically likely because of
@@ -1053,6 +1053,6 @@ TEST_CASE("/flow/Arena/Secure") {
 		}
 	}
 	fmt::print("Total iterations: {}, # of times check passed: {}\n", totalIters, samePtrCount);
-#endif // USE_SANITIZER
+#endif // !defined(USE_SANITIZER) && !defind(VALGRIND)
 	return Void();
 }

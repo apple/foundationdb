@@ -23,7 +23,7 @@
 #pragma once
 
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 730
+#define FDB_USE_LATEST_API_VERSION
 #endif
 
 #include <cassert>
@@ -45,8 +45,6 @@ namespace fdb {
 namespace native {
 #include <foundationdb/fdb_c.h>
 }
-
-#define TENANT_API_VERSION_GUARD 720
 
 using ByteString = std::basic_string<uint8_t>;
 using BytesRef = std::basic_string_view<uint8_t>;
@@ -162,6 +160,17 @@ template <template <class...> class StringLike, class Char>
 CharsRef toCharsRef(const StringLike<Char>& s) noexcept {
 	static_assert(sizeof(Char) == 1);
 	return CharsRef(reinterpret_cast<char const*>(s.data()), s.size());
+}
+
+// get charstring view from optional bytestring: e.g. std::optional<std::basic_string{_view}<uint8_t>>
+template <template <class...> class StringLike, class Char>
+CharsRef toCharsRef(const std::optional<StringLike<Char>>& s) noexcept {
+	static_assert(sizeof(Char) == 1);
+	if (s) {
+		return CharsRef(reinterpret_cast<char const*>(s.value().data()), s.value().size());
+	} else {
+		return CharsRef("[not set]");
+	}
 }
 
 [[maybe_unused]] constexpr const bool OverflowCheck = false;
@@ -1088,7 +1097,7 @@ public:
 };
 
 inline Error selectApiVersionNothrow(int version) {
-	if (version < TENANT_API_VERSION_GUARD) {
+	if (version < FDB_API_VERSION_TENANT_API_RELEASED) {
 		Tenant::tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
 	}
 	return Error(native::fdb_select_api_version(version));
@@ -1101,7 +1110,7 @@ inline void selectApiVersion(int version) {
 }
 
 inline Error selectApiVersionCappedNothrow(int version) {
-	if (version < TENANT_API_VERSION_GUARD) {
+	if (version < FDB_API_VERSION_TENANT_API_RELEASED) {
 		Tenant::tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
 	}
 	return Error(

@@ -240,20 +240,6 @@ protected:
 	int64_t counter;
 };
 
-static JsonBuilderObject getLocalityInfo(const LocalityData& locality) {
-	JsonBuilderObject localityObj;
-
-	for (auto it = locality._data.begin(); it != locality._data.end(); it++) {
-		if (it->second.present()) {
-			localityObj[it->first] = it->second.get();
-		} else {
-			localityObj[it->first] = JsonBuilder();
-		}
-	}
-
-	return localityObj;
-}
-
 static JsonBuilderObject getError(const TraceEventFields& errorFields) {
 	JsonBuilderObject statusObj;
 	try {
@@ -352,7 +338,7 @@ JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 				}
 
 				if (locality.count(it->first)) {
-					statusObj["locality"] = getLocalityInfo(locality[it->first]);
+					statusObj["locality"] = locality[it->first].toJSON<JsonBuilderObject>();
 				}
 
 				statusObj["address"] = address;
@@ -949,7 +935,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				std::string MachineID = processMetrics.getValue("MachineID");
 				statusObj["machine_id"] = MachineID;
 
-				statusObj["locality"] = getLocalityInfo(workerItr->interf.locality);
+				statusObj["locality"] = workerItr->interf.locality.toJSON<JsonBuilderObject>();
 
 				statusObj.setKeyRawNumber("uptime_seconds", processMetrics.getValue("UptimeSeconds"));
 
@@ -2488,41 +2474,17 @@ ACTOR static Future<JsonBuilderObject> blobWorkerStatusFetcher(
 ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std::set<std::string>* incompleteReason) {
 
 	state JsonBuilderObject statusObj;
-	state std::vector<Future<Optional<TraceEventFields>>> futures;
 
 	try {
-		Optional<BlobRestoreStatus> status = wait(getRestoreStatus(db, normalKeys));
-		if (status.present()) {
-			switch (status.get().phase) {
-			case BlobRestorePhase::INIT:
-				statusObj["blob_full_restore_phase"] = "Initializing";
-				break;
-			case BlobRestorePhase::STARTING_MIGRATOR:
-				statusObj["blob_full_restore_phase"] = "Starting migrator";
-				break;
-			case BlobRestorePhase::LOADING_MANIFEST:
-				statusObj["blob_full_restore_phase"] = "Loading manifest";
-				break;
-			case BlobRestorePhase::LOADED_MANIFEST:
-				statusObj["blob_full_restore_phase"] = "Manifest is loaded";
-				break;
-			case BlobRestorePhase::COPYING_DATA:
-				statusObj["blob_full_restore_phase"] = "Copying data";
-				statusObj["blob_full_restore_progress"] = status.get().status;
-				break;
-			case BlobRestorePhase::APPLYING_MLOGS:
-				statusObj["blob_full_restore_phase"] = "Applying mutation logs";
-				break;
-			case BlobRestorePhase::DONE:
-				statusObj["blob_full_restore_phase"] = "Completed successfully";
-				break;
-			case BlobRestorePhase::ERROR:
-				statusObj["blob_full_restore_phase"] =
-				    "Completed with fatal error: " + std::string(Error(status.get().status).what());
-				break;
-			default:
-				statusObj["blob_full_restore_phase"] = "Unexpected phase";
-			}
+		Reference<BlobRestoreController> restoreController = makeReference<BlobRestoreController>(db, normalKeys);
+		Optional<BlobRestoreState> restoreState = wait(BlobRestoreController::getState(restoreController));
+		if (restoreState.present()) {
+			statusObj["blob_full_restore_phase"] = restoreState.get().phase;
+			statusObj["blob_full_restore_phase_progress"] = restoreState.get().progress;
+			statusObj["blob_full_restore_phase_start_ts"] = restoreState.get().phaseStartTs[restoreState.get().phase];
+			statusObj["blob_full_restore_start_ts"] = restoreState.get().phaseStartTs[STARTING_MIGRATOR];
+			Optional<StringRef> error = restoreState.get().error;
+			statusObj["blob_full_restore_error"] = error.present() ? error.get() : ""_sr;
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)

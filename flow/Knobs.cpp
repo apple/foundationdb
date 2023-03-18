@@ -142,7 +142,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( ALLOW_TOKENLESS_TENANT_ACCESS,                     false );
 	init( AUDIT_LOGGING_ENABLED,                              true );
 	init( PUBLIC_KEY_FILE_MAX_SIZE,                    1024 * 1024 );
-	init( PUBLIC_KEY_FILE_REFRESH_INTERVAL_SECONDS,             30 );
+	init( PUBLIC_KEY_FILE_REFRESH_INTERVAL_SECONDS,            300 );
 	init( AUDIT_TIME_WINDOW,                                   5.0 );
 	init( TOKEN_CACHE_SIZE,                                   2000 );
 
@@ -313,6 +313,10 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	// Refer to EncryptUtil::EncryptAuthTokenAlgo for more details
 	init( ENCRYPT_HEADER_AUTH_TOKEN_ENABLED,                 false ); if ( randomize && BUGGIFY ) { ENCRYPT_HEADER_AUTH_TOKEN_ENABLED = !ENCRYPT_HEADER_AUTH_TOKEN_ENABLED; }
 	init( ENCRYPT_HEADER_AUTH_TOKEN_ALGO,                        0 ); if ( randomize && ENCRYPT_HEADER_AUTH_TOKEN_ENABLED ) { ENCRYPT_HEADER_AUTH_TOKEN_ALGO = getRandomAuthTokenAlgo(); }
+	// start exponential backoff at 5s when reaching out to the KMS from EKP
+	init( EKP_KMS_CONNECTION_BACKOFF,                          5.0 );
+	// number of times to retry KMS requests from the EKP (roughly attempt to reach out to the KMS for a total of 5 minutes)
+	init( EKP_KMS_CONNECTION_RETRIES,                          6 );
 
 	// REST Client
 	init( RESTCLIENT_MAX_CONNECTIONPOOL_SIZE,                   10 );
@@ -321,6 +325,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( RESTCLIENT_MAX_CONNECTION_LIFE,                      120 );
 	init( RESTCLIENT_REQUEST_TRIES,                             10 );
 	init( RESTCLIENT_REQUEST_TIMEOUT_SEC,                      120 );
+	init( REST_LOG_LEVEL,                                        3 );
 }
 // clang-format on
 

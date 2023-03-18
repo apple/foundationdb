@@ -88,7 +88,8 @@ class TestPicker:
 
         if not self.tests:
             raise Exception(
-                "No tests to run! Please check if tests are included/excluded incorrectly or old binaries are missing for restarting tests")
+                "No tests to run! Please check if tests are included/excluded incorrectly or old binaries are missing for restarting tests"
+            )
 
     def add_time(self, test_file: Path, run_time: int, out: SummaryTree) -> None:
         # getting the test name is fairly inefficient. But since we only have 100s of tests, I won't bother
@@ -144,7 +145,11 @@ class TestPicker:
             candidates: List[Path] = []
             dirs = path.parent.parts
             version_expr = dirs[-1].split("_")
-            if (version_expr[0] == "from" or version_expr[0] == "to") and len(version_expr) == 4 and version_expr[2] == "until":
+            if (
+                (version_expr[0] == "from" or version_expr[0] == "to")
+                and len(version_expr) == 4
+                and version_expr[2] == "until"
+            ):
                 max_version = Version.parse(version_expr[3])
                 min_version = Version.parse(version_expr[1])
                 for ver, binary in self.old_binaries.items():
@@ -299,6 +304,10 @@ def is_restarting_test(test_file: Path):
     return False
 
 
+def is_negative(test_file: Path):
+    return test_file.parts[-2] == "negative"
+
+
 def is_no_sim(test_file: Path):
     return test_file.parts[-2] == "noSim"
 
@@ -384,6 +393,22 @@ class TestRun:
     def delete_simdir(self):
         shutil.rmtree(self.temp_path / Path("simfdb"))
 
+    def _run_rocksdb_logtool(self):
+        """Calls Joshua LogTool to upload the test logs if 1) test failed 2) test is RocksDB related"""
+        if not os.path.exists("joshua_logtool.py"):
+            raise RuntimeError("joshua_logtool.py missing")
+        command = [
+            "python3",
+            "joshua_logtool.py",
+            "upload",
+            "--test-uid",
+            str(self.uid),
+            "--log-directory",
+            str(self.temp_path),
+            "--check-rocksdb"
+        ]
+        subprocess.run(command, check=True)
+
     def run(self):
         command: List[str] = []
         env: Dict[str, str] = os.environ.copy()
@@ -428,7 +453,7 @@ class TestRun:
             command.append("--restarting")
         if self.buggify_enabled:
             command += ["-b", "on"]
-        if config.crash_on_error:
+        if config.crash_on_error and not is_negative(self.test_file):
             command.append("--crash")
         if config.long_running:
             # disable simulation speedup
@@ -467,12 +492,16 @@ class TestRun:
         resources.join()
         # we're rounding times up, otherwise we will prefer running very short tests (<1s)
         self.run_time = math.ceil(resources.time())
+        self.summary.is_negative_test = is_negative(self.test_file)
         self.summary.runtime = resources.time()
         self.summary.max_rss = resources.max_rss
         self.summary.was_killed = did_kill
         self.summary.valgrind_out_file = valgrind_file
         self.summary.error_out = err_out
         self.summary.summarize(self.temp_path, " ".join(command))
+
+        if not self.summary.is_negative_test and not self.summary.ok():
+            self._run_rocksdb_logtool()
         return self.summary.ok()
 
 

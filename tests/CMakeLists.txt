@@ -16,9 +16,8 @@ set(SANITIZER_OPTIONS "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1;TSAN_OPT
 # to test upgrades
 if(WITH_PYTHON)
   find_program(OLD_FDBSERVER_BINARY
-    fdbserver fdbserver.exe
-    HINTS /opt/foundationdb/old /usr/sbin /usr/libexec /usr/local/sbin /usr/local/libexec)
-
+    fdbserver-7.1.23 fdbserver fdbserver.exe
+    HINTS /opt/foundationdb/old/7.1.23/bin/ /opt/foundationdb/old /usr/sbin /usr/libexec /usr/local/sbin /usr/local/libexec)
   if(OLD_FDBSERVER_BINARY)
     message(STATUS "Use old fdb at ${OLD_FDBSERVER_BINARY}")
   else()
@@ -152,6 +151,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BlobGranuleMoveVerifyCycle.toml IGNORE)
   add_fdb_test(TEST_FILES fast/BlobRestoreBasic.toml)
   add_fdb_test(TEST_FILES fast/BlobRestoreLarge.toml)
+  add_fdb_test(TEST_FILES fast/BlobRestoreToVersion.toml)
   add_fdb_test(TEST_FILES fast/CacheTest.toml)
   add_fdb_test(TEST_FILES fast/CloggedSideband.toml)
   add_fdb_test(TEST_FILES fast/CompressionUtilsUnit.toml IGNORE)
@@ -241,6 +241,7 @@ if(WITH_PYTHON)
 
   add_fdb_test(TEST_FILES rare/BlobGranuleRanges.toml)
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
+  add_fdb_test(TEST_FILES rare/ClogTlog.toml)
   add_fdb_test(TEST_FILES rare/ClogUnclog.toml)
   add_fdb_test(TEST_FILES rare/CloggedCycleWithKills.toml)
   add_fdb_test(TEST_FILES rare/ConfigDBUnitTest.toml)
@@ -250,6 +251,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/CycleWithKills.toml)
   add_fdb_test(TEST_FILES rare/CycleWithDeadHall.toml)
   add_fdb_test(TEST_FILES rare/DataDistributionMetrics.toml)
+  add_fdb_test(TEST_FILES rare/DcLag.toml)
   add_fdb_test(TEST_FILES rare/FuzzTest.toml)
   add_fdb_test(TEST_FILES rare/HighContentionPrefixAllocator.toml)
   add_fdb_test(TEST_FILES rare/InventoryTestHeavyWrites.toml)
@@ -447,6 +449,10 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessCycle.toml)
   add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessMultiCycles.toml)
   add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupWriteDuringReadAtomicRestore.toml)
+  add_fdb_test(TEST_FILES negative/ResolverIgnoreTooOld.toml)
+  add_fdb_test(TEST_FILES negative/ResolverIgnoreReads.toml)
+  add_fdb_test(TEST_FILES negative/ResolverIgnoreWrites.toml)
+  add_fdb_test(TEST_FILES negative/StorageCorruption.toml)
   add_fdb_test(TEST_FILES ParallelRestoreOldBackupApiCorrectnessAtomicRestore.toml IGNORE)
 
   # Note that status tests are not deterministic.

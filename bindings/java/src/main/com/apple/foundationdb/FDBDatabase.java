@@ -42,6 +42,10 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 		super(cPtr);
 		this.executor = executor;
 		this.options = new DatabaseOptions(this);
+		// Automatically set the UsedDuringCommitProtectionDisable option
+		// This is because the Java bindings disallow use of Transaction objects after
+		// Transaction#onError is called.
+		this.options.setTransactionUsedDuringCommitProtectionDisable();
 		this.eventKeeper = eventKeeper;
 	}
 
@@ -166,7 +170,6 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 		Transaction tr = null;
 		try {
 			tr = new FDBTransaction(Database_createTransaction(getPtr()), this, e, eventKeeper);
-			tr.options().setUsedDuringCommitProtectionDisable();
 			return tr;
 		} catch (RuntimeException err) {
 			if (tr != null) {

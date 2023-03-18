@@ -35,6 +35,7 @@
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h" // has to be last include
+#include "flow/network.h"
 
 FDB_DEFINE_BOOLEAN_PARAM(LockDB);
 FDB_DEFINE_BOOLEAN_PARAM(UnlockDB);
@@ -367,6 +368,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			logValue.param2 = value.substr(offset, len2);
 			offset += len2;
 			state Optional<MutationRef> encryptedLogValue = Optional<MutationRef>();
+			ASSERT(!config.encryptionAtRestMode.isEncryptionEnabled() || logValue.isEncrypted());
 
 			// Check for valid tenant in required tenant mode. If the tenant does not exist in our tenant map then
 			// we EXCLUDE the mutation (of that respective tenant) during the restore. NOTE: This simply allows a

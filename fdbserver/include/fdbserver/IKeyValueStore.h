@@ -85,6 +85,9 @@ public:
 	// Persists key range and physical shard mapping.
 	virtual void persistRangeMapping(KeyRangeRef range, bool isAdd) {}
 
+	// Returns key range to physical shard mapping.
+	virtual CoalescedKeyRangeMap<std::string> getExistingRanges() { throw not_implemented(); }
+
 	// To debug MEMORY_RADIXTREE type ONLY
 	// Returns (1) how many key & value pairs have been inserted (2) how many nodes have been created (3) how many
 	// key size is less than 12 bytes

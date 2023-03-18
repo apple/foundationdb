@@ -27,8 +27,7 @@ import org.junit.jupiter.api.Test;
  * all tests will be skipped if it can't connect to a running instance relatively quickly.
  */
 class GetClientStatusIntegrationTest {
-	public static final int API_VERSION = 720;
-	private static final FDB fdb = FDB.selectAPIVersion(API_VERSION);
+	private static final FDB fdb = FDB.selectAPIVersion(ApiVersion.LATEST);
 
 	@Test
 	public void clientStatusIsHealthy() throws Exception {
