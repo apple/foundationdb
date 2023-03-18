@@ -1539,6 +1539,7 @@ void testGetBlobMetadataRequestBody(Reference<RESTKmsConnectorCtx> ctx) {
 	for (const auto& detail : details) {
 		auto it = domainIds.find(detail.domainId);
 		ASSERT(it != domainIds.end());
+		ASSERT(detail.base.present() || !detail.partitions.empty());
 	}
 	if (refreshKmsUrls) {
 		validateKmsUrls(ctx);
