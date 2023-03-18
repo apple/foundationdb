@@ -23,49 +23,57 @@ import unittest
 
 from sidecar import Config
 
-
 class TestSidecarConfig(unittest.TestCase):
-    def test_get_topology_label_1(self):
-        HOSTNAME = 'test_host'
+    def test_get_node_label_1(self):
+        LABEL_NAME = 'topology.kubernetes.io/zone'
         labels = {
             'failure-domain.beta.kubernetes.io/zone': 'fdl',
             'topology.kubernetes.io/zone': 'tl'
         }
-        got = Config.get_topology_label(Config, labels, HOSTNAME)
+        got = Config.get_node_label(Config, labels, LABEL_NAME)
         want = labels['topology.kubernetes.io/zone']
         self.assertEqual(got, want)
 
-    def test_get_topology_label_2(self):
-        HOSTNAME = 'test_host'
+    def test_get_node_label_2(self):
+        LABEL_NAME = 'failure-domain.beta.kubernetes.io/zone'
         labels = {
             'failure-domain.beta.kubernetes.io/zone': 'fdl'
         }
-        got = Config.get_topology_label(Config, labels, HOSTNAME)
+        got = Config.get_node_label(Config, labels, LABEL_NAME)
         want = labels['failure-domain.beta.kubernetes.io/zone']
         self.assertEqual(got, want)
 
-    def test_get_topology_label_3(self):
-        HOSTNAME = 'test_host'
+    def test_get_node_label3(self):
+        LABEL_NAME = 'failure-domain.beta.kubernetes.io/zone'
         labels = {}
-        got = Config.get_topology_label(Config, labels, HOSTNAME)
-        want = HOSTNAME
+        want = ValueError("K8s node labels cannot be empty")
+        try:
+            got = Config.get_node_label(Config, labels, LABEL_NAME)
+        except ValueError as e:
+            got = e
         self.assertEqual(got, want)
 
-    def test_get_topology_label_4(self):
-        HOSTNAME = 'test_host'
+    def test_get_node_label4(self):
+        LABEL_NAME = 'test_host'
         labels = None
-        got = Config.get_topology_label(Config, labels, HOSTNAME)
-        want = HOSTNAME
+        want = ValueError("K8s node labels cannot be empty")
+        try:
+            got = Config.get_node_label(Config, labels, LABEL_NAME)
+        except ValueError as e:
+            got = e
         self.assertEqual(got, want)
 
-    def test_get_topology_label_5(self):
-        HOSTNAME = 'test_host'
+    def test_get_node_label5(self):
+        LABEL_NAME = 'label 3'
         labels = {
             "label 1": "1",
             "label 2": "2"
         }
-        got = Config.get_topology_label(Config, labels, HOSTNAME)
-        want = HOSTNAME
+        want = ValueError(f"K8s node label {LABEL_NAME} not found")
+        try:
+         got = Config.get_node_label(Config, labels, LABEL_NAME)
+        except ValueError as e:
+            got = e
         self.assertEqual(got, want)
 
 
