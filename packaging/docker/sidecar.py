@@ -169,9 +169,14 @@ class Config(object):
             action="append",
         )
         parser.add_argument(
-            "--read-zone-topology-label",
-            help=("Read kubernetes zone topology labels from the node"),
-            action="store_true"
+            "--read-node-label",
+            type=str,
+            default=[],
+            help=("A label name to read from the k8s node. "
+                "Format: TARGET_SUBSTITUTION=label_name "
+                "Example: FDB_DATA_HALL=kubernetes.io/zone"
+            ),
+            action="append",
         )
         args = parser.parse_args()
 
@@ -187,7 +192,7 @@ class Config(object):
         self.init_mode = args.init_mode
         self.main_container_version = args.main_container_version
         self.require_not_empty = args.require_not_empty
-        self.read_zone_topology_label = args.read_zone_topology_label
+        self.read_node_label = args.read_node_label
 
         with open("/var/fdb/version") as version_file:
             self.primary_version = version_file.read().strip()
@@ -229,12 +234,18 @@ class Config(object):
             "FDB_POD_IP",
         ]:
             self.substitutions[key] = os.getenv(key, "")
-
+        
         if self.substitutions["FDB_MACHINE_ID"] == "":
             self.substitutions["FDB_MACHINE_ID"] = os.getenv("HOSTNAME", "")
-
+        if len(self.read_node_label) > 0:
+            for nl in self.read_node_label:
+                substitution = nl.split("=")[0]
+                label_name = nl.split("=")[1]
+                if len(nl.split("="))!=2 or substitution == "" or label_name == "":
+                    raise ValueError("Invalid read-node-label argument: " + nl + ". Format: TARGET_SUBSTITUTION=label_name")
+                self.substitutions[substitution] = self.read_node_label(os.getenv("HOSTNAME", ""),label_name)
         if self.substitutions["FDB_ZONE_ID"] == "":
-            self.substitutions["FDB_ZONE_ID"] = self.read_node_zone_topology_label(self, self.substitutions["FDB_MACHINE_ID"])
+            self.substitutions["FDB_ZONE_ID"] = self.substitutions["FDB_MACHINE_ID"]
         if self.substitutions["FDB_PUBLIC_IP"] == "":
             # As long as the public IP is not set fallback to the
             # Pod IP address.
@@ -344,33 +355,25 @@ class Config(object):
             ip = f"[{ip}]"
         return ip
 
-    def get_topology_label(self, labels, hostname):
-        '''filter the topology label from a dict of labels. If empty return hostname.'''
+    def get_node_label(self, labels, label_name):
+        '''filter the node label from a dict of labels. If empty return None.'''
         # failure-domain.beta is deprecated, with topology being the new value.
         # This can vary between clusters/versions.
         # https://kubernetes.io/docs/reference/kubernetes-api/labels-annotations-taints
-        FAILURE_DOMAIN_LABEL = 'failure-domain.beta.kubernetes.io/zone'
-        TOPOLOGY_LABEL = 'topology.kubernetes.io/zone'
 
-        tl = None
+        label = None
 
         if not labels:
-            tl = hostname
-            log.error("The node does not have any labels")
-            return tl
-        if FAILURE_DOMAIN_LABEL in labels:
-            tl = labels[FAILURE_DOMAIN_LABEL]
-        if TOPOLOGY_LABEL in labels:
-            tl = labels[TOPOLOGY_LABEL]
-        if not tl:
-            tl = hostname
-            log.error("The node does not have zone topology labels")
+            raise ValueError("K8s node labels cannot be empty")
+        if label_name in labels:
+            label = labels[label_name]
+        if not label:
+            raise ValueError(f"K8s node label {label_name} not found")
 
-        return tl
+        return label
 
-    def read_node_zone_topology_label(self, hostname):
-        '''read the topology label from the node labels. When `read_zone_topology_label` arg is set.
-        Or return the machine ID otherwise.'''
+    def read_node_label(self, hostname, label_name):
+        '''read the label from the k8s node labels. When `read_node_label` arg is set.'''
         try:
             k8s_config.load_incluster_config()
         except Exception as k8s_config_exception:
@@ -378,13 +381,14 @@ class Config(object):
 
         client = k8s_client.CoreV1Api()
 
-        api_response = client.read_node(hostname)
+        try:
+            api_response = client.read_node(hostname)
+        except Exception as k8s_client_exception:
+            raise Exception("Exception when calling CoreV1Api->read_node: %s", e.body) from k8s_client_exception
 
         labels = api_response.metadata.labels
 
-        if self.read_zone_topology_label:
-            return self.get_topology_label(self, labels, hostname)
-        return self.substitutions["FDB_MACHINE_ID"]
+        return self.get_node_label(labels, label_name)
 
 
 class ThreadingHTTPServerV6(ThreadingHTTPServer):
