@@ -2182,7 +2182,6 @@ void DatabaseContext::expireThrottles() {
 	}
 }
 
-
 // Creates a database object that represents a connection to a cluster
 // This constructor uses a preallocated DatabaseContext that may have been created
 // on another thread
