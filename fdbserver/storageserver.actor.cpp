@@ -2505,6 +2505,7 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 	    mLV, MutationRef(MutationRef::ClearRange, pendingCheckpointKey, keyAfter(pendingCheckpointKey)));
 	self->addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::ClearRange, persistCheckpointKey, keyAfter(persistCheckpointKey)));
+	TraceEvent(SevInfo, "DeleteCheckpointEnd", self->thisServerID).detail("Checkpoint", checkpoint.toString());
 
 	return Void();
 }
@@ -2547,7 +2548,7 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 			    .detail("CheckpointID", req.checkpointID)
 			    .detail("TotalSize", totalSize)
 			    .detail("Token", req.token);
-		} else {
+		} else if (e.code() != error_code_operation_obsolete) {
 			TraceEvent(SevWarnAlways, "ServerFetchCheckpointFailure")
 			    .errorUnsuppressed(e)
 			    .detail("CheckpointID", req.checkpointID)
@@ -9797,10 +9798,13 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		    .detail("Checkpoint", checkpointResult.toString())
 		    .detail("BytesSampleFile", sampleByteSstFileCreated ? bytesSampleFile : "noFileCreated");
 	} catch (Error& e) {
+        if (e.code() == error_code_actor_cancelled) {
+            throw;
+        }
 		// If checkpoint creation fails, the failure is persisted.
 		checkpointResult = metaData;
 		checkpointResult.setState(CheckpointMetaData::Fail);
-		TraceEvent("StorageCreatedCheckpointFailure", data->thisServerID)
+		TraceEvent("StorageCreateCheckpointFailure", data->thisServerID)
 		    .detail("PendingCheckpoint", checkpointResult.toString());
 	}
 
@@ -9815,6 +9819,9 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		TraceEvent("StorageCreateCheckpointPersisted", data->thisServerID)
 		    .detail("Checkpoint", checkpointResult.toString());
 	} catch (Error& e) {
+        if (e.code() == error_code_actor_cancelled) {
+            throw;
+        }
 		// If the checkpoint meta data is not persisted successfully, remove the checkpoint.
 		TraceEvent(SevWarn, "StorageCreateCheckpointPersistFailure", data->thisServerID)
 		    .errorUnsuppressed(e)
