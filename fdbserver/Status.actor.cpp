@@ -235,20 +235,6 @@ protected:
 	int64_t counter;
 };
 
-static JsonBuilderObject getLocalityInfo(const LocalityData& locality) {
-	JsonBuilderObject localityObj;
-
-	for (auto it = locality._data.begin(); it != locality._data.end(); it++) {
-		if (it->second.present()) {
-			localityObj[it->first] = it->second.get();
-		} else {
-			localityObj[it->first] = JsonBuilder();
-		}
-	}
-
-	return localityObj;
-}
-
 static JsonBuilderObject getError(const TraceEventFields& errorFields) {
 	JsonBuilderObject statusObj;
 	try {
@@ -328,7 +314,7 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 				}
 
 				if (locality.count(it->first)) {
-					statusObj["locality"] = getLocalityInfo(locality[it->first]);
+					statusObj["locality"] = locality[it->first].toJSON<JsonBuilderObject>();
 				}
 
 				statusObj["address"] = address;
@@ -905,7 +891,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				std::string MachineID = processMetrics.getValue("MachineID");
 				statusObj["machine_id"] = MachineID;
 
-				statusObj["locality"] = getLocalityInfo(workerItr->interf.locality);
+				statusObj["locality"] = workerItr->interf.locality.toJSON<JsonBuilderObject>();
 
 				statusObj.setKeyRawNumber("uptime_seconds", processMetrics.getValue("UptimeSeconds"));
 
