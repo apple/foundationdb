@@ -60,9 +60,9 @@ struct Hostname {
 
 	// The resolve functions below use DNS cache.
 	Future<Optional<NetworkAddress>> resolve();
-	Future<NetworkAddress> resolveWithRetry();
-	Optional<NetworkAddress> resolveBlocking(); // This one should only be used when resolving asynchronously is
-	                                            // impossible. For all other cases, resolve() should be preferred.
+	Future<NetworkAddress> resolveWithRetry() const;
+	Optional<NetworkAddress> resolveBlocking() const; // This one should only be used when resolving asynchronously is
+	                                                  // impossible. For all other cases, resolve() should be preferred.
 
 	template <class Ar>
 	void serialize(Ar& ar) {
