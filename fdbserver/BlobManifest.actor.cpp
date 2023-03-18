@@ -163,11 +163,10 @@ public:
 			const BlobManifestFile& firstFile = *iter;
 			result.push_back(firstFile);
 			// search all following files belonging to same manifest
-			for (auto it = iter + 1; it != allFiles.end(); ++it) {
-				if (it->belongToSameManifest(firstFile)) {
-					result.push_back(*it);
+			for (++iter; iter != allFiles.end(); ++iter) {
+				if (iter->belongToSameManifest(firstFile)) {
+					result.push_back(*iter);
 				} else {
-					iter = it; // start point for next search
 					break;
 				}
 			}
@@ -768,10 +767,11 @@ private:
 				int64_t offset;
 				int64_t length;
 				int64_t fullFileLength;
+				int64_t logicalSize;
 				Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 
 				std::tie(gid, version, fileType) = decodeBlobGranuleFileKey(row.key);
-				std::tie(filename, offset, length, fullFileLength, cipherKeysMeta) =
+				std::tie(filename, offset, length, fullFileLength, logicalSize, cipherKeysMeta) =
 				    decodeBlobGranuleFileValue(row.value);
 				GranuleFileVersion vs = { version, fileType, filename.toString(), length };
 				files.push_back(vs);

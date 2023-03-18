@@ -143,8 +143,7 @@ ACTOR Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<REST
 	ASSERT(poolItr == connectionPool->connectionPoolMap.end() || poolItr->second.empty());
 
 	// No valid connection exists, create a new one
-	state Reference<IConnection> conn =
-	    wait(INetworkConnections::net()->connect(connectKey.first, connectKey.second, isSecure));
+	state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(connectKey.first, connectKey.second));
 	wait(conn->connectHandshake());
 
 	TraceEvent("RESTTUilCreateNewConn")
@@ -318,7 +317,7 @@ TEST_CASE("/RESTUtils/ValidURIWithExtraForwardSlash") {
 	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
 	ASSERT_EQ(r.host.compare("host"), 0);
 	ASSERT(r.service.empty());
-	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
+	ASSERT_EQ(r.resource.compare("//foo/bar"), 0);
 	return Void();
 }
 

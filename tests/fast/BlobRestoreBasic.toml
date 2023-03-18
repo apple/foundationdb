@@ -46,7 +46,7 @@ clearAfterTest = false
     testName = 'Cycle'
     nodeCount = 3000
     transactionsPerSecond = 3000.0
-    testDuration = 10.0
+    testDuration = 30.0
     expectedRate = 0
 
     [[test.workload]]
@@ -75,5 +75,5 @@ checkOnly = true
     testName = 'Cycle'
     nodeCount = 3000
     transactionsPerSecond = 3000.0
-    testDuration = 10.0
+    testDuration = 30.0
     expectedRate = 0

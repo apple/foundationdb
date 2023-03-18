@@ -551,6 +551,10 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db,
 	ASSERT(tenantIdPrefix >= TenantAPI::TENANT_ID_PREFIX_MIN_VALUE &&
 	       tenantIdPrefix <= TenantAPI::TENANT_ID_PREFIX_MAX_VALUE);
 
+	if (name.startsWith("\xff"_sr)) {
+		throw invalid_cluster_name();
+	}
+
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1215,6 +1219,10 @@ struct RegisterClusterImpl {
 		// Used if we need to rollback
 		state RemoveClusterImpl<DB> removeCluster(
 		    self->ctx.managementDb, self->clusterName, ClusterType::METACLUSTER_MANAGEMENT, ForceRemove::True, 5.0);
+
+		if (self->clusterName.startsWith("\xff"_sr)) {
+			throw invalid_cluster_name();
+		}
 
 		wait(self->ctx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return registerInManagementCluster(self, tr); }));
@@ -2595,10 +2603,7 @@ struct CreateTenantImpl {
 			ASSERT(tenantIdPrefix.present());
 			lastId = tenantIdPrefix.get() << 48;
 		}
-		if (!TenantAPI::nextTenantIdPrefixMatches(lastId.get(), lastId.get() + 1)) {
-			throw cluster_no_capacity();
-		}
-		self->tenantEntry.setId(lastId.get() + 1);
+		self->tenantEntry.setId(TenantAPI::computeNextTenantId(lastId.get(), 1));
 		ManagementClusterMetadata::tenantMetadata().lastTenantId.set(tr, self->tenantEntry.id);
 
 		self->tenantEntry.tenantState = MetaclusterAPI::TenantState::REGISTERING;
