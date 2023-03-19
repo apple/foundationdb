@@ -165,12 +165,15 @@ ACTOR Future<bool> getKeyServers(
     Database cx,
     Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise,
     KeyRangeRef kr,
-    bool performQuiescentChecks);
+    bool performQuiescentChecks,
+    bool failureIsError,
+    bool* success);
 ACTOR Future<bool> getKeyLocations(Database cx,
                                    std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> shards,
                                    Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise,
-                                   bool performQuiescentChecks);
-ACTOR Future<bool> checkDataConsistency(Database cx,
+                                   bool performQuiescentChecks,
+                                   bool* success);
+ACTOR Future<Void> checkDataConsistency(Database cx,
                                         VectorRef<KeyValueRef> keyLocations,
                                         DatabaseConfiguration configuration,
                                         std::map<UID, StorageServerInterface> tssMapping,
@@ -189,7 +192,8 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
                                         int restart,
                                         int64_t maxRate,
                                         int64_t targetInterval,
-                                        KeyRef progressKey);
+                                        KeyRef progressKey,
+                                        bool* success);
 
 #include "flow/unactorcompiler.h"
 

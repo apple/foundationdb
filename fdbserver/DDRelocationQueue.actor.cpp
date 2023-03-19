@@ -2012,7 +2012,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
 				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
 
-				completeDest(rd, self->destBusymap);
+				if (!signalledTransferComplete) {
+					// signalling transferComplete calls completeDest() in complete(), so doing so here would
+					// double-complete the work
+					completeDest(rd, self->destBusymap);
+				}
 				rd.completeDests.clear();
 
 				wait(delay(SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskPriority::DataDistributionLaunch));
