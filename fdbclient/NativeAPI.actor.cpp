@@ -2182,8 +2182,6 @@ void DatabaseContext::expireThrottles() {
 	}
 }
 
-extern IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs);
-
 // Creates a database object that represents a connection to a cluster
 // This constructor uses a preallocated DatabaseContext that may have been created
 // on another thread
@@ -2205,7 +2203,7 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 			FlowTransport::transport().initMetrics();
 			initTraceEventMetrics();
 
-			auto publicIP = determinePublicIPAutomatically(connRecord->getConnectionString());
+			auto publicIP = connRecord->getConnectionString().determineLocalSourceIP();
 			selectTraceFormatter(networkOptions.traceFormat);
 			selectTraceClockSource(networkOptions.traceClockSource);
 			addUniversalTraceField("ClientDescription",

@@ -88,6 +88,11 @@ public:
 
 	size_t getNumberOfCoordinators() const { return coords.size() + hostnames.size(); }
 
+	// Determine the local source IP used to connect to the cluster by connecting to the first available coordinator.
+	// Throw bind_failed() if no connection attempts were successful.
+	// This function blocks on connection attempts.
+	IPAddress determineLocalSourceIP() const;
+
 	bool operator==(const ClusterConnectionString& other) const noexcept {
 		return key == other.key && keyDesc == other.keyDesc && coords == other.coords && hostnames == other.hostnames;
 	}
