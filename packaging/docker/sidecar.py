@@ -172,7 +172,7 @@ class Config(object):
             "--read-node-label",
             type=str,
             default=[],
-            help=("A label name to read from the k8s node. "
+            help=("A node label that should be available for substitution in the monitor conf."
                 "Format: TARGET_SUBSTITUTION=label_name "
                 "Example: FDB_DATA_HALL=kubernetes.io/zone"
             ),
@@ -234,7 +234,7 @@ class Config(object):
             "FDB_POD_IP",
         ]:
             self.substitutions[key] = os.getenv(key, "")
-        
+
         if self.substitutions["FDB_MACHINE_ID"] == "":
             self.substitutions["FDB_MACHINE_ID"] = os.getenv("HOSTNAME", "")
         if len(self.read_node_label) > 0:

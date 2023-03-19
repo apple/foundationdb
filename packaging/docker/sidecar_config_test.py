@@ -71,7 +71,7 @@ class TestSidecarConfig(unittest.TestCase):
         }
         want = ValueError(f"K8s node label {LABEL_NAME} not found")
         try:
-         got = Config.get_node_label(Config, labels, LABEL_NAME)
+            got = Config.get_node_label(Config, labels, LABEL_NAME)
         except ValueError as e:
             got = e
         self.assertEqual(got, want)
