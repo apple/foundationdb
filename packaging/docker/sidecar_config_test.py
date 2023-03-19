@@ -24,46 +24,46 @@ import unittest
 from sidecar import Config
 
 class TestSidecarConfig(unittest.TestCase):
-    def test_get_node_label_1(self):
+    def test_filter_label_1(self):
         LABEL_NAME = 'topology.kubernetes.io/zone'
         labels = {
             'failure-domain.beta.kubernetes.io/zone': 'fdl',
             'topology.kubernetes.io/zone': 'tl'
         }
-        got = Config.get_node_label(Config, labels, LABEL_NAME)
+        got = Config.filter_label(Config, labels, LABEL_NAME)
         want = labels['topology.kubernetes.io/zone']
         self.assertEqual(got, want)
 
-    def test_get_node_label_2(self):
+    def test_filter_label_2(self):
         LABEL_NAME = 'failure-domain.beta.kubernetes.io/zone'
         labels = {
             'failure-domain.beta.kubernetes.io/zone': 'fdl'
         }
-        got = Config.get_node_label(Config, labels, LABEL_NAME)
+        got = Config.filter_label(Config, labels, LABEL_NAME)
         want = labels['failure-domain.beta.kubernetes.io/zone']
         self.assertEqual(got, want)
 
-    def test_get_node_label3(self):
+    def test_filter_label3(self):
         LABEL_NAME = 'failure-domain.beta.kubernetes.io/zone'
         labels = {}
         want = ValueError("K8s node labels cannot be empty")
         try:
-            got = Config.get_node_label(Config, labels, LABEL_NAME)
+            got = Config.filter_label(Config, labels, LABEL_NAME)
         except ValueError as e:
             got = e
         self.assertEqual(got, want)
 
-    def test_get_node_label4(self):
+    def test_filter_label4(self):
         LABEL_NAME = 'test_host'
         labels = None
         want = ValueError("K8s node labels cannot be empty")
         try:
-            got = Config.get_node_label(Config, labels, LABEL_NAME)
+            got = Config.filter_label(Config, labels, LABEL_NAME)
         except ValueError as e:
             got = e
         self.assertEqual(got, want)
 
-    def test_get_node_label5(self):
+    def test_filter_label5(self):
         LABEL_NAME = 'label 3'
         labels = {
             "label 1": "1",
@@ -71,7 +71,7 @@ class TestSidecarConfig(unittest.TestCase):
         }
         want = ValueError(f"K8s node label {LABEL_NAME} not found")
         try:
-            got = Config.get_node_label(Config, labels, LABEL_NAME)
+            got = Config.filter_label(Config, labels, LABEL_NAME)
         except ValueError as e:
             got = e
         self.assertEqual(got, want)

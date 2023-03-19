@@ -243,7 +243,7 @@ class Config(object):
                 label_name = nl.split("=")[1]
                 if len(nl.split("="))!=2 or substitution == "" or label_name == "":
                     raise ValueError("Invalid read-node-label argument: " + nl + ". Format: TARGET_SUBSTITUTION=label_name")
-                self.substitutions[substitution] = self.read_node_label(os.getenv("HOSTNAME", ""),label_name)
+                self.substitutions[substitution] = self.get_k8s_label(os.getenv("HOSTNAME", ""),label_name)
         if self.substitutions["FDB_ZONE_ID"] == "":
             self.substitutions["FDB_ZONE_ID"] = self.substitutions["FDB_MACHINE_ID"]
         if self.substitutions["FDB_PUBLIC_IP"] == "":
@@ -355,7 +355,7 @@ class Config(object):
             ip = f"[{ip}]"
         return ip
 
-    def get_node_label(self, labels, label_name):
+    def filter_label(self, labels, label_name):
         '''filter the node label from a dict of labels. If empty return None.'''
         # failure-domain.beta is deprecated, with topology being the new value.
         # This can vary between clusters/versions.
@@ -372,7 +372,7 @@ class Config(object):
 
         return label
 
-    def read_node_label(self, hostname, label_name):
+    def get_k8s_label(self, hostname, label_name):
         '''read the label from the k8s node labels. When `read_node_label` arg is set.'''
         try:
             k8s_config.load_incluster_config()
@@ -388,7 +388,7 @@ class Config(object):
 
         labels = api_response.metadata.labels
 
-        return self.get_node_label(labels, label_name)
+        return self.filter_label(labels, label_name)
 
 
 class ThreadingHTTPServerV6(ThreadingHTTPServer):
