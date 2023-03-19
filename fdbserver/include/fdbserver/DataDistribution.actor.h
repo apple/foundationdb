@@ -196,15 +196,15 @@ private:
 public:
 	std::vector<KeyRange> keys;
 	Promise<GetTopKMetricsReply> reply; // topK storage metrics
-	double maxBytesReadPerKSecond = 0, minBytesReadPerKSecond = 0; // all returned shards won't exceed this read load
+	double maxReadLoadPerKSecond = 0, minReadLoadPerKSecond = 0; // all returned shards won't exceed this read load
 
 	GetTopKMetricsRequest() {}
 	GetTopKMetricsRequest(std::vector<KeyRange> const& keys,
 	                      int topK = 1,
-	                      double maxBytesReadPerKSecond = std::numeric_limits<double>::max(),
-	                      double minBytesReadPerKSecond = 0)
-	  : topK(topK), keys(keys), maxBytesReadPerKSecond(maxBytesReadPerKSecond),
-	    minBytesReadPerKSecond(minBytesReadPerKSecond) {
+	                      double maxReadLoadPerKSecond = std::numeric_limits<double>::max(),
+	                      double minReadLoadPerKSecond = 0)
+	  : topK(topK), keys(keys), maxReadLoadPerKSecond(maxReadLoadPerKSecond),
+	    minReadLoadPerKSecond(minReadLoadPerKSecond) {
 		ASSERT_GE(topK, 1);
 	}
 
@@ -220,8 +220,8 @@ private:
 	// larger read density means higher score
 	static bool compareByReadDensity(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
 	                                 const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
-		return a.metrics.bytesReadPerKSecond / std::max(a.metrics.bytes * 1.0, 1.0) >
-		       b.metrics.bytesReadPerKSecond / std::max(b.metrics.bytes * 1.0, 1.0);
+		return a.metrics.readLoadKSecond() / std::max(a.metrics.bytes * 1.0, 1.0) >
+		       b.metrics.readLoadKSecond() / std::max(b.metrics.bytes * 1.0, 1.0);
 	}
 };
 
@@ -505,6 +505,44 @@ struct ShardSizeBounds {
 	}
 
 	static ShardSizeBounds shardSizeBoundsBeforeTrack();
+
+	void resetBytes() {
+		max.bytes = -1;
+		min.bytes = -1;
+		permittedError.bytes = -1;
+	}
+
+	void resetBytesWrittenPerKSecond() {
+		max.bytesWrittenPerKSecond = max.infinity;
+		min.bytesWrittenPerKSecond = 0;
+		permittedError.bytesWrittenPerKSecond = permittedError.infinity;
+	}
+
+	void resetBytesReadPerKSecond() {
+		max.bytesReadPerKSecond = max.infinity;
+		min.bytesReadPerKSecond = 0;
+		permittedError.bytesReadPerKSecond = permittedError.infinity;
+	}
+
+	void resetOpsReadPerKSecond() {
+		max.opsReadPerKSecond = max.infinity;
+		min.opsReadPerKSecond = 0;
+		permittedError.opsReadPerKSecond = permittedError.infinity;
+	}
+
+	void resetIOPerKSecond() {
+		max.iosPerKSecond = max.infinity;
+		min.iosPerKSecond = 0;
+		permittedError.iosPerKSecond = permittedError.infinity;
+	}
+
+	void reset() {
+		resetBytes();
+		resetBytesWrittenPerKSecond();
+		resetIOPerKSecond();
+		resetBytesReadPerKSecond();
+		resetOpsReadPerKSecond();
+	}
 };
 
 // Gets the permitted size and IO bounds for a shard

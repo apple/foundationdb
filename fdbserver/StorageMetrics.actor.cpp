@@ -22,6 +22,10 @@
 #include "fdbserver/StorageMetrics.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+int64_t StorageMetrics::readLoadKSecond() const {
+	return std::max((int64_t)0, std::max(bytesReadPerKSecond, opsReadPerKSecond * SERVER_KNOBS->EMPTY_READ_PENALTY));
+}
+
 int64_t StorageMetricSample::getEstimate(KeyRangeRef keys) const {
 	return sample.sumRange(keys.begin, keys.end);
 }
