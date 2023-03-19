@@ -155,6 +155,7 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 	bounds.max.bytesWrittenPerKSecond = bounds.max.infinity;
 	bounds.max.iosPerKSecond = bounds.max.infinity;
 	bounds.max.bytesReadPerKSecond = bounds.max.infinity;
+	bounds.max.opsReadPerKSecond = bounds.max.infinity;
 
 	// The first shard can have arbitrarily small size
 	if (shard.begin == allKeys.begin) {
@@ -166,6 +167,7 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 	bounds.min.bytesWrittenPerKSecond = 0;
 	bounds.min.iosPerKSecond = 0;
 	bounds.min.bytesReadPerKSecond = 0;
+	bounds.min.opsReadPerKSecond = 0;
 
 	// The permitted error is 1/3 of the general-case minimum bytes (even in the special case where this is the last
 	// shard)
@@ -173,6 +175,7 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 	bounds.permittedError.bytesWrittenPerKSecond = bounds.permittedError.infinity;
 	bounds.permittedError.iosPerKSecond = bounds.permittedError.infinity;
 	bounds.permittedError.bytesReadPerKSecond = bounds.permittedError.infinity;
+	bounds.permittedError.opsReadPerKSecond = bounds.permittedError.infinity;
 
 	return bounds;
 }
@@ -192,9 +195,6 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 	state double lastLowBandwidthStartTime =
 	    shardMetrics->get().present() ? shardMetrics->get().get().lastLowBandwidthStartTime : now();
 	state int shardCount = shardMetrics->get().present() ? shardMetrics->get().get().shardCount : 1;
-	state ReadBandwidthStatus readBandwidthStatus = shardMetrics->get().present()
-	                                                    ? getReadBandwidthStatus(shardMetrics->get().get().metrics)
-	                                                    : ReadBandwidthStatusNormal;
 
 	wait(delay(0, TaskPriority::DataDistribution));
 
@@ -254,21 +254,10 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 				} else {
 					ASSERT(false);
 				}
+				bounds.resetIOPerKSecond();
 			} else {
-				bounds.max.bytes = -1;
-				bounds.min.bytes = -1;
-				bounds.permittedError.bytes = -1;
-				bounds.max.bytesWrittenPerKSecond = bounds.max.infinity;
-				bounds.min.bytesWrittenPerKSecond = 0;
-				bounds.permittedError.bytesWrittenPerKSecond = bounds.permittedError.infinity;
-				bounds.max.bytesReadPerKSecond = bounds.max.infinity;
-				bounds.min.bytesReadPerKSecond = 0;
-				bounds.permittedError.bytesReadPerKSecond = bounds.permittedError.infinity;
+				bounds.reset();
 			}
-
-			bounds.max.iosPerKSecond = bounds.max.infinity;
-			bounds.min.iosPerKSecond = 0;
-			bounds.permittedError.iosPerKSecond = bounds.permittedError.infinity;
 
 			loop {
 				Transaction tr(self()->cx);
@@ -490,7 +479,9 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 	splitMetrics.bytesWrittenPerKSecond =
 	    keys.begin >= keyServersKeys.begin ? splitMetrics.infinity : SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
 	splitMetrics.iosPerKSecond = splitMetrics.infinity;
+	// Don't split by readBandwidth or read ops
 	splitMetrics.bytesReadPerKSecond = splitMetrics.infinity; // Don't split by readBandwidth
+	splitMetrics.opsReadPerKSecond = splitMetrics.infinity;
 
 	state Standalone<VectorRef<KeyRef>> splitKeys = wait(getSplitKeys(self, keys, splitMetrics, metrics));
 	// fprintf(stderr, "split keys:\n");
@@ -865,11 +856,11 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 					break;
 				}
 
-				if (metrics.bytesReadPerKSecond > 0) {
-					minReadLoad = std::min(metrics.bytesReadPerKSecond, minReadLoad);
-					maxReadLoad = std::max(metrics.bytesReadPerKSecond, maxReadLoad);
-					if (req.minBytesReadPerKSecond <= metrics.bytesReadPerKSecond &&
-					    metrics.bytesReadPerKSecond <= req.maxBytesReadPerKSecond) {
+				auto readLoad = metrics.readLoadKSecond();
+				if (readLoad > 0) {
+					minReadLoad = std::min(readLoad, minReadLoad);
+					maxReadLoad = std::max(readLoad, maxReadLoad);
+					if (req.minReadLoadPerKSecond <= readLoad && readLoad <= req.maxReadLoadPerKSecond) {
 						returnMetrics.emplace_back(range, metrics);
 					}
 				}
