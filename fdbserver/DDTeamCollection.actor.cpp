@@ -270,7 +270,9 @@ public:
 						}
 						TraceEvent("ReplicatingToLargeTeam", self->distributorId)
 						    .detail("Team", newTeam->getDesc())
-						    .detail("Healthy", newTeam->isHealthy());
+						    .detail("Healthy", newTeam->isHealthy())
+						    .detail("DesiredReplicas", customReplicas)
+						    .detail("UnderReplicated", newTeam->size() < customReplicas);
 						req.reply.send(std::make_pair(newTeam, foundSrc));
 						return Void();
 					} else {
@@ -1876,11 +1878,11 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> fixWrongReplicasLoop(DDTeamCollection* self) {
+	ACTOR static Future<Void> fixUnderReplicationLoop(DDTeamCollection* self) {
 		loop {
 			wait(delay(SERVER_KNOBS->DD_FIX_WRONG_REPLICAS_DELAY));
 			self->cleanupLargeTeams();
-			self->fixWrongReplicas();
+			self->fixUnderReplication();
 		}
 	}
 
@@ -2938,7 +2940,7 @@ public:
 			self->addActor.send(self->machineTeamRemover());
 			self->addActor.send(self->serverTeamRemover());
 			if (ddLargeTeamEnabled()) {
-				self->addActor.send(self->fixWrongReplicasLoop());
+				self->addActor.send(self->fixUnderReplicationLoop());
 			}
 
 			if (self->wrongStoreTypeRemover.isReady()) {
@@ -3516,11 +3518,11 @@ Future<Void> DDTeamCollection::serverTeamRemover() {
 	return DDTeamCollectionImpl::serverTeamRemover(this);
 }
 
-Future<Void> DDTeamCollection::fixWrongReplicasLoop() {
-	return DDTeamCollectionImpl::fixWrongReplicasLoop(this);
+Future<Void> DDTeamCollection::fixUnderReplicationLoop() {
+	return DDTeamCollectionImpl::fixUnderReplicationLoop(this);
 }
 
-void DDTeamCollection::fixWrongReplicas() {
+void DDTeamCollection::fixUnderReplication() {
 	int maxTeamSize = maxLargeTeamSize();
 	int checkCount = 0;
 	for (auto& it : underReplication.ranges()) {
@@ -3554,10 +3556,11 @@ void DDTeamCollection::fixWrongReplicas() {
 			if (currentSize < customReplicas) {
 				// check if a larger team exists
 				if (maxTeamSize > currentSize) {
-					TraceEvent("FixWrongReplicas", distributorId)
+					TraceEvent("FixUnderReplication", distributorId)
 					    .suppressFor(1.0)
 					    .detail("MaxTeamSize", maxTeamSize)
-					    .detail("Current", currentSize);
+					    .detail("Current", currentSize)
+					    .detail("Desired", customReplicas);
 					RelocateShard rs(r.range(),
 					                 SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY,
 					                 RelocateReason::OTHER,
@@ -4000,21 +4003,21 @@ int DDTeamCollection::maxLargeTeamSize() const {
 }
 
 struct ServerPriority {
-	int healthyUsed = 0;
-	int unhealthyUsed = 0;
+	int healthyShards = 0;
+	int unhealthyShards = 0;
 	int64_t loadBytes = std::numeric_limits<int64_t>::max();
 	UID id;
 	Reference<TCServerInfo> info;
 
 	ServerPriority() {}
-	ServerPriority(int healthyUsed, int unhealthyUsed, int64_t loadBytes, UID id, Reference<TCServerInfo> info)
-	  : healthyUsed(healthyUsed), unhealthyUsed(unhealthyUsed), loadBytes(loadBytes), id(id), info(info) {}
+	ServerPriority(int healthyShards, int unhealthyShards, int64_t loadBytes, UID id, Reference<TCServerInfo> info)
+	  : healthyShards(healthyShards), unhealthyShards(unhealthyShards), loadBytes(loadBytes), id(id), info(info) {}
 
 	bool operator<(ServerPriority const& r) const {
-		if (healthyUsed != r.healthyUsed) {
-			return healthyUsed < r.healthyUsed;
-		} else if (unhealthyUsed != r.unhealthyUsed) {
-			return unhealthyUsed < r.unhealthyUsed;
+		if (healthyShards != r.healthyShards) {
+			return healthyShards < r.healthyShards;
+		} else if (unhealthyShards != r.unhealthyShards) {
+			return unhealthyShards < r.unhealthyShards;
 		} else if (loadBytes != r.loadBytes) {
 			return loadBytes < r.loadBytes;
 		} else {
@@ -4032,10 +4035,10 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 		return Reference<TCTeamInfo>();
 	}
 
-	std::map<UID, ServerPriority> server_used;
+	std::map<UID, ServerPriority> server_priority;
 	for (auto& [serverID, server] : server_info) {
 		if (!server_status.get(serverID).isUnhealthy()) {
-			server_used[serverID] =
+			server_priority[serverID] =
 			    ServerPriority(0,
 			                   0,
 			                   server->metricsPresent() ? server->loadBytes() : std::numeric_limits<int64_t>::max(),
@@ -4045,21 +4048,21 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 	}
 
 	for (auto& team : largeTeams) {
-		auto servers = team->getServerIDs();
-		int shardCount =
+		const auto servers = team->getServerIDs();
+		const int shardCount =
 		    shardsAffectedByTeamFailure->getNumberOfShards(ShardsAffectedByTeamFailure::Team(servers, primary));
 		if (team->isHealthy()) {
 			for (auto& it : servers) {
-				auto f = server_used.find(it);
-				if (f != server_used.end()) {
-					f->second.healthyUsed += shardCount;
+				auto f = server_priority.find(it);
+				if (f != server_priority.end()) {
+					f->second.healthyShards += shardCount;
 				}
 			}
 		} else {
 			for (auto& it : servers) {
-				auto f = server_used.find(it);
-				if (f != server_used.end()) {
-					f->second.unhealthyUsed += shardCount;
+				auto f = server_priority.find(it);
+				if (f != server_priority.end()) {
+					f->second.unhealthyShards += shardCount;
 				}
 			}
 		}
@@ -4068,8 +4071,8 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 	// The set of all healthy servers sorted so the most desirable option is first in the list
 	std::vector<ServerPriority> sortedServers;
 
-	sortedServers.reserve(server_used.size());
-	for (auto& it : server_used) {
+	sortedServers.reserve(server_priority.size());
+	for (auto& it : server_priority) {
 		sortedServers.emplace_back(it.second);
 	}
 	std::sort(sortedServers.begin(), sortedServers.end());
@@ -4116,7 +4119,7 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 		}
 	}
 
-	std::vector<UID> serverIDVector(serverIds.begin(), serverIds.end());
+	const std::vector<UID> serverIDVector(serverIds.begin(), serverIds.end());
 	for (int t = 0; t < largeTeams.size(); t++) {
 		if (largeTeams[t]->getServerIDs() == serverIDVector) {
 			return largeTeams[t];

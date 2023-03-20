@@ -537,9 +537,9 @@ protected:
 
 	Future<Void> removeWrongStoreType();
 
-	Future<Void> fixWrongReplicasLoop();
+	Future<Void> fixUnderReplicationLoop();
 
-	void fixWrongReplicas();
+	void fixUnderReplication();
 
 	// Check if the number of server (and machine teams) is larger than the maximum allowed number
 	void traceTeamCollectionInfo() const;
