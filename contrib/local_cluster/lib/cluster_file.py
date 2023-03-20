@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 def generate_fdb_cluster_file(
     base_directory: str,
     description: Union[str, None] = None,
-    ip_address: Union[ipaddress.IPv4Address, None] = None,
+    ip_address: Union[ipaddress.IPv4Address, ipaddress.IPv6Address, None] = None,
     port: Union[int, None] = None,
 ) -> str:
     """Generate a fdb.cluster file

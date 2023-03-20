@@ -10,6 +10,7 @@ import os.path
 import sys
 
 import lib.local_cluster
+import lib.fdb_process
 
 
 logger = logging.getLogger(__name__)
