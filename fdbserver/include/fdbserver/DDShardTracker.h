@@ -108,6 +108,8 @@ public:
 
 	Optional<Reference<TenantCache>> ddTenantCache;
 
+	Reference<KeyRangeMap<int>> customReplication;
+
 	DataDistributionTracker() = default;
 
 	~DataDistributionTracker() override;
