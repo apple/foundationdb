@@ -71,21 +71,20 @@ class WorkDirectory:
         """Set up the directories"""
         if self._base_directory is None:
             self._base_directory = tempfile.mkdtemp()
-        logger.debug(f"Work directory {self.base_directory}")
-
         assert self.base_directory is not None
-        assert self.data_directory is not None
-        assert self.log_directory is not None
+        logger.debug(f"Work directory {self.base_directory}")
 
         self._data_directory = os.path.join(
             self._base_directory, self._data_directory_rel
         )
+        assert self.data_directory is not None
         os.makedirs(self.data_directory, exist_ok=True)
         logger.debug(f"Created data directory {self.data_directory}")
 
         self._log_directory = os.path.join(
             self._base_directory, self._log_directory_rel
         )
+        assert self.log_directory is not None
         os.makedirs(self.log_directory, exist_ok=True)
 
         os.chdir(self.base_directory)

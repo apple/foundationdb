@@ -59,7 +59,7 @@ def _setup_logs(log_level: int = logging.INFO):
     lib_logger.addHandler(stdout_handler)
     lib_logger.setLevel(log_level)
 
-    local_cluster_logger = logging.getLogger("local_cluster")
+    local_cluster_logger = logging.getLogger("lib.local_cluster")
     local_cluster_logger.addHandler(stdout_handler)
     local_cluster_logger.setLevel(log_level)
 
@@ -405,7 +405,6 @@ def main() -> int:
         timeout=args.test_timeout,
     )
 
-    logger.info(f"Binding test start")
     num_failures = asyncio.run(
         run_binding_tests(test_set, args.num_cycles, args.stop_at_failure, args.random)
     )
