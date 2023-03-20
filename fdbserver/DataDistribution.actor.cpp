@@ -477,14 +477,15 @@ public:
 			}
 			ranges.push_back(KeyRangeRef(beginKey, endKey));
 
+			std::vector<ShardsAffectedByTeamFailure::Team> teams;
+			teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.primarySrc, true));
+			if (self->configuration.usableRegions > 1) {
+				teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteSrc, false));
+			}
+
 			for (int r = 0; r < ranges.size(); r++) {
 				auto& keys = ranges[r];
 				self->shardsAffectedByTeamFailure->defineShard(keys);
-				std::vector<ShardsAffectedByTeamFailure::Team> teams;
-				teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.primarySrc, true));
-				if (self->configuration.usableRegions > 1) {
-					teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteSrc, false));
-				}
 
 				auto customRange = self->initData->customReplication->rangeContaining(keys.begin);
 				int customReplicas = std::max(self->configuration.storageTeamSize, customRange.value());
