@@ -303,7 +303,7 @@ Future<std::string> RestoreConfigFR::getFullStatus(Reference<ReadYourWritesTrans
 
 std::string RestoreConfigFR::toString() {
 	std::stringstream ss;
-	ss << "uid:" << uid.toString() << " prefix:" << prefix.contents().toString();
+	ss << "uid:" << uid.toString() << " prefix:" << subSpace.key().contents().toString();
 	return ss.str();
 }
 

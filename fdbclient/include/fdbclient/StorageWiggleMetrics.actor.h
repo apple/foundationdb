@@ -158,11 +158,11 @@ protected:
 	Key prefix;
 
 public:
-	struct DataForDc : public KeyBackedStruct {
-		DataForDc(StringRef prefix) : KeyBackedStruct(prefix) {}
+	struct DataForDc : public KeyBackedClass {
+		DataForDc(StringRef prefix) : KeyBackedClass(prefix) {}
 
 		auto storageWiggleDelay() const {
-			auto key = rootSpace.pack("storageWiggleDelay"_sr);
+			auto key = subSpace.pack("storageWiggleDelay"_sr);
 			return KeyBackedObjectProperty<StorageWiggleDelay, decltype(IncludeVersion())>(key, IncludeVersion());
 		}
 	};

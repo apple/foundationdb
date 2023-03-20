@@ -165,6 +165,16 @@ struct BinaryCodec {
 	static T unpack(Standalone<StringRef> val) { return BinaryReader::fromStringRef<T>(val, Unversioned()); }
 };
 
+// Codec for using Flatbuffer compatible types via ObjectWriter/ObjectReader
+template <typename T, typename VersionOptions>
+struct ObjectRWCodec {
+	ObjectRWCodec(VersionOptions vo) : vo(vo) {}
+	VersionOptions vo;
+
+	inline Standalone<StringRef> pack(T const& val) const { return ObjectWriter::toValue<T>(val, vo); }
+	inline T unpack(Standalone<StringRef> const& val) const { return ObjectReader::fromStringRef<T>(val, vo); }
+};
+
 template <typename ResultType>
 struct KeyBackedRangeResult {
 	std::vector<ResultType> results;
@@ -174,12 +184,50 @@ struct KeyBackedRangeResult {
 	bool operator!=(KeyBackedRangeResult const& other) const { return !(*this == other); }
 };
 
+class WatchableTrigger {
+private:
+	Key key;
+
+public:
+	WatchableTrigger(Key k) : key(k) {}
+
+	template <class Transaction>
+	void update(Transaction tr, AddConflictRange conflict = AddConflictRange::False) {
+		std::array<uint8_t, 14> value;
+		value.fill(0);
+		tr->atomicOp(key, StringRef(value.begin(), value.size()), MutationRef::SetVersionstampedValue);
+		if (conflict) {
+			tr->addReadConflictRange(singleKeyRange(key));
+		}
+	}
+
+	template <class Transaction>
+	Future<Versionstamp> get(Transaction tr, Snapshot snapshot = Snapshot::False) const {
+		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture = tr->get(key, snapshot);
+
+		return holdWhile(getFuture,
+		                 map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> Versionstamp {
+			                 Versionstamp v;
+			                 if (val.present()) {
+				                 return v = BinaryReader::fromStringRef<Versionstamp>(val.get(), Unversioned());
+			                 }
+			                 return v;
+		                 }));
+	}
+
+	template <class Transaction>
+	Future<Void> onChange(Transaction tr) const {
+		return safeThreadFutureToFuture(tr->watch(key));
+	}
+};
+
 // Convenient read/write access to a single value of type T stored at key
 // Even though 'this' is not actually mutated, methods that change the db key are not const.
 template <typename T, typename Codec = TupleCodec<T>>
 class KeyBackedProperty {
 public:
-	KeyBackedProperty(KeyRef key) : key(key) {}
+	KeyBackedProperty(KeyRef key, Optional<WatchableTrigger> trigger = {}, Codec codec = {})
+	  : key(key), trigger(trigger), codec(codec) {}
 
 	template <class Transaction>
 	typename std::enable_if<!is_transaction_creator<Transaction>, Future<Optional<T>>>::type get(
@@ -187,12 +235,13 @@ public:
 	    Snapshot snapshot = Snapshot::False) const {
 		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture = tr->get(key, snapshot);
 
-		return holdWhile(getFuture,
-		                 map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> Optional<T> {
-			                 if (val.present())
-				                 return Codec::unpack(val.get());
-			                 return {};
-		                 }));
+		return holdWhile(
+		    getFuture,
+		    map(safeThreadFutureToFuture(getFuture), [codec = codec](Optional<Value> const& val) -> Optional<T> {
+			    if (val.present())
+				    return codec.unpack(val.get());
+			    return {};
+		    }));
 	}
 
 	// Get property's value or defaultValue if it doesn't exist
@@ -253,7 +302,10 @@ public:
 
 	template <class Transaction>
 	typename std::enable_if<!is_transaction_creator<Transaction>, void>::type set(Transaction tr, T const& val) {
-		tr->set(key, Codec::pack(val));
+		tr->set(key, packValue(val));
+		if (trigger.present()) {
+			trigger.get().update(tr);
+		}
 	}
 
 	template <class DB>
@@ -269,58 +321,9 @@ public:
 	template <class Transaction>
 	typename std::enable_if<!is_transaction_creator<Transaction>, void>::type clear(Transaction tr) {
 		tr->clear(key);
-	}
-
-	Key key;
-};
-
-// This is just like KeyBackedProperty but instead of using a Codec for conversion to/from values it
-// uses BinaryReader and BinaryWriter.  This enables allows atomic ops with integer types, and also
-// allows reading and writing of existing keys which use BinaryReader/Writer.
-template <typename T>
-class KeyBackedBinaryValue {
-public:
-	KeyBackedBinaryValue(KeyRef key) : key(key) {}
-
-	template <class Transaction>
-	Future<Optional<T>> get(Transaction tr, Snapshot snapshot = Snapshot::False) const {
-		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture = tr->get(key, snapshot);
-
-		return holdWhile(getFuture,
-		                 map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> Optional<T> {
-			                 if (val.present())
-				                 return BinaryReader::fromStringRef<T>(val.get(), Unversioned());
-			                 return {};
-		                 }));
-	}
-	// Get property's value or defaultValue if it doesn't exist
-	template <class Transaction>
-	Future<T> getD(Transaction tr, Snapshot snapshot = Snapshot::False, T defaultValue = T()) const {
-		return map(get(tr, Snapshot::False),
-		           [=](Optional<T> val) -> T { return val.present() ? val.get() : defaultValue; });
-	}
-
-	template <class Transaction>
-	void set(Transaction tr, T const& val) {
-		tr->set(key, BinaryWriter::toValue<T>(val, Unversioned()));
-	}
-
-	template <class Transaction>
-	void atomicOp(Transaction tr, T const& val, MutationRef::Type type) {
-		tr->atomicOp(key, BinaryWriter::toValue<T>(val, Unversioned()), type);
-	}
-
-	template <class Transaction>
-	void setVersionstamp(Transaction tr, T const& val, int offset) {
-		tr->atomicOp(
-		    key,
-		    BinaryWriter::toValue<T>(val, Unversioned()).withSuffix(StringRef(reinterpret_cast<uint8_t*>(&offset), 4)),
-		    MutationRef::SetVersionstampedValue);
-	}
-
-	template <class Transaction>
-	void clear(Transaction tr) {
-		tr->clear(key);
+		if (trigger.present()) {
+			trigger.get().update(tr);
+		}
 	}
 
 	template <class Transaction>
@@ -328,7 +331,52 @@ public:
 		return tr->watch(key);
 	}
 
+	Value packValue(T const& value) const { return codec.pack(value); }
+
 	Key key;
+	Optional<WatchableTrigger> trigger;
+	Codec codec;
+};
+
+// KeyBackedObjectProperty is a convenience wrapper of KeyBackedProperty which uses ObjectRWCodec<T, VersionOptions> as
+// the codec
+template <typename T, typename VersionOptions>
+class KeyBackedObjectProperty : public KeyBackedProperty<T, ObjectRWCodec<T, VersionOptions>> {
+	typedef KeyBackedProperty<T, ObjectRWCodec<T, VersionOptions>> Base;
+	typedef ObjectRWCodec<T, VersionOptions> ObjectCodec;
+
+public:
+	KeyBackedObjectProperty(KeyRef key, VersionOptions vo, Optional<WatchableTrigger> trigger = {})
+	  : Base(key, trigger, ObjectRWCodec<T, VersionOptions>(vo)) {}
+};
+
+// KeyBackedBinaryValue is a convenience wrapper of KeyBackedProperty but using BinaryCodec<T> as the codec and adds
+// atomic ops and version stamp operations.
+template <typename T>
+class KeyBackedBinaryValue : public KeyBackedProperty<T, BinaryCodec<T>> {
+	typedef KeyBackedProperty<T, BinaryCodec<T>> Base;
+
+public:
+	KeyBackedBinaryValue(KeyRef key, Optional<WatchableTrigger> trigger = {}) : Base(key, trigger) {}
+
+	template <class Transaction>
+	void atomicOp(Transaction tr, T const& val, MutationRef::Type type) {
+		tr->atomicOp(this->key, BinaryWriter::toValue<T>(val, Unversioned()), type);
+		if (this->trigger.present()) {
+			this->trigger.get().update(tr);
+		}
+	}
+
+	template <class Transaction>
+	void setVersionstamp(Transaction tr, T const& val, int offset) {
+		tr->atomicOp(
+		    this->key,
+		    BinaryWriter::toValue<T>(val, Unversioned()).withSuffix(StringRef(reinterpret_cast<uint8_t*>(&offset), 4)),
+		    MutationRef::SetVersionstampedValue);
+		if (this->trigger.present()) {
+			this->trigger.get().update(tr);
+		}
+	}
 };
 
 // Convenient read/write access to a sorted map of KeyType to ValueType under prefix
@@ -339,7 +387,8 @@ template <typename _KeyType,
           typename ValueCodec = TupleCodec<_ValueType>>
 class KeyBackedMap {
 public:
-	KeyBackedMap(KeyRef prefix) : subspace(prefixRange(prefix)) {}
+	KeyBackedMap(KeyRef prefix, Optional<WatchableTrigger> trigger = {}, ValueCodec valueCodec = {})
+	  : subspace(prefixRange(prefix)), trigger(trigger), valueCodec(valueCodec) {}
 
 	typedef _KeyType KeyType;
 	typedef _ValueType ValueType;
@@ -362,31 +411,32 @@ public:
 		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
 		    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
 
-		return holdWhile(
-		    getRangeFuture,
-		    map(safeThreadFutureToFuture(getRangeFuture), [prefix](RangeResult const& kvs) -> RangeResultType {
-			    RangeResultType rangeResult;
-			    for (int i = 0; i < kvs.size(); ++i) {
-				    KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(prefix));
-				    ValueType val = ValueCodec::unpack(kvs[i].value);
-				    rangeResult.results.push_back(PairType(key, val));
-			    }
-			    rangeResult.more = kvs.more;
-			    return rangeResult;
-		    }));
+		return holdWhile(getRangeFuture,
+		                 map(safeThreadFutureToFuture(getRangeFuture),
+		                     [prefix, valueCodec = valueCodec](RangeResult const& kvs) -> RangeResultType {
+			                     RangeResultType rangeResult;
+			                     for (int i = 0; i < kvs.size(); ++i) {
+				                     KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(prefix));
+				                     ValueType val = valueCodec.unpack(kvs[i].value);
+				                     rangeResult.results.push_back(PairType(key, val));
+			                     }
+			                     rangeResult.more = kvs.more;
+			                     return rangeResult;
+		                     }));
 	}
 
 	template <class Transaction>
 	Future<Optional<ValueType>> get(Transaction tr, KeyType const& key, Snapshot snapshot = Snapshot::False) const {
 		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture =
-		    tr->get(subspace.begin.withSuffix(KeyCodec::pack(key)), snapshot);
+		    tr->get(packKey(key), snapshot);
 
-		return holdWhile(
-		    getFuture, map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> Optional<ValueType> {
-			    if (val.present())
-				    return ValueCodec::unpack(val.get());
-			    return {};
-		    }));
+		return holdWhile(getFuture,
+		                 map(safeThreadFutureToFuture(getFuture),
+		                     [valueCodec = valueCodec](Optional<Value> const& val) -> Optional<ValueType> {
+			                     if (val.present())
+				                     return valueCodec.unpack(val.get());
+			                     return {};
+		                     }));
 	}
 
 	// Get key's value or defaultValue if it doesn't exist
@@ -400,268 +450,104 @@ public:
 	}
 
 	// Returns a Property that can be get/set that represents key's entry in this this.
-	KeyBackedProperty<ValueType> getProperty(KeyType const& key) const {
-		return subspace.begin.withSuffix(KeyCodec::pack(key));
+	KeyBackedProperty<ValueType, ValueCodec> getProperty(KeyType const& key) const {
+		return { packKey(key), trigger, valueCodec };
 	}
 
 	// Returns the expectedSize of the set key
 	template <class Transaction>
 	int set(Transaction tr, KeyType const& key, ValueType const& val) {
-		Key k = subspace.begin.withSuffix(KeyCodec::pack(key));
-		Value v = ValueCodec::pack(val);
+		Key k = packKey(key);
+		Value v = packValue(val);
 		tr->set(k, v);
+		if (trigger.present()) {
+			trigger.get().update(tr);
+		}
 		return k.expectedSize() + v.expectedSize();
 	}
 
 	template <class Transaction>
 	void atomicOp(Transaction tr, KeyType const& key, ValueType const& val, MutationRef::Type type) {
-		Key k = subspace.begin.withSuffix(KeyCodec::pack(key));
-		Value v = ValueCodec::pack(val);
+		Key k = packKey(key);
+		Value v = packValue(val);
 		tr->atomicOp(k, v, type);
+		if (trigger.present()) {
+			trigger.get().update(tr);
+		}
 	}
 
 	template <class Transaction>
 	void erase(Transaction tr, KeyType const& key) {
-		tr->clear(subspace.begin.withSuffix(KeyCodec::pack(key)));
+		tr->clear(packKey(key));
+		if (trigger.present()) {
+			trigger.get().update(tr);
+		}
 	}
 
 	template <class Transaction>
 	void erase(Transaction tr, KeyType const& begin, KeyType const& end) {
-		tr->clear(KeyRangeRef(subspace.begin.withSuffix(KeyCodec::pack(begin)),
-		                      subspace.begin.withSuffix(KeyCodec::pack(end))));
+		tr->clear(KeyRangeRef(packKey(begin), packKey(end)));
+		if (trigger.present()) {
+			trigger.get().update(tr);
+		}
 	}
 
 	template <class Transaction>
 	void clear(Transaction tr) {
 		tr->clear(subspace);
+		if (trigger.present()) {
+			trigger.get().update(tr);
+		}
 	}
 
 	template <class Transaction>
 	void addReadConflictKey(Transaction tr, KeyType const& key) {
-		Key k = subspace.begin.withSuffix(KeyCodec::pack(key));
+		Key k = packKey(key);
 		tr->addReadConflictRange(singleKeyRange(k));
 	}
 
 	template <class Transaction>
 	void addReadConflictRange(Transaction tr, KeyType const& begin, KeyType const& end) {
-		tr->addReadConflictRange(subspace.begin.withSuffix(KeyCodec::pack(begin)),
-		                         subspace.begin.withSuffix(KeyCodec::pack(end)));
+		tr->addReadConflictRange(packKey(begin), packKey(end));
 	}
 
 	template <class Transaction>
 	void addWriteConflictKey(Transaction tr, KeyType const& key) {
-		Key k = subspace.begin.withSuffix(KeyCodec::pack(key));
+		Key k = packKey(key);
 		tr->addWriteConflictRange(singleKeyRange(k));
 	}
 
 	template <class Transaction>
 	void addWriteConflictRange(Transaction tr, KeyType const& begin, KeyType const& end) {
-		tr->addWriteConflictRange(subspace.begin.withSuffix(KeyCodec::pack(begin)),
-		                          subspace.begin.withSuffix(KeyCodec::pack(end)));
+		tr->addWriteConflictRange(packKey(begin), packKey(end));
 	}
 
 	KeyRange subspace;
+	Optional<WatchableTrigger> trigger;
+	ValueCodec valueCodec;
+
+	Key packKey(KeyType const& key) const { return subspace.begin.withSuffix(KeyCodec::pack(key)); }
+
+	Value packValue(ValueType const& value) const { return valueCodec.pack(value); }
 };
 
-// Convenient read/write access to a single value of type T stored at key
-// Even though 'this' is not actually mutated, methods that change the db key are not const.
-template <typename T, typename VersionOptions>
-class KeyBackedObjectProperty {
-public:
-	KeyBackedObjectProperty(KeyRef key, VersionOptions versionOptions) : key(key), versionOptions(versionOptions) {}
-
-	template <class Transaction>
-	typename std::enable_if<!is_transaction_creator<Transaction>, Future<Optional<T>>>::type get(
-	    Transaction tr,
-	    Snapshot snapshot = Snapshot::False) const {
-		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture = tr->get(key, snapshot);
-
-		return holdWhile(
-		    getFuture,
-		    map(safeThreadFutureToFuture(getFuture), [vo = versionOptions](Optional<Value> const& val) -> Optional<T> {
-			    if (val.present())
-				    return ObjectReader::fromStringRef<T>(val.get(), vo);
-			    return {};
-		    }));
-	}
-
-	// Get property's value or defaultValue if it doesn't exist
-	template <class Transaction>
-	typename std::enable_if<!is_transaction_creator<Transaction>, Future<T>>::type
-	getD(Transaction tr, Snapshot snapshot = Snapshot::False, T defaultValue = T()) const {
-		return map(get(tr, snapshot), [=](Optional<T> val) -> T { return val.present() ? val.get() : defaultValue; });
-	}
-	// Get property's value or throw error if it doesn't exist
-	template <class Transaction>
-	typename std::enable_if<!is_transaction_creator<Transaction>, Future<T>>::type
-	getOrThrow(Transaction tr, Snapshot snapshot = Snapshot::False, Error err = key_not_found()) const {
-		return map(get(tr, snapshot), [=](Optional<T> val) -> T {
-			if (!val.present()) {
-				throw err;
-			}
-
-			return val.get();
-		});
-	}
-
-	template <class DB>
-	typename std::enable_if<is_transaction_creator<DB>, Future<Optional<T>>>::type get(
-	    Reference<DB> db,
-	    Snapshot snapshot = Snapshot::False) const {
-		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-			return self.get(tr, snapshot);
-		});
-	}
-
-	template <class DB>
-	typename std::enable_if<is_transaction_creator<DB>, Future<T>>::type getD(Reference<DB> db,
-	                                                                          Snapshot snapshot = Snapshot::False,
-	                                                                          T defaultValue = T()) const {
-		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-			return self.getD(tr, snapshot, defaultValue);
-		});
-	}
-
-	template <class DB>
-	typename std::enable_if<is_transaction_creator<DB>, Future<T>>::type getOrThrow(Reference<DB> db,
-	                                                                                Snapshot snapshot = Snapshot::False,
-	                                                                                Error err = key_not_found()) const {
-		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-			return self.getOrThrow(tr, snapshot, err);
-		});
-	}
-
-	template <class Transaction>
-	typename std::enable_if<!is_transaction_creator<Transaction>, void>::type set(Transaction tr, T const& val) {
-		tr->set(key, ObjectWriter::toValue(val, versionOptions));
-	}
-
-	template <class DB>
-	typename std::enable_if<is_transaction_creator<DB>, Future<Void>>::type set(Reference<DB> db, T const& val) {
-		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			self.set(tr, val);
-			return Future<Void>(Void());
-		});
-	}
-
-	template <class Transaction>
-	typename std::enable_if<!is_transaction_creator<Transaction>, void>::type clear(Transaction tr) {
-		tr->clear(key);
-	}
-
-	Key key;
-	VersionOptions versionOptions;
-};
-
-// Convenient read/write access to a sorted map of KeyType to ValueType under key prefix
-// ValueType is encoded / decoded with ObjectWriter/ObjectReader
-// Even though 'this' is not actually mutated, methods that change db keys are not const.
+// KeyBackedObjectMap is a convenience wrapper of KeyBackedMap which uses ObjectRWCodec<_ValueType, VersionOptions> as
+// the value codec
 template <typename _KeyType, typename _ValueType, typename VersionOptions, typename KeyCodec = TupleCodec<_KeyType>>
-class KeyBackedObjectMap {
+class KeyBackedObjectMap
+  : public KeyBackedMap<_KeyType, _ValueType, KeyCodec, ObjectRWCodec<_ValueType, VersionOptions>> {
+	typedef KeyBackedMap<_KeyType, _ValueType, KeyCodec, ObjectRWCodec<_ValueType, VersionOptions>> Base;
+	typedef ObjectRWCodec<_ValueType, VersionOptions> ObjectCodec;
+
 public:
-	KeyBackedObjectMap(KeyRef prefix, VersionOptions versionOptions)
-	  : subspace(prefixRange(prefix)), versionOptions(versionOptions) {}
-
-	typedef _KeyType KeyType;
-	typedef _ValueType ValueType;
-	typedef std::pair<KeyType, ValueType> PairType;
-	typedef KeyBackedRangeResult<PairType> RangeResultType;
-
-	template <class Transaction>
-	Future<RangeResultType> getRange(Transaction tr,
-	                                 Optional<KeyType> const& begin,
-	                                 Optional<KeyType> const& end,
-	                                 int limit,
-	                                 Snapshot snapshot = Snapshot::False,
-	                                 Reverse reverse = Reverse::False) const {
-		Key beginKey = begin.present() ? subspace.begin.withSuffix(KeyCodec::pack(begin.get())) : subspace.begin;
-		Key endKey = end.present() ? subspace.begin.withSuffix(KeyCodec::pack(end.get())) : subspace.end;
-
-		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
-		    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
-
-		return holdWhile(
-		    getRangeFuture,
-		    map(safeThreadFutureToFuture(getRangeFuture), [self = *this](RangeResult const& kvs) -> RangeResultType {
-			    RangeResultType rangeResult;
-			    for (int i = 0; i < kvs.size(); ++i) {
-				    KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(self.subspace.begin));
-				    ValueType val = ObjectReader::fromStringRef<ValueType>(kvs[i].value, self.versionOptions);
-				    rangeResult.results.push_back(PairType(key, val));
-			    }
-			    rangeResult.more = kvs.more;
-			    return rangeResult;
-		    }));
-	}
-
-	template <class Transaction>
-	Future<Optional<ValueType>> get(Transaction tr, KeyType const& key, Snapshot snapshot = Snapshot::False) const {
-		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture =
-		    tr->get(subspace.begin.withSuffix(KeyCodec::pack(key)), snapshot);
-
-		return holdWhile(getFuture,
-		                 map(safeThreadFutureToFuture(getFuture),
-		                     [vo = versionOptions](Optional<Value> const& val) -> Optional<ValueType> {
-			                     if (val.present())
-				                     return ObjectReader::fromStringRef<ValueType>(val.get(), vo);
-			                     return {};
-		                     }));
-	}
-
-	// Returns a Property that can be get/set that represents key's entry in this this.
-	KeyBackedObjectProperty<ValueType, VersionOptions> getProperty(KeyType const& key) const {
-		return KeyBackedObjectProperty<ValueType, VersionOptions>(subspace.begin.withSuffix(KeyCodec::pack(key)),
-		                                                          versionOptions);
-	}
-
-	// Returns the expectedSize of the set key
-	template <class Transaction>
-	int set(Transaction tr, KeyType const& key, ValueType const& val) {
-		Key k = subspace.begin.withSuffix(KeyCodec::pack(key));
-		Value v = ObjectWriter::toValue(val, versionOptions);
-		tr->set(k, v);
-		return k.expectedSize() + v.expectedSize();
-	}
-
-	Key serializeKey(KeyType const& key) { return subspace.begin.withSuffix(KeyCodec::pack(key)); }
-
-	Value serializeValue(ValueType const& val) { return ObjectWriter::toValue(val, versionOptions); }
-
-	template <class Transaction>
-	void erase(Transaction tr, KeyType const& key) {
-		tr->clear(subspace.begin.withSuffix(KeyCodec::pack(key)));
-	}
-
-	template <class Transaction>
-	void erase(Transaction tr, KeyType const& begin, KeyType const& end) {
-		tr->clear(KeyRangeRef(subspace.begin.withSuffix(KeyCodec::pack(begin)),
-		                      subspace.begin.withSuffix(KeyCodec::pack(end))));
-	}
-
-	template <class Transaction>
-	void clear(Transaction tr) {
-		tr->clear(subspace);
-	}
-
-	KeyRange subspace;
-	VersionOptions versionOptions;
+	KeyBackedObjectMap(KeyRef key, VersionOptions vo, Optional<WatchableTrigger> trigger = {})
+	  : Base(key, trigger, ObjectCodec(vo)) {}
 };
 
 template <typename _ValueType, typename Codec = TupleCodec<_ValueType>>
 class KeyBackedSet {
 public:
-	KeyBackedSet(KeyRef key) : subspace(prefixRange(key)) {}
+	KeyBackedSet(KeyRef key, Optional<WatchableTrigger> trigger = {}) : subspace(prefixRange(key)), trigger(trigger) {}
 
 	typedef _ValueType ValueType;
 	typedef KeyBackedRangeResult<ValueType> RangeResultType;
@@ -695,7 +581,7 @@ public:
 	template <class Transaction>
 	Future<bool> exists(Transaction tr, ValueType const& val, Snapshot snapshot = Snapshot::False) const {
 		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture =
-		    tr->get(subspace.begin.withSuffix(Codec::pack(val)), snapshot);
+		    tr->get(packKey(val), snapshot);
 
 		return holdWhile(getFuture, map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> bool {
 			                 return val.present();
@@ -705,36 +591,59 @@ public:
 	// Returns the expectedSize of the set key
 	template <class Transaction>
 	int insert(Transaction tr, ValueType const& val) {
-		Key k = subspace.begin.withSuffix(Codec::pack(val));
+		Key k = packKey(val);
 		tr->set(k, StringRef());
+		if (trigger.present()) {
+			trigger.get().update(tr);
+		}
 		return k.expectedSize();
 	}
 
 	template <class Transaction>
 	void erase(Transaction tr, ValueType const& val) {
-		tr->clear(subspace.begin.withSuffix(Codec::pack(val)));
+		tr->clear(packKey(val));
+		if (trigger.present()) {
+			trigger.get().update(tr);
+		}
 	}
 
 	template <class Transaction>
 	void erase(Transaction tr, ValueType const& begin, ValueType const& end) {
-		tr->clear(
-		    KeyRangeRef(subspace.begin.withSuffix(Codec::pack(begin)), subspace.begin.withSuffix(Codec::pack(end))));
+		tr->clear(KeyRangeRef(packKey(begin), packKey(end)));
+		if (trigger.present()) {
+			trigger.get().update(tr);
+		}
 	}
 
 	template <class Transaction>
 	void clear(Transaction tr) {
 		tr->clear(subspace);
+		if (trigger.present()) {
+			trigger.get().update(tr);
+		}
 	}
 
 	KeyRange subspace;
+	Optional<WatchableTrigger> trigger;
+
+	Key packKey(ValueType const& value) const { return subspace.begin.withSuffix(Codec::pack(value)); }
 };
 
-// all fields are under prefix, the schema is like prefix/"packed key"/"packed key2"
-class KeyBackedStruct {
+
+// KeyBackedClass is a convenient base class for a set of related KeyBacked types that exist
+// under a single key prefix and other help functions relevant to the concepts that the class
+// represent.
+//
+// A WatchableTrigger called trigger is provided, which a default key which is under the struct's
+// root space.  Alternatively, a custom WatchableTrigger can be provided to the constructor
+// to use any other database key instead.
+
+class KeyBackedClass {
 public:
-	KeyBackedStruct(StringRef prefix) : prefix(prefix), rootSpace(prefix) {}
+	KeyBackedClass(StringRef prefix, Optional<Key> triggerOverride = {})
+	  : subSpace(prefix), trigger(triggerOverride.orDefault(subSpace.pack("_changeTrigger"_sr))) {}
 
 protected:
-	Key prefix;
-	Subspace rootSpace;
+	Subspace subSpace;
+	WatchableTrigger trigger;
 };
