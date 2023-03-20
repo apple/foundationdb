@@ -165,7 +165,7 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 		                                       .anyZeroHealthyTeams = zeroHealthyTeams,
 		                                       .shards = &shards,
 		                                       .trackerCancelled = &ddcx.trackerCancelled,
-		                                       .ddTenantCache = {}});
+		                                       .ddTenantCache = {} });
 		actors.add(DataDistributionTracker::run(shardTracker,
 		                                        initData,
 		                                        getShardMetrics.getFuture(),
