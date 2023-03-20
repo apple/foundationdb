@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include <climits>
 #include <limits>
 #include <numeric>
 #include <utility>
@@ -32,9 +31,6 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
-#include "fdbserver/MovingWindow.h"
-#include "fdbserver/DDSharedContext.h"
-#include "fdbclient/DatabaseContext.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
@@ -530,7 +526,8 @@ DDQueue::DDQueue(DDQueueInitParams const& params)
     rawProcessingUnhealthy(new AsyncVar<bool>(false)), rawProcessingWiggle(new AsyncVar<bool>(false)),
     unhealthyRelocations(0), movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")),
     moveReusePhysicalShard(0), moveCreateNewPhysicalShard(0),
-    retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0) {}
+    retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0),
+    moveBytesRate(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL) {}
 
 void DDQueue::startRelocation(int priority, int healthPriority) {
 	// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,

@@ -21,6 +21,8 @@
 #define FOUNDATIONDB_DDRELOCATIONQUEUE_H
 
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/MovingWindow.h"
+
 // send request/signal to DDRelocationQueue through interface
 // call synchronous method from components outside DDRelocationQueue
 struct IDDRelocationQueue {
@@ -290,6 +292,8 @@ struct DDQueue : public IDDRelocationQueue, ReferenceCounted<DDQueue> {
 		NumberOfTypes,
 	};
 	std::vector<int> retryFindDstReasonCount;
+
+	MovingWindow<int64_t> moveBytesRate;
 
 	DDQueue() = default;
 
