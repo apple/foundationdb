@@ -2936,7 +2936,12 @@ Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenant
 	results.reserve(futures.size());
 	for (int i = 0; i < futures.size(); ++i) {
 		const MetaclusterTenantMapEntry& entry = futures[i].get().get();
-		results.emplace_back(entry.tenantName, entry);
+
+		// Tenants being renamed show up in tenantIds twice, once under each name. The destination name will be
+		// different from the tenant entry and is filtered from the list
+		if (entry.tenantName == tenantIds[i].first) {
+			results.emplace_back(entry.tenantName, entry);
+		}
 	}
 
 	return results;
