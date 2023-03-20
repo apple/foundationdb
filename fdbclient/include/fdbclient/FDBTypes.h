@@ -341,6 +341,10 @@ struct KeyRangeRef {
 				return false; // uncovered gap between clone.begin and r.begin
 			if (clone.end <= r.end)
 				return true; // range is fully covered
+			// If a range of ranges is totally at the left of clone,
+			// clone needs not update
+			// If a range of ranges is partially at the left of clone,
+			// clone = clone - the overlap
 			if (clone.end > r.end && r.end > clone.begin)
 				// {clone.begin, r.end} is covered. need to check coverage for {r.end, clone.end}
 				clone = KeyRangeRef(r.end, clone.end);

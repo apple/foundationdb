@@ -140,6 +140,7 @@ ERROR( key_value_store_deadline_exceeded, 1224, "Exceeded maximum time allowed t
 ERROR( storage_quota_exceeded, 1225, "Exceeded the maximum storage quota allocated to the tenant.")
 ERROR( audit_storage_error, 1226, "Found data corruption" )
 ERROR( master_failed, 1227, "Cluster recovery terminating because master has failed")
+ERROR( test_failed, 1228, "Test failed" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -220,7 +221,8 @@ ERROR( invalid_checkpoint_format, 2044, "Invalid checkpoint format" )
 ERROR( invalid_throttle_quota_value, 2045, "Invalid quota value. Note that reserved_throughput cannot exceed total_throughput" )
 ERROR( failed_to_create_checkpoint, 2046, "Failed to create a checkpoint" )
 ERROR( failed_to_restore_checkpoint, 2047, "Failed to restore a checkpoint" )
-ERROR( failed_to_create_checkpoint_shard_metadata, 2048, "Failed to dump shard metadata for a checkpoint to a sst file")
+ERROR( failed_to_create_checkpoint_shard_metadata, 2048, "Failed to dump shard metadata for a checkpoint to a sst file" )
+ERROR( address_parse_error, 2049, "Failed to parse address" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )
@@ -278,6 +280,7 @@ ERROR( cluster_restoring, 2170, "The cluster is being restored to the metacluste
 ERROR( invalid_data_cluster, 2171, "The data cluster being restored has no record of its metacluster" )
 ERROR( metacluster_mismatch, 2172, "The cluster does not have the expected name or is associated with a different metacluster" )
 ERROR( conflicting_restore, 2173, "Another restore is running for the same data cluster" )
+ERROR( invalid_metacluster_configuration, 2174, "Metacluster configuration is invalid" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

@@ -20,7 +20,7 @@
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/EncryptKeyProxyInterface.h"
-#include "fdbclient/GetEncryptCipherKeys.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
 
 #include "fdbrpc/Locality.h"
 
@@ -79,8 +79,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			domainIds.emplace(domainId);
 		}
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> latestCiphers =
-		    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestEncryptCipherKeys(
-		        self->dbInfo, domainIds, BlobCipherMetrics::UsageType::TEST));
+		    wait(getLatestEncryptCipherKeys(self->dbInfo, domainIds, BlobCipherMetrics::UsageType::TEST));
 
 		ASSERT_EQ(latestCiphers.size(), domainIds.size());
 
@@ -106,8 +105,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			domainIds.emplace(domainId);
 		}
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> latestCiphers =
-		    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestEncryptCipherKeys(
-		        self->dbInfo, domainIds, BlobCipherMetrics::UsageType::TEST));
+		    wait(getLatestEncryptCipherKeys(self->dbInfo, domainIds, BlobCipherMetrics::UsageType::TEST));
 
 		TraceEvent("SimPartialDomainIdCacheEnd");
 		return Void();
@@ -124,8 +122,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		}
 
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> latestCiphers =
-		    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestEncryptCipherKeys(
-		        self->dbInfo, domainIds, BlobCipherMetrics::UsageType::TEST));
+		    wait(getLatestEncryptCipherKeys(self->dbInfo, domainIds, BlobCipherMetrics::UsageType::TEST));
 		state std::vector<Reference<BlobCipherKey>> cipherKeysVec;
 		for (auto item : latestCiphers) {
 			cipherKeysVec.push_back(item.second);
@@ -152,8 +149,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			}
 
 			std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys =
-			    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
-			        self->dbInfo, cipherDetails, BlobCipherMetrics::UsageType::TEST));
+			    wait(getEncryptCipherKeys(self->dbInfo, cipherDetails, BlobCipherMetrics::UsageType::TEST));
 			// Ensure the sanity of the lookedup data
 			for (auto item : cipherKeys) {
 				bool found = false;
@@ -187,8 +183,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			}
 			domainIds.emplace(FDB_DEFAULT_ENCRYPT_DOMAIN_ID - 1);
 			std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> res =
-			    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestEncryptCipherKeys(
-			        self->dbInfo, domainIds, BlobCipherMetrics::UsageType::TEST));
+			    wait(getLatestEncryptCipherKeys(self->dbInfo, domainIds, BlobCipherMetrics::UsageType::TEST));
 			// BlobCipherKeyCache is 'empty'; fetching invalid cipher from KMS must through 'encrypt_key_not_found'
 			ASSERT(false);
 		} catch (Error& e) {

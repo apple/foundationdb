@@ -1509,6 +1509,7 @@ DBType getDBType(std::string dbType) {
 }
 
 ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
+                                         IPAddress localIP,
                                          std::string name,
                                          std::string id,
                                          ProgramExe exe,
@@ -1544,6 +1545,9 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 	o.create("main_thread_cpu_seconds") = getProcessorTimeThread();
 	o.create("process_cpu_seconds") = getProcessorTimeProcess();
 	o.create("configured_workers") = CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT;
+	o.create("processID") = ::getpid();
+	o.create("locality") = tr->getDatabase()->clientLocality.toJSON<json_spirit::mObject>();
+	o.create("networkAddress") = localIP.toString();
 
 	if (exe == ProgramExe::AGENT) {
 		static S3BlobStoreEndpoint::Stats last_stats;
@@ -1789,6 +1793,21 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(statusUpdateDest));
 	state Future<Void> pollRateUpdater;
 
+	// In order to report a useful networkAddress to the cluster's layer status JSON object, determine which local
+	// network interface IP will be used to talk to the cluster.  This is a blocking call, so it is only done once,
+	// and in a retry loop because if we can't connect to the cluster we can't do any work anyway.
+	state IPAddress localIP;
+
+	loop {
+		try {
+			localIP = statusUpdateDest->getConnectionRecord()->getConnectionString().determineLocalSourceIP();
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "AgentCouldNotDetermineLocalIP").error(e);
+			wait(delay(1.0));
+		}
+	}
+
 	// Register the existence of this layer in the meta key space
 	loop {
 		try {
@@ -1811,7 +1830,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 					state Future<std::string> futureStatusDoc =
-					    getLayerStatus(tr, name, id, exe, taskDest, Snapshot::True);
+					    getLayerStatus(tr, localIP, name, id, exe, taskDest, Snapshot::True);
 					wait(cleanupStatus(tr, rootKey, name, id));
 					std::string statusdoc = wait(futureStatusDoc);
 					tr->set(instanceKey, statusdoc);

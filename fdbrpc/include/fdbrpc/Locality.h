@@ -322,6 +322,23 @@ public:
 		return infoString;
 	}
 
+	// Convert locality fields to a JSON object.  This is a template because it works with JSONBuilder, StatusObject,
+	// and json_spirit::mObject, and none of these types are in the fdbrpc/ project.
+	template <typename JSONType>
+	JSONType toJSON() const {
+		JSONType obj;
+
+		for (auto it = _data.begin(); it != _data.end(); it++) {
+			if (it->second.present()) {
+				obj[it->first.toString()] = it->second.get().toString();
+			} else {
+				obj[it->first.toString()] = nullptr;
+			}
+		}
+
+		return obj;
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		// Locality is persisted in the database inside StorageServerInterface, so changes here have to be

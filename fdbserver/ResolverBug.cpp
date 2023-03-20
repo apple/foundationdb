@@ -1,9 +1,9 @@
 /*
- * genericactors.actor.cpp
+ * ResolverBug.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2023 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,19 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "fdbserver/ResolverBug.h"
 
-#include "flow/flow.h"
-#include "fdbrpc/genericactors.actor.h" // Gets genericactors.actor.g.h indirectly
-#include "flow/network.h"
-#include "fdbrpc/simulator.h"
-#include "flow/actorcompiler.h"
-
-ACTOR Future<Void> disableConnectionFailuresAfter(double time, std::string context) {
-	if (g_network->isSimulated()) {
-		wait(delayUntil(time));
-		g_simulator->connectionFailuresDisableDuration = 1e6;
-		g_simulator->speedUpSimulation = true;
-		TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
-	}
-	return Void();
+std::shared_ptr<ISimBug> ResolverBugID::create() const {
+	return std::make_shared<ResolverBug>();
 }
