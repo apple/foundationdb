@@ -9142,7 +9142,7 @@ ACTOR static Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getChe
 		TraceEvent(SevDebug, "GetCheckpointShardEnd")
 		    .detail("Range", locations[index].range)
 		    .detail("Checkpoint", futures[index].get().toString());
-		res.push_back(std::make_pair(locations[index].range, futures[index].get()));
+		res.emplace_back(locations[index].range, futures[index].get());
 	}
 	return res;
 }

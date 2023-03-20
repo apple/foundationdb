@@ -263,7 +263,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		}
 
 		// Fetch checkpoint.
-		state std::string checkpointDir = abspath("fetchedCheckpoints");
+		state std::string checkpointDir = abspath("fetchedCheckpoints" + deterministicRandom()->randomAlphaNumeric(6));
 		platform::eraseDirectoryRecursive(checkpointDir);
 		ASSERT(platform::createDirectory(checkpointDir));
 		state std::vector<Future<CheckpointMetaData>> checkpointFutures;
