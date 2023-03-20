@@ -271,17 +271,26 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		loop {
 			checkpointFutures.clear();
 			try {
-				for (int i = 0; i < records.size(); ++i) {
-					TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", records[i].second.toString());
-					state std::string currentDir = fetchedCheckpointDir(checkpointDir, records[i].second.checkpointID);
-					platform::eraseDirectoryRecursive(currentDir);
-					ASSERT(platform::createDirectory(currentDir));
-					if (asKeyValues) {
+				if (asKeyValues) {
+					for (int i = 0; i < records.size(); ++i) {
+						TraceEvent(SevDebug, "TestFetchingCheckpoint")
+						    .detail("Checkpoint", records[i].second.toString());
+						const std::string currentDir =
+						    fetchedCheckpointDir(checkpointDir, records[i].second.checkpointID);
+						platform::eraseDirectoryRecursive(currentDir);
+						ASSERT(platform::createDirectory(currentDir));
 						checkpointFutures.push_back(
 						    fetchCheckpointRanges(cx, records[i].second, currentDir, { records[i].first }));
-					} else {
-						checkpointFutures.push_back(fetchCheckpoint(cx, records[i].second, currentDir));
 					}
+				} else {
+					for (int i = 1; i < records.size(); ++i) {
+						ASSERT(records[i].second.checkpointID == records[i - 1].second.checkpointID);
+					}
+					const std::string currentDir =
+					    fetchedCheckpointDir(checkpointDir, records.front().second.checkpointID);
+					platform::eraseDirectoryRecursive(currentDir);
+					ASSERT(platform::createDirectory(currentDir));
+					checkpointFutures.push_back(fetchCheckpoint(cx, records.front().second, currentDir));
 				}
 				wait(store(fetchedCheckpoints, getAll(checkpointFutures)));
 				TraceEvent(SevDebug, "TestCheckpointFetched").detail("Checkpoints", describe(fetchedCheckpoints));
