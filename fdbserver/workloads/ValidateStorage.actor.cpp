@@ -83,13 +83,16 @@ struct ValidateStorage : TestWorkload {
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId).detail("AuditType", type);
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e).detail("AuditType", type).detail("SuccessiveTimedOut", numSuccessiveTimedout);
-				if (e.code()==error_code_timed_out) {
+				TraceEvent(SevWarn, "StartAuditStorageError")
+				    .errorUnsuppressed(e)
+				    .detail("AuditType", type)
+				    .detail("SuccessiveTimedOut", numSuccessiveTimedout);
+				if (e.code() == error_code_timed_out) {
 					numSuccessiveTimedout++;
 				} else {
 					numSuccessiveTimedout = 0;
 				}
-				if (numSuccessiveTimedout>1) {
+				if (numSuccessiveTimedout > 1) {
 					return Void();
 				}
 				wait(delay(1));
@@ -119,13 +122,13 @@ struct ValidateStorage : TestWorkload {
 				    .errorUnsuppressed(e)
 				    .detail("AuditID", auditId)
 				    .detail("AuditType", type)
-					.detail("SuccessiveTimedOut", numSuccessiveTimedout);
-				if (e.code()==error_code_timed_out) {
+				    .detail("SuccessiveTimedOut", numSuccessiveTimedout);
+				if (e.code() == error_code_timed_out) {
 					numSuccessiveTimedout++;
 				} else {
 					numSuccessiveTimedout = 0;
 				}
-				if (numSuccessiveTimedout>1) {
+				if (numSuccessiveTimedout > 1) {
 					return Void();
 				}
 				wait(delay(1));
@@ -145,13 +148,16 @@ struct ValidateStorage : TestWorkload {
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId_).detail("AuditType", type);
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e).detail("AuditType", type).detail("SuccessiveTimedOut", numSuccessiveTimedout);
-				if (e.code()==error_code_timed_out) {
+				TraceEvent(SevWarn, "StartAuditStorageError")
+				    .errorUnsuppressed(e)
+				    .detail("AuditType", type)
+				    .detail("SuccessiveTimedOut", numSuccessiveTimedout);
+				if (e.code() == error_code_timed_out) {
 					numSuccessiveTimedout++;
 				} else {
 					numSuccessiveTimedout = 0;
 				}
-				if (numSuccessiveTimedout>1) {
+				if (numSuccessiveTimedout > 1) {
 					return Void();
 				}
 				wait(delay(1));
