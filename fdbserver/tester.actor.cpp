@@ -1174,7 +1174,7 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 			if (e.code() == error_code_timed_out) {
 				TraceEvent(SevDebug, "AuditStorageCorrectnessTimedout")
 				    .detail("Range", req.range)
-				    .detail("AuditType", req.type);
+				    .detail("AuditType", req.getType());
 				auditTrigger = false;
 				break;
 			} else {
@@ -1222,8 +1222,6 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 					}
 				}
 				if (readLatestResult.present()) {
-					TraceEvent(SevInfo, "AuditStorageCorrectnessReadLatestResult")
-					    .detail("AuditStorageState", readLatestResult.get().toString());
 					if (readLatestResult.get().getPhase() == AuditPhase::Running) {
 						wait(delay(30));
 						continue;

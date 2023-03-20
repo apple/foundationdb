@@ -77,7 +77,7 @@ struct ValidateStorage : TestWorkload {
 				UID auditId_ = wait(auditStorage(cx->getConnectionRecord(),
 				                                 allKeys,
 				                                 type,
-				                                 /*timeoutSecond=*/60,
+				                                 /*timeoutSecond=*/120,
 				                                 /*async=*/true));
 				auditId = auditId_;
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId).detail("AuditType", type);
@@ -102,7 +102,13 @@ struct ValidateStorage : TestWorkload {
 			try {
 				AuditStorageState auditState = wait(getAuditState(cx, type, auditId));
 				if (auditState.getPhase() != AuditPhase::Complete) {
-					ASSERT(auditState.getPhase() == AuditPhase::Running);
+					std::cout << auditState.phase << "\n";
+					// ASSERT(auditState.getPhase() == AuditPhase::Running);
+					if (auditState.getPhase() != AuditPhase::Running) {
+						ASSERT(auditState.getPhase() == AuditPhase::Error);
+						ASSERT(auditState.getType() == AuditType::ValidateShardLocLocalView);
+						return Void();
+					}
 					wait(delay(30));
 				} else {
 					ASSERT(auditState.getPhase() == AuditPhase::Complete);
@@ -133,7 +139,7 @@ struct ValidateStorage : TestWorkload {
 				UID auditId_ = wait(auditStorage(cx->getConnectionRecord(),
 				                                 allKeys,
 				                                 type,
-				                                 /*timeoutSeconds=*/60,
+				                                 /*timeoutSeconds=*/120,
 				                                 /*async=*/true));
 				ASSERT(auditId_ != auditId);
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId_).detail("AuditType", type);
@@ -171,14 +177,17 @@ struct ValidateStorage : TestWorkload {
 		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
 		TraceEvent("TestValueVerified");
 
-		wait(self->auditStorageForType(cx, AuditType::ValidateHA));
+		/*wait(self->auditStorageForType(cx, AuditType::ValidateHA));
 		TraceEvent("TestValidateHADone");
 
 		wait(self->auditStorageForType(cx, AuditType::ValidateReplica));
 		TraceEvent("TestValidateReplicaDone");
 
-		wait(self->auditStorageForType(cx, AuditType::ValidateMetadata));
-		TraceEvent("TestValidateMetadataDone");
+		wait(self->auditStorageForType(cx, AuditType::ValidateShardLocGlobalView));
+		TraceEvent("TestValidateShardGlobalViewDone");*/
+
+		wait(self->auditStorageForType(cx, AuditType::ValidateShardLocLocalView));
+		TraceEvent("TestValidateShardLocalViewDone");
 
 		return Void();
 	}

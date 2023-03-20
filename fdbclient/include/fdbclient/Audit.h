@@ -36,9 +36,9 @@ enum class AuditPhase : uint8_t {
 enum class AuditType : uint8_t {
 	Invalid = 0,
 	ValidateHA = 1,
-	LocationMetadata = 2,
-	ValidateReplica = 3,
-	ValidateMetadata = 4,
+	ValidateReplica = 2,
+	ValidateShardLocGlobalView = 3,
+	ValidateShardLocLocalView = 4,
 };
 
 struct AuditStorageState {

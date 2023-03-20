@@ -44,8 +44,10 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 		type = AuditType::ValidateHA;
 	} else if (tokencmp(tokens[1], "replica")) {
 		type = AuditType::ValidateReplica;
-	} else if (tokencmp(tokens[1], "metadata")) {
-		type = AuditType::ValidateMetadata;
+	} else if (tokencmp(tokens[1], "shardglobal")) {
+		type = AuditType::ValidateShardLocGlobalView;
+	} else if (tokencmp(tokens[1], "shardlocal")) {
+		type = AuditType::ValidateShardLocLocalView;
 	} else {
 		printUsage(tokens[0]);
 		return UID();
