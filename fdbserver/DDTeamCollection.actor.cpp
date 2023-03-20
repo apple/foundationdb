@@ -2899,8 +2899,7 @@ public:
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				auto property = metadataMap.getProperty(server->getId());
-				Optional<StorageMetadataType> metadata = wait(property.get(tr));
+				Optional<StorageMetadataType> metadata = wait(metadataMap.get(tr, server->getId()));
 				// NOTE: in upgrade testing, there may not be any metadata
 				if (metadata.present()) {
 					data.createdTime = metadata.get().createdTime;
