@@ -9798,9 +9798,9 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		    .detail("Checkpoint", checkpointResult.toString())
 		    .detail("BytesSampleFile", sampleByteSstFileCreated ? bytesSampleFile : "noFileCreated");
 	} catch (Error& e) {
-        if (e.code() == error_code_actor_cancelled) {
-            throw;
-        }
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		// If checkpoint creation fails, the failure is persisted.
 		checkpointResult = metaData;
 		checkpointResult.setState(CheckpointMetaData::Fail);
@@ -9819,9 +9819,9 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		TraceEvent("StorageCreateCheckpointPersisted", data->thisServerID)
 		    .detail("Checkpoint", checkpointResult.toString());
 	} catch (Error& e) {
-        if (e.code() == error_code_actor_cancelled) {
-            throw;
-        }
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		// If the checkpoint meta data is not persisted successfully, remove the checkpoint.
 		TraceEvent(SevWarn, "StorageCreateCheckpointPersistFailure", data->thisServerID)
 		    .errorUnsuppressed(e)
