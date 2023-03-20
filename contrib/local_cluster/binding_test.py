@@ -59,10 +59,6 @@ def _setup_logs(log_level: int = logging.INFO):
     lib_logger.addHandler(stdout_handler)
     lib_logger.setLevel(log_level)
 
-    local_cluster_logger = logging.getLogger("lib.local_cluster")
-    local_cluster_logger.addHandler(stdout_handler)
-    local_cluster_logger.setLevel(log_level)
-
 
 def _setup_args() -> argparse.Namespace:
     """Parse the command line arguments"""
