@@ -1413,7 +1413,7 @@ DataDistributionTracker::DataDistributionTracker(DataDistributionTrackerInitPara
     output(params.output), shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
     physicalShardCollection(params.physicalShardCollection), readyToStart(params.readyToStart),
     anyZeroHealthyTeams(params.anyZeroHealthyTeams), trackerCancelled(params.trackerCancelled),
-    ddTenantCache(params.ddTenantCache), customReplication(params.customReplication) {}
+    ddTenantCache(params.ddTenantCache) {}
 
 DataDistributionTracker::~DataDistributionTracker() {
 	if (trackerCancelled) {
@@ -1428,6 +1428,7 @@ struct DataDistributionTrackerImpl {
 		state Future<Void> loggingTrigger = Void();
 		state Future<Void> readHotDetect = readHotDetector(self);
 		state Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
+
 		try {
 			wait(trackInitialShards(self, initData));
 			initData.clear(); // Release reference count.
@@ -1485,6 +1486,7 @@ Future<Void> DataDistributionTracker::run(Reference<DataDistributionTracker> sel
 	self->getTopKMetrics = getTopKMetrics;
 	self->getShardMetricsList = getShardMetricsList;
 	self->averageShardBytes = getAverageShardBytes;
+	self->customReplication = initData->customReplication;
 	return holdWhile(self, DataDistributionTrackerImpl::run(self.getPtr(), initData));
 }
 
