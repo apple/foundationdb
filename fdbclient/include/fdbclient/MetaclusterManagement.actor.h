@@ -2603,10 +2603,7 @@ struct CreateTenantImpl {
 			ASSERT(tenantIdPrefix.present());
 			lastId = tenantIdPrefix.get() << 48;
 		}
-		if (!TenantAPI::nextTenantIdPrefixMatches(lastId.get(), lastId.get() + 1)) {
-			throw cluster_no_capacity();
-		}
-		self->tenantEntry.setId(lastId.get() + 1);
+		self->tenantEntry.setId(TenantAPI::computeNextTenantId(lastId.get(), 1));
 		ManagementClusterMetadata::tenantMetadata().lastTenantId.set(tr, self->tenantEntry.id);
 
 		self->tenantEntry.tenantState = MetaclusterAPI::TenantState::REGISTERING;
