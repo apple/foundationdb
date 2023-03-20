@@ -1084,7 +1084,7 @@ public:
 			auto existingShard = it.value()->physicalShard;
 			auto shardRange = it.range();
 
-			if (SERVER_KNOBS->ROCKSDB_EMPTY_RANGE_CHECK) {
+			if (SERVER_KNOBS->ROCKSDB_EMPTY_RANGE_CHECK && existingShard->initialized()) {
 				// Enable consistency validation.
 				RangeResult rangeResult;
 				auto bytesRead = readRangeInDb(existingShard, range, 1, UINT16_MAX, &rangeResult);
