@@ -54,6 +54,7 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/MoveKeys.actor.h"
 #include "flow/Platform.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -2038,6 +2039,14 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 
 		ASSERT(g_simulator->storagePolicy && g_simulator->tLogPolicy);
 		ASSERT(!g_simulator->hasSatelliteReplication || g_simulator->satelliteTLogPolicy);
+
+		if (deterministicRandom()->random01() < 1 && (g_simulator->storagePolicy->info() == "zoneid^1 x 1" ||
+		                                              g_simulator->storagePolicy->info() == "zoneid^2 x 1")) {
+			g_simulator->customReplicas.push_back(std::make_tuple("\xff\x03", "\xff\x04", 3));
+			g_simulator->customReplicas.push_back(std::make_tuple("\xff\x04", "\xff\x05", 3));
+			TraceEvent("SettingCustomReplicas");
+			MoveKeysLock lock = wait(takeMoveKeysLock(cx, UID()));
+		}
 	}
 
 	if (useDB) {

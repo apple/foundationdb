@@ -478,7 +478,8 @@ struct DDShardInfo {
 };
 
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
-	InitialDataDistribution() : dataMoveMap(std::make_shared<DataMove>()) {}
+	InitialDataDistribution()
+	  : dataMoveMap(std::make_shared<DataMove>()), customReplication(makeReference<KeyRangeMap<int>>(-1)) {}
 
 	// Read from dataDistributionModeKey. Whether DD is disabled. DD can be disabled persistently (mode = 0). Set mode
 	// to 1 will enable all disabled parts
@@ -490,6 +491,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	Optional<Key> initHealthyZoneValue; // set for maintenance mode
 	KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
 	std::vector<AuditStorageState> auditStates;
+	Reference<KeyRangeMap<int>> customReplication;
 };
 
 // Holds the permitted size and IO Bounds for a shard
@@ -510,6 +512,8 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
 
 // Determines the maximum shard size based on the size of the database
 int64_t getMaxShardSize(double dbSizeEstimate);
+
+bool ddLargeTeamEnabled();
 
 #ifndef __INTEL_COMPILER
 #pragma endregion

@@ -1893,6 +1893,10 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 			} else if (highestPriority == SERVER_KNOBS->PRIORITY_TEAM_HEALTHY) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy";
+			} else if (highestPriority == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE) {
+				stateSectionObj["healthy"] = true;
+				stateSectionObj["name"] = "healthy_perpetual_wiggle";
+				stateSectionObj["description"] = "Wiggling storage server";
 			} else if (highestPriority >= SERVER_KNOBS->PRIORITY_RECOVER_MOVE) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy_rebalancing";

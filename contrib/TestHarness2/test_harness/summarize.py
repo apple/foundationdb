@@ -318,6 +318,8 @@ class Summary:
         self.test_dir: Path | None = None
         self.is_negative_test = False
         self.negative_test_success = False
+        self.max_trace_time = -1
+        self.max_trace_time_type = 'None'
 
         if uid is not None:
             self.out.attributes['TestUID'] = str(uid)
@@ -439,6 +441,8 @@ class Summary:
         if not self.test_end_found:
             child = SummaryTree('TestUnexpectedlyNotFinished')
             child.attributes['Severity'] = '40'
+            child.attributes['LastTraceTime'] = str(self.max_trace_time)
+            child.attributes['LastTraceType'] = self.max_trace_time_type
             self.out.append(child)
             self.error = True
         if self.error_out is not None and len(self.error_out) > 0:
@@ -516,6 +520,17 @@ class Summary:
                 return str(self.severity_map[k])
 
         self.handler.add_handler(('Severity', None), remap_event_severity)
+
+        def get_max_trace_time(attrs):
+            if 'Type' not in attrs:
+                return None
+            time = float(attrs['Time'])
+            if time >= self.max_trace_time:
+                self.max_trace_time = time
+                self.max_trace_time_type = attrs['Type']
+            return None
+
+        self.handler.add_handler(('Time', None), get_max_trace_time)
 
         def program_start(attrs: Dict[str, str]):
             if self.test_begin_found:

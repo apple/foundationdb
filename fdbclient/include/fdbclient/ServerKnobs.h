@@ -142,24 +142,50 @@ public:
 	//   is possible within but not between priority groups; fewer priority groups
 	//   mean better worst case time bounds
 	// Maximum allowable priority is 999.
+	// Update the status json .data.team_tracker.state field when necessary
+	//
+	// Priority for movement resume from previous unfinished in-flight movement when a new DD
+	// start
 	int PRIORITY_RECOVER_MOVE;
+	// A load-balance priority for disk valley filler
 	int PRIORITY_REBALANCE_UNDERUTILIZED_TEAM;
+	// A load-balance priority disk mountain chopper
 	int PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
+	// A load-balance priority read valley filler
 	int PRIORITY_REBALANCE_READ_OVERUTIL_TEAM;
+	// A load-balance priority read mountain chopper
 	int PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM;
+	// A team healthy priority for wiggle a storage server
 	int PRIORITY_PERPETUAL_STORAGE_WIGGLE;
+	// A team healthy priority when all servers in a team are healthy. When a team changes from any unhealthy states to
+	// healthy, the unfinished relocations will be overriden to healthy priority
 	int PRIORITY_TEAM_HEALTHY;
+	// A team healthy priority when there's undesired servers in the team. (ex. same ip
+	// address as other SS process, or SS is lagging too far ...)
 	int PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
+	// A team healthy priority for removing redundant team to make the team count within a good range
 	int PRIORITY_TEAM_REDUNDANT;
+	// A shard boundary priority for merge small and write cold shard.
 	int PRIORITY_MERGE_SHARD;
+	// A team healthy priority for populate remote region
 	int PRIORITY_POPULATE_REGION;
+	// A team healthy priority when the replica > 3 and there's at least one unhealthy server in a team.
+	// Or when the team contains a server with wrong configuration (ex. storage engine,
+	// locality, excluded ...)
 	int PRIORITY_TEAM_UNHEALTHY;
+	// A team healthy priority when there should be >= 3 replicas and there's 2 healthy servers in a team
 	int PRIORITY_TEAM_2_LEFT;
+	// A team healthy priority when there should be >= 2 replicas and there's 1 healthy server in a team
 	int PRIORITY_TEAM_1_LEFT;
-	int PRIORITY_TEAM_FAILED; // Priority when a server in the team is excluded as failed
+	// A team healthy priority when a server in the team is excluded as failed
+	int PRIORITY_TEAM_FAILED;
+	// A team healthy priority when there's no healthy server in a team
 	int PRIORITY_TEAM_0_LEFT;
+	// A shard boundary priority for split large or write hot shard.
 	int PRIORITY_SPLIT_SHARD;
-	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD; // Priority when a physical shard is oversize or anonymous
+	// Priority when a physical shard is oversize or anonymous. When DD enable physical shard, the shard created before
+	// it are default to be 'anonymous' for compatibility.
+	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD;
 
 	// Data distribution
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
@@ -278,6 +304,13 @@ public:
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 	int DD_BUILD_EXTRA_TEAMS_OVERRIDE; // build extra teams to allow data movement to progress. must be larger than 0
+	int DD_MAXIMUM_LARGE_TEAMS; // the maximum number of large teams data distribution will maintain
+	int DD_MAXIMUM_LARGE_TEAM_CLEANUP; // the maximum number of large teams data distribution will attempt to cleanup
+	                                   // without yielding
+	double DD_LARGE_TEAM_DELAY; // the amount of time data distribution will wait before returning less replicas than
+	                            // requested
+	double DD_FIX_WRONG_REPLICAS_DELAY; // the amount of time between attempts to increase the replication factor of
+	                                    // under replicated shards
 
 	// Run storage enginee on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;
@@ -750,6 +783,9 @@ public:
 	int64_t EMPTY_READ_PENALTY;
 	int DD_SHARD_COMPARE_LIMIT; // when read-aware DD is enabled, at most how many shards are compared together
 	bool READ_SAMPLING_ENABLED;
+	// Rolling window duration over which the average bytes moved by DD is calculated for the 'MovingData' trace event.
+	double DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL;
+	int64_t MOVING_WINDOW_SAMPLE_SIZE;
 
 	// Storage Server
 	double STORAGE_LOGGING_DELAY;

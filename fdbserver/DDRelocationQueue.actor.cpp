@@ -18,17 +18,21 @@
  * limitations under the License.
  */
 
+#include <climits>
 #include <limits>
 #include <numeric>
+#include <utility>
 #include <vector>
 
 #include "flow/ActorCollection.h"
+#include "flow/Deque.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/MovingWindow.h"
 #include "fdbserver/DDSharedContext.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/MoveKeys.actor.h"
@@ -1257,6 +1261,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				while (tciIndex < self->teamCollections.size()) {
 					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && rd.isRestore()) {
 						auto req = GetTeamRequest(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest);
+						req.keys = rd.keys;
 						Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
 						    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
 						bestTeamReady = fbestTeam.isReady();
@@ -1298,7 +1303,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						                          TeamMustHaveShards::False,
 						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
 						                          PreferLowerReadUtil::True,
-						                          inflightPenalty);
+						                          inflightPenalty,
+						                          rd.keys);
 
 						req.src = rd.src;
 						req.completeSources = rd.completeSources;
@@ -1320,6 +1326,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 								// Exists a remoteTeam in the mapping that has the physicalShardIDCandidate
 								// use the remoteTeam with the physicalShard as the bestTeam
 								req = GetTeamRequest(remoteTeamWithPhysicalShard.first.get().servers);
+								req.keys = rd.keys;
 							}
 						}
 
@@ -1576,7 +1583,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			for (auto& destTeam : destinationTeams) {
 				totalIds += destTeam.servers.size();
 			}
-			if (totalIds != self->teamSize) {
+			if (totalIds < self->teamSize) {
 				TraceEvent(SevWarn, "IncorrectDestTeamSize")
 				    .suppressFor(1.0)
 				    .detail("ExpectedTeamSize", self->teamSize)
@@ -1778,6 +1785,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 
 					self->bytesWritten += metrics.bytes;
+					self->moveBytesRate.addSample(metrics.bytes);
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
 
@@ -2295,7 +2303,8 @@ struct DDQueueImpl {
 						    .detail("AverageShardSize", req.getFuture().isReady() ? req.getFuture().get() : -1)
 						    .detail("UnhealthyRelocations", self->unhealthyRelocations)
 						    .detail("HighestPriority", highestPriorityRelocation)
-						    .detail("BytesWritten", self->bytesWritten)
+						    .detail("BytesWritten", self->moveBytesRate.getTotal())
+						    .detail("BytesWrittenAverageRate", self->moveBytesRate.getAverage())
 						    .detail("PriorityRecoverMove",
 						            self->priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
 						    .detail("PriorityRebalanceUnderutilizedTeam",
