@@ -487,7 +487,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_MAX_BACKGROUND_JOBS,                             2 ); // RocksDB default.
 	init( ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD,                 21600 ); // 6h, RocksDB default.
 	init( ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY, isSimulated ? 10.0 : 300.0 ); // Delays shard clean up, must be larger than ROCKSDB_READ_VALUE_TIMEOUT to prevent reading deleted shard.
-	init( ROCKSDB_EMPTY_RANGE_CHECK,        isSimulated ? true: false);
+	init( ROCKSDB_EMPTY_RANGE_CHECK,       isSimulated ? true : false);
 	init( ROCKSDB_CREATE_BYTES_SAMPLE_FILE_RETRY_MAX,             50 );
 	init( ROCKSDB_ATOMIC_FLUSH,                                false ); if( randomize && BUGGIFY )  ROCKSDB_ATOMIC_FLUSH = deterministicRandom()->coinflip();
  	init( ROCKSDB_IMPORT_MOVE_FILES,                           false );
