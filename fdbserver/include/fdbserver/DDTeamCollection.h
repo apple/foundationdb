@@ -239,6 +239,7 @@ protected:
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 
 	std::vector<Reference<TCTeamInfo>> badTeams;
+	std::vector<Reference<TCTeamInfo>> largeTeams;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	PromiseStream<UID> removedServers;
 	PromiseStream<UID> removedTSS;
@@ -269,6 +270,7 @@ protected:
 	Reference<AsyncVar<bool>> processingUnhealthy;
 	Future<Void> readyToStart;
 	Future<Void> checkTeamDelay;
+	Optional<double> firstLargeTeamFailure;
 	Promise<Void> addSubsetComplete;
 	Future<Void> badTeamRemover;
 	Future<Void> checkInvalidLocalities;
@@ -301,6 +303,9 @@ protected:
 	UID distributorId;
 
 	LocalityMap<UID> machineLocalityMap; // locality info of machines
+
+	Reference<KeyRangeMap<int>> customReplication;
+	CoalescedKeyRangeMap<bool> underReplication;
 
 	// A mechanism to tell actors that reference a DDTeamCollection object through a direct
 	// pointer (without doing reference counting) that the object is being destroyed.
@@ -532,6 +537,10 @@ protected:
 
 	Future<Void> removeWrongStoreType();
 
+	Future<Void> fixUnderReplicationLoop();
+
+	void fixUnderReplication();
+
 	// Check if the number of server (and machine teams) is larger than the maximum allowed number
 	void traceTeamCollectionInfo() const;
 
@@ -627,6 +636,12 @@ protected:
 	// When it reaches the threshold, first try to build a server team with existing machine teams; if failed,
 	// build an extra machine team and record the event in trace
 	int addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams);
+
+	void cleanupLargeTeams();
+
+	int maxLargeTeamSize() const;
+
+	Reference<TCTeamInfo> buildLargeTeam(int size);
 
 public:
 	Reference<IDDTxnProcessor> db;
