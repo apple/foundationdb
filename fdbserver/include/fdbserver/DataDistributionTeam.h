@@ -72,28 +72,24 @@ FDB_DECLARE_BOOLEAN_PARAM(FindTeamByServers);
 class TeamSelect {
 public:
 	enum Value : int8_t {
-		INVALID = 0,
-		AVOIDMOVEMENT, // Avoid data movement by selecting srcTeam if it's not busy
-		WANTSRCSERVERS, // Ask for srcTeam
-		WANTTRUEBEST, // Ask for the most or least utilized team
-		OTHER
+		ANY = 0, // Any other situations
+		AVOID_MOVEMENT, // Avoid data movement by selecting srcTeam if it's not busy
+		WANT_SRCSERVERS, // Ask for srcTeam
+		WANT_TRUEBEST, // Ask for the most or least utilized team
 	};
-	TeamSelect() : value(INVALID) {}
-	TeamSelect(Value v) : value(v) { ASSERT(v != INVALID); }
+	TeamSelect() : value(ANY) {}
+	TeamSelect(Value v) : value(v) {}
 	std::string toString() const {
 		switch (value) {
-		case AVOIDMOVEMENT:
+		case AVOID_MOVEMENT:
 			return "Avoid_Movement";
-		case WANTSRCSERVERS:
+		case WANT_SRCSERVERS:
 			return "Want_SrcServers";
-		case WANTTRUEBEST:
+		case WANT_TRUEBEST:
 			return "Want_TrueBest";
-		case OTHER:
-			return "Other";
-		default:
-			ASSERT(false);
+		case ANY:
+			return "Any";
 		}
-		return "";
 	}
 
 	bool operator==(const TeamSelect& tmpTeamSelect) { return (int)value == (int)tmpTeamSelect.value; }
@@ -125,12 +121,11 @@ struct GetTeamRequest {
 	               PreferLowerReadUtil preferLowerReadUtil = PreferLowerReadUtil::False,
 	               double inflightPenalty = 1.0,
 	               Optional<KeyRange> keys = Optional<KeyRange>())
-	  : teamSelect(teamSelectRequest), preferLowerDiskUtil(preferLowerDiskUtil),
-	    teamMustHaveShards(teamMustHaveShards), forReadBalance(forReadBalance),
-	    preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty),
+	  : teamSelect(teamSelectRequest), preferLowerDiskUtil(preferLowerDiskUtil), teamMustHaveShards(teamMustHaveShards),
+	    forReadBalance(forReadBalance), preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty),
 	    findTeamByServers(FindTeamByServers::False), keys(keys) {}
 	GetTeamRequest(std::vector<UID> servers)
-	  : teamSelect(TeamSelect::WANTSRCSERVERS), preferLowerDiskUtil(PreferLowerDiskUtil::False),
+	  : teamSelect(TeamSelect::WANT_SRCSERVERS), preferLowerDiskUtil(PreferLowerDiskUtil::False),
 	    teamMustHaveShards(TeamMustHaveShards::False), forReadBalance(ForReadBalance::False),
 	    preferLowerReadUtil(PreferLowerReadUtil::False), inflightPenalty(1.0),
 	    findTeamByServers(FindTeamByServers::True), src(std::move(servers)) {}

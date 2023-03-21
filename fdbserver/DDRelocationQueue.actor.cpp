@@ -1294,7 +1294,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
 							inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
-						auto req = GetTeamRequest(TeamSelect::AVOIDMOVEMENT,
+						auto req = GetTeamRequest(TeamSelect::AVOID_MOVEMENT,
 						                          PreferLowerDiskUtil::True,
 						                          TeamMustHaveShards::False,
 						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
@@ -2139,12 +2139,12 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 
 			if (self->priority_relocations[ddPriority] < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				bool mcMove = isDataMovementForMountainChopper(reason);
-				GetTeamRequest srcReq = GetTeamRequest(mcMove ? TeamSelect::WANTTRUEBEST : TeamSelect::OTHER,
+				GetTeamRequest srcReq = GetTeamRequest(mcMove ? TeamSelect::WANT_TRUEBEST : TeamSelect::ANY,
 				                                       PreferLowerDiskUtil::False,
 				                                       TeamMustHaveShards::True,
 				                                       ForReadBalance(readRebalance),
 				                                       PreferLowerReadUtil::False);
-				GetTeamRequest destReq = GetTeamRequest(!mcMove ? TeamSelect::WANTTRUEBEST : TeamSelect::OTHER,
+				GetTeamRequest destReq = GetTeamRequest(!mcMove ? TeamSelect::WANT_TRUEBEST : TeamSelect::ANY,
 				                                        PreferLowerDiskUtil::True,
 				                                        TeamMustHaveShards::False,
 				                                        ForReadBalance(readRebalance),
