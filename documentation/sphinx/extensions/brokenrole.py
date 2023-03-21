@@ -21,7 +21,9 @@
 def setup(app):
     app.add_role('broken', broken_role)
 
-def broken_role(name, rawtext, text, lineno, inliner, options={}, content=[]):
+def broken_role(name, rawtext, text, lineno, inliner, options=None, content=None):
+    options = options or {}
+    content = content or []
     msg = inliner.reporter.error('Broken role invoked', line=lineno)
     prb = inliner.problematic(rawtext,rawtext,msg)
     return [prb],[msg]
