@@ -151,7 +151,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                      "ssd",
                      "ssd-1",
                      "ssd-2",
-                     "ssd-redwood-1-experimental",
+                     "ssd-redwood-1",
                      "ssd-rocksdb-v1",
                      "ssd-sharded-rocksdb",
                      "memory",
@@ -791,14 +791,26 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "storage_replication_policy":"(zoneid^3x1)",
          "logs":2,
          "log_version":2,
-         "log_engine":1,
+         "log_engine":{
+         "$enum":[
+             "ssd",
+             "ssd-1",
+             "ssd-2",
+             "ssd-redwood-1",
+             "ssd-rocksdb-v1",
+             "ssd-sharded-rocksdb",
+             "memory",
+             "memory-1",
+             "memory-2",
+             "memory-radixtree-beta"
+         ]},
          "log_spill":1,
          "storage_engine":{
          "$enum":[
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-1-experimental",
+             "ssd-redwood-1",
              "ssd-rocksdb-v1",
              "ssd-sharded-rocksdb",
              "memory",
@@ -812,7 +824,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-1-experimental",
+             "ssd-redwood-1",
              "ssd-rocksdb-v1",
              "ssd-sharded-rocksdb",
              "memory",
@@ -886,6 +898,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                   "healthy_repartitioning",
                   "healthy_removing_server",
                   "healthy_rebalancing",
+                  "healthy_perpetual_wiggle",
                   "healthy"
                ]
             },
@@ -921,6 +934,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                           "healthy_repartitioning",
                           "healthy_removing_server",
                           "healthy_rebalancing",
+                          "healthy_perpetual_wiggle",
                           "healthy"
                        ]
                     },

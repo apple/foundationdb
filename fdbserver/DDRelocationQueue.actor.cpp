@@ -18,17 +18,21 @@
  * limitations under the License.
  */
 
+#include <climits>
 #include <limits>
 #include <numeric>
+#include <utility>
 #include <vector>
 
 #include "flow/ActorCollection.h"
+#include "flow/Deque.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/MovingWindow.h"
 #include "fdbserver/DDSharedContext.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/MoveKeys.actor.h"
@@ -705,6 +709,8 @@ struct DDQueue : public IDDRelocationQueue {
 	};
 	std::vector<int> retryFindDstReasonCount;
 
+	MovingWindow<int64_t> moveBytesRate;
+
 	void startRelocation(int priority, int healthPriority) {
 		// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
 		// we must count it into unhealthyRelocations; because team removers relies on unhealthyRelocations to
@@ -769,8 +775,8 @@ struct DDQueue : public IDDRelocationQueue {
 	    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
 	    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
 	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")), moveReusePhysicalShard(0),
-	    moveCreateNewPhysicalShard(0), retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0) {
-	}
+	    moveCreateNewPhysicalShard(0), retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0),
+	    moveBytesRate(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL) {}
 	DDQueue() = default;
 
 	void validate() {
@@ -1253,7 +1259,14 @@ struct DDQueue : public IDDRelocationQueue {
 						if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 							rrs.dataMoveId = UID();
 						} else {
-							rrs.dataMoveId = deterministicRandom()->randomUniqueID();
+							rrs.dataMoveId =
+							    newDataMoveId(deterministicRandom()->randomUInt64(),
+							                  AssignEmptyRange::False,
+							                  EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
+							TraceEvent(SevInfo, "DDDataMoveInitiatedWithRandomDestID")
+							    .detail("DataMoveID", rrs.dataMoveId.toString())
+							    .detail("Range", rrs.keys)
+							    .detail("Reason", rrs.reason.toString());
 						}
 					} else {
 						rrs.dataMoveId = anonymousShardId;
@@ -1499,6 +1512,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				while (tciIndex < self->teamCollections.size()) {
 					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && rd.isRestore()) {
 						auto req = GetTeamRequest(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest);
+						req.keys = rd.keys;
 						Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
 						    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
 						bestTeamReady = fbestTeam.isReady();
@@ -1540,7 +1554,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						                          TeamMustHaveShards::False,
 						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
 						                          PreferLowerReadUtil::True,
-						                          inflightPenalty);
+						                          inflightPenalty,
+						                          rd.keys);
 
 						req.src = rd.src;
 						req.completeSources = rd.completeSources;
@@ -1562,6 +1577,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 								// Exists a remoteTeam in the mapping that has the physicalShardIDCandidate
 								// use the remoteTeam with the physicalShard as the bestTeam
 								req = GetTeamRequest(remoteTeamWithPhysicalShard.first.get().servers);
+								req.keys = rd.keys;
 							}
 						}
 
@@ -1746,7 +1762,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					} else {
 						self->moveCreateNewPhysicalShard++;
 					}
-					rd.dataMoveId = newShardId(physicalShardIDCandidate, AssignEmptyRange::False);
+					rd.dataMoveId = newDataMoveId(physicalShardIDCandidate,
+					                              AssignEmptyRange::False,
+					                              EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
+					TraceEvent(SevInfo, "DDDataMoveInitiated")
+					    .detail("DataMoveID", rd.dataMoveId.toString())
+					    .detail("Reason", rd.reason.toString());
 					auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
 					inFlightRange.value().dataMoveId = rd.dataMoveId;
 					auto f = self->dataMoves.intersectingRanges(rd.keys);
@@ -1813,7 +1834,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			for (auto& destTeam : destinationTeams) {
 				totalIds += destTeam.servers.size();
 			}
-			if (totalIds != self->teamSize) {
+			if (totalIds < self->teamSize) {
 				TraceEvent(SevWarn, "IncorrectDestTeamSize")
 				    .suppressFor(1.0)
 				    .detail("ExpectedTeamSize", self->teamSize)
@@ -2015,6 +2036,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 
 					self->bytesWritten += metrics.bytes;
+					self->moveBytesRate.addSample(metrics.bytes);
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
 
@@ -2044,7 +2066,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
 				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
 
-				completeDest(rd, self->destBusymap);
+				if (!signalledTransferComplete) {
+					// signalling transferComplete calls completeDest() in complete(), so doing so here would
+					// double-complete the work
+					completeDest(rd, self->destBusymap);
+				}
 				rd.completeDests.clear();
 
 				wait(delay(SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskPriority::DataDistributionLaunch));
@@ -2138,8 +2164,10 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 	// randomly choose topK shards
 	int topK = std::max(1, std::min(int(0.1 * shards.size()), SERVER_KNOBS->READ_REBALANCE_SHARD_TOPK));
 	state Future<HealthMetrics> healthMetrics = self->txnProcessor->getHealthMetrics(true);
-	state GetTopKMetricsRequest req(
-	    shards, topK, (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC, srcLoad / shards.size());
+	state GetTopKMetricsRequest req(shards,
+	                                topK,
+	                                (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC,
+	                                std::min(srcLoad / shards.size(), SERVER_KNOBS->READ_REBALANCE_MIN_READ_BYTES_KS));
 	state GetTopKMetricsReply reply = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
 	wait(ready(healthMetrics));
 	auto cpu = getWorstCpu(healthMetrics.get(), sourceTeam->getServerIDs());
@@ -2544,7 +2572,8 @@ ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
 					    .detail("AverageShardSize", req.getFuture().isReady() ? req.getFuture().get() : -1)
 					    .detail("UnhealthyRelocations", self.unhealthyRelocations)
 					    .detail("HighestPriority", highestPriorityRelocation)
-					    .detail("BytesWritten", self.bytesWritten)
+					    .detail("BytesWritten", self.moveBytesRate.getTotal())
+					    .detail("BytesWrittenAverageRate", self.moveBytesRate.getAverage())
 					    .detail("PriorityRecoverMove", self.priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
 					    .detail("PriorityRebalanceUnderutilizedTeam",
 					            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM])

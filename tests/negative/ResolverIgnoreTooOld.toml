@@ -1,0 +1,11 @@
+[[knobs]]
+enable_version_vector = false
+max_read_transaction_life_versions = 1000000
+max_write_transaction_life_versions = 1000000
+
+[[test]]
+testTitle = "ResolverIgnoreTooOld"
+
+[[test.workload]]
+testName = "ResolverBug"
+ignoreTooOldProbability = 0.2

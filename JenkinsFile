@@ -88,7 +88,7 @@ timestamps {
                     if ("${v.result}" != "SUCCESS") {
                         // In case if any of the build or test fails we will mark current build as FAILURE
                         currentBuild.result = 'FAILURE'
-                        setBuildStatus("build and test", "build and test", "FAILURE", currentBuild.absoluteUrl);
+                        setBuildStatus("precommit_job", "build and test", "FAILURE", currentBuild.absoluteUrl);
                     }
 
                     println("${k} result : ${v.result}")

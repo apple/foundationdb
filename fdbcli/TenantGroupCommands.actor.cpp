@@ -133,7 +133,7 @@ void tenantGroupGetOutput(TenantGroupEntry entry, bool useJson) {
 
 // tenantgroup get command
 ACTOR Future<bool> tenantGroupGetCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() > 4 || (tokens.size() == 4 && tokens[3] != "JSON"_sr)) {
+	if (tokens.size() > 4 || tokens.size() < 3 || (tokens.size() == 4 && tokens[3] != "JSON"_sr)) {
 		fmt::print("Usage: tenantgroup get <NAME> [JSON]\n\n");
 		fmt::print("Prints metadata associated with the given tenant group.\n");
 		fmt::print("If JSON is specified, then the output will be in JSON format.\n");

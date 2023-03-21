@@ -134,17 +134,18 @@ private:
 		    TenantMetadata::tenantCount().getD(&ryw->getTransaction(), Snapshot::False, 0);
 		int64_t _nextId = wait(TenantAPI::getNextTenantId(&ryw->getTransaction()));
 		state int64_t nextId = _nextId;
-		ASSERT(nextId > 0);
+		ASSERT(nextId >= 0);
 
 		state std::vector<Future<bool>> createFutures;
+		int itrCount = 0;
 		for (auto const& [tenant, config] : tenants) {
-			if (!TenantAPI::nextTenantIdPrefixMatches(nextId - 1, nextId)) {
-				throw cluster_no_capacity();
+			createFutures.push_back(createTenant(ryw, tenant, config, nextId, tenantGroupNetTenantDelta));
+			if (++itrCount < tenants.size()) {
+				nextId = TenantAPI::computeNextTenantId(nextId, 1);
 			}
-			createFutures.push_back(createTenant(ryw, tenant, config, nextId++, tenantGroupNetTenantDelta));
 		}
 
-		TenantMetadata::lastTenantId().set(&ryw->getTransaction(), nextId - 1);
+		TenantMetadata::lastTenantId().set(&ryw->getTransaction(), nextId);
 		wait(waitForAll(createFutures));
 
 		state int numCreatedTenants = 0;

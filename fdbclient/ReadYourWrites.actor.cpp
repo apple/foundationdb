@@ -1429,7 +1429,85 @@ public:
 		}
 	}
 
+	// This function must not block unless a non-empty commitFuture is passed in
+	// If commitFuture is specified, this will wait for the future and report the result of
+	// the future in the output. If commitFuture isn't specified, then the transaction will
+	// be reported uncommitted. In that case, an optional error can be provided to indicate
+	// why the transaction was uncommitted.
+	ACTOR static Future<Void> printDebugMessages(ReadYourWritesTransaction* self,
+	                                             Optional<Future<Void>> commitFuture,
+	                                             Optional<Error> error = Optional<Error>()) {
+		state std::string prefix;
+		state std::string commitResult;
+		state ErrorOr<Void> result;
+		state std::vector<BaseTraceEvent> debugTraces = std::move(self->debugTraces);
+		state std::vector<std::string> debugMessages = std::move(self->debugMessages);
+
+		self->debugTraces.clear();
+		self->debugMessages.clear();
+
+		if (commitFuture.present()) {
+			try {
+				wait(store(result, errorOr(commitFuture.get())));
+			} catch (Error& e) {
+				result = e;
+			}
+		}
+
+		Version readVersion = self->getReadVersion().canGet() ? self->getReadVersion().get() : -1;
+		Version commitVersion = result.present() ? self->getCommittedVersion() : -1;
+
+		if (result.present()) {
+			commitResult = "Committed";
+		} else if (result.getError().code() == error_code_commit_unknown_result ||
+		           result.getError().code() == error_code_operation_cancelled ||
+		           result.getError().code() == error_code_transaction_timed_out) {
+			commitResult = "Maybe committed";
+		} else if (commitFuture.present()) {
+			commitResult = "Not committed";
+		} else {
+			commitResult = "Uncommitted";
+		}
+
+		for (auto& event : debugTraces) {
+			event.detail("CommitResult", commitResult).detail("ReadVersion", readVersion);
+
+			if (result.present()) {
+				event.detail("CommitVersion", commitVersion);
+			} else if (commitFuture.present()) {
+				event.errorUnsuppressed(result.getError());
+			} else if (error.present()) {
+				event.errorUnsuppressed(error.get());
+			}
+
+			event.log();
+		}
+
+		for (auto message : debugMessages) {
+			std::string cvString = result.present() ? fmt::format(" cv={}", commitVersion) : "";
+			std::string errorString;
+			if (commitFuture.present() && result.isError()) {
+				errorString = fmt::format(" error={}", result.getError().name());
+			} else if (error.present()) {
+				errorString = fmt::format(" error={}", error.get().name());
+			}
+
+			fmt::print("[{} rv={}{}{}] {}\n", commitResult, readVersion, cvString, errorString, message);
+		}
+
+		if (result.isError()) {
+			throw result.getError();
+		}
+
+		return Void();
+	}
+
 	ACTOR static Future<Void> onError(ReadYourWritesTransaction* ryw, Error e) {
+		if (ryw->debugTraces.size() > 0 || ryw->debugMessages.size() > 0) {
+			// printDebugMessages returns a future but will not block if called with an empty second argument
+			ASSERT(printDebugMessages(ryw, {}, e).isReady());
+		}
+
 		try {
 			if (ryw->resetPromise.isSet()) {
 				throw ryw->resetPromise.getFuture().getError();
@@ -2429,14 +2507,16 @@ void ReadYourWritesTransaction::addWriteConflictRange(KeyRangeRef const& keys) {
 }
 
 Future<Void> ReadYourWritesTransaction::commit() {
+	Future<Void> result;
 	if (checkUsedDuringCommit()) {
-		return used_during_commit();
+		result = used_during_commit();
+	} else if (resetPromise.isSet()) {
+		result = resetPromise.getFuture().getError();
+	} else {
+		result = RYWImpl::commit(this);
 	}
 
-	if (resetPromise.isSet())
-		return resetPromise.getFuture().getError();
-
-	return RYWImpl::commit(this);
+	return debugMessages.size() > 0 || debugTraces.size() > 0 ? RYWImpl::printDebugMessages(this, result) : result;
 }
 
 Future<Standalone<StringRef>> ReadYourWritesTransaction::getVersionstamp() {
@@ -2572,6 +2652,8 @@ void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) noexcep
 	nativeWriteRanges = std::move(r.nativeWriteRanges);
 	versionStampKeys = std::move(r.versionStampKeys);
 	specialKeySpaceWriteMap = std::move(r.specialKeySpaceWriteMap);
+	debugTraces = std::move(r.debugTraces);
+	debugMessages = std::move(r.debugMessages);
 }
 
 ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&& r) noexcept
@@ -2592,6 +2674,8 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&&
 	nativeWriteRanges = std::move(r.nativeWriteRanges);
 	versionStampKeys = std::move(r.versionStampKeys);
 	specialKeySpaceWriteMap = std::move(r.specialKeySpaceWriteMap);
+	debugTraces = std::move(r.debugTraces);
+	debugMessages = std::move(r.debugMessages);
 }
 
 Future<Void> ReadYourWritesTransaction::onError(Error const& e) {
@@ -2656,6 +2740,11 @@ void ReadYourWritesTransaction::cancel() {
 }
 
 void ReadYourWritesTransaction::reset() {
+	if (debugTraces.size() > 0 || debugMessages.size() > 0) {
+		// printDebugMessages returns a future but will not block if called with an empty second argument
+		ASSERT(RYWImpl::printDebugMessages(this, {}).isReady());
+	}
+
 	retries = 0;
 	approximateSize = 0;
 	creationTime = now();
@@ -2689,6 +2778,11 @@ KeyRef ReadYourWritesTransaction::getMaxWriteKey() {
 ReadYourWritesTransaction::~ReadYourWritesTransaction() {
 	if (!resetPromise.isSet())
 		resetPromise.sendError(transaction_cancelled());
+
+	if (debugTraces.size() || debugMessages.size()) {
+		// printDebugMessages returns a future but will not block if called with an empty second argument
+		[[maybe_unused]] Future<Void> f = RYWImpl::printDebugMessages(this, {});
+	}
 }
 
 bool ReadYourWritesTransaction::checkUsedDuringCommit() {
@@ -2728,4 +2822,14 @@ void ReadYourWritesTransaction::debugLogRetries(Optional<Error> error) {
 			transactionDebugInfo->lastRetryLogTime = now();
 		}
 	}
+}
+
+void ReadYourWritesTransaction::debugTrace(BaseTraceEvent&& event) {
+	if (event.isEnabled()) {
+		debugTraces.emplace_back(std::move(event));
+	}
+}
+
+void ReadYourWritesTransaction::debugPrint(std::string const& message) {
+	debugMessages.push_back(message);
 }

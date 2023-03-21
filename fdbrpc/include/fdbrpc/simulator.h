@@ -55,6 +55,8 @@ struct ProcessInfo;
 struct MachineInfo;
 } // namespace simulator
 
+constexpr double DISABLE_CONNECTION_FAILURE_FOREVER = 1e6;
+
 class ISimulator : public INetwork {
 
 public:
@@ -346,6 +348,10 @@ public:
 	// 'plaintext marker' is present.
 	Optional<std::string> dataAtRestPlaintextMarker;
 
+	// A collection of custom shard boundaries (begin, end, replication factor) that will be removed once this feature
+	// is integrated with a way to set these boundaries in the database
+	std::vector<std::tuple<std::string, std::string, int>> customReplicas;
+
 	flowGlobalType global(int id) const final;
 	void setGlobal(size_t id, flowGlobalType v) final;
 
@@ -392,6 +398,12 @@ struct DiskParameters : ReferenceCounted<DiskParameters> {
 
 // Simulates delays for performing operations on disk
 extern Future<Void> waitUntilDiskReady(Reference<DiskParameters> parameters, int64_t size, bool sync = false);
+
+// Enables connection failures, i.e., clogging, in simulation
+void enableConnectionFailures(std::string const& context);
+
+// Disables connection failures, i.e., clogging, in simulation
+void disableConnectionFailures(std::string const& context);
 
 class Sim2FileSystem : public IAsyncFileSystem {
 public:

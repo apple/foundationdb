@@ -88,8 +88,8 @@ private:
 						        error(
 						            fmt::format("randomCommitReadOp mismatch. key: {} expected: {:.80} actual: {:.80}",
 						                        fdb::toCharsRef((*kvPairs)[i].key),
-						                        fdb::toCharsRef(expected.value()),
-						                        fdb::toCharsRef(actual.value())));
+						                        fdb::toCharsRef(expected),
+						                        fdb::toCharsRef(actual)));
 						        ASSERT(false);
 					        }
 				        }
@@ -129,8 +129,8 @@ private:
 				    if ((*results)[i] != expected) {
 					    error(fmt::format("randomGetOp mismatch. key: {} expected: {:.80} actual: {:.80}",
 					                      fdb::toCharsRef((*keys)[i]),
-					                      fdb::toCharsRef(expected.value()),
-					                      fdb::toCharsRef((*results)[i].value())));
+					                      fdb::toCharsRef(expected),
+					                      fdb::toCharsRef((*results)[i])));
 				    }
 			    }
 			    schedule(cont);

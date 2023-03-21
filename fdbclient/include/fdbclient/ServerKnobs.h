@@ -81,6 +81,7 @@ public:
 	double DESIRED_GET_MORE_DELAY;
 	int CONCURRENT_LOG_ROUTER_READS;
 	int LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED; // 0==peek from primary, non-zero==peek from satellites
+	double LOG_ROUTER_PEEK_SWITCH_DC_TIME;
 	double DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME;
 	double DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME;
 	int64_t TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES;
@@ -141,31 +142,59 @@ public:
 	//   is possible within but not between priority groups; fewer priority groups
 	//   mean better worst case time bounds
 	// Maximum allowable priority is 999.
+	// Update the status json .data.team_tracker.state field when necessary
+	//
+	// Priority for movement resume from previous unfinished in-flight movement when a new DD
+	// start
 	int PRIORITY_RECOVER_MOVE;
+	// A load-balance priority for disk valley filler
 	int PRIORITY_REBALANCE_UNDERUTILIZED_TEAM;
+	// A load-balance priority disk mountain chopper
 	int PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
+	// A load-balance priority read valley filler
 	int PRIORITY_REBALANCE_READ_OVERUTIL_TEAM;
+	// A load-balance priority read mountain chopper
 	int PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM;
+	// A team healthy priority for wiggle a storage server
 	int PRIORITY_PERPETUAL_STORAGE_WIGGLE;
+	// A team healthy priority when all servers in a team are healthy. When a team changes from any unhealthy states to
+	// healthy, the unfinished relocations will be overriden to healthy priority
 	int PRIORITY_TEAM_HEALTHY;
+	// A team healthy priority when there's undesired servers in the team. (ex. same ip
+	// address as other SS process, or SS is lagging too far ...)
 	int PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
+	// A team healthy priority for removing redundant team to make the team count within a good range
 	int PRIORITY_TEAM_REDUNDANT;
+	// A shard boundary priority for merge small and write cold shard.
 	int PRIORITY_MERGE_SHARD;
+	// A team healthy priority for populate remote region
 	int PRIORITY_POPULATE_REGION;
+	// A team healthy priority when the replica > 3 and there's at least one unhealthy server in a team.
+	// Or when the team contains a server with wrong configuration (ex. storage engine,
+	// locality, excluded ...)
 	int PRIORITY_TEAM_UNHEALTHY;
+	// A team healthy priority when there should be >= 3 replicas and there's 2 healthy servers in a team
 	int PRIORITY_TEAM_2_LEFT;
+	// A team healthy priority when there should be >= 2 replicas and there's 1 healthy server in a team
 	int PRIORITY_TEAM_1_LEFT;
-	int PRIORITY_TEAM_FAILED; // Priority when a server in the team is excluded as failed
+	// A team healthy priority when a server in the team is excluded as failed
+	int PRIORITY_TEAM_FAILED;
+	// A team healthy priority when there's no healthy server in a team
 	int PRIORITY_TEAM_0_LEFT;
+	// A shard boundary priority for split large or write hot shard.
 	int PRIORITY_SPLIT_SHARD;
-	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD; // Priority when a physical shard is oversize or anonymous
+	// Priority when a physical shard is oversize or anonymous. When DD enable physical shard, the shard created before
+	// it are default to be 'anonymous' for compatibility.
+	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD;
 
 	// Data distribution
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
+	bool ENABLE_DD_PHYSICAL_SHARD_MOVE; // Enable physical shard move.
 	int64_t MAX_PHYSICAL_SHARD_BYTES;
 	double PHYSICAL_SHARD_METRICS_DELAY;
 	double ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME;
+	bool PHYSICAL_SHARD_MOVE_VERBOSE_TRACKING;
 
 	double READ_REBALANCE_CPU_THRESHOLD; // read rebalance only happens if the source servers' CPU > threshold
 	int READ_REBALANCE_SRC_PARALLELISM; // the max count a server become a source server within a certain interval
@@ -173,6 +202,8 @@ public:
 	double
 	    READ_REBALANCE_DIFF_FRAC; // only when (srcLoad - destLoad)/srcLoad > DIFF_FRAC the read rebalance will happen
 	double READ_REBALANCE_MAX_SHARD_FRAC; // only move shard whose readLoad < (srcLoad - destLoad) * MAX_SHARD_FRAC
+	double
+	    READ_REBALANCE_MIN_READ_BYTES_KS; // only move shard whose readLoad > min(MIN_READ_BYTES_KS, shard avg traffic);
 
 	double RETRY_RELOCATESHARD_DELAY;
 	double DATA_DISTRIBUTION_FAILURE_REACTION_TIME;
@@ -180,6 +211,9 @@ public:
 	int64_t SHARD_MAX_BYTES_PER_KSEC, // Shards with more than this bandwidth will be split immediately
 	    SHARD_MIN_BYTES_PER_KSEC, // Shards with more than this bandwidth will not be merged
 	    SHARD_SPLIT_BYTES_PER_KSEC; // When splitting a shard, it is split into pieces with less than this bandwidth
+	int64_t SHARD_MAX_READ_OPS_PER_KSEC; // When the read operations count is larger than this threshold, a range will
+	                                     // be considered hot
+
 	double SHARD_MAX_READ_DENSITY_RATIO;
 	int64_t SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS;
 	double SHARD_MAX_BYTES_READ_PER_KSEC_JITTER;
@@ -271,6 +305,13 @@ public:
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 	int DD_BUILD_EXTRA_TEAMS_OVERRIDE; // build extra teams to allow data movement to progress. must be larger than 0
+	int DD_MAXIMUM_LARGE_TEAMS; // the maximum number of large teams data distribution will maintain
+	int DD_MAXIMUM_LARGE_TEAM_CLEANUP; // the maximum number of large teams data distribution will attempt to cleanup
+	                                   // without yielding
+	double DD_LARGE_TEAM_DELAY; // the amount of time data distribution will wait before returning less replicas than
+	                            // requested
+	double DD_FIX_WRONG_REPLICAS_DELAY; // the amount of time between attempts to increase the replication factor of
+	                                    // under replicated shards
 
 	// Run storage enginee on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;
@@ -386,6 +427,7 @@ public:
 	int64_t ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD;
 	double ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY;
 	bool ROCKSDB_EMPTY_RANGE_CHECK;
+	int ROCKSDB_CREATE_BYTES_SAMPLE_FILE_RETRY_MAX;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -737,10 +779,14 @@ public:
 	int64_t IOPS_UNITS_PER_SAMPLE;
 	int64_t BYTES_WRITTEN_UNITS_PER_SAMPLE;
 	int64_t BYTES_READ_UNITS_PER_SAMPLE;
+	int64_t OPS_READ_UNITES_PER_SAMPLE;
 	int64_t READ_HOT_SUB_RANGE_CHUNK_SIZE;
 	int64_t EMPTY_READ_PENALTY;
 	int DD_SHARD_COMPARE_LIMIT; // when read-aware DD is enabled, at most how many shards are compared together
 	bool READ_SAMPLING_ENABLED;
+	// Rolling window duration over which the average bytes moved by DD is calculated for the 'MovingData' trace event.
+	double DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL;
+	int64_t MOVING_WINDOW_SAMPLE_SIZE;
 
 	// Storage Server
 	double STORAGE_LOGGING_DELAY;
@@ -766,6 +812,8 @@ public:
 	double STORAGE_COMMIT_INTERVAL;
 	int BYTE_SAMPLING_FACTOR;
 	int BYTE_SAMPLING_OVERHEAD;
+	double MIN_BYTE_SAMPLING_PROBABILITY; // Adjustable only for test of PhysicalShardMove. Should always be 0 for other
+	                                      // cases
 	int MAX_STORAGE_SERVER_WATCH_BYTES;
 	int MAX_BYTE_SAMPLE_CLEAR_MAP_SIZE;
 	double LONG_BYTE_SAMPLE_RECOVERY_DELAY;
@@ -1020,6 +1068,9 @@ public:
 	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
 	double BLOB_WORKERLIST_FETCH_INTERVAL;
 	double BLOB_WORKER_BATCH_GRV_INTERVAL;
+	double BLOB_WORKER_EMPTY_GRV_INTERVAL;
+	int BLOB_WORKER_GRV_HISTORY_MAX_SIZE;
+	int64_t BLOB_WORKER_GRV_HISTORY_MIN_VERSION_GRANULARITY;
 	bool BLOB_WORKER_DO_REJECT_WHEN_FULL;
 	double BLOB_WORKER_REJECT_WHEN_FULL_THRESHOLD;
 	double BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY;
@@ -1061,7 +1112,9 @@ public:
 	std::string REST_KMS_CONNECTOR_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT;
 	std::string REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT;
 	int REST_KMS_CURRENT_BLOB_METADATA_REQUEST_VERSION;
+	int REST_KMS_MAX_BLOB_METADATA_REQUEST_VERSION;
 	int REST_KMS_CURRENT_CIPHER_REQUEST_VERSION;
+	int REST_KMS_MAX_CIPHER_REQUEST_VERSION;
 
 	// Idempotency ids
 	double IDEMPOTENCY_ID_IN_MEMORY_LIFETIME;

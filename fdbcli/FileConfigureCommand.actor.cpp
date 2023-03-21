@@ -21,6 +21,7 @@
 #include "fdbcli/FlowLineNoise.h"
 #include "fdbcli/fdbcli.actor.h"
 
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -60,28 +61,19 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
 		return false;
 	}
 
-	std::string configString;
+	state std::string configString;
 	if (isNewDatabase) {
 		configString = "new";
 	}
 
-	for (const auto& [name, value] : configJSON) {
-		if (!configString.empty()) {
-			configString += " ";
-		}
-		if (value.type() == json_spirit::int_type) {
-			configString += name + ":=" + format("%d", value.get_int());
-		} else if (value.type() == json_spirit::str_type) {
-			configString += value.get_str();
-		} else if (value.type() == json_spirit::array_type) {
-			configString +=
-			    name + "=" +
-			    json_spirit::write_string(json_spirit::mValue(value.get_array()), json_spirit::Output_options::none);
-		} else {
-			printUsage("fileconfigure"_sr);
-			return false;
-		}
+	try {
+		configString += DatabaseConfiguration::configureStringFromJSON(configJSON);
+	} catch (Error& e) {
+		fmt::print("ERROR: {}", e.what());
+		printUsage("fileconfigure"_sr);
+		return false;
 	}
+
 	ConfigurationResult result = wait(ManagementAPI::changeConfig(db, configString, force));
 	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
 	// there are various results specific to changeConfig() that we need to report:

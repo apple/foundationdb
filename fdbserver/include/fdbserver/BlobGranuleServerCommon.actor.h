@@ -45,21 +45,29 @@ struct BlobFileIndex {
 	int64_t offset;
 	int64_t length;
 	int64_t fullFileLength;
+	int64_t logicalSize;
 	Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 
 	BlobFileIndex() {}
-
-	BlobFileIndex(Version version, std::string filename, int64_t offset, int64_t length, int64_t fullFileLength)
-	  : version(version), filename(filename), offset(offset), length(length), fullFileLength(fullFileLength) {}
 
 	BlobFileIndex(Version version,
 	              std::string filename,
 	              int64_t offset,
 	              int64_t length,
 	              int64_t fullFileLength,
+	              int64_t logicalSize)
+	  : version(version), filename(filename), offset(offset), length(length), fullFileLength(fullFileLength),
+	    logicalSize(logicalSize) {}
+
+	BlobFileIndex(Version version,
+	              std::string filename,
+	              int64_t offset,
+	              int64_t length,
+	              int64_t fullFileLength,
+	              int64_t logicalSize,
 	              Optional<BlobGranuleCipherKeysMeta> ciphKeysMeta)
 	  : version(version), filename(filename), offset(offset), length(length), fullFileLength(fullFileLength),
-	    cipherKeysMeta(ciphKeysMeta) {}
+	    logicalSize(logicalSize), cipherKeysMeta(ciphKeysMeta) {}
 
 	// compare on version
 	bool operator<(const BlobFileIndex& r) const { return version < r.version; }
@@ -164,17 +172,31 @@ ACTOR Future<Void> loadManifest(Database db, Reference<BlobConnectionProvider> b
 ACTOR Future<Void> printRestoreSummary(Database db, Reference<BlobConnectionProvider> blobConn);
 ACTOR Future<BlobGranuleRestoreVersionVector> listBlobGranules(Database db, Reference<BlobConnectionProvider> blobConn);
 ACTOR Future<int64_t> lastBlobEpoc(Database db, Reference<BlobConnectionProvider> blobConn);
-ACTOR Future<bool> isFullRestoreMode(Database db, KeyRangeRef range);
-ACTOR Future<Void> updateRestoreStatus(Database db,
-                                       KeyRangeRef range,
-                                       BlobRestoreStatus status,
-                                       Optional<BlobRestorePhase> expectedPhase);
-ACTOR Future<std::pair<KeyRange, BlobRestoreStatus>> getRestoreRangeStatus(Database db, KeyRangeRef keys);
-ACTOR Future<Optional<BlobRestoreStatus>> getRestoreStatus(Database db, KeyRangeRef range);
-ACTOR Future<Optional<BlobRestoreArg>> getRestoreArg(Database db, KeyRangeRef range);
-ACTOR Future<Version> getRestoreTargetVersion(Database db, KeyRangeRef range, Version defaultVersion);
-ACTOR Future<Version> getManifestVersion(Database db);
 ACTOR Future<std::string> getMutationLogUrl();
+
+using BlobRestoreRangeState = std::pair<KeyRange, BlobRestoreState>;
+class BlobRestoreController : public ReferenceCounted<BlobRestoreController> {
+public:
+	BlobRestoreController() {}
+	BlobRestoreController(Database db, KeyRangeRef range) : db_(db), range_(range) {}
+
+	ACTOR static Future<bool> isRestoring(Reference<BlobRestoreController> self);
+	ACTOR static Future<Optional<BlobRestoreState>> getState(Reference<BlobRestoreController> self);
+	ACTOR static Future<Optional<BlobRestoreArg>> getArgument(Reference<BlobRestoreController> self);
+	ACTOR static Future<Version> getTargetVersion(Reference<BlobRestoreController> self, Version defaultVersion);
+	ACTOR static Future<BlobRestoreRangeState> getRangeState(Reference<BlobRestoreController> self);
+	ACTOR static Future<Void> updateState(Reference<BlobRestoreController> self,
+	                                      Standalone<BlobRestoreState> newStatus,
+	                                      Optional<BlobRestorePhase> expectedPhase);
+	ACTOR static Future<Void> updateState(Reference<BlobRestoreController> self,
+	                                      BlobRestorePhase newPhase,
+	                                      Optional<BlobRestorePhase> expectedPhase);
+	ACTOR static Future<Void> updateError(Reference<BlobRestoreController> self, Standalone<StringRef> errorMessage);
+
+private:
+	Database db_;
+	Standalone<KeyRangeRef> range_;
+};
 #include "flow/unactorcompiler.h"
 
 #endif

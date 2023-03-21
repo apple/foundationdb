@@ -50,14 +50,10 @@ def run_fdbcli_command(*args):
         string: Console output from fdbcli
     """
     commands = command_template + ["{}".format(" ".join(args))]
-    try:
-        # if the fdbcli command is stuck for more than 20 seconds, the database is definitely unavailable
-        process = subprocess.run(
-            commands, stdout=subprocess.PIPE, env=fdbcli_env, timeout=20
-        )
-        return process.stdout.decode("utf-8").strip()
-    except subprocess.TimeoutExpired:
-        raise Exception("The fdbcli command is stuck, database is unavailable")
+    process = subprocess.run(
+        commands, stdout=subprocess.PIPE, env=fdbcli_env
+    )
+    return process.stdout.decode("utf-8").strip()
 
 
 def run_fdbcli_command_and_get_error(*args):
@@ -758,10 +754,10 @@ def exclude(logger):
             assert coordinator_list[0]["address"] == excluded_address
             break
         elif (
-            "ERROR: This exclude may cause the total free space in the cluster to drop below 10%."
+            "ERROR: This exclude may cause the total available space in the cluster to drop below 10%."
             in error_message
         ):
-            # exclude the process may cause the free space not enough
+            # exclude the process may cause the available space not enough
             # use FORCE option to ignore it and proceed
             assert not force
             force = True
@@ -1073,10 +1069,17 @@ def tenant_get(logger):
 
     output = run_fdbcli_command("tenant get tenant")
     lines = output.split("\n")
-    assert len(lines) == 3
+    assert len(lines) == 4
     assert lines[0].strip().startswith("id: ")
     assert lines[1].strip().startswith("prefix: ")
-    assert lines[2].strip() == "lock state: unlocked"
+    assert lines[2].strip().startswith("name: ")
+    assert lines[3].strip() == "lock state: unlocked"
+    # id = lines[0].strip().removeprefix("id: ")
+    # Workaround until Python 3.9+ for removeprefix
+    id = lines[0].strip()[len("id: "):]
+    
+    id_output = run_fdbcli_command("tenant getId {}".format(id))
+    assert id_output == output
 
     output = run_fdbcli_command("tenant get tenant JSON")
     json_output = json.loads(output, strict=False)
@@ -1096,13 +1099,23 @@ def tenant_get(logger):
     assert "lock_state" in json_output["tenant"]
     assert json_output["tenant"]["lock_state"] == "unlocked"
 
+    id_output = run_fdbcli_command("tenant getId {} JSON".format(id))
+    assert id_output == output
+
     output = run_fdbcli_command("tenant get tenant2")
     lines = output.split("\n")
-    assert len(lines) == 4
+    assert len(lines) == 5
     assert lines[0].strip().startswith("id: ")
     assert lines[1].strip().startswith("prefix: ")
-    assert lines[2].strip() == "lock state: unlocked"
-    assert lines[3].strip() == "tenant group: tenant_group2"
+    assert lines[2].strip().startswith("name: ")
+    assert lines[3].strip() == "lock state: unlocked"
+    assert lines[4].strip() == "tenant group: tenant_group2"
+    # id2 = lines[0].strip().removeprefix("id: ")
+    # Workaround until Python 3.9+ for removeprefix
+    id2 = lines[0].strip()[len("id: "):]
+
+    id_output = run_fdbcli_command("tenant getId {}".format(id2))
+    assert id_output == output
 
     output = run_fdbcli_command("tenant get tenant2 JSON")
     json_output = json.loads(output, strict=False)
@@ -1123,6 +1136,8 @@ def tenant_get(logger):
     assert "base64" in json_output["tenant"]["tenant_group"]
     assert json_output["tenant"]["tenant_group"]["printable"] == "tenant_group2"
 
+    id_output = run_fdbcli_command("tenant getId {} JSON".format(id2))
+    assert id_output == output
 
 @enable_logging()
 def tenant_configure(logger):
@@ -1138,8 +1153,8 @@ def tenant_configure(logger):
 
     output = run_fdbcli_command("tenant get tenant")
     lines = output.split("\n")
-    assert len(lines) == 4
-    assert lines[3].strip() == "tenant group: tenant_group1"
+    assert len(lines) == 5
+    assert lines[4].strip() == "tenant group: tenant_group1"
 
     output = run_fdbcli_command("tenant configure tenant unset tenant_group")
     assert output == "The configuration for tenant `tenant' has been updated"
@@ -1151,7 +1166,7 @@ def tenant_configure(logger):
 
     output = run_fdbcli_command("tenant get tenant")
     lines = output.split("\n")
-    assert len(lines) == 3
+    assert len(lines) == 4
 
     output = run_fdbcli_command_and_get_error(
         "tenant configure tenant tenant_group=tenant_group1 tenant_group=tenant_group2"

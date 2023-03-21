@@ -119,6 +119,7 @@ logdir = {logdir}
 {authz_public_key_config}
 {custom_config}
 {use_future_protocol_version}
+knob_min_trace_severity=5
 # logsize = 10MiB
 # maxlogssize = 100MiB
 # machine-id =
@@ -263,9 +264,9 @@ logdir = {logdir}
                 bg_config = "\n".join(
                     [
                         "knob_bg_url=file://" + str(self.data) + "/fdbblob/",
-                        "knob_bg_snapshot_file_target_bytes=100000",
-                        "knob_bg_delta_file_target_bytes=5000",
-                        "knob_bg_delta_bytes_before_compact=50000",
+                        "knob_bg_snapshot_file_target_bytes=200000",
+                        "knob_bg_delta_file_target_bytes=10000",
+                        "knob_bg_delta_bytes_before_compact=100000",
                     ]
                 )
             if self.enable_encryption_at_rest:
@@ -425,7 +426,7 @@ logdir = {logdir}
     def create_database(self, storage="ssd", enable_tenants=True):
         if self.enable_encryption_at_rest:
             # only redwood supports EAR
-            storage = "ssd-redwood-1-experimental"
+            storage = "ssd-redwood-1"
         db_config = "configure new {} {}".format(self.redundancy, storage)
         if enable_tenants:
             db_config += " tenant_mode=optional_experimental"
@@ -731,7 +732,6 @@ logdir = {logdir}
         for file in glob.glob(glob_pattern):
             if filename_substr and file.find(filename_substr) == -1:
                 continue
-            print(f"### considering file {file}")
             for line in open(file):
                 try:
                     entry = ET.fromstring(line)
