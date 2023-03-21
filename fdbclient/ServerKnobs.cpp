@@ -164,6 +164,11 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PRIORITY_SPLIT_SHARD,                                  950 ); if( randomize && BUGGIFY ) PRIORITY_SPLIT_SHARD = 350;
 
 	// Data distribution
+	init( AVAILABLE_SPACE_PIVOT_PERCENT,                          0.6);
+	init( READ_LOAD_PIVOT_PERCENT,                                0.8);
+	// In order to make sure GetTeam has enough eligible destination team:
+	ASSERT_GT(AVAILABLE_SPACE_PIVOT_PERCENT + READ_LOAD_PIVOT_PERCENT, 1.0);
+
 	init( SHARD_ENCODE_LOCATION_METADATA,                      false );
 	init( READ_REBALANCE_CPU_THRESHOLD,                         15.0 );
 	init( READ_REBALANCE_SRC_PARALLELISM,                         20 );
