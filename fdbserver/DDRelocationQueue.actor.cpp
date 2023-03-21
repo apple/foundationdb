@@ -482,9 +482,9 @@ void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap, 
 }
 
 // Cancells in-flight data moves intersecting with range.
-ACTOR Future<Void> cancelDataMove(struct DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState);
+ACTOR Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState);
 
-ACTOR Future<Void> dataDistributionRelocator(struct DDQueue* self,
+ACTOR Future<Void> dataDistributionRelocator(class DDQueue* self,
                                              RelocateData rd,
                                              Future<Void> prevCleanup,
                                              const DDEnabledState* ddEnabledState);
@@ -1112,11 +1112,11 @@ Future<Void> DDQueue::periodicalRefreshCounter() {
 	return recurring(f, SERVER_KNOBS->DD_QUEUE_COUNTER_REFRESH_INTERVAL);
 }
 
-int DDQueue::getUnhealthyRelocationCount() {
+int DDQueue::getUnhealthyRelocationCount() const {
 	return unhealthyRelocations;
 }
 
-ACTOR Future<Void> cancelDataMove(struct DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState) {
+ACTOR Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState) {
 	std::vector<Future<Void>> cleanup;
 	auto f = self->dataMoves.intersectingRanges(range);
 	for (auto it = f.begin(); it != f.end(); ++it) {
