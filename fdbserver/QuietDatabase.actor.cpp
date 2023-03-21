@@ -344,7 +344,7 @@ getStorageWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo, b
 		if (!localOnly || (usableRegions == 1 || server.locality.dcId() == masterDcId)) {
 			auto itr = workersMap.find(server.address());
 			if (itr == workersMap.end()) {
-				TraceEvent(SevWarn, "GetStorageWorkers")
+				TraceEvent(SevWarn, "GetstStorageWorkers")
 				    .detail("Reason", "Could not find worker for storage server")
 				    .detail("SS", server.id());
 				++failures;
@@ -398,9 +398,18 @@ ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInter
 		    wi.eventLogRequest.getReply(EventLogRequest(StringRef(storage.toString() + "/StorageMetrics")));
 		state Future<Void> timeout = delay(30.0);
 		choose {
-			when(TraceEventFields res = wait(result)) {
-				if (version == invalidVersion || getDurableVersion(res) >= static_cast<int64_t>(version)) {
-					return res;
+			when(state TraceEventFields res = wait(result)) {
+				try {
+					if (version == invalidVersion || getDurableVersion(res) >= static_cast<int64_t>(version)) {
+						return res;
+					}
+				} catch (Error& e) {
+					TraceEvent("QuietDatabaseFailure")
+					    .error(e)
+					    .detail("Reason", "Failed to extract DurableVersion from StorageMetrics")
+					    .detail("SSID", StringRef(storage.toString()))
+					    .detail("StorageMetrics", res.toString());
+					throw;
 				}
 			}
 			when(wait(timeout)) {
