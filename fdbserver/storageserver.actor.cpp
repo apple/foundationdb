@@ -2487,7 +2487,7 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 
 	wait(self->durableVersion.whenAtLeast(version));
 
-	TraceEvent("DeleteCheckpointBegin", self->thisServerID).detail("Checkpoint", checkpoint.toString());
+	TraceEvent(SevInfo, "DeleteCheckpointBegin", self->thisServerID).detail("Checkpoint", checkpoint.toString());
 
 	self->checkpoints.erase(checkpoint.checkpointID);
 
@@ -2505,6 +2505,7 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 	    mLV, MutationRef(MutationRef::ClearRange, pendingCheckpointKey, keyAfter(pendingCheckpointKey)));
 	self->addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::ClearRange, persistCheckpointKey, keyAfter(persistCheckpointKey)));
+	TraceEvent(SevInfo, "DeleteCheckpointEnd", self->thisServerID).detail("Checkpoint", checkpoint.toString());
 
 	return Void();
 }
@@ -2547,7 +2548,7 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 			    .detail("CheckpointID", req.checkpointID)
 			    .detail("TotalSize", totalSize)
 			    .detail("Token", req.token);
-		} else {
+		} else if (e.code() != error_code_operation_obsolete) {
 			TraceEvent(SevWarnAlways, "ServerFetchCheckpointFailure")
 			    .errorUnsuppressed(e)
 			    .detail("CheckpointID", req.checkpointID)
@@ -8644,7 +8645,7 @@ public:
 			if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix)) {
 				applyPrivateCacheData(data, m);
 			} else if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(checkpointPrefix)) {
-				registerPendingCheckpoint(data, m, ver);
+				handleCheckpointPrivateMutation(data, m, ver);
 			} else {
 				applyPrivateData(data, ver, m);
 			}
@@ -9045,22 +9046,40 @@ private:
 		}
 	}
 
-	// Registers a pending checkpoint request, it will be fullfilled when the desired version is durable.
-	void registerPendingCheckpoint(StorageServer* data, const MutationRef& m, Version ver) {
+	// Handles checkpoint private mutations:
+	// 1. Registers a pending checkpoint request, it will be fullfilled when the desired version is durable.
+	// 2. Schedule deleting a checkpoint.
+	void handleCheckpointPrivateMutation(StorageServer* data, const MutationRef& m, Version ver) {
+		if (!data->shardAware) {
+			return;
+		}
 		CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
-		ASSERT(checkpoint.getState() == CheckpointMetaData::Pending);
+		const CheckpointMetaData::CheckpointState cState = checkpoint.getState();
 		const UID checkpointID = decodeCheckpointKey(m.param1.substr(1));
-		checkpoint.version = ver;
-		data->pendingCheckpoints[ver].push_back(checkpoint);
-
 		auto& mLV = data->addVersionToMutationLog(ver);
-		const Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpointID.toString());
-		data->addMutationToMutationLog(
-		    mLV, MutationRef(MutationRef::SetValue, pendingCheckpointKey, checkpointValue(checkpoint)));
+		if (cState == CheckpointMetaData::Pending) {
+			checkpoint.version = ver;
+			data->pendingCheckpoints[ver].push_back(checkpoint);
+			const Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpointID.toString());
+			data->addMutationToMutationLog(
+			    mLV, MutationRef(MutationRef::SetValue, pendingCheckpointKey, checkpointValue(checkpoint)));
 
-		TraceEvent("RegisterPendingCheckpoint", data->thisServerID)
-		    .detail("Key", pendingCheckpointKey)
-		    .detail("Checkpoint", checkpoint.toString());
+			TraceEvent(SevInfo, "RegisterPendingCheckpoint", data->thisServerID)
+			    .detail("Key", pendingCheckpointKey)
+			    .detail("Checkpoint", checkpoint.toString());
+		} else if (cState == CheckpointMetaData::Deleting) {
+			ASSERT(std::find(checkpoint.src.begin(), checkpoint.src.end(), data->thisServerID) != checkpoint.src.end());
+			checkpoint.src.clear();
+			checkpoint.src.push_back(data->thisServerID);
+			checkpoint.dir = serverCheckpointDir(data->checkpointFolder, checkpoint.checkpointID);
+			const Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
+			data->addMutationToMutationLog(
+			    mLV, MutationRef(MutationRef::SetValue, persistCheckpointKey, checkpointValue(checkpoint)));
+			data->actors.add(deleteCheckpointQ(data, ver, checkpoint));
+			TraceEvent(SevInfo, "DeleteCheckpointScheduled", data->thisServerID)
+			    .detail("Source", "PrivateMutation")
+			    .detail("Checkpoint", checkpoint.toString());
+		}
 	}
 };
 
@@ -9761,11 +9780,6 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		createCheckpointActors.push_back(store(
 		    sampleByteSstFileCreated, createSstFileForCheckpointShardBytesSample(data, metaData, bytesSampleTempFile)));
 		wait(waitForAll(createCheckpointActors));
-		checkpointResult.bytesSampleFile = sampleByteSstFileCreated ? bytesSampleFile : Optional<std::string>();
-		ASSERT(checkpointResult.src.empty() && checkpointResult.getState() == CheckpointMetaData::Complete);
-		checkpointResult.src.push_back(data->thisServerID);
-		checkpointResult.actionId = metaData.actionId;
-		data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
 		// Move sst file to the checkpoint folder
 		if (sampleByteSstFileCreated) {
 			ASSERT(directoryExists(abspath(checkpointDir)));
@@ -9773,14 +9787,24 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 			ASSERT(fileExists(abspath(bytesSampleTempFile)));
 			renameFile(abspath(bytesSampleTempFile), abspath(bytesSampleFile));
 		}
+		checkpointResult.bytesSampleFile = sampleByteSstFileCreated ? bytesSampleFile : Optional<std::string>();
+		ASSERT(checkpointResult.src.empty() && checkpointResult.getState() == CheckpointMetaData::Complete);
+		checkpointResult.src.push_back(data->thisServerID);
+		checkpointResult.actionId = metaData.actionId;
+		checkpointResult.dir = checkpointDir;
+		data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
+
 		TraceEvent("StorageCreatedCheckpoint", data->thisServerID)
 		    .detail("Checkpoint", checkpointResult.toString())
 		    .detail("BytesSampleFile", sampleByteSstFileCreated ? bytesSampleFile : "noFileCreated");
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		// If checkpoint creation fails, the failure is persisted.
 		checkpointResult = metaData;
 		checkpointResult.setState(CheckpointMetaData::Fail);
-		TraceEvent("StorageCreatedCheckpointFailure", data->thisServerID)
+		TraceEvent("StorageCreateCheckpointFailure", data->thisServerID)
 		    .detail("PendingCheckpoint", checkpointResult.toString());
 	}
 
@@ -9795,6 +9819,9 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		TraceEvent("StorageCreateCheckpointPersisted", data->thisServerID)
 		    .detail("Checkpoint", checkpointResult.toString());
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		// If the checkpoint meta data is not persisted successfully, remove the checkpoint.
 		TraceEvent(SevWarn, "StorageCreateCheckpointPersistFailure", data->thisServerID)
 		    .errorUnsuppressed(e)
@@ -10265,23 +10292,6 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 		bool endAvailable = self->shards.rangeContaining(keys.end)->value()->isCFInVersionedData();
 		self->addMutationToMutationLog(
 		    mLV, MutationRef(MutationRef::SetValue, availableKeys.end, endAvailable ? "1"_sr : "0"_sr));
-	}
-
-	// When a shard is moved out, delete all related checkpoints created for data move.
-	if (!available) {
-		for (auto& [id, checkpoint] : self->checkpoints) {
-			if (!checkpoint.ranges.empty() && checkpoint.ranges.front().intersects(keys)) {
-				Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
-				checkpoint.setState(CheckpointMetaData::Deleting);
-				self->addMutationToMutationLog(
-				    mLV, MutationRef(MutationRef::SetValue, persistCheckpointKey, checkpointValue(checkpoint)));
-			}
-			self->actors.add(deleteCheckpointQ(self, mLV.version + 1, checkpoint));
-			TraceEvent("SSDeleteCheckpointScheduled", self->thisServerID)
-			    .detail("MovedOutRange", keys.toString())
-			    .detail("Checkpoint", checkpoint.toString())
-			    .detail("DeleteVersion", mLV.version + 1);
-		}
 	}
 
 	if (BUGGIFY) {
