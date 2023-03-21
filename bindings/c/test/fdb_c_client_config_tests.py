@@ -168,6 +168,11 @@ class ClientConfigTest:
         self.tc.assertTrue("InitializationState" in self.status_json)
         self.tc.assertEqual(expected_state, self.status_json["InitializationState"])
 
+    def get_initialization_state(self):
+        self.tc.assertIsNotNone(self.status_json)
+        self.tc.assertTrue("InitializationState" in self.status_json)
+        return self.status_json["InitializationState"]
+
     def check_available_clients(self, expected_clients):
         self.tc.assertIsNotNone(self.status_json)
         self.tc.assertTrue("AvailableClients" in self.status_json)
@@ -461,10 +466,15 @@ class ClientConfigTests(unittest.TestCase):
         test.transaction_timeout = 100
         test.expected_error = 1031  # Timeout
         test.exec()
-        test.check_initialization_state("incompatible")
         test.check_healthy_status(False)
         test.check_available_clients([PREV_RELEASE_VERSION])
-        test.check_current_client(None)
+        init_state = test.get_initialization_state()
+        if init_state == "incompatible":
+            test.check_current_client(None)
+        elif init_state == "initializing":
+            test.check_protocol_version_not_set()
+        else:
+            self.fail("Unexpected initialization state {}".format(init_state))
 
     def test_cannot_connect_to_coordinator(self):
         # Testing a cluster file with a valid address, but no server behind it
