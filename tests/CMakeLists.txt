@@ -361,6 +361,15 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_71.3.0/BlobGranuleRestartLarge-1.toml
     restarting/from_71.3.0/BlobGranuleRestartLarge-2.toml)
   add_fdb_test(
+    TEST_FILES restarting/from_71.3.0/ClientTransactionProfilingCorrectness-1.txt
+    restarting/from_71.3.0/ClientTransactionProfilingCorrectness-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.3.0/CycleTestRestart-1.txt
+    restarting/from_71.3.0/CycleTestRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.3.0/StorefrontTestRestart-1.txt
+    restarting/from_71.3.0/StorefrontTestRestart-2.txt)
+  add_fdb_test(
     TEST_FILES restarting/to_7.1.0_until_71.2.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/to_7.1.0_until_71.2.0/ConfigureStorageMigrationTestRestart-2.toml)
   add_fdb_test(
