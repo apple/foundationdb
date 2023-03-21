@@ -1,0 +1,13 @@
+# https://snowflakecomputing.atlassian.net/wiki/spaces/EN/pages/681313379/Code+Reviews+at+Snowflake#CodeReviewsatSnowflake-AbouttheCODEOWNERSFile
+
+##################################################
+# Section 1
+# This section should only contain the catchall rule
+##################################################
+*     @snowflakedb/fdb
+
+##################################################
+# Section 2
+# This section contains all rules except for the catchall rule.
+# Please order the rules in sorted lexicographical order.
+##################################################

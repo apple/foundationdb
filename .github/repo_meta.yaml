@@ -1,0 +1,25 @@
+# point_of_contact: the owner of this repository, can be a GitHub user or GitHub team
+point_of_contact: fdb
+
+# production: whether this repository meets the criteria for being "production", see https://snowflakecomputing.atlassian.net/wiki/spaces/CLO/pages/2239988967/Production+Repository+Criteria for criteria
+production: true
+
+# distributed: whether any source code in this repository is distributed directly to customers (e.g. driver and frontend software)
+distributed: false
+
+# modified: whether any open source dependencies in this repository have been modified
+modified: true
+
+# release_branches: list of release branch patterns, exact matches or regex is acceptable
+release_branches:
+  - main
+  - release-*
+
+# code_owners_file_present: whether there is a CODEOWNERS file in this repository
+code_owners_file_present: true
+
+# jira_project_issue_type: the jira issuetype used to raise issues related to this repository in the SNOW Jira project
+jira_project_issue_type: Bug
+
+# jira_area: the jira area that raised issues should use
+jira_area: FDB Core
