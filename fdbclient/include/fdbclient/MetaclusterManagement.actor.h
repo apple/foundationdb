@@ -2603,10 +2603,7 @@ struct CreateTenantImpl {
 			ASSERT(tenantIdPrefix.present());
 			lastId = tenantIdPrefix.get() << 48;
 		}
-		if (!TenantAPI::nextTenantIdPrefixMatches(lastId.get(), lastId.get() + 1)) {
-			throw cluster_no_capacity();
-		}
-		self->tenantEntry.setId(lastId.get() + 1);
+		self->tenantEntry.setId(TenantAPI::computeNextTenantId(lastId.get(), 1));
 		ManagementClusterMetadata::tenantMetadata().lastTenantId.set(tr, self->tenantEntry.id);
 
 		self->tenantEntry.tenantState = MetaclusterAPI::TenantState::REGISTERING;
@@ -2939,7 +2936,12 @@ Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenant
 	results.reserve(futures.size());
 	for (int i = 0; i < futures.size(); ++i) {
 		const MetaclusterTenantMapEntry& entry = futures[i].get().get();
-		results.emplace_back(entry.tenantName, entry);
+
+		// Tenants being renamed show up in tenantIds twice, once under each name. The destination name will be
+		// different from the tenant entry and is filtered from the list
+		if (entry.tenantName == tenantIds[i].first) {
+			results.emplace_back(entry.tenantName, entry);
+		}
 	}
 
 	return results;

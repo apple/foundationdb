@@ -122,6 +122,10 @@ int64_t getMaxShardSize(double dbSizeEstimate) {
 	                (int64_t)SERVER_KNOBS->MAX_SHARD_BYTES);
 }
 
+bool ddLargeTeamEnabled() {
+	return SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAMS > 0 && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
+}
+
 // Returns the shard size bounds as well as whether `keys` a read hot shard.
 std::pair<ShardSizeBounds, bool> calculateShardSizeBounds(
     const KeyRange& keys,
@@ -851,11 +855,11 @@ ACTOR Future<Void> brokenPromiseToReady(Future<Void> f) {
 }
 
 static bool shardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef adjRange) {
-	bool honorTenantKeyspaceBoundaries = self->ddTenantCache.present();
-
-	if (!honorTenantKeyspaceBoundaries) {
+	if (!SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED) {
 		return true;
 	}
+
+	ASSERT(self->ddTenantCache.present());
 
 	Optional<Reference<TCTenantInfo>> tenantOwningRange = {};
 	Optional<Reference<TCTenantInfo>> tenantOwningAdjRange = {};
@@ -876,11 +880,19 @@ static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange co
 		return false;
 	}
 
+	if (self->customReplication->rangeContaining(keys.begin).range().end < nextRange.end) {
+		return false;
+	}
+
 	return shardMergeFeasible(self, keys, nextRange);
 }
 
 static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef prevRange) {
 	if (keys.begin == allKeys.begin) {
+		return false;
+	}
+
+	if (self->customReplication->rangeContaining(keys.begin).range().begin > prevRange.begin) {
 		return false;
 	}
 
@@ -1190,10 +1202,26 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 	// SOMEDAY: Figure out what this priority should actually be
 	wait(delay(0.0, TaskPriority::DataDistribution));
 
+	state std::vector<Key> customBoundaries;
+	for (auto& it : self->customReplication->ranges()) {
+		customBoundaries.push_back(it->range().begin);
+	}
+
 	state int s;
+	state int customBoundary = 0;
 	for (s = 0; s < initData->shards.size() - 1; s++) {
-		restartShardTrackers(
-		    self, KeyRangeRef(initData->shards[s].key, initData->shards[s + 1].key), Optional<ShardMetrics>(), true);
+		Key beginKey = initData->shards[s].key;
+		Key endKey = initData->shards[s + 1].key;
+		while (customBoundary < customBoundaries.size() && customBoundaries[customBoundary] <= beginKey) {
+			customBoundary++;
+		}
+		while (customBoundary < customBoundaries.size() && customBoundaries[customBoundary] < endKey) {
+			restartShardTrackers(
+			    self, KeyRangeRef(beginKey, customBoundaries[customBoundary]), Optional<ShardMetrics>(), true);
+			beginKey = customBoundaries[customBoundary];
+			customBoundary++;
+		}
+		restartShardTrackers(self, KeyRangeRef(beginKey, endKey), Optional<ShardMetrics>(), true);
 		wait(yield(TaskPriority::DataDistribution));
 	}
 
@@ -1405,7 +1433,8 @@ struct DataDistributionTrackerImpl {
 			initData.clear(); // Release reference count.
 
 			state PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
-			if (self->ddTenantCache.present()) {
+			if (SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED) {
+				ASSERT(self->ddTenantCache.present());
 				tenantCreationSignal = self->ddTenantCache.get()->tenantCreationSignal;
 			}
 

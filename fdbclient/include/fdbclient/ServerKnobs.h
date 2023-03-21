@@ -173,6 +173,8 @@ public:
 	double
 	    READ_REBALANCE_DIFF_FRAC; // only when (srcLoad - destLoad)/srcLoad > DIFF_FRAC the read rebalance will happen
 	double READ_REBALANCE_MAX_SHARD_FRAC; // only move shard whose readLoad < (srcLoad - destLoad) * MAX_SHARD_FRAC
+	double
+	    READ_REBALANCE_MIN_READ_BYTES_KS; // only move shard whose readLoad > min(MIN_READ_BYTES_KS, shard avg traffic);
 
 	double RETRY_RELOCATESHARD_DELAY;
 	double DATA_DISTRIBUTION_FAILURE_REACTION_TIME;
@@ -274,6 +276,13 @@ public:
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 	int DD_BUILD_EXTRA_TEAMS_OVERRIDE; // build extra teams to allow data movement to progress. must be larger than 0
+	int DD_MAXIMUM_LARGE_TEAMS; // the maximum number of large teams data distribution will maintain
+	int DD_MAXIMUM_LARGE_TEAM_CLEANUP; // the maximum number of large teams data distribution will attempt to cleanup
+	                                   // without yielding
+	double DD_LARGE_TEAM_DELAY; // the amount of time data distribution will wait before returning less replicas than
+	                            // requested
+	double DD_FIX_WRONG_REPLICAS_DELAY; // the amount of time between attempts to increase the replication factor of
+	                                    // under replicated shards
 
 	// Run storage enginee on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;

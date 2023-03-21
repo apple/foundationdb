@@ -17,7 +17,7 @@ import uuid
 from functools import total_ordering
 from pathlib import Path
 from test_harness.version import Version
-from test_harness.config import config
+from test_harness.config import config, BuggifyOptionValue
 from typing import Dict, List, Pattern, OrderedDict
 
 from test_harness.summarize import Summary, SummaryTree
@@ -549,7 +549,12 @@ class TestRunner:
                 not is_no_sim(file)
                 and config.random.random() < config.unseed_check_ratio
             )
-            buggify_enabled: bool = config.random.random() < config.buggify_on_ratio
+            buggify_enabled: bool = False
+            if config.buggify.value == BuggifyOptionValue.ON:
+                buggify_enabled = True
+            elif config.buggify.value == BuggifyOptionValue.RANDOM:
+                buggify_enabled = config.random.random() < config.buggify_on_ratio
+
             # FIXME: support unseed checks for restarting tests
             run = TestRun(
                 binary,
