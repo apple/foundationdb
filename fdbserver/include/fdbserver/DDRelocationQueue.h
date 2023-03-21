@@ -25,16 +25,19 @@
 
 // send request/signal to DDRelocationQueue through interface
 // call synchronous method from components outside DDRelocationQueue
-struct IDDRelocationQueue {
+class IDDRelocationQueue {
+public:
 	PromiseStream<RelocateShard> relocationProducer, relocationConsumer; // FIXME(xwang): not used yet
 	// PromiseStream<Promise<int>> getUnhealthyRelocationCount; // FIXME(xwang): change it to a synchronous call
 
-	virtual int getUnhealthyRelocationCount() = 0;
+	virtual int getUnhealthyRelocationCount() const = 0;
 	virtual ~IDDRelocationQueue() = default;
 	;
 };
 
-struct RelocateData {
+// DDQueue use RelocateData to track proposed movements
+class RelocateData {
+public:
 	KeyRange keys;
 	int priority;
 	int boundaryPriority;
@@ -76,6 +79,7 @@ struct RelocateData {
 	bool operator!=(const RelocateData& rhs) const;
 };
 
+// DDQueue uses Busyness to throttle too many movement to/from a same server
 struct Busyness {
 	std::vector<int> ledger;
 
@@ -102,7 +106,9 @@ struct DDQueueInitParams {
 	PromiseStream<GetTopKMetricsRequest> const& getTopKMetrics;
 };
 
-struct DDQueue : public IDDRelocationQueue, ReferenceCounted<DDQueue> {
+// DDQueue receives RelocateShard from any other DD components and schedules the actual movements
+class DDQueue : public IDDRelocationQueue, public ReferenceCounted<DDQueue> {
+public:
 	friend struct DDQueueImpl;
 
 	typedef Reference<IDataDistributionTeam> ITeamRef;
@@ -118,7 +124,8 @@ struct DDQueue : public IDDRelocationQueue, ReferenceCounted<DDQueue> {
 		Future<Void> cancel;
 	};
 
-	struct ServerCounter {
+	class ServerCounter {
+	public:
 		enum CountType : uint8_t { ProposedSource = 0, QueuedSource, LaunchedSource, LaunchedDest, __COUNT };
 
 	private:
@@ -334,7 +341,7 @@ struct DDQueue : public IDDRelocationQueue, ReferenceCounted<DDQueue> {
 
 	Future<Void> periodicalRefreshCounter();
 
-	int getUnhealthyRelocationCount() override;
+	int getUnhealthyRelocationCount() const override;
 
 	Future<SrcDestTeamPair> getSrcDestTeams(const int& teamCollectionIndex,
 	                                        const GetTeamRequest& srcReq,

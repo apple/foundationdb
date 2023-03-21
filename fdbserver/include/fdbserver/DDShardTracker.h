@@ -23,7 +23,8 @@
 
 // send request/signal to DDTracker through interface
 // call synchronous method from components outside DDShardTracker
-struct IDDShardTracker {
+class IDDShardTracker {
+public:
 	Promise<Void> readyToStart;
 	FutureStream<GetMetricsRequest> getShardMetrics;
 	FutureStream<GetTopKMetricsRequest> getTopKMetrics;
@@ -47,7 +48,9 @@ struct DataDistributionTrackerInitParams {
 	Optional<Reference<TenantCache>> ddTenantCache;
 };
 
-struct DataDistributionTracker : public IDDShardTracker, ReferenceCounted<DataDistributionTracker> {
+// track the status of shards
+class DataDistributionTracker : public IDDShardTracker, public ReferenceCounted<DataDistributionTracker> {
+public:
 	friend struct DataDistributionTrackerImpl;
 
 	Reference<IDDTxnProcessor> db;
