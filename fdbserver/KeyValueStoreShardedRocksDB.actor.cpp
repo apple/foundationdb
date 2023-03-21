@@ -556,6 +556,9 @@ struct PhysicalShard {
 		if (format == DataMoveRocksCF) {
 			rocksdb::ExportImportFilesMetaData metaData = getMetaData(checkpoint);
 			if (metaData.files.empty()) {
+				TraceEvent(SevInfo, "RocksDBRestoreEmptyShard")
+				    .detail("Shard", id)
+				    .detail("CheckpointID", checkpoint.checkpointID);
 				status = db->CreateColumnFamily(getCFOptions(), id, &cf);
 			} else {
 				rocksdb::ImportColumnFamilyOptions importOptions;
@@ -569,20 +572,21 @@ struct PhysicalShard {
 			std::vector<std::string> sstFiles;
 			const RocksDBCheckpointKeyValues rcp = getRocksKeyValuesCheckpoint(checkpoint);
 			for (const auto& file : rcp.fetchedFiles) {
-				TraceEvent(SevDebug, "RocksDBRestoreFile")
-				    .detail("Shard", id)
-				    .detail("CheckpointID", checkpoint.checkpointID)
-				    .detail("File", file.toString());
 				if (file.path != emptySstFilePath) {
 					sstFiles.push_back(file.path);
 				}
 			}
 
+			TraceEvent(SevDebug, "RocksDBRestoreFiles")
+			    .detail("Shard", id)
+			    .detail("CheckpointID", checkpoint.checkpointID)
+			    .detail("Files", describe(sstFiles));
+
 			if (!sstFiles.empty()) {
 				ASSERT(cf != nullptr);
 				rocksdb::IngestExternalFileOptions ingestOptions;
 				ingestOptions.move_files = SERVER_KNOBS->ROCKSDB_IMPORT_MOVE_FILES;
-				ingestOptions.verify_checksums_before_ingest = true;
+				ingestOptions.verify_checksums_before_ingest = SERVER_KNOBS->ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE;
 				status = db->IngestExternalFile(cf, sstFiles, ingestOptions);
 			} else {
 				TraceEvent(SevWarn, "RocksDBServeRestoreEmptyRange")
@@ -590,10 +594,11 @@ struct PhysicalShard {
 				    .detail("RocksKeyValuesCheckpoint", rcp.toString())
 				    .detail("Checkpoint", checkpoint.toString());
 			}
-			TraceEvent(SevInfo, "RocksDBServeRestoreEnd")
+			TraceEvent(SevInfo, "RocksDBServeRestoreFiles")
 			    .detail("Shard", id)
 			    .detail("CFName", cf->GetName())
-			    .detail("Checkpoint", checkpoint.toString());
+			    .detail("Checkpoint", checkpoint.toString())
+			    .detail("RestoredFiles", describe(sstFiles));
 		} else {
 			throw not_implemented();
 		}
