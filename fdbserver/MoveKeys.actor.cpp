@@ -246,6 +246,7 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 			state UID txnId;
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			if (!g_network->isSimulated()) {
 				txnId = deterministicRandom()->randomUniqueID();
 				tr.debugTransaction(txnId);

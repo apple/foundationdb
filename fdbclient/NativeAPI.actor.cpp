@@ -2223,8 +2223,6 @@ void DatabaseContext::expireThrottles() {
 	}
 }
 
-extern IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs);
-
 // Initialize tracing for FDB client
 //
 // connRecord is necessary for determining the local IP, which is then included in the trace
@@ -2256,7 +2254,7 @@ void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Opt
 
 	Optional<NetworkAddress> localAddress;
 	if (connRecord) {
-		auto publicIP = determinePublicIPAutomatically(connRecord->getConnectionString());
+		auto publicIP = connRecord->getConnectionString().determineLocalSourceIP();
 		localAddress = NetworkAddress(publicIP, ::getpid());
 	}
 	platform::ImageInfo imageInfo = platform::getImageInfo();
