@@ -279,8 +279,8 @@ protected:
 
 	AsyncVar<Optional<Key>> healthyZone;
 	Future<bool> clearHealthyZoneFuture;
-	double medianAvailableSpace;
-	double lastMedianAvailableSpaceUpdate;
+	double pivotAvailableSpaceRatio;
+	double lastPivotAvailableSpaceUpdate;
 
 	int lowestUtilizationTeam;
 	int highestUtilizationTeam;
@@ -642,6 +642,9 @@ protected:
 	int maxLargeTeamSize() const;
 
 	Reference<TCTeamInfo> buildLargeTeam(int size);
+
+	// get the min available space ratio from every healthy team and update the pivot ratio `pivotAvailableSpaceRatio`
+	void updatePivotAvailableSpaceRatio();
 
 public:
 	Reference<IDDTxnProcessor> db;
