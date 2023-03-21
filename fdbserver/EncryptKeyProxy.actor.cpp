@@ -639,7 +639,7 @@ ACTOR Future<Void> refreshEncryptionKeysImpl(Reference<EncryptKeyProxyData> ekpP
 		     itr != ekpProxyData->baseCipherDomainIdCache.end();) {
 			if (isCipherKeyEligibleForRefresh(itr->second, currTS)) {
 				TraceEvent("RefreshEKs").detail("Id", itr->first);
-				req.encryptDomainIds.emplace_back(itr->first);
+				req.encryptDomainIds.push_back(itr->first);
 			}
 
 			// Garbage collect expired cached CipherKeys
@@ -648,6 +648,12 @@ ACTOR Future<Void> refreshEncryptionKeysImpl(Reference<EncryptKeyProxyData> ekpP
 			} else {
 				itr++;
 			}
+		}
+
+		if (req.encryptDomainIds.empty()) {
+			// Nothing to refresh
+			TraceEvent(SevDebug, "RefreshEKsEmptyRefresh");
+			return Void();
 		}
 
 		state double startTime = now();

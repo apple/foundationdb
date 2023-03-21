@@ -39,6 +39,15 @@ int ShardsAffectedByTeamFailure::getNumberOfShards(UID ssID) const {
 	return it == storageServerShards.end() ? 0 : it->second;
 }
 
+int ShardsAffectedByTeamFailure::getNumberOfShards(Team team) const {
+	int shardCount = 0;
+	for (auto it = team_shards.lower_bound(std::pair<Team, KeyRange>(team, KeyRangeRef()));
+	     it != team_shards.end() && it->first == team;
+	     ++it)
+		shardCount++;
+	return shardCount;
+}
+
 std::pair<std::vector<ShardsAffectedByTeamFailure::Team>, std::vector<ShardsAffectedByTeamFailure::Team>>
 ShardsAffectedByTeamFailure::getTeamsForFirstShard(KeyRangeRef keys) {
 	return shard_teams[keys.begin];

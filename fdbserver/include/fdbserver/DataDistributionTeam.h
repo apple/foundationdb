@@ -110,6 +110,7 @@ struct GetTeamRequest {
 	bool preferLowerReadUtil; // only make sense when forReadBalance is true
 	double inflightPenalty;
 	bool findTeamByServers;
+	Optional<KeyRange> keys;
 	std::vector<UID> completeSources;
 	std::vector<UID> src;
 	Promise<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> reply;
@@ -122,10 +123,12 @@ struct GetTeamRequest {
 	               TeamMustHaveShards teamMustHaveShards,
 	               ForReadBalance forReadBalance = ForReadBalance::False,
 	               PreferLowerReadUtil preferLowerReadUtil = PreferLowerReadUtil::False,
-	               double inflightPenalty = 1.0)
-	  : teamSelect(teamSelectRequest), preferLowerDiskUtil(preferLowerDiskUtil), teamMustHaveShards(teamMustHaveShards),
-	    forReadBalance(forReadBalance), preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty),
-	    findTeamByServers(FindTeamByServers::False) {}
+	               double inflightPenalty = 1.0,
+	               Optional<KeyRange> keys = Optional<KeyRange>())
+	  : teamSelect(teamSelectRequest), preferLowerDiskUtil(preferLowerDiskUtil),
+	    teamMustHaveShards(teamMustHaveShards), forReadBalance(forReadBalance),
+	    preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty),
+	    findTeamByServers(FindTeamByServers::False), keys(keys) {}
 	GetTeamRequest(std::vector<UID> servers)
 	  : teamSelect(TeamSelect::WANTSRCSERVERS), preferLowerDiskUtil(PreferLowerDiskUtil::False),
 	    teamMustHaveShards(TeamMustHaveShards::False), forReadBalance(ForReadBalance::False),

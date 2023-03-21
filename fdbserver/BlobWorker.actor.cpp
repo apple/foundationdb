@@ -22,6 +22,7 @@
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BackupContainerFileSystem.h"
@@ -36,11 +37,11 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 
+#include "fdbserver/BlobWorker.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MutationTracking.h"
-#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -68,357 +69,180 @@
 #define BW_HISTORY_DEBUG false
 #define BW_REQUEST_DEBUG false
 
+void GranuleMetadata::resume() {
+	if (resumeSnapshot.canBeSet()) {
+		resumeSnapshot.send(Void());
+	}
+}
+
+void GranuleMetadata::resetReadStats() {
+	rdcCandidate = false;
+	readStats.reset();
+	runRDC.reset();
+}
+
+double GranuleMetadata::weightRDC() {
+	// ratio of read amp to write amp that would be incurred by re-snapshotting now
+	int64_t lastSnapshotSize = (files.snapshotFiles.empty()) ? 0 : files.snapshotFiles.back().length;
+	int64_t minSnapshotSize = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES / 2;
+	lastSnapshotSize = std::max(minSnapshotSize, lastSnapshotSize);
+
+	int64_t writeAmp = lastSnapshotSize + bufferedDeltaBytes + bytesInNewDeltaFiles;
+	// read amp is deltaBytesRead. Read amp must be READ_FACTOR times larger than write amp
+	return (1.0 * readStats.deltaBytesRead) / (writeAmp * SERVER_KNOBS->BG_RDC_READ_FACTOR);
+}
+
+bool GranuleMetadata::isEligibleRDC() const {
+	// granule should be reasonably read-hot to be eligible
+	int64_t bytesWritten = bufferedDeltaBytes + bytesInNewDeltaFiles;
+	return bytesWritten * SERVER_KNOBS->BG_RDC_READ_FACTOR < readStats.deltaBytesRead;
+}
+
+bool GranuleMetadata::updateReadStats(Version readVersion, const BlobGranuleChunkRef& chunk) {
+	// Only update stats for re-compacting for at-latest reads that have to do snapshot + delta merge
+	if (!SERVER_KNOBS->BG_ENABLE_READ_DRIVEN_COMPACTION || !chunk.snapshotFile.present() ||
+	    pendingSnapshotVersion != durableSnapshotVersion.get() || readVersion <= pendingSnapshotVersion) {
+		return false;
+	}
+
+	if (chunk.newDeltas.empty() && chunk.deltaFiles.empty()) {
+		return false;
+	}
+
+	readStats.deltaBytesRead += chunk.newDeltas.expectedSize();
+	for (auto& it : chunk.deltaFiles) {
+		readStats.deltaBytesRead += it.length;
+	}
+
+	if (rdcCandidate) {
+		return false;
+	}
+
+	if (isEligibleRDC() && weightRDC() > 1.0) {
+		rdcCandidate = true;
+		CODE_PROBE(true, "Granule read triggering read-driven compaction");
+		if (BW_DEBUG) {
+			fmt::print("Triggering read-driven compaction of [{0} - {1})\n",
+			           keyRange.begin.printable(),
+			           keyRange.end.printable());
+		}
+		return true;
+	}
+	return false;
+}
+
+void GranuleRangeMetadata::cancel() {
+	if (activeMetadata->cancelled.canBeSet()) {
+		activeMetadata->cancelled.send(Void());
+	}
+	activeMetadata.clear();
+	assignFuture.cancel();
+	historyLoaderFuture.cancel();
+	fileUpdaterFuture.cancel();
+}
 /*
  * The Blob Worker is a stateless role assigned a set of granules by the Blob Manager.
  * It is responsible for managing the change feeds for those granules, and for consuming the mutations from
  * those change feeds and writing them out as files to blob storage.
  */
-
-struct GranuleStartState {
-	UID granuleID;
-	Version changeFeedStartVersion;
-	Version previousDurableVersion;
-	Optional<std::pair<KeyRange, UID>> splitParentGranule;
-	bool doSnapshot;
-	std::vector<GranuleFiles> blobFilesToSnapshot;
-	Optional<GranuleFiles> existingFiles;
-	Optional<GranuleHistory> history;
-};
-
-// TODO: add more (blob file request cost, in-memory mutations vs blob delta file, etc...)
-struct GranuleReadStats {
-	int64_t deltaBytesRead;
-
-	void reset() { deltaBytesRead = 0; }
-
-	GranuleReadStats() { reset(); }
-};
-
-struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
-	KeyRange keyRange;
-
-	GranuleFiles files;
-	Standalone<GranuleDeltas>
-	    currentDeltas; // only contain deltas in pendingDeltaVersion + 1 through bufferedDeltaVersion
-
-	uint64_t bytesInNewDeltaFiles = 0;
-	uint64_t bufferedDeltaBytes = 0;
-
-	// for client to know when it is safe to read a certain version and from where (check waitForVersion)
-	Version bufferedDeltaVersion; // largest delta version in currentDeltas (including empty versions)
-	Version pendingDeltaVersion = 0; // largest version in progress writing to s3/fdb
-	NotifiedVersion durableDeltaVersion; // largest version persisted in s3/fdb
-	NotifiedVersion durableSnapshotVersion; // same as delta vars, except for snapshots
-	Version pendingSnapshotVersion = 0;
-	Version initialSnapshotVersion = invalidVersion;
-	Version historyVersion = invalidVersion;
-	Version knownCommittedVersion;
-	NotifiedVersion forceFlushVersion; // Version to force a flush at, if necessary
-	Version forceCompactVersion = invalidVersion;
-
-	int64_t originalEpoch;
-	int64_t originalSeqno;
-	int64_t continueEpoch;
-	int64_t continueSeqno;
-
-	Promise<Void> cancelled;
-	Promise<Void> readable;
-	Promise<Void> historyLoaded;
-
-	Promise<Void> resumeSnapshot;
-
-	AsyncVar<Reference<ChangeFeedData>> activeCFData;
-
-	AssignBlobRangeRequest originalReq;
-
-	GranuleReadStats readStats;
-	bool rdcCandidate;
-	Promise<Void> runRDC;
-
-	void resume() {
-		if (resumeSnapshot.canBeSet()) {
-			resumeSnapshot.send(Void());
-		}
-	}
-
-	void resetReadStats() {
-		rdcCandidate = false;
-		readStats.reset();
-		runRDC.reset();
-	}
-
-	// determine eligibility (>1) and priority for re-snapshotting this granule
-	double weightRDC() {
-		// ratio of read amp to write amp that would be incurred by re-snapshotting now
-		int64_t lastSnapshotSize = (files.snapshotFiles.empty()) ? 0 : files.snapshotFiles.back().length;
-		int64_t minSnapshotSize = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES / 2;
-		lastSnapshotSize = std::max(minSnapshotSize, lastSnapshotSize);
-
-		int64_t writeAmp = lastSnapshotSize + bufferedDeltaBytes + bytesInNewDeltaFiles;
-		// read amp is deltaBytesRead. Read amp must be READ_FACTOR times larger than write amp
-		return (1.0 * readStats.deltaBytesRead) / (writeAmp * SERVER_KNOBS->BG_RDC_READ_FACTOR);
-	}
-
-	bool isEligibleRDC() const {
-		// granule should be reasonably read-hot to be eligible
-		int64_t bytesWritten = bufferedDeltaBytes + bytesInNewDeltaFiles;
-		return bytesWritten * SERVER_KNOBS->BG_RDC_READ_FACTOR < readStats.deltaBytesRead;
-	}
-
-	bool updateReadStats(Version readVersion, const BlobGranuleChunkRef& chunk) {
-		// Only update stats for re-compacting for at-latest reads that have to do snapshot + delta merge
-		if (!SERVER_KNOBS->BG_ENABLE_READ_DRIVEN_COMPACTION || !chunk.snapshotFile.present() ||
-		    pendingSnapshotVersion != durableSnapshotVersion.get() || readVersion <= pendingSnapshotVersion) {
-			return false;
-		}
-
-		if (chunk.newDeltas.empty() && chunk.deltaFiles.empty()) {
-			return false;
-		}
-
-		readStats.deltaBytesRead += chunk.newDeltas.expectedSize();
-		for (auto& it : chunk.deltaFiles) {
-			readStats.deltaBytesRead += it.length;
-		}
-
-		if (rdcCandidate) {
-			return false;
-		}
-
-		if (isEligibleRDC() && weightRDC() > 1.0) {
-			rdcCandidate = true;
-			CODE_PROBE(true, "Granule read triggering read-driven compaction");
-			if (BW_DEBUG) {
-				fmt::print("Triggering read-driven compaction of [{0} - {1})\n",
-				           keyRange.begin.printable(),
-				           keyRange.end.printable());
-			}
-			return true;
+bool BlobWorkerData::managerEpochOk(int64_t epoch) {
+	if (epoch < currentManagerEpoch) {
+		if (BW_DEBUG) {
+			fmt::print(
+			    "BW {0} got request from old epoch {1}, notifying them they are out of date\n", id.toString(), epoch);
 		}
 		return false;
-	}
-
-	inline bool doEarlyReSnapshot() {
-		return runRDC.isSet() ||
-		       (forceCompactVersion <= pendingDeltaVersion && forceCompactVersion > pendingSnapshotVersion);
-	}
-};
-
-struct GranuleRangeMetadata {
-	int64_t lastEpoch;
-	int64_t lastSeqno;
-	Reference<GranuleMetadata> activeMetadata;
-
-	Future<GranuleStartState> assignFuture;
-	Future<Void> fileUpdaterFuture;
-	Future<Void> historyLoaderFuture;
-
-	void cancel() {
-		if (activeMetadata->cancelled.canBeSet()) {
-			activeMetadata->cancelled.send(Void());
-		}
-		activeMetadata.clear();
-		assignFuture.cancel();
-		historyLoaderFuture.cancel();
-		fileUpdaterFuture.cancel();
-	}
-
-	GranuleRangeMetadata() : lastEpoch(0), lastSeqno(0) {}
-	GranuleRangeMetadata(int64_t epoch, int64_t seqno, Reference<GranuleMetadata> activeMetadata)
-	  : lastEpoch(epoch), lastSeqno(seqno), activeMetadata(activeMetadata) {}
-};
-
-// represents a previous version of a granule, and optionally the files that compose it.
-struct GranuleHistoryEntry : NonCopyable, ReferenceCounted<GranuleHistoryEntry> {
-	KeyRange range;
-	UID granuleID;
-	Version startVersion; // version of the first snapshot
-	Version endVersion; // version of the last delta file
-
-	// load files lazily, and allows for clearing old cold-queried files to save memory
-	// FIXME: add memory limit and evictor for old cached files
-	Future<GranuleFiles> files;
-
-	// FIXME: do skip pointers with single back-pointer and neighbor pointers
-	std::vector<Reference<GranuleHistoryEntry>> parentGranules;
-
-	GranuleHistoryEntry() : startVersion(invalidVersion), endVersion(invalidVersion) {}
-	GranuleHistoryEntry(KeyRange range, UID granuleID, Version startVersion, Version endVersion)
-	  : range(range), granuleID(granuleID), startVersion(startVersion), endVersion(endVersion) {}
-};
-
-struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
-	UID id;
-	Database db;
-	IKeyValueStore* storage;
-
-	PromiseStream<Future<Void>> addActor;
-
-	LocalityData locality;
-	int64_t currentManagerEpoch = -1;
-
-	AsyncVar<ReplyPromiseStream<GranuleStatusReply>> currentManagerStatusStream;
-	bool statusStreamInitialized = false;
-
-	// FIXME: refactor out the parts of this that are just for interacting with blob stores from the backup business
-	// logic
-	Reference<BlobConnectionProvider> bstore;
-	KeyRangeMap<GranuleRangeMetadata> granuleMetadata;
-	BGTenantMap tenantData;
-	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
-
-	// contains the history of completed granules before the existing ones. Maps to the latest one, and has
-	// back-pointers to earlier granules
-	// FIXME: expire from map after a delay when granule is revoked and the history is no longer needed
-	KeyRangeMap<Reference<GranuleHistoryEntry>> granuleHistory;
-
-	PromiseStream<AssignBlobRangeRequest> granuleUpdateErrors;
-
-	Promise<Void> doGRVCheck;
-	NotifiedVersion grvVersion;
-	std::deque<Version> prevGRVVersions;
-	Promise<Void> fatalError;
-	Promise<Void> simInjectFailure;
-	Promise<Void> doReadDrivenCompaction;
-
-	Reference<FlowLock> initialSnapshotLock;
-	Reference<FlowLock> resnapshotBudget;
-	Reference<FlowLock> deltaWritesBudget;
-
-	BlobWorkerStats stats;
-
-	bool shuttingDown = false;
-
-	// FIXME: have cap on this independent of delta file size for larger granules
-	int changeFeedStreamReplyBufferSize = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 4;
-
-	EncryptionAtRestMode encryptMode;
-	bool buggifyFull = false;
-
-	int64_t memoryFullThreshold =
-	    (int64_t)(SERVER_KNOBS->BLOB_WORKER_REJECT_WHEN_FULL_THRESHOLD * SERVER_KNOBS->SERVER_MEM_LIMIT);
-	int64_t lastResidentMemory = 0;
-	double lastResidentMemoryCheckTime = -100.0;
-
-	bool isFullRestoreMode = false;
-
-	BlobWorkerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db, IKeyValueStore* storage)
-	  : id(id), db(db), storage(storage), tenantData(BGTenantMap(dbInfo)), dbInfo(dbInfo),
-	    initialSnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM)),
-	    resnapshotBudget(new FlowLock(SERVER_KNOBS->BLOB_WORKER_RESNAPSHOT_BUDGET_BYTES)),
-	    deltaWritesBudget(new FlowLock(SERVER_KNOBS->BLOB_WORKER_DELTA_WRITE_BUDGET_BYTES)),
-	    stats(id,
-	          SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
-	          initialSnapshotLock,
-	          resnapshotBudget,
-	          deltaWritesBudget,
-	          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	          SERVER_KNOBS->FILE_LATENCY_SKETCH_ACCURACY,
-	          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-	    encryptMode(EncryptionAtRestMode::DISABLED) {}
-
-	bool managerEpochOk(int64_t epoch) {
-		if (epoch < currentManagerEpoch) {
+	} else {
+		if (epoch > currentManagerEpoch) {
+			currentManagerEpoch = epoch;
 			if (BW_DEBUG) {
-				fmt::print("BW {0} got request from old epoch {1}, notifying them they are out of date\n",
-				           id.toString(),
-				           epoch);
+				fmt::print("BW {0} found new manager epoch {1}\n", id.toString(), currentManagerEpoch);
 			}
-			return false;
-		} else {
-			if (epoch > currentManagerEpoch) {
-				currentManagerEpoch = epoch;
-				if (BW_DEBUG) {
-					fmt::print("BW {0} found new manager epoch {1}\n", id.toString(), currentManagerEpoch);
-				}
-				TraceEvent(SevDebug, "BlobWorkerFoundNewManager", id).detail("Epoch", epoch);
-			}
-
-			return true;
+			TraceEvent(SevDebug, "BlobWorkerFoundNewManager", id).detail("Epoch", epoch);
 		}
+
+		return true;
 	}
+}
 
-	bool isFull() {
-		if (!SERVER_KNOBS->BLOB_WORKER_DO_REJECT_WHEN_FULL) {
-			return false;
-		}
-		if (g_network->isSimulated()) {
-			if (g_simulator->speedUpSimulation) {
-				return false;
-			}
-			return buggifyFull;
-		}
-
-		// TODO knob?
-		if (now() >= 1.0 + lastResidentMemoryCheckTime) {
-			// fdb as of 7.1 limits on resident memory instead of virtual memory
-			stats.lastResidentMemory = getResidentMemoryUsage();
-			lastResidentMemoryCheckTime = now();
-		}
-
-		// if we are already over threshold, no need to estimate extra memory
-		if (stats.lastResidentMemory >= memoryFullThreshold) {
-			return true;
-		}
-
-		// FIXME: since this isn't tested in simulation, could unit test this
-		// Try to model how much memory we *could* use given the already existing assignments and workload on this blob
-		// worker, before agreeing to take on a new assignment, given that several large sources of memory can grow and
-		// change post-assignment
-
-		// FIXME: change these to be byte counts
-		// FIXME: buggify an extra multiplication factor for short periods of time to hopefully trigger this logic more
-		// often? estimate slack in bytes buffered as max(0, assignments * (delta file size / 2) - bytesBuffered)
-		// FIXME: this doesn't take increased delta file size for heavy write amp cases into account
-		int64_t expectedExtraBytesBuffered = std::max<int64_t>(
-		    0, stats.numRangesAssigned * (SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 2) - stats.mutationBytesBuffered);
-		// estimate slack in potential pending resnapshot
-		int64_t totalExtra =
-		    expectedExtraBytesBuffered + deltaWritesBudget->available() + resnapshotBudget->available();
-		// assumes initial snapshot parallelism is small enough and uncommon enough to not add it to this computation
-		stats.estimatedMaxResidentMemory = stats.lastResidentMemory + totalExtra;
-
-		return stats.estimatedMaxResidentMemory >= memoryFullThreshold;
-	}
-
-	void triggerReadDrivenCompaction() {
-		Promise<Void> doRDC = doReadDrivenCompaction;
-		if (doRDC.canBeSet()) {
-			doRDC.send(Void());
-		}
-	}
-
-	void addGRVHistory(Version readVersion) {
-		if (grvVersion.get() < readVersion) {
-			// We use GRVs from grv checker loop, plus other common BW transactions. To prevent the deque size from
-			// exploding or the effective version window from getting too small, only put GRVs in the deque if they are
-			// at least some small distance apart
-			if (prevGRVVersions.empty() ||
-			    prevGRVVersions.back() + SERVER_KNOBS->BLOB_WORKER_GRV_HISTORY_MIN_VERSION_GRANULARITY <= readVersion) {
-				prevGRVVersions.push_back(readVersion);
-				while (prevGRVVersions.size() > SERVER_KNOBS->BLOB_WORKER_GRV_HISTORY_MAX_SIZE) {
-					prevGRVVersions.pop_front();
-				}
-			}
-
-			// set notified version last, so that all triggered waiters have prevGRVVersions populated too
-			grvVersion.set(readVersion);
-		}
-	}
-
-	bool maybeInjectTargetedRestart() {
-		// inject a BW restart at most once per test
-		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
-		    now() > g_simulator->injectTargetedBWRestartTime) {
-			CODE_PROBE(true, "Injecting BW targeted restart");
-			TraceEvent("SimBWInjectTargetedRestart", id);
-			g_simulator->injectTargetedBWRestartTime = std::numeric_limits<double>::max();
-			simInjectFailure.send(Void());
-			return true;
-		}
+bool BlobWorkerData::isFull() {
+	if (!SERVER_KNOBS->BLOB_WORKER_DO_REJECT_WHEN_FULL) {
 		return false;
 	}
-};
+	if (g_network->isSimulated()) {
+		if (g_simulator->speedUpSimulation) {
+			return false;
+		}
+		return buggifyFull;
+	}
+
+	// TODO knob?
+	if (now() >= 1.0 + lastResidentMemoryCheckTime) {
+		// fdb as of 7.1 limits on resident memory instead of virtual memory
+		stats.lastResidentMemory = getResidentMemoryUsage();
+		lastResidentMemoryCheckTime = now();
+	}
+
+	// if we are already over threshold, no need to estimate extra memory
+	if (stats.lastResidentMemory >= memoryFullThreshold) {
+		return true;
+	}
+
+	// FIXME: since this isn't tested in simulation, could unit test this
+	// Try to model how much memory we *could* use given the already existing assignments and workload on this blob
+	// worker, before agreeing to take on a new assignment, given that several large sources of memory can grow and
+	// change post-assignment
+
+	// FIXME: change these to be byte counts
+	// FIXME: buggify an extra multiplication factor for short periods of time to hopefully trigger this logic more
+	// often? estimate slack in bytes buffered as max(0, assignments * (delta file size / 2) - bytesBuffered)
+	// FIXME: this doesn't take increased delta file size for heavy write amp cases into account
+	int64_t expectedExtraBytesBuffered = std::max<int64_t>(
+	    0, stats.numRangesAssigned * (SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 2) - stats.mutationBytesBuffered);
+	// estimate slack in potential pending resnapshot
+	int64_t totalExtra = expectedExtraBytesBuffered + deltaWritesBudget->available() + resnapshotBudget->available();
+	// assumes initial snapshot parallelism is small enough and uncommon enough to not add it to this computation
+	stats.estimatedMaxResidentMemory = stats.lastResidentMemory + totalExtra;
+
+	return stats.estimatedMaxResidentMemory >= memoryFullThreshold;
+}
+
+void BlobWorkerData::triggerReadDrivenCompaction() {
+	Promise<Void> doRDC = doReadDrivenCompaction;
+	if (doRDC.canBeSet()) {
+		doRDC.send(Void());
+	}
+}
+
+void BlobWorkerData::addGRVHistory(Version readVersion) {
+	if (grvVersion.get() < readVersion) {
+		// We use GRVs from grv checker loop, plus other common BW transactions. To prevent the deque size from
+		// exploding or the effective version window from getting too small, only put GRVs in the deque if they are
+		// at least some small distance apart
+		if (prevGRVVersions.empty() ||
+		    prevGRVVersions.back() + SERVER_KNOBS->BLOB_WORKER_GRV_HISTORY_MIN_VERSION_GRANULARITY <= readVersion) {
+			prevGRVVersions.push_back(readVersion);
+			while (prevGRVVersions.size() > SERVER_KNOBS->BLOB_WORKER_GRV_HISTORY_MAX_SIZE) {
+				prevGRVVersions.pop_front();
+			}
+		}
+
+		// set notified version last, so that all triggered waiters have prevGRVVersions populated too
+		grvVersion.set(readVersion);
+	}
+}
+bool BlobWorkerData::maybeInjectTargetedRestart() {
+	// inject a BW restart at most once per test
+	if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
+	    now() > g_simulator->injectTargetedBWRestartTime) {
+		CODE_PROBE(true, "Injecting BW targeted restart");
+		TraceEvent("SimBWInjectTargetedRestart", id);
+		g_simulator->injectTargetedBWRestartTime = std::numeric_limits<double>::max();
+		simInjectFailure.send(Void());
+		return true;
+	}
+	return false;
+}
 
 namespace {
 
@@ -426,6 +250,9 @@ Optional<CompressionFilter> getBlobFileCompressFilter() {
 	Optional<CompressionFilter> compFilter;
 	if (SERVER_KNOBS->ENABLE_BLOB_GRANULE_COMPRESSION) {
 		compFilter = CompressionUtils::fromFilterString(SERVER_KNOBS->BLOB_GRANULE_COMPRESSION_FILTER);
+		if (BUGGIFY_WITH_PROB(0.1)) {
+			compFilter = CompressionUtils::getRandomFilter();
+		}
 	}
 	return compFilter;
 }
@@ -505,16 +332,14 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 	std::unordered_set<EncryptCipherDomainId> domainIds;
 	domainIds.emplace(domainId);
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> domainKeyMap =
-	    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestEncryptCipherKeys(
-	        bwData->dbInfo, domainIds, BlobCipherMetrics::BLOB_GRANULE));
+	    wait(getLatestEncryptCipherKeys(bwData->dbInfo, domainIds, BlobCipherMetrics::BLOB_GRANULE));
 
 	auto domainKeyItr = domainKeyMap.find(domainId);
 	ASSERT(domainKeyItr != domainKeyMap.end());
 	cipherKeysCtx.textCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(domainKeyItr->second, *arena);
 
 	TextAndHeaderCipherKeys systemCipherKeys =
-	    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestSystemEncryptCipherKeys(bwData->dbInfo,
-	                                                                              BlobCipherMetrics::BLOB_GRANULE));
+	    wait(getLatestSystemEncryptCipherKeys(bwData->dbInfo, BlobCipherMetrics::BLOB_GRANULE));
 	ASSERT(systemCipherKeys.cipherHeaderKey.isValid());
 	cipherKeysCtx.headerCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(systemCipherKeys.cipherHeaderKey, *arena);
 
@@ -541,8 +366,7 @@ ACTOR Future<BlobGranuleCipherKey> lookupCipherKey(Reference<BlobWorkerData> bwD
 	std::unordered_set<BlobCipherDetails> cipherDetailsSet;
 	cipherDetailsSet.emplace(cipherDetails);
 	state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeyMap =
-	    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
-	        bwData->dbInfo, cipherDetailsSet, BlobCipherMetrics::BLOB_GRANULE));
+	    wait(getEncryptCipherKeys(bwData->dbInfo, cipherDetailsSet, BlobCipherMetrics::BLOB_GRANULE));
 
 	ASSERT(cipherKeyMap.size() == 1);
 

@@ -23,18 +23,107 @@
 
 // send request/signal to DDTracker through interface
 // call synchronous method from components outside DDShardTracker
-struct IDDShardTracker {
-	// FIXME: the streams are not used yet
+class IDDShardTracker {
+public:
 	Promise<Void> readyToStart;
-	PromiseStream<GetMetricsRequest> getShardMetrics;
-	PromiseStream<GetTopKMetricsRequest> getTopKMetrics;
-	PromiseStream<GetMetricsListRequest> getShardMetricsList;
-	PromiseStream<KeyRange> restartShardTracker;
-
-	// PromiseStream<Promise<int64_t>> averageShardBytes; // FIXME(xwang): change it to a synchronous call
+	FutureStream<GetMetricsRequest> getShardMetrics;
+	FutureStream<GetTopKMetricsRequest> getTopKMetrics;
+	FutureStream<GetMetricsListRequest> getShardMetricsList;
+	FutureStream<Promise<int64_t>> averageShardBytes;
 
 	virtual double getAverageShardBytes() = 0;
 	virtual ~IDDShardTracker() = default;
+};
+
+struct DataDistributionTrackerInitParams {
+	Reference<IDDTxnProcessor> db;
+	UID const& distributorId;
+	Promise<Void> const& readyToStart;
+	PromiseStream<RelocateShard> const& output;
+	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
+	Reference<PhysicalShardCollection> physicalShardCollection;
+	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
+	KeyRangeMap<ShardTrackedData>* shards = nullptr;
+	bool* trackerCancelled = nullptr;
+	Optional<Reference<TenantCache>> ddTenantCache;
+};
+
+// track the status of shards
+class DataDistributionTracker : public IDDShardTracker, public ReferenceCounted<DataDistributionTracker> {
+public:
+	friend struct DataDistributionTrackerImpl;
+
+	Reference<IDDTxnProcessor> db;
+	UID distributorId;
+
+	// At now, the lifetime of shards is guaranteed longer than DataDistributionTracker.
+	KeyRangeMap<ShardTrackedData>* shards = nullptr;
+	ActorCollection actors;
+
+	int64_t systemSizeEstimate = 0;
+	Reference<AsyncVar<int64_t>> dbSizeEstimate;
+	Reference<AsyncVar<Optional<int64_t>>> maxShardSize;
+	Future<Void> maxShardSizeUpdater;
+
+	// CapacityTracker
+	PromiseStream<RelocateShard> output;
+	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
+
+	// PhysicalShard Tracker
+	Reference<PhysicalShardCollection> physicalShardCollection;
+
+	Promise<Void> readyToStart;
+	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
+
+	// Read hot detection
+	PromiseStream<KeyRange> readHotShard;
+
+	// The reference to trackerCancelled must be extracted by actors,
+	// because by the time (trackerCancelled == true) this memory cannot
+	// be accessed
+	bool* trackerCancelled = nullptr;
+
+	// This class extracts the trackerCancelled reference from a DataDistributionTracker object
+	// Because some actors spawned by the dataDistributionTracker outlive the DataDistributionTracker
+	// object, we must guard against memory errors by using a GetTracker functor to access
+	// the DataDistributionTracker object.
+	class SafeAccessor {
+		bool const& trackerCancelled;
+		DataDistributionTracker& tracker;
+
+	public:
+		SafeAccessor(DataDistributionTracker* tracker)
+		  : trackerCancelled(*tracker->trackerCancelled), tracker(*tracker) {
+			ASSERT(!trackerCancelled);
+		}
+
+		DataDistributionTracker* operator()() {
+			if (trackerCancelled) {
+				CODE_PROBE(true, "Trying to access DataDistributionTracker after tracker has been cancelled");
+				throw dd_tracker_cancelled();
+			}
+			return &tracker;
+		}
+	};
+
+	Optional<Reference<TenantCache>> ddTenantCache;
+
+	Reference<KeyRangeMap<int>> customReplication;
+
+	DataDistributionTracker() = default;
+
+	~DataDistributionTracker() override;
+
+	double getAverageShardBytes() override { return maxShardSize->get().get() / 2.0; }
+
+	static Future<Void> run(Reference<DataDistributionTracker> self,
+	                        Reference<InitialDataDistribution> const& initData,
+	                        FutureStream<GetMetricsRequest> const& getShardMetrics,
+	                        FutureStream<GetTopKMetricsRequest> const& getTopKMetrics,
+	                        FutureStream<GetMetricsListRequest> const& getShardMetricsList,
+	                        FutureStream<Promise<int64_t>> const& getAverageShardBytes);
+
+	explicit DataDistributionTracker(DataDistributionTrackerInitParams const& params);
 };
 
 #endif // FOUNDATIONDB_DDSHARDTRACKER_H

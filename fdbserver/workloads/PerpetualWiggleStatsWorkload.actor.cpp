@@ -158,6 +158,7 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 		MoveKeysLock lock = wait(takeMoveKeysLock(cx, UID())); // force current DD to quit
 		bool success = wait(IssueConfigurationChange(cx, "storage_migration_type=disabled", true));
 		ASSERT(success);
+		wait(delay(30.0)); // make sure the DD has already quit before the test start
 		return Void();
 	}
 
