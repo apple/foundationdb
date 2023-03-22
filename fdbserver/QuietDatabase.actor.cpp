@@ -344,7 +344,7 @@ getStorageWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo, b
 		if (!localOnly || (usableRegions == 1 || server.locality.dcId() == masterDcId)) {
 			auto itr = workersMap.find(server.address());
 			if (itr == workersMap.end()) {
-				TraceEvent(SevWarn, "GetstStorageWorkers")
+				TraceEvent(SevWarn, "GetStorageWorkers")
 				    .detail("Reason", "Could not find worker for storage server")
 				    .detail("SS", server.id());
 				++failures;
