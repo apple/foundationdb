@@ -1242,18 +1242,7 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 	}
 }
 
-ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext* cx, bool detailed) {
-	if (now() - cx->healthMetricsLastUpdated < CLIENT_KNOBS->AGGREGATE_HEALTH_METRICS_MAX_STALENESS) {
-		if (detailed) {
-			return cx->healthMetrics;
-		} else {
-			HealthMetrics result;
-			result.update(cx->healthMetrics, false, false);
-			return result;
-		}
-	}
-	state bool sendDetailedRequest =
-	    detailed && now() - cx->detailedHealthMetricsLastUpdated > CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS;
+ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext* cx, bool detailed, bool sendDetailedRequest) {
 	loop {
 		choose {
 			when(wait(cx->onProxiesChanged())) {}
@@ -1277,7 +1266,30 @@ ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext* cx, bo
 }
 
 Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
-	return getHealthMetricsActor(this, detailed);
+	if (now() - healthMetricsLastUpdated < CLIENT_KNOBS->AGGREGATE_HEALTH_METRICS_MAX_STALENESS) {
+		if (detailed) {
+			return healthMetrics;
+		} else {
+			HealthMetrics result;
+			result.update(healthMetrics, false, false);
+			return result;
+		}
+	}
+	bool sendDetailedRequest =
+	    detailed && now() - detailedHealthMetricsLastUpdated > CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS;
+	return getHealthMetricsActor(this, detailed, sendDetailedRequest);
+}
+
+Future<Optional<HealthMetrics::StorageStats>> DatabaseContext::getStorageStats(const UID& id, double maxStaleness) {
+	if (now() - detailedHealthMetricsLastUpdated < maxStaleness) {
+		auto it = healthMetrics.storageStats.find(id);
+		return it == healthMetrics.storageStats.end() ? Optional<HealthMetrics::StorageStats>() : it->second;
+	}
+
+	return map(getHealthMetricsActor(this, true, true), [&id](auto metrics) -> Optional<HealthMetrics::StorageStats> {
+		auto it = metrics.storageStats.find(id);
+		return it == metrics.storageStats.end() ? Optional<HealthMetrics::StorageStats>() : it->second;
+	});
 }
 
 // register a special key(s) implementation under the specified module

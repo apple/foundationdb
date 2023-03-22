@@ -51,6 +51,7 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	int64_t dataInFlightToServer = 0, readInFlightToServer = 0;
 	std::vector<Reference<TCTeamInfo>> teams;
 	ErrorOr<GetStorageMetricsReply> metrics;
+	Optional<HealthMetrics::StorageStats> storageStats;
 
 	void setMetrics(GetStorageMetricsReply serverMetrics) { this->metrics = serverMetrics; }
 	void markTeamUnhealthy(int teamIndex);
