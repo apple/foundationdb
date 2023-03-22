@@ -356,6 +356,7 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 				                                    applyManagementClusterUpdates,
 				                                    RestoreDryRun::True,
 				                                    forceJoin,
+				                                    ForceReuseTenantIdPrefix::True,
 				                                    &messages));
 
 				TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreDryRunDone", debugId)
@@ -371,6 +372,7 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 			                                    applyManagementClusterUpdates,
 			                                    RestoreDryRun::False,
 			                                    forceJoin,
+			                                    ForceReuseTenantIdPrefix::True,
 			                                    &messages));
 
 			TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreComplete", debugId)

@@ -127,7 +127,7 @@ TenantMode tenantModeForClusterType(ClusterType clusterType, TenantMode tenantMo
 int64_t extractTenantIdFromMutation(MutationRef m);
 int64_t extractTenantIdFromKeyRef(StringRef s);
 bool tenantMapChanging(MutationRef const& mutation, KeyRangeRef const& tenantMapRange);
-bool nextTenantIdPrefixMatches(int64_t lastTenantId, int64_t nextTenantId);
+int64_t computeNextTenantId(int64_t tenantId, int64_t delta);
 int64_t getMaxAllowableTenantId(int64_t curTenantId);
 int64_t getTenantIdPrefix(int64_t tenantId);
 
@@ -230,14 +230,13 @@ Future<int64_t> getNextTenantId(Transaction tr) {
 		// Shift by 6 bytes to make the prefix the first two bytes of the tenant id
 		lastId = tenantIdPrefix << 48;
 	}
-	int64_t tenantId = lastId.get() + 1;
+
+	int64_t delta = 1;
 	if (BUGGIFY) {
-		tenantId += deterministicRandom()->randomSkewedUInt32(1, 1e9);
+		delta += deterministicRandom()->randomSkewedUInt32(1, 1e9);
 	}
-	if (!TenantAPI::nextTenantIdPrefixMatches(lastId.get(), tenantId)) {
-		throw cluster_no_capacity();
-	}
-	return tenantId;
+
+	return TenantAPI::computeNextTenantId(lastId.get(), delta);
 }
 
 ACTOR template <class DB>

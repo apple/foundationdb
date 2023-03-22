@@ -95,6 +95,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	bool recoverManagementCluster;
 	bool recoverDataClusters;
 
+	int initialTenantIdPrefix;
 	bool backupComplete = false;
 	double endTime = std::numeric_limits<double>::max();
 
@@ -107,6 +108,9 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		int mode = deterministicRandom()->randomInt(0, 3);
 		recoverManagementCluster = (mode != 2);
 		recoverDataClusters = (mode != 1);
+
+		initialTenantIdPrefix = deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
+		                                                         TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1);
 	}
 
 	ClusterName chooseClusterName() { return dataDbIndex[deterministicRandom()->randomInt(0, dataDbIndex.size())]; }
@@ -179,11 +183,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 		self->managementDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 		wait(success(MetaclusterAPI::createMetacluster(
-		    self->managementDb,
-		    "management_cluster"_sr,
-		    deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
-		                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1),
-		    false)));
+		    self->managementDb, "management_cluster"_sr, self->initialTenantIdPrefix, false)));
 
 		ASSERT(g_simulator->extraDatabases.size() > 0);
 		state std::vector<std::string>::iterator extraDatabasesItr;
@@ -248,6 +248,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	                                             MetaclusterRestoreWorkload* self) {
 		state FileBackupAgent backupAgent;
 		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
+		state ForceReuseTenantIdPrefix forceReuseTenantIdPrefix(deterministicRandom()->coinflip());
 		addDefaultBackupRanges(backupRanges);
 
 		TraceEvent("MetaclusterRestoreWorkloadClearDatabase").detail("ClusterName", clusterName);
@@ -279,6 +280,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				                                    ApplyManagementClusterUpdates::True,
 				                                    RestoreDryRun::True,
 				                                    forceJoin,
+				                                    forceReuseTenantIdPrefix,
 				                                    &messages));
 
 				state MetaclusterData<IDatabase> postDryRunMetaclusterData(self->managementDb);
@@ -309,6 +311,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 					                                           ApplyManagementClusterUpdates::True,
 					                                           RestoreDryRun::False,
 					                                           forceJoin,
+					                                           forceReuseTenantIdPrefix,
 					                                           &messages)));
 					wait(delay(deterministicRandom()->random01() * 5));
 				}
@@ -535,12 +538,17 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 	ACTOR static Future<Void> restoreManagementCluster(MetaclusterRestoreWorkload* self) {
 		TraceEvent("MetaclusterRestoreWorkloadRestoringManagementCluster");
-		wait(success(MetaclusterAPI::createMetacluster(
-		    self->managementDb,
-		    "management_cluster"_sr,
-		    deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
-		                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1),
-		    false)));
+
+		state int newTenantIdPrefix = self->initialTenantIdPrefix;
+		if (deterministicRandom()->coinflip()) {
+			while (newTenantIdPrefix == self->initialTenantIdPrefix) {
+				newTenantIdPrefix = deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
+				                                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1);
+			}
+		}
+
+		wait(success(
+		    MetaclusterAPI::createMetacluster(self->managementDb, "management_cluster"_sr, newTenantIdPrefix, false)));
 		state std::map<ClusterName, DataClusterData>::iterator clusterItr;
 		for (clusterItr = self->dataDbs.begin(); clusterItr != self->dataDbs.end(); ++clusterItr) {
 			TraceEvent("MetaclusterRestoreWorkloadProcessDataCluster").detail("FromCluster", clusterItr->first);
@@ -587,6 +595,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 						    ApplyManagementClusterUpdates::False,
 						    RestoreDryRun::True,
 						    ForceJoin(deterministicRandom()->coinflip()),
+						    ForceReuseTenantIdPrefix(newTenantIdPrefix == self->initialTenantIdPrefix),
 						    &messages));
 
 						state MetaclusterData<IDatabase> postDryRunMetaclusterData(self->managementDb);
@@ -621,6 +630,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 							    ApplyManagementClusterUpdates::False,
 							    RestoreDryRun::False,
 							    ForceJoin(deterministicRandom()->coinflip()),
+							    ForceReuseTenantIdPrefix(newTenantIdPrefix == self->initialTenantIdPrefix),
 							    &messagesList[restoreFutures.size()])));
 							wait(delay(deterministicRandom()->random01() * 5));
 						}

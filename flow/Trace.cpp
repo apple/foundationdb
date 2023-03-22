@@ -42,6 +42,7 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/MetricSample.h"
 #include "flow/network.h"
+#include "flow/SimBugInjector.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -60,6 +61,7 @@
 thread_local int g_allocation_tracing_disabled = 1;
 unsigned tracedLines = 0;
 thread_local int failedLineOverflow = 0;
+bool g_traceProcessEvents = false;
 
 ITraceLogIssuesReporter::~ITraceLogIssuesReporter() {}
 
@@ -1330,6 +1332,10 @@ void BaseTraceEvent::log() {
 				if (isNetworkThread()) {
 					TraceEvent::eventCounts[severity / 10]++;
 				}
+				if (g_traceProcessEvents) {
+					auto name = fmt::format("TraceEvent::{}", type);
+					ProcessEvents::trigger(StringRef(name), this, success());
+				}
 				g_traceLog.writeEvent(fields, trackingKey, severity > SevWarnAlways);
 
 				if (g_traceLog.isOpen()) {
@@ -1362,7 +1368,7 @@ BaseTraceEvent::~BaseTraceEvent() {
 	if (failedLineOverflow == 1) {
 		failedLineOverflow = 2;
 		auto msg = fmt::format("Traced {} lines", tracedLines);
-		ProcessEvents::trigger("TracedTooManyLines"_sr, StringRef(msg), unknown_error());
+		ProcessEvents::trigger("TracedTooManyLines"_sr, StringRef(msg), test_failed());
 		TraceEvent(SevError, "TracedTooManyLines").log();
 		crashAndDie();
 	}

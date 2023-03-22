@@ -172,7 +172,7 @@ std::string getFullRequestUrl(Reference<RESTKmsConnectorCtx> ctx, const std::str
 		throw encrypt_invalid_kms_config();
 	}
 	std::string fullUrl(url);
-	return fullUrl.append("/").append(suffix);
+	return (suffix[0] == '/') ? fullUrl.append(suffix) : fullUrl.append("/").append(suffix);
 }
 
 void dropCachedKmsUrls(Reference<RESTKmsConnectorCtx> ctx) {
@@ -1539,6 +1539,7 @@ void testGetBlobMetadataRequestBody(Reference<RESTKmsConnectorCtx> ctx) {
 	for (const auto& detail : details) {
 		auto it = domainIds.find(detail.domainId);
 		ASSERT(it != domainIds.end());
+		ASSERT(detail.base.present() || !detail.partitions.empty());
 	}
 	if (refreshKmsUrls) {
 		validateKmsUrls(ctx);
