@@ -100,10 +100,12 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> serverMetricsPolling(TCServerInfo* server) {
+	ACTOR static Future<Void> serverMetricsPolling(TCServerInfo* server, Reference<IDDTxnProcessor> txnProcessor) {
 		state double lastUpdate = now();
 		loop {
-			wait(server->updateServerMetrics());
+			wait(server->updateServerMetrics() &&
+			     store(server->storageStats,
+			           txnProcessor->getStorageStats(server->getId(), SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE)));
 			wait(delayUntil(lastUpdate + SERVER_KNOBS->STORAGE_METRICS_POLLING_DELAY +
 			                    SERVER_KNOBS->STORAGE_METRICS_RANDOM_DELAY * deterministicRandom()->random01(),
 			                TaskPriority::DataDistributionLaunch));
@@ -168,8 +170,8 @@ Future<Void> TCServerInfo::updateServerMetrics(Reference<TCServerInfo> server) {
 	return TCServerInfoImpl::updateServerMetrics(server);
 }
 
-Future<Void> TCServerInfo::serverMetricsPolling() {
-	return TCServerInfoImpl::serverMetricsPolling(this);
+Future<Void> TCServerInfo::serverMetricsPolling(Reference<IDDTxnProcessor> txnProcessor) {
+	return TCServerInfoImpl::serverMetricsPolling(this, txnProcessor);
 }
 
 void TCServerInfo::updateInDesiredDC(std::vector<Optional<Key>> const& includedDCs) {

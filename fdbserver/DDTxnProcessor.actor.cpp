@@ -1042,3 +1042,8 @@ Future<Void> DDMockTxnProcessor::rawFinishMovement(const MoveKeysParams& params,
                                                    const std::map<UID, StorageServerInterface>& tssMapping) {
 	return ::rawFinishMovement(mgs, params, tssMapping);
 }
+
+Future<Optional<HealthMetrics::StorageStats>> DDTxnProcessor::getStorageStats(const UID& id,
+                                                                              double maxStaleness) const {
+	return cx->getStorageStats(id, maxStaleness);
+}
