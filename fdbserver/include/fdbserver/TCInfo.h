@@ -211,7 +211,7 @@ public:
 
 	int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const override;
 
-	double getLoadReadBandwidth(bool includeInFlight = true, double inflightPenalty = 1.0) const override;
+	double getReadLoad(bool includeInFlight = true, double inflightPenalty = 1.0) const override;
 
 	int64_t getReadInFlightToTeam() const override;
 

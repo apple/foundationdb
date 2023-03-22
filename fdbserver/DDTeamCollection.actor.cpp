@@ -3283,11 +3283,13 @@ public:
 void DDTeamCollection::updatePivotAvailableSpaceRatio() {
 	if (now() - lastPivotAvailableSpaceUpdate > SERVER_KNOBS->AVAILABLE_SPACE_UPDATE_DELAY) {
 		lastPivotAvailableSpaceUpdate = now();
-		std::vector<double> teamAvailableSpace;
+		std::vector<double> teamAvailableSpace, teamAverageCPU;
 		teamAvailableSpace.reserve(teams.size());
+		teamAverageCPU.reserve(teams.size());
 		for (const auto& team : teams) {
 			if (team->isHealthy()) {
 				teamAvailableSpace.push_back(team->getMinAvailableSpaceRatio());
+				// teamAverageCPU.push_back();
 			}
 		}
 
