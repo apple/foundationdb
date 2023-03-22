@@ -1954,8 +1954,9 @@ ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, 
 		when(wait(data->version.whenAtLeast(version))) {
 			// FIXME: A bunch of these can block with or without the following delay 0.
 			// wait( delay(0) );  // don't do a whole bunch of these at once
-			if (version < data->oldestVersion.get())
+			if (version < data->oldestVersion.get()) {
 				throw transaction_too_old(); // just in case
+			}
 			return version;
 		}
 		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {

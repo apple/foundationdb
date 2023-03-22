@@ -2530,8 +2530,11 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 			    .detail("MyRecoveryCount", recoveryCount);
 			stoppedPromise.send(Void());
 		}
-
+		TraceEvent("TLogRejoiningWaingForRegister", tli.id()).log();
 		if (registerWithCC.isReady()) {
+			TraceEvent("TLogRejoiningWaingForMaster", tli.id())
+			    .detail("Last", lastMasterLifetime.toString())
+			    .detail("DbInfo", self->dbInfo->get().masterLifetime.toString());
 			if (!lastMasterLifetime.isEqual(self->dbInfo->get().masterLifetime)) {
 				// The TLogRejoinRequest is needed to establish communications with a new master, which doesn't have our
 				// TLogInterface
@@ -2567,6 +2570,12 @@ ACTOR Future<Void> respondToRecovered(TLogInterface tli, Promise<Void> recoveryC
 		}
 		finishedRecovery = false;
 	}
+
+	while (g_network->isSimulated() && g_simulator->disableTLogRecoveryFinish) {
+		TraceEvent("WaitingToBeUnblocked", tli.id());
+		wait(delay(10));
+	}
+
 	TraceEvent("TLogRespondToRecovered", tli.id()).detail("Finished", finishedRecovery);
 	loop {
 		TLogRecoveryFinishedRequest req = waitNext(tli.recoveryFinished.getFuture());
@@ -2578,7 +2587,7 @@ ACTOR Future<Void> respondToRecovered(TLogInterface tli, Promise<Void> recoveryC
 	}
 }
 
-ACTOR Future<Void> trackRecoveryReq(TrackTLogRecoveryRequest req, Reference<LogData> logData) {
+ACTOR Future<Void> trackRecoveryReq(TLogInterface tli, TrackTLogRecoveryRequest req, Reference<LogData> logData) {
 	loop {
 		Version oldestGenerationStartVersion = MAX_VERSION;
 		for (const auto& [tag, genVersions] : logData->tagUnpoppedOldGenerations) {
@@ -2586,6 +2595,8 @@ ACTOR Future<Void> trackRecoveryReq(TrackTLogRecoveryRequest req, Reference<LogD
 		}
 
 		if (req.oldestGenStartVersion < oldestGenerationStartVersion) {
+			TraceEvent("TLogRespondRecoveredVersion", tli.id())
+			    .detail("RecoveredVersion", oldestGenerationStartVersion);
 			req.reply.send(TrackTLogRecoveryReply(oldestGenerationStartVersion));
 			break;
 		}
@@ -2598,7 +2609,7 @@ ACTOR Future<Void> trackRecoveryReq(TrackTLogRecoveryRequest req, Reference<LogD
 ACTOR Future<Void> respondToTrackRecovery(TLogInterface tli, Reference<LogData> logData) {
 	loop {
 		TrackTLogRecoveryRequest req = waitNext(tli.trackRecovery.getFuture());
-		logData->addActor.send(trackRecoveryReq(req, logData));
+		logData->addActor.send(trackRecoveryReq(tli, req, logData));
 	}
 }
 
@@ -2768,6 +2779,7 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			logData->addActor.send(tLogPeekStream(self, req, logData));
 		}
 		when(TLogPeekRequest req = waitNext(tli.peekMessages.getFuture())) {
+			// TraceEvent("ZZZZZTLogReceivingPeek", logData->logId).detail("Begin", req.begin).detail("Tag", req.tag);
 			logData->addActor.send(tLogPeekMessages(
 			    req.reply, self, logData, req.begin, req.tag, req.returnIfBlocked, req.onlySpilled, req.sequence));
 		}
@@ -2876,6 +2888,10 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 	while (!endVersion.present() || logData->version.get() < endVersion.get()) {
 		// When we just processed some data, we reset the warning start time.
 		state double lastPullAsyncDataWarningTime = now();
+		TraceEvent("ZZZZDoingPulling")
+		    .detail("Cursor", r.isValid())
+		    .detail("DbInfo", logData->logSystem->get().isValid())
+		    .detail("Tags", describe(tags));
 		loop {
 			choose {
 				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
@@ -3539,7 +3555,8 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 
 	TraceEvent("TLogStart", logData->logId)
 	    .detail("RecoveryCount", logData->recoveryCount)
-	    .detail("RecoveryTxnVersion", logData->recoveryTxnVersion);
+	    .detail("RecoveryTxnVersion", logData->recoveryTxnVersion)
+	    .detail("IsPrimary", req.isPrimary);
 
 	state Future<Void> updater;
 	state bool pulledRecoveryVersions = false;
@@ -3574,7 +3591,8 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			    .detail("Unrecovered", logData->unrecoveredBefore)
 			    .detail("Tags", describe(req.recoverTags))
 			    .detail("Locality", req.locality)
-			    .detail("LogRouterTags", logData->logRouterTags);
+			    .detail("LogRouterTags", logData->logRouterTags)
+			    .detail("OldGenerationStartVersions", describe(req.oldGenerationStartVersions));
 
 			if (logData->recoveryComplete.isSet()) {
 				throw worker_removed();

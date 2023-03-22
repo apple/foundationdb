@@ -73,8 +73,8 @@ ISimulator::ISimulator()
   : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
     allowLogSetKills(true), tssMode(TSSMode::Disabled), configDBType(ConfigDBType::DISABLED), isStopped(false),
     lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false),
-    connectionFailureEnableTime(0), backupAgents(BackupAgentType::WaitForType), drAgents(BackupAgentType::WaitForType),
-    allSwapsDisabled(false), blobGranulesEnabled(false) {}
+    connectionFailureEnableTime(0), disableTLogRecoveryFinish(false), backupAgents(BackupAgentType::WaitForType),
+    drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false), blobGranulesEnabled(false) {}
 ISimulator::~ISimulator() = default;
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
@@ -204,7 +204,9 @@ struct SimClogging {
 	double getSendDelay(NetworkAddress from, NetworkAddress to, bool stableConnection = false) const {
 		// stable connection here means it's a local connection between processes on the same machine
 		// we expect it to have much lower latency
-		return (stableConnection ? 0.1 : 1.0) * halfLatency();
+		double latency = (stableConnection ? 0.1 : 1.0) * halfLatency();
+		// TraceEvent("SendDelay").detail("From", from).detail("To", to).detail("Delay", latency).detail("Stable", stableConnection);
+		return latency;
 	}
 
 	double getRecvDelay(NetworkAddress from, NetworkAddress to, bool stableConnection = false) {
@@ -224,6 +226,8 @@ struct SimClogging {
 
 		if (!g_simulator->speedUpSimulation && !stableConnection && clogRecvUntil.count(to.ip))
 			t = std::max(t, clogRecvUntil[to.ip]);
+
+		// TraceEvent("RecvDelay").detail("From", from).detail("To", to).detail("Delay", t - tnow).detail("Stable", stableConnection);
 
 		return t - tnow;
 	}
@@ -255,9 +259,11 @@ struct SimClogging {
 		u = std::max(u, now() + t);
 	}
 	double setPairLatencyIfNotSet(const IPAddress& from, const IPAddress& to, double t) {
+		// TraceEvent("ZZZZSetPairLatency0").detail("From", from).detail("To", to).detail("Duration", t);
 		auto i = clogPairLatency.find(std::make_pair(from, to));
 		if (i == clogPairLatency.end())
 			i = clogPairLatency.insert(std::make_pair(std::make_pair(from, to), t)).first;
+		// TraceEvent("ZZZZSetPairLatency1").detail("From", from).detail("To", to).detail("Duration", i->second);
 		return i->second;
 	}
 

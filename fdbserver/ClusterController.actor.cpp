@@ -906,7 +906,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		self->db.logGenerations = 0;
 		ASSERT(!req.logSystemConfig.oldTLogs.size());
 	} else {
-		self->db.logGenerations = std::max<int>(self->db.logGenerations, req.logSystemConfig.oldTLogs.size());
+		self->db.logGenerations = req.logSystemConfig.oldTLogs.size();
+		// self->db.logGenerations = std::max<int>(self->db.logGenerations, req.logSystemConfig.oldTLogs.size());
 	}
 
 	db->masterRegistrationCount = req.registrationCount;
@@ -981,6 +982,10 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		dbInfo.client = db->clientInfo->get();
 	}
 
+	TraceEvent("ZZZZLogSystemConfig")
+	    .detail("Equal", dbInfo.logSystemConfig.isEqual(req.logSystemConfig))
+	    .detail("CurrentGen", dbInfo.logSystemConfig.oldTLogs.size())
+	    .detail("NewGen", req.logSystemConfig.oldTLogs.size());
 	if (!dbInfo.logSystemConfig.isEqual(req.logSystemConfig)) {
 		isChanged = true;
 		dbInfo.logSystemConfig = req.logSystemConfig;

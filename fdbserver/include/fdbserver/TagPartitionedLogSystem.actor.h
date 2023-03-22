@@ -180,6 +180,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	bool remoteStorageRecovered() const final;
 
+	void pergeOldRecoveredGenerations() final;
+
 	Future<Void> onCoreStateChanged() const final;
 
 	void coreStateWritten(DBCoreState const& newState) final;

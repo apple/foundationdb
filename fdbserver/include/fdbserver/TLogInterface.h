@@ -438,7 +438,7 @@ struct TrackTLogRecoveryRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, oldestGenStartVersion);
+		serializer(ar, oldestGenStartVersion, reply);
 	}
 };
 

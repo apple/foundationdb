@@ -88,6 +88,8 @@ Future<uint64_t> setupRange(Database cx,
                             uint64_t end,
                             std::vector<Reference<Tenant>> tenants) {
 	state uint64_t bytesInserted = 0;
+	state double startT = now();
+	state double prevStart;
 	loop {
 		Optional<Reference<Tenant>> tenant;
 		if (tenants.size() > 0) {
@@ -96,8 +98,9 @@ Future<uint64_t> setupRange(Database cx,
 		state Transaction tr(cx, tenant);
 		setAuthToken(*workload, tr);
 		try {
+			prevStart = now();
 			// if( deterministicRandom()->random01() < 0.001 )
-			//	tr.debugTransaction( deterministicRandom()->randomUniqueID() );
+			tr.debugTransaction(deterministicRandom()->randomUniqueID());
 
 			state Standalone<KeyValueRef> sampleKV = (*workload)(begin);
 			Optional<Value> f = wait(tr.get(sampleKV.key));
@@ -119,6 +122,8 @@ Future<uint64_t> setupRange(Database cx,
 				// throw operation_failed();
 			}
 			// Predefine a single large write conflict range over the whole key space
+			TraceEvent("ZZZZBulkLoadConflictingRange")
+			    .detail("Range", KeyRangeRef(workload->keyForIndex(begin), keyAfter(workload->keyForIndex(end))));
 			tr.addWriteConflictRange(KeyRangeRef(workload->keyForIndex(begin), keyAfter(workload->keyForIndex(end))));
 			bytesInserted = 0;
 			for (uint64_t n = begin; n < end; n++) {
@@ -127,8 +132,10 @@ Future<uint64_t> setupRange(Database cx,
 				bytesInserted += kv.key.size() + kv.value.size();
 			}
 			wait(tr.commit());
+			TraceEvent("ZZZZBulkLoad").detail("Duration", now() - startT);
 			return bytesInserted;
 		} catch (Error& e) {
+			TraceEvent("ZZZZBulkLoadTxnFail").error(e).detail("Duration", now() - prevStart);
 			wait(tr.onError(e));
 		}
 	}
@@ -154,6 +161,7 @@ Future<uint64_t> setupRangeWorker(Database cx,
 		uint64_t numBytes = wait(setupRange(cx, workload, job.first, job.second, tenants));
 		if (numBytes > 0)
 			loadedRanges++;
+		TraceEvent("ZZZZZBytesLoad").detail("Size", numBytes);
 
 		Optional<Reference<Tenant>> tenant;
 		if (tenants.size() > 0) {

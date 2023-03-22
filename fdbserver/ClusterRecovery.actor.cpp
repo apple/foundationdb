@@ -457,6 +457,7 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 	    self->configuration; // self-configuration can be changed by configurationMonitor so we need a copy
 	loop {
 		state DBCoreState newState;
+		self->logSystem->pergeOldRecoveredGenerations();
 		self->logSystem->toCoreState(newState);
 		newState.recoveryCount = recoverCount;
 
@@ -819,6 +820,7 @@ ACTOR Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Refer
 		    .detail("RecoveryCount", self->cstate.myDBState.recoveryCount)
 		    .detail("OldestBackupEpoch", logSystemConfig.oldestBackupEpoch)
 		    .detail("Logs", describe(logSystemConfig.tLogs))
+		    .detail("OldGenerations", logSystemConfig.oldTLogs.size())
 		    .detail("CStateUpdated", self->cstateUpdated.isSet())
 		    .detail("RecoveryTxnVersion", self->recoveryTransactionVersion)
 		    .detail("LastEpochEnd", self->lastEpochEnd);
