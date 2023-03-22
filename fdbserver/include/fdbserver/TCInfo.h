@@ -24,7 +24,7 @@
 #include "fdbclient/Tenant.h"
 #include "fdbrpc/ReplicationTypes.h"
 #include "fdbserver/DataDistributionTeam.h"
-
+#include "fdbserver/DDTxnProcessor.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 
@@ -117,7 +117,7 @@ public:
 
 	Future<Void> updateServerMetrics();
 	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
-	Future<Void> serverMetricsPolling();
+	Future<Void> serverMetricsPolling(Reference<IDDTxnProcessor> txnProcessor);
 
 	~TCServerInfo();
 };
