@@ -991,9 +991,8 @@ ACTOR Future<bool> checkExclusion(Database db,
 				return false;
 			}
 			NetworkAddress addr = NetworkAddress::parse(addrStr);
-			bool includedInExclusion =  addressExcluded(*exclusions, addr);
-			bool excluded =
-			    (process.has("excluded") && process.last().get_bool()) || includedInExclusion;
+			bool includedInExclusion = addressExcluded(*exclusions, addr);
+			bool excluded = (process.has("excluded") && process.last().get_bool()) || includedInExclusion;
 
 			StatusObjectReader localityObj;
 			std::string disk_id;
@@ -1006,9 +1005,8 @@ ACTOR Future<bool> checkExclusion(Database db,
 				if (role["role"].get_str() == "storage") {
 					ssTotalCount++;
 
-					// Check if we are excluding a process that serves the storage role. If this check was true once, we
-					// don't have to check any further since we don't case in this variable about the count of excluded
-					// storage servers but only about if we exclude any storage server with the provided addresses.
+					// Check if we are excluding a process that serves the storage role. We only have to check the free
+					// capacity if we are excluding at least one process that serves the storage role.
 					if (!excludedAddressesContainsStorageRole && includedInExclusion) {
 						excludedAddressesContainsStorageRole = true;
 						break;
