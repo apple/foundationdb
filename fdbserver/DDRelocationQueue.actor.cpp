@@ -18,21 +18,18 @@
  * limitations under the License.
  */
 
-#include <climits>
 #include <limits>
 #include <numeric>
 #include <utility>
 #include <vector>
 
 #include "flow/ActorCollection.h"
-#include "flow/Deque.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
-#include "fdbserver/MovingWindow.h"
 #include "fdbserver/DDSharedContext.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/MoveKeys.actor.h"
