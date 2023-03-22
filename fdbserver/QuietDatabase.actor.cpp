@@ -403,7 +403,7 @@ ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInter
 				try {
 					if (version == invalidVersion ||
 					    getDurableVersion(storageMetrics) >= static_cast<int64_t>(version)) {
-						return;
+						return storageMetrics;
 					}
 				} catch (Error& e) {
 					TraceEvent("QuietDatabaseFailure")
