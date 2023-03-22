@@ -532,7 +532,6 @@ DDQueue::DDQueue(DDQueueInitParams const& params)
     moveReusePhysicalShard(0), moveCreateNewPhysicalShard(0),
     retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0),
     moveBytesRate(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL) {}
-    {}
 
 void DDQueue::startRelocation(int priority, int healthPriority) {
 	// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
@@ -2293,8 +2292,8 @@ struct DDQueueImpl {
 						    .detail("AverageShardSize", req.getFuture().isReady() ? req.getFuture().get() : -1)
 						    .detail("UnhealthyRelocations", self->unhealthyRelocations)
 						    .detail("HighestPriority", highestPriorityRelocation)
-                            .detail("BytesWritten", self->moveBytesRate.getTotal())
-					        .detail("BytesWrittenAverageRate", self->moveBytesRate.getAverage())
+						    .detail("BytesWritten", self->moveBytesRate.getTotal())
+						    .detail("BytesWrittenAverageRate", self->moveBytesRate.getAverage())
 						    .detail("PriorityRecoverMove",
 						            self->priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
 						    .detail("PriorityRebalanceUnderutilizedTeam",
