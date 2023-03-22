@@ -187,6 +187,15 @@ public:
 	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD;
 
 	// Data distribution
+	// DD won't move shard to teams that has availableSpaceRatio < max(0.05,  AllTeamAvailSpaceRatio[pivot]), where
+	// pivot = pivot percent * team count.
+	double AVAILABLE_SPACE_PIVOT_PERCENT;
+	// DD won't move shard to teams that has CPU > AllTeamCPU[pivot], where pivot = pivot percent *
+	// team count.
+	double CPU_PIVOT_PERCENT;
+	// // DD won't move shard to teams that has CPU > MAX_DEST_CPU_PERCENT
+	double MAX_DEST_CPU_PERCENT;
+
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
 	int64_t MAX_PHYSICAL_SHARD_BYTES;
