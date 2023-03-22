@@ -5223,7 +5223,7 @@ ACTOR Future<Void> auditStorageMetadataShardLocationLocalViewQ(StorageServer* da
 		}
 
 	} catch (Error& e) {
-		TraceEvent(SevDebug, "AuditStorageShardLocLocalViewFailed", data->thisServerID)
+		TraceEvent(SevInfo, "AuditStorageShardLocLocalViewFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("AuditServer", data->thisServerID.first());
 		// Make sure the history collection is not open due to this audit

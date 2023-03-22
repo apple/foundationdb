@@ -1580,6 +1580,11 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self, TriggerAudi
 			audit->state.setPhase(AuditPhase::Failed);
 			audit->actors.clear(true);
 			self->audits[audit->state.getType()].erase(audit->state.id);
+			if (!req.async && !req.reply.isSet()) {
+				req.reply.send(audit->state.id);
+				TraceEvent(SevInfo, "DDAuditStorageReplyFailed", self->ddId)
+				    .detail("AuditState", audit->state.toString());
+			}
 		} else {
 			throw retry();
 		}
@@ -1601,6 +1606,7 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			}
 		}
 	}
+
 	return Void();
 }
 

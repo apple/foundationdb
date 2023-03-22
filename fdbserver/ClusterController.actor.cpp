@@ -1937,7 +1937,7 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 			req.reply.send(auditId);
 		}
 	} catch (Error& e) {
-		TraceEvent(SevDebug, "CCTriggerAuditStorageFailed", self->id)
+		TraceEvent(SevInfo, "CCTriggerAuditStorageFailed", self->id)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)
