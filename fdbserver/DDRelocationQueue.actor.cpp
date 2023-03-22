@@ -23,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include "fdbserver/DataDistributionTeam.h"
 #include "flow/ActorCollection.h"
 #include "flow/Deque.h"
 #include "flow/FastRef.h"
@@ -1294,7 +1295,15 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
 							inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
-						auto req = GetTeamRequest(TeamSelect::AVOID_MOVEMENT,
+						TeamSelect destTeamSelect;
+						if (!rd.wantsNewServers) {
+							destTeamSelect = TeamSelect::WANT_SRCSERVERS;
+						} else if (wantTrueBest) {
+							destTeamSelect = TeamSelect::WANT_TRUEBEST;
+						} else {
+							destTeamSelect = TeamSelect::ANY;
+						}
+						auto req = GetTeamRequest(destTeamSelect,
 						                          PreferLowerDiskUtil::True,
 						                          TeamMustHaveShards::False,
 						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),

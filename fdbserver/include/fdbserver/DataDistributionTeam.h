@@ -73,7 +73,6 @@ class TeamSelect {
 public:
 	enum Value : int8_t {
 		ANY = 0, // Any other situations
-		AVOID_MOVEMENT, // Avoid data movement by selecting srcTeam if it's not busy
 		WANT_SRCSERVERS, // Ask for srcTeam
 		WANT_TRUEBEST, // Ask for the most or least utilized team
 	};
@@ -81,8 +80,6 @@ public:
 	TeamSelect(Value v) : value(v) {}
 	std::string toString() const {
 		switch (value) {
-		case AVOID_MOVEMENT:
-			return "Avoid_Movement";
 		case WANT_SRCSERVERS:
 			return "Want_SrcServers";
 		case WANT_TRUEBEST:
