@@ -158,12 +158,14 @@ public:
 	int PRIORITY_SPLIT_SHARD;
 
 	// Data distribution
-	// DD won't move shard to teams that has availableSpaceRatio < min(0.05,  AllTeamAvailSpaceRatio[pivot]), where pivot = pivot percent *
-	// team count.
+	// DD won't move shard to teams that has availableSpaceRatio < min(0.05,  AllTeamAvailSpaceRatio[pivot]), where
+	// pivot = pivot percent * team count.
 	double AVAILABLE_SPACE_PIVOT_PERCENT;
-	// DD won't move shard to teams that has readLoad > AllTeamReadLoad[pivot], where pivot = pivot percent *
+	// DD won't move shard to teams that has CPU > AllTeamCPU[pivot], where pivot = pivot percent *
 	// team count.
-	double READ_LOAD_PIVOT_PERCENT;
+	double CPU_PIVOT_PERCENT;
+	// // DD won't move shard to teams that has CPU > MAX_DEST_CPU_PERCENT
+	double MAX_DEST_CPU_PERCENT;
 
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 

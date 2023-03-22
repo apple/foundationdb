@@ -158,6 +158,7 @@ struct IDataDistributionTeam {
 	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
 	virtual int64_t getReadInFlightToTeam() const = 0;
 	virtual double getReadLoad(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
+	virtual double getAverageCPU() const = 0;
 	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) const = 0;
 	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) const = 0;
 	virtual bool hasHealthyAvailableSpace(double minRatio) const = 0;
@@ -215,8 +216,8 @@ struct GetTeamRequest {
 	               WantTrueBest wantsTrueBest,
 	               PreferLowerDiskUtil preferLowerDiskUtil,
 	               TeamMustHaveShards teamMustHaveShards,
+	               PreferLowerReadUtil preferLowerReadUtil,
 	               ForReadBalance forReadBalance = ForReadBalance::False,
-	               PreferLowerReadUtil preferLowerReadUtil = PreferLowerReadUtil::False,
 	               double inflightPenalty = 1.0)
 	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerDiskUtil(preferLowerDiskUtil),
 	    teamMustHaveShards(teamMustHaveShards), forReadBalance(forReadBalance),

@@ -175,8 +175,8 @@ public:
 	ACTOR static Future<Void> getTeam(DDTeamCollection* self, GetTeamRequest req) {
 		try {
 			wait(self->checkBuildTeams());
-			// report the pivot available space
-			self->updatePivotAvailableSpaceRatio();
+			// report the pivot values
+			self->updateTeamPivotValues();
 
 			bool foundSrc = false;
 			for (const auto& id : req.src) {
@@ -241,9 +241,12 @@ public:
 				int bestIndex = startIndex;
 				for (int i = 0; i < self->teams.size(); i++) {
 					int currentIndex = (startIndex + i) % self->teams.size();
-					if (self->teams[currentIndex]->isHealthy() &&
-					    (!req.preferLowerDiskUtil ||
-					     self->teams[currentIndex]->hasHealthyAvailableSpace(self->pivotAvailableSpaceRatio))) {
+					// 1. eligible team has to have enough space if we care about lower disk utilization
+					bool eligibleTeam = !req.preferLowerDiskUtil || self->teams[currentIndex]->hasHealthyAvailableSpace(
+					                                                    self->pivotAvailableSpaceRatio);
+					// eligibleTeam = eligibleTeam &&
+
+					if (self->teams[currentIndex]->isHealthy() && eligibleTeam) {
 						int64_t loadBytes = self->teams[currentIndex]->getLoadBytes(true, req.inflightPenalty);
 						if ((!req.teamMustHaveShards ||
 						     self->shardsAffectedByTeamFailure->hasShards(ShardsAffectedByTeamFailure::Team(
@@ -3280,30 +3283,36 @@ public:
 
 }; // class DDTeamCollectionImpl
 
-void DDTeamCollection::updatePivotAvailableSpaceRatio() {
-	if (now() - lastPivotAvailableSpaceUpdate > SERVER_KNOBS->AVAILABLE_SPACE_UPDATE_DELAY) {
-		lastPivotAvailableSpaceUpdate = now();
+void DDTeamCollection::updateTeamPivotValues() {
+	if (now() - lastPivotValuesUpdate > SERVER_KNOBS->AVAILABLE_SPACE_UPDATE_DELAY) {
+		lastPivotValuesUpdate = now();
 		std::vector<double> teamAvailableSpace, teamAverageCPU;
 		teamAvailableSpace.reserve(teams.size());
 		teamAverageCPU.reserve(teams.size());
 		for (const auto& team : teams) {
 			if (team->isHealthy()) {
 				teamAvailableSpace.push_back(team->getMinAvailableSpaceRatio());
-				// teamAverageCPU.push_back();
+				teamAverageCPU.push_back(team->getAverageCPU());
 			}
 		}
 
 		size_t pivot = teamAvailableSpace.size() * std::min(1.0, SERVER_KNOBS->AVAILABLE_SPACE_PIVOT_PERCENT);
+		size_t cpuPivotIndex = teamAverageCPU.size() * std::min(1.0, SERVER_KNOBS->CPU_PIVOT_PERCENT);
 		if (teamAvailableSpace.size() > 1) {
 			std::nth_element(teamAvailableSpace.begin(), teamAvailableSpace.begin() + pivot, teamAvailableSpace.end());
 			pivotAvailableSpaceRatio =
 			    std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO,
 			             std::min(SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO, teamAvailableSpace[pivot]));
+
+			std::nth_element(teamAverageCPU.begin(), teamAverageCPU.end() + cpuPivotIndex, teamAverageCPU.end());
+			pivotCPU = std::min(SERVER_KNOBS->MAX_DEST_CPU_PERCENT, teamAverageCPU[cpuPivotIndex]);
 		} else {
 			pivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
+			pivotCPU = SERVER_KNOBS->MAX_DEST_CPU_PERCENT;
 		}
+
 		if (pivotAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
-			TraceEvent(SevWarn, "DDTeamMedianAvailableSpaceTooSmall", distributorId)
+			TraceEvent(SevWarn, "DDTeamPivotAvailableSpaceTooSmall", distributorId)
 			    .detail("PivotAvailableSpaceRatio", pivotAvailableSpaceRatio)
 			    .detail("TargetAvailableSpaceRatio", SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO)
 			    .detail("Primary", primary);
@@ -3686,7 +3695,7 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
     processingUnhealthy(params.processingUnhealthy), readyToStart(params.readyToStart),
     checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)), badTeamRemover(Void()),
     checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()), clearHealthyZoneFuture(true),
-    pivotAvailableSpaceRatio(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastPivotAvailableSpaceUpdate(0),
+    pivotAvailableSpaceRatio(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastPivotValuesUpdate(0),
     lowestUtilizationTeam(0), highestUtilizationTeam(0), getShardMetrics(params.getShardMetrics),
     getUnhealthyRelocationCount(params.getUnhealthyRelocationCount), removeFailedServer(params.removeFailedServer),
     ddTrackerStartingEventHolder(makeReference<EventCacheHolder>("DDTrackerStarting")),
@@ -5495,8 +5504,11 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::False, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(WantNewServers::False,
+		                         WantTrueBest::True,
+		                         PreferLowerDiskUtil::True,
+		                         TeamMustHaveShards::False,
+		                         PreferLowerReadUtil::True);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5547,8 +5559,11 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0), UID(4, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::False, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(WantNewServers::False,
+		                         WantTrueBest::True,
+		                         PreferLowerDiskUtil::True,
+		                         TeamMustHaveShards::False,
+		                         PreferLowerReadUtil::True);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5597,8 +5612,11 @@ public:
 
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(WantNewServers::True,
+		                         WantTrueBest::True,
+		                         PreferLowerDiskUtil::True,
+		                         TeamMustHaveShards::False,
+		                         PreferLowerReadUtil::True);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5646,8 +5664,11 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::False, TeamMustHaveShards::False);
+		state GetTeamRequest req(WantNewServers::True,
+		                         WantTrueBest::True,
+		                         PreferLowerDiskUtil::False,
+		                         TeamMustHaveShards::False,
+		                         PreferLowerReadUtil::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5697,8 +5718,11 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(WantNewServers::True,
+		                         WantTrueBest::True,
+		                         PreferLowerDiskUtil::True,
+		                         TeamMustHaveShards::False,
+		                         PreferLowerReadUtil::True);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5753,8 +5777,11 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(WantNewServers::True,
+		                         WantTrueBest::True,
+		                         PreferLowerDiskUtil::True,
+		                         TeamMustHaveShards::False,
+		                         PreferLowerReadUtil::True);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5803,16 +5830,16 @@ public:
 		                         wantsTrueBest,
 		                         preferLowerDiskUtil,
 		                         teamMustHaveShards,
-		                         forReadBalance,
-		                         PreferLowerReadUtil::True);
+		                         PreferLowerReadUtil::True,
+		                         forReadBalance);
 		req.completeSources = completeSources;
 
 		state GetTeamRequest reqHigh(wantsNewServers,
 		                             wantsTrueBest,
 		                             PreferLowerDiskUtil::False,
 		                             teamMustHaveShards,
-		                             forReadBalance,
-		                             PreferLowerReadUtil::False);
+		                             PreferLowerReadUtil::False,
+		                             forReadBalance);
 
 		wait(collection->getTeam(req) && collection->getTeam(reqHigh));
 		auto [resTeam, resTeamSrcFound] = req.reply.getFuture().get();
@@ -5871,8 +5898,11 @@ public:
 
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(WantNewServers::True,
+		                         WantTrueBest::True,
+		                         PreferLowerDiskUtil::True,
+		                         TeamMustHaveShards::False,
+		                         PreferLowerReadUtil::True);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));

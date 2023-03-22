@@ -191,8 +191,9 @@ class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDa
 	std::vector<Reference<IDataDistributionTeam>> teams;
 	std::vector<UID> tempServerIDs;
 
-	int64_t sum(std::function<int64_t(IDataDistributionTeam const&)> func) const {
-		int64_t result = 0;
+	template <typename NUM>
+	NUM sum(std::function<NUM(IDataDistributionTeam const&)> func) const {
+		NUM result = 0;
 		for (const auto& team : teams) {
 			result += func(*team);
 		}
@@ -267,23 +268,27 @@ public:
 	}
 
 	int64_t getDataInFlightToTeam() const override {
-		return sum([](IDataDistributionTeam const& team) { return team.getDataInFlightToTeam(); });
+		return sum<int64_t>([](IDataDistributionTeam const& team) { return team.getDataInFlightToTeam(); });
 	}
 
 	int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const override {
-		return sum([includeInFlight, inflightPenalty](IDataDistributionTeam const& team) {
+		return sum<int64_t>([includeInFlight, inflightPenalty](IDataDistributionTeam const& team) {
 			return team.getLoadBytes(includeInFlight, inflightPenalty);
 		});
 	}
 
 	int64_t getReadInFlightToTeam() const override {
-		return sum([](IDataDistributionTeam const& team) { return team.getReadInFlightToTeam(); });
+		return sum<int64_t>([](IDataDistributionTeam const& team) { return team.getReadInFlightToTeam(); });
 	}
 
 	double getReadLoad(bool includeInFlight = true, double inflightPenalty = 1.0) const override {
-		return sum([includeInFlight, inflightPenalty](IDataDistributionTeam const& team) {
+		return sum<double>([includeInFlight, inflightPenalty](IDataDistributionTeam const& team) {
 			return team.getReadLoad(includeInFlight, inflightPenalty);
 		});
+	}
+
+	double getAverageCPU() const override {
+		return sum<double>([](IDataDistributionTeam const& team) { return team.getAverageCPU(); }) / teams.size();
 	}
 
 	int64_t getMinAvailableSpace(bool includeInFlight = true) const override {
@@ -1476,8 +1481,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						                          WantTrueBest(isValleyFillerPriority(rd.priority)),
 						                          PreferLowerDiskUtil::True,
 						                          TeamMustHaveShards::False,
-						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
 						                          PreferLowerReadUtil::True,
+						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
 						                          inflightPenalty);
 
 						req.src = rd.src;
@@ -2102,14 +2107,14 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 				                        WantTrueBest(mcMove),
 				                        PreferLowerDiskUtil::False,
 				                        TeamMustHaveShards::True,
-				                        ForReadBalance(readRebalance),
-				                        PreferLowerReadUtil::False);
+				                        PreferLowerReadUtil::False,
+				                        ForReadBalance(readRebalance));
 				destReq = GetTeamRequest(WantNewServers::True,
 				                         WantTrueBest(!mcMove),
 				                         PreferLowerDiskUtil::True,
 				                         TeamMustHaveShards::False,
-				                         ForReadBalance(readRebalance),
-				                         PreferLowerReadUtil::True);
+				                         PreferLowerReadUtil::True,
+				                         ForReadBalance(readRebalance));
 				state Future<SrcDestTeamPair> getTeamFuture =
 				    getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, ddPriority, &traceEvent);
 				wait(ready(getTeamFuture));
@@ -2198,7 +2203,8 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueue* self, int teamCollectionIndex) {
 				        GetTeamRequest(WantNewServers::True,
 				                       WantTrueBest::False,
 				                       PreferLowerDiskUtil::True,
-				                       TeamMustHaveShards::False))));
+				                       TeamMustHaveShards::False,
+				                       PreferLowerReadUtil::True))));
 				randomTeam = _randomTeam;
 				traceEvent.detail("DestTeam",
 				                  printable(randomTeam.first.map<std::string>(
@@ -2210,7 +2216,8 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueue* self, int teamCollectionIndex) {
 					        GetTeamRequest(WantNewServers::True,
 					                       WantTrueBest::True,
 					                       PreferLowerDiskUtil::False,
-					                       TeamMustHaveShards::True))));
+					                       TeamMustHaveShards::True,
+					                       PreferLowerReadUtil::False))));
 
 					traceEvent.detail(
 					    "SourceTeam",
@@ -2299,7 +2306,8 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueue* self, int teamCollectionIndex) {
 				        GetTeamRequest(WantNewServers::True,
 				                       WantTrueBest::False,
 				                       PreferLowerDiskUtil::False,
-				                       TeamMustHaveShards::True))));
+				                       TeamMustHaveShards::True,
+				                       PreferLowerReadUtil::False))));
 				randomTeam = _randomTeam;
 				traceEvent.detail("SourceTeam",
 				                  printable(randomTeam.first.map<std::string>(
@@ -2311,7 +2319,8 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueue* self, int teamCollectionIndex) {
 					        GetTeamRequest(WantNewServers::True,
 					                       WantTrueBest::True,
 					                       PreferLowerDiskUtil::True,
-					                       TeamMustHaveShards::False))));
+					                       TeamMustHaveShards::False,
+					                       PreferLowerReadUtil::True))));
 
 					traceEvent.detail(
 					    "DestTeam",

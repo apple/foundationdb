@@ -270,7 +270,8 @@ protected:
 	AsyncVar<Optional<Key>> healthyZone;
 	Future<bool> clearHealthyZoneFuture;
 	double pivotAvailableSpaceRatio;
-	double lastPivotAvailableSpaceUpdate;
+	double lastPivotValuesUpdate;
+	double pivotCPU;
 
 	int lowestUtilizationTeam;
 	int highestUtilizationTeam;
@@ -622,7 +623,7 @@ protected:
 	int addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams);
 
 	// get the min available space ratio from every healthy team and update the pivot ratio `pivotAvailableSpaceRatio`
-	void updatePivotAvailableSpaceRatio();
+	void updateTeamPivotValues();
 
 public:
 	Database cx;

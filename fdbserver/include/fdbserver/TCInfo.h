@@ -79,6 +79,7 @@ public:
 	             Version addedVersion = 0);
 
 	GetStorageMetricsReply const& getMetrics() const { return metrics.get(); }
+	auto const& getStorageStats() const { return storageStats; }
 
 	UID const& getId() const { return id; }
 	bool isInDesiredDC() const { return inDesiredDC; }
@@ -212,6 +213,8 @@ public:
 	int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const override;
 
 	double getReadLoad(bool includeInFlight = true, double inflightPenalty = 1.0) const override;
+
+	double getAverageCPU() const override;
 
 	int64_t getReadInFlightToTeam() const override;
 
