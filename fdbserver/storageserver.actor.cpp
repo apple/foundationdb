@@ -396,6 +396,10 @@ struct StorageServerDisk {
 
 	std::vector<std::string> removeRange(KeyRangeRef range) { return storage->removeRange(range); }
 
+	Future<Void> replaceRange(KeyRange blockRange, Standalone<VectorRef<KeyValueRef>> blockData) {
+		return storage->replaceRange(blockRange, blockData);
+	}
+
 	void persistRangeMapping(KeyRangeRef range, bool isAdd) { storage->persistRangeMapping(range, isAdd); }
 
 	CoalescedKeyRangeMap<std::string> getExistingRanges() { return storage->getExistingRanges(); }
@@ -7567,6 +7571,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			}
 
 			state Key nfk = keys.begin;
+			state Key blockBegin = keys.begin;
 
 			try {
 				loop {
@@ -7601,17 +7606,18 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					metricReporter.addFetchedBytes(expectedBlockSize, this_block.size());
 
 					// Write this_block to storage
-					state int sinceYield = 0;
+					state Standalone<VectorRef<KeyValueRef>> blockData(this_block, this_block.arena());
+					state Key blockEnd = this_block.more ? this_block.end()[-1].key : keys.end;
+					state KeyRange blockRange(KeyRangeRef(blockBegin, blockEnd));
+					wait(data->storage.replaceRange(blockRange, blockData));
+					// set the next blockBegin which is not necessary the key of the next readRange, as long as it
+					// covers the range from keys.begin -> keys.end.
+					blockBegin = keyAfter(this_block.end()[-1].key);
+
 					state KeyValueRef* kvItr = this_block.begin();
 					for (; kvItr != this_block.end(); ++kvItr) {
-						data->storage.writeKeyValue(*kvItr);
 						data->byteSampleApplySet(*kvItr, invalidVersion);
-						if (++sinceYield > 1000) {
-							wait(yield());
-							sinceYield = 0;
-						}
 					}
-
 					ASSERT(this_block.readThrough.present() || this_block.size());
 					nfk = this_block.readThrough.present() ? this_block.readThrough.get()
 					                                       : keyAfter(this_block.end()[-1].key);
