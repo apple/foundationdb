@@ -407,7 +407,7 @@ ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInter
 					TraceEvent("QuietDatabaseFailure")
 					    .error(e)
 					    .detail("Reason", "Failed to extract DurableVersion from StorageMetrics")
-					    .detail("SSID", StringRef(storage.toString()))
+					    .detail("SSID", storage)
 					    .detail("StorageMetrics", res.toString());
 					throw;
 				}
