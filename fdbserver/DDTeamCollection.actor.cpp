@@ -3262,6 +3262,38 @@ public:
 	}
 }; // class DDTeamCollectionImpl
 
+void DDTeamCollection::updatePivotAvailableSpaceRatio() {
+	if (now() - lastPivotAvailableSpaceUpdate > SERVER_KNOBS->AVAILABLE_SPACE_UPDATE_DELAY) {
+		lastPivotAvailableSpaceUpdate = now();
+		std::vector<double> teamAvailableSpace, teamAverageCPU;
+		teamAvailableSpace.reserve(teams.size());
+		teamAverageCPU.reserve(teams.size());
+		for (const auto& team : teams) {
+			if (team->isHealthy()) {
+				teamAvailableSpace.push_back(team->getMinAvailableSpaceRatio());
+				// teamAverageCPU.push_back();
+			}
+		}
+
+		size_t pivot = teamAvailableSpace.size() * std::min(1.0, SERVER_KNOBS->AVAILABLE_SPACE_PIVOT_PERCENT);
+		if (teamAvailableSpace.size() > 1) {
+			std::nth_element(teamAvailableSpace.begin(), teamAvailableSpace.begin() + pivot, teamAvailableSpace.end());
+			pivotAvailableSpaceRatio =
+			    std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO,
+			             std::min(SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO, teamAvailableSpace[pivot]));
+		} else {
+			pivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
+		}
+		if (pivotAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
+			TraceEvent(SevWarn, "DDTeamMedianAvailableSpaceTooSmall", distributorId)
+			    .detail("PivotAvailableSpaceRatio", pivotAvailableSpaceRatio)
+			    .detail("TargetAvailableSpaceRatio", SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO)
+			    .detail("Primary", primary);
+			printDetailedTeamsInfo.trigger();
+		}
+	}
+}
+
 int32_t DDTeamCollection::getTargetTSSInDC() const {
 	int32_t targetTSSInDC = configuration.desiredTSSCount;
 	if (configuration.usableRegions > 1) {
