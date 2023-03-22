@@ -31,7 +31,7 @@ struct StorageServerShard {
 
 	enum ShardState {
 		NotAssigned = 0,
-		MovingIn = 1,
+		Adding = 1,
 		ReadWritePending = 2,
 		ReadWrite = 3,
 	};
@@ -57,8 +57,8 @@ struct StorageServerShard {
 		switch (ss) {
 		case NotAssigned:
 			return "NotAssigned";
-		case MovingIn:
-			return "MovingIn";
+		case Adding:
+			return "Adding";
 		case ReadWritePending:
 			return "ReadWritePending";
 		case ReadWrite:

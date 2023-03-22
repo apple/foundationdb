@@ -289,7 +289,7 @@ public:
 		case StorageServerShard::NotAssigned:
 			res = newNotAssigned(shard.range);
 			break;
-		case StorageServerShard::MovingIn:
+		case StorageServerShard::Adding:
 		case StorageServerShard::ReadWritePending:
 			res = newAdding(data, shard.range);
 			break;
@@ -323,7 +323,7 @@ public:
 		} else {
 			ASSERT(this->adding);
 			st = this->adding->phase == AddingShard::Waiting ? StorageServerShard::ReadWritePending
-			                                                 : StorageServerShard::MovingIn;
+			                                                 : StorageServerShard::Adding;
 		}
 		return StorageServerShard(this->keys, this->version, this->shardId, this->desiredShardId, st);
 	}
@@ -8461,7 +8461,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				auto& shard = data->shards[range.begin];
 				if (!shard->assigned()) {
 					updatedShards.push_back(
-					    StorageServerShard(range, cVer, desiredId, desiredId, StorageServerShard::MovingIn));
+					    StorageServerShard(range, cVer, desiredId, desiredId, StorageServerShard::Adding));
 					data->pendingAddRanges[cVer].emplace_back(desiredId, range);
 					data->newestDirtyVersion.insert(range, cVer);
 					TraceEvent(SevVerbose, "SSAssignShard", data->thisServerID)
