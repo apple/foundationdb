@@ -10228,7 +10228,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	// Check test op limits
 	state std::function<bool()> testFinished = [=]() {
 		return !(totalPageOps < maxPageOps && written.size() < maxVerificationMapEntries &&
-		         totalRecordsRead < maxRecordsRead);
+		         totalRecordsRead < maxRecordsRead && coldStarts < maxColdStarts);
 	};
 
 	while (!testFinished()) {
@@ -10405,8 +10405,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 			mutationBytesTargetThisCommit = randomSize(maxCommitSize);
 
 			// Recover from disk at random
-			if (!pagerMemoryOnly && coldStarts < maxColdStarts &&
-			    deterministicRandom()->random01() < coldStartProbability) {
+			if (!pagerMemoryOnly && deterministicRandom()->random01() < coldStartProbability) {
 				++coldStarts;
 				printf("Recovering from disk after next commit.\n");
 
