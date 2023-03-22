@@ -186,8 +186,7 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 		options.prefix_extractor.reset(rocksdb::NewFixedPrefixTransform(SERVER_KNOBS->ROCKSDB_PREFIX_LEN));
 
 		// Also turn on bloom filters in the memtable.
-		// TODO: Make a knob for this as well.
-		options.memtable_prefix_bloom_size_ratio = 0.1;
+		options.memtable_prefix_bloom_size_ratio = SERVER_KNOBS->ROCKSDB_MEMTABLE_PREFIX_BLOOM_SIZE_RATIO;
 
 		// 5 -- Can be read by RocksDB's versions since 6.6.0. Full and partitioned
 		// filters use a generally faster and more accurate Bloom filter
@@ -198,11 +197,11 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 		// Create and apply a bloom filter using the 10 bits
 		// which should yield a ~1% false positive rate:
 		// https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#full-filters-new-format
-		bbOpts.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10));
+		bbOpts.filter_policy.reset(rocksdb::NewBloomFilterPolicy(SERVER_KNOBS->ROCKSDB_BLOOM_BITS_PER_KEY));
 
 		// The whole key blooms are only used for point lookups.
 		// https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#prefix-vs-whole-key
-		bbOpts.whole_key_filtering = false;
+		bbOpts.whole_key_filtering = SERVER_KNOBS->ROCKSDB_BLOOM_WHOLE_KEY_FILTERING;
 	}
 
 	if (SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE > 0) {
@@ -211,6 +210,12 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 
 	if (SERVER_KNOBS->ROCKSDB_BLOCK_SIZE > 0) {
 		bbOpts.block_size = SERVER_KNOBS->ROCKSDB_BLOCK_SIZE;
+	}
+
+	// The readahead size starts with 8KB and is exponentially increased on each additional sequential IO,
+	// up to a max of BlockBasedTableOptions.max_auto_readahead_size (default 256 KB)
+	if (SERVER_KNOBS->ROCKSDB_MAX_AUTO_READAHEAD_SIZE > 0) {
+		bbOpts.max_auto_readahead_size = SERVER_KNOBS->ROCKSDB_MAX_AUTO_READAHEAD_SIZE;
 	}
 
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
@@ -429,13 +434,14 @@ struct Counters {
 	Counter convertedDeleteKeyReqs;
 	Counter convertedDeleteRangeReqs;
 	Counter rocksdbReadRangeQueries;
+	Counter commitDelayed;
 
 	Counters()
 	  : cc("RocksDBThrottle"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("FailedToAcquire", cc),
 	    deleteKeyReqs("DeleteKeyRequests", cc), deleteRangeReqs("DeleteRangeRequests", cc),
 	    convertedDeleteKeyReqs("ConvertedDeleteKeyRequests", cc),
 	    convertedDeleteRangeReqs("ConvertedDeleteRangeRequests", cc),
-	    rocksdbReadRangeQueries("RocksdbReadRangeQueries", cc) {}
+	    rocksdbReadRangeQueries("RocksdbReadRangeQueries", cc), commitDelayed("CommitDelayed", cc) {}
 };
 
 struct ReadIterator {
@@ -954,6 +960,8 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		{ "RowCacheHit", rocksdb::ROW_CACHE_HIT, 0 },
 		{ "RowCacheMiss", rocksdb::ROW_CACHE_MISS, 0 },
 		{ "CountIterSkippedKeys", rocksdb::NUMBER_ITER_SKIP, 0 },
+		{ "NoIteratorCreated", rocksdb::NO_ITERATOR_CREATED, 0 },
+		{ "NoIteratorDeleted", rocksdb::NO_ITERATOR_DELETED, 0 },
 	};
 
 	// To control the rocksdb::StatsLevel, use ROCKSDB_STATS_LEVEL knob.
@@ -2070,9 +2078,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                                   &estPendCompactBytes);
 		while (count && estPendCompactBytes > SERVER_KNOBS->ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT) {
 			wait(delay(SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD));
+			++self->counters.commitDelayed;
 			count--;
 			self->db->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes,
 			                                   &estPendCompactBytes);
+			if (deterministicRandom()->random01() < 0.001)
+				TraceEvent(SevWarn, "RocksDBCommitsDelayed1000x", self->id);
 		}
 
 		return Void();
