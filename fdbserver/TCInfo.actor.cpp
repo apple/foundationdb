@@ -414,6 +414,19 @@ double TCTeamInfo::getReadLoad(bool includeInFlight, double inflightPenalty) con
 	       (includeInFlight ? inflightPenalty * getReadInFlightToTeam() / servers.size() : 0);
 }
 
+double TCTeamInfo::getAverageCPU() const {
+	double sum = 0;
+	int size = 0;
+	for (const auto& server : servers) {
+		if (server->getStorageStats().present()) {
+			sum += server->getStorageStats().get().cpuUsage;
+			size++;
+		}
+	}
+	// If every storage server hasn't gotten their CPU updated, we assume they are too busy to respond so return 101;
+	return size == 0 ? 101.0 : sum / size;
+}
+
 int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
 	int64_t minAvailableSpace = std::numeric_limits<int64_t>::max();
 	for (const auto& server : servers) {
