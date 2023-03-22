@@ -31,7 +31,7 @@ struct IDataDistributionTeam {
 	virtual int64_t getDataInFlightToTeam() const = 0;
 	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
 	virtual int64_t getReadInFlightToTeam() const = 0;
-	virtual double getLoadReadBandwidth(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
+	virtual double getReadLoad(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
 	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) const = 0;
 	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) const = 0;
 	virtual bool hasHealthyAvailableSpace(double minRatio) const = 0;
@@ -167,12 +167,12 @@ private:
 
 	// return -1 if a.readload > b.readload
 	static int greaterReadLoad(TeamRef a, TeamRef b) {
-		auto r1 = a->getLoadReadBandwidth(true), r2 = b->getLoadReadBandwidth(true);
+		auto r1 = a->getReadLoad(true), r2 = b->getReadLoad(true);
 		return r1 == r2 ? 0 : (r1 > r2 ? -1 : 1);
 	}
 	// return -1 if a.readload < b.readload
 	static int lessReadLoad(TeamRef a, TeamRef b) {
-		auto r1 = a->getLoadReadBandwidth(false), r2 = b->getLoadReadBandwidth(false);
+		auto r1 = a->getReadLoad(false), r2 = b->getReadLoad(false);
 		return r1 == r2 ? 0 : (r1 < r2 ? -1 : 1);
 	}
 };
