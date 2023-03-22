@@ -325,6 +325,7 @@ public:
 	double lastConnectionFailure;
 	double connectionFailuresDisableDuration;
 	bool speedUpSimulation;
+	double connectionFailureEnableTime; // Last time connection failure is enabled.
 	BackupAgentType backupAgents;
 	BackupAgentType drAgents;
 	bool restarted = false;
