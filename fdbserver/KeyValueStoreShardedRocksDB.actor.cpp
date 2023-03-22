@@ -2438,6 +2438,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			res.setState(CheckpointMetaData::Complete);
+			res.dir = a.request.checkpointDir;
 			a.reply.send(res);
 
 			if (checkpoint != nullptr) {
