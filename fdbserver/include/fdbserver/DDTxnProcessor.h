@@ -140,6 +140,8 @@ public:
 	virtual Future<Void> waitDDTeamInfoPrintSignal() const { return Never(); }
 
 	virtual Future<std::vector<ProcessData>> getWorkers() const = 0;
+
+	virtual Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness) const = 0;
 };
 
 class DDTxnProcessorImpl;
@@ -224,11 +226,14 @@ public:
 
 	Future<std::vector<ProcessData>> getWorkers() const override;
 
+	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness) const override;
+
 protected:
 	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
 
 	Future<Void> rawFinishMovement(const MoveKeysParams& params,
 	                               const std::map<UID, StorageServerInterface>& tssMapping);
+
 };
 
 struct DDMockTxnProcessorImpl;
@@ -292,6 +297,8 @@ public:
 	Future<HealthMetrics> getHealthMetrics(bool detailed = false) const override;
 
 	Future<std::vector<ProcessData>> getWorkers() const override;
+
+	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness) const override;
 
 protected:
 	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
