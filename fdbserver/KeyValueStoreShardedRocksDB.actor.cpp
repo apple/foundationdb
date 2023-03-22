@@ -307,6 +307,7 @@ Error statusToError(const rocksdb::Status& s) {
 
 rocksdb::ColumnFamilyOptions getCFOptions() {
 	rocksdb::ColumnFamilyOptions options;
+	options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
 	options.level_compaction_dynamic_level_bytes = SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
 	options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
 	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
@@ -561,12 +562,11 @@ struct PhysicalShard {
 				    .detail("CheckpointID", checkpoint.checkpointID);
 				status = db->CreateColumnFamily(getCFOptions(), id, &cf);
 			} else {
+				TraceEvent(SevInfo, "RocksDBRestoreCF");
 				rocksdb::ImportColumnFamilyOptions importOptions;
 				importOptions.move_files = SERVER_KNOBS->ROCKSDB_IMPORT_MOVE_FILES;
 				status = db->CreateColumnFamilyWithImport(getCFOptions(), id, importOptions, metaData, &cf);
-			}
-			if (!status.ok()) {
-				logRocksDBError(status, "RocksImportColumnFamily");
+				TraceEvent(SevInfo, "RocksDBRestoreCFEnd").detail("Status", status.ToString());
 			}
 		} else if (format == RocksDBKeyValues) {
 			std::vector<std::string> sstFiles;
@@ -603,10 +603,10 @@ struct PhysicalShard {
 			throw not_implemented();
 		}
 
-		TraceEvent(SevInfo, "PhysicalShardRestoreEnd")
+		TraceEvent(status.ok() ? SevInfo : SevWarnAlways, "PhysicalShardRestoreEnd")
 		    .detail("Status", status.ToString())
 		    .detail("Shard", id)
-		    .detail("CFName", cf->GetName())
+		    .detail("CFName", cf == nullptr ? "" : cf->GetName())
 		    .detail("Checkpoint", checkpoint.toString());
 		if (status.ok()) {
 			if (!this->isInitialized) {
@@ -2331,7 +2331,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			    readOptions, a.shardManager->getSpecialKeysShard()->cf, toSlice(persistVersion), &value);
 
 			if (!s.ok() && !s.IsNotFound()) {
-				logRocksDBError(s, "CheckpointReadPersistVersion");
+				logRocksDBError(s, "ShardedRocksCheckpointReadPersistVersion");
 				a.reply.sendError(failed_to_create_checkpoint());
 				return;
 			}
@@ -2340,7 +2340,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			                            ? latestVersion
 			                            : BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned());
 
-			TraceEvent(SevDebug, "ShardedRocksDBServeCheckpointVersion", logId)
+			TraceEvent(SevDebug, "ShardedRocksCheckpointVersion", logId)
 			    .detail("CheckpointVersion", a.request.version)
 			    .detail("PersistVersion", version);
 			ASSERT(a.request.version == version || a.request.version == latestVersion);
@@ -2375,7 +2375,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					s = a.shardManager->getDb()->CreateColumnFamilyWithImport(
 					    getCFOptions(), cfName, importOptions, metadata, &handle);
 					if (!s.ok()) {
-						TraceEvent(SevError, "ShardedRocksValidateCheckpointImportError", logId)
+						TraceEvent(SevError, "ShardedRocksCheckpointValidateImportError", logId)
 						    .detail("Status", s.ToString())
 						    .detail("CheckpointID", a.request.checkpointID)
 						    .detail("Ranges", describe(a.request.ranges))
@@ -2394,7 +2394,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					while (oriIter->Valid() && resIter->Valid()) {
 						if (oriIter->key().compare(resIter->key()) != 0 ||
 						    oriIter->value().compare(resIter->value()) != 0) {
-							TraceEvent(SevError, "RocksValidateCheckpointError", logId)
+							TraceEvent(SevError, "ShardedRocksCheckpointValidateError", logId)
 							    .detail("KeyInDB", toStringRef(oriIter->key()))
 							    .detail("ValueInDB", toStringRef(oriIter->value()))
 							    .detail("KeyInCheckpoint", toStringRef(resIter->key()))
@@ -2425,7 +2425,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 						a.reply.sendError(failed_to_create_checkpoint());
 						return;
 					}
-					TraceEvent(SevDebug, "ShardedRocksValidateCheckpointSuccess", logId)
+					TraceEvent(SevDebug, "ShardedRocksCheckpointValidateSuccess", logId)
 					    .detail("CheckpointVersion", a.request.version)
 					    .detail("PersistVersion", version);
 				}
@@ -2527,8 +2527,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				status = ps->restore(a.checkpoints[0]);
 
 				if (!status.ok()) {
-					logRocksDBError(status, "Restore");
-					a.done.sendError(statusToError(status));
+					a.done.sendError(failed_to_restore_checkpoint());
 					return;
 				} else {
 					ASSERT(ps->initialized());
@@ -2549,7 +2548,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 						writeBatch.DeleteRange(ps->cf, toSlice(cRange.begin), toSlice(cRange.end));
 						status = a.shardManager->getDb()->Write(options, &writeBatch);
 						if (!status.ok()) {
-							logRocksDBError(status, "RestorePersistMetaData");
+							logRocksDBError(status, "RestoreClearnExtraRanges");
 							a.done.sendError(statusToError(status));
 							return;
 						}
@@ -2655,9 +2654,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
-			TraceEvent(SevDebug, "ShardedRocksRestoreMetaDataPersisted", logId)
-			    .detail("Path", a.path)
-			    .detail("Checkpoints", describe(a.checkpoints));
 			TraceEvent(SevInfo, "ShardedRocksDBRestoreEnd", logId)
 			    .detail("Path", a.path)
 			    .detail("Checkpoints", describe(a.checkpoints));
@@ -3336,6 +3332,55 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> cleanUpJob;
 };
 
+ACTOR Future<Void> testCheckpointRestore(IKeyValueStore* kvStore, std::vector<KeyRange> ranges) {
+	state std::string checkpointDir = "checkpoint" + deterministicRandom()->randomAlphaNumeric(5);
+	platform::eraseDirectoryRecursive(checkpointDir);
+	CheckpointRequest request(
+	    latestVersion, ranges, DataMoveRocksCF, deterministicRandom()->randomUniqueID(), checkpointDir);
+	state CheckpointMetaData checkpoint = wait(kvStore->checkpoint(request));
+	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
+
+	TraceEvent(SevDebug, "ShardedRocksCheckpointTest")
+	    .detail("Checkpoint", checkpoint.toString())
+	    .detail("ColumnFamily", rocksCF.toString());
+
+	state std::string rocksDBRestoreDir = "sharded-rocks-restore" + deterministicRandom()->randomAlphaNumeric(5);
+	platform::eraseDirectoryRecursive(rocksDBRestoreDir);
+	state IKeyValueStore* restoreKv = keyValueStoreShardedRocksDB(
+	    rocksDBRestoreDir, deterministicRandom()->randomUniqueID(), KeyValueStoreType::SSD_SHARDED_ROCKSDB);
+	wait(restoreKv->init());
+	try {
+		const std::string shardId = "restoredShard";
+		wait(restoreKv->restore(shardId, ranges, { checkpoint }));
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "TestRestoreCheckpointError")
+		    .errorUnsuppressed(e)
+		    .detail("Checkpoint", checkpoint.toString());
+		throw;
+	}
+
+	state int i = 0;
+	for (; i < ranges.size(); ++i) {
+		state RangeResult restoreResult = wait(restoreKv->readRange(ranges[i]));
+		RangeResult result = wait(kvStore->readRange(ranges[i]));
+		ASSERT(!restoreResult.more && !result.more);
+		ASSERT(restoreResult.size() == result.size());
+		for (int i = 0; i < result.size(); ++i) {
+			TraceEvent(SevDebug, "ReadKeyValueFromRestoredRocks")
+			    .detail("Key", result[i].key)
+			    .detail("Value", result[i].value)
+			    .detail("RestoreKey", restoreResult[i].key)
+			    .detail("RestoreValue", restoreResult[i].value);
+			ASSERT(result[i].key == restoreResult[i].key);
+			ASSERT(result[i].value == restoreResult[i].value);
+		}
+	}
+
+	Future<Void> restoreKvClose = restoreKv->onClosed();
+	restoreKv->close();
+	wait(restoreKvClose);
+	return Void();
+}
 } // namespace
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
@@ -3907,6 +3952,69 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointBasic") {
 
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 	platform::eraseDirectoryRecursive(checkpointDir);
+
+	return Void();
+}
+
+TEST_CASE("noSim/ShardedRocksDB/CheckpointRestore") {
+	state std::string rocksDBTestDir = "sharded-rocks-checkpoint" + deterministicRandom()->randomAlphaNumeric(5);
+	state std::map<Key, Value> kvs({ { "ab"_sr, "TestValueAB"_sr },
+	                                 { "ad"_sr, "TestValueAD"_sr },
+	                                 { "b"_sr, "TestValueB"_sr },
+	                                 { "ba"_sr, "TestValueBA"_sr },
+	                                 { "c"_sr, "TestValueC"_sr },
+	                                 { "d"_sr, "TestValueD"_sr },
+	                                 { "e"_sr, "TestValueE"_sr },
+	                                 { "h"_sr, "TestValueH"_sr },
+	                                 { "ha"_sr, "TestValueHA"_sr } });
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+	state IKeyValueStore* kvStore =
+	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	state std::string shardId = "shard_1";
+	state std::string emptyShardId = "shard_2";
+	state KeyRangeRef rangeK(""_sr, "k"_sr);
+	state KeyRangeRef rangeKz("z1"_sr, "z3"_sr);
+	// // Add some ranges.
+	std::vector<Future<Void>> addRangeFutures;
+	addRangeFutures.push_back(kvStore->addRange(rangeK, shardId));
+	addRangeFutures.push_back(kvStore->addRange(rangeKz, emptyShardId));
+	kvStore->persistRangeMapping(rangeK, true);
+	kvStore->persistRangeMapping(rangeKz, true);
+	wait(waitForAll(addRangeFutures));
+	wait(kvStore->commit(false));
+
+	for (const auto& [k, v] : kvs) {
+		kvStore->set(KeyValueRef(k, v));
+	}
+	wait(kvStore->commit(false));
+	kvStore->clear(KeyRangeRef(""_sr, "z"_sr));
+	wait(kvStore->commit(false));
+
+	state Error err;
+	try {
+		wait(testCheckpointRestore(kvStore, { rangeK }));
+	} catch (Error& e) {
+		TraceEvent("TestCheckpointRestoreError").errorUnsuppressed(e);
+		err = e;
+	}
+	// This will fail once RocksDB is upgraded to 8.1.
+	ASSERT(err.code() == error_code_failed_to_restore_checkpoint);
+
+	try {
+		wait(testCheckpointRestore(kvStore, { rangeKz }));
+	} catch (Error& e) {
+		TraceEvent("TestCheckpointRestoreError").errorUnsuppressed(e);
+		err = e;
+	}
+
+	std::vector<Future<Void>> closes;
+	closes.push_back(kvStore->onClosed());
+	kvStore->close();
+	wait(waitForAll(closes));
+
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
 	return Void();
 }
