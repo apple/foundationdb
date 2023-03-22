@@ -994,7 +994,8 @@ public:
 		state Future<Void> failureTracker;
 		state ServerStatus status(false, false, false, server->getLastKnownInterface().locality);
 		state bool lastIsUnhealthy = false;
-		state Future<Void> metricsTracker = server->serverMetricsPolling();
+		state Reference<IDDTxnProcessor> txnProcessor = makeReference<DDTxnProcessor>(cx);
+		state Future<Void> metricsTracker = server->serverMetricsPolling(txnProcessor);
 
 		state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
 		state bool hasWrongDC = !self->isCorrectDC(*server);

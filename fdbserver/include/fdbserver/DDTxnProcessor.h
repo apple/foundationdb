@@ -31,7 +31,7 @@ struct InitialDataDistribution;
  * testability benefits from a mock implementation; b. Other control-plane roles should consider providing its own
  * TxnProcessor interface to provide testability, for example, Ratekeeper.
  * */
-class IDDTxnProcessor {
+class IDDTxnProcessor : public ReferenceCounted<IDDTxnProcessor> {
 public:
 	struct SourceServers {
 		std::vector<UID> srcServers, completeSources; // the same as RelocateData.src, RelocateData.completeSources;
@@ -61,6 +61,8 @@ public:
 	}
 
 	virtual Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const = 0;
+
+	virtual Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness) const = 0;
 };
 
 class DDTxnProcessorImpl;
@@ -94,6 +96,8 @@ public:
 	                               const DatabaseConfiguration& configuration) const override;
 
 	Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const override;
+
+	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness) const override;
 };
 
 // A mock transaction implementation for test usage.
