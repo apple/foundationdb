@@ -665,8 +665,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 	state Reference<DDTeamCollection> primaryTeamCollection;
 	state Reference<DDTeamCollection> remoteTeamCollection;
 	state bool trackerCancelled;
+
 	loop {
 		trackerCancelled = false;
+		// whether all initial shard are tracked
 		self->initialized = Promise<Void>();
 		self->auditInitialized = Promise<Void>();
 
@@ -719,42 +721,47 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			actors.push_back(resumeStorageAudits(self));
 
 			actors.push_back(self->pollMoveKeysLock());
-			actors.push_back(reportErrorsExcept(dataDistributionTracker(self->initData,
-			                                                            self->txnProcessor,
-			                                                            self->relocationProducer,
-			                                                            self->shardsAffectedByTeamFailure,
-			                                                            self->physicalShardCollection,
-			                                                            getShardMetrics,
-			                                                            getTopKShardMetrics.getFuture(),
-			                                                            getShardMetricsList,
-			                                                            getAverageShardBytes.getFuture(),
-			                                                            self->initialized,
-			                                                            anyZeroHealthyTeams,
-			                                                            self->ddId,
-			                                                            &shards,
-			                                                            &trackerCancelled,
-			                                                            self->ddTenantCache,
-			                                                            self->initData->customReplication),
+
+			auto shardTracker = makeReference<DataDistributionTracker>(
+			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
+			                                       .distributorId = self->ddId,
+			                                       .readyToStart = self->initialized,
+			                                       .output = self->relocationProducer,
+			                                       .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
+			                                       .physicalShardCollection = self->physicalShardCollection,
+			                                       .anyZeroHealthyTeams = anyZeroHealthyTeams,
+			                                       .shards = &shards,
+			                                       .trackerCancelled = &trackerCancelled,
+			                                       .ddTenantCache = self->ddTenantCache });
+			actors.push_back(reportErrorsExcept(DataDistributionTracker::run(shardTracker,
+			                                                                 self->initData,
+			                                                                 getShardMetrics.getFuture(),
+			                                                                 getTopKShardMetrics.getFuture(),
+			                                                                 getShardMetricsList.getFuture(),
+			                                                                 getAverageShardBytes.getFuture()),
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
-			actors.push_back(reportErrorsExcept(dataDistributionQueue(self->txnProcessor,
-			                                                          self->relocationProducer,
-			                                                          self->relocationConsumer.getFuture(),
-			                                                          getShardMetrics,
-			                                                          getTopKShardMetrics,
-			                                                          processingUnhealthy,
-			                                                          processingWiggle,
-			                                                          tcis,
-			                                                          self->shardsAffectedByTeamFailure,
-			                                                          self->physicalShardCollection,
-			                                                          self->lock,
-			                                                          getAverageShardBytes,
-			                                                          getUnhealthyRelocationCount.getFuture(),
-			                                                          self->ddId,
-			                                                          replicaSize,
-			                                                          self->configuration.storageTeamSize,
-			                                                          self->context->ddEnabledState.get()),
+
+			auto ddQueue = makeReference<DDQueue>(
+			    DDQueueInitParams{ .id = self->ddId,
+			                       .lock = self->lock,
+			                       .db = self->txnProcessor,
+			                       .teamCollections = tcis,
+			                       .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
+			                       .physicalShardCollection = self->physicalShardCollection,
+			                       .getAverageShardBytes = getAverageShardBytes,
+			                       .teamSize = replicaSize,
+			                       .singleRegionTeamSize = self->configuration.storageTeamSize,
+			                       .relocationProducer = self->relocationProducer,
+			                       .relocationConsumer = self->relocationConsumer.getFuture(),
+			                       .getShardMetrics = getShardMetrics,
+			                       .getTopKMetrics = getTopKShardMetrics });
+			actors.push_back(reportErrorsExcept(DDQueue::run(ddQueue,
+			                                                 processingUnhealthy,
+			                                                 processingWiggle,
+			                                                 getUnhealthyRelocationCount.getFuture(),
+			                                                 self->context->ddEnabledState.get()),
 			                                    "DDQueue",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
