@@ -204,9 +204,7 @@ struct SimClogging {
 	double getSendDelay(NetworkAddress from, NetworkAddress to, bool stableConnection = false) const {
 		// stable connection here means it's a local connection between processes on the same machine
 		// we expect it to have much lower latency
-		double latency = (stableConnection ? 0.1 : 1.0) * halfLatency();
-		// TraceEvent("SendDelay").detail("From", from).detail("To", to).detail("Delay", latency).detail("Stable", stableConnection);
-		return latency;
+		return (stableConnection ? 0.1 : 1.0) * halfLatency();
 	}
 
 	double getRecvDelay(NetworkAddress from, NetworkAddress to, bool stableConnection = false) {
@@ -226,8 +224,6 @@ struct SimClogging {
 
 		if (!g_simulator->speedUpSimulation && !stableConnection && clogRecvUntil.count(to.ip))
 			t = std::max(t, clogRecvUntil[to.ip]);
-
-		// TraceEvent("RecvDelay").detail("From", from).detail("To", to).detail("Delay", t - tnow).detail("Stable", stableConnection);
 
 		return t - tnow;
 	}
@@ -259,11 +255,9 @@ struct SimClogging {
 		u = std::max(u, now() + t);
 	}
 	double setPairLatencyIfNotSet(const IPAddress& from, const IPAddress& to, double t) {
-		// TraceEvent("ZZZZSetPairLatency0").detail("From", from).detail("To", to).detail("Duration", t);
 		auto i = clogPairLatency.find(std::make_pair(from, to));
 		if (i == clogPairLatency.end())
 			i = clogPairLatency.insert(std::make_pair(std::make_pair(from, to), t)).first;
-		// TraceEvent("ZZZZSetPairLatency1").detail("From", from).detail("To", to).detail("Duration", i->second);
 		return i->second;
 	}
 

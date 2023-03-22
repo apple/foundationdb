@@ -356,17 +356,6 @@ void TagPartitionedLogSystem::toCoreState(DBCoreState& newState) const {
 	    (repopulateRegionAntiQuorum == 0 && (!remoteRecoveryComplete.isValid() || !remoteRecoveryComplete.isReady())) ||
 	    epoch != oldestBackupEpoch) {
 		for (const auto& oldData : oldLogData) {
-			/*
-			for (int i = 0; i < oldLogData.size(); ++i) {
-			    const auto& oldData = oldLogData[i];
-			    if (oldData.epochBegin < oldestGenerationStartVersion) {
-			        if (g_network->isSimulated()) {
-			            for (int j = i + 1; j < oldLogData.size(); ++j) {
-			                ASSERT(oldLogData[j].epochBegin < oldestGenerationStartVersion);
-			            }
-			        }
-			        break;
-			    }*/
 			newState.oldTLogData.emplace_back(oldData);
 			TraceEvent("BWToCore")
 			    .detail("Epoch", newState.oldTLogData.back().epoch)
@@ -2205,8 +2194,6 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 
 	CODE_PROBE(true, "Master recovery from pre-existing database");
 
-	TraceEvent("ZZZEndEpochStuck1").log();
-
 	// trackRejoins listens for rejoin requests from the tLogs that we are recovering from, to learn their
 	// TLogInterfaces
 	state std::vector<LogLockInfo> lockResults;
@@ -2278,7 +2265,6 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			}
 		}
 	}
-	TraceEvent("ZZZEndEpochStuck2").log();
 	if (*forceRecovery) {
 		state std::vector<LogLockInfo> allLockResults;
 		ASSERT(lockResults.size() == 1);
@@ -2329,11 +2315,9 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 		}
 	}
 
-	TraceEvent("ZZZEndEpochStuck3").log();
 	state Optional<Version> lastEnd;
 	state Version knownCommittedVersion = 0;
 	loop {
-		TraceEvent("ZZZEndEpochStuck4").log();
 		Version minEnd = std::numeric_limits<Version>::max();
 		Version maxEnd = 0;
 		std::vector<Future<Void>> changes;
@@ -2383,7 +2367,6 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			logSystem->stopped = true;
 			logSystem->pseudoLocalities = prevState.pseudoLocalities;
 
-			TraceEvent("ZZZEndEpochStuck5").log();
 			outLogSystem->set(logSystem);
 		}
 
@@ -2596,7 +2579,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
                                                            std::vector<Version> oldGenerationStartVersions) {
 	TraceEvent("RemoteLogRecruitment_WaitingForWorkers").log();
 	state RecruitRemoteFromConfigurationReply remoteWorkers = wait(fRemoteWorkers);
-	TraceEvent("GotRemoteLogWorkers")
+	TraceEvent("RecruitedRemoteLogWorkers")
 	    .detail("TLogs", remoteWorkers.remoteTLogs.size())
 	    .detail("LogRouter", remoteWorkers.logRouters.size());
 
@@ -3177,8 +3160,6 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		logSystem->remoteRecoveryComplete = logSystem->recoveryComplete;
 		logSystem->remoteRecoveredVersion->set(MAX_VERSION);
 	}
-
-	TraceEvent("DoneNewEpoch").log();
 
 	return logSystem;
 }

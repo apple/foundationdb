@@ -56,7 +56,10 @@ struct GcGenerationsWorkload : TestWorkload {
 		startDelay = getOption(options, "startDelay"_sr, 30.0);
 	}
 
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); out.insert("RandomClogging");}
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert("Attrition");
+		out.insert("RandomClogging");
+	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
@@ -85,7 +88,7 @@ struct GcGenerationsWorkload : TestWorkload {
 			wait(store(coordinators, cs.tryResolveHostnames()));
 		}
 
-		auto isCoordinator = [](const std::vector<NetworkAddress>& coordinators, const IPAddress& ip){
+		auto isCoordinator = [](const std::vector<NetworkAddress>& coordinators, const IPAddress& ip) {
 			for (const auto& c : coordinators) {
 				if (c.ip == ip) {
 					return true;
@@ -98,9 +101,8 @@ struct GcGenerationsWorkload : TestWorkload {
 		std::vector<IPAddress> remoteIps; // all remote process IPs
 		for (const auto& process : g_simulator->getAllProcesses()) {
 			const auto& ip = process->address.ip;
-			if (process->locality.dcId().present() 
-			    && process->locality.dcId().get() == g_simulator->remoteDcId
-				&& !isCoordinator(coordinators, ip)) {
+			if (process->locality.dcId().present() && process->locality.dcId().get() == g_simulator->remoteDcId &&
+			    !isCoordinator(coordinators, ip)) {
 				remoteIps.push_back(ip);
 			} else {
 				ips.push_back(ip);
@@ -119,7 +121,9 @@ struct GcGenerationsWorkload : TestWorkload {
 			}
 		}
 
-		TraceEvent("PartitionRemoteDc").detail("RemoteDc", g_simulator->remoteDcId).detail("CloggedRemoteProcess", describe(remoteIps));
+		TraceEvent("PartitionRemoteDc")
+		    .detail("RemoteDc", g_simulator->remoteDcId)
+		    .detail("CloggedRemoteProcess", describe(remoteIps));
 		return Void();
 	}
 
@@ -138,32 +142,47 @@ struct GcGenerationsWorkload : TestWorkload {
 		// ASSERT(generationCount == 0);
 		for (; i < 6; ++i) {
 			wait(delay(30));
-			TraceEvent("WaitingForDbAvailable").detail("Index", i).detail("RecoveryState", self->dbInfo->get().recoveryState);
+			TraceEvent("WaitingForDbAvailable")
+			    .detail("Index", i)
+			    .detail("RecoveryState", self->dbInfo->get().recoveryState);
 			wait(self->dbAvailable(self));
-		    generationCount = self->dbInfo->get().logSystemConfig.oldTLogs.size();
-			TraceEvent("WaitingForDbAvailableDone").detail("Index", i).detail("Master", self->dbInfo->get().master.address());
-			// g_simulator->killInterface(self->dbInfo->get().master.address(), ISimulator::KillType::KillInstantly);
-			g_simulator->rebootProcess(g_simulator->getProcessByAddress(self->dbInfo->get().master.address()), ISimulator::KillType::Reboot);
+			generationCount = self->dbInfo->get().logSystemConfig.oldTLogs.size();
+			TraceEvent("WaitingForDbAvailableDone")
+			    .detail("Index", i)
+			    .detail("Master", self->dbInfo->get().master.address());
+			g_simulator->rebootProcess(g_simulator->getProcessByAddress(self->dbInfo->get().master.address()),
+			                           ISimulator::KillType::Reboot);
 
 			// Wait for recovery
-			while (self->dbInfo->get().logSystemConfig.oldTLogs.size() == generationCount || self->dbInfo->get().recoveryState < RecoveryState::RECOVERY_TRANSACTION) {
+			while (self->dbInfo->get().logSystemConfig.oldTLogs.size() == generationCount ||
+			       self->dbInfo->get().recoveryState < RecoveryState::RECOVERY_TRANSACTION) {
 				wait(self->dbInfo->onChange());
 			}
-			TraceEvent("CurrentGenerations").detail("PrevCount", generationCount).detail("New", self->dbInfo->get().logSystemConfig.oldTLogs.size());
+			TraceEvent("CurrentGenerations")
+			    .detail("PrevCount", generationCount)
+			    .detail("New", self->dbInfo->get().logSystemConfig.oldTLogs.size());
 			ASSERT(self->dbInfo->get().logSystemConfig.oldTLogs.size() > generationCount);
 			generationCount = self->dbInfo->get().logSystemConfig.oldTLogs.size();
 		}
-		TraceEvent("AfterMultipleRecovery").detail("OldGenerationCount", self->dbInfo->get().logSystemConfig.oldTLogs.size());
+		TraceEvent("AfterMultipleRecovery")
+		    .detail("OldGenerationCount", self->dbInfo->get().logSystemConfig.oldTLogs.size());
 		return Void();
 	}
 
 	ACTOR Future<Void> generationReduced(GcGenerationsWorkload* self) {
-		TraceEvent("WaitForGenerationReduction").detail("GenerationCount", self->dbInfo->get().logSystemConfig.oldTLogs.size()).detail("RecoveryState", self->dbInfo->get().recoveryState);
-		while (self->dbInfo->get().logSystemConfig.oldTLogs.size() > 1 || self->dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-			TraceEvent("WaitForGenerationReduction").detail("GenerationCount", self->dbInfo->get().logSystemConfig.oldTLogs.size()).detail("RecoveryState", self->dbInfo->get().recoveryState);
+		TraceEvent("WaitForGenerationReduction")
+		    .detail("GenerationCount", self->dbInfo->get().logSystemConfig.oldTLogs.size())
+		    .detail("RecoveryState", self->dbInfo->get().recoveryState);
+		while (self->dbInfo->get().logSystemConfig.oldTLogs.size() > 1 ||
+		       self->dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			TraceEvent("WaitForGenerationReduction")
+			    .detail("GenerationCount", self->dbInfo->get().logSystemConfig.oldTLogs.size())
+			    .detail("RecoveryState", self->dbInfo->get().recoveryState);
 			wait(self->dbInfo->onChange());
 		}
-		TraceEvent("WaitForGenerationReduction").detail("GenerationCount", self->dbInfo->get().logSystemConfig.oldTLogs.size()).detail("RecoveryState", self->dbInfo->get().recoveryState);
+		TraceEvent("WaitForGenerationReduction")
+		    .detail("GenerationCount", self->dbInfo->get().logSystemConfig.oldTLogs.size())
+		    .detail("RecoveryState", self->dbInfo->get().recoveryState);
 		return Void();
 	}
 
@@ -188,7 +207,7 @@ struct GcGenerationsWorkload : TestWorkload {
 		wait(self->generationReduced(self));
 
 		g_simulator->disableTLogRecoveryFinish = false;
-		
+
 		TraceEvent("WaitingForDbFullyRecovered").detail("RecoveryState", self->dbInfo->get().recoveryState);
 		while (self->dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
 			wait(self->dbInfo->onChange());

@@ -279,7 +279,6 @@ ACTOR Future<Void> serverPeekParallelGetMore(ILogSystem::ServerPeekCursor* self,
 			if (self->parallelGetMore || self->onlySpilled) {
 				while (self->futureResults.size() < SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS &&
 				       self->interf->get().present()) {
-					// TraceEvent("ZZZZZPeekingParallel").detail("Interf", self->interf->get().id()).detail("Tag", self->tag).detail("Version", self->messageVersion.version);
 					self->futureResults.push_back(recordRequestMetrics(
 					    self,
 					    self->interf->get().interf().peekMessages.getEndpoint().getPrimaryAddress(),
@@ -303,7 +302,6 @@ ACTOR Future<Void> serverPeekParallelGetMore(ILogSystem::ServerPeekCursor* self,
 
 			choose {
 				when(TLogPeekReply res = wait(self->interf->get().present() ? self->futureResults.front() : Never())) {
-					// TraceEvent("ZZZZZPeekingParallelReply").detail("Tag", self->tag).detail("Interf", self->interf->get().id()).detail("Begin", res.begin).detail("End", res.end);
 					if (res.begin.get() != expectedBegin) {
 						throw operation_obsolete();
 					}
@@ -327,7 +325,7 @@ ACTOR Future<Void> serverPeekParallelGetMore(ILogSystem::ServerPeekCursor* self,
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent("PeekCursorError", self->randomID)
+			DebugLogTraceEvent("PeekCursorError", self->randomID)
 			    .error(e)
 			    .detail("Tag", self->tag.toString())
 			    .detail("Begin", self->messageVersion.version)
@@ -438,7 +436,6 @@ ACTOR Future<Void> serverPeekGetMore(ILogSystem::ServerPeekCursor* self, TaskPri
 	}
 	try {
 		loop {
-			// TraceEvent("ZZZZZPeeking").detail("Interf", self->interf->get().id()).detail("Tag", self->tag).detail("Version", self->messageVersion.version);
 			choose {
 				when(TLogPeekReply res =
 				         wait(self->interf->get().present()
@@ -449,7 +446,6 @@ ACTOR Future<Void> serverPeekGetMore(ILogSystem::ServerPeekCursor* self, TaskPri
 				                                        self->onlySpilled),
 				                        taskID))
 				                  : Never())) {
-					// TraceEvent("ZZZZZPeekingReply").detail("Tag", self->tag).detail("Interf", self->interf->get().id()).detail("Begin", res.begin).detail("End", res.end);
 					updateCursorWithReply(self, res);
 					DebugLogTraceEvent("SPC_GetMoreB", self->randomID)
 					    .detail("Tag", self->tag.toString())

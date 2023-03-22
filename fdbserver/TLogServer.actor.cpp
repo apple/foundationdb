@@ -2530,11 +2530,8 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 			    .detail("MyRecoveryCount", recoveryCount);
 			stoppedPromise.send(Void());
 		}
-		TraceEvent("TLogRejoiningWaingForRegister", tli.id()).log();
+
 		if (registerWithCC.isReady()) {
-			TraceEvent("TLogRejoiningWaingForMaster", tli.id())
-			    .detail("Last", lastMasterLifetime.toString())
-			    .detail("DbInfo", self->dbInfo->get().masterLifetime.toString());
 			if (!lastMasterLifetime.isEqual(self->dbInfo->get().masterLifetime)) {
 				// The TLogRejoinRequest is needed to establish communications with a new master, which doesn't have our
 				// TLogInterface
@@ -2779,7 +2776,6 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			logData->addActor.send(tLogPeekStream(self, req, logData));
 		}
 		when(TLogPeekRequest req = waitNext(tli.peekMessages.getFuture())) {
-			// TraceEvent("ZZZZZTLogReceivingPeek", logData->logId).detail("Begin", req.begin).detail("Tag", req.tag);
 			logData->addActor.send(tLogPeekMessages(
 			    req.reply, self, logData, req.begin, req.tag, req.returnIfBlocked, req.onlySpilled, req.sequence));
 		}
@@ -2888,10 +2884,6 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 	while (!endVersion.present() || logData->version.get() < endVersion.get()) {
 		// When we just processed some data, we reset the warning start time.
 		state double lastPullAsyncDataWarningTime = now();
-		TraceEvent("ZZZZDoingPulling")
-		    .detail("Cursor", r.isValid())
-		    .detail("DbInfo", logData->logSystem->get().isValid())
-		    .detail("Tags", describe(tags));
 		loop {
 			choose {
 				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {

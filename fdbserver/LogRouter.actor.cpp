@@ -764,7 +764,6 @@ ACTOR Future<Void> logRouterCore(TLogInterface interf,
 			logRouterData.logSystem->set(ILogSystem::fromServerDBInfo(logRouterData.dbgid, db->get(), true));
 		}
 		when(TLogPeekRequest req = waitNext(interf.peekMessages.getFuture())) {
-			// TraceEvent("ZZZZZLogRouterReceivingPeek", logRouterData.dbgid).detail("Begin", req.begin).detail("Tag", req.tag);
 			addActor.send(logRouterPeekMessages(
 			    req.reply, &logRouterData, req.begin, req.tag, req.returnIfBlocked, req.onlySpilled, req.sequence));
 		}
