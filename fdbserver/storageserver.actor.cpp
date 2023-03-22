@@ -115,7 +115,7 @@
 #define SHORT_CIRCUT_ACTUAL_STORAGE 0
 
 namespace {
-enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE, CSK_ASSIGN_EMPTY };
+enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE, CSK_ASSIGN_EMPTY, CSK_FALL_BACK };
 
 std::string changeServerKeysContextName(const ChangeServerKeysContext& context) {
 	switch (context) {
@@ -125,6 +125,8 @@ std::string changeServerKeysContextName(const ChangeServerKeysContext& context) 
 		return "Restore";
 	case CSK_ASSIGN_EMPTY:
 		return "AssignEmpty";
+    case CSK_FALL_BACK:
+ 		return "FallBackToFetchKeys";
 	default:
 		ASSERT(false);
 	}
