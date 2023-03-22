@@ -1211,6 +1211,7 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 		loop {
 			try {
 				cx = openDBOnServer(dbInfo);
+				TraceEvent(SevDebug, "AuditStorageCorrectnessReadBegin");
 				std::vector<AuditStorageState> auditStates = wait(getLatestAuditStates(cx, req.getType(), 30));
 				state Optional<AuditStorageState> readLatestResult;
 				for (const auto& auditState : auditStates) {
@@ -1223,13 +1224,16 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 				}
 				if (readLatestResult.present()) {
 					if (readLatestResult.get().getPhase() == AuditPhase::Running) {
+						TraceEvent(SevDebug, "AuditStorageCorrectnessReadWaitForRunning")
+						    .detail("AuditStorageState", readLatestResult.get().toString());
 						wait(delay(30));
 						continue;
 					}
 					ASSERT(readLatestResult.get().getPhase() == AuditPhase::Complete ||
 					       readLatestResult.get().getPhase() == AuditPhase::Failed);
 					if (readLatestResult.get().getPhase() == AuditPhase::Failed) {
-						TraceEvent(SevWarnAlways, "AuditStorageCorrectnessReadLatestFailed");
+						TraceEvent(SevWarnAlways, "AuditStorageCorrectnessReadLatestFailed")
+						    .detail("AuditStorageState", readLatestResult.get().toString());
 					} else {
 						ASSERT(readLatestResult.get().getPhase() == AuditPhase::Complete);
 						TraceEvent("AuditStorageCorrectnessReadLatestResult")

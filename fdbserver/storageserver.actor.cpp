@@ -5023,7 +5023,6 @@ bool rangesSame(std::vector<KeyRange> rangesA, std::vector<KeyRange> rangesB) {
 }
 
 // Check shard (key range) assignments in SS (local view) is consistent with serverKeys space (global view)
-// TODO: add try catch
 ACTOR Future<Void> auditStorageMetadataShardLocationLocalViewQ(StorageServer* data, AuditStorageRequest req) {
 	TraceEvent(SevDebug, "AuditStorageShardLocLocalViewBegin", data->thisServerID);
 	ASSERT(req.getType() == AuditType::ValidateShardLocLocalView);
@@ -5230,6 +5229,9 @@ ACTOR Future<Void> auditStorageMetadataShardLocationLocalViewQ(StorageServer* da
 		// Make sure the history collection is not open due to this audit
 		data->unregisterAuditsForShardAssignmentHistoryCollection(req.id, false);
 		req.reply.sendError(audit_storage_failed());
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 	}
 
 	return Void();
@@ -5373,6 +5375,9 @@ ACTOR Future<Void> auditStorageMetadataShardLocationGlobalViewQ(StorageServer* d
 
 	} catch (Error& e) {
 		req.reply.sendError(audit_storage_failed());
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 	}
 
 	return Void();

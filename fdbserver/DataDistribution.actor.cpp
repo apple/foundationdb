@@ -591,7 +591,8 @@ ACTOR Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
 	// resume from disk
 	state std::vector<Future<Void>> fs;
 	for (const auto& auditState : self->initData->auditStates) {
-		if (auditState.getPhase() == AuditPhase::Complete || auditState.getPhase() == AuditPhase::Error) {
+		if (auditState.getPhase() == AuditPhase::Complete || auditState.getPhase() == AuditPhase::Error ||
+		    auditState.getPhase() == AuditPhase::Failed) {
 			continue;
 		}
 		ASSERT(!self->auditInitialized.getFuture().isReady());
@@ -1461,14 +1462,14 @@ ACTOR Future<Void> resumeAuditStorage(Reference<DataDistributor> self, AuditStor
 	return Void();
 }
 
-ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req) {
+ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self, TriggerAuditRequest req) {
 	if (req.getType() != AuditType::ValidateHA && req.getType() != AuditType::ValidateReplica &&
 	    req.getType() != AuditType::ValidateShardLocGlobalView &&
 	    req.getType() != AuditType::ValidateShardLocLocalView) {
 		throw not_implemented();
 	}
 
-	state std::shared_ptr<DDAudit> audit = nullptr;
+	state std::shared_ptr<DDAudit> audit;
 
 	try {
 		TraceEvent(SevDebug, "AuditStorageTriggered", self->ddId)
@@ -1573,14 +1574,33 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		    .detail("RetryCount", (audit == nullptr ? 0 : audit->retryCount));
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
+		} else if (audit == nullptr) {
+			throw retry();
+		} else if (audit->retryCount > 30) {
+			audit->state.setPhase(AuditPhase::Failed);
+			audit->actors.clear(true);
+			self->audits[audit->state.getType()].erase(audit->state.id);
 		} else {
-			if (!req.reply.isSet()) {
-				req.reply.sendError(e);
-			}
+			throw retry();
 		}
-		throw audit_storage_failed(); // kill dd
 	}
 
+	return Void();
+}
+
+ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req) {
+	loop {
+		try {
+			wait(auditStorageCore(self, req));
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_retry) {
+				wait(delay(1));
+			} else {
+				throw e;
+			}
+		}
+	}
 	return Void();
 }
 
@@ -1778,8 +1798,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 			throw e;
 		} else if (e.code() == error_code_audit_storage_error) {
 			audit->foundError = true;
-		} else if (audit->retryCount > 10) {
-			audit->state.setPhase(AuditPhase::Failed);
+		} else if (audit->retryCount > 30) {
 			throw audit_storage_failed();
 		} else {
 			// audit->auditMap.insert(req.range, AuditPhase::Failed);

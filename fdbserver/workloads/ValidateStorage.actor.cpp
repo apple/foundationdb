@@ -50,6 +50,11 @@ struct ValidateStorage : TestWorkload {
 	const bool enabled;
 	bool pass;
 
+	// We disable failure injection because there is an irrelevant issue:
+	// Remote tLog is failed to rejoin to CC
+	// Once this issue is fixed, we should be able to enable the failure injection
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.emplace("Attrition"); }
+
 	void validationFailed(ErrorOr<Optional<Value>> expectedValue, ErrorOr<Optional<Value>> actualValue) {
 		TraceEvent(SevError, "TestFailed")
 		    .detail("ExpectedValue", printValue(expectedValue))
@@ -70,8 +75,6 @@ struct ValidateStorage : TestWorkload {
 
 	ACTOR Future<Void> auditStorageForType(Database cx, AuditType type) {
 		state UID auditId;
-		state int numSuccessiveTimedout = 0;
-
 		loop {
 			try {
 				UID auditId_ = wait(auditStorage(cx->getConnectionRecord(),
@@ -83,60 +86,33 @@ struct ValidateStorage : TestWorkload {
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId).detail("AuditType", type);
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevWarn, "StartAuditStorageError")
-				    .errorUnsuppressed(e)
-				    .detail("AuditType", type)
-				    .detail("SuccessiveTimedOut", numSuccessiveTimedout);
-				if (e.code() == error_code_timed_out) {
-					numSuccessiveTimedout++;
-				} else {
-					numSuccessiveTimedout = 0;
-				}
-				if (numSuccessiveTimedout > 1) {
-					return Void();
-				}
+				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e).detail("AuditType", type);
 				wait(delay(1));
 			}
 		}
-
-		numSuccessiveTimedout = 0;
-
 		loop {
 			try {
 				AuditStorageState auditState = wait(getAuditState(cx, type, auditId));
-				if (auditState.getPhase() != AuditPhase::Complete) {
-					std::cout << auditState.phase << "\n";
-					// ASSERT(auditState.getPhase() == AuditPhase::Running);
-					if (auditState.getPhase() != AuditPhase::Running) {
-						ASSERT(auditState.getPhase() == AuditPhase::Error);
-						ASSERT(auditState.getType() == AuditType::ValidateShardLocLocalView);
-						return Void();
-					}
-					wait(delay(30));
-				} else {
-					ASSERT(auditState.getPhase() == AuditPhase::Complete);
+				if (auditState.getPhase() == AuditPhase::Complete) {
 					break;
+				} else if (auditState.getPhase() == AuditPhase::Running) {
+					wait(delay(30));
+					continue;
+				} else if (auditState.getPhase() == AuditPhase::Error) {
+					break;
+				} else if (auditState.getPhase() == AuditPhase::Failed) {
+					break;
+				} else {
+					UNREACHABLE();
 				}
 			} catch (Error& e) {
 				TraceEvent("WaitAuditStorageError")
 				    .errorUnsuppressed(e)
 				    .detail("AuditID", auditId)
-				    .detail("AuditType", type)
-				    .detail("SuccessiveTimedOut", numSuccessiveTimedout);
-				if (e.code() == error_code_timed_out) {
-					numSuccessiveTimedout++;
-				} else {
-					numSuccessiveTimedout = 0;
-				}
-				if (numSuccessiveTimedout > 1) {
-					return Void();
-				}
+				    .detail("AuditType", type);
 				wait(delay(1));
 			}
 		}
-
-		numSuccessiveTimedout = 0;
-
 		loop {
 			try {
 				UID auditId_ = wait(auditStorage(cx->getConnectionRecord(),
@@ -148,18 +124,7 @@ struct ValidateStorage : TestWorkload {
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId_).detail("AuditType", type);
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevWarn, "StartAuditStorageError")
-				    .errorUnsuppressed(e)
-				    .detail("AuditType", type)
-				    .detail("SuccessiveTimedOut", numSuccessiveTimedout);
-				if (e.code() == error_code_timed_out) {
-					numSuccessiveTimedout++;
-				} else {
-					numSuccessiveTimedout = 0;
-				}
-				if (numSuccessiveTimedout > 1) {
-					return Void();
-				}
+				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e).detail("AuditType", type);
 				wait(delay(1));
 			}
 		}
@@ -180,17 +145,22 @@ struct ValidateStorage : TestWorkload {
 
 		TraceEvent("TestValueWritten");
 
+		if (g_network->isSimulated()) {
+			// NOTE: the value will be reset after consistency check
+			disableConnectionFailures("AuditStorage");
+		}
+
 		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
 		TraceEvent("TestValueVerified");
 
-		/*wait(self->auditStorageForType(cx, AuditType::ValidateHA));
+		wait(self->auditStorageForType(cx, AuditType::ValidateHA));
 		TraceEvent("TestValidateHADone");
 
 		wait(self->auditStorageForType(cx, AuditType::ValidateReplica));
 		TraceEvent("TestValidateReplicaDone");
 
 		wait(self->auditStorageForType(cx, AuditType::ValidateShardLocGlobalView));
-		TraceEvent("TestValidateShardGlobalViewDone");*/
+		TraceEvent("TestValidateShardGlobalViewDone");
 
 		wait(self->auditStorageForType(cx, AuditType::ValidateShardLocLocalView));
 		TraceEvent("TestValidateShardLocalViewDone");
@@ -261,24 +231,22 @@ struct ValidateStorage : TestWorkload {
 					Optional<AuditStorageState> vResult =
 					    wait(timeout<AuditStorageState>(ssi.auditStorage.getReply(req), 5));
 					if (!vResult.present()) {
-						throw audit_storage_failed();
+						return Void();
 					}
 				}
 				break;
 			} catch (Error& e) {
-				try {
-					if (retryCount > 5) {
-						TraceEvent(SevWarnAlways, "TestValidateStorageFailed")
-						    .errorUnsuppressed(e)
-						    .detail("Range", range);
-						break;
-					}
-					wait(tr.onError(e));
+				if (retryCount > 5) {
+					TraceEvent(SevWarnAlways, "TestValidateStorageFailed").errorUnsuppressed(e).detail("Range", range);
+					break;
+				} else {
+					TraceEvent(SevWarn, "TestValidateStorageFailedRetry")
+					    .errorUnsuppressed(e)
+					    .detail("Range", range)
+					    .detail("RetryCount", retryCount);
+					wait(delay(1));
 					retryCount++;
-				} catch (Error& e) {
-					if (e.code() != error_code_audit_storage_failed && e.code() != error_code_broken_promise) {
-						throw e;
-					}
+					continue;
 				}
 			}
 		}

@@ -1916,9 +1916,6 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 }
 
 ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAuditRequest req) {
-	TraceEvent(SevInfo, "CCTriggerAuditStorageBegin", self->id)
-	    .detail("Range", req.range)
-	    .detail("AuditType", req.type);
 	state UID auditId;
 
 	try {
@@ -1926,8 +1923,9 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 		       !self->db.serverInfo->get().distributor.present()) {
 			wait(self->db.serverInfo->onChange());
 		}
-
-		TraceEvent(SevInfo, "CCTriggerAuditStorageBegin", self->id);
+		TraceEvent(SevInfo, "CCTriggerAuditStorageBegin", self->id)
+		    .detail("Range", req.range)
+		    .detail("AuditType", req.type);
 		TriggerAuditRequest fReq(req.getType(), req.range);
 		UID auditId_ = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
 		auditId = auditId_;
