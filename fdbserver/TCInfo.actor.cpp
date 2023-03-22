@@ -398,15 +398,15 @@ int64_t TCTeamInfo::getLoadBytes(bool includeInFlight, double inflightPenalty) c
 }
 
 // average read bandwidth within a team
-double TCTeamInfo::getLoadReadBandwidth(bool includeInFlight, double inflightPenalty) const {
+double TCTeamInfo::getReadLoad(bool includeInFlight, double inflightPenalty) const {
 	// FIXME: consider team load variance
 	double sum = 0;
 	int size = 0;
 	for (const auto& server : servers) {
 		if (server->metricsPresent()) {
-			auto& replyValue = server->getMetrics();
-			ASSERT(replyValue.load.bytesReadPerKSecond >= 0);
-			sum += replyValue.load.bytesReadPerKSecond;
+			auto replyValue = server->getMetrics().load.readLoadKSecond();
+			ASSERT(replyValue >= 0);
+			sum += replyValue;
 			size += 1;
 		}
 	}
