@@ -34,9 +34,19 @@ struct StorageServerShard {
 		Adding = 1,
 		ReadWritePending = 2,
 		ReadWrite = 3,
+		MovingIn = 4,
+		Error = 5,
 	};
 
 	StorageServerShard() = default;
+	StorageServerShard(KeyRange range,
+	                   Version version,
+	                   const uint64_t id,
+	                   const uint64_t desiredId,
+	                   ShardState shardState,
+	                   Optional<UID> moveInShardId)
+	  : range(range), version(version), id(id), desiredId(desiredId), shardState(shardState),
+	    moveInShardId(moveInShardId) {}
 	StorageServerShard(KeyRange range,
 	                   Version version,
 	                   const uint64_t id,
@@ -63,19 +73,29 @@ struct StorageServerShard {
 			return "ReadWritePending";
 		case ReadWrite:
 			return "ReadWrite";
+		case MovingIn:
+			return "MovingIn";
+		case Error:
+			return "Error";
 		}
+
 		return "InvalidState";
 	}
 
 	std::string toString() const {
-		return "StorageServerShard: [Range]: " + Traceable<KeyRangeRef>::toString(range) +
-		       " [Shard ID]: " + format("%016llx", this->id) + " [Version]: " + std::to_string(version) +
-		       " [State]: " + getShardStateString() + " [Desired Shard ID]: " + format("%016llx", this->desiredId);
+		std::string res = "StorageServerShard: [Range]: " + Traceable<KeyRangeRef>::toString(range) +
+		                  " [Shard ID]: " + format("%016llx", this->id) + " [Version]: " + std::to_string(version) +
+		                  " [State]: " + getShardStateString() +
+		                  " [Desired Shard ID]: " + format("%016llx", this->desiredId);
+		if (moveInShardId.present()) {
+			res += " [MoveInShard ID]: " + this->moveInShardId.get().toString();
+		}
+		return res;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, range, version, id, desiredId, shardState);
+		serializer(ar, range, version, id, desiredId, shardState, moveInShardId);
 	}
 
 	KeyRange range;
@@ -83,6 +103,7 @@ struct StorageServerShard {
 	uint64_t id; // The actual shard ID.
 	uint64_t desiredId; // The intended shard ID.
 	int8_t shardState;
+	Optional<UID> moveInShardId; // If present, it is the associated MoveInShardMetaData.
 };
 
 #endif
