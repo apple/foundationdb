@@ -7607,12 +7607,14 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 					// Write this_block to storage
 					state Standalone<VectorRef<KeyValueRef>> blockData(this_block, this_block.arena());
-					state Key blockEnd = this_block.more ? this_block.end()[-1].key : keys.end;
+					state Key blockEnd = this_block.size() > 0 && this_block.more ? this_block.end()[-1].key : keys.end;
 					state KeyRange blockRange(KeyRangeRef(blockBegin, blockEnd));
 					wait(data->storage.replaceRange(blockRange, blockData));
 					// set the next blockBegin which is not necessary the key of the next readRange, as long as it
 					// covers the range from keys.begin -> keys.end.
-					blockBegin = keyAfter(this_block.end()[-1].key);
+					if (this_block.size() > 0 && this_block.more) {
+						blockBegin = keyAfter(this_block.end()[-1].key);
+					}
 
 					state KeyValueRef* kvItr = this_block.begin();
 					for (; kvItr != this_block.end(); ++kvItr) {
