@@ -23,6 +23,7 @@
 #include <algorithm>
 #include "fdbrpc/simulator.h"
 #include "fdbclient/MutationLogReader.actor.h"
+#include "fdbclient/StatusClient.h"
 #include "fdbclient/Tuple.h"
 #include "fdbserver/workloads/ApiWorkload.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -389,6 +390,39 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 	}
 
+	ACTOR static Future<Void> reportMetric(GetMappedRangeWorkload* self, Database cx) {
+		StatusObject result = wait(StatusClient::statusFetcher(cx));
+		StatusObjectReader statusObj(result);
+		StatusObjectReader statusObjCluster;
+		StatusObjectReader processesMap;
+
+		if (!statusObj.get("cluster", statusObjCluster)) {
+			TraceEvent("NoCluster");
+			return Void();
+		}
+
+		long queryQueueMax = 0;
+		if (statusObjCluster.get("processes", processesMap)) {
+			TraceEvent("NoProcesses");
+			return Void();
+		}
+		for (auto proc : processesMap.obj()) {
+			StatusObjectReader process(proc.second);
+			if (process.has("roles")) {
+				StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
+				for (StatusObjectReader role : rolesArray) {
+					if (role["role"].get_str() == "storage") {
+						role.get("query_queue_max", queryQueueMax);
+						TraceEvent("QueryQueueMax").detail("Value", queryQueueMax);
+					}
+				}
+			} else {
+				TraceEvent("NoRoles");
+			}
+		}
+		return Void();
+	}
+
 	// If the same transaction writes to the read set (the scanned ranges) before reading, it should throw read your
 	// write exception.
 	ACTOR Future<Void> testRYW(GetMappedRangeWorkload* self) {
@@ -440,12 +474,21 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		std::cout << "Test configuration: transactionType:" << self->transactionType << " snapshot:" << self->snapshot
 		          << "bad_mapper:" << self->BAD_MAPPER << std::endl;
 
-		Key mapper = getMapper(self);
+		state Key mapper = getMapper(self);
 		// The scanned range cannot be too large to hit get_mapped_key_values_has_more. We have a unit validating the
 		// error is thrown when the range is large.
 		state bool originalStrictlyEnforeByteLimit = SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT;
 		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinflip();
-		wait(self->scanMappedRange(cx, 10, 490, mapper, self));
+
+		loop choose {
+			when(wait(delay(0.1))) {
+				wait(reportMetric(self, cx));
+			}
+			when(wait(self->scanMappedRange(cx, 10, 490, mapper, self))) {
+				break;
+			}
+		}
+
 		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = originalStrictlyEnforeByteLimit;
 		return Void();
 	}
