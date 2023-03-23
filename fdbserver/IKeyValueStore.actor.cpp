@@ -37,6 +37,7 @@ ACTOR static Future<Void> replaceRange_impl(IKeyValueStore* self,
 	return Void();
 }
 
+// Default implementation for replaceRange(), which writes the key one by one.
 Future<Void> IKeyValueStore::replaceRange(KeyRange blockRange, Standalone<VectorRef<KeyValueRef>> blockData) {
 	return replaceRange_impl(this, blockRange, blockData);
 }
