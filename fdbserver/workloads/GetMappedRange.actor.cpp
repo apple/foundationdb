@@ -447,6 +447,17 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 	}
 
+	ACTOR static Future<Void> testLoop(Database cx, GetMappedRangeWorkload* self, Key mapper) {
+		loop choose {
+			when(wait(delay(0.1))) {
+				wait(reportMetric(self, cx));
+			}
+			when(wait(self->scanMappedRange(cx, 10, 490, mapper, self))) {
+				return Void();
+			}
+		}
+	}
+
 	ACTOR Future<Void> _start(Database cx, GetMappedRangeWorkload* self) {
 		TraceEvent("GetMappedRangeWorkloadConfig").detail("BadMapper", self->BAD_MAPPER);
 
@@ -474,21 +485,12 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		std::cout << "Test configuration: transactionType:" << self->transactionType << " snapshot:" << self->snapshot
 		          << "bad_mapper:" << self->BAD_MAPPER << std::endl;
 
-		state Key mapper = getMapper(self);
+		Key mapper = getMapper(self);
 		// The scanned range cannot be too large to hit get_mapped_key_values_has_more. We have a unit validating the
 		// error is thrown when the range is large.
 		state bool originalStrictlyEnforeByteLimit = SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT;
 		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinflip();
-
-		loop choose {
-			when(wait(delay(0.1))) {
-				wait(reportMetric(self, cx));
-			}
-			when(wait(self->scanMappedRange(cx, 10, 490, mapper, self))) {
-				break;
-			}
-		}
-
+		wait(testLoop(cx, self, mapper));
 		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = originalStrictlyEnforeByteLimit;
 		return Void();
 	}
