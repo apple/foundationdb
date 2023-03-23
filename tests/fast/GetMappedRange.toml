@@ -4,3 +4,4 @@ useDB = true
 
     [[test.workload]]
     testName = 'GetMappedRange'
+    checkStorageQueueSeconds=20

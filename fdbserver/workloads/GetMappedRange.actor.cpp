@@ -50,9 +50,11 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	//	const bool SPLIT_RECORDS = deterministicRandom()->random01() < 0.5;
 	const bool SPLIT_RECORDS = true;
 	const static int SPLIT_SIZE = 3;
+	int checkStorageQueueSeconds;
 
 	GetMappedRangeWorkload(WorkloadContext const& wcx) : ApiWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
+		checkStorageQueueSeconds = getOption(options, "checkStorageQueueSeconds"_sr, 30.0);
 	}
 
 	std::string description() const override { return "GetMappedRange"; }
@@ -441,7 +443,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					for (StatusObjectReader role : rolesArray) {
 						if (role["role"].get_str() == "storage") {
 							role.get("query_queue_max", queryQueueMax);
-							TEST(queryQueueMax > 0); // for code coverage
+							TEST(queryQueueMax > 0); // SS query queue is non-empty
 							ASSERT(queryQueueMax < 100); // if the queue size metric is wrong, it is likely above 100
 							TraceEvent(SevDebug, "QueryQueueMax").detail("Value", queryQueueMax);
 						}
@@ -533,8 +535,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		state bool originalStrictlyEnforeByteLimit = SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT;
 		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinflip();
 		wait(self->scanMappedRange(cx, 10, 490, mapper, self));
-		int secondsToRun = 30;
-		wait(testMetric(cx, self, 10, 490, mapper, secondsToRun));
+		wait(testMetric(cx, self, 10, 490, mapper, checkStorageQueueSeconds));
 		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = originalStrictlyEnforeByteLimit;
 		return Void();
 	}
