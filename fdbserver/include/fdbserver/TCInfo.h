@@ -182,6 +182,9 @@ class TCTeamInfo final : public ReferenceCounted<TCTeamInfo>, public IDataDistri
 	int priority;
 	UID id;
 
+	// the last time stamp when the team's CPU > pivot CPU
+	double lastHighCPUTime = 0;
+
 public:
 	Reference<TCMachineTeamInfo> machineTeam;
 	Future<Void> tracker;
@@ -218,6 +221,12 @@ public:
 	double getReadLoad(bool includeInFlight = true, double inflightPenalty = 1.0) const override;
 
 	double getAverageCPU() const override;
+
+	void setLastHighCPUTime(double time) override { lastHighCPUTime = time; }
+
+	bool hasLowCpuFor(double cpuThreshold, double duration) const override {
+		return getAverageCPU() < cpuThreshold && now() - lastHighCPUTime >= duration;
+	}
 
 	int64_t getReadInFlightToTeam() const override;
 
