@@ -1923,16 +1923,19 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 		       !self->db.serverInfo->get().distributor.present()) {
 			wait(self->db.serverInfo->onChange());
 		}
-		TraceEvent(SevInfo, "CCTriggerAuditStorageBegin", self->id)
+		TraceEvent(SevDebug, "CCTriggerAuditStorageBegin", self->id)
 		    .detail("Range", req.range)
-		    .detail("AuditType", req.type);
-		TriggerAuditRequest fReq(req.getType(), req.range);
+		    .detail("AuditType", req.type)
+		    .detail("Async", req.async)
+		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
+		TriggerAuditRequest fReq(req.getType(), req.range, req.async);
 		UID auditId_ = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
 		auditId = auditId_;
 		TraceEvent(SevDebug, "CCTriggerAuditStorageEnd", self->id)
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)
-		    .detail("AuditType", req.type);
+		    .detail("AuditType", req.type)
+		    .detail("Async", req.async);
 		if (!req.reply.isSet()) {
 			req.reply.send(auditId);
 		}
@@ -1941,9 +1944,14 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)
-		    .detail("AuditType", req.type);
+		    .detail("AuditType", req.type)
+		    .detail("Async", req.async);
 		if (!req.reply.isSet()) {
-			req.reply.sendError(audit_storage_failed());
+			if (e.code() == error_code_broken_promise) {
+				req.reply.sendError(request_maybe_delivered()); // we do not know whether the result is persist
+			} else {
+				req.reply.sendError(audit_storage_failed());
+			}
 		}
 	}
 
@@ -1953,10 +1961,11 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 ACTOR Future<Void> handleTriggerAuditStorage(ClusterControllerData* self, ClusterControllerFullInterface interf) {
 	loop {
 		TriggerAuditRequest req = waitNext(interf.clientInterface.triggerAudit.getFuture());
-		TraceEvent(SevDebug, "TriggerAuditStorageReceived", self->id)
+		TraceEvent(SevDebug, "CCTriggerAuditStorageReceived", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("Range", req.range)
-		    .detail("AuditType", req.type);
+		    .detail("AuditType", req.type)
+		    .detail("Async", req.async);
 		self->addActor.send(triggerAuditStorage(self, req));
 	}
 }

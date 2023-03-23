@@ -5238,7 +5238,6 @@ ACTOR Future<Void> auditStorageMetadataShardLocationLocalViewQ(StorageServer* da
 }
 
 // Check keyServers space (global view) is consistent with serverKeys space (global view)
-// TODO: add try catch
 ACTOR Future<Void> auditStorageMetadataShardLocationGlobalViewQ(StorageServer* data, AuditStorageRequest req) {
 	ASSERT(req.getType() == AuditType::ValidateShardLocGlobalView);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
@@ -5305,7 +5304,7 @@ ACTOR Future<Void> auditStorageMetadataShardLocationGlobalViewQ(StorageServer* d
 				std::sort(serverKeysMap[ssid].begin(), serverKeysMap[ssid].end(), [](KeyRangeRef a, KeyRangeRef b) {
 					return a.begin < b.begin;
 				});
-				std::vector<KeyRangeRef> ranges; // something wrong there
+				std::vector<KeyRangeRef> ranges;
 				for (auto range : serverKeysMap[ssid]) {
 					ranges.push_back(KeyRangeRef(range.begin, range.end));
 				}

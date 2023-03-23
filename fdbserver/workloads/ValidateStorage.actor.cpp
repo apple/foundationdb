@@ -83,10 +83,10 @@ struct ValidateStorage : TestWorkload {
 				                                 /*timeoutSecond=*/120,
 				                                 /*async=*/true));
 				auditId = auditId_;
-				TraceEvent("TestValidateEnd").detail("AuditID", auditId).detail("AuditType", type);
+				TraceEvent("TestStartValidateFirstEnd").detail("AuditID", auditId).detail("AuditType", type);
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e).detail("AuditType", type);
+				TraceEvent(SevWarn, "TestStartAuditStorageFirstError").errorUnsuppressed(e).detail("AuditType", type);
 				wait(delay(1));
 			}
 		}
@@ -121,10 +121,10 @@ struct ValidateStorage : TestWorkload {
 				                                 /*timeoutSeconds=*/120,
 				                                 /*async=*/true));
 				ASSERT(auditId_ != auditId);
-				TraceEvent("TestValidateEnd").detail("AuditID", auditId_).detail("AuditType", type);
+				TraceEvent("TestStartValidateSecondEnd").detail("AuditID", auditId_).detail("AuditType", type);
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e).detail("AuditType", type);
+				TraceEvent(SevWarn, "TestStartAuditStorageSecondError").errorUnsuppressed(e).detail("AuditType", type);
 				wait(delay(1));
 			}
 		}

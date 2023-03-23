@@ -39,6 +39,7 @@ enum class AuditType : uint8_t {
 	ValidateReplica = 2,
 	ValidateShardLocGlobalView = 3,
 	ValidateShardLocLocalView = 4,
+	PhysicalshardMigration = 5,
 };
 
 struct AuditStorageState {
@@ -110,18 +111,25 @@ struct TriggerAuditRequest {
 	TriggerAuditRequest(AuditType type, KeyRange range)
 	  : type(static_cast<uint8_t>(type)), range(range), force(false), async(false) {}
 
+	TriggerAuditRequest(AuditType type, KeyRange range, bool async)
+	  : type(static_cast<uint8_t>(type)), range(range), force(false), async(async), timeoutSeconds(0.0) {}
+
+	TriggerAuditRequest(AuditType type, KeyRange range, bool async, double timeoutSeconds)
+	  : type(static_cast<uint8_t>(type)), range(range), force(false), async(async), timeoutSeconds(timeoutSeconds) {}
+
 	void setType(AuditType type) { this->type = static_cast<uint8_t>(this->type); }
 	AuditType getType() const { return static_cast<AuditType>(this->type); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, type, range, force, async, reply);
+		serializer(ar, type, range, force, async, timeoutSeconds, reply);
 	}
 
 	uint8_t type;
 	KeyRange range;
 	bool force;
 	bool async;
+	double timeoutSeconds;
 	ReplyPromise<UID> reply;
 };
 
