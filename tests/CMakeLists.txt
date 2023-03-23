@@ -301,7 +301,12 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.2.0/DrUpgradeRestart-1.txt
                restarting/from_7.2.0/DrUpgradeRestart-2.txt)
-
+  add_fdb_test(
+    TEST_FILES restarting/from_71.2.8/BlobGranuleRestartCycle-1.toml
+    restarting/from_71.2.8/BlobGranuleRestartCycle-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.2.8/BlobGranuleRestartLarge-1.toml
+    restarting/from_71.2.8/BlobGranuleRestartLarge-2.toml)
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
