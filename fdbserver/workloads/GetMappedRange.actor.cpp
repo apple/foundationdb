@@ -249,12 +249,40 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				     e.code() == error_code_quick_get_key_values_miss)) {
 					TraceEvent("GetMappedRangeWorkloadExpectedErrorDetected").error(e);
 					return MappedRangeResult();
+				} else if (e.code() == error_code_proxy_memory_limit_exceeded) {
+					// requests have overwhelmed commit proxy, rest a bit
+					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+					continue;
 				} else {
-					std::cout << "error " << e.what() << std::endl;
+					std::cout << "error " << e.what() << "  code is " << e.code() << std::endl;
 					wait(tr->onError(e));
 				}
 				std::cout << "failed scanMappedRangeWithLimits" << std::endl;
 			}
+		}
+	}
+
+	// if sendFirstRequestIndefinitely is true, then this method would send the first request indefinitly
+	// it is in order to test the metric
+	ACTOR Future<Void> submitSmallRequestIndefinitely(Database cx,
+	                                                  int beginId,
+	                                                  int endId,
+	                                                  Key mapper,
+	                                                  GetMappedRangeWorkload* self) {
+		Key beginTuple = Tuple().append(prefix).append(INDEX).append(indexKey(beginId)).getDataAsStandalone();
+		state KeySelector beginSelector = KeySelector(firstGreaterOrEqual(beginTuple));
+		Key endTuple = Tuple().append(prefix).append(INDEX).append(indexKey(endId)).getDataAsStandalone();
+		state KeySelector endSelector = KeySelector(firstGreaterOrEqual(endTuple));
+		state int limit = 1;
+		state int byteLimit = 10000;
+		while (true) {
+			MappedRangeResult result = wait(self->scanMappedRangeWithLimits(
+			    cx, beginSelector, endSelector, mapper, limit, byteLimit, beginId, self));
+			if (result.empty()) {
+				TraceEvent("EmptyResult");
+			}
+			// to avoid requests make proxy memory overwhelmed
+			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 		}
 	}
 
@@ -283,7 +311,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					int indexByteLimit = byteLimit * SERVER_KNOBS->FRACTION_INDEX_BYTELIMIT_PREFETCH;
 					int indexCountByteLimit = indexByteLimit / indexSize + (indexByteLimit % indexSize != 0);
 					int indexCount = std::min(limit, indexCountByteLimit);
-					std::cout << "indexCount:  " << indexCount << std::endl;
 					// result set cannot be larger than the number of index fetched
 					ASSERT(result.size() <= indexCount);
 
@@ -299,7 +326,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 						boundByRecord = round * SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE;
 					}
 					expectedCnt = std::min(expectedCnt, boundByRecord);
-					std::cout << "boundByRecord:  " << boundByRecord << std::endl;
 					ASSERT(result.size() == expectedCnt);
 					beginSelector = KeySelector(firstGreaterThan(result.back().key));
 				}
@@ -390,35 +416,41 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 	}
 
+	// checking the max storage queue length is bounded
 	ACTOR static Future<Void> reportMetric(GetMappedRangeWorkload* self, Database cx) {
-		StatusObject result = wait(StatusClient::statusFetcher(cx));
-		StatusObjectReader statusObj(result);
-		StatusObjectReader statusObjCluster;
-		StatusObjectReader processesMap;
+		loop {
+			StatusObject result = wait(StatusClient::statusFetcher(cx));
+			StatusObjectReader statusObj(result);
+			StatusObjectReader statusObjCluster;
+			StatusObjectReader processesMap;
 
-		if (!statusObj.get("cluster", statusObjCluster)) {
-			TraceEvent("NoCluster");
-			return Void();
-		}
-
-		long queryQueueMax = 0;
-		if (statusObjCluster.get("processes", processesMap)) {
-			TraceEvent("NoProcesses");
-			return Void();
-		}
-		for (auto proc : processesMap.obj()) {
-			StatusObjectReader process(proc.second);
-			if (process.has("roles")) {
-				StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
-				for (StatusObjectReader role : rolesArray) {
-					if (role["role"].get_str() == "storage") {
-						role.get("query_queue_max", queryQueueMax);
-						TraceEvent("QueryQueueMax").detail("Value", queryQueueMax);
-					}
-				}
-			} else {
-				TraceEvent("NoRoles");
+			if (!statusObj.get("cluster", statusObjCluster)) {
+				TraceEvent("NoCluster");
+				break;
 			}
+
+			long queryQueueMax = 0;
+			if (!statusObjCluster.get("processes", processesMap)) {
+				TraceEvent("NoProcesses");
+				break;
+			}
+			for (auto proc : processesMap.obj()) {
+				StatusObjectReader process(proc.second);
+				if (process.has("roles")) {
+					StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
+					for (StatusObjectReader role : rolesArray) {
+						if (role["role"].get_str() == "storage") {
+							role.get("query_queue_max", queryQueueMax);
+							TEST(queryQueueMax > 0); // for code coverage
+							ASSERT(queryQueueMax < 100); // if the queue size metric is wrong, it is likely above 100
+							TraceEvent(SevDebug, "QueryQueueMax").detail("Value", queryQueueMax);
+						}
+					}
+				} else {
+					TraceEvent("NoRoles");
+				}
+			}
+			wait(delay(2));
 		}
 		return Void();
 	}
@@ -447,12 +479,22 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> testLoop(Database cx, GetMappedRangeWorkload* self, Key mapper) {
+	ACTOR static Future<Void> testMetric(Database cx,
+	                                     GetMappedRangeWorkload* self,
+	                                     int beginId,
+	                                     int endId,
+	                                     Key mapper,
+	                                     int seconds) {
 		loop choose {
-			when(wait(delay(0.1))) {
-				wait(reportMetric(self, cx));
+			when(wait(reportMetric(self, cx))) {
+				TraceEvent(SevError, "Error: ReportMetric has ended");
+				return Void();
 			}
-			when(wait(self->scanMappedRange(cx, 10, 490, mapper, self))) {
+			when(wait(self->submitSmallRequestIndefinitely(cx, 10, 490, mapper, self))) {
+				TraceEvent(SevError, "Error: submitSmallRequestIndefinitely has ended");
+				return Void();
+			}
+			when(wait(delay(seconds))) {
 				return Void();
 			}
 		}
@@ -485,12 +527,14 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		std::cout << "Test configuration: transactionType:" << self->transactionType << " snapshot:" << self->snapshot
 		          << "bad_mapper:" << self->BAD_MAPPER << std::endl;
 
-		Key mapper = getMapper(self);
+		state Key mapper = getMapper(self);
 		// The scanned range cannot be too large to hit get_mapped_key_values_has_more. We have a unit validating the
 		// error is thrown when the range is large.
 		state bool originalStrictlyEnforeByteLimit = SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT;
 		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinflip();
-		wait(testLoop(cx, self, mapper));
+		wait(self->scanMappedRange(cx, 10, 490, mapper, self));
+		int secondsToRun = 30;
+		wait(testMetric(cx, self, 10, 490, mapper, secondsToRun));
 		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = originalStrictlyEnforeByteLimit;
 		return Void();
 	}
