@@ -2099,7 +2099,6 @@ Future<T> forwardError(Future<T> f, Promise<Void> target) {
 		if (e.code() != error_code_actor_cancelled && target.canBeSet()) {
 			target.sendError(e);
 		}
-
 		throw;
 	}
 }
@@ -7821,7 +7820,7 @@ public:
 			// Only proceed if the last commit is a success, but don't throw if it's not because shutdown
 			// should not throw.
 			wait(ready(self->m_lastCommit));
-			if (!self->m_lastCommit.isError()) {
+			if (!self->getErrorNoDelay().isReady()) {
 				// Run the destructive sanity check, but don't throw.
 				ErrorOr<Void> err = wait(errorOr(self->m_tree->clearAllAndCheckSanity()));
 				// If the test threw an error, it must be an injected fault or something has gone wrong.
@@ -7865,7 +7864,9 @@ public:
 
 	StorageBytes getStorageBytes() const override { return m_tree->getStorageBytes(); }
 
-	Future<Void> getError() const override { return delayed(m_error.getFuture()); };
+	Future<Void> getError() const override { return delayed(getErrorNoDelay()); }
+
+	Future<Void> getErrorNoDelay() const { return m_error.getFuture(); };
 
 	void clear(KeyRangeRef range, const Arena* arena = 0) override {
 		debug_printf("CLEAR %s\n", printable(range).c_str());
