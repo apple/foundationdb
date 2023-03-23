@@ -621,7 +621,14 @@ private:
 		if (toCommit) {
 			CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
 			for (const auto& ssID : checkpoint.src) {
-				Tag tag = decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(ssID)).get().get());
+				Optional<Value> tagValue = txnStateStore->readValue(serverTagKeyFor(ssID)).get();
+				if (!tagValue.present()) {
+					TraceEvent(SevWarn, "CheckpointServerTagNotFound", dbgid)
+					    .detail("StorageServerID", ssID)
+					    .detail("Checkpoint", checkpoint.toString());
+						continue;
+				}
+				const Tag tag = decodeServerTagValue(tagValue.get());
 				MutationRef privatized = m;
 				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 				TraceEvent("SendingPrivateMutationCheckpoint", dbgid)

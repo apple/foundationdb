@@ -2367,7 +2367,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				populateMetaData(&res, pMetadata);
 				rocksdb::ExportImportFilesMetaData metadata = *pMetadata;
 				delete pMetadata;
-				if (SERVER_KNOBS->ROCKSDB_ENABLE_CHECKPOINT_VALIDATION) {
+				if (!metadata.files.empty() && SERVER_KNOBS->ROCKSDB_ENABLE_CHECKPOINT_VALIDATION) {
 					rocksdb::ImportColumnFamilyOptions importOptions;
 					importOptions.move_files = false;
 					rocksdb::ColumnFamilyHandle* handle;

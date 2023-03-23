@@ -203,7 +203,9 @@ ACTOR Future<int64_t> doFetchCheckpointFile(Database cx,
 				offset += rep.data.size();
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_end_of_stream ||
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			} else if (e.code() != error_code_end_of_stream ||
 			    (g_network->isSimulated() && attempt == 1 && deterministicRandom()->coinflip())) {
 				TraceEvent(e.code() != error_code_end_of_stream ? SevWarnAlways : SevWarn, "FetchCheckpointFileError")
 				    .errorUnsuppressed(e)
@@ -1193,7 +1195,9 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 		    .detail("RocksCF", rocksKv.toString());
 
 		for (const CheckpointFile& file : rocksKv.fetchedFiles) {
-			dirs.insert(file.path);
+			if (file.path != emptySstFilePath) {
+				dirs.insert(file.path);
+			}
 		}
 	} else {
 		ASSERT(false);
