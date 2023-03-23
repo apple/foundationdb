@@ -8,6 +8,7 @@ pipeline {
                     repo_url = "https://github.com/snowflakedb/frostdb.git"
                     scmInfo = checkout scm
                     println("${scmInfo}")
+                    //extracting the LDAP portion from sfc-gh-xxx
                     user_id=sh(script: "git show -s --pretty=%ae | cut -d '@' -f 1 | cut -d '-' -f 3", returnStdout: true).trim()
                     precommit_job_status = "SUCCESS"
                 }
