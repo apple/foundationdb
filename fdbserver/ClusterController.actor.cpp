@@ -2674,7 +2674,7 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 			when(wait(dbInfoChange)) {}
 		}
 
-		UpdateServerDBInfoRequest req;
+		state UpdateServerDBInfoRequest req;
 		if (dbInfoChange.isReady()) {
 			for (auto& it : self->id_worker) {
 				req.broadcastInfo.push_back(it.second.details.interf.updateServerDBInfo.getEndpoint());
@@ -2696,7 +2696,9 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 		req.serializedDbInfo =
 		    BinaryWriter::toValue(self->db.serverInfo->get(), AssumeVersion(g_network->protocolVersion()));
 
-		TraceEvent("DBInfoStartBroadcast", self->id).log();
+		TraceEvent("DBInfoStartBroadcast", self->id)
+		    .detail("MasterLifetime", self->db.serverInfo->get().masterLifetime.toString());
+		;
 		choose {
 			when(std::vector<Endpoint> notUpdated =
 			         wait(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, Optional<Endpoint>(), false))) {
@@ -2707,6 +2709,11 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 				}
 			}
 			when(wait(dbInfoChange)) {}
+			when(wait(updateDBInfo)) {
+				// The current round of broadcast hasn't finished yet. So we need to include all the current broadcast
+				// endpoints in the new round as well.
+				self->updateDBInfoEndpoints.insert(req.broadcastInfo.begin(), req.broadcastInfo.end());
+			}
 		}
 	}
 }

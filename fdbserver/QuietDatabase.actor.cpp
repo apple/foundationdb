@@ -788,7 +788,7 @@ ACTOR Future<Void> reconfigureAfter(Database cx,
                                     Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                     std::string context) {
 	wait(delay(time));
-	wait(repairDeadDatacenter(cx, dbInfo, context));
+	wait(uncancellable(repairDeadDatacenter(cx, dbInfo, context)));
 	return Void();
 }
 
