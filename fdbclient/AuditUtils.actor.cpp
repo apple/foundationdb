@@ -39,7 +39,6 @@ ACTOR static Future<std::vector<AuditStorageState>> getLatestAuditStatesImpl(Tra
 			break;
 		} catch (Error& e) {
 			wait(tr->onError(e));
-			tr->fullReset();
 		}
 	}
 
@@ -66,7 +65,6 @@ ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
-			tr.fullReset();
 		}
 	}
 

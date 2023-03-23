@@ -2599,7 +2599,7 @@ ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
 		    .detail("AuditType", type)
 		    .detail("Range", range)
 		    .detail("Async", async);
-		TriggerAuditRequest req(type, range, async, timeoutSeconds);
+		TriggerAuditRequest req(type, range, async);
 		UID auditId_ = wait(timeoutError(clusterInterface->get().get().triggerAudit.getReply(req), timeoutSeconds));
 		auditId = auditId_;
 		TraceEvent(SevDebug, "ManagementAPIAuditStorageEnd")

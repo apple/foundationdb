@@ -1893,9 +1893,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 			// audit->auditMap.insert(req.range, AuditPhase::Failed);
 			wait(delay(1));
 			audit->retryCount++;
-			if (audit->state.getType() != AuditType::ValidateShardLocLocalView) {
-				audit->actors.add(loadAndDispatchAuditRange(self, audit, req.range));
-			}
+			audit->actors.add(loadAndDispatchAuditRange(self, audit, req.range));
 		}
 	}
 	return Void();

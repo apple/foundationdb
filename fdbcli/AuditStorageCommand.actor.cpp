@@ -48,8 +48,6 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 		type = AuditType::ValidateShardLocGlobalView;
 	} else if (tokencmp(tokens[1], "shardlocal")) {
 		type = AuditType::ValidateShardLocLocalView;
-	} else if (tokencmp(tokens[1], "physicalshardmigration")) {
-		type = AuditType::PhysicalshardMigration;
 	} else {
 		printUsage(tokens[0]);
 		return UID();
