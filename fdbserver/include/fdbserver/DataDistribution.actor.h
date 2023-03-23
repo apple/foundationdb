@@ -158,7 +158,13 @@ struct IDataDistributionTeam {
 	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
 	virtual int64_t getReadInFlightToTeam() const = 0;
 	virtual double getReadLoad(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
+
 	virtual double getAverageCPU() const = 0;
+	// update the last time stamp the team's CPU >= pivot CPU
+	virtual void setLastHighCPUTime(double time) = 0;
+	// return true if the team has CPU < currentThreshold and historical threshold for `duration`
+	virtual bool hasLowCpuFor(double cpuThreshold, double duration) const = 0;
+
 	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) const = 0;
 	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) const = 0;
 	virtual bool hasHealthyAvailableSpace(double minRatio) const = 0;

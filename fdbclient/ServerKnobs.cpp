@@ -169,6 +169,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// In order to make sure GetTeam has enough eligible destination team:
 	ASSERT_GT(AVAILABLE_SPACE_PIVOT_PERCENT + CPU_PIVOT_PERCENT, 1.0 );
 	init( MAX_DEST_CPU_PERCENT, 								98.0 );
+	init( CPU_STABLE_INTERVAL,                                 300.0 );
 
 	init( SHARD_ENCODE_LOCATION_METADATA,                      false );
 	init( READ_REBALANCE_CPU_THRESHOLD,                         15.0 );

@@ -161,11 +161,13 @@ public:
 	// DD won't move shard to teams that has availableSpaceRatio < min(0.05,  AllTeamAvailSpaceRatio[pivot]), where
 	// pivot = pivot percent * team count.
 	double AVAILABLE_SPACE_PIVOT_PERCENT;
-	// DD won't move shard to teams that has CPU > AllTeamCPU[pivot], where pivot = pivot percent *
+	// DD won't move shard to teams that has CPU >= AllTeamCPU[pivot], where pivot = pivot percent *
 	// team count.
 	double CPU_PIVOT_PERCENT;
-	// // DD won't move shard to teams that has CPU > MAX_DEST_CPU_PERCENT
+	// DD won't move shard to teams that has CPU >= MAX_DEST_CPU_PERCENT
 	double MAX_DEST_CPU_PERCENT;
+	// DD only move shard to teams that has CPU < pivot CPU for enough time
+	double CPU_STABLE_INTERVAL;
 
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 

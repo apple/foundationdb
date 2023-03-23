@@ -244,7 +244,11 @@ public:
 					// 1. eligible team has to have enough space if we care about lower disk utilization
 					bool eligibleTeam = !req.preferLowerDiskUtil || self->teams[currentIndex]->hasHealthyAvailableSpace(
 					                                                    self->pivotAvailableSpaceRatio);
-					// eligibleTeam = eligibleTeam &&
+					// 2. eligible team has to be low CPU for enough time if we care about lower read. TODO: read and
+					// CPU may not linearly correlated so in the future we may change this.
+					eligibleTeam = eligibleTeam &&
+					               (!req.preferLowerReadUtil || self->teams[currentIndex]->hasLowCpuFor(
+					                                                self->pivotCPU, SERVER_KNOBS->CPU_STABLE_INTERVAL));
 
 					if (self->teams[currentIndex]->isHealthy() && eligibleTeam) {
 						int64_t loadBytes = self->teams[currentIndex]->getLoadBytes(true, req.inflightPenalty);
@@ -279,6 +283,9 @@ public:
 
 					bool ok = dest->isHealthy() && (!req.preferLowerDiskUtil ||
 					                                dest->hasHealthyAvailableSpace(self->pivotAvailableSpaceRatio));
+
+					ok = ok && (!req.preferLowerReadUtil ||
+					            dest->hasLowCpuFor(self->pivotCPU, SERVER_KNOBS->CPU_STABLE_INTERVAL));
 
 					for (int i = 0; ok && i < randomTeams.size(); i++) {
 						if (randomTeams[i]->getServerIDs() == dest->getServerIDs()) {
@@ -3286,26 +3293,36 @@ public:
 void DDTeamCollection::updateTeamPivotValues() {
 	if (now() - lastPivotValuesUpdate > SERVER_KNOBS->AVAILABLE_SPACE_UPDATE_DELAY) {
 		lastPivotValuesUpdate = now();
-		std::vector<double> teamAvailableSpace, teamAverageCPU;
+		std::vector<double> teamAvailableSpace;
+		std::vector<std::pair<double, int>> teamAverageCPU_index;
 		teamAvailableSpace.reserve(teams.size());
-		teamAverageCPU.reserve(teams.size());
-		for (const auto& team : teams) {
-			if (team->isHealthy()) {
-				teamAvailableSpace.push_back(team->getMinAvailableSpaceRatio());
-				teamAverageCPU.push_back(team->getAverageCPU());
+		teamAverageCPU_index.reserve(teams.size());
+		for (int i = 0; i < teams.size(); ++i) {
+			if (teams[i]->isHealthy()) {
+				teamAvailableSpace.push_back(teams[i]->getMinAvailableSpaceRatio());
+				teamAverageCPU_index.emplace_back(teams[i]->getAverageCPU(), i);
 			}
 		}
 
 		size_t pivot = teamAvailableSpace.size() * std::min(1.0, SERVER_KNOBS->AVAILABLE_SPACE_PIVOT_PERCENT);
-		size_t cpuPivotIndex = teamAverageCPU.size() * std::min(1.0, SERVER_KNOBS->CPU_PIVOT_PERCENT);
+		size_t cpuPivotIndex = teamAverageCPU_index.size() * std::min(1.0, SERVER_KNOBS->CPU_PIVOT_PERCENT);
 		if (teamAvailableSpace.size() > 1) {
 			std::nth_element(teamAvailableSpace.begin(), teamAvailableSpace.begin() + pivot, teamAvailableSpace.end());
 			pivotAvailableSpaceRatio =
 			    std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO,
 			             std::min(SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO, teamAvailableSpace[pivot]));
 
-			std::nth_element(teamAverageCPU.begin(), teamAverageCPU.end() + cpuPivotIndex, teamAverageCPU.end());
-			pivotCPU = std::min(SERVER_KNOBS->MAX_DEST_CPU_PERCENT, teamAverageCPU[cpuPivotIndex]);
+			std::nth_element(
+			    teamAverageCPU_index.begin(), teamAverageCPU_index.end() + cpuPivotIndex, teamAverageCPU_index.end());
+			pivotCPU = std::min(SERVER_KNOBS->MAX_DEST_CPU_PERCENT, teamAverageCPU_index[cpuPivotIndex].first);
+			// set high CPU for teams >= pivot CPU
+			for (size_t i = cpuPivotIndex; i < teamAverageCPU_index.size(); ++i) {
+				teams[teamAverageCPU_index[i].second]->setLastHighCPUTime(lastPivotValuesUpdate);
+			}
+			for (size_t i = cpuPivotIndex - 1; i >= 0 && teamAverageCPU_index[i].first >= pivotCPU; --i) {
+				teams[teamAverageCPU_index[i].second]->setLastHighCPUTime(lastPivotValuesUpdate);
+			}
+
 		} else {
 			pivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
 			pivotCPU = SERVER_KNOBS->MAX_DEST_CPU_PERCENT;
