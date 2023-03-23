@@ -2615,7 +2615,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					rocksdb::ExportImportFilesMetaData* pMetadata = nullptr;
 					RangeResult result;
 					const int bytesRead = readRangeInDb(ps, allKeys, 1, CLIENT_KNOBS->TOO_MANY, &result);
-					if (result.empty()) {
+					if (false) {
+					// if (result.empty()) {
 						ASSERT(bytesRead == 0);
 						TraceEvent(SevInfo, "ShardedRocksCheckpointEmpty", logId)
 						    .detail("CheckpointID", a.request.checkpointID)
@@ -2640,7 +2641,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 						rocksdb::ExportImportFilesMetaData metadata = *pMetadata;
 						delete pMetadata;
 
-						if (SERVER_KNOBS->ROCKSDB_ENABLE_EXPENSIVE_VALIDATION) {
+						if (!metadata.files.empty() && SERVER_KNOBS->ROCKSDB_ENABLE_EXPENSIVE_VALIDATION) {
 							rocksdb::ImportColumnFamilyOptions importOptions;
 							importOptions.move_files = false;
 							rocksdb::ColumnFamilyHandle* handle;
