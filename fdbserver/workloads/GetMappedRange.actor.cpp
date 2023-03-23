@@ -423,18 +423,20 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		loop {
 			StatusObject result = wait(StatusClient::statusFetcher(cx));
 			StatusObjectReader statusObj(result);
-			StatusObjectReader statusObjCluster;
-			StatusObjectReader processesMap;
-
+			state StatusObjectReader statusObjCluster;
+			state StatusObjectReader processesMap;
+			state long queryQueueMax = 0;
+			state int waitInterval = 2;
 			if (!statusObj.get("cluster", statusObjCluster)) {
 				TraceEvent("NoCluster");
-				break;
+				wait(delay(waitInterval));
+				continue;
 			}
 
-			long queryQueueMax = 0;
 			if (!statusObjCluster.get("processes", processesMap)) {
 				TraceEvent("NoProcesses");
-				break;
+				wait(delay(waitInterval));
+				continue;
 			}
 			for (auto proc : processesMap.obj()) {
 				StatusObjectReader process(proc.second);
@@ -452,9 +454,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					TraceEvent("NoRoles");
 				}
 			}
-			wait(delay(2));
+			wait(delay(waitInterval));
 		}
-		return Void();
 	}
 
 	// If the same transaction writes to the read set (the scanned ranges) before reading, it should throw read your
@@ -535,7 +536,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		state bool originalStrictlyEnforeByteLimit = SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT;
 		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinflip();
 		wait(self->scanMappedRange(cx, 10, 490, mapper, self));
-		wait(testMetric(cx, self, 10, 490, mapper, checkStorageQueueSeconds));
+		wait(testMetric(cx, self, 10, 490, mapper, self->checkStorageQueueSeconds));
 		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = originalStrictlyEnforeByteLimit;
 		return Void();
 	}
