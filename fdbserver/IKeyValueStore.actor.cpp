@@ -23,11 +23,12 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR static Future<Void> replaceRange_impl(IKeyValueStore* self,
-                                            KeyRange blockRange,
-                                            Standalone<VectorRef<KeyValueRef>> blockData) {
+                                            KeyRange range,
+                                            Standalone<VectorRef<KeyValueRef>> data) {
 	state int sinceYield = 0;
-	state const KeyValueRef* kvItr = blockData.begin();
-	for (; kvItr != blockData.end(); kvItr++) {
+	state const KeyValueRef* kvItr = data.begin();
+	self->clear(range);
+	for (; kvItr != data.end(); kvItr++) {
 		self->set(*kvItr);
 		if (++sinceYield > 1000) {
 			wait(yield());
@@ -38,6 +39,6 @@ ACTOR static Future<Void> replaceRange_impl(IKeyValueStore* self,
 }
 
 // Default implementation for replaceRange(), which writes the key one by one.
-Future<Void> IKeyValueStore::replaceRange(KeyRange blockRange, Standalone<VectorRef<KeyValueRef>> blockData) {
-	return replaceRange_impl(this, blockRange, blockData);
+Future<Void> IKeyValueStore::replaceRange(KeyRange range, Standalone<VectorRef<KeyValueRef>> data) {
+	return replaceRange_impl(this, range, data);
 }
