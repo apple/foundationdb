@@ -61,18 +61,19 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 		return true;
 	}
 
-	ACTOR static Future<Optional<Value>> runExcludeAndGetVersionKey(Reference<ReadYourWritesTransaction> tx, std::string workerAddress, std::string command, KeyRef versionKey) {
-		tx->reset();		
+	ACTOR static Future<Optional<Value>> runExcludeAndGetVersionKey(Reference<ReadYourWritesTransaction> tx,
+	                                                                std::string workerAddress,
+	                                                                std::string command,
+	                                                                KeyRef versionKey) {
+		tx->reset();
 		tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 		tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-		tx->set(Key(workerAddress)
-				            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix(command)),
-				        ValueRef());
+		tx->set(Key(workerAddress).withPrefix(SpecialKeySpace::getManagementApiCommandPrefix(command)), ValueRef());
 		wait(tx->commit());
 		tx->reset();
 
 		tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				Optional<Value> versionKeyValue = wait(tx->get(versionKey));
+		Optional<Value> versionKeyValue = wait(tx->get(versionKey));
 		tx->reset();
 		return versionKeyValue;
 	}
@@ -131,17 +132,21 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 			try {
 				std::vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
 				ProcessData excludeWorker = deterministicRandom()->randomChoice(workers);
-				state std::string workerAddress = formatIpPort(excludeWorker.address.ip, excludeWorker.address.port); 
+				state std::string workerAddress = formatIpPort(excludeWorker.address.ip, excludeWorker.address.port);
 
-				state Optional<Value> versionKey1 = wait(runExcludeAndGetVersionKey(tx, workerAddress, "exclude", excludedServersVersionKey));
+				state Optional<Value> versionKey1 =
+				    wait(runExcludeAndGetVersionKey(tx, workerAddress, "exclude", excludedServersVersionKey));
 				ASSERT(versionKey1.present());
-				Optional<Value> versionKey2 = wait(runExcludeAndGetVersionKey(tx, workerAddress, "exclude", excludedServersVersionKey));
+				Optional<Value> versionKey2 =
+				    wait(runExcludeAndGetVersionKey(tx, workerAddress, "exclude", excludedServersVersionKey));
 				ASSERT(versionKey2.present());
 				ASSERT(versionKey1 == versionKey2);
 
-				state Optional<Value> versionKey3 = wait(runExcludeAndGetVersionKey(tx, workerAddress, "failed", failedServersVersionKey));
+				state Optional<Value> versionKey3 =
+				    wait(runExcludeAndGetVersionKey(tx, workerAddress, "failed", failedServersVersionKey));
 				ASSERT(versionKey3.present());
-				Optional<Value> versionKey4 = wait(runExcludeAndGetVersionKey(tx, workerAddress, "failed", failedServersVersionKey));
+				Optional<Value> versionKey4 =
+				    wait(runExcludeAndGetVersionKey(tx, workerAddress, "failed", failedServersVersionKey));
 				ASSERT(versionKey4.present());
 				ASSERT(versionKey3 == versionKey4);
 
