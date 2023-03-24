@@ -1158,16 +1158,20 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 	return Void();
 }
 
-ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo) {
-	state bool auditTrigger;
+ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo, AuditType auditType) {
 	TraceEvent(SevDebug, "AuditStorageCorrectnessBegin");
+	state TriggerAuditRequest req;
+	state bool auditTrigger;
+	state UID auditId;
+	state Database cx;
+	state Optional<AuditStorageState> readLatestResult;
 
 	loop {
 		try {
-			state TriggerAuditRequest req(AuditType::ValidateHA, allKeys);
-			req.async = true;
-			state UID auditId =
-			    wait(timeoutError(dbInfo->get().clusterInterface.clientInterface.triggerAudit.getReply(req), 30));
+			req = TriggerAuditRequest(auditType, allKeys, true);
+			UID auditId_ =
+			    wait(timeoutError(dbInfo->get().clusterInterface.clientInterface.triggerAudit.getReply(req), 120));
+			auditId = auditId_;
 			auditTrigger = true;
 			TraceEvent(SevDebug, "AuditStorageCorrectnessTriggered").detail("AuditID", auditId);
 			break;
@@ -1185,13 +1189,12 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 		}
 	}
 
-	state Database cx;
 	if (auditTrigger) {
 		loop {
 			try {
 				cx = openDBOnServer(dbInfo);
 				TraceEvent(SevDebug, "AuditStorageCorrectnessCheck").detail("AuditID", auditId);
-				AuditStorageState auditState = wait(getAuditState(cx, AuditType::ValidateHA, auditId));
+				AuditStorageState auditState = wait(getAuditState(cx, req.getType(), auditId));
 				TraceEvent(SevInfo, "AuditStorageCorrectnessResult").detail("AuditStorageState", auditState.toString());
 				const AuditPhase phase = auditState.getPhase();
 				if (phase == AuditPhase::Running) {
@@ -1213,8 +1216,8 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 			try {
 				cx = openDBOnServer(dbInfo);
 				TraceEvent(SevDebug, "AuditStorageCorrectnessReadBegin");
-				std::vector<AuditStorageState> auditStates = wait(getLatestAuditStates(cx, req.getType(), 30));
-				state Optional<AuditStorageState> readLatestResult;
+				std::vector<AuditStorageState> auditStates = wait(getLatestAuditStates(cx, req.getType(), 120));
+				readLatestResult = Optional<AuditStorageState>();
 				for (const auto& auditState : auditStates) {
 					if (auditState.range.contains(req.range)) {
 						if (!readLatestResult.present() ||
@@ -1392,9 +1395,10 @@ ACTOR Future<bool> runTest(Database cx,
 				ok = false;
 			}
 
+			// Run auditStorage
 			if (quiescent) {
 				try {
-					wait(timeoutError(auditStorageCorrectness(dbInfo), 5000.0));
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateHA), 5000.0));
 				} catch (Error& e) {
 					ok = false;
 					TraceEvent(SevError, "TestFailure")

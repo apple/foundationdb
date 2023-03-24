@@ -1816,6 +1816,14 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
 					const int idx = deterministicRandom()->randomInt(0, it->second.size());
 					StorageServerInterface& targetServer = it->second[idx];
 					++it;
+					if (it == rangeLocations[i].servers.end()) {
+						TraceEvent(SevWarn, "DDScheduleAuditForRangeIgnore", self->ddId)
+						    .detail("Reason", "No remote DC")
+						    .detail("AuditID", audit->state.id)
+						    .detail("Range", range)
+						    .detail("AuditType", audit->state.getType());
+						continue;
+					}
 					// pick a server from remote DC
 					for (; it != rangeLocations[i].servers.end(); ++it) {
 						const int idx = deterministicRandom()->randomInt(0, it->second.size());
@@ -1823,7 +1831,15 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
 					}
 					audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
 				} else if (audit->state.getType() == AuditType::ValidateReplica) {
-					auto it = rangeLocations[i].servers.begin();
+					auto it = rangeLocations[i].servers.begin(); // always compare primary DC
+					if (it->second.size() == 1) {
+						TraceEvent(SevWarn, "DDScheduleAuditForRangeIgnore", self->ddId)
+						    .detail("Reason", "Single replica")
+						    .detail("AuditID", audit->state.id)
+						    .detail("Range", range)
+						    .detail("AuditType", audit->state.getType());
+						continue;
+					}
 					ASSERT(it->second.size() >= 2);
 					const int pickedIdx = deterministicRandom()->randomInt(0, it->second.size());
 					StorageServerInterface targetServer;
@@ -1844,10 +1860,16 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
 			TraceEvent(SevWarn, "DDScheduleAuditForRangeError", self->ddId)
 			    .errorUnsuppressed(e)
 			    .detail("AuditID", audit->state.id)
-			    .detail("Range", range);
+			    .detail("Range", range)
+			    .detail("AuditType", audit->state.getType());
 			throw e;
 		}
 	}
+
+	TraceEvent(SevDebug, "DDScheduleAuditForRangeEnd", self->ddId)
+	    .detail("AuditID", audit->state.id)
+	    .detail("Range", range)
+	    .detail("AuditType", audit->state.getType());
 
 	return Void();
 }
