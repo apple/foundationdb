@@ -18,17 +18,22 @@
  * limitations under the License.
  */
 
+#include <climits>
 #include <limits>
 #include <numeric>
+#include <utility>
 #include <vector>
 
 #include "flow/ActorCollection.h"
+#include "flow/Deque.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/MovingWindow.h"
+#include "fdbserver/DDSharedContext.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
@@ -682,6 +687,7 @@ struct DDQueue {
 	int unhealthyRelocations;
 
 	Reference<EventCacheHolder> movedKeyServersEventHolder;
+	MovingWindow<int64_t> moveBytesRate;
 
 	void startRelocation(int priority, int healthPriority) {
 		// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
@@ -744,7 +750,9 @@ struct DDQueue {
 	    output(output), input(input), getShardMetrics(getShardMetrics), getTopKMetrics(getTopKMetrics), lastInterval(0),
 	    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
 	    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
-	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")) {}
+	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")),
+		moveBytesRate(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL)
+		{}
 	DDQueue() = default;
 
 	void validate() {
@@ -1770,6 +1778,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 
 					self->bytesWritten += metrics.bytes;
+					self->moveBytesRate.addSample(metrics.bytes);
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
 					return Void();
@@ -2471,7 +2480,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					    .detail("AverageShardSize", req.getFuture().isReady() ? req.getFuture().get() : -1)
 					    .detail("UnhealthyRelocations", self.unhealthyRelocations)
 					    .detail("HighestPriority", highestPriorityRelocation)
-					    .detail("BytesWritten", self.bytesWritten)
+					    .detail("BytesWritten", self.moveBytesRate.getTotal())
+					    .detail("BytesWrittenAverageRate", self.moveBytesRate.getAverage())
 					    .detail("PriorityRecoverMove", self.priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
 					    .detail("PriorityRebalanceUnderutilizedTeam",
 					            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM])
