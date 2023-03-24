@@ -831,9 +831,15 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 						for (int k = 0; k < data.size(); k++) {
 							ByteSampleInfo sampleInfo = isKeyValueInSample(data[k]);
 							shardBytes += sampleInfo.size;
-							if (sampleInfo.probability > 0 && sampleInfo.probability < 1)
-								shardVariance += sampleInfo.probability * (1 - sampleInfo.probability) *
-								                 pow((double)sampleInfo.sampledSize, 2);
+
+							// Sanity check before putting probability into variance formula.
+							ASSERT_GE(sampleInfo.probability, 0);
+							ASSERT_LE(sampleInfo.probability, 1);
+
+							// Variance of a single Bernoulli trial, for which X=n with probability p,
+							// is p * (1-p) * n^2.
+							shardVariance += sampleInfo.probability * (1 - sampleInfo.probability) *
+							                 pow((double)sampleInfo.sampledSize, 2);
 
 							if (sampleInfo.inSample) {
 								sampledBytes += sampleInfo.sampledSize;
@@ -857,7 +863,13 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 									firstKeySampledBytes += sampleInfo.sampledSize;
 
 								sampledKeys++;
-								if (sampleInfo.probability > 0 && sampleInfo.probability < 1) {
+
+								// Track sampled items with non-trivial variance,
+								// i.e. not those withprobability 0 or 1.
+								// Probability shouldn't be 0 here because we're
+								// decided to sample this key.
+								ASSERT_GT(sampleInfo.probability, 0);
+								if (sampleInfo.probability < 1) {
 									sampledKeysWithProb++;
 								}
 							}

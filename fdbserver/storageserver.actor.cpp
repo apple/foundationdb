@@ -10822,11 +10822,16 @@ Future<bool> StorageServerDisk::restoreDurableState() {
 // are used to estimate the size of key ranges and determine split points.
 //
 // It's assumed that there's some overhead involved in the sample,
-// BYTE_SAMPLING_OVERHEAD, which defaults to 100 bytes.
+// BYTE_SAMPLING_OVERHEAD, which defaults to 100 bytes per entry.
 //
 // The rough goal is for the sample size to be a fixed fraction of the total
 // size of all keys and values, 1/BYTE_SAMPLING_FACTOR, which defaults to 1/250.
 // This includes the overhead, mentioned above.
+//
+// NOTE: This BYTE_SAMPLING_FACTOR and BYTE_SAMPLING_OVERHEAD knobs can't be
+// changed after a database has been created. Data which has been already
+// sampled can't be resampled, and the estimates of the size of key ranges
+// implicitly includes these constants.
 //
 // This functions returns a struct containing
 //   * inSample: true if we've selected this key-value pair for sampling.

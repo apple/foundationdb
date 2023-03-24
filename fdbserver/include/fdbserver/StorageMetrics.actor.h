@@ -165,7 +165,8 @@ struct ByteSampleInfo {
 
 	// Probability that the key-value pair will be sampled.
 	// This is a function of key and value sizes.
-	// The goal is to sample ~1/250th of the key-value space.
+	// The goal is to sample ~1/BYTE_SAMPLING_FACTOR of the key-value space,
+	// which by default is 1/250th.
 	double probability;
 
 	// The recorded size of the sample (max of bytesPerSample, size).
