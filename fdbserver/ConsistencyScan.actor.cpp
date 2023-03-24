@@ -831,10 +831,9 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 						for (int k = 0; k < data.size(); k++) {
 							ByteSampleInfo sampleInfo = isKeyValueInSample(data[k]);
 							shardBytes += sampleInfo.size;
-							double itemProbability = ((double)sampleInfo.size) / sampleInfo.sampledSize;
-							if (itemProbability < 1)
-								shardVariance +=
-								    itemProbability * (1 - itemProbability) * pow((double)sampleInfo.sampledSize, 2);
+							if (sampleInfo.probability > 0 && sampleInfo.probability < 1)
+								shardVariance += sampleInfo.probability * (1 - sampleInfo.probability) *
+								                 pow((double)sampleInfo.sampledSize, 2);
 
 							if (sampleInfo.inSample) {
 								sampledBytes += sampleInfo.sampledSize;
@@ -858,7 +857,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 									firstKeySampledBytes += sampleInfo.sampledSize;
 
 								sampledKeys++;
-								if (itemProbability < 1) {
+								if (sampleInfo.probability > 0 && sampleInfo.probability < 1) {
 									sampledKeysWithProb++;
 								}
 							}

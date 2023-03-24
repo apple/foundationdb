@@ -152,15 +152,23 @@ private:
 	static void add(KeyRangeMap<int>& map, KeyRangeRef const& keys, int delta);
 };
 
-// Contains information about whether or not a key-value pair should be included in a byte sample
-// Also contains size information about the byte sample
+// Contains information about whether or not a key-value pair should be included in a byte sample.
+//
+// The invariant holds:
+//    probability * sampledSize == size
 struct ByteSampleInfo {
+	// True if we've decided to sample this key-value pair.
 	bool inSample;
 
-	// Actual size of the key value pair
+	// Actual size of the key value pair.
 	int64_t size;
 
-	// The recorded size of the sample (max of bytesPerSample, size)
+	// Probability that the key-value pair will be sampled.
+	// This is a function of key and value sizes.
+	// The goal is to sample ~1/250th of the key-value space.
+	double probability;
+
+	// The recorded size of the sample (max of bytesPerSample, size).
 	int64_t sampledSize;
 };
 
