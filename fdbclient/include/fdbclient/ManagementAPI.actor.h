@@ -88,12 +88,15 @@ ACTOR Future<Void> includeLocalities(Database cx,
 // the given IP.
 ACTOR Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass processClass);
 
-// Get the current list of excluded servers
+// Get the current list of excluded servers including both "exclude" and "failed".
 ACTOR Future<std::vector<AddressExclusion>> getAllExcludedServers(Database cx);
-
-ACTOR Future<std::vector<AddressExclusion>> getExcludedServerList(Transaction* tr);
-ACTOR Future<std::vector<AddressExclusion>> getExcludedFailedServerList(Transaction* tr);
 ACTOR Future<std::vector<AddressExclusion>> getAllExcludedServers(Transaction* tr);
+
+// Get the current list of excluded servers.
+ACTOR Future<std::vector<AddressExclusion>> getExcludedServerList(Transaction* tr);
+
+// Get the current list of failed servers.
+ACTOR Future<std::vector<AddressExclusion>> getExcludedFailedServerList(Transaction* tr);
 
 // Get the current list of excluded localities
 ACTOR Future<std::vector<std::string>> getExcludedLocalities(Database cx);

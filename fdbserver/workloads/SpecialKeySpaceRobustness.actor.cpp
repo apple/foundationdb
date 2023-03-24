@@ -61,6 +61,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 		return true;
 	}
 
+	// A test utility that exclude the worker with `workerAddress` using `command` and return the value of `versionKey`.
 	ACTOR static Future<Optional<Value>> runExcludeAndGetVersionKey(Reference<ReadYourWritesTransaction> tx,
 	                                                                std::string workerAddress,
 	                                                                std::string command,
@@ -127,28 +128,38 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 			}
 			tx->reset();
 		}
-		// "Exclude" same address
+		// "Exclude" same address multiple times, and only the first excluson should trigger a system metadata update.
 		{
 			try {
 				std::vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
 				ProcessData excludeWorker = deterministicRandom()->randomChoice(workers);
 				state std::string workerAddress = formatIpPort(excludeWorker.address.ip, excludeWorker.address.port);
 
+				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				state Optional<Value> versionKey0 = wait(tx->get(excludedServersVersionKey));
+
 				state Optional<Value> versionKey1 =
 				    wait(runExcludeAndGetVersionKey(tx, workerAddress, "exclude", excludedServersVersionKey));
 				ASSERT(versionKey1.present());
+				ASSERT(versionKey0 != versionKey1);
 				Optional<Value> versionKey2 =
 				    wait(runExcludeAndGetVersionKey(tx, workerAddress, "exclude", excludedServersVersionKey));
 				ASSERT(versionKey2.present());
+				// Exclude the same worker twice. The second exclusion shouldn't trigger a system metadata update.
 				ASSERT(versionKey1 == versionKey2);
 
-				state Optional<Value> versionKey3 =
-				    wait(runExcludeAndGetVersionKey(tx, workerAddress, "failed", failedServersVersionKey));
-				ASSERT(versionKey3.present());
-				Optional<Value> versionKey4 =
+				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				state Optional<Value> versionKey3 = wait(tx->get(failedServersVersionKey));
+
+				state Optional<Value> versionKey4 =
 				    wait(runExcludeAndGetVersionKey(tx, workerAddress, "failed", failedServersVersionKey));
 				ASSERT(versionKey4.present());
-				ASSERT(versionKey3 == versionKey4);
+				ASSERT(versionKey3 != versionKey4);
+				Optional<Value> versionKey5 =
+				    wait(runExcludeAndGetVersionKey(tx, workerAddress, "failed", failedServersVersionKey));
+				ASSERT(versionKey5.present());
+				// Exclude the same worker twice. The second exclusion shouldn't trigger a system metadata update.
+				ASSERT(versionKey4 == versionKey5);
 
 				tx->reset();
 			} catch (Error& e) {
@@ -163,7 +174,9 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 					auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
 					// special_key_space_management_api_error_msg schema validation
 					ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
-					ASSERT(valueObj["command"].get_str() == "exclude" && !valueObj["retriable"].get_bool());
+					ASSERT((valueObj["command"].get_str() == "exclude" ||
+					        valueObj["command"].get_str() == "exclude failed") &&
+					       !valueObj["retriable"].get_bool());
 				} else {
 					TraceEvent(SevDebug, "UnexpectedError")
 					    .error(e)

@@ -1678,6 +1678,7 @@ ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> ser
 }
 
 // excludes localities by setting the keys in api version below 7.0
+// TODO(zhewu): update this function that if the locality is already excluded, don't need to update the system metadata.
 void excludeLocalities(Transaction& tr, std::unordered_set<std::string> localities, bool failed) {
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
