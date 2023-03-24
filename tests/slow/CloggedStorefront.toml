@@ -4,7 +4,7 @@ testTitle = 'CloggedStorefrontTest'
     [[test.workload]]
     testName = 'Storefront'
     actorsPerClient = 20
-	transactionsPerSecond = 200
+    transactionsPerSecond = 200
     itemCount = 20000
     maxOrderSize = 6
     testDuration = 30.0
