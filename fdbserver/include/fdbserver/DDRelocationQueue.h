@@ -21,6 +21,7 @@
 #define FOUNDATIONDB_DDRELOCATIONQUEUE_H
 
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/MovingWindow.h"
 // send request/signal to DDRelocationQueue through interface
 // call synchronous method from components outside DDRelocationQueue
 class IDDRelocationQueue {
@@ -236,6 +237,7 @@ public:
 	int activeRelocations;
 	int queuedRelocations;
 	int64_t bytesWritten;
+	MovingWindow<int64_t> moveBytesRate;
 	int teamSize;
 	int singleRegionTeamSize;
 

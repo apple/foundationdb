@@ -20,6 +20,7 @@
 
 #include <limits>
 #include <numeric>
+#include <utility>
 #include <vector>
 
 #include "flow/ActorCollection.h"
@@ -526,7 +527,8 @@ DDQueue::DDQueue(DDQueueInitParams const& params)
     rawProcessingUnhealthy(new AsyncVar<bool>(false)), rawProcessingWiggle(new AsyncVar<bool>(false)),
     unhealthyRelocations(0), movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")),
     moveReusePhysicalShard(0), moveCreateNewPhysicalShard(0),
-    retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0) {}
+    retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0),
+    moveBytesRate(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL) {}
 
 void DDQueue::startRelocation(int priority, int healthPriority) {
 	// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
@@ -1769,6 +1771,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 
 					self->bytesWritten += metrics.bytes;
+					self->moveBytesRate.addSample(metrics.bytes);
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
 
@@ -2286,7 +2289,8 @@ struct DDQueueImpl {
 						    .detail("AverageShardSize", req.getFuture().isReady() ? req.getFuture().get() : -1)
 						    .detail("UnhealthyRelocations", self->unhealthyRelocations)
 						    .detail("HighestPriority", highestPriorityRelocation)
-						    .detail("BytesWritten", self->bytesWritten)
+						    .detail("BytesWritten", self->moveBytesRate.getTotal())
+						    .detail("BytesWrittenAverageRate", self->moveBytesRate.getAverage())
 						    .detail("PriorityRecoverMove",
 						            self->priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
 						    .detail("PriorityRebalanceUnderutilizedTeam",
