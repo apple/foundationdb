@@ -18,14 +18,12 @@
  * limitations under the License.
  */
 
-#include <climits>
 #include <limits>
 #include <numeric>
 #include <utility>
 #include <vector>
 
 #include "flow/ActorCollection.h"
-#include "flow/Deque.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
@@ -33,7 +31,6 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/MovingWindow.h"
-#include "fdbserver/DDSharedContext.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
@@ -751,8 +748,7 @@ struct DDQueue {
 	    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
 	    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
 	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")),
-		moveBytesRate(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL)
-		{}
+	    moveBytesRate(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL) {}
 	DDQueue() = default;
 
 	void validate() {
