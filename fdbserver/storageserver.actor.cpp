@@ -1197,39 +1197,39 @@ public:
 	Optional<EncryptionAtRestMode> encryptionMode;
 
 	// Used for recording shard assignment history for auditStorage
-	std::vector<std::pair<Version, KeyRangeRef>> assignedShardHistory;
+	std::vector<std::pair<Version, KeyRange>> assignedShardHistory;
 	std::set<UID> ongoingAuditsForShardAssignment;
 	std::string printAssignedShardHistory() {
 		std::string toPrint = "";
 		for (auto item : assignedShardHistory) {
-			toPrint = toPrint + ", " + std::to_string(item.first);
+			toPrint = toPrint + std::to_string(item.first) + " ";
 		}
 		return toPrint;
 	}
 	void registerAuditsForShardAssignmentHistoryCollection(UID auditID) {
 		ASSERT(!ongoingAuditsForShardAssignment.contains(auditID));
-		TraceEvent(SevDebug, "RegisterAuditsForShardAssignmentHistoryCollection").detail("AuditID", auditID);
+		TraceEvent(SevDebug, "ShardAssignmentHistoryRegisterAudit", thisServerID).detail("AuditID", auditID);
 		ongoingAuditsForShardAssignment.insert(auditID);
 		return;
 	}
 	void unregisterAuditsForShardAssignmentHistoryCollection(UID auditID, bool check = true) {
 		if (check)
 			ASSERT(ongoingAuditsForShardAssignment.contains(auditID));
-		TraceEvent(SevDebug, "UnregisterAuditsForShardAssignmentHistoryCollection").detail("AuditID", auditID);
+		TraceEvent(SevDebug, "ShardAssignmentHistoryUnRegisterAudit", thisServerID).detail("AuditID", auditID);
 		ongoingAuditsForShardAssignment.erase(auditID);
 		return;
 	}
 	bool auditExistForShardAssignment() { return !ongoingAuditsForShardAssignment.empty(); }
 	void addShardAssignmentToHistory(Version version, const KeyRangeRef keys, Version ssVersion) {
-		assignedShardHistory.push_back(std::make_pair(version, keys));
-		TraceEvent(SevDebug, "AddShardAssignmentToHistory")
+		assignedShardHistory.push_back(std::make_pair(version, Standalone(keys)));
+		TraceEvent(SevDebug, "ShardAssignmentHistoryAdd", thisServerID)
 		    .detail("Version", version)
 		    .detail("Keys", keys)
 		    .detail("SSVersion", ssVersion);
 		return;
 	}
 	void clearShardAssignmentHistory() {
-		TraceEvent(SevDebug, "ClearShardAssignmentHistory");
+		TraceEvent(SevDebug, "ShardAssignmentHistoryClear", thisServerID);
 		assignedShardHistory.clear();
 		return;
 	}
@@ -1237,21 +1237,19 @@ public:
 		std::vector<std::pair<Version, KeyRangeRef>> res;
 		for (auto assignedShard : assignedShardHistory) {
 			if (assignedShard.first >= early && assignedShard.first <= later) {
-				TraceEvent(SevDebug, "GetShardAssignmentToHistory")
+				TraceEvent(SevDebug, "ShardAssignmentHistoryGetOne", thisServerID)
 				    .detail("Keys", assignedShard.second)
 				    .detail("Version", assignedShard.first);
 				res.push_back(assignedShard);
 			} else {
-				TraceEvent(SevDebug, "GetShardAssignmentToHistorySkip")
+				TraceEvent(SevDebug, "ShardAssignmentHistoryGetSkip", thisServerID)
 				    .detail("Keys", assignedShard.second)
 				    .detail("Version", assignedShard.first)
 				    .detail("EarlyVersion", early)
 				    .detail("LaterVersion", later);
 			}
 		}
-		TraceEvent(SevDebug, "GetShardAssignmentToHistoryDone")
-		    .setMaxEventLength(100000)
-		    .setMaxFieldLength(10000)
+		TraceEvent(SevDebug, "ShardAssignmentHistoryGetDone", thisServerID)
 		    .detail("EarlyVersion", early)
 		    .detail("LaterVersion", later)
 		    .detail("HistoryTotalSize", assignedShardHistory.size())
@@ -5025,14 +5023,14 @@ bool rangesSame(std::vector<KeyRange> rangesA, std::vector<KeyRange> rangesB) {
 
 // Check shard (key range) assignments in SS (local view) is consistent with serverKeys space (global view)
 ACTOR Future<Void> auditStorageMetadataShardLocationLocalViewQ(StorageServer* data, AuditStorageRequest req) {
-	TraceEvent(SevDebug, "AuditStorageShardLocLocalViewBegin", data->thisServerID);
-	ASSERT(req.getType() == AuditType::ValidateShardLocLocalView);
+	TraceEvent(SevDebug, "AuditStorageShardStorageServerShardBegin", data->thisServerID);
+	ASSERT(req.getType() == AuditType::ValidateStorageServerShard);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
 
 	try {
 		if (data->knownCommittedVersion.get() == 0 || data->version.get() == 0) {
-			TraceEvent(SevDebug, "AuditStorageShardLocLocalViewFailed", data->thisServerID)
+			TraceEvent(SevDebug, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
 			    .detail("Reason", "Versions are not valid")
 			    .detail("LatestVersion", data->version.get())
 			    .detail("LatestCommitVersion", data->knownCommittedVersion.get());
@@ -5059,16 +5057,15 @@ ACTOR Future<Void> auditStorageMetadataShardLocationLocalViewQ(StorageServer* da
 		if (latestVersion > latestCommitVersion) {
 			try {
 				data->registerAuditsForShardAssignmentHistoryCollection(req.id);
-				TraceEvent(SevDebug, "AuditStorageShardLocLocalViewBeforeWait", data->thisServerID)
+				TraceEvent(SevDebug, "AuditStorageShardStorageServerShardBeforeWait", data->thisServerID)
 				    .detail("LatestVersion", latestVersion)
 				    .detail("LatestCommitVersion", latestCommitVersion);
-				// wait(timeoutError(data->knownCommittedVersion.whenAtLeast(latestVersion+1), 30));
 				wait(timeoutError(data->knownCommittedVersion.whenAtLeast(latestVersion), 30));
-				TraceEvent(SevDebug, "AuditStorageShardLocLocalViewAfterWait", data->thisServerID)
+				TraceEvent(SevDebug, "AuditStorageShardStorageServerShardAfterWait", data->thisServerID)
 				    .detail("LatestVersion", data->version.get())
 				    .detail("LatestCommitVersion", data->knownCommittedVersion.get());
 				if (data->version.get() < data->knownCommittedVersion.get()) {
-					TraceEvent(SevDebug, "AuditStorageShardLocLocalViewFailed", data->thisServerID)
+					TraceEvent(SevDebug, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
 					    .detail("Reason", "KnownCommittedVersion larger than version")
 					    .detail("LatestVersion", data->version.get())
 					    .detail("LatestCommitVersion", data->knownCommittedVersion.get())
@@ -5079,7 +5076,7 @@ ACTOR Future<Void> auditStorageMetadataShardLocationLocalViewQ(StorageServer* da
 					return Void();
 				}
 			} catch (Error& e) {
-				TraceEvent(SevDebug, "AuditStorageShardLocLocalViewFailed", data->thisServerID)
+				TraceEvent(SevDebug, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
 				    .errorUnsuppressed(e)
 				    .detail("Reason", "Catch up version failed")
 				    .detail("LatestVersion", data->version.get())
@@ -5090,7 +5087,7 @@ ACTOR Future<Void> auditStorageMetadataShardLocationLocalViewQ(StorageServer* da
 				return Void();
 			}
 			historyCollection = data->getAssignmentHistory(latestVersion, data->knownCommittedVersion.get());
-			TraceEvent(SevDebug, "AuditStorageShardLocLocalViewGetHistory", data->thisServerID)
+			TraceEvent(SevDebug, "AuditStorageShardStorageServerShardGetHistory", data->thisServerID)
 			    .detail("LatestVersion", latestVersion)
 			    .detail("LatestVersionNew", data->version.get())
 			    .detail("LatestCommitVersion", latestCommitVersion)
@@ -5100,7 +5097,7 @@ ACTOR Future<Void> auditStorageMetadataShardLocationLocalViewQ(StorageServer* da
 			if (historyCollection.size() != 0) {
 				// Ideally, we revert ownRangesLocalView changes from latestVersion to latestCommitVersion
 				// Currently, we return failed if any update collected
-				TraceEvent(SevDebug, "AuditStorageShardLocLocalViewFailed", data->thisServerID)
+				TraceEvent(SevDebug, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
 				    .detail("Reason", "History collection is not empty")
 				    .detail("LatestVersion", latestVersion)
 				    .detail("LatestVersionNew", data->version.get())
@@ -5125,22 +5122,39 @@ ACTOR Future<Void> auditStorageMetadataShardLocationLocalViewQ(StorageServer* da
 		state Transaction tr(data->cx);
 		state int retryCount = 0;
 		state int readRangeCount = 0;
+		state KeyRangeRef range;
 		loop {
 			try {
 				tr.setVersion(toReadVersion);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				keyBegin = allKeys.begin;
 				while (true) {
-					KeyRangeRef range(keyBegin, allKeys.end);
-					TraceEvent(SevDebug, "AuditStorageShardLocLocalViewReadRange", data->thisServerID)
-					    .detail("AtVersion", toReadVersion)
-					    .detail("ReadRangeCount", readRangeCount)
-					    .detail("Range", range)
-					    .detail("Prefix", serverKeysPrefixFor(data->thisServerID))
-					    .detail("AduitServerID", data->thisServerID);
-					wait(store(readResult, krmGetRanges(&tr, serverKeysPrefixFor(data->thisServerID), range, 1e5)));
+					range = KeyRangeRef(keyBegin, allKeys.end);
+					try {
+						wait(store(readResult, krmGetRanges(&tr, serverKeysPrefixFor(data->thisServerID), range, 1e5)));
+						TraceEvent(SevDebug, "AuditStorageShardStorageServerShardReadRange", data->thisServerID)
+						    .detail("AtVersion", toReadVersion)
+						    .detail("ReadRangeCount", readRangeCount)
+						    .detail("Range", range)
+						    .detail("Prefix", serverKeysPrefixFor(data->thisServerID))
+						    .detail("AduitServerID", data->thisServerID)
+						    .detail("ResultSize", readResult.size());
+					} catch (Error& e) {
+						TraceEvent(SevDebug, "AuditStorageShardStorageServerShardReadRangeError", data->thisServerID)
+						    .errorUnsuppressed(e)
+						    .detail("AtVersion", toReadVersion)
+						    .detail("AuditServer", data->thisServerID.first());
+						throw e;
+					}
 					readRangeCount++;
 					for (int i = 0; i < readResult.size() - 1; ++i) {
+						TraceEvent(
+						    SevDebug, "AuditStorageShardStorageServerShardReadRangeAddToResult", data->thisServerID)
+						    .detail("ValueIsServerKeysFalse", readResult[i].value == serverKeysFalse)
+						    .detail("ServerHasKey", serverHasKey(readResult[i].value))
+						    .detail("Range", KeyRangeRef(readResult[i].key, readResult[i + 1].key))
+						    .detail("AtVersion", toReadVersion)
+						    .detail("AuditServer", data->thisServerID.first());
 						if (serverHasKey(readResult[i].value)) {
 							ownRangesSeenByServerKey.push_back(
 							    Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key)));
@@ -5154,7 +5168,7 @@ ACTOR Future<Void> auditStorageMetadataShardLocationLocalViewQ(StorageServer* da
 				break;
 			} catch (Error& e) {
 				if (e.code() == error_code_transaction_too_old) {
-					TraceEvent(SevDebug, "AuditStorageShardLocLocalViewFailed", data->thisServerID)
+					TraceEvent(SevDebug, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
 					    .errorUnsuppressed(e)
 					    .detail("LatestCommitVersion", latestCommitVersion)
 					    .detail("LatestVersion", latestVersion)
@@ -5163,7 +5177,7 @@ ACTOR Future<Void> auditStorageMetadataShardLocationLocalViewQ(StorageServer* da
 					return Void(); // then will never read at 'readServerKeysVersion', so give up
 				}
 				if (retryCount > 10) {
-					TraceEvent(SevDebug, "AuditStorageShardLocLocalViewFailed", data->thisServerID)
+					TraceEvent(SevDebug, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
 					    .detail("Reason", "Timed out")
 					    .detail("LatestCommitVersion", latestCommitVersion)
 					    .detail("LatestVersion", latestVersion)
@@ -5177,7 +5191,7 @@ ACTOR Future<Void> auditStorageMetadataShardLocationLocalViewQ(StorageServer* da
 				retryCount++;
 			}
 		}
-		TraceEvent(SevDebug, "AuditStorageShardLocLocalViewReadDone", data->thisServerID)
+		TraceEvent(SevDebug, "AuditStorageShardStorageServerShardReadDone", data->thisServerID)
 		    .detail("LocalView", describe(ownRangesLocalView))
 		    .detail("SeenByServerKey", describe(ownRangesSeenByServerKey))
 		    .detail("AtVersion", toReadVersion)
@@ -5191,40 +5205,36 @@ ACTOR Future<Void> auditStorageMetadataShardLocationLocalViewQ(StorageServer* da
 			                           describe(ownRangesLocalView).c_str(),
 			                           describe(ownRangesSeenByServerKey).c_str());
 			errors.push_back(error);
-			TraceEvent(SevError, "AuditStorageShardLocLocalViewError", data->thisServerID)
+			TraceEvent(SevError, "AuditStorageShardStorageServerShardError", data->thisServerID)
 			    .detail("ErrorMessage", error)
 			    .detail("Range", res.range)
 			    .detail("AuditServer", data->thisServerID.first())
 			    .detail("LatestCommitVersion", latestCommitVersion)
 			    .detail("LatestVersion", latestVersion);
+			std::cout << error << "\n";
 		}
 
 		// Return result
 		if (!errors.empty()) {
-			/*TraceEvent(SevError, "AuditStorageShardLocLocalViewError", data->thisServerID)
-			        .detail("NumErrors", errors.size())
-			        .detail("Range", res.range)
-			        .detail("VersionType", serverKeysReadVersionType)
-			        .detail("AuditServer", data->thisServerID.first());*/
 			res.setPhase(AuditPhase::Error);
 			wait(persistAuditStateMap(data->cx, res));
-			if (!req.reply.isSet()) { // Why this can be set??
+			if (!req.reply.isSet()) {
 				req.reply.sendError(audit_storage_error());
 			}
 		} else {
-			TraceEvent(SevInfo, "AuditStorageShardLocLocalViewComplete", data->thisServerID)
+			TraceEvent(SevInfo, "AuditStorageShardStorageServerShardComplete", data->thisServerID)
 			    .detail("Range", res.range)
 			    .detail("Version", latestCommitVersion)
 			    .detail("AuditServer", data->thisServerID.first());
 			res.setPhase(AuditPhase::Complete);
 			wait(persistAuditStateMap(data->cx, res));
-			if (!req.reply.isSet()) { // Why this can be set??
+			if (!req.reply.isSet()) {
 				req.reply.send(res);
 			}
 		}
 
 	} catch (Error& e) {
-		TraceEvent(SevInfo, "AuditStorageShardLocLocalViewFailed", data->thisServerID)
+		TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("AuditServer", data->thisServerID.first());
 		// Make sure the history collection is not open due to this audit
@@ -5240,10 +5250,10 @@ ACTOR Future<Void> auditStorageMetadataShardLocationLocalViewQ(StorageServer* da
 
 // Check keyServers space (global view) is consistent with serverKeys space (global view)
 ACTOR Future<Void> auditStorageMetadataShardLocationGlobalViewQ(StorageServer* data, AuditStorageRequest req) {
-	ASSERT(req.getType() == AuditType::ValidateShardLocGlobalView);
+	ASSERT(req.getType() == AuditType::ValidateLocationMetadata);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
-	TraceEvent(SevDebug, "AuditStorageShardLocGlobalViewBegin", data->thisServerID);
+	TraceEvent(SevDebug, "AuditStorageShardLocMetadataBegin", data->thisServerID);
 	state std::vector<std::string> errors;
 	state AuditStorageState res(req.id, req.range, req.getType());
 	state std::vector<Future<Void>> actors;
@@ -5317,7 +5327,7 @@ ACTOR Future<Void> auditStorageMetadataShardLocationGlobalViewQ(StorageServer* d
 					           Traceable<StringRef>::toString(shardRange.end).c_str(),
 					           ssid.first());
 					errors.push_back(error);
-					TraceEvent(SevError, "AuditStorageShardLocGlobalViewError", data->thisServerID)
+					TraceEvent(SevError, "AuditStorageShardLocMetadataError", data->thisServerID)
 					    .detail("ErrorMessage", error)
 					    .detail("Range", req.range)
 					    .detail("Version", version)
@@ -5342,7 +5352,7 @@ ACTOR Future<Void> auditStorageMetadataShardLocationGlobalViewQ(StorageServer* d
 					                           describe(servers).c_str(),
 					                           server.first());
 					errors.push_back(error);
-					TraceEvent(SevError, "AuditStorageShardLocGlobalViewError", data->thisServerID)
+					TraceEvent(SevError, "AuditStorageShardLocMetadataError", data->thisServerID)
 					    .detail("ErrorMessage", error)
 					    .detail("Range", req.range)
 					    .detail("Version", version)
@@ -5351,24 +5361,24 @@ ACTOR Future<Void> auditStorageMetadataShardLocationGlobalViewQ(StorageServer* d
 			}
 		}
 		if (!errors.empty()) {
-			TraceEvent(SevError, "AuditStorageShardLocGlobalViewError", data->thisServerID)
+			TraceEvent(SevError, "AuditStorageShardLocMetadataError", data->thisServerID)
 			    .detail("NumErrors", errors.size())
 			    .detail("Range", req.range)
 			    .detail("Version", version)
 			    .detail("AuditServer", data->thisServerID.first());
 			res.setPhase(AuditPhase::Error);
 			wait(persistAuditStateMap(data->cx, res));
-			if (!req.reply.isSet()) { // Why this can be set??
+			if (!req.reply.isSet()) {
 				req.reply.sendError(audit_storage_error());
 			}
 		} else {
-			TraceEvent(SevInfo, "AuditStorageShardLocGlobalViewComplete", data->thisServerID)
+			TraceEvent(SevInfo, "AuditStorageShardLocMetadataComplete", data->thisServerID)
 			    .detail("Range", req.range)
 			    .detail("Version", version)
 			    .detail("AuditServer", data->thisServerID.first());
 			res.setPhase(AuditPhase::Complete);
 			wait(persistAuditStateMap(data->cx, res));
-			if (!req.reply.isSet()) { // Why this can be set??
+			if (!req.reply.isSet()) {
 				req.reply.send(res);
 			}
 		}
@@ -12130,9 +12140,9 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				self->actors.add(fetchCheckpointKeyValuesQ(self, req));
 			}
 			when(AuditStorageRequest req = waitNext(ssi.auditStorage.getFuture())) {
-				if (req.getType() == AuditType::ValidateShardLocGlobalView) {
+				if (req.getType() == AuditType::ValidateLocationMetadata) {
 					self->actors.add(auditStorageMetadataShardLocationGlobalViewQ(self, req));
-				} else if (req.getType() == AuditType::ValidateShardLocLocalView) {
+				} else if (req.getType() == AuditType::ValidateStorageServerShard) {
 					self->actors.add(auditStorageMetadataShardLocationLocalViewQ(self, req));
 				} else {
 					self->actors.add(auditStorageQ(self, req));

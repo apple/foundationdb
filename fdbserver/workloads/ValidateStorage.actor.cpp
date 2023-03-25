@@ -159,10 +159,10 @@ struct ValidateStorage : TestWorkload {
 		wait(self->auditStorageForType(cx, AuditType::ValidateReplica));
 		TraceEvent("TestValidateReplicaDone");
 
-		wait(self->auditStorageForType(cx, AuditType::ValidateShardLocGlobalView));
+		wait(self->auditStorageForType(cx, AuditType::ValidateLocationMetadata));
 		TraceEvent("TestValidateShardGlobalViewDone");
 
-		wait(self->auditStorageForType(cx, AuditType::ValidateShardLocLocalView));
+		wait(self->auditStorageForType(cx, AuditType::ValidateStorageServerShard));
 		TraceEvent("TestValidateShardLocalViewDone");
 
 		return Void();

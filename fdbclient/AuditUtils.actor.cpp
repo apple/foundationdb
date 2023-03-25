@@ -168,21 +168,3 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateForRange(Database cx,
 
 	return res;
 }
-
-ACTOR Future<Void> persistAuditMetadataState(Database cx, UID id, AuditStorageState auditState) {
-	state Transaction tr(cx);
-
-	loop {
-		try {
-			wait(krmSetRange(&tr,
-			                 auditRangePrefixFor(auditState.getType(), auditState.id),
-			                 auditState.range,
-			                 auditStorageStateValue(auditState)));
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-
-	return Void();
-}

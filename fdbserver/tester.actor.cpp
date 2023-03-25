@@ -1202,6 +1202,9 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 				} else if (phase == AuditPhase::Failed) {
 					TraceEvent(SevWarnAlways, "AuditStorageCorrectnessFailed").detail("AuditID", auditId);
 					break;
+				} else if (phase == AuditPhase::Error) {
+					TraceEvent(SevError, "AuditStorageCorrectnessError").detail("AuditID", auditId);
+					break;
 				} else {
 					ASSERT(phase == AuditPhase::Complete);
 					break;
@@ -1398,7 +1401,11 @@ ACTOR Future<bool> runTest(Database cx,
 			// Run auditStorage
 			if (quiescent) {
 				try {
-					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateHA), 5000.0));
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateHA), 1000.0));
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateReplica), 1000.0));
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateLocationMetadata), 1000.0));
+					// wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateStorageServerShard),
+					// 1000.0));
 				} catch (Error& e) {
 					ok = false;
 					TraceEvent(SevError, "TestFailure")

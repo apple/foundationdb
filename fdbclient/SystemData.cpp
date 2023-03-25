@@ -332,23 +332,6 @@ const Key auditRangePrefixFor(const AuditType type, const UID& auditId) {
 	return wr.toValue();
 }
 
-const Key auditMetaItemKey(const UID& auditId, const UID& auditorId) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(auditMetaItemsPrefix);
-	wr << auditId;
-	wr.serializeBytes("/"_sr);
-	wr << auditorId;
-	return wr.toValue();
-}
-
-const KeyRange auditMetaItemsRangeFor(const UID& auditId) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(auditMetaItemsPrefix);
-	wr << auditId;
-	wr.serializeBytes("/"_sr);
-	return prefixRange(wr.toValue());
-}
-
 const Value auditStorageStateValue(const AuditStorageState& auditStorageState) {
 	return ObjectWriter::toValue(auditStorageState, IncludeVersion());
 }

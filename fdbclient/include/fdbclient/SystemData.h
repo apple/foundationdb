@@ -105,8 +105,6 @@ const Key auditKey(const AuditType type, const UID& auditId);
 const KeyRange auditKeyRange(const AuditType type);
 const Key auditRangeKey(const UID& auditId, const KeyRef& key);
 const Key auditRangePrefixFor(const AuditType type, const UID& auditId);
-const Key auditMetaItemKey(const UID& auditId, const UID& auditorId);
-const KeyRange auditMetaItemsRangeFor(const UID& auditId);
 
 const Value auditStorageStateValue(const AuditStorageState& auditStorageState);
 AuditStorageState decodeAuditStorageState(const ValueRef& value);

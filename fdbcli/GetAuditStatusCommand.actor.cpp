@@ -41,10 +41,10 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 		type = AuditType::ValidateHA;
 	} else if (tokencmp(tokens[1], "replica")) {
 		type = AuditType::ValidateReplica;
-	} else if (tokencmp(tokens[1], "shardglobal")) {
-		type = AuditType::ValidateShardLocGlobalView;
-	} else if (tokencmp(tokens[1], "shardlocal")) {
-		type = AuditType::ValidateShardLocLocalView;
+	} else if (tokencmp(tokens[1], "locationmetadata")) {
+		type = AuditType::ValidateLocationMetadata;
+	} else if (tokencmp(tokens[1], "ssshard")) {
+		type = AuditType::ValidateStorageServerShard;
 	} else {
 		printUsage(tokens[0]);
 		return false;
