@@ -132,8 +132,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 		{
 			try {
 				std::vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
-				ProcessData excludeWorker = deterministicRandom()->randomChoice(workers);
-				state std::string workerAddress = formatIpPort(excludeWorker.address.ip, excludeWorker.address.port);
+				state std::string workerAddress = "123.4.56.7:9876"; // Use a random address to not impact the cluster.
 
 				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				state Optional<Value> versionKey0 = wait(tx->get(excludedServersVersionKey));
