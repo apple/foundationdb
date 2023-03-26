@@ -36,9 +36,6 @@
 #define BOOST_REGEX_NO_LIB
 #endif
 #include <boost/asio.hpp>
-#if defined(HAVE_WOLFSSL)
-#include <wolfssl/options.h>
-#endif
 #include "boost/asio/ssl.hpp"
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/range.hpp>

@@ -418,7 +418,7 @@ ACTOR Future<bool> metaclusterListCommand(Reference<IDatabase> db, std::vector<S
 
 // metacluster get command
 ACTOR Future<bool> metaclusterGetCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() > 4 || (tokens.size() == 4 && tokens[3] != "JSON"_sr)) {
+	if (tokens.size() > 4 || tokens.size() < 3 || (tokens.size() == 4 && tokens[3] != "JSON"_sr)) {
 		fmt::print("Usage: metacluster get <NAME> [JSON]\n\n");
 		fmt::print("Prints metadata associated with the given data cluster.\n");
 		fmt::print("If JSON is specified, then the output will be in JSON format.\n");
