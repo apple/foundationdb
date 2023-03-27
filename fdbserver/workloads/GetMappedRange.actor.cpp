@@ -48,8 +48,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	//	const bool SPLIT_RECORDS = deterministicRandom()->random01() < 0.5;
 	const bool SPLIT_RECORDS = true;
 	const static int SPLIT_SIZE = 3;
-	int checkStorageQueueSeconds;
-	int queueMaxLength;
+	double checkStorageQueueSeconds;
+	double queueMaxLength;
 
 	GetMappedRangeWorkload(WorkloadContext const& wcx) : ApiWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
@@ -462,7 +462,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			StatusObjectReader statusObj(result);
 			state StatusObjectReader statusObjCluster;
 			state StatusObjectReader processesMap;
-			state long queryQueueMax = 0;
+			state int64_t queryQueueMax = 0;
 			state int waitInterval = 2;
 			if (!statusObj.get("cluster", statusObjCluster)) {
 				TraceEvent("NoCluster");
