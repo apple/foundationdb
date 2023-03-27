@@ -433,21 +433,35 @@ public:
 			                                  getEncryptAuthTokenMode(ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 			                                  BlobCipherMetrics::KV_REDWOOD);
 			Arena arena;
-			StringRef ciphertext;
+
 			if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 				BlobCipherEncryptHeaderRef headerRef;
-				ciphertext = cipher.encrypt(payload, len, &headerRef, arena);
+				if (FLOW_KNOBS->ENCRYPT_INPLACE_ENABLED) {
+					cipher.encryptInplace(payload, len, &headerRef);
+				} else {
+					StringRef ciphertext = cipher.encrypt(payload, len, &headerRef, arena);
+					ASSERT_EQ(len, ciphertext.size());
+					memcpy(payload, ciphertext.begin(), len);
+				}
+
 				Standalone<StringRef> serializedHeader = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
-				ASSERT(serializedHeader.size() <= headerSize);
+				ASSERT(serializedHeader.size() <= BlobCipherEncryptHeader::headerSize);
 				memcpy(h->encryptionHeaderBuf, serializedHeader.begin(), serializedHeader.size());
-				if (serializedHeader.size() < headerSize) {
-					memset(h->encryptionHeaderBuf + serializedHeader.size(), 0, headerSize - serializedHeader.size());
+				if (serializedHeader.size() < BlobCipherEncryptHeader::headerSize) {
+					memset(h->encryptionHeaderBuf + serializedHeader.size(),
+					       0,
+					       BlobCipherEncryptHeader::headerSize - serializedHeader.size());
 				}
 			} else {
-				ciphertext = cipher.encrypt(payload, len, &h->encryption, arena)->toStringRef();
+				if (FLOW_KNOBS->ENCRYPT_INPLACE_ENABLED) {
+					cipher.encryptInplace(payload, len, &h->encryption);
+				} else {
+					StringRef ciphertext = cipher.encrypt(payload, len, &h->encryption, arena)->toStringRef();
+					ASSERT_EQ(len, ciphertext.size());
+					memcpy(payload, ciphertext.begin(), len);
+				}
 			}
-			ASSERT_EQ(len, ciphertext.size());
-			memcpy(payload, ciphertext.begin(), len);
+
 			if constexpr (encodingType == AESEncryption) {
 				h->checksum = XXH3_64bits_withSeed(payload, len, seed);
 			}
@@ -472,23 +486,33 @@ public:
 				}
 			}
 			Arena arena;
-			StringRef plaintext;
 			if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 				BlobCipherEncryptHeaderRef headerRef = getEncryptionHeaderRef(header);
 				DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey,
 				                                  cipherKeys.cipherHeaderKey,
 				                                  headerRef.getIV(),
 				                                  BlobCipherMetrics::KV_REDWOOD);
-				plaintext = cipher.decrypt(payload, len, headerRef, arena);
+				if (FLOW_KNOBS->ENCRYPT_INPLACE_ENABLED) {
+					cipher.decryptInplace(payload, len, headerRef);
+				} else {
+					StringRef plaintext = cipher.decrypt(payload, len, headerRef, arena);
+					ASSERT_EQ(len, plaintext.size());
+					memcpy(payload, plaintext.begin(), len);
+				}
+
 			} else {
 				DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey,
 				                                  cipherKeys.cipherHeaderKey,
 				                                  h->encryption.iv,
 				                                  BlobCipherMetrics::KV_REDWOOD);
-				plaintext = cipher.decrypt(payload, len, h->encryption, arena)->toStringRef();
+				if (FLOW_KNOBS->ENCRYPT_INPLACE_ENABLED) {
+					cipher.decryptInplace(payload, len, h->encryption);
+				} else {
+					StringRef plaintext = cipher.decrypt(payload, len, h->encryption, arena)->toStringRef();
+					ASSERT_EQ(len, plaintext.size());
+					memcpy(payload, plaintext.begin(), len);
+				}
 			}
-			ASSERT_EQ(len, plaintext.size());
-			memcpy(payload, plaintext.begin(), len);
 		}
 	};
 
