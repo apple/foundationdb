@@ -5119,7 +5119,7 @@ std::vector<KeyRange> getServerShardsByReadingShardInfo(StorageServer* data, Ver
 }
 
 // Check shardInfo of SS is consistent with serverKeys space
-ACTOR Future<Void> auditStorageStorageServerShardViewQ(StorageServer* data, AuditStorageRequest req) {
+ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditStorageRequest req) {
 	TraceEvent(SevDebug, "AuditStorageShardStorageServerShardBegin", data->thisServerID);
 	ASSERT(req.getType() == AuditType::ValidateStorageServerShard);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
@@ -5166,7 +5166,7 @@ ACTOR Future<Void> auditStorageStorageServerShardViewQ(StorageServer* data, Audi
 				    .detail("Reason", "Catch up version failed")
 				    .detail("Version", VersionBeforeWait)
 				    .detail("KnownCommitVersion", KnownCommitVersionBeforeWait)
-				    .detail("AuditServer", data->thisServerID.first());
+				    .detail("AuditServer", data->thisServerID);
 				data->unregisterAuditsForShardAssignmentHistoryCollection(req.id);
 				req.reply.sendError(audit_storage_failed()); // we cannot decide result for this time
 				return Void();
@@ -5182,7 +5182,7 @@ ACTOR Future<Void> auditStorageStorageServerShardViewQ(StorageServer* data, Audi
 				    .detail("Reason", "KnownCommittedVersion larger than version")
 				    .detail("Version", VersionAfterWait)
 				    .detail("KnownCommitVersion", KnownCommitVersionAfterWait)
-				    .detail("AuditServer", data->thisServerID.first());
+				    .detail("AuditServer", data->thisServerID);
 				data->unregisterAuditsForShardAssignmentHistoryCollection(req.id);
 				// We cannot decide result for this time, because ServerKeys may not be updated yet
 				req.reply.sendError(audit_storage_failed());
@@ -5207,7 +5207,7 @@ ACTOR Future<Void> auditStorageStorageServerShardViewQ(StorageServer* data, Audi
 				    .detail("KnownCommitVersion", KnownCommitVersionBeforeWait)
 				    .detail("KnownCommitVersionnNew", KnownCommitVersionAfterWait)
 				    .detail("ShardAssignmentsCountc", shardAssignments.size())
-				    .detail("AuditServer", data->thisServerID.first());
+				    .detail("AuditServer", data->thisServerID);
 				data->unregisterAuditsForShardAssignmentHistoryCollection(req.id);
 				req.reply.sendError(audit_storage_failed()); // we cannot decide result for this time
 				return Void();
@@ -5237,14 +5237,14 @@ ACTOR Future<Void> auditStorageStorageServerShardViewQ(StorageServer* data, Audi
 		// Compare
 		if (!rangesSame(ownRangesSeenByServerKey, ownRangesLocalView)) {
 			std::string error = format("Local view mismatch on Server(%016llx):\t LocalView: %s; ServerKey: %s",
-			                           data->thisServerID.first(),
+			                           data->thisServerID,
 			                           describe(ownRangesLocalView).c_str(),
 			                           describe(ownRangesSeenByServerKey).c_str());
 			errors.push_back(error);
 			TraceEvent(SevError, "AuditStorageShardStorageServerShardError", data->thisServerID)
 			    .detail("ErrorMessage", error)
 			    .detail("Range", res.range)
-			    .detail("AuditServer", data->thisServerID.first());
+			    .detail("AuditServer", data->thisServerID);
 			std::cout << error << "\n";
 		}
 
@@ -5257,7 +5257,7 @@ ACTOR Future<Void> auditStorageStorageServerShardViewQ(StorageServer* data, Audi
 			TraceEvent(SevInfo, "AuditStorageShardStorageServerShardComplete", data->thisServerID)
 			    .detail("Range", res.range)
 			    .detail("Version", toReadVersion)
-			    .detail("AuditServer", data->thisServerID.first());
+			    .detail("AuditServer", data->thisServerID);
 			res.setPhase(AuditPhase::Complete);
 			wait(persistAuditStateMap(data->cx, res));
 			req.reply.send(res);
@@ -5266,7 +5266,7 @@ ACTOR Future<Void> auditStorageStorageServerShardViewQ(StorageServer* data, Audi
 	} catch (Error& e) {
 		TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
-		    .detail("AuditServer", data->thisServerID.first());
+		    .detail("AuditServer", data->thisServerID);
 		// Make sure the history collection is not open due to this audit
 		data->unregisterAuditsForShardAssignmentHistoryCollection(req.id, false);
 		req.reply.sendError(audit_storage_failed());
@@ -5279,7 +5279,7 @@ ACTOR Future<Void> auditStorageStorageServerShardViewQ(StorageServer* data, Audi
 }
 
 // Check keyServers space is consistent with serverKeys space
-ACTOR Future<Void> auditStorageLocationMetadataViewQ(StorageServer* data, AuditStorageRequest req) {
+ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStorageRequest req) {
 	ASSERT(req.getType() == AuditType::ValidateLocationMetadata);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
@@ -12223,9 +12223,9 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 			}
 			when(AuditStorageRequest req = waitNext(ssi.auditStorage.getFuture())) {
 				if (req.getType() == AuditType::ValidateLocationMetadata) {
-					self->actors.add(auditStorageLocationMetadataViewQ(self, req));
+					self->actors.add(auditStorageLocationMetadataQ(self, req));
 				} else if (req.getType() == AuditType::ValidateStorageServerShard) {
-					self->actors.add(auditStorageStorageServerShardViewQ(self, req));
+					self->actors.add(auditStorageStorageServerShardQ(self, req));
 				} else {
 					self->actors.add(auditStorageQ(self, req));
 				}
