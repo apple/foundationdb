@@ -2182,8 +2182,6 @@ void DatabaseContext::expireThrottles() {
 	}
 }
 
-extern IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs);
-
 // Creates a database object that represents a connection to a cluster
 // This constructor uses a preallocated DatabaseContext that may have been created
 // on another thread
@@ -2205,7 +2203,7 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 			FlowTransport::transport().initMetrics();
 			initTraceEventMetrics();
 
-			auto publicIP = determinePublicIPAutomatically(connRecord->getConnectionString());
+			auto publicIP = connRecord->getConnectionString().determineLocalSourceIP();
 			selectTraceFormatter(networkOptions.traceFormat);
 			selectTraceClockSource(networkOptions.traceClockSource);
 			addUniversalTraceField("ClientDescription",
@@ -8184,9 +8182,10 @@ Future<Version> DatabaseContext::verifyBlobRange(const KeyRange& range, Optional
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
                                                                                       bool primary,
                                                                                       bool use_system_priority) {
-	state const Key readKey = perpetualStorageWiggleIDPrefix.withSuffix(primary ? "primary/"_sr : "remote/"_sr);
-	state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(readKey,
-	                                                                                          IncludeVersion());
+	state StorageWiggleData wiggleState;
+	state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap =
+	    wiggleState.wigglingStorageServer(PrimaryRegion(primary));
+
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state KeyBackedRangeResult<std::pair<UID, StorageWiggleValue>> res;
 

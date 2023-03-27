@@ -621,7 +621,7 @@ class TagUidMap : public KeyBackedMap<std::string, UidAndAbortedFlagT> {
 	                                                           Snapshot snapshot);
 
 public:
-	TagUidMap(const StringRef& prefix) : TagMap(LiteralStringRef("tag->uid/").withPrefix(prefix)), prefix(prefix) {}
+	TagUidMap(const StringRef& prefix) : TagMap("tag->uid/"_sr.withPrefix(prefix)), prefix(prefix) {}
 
 	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr,
 	                                         Snapshot snapshot = Snapshot::False) {
@@ -631,34 +631,41 @@ public:
 	Key prefix;
 };
 
-static inline KeyBackedTag makeRestoreTag(std::string tagName) {
-	return KeyBackedTag(tagName, fileRestorePrefixRange.begin);
-}
+class KeyBackedTaskConfig : public KeyBackedStruct {
+protected:
+	UID uid;
+	Subspace configSpace;
 
-static inline KeyBackedTag makeBackupTag(std::string tagName) {
-	return KeyBackedTag(tagName, fileBackupPrefixRange.begin);
-}
-
-static inline Future<std::vector<KeyBackedTag>> getAllRestoreTags(Reference<ReadYourWritesTransaction> tr,
-                                                                  Snapshot snapshot = Snapshot::False) {
-	return TagUidMap(fileRestorePrefixRange.begin).getAll(tr, snapshot);
-}
-
-static inline Future<std::vector<KeyBackedTag>> getAllBackupTags(Reference<ReadYourWritesTransaction> tr,
-                                                                 Snapshot snapshot = Snapshot::False) {
-	return TagUidMap(fileBackupPrefixRange.begin).getAll(tr, snapshot);
-}
-
-class KeyBackedConfig {
 public:
 	static struct {
 		static TaskParam<UID> uid() { return LiteralStringRef(__FUNCTION__); }
 	} TaskParams;
 
-	KeyBackedConfig(StringRef prefix, UID uid = UID())
-	  : uid(uid), prefix(prefix), configSpace(uidPrefixKey(LiteralStringRef("uid->config/").withPrefix(prefix), uid)) {}
+	KeyBackedTaskConfig(StringRef prefix, UID uid = UID())
+	  : KeyBackedStruct(prefix), uid(uid), configSpace(uidPrefixKey("uid->config/"_sr.withPrefix(prefix), uid)) {}
 
-	KeyBackedConfig(StringRef prefix, Reference<Task> task) : KeyBackedConfig(prefix, TaskParams.uid().get(task)) {}
+	KeyBackedTaskConfig(StringRef prefix, Reference<Task> task)
+	  : KeyBackedTaskConfig(prefix, TaskParams.uid().get(task)) {}
+
+	KeyBackedProperty<std::string> tag() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+
+	UID getUid() { return uid; }
+
+	Key getUidAsKey() { return BinaryWriter::toValue(uid, Unversioned()); }
+
+	template <class TrType>
+	void clear(TrType tr) {
+		tr->clear(configSpace.range());
+	}
+
+	// lastError is a pair of error message and timestamp expressed as an int64_t
+	KeyBackedProperty<std::pair<std::string, Version>> lastError() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	KeyBackedMap<int64_t, std::pair<std::string, Version>> lastErrorPerType() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
 
 	Future<Void> toTask(Reference<ReadYourWritesTransaction> tr,
 	                    Reference<Task> task,
@@ -685,23 +692,6 @@ public:
 		});
 	}
 
-	KeyBackedProperty<std::string> tag() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
-
-	UID getUid() { return uid; }
-
-	Key getUidAsKey() { return BinaryWriter::toValue(uid, Unversioned()); }
-
-	void clear(Reference<ReadYourWritesTransaction> tr) { tr->clear(configSpace.range()); }
-
-	// lastError is a pair of error message and timestamp expressed as an int64_t
-	KeyBackedProperty<std::pair<std::string, Version>> lastError() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
-
-	KeyBackedMap<int64_t, std::pair<std::string, Version>> lastErrorPerType() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
-
 	// Updates the error per type map and the last error property
 	Future<Void> updateErrorInfo(Database cx, Error e, std::string message) {
 		// Avoid capture of this ptr
@@ -718,12 +708,25 @@ public:
 			});
 		});
 	}
-
-protected:
-	UID uid;
-	Key prefix;
-	Subspace configSpace;
 };
+
+static inline KeyBackedTag makeRestoreTag(std::string tagName) {
+	return KeyBackedTag(tagName, fileRestorePrefixRange.begin);
+}
+
+static inline KeyBackedTag makeBackupTag(std::string tagName) {
+	return KeyBackedTag(tagName, fileBackupPrefixRange.begin);
+}
+
+static inline Future<std::vector<KeyBackedTag>> getAllRestoreTags(Reference<ReadYourWritesTransaction> tr,
+                                                                  Snapshot snapshot = Snapshot::False) {
+	return TagUidMap(fileRestorePrefixRange.begin).getAll(tr, snapshot);
+}
+
+static inline Future<std::vector<KeyBackedTag>> getAllBackupTags(Reference<ReadYourWritesTransaction> tr,
+                                                                 Snapshot snapshot = Snapshot::False) {
+	return TagUidMap(fileBackupPrefixRange.begin).getAll(tr, snapshot);
+}
 
 template <>
 inline Standalone<StringRef> TupleCodec<Reference<IBackupContainer>>::pack(Reference<IBackupContainer> const& bc) {
@@ -763,10 +766,10 @@ inline Reference<IBackupContainer> TupleCodec<Reference<IBackupContainer>>::unpa
 	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName);
 }
 
-class BackupConfig : public KeyBackedConfig {
+class BackupConfig : public KeyBackedTaskConfig {
 public:
-	BackupConfig(UID uid = UID()) : KeyBackedConfig(fileBackupPrefixRange.begin, uid) {}
-	BackupConfig(Reference<Task> task) : KeyBackedConfig(fileBackupPrefixRange.begin, task) {}
+	BackupConfig(UID uid = UID()) : KeyBackedTaskConfig(fileBackupPrefixRange.begin, uid) {}
+	BackupConfig(Reference<Task> task) : KeyBackedTaskConfig(fileBackupPrefixRange.begin, task) {}
 
 	// rangeFileMap maps a keyrange file's End to its Begin and Filename
 	struct RangeSlice {

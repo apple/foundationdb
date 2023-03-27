@@ -21,7 +21,6 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/Arena.h"
 #include "flow/TDMetric.actor.h"
@@ -843,12 +842,13 @@ ProcessClass decodeProcessClassValue(ValueRef const& value) {
 const KeyRangeRef configKeys(LiteralStringRef("\xff/conf/"), LiteralStringRef("\xff/conf0"));
 const KeyRef configKeysPrefix = configKeys.begin;
 
-const KeyRef perpetualStorageWiggleKey(LiteralStringRef("\xff/conf/perpetual_storage_wiggle"));
-const KeyRef perpetualStorageWiggleLocalityKey(LiteralStringRef("\xff/conf/perpetual_storage_wiggle_locality"));
-const KeyRef perpetualStorageWiggleIDPrefix(
-    LiteralStringRef("\xff/storageWiggleID/")); // withSuffix /primary or /remote
-const KeyRef perpetualStorageWiggleStatsPrefix(
-    LiteralStringRef("\xff/storageWiggleStats/")); // withSuffix /primary or /remote
+const KeyRef perpetualStorageWiggleKey("\xff/conf/perpetual_storage_wiggle"_sr);
+const KeyRef perpetualStorageWiggleLocalityKey("\xff/conf/perpetual_storage_wiggle_locality"_sr);
+// The below two are there for compatible upgrade and downgrade. After 7.3, the perpetual wiggle related keys should use
+// format "\xff/storageWiggle/[primary | remote]/[fieldName]". See class StorageWiggleData for the data schema.
+const KeyRef perpetualStorageWiggleIDPrefix("\xff/storageWiggleID/"_sr); // withSuffix /primary/ or /remote/
+const KeyRef perpetualStorageWiggleStatsPrefix("\xff/storageWiggleStats/"_sr); // withSuffix /primary or /remote
+const KeyRef perpetualStorageWigglePrefix("\xff/storageWiggle/"_sr);
 
 const KeyRef triggerDDTeamInfoPrintKey(LiteralStringRef("\xff/triggerDDTeamInfoPrint"));
 

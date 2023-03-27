@@ -26,7 +26,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
@@ -49,7 +49,7 @@
 #include "flow/serialize.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
-
+#include "fdbclient/StorageWiggleMetrics.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int priority) {
@@ -153,29 +153,26 @@ Optional<UID> StorageWiggler::getNextServerId(bool necessaryOnly) {
 }
 
 Future<Void> StorageWiggler::resetStats() {
-	auto newMetrics = StorageWiggleMetrics();
-	newMetrics.smoothed_round_duration = metrics.smoothed_round_duration;
-	newMetrics.smoothed_wiggle_duration = metrics.smoothed_wiggle_duration;
-	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->isPrimary(), newMetrics);
+	metrics.reset();
+	return runRYWTransaction(teamCollection->cx, [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		return wiggleData.resetStorageWiggleMetrics(tr, PrimaryRegion(teamCollection->isPrimary()), metrics);
+	});
 }
 
 Future<Void> StorageWiggler::restoreStats() {
-	auto& metricsRef = metrics;
-	auto assignFunc = [&metricsRef](Optional<Value> v) {
-		if (v.present()) {
-			metricsRef = BinaryReader::fromStringRef<StorageWiggleMetrics>(v.get(), IncludeVersion());
-		}
-		return Void();
-	};
-	auto readFuture = StorageWiggleMetrics::runGetTransaction(teamCollection->cx, teamCollection->isPrimary());
-	return map(readFuture, assignFunc);
+	auto readFuture = wiggleData.storageWiggleMetrics(PrimaryRegion(teamCollection->isPrimary()))
+	                      .getD(teamCollection->cx.getReference(), Snapshot::False, metrics);
+	return store(metrics, readFuture);
 }
+
 Future<Void> StorageWiggler::startWiggle() {
 	metrics.last_wiggle_start = StorageMetadataType::currentTime();
 	if (shouldStartNewRound()) {
 		metrics.last_round_start = metrics.last_wiggle_start;
 	}
-	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->isPrimary(), metrics);
+	return runRYWTransaction(teamCollection->cx, [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		return wiggleData.updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
+	});
 }
 
 Future<Void> StorageWiggler::finishWiggle() {
@@ -190,7 +187,9 @@ Future<Void> StorageWiggler::finishWiggle() {
 		duration = metrics.last_round_finish - metrics.last_round_start;
 		metrics.smoothed_round_duration.setTotal((double)duration);
 	}
-	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->isPrimary(), metrics);
+	return runRYWTransaction(teamCollection->cx, [this](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		return wiggleData.updateStorageWiggleMetrics(tr, metrics, PrimaryRegion(teamCollection->isPrimary()));
+	});
 }
 
 ACTOR Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
@@ -659,7 +658,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    &normalDDQueueErrors()));
 
 			std::vector<DDTeamCollection*> teamCollectionsPtrs;
-			primaryTeamCollection = makeReference<DDTeamCollection>(
+			primaryTeamCollection = makeReference<DDTeamCollection>(DDTeamCollectionInitParams{
 			    cx,
 			    self->ddId,
 			    self->lock,
@@ -675,28 +674,30 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    processingWiggle,
 			    getShardMetrics,
 			    removeFailedServer,
-			    getUnhealthyRelocationCount);
+			    getUnhealthyRelocationCount,
+			    getAverageShardBytes });
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			auto recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
 			    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
 			if (self->configuration.usableRegions > 1) {
-				remoteTeamCollection =
-				    makeReference<DDTeamCollection>(cx,
-				                                    self->ddId,
-				                                    self->lock,
-				                                    self->relocationProducer,
-				                                    self->shardsAffectedByTeamFailure,
-				                                    self->configuration,
-				                                    self->remoteDcIds,
-				                                    Optional<std::vector<Optional<Key>>>(),
-				                                    readyToStart.getFuture() && remoteRecovered(self->dbInfo),
-				                                    zeroHealthyTeams[1],
-				                                    IsPrimary::False,
-				                                    processingUnhealthy,
-				                                    processingWiggle,
-				                                    getShardMetrics,
-				                                    removeFailedServer,
-				                                    getUnhealthyRelocationCount);
+				remoteTeamCollection = makeReference<DDTeamCollection>(
+				    DDTeamCollectionInitParams{ cx,
+				                                self->ddId,
+				                                self->lock,
+				                                self->relocationProducer,
+				                                self->shardsAffectedByTeamFailure,
+				                                self->configuration,
+				                                self->remoteDcIds,
+				                                Optional<std::vector<Optional<Key>>>(),
+				                                readyToStart.getFuture() && remoteRecovered(self->dbInfo),
+				                                zeroHealthyTeams[1],
+				                                IsPrimary::False,
+				                                processingUnhealthy,
+				                                processingWiggle,
+				                                getShardMetrics,
+				                                removeFailedServer,
+				                                getUnhealthyRelocationCount,
+				                                getAverageShardBytes });
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(reportErrorsExcept(
