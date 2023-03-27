@@ -312,16 +312,22 @@ void TagPartitionedLogSystem::pergeOldRecoveredGenerations() {
 	    .detail("RemoteRecoveredVersion", remoteRecoveredVersion->get());
 	for (int i = 0; i < oldLogData.size(); ++i) {
 		const auto& oldData = oldLogData[i];
-		if (oldData.epochBegin < oldestGenerationStartVersion) {
+		// Remove earlier generation that TLog data are
+		//  - consumed by all storage servers
+		//  - no longer used by backup workers
+		if (oldData.epochBegin < oldestGenerationStartVersion &&
+		    (oldData.tLogs[0]->backupWorkers.size() == 0 || oldData.epoch < oldestBackupEpoch)) {
 			if (g_network->isSimulated()) {
 				for (int j = i + 1; j < oldLogData.size(); ++j) {
 					ASSERT(oldLogData[j].epochBegin < oldestGenerationStartVersion);
+					ASSERT(oldData.tLogs[0]->backupWorkers.size() == 0 || oldLogData[j].epoch < oldestBackupEpoch);
 				}
 			}
 			for (int j = i; j < oldLogData.size(); ++j) {
 				TraceEvent("PergeOldTLogGeneration")
 				    .detail("Begin", oldLogData[j].epochBegin)
 				    .detail("End", oldLogData[j].epochEnd)
+				    .detail("Epoch", oldLogData[j].epoch)
 				    .detail("Index", j);
 			}
 			oldLogData.resize(i);

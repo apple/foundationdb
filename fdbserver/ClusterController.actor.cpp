@@ -908,7 +908,6 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	} else {
 		// TODO(zhewu): Remove logGenerations. It is not used anywhere.
 		self->db.logGenerations = req.logSystemConfig.oldTLogs.size();
-		// self->db.logGenerations = std::max<int>(self->db.logGenerations, req.logSystemConfig.oldTLogs.size());
 	}
 
 	db->masterRegistrationCount = req.registrationCount;

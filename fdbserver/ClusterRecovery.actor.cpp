@@ -479,7 +479,8 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		    .detail("NewState.OldTLogs", newState.oldTLogData.size())
 		    .detail("NewState.EncryptionAtRestMode", newState.encryptionAtRestMode.toString())
 		    .detail("Expected.tlogs",
-		            configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>()));
+		            configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>()))
+		    .detail("RecoveryCount", newState.recoveryCount);
 		wait(self->cstate.write(newState, finalUpdate));
 		if (self->cstateUpdated.canBeSet()) {
 			self->cstateUpdated.send(Void());
