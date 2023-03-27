@@ -3,3 +3,4 @@ cffi==1.15.1
 cryptography==38.0.3
 pycparser==2.21
 toml==0.10.2
+certifi
