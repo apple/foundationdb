@@ -33,7 +33,7 @@
 #include "flow/Platform.h"
 #include "flow/actorcompiler.h" // This must be the last include.
 
-extern volatile thread_local int profilingEnabled;
+extern volatile thread_local int flowProfilingEnabled;
 
 static uint64_t sys_gettid() {
 	return syscall(__NR_gettid);
@@ -146,7 +146,7 @@ struct Profiler {
 		if (inSigHandler.exchange(true)) {
 			return;
 		}
-		if (profilingEnabled) {
+		if (flowProfilingEnabled) {
 			double t = timer();
 			output_buffer->push(*(void**)&t);
 			size_t n = platform::raw_backtrace(addresses, 256);

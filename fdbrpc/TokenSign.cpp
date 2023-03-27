@@ -36,9 +36,6 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
-#if defined(HAVE_WOLFSSL)
-#include <wolfssl/options.h>
-#endif
 #include <openssl/ec.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
