@@ -10,6 +10,7 @@ import hashlib
 from fdb_version import CURRENT_VERSION, FUTURE_VERSION
 
 from test_util import random_alphanum_string
+import certifi
 
 SUPPORTED_PLATFORMS = ["x86_64", "aarch64"]
 FDB_DOWNLOAD_ROOT = "https://github.com/apple/foundationdb/releases/download/"
@@ -96,9 +97,9 @@ class FdbBinaryDownloader:
                 assert False, "Failed to download {} after {} attempts".format(local_file_tmp, MAX_DOWNLOAD_ATTEMPTS)
             try:
                 print("Downloading '{}' to '{}'...".format(remote_file, local_file_tmp))
-                request.urlretrieve(remote_file, local_file_tmp)
+                request.urlretrieve(remote_file, local_file_tmp, cafile=certifi.where())
                 print("Downloading '{}' to '{}'...".format(remote_sha256, local_sha256))
-                request.urlretrieve(remote_sha256, local_sha256)
+                request.urlretrieve(remote_sha256, local_sha256, cafile=certifi.where())
                 print("Download complete")
             except Exception as e:
                 print("Retrying on error:", e)
