@@ -309,14 +309,14 @@ void TagPartitionedLogSystem::pergeOldRecoveredGenerations() {
 	Version oldestGenerationStartVersion = std::min(recoveredVersion->get(), remoteRecoveredVersion->get());
 	TraceEvent("ToCoreStateOldestGenerationStartVersion")
 	    .detail("RecoveredVersion", recoveredVersion->get())
-	    .detail("RemoteRecoveredVersion", remoteRecoveredVersion->get());
+	    .detail("RemoteRecoveredVersion", remoteRecoveredVersion->get())
+	    .detail("OldestBackupEpoch", oldestBackupEpoch);
 	for (int i = 0; i < oldLogData.size(); ++i) {
 		const auto& oldData = oldLogData[i];
 		// Remove earlier generation that TLog data are
 		//  - consumed by all storage servers
 		//  - no longer used by backup workers
-		if (oldData.epochBegin < oldestGenerationStartVersion &&
-		    (oldData.tLogs[0]->backupWorkers.size() == 0 || oldData.epoch < oldestBackupEpoch)) {
+		if (oldData.epochBegin < oldestGenerationStartVersion && oldData.epoch < oldestBackupEpoch) {
 			if (g_network->isSimulated()) {
 				for (int j = i + 1; j < oldLogData.size(); ++j) {
 					ASSERT(oldLogData[j].epochBegin < oldestGenerationStartVersion);
