@@ -3268,13 +3268,13 @@ void DDTeamCollection::updateTeamPivotValues() {
 			             std::min(SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO, teamAvailableSpace[pivot]));
 
 			std::nth_element(
-			    teamAverageCPU_index.begin(), teamAverageCPU_index.end() + cpuPivotIndex, teamAverageCPU_index.end());
+			    teamAverageCPU_index.begin(), teamAverageCPU_index.begin() + cpuPivotIndex, teamAverageCPU_index.end());
 			pivotCPU = std::min(SERVER_KNOBS->MAX_DEST_CPU_PERCENT, teamAverageCPU_index[cpuPivotIndex].first);
 			// set high CPU for teams >= pivot CPU
-			for (size_t i = cpuPivotIndex; i < teamAverageCPU_index.size(); ++i) {
+			for (int i = cpuPivotIndex; i < teamAverageCPU_index.size(); ++i) {
 				teams[teamAverageCPU_index[i].second]->setLastHighCPUTime(lastPivotValuesUpdate);
 			}
-			for (size_t i = cpuPivotIndex - 1; i >= 0 && teamAverageCPU_index[i].first >= pivotCPU; --i) {
+			for (int i = cpuPivotIndex - 1; i >= 0 && teamAverageCPU_index[i].first >= pivotCPU; --i) {
 				teams[teamAverageCPU_index[i].second]->setLastHighCPUTime(lastPivotValuesUpdate);
 			}
 
