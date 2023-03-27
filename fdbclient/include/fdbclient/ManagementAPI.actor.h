@@ -67,7 +67,7 @@ Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQu
 // necessarily waiting for the servers to be evacuated.  A NetworkAddress with a port of 0 means all servers on the
 // given IP.
 ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> servers, bool failed = false);
-void excludeServers(Transaction& tr, std::vector<AddressExclusion>& servers, bool failed = false);
+ACTOR Future<Void> excludeServers(Transaction* tr, std::vector<AddressExclusion> servers, bool failed = false);
 
 // Exclude the servers matching the given set of localities from use as state servers.  Returns as soon as the change
 // is durable, without necessarily waiting for the servers to be evacuated.
@@ -88,9 +88,15 @@ ACTOR Future<Void> includeLocalities(Database cx,
 // the given IP.
 ACTOR Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass processClass);
 
-// Get the current list of excluded servers
-ACTOR Future<std::vector<AddressExclusion>> getExcludedServers(Database cx);
-ACTOR Future<std::vector<AddressExclusion>> getExcludedServers(Transaction* tr);
+// Get the current list of excluded servers including both "exclude" and "failed".
+ACTOR Future<std::vector<AddressExclusion>> getAllExcludedServers(Database cx);
+ACTOR Future<std::vector<AddressExclusion>> getAllExcludedServers(Transaction* tr);
+
+// Get the current list of excluded servers.
+ACTOR Future<std::vector<AddressExclusion>> getExcludedServerList(Transaction* tr);
+
+// Get the current list of failed servers.
+ACTOR Future<std::vector<AddressExclusion>> getExcludedFailedServerList(Transaction* tr);
 
 // Get the current list of excluded localities
 ACTOR Future<std::vector<std::string>> getExcludedLocalities(Database cx);
