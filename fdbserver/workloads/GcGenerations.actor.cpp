@@ -37,12 +37,8 @@
 #include "flow/network.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// This workload tests a gray failure scenario: a satellite TLog is have network issue
-// for sending packets to the remote data center's log routers. This will cause these
-// log routers to fail to progress, and causing data center lag, i.e., lag between the
-// primary and remote DC's tlags. With changes to log routers, they can detect that the
-// peek is taking a long time (> LOG_ROUTER_PEEK_SWITCH_DC_TIME) and swith to use
-// another DC to get data, thus recoverying from the data center lag.
+// This workload tests that when TRACK_TLOG_RECOVERY is turned on, older TLog generations can be garbage collected
+// during the recovery before reaching fully_recovered.
 struct GcGenerationsWorkload : TestWorkload {
 	static constexpr auto NAME = "GcGenerations";
 	bool enabled;

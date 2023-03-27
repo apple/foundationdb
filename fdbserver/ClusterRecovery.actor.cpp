@@ -457,7 +457,7 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 	    self->configuration; // self-configuration can be changed by configurationMonitor so we need a copy
 	loop {
 		state DBCoreState newState;
-		self->logSystem->pergeOldRecoveredGenerations();
+		self->logSystem->purgeOldRecoveredGenerations();
 		self->logSystem->toCoreState(newState);
 		newState.recoveryCount = recoverCount;
 

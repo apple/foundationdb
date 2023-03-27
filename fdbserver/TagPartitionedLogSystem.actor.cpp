@@ -305,7 +305,7 @@ Reference<ILogSystem> TagPartitionedLogSystem::fromOldLogSystemConfig(UID const&
 	return logSystem;
 }
 
-void TagPartitionedLogSystem::pergeOldRecoveredGenerations() {
+void TagPartitionedLogSystem::purgeOldRecoveredGenerations() {
 	Version oldestGenerationStartVersion = std::min(recoveredVersion->get(), remoteRecoveredVersion->get());
 	TraceEvent("ToCoreStateOldestGenerationStartVersion")
 	    .detail("RecoveredVersion", recoveredVersion->get())
@@ -324,7 +324,7 @@ void TagPartitionedLogSystem::pergeOldRecoveredGenerations() {
 				}
 			}
 			for (int j = i; j < oldLogData.size(); ++j) {
-				TraceEvent("PergeOldTLogGeneration")
+				TraceEvent("PurgeOldTLogGeneration")
 				    .detail("Begin", oldLogData[j].epochBegin)
 				    .detail("End", oldLogData[j].epochEnd)
 				    .detail("Epoch", oldLogData[j].epoch)
