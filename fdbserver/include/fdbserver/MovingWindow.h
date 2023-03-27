@@ -27,8 +27,16 @@
 #include "flow/Deque.h"
 #include "fdbserver/Knobs.h"
 
-// Perfomed as the rolling window to calculate average change rates in the past <interval>
-// e.g., we may use it in "MovingData" Trace to show average moving bytes rate by DD.
+// Smoother will try to modify the sum of all samples and return an estimtaed value, while
+// MovingWindow will just sum up all the samples, and getAverage() will return the average
+// change rate in the past <timeWindow>.
+// The motivation of MovingWindow comes from "MovingData" trace, where we want to get the
+// average bytes moved by DD in the past DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL. This data could be
+// precise and clear to show how DD works recently.
+// As for Smoother, however, it doesn't have a method to calculate average change rate, and it will
+// take all of the samples into account, while we don't really need it for "MovingData". Also, saying there
+// is no DD workload recently, we could just return 0 with MovingWindow and Smoother will return
+// a value closed to 0, where the former method is more obvious and clear to understand DD workloads.
 template <class T>
 class MovingWindow {
 private:
