@@ -180,6 +180,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	bool remoteStorageRecovered() const final;
 
+	// Checks older TLog generations and remove no longer needed generations from the log system.
 	void pergeOldRecoveredGenerations() final;
 
 	Future<Void> onCoreStateChanged() const final;
@@ -381,6 +382,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	        logServers,
 	    FutureStream<struct TLogRejoinRequest> rejoinRequests);
 
+	// Keeps track the recovered generations in all the TLogs in `tlogs` list and updates latest `recoveredVersion`.
 	ACTOR static Future<Void> trackTLogRecoveryActor(
 	    std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> tlogs,
 	    Reference<AsyncVar<Version>> recoveredVersion);

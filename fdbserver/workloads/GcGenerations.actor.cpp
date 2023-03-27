@@ -113,7 +113,6 @@ struct GcGenerationsWorkload : TestWorkload {
 
 		for (const auto& ip : ips) {
 			for (const auto& remoteIp : remoteIps) {
-				TraceEvent("AddingPartitionBetween").detail("Src", ip).detail("Dst", remoteIp);
 				g_simulator->clogPair(ip, remoteIp, 10000);
 				g_simulator->clogPair(remoteIp, ip, 10000);
 				self->cloggedPairs.emplace_back(ip, remoteIp);
@@ -190,7 +189,6 @@ struct GcGenerationsWorkload : TestWorkload {
 		g_simulator->disableTLogRecoveryFinish = true;
 
 		wait(delay(self->startDelay));
-		// ASSERT(SERVER_KNOBS->TLOG_DISABLE_RECOVERY_COMPLETE);
 
 		TraceEvent("WaitingForDbAvailable").detail("RecoveryState", self->dbInfo->get().recoveryState);
 		while (self->dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {

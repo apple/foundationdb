@@ -415,6 +415,7 @@ struct TLogSnapRequest {
 struct TrackTLogRecoveryReply {
 	constexpr static FileIdentifier file_identifier = 5736775;
 
+	// This is the current oldest generation start version this TLog has. This generation is currently being recovered.
 	Version oldestUnrecoveredStartVersion;
 
 	TrackTLogRecoveryReply() = default;
@@ -430,6 +431,7 @@ struct TrackTLogRecoveryReply {
 struct TrackTLogRecoveryRequest {
 	constexpr static FileIdentifier file_identifier = 6876454;
 
+	// Reply when the TLog's oldest generation start version is higher than this version.
 	Version oldestGenStartVersion;
 	ReplyPromise<TrackTLogRecoveryReply> reply;
 

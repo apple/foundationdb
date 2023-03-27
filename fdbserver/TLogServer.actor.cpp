@@ -1222,6 +1222,10 @@ ACTOR Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Referen
 		tagData->poppedRecently = true;
 
 		if (tagData->unpoppedRecovered) {
+			// Check for `tag`, if earlier generations are no longer needed. This is by comparing the `upTo` value with
+			// start version of the second earliest generation. If `upTo` > secondEarliestGenStartVersion, the earliest
+			// generation is no longer needed for `tag`.
+			// When there is only one old generation left, GC that generation uses `recoveryComplete` mechanism.
 			std::vector<Version>* unpoppedGen = &(logData->tagUnpoppedOldGenerations[tag]);
 			bool poppedGen = false;
 			while (unpoppedGen->size() > 1 && ((*unpoppedGen)[unpoppedGen->size() - 2] < upTo)) {
@@ -2568,6 +2572,8 @@ ACTOR Future<Void> respondToRecovered(TLogInterface tli, Promise<Void> recoveryC
 		finishedRecovery = false;
 	}
 
+	// This delay is added for testing purpose in simulation where by setting `disableTLogRecoveryFinish`, we disable
+	// TLogs to send back `TLogRecoveryFinishedRequest`.
 	while (g_network->isSimulated() && g_simulator->disableTLogRecoveryFinish) {
 		TraceEvent("WaitingToBeUnblocked", tli.id());
 		wait(delay(10));
