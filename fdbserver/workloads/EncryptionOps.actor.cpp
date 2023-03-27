@@ -111,11 +111,6 @@ struct WorkloadMetrics {
 // 2. Time spent encrypting the buffer (doesn't incude key lookup time); also records the throughput in MB/sec.
 // 3. Time spent decrypting the buffer (doesn't incude key lookup time); also records the throughput in MB/sec.
 
-namespace {
-const int minBaseCipherLen = deterministicRandom()->randomInt(4, 11);
-const int maxBaseCipherLen = deterministicRandom()->randomInt(AES_256_KEY_LENGTH, (4 * AES_256_IV_LENGTH) + 1);
-} // namespace
-
 struct EncryptionOpsWorkload : TestWorkload {
 	static constexpr auto NAME = "EncryptionOps";
 	int mode;
@@ -124,6 +119,8 @@ struct EncryptionOpsWorkload : TestWorkload {
 	int maxBufSize;
 	std::unique_ptr<uint8_t[]> buff;
 	int enableTTLTest;
+	int minBaseCipherLen;
+	int maxBaseCipherLen;
 
 	std::unique_ptr<WorkloadMetrics> metrics;
 
@@ -147,6 +144,9 @@ struct EncryptionOpsWorkload : TestWorkload {
 		headerBaseCipherId = wcx.clientId * 100 + 1;
 
 		metrics = std::make_unique<WorkloadMetrics>();
+
+		minBaseCipherLen = deterministicRandom()->randomInt(4, 11);
+		maxBaseCipherLen = deterministicRandom()->randomInt(AES_256_KEY_LENGTH, (4 * AES_256_KEY_LENGTH) + 1);
 
 		if (wcx.clientId == 0 && mode == 1) {
 			enableTTLTest = true;
@@ -253,7 +253,9 @@ struct EncryptionOpsWorkload : TestWorkload {
 		TraceEvent("UpdateBaseCipher")
 		    .detail("DomainId", encryptDomainId)
 		    .detail("BaseCipherId", *nextBaseCipherId)
-		    .detail("BaseCipherLen", *baseCipherLen);
+		    .detail("BaseCipherLen", *baseCipherLen)
+		    .detail("ExistingBaseCipherId", cipherKey->getBaseCipherId())
+		    .detail("ExistingBaseCipherLen", cipherKey->getBaseCipherLen());
 	}
 
 	Reference<BlobCipherKey> getEncryptionKey(const EncryptCipherDomainId& domainId,
@@ -440,7 +442,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 	}
 
 	void testBlobCipherKeyCacheOps() {
-		uint8_t baseCipher[AES_256_KEY_LENGTH];
+		uint8_t baseCipher[maxBaseCipherLen];
 		int baseCipherLen = 0;
 		EncryptCipherBaseKeyId nextBaseCipherId;
 
