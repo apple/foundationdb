@@ -3752,7 +3752,8 @@ extern void initProfiling();
 namespace {
 
 std::atomic<double> checkThreadTime;
-pthread_t loopProfilerThread;
+std::mutex loopProfilerThreadMutex;
+std::optional<pthread_t> loopProfilerThread;
 std::atomic<bool> loopProfilerStopRequested = false;
 
 } // namespace
@@ -4029,7 +4030,10 @@ void setupRunLoopProfiler() {
 		// Start a thread which will use signals to log stacks on long events
 		pthread_t* mainThread = (pthread_t*)malloc(sizeof(pthread_t));
 		*mainThread = pthread_self();
-		loopProfilerThread = startThread(&checkThread, (void*)mainThread, 0, "fdb-loopprofile");
+		{
+			std::unique_lock<std::mutex> lock(loopProfilerThreadMutex);
+			loopProfilerThread = startThread(&checkThread, (void*)mainThread, 0, "fdb-loopprofile");
+		}
 	}
 #else
 	// No slow task profiling for other platforms!
@@ -4039,7 +4043,13 @@ void setupRunLoopProfiler() {
 void stopRunLoopProfiler() {
 #ifdef __linux__
 	loopProfilerStopRequested.store(true);
-	pthread_join(loopProfilerThread, NULL);
+	{
+		std::unique_lock<std::mutex> lock(loopProfilerThreadMutex);
+		if (loopProfilerThread) {
+			pthread_join(loopProfilerThread.value(), NULL);
+			loopProfilerThread = {};
+		}
+	}
 #endif
 }
 
