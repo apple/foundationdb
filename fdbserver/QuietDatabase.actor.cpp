@@ -394,13 +394,24 @@ ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInter
 	state int retries = 0;
 	loop {
 		++retries;
-		state Future<TraceEventFields> result =
+		state Future<TraceEventFields> eventLogReply =
 		    wi.eventLogRequest.getReply(EventLogRequest(StringRef(storage.toString() + "/StorageMetrics")));
 		state Future<Void> timeout = delay(30.0);
+		state TraceEventFields storageMetrics;
 		choose {
-			when(TraceEventFields res = wait(result)) {
-				if (version == invalidVersion || getDurableVersion(res) >= static_cast<int64_t>(version)) {
-					return res;
+			when(wait(store(storageMetrics, eventLogReply))) {
+				try {
+					if (version == invalidVersion ||
+					    getDurableVersion(storageMetrics) >= static_cast<int64_t>(version)) {
+						return storageMetrics;
+					}
+				} catch (Error& e) {
+					TraceEvent("QuietDatabaseFailure")
+					    .error(e)
+					    .detail("Reason", "Failed to extract DurableVersion from StorageMetrics")
+					    .detail("SSID", storage)
+					    .detail("StorageMetrics", storageMetrics.toString());
+					throw;
 				}
 			}
 			when(wait(timeout)) {
