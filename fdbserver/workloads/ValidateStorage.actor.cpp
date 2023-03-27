@@ -119,7 +119,7 @@ struct ValidateStorage : TestWorkload {
 				                                 allKeys,
 				                                 type,
 				                                 /*timeoutSeconds=*/120,
-				                                 /*async=*/true));
+				                                 /*async=*/false));
 				ASSERT(auditId_ != auditId);
 				TraceEvent("TestStartValidateSecondEnd").detail("AuditID", auditId_).detail("AuditType", type);
 				break;
@@ -160,10 +160,10 @@ struct ValidateStorage : TestWorkload {
 		TraceEvent("TestValidateReplicaDone");
 
 		wait(self->auditStorageForType(cx, AuditType::ValidateLocationMetadata));
-		TraceEvent("TestValidateShardGlobalViewDone");
+		TraceEvent("TestValidateShardKeyServersDone");
 
 		wait(self->auditStorageForType(cx, AuditType::ValidateStorageServerShard));
-		TraceEvent("TestValidateShardLocalViewDone");
+		TraceEvent("TestValidateShardSSShardInfoDone");
 
 		return Void();
 	}

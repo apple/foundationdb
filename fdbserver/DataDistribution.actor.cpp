@@ -1636,7 +1636,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self, TriggerAudi
 			throw e;
 		} else if (audit == nullptr) {
 			throw retry();
-		} else if (audit->retryCount > 30) {
+		} else if (audit->retryCount > SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
 			audit->coreState.setPhase(AuditPhase::Failed);
 			wait(persistAuditState(self->txnProcessor->context(), audit->coreState));
 			audit->actors.clear(true);
@@ -1914,7 +1914,10 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 			throw e;
 		} else if (e.code() == error_code_audit_storage_error) {
 			audit->foundError = true;
-		} else if (audit->retryCount > 30) {
+		} else if (audit->retryCount > SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
+			throw audit_storage_failed();
+		} else if (e.code() == error_code_transaction_too_old) {
+			audit->retryCount = SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX + 1; // do not retry
 			throw audit_storage_failed();
 		} else {
 			// audit->auditMap.insert(req.range, AuditPhase::Failed);

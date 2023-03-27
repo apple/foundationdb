@@ -1401,11 +1401,15 @@ ACTOR Future<bool> runTest(Database cx,
 			// Run auditStorage
 			if (quiescent) {
 				try {
+					TraceEvent("RunAuditStorage");
 					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateHA), 1000.0));
+					TraceEvent("ValidateHADone");
 					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateReplica), 1000.0));
+					TraceEvent("ValidateReplicaDone");
 					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateLocationMetadata), 1000.0));
-					// wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateStorageServerShard),
-					// 1000.0));
+					TraceEvent("ValidateLocationMetadataDone");
+					//wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateStorageServerShard), 1000.0));
+					//TraceEvent("ValidateStorageServerShardDone");
 				} catch (Error& e) {
 					ok = false;
 					TraceEvent(SevError, "TestFailure")
