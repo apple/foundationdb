@@ -36,6 +36,7 @@
 #include "fdbserver/MutationTracking.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbserver/CoroFlow.h"
+#include "fdbserver/FDBRocksDBVersion.h"
 #include "fdbserver/Knobs.h"
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.actor.h"
@@ -47,9 +48,11 @@
 FDB_DEFINE_BOOLEAN_PARAM(CheckpointAsKeyValues);
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
-// Enforcing rocksdb version to be 7.7.3.
-static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 7 && ROCKSDB_PATCH == 3),
-              "Unsupported rocksdb version. Update the rocksdb to 7.7.3 version");
+
+// Enforcing rocksdb version.
+static_assert((ROCKSDB_MAJOR == FDB_ROCKSDB_MAJOR && ROCKSDB_MINOR == FDB_ROCKSDB_MINOR &&
+               ROCKSDB_PATCH == FDB_ROCKSDB_PATCH),
+              "Unsupported rocksdb version.");
 
 namespace {
 
@@ -73,6 +76,7 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 
 	for (const LiveFileMetaData& fileMetaData : rocksCF.sstFiles) {
 		rocksdb::LiveFileMetaData liveFileMetaData;
+		liveFileMetaData.file_type = rocksdb::kTableFile;
 		liveFileMetaData.size = fileMetaData.size;
 		liveFileMetaData.name = fileMetaData.name;
 		liveFileMetaData.file_number = fileMetaData.file_number;
@@ -91,6 +95,8 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
 		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
 		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+		liveFileMetaData.smallest = fileMetaData.smallest;
+		liveFileMetaData.largest = fileMetaData.largest;
 		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
 		liveFileMetaData.level = fileMetaData.level;
 		metaData.files.push_back(liveFileMetaData);
@@ -206,7 +212,7 @@ ACTOR Future<int64_t> doFetchCheckpointFile(Database cx,
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			} else if (e.code() != error_code_end_of_stream ||
-			    (g_network->isSimulated() && attempt == 1 && deterministicRandom()->coinflip())) {
+			           (g_network->isSimulated() && attempt == 1 && deterministicRandom()->coinflip())) {
 				TraceEvent(e.code() != error_code_end_of_stream ? SevWarnAlways : SevWarn, "FetchCheckpointFileError")
 				    .errorUnsuppressed(e)
 				    .detail("RemoteFile", remoteFile)
@@ -484,7 +490,7 @@ void RocksDBColumnFamilyReader::Reader::action(RocksDBColumnFamilyReader::Reader
 	}
 
 	if (!status.ok()) {
-		a.done.sendError(statusToError(status));
+		a.done.sendError(checkpoint_not_found());
 		return;
 	}
 
@@ -602,6 +608,10 @@ rocksdb::Status RocksDBColumnFamilyReader::Reader::importCheckpoint(const std::s
 	std::vector<std::string> columnFamilies;
 	const rocksdb::Options options = getOptions();
 	rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, path, &columnFamilies);
+	// if (!status.ok()) {
+	// 	logRocksDBError(status, "CheckpointReaderListColumnFamilies", logId);
+	// 	return status;
+	// }
 	if (std::find(columnFamilies.begin(), columnFamilies.end(), rocksDefaultCf) == columnFamilies.end()) {
 		columnFamilies.push_back(rocksDefaultCf);
 	}
@@ -615,7 +625,7 @@ rocksdb::Status RocksDBColumnFamilyReader::Reader::importCheckpoint(const std::s
 
 	status = rocksdb::DB::Open(options, path, descriptors, &handles, &db);
 	if (!status.ok()) {
-		logRocksDBError(status, "CheckpointReaderOpen", logId);
+		// logRocksDBError(status, "CheckpointReaderOpen", logId);
 		return status;
 	}
 
@@ -802,8 +812,8 @@ KeyValue RocksDBCheckpointByteSampleReader::next() {
 	return res;
 }
 
-// RocksDBCFCheckpointReader reads an exported RocksDB Column Family checkpoint, and returns the serialized
-// checkpoint via nextChunk.
+// RocksDBCFCheckpointReader reads an exported RocksDB Column Family checkpoint files, and returns the
+// serialized checkpoint via nextChunk.
 class RocksDBCFCheckpointReader : public ICheckpointReader {
 public:
 	RocksDBCFCheckpointReader(const CheckpointMetaData& checkpoint, UID logId)

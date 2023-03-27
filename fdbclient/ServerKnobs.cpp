@@ -169,7 +169,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,           960 ); if( randomize && BUGGIFY ) PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD = 360; // Set as the lowest priority
 
 	// Data distribution
-	init( SHARD_ENCODE_LOCATION_METADATA,                       false ); if( randomize && BUGGIFY )  SHARD_ENCODE_LOCATION_METADATA = true;
+	init( SHARD_ENCODE_LOCATION_METADATA,                        true ); if( randomize && BUGGIFY )  SHARD_ENCODE_LOCATION_METADATA = true;
 	init( ENABLE_DD_PHYSICAL_SHARD,                             false ); // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true; When true, optimization of data move between DCs is disabled
 	init( ENABLE_DD_PHYSICAL_SHARD_MOVE,                         true );
 	init( MAX_PHYSICAL_SHARD_BYTES,                         10000000 ); // 10 MB; for ENABLE_DD_PHYSICAL_SHARD; smaller leads to larger number of physicalShard per storage server
@@ -497,7 +497,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
  	init( ROCKSDB_IMPORT_MOVE_FILES,                           false );
  	init( ROCKSDB_CHECKPOINT_REPLAY_MARKER,                    false );
  	init( ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE,               true );
- 	init( ROCKSDB_ENABLE_CHECKPOINT_VALIDATION,                false ); // if( randomize && BUGGIFY )   ROCKSDB_ENABLE_CHECKPOINT_VALIDATION = deterministicRandom()->coinflip();
+ 	init( ROCKSDB_ENABLE_CHECKPOINT_VALIDATION,                 true ); // if( randomize && BUGGIFY )   ROCKSDB_ENABLE_CHECKPOINT_VALIDATION = deterministicRandom()->coinflip();
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;

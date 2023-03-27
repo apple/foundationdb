@@ -1657,6 +1657,11 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		}
 	}
 
+	if ((!testConfig.excludedStorageEngineType(5))) {
+ 		storage_engine_type = 5;
+ 		set_config("encryption_at_rest_mode=disabled");
+ 	}
+
 	switch (storage_engine_type) {
 	case 0: {
 		CODE_PROBE(true, "Simulated cluster using ssd storage engine");
@@ -2656,6 +2661,22 @@ ACTOR void setupAndRun(std::string dataFolder,
 		testConfig.storageEngineExcludeTypes.push_back(4);
 		testConfig.storageEngineExcludeTypes.push_back(5);
 	}
+
+	if (std::string_view(testFile).find("Encrypt") != std::string_view::npos) {
+ 		testConfig.storageEngineExcludeTypes.push_back(5);
+ 	}
+
+ 	if (std::string_view(testFile).find("Backup") != std::string_view::npos) {
+ 		testConfig.storageEngineExcludeTypes.push_back(5);
+ 	}
+
+ 	if (std::string_view(testFile).find("BlobGranule") != std::string_view::npos) {
+ 		testConfig.storageEngineExcludeTypes.push_back(5);
+ 	}
+
+ 	if (std::string_view(testFile).find("ChangeFeed") != std::string_view::npos) {
+ 		testConfig.storageEngineExcludeTypes.push_back(5);
+ 	}
 
 	state ProtocolVersion protocolVersion = currentProtocolVersion();
 	if (testConfig.startIncompatibleProcess) {
