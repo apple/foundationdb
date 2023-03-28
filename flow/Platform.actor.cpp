@@ -4032,7 +4032,9 @@ void setupRunLoopProfiler() {
 		*mainThread = pthread_self();
 		{
 			std::unique_lock<std::mutex> lock(loopProfilerThreadMutex);
-			loopProfilerThread = startThread(&checkThread, (void*)mainThread, 0, "fdb-loopprofile");
+			if (!loopProfilerStopRequested) {
+				loopProfilerThread = startThread(&checkThread, (void*)mainThread, 0, "fdb-loopprofile");
+			}
 		}
 	}
 #else
@@ -4042,13 +4044,11 @@ void setupRunLoopProfiler() {
 
 void stopRunLoopProfiler() {
 #ifdef __linux__
+	std::unique_lock<std::mutex> lock(loopProfilerThreadMutex);
 	loopProfilerStopRequested.store(true);
-	{
-		std::unique_lock<std::mutex> lock(loopProfilerThreadMutex);
-		if (loopProfilerThread) {
-			pthread_join(loopProfilerThread.value(), NULL);
-			loopProfilerThread = {};
-		}
+	if (loopProfilerThread) {
+		pthread_join(loopProfilerThread.value(), NULL);
+		loopProfilerThread = {};
 	}
 #endif
 }
