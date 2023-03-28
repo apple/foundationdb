@@ -8472,7 +8472,6 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 	TraceEvent(SevInfo, "FetchCheckpointsStats", data->thisServerID)
 	    .detail("MoveInShardID", shard->id)
 	    .detail("MoveInShard", shard->toString())
-	    .setMaxFieldLength(10000)
 	    .detail("Checkpoint", describe(localRecords))
 	    .detail("Duration", duration)
 	    .detail("TotalBytes", totalBytes)
@@ -8564,10 +8563,12 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 			    .detail("SampleKey", key)
 			    .detail("Size", size);
 			data->metrics.byteSample.sample.insert(key, size);
+		    data->metrics.notifyBytes(key, size);
 			data->addMutationToMutationLogOrStorage(invalidVersion,
 			                                        MutationRef(MutationRef::SetValue, kv.key, kv.value));
 			bytesSum += size;
 		}
+
 		if (g_network->isSimulated()) {
 			int64_t checkpointBytes = 0;
 			for (const auto& range : checkpoint.ranges) {
@@ -9617,7 +9618,6 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 						updatedMoveInShards.emplace(moveInShard->id(), moveInShard);
 						updatedShards.push_back(StorageServerShard(
 						    range, cVer, desiredId, desiredId, StorageServerShard::MovingIn, moveInShard->id()));
-
 					} else {
 						updatedShards.push_back(
 						    StorageServerShard(range, cVer, desiredId, desiredId, StorageServerShard::Adding));
@@ -9639,6 +9639,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 						    .detail("TargetShard", desiredId)
 						    .detail("CurrentShard", shard->desiredShardId)
 						    .detail("Version", cVer);
+                        // TODO(heliu): Mark the data move as failed locally, instead of crashing ss.
 						ASSERT(false);
 					} else {
 						TraceEvent(SevInfo, "CSKMoveInToSameShard", data->thisServerID)

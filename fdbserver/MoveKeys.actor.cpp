@@ -156,6 +156,9 @@ ACTOR Future<Void> unassignServerKeys(Transaction* tr, UID ssId, KeyRange range,
 }
 
 ACTOR Future<Void> deleteCheckpoints(Transaction* tr, std::set<UID> checkpointIds, UID logId) {
+	if (!(logId.second() & 1U)) {
+		return Void();
+	}
 	TraceEvent(SevDebug, "DataMoveDeleteCheckpoints", logId).detail("Checkpoints", describe(checkpointIds));
 	std::vector<Future<Optional<Value>>> checkpointEntries;
 	for (const UID& id : checkpointIds) {
@@ -1466,23 +1469,24 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							physicalShardMap[ssId].emplace_back(rangeIntersectKeys, srcId);
 						}
 
-						const UID checkpointId = UID(deterministicRandom()->randomUInt64(), srcId.first());
-						CheckpointMetaData checkpoint(std::vector<KeyRange>{ rangeIntersectKeys },
-						                              DataMoveRocksCF,
-						                              src,
-						                              checkpointId,
-						                              dataMoveId);
-						checkpoint.setState(CheckpointMetaData::Pending);
-						tr.set(checkpointKeyFor(checkpointId), checkpointValue(checkpoint));
-						TraceEvent(sevDm, "InitiatedCheckpoint")
-						    .detail("CheckpointID", checkpointId.toString())
-						    .detail("Range", rangeIntersectKeys)
-						    .detail("DataMoveID", dataMoveId)
-						    .detail("SrcServers", describe(src))
-						    .detail("ReadVersion", tr.getReadVersion().get());
-
+						if (dataMoveId.second() & 1U) {
+							const UID checkpointId = UID(deterministicRandom()->randomUInt64(), srcId.first());
+							CheckpointMetaData checkpoint(std::vector<KeyRange>{ rangeIntersectKeys },
+							                              DataMoveRocksCF,
+							                              src,
+							                              checkpointId,
+							                              dataMoveId);
+							checkpoint.setState(CheckpointMetaData::Pending);
+							tr.set(checkpointKeyFor(checkpointId), checkpointValue(checkpoint));
+							dataMove.checkpoints.insert(checkpointId);
+							TraceEvent(sevDm, "InitiatedCheckpoint")
+							    .detail("CheckpointID", checkpointId.toString())
+							    .detail("Range", rangeIntersectKeys)
+							    .detail("DataMoveID", dataMoveId)
+							    .detail("SrcServers", describe(src))
+							    .detail("ReadVersion", tr.getReadVersion().get());
+						}
 						dataMove.src.insert(src.begin(), src.end());
-						dataMove.checkpoints.insert(checkpointId);
 					}
 
 					// Remove old dests from serverKeys.
