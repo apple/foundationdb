@@ -7606,7 +7606,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 					// Write this_block to storage
 					state Standalone<VectorRef<KeyValueRef>> blockData(this_block, this_block.arena());
-					state Key blockEnd = this_block.size() > 0 && this_block.more ? this_block.back().key : keys.end;
+					state Key blockEnd =
+					    this_block.size() > 0 && this_block.more ? keyAfter(this_block.back().key) : keys.end;
 					state KeyRange blockRange(KeyRangeRef(blockBegin, blockEnd));
 					wait(data->storage.replaceRange(blockRange, blockData));
 

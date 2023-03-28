@@ -27,7 +27,11 @@ ACTOR static Future<Void> replaceRange_impl(IKeyValueStore* self,
                                             Standalone<VectorRef<KeyValueRef>> data) {
 	state int sinceYield = 0;
 	state const KeyValueRef* kvItr = data.begin();
-	self->clear(range);
+	state KeyRangeRef rangeRef = range;
+	if (rangeRef.empty()) {
+		return Void();
+	}
+	self->clear(rangeRef);
 	for (; kvItr != data.end(); kvItr++) {
 		self->set(*kvItr);
 		if (++sinceYield > 1000) {
