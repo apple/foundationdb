@@ -5566,6 +5566,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	}
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
+	++data->counters.finishedQueries;
 	++data->counters.finishedGetMappedRangeQueries;
 
 	double duration = g_network->timer() - req.requestTime();
@@ -10813,11 +10814,47 @@ Future<bool> StorageServerDisk::restoreDurableState() {
 	return ::restoreDurableState(data, storage);
 }
 
-// Determines whether a key-value pair should be included in a byte sample
-// Also returns size information about the sample
+// Determines whether a particular key-value pair should be included in a byte sample.
+//
+// This is part of the process to randomly and uniformly sample the key space.
+//
+// The sample will consist of (key, sampled_size) pairs, where sampled_size is
+// an estimate of the size of the values associated with that key. These sizes
+// are used to estimate the size of key ranges and determine split points.
+//
+// It's assumed that there's some overhead involved in the sample,
+// BYTE_SAMPLING_OVERHEAD, which defaults to 100 bytes per entry.
+//
+// The rough goal is for the sample size to be a fixed fraction of the total
+// size of all keys and values, 1/BYTE_SAMPLING_FACTOR, which defaults to 1/250.
+// This includes the overhead, mentioned above.
+//
+// NOTE: This BYTE_SAMPLING_FACTOR and BYTE_SAMPLING_OVERHEAD knobs can't be
+// changed after a database has been created. Data which has been already
+// sampled can't be resampled, and the estimates of the size of key ranges
+// implicitly includes these constants.
+//
+// This functions returns a struct containing
+//   * inSample: true if we've selected this key-value pair for sampling.
+//   * size: |key + value|
+//   * probability: probability we select a key-value pair of this size, at random.
+//   * sampledSize: always |key + value| / probability
+//                  represents the amount of key-value space covered by that key.
 ByteSampleInfo isKeyValueInSample(const KeyRef key, int64_t totalKvSize) {
 	ASSERT(totalKvSize >= key.size());
 	ByteSampleInfo info;
+
+	// Pathological case: key size == value size == 0
+	//
+	// It's probability of getting chosen is 0, so let's skip the
+	// computation and avoid dividing by zero.
+	if (totalKvSize == 0) {
+		info.size = 0;
+		info.probability = 0.0;
+		info.inSample = false;
+		info.sampledSize = 0;
+		return info;
+	}
 
 	info.size = totalKvSize;
 
@@ -10825,16 +10862,16 @@ ByteSampleInfo isKeyValueInSample(const KeyRef key, int64_t totalKvSize) {
 	uint32_t b = 0;
 	hashlittle2(key.begin(), key.size(), &a, &b);
 
-	double probability =
+	info.probability =
 	    (double)info.size / (key.size() + SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD) / SERVER_KNOBS->BYTE_SAMPLING_FACTOR;
 	// MIN_BYTE_SAMPLING_PROBABILITY is 0.99 only for testing
 	// MIN_BYTE_SAMPLING_PROBABILITY is 0 for other cases
 	if (SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY != 0) {
 		ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	}
-	probability = std::max(probability, SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY);
-	info.inSample = a / ((1 << 30) * 4.0) < probability;
-	info.sampledSize = info.size / std::min(1.0, probability);
+	info.probability = std::clamp(info.probability, SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY, 1.0);
+	info.inSample = a / ((1 << 30) * 4.0) < info.probability;
+	info.sampledSize = info.size / info.probability;
 
 	return info;
 }

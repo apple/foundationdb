@@ -1162,7 +1162,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	ACTOR Future<bool> checkBlobWorkers(Database cx,
 	                                    DatabaseConfiguration configuration,
 	                                    ConsistencyCheckWorkload* self) {
-		state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(cx));
+		state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(cx, true));
 		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 
 		// process addr -> num blob workers on that process
