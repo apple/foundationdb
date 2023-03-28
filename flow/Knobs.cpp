@@ -316,7 +316,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	// start exponential backoff at 5s when reaching out to the KMS from EKP
 	init( EKP_KMS_CONNECTION_BACKOFF,                          5.0 );
 	// number of times to retry KMS requests from the EKP (roughly attempt to reach out to the KMS for a total of 5 minutes)
-	init( EKP_KMS_CONNECTION_RETRIES,                          6 );
+	init( EKP_KMS_CONNECTION_RETRIES,                            6 );
+	init( ENCRYPT_INPLACE_ENABLED,                           false ); if ( randomize && BUGGIFY ) { ENCRYPT_INPLACE_ENABLED = true; }
 
 	// REST Client
 	init( RESTCLIENT_MAX_CONNECTIONPOOL_SIZE,                   10 );

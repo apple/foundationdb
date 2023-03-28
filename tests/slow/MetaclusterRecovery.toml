@@ -2,9 +2,13 @@
 allowDefaultTenant = false
 allowCreatingTenants = false
 extraDatabaseMode = 'Multiple'
-extraDatabaseCount = 4
+extraDatabaseCount = 3
 extraDatabaseBackupAgents = true
 tenantModes = ['optional', 'required']
+config = 'triple'
+generateFearless = false
+processesPerMachine = 1
+machineCount = 5
 
 [[test]]
 testTitle = 'MetaclusterRestoreTest'

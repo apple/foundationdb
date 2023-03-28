@@ -21,13 +21,15 @@
 #ifndef FLOW_PROCESS_EVENTS_H
 #define FLOW_PROCESS_EVENTS_H
 #include <functional>
+#include <any>
+
 #include "flow/flow.h"
 
 namespace ProcessEvents {
 
 // A callback is never allowed to throw. Since std::function can't
 // take noexcept signatures, this is enforced at runtime
-using Callback = std::function<void(StringRef, StringRef, Error const&)>;
+using Callback = std::function<void(StringRef, std::any const&, Error const&)>;
 
 class Event : NonCopyable {
 	void* impl;
@@ -38,7 +40,8 @@ public:
 	~Event();
 };
 
-void trigger(StringRef name, StringRef msg, Error const& e);
+void uncancellableEvent(StringRef name, Callback callback);
+void trigger(StringRef name, std::any const& data, Error const& e);
 
 } // namespace ProcessEvents
 

@@ -22,11 +22,10 @@
 // The RestoreLoader role starts with the restoreLoaderCore actor
 
 #include "fdbclient/BlobCipher.h"
-#include "fdbclient/CommitProxyInterface.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupAgent.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
@@ -377,8 +376,8 @@ ACTOR static Future<MutationRef> _decryptMutation(MutationRef mutation, Database
 	Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
 	std::unordered_set<BlobCipherDetails> cipherDetails;
 	mutation.updateEncryptCipherDetails(cipherDetails);
-	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult = wait(
-	    GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(dbInfo, cipherDetails, BlobCipherMetrics::BACKUP));
+	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
+	    wait(getEncryptCipherKeys(dbInfo, cipherDetails, BlobCipherMetrics::BACKUP));
 	return mutation.decrypt(getCipherKeysResult, *arena, BlobCipherMetrics::BACKUP);
 }
 

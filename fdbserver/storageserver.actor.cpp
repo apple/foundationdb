@@ -71,7 +71,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LatencyBandConfig.h"
@@ -92,6 +92,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
+#include "fdbserver/StorageCorruptionBug.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
@@ -201,8 +202,9 @@ static const KeyRangeRef persistCheckpointKeys =
     KeyRangeRef(PERSIST_PREFIX "Checkpoint/"_sr, PERSIST_PREFIX "Checkpoint0"_sr);
 static const KeyRangeRef persistPendingCheckpointKeys =
     KeyRangeRef(PERSIST_PREFIX "PendingCheckpoint/"_sr, PERSIST_PREFIX "PendingCheckpoint0"_sr);
-static const std::string rocksdbCheckpointDirPrefix = "/rockscheckpoints_";
+static const std::string serverCheckpointFolder = "serverCheckpoints";
 static const std::string checkpointBytesSampleTempFolder = "/metadata_temp";
+static const std::string fetchedCheckpointFolder = "fetchedCheckpoints";
 
 struct AddingShard : NonCopyable {
 	KeyRange keys;
@@ -457,6 +459,7 @@ private:
 	struct StorageServer* data;
 	IKeyValueStore* storage;
 	void writeMutations(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
+	void writeMutationsBuggy(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
 
 	ACTOR static Future<Key> readFirstKey(IKeyValueStore* storage, KeyRangeRef range, Optional<ReadOptions> options) {
 		RangeResult r = wait(storage->readRange(range, 1, 1 << 30, options));
@@ -1133,6 +1136,8 @@ public:
 	double lastUpdate;
 
 	std::string folder;
+	std::string checkpointFolder;
+	std::string fetchedCheckpointFolder;
 
 	// defined only during splitMutations()/addMutation()
 	UpdateEagerReadInfo* updateEagerReads;
@@ -2482,7 +2487,7 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 
 	wait(self->durableVersion.whenAtLeast(version));
 
-	TraceEvent("DeleteCheckpointBegin", self->thisServerID).detail("Checkpoint", checkpoint.toString());
+	TraceEvent(SevInfo, "DeleteCheckpointBegin", self->thisServerID).detail("Checkpoint", checkpoint.toString());
 
 	self->checkpoints.erase(checkpoint.checkpointID);
 
@@ -2500,6 +2505,7 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 	    mLV, MutationRef(MutationRef::ClearRange, pendingCheckpointKey, keyAfter(pendingCheckpointKey)));
 	self->addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::ClearRange, persistCheckpointKey, keyAfter(persistCheckpointKey)));
+	TraceEvent(SevInfo, "DeleteCheckpointEnd", self->thisServerID).detail("Checkpoint", checkpoint.toString());
 
 	return Void();
 }
@@ -2542,7 +2548,7 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 			    .detail("CheckpointID", req.checkpointID)
 			    .detail("TotalSize", totalSize)
 			    .detail("Token", req.token);
-		} else {
+		} else if (e.code() != error_code_operation_obsolete) {
 			TraceEvent(SevWarnAlways, "ServerFetchCheckpointFailure")
 			    .errorUnsuppressed(e)
 			    .detail("CheckpointID", req.checkpointID)
@@ -3051,8 +3057,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherMap;
 		if (cipherDetails.size()) {
 			std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-			    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
-			        data->db, cipherDetails, BlobCipherMetrics::TLOG));
+			    wait(getEncryptCipherKeys(data->db, cipherDetails, BlobCipherMetrics::TLOG));
 			cipherMap = getCipherKeysResult;
 		}
 
@@ -5561,6 +5566,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	}
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
+	++data->counters.finishedQueries;
 	++data->counters.finishedGetMappedRangeQueries;
 
 	double duration = g_network->timer() - req.requestTime();
@@ -8640,7 +8646,7 @@ public:
 			if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix)) {
 				applyPrivateCacheData(data, m);
 			} else if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(checkpointPrefix)) {
-				registerPendingCheckpoint(data, m, ver);
+				handleCheckpointPrivateMutation(data, m, ver);
 			} else {
 				applyPrivateData(data, ver, m);
 			}
@@ -8709,7 +8715,8 @@ private:
 			// We can also ignore clearRanges, because they are always accompanied by such a pair of sets with the same
 			// keys
 			startKey = m.param1;
-			decodeServerKeysValue(m.param2, nowAssigned, emptyRange, dataMoveId);
+			EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
+			decodeServerKeysValue(m.param2, nowAssigned, emptyRange, enablePSM, dataMoveId);
 			processedStartKey = true;
 		} else if (m.type == MutationRef::SetValue && m.param1 == lastEpochEndPrivateKey) {
 			// lastEpochEnd transactions are guaranteed by the master to be alone in their own batch (version)
@@ -9040,22 +9047,40 @@ private:
 		}
 	}
 
-	// Registers a pending checkpoint request, it will be fullfilled when the desired version is durable.
-	void registerPendingCheckpoint(StorageServer* data, const MutationRef& m, Version ver) {
+	// Handles checkpoint private mutations:
+	// 1. Registers a pending checkpoint request, it will be fullfilled when the desired version is durable.
+	// 2. Schedule deleting a checkpoint.
+	void handleCheckpointPrivateMutation(StorageServer* data, const MutationRef& m, Version ver) {
+		if (!data->shardAware) {
+			return;
+		}
 		CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
-		ASSERT(checkpoint.getState() == CheckpointMetaData::Pending);
+		const CheckpointMetaData::CheckpointState cState = checkpoint.getState();
 		const UID checkpointID = decodeCheckpointKey(m.param1.substr(1));
-		checkpoint.version = ver;
-		data->pendingCheckpoints[ver].push_back(checkpoint);
-
 		auto& mLV = data->addVersionToMutationLog(ver);
-		const Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpointID.toString());
-		data->addMutationToMutationLog(
-		    mLV, MutationRef(MutationRef::SetValue, pendingCheckpointKey, checkpointValue(checkpoint)));
+		if (cState == CheckpointMetaData::Pending) {
+			checkpoint.version = ver;
+			data->pendingCheckpoints[ver].push_back(checkpoint);
+			const Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpointID.toString());
+			data->addMutationToMutationLog(
+			    mLV, MutationRef(MutationRef::SetValue, pendingCheckpointKey, checkpointValue(checkpoint)));
 
-		TraceEvent("RegisterPendingCheckpoint", data->thisServerID)
-		    .detail("Key", pendingCheckpointKey)
-		    .detail("Checkpoint", checkpoint.toString());
+			TraceEvent(SevInfo, "RegisterPendingCheckpoint", data->thisServerID)
+			    .detail("Key", pendingCheckpointKey)
+			    .detail("Checkpoint", checkpoint.toString());
+		} else if (cState == CheckpointMetaData::Deleting) {
+			ASSERT(std::find(checkpoint.src.begin(), checkpoint.src.end(), data->thisServerID) != checkpoint.src.end());
+			checkpoint.src.clear();
+			checkpoint.src.push_back(data->thisServerID);
+			checkpoint.dir = serverCheckpointDir(data->checkpointFolder, checkpoint.checkpointID);
+			const Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
+			data->addMutationToMutationLog(
+			    mLV, MutationRef(MutationRef::SetValue, persistCheckpointKey, checkpointValue(checkpoint)));
+			data->actors.add(deleteCheckpointQ(data, ver, checkpoint));
+			TraceEvent(SevInfo, "DeleteCheckpointScheduled", data->thisServerID)
+			    .detail("Source", "PrivateMutation")
+			    .detail("Checkpoint", checkpoint.toString());
+		}
 	}
 };
 
@@ -9298,8 +9323,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			if (collectingCipherKeys) {
 				std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-				    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
-				        data->db, cipherDetails, BlobCipherMetrics::TLOG));
+				    wait(getEncryptCipherKeys(data->db, cipherDetails, BlobCipherMetrics::TLOG));
 				cipherKeys = getCipherKeysResult;
 				collectingCipherKeys = false;
 				eager = UpdateEagerReadInfo(enableClearRangeEagerReads);
@@ -9597,6 +9621,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				ErrorOr<Void> e = wait(errorOr(data->interfaceRegistered));
 				if (e.isError()) {
 					TraceEvent(SevWarn, "StorageInterfaceRegistrationFailed", data->thisServerID).error(e.getError());
+					throw e.getError();
 				}
 			}
 		}
@@ -9732,8 +9757,8 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData metaData) {
 	ASSERT(std::find(metaData.src.begin(), metaData.src.end(), data->thisServerID) != metaData.src.end() &&
 	       !metaData.ranges.empty());
-	state std::string checkpointDir = data->folder + rocksdbCheckpointDirPrefix + metaData.checkpointID.toString();
-	state std::string bytesSampleFile = checkpointDir + "/" + checkpointBytesSampleFileName;
+	state std::string checkpointDir = serverCheckpointDir(data->checkpointFolder, metaData.checkpointID);
+	state std::string bytesSampleFile = joinPath(checkpointDir, checkpointBytesSampleFileName);
 	state std::string bytesSampleTempDir = data->folder + checkpointBytesSampleTempFolder;
 	state std::string bytesSampleTempFile =
 	    bytesSampleTempDir + "/" + metaData.checkpointID.toString() + "_" + checkpointBytesSampleFileName;
@@ -9756,11 +9781,6 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		createCheckpointActors.push_back(store(
 		    sampleByteSstFileCreated, createSstFileForCheckpointShardBytesSample(data, metaData, bytesSampleTempFile)));
 		wait(waitForAll(createCheckpointActors));
-		checkpointResult.bytesSampleFile = sampleByteSstFileCreated ? bytesSampleFile : Optional<std::string>();
-		ASSERT(checkpointResult.src.empty() && checkpointResult.getState() == CheckpointMetaData::Complete);
-		checkpointResult.src.push_back(data->thisServerID);
-		checkpointResult.actionId = metaData.actionId;
-		data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
 		// Move sst file to the checkpoint folder
 		if (sampleByteSstFileCreated) {
 			ASSERT(directoryExists(abspath(checkpointDir)));
@@ -9768,14 +9788,24 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 			ASSERT(fileExists(abspath(bytesSampleTempFile)));
 			renameFile(abspath(bytesSampleTempFile), abspath(bytesSampleFile));
 		}
+		checkpointResult.bytesSampleFile = sampleByteSstFileCreated ? bytesSampleFile : Optional<std::string>();
+		ASSERT(checkpointResult.src.empty() && checkpointResult.getState() == CheckpointMetaData::Complete);
+		checkpointResult.src.push_back(data->thisServerID);
+		checkpointResult.actionId = metaData.actionId;
+		checkpointResult.dir = checkpointDir;
+		data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
+
 		TraceEvent("StorageCreatedCheckpoint", data->thisServerID)
 		    .detail("Checkpoint", checkpointResult.toString())
 		    .detail("BytesSampleFile", sampleByteSstFileCreated ? bytesSampleFile : "noFileCreated");
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		// If checkpoint creation fails, the failure is persisted.
 		checkpointResult = metaData;
 		checkpointResult.setState(CheckpointMetaData::Fail);
-		TraceEvent("StorageCreatedCheckpointFailure", data->thisServerID)
+		TraceEvent("StorageCreateCheckpointFailure", data->thisServerID)
 		    .detail("PendingCheckpoint", checkpointResult.toString());
 	}
 
@@ -9790,6 +9820,9 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		TraceEvent("StorageCreateCheckpointPersisted", data->thisServerID)
 		    .detail("Checkpoint", checkpointResult.toString());
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
 		// If the checkpoint meta data is not persisted successfully, remove the checkpoint.
 		TraceEvent(SevWarn, "StorageCreateCheckpointPersistFailure", data->thisServerID)
 		    .errorUnsuppressed(e)
@@ -10262,23 +10295,6 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 		    mLV, MutationRef(MutationRef::SetValue, availableKeys.end, endAvailable ? "1"_sr : "0"_sr));
 	}
 
-	// When a shard is moved out, delete all related checkpoints created for data move.
-	if (!available) {
-		for (auto& [id, checkpoint] : self->checkpoints) {
-			if (!checkpoint.ranges.empty() && checkpoint.ranges.front().intersects(keys)) {
-				Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
-				checkpoint.setState(CheckpointMetaData::Deleting);
-				self->addMutationToMutationLog(
-				    mLV, MutationRef(MutationRef::SetValue, persistCheckpointKey, checkpointValue(checkpoint)));
-			}
-			self->actors.add(deleteCheckpointQ(self, mLV.version + 1, checkpoint));
-			TraceEvent("SSDeleteCheckpointScheduled", self->thisServerID)
-			    .detail("MovedOutRange", keys.toString())
-			    .detail("Checkpoint", checkpoint.toString())
-			    .detail("DeleteVersion", mLV.version + 1);
-		}
-	}
-
 	if (BUGGIFY) {
 		self->maybeInjectTargetedRestart(logV);
 	}
@@ -10365,6 +10381,29 @@ void StorageServerDisk::writeMutation(MutationRef mutation) {
 		ASSERT(false);
 }
 
+void StorageServerDisk::writeMutationsBuggy(const VectorRef<MutationRef>& mutations,
+                                            Version debugVersion,
+                                            const char* debugContext) {
+	auto bug = SimBugInjector().get<StorageCorruptionBug>(StorageCorruptionBugID());
+	if (!bug) {
+		writeMutations(mutations, debugVersion, debugContext);
+	}
+	int begin = 0;
+	while (begin < mutations.size()) {
+		int i;
+		for (i = begin; i < mutations.size(); ++i) {
+			if (deterministicRandom()->random01() < bug->corruptionProbability) {
+				bug->hit();
+				break;
+			}
+		}
+		writeMutations(mutations.slice(begin, i), debugVersion, debugContext);
+		// we want to drop the mutation at i (unless i == mutations.size(), in which case this will just finish the
+		// loop)
+		begin = i + 1;
+	}
+}
+
 void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
                                        Version debugVersion,
                                        const char* debugContext) {
@@ -10397,7 +10436,11 @@ bool StorageServerDisk::makeVersionMutationsDurable(Version& prevStorageVersion,
 		ASSERT(v.version > prevStorageVersion && v.version <= newStorageVersion);
 		// TODO(alexmiller): Update to version tracking.
 		// DEBUG_KEY_RANGE("makeVersionMutationsDurable", v.version, KeyRangeRef());
-		writeMutations(v.mutations, v.version, "makeVersionDurable");
+		if (!SimBugInjector().isEnabled()) {
+			writeMutations(v.mutations, v.version, "makeVersionDurable");
+		} else {
+			writeMutationsBuggy(v.mutations, v.version, "makeVersionDurable");
+		}
 		for (const auto& m : v.mutations)
 			bytesLeft -= mvccStorageBytes(m);
 		prevStorageVersion = v.version;
@@ -10771,11 +10814,47 @@ Future<bool> StorageServerDisk::restoreDurableState() {
 	return ::restoreDurableState(data, storage);
 }
 
-// Determines whether a key-value pair should be included in a byte sample
-// Also returns size information about the sample
+// Determines whether a particular key-value pair should be included in a byte sample.
+//
+// This is part of the process to randomly and uniformly sample the key space.
+//
+// The sample will consist of (key, sampled_size) pairs, where sampled_size is
+// an estimate of the size of the values associated with that key. These sizes
+// are used to estimate the size of key ranges and determine split points.
+//
+// It's assumed that there's some overhead involved in the sample,
+// BYTE_SAMPLING_OVERHEAD, which defaults to 100 bytes per entry.
+//
+// The rough goal is for the sample size to be a fixed fraction of the total
+// size of all keys and values, 1/BYTE_SAMPLING_FACTOR, which defaults to 1/250.
+// This includes the overhead, mentioned above.
+//
+// NOTE: This BYTE_SAMPLING_FACTOR and BYTE_SAMPLING_OVERHEAD knobs can't be
+// changed after a database has been created. Data which has been already
+// sampled can't be resampled, and the estimates of the size of key ranges
+// implicitly includes these constants.
+//
+// This functions returns a struct containing
+//   * inSample: true if we've selected this key-value pair for sampling.
+//   * size: |key + value|
+//   * probability: probability we select a key-value pair of this size, at random.
+//   * sampledSize: always |key + value| / probability
+//                  represents the amount of key-value space covered by that key.
 ByteSampleInfo isKeyValueInSample(const KeyRef key, int64_t totalKvSize) {
 	ASSERT(totalKvSize >= key.size());
 	ByteSampleInfo info;
+
+	// Pathological case: key size == value size == 0
+	//
+	// It's probability of getting chosen is 0, so let's skip the
+	// computation and avoid dividing by zero.
+	if (totalKvSize == 0) {
+		info.size = 0;
+		info.probability = 0.0;
+		info.inSample = false;
+		info.sampledSize = 0;
+		return info;
+	}
 
 	info.size = totalKvSize;
 
@@ -10783,16 +10862,16 @@ ByteSampleInfo isKeyValueInSample(const KeyRef key, int64_t totalKvSize) {
 	uint32_t b = 0;
 	hashlittle2(key.begin(), key.size(), &a, &b);
 
-	double probability =
+	info.probability =
 	    (double)info.size / (key.size() + SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD) / SERVER_KNOBS->BYTE_SAMPLING_FACTOR;
 	// MIN_BYTE_SAMPLING_PROBABILITY is 0.99 only for testing
 	// MIN_BYTE_SAMPLING_PROBABILITY is 0 for other cases
 	if (SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY != 0) {
 		ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	}
-	probability = std::max(probability, SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY);
-	info.inSample = a / ((1 << 30) * 4.0) < probability;
-	info.sampledSize = info.size / std::min(1.0, probability);
+	info.probability = std::clamp(info.probability, SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY, 1.0);
+	info.inSample = a / ((1 << 30) * 4.0) < info.probability;
+	info.sampledSize = info.size / info.probability;
 
 	return info;
 }
@@ -11885,11 +11964,16 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
 	              .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
 	self.folder = folder;
+	self.checkpointFolder = joinPath(self.folder, serverCheckpointFolder);
+	self.fetchedCheckpointFolder = joinPath(self.folder, fetchedCheckpointFolder);
 
 	try {
 		wait(self.storage.init());
 		wait(self.storage.commit());
 		++self.counters.kvCommits;
+
+		platform::createDirectory(self.checkpointFolder);
+		platform::createDirectory(self.fetchedCheckpointFolder);
 
 		EncryptionAtRestMode encryptionMode = wait(self.storage.encryptionMode());
 		self.encryptionMode = encryptionMode;
@@ -11970,6 +12054,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	state StorageServer self(persistentData, db, ssi);
 	state Future<Void> ssCore;
 	self.folder = folder;
+	self.checkpointFolder = joinPath(self.folder, serverCheckpointFolder);
+	self.fetchedCheckpointFolder = joinPath(self.folder, fetchedCheckpointFolder);
 
 	try {
 		state double start = now();

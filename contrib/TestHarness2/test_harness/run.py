@@ -17,7 +17,7 @@ import uuid
 from functools import total_ordering
 from pathlib import Path
 from test_harness.version import Version
-from test_harness.config import config
+from test_harness.config import config, BuggifyOptionValue
 from typing import Dict, List, Pattern, OrderedDict
 
 from test_harness.summarize import Summary, SummaryTree
@@ -304,6 +304,10 @@ def is_restarting_test(test_file: Path):
     return False
 
 
+def is_negative(test_file: Path):
+    return test_file.parts[-2] == "negative"
+
+
 def is_no_sim(test_file: Path):
     return test_file.parts[-2] == "noSim"
 
@@ -449,7 +453,7 @@ class TestRun:
             command.append("--restarting")
         if self.buggify_enabled:
             command += ["-b", "on"]
-        if config.crash_on_error:
+        if config.crash_on_error and not is_negative(self.test_file):
             command.append("--crash")
         if config.long_running:
             # disable simulation speedup
@@ -488,6 +492,7 @@ class TestRun:
         resources.join()
         # we're rounding times up, otherwise we will prefer running very short tests (<1s)
         self.run_time = math.ceil(resources.time())
+        self.summary.is_negative_test = is_negative(self.test_file)
         self.summary.runtime = resources.time()
         self.summary.max_rss = resources.max_rss
         self.summary.was_killed = did_kill
@@ -495,7 +500,7 @@ class TestRun:
         self.summary.error_out = err_out
         self.summary.summarize(self.temp_path, " ".join(command))
 
-        if not self.summary.ok():
+        if not self.summary.is_negative_test and not self.summary.ok():
             self._run_rocksdb_logtool()
         return self.summary.ok()
 
@@ -549,7 +554,12 @@ class TestRunner:
                 not is_no_sim(file)
                 and config.random.random() < config.unseed_check_ratio
             )
-            buggify_enabled: bool = config.random.random() < config.buggify_on_ratio
+            buggify_enabled: bool = False
+            if config.buggify.value == BuggifyOptionValue.ON:
+                buggify_enabled = True
+            elif config.buggify.value == BuggifyOptionValue.RANDOM:
+                buggify_enabled = config.random.random() < config.buggify_on_ratio
+
             # FIXME: support unseed checks for restarting tests
             run = TestRun(
                 binary,

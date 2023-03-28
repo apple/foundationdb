@@ -51,6 +51,7 @@ inline static bool TRACE_SAMPLE() {
 }
 
 extern thread_local int g_allocation_tracing_disabled;
+extern bool g_traceProcessEvents;
 
 // Each major level of severity has 10 levels of minor levels, which are not all
 // used. when the numbers of severity events in each level are counted, they are
@@ -413,6 +414,7 @@ public:
 	std::unique_ptr<DynamicEventMetric> tmpEventMetric; // This just just a place to store fields
 
 	const TraceEventFields& getFields() const { return fields; }
+	Severity getSeverity() const { return severity; }
 
 	template <class Object>
 	void moveTo(Object& obj) {

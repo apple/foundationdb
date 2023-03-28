@@ -39,6 +39,8 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 
 	std::map<RelocateReason, int> rsReasonCounts;
 
+	Reference<DataDistributionTracker> shardTracker;
+
 	// --- test configs ---
 
 	// Each key space is convert from an int N. [N, N+1) represent a key space. So at most we have 2G key spaces
@@ -152,21 +154,25 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 		        .get();
 		Reference<PhysicalShardCollection> physicalShardCollection = makeReference<PhysicalShardCollection>();
 		Reference<AsyncVar<bool>> zeroHealthyTeams = makeReference<AsyncVar<bool>>(false);
-		actors.add(dataDistributionTracker(initData,
-		                                   mock,
-		                                   output,
-		                                   ddcx.shardsAffectedByTeamFailure,
-		                                   physicalShardCollection,
-		                                   getShardMetrics,
-		                                   getTopKMetrics.getFuture(),
-		                                   getShardMetricsList,
-		                                   getAverageShardBytes.getFuture(),
-		                                   Promise<Void>(),
-		                                   zeroHealthyTeams,
-		                                   ddcx.id(),
-		                                   &shards,
-		                                   &ddcx.trackerCancelled,
-		                                   {}));
+
+		shardTracker = makeReference<DataDistributionTracker>(
+		    DataDistributionTrackerInitParams{ .db = mock,
+		                                       .distributorId = ddcx.id(),
+		                                       .readyToStart = Promise<Void>(),
+		                                       .output = output,
+		                                       .shardsAffectedByTeamFailure = ddcx.shardsAffectedByTeamFailure,
+		                                       .physicalShardCollection = physicalShardCollection,
+		                                       .anyZeroHealthyTeams = zeroHealthyTeams,
+		                                       .shards = &shards,
+		                                       .trackerCancelled = &ddcx.trackerCancelled,
+		                                       .ddTenantCache = {} });
+		actors.add(DataDistributionTracker::run(shardTracker,
+		                                        initData,
+		                                        getShardMetrics.getFuture(),
+		                                        getTopKMetrics.getFuture(),
+		                                        getShardMetricsList.getFuture(),
+		                                        getAverageShardBytes.getFuture()));
+
 		actors.add(relocateShardReporter(this, output.getFuture()));
 
 		return timeout(reportErrors(actors.getResult(), "MockDDTrackerShardEvaluatorWorkload"), testDuration, Void());
