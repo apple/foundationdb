@@ -65,10 +65,6 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-FDB_DEFINE_BOOLEAN_PARAM(IncrementalBackupOnly);
-FDB_DEFINE_BOOLEAN_PARAM(OnlyApplyMutationLogs);
-FDB_DEFINE_BOOLEAN_PARAM(SnapshotBackupUseTenantCache);
-
 #define SevFRTestInfo SevVerbose
 // #define SevFRTestInfo SevInfo
 

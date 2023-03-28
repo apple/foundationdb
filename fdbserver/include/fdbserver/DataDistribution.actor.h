@@ -242,11 +242,11 @@ struct GetMetricsListRequest {
 // For each shard (key-range) move, PhysicalShardCollection decides which physical shard and corresponding team(s) to
 // move The current design of PhysicalShardCollection assumes that there exists at most two teamCollections
 // TODO: unit test needed
-FDB_DECLARE_BOOLEAN_PARAM(InAnonymousPhysicalShard);
-FDB_DECLARE_BOOLEAN_PARAM(PhysicalShardHasMoreThanKeyRange);
-FDB_DECLARE_BOOLEAN_PARAM(InOverSizePhysicalShard);
-FDB_DECLARE_BOOLEAN_PARAM(PhysicalShardAvailable);
-FDB_DECLARE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
+FDB_BOOLEAN_PARAM(InAnonymousPhysicalShard);
+FDB_BOOLEAN_PARAM(PhysicalShardHasMoreThanKeyRange);
+FDB_BOOLEAN_PARAM(InOverSizePhysicalShard);
+FDB_BOOLEAN_PARAM(PhysicalShardAvailable);
+FDB_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
 
 struct ShardMetrics {
 	StorageMetrics metrics;

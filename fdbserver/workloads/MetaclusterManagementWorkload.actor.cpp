@@ -40,8 +40,6 @@
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-FDB_DEFINE_BOOLEAN_PARAM(AllowPartialMetaclusterOperations);
-
 struct MetaclusterManagementWorkload : TestWorkload {
 	static constexpr auto NAME = "MetaclusterManagement";
 
