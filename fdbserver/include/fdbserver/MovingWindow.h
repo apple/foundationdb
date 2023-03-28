@@ -27,8 +27,15 @@
 #include "flow/Deque.h"
 #include "fdbserver/Knobs.h"
 
-// Perfomed as the rolling window to calculate average change rates in the past <interval>
-// e.g., we may use it in "MovingData" Trace to show average moving bytes rate by DD.
+// MovingWindow::addSample() will sum up all the samples, and getAverage() method will return the average
+// sampling rate in the past <timeWindow>, where every sample weights evenly.
+// A use case for MovingWindow is the "BytesWrittenAverageRate" in "MovingData" Trace, where we
+// want to get the actual average bytes moved rate by DD in the past DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL. We would have
+// a sense of how many bytes DD moved recently and it will help us get to know DD workload.
+// Comparison with Smoother: if you want to use a recency-based weighting(i.e. less important if sampled long time ago)
+// Smoother(which uses an exponential function for smoothing) woule be a good choice. On the other hand, if you want to
+// know the average sample rates in the last <timeWindow>, MovingWindow might be better.
+
 template <class T>
 class MovingWindow {
 private:
