@@ -1122,7 +1122,7 @@ ACTOR Future<Optional<std::string>> excludeCommitActor(ReadYourWritesTransaction
 		if (!safe)
 			return result;
 	}
-	excludeServers(ryw->getTransaction(), addresses, failed);
+	wait(excludeServers(&(ryw->getTransaction()), addresses, failed));
 	includeServers(ryw);
 
 	return result;
@@ -1167,7 +1167,7 @@ ACTOR Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ry
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE); // necessary?
 	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-	state std::vector<AddressExclusion> excl = wait((getExcludedServers(&tr)));
+	state std::vector<AddressExclusion> excl = wait((getAllExcludedServers(&tr)));
 	state std::set<AddressExclusion> exclusions(excl.begin(), excl.end());
 	state std::set<NetworkAddress> inProgressExclusion;
 	// Just getting a consistent read version proves that a set of tlogs satisfying the exclusions has completed
