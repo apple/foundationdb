@@ -1208,28 +1208,28 @@ public:
 	}
 	void registerAuditsForShardAssignmentHistoryCollection(UID auditID) {
 		ASSERT(!ongoingAuditsForShardAssignment.contains(auditID));
-		TraceEvent(SevDebug, "ShardAssignmentHistoryRegisterAudit", thisServerID).detail("AuditID", auditID);
+		TraceEvent(SevVerbose, "ShardAssignmentHistoryRegisterAudit", thisServerID).detail("AuditID", auditID);
 		ongoingAuditsForShardAssignment.insert(auditID);
 		return;
 	}
 	void unregisterAuditsForShardAssignmentHistoryCollection(UID auditID, bool check = true) {
 		if (check)
 			ASSERT(ongoingAuditsForShardAssignment.contains(auditID));
-		TraceEvent(SevDebug, "ShardAssignmentHistoryUnRegisterAudit", thisServerID).detail("AuditID", auditID);
+		TraceEvent(SevVerbose, "ShardAssignmentHistoryUnRegisterAudit", thisServerID).detail("AuditID", auditID);
 		ongoingAuditsForShardAssignment.erase(auditID);
 		return;
 	}
 	bool auditExistForShardAssignment() { return !ongoingAuditsForShardAssignment.empty(); }
 	void addShardAssignmentToHistory(Version version, const KeyRange keys, Version ssVersion) {
 		assignedShardHistory.push_back(std::make_pair(version, keys));
-		TraceEvent(SevDebug, "ShardAssignmentHistoryAdd", thisServerID)
+		TraceEvent(SevVerbose, "ShardAssignmentHistoryAdd", thisServerID)
 		    .detail("Version", version)
 		    .detail("Keys", keys)
 		    .detail("SSVersion", ssVersion);
 		return;
 	}
 	void clearShardAssignmentHistory() {
-		TraceEvent(SevDebug, "ShardAssignmentHistoryClear", thisServerID);
+		TraceEvent(SevVerbose, "ShardAssignmentHistoryClear", thisServerID);
 		assignedShardHistory.clear();
 		return;
 	}
@@ -1237,19 +1237,19 @@ public:
 		std::vector<std::pair<Version, KeyRangeRef>> res;
 		for (auto assignedShard : assignedShardHistory) {
 			if (assignedShard.first >= early && assignedShard.first <= later) {
-				TraceEvent(SevDebug, "ShardAssignmentHistoryGetOne", thisServerID)
+				TraceEvent(SevVerbose, "ShardAssignmentHistoryGetOne", thisServerID)
 				    .detail("Keys", assignedShard.second)
 				    .detail("Version", assignedShard.first);
 				res.push_back(assignedShard);
 			} else {
-				TraceEvent(SevDebug, "ShardAssignmentHistoryGetSkip", thisServerID)
+				TraceEvent(SevVerbose, "ShardAssignmentHistoryGetSkip", thisServerID)
 				    .detail("Keys", assignedShard.second)
 				    .detail("Version", assignedShard.first)
 				    .detail("EarlyVersion", early)
 				    .detail("LaterVersion", later);
 			}
 		}
-		TraceEvent(SevDebug, "ShardAssignmentHistoryGetDone", thisServerID)
+		TraceEvent(SevVerbose, "ShardAssignmentHistoryGetDone", thisServerID)
 		    .detail("EarlyVersion", early)
 		    .detail("LaterVersion", later)
 		    .detail("HistoryTotalSize", assignedShardHistory.size())
@@ -4972,7 +4972,6 @@ bool elementsAreExclusiveWithEachOther(std::vector<KeyRange> ranges) {
 	return true;
 }
 
-// TODO: add unit test
 bool rangesSame(std::vector<KeyRange> rangesA, std::vector<KeyRange> rangesB) {
 	if (rangesA.empty() && rangesB.empty()) {
 		return true;
@@ -4981,11 +4980,11 @@ bool rangesSame(std::vector<KeyRange> rangesA, std::vector<KeyRange> rangesB) {
 	} else if (!rangesA.empty() && rangesB.empty()) {
 		return false;
 	}
-	TraceEvent(SevDebug, "RangesSameBeforeSort").detail("RangesA", rangesA).detail("Rangesb", rangesB);
+	TraceEvent(SevVerbose, "RangesSameBeforeSort").detail("RangesA", rangesA).detail("Rangesb", rangesB);
 	// sort in ascending order
 	std::sort(rangesA.begin(), rangesA.end(), [](KeyRange a, KeyRange b) { return a.begin < b.begin; });
 	std::sort(rangesB.begin(), rangesB.end(), [](KeyRange a, KeyRange b) { return a.begin < b.begin; });
-	TraceEvent(SevDebug, "RangesSameAfterSort").detail("RangesA", rangesA).detail("Rangesb", rangesB);
+	TraceEvent(SevVerbose, "RangesSameAfterSort").detail("RangesA", rangesA).detail("Rangesb", rangesB);
 	ASSERT(elementsAreExclusiveWithEachOther(rangesA));
 	ASSERT(elementsAreExclusiveWithEachOther(rangesB));
 	if (rangesA.front().begin != rangesB.front().begin || rangesA.back().end != rangesB.back().end) {
@@ -5039,7 +5038,7 @@ ACTOR Future<std::vector<KeyRange>> getServerShardsByReadingServerKeys(StorageSe
 				range = KeyRangeRef(keyBegin, allKeys.end);
 				try {
 					wait(store(readResult, krmGetRanges(&tr, serverKeysPrefixFor(serverID), range, 1e5)));
-					TraceEvent(SevDebug, "AuditStorageShardStorageServerShardReadRange", serverID)
+					TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardReadRange", serverID)
 					    .detail("AtVersion", readAtVersion)
 					    .detail("Range", range)
 					    .detail("Prefix", serverKeysPrefixFor(serverID))
@@ -5048,7 +5047,7 @@ ACTOR Future<std::vector<KeyRange>> getServerShardsByReadingServerKeys(StorageSe
 					    .detail("RetryCount", retryCount)
 					    .detail("AduitServerID", serverID);
 				} catch (Error& e) {
-					TraceEvent(SevDebug, "AuditStorageShardStorageServerShardReadRangeError", serverID)
+					TraceEvent(SevInfo, "AuditStorageShardStorageServerShardReadRangeError", serverID)
 					    .errorUnsuppressed(e)
 					    .detail("AtVersion", readAtVersion)
 					    .detail("AuditServer", serverID.first());
@@ -5056,7 +5055,7 @@ ACTOR Future<std::vector<KeyRange>> getServerShardsByReadingServerKeys(StorageSe
 				}
 				readRangeCount++;
 				for (int i = 0; i < readResult.size() - 1; ++i) {
-					TraceEvent(SevDebug, "AuditStorageShardStorageServerShardReadRangeAddToResult", serverID)
+					TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardReadRangeAddToResult", serverID)
 					    .detail("ValueIsServerKeysFalse", readResult[i].value == serverKeysFalse)
 					    .detail("ServerHasKey", serverHasKey(readResult[i].value))
 					    .detail("Range", KeyRangeRef(readResult[i].key, readResult[i + 1].key))
@@ -5074,13 +5073,13 @@ ACTOR Future<std::vector<KeyRange>> getServerShardsByReadingServerKeys(StorageSe
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_transaction_too_old) {
-				TraceEvent(SevDebug, "AuditStorageShardStorageServerShardFailed", serverID)
+				TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", serverID)
 				    .errorUnsuppressed(e)
 				    .detail("AtVersion", readAtVersion)
 				    .detail("AuditServer", serverID.first());
 				throw e;
 			} else if (retryCount > 10) {
-				TraceEvent(SevDebug, "AuditStorageShardStorageServerShardFailed", serverID)
+				TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", serverID)
 				    .detail("Reason", "Read range retry exceeds maximum tryTimes")
 				    .detail("AtVersion", readAtVersion)
 				    .detail("AuditServer", serverID.first());
@@ -5105,7 +5104,7 @@ std::vector<KeyRange> getServerShardsByReadingShardInfo(StorageServer* data, Ver
 	std::vector<KeyRange> res;
 	const UID serverID = data->thisServerID;
 	for (auto t : data->shards.intersectingRanges(allKeys)) {
-		TraceEvent(SevDebug, "AuditStorageShardStorageServerShardCheckShardInfo", data->thisServerID)
+		TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardCheckShardInfo", data->thisServerID)
 		    .detail("Range", t.value()->keys)
 		    .detail("AtVersion", readAtVersion)
 		    .detail("AuditServer", serverID)
@@ -5120,14 +5119,14 @@ std::vector<KeyRange> getServerShardsByReadingShardInfo(StorageServer* data, Ver
 
 // Check shardInfo of SS is consistent with serverKeys space
 ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditStorageRequest req) {
-	TraceEvent(SevDebug, "AuditStorageShardStorageServerShardBegin", data->thisServerID);
+	TraceEvent(SevInfo, "AuditStorageShardStorageServerShardBegin", data->thisServerID);
 	ASSERT(req.getType() == AuditType::ValidateStorageServerShard);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
 
 	try {
 		if (data->knownCommittedVersion.get() == 0 || data->version.get() == 0) {
-			TraceEvent(SevDebug, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
+			TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
 			    .detail("Reason", "Versions are not valid")
 			    .detail("LatestVersion", data->version.get())
 			    .detail("LatestCommitVersion", data->knownCommittedVersion.get());
@@ -5155,7 +5154,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			// Wait until knownCommitVersion catches up with Version and
 			// to read serverKeys at the new knownCommitVersion
 			data->registerAuditsForShardAssignmentHistoryCollection(req.id);
-			TraceEvent(SevDebug, "AuditStorageShardStorageServerShardBeforeWait", data->thisServerID)
+			TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardBeforeWait", data->thisServerID)
 			    .detail("Version", VersionBeforeWait)
 			    .detail("KnownCommitVersion", KnownCommitVersionBeforeWait);
 			try {
@@ -5174,7 +5173,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 
 			VersionAfterWait = data->version.get();
 			KnownCommitVersionAfterWait = data->knownCommittedVersion.get();
-			TraceEvent(SevDebug, "AuditStorageShardStorageServerShardAfterWait", data->thisServerID)
+			TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardAfterWait", data->thisServerID)
 			    .detail("Version", VersionAfterWait)
 			    .detail("KnownCommitVersion", KnownCommitVersionAfterWait);
 			if (VersionAfterWait < KnownCommitVersionAfterWait) {
@@ -5190,7 +5189,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			}
 
 			shardAssignments = data->getAssignmentHistory(VersionBeforeWait, KnownCommitVersionAfterWait);
-			TraceEvent(SevDebug, "AuditStorageShardStorageServerShardGetHistory", data->thisServerID)
+			TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardGetHistory", data->thisServerID)
 			    .detail("Version", VersionBeforeWait)
 			    .detail("VersionNew", VersionAfterWait)
 			    .detail("KnownCommitVersion", KnownCommitVersionBeforeWait)
@@ -5254,7 +5253,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			wait(persistAuditStateMap(data->cx, res));
 			req.reply.sendError(audit_storage_error());
 		} else {
-			TraceEvent(SevInfo, "AuditStorageShardStorageServerShardComplete", data->thisServerID)
+			TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardComplete", data->thisServerID)
 			    .detail("Range", res.range)
 			    .detail("Version", toReadVersion)
 			    .detail("AuditServer", data->thisServerID);
@@ -5283,7 +5282,7 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 	ASSERT(req.getType() == AuditType::ValidateLocationMetadata);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
-	TraceEvent(SevDebug, "AuditStorageShardLocMetadataBegin", data->thisServerID);
+	TraceEvent(SevInfo, "AuditStorageShardLocMetadataBegin", data->thisServerID);
 	state std::vector<std::string> errors;
 	state AuditStorageState res(req.id, req.range, req.getType());
 	state std::vector<Future<Void>> actors;
@@ -8695,7 +8694,7 @@ void changeServerKeys(StorageServer* data,
                       ChangeServerKeysContext context) {
 	ASSERT(!keys.empty());
 
-	TraceEvent(SevDebug, "ChangeServerKeys", data->thisServerID)
+	TraceEvent(SevVerbose, "ChangeServerKeys", data->thisServerID)
 	    .detail("KeyBegin", keys.begin)
 	    .detail("KeyEnd", keys.end)
 	    .detail("NowAssigned", nowAssigned)
@@ -8756,7 +8755,7 @@ void changeServerKeys(StorageServer* data,
 	for (auto r = vr.begin(); r != vr.end(); ++r) {
 		KeyRangeRef range = keys & r->range();
 		bool dataAvailable = r->value() == latestVersion || r->value() >= version;
-		TraceEvent(SevDebug, "CSKRange", data->thisServerID)
+		TraceEvent(SevVerbose, "CSKRange", data->thisServerID)
 		    .detail("KeyBegin", range.begin)
 		    .detail("KeyEnd", range.end)
 		    .detail("Available", dataAvailable)
@@ -8765,13 +8764,13 @@ void changeServerKeys(StorageServer* data,
 		    .detail("ShardState0", data->shards[range.begin]->debugDescribeState());
 		if (context == CSK_ASSIGN_EMPTY && !dataAvailable) {
 			ASSERT(nowAssigned);
-			TraceEvent("ChangeServerKeysAddEmptyRange", data->thisServerID)
+			TraceEvent(SevVerbose, "ChangeServerKeysAddEmptyRange", data->thisServerID)
 			    .detail("Begin", range.begin)
 			    .detail("End", range.end);
 			newEmptyRanges.push_back(range);
 			data->addShard(ShardInfo::newReadWrite(range, data));
 		} else if (!nowAssigned) {
-			TraceEvent("ChangeServerKeysEnsureNotAssignedRange", data->thisServerID)
+			TraceEvent(SevVerbose, "ChangeServerKeysEnsureNotAssignedRange", data->thisServerID)
 			    .detail("Begin", range.begin)
 			    .detail("End", range.end);
 			if (dataAvailable) {
@@ -8787,7 +8786,7 @@ void changeServerKeys(StorageServer* data,
 			// SOMEDAY: Avoid restarting adding/transferred shards
 			// bypass fetchkeys; shard is known empty at initial cluster version
 			if (version == data->initialClusterVersion - 1) {
-				TraceEvent("ChangeServerKeysInitialRange", data->thisServerID)
+				TraceEvent(SevVerbose, "ChangeServerKeysInitialRange", data->thisServerID)
 				    .detail("Begin", range.begin)
 				    .detail("End", range.end);
 				changeNewestAvailable.emplace_back(range, latestVersion);
@@ -8795,7 +8794,7 @@ void changeServerKeys(StorageServer* data,
 				setAvailableStatus(data, range, true);
 			} else {
 				auto& shard = data->shards[range.begin];
-				TraceEvent("ChangeServerKeysAddNonEmptyRange", data->thisServerID)
+				TraceEvent(SevVerbose, "ChangeServerKeysAddNonEmptyRange", data->thisServerID)
 				    .detail("Begin", range.begin)
 				    .detail("End", range.end)
 				    .detail("TrueAdd", !shard->assigned() || shard->keys != range);
@@ -8803,7 +8802,7 @@ void changeServerKeys(StorageServer* data,
 					data->addShard(ShardInfo::newAdding(data, range));
 			}
 		} else {
-			TraceEvent("ChangeServerKeysNewReadWrite", data->thisServerID)
+			TraceEvent(SevVerbose, "ChangeServerKeysNewReadWrite", data->thisServerID)
 			    .detail("Begin", range.begin)
 			    .detail("End", range.end);
 			changeNewestAvailable.emplace_back(range, latestVersion);

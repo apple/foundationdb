@@ -2618,7 +2618,7 @@ ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
                                bool async) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
-	TraceEvent(SevDebug, "ManagementAPIAuditStorageTrigger")
+	TraceEvent(SevVerbose, "ManagementAPIAuditStorageTrigger")
 	    .detail("AuditType", type)
 	    .detail("Range", range)
 	    .detail("Async", async);
@@ -2627,14 +2627,14 @@ ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
 		while (!clusterInterface->get().present()) {
 			wait(clusterInterface->onChange());
 		}
-		TraceEvent(SevDebug, "ManagementAPIAuditStorageBegin")
+		TraceEvent(SevVerbose, "ManagementAPIAuditStorageBegin")
 		    .detail("AuditType", type)
 		    .detail("Range", range)
 		    .detail("Async", async);
 		TriggerAuditRequest req(type, range, async);
 		UID auditId_ = wait(timeoutError(clusterInterface->get().get().triggerAudit.getReply(req), timeoutSeconds));
 		auditId = auditId_;
-		TraceEvent(SevDebug, "ManagementAPIAuditStorageEnd")
+		TraceEvent(SevVerbose, "ManagementAPIAuditStorageEnd")
 		    .detail("AuditType", type)
 		    .detail("Range", range)
 		    .detail("AuditID", auditId)

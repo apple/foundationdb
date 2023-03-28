@@ -1399,7 +1399,7 @@ ACTOR Future<bool> runTest(Database cx,
 			}
 
 			// Run auditStorage
-			if (quiescent && SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			if (quiescent) {
 				try {
 					TraceEvent("RunAuditStorage");
 					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateHA), 1000.0));

@@ -1520,7 +1520,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self, TriggerAudi
 	state std::shared_ptr<DDAudit> audit;
 
 	try {
-		TraceEvent(SevDebug, "DDAuditStorageCoreTriggered", self->ddId)
+		TraceEvent(SevVerbose, "DDAuditStorageCoreTriggered", self->ddId)
 		    .detail("AuditType", req.getType())
 		    .detail("Range", req.range)
 		    .detail("IsReady", self->auditInitialized.getFuture().isReady())
@@ -1531,7 +1531,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self, TriggerAudi
 		fs.push_back(self->initialized.getFuture());
 		wait(waitForAll(fs));
 
-		TraceEvent(SevDebug, "DDAuditStorageCoreStart", self->ddId)
+		TraceEvent(SevVerbose, "DDAuditStorageCoreStart", self->ddId)
 		    .detail("AuditType", req.getType())
 		    .detail("Range", req.range)
 		    .detail("IsReady", self->auditInitialized.getFuture().isReady())
@@ -1556,7 +1556,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self, TriggerAudi
 				req.reply.sendError(audit_storage_exceeded_request_limit());
 				return Void();
 			}
-			TraceEvent(SevDebug, "DDAuditStorageCoreAuditExist", self->ddId)
+			TraceEvent(SevVerbose, "DDAuditStorageCoreAuditExist", self->ddId)
 			    .detail("AuditType", req.getType())
 			    .detail("AuditID", audit->coreState.id)
 			    .detail("State", audit->coreState.toString());
@@ -1565,7 +1565,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self, TriggerAudi
 			auditState.setType(req.getType());
 			auditState.range = req.range;
 			auditState.setPhase(AuditPhase::Running);
-			TraceEvent(SevDebug, "DDAuditStorageCorePersistNewAuditID", self->ddId)
+			TraceEvent(SevVerbose, "DDAuditStorageCorePersistNewAuditID", self->ddId)
 			    .detail("AuditType", req.getType())
 			    .detail("Range", req.range);
 			UID auditId = wait(persistNewAuditState(self->txnProcessor->context(), auditState)); // must succeed
@@ -1600,7 +1600,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self, TriggerAudi
 		    .detail("Async", req.async);
 		if (req.async && !req.reply.isSet()) {
 			req.reply.send(audit->coreState.id);
-			TraceEvent(SevDebug, "DDAuditStorageCoreReplyAsync", self->ddId)
+			TraceEvent(SevVerbose, "DDAuditStorageCoreReplyAsync", self->ddId)
 			    .detail("AuditState", audit->coreState.toString());
 		}
 		wait(audit->actors.getResult()); // goto exception handler if any actor is failed
@@ -1610,17 +1610,18 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self, TriggerAudi
 		} else {
 			audit->coreState.setPhase(AuditPhase::Complete);
 		}
-		TraceEvent(SevInfo, "DDAuditStorageCoreGotResult", self->ddId)
+		TraceEvent(SevVerbose, "DDAuditStorageCoreGotResult", self->ddId)
 		    .detail("AuditState", audit->coreState.toString());
 		// persist audit state first, then send back result
 		wait(persistAuditState(self->txnProcessor->context(), audit->coreState));
-		TraceEvent(SevInfo, "DDAuditStorageCorePersist", self->ddId).detail("AuditState", audit->coreState.toString());
+		TraceEvent(SevVerbose, "DDAuditStorageCorePersist", self->ddId)
+		    .detail("AuditState", audit->coreState.toString());
 		ASSERT(audit != nullptr);
 		audit->actors.clear(true);
 		self->audits[audit->coreState.getType()].erase(audit->coreState.id);
 		if (!req.async && !req.reply.isSet()) {
 			req.reply.send(audit->coreState.id);
-			TraceEvent(SevInfo, "DDAuditStorageCoreReplySync", self->ddId)
+			TraceEvent(SevVerbose, "DDAuditStorageCoreReplySync", self->ddId)
 			    .detail("AuditState", audit->coreState.toString());
 		}
 
@@ -1769,6 +1770,11 @@ ACTOR Future<Void> scheduleAuditForMetadata(Reference<DataDistributor> self, std
 			state int i = 0;
 			for (; i < serverWorkers.servers.size(); ++i) {
 				StorageServerInterface targetServer = serverWorkers.servers[i].first;
+				// Currently, Tss server may not follow the auit consistency rule
+				// Thus, skip if the server is tss
+				if (targetServer.isTss()) {
+					continue;
+				}
 				AuditStorageRequest req(audit->coreState.id,
 				                        specialKeys,
 				                        audit->coreState.getType()); // use specialKeys to represent this goal
