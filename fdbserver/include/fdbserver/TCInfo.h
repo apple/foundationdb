@@ -225,7 +225,8 @@ public:
 	void setLastHighCPUTime(double time) override { lastHighCPUTime = time; }
 
 	bool hasLowCpuFor(double cpuThreshold, double duration) const override {
-		return getAverageCPU() < cpuThreshold && now() - lastHighCPUTime >= duration;
+		return getAverageCPU() <= std::min(cpuThreshold, SERVER_KNOBS->MAX_DEST_CPU_PERCENT) &&
+		       now() - lastHighCPUTime >= duration;
 	}
 
 	int64_t getReadInFlightToTeam() const override;
