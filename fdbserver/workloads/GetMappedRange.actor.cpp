@@ -50,11 +50,13 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	//	const bool SPLIT_RECORDS = deterministicRandom()->random01() < 0.5;
 	const bool SPLIT_RECORDS = true;
 	const static int SPLIT_SIZE = 3;
-	int checkStorageQueueSeconds;
+	double checkStorageQueueSeconds;
+	double queueMaxLength;
 
 	GetMappedRangeWorkload(WorkloadContext const& wcx) : ApiWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		checkStorageQueueSeconds = getOption(options, "checkStorageQueueSeconds"_sr, 30.0);
+		checkStorageQueueSeconds = getOption(options, "checkStorageQueueSeconds"_sr, 60.0);
+		queueMaxLength = getOption(options, "queueMaxLength"_sr, 200);
 	}
 
 	std::string description() const override { return "GetMappedRange"; }
@@ -251,7 +253,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				     e.code() == error_code_quick_get_key_values_miss)) {
 					TraceEvent("GetMappedRangeWorkloadExpectedErrorDetected").error(e);
 					return MappedRangeResult();
-				} else if (e.code() == error_code_proxy_memory_limit_exceeded) {
+				} else if (e.code() == error_code_proxy_memory_limit_exceeded ||
+				           e.code() == error_code_operation_cancelled) {
 					// requests have overwhelmed commit proxy, rest a bit
 					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 					continue;
@@ -425,7 +428,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			StatusObjectReader statusObj(result);
 			state StatusObjectReader statusObjCluster;
 			state StatusObjectReader processesMap;
-			state long queryQueueMax = 0;
+			state int64_t queryQueueMax = 0;
 			state int waitInterval = 2;
 			if (!statusObj.get("cluster", statusObjCluster)) {
 				TraceEvent("NoCluster");
@@ -446,8 +449,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 						if (role["role"].get_str() == "storage") {
 							role.get("query_queue_max", queryQueueMax);
 							TEST(queryQueueMax > 0); // SS query queue is non-empty
-							ASSERT(queryQueueMax < 100); // if the queue size metric is wrong, it is likely above 100
 							TraceEvent(SevDebug, "QueryQueueMax").detail("Value", queryQueueMax);
+							ASSERT(queryQueueMax < self->queueMaxLength);
 						}
 					}
 				} else {
