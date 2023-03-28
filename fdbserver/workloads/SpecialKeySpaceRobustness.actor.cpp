@@ -61,6 +61,24 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 		return true;
 	}
 
+	// A test utility that exclude the worker with `workerAddress` using `command` and return the value of `versionKey`.
+	ACTOR static Future<Optional<Value>> runExcludeAndGetVersionKey(Reference<ReadYourWritesTransaction> tx,
+	                                                                std::string workerAddress,
+	                                                                std::string command,
+	                                                                KeyRef versionKey) {
+		tx->reset();
+		tx->setOption(FDBTransactionOptions::RAW_ACCESS);
+		tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		tx->set(Key(workerAddress).withPrefix(SpecialKeySpace::getManagementApiCommandPrefix(command)), ValueRef());
+		wait(tx->commit());
+		tx->reset();
+
+		tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		Optional<Value> versionKeyValue = wait(tx->get(versionKey));
+		tx->reset();
+		return versionKeyValue;
+	}
+
 	ACTOR Future<Void> managementApiCorrectnessActor(Database cx, SpecialKeySpaceRobustnessWorkload* self) {
 		// Management api related tests that can run during failure injections
 		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
@@ -109,6 +127,64 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 				wait(tx->onError(e));
 			}
 			tx->reset();
+		}
+		// "Exclude" same address multiple times, and only the first excluson should trigger a system metadata update.
+		{
+			try {
+				std::vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
+				state std::string workerAddress = "123.4.56.7:9876"; // Use a random address to not impact the cluster.
+
+				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				state Optional<Value> versionKey0 = wait(tx->get(excludedServersVersionKey));
+
+				state Optional<Value> versionKey1 =
+				    wait(runExcludeAndGetVersionKey(tx, workerAddress, "exclude", excludedServersVersionKey));
+				ASSERT(versionKey1.present());
+				ASSERT(versionKey0 != versionKey1);
+				Optional<Value> versionKey2 =
+				    wait(runExcludeAndGetVersionKey(tx, workerAddress, "exclude", excludedServersVersionKey));
+				ASSERT(versionKey2.present());
+				// Exclude the same worker twice. The second exclusion shouldn't trigger a system metadata update.
+				ASSERT(versionKey1 == versionKey2);
+
+				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				state Optional<Value> versionKey3 = wait(tx->get(failedServersVersionKey));
+
+				state Optional<Value> versionKey4 =
+				    wait(runExcludeAndGetVersionKey(tx, workerAddress, "failed", failedServersVersionKey));
+				ASSERT(versionKey4.present());
+				ASSERT(versionKey3 != versionKey4);
+				Optional<Value> versionKey5 =
+				    wait(runExcludeAndGetVersionKey(tx, workerAddress, "failed", failedServersVersionKey));
+				ASSERT(versionKey5.present());
+				// Exclude the same worker twice. The second exclusion shouldn't trigger a system metadata update.
+				ASSERT(versionKey4 == versionKey5);
+
+				tx->reset();
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled)
+					throw;
+				if (e.code() == error_code_special_keys_api_failure) {
+					Optional<Value> errorMsg =
+					    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+					ASSERT(errorMsg.present());
+					std::string errorStr;
+					auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+					auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+					// special_key_space_management_api_error_msg schema validation
+					ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+					ASSERT((valueObj["command"].get_str() == "exclude" ||
+					        valueObj["command"].get_str() == "exclude failed") &&
+					       !valueObj["retriable"].get_bool());
+				} else {
+					TraceEvent(SevDebug, "UnexpectedError")
+					    .error(e)
+					    .detail("Command", "Exclude")
+					    .detail("Test", "Repeated exclusions");
+					wait(tx->onError(e));
+				}
+				tx->reset();
+			}
 		}
 		// "setclass"
 		{
