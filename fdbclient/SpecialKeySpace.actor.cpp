@@ -2766,7 +2766,7 @@ ACTOR Future<Optional<std::string>> excludeLocalityCommitActor(ReadYourWritesTra
 			return result;
 	}
 
-	excludeLocalities(ryw->getTransaction(), localities, failed);
+	wait(excludeLocalities(&ryw->getTransaction(), localities, failed));
 	includeLocalities(ryw);
 
 	return result;
