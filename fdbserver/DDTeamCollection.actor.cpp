@@ -339,7 +339,10 @@ public:
 				if (randomTeams.empty() && !self->zeroHealthyTeams->get()) {
 					self->bestTeamKeepStuckCount++;
 					if (g_network->isSimulated()) {
-						TraceEvent(SevWarn, "GetTeamReturnEmpty").detail("HealthyTeams", self->healthyTeamCount);
+						TraceEvent(SevWarn, "GetTeamReturnEmpty")
+						    .detail("HealthyTeams", self->healthyTeamCount)
+						    .detail("PivotCPU", self->pivotCPU)
+						    .detail("PivotDiskSpace", self->pivotAvailableSpaceRatio);
 					}
 				} else {
 					self->bestTeamKeepStuckCount = 0;
@@ -374,10 +377,14 @@ public:
 					return Void();
 				}
 			}
-			// if (!bestOption.present()) {
-			// 	TraceEvent("GetTeamRequest").detail("Request", req.getDesc());
-			// 	self->traceAllInfo(true);
-			// }
+			if (!bestOption.present()) {
+				TraceEvent("GetTeamRequestDebug")
+				    .detail("Request", req.getDesc())
+				    .detail("HealthyTeams", self->healthyTeamCount)
+				    .detail("PivotCPU", self->pivotCPU)
+				    .detail("PivotDiskSpace", self->pivotAvailableSpaceRatio);
+				self->traceAllInfo(true);
+			}
 
 			req.reply.send(std::make_pair(bestOption, foundSrc));
 			return Void();
@@ -3246,7 +3253,7 @@ public:
 }; // class DDTeamCollectionImpl
 
 void DDTeamCollection::updateTeamPivotValues() {
-	if (now() - lastPivotValuesUpdate > SERVER_KNOBS->AVAILABLE_SPACE_UPDATE_DELAY) {
+	if (now() - lastPivotValuesUpdate > SERVER_KNOBS->DD_TEAM_PIVOT_UPDATE_DELAY) {
 		lastPivotValuesUpdate = now();
 		std::vector<double> teamAvailableSpace;
 		std::vector<std::pair<double, int>> teamAverageCPU_index;
@@ -3256,11 +3263,12 @@ void DDTeamCollection::updateTeamPivotValues() {
 			if (teams[i]->isHealthy()) {
 				teamAvailableSpace.push_back(teams[i]->getMinAvailableSpaceRatio());
 				teamAverageCPU_index.emplace_back(teams[i]->getAverageCPU(), i);
+				minTeamAvgCPU = std::min(minTeamAvgCPU, teamAverageCPU_index.back().first);
 			}
 		}
 
-		size_t pivot = teamAvailableSpace.size() * std::min(1.0, SERVER_KNOBS->AVAILABLE_SPACE_PIVOT_PERCENT);
-		size_t cpuPivotIndex = teamAverageCPU_index.size() * std::min(1.0, SERVER_KNOBS->CPU_PIVOT_PERCENT);
+		size_t pivot = teamAvailableSpace.size() * std::min(1.0, SERVER_KNOBS->AVAILABLE_SPACE_PIVOT_RATIO);
+		size_t cpuPivotIndex = teamAverageCPU_index.size() * std::min(1.0, SERVER_KNOBS->CPU_PIVOT_RATIO);
 		if (teamAvailableSpace.size() > 1) {
 			std::nth_element(teamAvailableSpace.begin(), teamAvailableSpace.begin() + pivot, teamAvailableSpace.end());
 			pivotAvailableSpaceRatio =
@@ -3269,15 +3277,11 @@ void DDTeamCollection::updateTeamPivotValues() {
 
 			std::nth_element(
 			    teamAverageCPU_index.begin(), teamAverageCPU_index.begin() + cpuPivotIndex, teamAverageCPU_index.end());
-			pivotCPU = std::min(SERVER_KNOBS->MAX_DEST_CPU_PERCENT, teamAverageCPU_index[cpuPivotIndex].first);
-			// set high CPU for teams >= pivot CPU
-			for (int i = cpuPivotIndex; i < teamAverageCPU_index.size(); ++i) {
+			pivotCPU = teamAverageCPU_index[cpuPivotIndex].first;
+			// set high CPU for teams > pivot CPU
+			for (int i = cpuPivotIndex + 1; i < teamAverageCPU_index.size(); ++i) {
 				teams[teamAverageCPU_index[i].second]->setLastHighCPUTime(lastPivotValuesUpdate);
 			}
-			for (int i = cpuPivotIndex - 1; i >= 0 && teamAverageCPU_index[i].first >= pivotCPU; --i) {
-				teams[teamAverageCPU_index[i].second]->setLastHighCPUTime(lastPivotValuesUpdate);
-			}
-
 		} else {
 			pivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
 			pivotCPU = SERVER_KNOBS->MAX_DEST_CPU_PERCENT;
@@ -3289,6 +3293,13 @@ void DDTeamCollection::updateTeamPivotValues() {
 			    .detail("TargetAvailableSpaceRatio", SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO)
 			    .detail("Primary", primary);
 			printDetailedTeamsInfo.trigger();
+		}
+
+		if (pivotCPU > SERVER_KNOBS->MAX_DEST_CPU_PERCENT) {
+			TraceEvent(SevWarnAlways, "DDTeamPivotCPUTooHigh", distributorId)
+			    .detail("PivotCPU", pivotCPU)
+			    .detail("MinTeamAvgCPU", minTeamAvgCPU)
+			    .detail("Primary", primary);
 		}
 	}
 }
@@ -5768,7 +5779,7 @@ public:
 		state GetTeamRequest req(TeamSelect::WANT_COMPLETE_SRCS,
 		                         PreferLowerDiskUtil::True,
 		                         TeamMustHaveShards::False,
-		                         PreferLowerReadUtil::True);
+		                         PreferLowerReadUtil::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5822,7 +5833,7 @@ public:
 		state GetTeamRequest req(TeamSelect::WANT_COMPLETE_SRCS,
 		                         PreferLowerDiskUtil::True,
 		                         TeamMustHaveShards::False,
-		                         PreferLowerReadUtil::True);
+		                         PreferLowerReadUtil::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5874,7 +5885,7 @@ public:
 		state GetTeamRequest req(TeamSelect::WANT_TRUE_BEST,
 		                         PreferLowerDiskUtil::True,
 		                         TeamMustHaveShards::False,
-		                         PreferLowerReadUtil::True);
+		                         PreferLowerReadUtil::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5978,7 +5989,7 @@ public:
 		state GetTeamRequest req(TeamSelect::WANT_TRUE_BEST,
 		                         PreferLowerDiskUtil::True,
 		                         TeamMustHaveShards::False,
-		                         PreferLowerReadUtil::True);
+		                         PreferLowerReadUtil::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -6036,7 +6047,7 @@ public:
 		state GetTeamRequest req(TeamSelect::WANT_TRUE_BEST,
 		                         PreferLowerDiskUtil::True,
 		                         TeamMustHaveShards::False,
-		                         PreferLowerReadUtil::True);
+		                         PreferLowerReadUtil::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -6099,13 +6110,15 @@ public:
 		std::set<UID> expectedServers{ UID(4, 0) };
 		std::set<UID> expectedServersHigh{ UID(5, 0) };
 
-		ASSERT(resTeam.present() && resTeamHigh.present());
+		ASSERT(resTeam.present());
+		ASSERT(resTeamHigh.present());
 		auto servers = resTeam.get()->getServerIDs(), serversHigh = resTeamHigh.get()->getServerIDs();
 		const std::set<UID> selectedServers(servers.begin(), servers.end()),
 		    selectedServersHigh(serversHigh.begin(), serversHigh.end());
 		// for (auto id : selectedServers)
 		// 	std::cout << id.toString() << std::endl;
-		ASSERT(expectedServers == selectedServers && expectedServersHigh == selectedServersHigh);
+		ASSERT(expectedServers == selectedServers);
+		ASSERT(expectedServersHigh == selectedServersHigh);
 
 		resTeam.get()->addReadInFlightToTeam(50);
 		req.reply.reset();
@@ -6152,7 +6165,7 @@ public:
 		state GetTeamRequest req(TeamSelect::WANT_TRUE_BEST,
 		                         PreferLowerDiskUtil::True,
 		                         TeamMustHaveShards::False,
-		                         PreferLowerReadUtil::True);
+		                         PreferLowerReadUtil::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -6167,6 +6180,8 @@ public:
 
 		return Void();
 	}
+
+	ACTOR static Future<Void> GetTeam_CpuUtilSelection() { return Void(); }
 };
 
 TEST_CASE("DataDistribution/AddTeamsBestOf/UseMachineID") {
@@ -6228,6 +6243,7 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
 	wait(DDTeamCollectionUnitTest::GetTeam_ServerUtilizationNearCutoff());
 	return Void();
 }
+
 TEST_CASE("/DataDistribution/GetTeam/TrueBestLeastReadBandwidth") {
 	wait(DDTeamCollectionUnitTest::GetTeam_TrueBestLeastReadBandwidth());
 	return Void();
