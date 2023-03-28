@@ -28,7 +28,10 @@ function(add_swift_to_cxx_header_gen_target target_name header_target_name heade
 
   set (SwiftFrontendOpts )
 
-  string(REGEX MATCHALL "-Xcc [-=/a-zA-Z0-9.]+" SwiftXccOptionsFlags "${CMAKE_Swift_FLAGS}")
+  string(REGEX MATCHALL "-Xcc [-=/a-zA-Z0-9_.]+" SwiftXccOptionsFlags "${CMAKE_Swift_FLAGS}")
+  string(REGEX MATCHALL "-target [-=/a-zA-Z0-9_.]+" SwiftTargetFlags "${CMAKE_Swift_FLAGS}")
+  string(REGEX MATCHALL "-sdk [-=/a-zA-Z0-9_.]+" SwiftSDKFlags "${CMAKE_Swift_FLAGS}")
+  string(REGEX MATCHALL "-module-cache-path [-=/a-zA-Z0-9_.]+" SwiftMCFlags "${CMAKE_Swift_FLAGS}")
   foreach (flag ${SwiftXccOptionsFlags})
     string(SUBSTRING ${flag} 5 -1 clangFlag)
     list(APPEND SwiftFrontendOpts "-Xcc")
@@ -39,6 +42,21 @@ function(add_swift_to_cxx_header_gen_target target_name header_target_name heade
   string(REGEX MATCHALL "${FlagName}=[-_/a-zA-Z0-9.]+" SwiftEqFlags "${CMAKE_Swift_FLAGS}")
   foreach (flag ${SwiftEqFlags})
     list(APPEND SwiftFrontendOpts "${flag}")
+  endforeach()
+  foreach (flag ${SwiftTargetFlags})
+    string(SUBSTRING ${flag} 8 -1 clangFlag)
+    list(APPEND SwiftFrontendOpts "-target")
+    list(APPEND SwiftFrontendOpts "${clangFlag}")
+  endforeach()
+  foreach (flag ${SwiftSDKFlags})
+    string(SUBSTRING ${flag} 5 -1 clangFlag)
+    list(APPEND SwiftFrontendOpts "-sdk")
+    list(APPEND SwiftFrontendOpts "${clangFlag}")
+  endforeach()
+  foreach (flag ${SwiftMCFlags})
+    string(SUBSTRING ${flag} 19 -1 clangFlag)
+    list(APPEND SwiftFrontendOpts "-module-cache-path")
+    list(APPEND SwiftFrontendOpts "${clangFlag}")
   endforeach()
 
   add_custom_command(
