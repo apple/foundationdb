@@ -24,16 +24,18 @@
 #ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
 #endif
+#ifndef BOOST_DATE_TIME_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
+#endif
+#ifndef BOOST_REGEX_NO_LIB
 #define BOOST_REGEX_NO_LIB
+#endif
 #include "boost/asio.hpp"
 
 #include "fdbclient/CoordinationInterface.h"
 
-// Determine public IP address by calling the first available coordinator.
-// If fail connecting all coordinators, throw bind_failed().
-IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs) {
-	int size = ccs.coords.size() + ccs.hostnames.size();
+IPAddress ClusterConnectionString::determineLocalSourceIP() const {
+	int size = coords.size() + hostnames.size();
 	int index = 0;
 	loop {
 		try {
@@ -44,10 +46,10 @@ IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs) {
 
 			NetworkAddress coordAddr;
 			// Try coords first, because they don't need to be resolved.
-			if (index < ccs.coords.size()) {
-				coordAddr = ccs.coords[index];
+			if (index < coords.size()) {
+				coordAddr = coords[index];
 			} else {
-				Hostname& h = ccs.hostnames[index - ccs.coords.size()];
+				const Hostname& h = hostnames[index - coords.size()];
 				Optional<NetworkAddress> resolvedAddr = h.resolveBlocking();
 				if (!resolvedAddr.present()) {
 					throw lookup_failed();

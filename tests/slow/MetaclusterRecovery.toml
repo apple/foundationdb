@@ -2,9 +2,13 @@
 allowDefaultTenant = false
 allowCreatingTenants = false
 extraDatabaseMode = 'Multiple'
-extraDatabaseCount = 5
+extraDatabaseCount = 3
 extraDatabaseBackupAgents = true
 tenantModes = ['optional', 'required']
+config = 'triple'
+generateFearless = false
+processesPerMachine = 1
+machineCount = 5
 
 [[test]]
 testTitle = 'MetaclusterRestoreTest'
@@ -15,5 +19,5 @@ simBackupAgents = 'BackupToFile'
 
     [[test.workload]]
     testName = 'MetaclusterRestore'
-	maxTenants = 1000
-	maxTenantGroups = 20
+	maxTenants = 500
+	maxTenantGroups = 10

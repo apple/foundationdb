@@ -19,7 +19,7 @@
  */
 
 #include <foundationdb/ClientWorkload.h>
-#define FDB_API_VERSION 720
+#define FDB_USE_LATEST_BINDINGS_API_VERSION
 #include <foundationdb/fdb_c.h>
 
 #include "com_apple_foundationdb_testing_AbstractWorkload.h"

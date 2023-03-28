@@ -46,6 +46,7 @@ FDB_DECLARE_BOOLEAN_PARAM(Terminator);
 FDB_DECLARE_BOOLEAN_PARAM(IncrementalBackupOnly);
 FDB_DECLARE_BOOLEAN_PARAM(UsePartitionedLog);
 FDB_DECLARE_BOOLEAN_PARAM(OnlyApplyMutationLogs);
+FDB_DECLARE_BOOLEAN_PARAM(SnapshotBackupUseTenantCache);
 FDB_DECLARE_BOOLEAN_PARAM(InconsistentSnapshotOnly);
 FDB_DECLARE_BOOLEAN_PARAM(ShowErrors);
 FDB_DECLARE_BOOLEAN_PARAM(AbortOldBackup);
@@ -1001,10 +1002,14 @@ struct StringRefReader {
 };
 
 namespace fileBackup {
+Standalone<VectorRef<KeyValueRef>> decodeRangeFileBlock(const Standalone<StringRef>& buf);
+
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
                                                                       int len,
                                                                       Database cx);
+
+Standalone<VectorRef<KeyValueRef>> decodeMutationLogFileBlock(const Standalone<StringRef>& buf);
 
 // Reads a mutation log block from file and parses into batch mutation blocks for further parsing.
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Reference<IAsyncFile> file,

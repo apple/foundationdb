@@ -64,7 +64,9 @@ public:
 
 	void proposeRelocation(const RelocateShard& rs) const { return relocationQueue->relocationProducer.send(rs); }
 
-	void requestRestartShardTracker(KeyRange keys) const { return shardTracker->restartShardTracker.send(keys); }
+	void requestRestartShardTracker(KeyRange keys) const {
+		return shardsAffectedByTeamFailure->restartShardTracker.send(keys);
+	}
 };
 
 #endif // FOUNDATIONDB_DDSHAREDCONTEXT_H

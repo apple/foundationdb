@@ -8,7 +8,7 @@ import shutil
 
 import lib.process
 
-from typing import Dict, List, Union
+from typing import Dict, Generator, List, Union
 
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ class FileNotFoundError(OSError):
 class _ExecutablePath:
     """Path to executable"""
 
-    def __init__(self, executable: str, overridden_path: str = None):
+    def __init__(self, executable: str, overridden_path: Union[str, None] = None):
         """Constructor
         :param str executable:
         :param str overridden_path:
@@ -60,7 +60,7 @@ class _ExecutablePath:
         if overridden_path:
             self.set(overridden_path)
 
-    def set(self, overridden_path: str = None):
+    def set(self, overridden_path: Union[str, None] = None):
         """Set and validate the path
         :param str overridden_path:
         """
@@ -72,14 +72,14 @@ class _ExecutablePath:
 
         if path is None or not os.path.exists(path):
             raise FileNotFoundError(
-                0, f"{self._executable} not found in {path}", self._executable
+                f"{self._executable} not found in {path}", self._executable
             )
 
         logger.debug(f"Setting {self._executable} executable to {path}")
         self._path = path
 
     def __str__(self) -> str:
-        return self._path
+        return self._path or "[None]"
 
 
 _fdbserver_path: _ExecutablePath = _ExecutablePath("fdbserver")
@@ -118,10 +118,10 @@ class FDBServerProcess(lib.process.Process):
         cluster_file: str,
         public_ip_address: Union[ipaddress.IPv4Address, None] = None,
         port: Union[int, None] = None,
-        class_: str = None,
-        data_path: str = None,
-        log_path: str = None,
-        fdbserver_overridden_path: str = None,
+        class_: Union[str, None] = None,
+        data_path: Union[str, None] = None,
+        log_path: Union[str, None] = None,
+        fdbserver_overridden_path: Union[str, None] = None,
     ):
         """Constructor
         :param str cluster_file: Path to the cluster file
@@ -142,18 +142,20 @@ class FDBServerProcess(lib.process.Process):
     async def run(self):
         self._args = ["--cluster-file", self._cluster_file, "-p", self._public_address]
         if self._class_:
-            self._args.extend("-c", self._class_)
+            self._args.extend(["-c", self._class_])
         if self._data_path:
             self._args.extend(["--datadir", self._data_path])
         if self._log_path:
             self._args.extend(["--logdir", self._log_path])
         return await super().run()
 
-    def _iterate_log_files(self) -> List[str]:
+    def _iterate_log_files(self) -> Generator[str, None, None]:
         """Iterate log files
 
         :return List[str]: _description_
         """
+        if self._log_path is None:
+            return
         pattern = os.path.join(self._log_path, "*.xml")
         for path in glob.glob(pattern, recursive=False):
             yield path

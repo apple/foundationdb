@@ -45,8 +45,6 @@
 #error Unsupported platform
 #endif
 
-#define API_VERSION_CLIENT_TMP_DIR 720
-
 using namespace std::string_view_literals;
 
 namespace {
@@ -276,7 +274,7 @@ std::string stringToUpper(const std::string& str) {
 }
 
 void applyNetworkOptions() {
-	if (!options.tmpDir.empty() && options.apiVersion >= API_VERSION_CLIENT_TMP_DIR) {
+	if (!options.tmpDir.empty() && options.apiVersion >= FDB_API_VERSION_CLIENT_TMP_DIR) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_TMP_DIR, options.tmpDir);
 	}
 	if (!options.externalClientLibrary.empty()) {

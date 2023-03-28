@@ -25,7 +25,7 @@ import base64
 from fdb.tuple import pack
 
 if __name__ == '__main__':
-    fdb.api_version(720)
+    fdb.api_version(fdb.LATEST_API_VERSION)
 
 
 def cleanup_tenant(db, tenant_name):

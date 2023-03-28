@@ -39,9 +39,6 @@
 #include "flow/Knobs.h"
 #include "flow/flow.h"
 
-#if defined(HAVE_WOLFSSL)
-#include <wolfssl/options.h>
-#endif
 #include <openssl/x509.h>
 typedef int NID;
 

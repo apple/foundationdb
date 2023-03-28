@@ -26,8 +26,9 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <foundationdb/fdb_c_apiversion.g.h>
 
-#define FDB_API_VERSION 730
+#define FDB_API_VERSION FDB_LATEST_API_VERSION
 
 namespace FdbApiTester {
 

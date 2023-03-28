@@ -168,6 +168,9 @@ template <typename ResultType>
 struct KeyBackedRangeResult {
 	std::vector<ResultType> results;
 	bool more;
+
+	bool operator==(KeyBackedRangeResult const& other) const { return results == other.results && more == other.more; }
+	bool operator!=(KeyBackedRangeResult const& other) const { return !(*this == other); }
 };
 
 // Convenient read/write access to a single value of type T stored at key
@@ -430,6 +433,30 @@ public:
 	template <class Transaction>
 	void clear(Transaction tr) {
 		tr->clear(subspace);
+	}
+
+	template <class Transaction>
+	void addReadConflictKey(Transaction tr, KeyType const& key) {
+		Key k = subspace.begin.withSuffix(KeyCodec::pack(key));
+		tr->addReadConflictRange(singleKeyRange(k));
+	}
+
+	template <class Transaction>
+	void addReadConflictRange(Transaction tr, KeyType const& begin, KeyType const& end) {
+		tr->addReadConflictRange(subspace.begin.withSuffix(KeyCodec::pack(begin)),
+		                         subspace.begin.withSuffix(KeyCodec::pack(end)));
+	}
+
+	template <class Transaction>
+	void addWriteConflictKey(Transaction tr, KeyType const& key) {
+		Key k = subspace.begin.withSuffix(KeyCodec::pack(key));
+		tr->addWriteConflictRange(singleKeyRange(k));
+	}
+
+	template <class Transaction>
+	void addWriteConflictRange(Transaction tr, KeyType const& begin, KeyType const& end) {
+		tr->addWriteConflictRange(subspace.begin.withSuffix(KeyCodec::pack(begin)),
+		                          subspace.begin.withSuffix(KeyCodec::pack(end)));
 	}
 
 	KeyRange subspace;

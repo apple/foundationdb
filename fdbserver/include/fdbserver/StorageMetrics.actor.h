@@ -63,7 +63,7 @@ struct TransientStorageMetricSample : StorageMetricSample {
 
 	explicit TransientStorageMetricSample(int64_t metricUnitsPerSample) : StorageMetricSample(metricUnitsPerSample) {}
 
-	int64_t addAndExpire(KeyRef key, int64_t metric, double expiration);
+	int64_t addAndExpire(const Key& key, int64_t metric, double expiration);
 
 	int64_t erase(KeyRef key);
 	void erase(KeyRangeRef keys);
@@ -73,8 +73,10 @@ struct TransientStorageMetricSample : StorageMetricSample {
 	void poll();
 
 private:
-	bool roll(KeyRef key, int64_t metric) const;
-	int64_t add(KeyRef key, int64_t metric);
+	bool roll(int64_t metric) const;
+
+	// return the sampled metric delta
+	int64_t add(const Key& key, int64_t metric);
 };
 
 struct StorageServerMetrics {
@@ -84,22 +86,24 @@ struct StorageServerMetrics {
 	// FIXME: iops is not effectively tested, and is not used by data distribution
 	TransientStorageMetricSample iopsSample, bytesWriteSample;
 	TransientStorageMetricSample bytesReadSample;
+	TransientStorageMetricSample opsReadSample;
 
 	StorageServerMetrics()
 	  : byteSample(0), iopsSample(SERVER_KNOBS->IOPS_UNITS_PER_SAMPLE),
 	    bytesWriteSample(SERVER_KNOBS->BYTES_WRITTEN_UNITS_PER_SAMPLE),
-	    bytesReadSample(SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE) {}
+	    bytesReadSample(SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE),
+	    opsReadSample(SERVER_KNOBS->OPS_READ_UNITES_PER_SAMPLE) {}
 
 	StorageMetrics getMetrics(KeyRangeRef const& keys) const;
 
-	void notify(KeyRef key, StorageMetrics& metrics);
+	void notify(const Key& key, StorageMetrics& metrics);
 
-	void notifyBytesReadPerKSecond(KeyRef key, int64_t in);
+	void notifyBytesReadPerKSecond(const Key& key, int64_t in);
 
 	void notifyBytes(RangeMap<Key, std::vector<PromiseStream<StorageMetrics>>, KeyRangeRef>::iterator shard,
 	                 int64_t bytes);
 
-	void notifyBytes(KeyRef key, int64_t bytes);
+	void notifyBytes(const KeyRef& key, int64_t bytes);
 
 	void notifyNotReadable(KeyRangeRef keys);
 
@@ -129,10 +133,7 @@ struct StorageServerMetrics {
 
 	Future<Void> waitMetrics(WaitMetricsRequest req, Future<Void> delay);
 
-	std::vector<ReadHotRangeWithMetrics> getReadHotRanges(KeyRangeRef shard,
-	                                                      double readDensityRatio,
-	                                                      int64_t baseChunkSize,
-	                                                      int64_t minShardReadBandwidthPerKSeconds) const;
+	std::vector<ReadHotRangeWithMetrics> getReadHotRanges(KeyRangeRef shard, int chunkCount, uint8_t splitType) const;
 
 	void getReadHotRanges(ReadHotSubRangeRequest req) const;
 
@@ -140,20 +141,35 @@ struct StorageServerMetrics {
 
 	void getSplitPoints(SplitRangeRequest req, Optional<KeyRef> prefix) const;
 
+	[[maybe_unused]] std::vector<ReadHotRangeWithMetrics> _getReadHotRanges(
+	    KeyRangeRef shard,
+	    double readDensityRatio,
+	    int64_t baseChunkSize,
+	    int64_t minShardReadBandwidthPerKSeconds) const;
+
 private:
 	static void collapse(KeyRangeMap<int>& map, KeyRef const& key);
 	static void add(KeyRangeMap<int>& map, KeyRangeRef const& keys, int delta);
 };
 
-// Contains information about whether or not a key-value pair should be included in a byte sample
-// Also contains size information about the byte sample
+// Contains information about whether or not a key-value pair should be included in a byte sample.
+//
+// The invariant holds:
+//    probability * sampledSize == size
 struct ByteSampleInfo {
+	// True if we've decided to sample this key-value pair.
 	bool inSample;
 
-	// Actual size of the key value pair
+	// Actual size of the key value pair.
 	int64_t size;
 
-	// The recorded size of the sample (max of bytesPerSample, size)
+	// Probability that the key-value pair will be sampled.
+	// This is a function of key and value sizes.
+	// The goal is to sample ~1/BYTE_SAMPLING_FACTOR of the key-value space,
+	// which by default is 1/250th.
+	double probability;
+
+	// The recorded size of the sample (max of bytesPerSample, size).
 	int64_t sampledSize;
 };
 
@@ -211,12 +227,7 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 				self->getStorageMetrics(req);
 			}
 			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
-				if (!self->isReadable(req.keys)) {
-					CODE_PROBE(true, "readHotSubRanges immediate wrong_shard_server()", probe::decoration::rare);
-					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
-				} else {
-					self->metrics.getReadHotRanges(req);
-				}
+				self->metrics.getReadHotRanges(req);
 			}
 			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
 				if (!self->isReadable(req.keys)) {

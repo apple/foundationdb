@@ -19,18 +19,23 @@
  */
 
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/filesystem.hpp>
+#include <boost/filesystem/directory.hpp>
+#include <boost/filesystem/path.hpp>
+#include <boost/range/iterator_range_core.hpp>
 #include <cinttypes>
 #include <fstream>
 #include <functional>
+#include <istream>
+#include <iterator>
 #include <map>
+#include <streambuf>
 #include <toml.hpp>
 
 #include "flow/ActorCollection.h"
-#include "flow/ChaosMetrics.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Histogram.h"
-#include "flow/IAsyncFile.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/ProcessEvents.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/sim_validation.h"
@@ -45,14 +50,13 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/Status.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbclient/MonitorLeader.h"
-#include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/MoveKeys.actor.h"
 #include "flow/Platform.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 FDB_DEFINE_BOOLEAN_PARAM(UntrustedMode);
@@ -1208,8 +1212,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	if (g_network->isSimulated()) {
 		// NOTE: the value will be reset after consistency check
 		connectionFailures = g_simulator->connectionFailuresDisableDuration;
-		g_simulator->connectionFailuresDisableDuration = 1e6;
-		g_simulator->speedUpSimulation = true;
+		disableConnectionFailures("ConsistencyCheck");
 	}
 
 	Standalone<VectorRef<KeyValueRef>> options;
@@ -1265,16 +1268,26 @@ ACTOR Future<bool> runTest(Database cx,
                            Reference<AsyncVar<ServerDBInfo>> dbInfo,
                            Optional<TenantName> defaultTenant) {
 	state DistributedTestResults testResults;
+	state double savedDisableDuration = 0;
 
 	try {
 		Future<DistributedTestResults> fTestResults = runWorkload(cx, testers, spec, defaultTenant);
+		if (g_network->isSimulated() && spec.simConnectionFailuresDisableDuration > 0) {
+			savedDisableDuration = g_simulator->connectionFailuresDisableDuration;
+			g_simulator->connectionFailuresDisableDuration = spec.simConnectionFailuresDisableDuration;
+		}
 		if (spec.timeout > 0) {
 			fTestResults = timeoutError(fTestResults, spec.timeout);
 		}
 		DistributedTestResults _testResults = wait(fTestResults);
 		testResults = _testResults;
 		logMetrics(testResults.metrics);
+		if (g_network->isSimulated() && savedDisableDuration > 0) {
+			g_simulator->connectionFailuresDisableDuration = savedDisableDuration;
+		}
 	} catch (Error& e) {
+		auto msg = fmt::format("Process timed out after {} seconds", spec.timeout);
+		ProcessEvents::trigger("Timeout"_sr, StringRef(msg), e);
 		if (e.code() == error_code_timed_out) {
 			TraceEvent(SevError, "TestFailure")
 			    .error(e)
@@ -1311,7 +1324,7 @@ ACTOR Future<bool> runTest(Database cx,
 				                                   spec.runConsistencyCheckOnCache,
 				                                   spec.runConsistencyCheckOnTSS,
 				                                   10000.0,
-				                                   18000,
+				                                   5000,
 				                                   spec.databasePingDelay,
 				                                   dbInfo),
 				                  20000.0));
@@ -1493,8 +1506,6 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	      sscanf(value.c_str(), "%lf", &connectionFailuresDisableDuration);
 	      ASSERT(connectionFailuresDisableDuration >= 0);
 	      spec->simConnectionFailuresDisableDuration = connectionFailuresDisableDuration;
-	      if (g_network->isSimulated())
-		      g_simulator->connectionFailuresDisableDuration = spec->simConnectionFailuresDisableDuration;
 	      TraceEvent("TestParserTest")
 	          .detail("ParsedSimConnectionFailuresDisableDuration", spec->simConnectionFailuresDisableDuration);
 	  } },
@@ -1772,13 +1783,108 @@ ACTOR Future<Void> initializeSimConfig(Database db) {
 			g_simulator->storagePolicy = dbConfig.storagePolicy;
 			g_simulator->tLogPolicy = dbConfig.tLogPolicy;
 			g_simulator->tLogWriteAntiQuorum = dbConfig.tLogWriteAntiQuorum;
-			g_simulator->remoteTLogPolicy = dbConfig.getRemoteTLogPolicy();
 			g_simulator->usableRegions = dbConfig.usableRegions;
+
+			// If the same region is being shared between the remote and a satellite, then our simulated policy checking
+			// may fail to account for the total number of needed machines when deciding what can be killed. To work
+			// around this, we increase the required transaction logs in the remote policy to include the number of
+			// satellite logs that may get recruited there
+			bool foundSharedDcId = false;
+			std::set<Key> dcIds;
+			int maxSatelliteReplication = 0;
+			for (auto const& r : dbConfig.regions) {
+				if (!dcIds.insert(r.dcId).second) {
+					foundSharedDcId = true;
+				}
+				if (!r.satellites.empty() && r.satelliteTLogReplicationFactor > 0 && r.satelliteTLogUsableDcs > 0) {
+					for (auto const& s : r.satellites) {
+						if (!dcIds.insert(s.dcId).second) {
+							foundSharedDcId = true;
+						}
+					}
+
+					maxSatelliteReplication =
+					    std::max(maxSatelliteReplication, r.satelliteTLogReplicationFactor / r.satelliteTLogUsableDcs);
+				}
+			}
+
+			if (foundSharedDcId) {
+				int totalRequired = std::max(dbConfig.tLogReplicationFactor, dbConfig.remoteTLogReplicationFactor) +
+				                    maxSatelliteReplication;
+				g_simulator->remoteTLogPolicy = Reference<IReplicationPolicy>(
+				    new PolicyAcross(totalRequired, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+				TraceEvent("ChangingSimTLogPolicyForSharedRemote")
+				    .detail("TotalRequired", totalRequired)
+				    .detail("MaxSatelliteReplication", maxSatelliteReplication)
+				    .detail("ActualPolicy", dbConfig.getRemoteTLogPolicy()->info())
+				    .detail("SimulatorPolicy", g_simulator->remoteTLogPolicy->info());
+			} else {
+				g_simulator->remoteTLogPolicy = dbConfig.getRemoteTLogPolicy();
+			}
+
 			return Void();
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
 	}
+}
+
+void encryptionAtRestPlaintextMarkerCheck() {
+	if (!g_network->isSimulated() || !g_simulator->dataAtRestPlaintextMarker.present()) {
+		// Encryption at-rest was not enabled, do nothing
+		return;
+	}
+
+	namespace fs = boost::filesystem;
+
+	printf("EncryptionAtRestPlaintextMarkerCheckStart\n");
+	TraceEvent("EncryptionAtRestPlaintextMarkerCheckStart");
+	fs::path p("simfdb/");
+	fs::recursive_directory_iterator end;
+	int scanned = 0;
+	bool success = true;
+	// Enumerate all files in the "simfdb/" folder and look for "marker" string
+	for (fs::recursive_directory_iterator itr(p); itr != end; ++itr) {
+		if (boost::filesystem::is_regular_file(itr->path())) {
+			std::ifstream f(itr->path().string().c_str());
+			if (f) {
+				std::string buf;
+				int count = 0;
+				while (std::getline(f, buf)) {
+					// SOMEDAY: using 'std::boyer_moore_horspool_searcher' would significantly improve search
+					// time
+					if (buf.find(g_simulator->dataAtRestPlaintextMarker.get()) != std::string::npos) {
+						TraceEvent(SevError, "EncryptionAtRestPlaintextMarkerCheckPanic")
+						    .detail("Filename", itr->path().string())
+						    .detail("LineBuf", buf)
+						    .detail("Marker", g_simulator->dataAtRestPlaintextMarker.get());
+						success = false;
+					}
+					count++;
+				}
+				TraceEvent("EncryptionAtRestPlaintextMarkerCheckScanned")
+				    .detail("Filename", itr->path().string())
+				    .detail("NumLines", count);
+				scanned++;
+			} else {
+				TraceEvent(SevError, "FileOpenError").detail("Filename", itr->path().string());
+			}
+		}
+		ASSERT(success);
+	}
+	printf("EncryptionAtRestPlaintextMarkerCheckEnd NumFiles: %d\n", scanned);
+	TraceEvent("EncryptionAtRestPlaintextMarkerCheckEnd").detail("NumFiles", scanned);
+}
+
+// Disables connection failures after the given time seconds
+ACTOR Future<Void> disableConnectionFailuresAfter(double seconds, std::string context) {
+	if (g_network->isSimulated()) {
+		TraceEvent(SevWarnAlways, ("ScheduleDisableConnectionFailures_" + context).c_str())
+		    .detail("At", now() + seconds);
+		wait(delay(seconds));
+		disableConnectionFailures(context);
+	}
+	return Void();
 }
 
 /**
@@ -1858,12 +1964,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		cx->defaultTenant = defaultTenant;
 	}
 
-	state Future<Void> disabler = disableConnectionFailuresAfter(FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, "Tester");
-	state Future<Void> repairDataCenter;
-	if (useDB) {
-		Future<Void> reconfigure = reconfigureAfter(cx, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, dbInfo, "Tester");
-		repairDataCenter = reconfigure;
-	}
+	disableConnectionFailures("Tester");
 
 	// Change the configuration (and/or create the database) if necessary
 	printf("startingConfiguration:%s start\n", startingConfiguration.toString().c_str());
@@ -1938,6 +2039,14 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 
 		ASSERT(g_simulator->storagePolicy && g_simulator->tLogPolicy);
 		ASSERT(!g_simulator->hasSatelliteReplication || g_simulator->satelliteTLogPolicy);
+
+		if (deterministicRandom()->random01() < 1 && (g_simulator->storagePolicy->info() == "zoneid^1 x 1" ||
+		                                              g_simulator->storagePolicy->info() == "zoneid^2 x 1")) {
+			g_simulator->customReplicas.push_back(std::make_tuple("\xff\x03", "\xff\x04", 3));
+			g_simulator->customReplicas.push_back(std::make_tuple("\xff\x04", "\xff\x05", 3));
+			TraceEvent("SettingCustomReplicas");
+			MoveKeysLock lock = wait(takeMoveKeysLock(cx, UID()));
+		}
 	}
 
 	if (useDB) {
@@ -1979,6 +2088,14 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 	}
 
+	enableConnectionFailures("Tester");
+	state Future<Void> disabler = disableConnectionFailuresAfter(FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, "Tester");
+	state Future<Void> repairDataCenter;
+	if (useDB) {
+		Future<Void> reconfigure = reconfigureAfter(cx, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, dbInfo, "Tester");
+		repairDataCenter = reconfigure;
+	}
+
 	TraceEvent("TestsExpectedToPass").detail("Count", tests.size());
 	state int idx = 0;
 	state std::unique_ptr<KnobProtectiveGroup> knobProtectiveGroup;
@@ -2008,6 +2125,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 	}
 	printf("\n");
+
+	encryptionAtRestPlaintextMarkerCheck();
 
 	return Void();
 }

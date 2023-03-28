@@ -20,26 +20,23 @@
 
 #include <cinttypes>
 #include <vector>
-#include <type_traits>
+#include <map>
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/SystemData.h"
-#include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
+#include "flow/flow.h"
+#include "flow/ProcessEvents.h"
 #include "flow/Trace.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/Status.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include <boost/lexical_cast.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include "flow/flow.h"
 
 ACTOR Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags = 0) {
 	loop {
@@ -264,6 +261,35 @@ ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx,
 	}
 }
 
+ACTOR Future<std::vector<std::pair<UID, UID>>> getBlobWorkerAffinity(Database cx,
+                                                                     bool use_system_priority = false,
+                                                                     Version* grv = nullptr) {
+	state Transaction tr(cx);
+	loop {
+		if (use_system_priority) {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		}
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			RangeResult blobWorkerAffinity = wait(tr.getRange(blobWorkerAffinityKeys, CLIENT_KNOBS->TOO_MANY));
+
+			std::vector<std::pair<UID, UID>> affinities;
+			affinities.reserve(blobWorkerAffinity.size());
+			for (int i = 0; i < blobWorkerAffinity.size(); i++) {
+				affinities.push_back(std::make_pair(decodeBlobWorkerAffinityKey(blobWorkerAffinity[i].key),
+				                                    decodeBlobWorkerAffinityValue(blobWorkerAffinity[i].value)));
+			}
+			if (grv) {
+				*grv = tr.getReadVersion().get();
+			}
+			return affinities;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<std::vector<StorageServerInterface>> getStorageServers(Database cx, bool use_system_priority = false) {
 	state Transaction tr(cx);
 	loop {
@@ -368,13 +394,24 @@ ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInter
 	state int retries = 0;
 	loop {
 		++retries;
-		state Future<TraceEventFields> result =
+		state Future<TraceEventFields> eventLogReply =
 		    wi.eventLogRequest.getReply(EventLogRequest(StringRef(storage.toString() + "/StorageMetrics")));
 		state Future<Void> timeout = delay(30.0);
+		state TraceEventFields storageMetrics;
 		choose {
-			when(TraceEventFields res = wait(result)) {
-				if (version == invalidVersion || getDurableVersion(res) >= static_cast<int64_t>(version)) {
-					return res;
+			when(wait(store(storageMetrics, eventLogReply))) {
+				try {
+					if (version == invalidVersion ||
+					    getDurableVersion(storageMetrics) >= static_cast<int64_t>(version)) {
+						return storageMetrics;
+					}
+				} catch (Error& e) {
+					TraceEvent("QuietDatabaseFailure")
+					    .error(e)
+					    .detail("Reason", "Failed to extract DurableVersion from StorageMetrics")
+					    .detail("SSID", storage)
+					    .detail("StorageMetrics", storageMetrics.toString());
+					throw;
 				}
 			}
 			when(wait(timeout)) {
@@ -762,24 +799,40 @@ ACTOR Future<Void> reconfigureAfter(Database cx,
                                     Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                     std::string context) {
 	wait(delay(time));
-	wait(repairDeadDatacenter(cx, dbInfo, context));
+	wait(uncancellable(repairDeadDatacenter(cx, dbInfo, context)));
 	return Void();
 }
 
 struct QuietDatabaseChecker {
+	ProcessEvents::Callback timeoutCallback = [this](StringRef name, std::any const& msg, Error const& e) {
+		logFailure(name, std::any_cast<StringRef>(msg), e);
+	};
 	double start = now();
 	double maxDDRunTime;
+	ProcessEvents::Event timeoutEvent;
+	std::vector<std::string> lastFailReasons;
 
-	QuietDatabaseChecker(double maxDDRunTime) : maxDDRunTime(maxDDRunTime) {}
+	QuietDatabaseChecker(double maxDDRunTime)
+	  : maxDDRunTime(maxDDRunTime), timeoutEvent({ "Timeout"_sr, "TracedTooManyLines"_sr }, timeoutCallback) {}
+
+	void logFailure(StringRef name, StringRef msg, Error const& e) {
+		std::string reasons = fmt::format("{}", fmt::join(lastFailReasons, ", "));
+		TraceEvent(SevError, "QuietDatabaseFailure")
+		    .error(e)
+		    .detail("EventName", name)
+		    .detail("EventMessage", msg)
+		    .detail("Reasons", lastFailReasons)
+		    .log();
+	};
 
 	struct Impl {
 		double start;
 		std::string const& phase;
 		double maxDDRunTime;
-		std::vector<std::string> failReasons;
+		std::vector<std::string>& failReasons;
 
-		Impl(double start, const std::string& phase, const double maxDDRunTime)
-		  : start(start), phase(phase), maxDDRunTime(maxDDRunTime) {}
+		Impl(double start, const std::string& phase, const double maxDDRunTime, std::vector<std::string>& failReasons)
+		  : start(start), phase(phase), maxDDRunTime(maxDDRunTime), failReasons(failReasons) {}
 
 		template <class T, class Comparison = std::less_equal<>>
 		Impl& add(BaseTraceEvent& evt,
@@ -818,8 +871,9 @@ struct QuietDatabaseChecker {
 		}
 	};
 
-	Impl startIteration(std::string const& phase) const {
-		Impl res(start, phase, maxDDRunTime);
+	Impl startIteration(std::string const& phase) {
+		lastFailReasons.clear();
+		Impl res(start, phase, maxDDRunTime, lastFailReasons);
 		return res;
 	}
 };
@@ -848,7 +902,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	state Future<int64_t> versionOffset;
 	state Future<Version> dcLag;
 	state Version maxDcLag = 30e6;
-	auto traceMessage = "QuietDatabase" + phase + "Begin";
+	state std::string traceMessage = "QuietDatabase" + phase + "Begin";
 	TraceEvent(traceMessage.c_str()).log();
 
 	// In a simulated environment, wait 5 seconds so that workers can move to their optimal locations

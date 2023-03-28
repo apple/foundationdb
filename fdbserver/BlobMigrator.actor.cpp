@@ -22,6 +22,7 @@
 #include <string>
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbserver/RestoreUtil.h"
+#include "flow/CodeProbe.h"
 #include "flow/network.h"
 #include "flow/flow.h"
 #include "flow/ActorCollection.h"
@@ -58,10 +59,8 @@ static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
 // StorageServerInterface APIs which are needed for DataDistributor to start data migration.
 class BlobMigrator : public NonCopyable, public ReferenceCounted<BlobMigrator> {
 public:
-	BlobMigrator(Reference<AsyncVar<ServerDBInfo> const> dbInfo, BlobMigratorInterface interf)
-	  : interf_(interf), actors_(false) {
+	BlobMigrator(Database db, BlobMigratorInterface interf) : interf_(interf), actors_(false), db_(db) {
 		blobConn_ = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
-		db_ = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 	~BlobMigrator() {}
 
@@ -75,18 +74,15 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> updateStatus(Reference<BlobMigrator> self, KeyRange keys, BlobRestoreStatus status) {
-		wait(updateRestoreStatus(self->db_, keys, status, {}));
-		return Void();
-	}
-
 private:
 	// Check if blob manifest is loaded so that blob migration can start
 	ACTOR static Future<Void> checkIfReadyForMigration(Reference<BlobMigrator> self) {
 		loop {
-			Optional<BlobRestoreStatus> status = wait(getRestoreStatus(self->db_, normalKeys));
-			ASSERT(status.present());
-			BlobRestorePhase phase = status.get().phase;
+			state Reference<BlobRestoreController> restoreController =
+			    makeReference<BlobRestoreController>(self->db_, normalKeys);
+			Optional<BlobRestoreState> restoreState = wait(BlobRestoreController::getState(restoreController));
+			ASSERT(restoreState.present());
+			state BlobRestorePhase phase = restoreState.get().phase;
 			if (phase == BlobRestorePhase::LOADED_MANIFEST) {
 				BlobGranuleRestoreVersionVector granules = wait(listBlobGranules(self->db_, self->blobConn_));
 				if (!granules.empty()) {
@@ -98,14 +94,21 @@ private:
 						    .detail("Version", granule.version)
 						    .detail("SizeInBytes", granule.sizeInBytes);
 					}
-					wait(updateRestoreStatus(self->db_,
-					                         normalKeys,
-					                         BlobRestoreStatus(BlobRestorePhase::COPYING_DATA),
-					                         BlobRestorePhase::LOADED_MANIFEST));
+
+					// Restore version is expected to be greater than max version from blob granule files.
+					state Version max = maxVersion(self);
+					Version targetVersion = wait(BlobRestoreController::getTargetVersion(restoreController, max));
+					if (targetVersion < max) {
+						TraceEvent("UnsupportedRestoreVersion", self->interf_.id())
+						    .detail("MaxBlobGranulesVersion", max)
+						    .detail("TargetVersion", targetVersion);
+						throw restore_missing_data();
+					}
+					wait(BlobRestoreController::updateState(restoreController, COPYING_DATA, LOADED_MANIFEST));
 					return Void();
 				}
 			} else if (phase >= BlobRestorePhase::COPYING_DATA && phase < BlobRestorePhase::DONE) {
-				TraceEvent("BlobMigratorUnexpectedPhase", self->interf_.id()).detail("Phase", status.get().phase);
+				TraceEvent("BlobMigratorUnexpectedPhase", self->interf_.id()).detail("Phase", phase);
 				throw restore_error();
 			}
 			wait(delay(SERVER_KNOBS->BLOB_MIGRATOR_CHECK_INTERVAL));
@@ -225,20 +228,19 @@ private:
 
 	// Print migration progress periodically
 	ACTOR static Future<Void> logProgress(Reference<BlobMigrator> self) {
+		state Reference<BlobRestoreController> restoreController =
+		    makeReference<BlobRestoreController>(self->db_, normalKeys);
+
 		loop {
 			bool done = wait(checkProgress(self));
 			if (done) {
-				wait(updateRestoreStatus(self->db_,
-				                         normalKeys,
-				                         BlobRestoreStatus(BlobRestorePhase::APPLYING_MLOGS),
-				                         BlobRestorePhase::COPYING_DATA));
+				wait(BlobRestoreController::updateState(restoreController, APPLYING_MLOGS, COPYING_DATA));
 				wait(unlockDatabase(self->db_, self->interf_.id()));
+				TraceEvent("BlobMigratorCopied", self->interf_.id()).log();
 				wait(applyMutationLogs(self));
 
-				wait(updateRestoreStatus(self->db_,
-				                         normalKeys,
-				                         BlobRestoreStatus(BlobRestorePhase::DONE),
-				                         BlobRestorePhase::APPLYING_MLOGS));
+				wait(BlobRestoreController::updateState(restoreController, DONE, APPLYING_MLOGS));
+				TraceEvent("BlobMigratorDone", self->interf_.id()).log();
 				return Void();
 			}
 			wait(delay(SERVER_KNOBS->BLOB_MIGRATOR_CHECK_INTERVAL));
@@ -247,6 +249,8 @@ private:
 
 	// Check key ranges that are migrated. Return true if all ranges are done
 	ACTOR static Future<bool> checkProgress(Reference<BlobMigrator> self) {
+		state Reference<BlobRestoreController> restoreController =
+		    makeReference<BlobRestoreController>(self->db_, normalKeys);
 		state Transaction tr(self->db_);
 		loop {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -279,8 +283,10 @@ private:
 				state bool done = incompleted == 0;
 				dprint("Migration progress :{}%. done {}\n", progress, done);
 				TraceEvent("BlobMigratorProgress", self->interf_.id()).detail("Progress", progress);
-				BlobRestoreStatus status(BlobRestorePhase::COPYING_DATA, progress);
-				wait(updateRestoreStatus(self->db_, normalKeys, status, BlobRestorePhase::COPYING_DATA));
+				Standalone<BlobRestoreState> restoreState;
+				restoreState.phase = BlobRestorePhase::COPYING_DATA;
+				restoreState.progress = progress;
+				wait(BlobRestoreController::updateState(restoreController, restoreState, COPYING_DATA));
 				return done;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -331,34 +337,39 @@ private:
 		// check last version in mutation logs
 		state std::string mlogsUrl = wait(getMutationLogUrl());
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
-		BackupDescription desc = wait(bc->describeBackup());
+		state double beginTs = now();
+		BackupDescription desc = wait(bc->describeBackup(true));
+		TraceEvent("DescribeBackupLatency", self->interf_.id()).detail("Seconds", now() - beginTs);
+
 		if (!desc.contiguousLogEnd.present()) {
-			TraceEvent("InvalidMutationLogs").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL);
+			TraceEvent("InvalidMutationLogs", self->interf_.id()).detail("Url", SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL);
 			throw blob_restore_missing_logs();
 		}
 		if (!desc.minLogBegin.present()) {
-			TraceEvent("InvalidMutationLogs").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL);
+			TraceEvent("InvalidMutationLogs", self->interf_.id()).detail("Url", SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL);
 			throw blob_restore_missing_logs();
 		}
 		state Version minLogVersion = desc.minLogBegin.get();
 		state Version maxLogVersion = desc.contiguousLogEnd.get() - 1;
-		state Version targetVersion = wait(getRestoreTargetVersion(self->db_, normalKeys, maxLogVersion));
+		Reference<BlobRestoreController> restoreController =
+		    makeReference<BlobRestoreController>(self->db_, normalKeys);
+		state Version targetVersion = wait(BlobRestoreController::getTargetVersion(restoreController, maxLogVersion));
 		if (targetVersion < maxLogVersion) {
 			if (!needApplyLogs(self, targetVersion)) {
-				TraceEvent("SkipMutationLogs").detail("TargetVersion", targetVersion);
+				TraceEvent("SkipMutationLogs", self->interf_.id()).detail("TargetVersion", targetVersion);
 				dprint("Skip mutation logs as all granules are at version {}\n", targetVersion);
 				return Void();
 			}
 		}
 
 		if (targetVersion < minLogVersion) {
-			TraceEvent("MissingMutationLogs")
+			TraceEvent("MissingMutationLogs", self->interf_.id())
 			    .detail("MinLogVersion", minLogVersion)
 			    .detail("TargetVersion", maxLogVersion);
 			throw blob_restore_missing_logs();
 		}
 		if (targetVersion > maxLogVersion) {
-			TraceEvent("SkipTargetVersion")
+			TraceEvent("SkipTargetVersion", self->interf_.id())
 			    .detail("MaxLogVersion", maxLogVersion)
 			    .detail("TargetVersion", targetVersion);
 		}
@@ -368,7 +379,7 @@ private:
 		state Standalone<VectorRef<Version>> beginVersions;
 		for (auto& granule : self->blobGranules_) {
 			if (granule.version < minLogVersion || granule.version > maxLogVersion) {
-				TraceEvent("InvalidMutationLogs")
+				TraceEvent("InvalidMutationLogs", self->interf_.id())
 				    .detail("Granule", granule.granuleID)
 				    .detail("GranuleVersion", granule.version)
 				    .detail("MinLogVersion", minLogVersion)
@@ -382,13 +393,15 @@ private:
 				// Blob granule ends at granule.version(inclusive), so we need to apply mutation logs
 				// after granule.version(exclusive).
 				beginVersions.push_back(beginVersions.arena(), granule.version);
-				TraceEvent("ApplyMutationLogVersion").detail("GID", granule.granuleID).detail("Ver", granule.version);
+				TraceEvent("ApplyMutationLogVersion", self->interf_.id())
+				    .detail("GID", granule.granuleID)
+				    .detail("Ver", granule.version);
 			}
 		}
 		Optional<RestorableFileSet> restoreSet =
 		    wait(bc->getRestoreSet(maxLogVersion, ranges, OnlyApplyMutationLogs::True, minLogVersion));
 		if (!restoreSet.present()) {
-			TraceEvent("InvalidMutationLogs")
+			TraceEvent("InvalidMutationLogs", self->interf_.id())
 			    .detail("MinLogVersion", minLogVersion)
 			    .detail("MaxLogVersion", maxLogVersion);
 			throw blob_restore_corrupted_logs();
@@ -477,14 +490,8 @@ private:
 						self->actors_.add(processWaitMetricsRequest(self, req));
 					}
 					when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {
-						dprint("Handle SplitMetrics {}\n", req.keys.toString());
-						SplitMetricsReply rep;
-						for (auto granule : self->blobGranules_) {
-							// TODO: Use granule boundary as split point. A better approach is to split by size
-							if (granule.keyRange.begin > req.keys.begin && granule.keyRange.end < req.keys.end)
-								rep.splits.push_back_deep(rep.splits.arena(), granule.keyRange.begin);
-						}
-						req.reply.send(rep);
+						dprint("Handle SplitMetrics {} limit {} bytes\n", req.keys.toString(), req.limits.bytes);
+						processSplitMetricsRequest(self, req);
 					}
 					when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
 						StorageMetrics metrics;
@@ -573,6 +580,34 @@ private:
 		}
 	}
 
+	// This API is used by DD to figure out split points for data movement.
+	static void processSplitMetricsRequest(Reference<BlobMigrator> self, SplitMetricsRequest req) {
+		SplitMetricsReply rep;
+		int64_t bytes = 0; // number of bytes accumulated for current split
+		for (auto& granule : self->blobGranules_) {
+			if (!req.keys.contains(granule.keyRange)) {
+				continue;
+			}
+			bytes += granule.sizeInBytes;
+			if (bytes < req.limits.bytes) {
+				continue;
+			}
+			// Add a split point if the key range exceeds expected minimal size in bytes
+			rep.splits.push_back_deep(rep.splits.arena(), granule.keyRange.end);
+			bytes = 0;
+			// Limit number of splits in single response for fast RPC processing
+			if (rep.splits.size() > SERVER_KNOBS->SPLIT_METRICS_MAX_ROWS) {
+				CODE_PROBE(true, "Blob Migrator SplitMetrics API has more");
+				TraceEvent("BlobMigratorSplitMetricsContinued", self->interf_.id())
+				    .detail("Range", req.keys)
+				    .detail("Splits", rep.splits.size());
+				rep.more = true;
+				break;
+			}
+		}
+		req.reply.send(rep);
+	}
+
 	ACTOR static Future<Void> processWaitMetricsRequest(Reference<BlobMigrator> self, WaitMetricsRequest req) {
 		state WaitMetricsRequest waitMetricsRequest = req;
 		// FIXME get rid of this delay. it's a temp solution to avoid starvaion scheduling of DD
@@ -600,7 +635,7 @@ private:
 	static int64_t sizeInBytes(Reference<BlobMigrator> self, KeyRangeRef range) {
 		int64_t bytes = 0;
 		for (auto granule : self->blobGranules_) {
-			if (range.intersects(granule.keyRange))
+			if (range.contains(granule.keyRange))
 				bytes += granule.sizeInBytes;
 		}
 		return bytes;
@@ -628,13 +663,16 @@ private:
 ACTOR Future<Void> blobMigrator(BlobMigratorInterface interf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	TraceEvent("StartBlobMigrator", interf.id()).detail("Interface", interf.id().toString());
 	dprint("Starting blob migrator {}\n", interf.id().toString());
-	state Reference<BlobMigrator> self = makeReference<BlobMigrator>(dbInfo, interf);
+	state Database db = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+	state Reference<BlobMigrator> self = makeReference<BlobMigrator>(db, interf);
 	try {
 		wait(BlobMigrator::start(self));
 	} catch (Error& e) {
 		dprint("Unexpected blob migrator error {}\n", e.what());
 		TraceEvent("BlobMigratorError", interf.id()).error(e);
-		wait(BlobMigrator::updateStatus(self, normalKeys, BlobRestoreStatus(BlobRestorePhase::ERROR, e.code())));
+		std::string errorMessage = fmt::format("Migrator failure '{}' on {}", e.what(), interf.address().toString());
+		Reference<BlobRestoreController> restoreController = makeReference<BlobRestoreController>(db, normalKeys);
+		wait(BlobRestoreController::updateError(restoreController, StringRef(errorMessage)));
 	}
 	return Void();
 }

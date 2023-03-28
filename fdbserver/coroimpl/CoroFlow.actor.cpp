@@ -28,6 +28,7 @@
 #include <functional>
 #include "flow/flow.h"
 #include "flow/network.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 using coro_t = boost::coroutines2::coroutine<Future<Void>>;
