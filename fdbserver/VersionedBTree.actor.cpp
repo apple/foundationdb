@@ -4993,9 +4993,8 @@ public:
 	void clear(KeyRangeRef clearedRange) {
 		++m_mutationCount;
 		// Optimization for single key clears to create just one mutation boundary instead of two
-		if ((clearedRange.begin.size() == clearedRange.end.size() - 1 &&
-		     clearedRange.end[clearedRange.end.size() - 1] == 0 && clearedRange.end.startsWith(clearedRange.begin)) ||
-		    (clearedRange.begin.compare(clearedRange.end) == 0)) {
+		if (clearedRange.begin.size() == clearedRange.end.size() - 1 &&
+		    clearedRange.end[clearedRange.end.size() - 1] == 0 && clearedRange.end.startsWith(clearedRange.begin)) {
 			++g_redwoodMetrics.metric.opClear;
 			++g_redwoodMetrics.metric.opClearKey;
 			m_pBuffer->insert(clearedRange.begin).mutation().clearBoundary();
