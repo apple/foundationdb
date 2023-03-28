@@ -1124,7 +1124,7 @@ int DDQueue::getUnhealthyRelocationCount() const {
 	return unhealthyRelocations;
 }
 
-ACTOR Future<Void> cancelDataMove(struct DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState) {
+ACTOR Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState) {
 	state std::vector<Future<Void>> cleanup;
 	state std::vector<std::pair<KeyRange, UID>> lastObservedDataMoves;
 
@@ -1162,7 +1162,7 @@ ACTOR Future<Void> cancelDataMove(struct DDQueue* self, KeyRange range, const DD
 					if (it->value().id != observedDataMove.second) {
 						// Invariant: When two concurrent cleanups/relocations try to modify on the same range,
 						// the one who set ddQueue->dataMoves at first win the race
-						// others do backoff and retry cleanup later
+						// the other one does backoff and retry cleanup later
 						// In this case, someone else of the overlapping range has changed the ddQueue->dataMoves
 						// Thus, the cleanup retries later
 						TraceEvent(SevInfo, "DataMoveWrittenByConcurrentDataMove", self->distributorId)
@@ -1184,7 +1184,7 @@ ACTOR Future<Void> cancelDataMove(struct DDQueue* self, KeyRange range, const DD
 			if (e.code() == error_code_retry) {
 				wait(delay(1));
 			} else {
-				throw;
+				throw e;
 			}
 		}
 	}
