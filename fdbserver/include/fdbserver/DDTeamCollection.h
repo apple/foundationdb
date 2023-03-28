@@ -271,7 +271,8 @@ protected:
 	Future<bool> clearHealthyZoneFuture;
 	double pivotAvailableSpaceRatio;
 	double lastPivotValuesUpdate;
-	double pivotCPU;
+	double pivotCPU = 0.0;
+	double minTeamAvgCPU = 101.0;
 
 	int lowestUtilizationTeam;
 	int highestUtilizationTeam;

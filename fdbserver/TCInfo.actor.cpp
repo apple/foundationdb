@@ -423,8 +423,8 @@ double TCTeamInfo::getAverageCPU() const {
 			size++;
 		}
 	}
-	// If every storage server hasn't gotten their CPU updated, we assume they are too busy to respond so return 101;
-	return size == 0 ? 101.0 : sum / size;
+	// If every storage server hasn't gotten their CPU updated, we assume they are too busy to respond so return 100.0;
+	return size == 0 ? 100.0 : sum / size;
 }
 
 int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
