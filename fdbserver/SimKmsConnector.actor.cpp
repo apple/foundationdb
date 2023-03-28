@@ -101,6 +101,7 @@ struct SimKmsConnectorContext : NonCopyable, ReferenceCounted<SimKmsConnectorCon
 			uint8_t key[keyLen];
 			uint8_t digest[AUTH_TOKEN_HMAC_SHA_SIZE];
 
+			// TODO: Allow baseCipherKeyLen < AES_256_KEY_LENGTH
 			ASSERT_EQ(AES_256_KEY_LENGTH, AUTH_TOKEN_HMAC_SHA_SIZE);
 			computeAuthToken({ { reinterpret_cast<const uint8_t*>(&i), sizeof(i) } },
 			                 SHA_KEY,

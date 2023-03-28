@@ -148,6 +148,8 @@ struct EncryptionOpsWorkload : TestWorkload {
 		minBaseCipherLen = deterministicRandom()->randomInt(4, 11);
 		maxBaseCipherLen = deterministicRandom()->randomInt(AES_256_KEY_LENGTH, (4 * AES_256_KEY_LENGTH) + 1);
 
+		ASSERT_LT(minBaseCipherLen, maxBaseCipherLen);
+
 		if (wcx.clientId == 0 && mode == 1) {
 			enableTTLTest = true;
 		}
