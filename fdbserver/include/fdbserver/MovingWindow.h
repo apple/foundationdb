@@ -27,16 +27,15 @@
 #include "flow/Deque.h"
 #include "fdbserver/Knobs.h"
 
-// Smoother will try to modify the sum of all samples and return an estimtaed value, while
-// MovingWindow will just sum up all the samples, and getAverage() will return the average
-// change rate in the past <timeWindow>.
-// The motivation of MovingWindow comes from "MovingData" trace, where we want to get the
-// average bytes moved by DD in the past DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL. This data could be
-// precise and clear to show how DD works recently.
-// As for Smoother, however, it doesn't have a method to calculate average change rate, and it will
-// take all of the samples into account, while we don't really need it for "MovingData". Also, saying there
-// is no DD workload recently, we could just return 0 with MovingWindow and Smoother will return
-// a value closed to 0, where the former method is more obvious and clear to understand DD workloads.
+// MovingWindow::addSample() will sum up all the samples, and getAverage() method will return the average
+// sampling rate in the past <timeWindow>, where every sample weights evenly.
+// A use case for MovingWindow is the "BytesWrittenAverageRate" in "MovingData" Trace, where we
+// want to get the actual average bytes moved rate by DD in the past DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL. We would have
+// a sense of how many bytes DD moved recently and it will help us get to know DD workload.
+// Comparison with Smoother: if you want to use a recency-based weighting(i.e. less important if sampled long time ago)
+// Smoother(which uses an exponential function for smoothing) woule be a good choice. On the other hand, if you want to
+// know the average sample rates in the last <timeWindow>, MovingWindow might be better.
+
 template <class T>
 class MovingWindow {
 private:
