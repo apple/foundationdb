@@ -9107,7 +9107,9 @@ void rollback(StorageServer* data, Version rollbackVersion, Version nextVersion)
 	// approach would be to make the rollback range durable and, after reboot, skip over those versions if they appear
 	// in peek results.
 
-	TraceEvent("PleaseRollBack").detail("RollbackVersion", rollbackVersion).detail("NextVersion", nextVersion);
+	TraceEvent(SevDebug, "PleaseRollBack", data->thisServerID)
+	    .detail("RollbackVersion", rollbackVersion)
+	    .detail("NextVersion", nextVersion);
 
 	throw please_reboot();
 }

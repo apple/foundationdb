@@ -1811,11 +1811,6 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				for (int s = 0; s < serverReady.size(); ++s) {
 					if (serverReady[s].isReady() && !serverReady[s].isError()) {
 						readyServers.push_back(storageServerInterfaces[s].uniqueID);
-					} else {
-						TraceEvent(SevVerbose, "FinishMoveShardsFailedToAddReadyServers", relocationIntervalId)
-						    .detail("ServerInterfaceID", storageServerInterfaces[s].uniqueID)
-						    .detail("ServerReady", serverReady[s].isReady())
-						    .detail("ServerError", serverReady[s].isError() ? serverReady[s].getError().what() : "N/A");
 					}
 				}
 
@@ -1868,10 +1863,6 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						break;
 					}
 				} else {
-					TraceEvent(SevVerbose, "FinishMoveShardsReadyNotMatchNewAll", relocationIntervalId)
-					    .detail("DataMoveID", dataMoveId)
-					    .detail("ReadyServers", describe(readyServers))
-					    .detail("NewDestinations", describe(newDestinations));
 					tr.reset();
 				}
 			} catch (Error& error) {

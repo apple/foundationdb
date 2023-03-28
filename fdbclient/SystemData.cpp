@@ -293,8 +293,6 @@ const KeyRangeRef auditKeys = KeyRangeRef("\xff/audits/"_sr, "\xff/audits0"_sr);
 const KeyRef auditPrefix = auditKeys.begin;
 const KeyRangeRef auditRanges = KeyRangeRef("\xff/auditRanges/"_sr, "\xff/auditRanges0"_sr);
 const KeyRef auditRangePrefix = auditRanges.begin;
-const KeyRangeRef auditMetaItems = KeyRangeRef("\xff/auditMeta/"_sr, "\xff/auditMeta0"_sr);
-const KeyRef auditMetaItemsPrefix = auditMetaItems.begin;
 
 const Key auditKey(const AuditType type, const UID& auditId) {
 	BinaryWriter wr(Unversioned());

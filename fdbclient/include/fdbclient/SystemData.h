@@ -98,8 +98,6 @@ extern const KeyRangeRef auditKeys;
 extern const KeyRef auditPrefix;
 extern const KeyRangeRef auditRanges;
 extern const KeyRef auditRangePrefix;
-extern const KeyRangeRef auditMetaItems;
-extern const KeyRef auditMetaItemsPrefix;
 
 const Key auditKey(const AuditType type, const UID& auditId);
 const KeyRange auditKeyRange(const AuditType type);
