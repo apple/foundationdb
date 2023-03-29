@@ -72,24 +72,24 @@ FDB_DECLARE_BOOLEAN_PARAM(FindTeamByServers);
 class TeamSelect {
 public:
 	enum Value : int8_t {
-		ANY = 0, // Any other situations
-		WANT_SRCSERVERS, // Ask for srcTeam
-		WANT_TRUEBEST, // Ask for the most or least utilized team
+		ANY = 0, // Any other situations except for the next two
+		WANT_COMPLETE_SRCS, // Try best to select a healthy team consists of servers in completeSources
+		WANT_TRUE_BEST, // Ask for the most or least utilized team in the cluster
 	};
 	TeamSelect() : value(ANY) {}
 	TeamSelect(Value v) : value(v) {}
 	std::string toString() const {
 		switch (value) {
-		case WANT_SRCSERVERS:
-			return "Want_SrcServers";
-		case WANT_TRUEBEST:
-			return "Want_TrueBest";
+		case WANT_COMPLETE_SRCS:
+			return "Want_Complete_Srcs";
+		case WANT_TRUE_BEST:
+			return "Want_True_Best";
 		case ANY:
 			return "Any";
 		}
 	}
 
-	bool operator==(const TeamSelect& tmpTeamSelect) { return (int)value == (int)tmpTeamSelect.value; }
+	bool operator==(const TeamSelect& tmpTeamSelect) { return value == tmpTeamSelect.value; }
 
 private:
 	Value value;
@@ -104,8 +104,15 @@ struct GetTeamRequest {
 	double inflightPenalty;
 	bool findTeamByServers;
 	Optional<KeyRange> keys;
+
+	// completeSources have all shards in the key range being considered for movement, src have at least 1 shard in the
+	// key range for movement. From the point of set, completeSources is the Intersection set of several <server_lists>,
+	// while src is the Union set of them. E.g. keyRange = [Shard_1, Shard_2), and Shard_1 is located at {Server_1,
+	// Server_2, Server_3}, Shard_2 is located at {Server_2, Server_3, Server_4}. completeSources = {Server_2,
+	// Server_3}, src = {Server_1, Server_2, Server_3, Server_4}
 	std::vector<UID> completeSources;
 	std::vector<UID> src;
+
 	Promise<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> reply;
 
 	typedef Reference<IDataDistributionTeam> TeamRef;
@@ -122,7 +129,7 @@ struct GetTeamRequest {
 	    forReadBalance(forReadBalance), preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty),
 	    findTeamByServers(FindTeamByServers::False), keys(keys) {}
 	GetTeamRequest(std::vector<UID> servers)
-	  : teamSelect(TeamSelect::WANT_SRCSERVERS), preferLowerDiskUtil(PreferLowerDiskUtil::False),
+	  : teamSelect(TeamSelect::WANT_COMPLETE_SRCS), preferLowerDiskUtil(PreferLowerDiskUtil::False),
 	    teamMustHaveShards(TeamMustHaveShards::False), forReadBalance(ForReadBalance::False),
 	    preferLowerReadUtil(PreferLowerReadUtil::False), inflightPenalty(1.0),
 	    findTeamByServers(FindTeamByServers::True), src(std::move(servers)) {}

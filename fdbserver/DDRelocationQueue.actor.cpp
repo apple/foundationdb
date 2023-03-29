@@ -1297,9 +1297,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 
 						TeamSelect destTeamSelect;
 						if (!rd.wantsNewServers) {
-							destTeamSelect = TeamSelect::WANT_SRCSERVERS;
+							destTeamSelect = TeamSelect::WANT_COMPLETE_SRCS;
 						} else if (wantTrueBest) {
-							destTeamSelect = TeamSelect::WANT_TRUEBEST;
+							destTeamSelect = TeamSelect::WANT_TRUE_BEST;
 						} else {
 							destTeamSelect = TeamSelect::ANY;
 						}
@@ -2148,12 +2148,12 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 
 			if (self->priority_relocations[ddPriority] < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				bool mcMove = isDataMovementForMountainChopper(reason);
-				GetTeamRequest srcReq = GetTeamRequest(mcMove ? TeamSelect::WANT_TRUEBEST : TeamSelect::ANY,
+				GetTeamRequest srcReq = GetTeamRequest(mcMove ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
 				                                       PreferLowerDiskUtil::False,
 				                                       TeamMustHaveShards::True,
 				                                       ForReadBalance(readRebalance),
 				                                       PreferLowerReadUtil::False);
-				GetTeamRequest destReq = GetTeamRequest(!mcMove ? TeamSelect::WANT_TRUEBEST : TeamSelect::ANY,
+				GetTeamRequest destReq = GetTeamRequest(!mcMove ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
 				                                        PreferLowerDiskUtil::True,
 				                                        TeamMustHaveShards::False,
 				                                        ForReadBalance(readRebalance),
