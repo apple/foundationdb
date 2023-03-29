@@ -74,7 +74,7 @@ struct SimEncryptKeyCtx {
 
 		int ret = AES_256_KEY_LENGTH;
 		if ((id % 2) == 0) {
-			ret += (id % AES_256_IV_LENGTH);
+			ret += (id % AES_256_KEY_LENGTH);
 		}
 		CODE_PROBE(ret == AES_256_KEY_LENGTH, "BaseCipherKeyLen AES_256_KEY_LENGTH");
 		CODE_PROBE(ret != AES_256_KEY_LENGTH, "BaseCipherKeyLen variable length");
