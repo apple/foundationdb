@@ -2423,10 +2423,10 @@ ACTOR Future<Void> cleanUpDataMoveBackground(Database occ,
 	state FlowLock::Releaser releaser = FlowLock::Releaser(*cleanUpDataMoveParallelismLock);
 	state DataMoveMetaData dataMove;
 	state bool completeWithoutClear = false;
+	state Transaction tr(occ);
 
 	loop {
 		try {
-			state Transaction tr(occ);
 			tr.trState->taskID = TaskPriority::MoveKeys;
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
