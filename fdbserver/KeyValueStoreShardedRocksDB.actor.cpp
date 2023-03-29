@@ -576,6 +576,7 @@ struct PhysicalShard {
 				TraceEvent(SevInfo, "RocksDBRestoreCFEnd").detail("Status", status.ToString());
 			}
 		} else if (format == RocksDBKeyValues) {
+			ASSERT(cf != nullptr);
 			std::vector<std::string> sstFiles;
 			const RocksDBCheckpointKeyValues rcp = getRocksKeyValuesCheckpoint(checkpoint);
 			for (const auto& file : rcp.fetchedFiles) {
@@ -590,7 +591,6 @@ struct PhysicalShard {
 			    .detail("Files", describe(sstFiles));
 
 			if (!sstFiles.empty()) {
-				ASSERT(cf != nullptr);
 				rocksdb::IngestExternalFileOptions ingestOptions;
 				ingestOptions.move_files = SERVER_KNOBS->ROCKSDB_IMPORT_MOVE_FILES;
 				ingestOptions.verify_checksums_before_ingest = SERVER_KNOBS->ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE;
@@ -601,7 +601,7 @@ struct PhysicalShard {
 				    .detail("RocksKeyValuesCheckpoint", rcp.toString())
 				    .detail("Checkpoint", checkpoint.toString());
 			}
-			TraceEvent(SevInfo, "RocksDBServeRestoreFiles")
+			TraceEvent(SevInfo, "PhysicalShardRstoredFiles")
 			    .detail("Shard", id)
 			    .detail("CFName", cf->GetName())
 			    .detail("Checkpoint", checkpoint.toString())
@@ -620,7 +620,7 @@ struct PhysicalShard {
 				readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
 				this->isInitialized.store(true);
 			} else {
-				refreshReadIteratorPool();
+				// refreshReadIteratorPool();
 			}
 		}
 
@@ -2348,7 +2348,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			    .detail("PersistVersion", version);
 			ASSERT(a.request.version == version || a.request.version == latestVersion);
 
-			CheckpointMetaData res(ps->getAllRanges(), version, a.request.format, a.request.checkpointID);
+			CheckpointMetaData res(a.request.ranges, version, a.request.format, a.request.checkpointID);
 			s = rocksdb::Checkpoint::Create(a.shardManager->getDb(), &checkpoint);
 			if (!s.ok()) {
 				logRocksDBError(s, "CreateRocksDBCheckpoint");

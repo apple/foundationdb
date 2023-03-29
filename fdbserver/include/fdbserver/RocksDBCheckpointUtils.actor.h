@@ -63,8 +63,8 @@ struct CheckpointFile {
 	bool isValid() const { return !path.empty(); }
 
 	std::string toString() const {
-		return "CheckpointFile:\nFile Name: " + this->path + "\nRange: " + range.toString() +
-		       "\nSize: " + std::to_string(size) + "\n";
+		return "CheckpointFile: [File Name]: " + this->path + ", [Range]: " + range.toString() +
+		       ", [Size]: " + std::to_string(size);
 	}
 
 	template <class Ar>
@@ -152,12 +152,11 @@ struct SstFileMetaData {
 	// "Unknown".
 	std::string file_checksum_func_name;
 
- 	// These bounds define the effective key range for range tombstones
- 	// in this file.
- 	// Currently only used by CreateColumnFamilyWithImport().
- 	std::string smallest{}; // Smallest internal key served by table
- 	std::string largest{}; // Largest internal key served by table
-
+	// These bounds define the effective key range for range tombstones
+	// in this file.
+	// Currently only used by CreateColumnFamilyWithImport().
+	std::string smallest{}; // Smallest internal key served by table
+	std::string largest{}; // Largest internal key served by table
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -179,9 +178,9 @@ struct SstFileMetaData {
 		           oldest_ancester_time,
 		           file_creation_time,
 		           file_checksum,
-				   file_checksum_func_name,
- 		           smallest,
- 		           largest);
+		           file_checksum_func_name,
+		           smallest,
+		           largest);
 	}
 };
 
@@ -214,8 +213,8 @@ struct LiveFileMetaData : public SstFileMetaData {
 		           SstFileMetaData::file_creation_time,
 		           SstFileMetaData::file_checksum,
 		           SstFileMetaData::file_checksum_func_name,
-				   SstFileMetaData::smallest,
- 		           SstFileMetaData::largest,
+		           SstFileMetaData::smallest,
+		           SstFileMetaData::largest,
 		           column_family_name,
 		           level,
 		           fetched);

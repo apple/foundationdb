@@ -259,6 +259,7 @@ private:
 			// restored[version].push_back_deep(restored[version].arena(), mutation);
 			// wait(yield());
 		}
+		TraceEvent(SevDebug, "MoveInUpdatesRestored", self->id).detail("Size", res.size());
 
 		std::deque<Standalone<VerUpdateRef>> tmp(std::move(self->updates));
 		self->updates = std::deque<Standalone<VerUpdateRef>>();
@@ -8395,7 +8396,7 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 		TraceEvent(moveInShard->logSev, "FetchShardCheckpointMetaData", data->thisServerID)
 		    .detail("MoveInShardID", moveInShard->id())
 		    .detail("Range", range)
-		    .setMaxFieldLength(10000)
+		    // .setMaxFieldLength(10000)
 		    .detail("CheckpointMetaData", record.toString());
 	}
 
@@ -8553,7 +8554,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 			KeyRef key = kv.key.removePrefix(persistByteSampleKeys.begin);
 			if (!checkpoint.containsKey(key)) {
 				TraceEvent(moveInShard->logSev, "StorageRestoreCheckpointKeySampleNotInRange", data->thisServerID)
-				    .setMaxFieldLength(10000)
+				    // .setMaxFieldLength(10000)
 				    .detail("Checkpoint", checkpoint.toString())
 				    .detail("SampleKey", key)
 				    .detail("Size", size);
@@ -8564,7 +8565,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 			    .detail("SampleKey", key)
 			    .detail("Size", size);
 			data->metrics.byteSample.sample.insert(key, size);
-		    data->metrics.notifyBytes(key, size);
+			data->metrics.notifyBytes(key, size);
 			data->addMutationToMutationLogOrStorage(invalidVersion,
 			                                        MutationRef(MutationRef::SetValue, kv.key, kv.value));
 			bytesSum += size;
@@ -9640,7 +9641,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 						    .detail("TargetShard", desiredId)
 						    .detail("CurrentShard", shard->desiredShardId)
 						    .detail("Version", cVer);
-                        // TODO(heliu): Mark the data move as failed locally, instead of crashing ss.
+						// TODO(heliu): Mark the data move as failed locally, instead of crashing ss.
 						ASSERT(false);
 					} else {
 						TraceEvent(SevInfo, "CSKMoveInToSameShard", data->thisServerID)
@@ -10836,6 +10837,8 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 	state Key readBegin;
 	state Key readEnd;
 	state bool anyFileCreated;
+	TraceEvent(SevDebug, "CheckpointbytesSampleBegin", data->thisServerID)
+	    .detail("Checkpoint", metaData.toString());
 
 	loop {
 		try {
@@ -10884,7 +10887,7 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 							int64_t size = BinaryReader::fromStringRef<int64_t>(readResult[i].value, Unversioned());
 							KeyRef key = readResult[i].key.removePrefix(persistByteSampleKeys.begin);
 							TraceEvent(SevDebug, "CheckpointbytesSampleKey", data->thisServerID)
-							    .setMaxFieldLength(10000)
+							    // .setMaxFieldLength(10000)
 							    .detail("Checkpoint", metaData.toString())
 							    .detail("SampleKey", key)
 							    .detail("Size", size);
@@ -10913,7 +10916,7 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 			TraceEvent(SevDebug, "DumpCheckPointMetaData", data->thisServerID)
 			    .detail("NumSampledKeys", numSampledKeys)
 			    .detail("NumGetRangeQueries", numGetRangeQueries)
-			    .detail("CheckpointID", metaData.checkpointID)
+			    .detail("CheckpointID", metaData.checkpointID.toString())
 			    .detail("BytesSampleTempFile", anyFileCreated ? bytesSampleFile : "noFileCreated");
 			break;
 
@@ -12058,7 +12061,7 @@ ByteSampleInfo isKeyValueInSample(const KeyRef key, int64_t totalKvSize) {
 	if (SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY != 0) {
 		ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	}
-	info.probability = std::clamp(info.probability, SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY, 1.0);
+	info.probability = std::min(info.probability, 1.0);
 	info.inSample = a / ((1 << 30) * 4.0) < info.probability;
 	info.sampledSize = info.size / info.probability;
 

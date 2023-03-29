@@ -935,7 +935,6 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 
 // TODO: Return when a file exceeds a limit.
 ACTOR Future<Void> fetchCheckpointRange(Database cx,
-
                                         std::shared_ptr<CheckpointMetaData> metaData,
                                         KeyRange range,
                                         std::string dir,
