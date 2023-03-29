@@ -109,7 +109,7 @@ struct CodeProbes {
 	}
 
 	static CodeProbes& instance() {
-		static CodeProbes probes;
+		thread_local static CodeProbes probes;
 		return probes;
 	}
 
