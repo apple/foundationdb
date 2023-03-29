@@ -464,11 +464,11 @@ endif()
 set(SwiftOptions "")
 
 # Let Swift know where to find the external GCC toolchain if such toolchain is used.
-if (CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN)
+if (CMAKE_Swift_COMPILER_EXTERNAL_TOOLCHAIN)
     # FIXME: adopt driver flag once it lands:
     # https://github.com/apple/swift-driver/pull/1307.
-    set(SwiftOptions "${SwiftOptions} -Xcc --gcc-toolchain=${CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN}")
-    set(SwiftOptions "${SwiftOptions} -Xclang-linker --gcc-toolchain=${CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN}")
+    set(SwiftOptions "${SwiftOptions} -Xcc --gcc-toolchain=${CMAKE_Swift_COMPILER_EXTERNAL_TOOLCHAIN}")
+    set(SwiftOptions "${SwiftOptions} -Xclang-linker --gcc-toolchain=${CMAKE_Swift_COMPILER_EXTERNAL_TOOLCHAIN}")
 endif()
 
 # Set the module cache path.
@@ -505,5 +505,5 @@ endif()
 include(CompilerChecks)
 check_swift_source_compiles("import CxxStdlib" CanImportCxxStdlibIntoSwift)
 if (NOT CanImportCxxStdlibIntoSwift)
-  message(FATAL_ERROR "Swift compiler: can not import C++ standard library into Swift; did you forget to set 'CMAKE_Swift_COMPILE_EXTERNAL_TOOLCHAIN'?")
+  message(FATAL_ERROR "Swift compiler: can not import C++ standard library into Swift; did you forget to set 'CMAKE_Swift_COMPILER_EXTERNAL_TOOLCHAIN'?")
 endif()
