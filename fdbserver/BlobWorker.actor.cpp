@@ -69,6 +69,34 @@
 #define BW_HISTORY_DEBUG false
 #define BW_REQUEST_DEBUG false
 
+void WriteAmpTarget::decrease(int deltaBytes) {
+	if (SERVER_KNOBS->BG_ENABLE_DYNAMIC_WRITE_AMP) {
+		catchingUp = true;
+		double minWriteAmp =
+		    SERVER_KNOBS->BG_DYNAMIC_WRITE_AMP_MIN_FACTOR *
+		    (SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT + SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) /
+		    SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT;
+		targetWriteAmp = std::max(targetWriteAmp * SERVER_KNOBS->BG_DYNAMIC_WRITE_AMP_DECREASE_FACTOR, minWriteAmp);
+		// To not wait for next re-snapshot, pessimistically assume that all deltas are inserts and new snapshot
+		// will be bigger. This is usually the case in write-heavy catchup cases, but helps us catch up faster
+		// regardless
+		targetSnapshotBytes += deltaBytes;
+		bytesBeforeCompact = targetSnapshotBytes / (targetWriteAmp - 1.0);
+	}
+}
+
+void WriteAmpTarget::newSnapshotSize(int snapshotSize) {
+	if (SERVER_KNOBS->BG_ENABLE_DYNAMIC_WRITE_AMP) {
+		snapshotSize = std::max(snapshotSize, SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES);
+		if (catchingUp) {
+			// if catching up, always aim for larger snapshot cycles to help catch up faster
+			snapshotSize = std::max(targetSnapshotBytes, snapshotSize);
+		}
+		targetSnapshotBytes = snapshotSize;
+		bytesBeforeCompact = targetSnapshotBytes / (targetWriteAmp - 1.0);
+	}
+}
+
 void GranuleMetadata::resume() {
 	if (resumeSnapshot.canBeSet()) {
 		resumeSnapshot.send(Void());
@@ -2080,58 +2108,6 @@ ACTOR Future<Void> forceFlushCleanup(Reference<BlobWorkerData> bwData, Reference
 	return Void();
 }
 
-// We have a normal target snapshot/delta ratio, but in write-heavy cases where are behind and need to catch up,
-// we want to change this target to get more efficient. To maintain a consistent write amp if the snapshot size is
-// growing without the ability to split, we scale the bytes before recompact to reach the target write amp. We also
-// decrease the target write amp the further behind we are to be more efficient.
-struct WriteAmpTarget {
-	double targetWriteAmp;
-	int bytesBeforeCompact;
-	int targetSnapshotBytes;
-	bool catchingUp;
-
-	WriteAmpTarget() { reset(); }
-
-	void reset() {
-		catchingUp = false;
-		bytesBeforeCompact = SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT;
-		targetSnapshotBytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
-		targetWriteAmp = 1.0 * (bytesBeforeCompact + targetSnapshotBytes) / bytesBeforeCompact;
-	}
-
-	void decrease(int deltaBytes) {
-		if (SERVER_KNOBS->BG_ENABLE_DYNAMIC_WRITE_AMP) {
-			catchingUp = true;
-			double minWriteAmp =
-			    SERVER_KNOBS->BG_DYNAMIC_WRITE_AMP_MIN_FACTOR *
-			    (SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT + SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) /
-			    SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT;
-			targetWriteAmp = std::max(targetWriteAmp * SERVER_KNOBS->BG_DYNAMIC_WRITE_AMP_DECREASE_FACTOR, minWriteAmp);
-			// To not wait for next re-snapshot, pessimistically assume that all deltas are inserts and new snapshot
-			// will be bigger. This is usually the case in write-heavy catchup cases, but helps us catch up faster
-			// regardless
-			targetSnapshotBytes += deltaBytes;
-			bytesBeforeCompact = targetSnapshotBytes / (targetWriteAmp - 1.0);
-		}
-	}
-
-	void newSnapshotSize(int snapshotSize) {
-		if (SERVER_KNOBS->BG_ENABLE_DYNAMIC_WRITE_AMP) {
-			snapshotSize = std::max(snapshotSize, SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES);
-			if (catchingUp) {
-				// if catching up, always aim for larger snapshot cycles to help catch up faster
-				snapshotSize = std::max(targetSnapshotBytes, snapshotSize);
-			}
-			targetSnapshotBytes = snapshotSize;
-			bytesBeforeCompact = targetSnapshotBytes / (targetWriteAmp - 1.0);
-		}
-	}
-
-	int getDeltaFileBytes() { return getBytesBeforeCompact() / 10; }
-
-	int getBytesBeforeCompact() { return bytesBeforeCompact; }
-};
-
 // updater for a single granule
 // TODO: this is getting kind of large. Should try to split out this actor if it continues to grow?
 ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
@@ -2157,7 +2133,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 	state std::deque<std::pair<Version, Version>> rollbacksInProgress;
 	state std::deque<std::pair<Version, Version>> rollbacksCompleted;
 	state Future<Void> startDeltaFileWrite = Future<Void>(Void());
-	state WriteAmpTarget writeAmpTarget;
 
 	state bool snapshotEligible; // just wrote a delta file or just took granule over from another worker
 	state bool justDidRollback = false;
@@ -2211,7 +2186,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			}
 
 			if (!files.snapshotFiles.empty()) {
-				writeAmpTarget.newSnapshotSize(files.snapshotFiles.back().length);
+				metadata->writeAmpTarget.newSnapshotSize(files.snapshotFiles.back().length);
 			}
 
 			metadata->files = startState.existingFiles.get();
@@ -2355,7 +2330,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 						metadata->files.snapshotFiles.push_back(completedFile);
 						metadata->durableSnapshotVersion.set(completedFile.version);
-						writeAmpTarget.newSnapshotSize(completedFile.length);
+						metadata->writeAmpTarget.newSnapshotSize(completedFile.length);
 						pendingSnapshots--;
 					} else {
 						handleCompletedDeltaFile(bwData,
@@ -2496,7 +2471,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				metadata->activeCFData.set(cfData);
 
 				// no longer catching up on old feed, resume desired write amp target
-				writeAmpTarget.reset();
+				metadata->writeAmpTarget.reset();
 			}
 
 			// process mutations
@@ -2712,7 +2687,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			bool forceFlush = !forceFlushVersions.empty() && forceFlushVersions.back() > metadata->pendingDeltaVersion;
 			bool doEarlyFlush = !metadata->currentDeltas.empty() && metadata->doEarlyReSnapshot();
 			CODE_PROBE(forceFlush, "Force flushing granule");
-			if ((processedAnyMutations && metadata->bufferedDeltaBytes >= writeAmpTarget.getDeltaFileBytes()) ||
+			if ((processedAnyMutations &&
+			     metadata->bufferedDeltaBytes >= metadata->writeAmpTarget.getDeltaFileBytes()) ||
 			    forceFlush || doEarlyFlush) {
 				TraceEvent(SevDebug, "BlobGranuleDeltaFile", bwData->id)
 				    .detail("Granule", metadata->keyRange)
@@ -2848,8 +2824,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 			// If we have enough delta files, try to re-snapshot
 			// FIXME: have max file count in addition to bytes count
-			if (snapshotEligible && (metadata->doEarlyReSnapshot() ||
-			                         metadata->bytesInNewDeltaFiles >= writeAmpTarget.getBytesBeforeCompact())) {
+			if (snapshotEligible &&
+			    (metadata->doEarlyReSnapshot() ||
+			     metadata->bytesInNewDeltaFiles >= metadata->writeAmpTarget.getBytesBeforeCompact())) {
 				if (BW_DEBUG && !inFlightFiles.empty()) {
 					fmt::print("Granule [{0} - {1}) ready to re-snapshot at {2} after {3} > {4} bytes, "
 					           "waiting for outstanding {5} files to finish\n",
@@ -2857,7 +2834,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					           metadata->keyRange.end.printable(),
 					           metadata->pendingDeltaVersion,
 					           metadata->bytesInNewDeltaFiles,
-					           writeAmpTarget.getBytesBeforeCompact(),
+					           metadata->writeAmpTarget.getBytesBeforeCompact(),
 					           inFlightFiles.size());
 				}
 
@@ -2888,7 +2865,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				} else {
 					inFlightBlobSnapshot =
 					    reSnapshotNoCheck(bwData, bstore, metadata, startState.granuleID, previousFuture);
-					writeAmpTarget.decrease(metadata->bytesInNewDeltaFiles);
+					metadata->writeAmpTarget.decrease(metadata->bytesInNewDeltaFiles);
 				}
 				inFlightFiles.push_back(
 				    InFlightFile(inFlightBlobSnapshot, metadata->pendingDeltaVersion, 0, true, false));
@@ -2941,7 +2918,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							}
 							metadata->files.snapshotFiles.push_back(completedFile);
 							metadata->durableSnapshotVersion.set(completedFile.version);
-							writeAmpTarget.newSnapshotSize(completedFile.length);
+							metadata->writeAmpTarget.newSnapshotSize(completedFile.length);
 							pendingSnapshots--;
 						} else {
 							handleCompletedDeltaFile(bwData,

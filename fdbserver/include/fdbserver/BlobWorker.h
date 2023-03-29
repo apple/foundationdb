@@ -30,6 +30,34 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+// We have a normal target snapshot/delta ratio, but in write-heavy cases where are behind and need to catch up,
+// we want to change this target to get more efficient. To maintain a consistent write amp if the snapshot size is
+// growing without the ability to split, we scale the bytes before recompact to reach the target write amp. We also
+// decrease the target write amp the further behind we are to be more efficient.
+struct WriteAmpTarget {
+	double targetWriteAmp;
+	int bytesBeforeCompact;
+	int targetSnapshotBytes;
+	bool catchingUp;
+
+	WriteAmpTarget() { reset(); }
+
+	void reset() {
+		catchingUp = false;
+		bytesBeforeCompact = SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT;
+		targetSnapshotBytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
+		targetWriteAmp = 1.0 * (bytesBeforeCompact + targetSnapshotBytes) / bytesBeforeCompact;
+	}
+
+	void decrease(int deltaBytes);
+
+	void newSnapshotSize(int snapshotSize);
+
+	int getDeltaFileBytes() { return getBytesBeforeCompact() / 10; }
+
+	int getBytesBeforeCompact() { return bytesBeforeCompact; }
+};
+
 struct GranuleStartState {
 	UID granuleID;
 	Version changeFeedStartVersion;
@@ -90,6 +118,7 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	GranuleReadStats readStats;
 	bool rdcCandidate;
 	Promise<Void> runRDC;
+	WriteAmpTarget writeAmpTarget;
 
 	void resume();
 	void resetReadStats();
