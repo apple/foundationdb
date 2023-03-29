@@ -4171,6 +4171,11 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 
 			state Future<Optional<Value>> fLockValue = tr.get(lockKey);
 			state Future<ForcedPurgeState> fForcedPurgeState = getForcePurgedState(&tr, req.keyRange);
+			Reference<BlobRestoreController> restoreController =
+			    makeReference<BlobRestoreController>(bwData->db, req.keyRange);
+			state Future<bool> fIsRestoring = BlobRestoreController::isRestoring(restoreController);
+			state Future<Void> fKrmSetRange =
+			    krmSetRange(&tr, blobGranuleMappingKeys.begin, req.keyRange, blobGranuleMappingValueFor(bwData->id));
 			Future<Optional<GranuleHistory>> fHistory = getLatestGranuleHistory(&tr, req.keyRange);
 			Optional<GranuleHistory> history = wait(fHistory);
 			info.history = history;
@@ -4187,9 +4192,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				throw granule_assignment_conflict();
 			}
 
-			Reference<BlobRestoreController> restoreController =
-			    makeReference<BlobRestoreController>(bwData->db, req.keyRange);
-			bool isFullRestore = wait(BlobRestoreController::isRestoring(restoreController));
+			bool isFullRestore = wait(fIsRestoring);
 			bwData->isFullRestoreMode = isFullRestore;
 
 			Optional<Value> prevLockValue = wait(fLockValue);
@@ -4296,7 +4299,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			}
 
 			tr.set(lockKey, blobGranuleLockValueFor(req.managerEpoch, req.managerSeqno, info.granuleID));
-			wait(krmSetRange(&tr, blobGranuleMappingKeys.begin, req.keyRange, blobGranuleMappingValueFor(bwData->id)));
+			wait(fKrmSetRange);
 
 			// If anything in previousGranules, need to do the handoff logic and set
 			// ret.previousChangeFeedId, and the previous durable version will come from the previous
