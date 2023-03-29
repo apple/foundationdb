@@ -432,7 +432,13 @@ public actor MasterDataActor {
 
 extension MasterData {
     var swiftActorImpl: MasterDataActor {
-        UnsafeRawPointer(self.__getSwiftImplUnsafe()).load(as: MasterDataActor.self)
+        #if FDBSERVER_FORWARD_DECLARE_SWIFT_APIS
+        // During the generationg of the C++ header for this module, we do not
+        // yet have access to `getSwiftImpl` API.
+        return MasterDataActor()
+        #else
+        return self.getSwiftImpl()
+        #endif
     }
 }
 
