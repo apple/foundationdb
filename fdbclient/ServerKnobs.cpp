@@ -169,6 +169,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,           960 ); if( randomize && BUGGIFY ) PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD = 360; // Set as the lowest priority
 
 	// Data distribution
+	init( SHARD_ENCODE_LOCATION_METADATA,                        true ); if( randomize && BUGGIFY )  SHARD_ENCODE_LOCATION_METADATA = true;
 	init( AVAILABLE_SPACE_PIVOT_PERCENT,                          0.6);
 	init( READ_LOAD_PIVOT_PERCENT,                                0.8);
 	// In order to make sure GetTeam has enough eligible destination team:
