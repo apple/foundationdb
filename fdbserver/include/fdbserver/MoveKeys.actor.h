@@ -153,7 +153,8 @@ ACTOR Future<Void> cleanUpDataMove(
     FlowLock* cleanUpDataMoveParallelismLock,
     KeyRange range,
     const DDEnabledState* ddEnabledState,
-    Optional<PromiseStream<Future<Void>>> addCleanUpDataMoveActor = Optional<PromiseStream<Future<Void>>>());
+    Optional<PromiseStream<Future<Void>>> addCleanUpDataMoveActor = Optional<PromiseStream<Future<Void>>>(),
+    Optional<double> delaySeconds = Optional<double>());
 
 ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInterface server);
 // Adds a newly recruited storage server to a database (e.g. adding it to FF/serverList)

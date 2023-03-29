@@ -1441,7 +1441,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 									ASSERT(val.present());
 									DataMoveMetaData dmv = decodeDataMoveValue(val.get());
 									TraceEvent(
-									    SevWarnAlways, "StartMoveShardsFoundConflictingDataMove", relocationIntervalId)
+									    SevError, "StartMoveShardsFoundConflictingDataMove", relocationIntervalId)
 									    .detail("Range", rangeIntersectKeys)
 									    .detail("DataMoveID", dataMoveId.toString())
 									    .detail("ExistingDataMoveID", destId.toString())
@@ -2458,15 +2458,19 @@ ACTOR Future<Void> cleanUpDataMoveBackground(Database occ,
 	return Void();
 }
 
-ACTOR Future<Void> cleanUpDataMove(Database occ,
-                                   UID dataMoveId,
-                                   MoveKeysLock lock,
-                                   FlowLock* cleanUpDataMoveParallelismLock,
-                                   KeyRange keys,
-                                   const DDEnabledState* ddEnabledState,
-                                   Optional<PromiseStream<Future<Void>>> addCleanUpDataMoveActor) {
+ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
+                                       UID dataMoveId,
+                                       MoveKeysLock lock,
+                                       FlowLock* cleanUpDataMoveParallelismLock,
+                                       KeyRange keys,
+                                       const DDEnabledState* ddEnabledState,
+                                       Optional<double> backgroundDelaySeconds = Optional<double>()) {
+	if (backgroundDelaySeconds.present()) { // if backgroundDelaySeconds present, this is a background cleanup
+		wait(delay(backgroundDelaySeconds.get()));
+	}
+
 	state KeyRange range;
-	TraceEvent(SevVerbose, "CleanUpDataMoveBegin", dataMoveId).detail("DataMoveID", dataMoveId).detail("Range", keys);
+	TraceEvent(SevDebug, "CleanUpDataMoveBegin", dataMoveId).detail("DataMoveID", dataMoveId).detail("Range", keys);
 	state bool complete = false;
 
 	wait(cleanUpDataMoveParallelismLock->take(TaskPriority::DataDistributionLaunch));
@@ -2489,52 +2493,31 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
 
 				Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
-				// Overall we have four cases:
-				// (1) val.present() => normal cleanup
-				// (2) !val.present() => put a place holder on the range and trigger a background cleanup
-				// (2.1) the trial appears commit_unknown_result but actually succeed
-				//  In this case, val.present() and dataMove.ranges.empty() => retry without commit the placeholder
-				// (2.2) the trial failed to commit
-				//  In this case, !val.present() => retry
-				// (2.3) the trial succeeds to commit
-				//  Never appears since the trial has succeed
 				if (val.present()) {
 					dataMove = decodeDataMoveValue(val.get());
-					if (!dataMove.ranges.empty()) {
-						TraceEvent(SevVerbose, "CleanUpDataMoveMetaData", dataMoveId)
-						    .detail("DataMoveID", dataMoveId)
-						    .detail("DataMoveMetaData", dataMove.toString());
-						range = dataMove.ranges.front();
-						ASSERT(!range.empty());
-					} else {
-						ASSERT(addCleanUpDataMoveActor.present());
-						addCleanUpDataMoveActor.get().send(cleanUpDataMoveBackground(occ,
-						                                                             dataMoveId,
-						                                                             lock,
-						                                                             cleanUpDataMoveParallelismLock,
-						                                                             keys,
-						                                                             ddEnabledState,
-						                                                             /*delaySeconds=*/10));
-						TraceEvent(SevDebug, "CleanUpDataMovePlaceHolder", dataMoveId).detail("DataMoveID", dataMoveId);
+					if (dataMove.ranges.empty()) {
+						// If a background cleanup has been triggered, safely do nothing
 						break;
 					}
+					TraceEvent(SevDebug, "CleanUpDataMoveMetaData", dataMoveId)
+					    .detail("DataMoveID", dataMoveId)
+					    .detail("DataMoveMetaData", dataMove.toString());
+					ASSERT(!dataMove.ranges.empty());
+					range = dataMove.ranges.front();
+					ASSERT(!range.empty());
 				} else {
-					ASSERT(addCleanUpDataMoveActor.present());
-					TraceEvent(SevDebug, "CleanUpDataMoveTriggerBackground", dataMoveId)
-					    .detail("DataMoveID", dataMoveId);
+					if (backgroundDelaySeconds.present()) {
+						// If a background cleanup sees nothing, safely do nothing
+						break;
+					}
+					ASSERT(!backgroundDelaySeconds.present());
+					// If a normal cleanup sees nothing, triggers background cleanup
 					dataMove = DataMoveMetaData(dataMoveId);
 					dataMove.setPhase(DataMoveMetaData::Deleting);
 					tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
 					wait(tr.commit());
-					addCleanUpDataMoveActor.get().send(cleanUpDataMoveBackground(occ,
-					                                                             dataMoveId,
-					                                                             lock,
-					                                                             cleanUpDataMoveParallelismLock,
-					                                                             keys,
-					                                                             ddEnabledState,
-					                                                             /*delaySeconds=*/10));
 					TraceEvent(SevDebug, "CleanUpDataMovePlaceHolder", dataMoveId).detail("DataMoveID", dataMoveId);
-					break;
+					throw need_background_datamove_cleanup();
 				}
 
 				dataMove.setPhase(DataMoveMetaData::Deleting);
@@ -2617,7 +2600,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				}
 
 				std::vector<Future<Void>> actors;
-				for (const auto& uid : oldDests) {
+				for (const auto& uid : oldDests) { // Is it safe to delay 10 sec to cleanup serverKeys and keyservers?
 					actors.push_back(unassignServerKeys(&tr, uid, range, physicalShardMap[uid], dataMoveId));
 				}
 				wait(waitForAll(actors));
@@ -2632,20 +2615,52 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				}
 			} catch (Error& e) {
 				state Error err = e;
-				wait(tr.onError(e));
+				if (backgroundDelaySeconds.present()) {
+					ASSERT(e.code() != error_code_need_background_datamove_cleanup);
+				}
+				wait(tr.onError(e)); // throw error if need_background_datamove_cleanup
 				TraceEvent(SevWarn, "CleanUpDataMoveRetriableError", dataMoveId)
 				    .error(err)
 				    .detail("DataMoveRange", range.toString());
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "CleanUpDataMoveFail", dataMoveId).errorUnsuppressed(e);
 		throw;
 	}
 
 	TraceEvent(SevDebug, "CleanUpDataMoveEnd", dataMoveId)
 	    .detail("DataMoveID", dataMoveId)
 	    .detail("DataMoveRange", range.toString());
+
+	return Void();
+}
+
+ACTOR Future<Void> cleanUpDataMove(Database occ,
+                                   UID dataMoveId,
+                                   MoveKeysLock lock,
+                                   FlowLock* cleanUpDataMoveParallelismLock,
+                                   KeyRange keys,
+                                   const DDEnabledState* ddEnabledState,
+                                   Optional<PromiseStream<Future<Void>>> addCleanUpDataMoveActor,
+                                   Optional<double> delaySeconds) {
+	try {
+		wait(cleanUpDataMoveCore(occ, dataMoveId, lock, cleanUpDataMoveParallelismLock, keys, ddEnabledState));
+	} catch (Error& e) {
+		if (e.code() == error_code_need_background_datamove_cleanup) {
+			ASSERT(addCleanUpDataMoveActor.present());
+			TraceEvent(SevDebug, "CleanUpDataMoveTriggerBackground", dataMoveId).detail("DataMoveID", dataMoveId);
+			addCleanUpDataMoveActor.get().send(cleanUpDataMoveCore(occ,
+			                                                       dataMoveId,
+			                                                       lock,
+			                                                       cleanUpDataMoveParallelismLock,
+			                                                       keys,
+			                                                       ddEnabledState,
+			                                                       /*backgroundDelaySeconds=*/10));
+		} else {
+			TraceEvent(SevWarn, "CleanUpDataMoveFail", dataMoveId).errorUnsuppressed(e);
+			throw e;
+		}
+	}
 
 	return Void();
 }
