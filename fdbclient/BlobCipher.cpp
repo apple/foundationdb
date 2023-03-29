@@ -499,6 +499,13 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::insertBaseCipherKey(const Encrypt
 		}
 	}
 
+	// Logging only tracks newly inserted cipher in the cache
+	// Approach limits the logging to two instances when new cipher gets added to the cache, two
+	// possible scenarios could be:
+	// 1. Cold start - cache getting warmed up
+	// 2. New cipher - new Tenant and/or KMS driven key-rotation
+	// Frequency of the log is governed by KMS driven `refreshAt` interval which is usually a long duration (days if
+	// not months)
 	TraceEvent(SevInfo, "BlobCipherKeyInsertBaseCipherKeyLatest")
 	    .detail("DomainId", domainId)
 	    .detail("BaseCipherId", baseCipherId)
@@ -551,6 +558,12 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::insertBaseCipherKey(const Encrypt
 		}
 	}
 
+	// Logging only tracks newly inserted cipher in the cache
+	// possible scenarios could be:
+	// 1. Cold start - cache getting warmed up
+	// 2. New cipher - new Tenant and/or KMS driven key-rotation
+	// Frequency of the log is governed by KMS driven `refreshAt` interval which is usually a long duration (days if
+	// not months)
 	TraceEvent(SevInfo, "BlobCipherKeyInsertBaseCipherKey")
 	    .detail("DomainId", domainId)
 	    .detail("BaseCipherId", baseCipherId)

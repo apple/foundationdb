@@ -290,8 +290,7 @@ public:
 		TraceEvent("InsertIntoBaseCipherIdCache")
 		    .detail("DomId", domainId)
 		    .detail("BaseCipherId", baseCipherId)
-		    .detail("BaseCipherLen", baseCipherKey.size())
-		    .detail("BaseCipherKeyChecksum", XXH3_64bits(baseCipherKey.begin(), baseCipherKey.size()));
+		    .detail("BaseCipherLen", baseCipherKey.size());
 	}
 
 	void insertIntoBlobMetadataCache(const BlobMetadataDomainId domainId,
