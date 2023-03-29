@@ -85,8 +85,9 @@ struct BlobFailureInjectionWorkload : FailureInjectionWorkload {
 		auto processes = getServers();
 		deterministicRandom()->randomShuffle(processes);
 
-		wait(timeout(
-		    reportErrors(self->worker(cx, self, processes), "BlobFailureInjectionWorkerError"), self->testDuration, Void()));
+		wait(timeout(reportErrors(self->worker(cx, self, processes), "BlobFailureInjectionWorkerError"),
+		             self->testDuration,
+		             Void()));
 
 		// Undo all fault injection before exiting, if worker didn't
 		self->undoFaultInjection();
@@ -106,7 +107,9 @@ struct BlobFailureInjectionWorkload : FailureInjectionWorkload {
 		return machines;
 	}
 
-	ACTOR Future<Void> worker(Database cx, BlobFailureInjectionWorkload* self, std::vector<ISimulator::ProcessInfo*> processes) {
+	ACTOR Future<Void> worker(Database cx,
+	                          BlobFailureInjectionWorkload* self,
+	                          std::vector<ISimulator::ProcessInfo*> processes) {
 		int minFailureDuration = 5;
 		int maxFailureDuration = std::max(10, (int)(self->testDuration / 2));
 
@@ -114,7 +117,8 @@ struct BlobFailureInjectionWorkload : FailureInjectionWorkload {
 		    deterministicRandom()->randomSkewedUInt32(minFailureDuration, maxFailureDuration);
 		// add a random amount between 0 and 1, otherwise it's a whole number
 		failureDuration += deterministicRandom()->random01();
-		state double delayBefore = deterministicRandom()->random01() * (std::max<double>(0.0, self->testDuration - failureDuration));
+		state double delayBefore =
+		    deterministicRandom()->random01() * (std::max<double>(0.0, self->testDuration - failureDuration));
 
 		wait(delay(delayBefore));
 
