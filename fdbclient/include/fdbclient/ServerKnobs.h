@@ -188,6 +188,13 @@ public:
 	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD;
 
 	// Data distribution
+	// DD won't move shard to teams that has availableSpaceRatio < max(0.05,  AllTeamAvailSpaceRatio[pivot]), where
+	// pivot = pivot percent * team count.
+	double AVAILABLE_SPACE_PIVOT_PERCENT;
+	// DD won't move shard to teams that has readLoad > AllTeamReadLoad[pivot], where pivot = pivot percent *
+	// team count.
+	double READ_LOAD_PIVOT_PERCENT;
+
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
 	bool ENABLE_DD_PHYSICAL_SHARD_MOVE; // Enable physical shard move.
@@ -376,6 +383,10 @@ public:
 	bool ROCKSDB_MUTE_LOGS;
 	int64_t ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 	int ROCKSDB_PREFIX_LEN;
+	double ROCKSDB_MEMTABLE_PREFIX_BLOOM_SIZE_RATIO;
+	int ROCKSDB_BLOOM_BITS_PER_KEY;
+	bool ROCKSDB_BLOOM_WHOLE_KEY_FILTERING;
+	int ROCKSDB_MAX_AUTO_READAHEAD_SIZE;
 	int64_t ROCKSDB_BLOCK_CACHE_SIZE;
 	double ROCKSDB_METRICS_DELAY;
 	double ROCKSDB_READ_VALUE_TIMEOUT;

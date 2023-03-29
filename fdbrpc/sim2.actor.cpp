@@ -73,8 +73,8 @@ ISimulator::ISimulator()
   : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
     allowLogSetKills(true), tssMode(TSSMode::Disabled), configDBType(ConfigDBType::DISABLED), isStopped(false),
     lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false),
-    backupAgents(BackupAgentType::WaitForType), drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false),
-    blobGranulesEnabled(false) {}
+    connectionFailureEnableTime(0), backupAgents(BackupAgentType::WaitForType), drAgents(BackupAgentType::WaitForType),
+    allSwapsDisabled(false), blobGranulesEnabled(false) {}
 ISimulator::~ISimulator() = default;
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
@@ -2785,6 +2785,7 @@ void enableConnectionFailures(std::string const& context) {
 	if (g_network->isSimulated()) {
 		g_simulator->connectionFailuresDisableDuration = 0;
 		g_simulator->speedUpSimulation = false;
+		g_simulator->connectionFailureEnableTime = now();
 		TraceEvent(SevWarnAlways, ("EnableConnectionFailures_" + context).c_str());
 	}
 }

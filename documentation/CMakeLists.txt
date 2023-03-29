@@ -1,69 +1,79 @@
 add_subdirectory(tutorial)
-# build a virtualenv
-set(sphinx_dir ${CMAKE_CURRENT_SOURCE_DIR}/sphinx)
-set(venv_dir ${CMAKE_CURRENT_BINARY_DIR}/venv)
-if(WIN32)
-  set(venv_bin_dir ${CMAKE_CURRENT_BINARY_DIR}/venv/Scripts)
-  set(activate_script ${venv_bin_dir}/activate.bat)
-  set(EXE_SUFFIX ".exe")
-else()
-  set(venv_bin_dir ${CMAKE_CURRENT_BINARY_DIR}/venv/bin)
-  set(activate_script . ${venv_bin_dir}/activate)
-  set(EXE_SUFFIX "")
+
+set(SPHINX_DOCUMENT_DIR "${CMAKE_SOURCE_DIR}/documentation/sphinx")
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_package(Sphinx)
+if(NOT Sphinx_FOUND)
+  message(STATUS "Sphinx not found, setting up sphinx virtual environment")
+  set(SPHINX_VENV_DIR "${CMAKE_BINARY_DIR}/sphinx-venv")
+  execute_process(COMMAND "${Python3_EXECUTABLE}" -m venv ${SPHINX_VENV_DIR})
+  find_program(
+    VENV_Python3_EXECUTABLE
+    NAMES python3 python3.exe
+    PATHS ${SPHINX_VENV_DIR}/Scripts ${SPHINX_VENV_DIR}/bin REQUIRED
+    NO_DEFAULT_PATH NO_CACHE
+    DOC "Checking Python3 executable in virtual environment")
+  execute_process(
+    COMMAND "${VENV_Python3_EXECUTABLE}" -m ensurepip
+    COMMAND "${VENV_Python3_EXECUTABLE}" -m pip install --upgrade pip
+    COMMAND "${VENV_Python3_EXECUTABLE}" -m pip install -r
+            "${SPHINX_DOCUMENT_DIR}/requirements.txt")
+  set(Sphinx_ROOT "${SPHINX_VENV_DIR}")
+  unset(Sphinx_FOUND)
+  find_package(Sphinx REQUIRED)
 endif()
-set(python_command ${venv_bin_dir}/python${EXE_SUFFIX})
-set(pip_command ${venv_bin_dir}/pip${EXE_SUFFIX})
 
-add_custom_command(OUTPUT ${venv_dir}/venv_setup
-  COMMAND ${Python3_EXECUTABLE} -m venv venv &&
-          ${CMAKE_COMMAND} -E copy ${sphinx_dir}/.pip.conf ${venv_dir}/pip.conf &&
-          ${activate_script} &&
-          ${python_command} -m pip install --upgrade pip &&
-          ${pip_command} install --upgrade -r ${sphinx_dir}/requirements.txt &&
-          ${pip_command} install sphinx-autobuild && # somehow this is missing in requirements.txt
-          ${CMAKE_COMMAND} -E touch ${venv_dir}/venv_setup
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-  COMMENT "Set up virtualenv")
-add_custom_target(buildsphinx DEPENDS ${venv_dir}/venv_setup)
-
-file(GLOB_RECURSE SRCS *.rst)
+message(
+  STATUS "Sphinx found at ${Sphinx_EXECUTABLE} with version ${Sphinx_VERSION}")
 
 function(add_documentation_target)
   set(options)
-  set(oneValueArgs GENERATOR SPHINX_COMMAND DOCTREE)
+  set(oneValueArgs GENERATOR DOCTREE)
   set(multiValueArgs ADDITIONAL_ARGUMENTS)
-  cmake_parse_arguments(ADT "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
+  cmake_parse_arguments(ADT "${options}" "${oneValueArgs}" "${multiValueArgs}"
+                        "${ARGN}")
+
   if(NOT ADT_GENERATOR)
-    message(ERROR "GENERATOR is a required argument to add_documentation_target")
+    message(ERROR
+            "GENERATOR is a required argument to add_documentation_target")
   endif()
-  set(target ${ADT_GENERATOR})
-  set(SPHINX_COMMAND "${venv_bin_dir}/sphinx-build${EXE_SUFFIX}")
-  if(ADT_SPHINX_COMMAND)
-    set(SPHINX_COMMAND "${venv_bin_dir}/${ADT_SPHINX_COMMAND}")
+  set(TARGET ${ADT_GENERATOR})
+
+  set(DOCTREE "doctree")
+  if(ADT_DOCTREE)
+    set(DOCTREE "${ADT_DOCTREE}")
   endif()
-  set(doctree "doctree")
-  if (ADT_DOCTREE)
-    set(doctree "${ADT_DOCTREE}")
-  endif()
-  set(out_dir ${CMAKE_CURRENT_BINARY_DIR}/${target})
+
+  set(OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/${TARGET})
+  set(STAMP_FILE ${CMAKE_CURRENT_BINARY_DIR}/document_${TARGET}_done)
+  file(
+    GLOB_RECURSE DOC_FILES
+    LIST_DIRECTORIES false
+    CONFIGURE_DEPENDS ${SPHINX_DOCUMENT_DIR}/*.*)
   add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${target}_done
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${out_dir} &&
-            ${python_command} ${SPHINX_COMMAND} -W -b ${target}
-                              -d ${doctree} -c ${sphinx_dir}
-                              ${sphinx_dir}/source
-                              ${CMAKE_CURRENT_BINARY_DIR}/${target} &&
-            ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/${target}_done
-    DEPENDS ${SRCS}
-    WORKING_DIRECTORY ${venv_dir})
-  add_custom_target(${target} DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${target}_done)
-  add_dependencies(${target} buildsphinx)
+    OUTPUT ${STAMP_FILE}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${OUTPUT_DIR}
+    COMMAND
+      ${Sphinx_EXECUTABLE} -W -b ${TARGET} -d ${DOCTREE} -c
+      ${SPHINX_DOCUMENT_DIR} ${SPHINX_DOCUMENT_DIR}/source ${OUTPUT_DIR}
+      -Dversion=${FDB_VERSION} -Drelease=${FDB_RELEASE}
+    COMMAND ${CMAKE_COMMAND} -E touch ${STAMP_FILE}
+    DEPENDS ${DOC_FILES}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  add_custom_target(${TARGET}
+                    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/document_${TARGET}_done)
 endfunction()
 
 message(STATUS "Add html target")
 add_documentation_target(GENERATOR html)
 
-set(DOCSERVER_PORT "-1" CACHE STRING "Port to which the documentation server should bind (negative means cmake will choose one)")
+set(DOCSERVER_PORT
+    "-1"
+    CACHE
+      STRING
+      "Port to which the documentation server should bind (negative means cmake will choose one)"
+)
 
 if(DOCSERVER_PORT GREATER_EQUAL 0)
   set(port ${DOCSERVER_PORT})
@@ -82,19 +92,24 @@ else()
     endif()
   endif()
   string(MD5 username_hash ${username})
-  # cmake math function can only use 64 bit signed integers - so we just truncate the string
+  # cmake math function can only use 64 bit signed integers - so we just
+  # truncate the string
   string(SUBSTRING "${username_hash}" 0 15 username_hash_small)
-  math(EXPR port "(0x${username_hash_small} % 8000) + 8000" OUTPUT_FORMAT DECIMAL)
+  math(EXPR port "(0x${username_hash_small} % 8000) + 8000"
+       OUTPUT_FORMAT DECIMAL)
   message(STATUS "Port is ${port}")
 endif()
 
-add_custom_target(docpreview
-  COMMAND ${python_command} -m http.server ${port}
+add_custom_target(
+  docpreview
+  COMMAND ${Python3_EXECUTABLE} -m http.server ${port}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/html
   USES_TERMINAL)
 add_dependencies(docpreview html)
 
-set(tar_file ${CMAKE_BINARY_DIR}/packages/${CMAKE_PROJECT_NAME}-docs-${FDB_VERSION}.tar.gz)
+set(tar_file
+    ${CMAKE_BINARY_DIR}/packages/${CMAKE_PROJECT_NAME}-docs-${FDB_VERSION}.tar.gz
+)
 add_custom_command(
   OUTPUT ${tar_file}
   COMMAND ${CMAKE_COMMAND} -E tar czf ${tar_file} .
