@@ -1454,13 +1454,11 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 }
 
 ACTOR Future<Void> resumeAuditStorage(Reference<DataDistributor> self, AuditStorageState auditState, int retryCount) {
-	if (auditState.getType() != AuditType::ValidateHA &&
-	    auditState.getType() != AuditType::ValidateReplica &&
+	if (auditState.getType() != AuditType::ValidateHA && auditState.getType() != AuditType::ValidateReplica &&
 	    auditState.getType() != AuditType::ValidateLocationMetadata &&
 	    auditState.getType() != AuditType::ValidateStorageServerShard) {
 		throw not_implemented();
 	}
-
 	state std::shared_ptr<DDAudit> audit =
 	    std::make_shared<DDAudit>(auditState.id, auditState.range, auditState.getType());
 	audit->coreState.setPhase(AuditPhase::Running);
@@ -1497,6 +1495,7 @@ ACTOR Future<Void> resumeAuditStorage(Reference<DataDistributor> self, AuditStor
 			} else if (audit->retryCount > 30) {
 				audit->coreState.setPhase(AuditPhase::Failed);
 				wait(persistAuditState(self->txnProcessor->context(), audit->coreState));
+				// throw audit_storage_failed();
 			} else {
 				wait(delay(5));
 				audit->retryCount++;
@@ -1509,7 +1508,6 @@ ACTOR Future<Void> resumeAuditStorage(Reference<DataDistributor> self, AuditStor
 	       audit->coreState.getPhase() == AuditPhase::Complete);
 	audit->actors.clear(true);
 	self->audits[audit->coreState.getType()].erase(audit->coreState.id);
-
 	return Void();
 }
 
@@ -1607,7 +1605,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self, TriggerAudi
 			    .detail("AuditState", audit->coreState.toString());
 		}
 		wait(audit->actors.getResult()); // goto exception handler if any actor is failed
-		// At this point, audit->actors is cleared
+		// At this point, audit->actors is clear
 		if (audit->foundError) {
 			audit->coreState.setPhase(AuditPhase::Error);
 		} else {
@@ -1627,6 +1625,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self, TriggerAudi
 			TraceEvent(SevVerbose, "DDAuditStorageCoreReplySync", self->ddId)
 			    .detail("AuditState", audit->coreState.toString());
 		}
+
 	} catch (Error& e) {
 		TraceEvent(SevInfo, "DDAuditStorageCoreError", self->ddId)
 		    .errorUnsuppressed(e)
@@ -1654,6 +1653,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self, TriggerAudi
 			throw retry();
 		}
 	}
+
 	TraceEvent(SevDebug, "DDAuditStorageCoreEnd", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("AuditType", req.getType())
@@ -1924,10 +1924,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		} else if (audit->retryCount > SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
 			throw audit_storage_failed();
 		} else if (e.code() == error_code_transaction_too_old) {
-			// some storage server fail behind, do not retry
-			// we set audit->retryCount to the max
-			// then this audit will not retry
-			audit->retryCount = SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX + 1;
+			audit->retryCount = SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX + 1; // do not retry
 			throw audit_storage_failed();
 		} else {
 			// audit->auditMap.insert(req.range, AuditPhase::Failed);

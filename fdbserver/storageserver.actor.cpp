@@ -5075,6 +5075,7 @@ ACTOR Future<std::vector<KeyRange>> getServerShardsByReadingServerKeys(StorageSe
 			if (e.code() == error_code_transaction_too_old) {
 				TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", serverID)
 				    .errorUnsuppressed(e)
+				    .detail("Reason", "Can never read at this version in further retrials")
 				    .detail("AtVersion", readAtVersion)
 				    .detail("AuditServer", serverID.first());
 				throw e;
@@ -5085,7 +5086,7 @@ ACTOR Future<std::vector<KeyRange>> getServerShardsByReadingServerKeys(StorageSe
 				    .detail("AuditServer", serverID.first());
 				throw timed_out();
 			} else {
-				TraceEvent(SevDebug, "AuditStorageShardStorageServerShardFailed", serverID)
+				TraceEvent(SevDebug, "AuditStorageShardStorageServerShardRetriableError", serverID)
 				    .errorUnsuppressed(e)
 				    .detail("AtVersion", readAtVersion)
 				    .detail("AuditServer", serverID.first());
@@ -5235,10 +5236,11 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 
 		// Compare
 		if (!rangesSame(ownRangesSeenByServerKey, ownRangesLocalView)) {
-			std::string error = format("Local view mismatch on Server(%016llx):\t LocalView: %s; ServerKey: %s",
-			                           data->thisServerID,
-			                           describe(ownRangesLocalView).c_str(),
-			                           describe(ownRangesSeenByServerKey).c_str());
+			std::string error =
+			    format("Storage server shard info mismatch on Server(%016llx):\t ServerShardInfo: %s; ServerKey: %s",
+			           data->thisServerID,
+			           describe(ownRangesLocalView).c_str(),
+			           describe(ownRangesSeenByServerKey).c_str());
 			errors.push_back(error);
 			TraceEvent(SevError, "AuditStorageShardStorageServerShardError", data->thisServerID)
 			    .detail("ErrorMessage", error)
