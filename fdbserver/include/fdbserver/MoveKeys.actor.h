@@ -146,12 +146,14 @@ Future<Void> rawFinishMovement(Database occ,
 ACTOR Future<Void> moveKeys(Database occ, MoveKeysParams params);
 
 // Cancels a data move designated by dataMoveId.
-ACTOR Future<Void> cleanUpDataMove(Database occ,
-                                   UID dataMoveId,
-                                   MoveKeysLock lock,
-                                   FlowLock* cleanUpDataMoveParallelismLock,
-                                   KeyRange range,
-                                   const DDEnabledState* ddEnabledState);
+ACTOR Future<Void> cleanUpDataMove(
+    Database occ,
+    UID dataMoveId,
+    MoveKeysLock lock,
+    FlowLock* cleanUpDataMoveParallelismLock,
+    KeyRange range,
+    const DDEnabledState* ddEnabledState,
+    Optional<PromiseStream<Future<Void>>> addCleanUpDataMoveActor = Optional<PromiseStream<Future<Void>>>());
 
 ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInterface server);
 // Adds a newly recruited storage server to a database (e.g. adding it to FF/serverList)
