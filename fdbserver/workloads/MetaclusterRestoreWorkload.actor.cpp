@@ -97,12 +97,14 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 	int initialTenantIdPrefix;
 	bool backupComplete = false;
+	double postBackupDuration;
 	double endTime = std::numeric_limits<double>::max();
 
 	MetaclusterRestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 1000));
 		initialTenants = std::min<int>(maxTenants, getOption(options, "initialTenants"_sr, 40));
 		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
+		postBackupDuration = getOption(options, "postBackupDuration"_sr, 30);
 
 		tenantGroupCapacity = (initialTenants / 2 + maxTenantGroups - 1) / g_simulator->extraDatabases.size();
 		int mode = deterministicRandom()->randomInt(0, 3);
@@ -1011,7 +1013,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		}
 
 		self->backupComplete = true;
-		self->endTime = now() + 30.0;
+		self->endTime = now() + self->postBackupDuration;
 
 		wait(opsFuture);
 		TraceEvent("MetaclusterRestoreWorkloadOperationsComplete");
