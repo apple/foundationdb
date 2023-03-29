@@ -632,8 +632,10 @@ int readRangeInDb(PhysicalShard* shard, const KeyRangeRef range, int rowLimit, i
 // Manages physical shards and maintains logical shard mapping.
 class ShardManager {
 public:
-	ShardManager(std::string path, UID logId, const rocksdb::Options& options)
-	  : path(path), logId(logId), dbOptions(options), dataShardMap(nullptr, specialKeys.end) {}
+	ShardManager(std::string path, UID logId, const rocksdb::Options& options, std::shared_ptr<RocksDBErrorListener> errorListener)
+	  : path(path), logId(logId), errorListener(errorListener) ,dbOptions(options), dataShardMap(nullptr, specialKeys.end) {
+		dbOptions.listeners.push_back(errorListener);
+	  }
 
 	ACTOR static Future<Void> shardMetricsLogger(std::shared_ptr<ShardedRocksDBState> rState,
 	                                             Future<Void> openFuture,
@@ -1219,6 +1221,7 @@ private:
 	const std::string path;
 	const UID logId;
 	rocksdb::Options dbOptions;
+	std::shared_ptr<RocksDBErrorListener> errorListener;
 	rocksdb::DB* db = nullptr;
 	std::unordered_map<std::string, std::shared_ptr<PhysicalShard>> physicalShards;
 	std::unordered_set<std::string> activePhysicalShardIds;
@@ -2363,7 +2366,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    errorListener(std::make_shared<RocksDBErrorListener>()), errorFuture(errorListener->getFuture()),
-	    dbOptions(getOptions()), shardManager(path, id, dbOptions),
+	    dbOptions(getOptions()), shardManager(path, id, dbOptions, errorListener),
 	    rocksDBMetrics(std::make_shared<RocksDBMetrics>(id, dbOptions.statistics)) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage
 		// engine is still multi-threaded as background compaction threads are still present. Reads/writes to disk
