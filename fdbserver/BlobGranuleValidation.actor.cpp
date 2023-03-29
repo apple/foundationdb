@@ -22,6 +22,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbclient/BlobGranuleRequest.actor.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 ACTOR Future<std::pair<RangeResult, Version>> readFromFDB(Database cx, KeyRange range) {
@@ -526,8 +527,11 @@ ACTOR Future<Void> checkFeedCleanup(Database cx, bool debug) {
 		return Void();
 	}
 	// big extra timeout just because simulation can take a while to quiesce
-	state double checkTimeoutOnceStable = 300.0 + 2 * SERVER_KNOBS->BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY;
+
+	state double checkTimeoutSpeedupSim = 50.0 + 2 * SERVER_KNOBS->BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY;
+	state double checkTimeoutOnceStable = 250.0 + checkTimeoutSpeedupSim;
 	state Optional<double> stableTimestamp;
+	state Optional<double> speedUpSimTimestamp;
 	state Standalone<VectorRef<KeyRangeRef>> lastGranules;
 
 	state Transaction tr(cx);
@@ -541,11 +545,19 @@ ACTOR Future<Void> checkFeedCleanup(Database cx, bool debug) {
 			if (debug) {
 				fmt::print("{0} granules and {1} active feeds found\n", granules.size(), activeFeeds.size());
 			}
-			/*fmt::print("Granules:\n");
-			for (auto& it : granules) {
-			    fmt::print("  [{0} - {1})\n", it.begin.printable(), it.end.printable());
-			}*/
+
 			bool allPresent = granules.size() == activeFeeds.size();
+			/*if (!allPresent) {
+			    fmt::print("Granules:\n");
+			    for (auto& it : granules) {
+			        fmt::print("  [{0} - {1})\n", it.begin.printable(), it.end.printable());
+			    }
+			    fmt::print("Feeds:\n");
+			    for (auto& it : activeFeeds) {
+			        fmt::print("  {0}: [{1} - {2})\n", it.first.printable(), it.second.begin.printable(),
+			it.second.end.printable());
+			    }
+			}*/
 			for (int i = 0; allPresent && i < granules.size(); i++) {
 				if (granules[i] != activeFeeds[i].second) {
 					if (debug) {
@@ -570,10 +582,19 @@ ACTOR Future<Void> checkFeedCleanup(Database cx, bool debug) {
 				stableTimestamp = now();
 			}
 			lastGranules = granules;
+			if (g_network->isSimulated()) {
+				if (g_simulator->speedUpSimulation && !speedUpSimTimestamp.present()) {
+					speedUpSimTimestamp = now();
+				}
+			} else {
+				speedUpSimTimestamp = 0.0;
+			}
 
 			// ensure this converges within a time window of granules becoming stable
-			if (stableTimestamp.present()) {
-				ASSERT(now() - stableTimestamp.get() <= checkTimeoutOnceStable);
+			if (stableTimestamp.present() && speedUpSimTimestamp.present()) {
+				bool granulesStable = now() - stableTimestamp.get() > checkTimeoutOnceStable;
+				bool speedUpSimStable = now() - stableTimestamp.get() > checkTimeoutSpeedupSim;
+				ASSERT(!granulesStable || !speedUpSimStable);
 			}
 
 			wait(delay(2.0));
