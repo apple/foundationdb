@@ -1454,8 +1454,7 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 }
 
 ACTOR Future<Void> resumeAuditStorage(Reference<DataDistributor> self, AuditStorageState auditState, int retryCount) {
-	if (auditState.getType() != AuditType::ValidateHA &&
-	    auditState.getType() != AuditType::ValidateReplica &&
+	if (auditState.getType() != AuditType::ValidateHA && auditState.getType() != AuditType::ValidateReplica &&
 	    auditState.getType() != AuditType::ValidateLocationMetadata &&
 	    auditState.getType() != AuditType::ValidateStorageServerShard) {
 		throw not_implemented();
