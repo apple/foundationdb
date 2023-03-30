@@ -167,8 +167,8 @@ struct BinaryCodec {
 
 // Codec for using Flatbuffer compatible types via ObjectWriter/ObjectReader
 template <typename T, typename VersionOptions>
-struct ObjectRWCodec {
-	ObjectRWCodec(VersionOptions vo) : vo(vo) {}
+struct ObjectCodec {
+	ObjectCodec(VersionOptions vo) : vo(vo) {}
 	VersionOptions vo;
 
 	inline Standalone<StringRef> pack(T const& val) const { return ObjectWriter::toValue<T>(val, vo); }
@@ -332,22 +332,23 @@ public:
 	}
 
 	Value packValue(T const& value) const { return codec.pack(value); }
+	T unpackValue(ValueRef const& value) const { return codec.unpack(value); }
 
 	Key key;
 	Optional<WatchableTrigger> trigger;
 	Codec codec;
 };
 
-// KeyBackedObjectProperty is a convenience wrapper of KeyBackedProperty which uses ObjectRWCodec<T, VersionOptions> as
+// KeyBackedObjectProperty is a convenience wrapper of KeyBackedProperty which uses ObjectCodec<T, VersionOptions> as
 // the codec
 template <typename T, typename VersionOptions>
-class KeyBackedObjectProperty : public KeyBackedProperty<T, ObjectRWCodec<T, VersionOptions>> {
-	typedef KeyBackedProperty<T, ObjectRWCodec<T, VersionOptions>> Base;
-	typedef ObjectRWCodec<T, VersionOptions> ObjectCodec;
+class KeyBackedObjectProperty : public KeyBackedProperty<T, ObjectCodec<T, VersionOptions>> {
+	typedef ObjectCodec<T, VersionOptions> TCodec;
+	typedef KeyBackedProperty<T, TCodec> Base;
 
 public:
 	KeyBackedObjectProperty(KeyRef key, VersionOptions vo, Optional<WatchableTrigger> trigger = {})
-	  : Base(key, trigger, ObjectRWCodec<T, VersionOptions>(vo)) {}
+	  : Base(key, trigger, TCodec(vo)) {}
 };
 
 // KeyBackedBinaryValue is a convenience wrapper of KeyBackedProperty but using BinaryCodec<T> as the codec and adds
@@ -379,6 +380,12 @@ public:
 	}
 };
 
+template <typename KeyType, typename ValueType>
+struct TypedKVPair {
+	KeyType key;
+	ValueType value;
+};
+
 // Convenient read/write access to a sorted map of KeyType to ValueType under prefix
 // Even though 'this' is not actually mutated, methods that change db keys are not const.
 template <typename _KeyType,
@@ -393,7 +400,9 @@ public:
 	typedef _KeyType KeyType;
 	typedef _ValueType ValueType;
 	typedef std::pair<KeyType, ValueType> PairType;
+	typedef TypedKVPair<KeyType, ValueType> KVType;
 	typedef KeyBackedRangeResult<PairType> RangeResultType;
+	typedef KeyBackedProperty<ValueType, ValueCodec> SingleRecordProperty;
 
 	// If end is not present one key past the end of the map is used.
 	template <class Transaction>
@@ -450,9 +459,7 @@ public:
 	}
 
 	// Returns a Property that can be get/set that represents key's entry in this this.
-	KeyBackedProperty<ValueType, ValueCodec> getProperty(KeyType const& key) const {
-		return { packKey(key), trigger, valueCodec };
-	}
+	SingleRecordProperty getProperty(KeyType const& key) const { return { packKey(key), trigger, valueCodec }; }
 
 	// Returns the expectedSize of the set key
 	template <class Transaction>
@@ -527,17 +534,21 @@ public:
 	ValueCodec valueCodec;
 
 	Key packKey(KeyType const& key) const { return subspace.begin.withSuffix(KeyCodec::pack(key)); }
+	KeyType unpackKey(KeyRef const& key) const { return KeyCodec::unpack(key.removePrefix(subspace.begin)); }
 
 	Value packValue(ValueType const& value) const { return valueCodec.pack(value); }
+	ValueType unpackValue(ValueRef const& value) const { return valueCodec.unpack(value); }
+
+	KVType unpackKV(KeyValueRef const& kv) const { return { unpackKey(kv.key), unpackValue(kv.value) }; }
 };
 
-// KeyBackedObjectMap is a convenience wrapper of KeyBackedMap which uses ObjectRWCodec<_ValueType, VersionOptions> as
+// KeyBackedObjectMap is a convenience wrapper of KeyBackedMap which uses ObjectCodec<_ValueType, VersionOptions> as
 // the value codec
 template <typename _KeyType, typename _ValueType, typename VersionOptions, typename KeyCodec = TupleCodec<_KeyType>>
 class KeyBackedObjectMap
-  : public KeyBackedMap<_KeyType, _ValueType, KeyCodec, ObjectRWCodec<_ValueType, VersionOptions>> {
-	typedef KeyBackedMap<_KeyType, _ValueType, KeyCodec, ObjectRWCodec<_ValueType, VersionOptions>> Base;
-	typedef ObjectRWCodec<_ValueType, VersionOptions> ObjectCodec;
+  : public KeyBackedMap<_KeyType, _ValueType, KeyCodec, ObjectCodec<_ValueType, VersionOptions>> {
+	typedef KeyBackedMap<_KeyType, _ValueType, KeyCodec, ObjectCodec<_ValueType, VersionOptions>> Base;
+	typedef ObjectCodec<_ValueType, VersionOptions> ObjectCodec;
 
 public:
 	KeyBackedObjectMap(KeyRef key, VersionOptions vo, Optional<WatchableTrigger> trigger = {})
@@ -629,6 +640,123 @@ public:
 	Key packKey(ValueType const& value) const { return subspace.begin.withSuffix(Codec::pack(value)); }
 };
 
+// KeyBackedKeyRangeMap is similar to KeyRangeMap but without a Metric
+// It is assumed that any range not covered by the map is set to a default ValueType()
+// The ValueType must have
+//     // Return a copy of *this updated with properties in value
+//     ValueType update(ValueType const& value) const;
+//
+//     // Return true if adjacent ranges with values *this and value could be merged to a single
+//     // range represented by *this and retain identical meaning
+//     bool canMerge(ValueType const& value) const;
+template <typename KeyType,
+          typename ValueType,
+          typename KeyCodec = TupleCodec<KeyType>,
+          typename ValueCodec = TupleCodec<ValueType>>
+class KeyBackedRangeMap {
+public:
+	typedef KeyBackedMap<KeyType, ValueType, KeyCodec, ValueCodec> Map;
+	typedef KeyBackedRangeResult<typename Map::KVType> RangeMapResult;
+
+	KeyBackedRangeMap(KeyRef prefix, Optional<WatchableTrigger> trigger = {}, ValueCodec valueCodec = {})
+	  : kvMap(prefix, trigger, valueCodec) {}
+
+	// Get ranges to fully describe the given range.
+	// Result will be that returned by a range read from lastLessOrEqual(begin) to lastLessOrEqual(end)
+	template <class Transaction>
+	Future<RangeMapResult> getRanges(Transaction* tr, KeyType const& begin, KeyType const& end) const {
+		KeySelector rangeBegin = lastLessOrEqual(kvMap.packKey(begin));
+		KeySelector rangeEnd = lastLessOrEqual(kvMap.packKey(end));
+
+		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		    tr->getRange(rangeBegin, rangeEnd, std::numeric_limits<int>::max());
+
+		return holdWhile(
+		    getRangeFuture,
+		    map(safeThreadFutureToFuture(getRangeFuture), [=, kvMap = kvMap](RangeResult const& rawkvs) mutable {
+				RangeMapResult result;
+				result.results.reserve(rawkvs.size());
+			    for (auto const& kv : rawkvs) {
+					result.results.emplace_back(kvMap.unpackKV(kv));
+			    }
+				return result;
+			}));
+	}
+
+	// Get the Value for the range that key is in
+	template <class Transaction>
+	Future<ValueType> getRangeForKey(Transaction* tr, KeyType const& key) {
+		KeySelector rangeBegin = lastLessOrEqual(kvMap.packKey(key));
+		KeySelector rangeEnd = firstGreaterOrEqual(kvMap.packKey(key));
+
+		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		    tr->getRange(rangeBegin, rangeEnd, std::numeric_limits<int>::max());
+
+		return holdWhile(
+		    getRangeFuture,
+		    map(safeThreadFutureToFuture(getRangeFuture), [=, kvMap = kvMap](RangeResult const& rawkvs) mutable {
+				ASSERT(rawkvs.size() <= 1);
+				if(rawkvs.empty()) {
+					return ValueType();
+				}
+				return kvMap.unpackValue(rawkvs.back().value);
+			}));
+	}
+
+	// Update the range from begin to end by applying valueUpdate to it
+	// Since the transaction type may not be RYW, this method must take care to not rely on reading its own updates.
+	template <class Transaction>
+	Future<Void> updateRange(Transaction* tr, KeyType const& begin, KeyType const& end, ValueType const& valueUpdate) {
+		return map(getRanges(tr, begin, end), [=, kvMap = kvMap](RangeMapResult const& range) mutable {
+				// TODO:  Handle partial ranges.
+				ASSERT(!range.more);
+
+				// A deque here makes the following logic easier, though it's not very efficient.
+				std::deque<typename Map::KVType> kvs(range.results.begin(), range.results.end());
+
+			    // First, handle modification at the begin boundary.
+			    // If there are no records, or no records <= begin, then set begin to valueUpdate
+			    if (kvs.empty() || kvs.front().key > begin) {
+				    kvMap.set(tr, begin, valueUpdate);
+			    } else {
+				    // Otherwise, the first record represents the range that begin is currently in.
+				    // This record may be begin or before it, either way the action is to set begin
+				    // to the first record's value updated with valueUpdate
+				    kvMap.set(tr, begin, kvs.front().value.update(valueUpdate));
+				    // The first record has consumed
+				    kvs.pop_front();
+			    }
+
+			    // Next, handle modification at the end boundary
+			    // If there are no records, then set end to the default value to clear the effects of begin as of the
+			    // end boundary.
+			    if (kvs.empty()) {
+				    kvMap.set(tr, end, ValueType());
+			    } else if (kvs.back().key < end) {
+				    // If the last key is less than end, then end is not yet a boundary in the range map so we must
+				    // create it.  It will be set to the value of the range it resides in, which begins with the last
+				    // item in kvs. Note that it is very important to do this *before* modifying all the middle
+				    // boundaries of the range so that the changes we are making here terminate at end.
+				    kvMap.set(tr, end, kvs.back().value);
+			    } else {
+				    // Otherwise end is in kvs, which effectively ends the range we are modifying so just pop it from
+				    // kvs so that it is not modified in the loop below.
+				    ASSERT(kvs.back().key == end);
+				    kvs.pop_back();
+			    }
+
+			    // Last, update all of the range boundaries in the middle which are left in the kvs queue
+			    for (auto const& kv : kvs) {
+				    kvMap.set(tr, kv.key, kv.value.update(valueUpdate));
+			    }
+
+			    return Void();
+		    });
+	}
+
+private:
+	Map kvMap;
+};
 
 // KeyBackedClass is a convenient base class for a set of related KeyBacked types that exist
 // under a single key prefix and other help functions relevant to the concepts that the class
