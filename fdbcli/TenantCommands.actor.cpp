@@ -25,13 +25,15 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Schemas.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+
+#include "metacluster/MetaclusterManagement.actor.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {

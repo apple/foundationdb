@@ -39,7 +39,7 @@ the contents of the system key space.
 #include "fdbclient/Status.h"
 #include "fdbclient/Subspace.h"
 #include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/Metacluster.h"
+#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/StorageWiggleMetrics.actor.h"

@@ -30,7 +30,9 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/ClusterInterface.h"
-#include "fdbclient/Metacluster.h"
+#include "fdbclient/MetaclusterRegistration.h"
+
+#include "metacluster/MetaclusterMetrics.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 

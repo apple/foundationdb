@@ -18,8 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbclient/Metacluster.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
+#include "metacluster/Metacluster.h"
+#include "metacluster/MetaclusterManagement.actor.h"
+
 #include "libb64/decode.h"
 #include "libb64/encode.h"
 
@@ -63,19 +64,6 @@ TenantState stringToTenantState(std::string stateStr) {
 	throw invalid_option();
 }
 } // namespace MetaclusterAPI
-
-std::string clusterTypeToString(const ClusterType& clusterType) {
-	switch (clusterType) {
-	case ClusterType::STANDALONE:
-		return "standalone";
-	case ClusterType::METACLUSTER_MANAGEMENT:
-		return "metacluster_management";
-	case ClusterType::METACLUSTER_DATA:
-		return "metacluster_data";
-	default:
-		return "unknown";
-	}
-}
 
 std::string DataClusterEntry::clusterStateToString(DataClusterState clusterState) {
 	switch (clusterState) {
@@ -243,13 +231,6 @@ bool MetaclusterTenantGroupEntry::operator==(MetaclusterTenantGroupEntry const& 
 }
 bool MetaclusterTenantGroupEntry::operator!=(MetaclusterTenantGroupEntry const& other) const {
 	return !(*this == other);
-}
-
-KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>&
-MetaclusterMetadata::metaclusterRegistration() {
-	static KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())> instance(
-	    "\xff/metacluster/clusterRegistration"_sr, IncludeVersion());
-	return instance;
 }
 
 KeyBackedSet<UID>& MetaclusterMetadata::registrationTombstones() {

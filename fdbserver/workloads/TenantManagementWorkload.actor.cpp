@@ -27,7 +27,7 @@
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
+#include "metacluster/MetaclusterManagement.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/Tenant.h"
