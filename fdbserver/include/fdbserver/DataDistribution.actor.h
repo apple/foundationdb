@@ -529,40 +529,6 @@ struct TeamCollectionInterface {
 	PromiseStream<GetTeamRequest> getTeam;
 };
 
-ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
-                                           Reference<IDDTxnProcessor> db,
-                                           PromiseStream<RelocateShard> output,
-                                           Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-                                           Reference<PhysicalShardCollection> physicalShardCollection,
-                                           PromiseStream<GetMetricsRequest> getShardMetrics,
-                                           FutureStream<GetTopKMetricsRequest> getTopKMetrics,
-                                           PromiseStream<GetMetricsListRequest> getShardMetricsList,
-                                           FutureStream<Promise<int64_t>> getAverageShardBytes,
-                                           Promise<Void> readyToStart,
-                                           Reference<AsyncVar<bool>> zeroHealthyTeams,
-                                           UID distributorId,
-                                           KeyRangeMap<ShardTrackedData>* shards,
-                                           bool* trackerCancelled,
-                                           Optional<Reference<TenantCache>> ddTenantCache,
-                                           Reference<KeyRangeMap<int>> customReplication);
-
-ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
-                                         PromiseStream<RelocateShard> output,
-                                         FutureStream<RelocateShard> input,
-                                         PromiseStream<GetMetricsRequest> getShardMetrics,
-                                         PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
-                                         Reference<AsyncVar<bool>> processingUnhealthy,
-                                         Reference<AsyncVar<bool>> processingWiggle,
-                                         std::vector<TeamCollectionInterface> teamCollections,
-                                         Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-                                         Reference<PhysicalShardCollection> physicalShardCollection,
-                                         MoveKeysLock lock,
-                                         PromiseStream<Promise<int64_t>> getAverageShardBytes,
-                                         FutureStream<Promise<int>> getUnhealthyRelocationCount,
-                                         UID distributorId,
-                                         int teamSize,
-                                         int singleRegionTeamSize,
-                                         const DDEnabledState* ddEnabledState);
 #ifndef __INTEL_COMPILER
 #pragma endregion
 #endif
