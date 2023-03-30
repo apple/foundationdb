@@ -173,7 +173,6 @@ ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorR
                                                               const KeySelectorRef& end,
                                                               const StringRef& mapper,
                                                               GetRangeLimits limits,
-                                                              int matchIndex,
                                                               bool snapshot,
                                                               bool reverse) {
 	FdbCApi::FDBFuture* f = api->transactionGetMappedRange(tr,
@@ -191,7 +190,6 @@ ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorR
 	                                                       limits.bytes,
 	                                                       FDB_STREAMING_MODE_EXACT,
 	                                                       0,
-	                                                       matchIndex,
 	                                                       snapshot,
 	                                                       reverse);
 	return toThreadFuture<MappedRangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
@@ -1530,7 +1528,6 @@ ThreadFuture<MappedRangeResult> MultiVersionTransaction::getMappedRange(const Ke
                                                                         const KeySelectorRef& end,
                                                                         const StringRef& mapper,
                                                                         GetRangeLimits limits,
-                                                                        int matchIndex,
                                                                         bool snapshot,
                                                                         bool reverse) {
 	return executeOperation(&ITransaction::getMappedRange,
@@ -1538,7 +1535,6 @@ ThreadFuture<MappedRangeResult> MultiVersionTransaction::getMappedRange(const Ke
 	                        end,
 	                        mapper,
 	                        std::forward<GetRangeLimits>(limits),
-	                        std::forward<int>(matchIndex),
 	                        std::forward<bool>(snapshot),
 	                        std::forward<bool>(reverse));
 }
