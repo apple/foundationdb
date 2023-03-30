@@ -806,6 +806,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( EMPTY_READ_PENALTY,                                   20 ); // 20 bytes
 	init( DD_SHARD_COMPARE_LIMIT,                               1000 );
 	init( READ_SAMPLING_ENABLED,                                true ); if ( randomize && BUGGIFY ) READ_SAMPLING_ENABLED = false;// enable/disable read sampling
+	init( DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL,                   120);
+	init( MOVING_WINDOW_SAMPLE_SIZE,                         10000000); // 10MB
 
 	//Storage Server
 	init( STORAGE_LOGGING_DELAY,                                 5.0 );
@@ -829,8 +831,23 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGE_DURABILITY_LAG_REJECT_THRESHOLD,              0.25 );
 	init( STORAGE_DURABILITY_LAG_MIN_RATE,                       0.1 );
 	init( STORAGE_COMMIT_INTERVAL,                               0.5 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_INTERVAL = 2.0;
+
+
+	// Constants which affect the fraction of data which is sampled
+	// by storage severs to estimate key-range sizes and splits.
+	//
+	// The rough goal is for the sample size to be a fixed fraction of the total
+	// size of all keys and values, 1/BYTE_SAMPLING_FACTOR, which defaults to 1/250.
+	// This includes an estimated overhead per entry of BYTE_SAMPLING_OVERHEAD,
+	// which defaults to 100 bytes.
+	//
+	// NOTE: This BYTE_SAMPLING_FACTOR and BYTE_SAMPLING_OVERHEAD knobs can't be
+	// changed after a database has been created. Data which has been already
+	// sampled can't be resampled, and the estimates of the size of key ranges
+	// implicitly includes these constants.
 	init( BYTE_SAMPLING_FACTOR,                                  250 ); //cannot buggify because of differences in restarting tests
 	init( BYTE_SAMPLING_OVERHEAD,                                100 );
+
 	init( MAX_STORAGE_SERVER_WATCH_BYTES,                      100e6 ); if( randomize && BUGGIFY ) MAX_STORAGE_SERVER_WATCH_BYTES = 10e3;
 	init( MAX_BYTE_SAMPLE_CLEAR_MAP_SIZE,                        1e9 ); if( randomize && BUGGIFY ) MAX_BYTE_SAMPLE_CLEAR_MAP_SIZE = 1e3;
 	init( LONG_BYTE_SAMPLE_RECOVERY_DELAY,                      60.0 );
