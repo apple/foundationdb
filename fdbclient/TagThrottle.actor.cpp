@@ -165,9 +165,6 @@ ThrottleApi::TagQuotaValue ThrottleApi::TagQuotaValue::fromValue(ValueRef value)
 	return result;
 }
 
-FDB_DEFINE_BOOLEAN_PARAM(ContainsRecommended);
-FDB_DEFINE_BOOLEAN_PARAM(Capitalize);
-
 TEST_CASE("TagSet/toString") {
 	{
 		TagSet tagSet;

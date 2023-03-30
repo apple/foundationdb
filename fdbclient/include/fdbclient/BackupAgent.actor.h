@@ -36,26 +36,26 @@
 #include "fdbclient/BackupContainer.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-FDB_DECLARE_BOOLEAN_PARAM(LockDB);
-FDB_DECLARE_BOOLEAN_PARAM(UnlockDB);
-FDB_DECLARE_BOOLEAN_PARAM(StopWhenDone);
-FDB_DECLARE_BOOLEAN_PARAM(Verbose);
-FDB_DECLARE_BOOLEAN_PARAM(WaitForComplete);
-FDB_DECLARE_BOOLEAN_PARAM(ForceAction);
-FDB_DECLARE_BOOLEAN_PARAM(Terminator);
-FDB_DECLARE_BOOLEAN_PARAM(IncrementalBackupOnly);
-FDB_DECLARE_BOOLEAN_PARAM(UsePartitionedLog);
-FDB_DECLARE_BOOLEAN_PARAM(OnlyApplyMutationLogs);
-FDB_DECLARE_BOOLEAN_PARAM(SnapshotBackupUseTenantCache);
-FDB_DECLARE_BOOLEAN_PARAM(InconsistentSnapshotOnly);
-FDB_DECLARE_BOOLEAN_PARAM(ShowErrors);
-FDB_DECLARE_BOOLEAN_PARAM(AbortOldBackup);
-FDB_DECLARE_BOOLEAN_PARAM(DstOnly); // TODO: More descriptive name?
-FDB_DECLARE_BOOLEAN_PARAM(WaitForDestUID);
-FDB_DECLARE_BOOLEAN_PARAM(CheckBackupUID);
-FDB_DECLARE_BOOLEAN_PARAM(DeleteData);
-FDB_DECLARE_BOOLEAN_PARAM(SetValidation);
-FDB_DECLARE_BOOLEAN_PARAM(PartialBackup);
+FDB_BOOLEAN_PARAM(LockDB);
+FDB_BOOLEAN_PARAM(UnlockDB);
+FDB_BOOLEAN_PARAM(StopWhenDone);
+FDB_BOOLEAN_PARAM(Verbose);
+FDB_BOOLEAN_PARAM(WaitForComplete);
+FDB_BOOLEAN_PARAM(ForceAction);
+FDB_BOOLEAN_PARAM(Terminator);
+FDB_BOOLEAN_PARAM(IncrementalBackupOnly);
+FDB_BOOLEAN_PARAM(UsePartitionedLog);
+FDB_BOOLEAN_PARAM(OnlyApplyMutationLogs);
+FDB_BOOLEAN_PARAM(SnapshotBackupUseTenantCache);
+FDB_BOOLEAN_PARAM(InconsistentSnapshotOnly);
+FDB_BOOLEAN_PARAM(ShowErrors);
+FDB_BOOLEAN_PARAM(AbortOldBackup);
+FDB_BOOLEAN_PARAM(DstOnly); // TODO: More descriptive name?
+FDB_BOOLEAN_PARAM(WaitForDestUID);
+FDB_BOOLEAN_PARAM(CheckBackupUID);
+FDB_BOOLEAN_PARAM(DeleteData);
+FDB_BOOLEAN_PARAM(SetValidation);
+FDB_BOOLEAN_PARAM(PartialBackup);
 
 class BackupAgentBase : NonCopyable {
 public:
