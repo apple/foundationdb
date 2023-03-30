@@ -23,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include "fdbserver/DataDistributionTeam.h"
 #include "flow/ActorCollection.h"
 #include "flow/Deque.h"
 #include "flow/FastRef.h"
@@ -401,6 +402,11 @@ bool canLaunchSrc(RelocateData& relocation,
 	ASSERT(relocation.src.size() != 0);
 	ASSERT(teamSize >= singleRegionTeamSize);
 
+	// Blob migrator is backed by s3 so it can allow unlimited data movements
+	if (relocation.src.size() == 1 && BlobMigratorInterface::isBlobMigrator(relocation.src.back())) {
+		return true;
+	}
+
 	// find the "workFactor" for this, were it launched now
 	int workFactor = getSrcWorkFactor(relocation, singleRegionTeamSize);
 	int neededServers = std::min<int>(relocation.src.size(), teamSize - singleRegionTeamSize + 1);
@@ -424,6 +430,7 @@ bool canLaunchSrc(RelocateData& relocation,
 				return true;
 		}
 	}
+
 	return false;
 }
 
@@ -1294,8 +1301,15 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
 							inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
-						auto req = GetTeamRequest(WantNewServers(rd.wantsNewServers),
-						                          wantTrueBest,
+						TeamSelect destTeamSelect;
+						if (!rd.wantsNewServers) {
+							destTeamSelect = TeamSelect::WANT_COMPLETE_SRCS;
+						} else if (wantTrueBest) {
+							destTeamSelect = TeamSelect::WANT_TRUE_BEST;
+						} else {
+							destTeamSelect = TeamSelect::ANY;
+						}
+						auto req = GetTeamRequest(destTeamSelect,
 						                          PreferLowerDiskUtil::True,
 						                          TeamMustHaveShards::False,
 						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
@@ -2114,8 +2128,6 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 		state bool moved = false;
 		state Reference<IDataDistributionTeam> sourceTeam;
 		state Reference<IDataDistributionTeam> destTeam;
-		state GetTeamRequest srcReq;
-		state GetTeamRequest destReq;
 		state TraceEvent traceEvent(eventName, self->distributorId);
 		traceEvent.suppressFor(5.0)
 		    .detail("PollingInterval", rebalancePollingInterval)
@@ -2142,18 +2154,16 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 
 			if (self->priority_relocations[ddPriority] < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				bool mcMove = isDataMovementForMountainChopper(reason);
-				srcReq = GetTeamRequest(WantNewServers::True,
-				                        WantTrueBest(mcMove),
-				                        PreferLowerDiskUtil::False,
-				                        TeamMustHaveShards::True,
-				                        ForReadBalance(readRebalance),
-				                        PreferLowerReadUtil::False);
-				destReq = GetTeamRequest(WantNewServers::True,
-				                         WantTrueBest(!mcMove),
-				                         PreferLowerDiskUtil::True,
-				                         TeamMustHaveShards::False,
-				                         ForReadBalance(readRebalance),
-				                         PreferLowerReadUtil::True);
+				GetTeamRequest srcReq = GetTeamRequest(mcMove ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
+				                                       PreferLowerDiskUtil::False,
+				                                       TeamMustHaveShards::True,
+				                                       ForReadBalance(readRebalance),
+				                                       PreferLowerReadUtil::False);
+				GetTeamRequest destReq = GetTeamRequest(!mcMove ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
+				                                        PreferLowerDiskUtil::True,
+				                                        TeamMustHaveShards::False,
+				                                        ForReadBalance(readRebalance),
+				                                        PreferLowerReadUtil::True);
 				state Future<SrcDestTeamPair> getTeamFuture =
 				    self->getSrcDestTeams(teamCollectionIndex, srcReq, destReq, ddPriority, &traceEvent);
 				wait(ready(getTeamFuture));

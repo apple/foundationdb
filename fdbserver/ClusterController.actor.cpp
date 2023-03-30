@@ -2442,7 +2442,7 @@ ACTOR Future<Void> startBlobMigrator(ClusterControllerData* self, double waitTim
 			                                                                          ProcessClass::NeverAssign,
 			                                                                          self->db.config,
 			                                                                          id_used);
-			InitializeBlobMigratorRequest req(deterministicRandom()->randomUniqueID());
+			InitializeBlobMigratorRequest req(BlobMigratorInterface::newId());
 			state WorkerDetails worker = blobMigratorWorker.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::BlobMigrator)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;

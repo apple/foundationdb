@@ -3749,7 +3749,14 @@ extern std::atomic<int64_t> net2RunLoopIterations;
 extern std::atomic<int64_t> net2RunLoopSleeps;
 extern void initProfiling();
 
+namespace {
+
 std::atomic<double> checkThreadTime;
+std::mutex loopProfilerThreadMutex;
+std::optional<pthread_t> loopProfilerThread;
+std::atomic<bool> loopProfilerStopRequested = false;
+
+} // namespace
 #endif
 
 // True if this thread is the thread being profiled. Not to be used from the signal handler.
@@ -3868,7 +3875,7 @@ void* checkThread(void* arg) {
 	double slowTaskLogInterval = minSlowTaskLogInterval;
 	double saturatedLogInterval = minSaturationLogInterval;
 
-	while (true) {
+	while (!loopProfilerStopRequested) {
 		threadSleep(FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
 
 		int64_t currentRunLoopIterations = net2RunLoopIterations.load();
@@ -4023,10 +4030,26 @@ void setupRunLoopProfiler() {
 		// Start a thread which will use signals to log stacks on long events
 		pthread_t* mainThread = (pthread_t*)malloc(sizeof(pthread_t));
 		*mainThread = pthread_self();
-		startThread(&checkThread, (void*)mainThread, 0, "fdb-loopprofile");
+		{
+			std::unique_lock<std::mutex> lock(loopProfilerThreadMutex);
+			if (!loopProfilerStopRequested) {
+				loopProfilerThread = startThread(&checkThread, (void*)mainThread, 0, "fdb-loopprofile");
+			}
+		}
 	}
 #else
 	// No slow task profiling for other platforms!
+#endif
+}
+
+void stopRunLoopProfiler() {
+#ifdef __linux__
+	std::unique_lock<std::mutex> lock(loopProfilerThreadMutex);
+	loopProfilerStopRequested.store(true);
+	if (loopProfilerThread) {
+		pthread_join(loopProfilerThread.value(), NULL);
+		loopProfilerThread = {};
+	}
 #endif
 }
 

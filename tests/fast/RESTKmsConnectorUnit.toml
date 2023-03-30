@@ -1,3 +1,6 @@
+[[knobs]]
+rest_kms_connector_remove_trailing_newline = true
+
 [[test]]
 testTitle = 'RESTKmsConnectorTest'
 useDB = false
