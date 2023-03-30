@@ -32,7 +32,7 @@
 #include "flow/BooleanParam.h"
 #include "flow/actorcompiler.h"
 
-FDB_DECLARE_BOOLEAN_PARAM(CancelConflictingDataMoves);
+FDB_BOOLEAN_PARAM(CancelConflictingDataMoves);
 
 struct MoveKeysLock {
 	UID prevOwner, myOwner, prevWrite;

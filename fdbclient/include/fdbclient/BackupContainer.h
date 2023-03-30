@@ -29,7 +29,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include <vector>
 
-FDB_DECLARE_BOOLEAN_PARAM(IncludeKeyRangeMap);
+FDB_BOOLEAN_PARAM(IncludeKeyRangeMap);
 
 class ReadYourWritesTransaction;
 
