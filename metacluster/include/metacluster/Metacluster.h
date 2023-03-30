@@ -18,14 +18,15 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_METACLUSTER_H
-#define FDBCLIENT_METACLUSTER_H
-#include "fdbclient/CoordinationInterface.h"
-#include "json_spirit/json_spirit_value.h"
+#ifndef METACLUSTER_METACLUSTER_H
+#define METACLUSTER_METACLUSTER_H
 #pragma once
 
+#include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/json_spirit/json_spirit_value.h"
 #include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/MetaclusterRegistration.h"
 #include "flow/flat_buffers.h"
 
 namespace MetaclusterAPI {
@@ -78,8 +79,6 @@ struct Traceable<ClusterUsage> : std::true_type {
 		return format("NumTenantGroups: %d", value.numTenantGroups);
 	}
 };
-
-std::string clusterTypeToString(const ClusterType& clusterType);
 
 // Represents the various states that a data cluster could be in.
 //
@@ -227,103 +226,9 @@ public:
 	using TenantGroupEntryT = MetaclusterTenantGroupEntry;
 };
 
-struct MetaclusterMetrics {
-	int numTenants = 0;
-	int numDataClusters = 0;
-	int tenantGroupCapacity = 0;
-	int tenantGroupsAllocated = 0;
-
-	MetaclusterMetrics() = default;
-};
-
-struct MetaclusterRegistrationEntry {
-	constexpr static FileIdentifier file_identifier = 13448589;
-
-	ClusterType clusterType;
-
-	ClusterName metaclusterName;
-	ClusterName name;
-	UID metaclusterId;
-	UID id;
-
-	MetaclusterRegistrationEntry() = default;
-	MetaclusterRegistrationEntry(ClusterName metaclusterName, UID metaclusterId)
-	  : clusterType(ClusterType::METACLUSTER_MANAGEMENT), metaclusterName(metaclusterName), name(metaclusterName),
-	    metaclusterId(metaclusterId), id(metaclusterId) {}
-	MetaclusterRegistrationEntry(ClusterName metaclusterName, ClusterName name, UID metaclusterId, UID id)
-	  : clusterType(ClusterType::METACLUSTER_DATA), metaclusterName(metaclusterName), name(name),
-	    metaclusterId(metaclusterId), id(id) {
-		ASSERT(metaclusterName != name && metaclusterId != id);
-	}
-
-	// Returns true if this entry is associated with the same cluster as the passed in entry. If one entry is from the
-	// management cluster and the other is from a data cluster, this checks whether they are part of the same
-	// metacluster.
-	bool matches(MetaclusterRegistrationEntry const& other) const {
-		if (metaclusterName != other.metaclusterName || metaclusterId != other.metaclusterId) {
-			return false;
-		} else if (clusterType == ClusterType::METACLUSTER_DATA && other.clusterType == ClusterType::METACLUSTER_DATA &&
-		           (name != other.name || id != other.id)) {
-			return false;
-		}
-
-		return true;
-	}
-
-	MetaclusterRegistrationEntry toManagementClusterRegistration() const {
-		ASSERT(clusterType == ClusterType::METACLUSTER_DATA);
-		return MetaclusterRegistrationEntry(metaclusterName, metaclusterId);
-	}
-
-	MetaclusterRegistrationEntry toDataClusterRegistration(ClusterName name, UID id) const {
-		ASSERT(clusterType == ClusterType::METACLUSTER_MANAGEMENT);
-		return MetaclusterRegistrationEntry(metaclusterName, name, metaclusterId, id);
-	}
-
-	Value encode() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
-	static MetaclusterRegistrationEntry decode(ValueRef const& value) {
-		return ObjectReader::fromStringRef<MetaclusterRegistrationEntry>(value, IncludeVersion());
-	}
-	static Optional<MetaclusterRegistrationEntry> decode(Optional<Value> value) {
-		return value.map([](ValueRef const& v) { return MetaclusterRegistrationEntry::decode(v); });
-	}
-
-	std::string toString() const {
-		if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-			return fmt::format(
-			    "metacluster name: {}, metacluster id: {}", printable(metaclusterName), metaclusterId.shortString());
-		} else {
-			return fmt::format("metacluster name: {}, metacluster id: {}, data cluster name: {}, data cluster id: {}",
-			                   printable(metaclusterName),
-			                   metaclusterId.shortString(),
-			                   printable(name),
-			                   id.shortString());
-		}
-	}
-
-	bool operator==(MetaclusterRegistrationEntry const& other) const {
-		return clusterType == other.clusterType && metaclusterName == other.metaclusterName && name == other.name &&
-		       metaclusterId == other.metaclusterId && id == other.id;
-	}
-
-	bool operator!=(MetaclusterRegistrationEntry const& other) const { return !(*this == other); }
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, clusterType, metaclusterName, name, metaclusterId, id);
-	}
-};
-
-template <>
-struct Traceable<MetaclusterRegistrationEntry> : std::true_type {
-	static std::string toString(MetaclusterRegistrationEntry const& entry) { return entry.toString(); }
-};
-
-struct MetaclusterMetadata {
-	// Registration information for a metacluster, stored on both management and data clusters
-	static KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>& metaclusterRegistration();
-	static KeyBackedSet<UID>& registrationTombstones();
-	static KeyBackedMap<ClusterName, UID>& activeRestoreIds();
-};
+namespace MetaclusterMetadata {
+KeyBackedSet<UID>& registrationTombstones();
+KeyBackedMap<ClusterName, UID>& activeRestoreIds();
+}; // namespace MetaclusterMetadata
 
 #endif

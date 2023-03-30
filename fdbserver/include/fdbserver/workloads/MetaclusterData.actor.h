@@ -23,19 +23,21 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
-#include "fdbclient/FDBOptions.g.h"
-#include "fdbclient/Tenant.h"
-#include "fdbclient/TenantManagement.actor.h"
-#include "flow/BooleanParam.h"
 #if defined(NO_INTELLISENSE) && !defined(WORKLOADS_METACLUSTER_DATA_ACTOR_G_H)
 #define WORKLOADS_METACLUSTER_DATA_ACTOR_G_H
 #include "fdbserver/workloads/MetaclusterData.actor.g.h"
 #elif !defined(WORKLOADS_METACLUSTER_DATA_ACTOR_H)
 #define WORKLOADS_METACLUSTER_DATA_ACTOR_H
 
-#include "fdbclient/Metacluster.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
+#include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/Tenant.h"
+#include "fdbclient/TenantManagement.actor.h"
+#include "flow/BooleanParam.h"
 #include "fdbserver/workloads/TenantData.actor.h"
+
+#include "metacluster/Metacluster.h"
+#include "metacluster/MetaclusterManagement.actor.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 template <class DB>

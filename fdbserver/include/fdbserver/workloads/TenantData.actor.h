@@ -32,10 +32,12 @@
 #elif !defined(WORKLOADS_TENANT_DATA_ACTOR_H)
 #define WORKLOADS_TENANT_DATA_ACTOR_H
 
-#include "fdbclient/Metacluster.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
+
+#include "metacluster/Metacluster.h"
+#include "metacluster/MetaclusterManagement.actor.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 template <class DB, class TenantTypes>

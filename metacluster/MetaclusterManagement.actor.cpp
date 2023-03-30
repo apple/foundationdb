@@ -21,8 +21,10 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
+
+#include "metacluster/MetaclusterManagement.actor.h"
+
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace MetaclusterAPI {

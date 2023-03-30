@@ -19,11 +19,11 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_METACLUSTER_MANAGEMENT_ACTOR_G_H)
-#define FDBCLIENT_METACLUSTER_MANAGEMENT_ACTOR_G_H
-#include "fdbclient/MetaclusterManagement.actor.g.h"
-#elif !defined(FDBCLIENT_METACLUSTER_MANAGEMENT_ACTOR_H)
-#define FDBCLIENT_METACLUSTER_MANAGEMENT_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(METACLUSTER_METACLUSTER_MANAGEMENT_ACTOR_G_H)
+#define METACLUSTER_METACLUSTER_MANAGEMENT_ACTOR_G_H
+#include "metacluster/MetaclusterManagement.actor.g.h"
+#elif !defined(METACLUSTER_METACLUSTER_MANAGEMENT_ACTOR_H)
+#define METACLUSTER_METACLUSTER_MANAGEMENT_ACTOR_H
 
 #include <limits>
 
@@ -33,7 +33,6 @@
 #include "fdbclient/GenericTransactionHelper.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/KeyBackedTypes.h"
-#include "fdbclient/Metacluster.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/SystemData.h"
@@ -46,6 +45,9 @@
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
 #include "flow/ThreadHelper.actor.h"
+
+#include "metacluster/Metacluster.h"
+
 #include "flow/actorcompiler.h" // has to be last include
 
 // This file provides the interfaces to manage metacluster metadata.
