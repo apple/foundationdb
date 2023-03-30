@@ -22,11 +22,12 @@
 #include "fdbclient/ReadYourWrites.h"
 
 #include "metacluster/Metacluster.h"
-#include "metacluster/MetaclusterManagement.actor.h"
 #include "metacluster/MetaclusterMetrics.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
+namespace metacluster {
+namespace internal {
 ACTOR Future<MetaclusterMetrics> getMetaclusterMetricsImpl(Database db) {
 	state Reference<ReadYourWritesTransaction> tr = db->createTransaction();
 	loop {
@@ -34,14 +35,12 @@ ACTOR Future<MetaclusterMetrics> getMetaclusterMetricsImpl(Database db) {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state std::map<ClusterName, DataClusterMetadata> clusters;
 			state int64_t tenantCount;
-			wait(
-			    store(clusters,
-			          MetaclusterAPI::listClustersTransaction(tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS)) &&
-			    store(tenantCount,
-			          MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantCount.getD(
-			              tr, Snapshot::False, 0)));
+			wait(store(clusters,
+			           metacluster::listClustersTransaction(tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS)) &&
+			     store(tenantCount,
+			           metacluster::metadata::management::tenantMetadata().tenantCount.getD(tr, Snapshot::False, 0)));
 
-			state std::pair<ClusterUsage, ClusterUsage> capacityNumbers = MetaclusterAPI::metaclusterCapacity(clusters);
+			state std::pair<ClusterUsage, ClusterUsage> capacityNumbers = util::metaclusterCapacity(clusters);
 
 			MetaclusterMetrics metrics;
 			metrics.numTenants = tenantCount;
@@ -62,7 +61,9 @@ ACTOR Future<MetaclusterMetrics> getMetaclusterMetricsImpl(Database db) {
 		}
 	}
 }
+} // namespace internal
 
 Future<MetaclusterMetrics> MetaclusterMetrics::getMetaclusterMetrics(Database db) {
-	return getMetaclusterMetricsImpl(db);
+	return internal::getMetaclusterMetricsImpl(db);
 }
+} // namespace metacluster

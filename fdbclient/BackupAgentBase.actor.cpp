@@ -1372,7 +1372,7 @@ VectorRef<KeyRangeRef> const& getSystemBackupRanges() {
 	if (systemBackupRanges.empty()) {
 		systemBackupRanges.push_back_deep(systemBackupRanges.arena(), prefixRange(TenantMetadata::subspace()));
 		systemBackupRanges.push_back_deep(systemBackupRanges.arena(),
-		                                  singleKeyRange(MetaclusterMetadata::metaclusterRegistration().key));
+		                                  singleKeyRange(metacluster::metadata::metaclusterRegistration().key));
 	}
 
 	return systemBackupRanges;
