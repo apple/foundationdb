@@ -328,6 +328,7 @@ public:
 	double connectionFailureEnableTime; // Last time connection failure is enabled.
 	BackupAgentType backupAgents;
 	BackupAgentType drAgents;
+	bool willRestart = false;
 	bool restarted = false;
 	ValidationData validationData;
 

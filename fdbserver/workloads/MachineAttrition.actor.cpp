@@ -409,7 +409,9 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 						CODE_PROBE(true, "Marked a zone for maintenance before killing it");
 						wait(success(
 						    setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20)));
-					} else if (BUGGIFY_WITH_PROB(0.005)) {
+					} else if (!g_simulator->willRestart && BUGGIFY_WITH_PROB(0.005)) {
+						// don't do this in restarting test, since test could exit before it is unset, and restarted
+						// test would never unset it
 						CODE_PROBE(true, "Disable DD for all storage server failures");
 						self->ignoreSSFailures =
 						    uncancellable(ignoreSSFailuresForDuration(cx, deterministicRandom()->random01() * 5));
