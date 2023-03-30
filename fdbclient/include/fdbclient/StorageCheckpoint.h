@@ -139,6 +139,10 @@ struct DataMoveMetaData {
 	constexpr static FileIdentifier file_identifier = 13804362;
 	UID id; // A unique id for this data move.
 	Version version;
+
+	// a deprecated field only for downgrade to or upgrade from 71.2 compatible;
+	[[deprecated("Use ranges instead")]] KeyRange range;
+
 	std::vector<KeyRange> ranges;
 	int priority;
 	std::set<UID> src;
@@ -168,7 +172,19 @@ struct DataMoveMetaData {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, version, ranges, priority, src, dest, checkpoints, phase, mode);
+		// 71.2 order serializer(ar, id, version, range, phase, src, dest);
+		if (ar.isDeserializing) {
+			serializer(ar, id, version, range, phase, src, dest, ranges, checkpoints, priority, mode);
+			if (!range.empty()) {
+				ranges.push_back(range);
+			}
+		} else {
+			if (ranges.empty()) {
+				serializer(ar, id, version, range, phase, src, dest, ranges, checkpoints, priority, mode);
+			} else {
+				serializer(ar, id, version, ranges[0], phase, src, dest, ranges, checkpoints, priority, mode);
+			}
+		}
 	}
 };
 
