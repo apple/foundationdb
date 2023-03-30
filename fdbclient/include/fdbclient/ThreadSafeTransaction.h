@@ -155,7 +155,6 @@ public:
 	                                               const KeySelectorRef& end,
 	                                               const StringRef& mapper,
 	                                               GetRangeLimits limits,
-	                                               int matchIndex,
 	                                               bool snapshot,
 	                                               bool reverse) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
