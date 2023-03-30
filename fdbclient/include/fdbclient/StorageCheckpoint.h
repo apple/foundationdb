@@ -128,6 +128,11 @@ public:
 
 // A DataMoveMetaData object corresponds to a single data move.
 struct DataMoveMetaData {
+private:
+	// a deprecated field only for downgrade to or upgrade from 71.2 compatible;
+	KeyRange range;
+
+public:
 	enum Phase {
 		InvalidPhase = 0,
 		Prepare = 1, // System keyspace is being modified.
@@ -139,9 +144,6 @@ struct DataMoveMetaData {
 	constexpr static FileIdentifier file_identifier = 13804362;
 	UID id; // A unique id for this data move.
 	Version version;
-
-	// a deprecated field only for downgrade to or upgrade from 71.2 compatible;
-	[[deprecated("Use ranges instead")]] KeyRange range;
 
 	std::vector<KeyRange> ranges;
 	int priority;
@@ -175,7 +177,8 @@ struct DataMoveMetaData {
 		// 71.2 order serializer(ar, id, version, range, phase, src, dest);
 		if (ar.isDeserializing) {
 			serializer(ar, id, version, range, phase, src, dest, ranges, checkpoints, priority, mode);
-			if (!range.empty()) {
+			if (!range.empty() && ranges.empty()) {
+				// upgrade from 71.2 so ranges is empty
 				ranges.push_back(range);
 			}
 		} else {

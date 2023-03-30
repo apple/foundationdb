@@ -20,6 +20,7 @@
 #ifndef FOUNDATIONDB_DDRELOCATIONQUEUE_H
 #define FOUNDATIONDB_DDRELOCATIONQUEUE_H
 
+#include <numeric>
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/MovingWindow.h"
 // send request/signal to DDRelocationQueue through interface
