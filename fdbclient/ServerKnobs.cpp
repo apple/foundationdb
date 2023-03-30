@@ -169,10 +169,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,           960 ); if( randomize && BUGGIFY ) PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD = 360; // Set as the lowest priority
 
 	// Data distribution
-	init( AVAILABLE_SPACE_PIVOT_RATIO,                         0.6 );
+	init( AVAILABLE_SPACE_PIVOT_RATIO,                         0.5 );
 	init( CPU_PIVOT_RATIO,                                     0.9 );
 	// In order to make sure GetTeam has enough eligible destination team:
-	ASSERT_GT(AVAILABLE_SPACE_PIVOT_RATIO + CPU_PIVOT_RATIO, 1.0 );
+	ASSERT_GT(1 - AVAILABLE_SPACE_PIVOT_RATIO + CPU_PIVOT_RATIO, 1.0 );
 	// In simulation, the CPU percent of every storage server is hard-coded as 100.0%. It is difficult to test pivot CPU in normal simulation. TODO: add mock DD Test case for it.
 	init( MAX_DEST_CPU_PERCENT, 		   isSimulated ? 100.0:	98.0 );
 	init( CPU_STABLE_INTERVAL,            isSimulated ?  0.0 : 300.0 );
