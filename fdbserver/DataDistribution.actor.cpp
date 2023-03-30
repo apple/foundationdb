@@ -624,12 +624,7 @@ ACTOR Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
 		self->auditInitialized.send(Void());
 		return Void();
 	}
-	// cancel existing audits
-	for (auto& [type, audits] : self->audits) {
-		for (auto& [id, currentAudit] : self->audits[type]) {
-			currentAudit->actors.clear(true);
-		}
-	}
+	// clear existing audits
 	self->audits.clear();
 	// resume from disk
 	ASSERT(!self->auditInitialized.getFuture().isReady());
@@ -1493,7 +1488,7 @@ ACTOR Future<Void> resumeAuditStorage(Reference<DataDistributor> self, AuditStor
 			    .detail("RetryCount", audit->retryCount);
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
-			} else if (audit->retryCount > 30) {
+			} else if (audit->retryCount > SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
 				audit->coreState.setPhase(AuditPhase::Failed);
 				wait(persistAuditState(self->txnProcessor->context(), audit->coreState));
 			} else {
@@ -1506,7 +1501,6 @@ ACTOR Future<Void> resumeAuditStorage(Reference<DataDistributor> self, AuditStor
 	}
 	ASSERT(audit->coreState.getPhase() == AuditPhase::Failed || audit->coreState.getPhase() == AuditPhase::Error ||
 	       audit->coreState.getPhase() == AuditPhase::Complete);
-	audit->actors.clear(true);
 	self->audits[audit->coreState.getType()].erase(audit->coreState.id);
 
 	return Void();
@@ -1619,7 +1613,6 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self, TriggerAudi
 		TraceEvent(SevVerbose, "DDAuditStorageCorePersist", self->ddId)
 		    .detail("AuditState", audit->coreState.toString());
 		ASSERT(audit != nullptr);
-		audit->actors.clear(true);
 		self->audits[audit->coreState.getType()].erase(audit->coreState.id);
 		if (!req.async && !req.reply.isSet()) {
 			req.reply.send(audit->coreState.id);
@@ -1663,6 +1656,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self, TriggerAudi
 }
 
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req) {
+	state int retryCount = 0;
 	loop {
 		try {
 			TraceEvent(SevDebug, "DDAuditStorageStart", self->ddId)
@@ -1679,8 +1673,18 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			    .detail("Async", req.async);
 			ASSERT(e.code() == error_code_actor_cancelled || e.code() == error_code_retry);
 			if (e.code() == error_code_retry) {
+				if (retryCount > SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
+					// A guard to make sure no infinite loop
+					// If this gets reached, audit is nullptr in auditStorageCore
+					// In this case, persistNewAuditState must get failed
+					// req.reply is impossible to be set
+					ASSERT(!req.reply.isSet());
+					req.reply.sendError(broken_promise());
+				}
+				retryCount++;
 				wait(delay(5));
 			} else {
+				ASSERT(e.code() == error_code_actor_cancelled);
 				if (!req.reply.isSet()) {
 					req.reply.sendError(broken_promise());
 				}
