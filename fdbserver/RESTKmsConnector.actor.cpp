@@ -75,7 +75,7 @@ const char* VALIDATION_TOKEN_NAME_TAG = "token_name";
 const char* VALIDATION_TOKEN_VALUE_TAG = "token_value";
 const char* DEBUG_UID_TAG = "debug_uid";
 
-const char* TOKEN_NAME_FILE_SEP = "#";
+const char* TOKEN_NAME_FILE_SEP = "$";
 const char* TOKEN_TUPLE_SEP = ",";
 const char DISCOVER_URL_FILE_URL_SEP = '\n';
 
@@ -1182,7 +1182,7 @@ ACTOR Future<Void> testMalformedFileValidationTokenDetails(Reference<RESTKmsConn
 
 ACTOR Future<Void> testValidationTokenFileNotFound(Reference<RESTKmsConnectorCtx> ctx) {
 	try {
-		wait(procureValidationTokensFromFiles(ctx, "foo#/imaginary-dir/dream/phantom-file"));
+		wait(procureValidationTokensFromFiles(ctx, "foo$/imaginary-dir/dream/phantom-file"));
 		ASSERT(false);
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_encrypt_invalid_kms_config);
