@@ -54,7 +54,7 @@ Future<StatusReply> clusterGetStatus(
     Version const& datacenterVersionDifference,
     ConfigBroadcaster const* const& conifgBroadcaster,
     Optional<MetaclusterRegistrationEntry> const& metaclusterRegistration,
-    MetaclusterMetrics const& metaclusterMetrics);
+    metacluster::MetaclusterMetrics const& metaclusterMetrics);
 
 struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};
 ACTOR Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(

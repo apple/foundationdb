@@ -112,8 +112,8 @@ struct Traceable<MetaclusterRegistrationEntry> : std::true_type {
 };
 
 // Registration information for a metacluster, stored on both management and data clusters
-namespace MetaclusterMetadata {
+namespace metacluster::metadata {
 KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>& metaclusterRegistration();
-}; // namespace MetaclusterMetadata
+}; // namespace metacluster::metadata
 
 #endif

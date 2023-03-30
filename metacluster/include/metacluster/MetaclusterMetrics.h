@@ -25,6 +25,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/flow.h"
 
+namespace metacluster {
 struct MetaclusterMetrics {
 	int numTenants = 0;
 	int numDataClusters = 0;
@@ -35,5 +36,6 @@ struct MetaclusterMetrics {
 
 	static Future<MetaclusterMetrics> getMetaclusterMetrics(Database db);
 };
+} // namespace metacluster
 
 #endif
