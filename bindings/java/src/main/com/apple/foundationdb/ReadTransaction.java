@@ -440,12 +440,6 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param matchIndex the mode to return index entries based on whether their
-	 *  corresponding records are present, examples:
-	 *     {@link FDBTransaction#MATCH_INDEX_ALL}
-	 *     {@link FDBTransaction#MATCH_INDEX_NONE}
-	 *     {@link FDBTransaction#MATCH_INDEX_MATCHED_ONLY}
-	 *     {@link FDBTransaction#MATCH_INDEX_UNMATCHED_ONLY}
 	 * @param reverse return results starting at the end of the range in reverse order.
 	 *  Reading ranges in reverse is supported natively by the database and should
 	 *  have minimal extra cost.
@@ -466,7 +460,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	AsyncIterable<MappedKeyValue> getMappedRange(KeySelector begin, KeySelector end, byte[] mapper, int limit,
-	                                             int matchIndex, boolean reverse, StreamingMode mode);
+	                                             boolean reverse, StreamingMode mode);
 
 	/**
 	 * Gets an estimate for the number of bytes stored in the given range.
