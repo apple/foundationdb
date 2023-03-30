@@ -815,6 +815,7 @@ void registerCrashHandlerCallback(void (*f)());
 void registerCrashHandler();
 
 void setupRunLoopProfiler();
+void stopRunLoopProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
 
 // Use _exit() or criticalError(), not exit()
