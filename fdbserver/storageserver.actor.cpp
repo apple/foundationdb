@@ -5329,12 +5329,20 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 				serverKeysMap[ssidThis].push_back(shardRange);
 			}
 		}
+		int64_t totalShardsCount = 0;
+		int64_t shardsInAnonymousPhysicalShardCount = 0;
 		KeyRangeMap<std::vector<UID>> keyServersMap;
 		// check: given server x = keyServers[keyRange], then the keyRange is fully covered by serverKeys[src x]
 		for (i = 0; i < keyServers.size() - 1; ++i) { // TODO: what about the last shard?
 			std::vector<UID> src;
 			std::vector<UID> dest;
-			decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
+			UID srcID;
+			UID destID;
+			decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest, srcID, destID);
+			if (srcID == anonymousShardId) {
+				shardsInAnonymousPhysicalShardCount++;
+			}
+			totalShardsCount++;
 			KeyRangeRef shardRange(keyServers[i].key.removePrefix(keyServersPrefix),
 			                       keyServers[i + 1].key.removePrefix(keyServersPrefix));
 			ASSERT(src.size() > 0);
@@ -5404,7 +5412,9 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 			TraceEvent(SevInfo, "AuditStorageShardLocMetadataComplete", data->thisServerID)
 			    .detail("Range", req.range)
 			    .detail("Version", version)
-			    .detail("AuditServer", data->thisServerID.first());
+			    .detail("AuditServer", data->thisServerID.first())
+			    .detail("TotalShardsCount", totalShardsCount)
+			    .detail("ShardsOfAnonymousPhysicalShardCount", shardsInAnonymousPhysicalShardCount);
 			res.setPhase(AuditPhase::Complete);
 			wait(persistAuditStateMap(data->cx, res));
 			req.reply.send(res);
