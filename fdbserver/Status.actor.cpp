@@ -3015,7 +3015,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
     Version datacenterVersionDifference,
     ConfigBroadcaster const* configBroadcaster,
     Optional<MetaclusterRegistrationEntry> metaclusterRegistration,
-    MetaclusterMetrics metaclusterMetrics) {
+    metacluster::MetaclusterMetrics metaclusterMetrics) {
 	state double tStart = timer();
 
 	state JsonBuilderArray messages;

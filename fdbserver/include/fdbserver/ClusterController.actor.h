@@ -150,7 +150,7 @@ public:
 		ClusterType clusterType = ClusterType::STANDALONE;
 		Optional<ClusterName> metaclusterName;
 		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
-		MetaclusterMetrics metaclusterMetrics;
+		metacluster::MetaclusterMetrics metaclusterMetrics;
 
 		DBInfo()
 		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),

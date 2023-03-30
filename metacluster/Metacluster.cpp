@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "metacluster/Metacluster.h"
-#include "metacluster/MetaclusterManagement.actor.h"
+#include "metacluster/MetaclusterMetadata.h"
+#include "metacluster/MetaclusterTypes.h"
 
 #include "libb64/decode.h"
 #include "libb64/encode.h"
 
-namespace MetaclusterAPI {
+namespace metacluster {
 
 std::string tenantStateToString(TenantState tenantState) {
 	switch (tenantState) {
@@ -63,7 +63,6 @@ TenantState stringToTenantState(std::string stateStr) {
 
 	throw invalid_option();
 }
-} // namespace MetaclusterAPI
 
 std::string DataClusterEntry::clusterStateToString(DataClusterState clusterState) {
 	switch (clusterState) {
@@ -112,13 +111,13 @@ json_spirit::mObject ClusterUsage::toJson() const {
 MetaclusterTenantMapEntry::MetaclusterTenantMapEntry() {}
 MetaclusterTenantMapEntry::MetaclusterTenantMapEntry(int64_t id,
                                                      TenantName tenantName,
-                                                     MetaclusterAPI::TenantState tenantState)
+                                                     metacluster::TenantState tenantState)
   : tenantName(tenantName), tenantState(tenantState) {
 	setId(id);
 }
 MetaclusterTenantMapEntry::MetaclusterTenantMapEntry(int64_t id,
                                                      TenantName tenantName,
-                                                     MetaclusterAPI::TenantState tenantState,
+                                                     metacluster::TenantState tenantState,
                                                      Optional<TenantGroupName> tenantGroup)
   : tenantName(tenantName), tenantState(tenantState), tenantGroup(tenantGroup) {
 	setId(id);
@@ -165,7 +164,7 @@ std::string MetaclusterTenantMapEntry::toJson() const {
 	tenantEntry["name"] = binaryToJson(tenantName);
 	tenantEntry["prefix"] = binaryToJson(prefix);
 
-	tenantEntry["tenant_state"] = MetaclusterAPI::tenantStateToString(tenantState);
+	tenantEntry["tenant_state"] = metacluster::tenantStateToString(tenantState);
 	tenantEntry["assigned_cluster"] = binaryToJson(assignedCluster);
 
 	if (tenantGroup.present()) {
@@ -177,10 +176,10 @@ std::string MetaclusterTenantMapEntry::toJson() const {
 		tenantEntry["lock_id"] = tenantLockId.get().toString();
 	}
 
-	if (tenantState == MetaclusterAPI::TenantState::RENAMING) {
+	if (tenantState == metacluster::TenantState::RENAMING) {
 		ASSERT(renameDestination.present());
 		tenantEntry["rename_destination"] = binaryToJson(renameDestination.get());
-	} else if (tenantState == MetaclusterAPI::TenantState::ERROR) {
+	} else if (tenantState == metacluster::TenantState::ERROR) {
 		tenantEntry["error"] = error;
 	}
 
@@ -233,12 +232,4 @@ bool MetaclusterTenantGroupEntry::operator!=(MetaclusterTenantGroupEntry const& 
 	return !(*this == other);
 }
 
-KeyBackedSet<UID>& MetaclusterMetadata::registrationTombstones() {
-	static KeyBackedSet<UID> instance("\xff/metacluster/registrationTombstones"_sr);
-	return instance;
-}
-
-KeyBackedMap<ClusterName, UID>& MetaclusterMetadata::activeRestoreIds() {
-	static KeyBackedMap<ClusterName, UID> instance("\xff/metacluster/activeRestoreIds"_sr);
-	return instance;
-}
+} // namespace metacluster

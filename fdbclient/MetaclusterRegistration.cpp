@@ -33,7 +33,7 @@ std::string clusterTypeToString(const ClusterType& clusterType) {
 	}
 }
 KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>&
-MetaclusterMetadata::metaclusterRegistration() {
+metacluster::metadata::metaclusterRegistration() {
 	static KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())> instance(
 	    "\xff/metacluster/clusterRegistration"_sr, IncludeVersion());
 	return instance;
