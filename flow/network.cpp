@@ -148,8 +148,6 @@ bool IPAddress::isValid() const {
 	return std::get<uint32_t>(addr) != 0;
 }
 
-FDB_DEFINE_BOOLEAN_PARAM(NetworkAddressFromHostname);
-
 NetworkAddress NetworkAddress::parse(std::string const& s) {
 	if (s.empty()) {
 		throw connection_string_invalid();

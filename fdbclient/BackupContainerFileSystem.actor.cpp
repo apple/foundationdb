@@ -36,8 +36,6 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-FDB_DEFINE_BOOLEAN_PARAM(IncludeKeyRangeMap);
-
 class BackupContainerFileSystemImpl {
 public:
 	// TODO:  Do this more efficiently, as the range file list for a snapshot could potentially be hundreds of

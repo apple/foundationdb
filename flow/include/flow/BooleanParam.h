@@ -22,25 +22,40 @@
 
 #include "flow/Trace.h"
 
+class BooleanParam {
+	bool value;
+
+public:
+	explicit constexpr BooleanParam(bool value) : value(value) {}
+	constexpr operator bool() const { return value; }
+	constexpr void set(bool value) { this->value = value; }
+};
+
+template <class BooleanParamSub>
+struct Traceable<BooleanParamSub, std::enable_if_t<std::is_base_of_v<BooleanParam, BooleanParamSub>>> : std::true_type {
+	static std::string toString(BooleanParamSub const& value) { return Traceable<bool>::toString(value); }
+};
+
+// Declares a boolean parametr with the desired name. This declaration can be nested inside of a namespace or another
+// class. This macro should not be used directly unless this boolean parameter is going to be defined as a nested class.
 #define FDB_DECLARE_BOOLEAN_PARAM(ParamName)                                                                           \
-	class ParamName {                                                                                                  \
-		bool value;                                                                                                    \
-                                                                                                                       \
+	class ParamName : public BooleanParam {                                                                            \
 	public:                                                                                                            \
-		explicit constexpr ParamName(bool value) : value(value) {}                                                     \
-		constexpr operator bool() const { return value; }                                                              \
-		static ParamName const True, False;                                                                            \
-		constexpr void set(bool value) { this->value = value; }                                                        \
-	};                                                                                                                 \
-	template <>                                                                                                        \
-	struct Traceable<ParamName> : std::true_type {                                                                     \
-		static std::string toString(ParamName const& value) { return Traceable<bool>::toString(value); }               \
+		explicit constexpr ParamName(bool value) : BooleanParam(value) {}                                              \
+		static ParamName const True;                                                                                   \
+		static ParamName const False;                                                                                  \
 	}
 
+// Defines the static members True and False of a boolean parameter.
+// This macro should not be used directly unless this boolean parameter is going to be defined as a nested class.
+// For a nested class, it is necessary to specify the fully qualified name for the boolean param.
 #define FDB_DEFINE_BOOLEAN_PARAM(ParamName)                                                                            \
-	ParamName const ParamName::True = ParamName(true);                                                                 \
-	ParamName const ParamName::False = ParamName(false)
+	inline ParamName const ParamName::True = ParamName(true);                                                          \
+	inline ParamName const ParamName::False = ParamName(false)
 
+// Declares and defines a boolean parameter. Use this macro unless this parameter will be nested inside of another
+// class. In that case, declare the boolean parameter inside of the class using FDB_DECLARE_BOOLEAN_PARAM and define it
+// outside the class using FDB_DEFINE_BOOLEAN_PARAM with a fully-qualified name.
 #define FDB_BOOLEAN_PARAM(ParamName)                                                                                   \
 	FDB_DECLARE_BOOLEAN_PARAM(ParamName);                                                                              \
 	FDB_DEFINE_BOOLEAN_PARAM(ParamName)

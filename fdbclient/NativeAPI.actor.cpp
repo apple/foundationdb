@@ -114,8 +114,6 @@
 template class RequestStream<OpenDatabaseRequest, false>;
 template struct NetNotifiedQueue<OpenDatabaseRequest, false>;
 
-FDB_DEFINE_BOOLEAN_PARAM(CacheResult);
-
 extern const char* getSourceVersion();
 
 namespace {
@@ -148,10 +146,6 @@ Future<REPLY_TYPE(Request)> loadBalance(
 } // namespace
 
 FDB_BOOLEAN_PARAM(TransactionRecordLogInfo);
-FDB_DEFINE_BOOLEAN_PARAM(UseProvisionalProxies);
-
-// Used to determine whether or not client will load balance based on the number of GRVs released by each proxy
-FDB_DEFINE_BOOLEAN_PARAM(BalanceOnRequests);
 
 // Whether or not a request should include the tenant name
 FDB_BOOLEAN_PARAM(UseTenant);
@@ -3400,9 +3394,6 @@ ACTOR Future<int64_t> lookupTenantImpl(DatabaseContext* cx, TenantName tenant) {
 Future<int64_t> DatabaseContext::lookupTenant(TenantName tenant) {
 	return lookupTenantImpl(this, tenant);
 }
-
-FDB_DEFINE_BOOLEAN_PARAM(AllowInvalidTenantID);
-FDB_DEFINE_BOOLEAN_PARAM(ResolveDefaultTenant);
 
 TransactionState::TransactionState(Database cx,
                                    Optional<Reference<Tenant>> tenant,

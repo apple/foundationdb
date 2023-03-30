@@ -30,7 +30,7 @@
 #include "flow/BooleanParam.h"
 #include "flow/flat_buffers.h"
 
-FDB_DECLARE_BOOLEAN_PARAM(EnforceValidTenantId);
+FDB_BOOLEAN_PARAM(EnforceValidTenantId);
 
 namespace TenantAPI {
 KeyRef idToPrefix(Arena& p, int64_t id);
