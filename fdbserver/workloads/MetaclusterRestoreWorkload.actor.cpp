@@ -23,8 +23,6 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/FDBOptions.g.h"
-#include "fdbclient/Metacluster.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
@@ -37,6 +35,10 @@
 #include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/flow.h"
+
+#include "metacluster/Metacluster.h"
+#include "metacluster/MetaclusterManagement.actor.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MetaclusterRestoreWorkload : TestWorkload {

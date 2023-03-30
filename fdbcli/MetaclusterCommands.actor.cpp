@@ -23,13 +23,15 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
-#include "fdbclient/Metacluster.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/Schemas.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+
+#include "metacluster/Metacluster.h"
+#include "metacluster/MetaclusterManagement.actor.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include <string>
 

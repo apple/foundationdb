@@ -23,8 +23,6 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
-#include "fdbclient/Metacluster.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/Tenant.h"
@@ -41,6 +39,10 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
+
+#include "metacluster/Metacluster.h"
+#include "metacluster/MetaclusterManagement.actor.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TenantCapacityLimits : TestWorkload {
