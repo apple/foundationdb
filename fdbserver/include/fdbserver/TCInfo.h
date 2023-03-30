@@ -53,6 +53,7 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	std::vector<Reference<TCTeamInfo>> teams;
 	ErrorOr<GetStorageMetricsReply> metrics;
 	Optional<HealthMetrics::StorageStats> storageStats;
+	Smoother smoothedCPU;
 
 	void setMetrics(GetStorageMetricsReply serverMetrics) { this->metrics = serverMetrics; }
 	void markTeamUnhealthy(int teamIndex);
@@ -79,7 +80,7 @@ public:
 	             Version addedVersion = 0);
 
 	GetStorageMetricsReply const& getMetrics() const { return metrics.get(); }
-	auto const& getStorageStats() const { return storageStats; }
+	double getSmoothedCPU() const { return smoothedCPU.smoothTotal(); }
 
 	UID const& getId() const { return id; }
 	bool isInDesiredDC() const { return inDesiredDC; }
