@@ -511,24 +511,6 @@ ACTOR Future<Void> getSourceServersForRange(DDQueue* self,
 	return Void();
 }
 
-void DDQueue::ServerCounter::summarizeLaunchedServers(decltype(counter.cbegin()) begin,
-                                                      decltype(counter.cend()) end,
-                                                      TraceEvent* event) const {
-	if (begin == end)
-		return;
-
-	std::string execSrc, execDest;
-	for (; begin != end; ++begin) {
-		if (countNonZero(begin->second, LaunchedSource)) {
-			execSrc += begin->first.shortString() + ",";
-		}
-		if (countNonZero(begin->second, LaunchedDest)) {
-			execDest += begin->first.shortString() + ",";
-		}
-	}
-	event->detail("RemainedLaunchedSources", execSrc).detail("RemainedLaunchedDestinations", execDest);
-}
-
 DDQueue::DDQueue(DDQueueInitParams const& params)
   : IDDRelocationQueue(), distributorId(params.id), lock(params.lock), cx(params.db->context()),
     txnProcessor(params.db), teamCollections(params.teamCollections),
@@ -2312,41 +2294,43 @@ struct DDQueueImpl {
 
 						auto const highestPriorityRelocation = self->getHighestPriorityRelocation();
 
-						TraceEvent("MovingData", self.distributorId)
-						    .detail("InFlight", self.activeRelocations)
-						    .detail("InQueue", self.queuedRelocations)
+						TraceEvent("MovingData", self->distributorId)
+						    .detail("InFlight", self->activeRelocations)
+						    .detail("InQueue", self->queuedRelocations)
 						    .detail("AverageShardSize", req.getFuture().isReady() ? req.getFuture().get() : -1)
-						    .detail("UnhealthyRelocations", self.unhealthyRelocations)
+						    .detail("UnhealthyRelocations", self->unhealthyRelocations)
 						    .detail("HighestPriority", highestPriorityRelocation)
-						    .detail("BytesWritten", self.moveBytesRate.getTotal())
-						    .detail("BytesWrittenAverageRate", self.moveBytesRate.getAverage())
+						    .detail("BytesWritten", self->moveBytesRate.getTotal())
+						    .detail("BytesWrittenAverageRate", self->moveBytesRate.getAverage())
 						    .detail("PriorityRecoverMove",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
+						            self->priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
 						    .detail("PriorityRebalanceUnderutilizedTeam",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM])
+						            self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM])
 						    .detail("PriorityRebalanceOverutilizedTeam",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM])
+						            self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM])
 						    .detail("PriorityRebalanceReadUnderutilTeam",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM])
+						            self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM])
 						    .detail("PriorityRebalanceReadOverutilTeam",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM])
+						            self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM])
 						    .detail("PriorityStorageWiggle",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE])
+						            self->priority_relocations[SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE])
 						    .detail("PriorityTeamHealthy",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_HEALTHY])
+						            self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_HEALTHY])
 						    .detail("PriorityTeamContainsUndesiredServer",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER])
+						            self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER])
 						    .detail("PriorityTeamRedundant",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT])
-						    .detail("PriorityMergeShard", self.priority_relocations[SERVER_KNOBS->PRIORITY_MERGE_SHARD])
+						            self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT])
+						    .detail("PriorityMergeShard",
+						            self->priority_relocations[SERVER_KNOBS->PRIORITY_MERGE_SHARD])
 						    .detail("PriorityPopulateRegion",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_POPULATE_REGION])
+						            self->priority_relocations[SERVER_KNOBS->PRIORITY_POPULATE_REGION])
 						    .detail("PriorityTeamUnhealthy",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY])
-						    .detail("PriorityTeam2Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_2_LEFT])
-						    .detail("PriorityTeam1Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_1_LEFT])
-						    .detail("PriorityTeam0Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_0_LEFT])
-						    .detail("PrioritySplitShard", self.priority_relocations[SERVER_KNOBS->PRIORITY_SPLIT_SHARD])
+						            self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY])
+						    .detail("PriorityTeam2Left", self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_2_LEFT])
+						    .detail("PriorityTeam1Left", self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_1_LEFT])
+						    .detail("PriorityTeam0Left", self->priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_0_LEFT])
+						    .detail("PrioritySplitShard",
+						            self->priority_relocations[SERVER_KNOBS->PRIORITY_SPLIT_SHARD])
 						    .trackLatest("MovingData"); // This trace event's trackLatest lifetime is controlled by
 						                                // DataDistributor::movingDataEventHolder. The track latest
 						                                // key we use here must match the key used in the holder.
