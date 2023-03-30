@@ -1441,7 +1441,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 									ASSERT(val.present());
 									DataMoveMetaData dmv = decodeDataMoveValue(val.get());
 									TraceEvent(
-									    SevError, "StartMoveShardsFoundConflictingDataMove", relocationIntervalId)
+									    SevWarnAlways, "StartMoveShardsFoundConflictingDataMove", relocationIntervalId)
 									    .detail("Range", rangeIntersectKeys)
 									    .detail("DataMoveID", dataMoveId.toString())
 									    .detail("ExistingDataMoveID", destId.toString())
