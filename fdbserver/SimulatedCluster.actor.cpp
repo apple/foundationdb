@@ -2560,6 +2560,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	g_simulator->connectionString = conn.toString();
 	g_simulator->testerCount = testerCount;
 	g_simulator->allowStorageMigrationTypeChange = gradualMigrationPossible;
+	g_simulator->willRestart = testConfig.isFirstTestInRestart;
 
 	TraceEvent("SimulatedClusterStarted")
 	    .detail("DataCenters", dataCenters)
