@@ -1009,7 +1009,6 @@ ACTOR Future<bool> checkExclusion(Database db,
 					// capacity if we are excluding at least one process that serves the storage role.
 					if (!excludedAddressesContainsStorageRole && includedInExclusion) {
 						excludedAddressesContainsStorageRole = true;
-						break;
 					}
 
 					int64_t used_bytes;
