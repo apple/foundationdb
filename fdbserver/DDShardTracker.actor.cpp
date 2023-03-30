@@ -1434,7 +1434,7 @@ struct DataDistributionTrackerImpl {
 
 			state PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
 			if (SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED) {
-			ASSERT(self->ddTenantCache.present());
+				ASSERT(self->ddTenantCache.present());
 				tenantCreationSignal = self->ddTenantCache.get()->tenantCreationSignal;
 			}
 
