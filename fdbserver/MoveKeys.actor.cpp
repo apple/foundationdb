@@ -2408,7 +2408,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 	return Void();
 }
 
-// In cleanUpDataMoveCore, to do the actual cleanup, we suppose the target data move already put its 
+// In cleanUpDataMoveCore, to do the actual cleanup, we suppose the target data move already put its
 // information to the metadata. However, this does not always happen.
 // Background cleanup is used to handle the case where the normal cleanup (cleanUpDataMoveCore)
 // and the moveShard (startMoveShard) has race on update of metadata.
@@ -2417,14 +2417,14 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 // For this case, the startMoveShard must exit without update the meta data
 // This background cleanup is used to clean the placehold left by the normal cleanup
 // To understand this trick, we have three cases:
-// (1) Race condition of dataMove metadata between cleanUpDataMoveCore and startMoveShard, and 
+// (1) Race condition of dataMove metadata between cleanUpDataMoveCore and startMoveShard, and
 // cleanUpDataMoveCore wins the race. Then startMoveShard retries and see the place holder on the metadata
 // put by cleanUpDataMoveCore, and startMoveShard gives up and exits. No update to the metadata
-// (2) Race condition of dataMove metadata between cleanUpDataMoveCore and startMoveShard, and 
-// startMoveShard wins the race. Then cleanUpDataMoveCore retries and see the update of metadata by 
+// (2) Race condition of dataMove metadata between cleanUpDataMoveCore and startMoveShard, and
+// startMoveShard wins the race. Then cleanUpDataMoveCore retries and see the update of metadata by
 // startMoveShard. Then cleanUpDataMoveCore successfully does the cleanup as normal
 // (3) cleanUpDataMoveCore happens before startMoveShard. No race happens. Then, cleanUpDataMoveCore sees
-// the place holder on the metadata put by cleanUpDataMoveCore. Then, startMoveShard gives up and exits. 
+// the place holder on the metadata put by cleanUpDataMoveCore. Then, startMoveShard gives up and exits.
 // No update to the metadata by the startMoveShard
 // For all three cases, the background cleanup only needs to cleanup the place holder
 ACTOR Future<Void> cleanUpDataMoveBackground(Database occ,
@@ -2435,13 +2435,12 @@ ACTOR Future<Void> cleanUpDataMoveBackground(Database occ,
                                              const DDEnabledState* ddEnabledState,
                                              double delaySeconds) {
 	wait(delay(std::max(10.0, delaySeconds)));
-	TraceEvent(SevVerbose, "CleanUpDataMoveBackgroundBegin", dataMoveId)
+	TraceEvent(SevDebug, "CleanUpDataMoveBackgroundBegin", dataMoveId)
 	    .detail("DataMoveID", dataMoveId)
 	    .detail("Range", keys);
 	wait(cleanUpDataMoveParallelismLock->take(TaskPriority::DataDistributionLaunch));
 	state FlowLock::Releaser releaser = FlowLock::Releaser(*cleanUpDataMoveParallelismLock);
 	state DataMoveMetaData dataMove;
-	state bool completeWithoutClear = false;
 	state Transaction tr(occ);
 	loop {
 		try {
@@ -2452,14 +2451,12 @@ ACTOR Future<Void> cleanUpDataMoveBackground(Database occ,
 
 			Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
 			if (!val.present()) {
-				completeWithoutClear = true;
 				break;
 			}
 			dataMove = decodeDataMoveValue(val.get());
 			ASSERT(dataMove.ranges.empty());
 			ASSERT(dataMove.getPhase() == DataMoveMetaData::Deleting);
 			tr.clear(dataMoveKeyFor(dataMoveId));
-			TraceEvent(SevDebug, "CleanUpDataMoveBackground", dataMoveId).detail("DataMoveID", dataMove.toString());
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -2470,8 +2467,7 @@ ACTOR Future<Void> cleanUpDataMoveBackground(Database occ,
 
 	TraceEvent(SevDebug, "CleanUpDataMoveBackgroundEnd", dataMoveId)
 	    .detail("DataMoveID", dataMoveId)
-	    .detail("DataMoveRange", keys)
-	    .detail("RangeClear", completeWithoutClear);
+	    .detail("DataMoveRange", keys);
 
 	return Void();
 }
@@ -2646,8 +2642,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
                                    FlowLock* cleanUpDataMoveParallelismLock,
                                    KeyRange keys,
                                    const DDEnabledState* ddEnabledState,
-                                   Optional<PromiseStream<Future<Void>>> addCleanUpDataMoveActor,
-                                   Optional<double> delaySeconds) {
+                                   Optional<PromiseStream<Future<Void>>> addCleanUpDataMoveActor) {
 	try {
 		wait(cleanUpDataMoveCore(occ, dataMoveId, lock, cleanUpDataMoveParallelismLock, keys, ddEnabledState));
 	} catch (Error& e) {
@@ -2655,12 +2650,12 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 			ASSERT(addCleanUpDataMoveActor.present());
 			TraceEvent(SevDebug, "CleanUpDataMoveTriggerBackground", dataMoveId).detail("DataMoveID", dataMoveId);
 			addCleanUpDataMoveActor.get().send(cleanUpDataMoveBackground(occ,
-			                                                       dataMoveId,
-			                                                       lock,
-			                                                       cleanUpDataMoveParallelismLock,
-			                                                       keys,
-			                                                       ddEnabledState,
-			                                                       /*backgroundDelaySeconds=*/10));
+			                                                             dataMoveId,
+			                                                             lock,
+			                                                             cleanUpDataMoveParallelismLock,
+			                                                             keys,
+			                                                             ddEnabledState,
+			                                                             /*backgroundDelaySeconds=*/10));
 		} else {
 			TraceEvent(SevWarn, "CleanUpDataMoveFail", dataMoveId).errorUnsuppressed(e);
 			throw e;
