@@ -2408,6 +2408,25 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 	return Void();
 }
 
+// In cleanUpDataMoveCore, to do the actual cleanup, we suppose the target data move already put its 
+// information to the metadata. However, this does not always happen.
+// Background cleanup is used to handle the case where the normal cleanup (cleanUpDataMoveCore)
+// and the moveShard (startMoveShard) has race on update of metadata.
+// Background cleanup is triggered when the normal cleanup (cleanUpDataMoveCore) with a succeed transaction
+// is failed to see the update of metadata (datamove key space) by the startMoveShard
+// For this case, the startMoveShard must exit without update the meta data
+// This background cleanup is used to clean the placehold left by the normal cleanup
+// To understand this trick, we have three cases:
+// (1) Race condition of dataMove metadata between cleanUpDataMoveCore and startMoveShard, and 
+// cleanUpDataMoveCore wins the race. Then startMoveShard retries and see the place holder on the metadata
+// put by cleanUpDataMoveCore, and startMoveShard gives up and exits. No update to the metadata
+// (2) Race condition of dataMove metadata between cleanUpDataMoveCore and startMoveShard, and 
+// startMoveShard wins the race. Then cleanUpDataMoveCore retries and see the update of metadata by 
+// startMoveShard. Then cleanUpDataMoveCore successfully does the cleanup as normal
+// (3) cleanUpDataMoveCore happens before startMoveShard. No race happens. Then, cleanUpDataMoveCore sees
+// the place holder on the metadata put by cleanUpDataMoveCore. Then, startMoveShard gives up and exits. 
+// No update to the metadata by the startMoveShard
+// For all three cases, the background cleanup only needs to cleanup the place holder
 ACTOR Future<Void> cleanUpDataMoveBackground(Database occ,
                                              UID dataMoveId,
                                              MoveKeysLock lock,
@@ -2424,7 +2443,6 @@ ACTOR Future<Void> cleanUpDataMoveBackground(Database occ,
 	state DataMoveMetaData dataMove;
 	state bool completeWithoutClear = false;
 	state Transaction tr(occ);
-
 	loop {
 		try {
 			tr.trState->taskID = TaskPriority::MoveKeys;
@@ -2463,12 +2481,7 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
                                        MoveKeysLock lock,
                                        FlowLock* cleanUpDataMoveParallelismLock,
                                        KeyRange keys,
-                                       const DDEnabledState* ddEnabledState,
-                                       Optional<double> backgroundDelaySeconds = Optional<double>()) {
-	if (backgroundDelaySeconds.present()) { // if backgroundDelaySeconds present, this is a background cleanup
-		wait(delay(backgroundDelaySeconds.get()));
-	}
-
+                                       const DDEnabledState* ddEnabledState) {
 	state KeyRange range;
 	TraceEvent(SevDebug, "CleanUpDataMoveBegin", dataMoveId).detail("DataMoveID", dataMoveId).detail("Range", keys);
 	state bool complete = false;
@@ -2506,11 +2519,6 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 					range = dataMove.ranges.front();
 					ASSERT(!range.empty());
 				} else {
-					if (backgroundDelaySeconds.present()) {
-						// If a background cleanup sees nothing, safely do nothing
-						break;
-					}
-					ASSERT(!backgroundDelaySeconds.present());
 					// If a normal cleanup sees nothing, triggers background cleanup
 					dataMove = DataMoveMetaData(dataMoveId);
 					dataMove.setPhase(DataMoveMetaData::Deleting);
@@ -2615,9 +2623,6 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 				}
 			} catch (Error& e) {
 				state Error err = e;
-				if (backgroundDelaySeconds.present()) {
-					ASSERT(e.code() != error_code_need_background_datamove_cleanup);
-				}
 				wait(tr.onError(e)); // throw error if need_background_datamove_cleanup
 				TraceEvent(SevWarn, "CleanUpDataMoveRetriableError", dataMoveId)
 				    .error(err)
@@ -2649,7 +2654,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 		if (e.code() == error_code_need_background_datamove_cleanup) {
 			ASSERT(addCleanUpDataMoveActor.present());
 			TraceEvent(SevDebug, "CleanUpDataMoveTriggerBackground", dataMoveId).detail("DataMoveID", dataMoveId);
-			addCleanUpDataMoveActor.get().send(cleanUpDataMoveCore(occ,
+			addCleanUpDataMoveActor.get().send(cleanUpDataMoveBackground(occ,
 			                                                       dataMoveId,
 			                                                       lock,
 			                                                       cleanUpDataMoveParallelismLock,
