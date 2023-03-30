@@ -26,8 +26,8 @@
 #include "flow/Knobs.h"
 #include "flow/flow.h"
 
-FDB_DECLARE_BOOLEAN_PARAM(Randomize);
-FDB_DECLARE_BOOLEAN_PARAM(IsSimulated);
+FDB_BOOLEAN_PARAM(Randomize);
+FDB_BOOLEAN_PARAM(IsSimulated);
 
 class ClientKnobs : public KnobsImpl<ClientKnobs> {
 public:

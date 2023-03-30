@@ -40,8 +40,8 @@
 typedef StringRef TransactionTagRef;
 typedef Standalone<TransactionTagRef> TransactionTag;
 
-FDB_DECLARE_BOOLEAN_PARAM(ContainsRecommended);
-FDB_DECLARE_BOOLEAN_PARAM(Capitalize);
+FDB_BOOLEAN_PARAM(ContainsRecommended);
+FDB_BOOLEAN_PARAM(Capitalize);
 
 class TagSet {
 public:

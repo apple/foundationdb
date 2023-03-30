@@ -37,24 +37,6 @@
 #include "flow/actorcompiler.h" // has to be last include
 #include "flow/network.h"
 
-FDB_DEFINE_BOOLEAN_PARAM(LockDB);
-FDB_DEFINE_BOOLEAN_PARAM(UnlockDB);
-FDB_DEFINE_BOOLEAN_PARAM(StopWhenDone);
-FDB_DEFINE_BOOLEAN_PARAM(Verbose);
-FDB_DEFINE_BOOLEAN_PARAM(WaitForComplete);
-FDB_DEFINE_BOOLEAN_PARAM(ForceAction);
-FDB_DEFINE_BOOLEAN_PARAM(Terminator);
-FDB_DEFINE_BOOLEAN_PARAM(UsePartitionedLog);
-FDB_DEFINE_BOOLEAN_PARAM(InconsistentSnapshotOnly);
-FDB_DEFINE_BOOLEAN_PARAM(ShowErrors);
-FDB_DEFINE_BOOLEAN_PARAM(AbortOldBackup);
-FDB_DEFINE_BOOLEAN_PARAM(DstOnly);
-FDB_DEFINE_BOOLEAN_PARAM(WaitForDestUID);
-FDB_DEFINE_BOOLEAN_PARAM(CheckBackupUID);
-FDB_DEFINE_BOOLEAN_PARAM(DeleteData);
-FDB_DEFINE_BOOLEAN_PARAM(SetValidation);
-FDB_DEFINE_BOOLEAN_PARAM(PartialBackup);
-
 std::string BackupAgentBase::formatTime(int64_t epochs) {
 	time_t curTime = (time_t)epochs;
 	char buffer[30];

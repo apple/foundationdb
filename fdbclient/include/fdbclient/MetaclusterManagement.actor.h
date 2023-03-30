@@ -92,18 +92,18 @@ struct DataClusterMetadata {
 	}
 };
 
-FDB_DECLARE_BOOLEAN_PARAM(ApplyManagementClusterUpdates);
-FDB_DECLARE_BOOLEAN_PARAM(RemoveMissingTenants);
-FDB_DECLARE_BOOLEAN_PARAM(AssignClusterAutomatically);
-FDB_DECLARE_BOOLEAN_PARAM(GroupAlreadyExists);
-FDB_DECLARE_BOOLEAN_PARAM(IsRestoring);
-FDB_DECLARE_BOOLEAN_PARAM(RunOnDisconnectedCluster);
-FDB_DECLARE_BOOLEAN_PARAM(RunOnMismatchedCluster);
-FDB_DECLARE_BOOLEAN_PARAM(RestoreDryRun);
-FDB_DECLARE_BOOLEAN_PARAM(ForceJoin);
-FDB_DECLARE_BOOLEAN_PARAM(ForceReuseTenantIdPrefix);
-FDB_DECLARE_BOOLEAN_PARAM(ForceRemove);
-FDB_DECLARE_BOOLEAN_PARAM(IgnoreCapacityLimit);
+FDB_BOOLEAN_PARAM(ApplyManagementClusterUpdates);
+FDB_BOOLEAN_PARAM(RemoveMissingTenants);
+FDB_BOOLEAN_PARAM(AssignClusterAutomatically);
+FDB_BOOLEAN_PARAM(GroupAlreadyExists);
+FDB_BOOLEAN_PARAM(IsRestoring);
+FDB_BOOLEAN_PARAM(RunOnDisconnectedCluster);
+FDB_BOOLEAN_PARAM(RunOnMismatchedCluster);
+FDB_BOOLEAN_PARAM(RestoreDryRun);
+FDB_BOOLEAN_PARAM(ForceJoin);
+FDB_BOOLEAN_PARAM(ForceReuseTenantIdPrefix);
+FDB_BOOLEAN_PARAM(ForceRemove);
+FDB_BOOLEAN_PARAM(IgnoreCapacityLimit);
 
 namespace MetaclusterAPI {
 

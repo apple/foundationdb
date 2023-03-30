@@ -135,9 +135,6 @@ void* Arena::allocate4kAlignedBuffer(uint32_t size) {
 	return ArenaBlock::dependOn4kAlignedBuffer(impl, size);
 }
 
-FDB_DEFINE_BOOLEAN_PARAM(FastInaccurateEstimate);
-FDB_DEFINE_BOOLEAN_PARAM(IsSecureMem);
-
 size_t Arena::getSize(FastInaccurateEstimate fastInaccurateEstimate) const {
 	if (impl) {
 		allowAccess(impl.getPtr());
