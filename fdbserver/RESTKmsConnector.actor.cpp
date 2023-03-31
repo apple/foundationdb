@@ -393,13 +393,13 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 	// 	  }
 	// }
 
-	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
-		TraceEvent("RESTParseEncryptCipherResponseStart", ctx->uid).detail("Response", resp->toString());
-	}
-
-	if (resp->code != HTTP::HTTP_STATUS_CODE_OK) {
+	if (!resp.isValid() || resp->code != HTTP::HTTP_STATUS_CODE_OK) {
 		// STATUS_OK is gating factor for REST request success
 		throw http_request_failed();
+	}
+
+	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
+		TraceEvent("RESTParseEncryptCipherResponseStart", ctx->uid).detail("Response", resp->toString());
 	}
 
 	rapidjson::Document doc;
@@ -1400,6 +1400,7 @@ void getFakeEncryptCipherResponse(StringRef jsonReqRef,
 	resDoc.Accept(writer);
 	httpResponse->content.resize(sb.GetSize(), '\0');
 	memcpy(httpResponse->content.data(), sb.GetString(), sb.GetSize());
+	httpResponse->contentLen = sb.GetSize();
 }
 
 void getFakeBlobMetadataResponse(StringRef jsonReqRef,
@@ -1604,6 +1605,8 @@ void testMissingOrInvalidVersion(Reference<RESTKmsConnectorCtx> ctx, bool isCiph
 
 	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
 	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
+	httpResp->contentLen = 0;
+	httpResp->content = "";
 	rapidjson::StringBuffer sb;
 	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
 	doc.Accept(writer);
@@ -1637,6 +1640,7 @@ void testMissingDetailsTag(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 	doc.Accept(writer);
 	httpResp->content.resize(sb.GetSize(), '\0');
 	memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
+	httpResp->contentLen = sb.GetSize();
 
 	try {
 		if (isCipher) {
@@ -1665,6 +1669,7 @@ void testMalformedDetails(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 	doc.Accept(writer);
 	httpResp->content.resize(sb.GetSize(), '\0');
 	memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
+	httpResp->contentLen = sb.GetSize();
 
 	try {
 		if (isCipher) {
@@ -1698,6 +1703,7 @@ void testMalformedDetailObj(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 	doc.Accept(writer);
 	httpResp->content.resize(sb.GetSize(), '\0');
 	memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
+	httpResp->contentLen = sb.GetSize();
 
 	try {
 		if (isCipher) {
@@ -1746,6 +1752,7 @@ void testKMSErrorResponse(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 	doc.Accept(writer);
 	httpResp->content.resize(sb.GetSize(), '\0');
 	memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
+	httpResp->contentLen = sb.GetSize();
 
 	try {
 		if (isCipher) {
