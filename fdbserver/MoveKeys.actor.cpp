@@ -32,6 +32,12 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+template <typename... T>
+static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
+	if (g_network->isSimulated())
+		fmt::print(fmt, std::forward<T>(args)...);
+}
+
 namespace {
 struct Shard {
 	Shard() = default;
@@ -180,31 +186,54 @@ ACTOR Future<Void> deleteCheckpoints(Transaction* tr, std::set<UID> checkpointId
 }
 } // namespace
 
-bool DDEnabledState::isDDEnabled() const {
-	return ddEnabled;
+bool DDEnabledState::sameId(const UID& id) const {
+	return ddEnabledStatusUID == id;
+}
+bool DDEnabledState::isEnabled() const {
+	return stateValue == ENABLED;
 }
 
-bool DDEnabledState::setDDEnabled(bool status, UID snapUID) {
-	TraceEvent("SetDDEnabled").detail("Status", status).detail("SnapUID", snapUID);
-	ASSERT(snapUID != UID());
-	if (!status) {
-		// disabling DD
-		if (ddEnabledStatusUID != UID()) {
-			// disable DD when a disable is already in progress not allowed
-			return false;
-		}
-		ddEnabled = status;
-		ddEnabledStatusUID = snapUID;
-		return true;
+bool DDEnabledState::isRestorePreparing() const {
+	return stateValue == RESTORE_PREPARING;
+}
+
+bool DDEnabledState::setDDSnapshot(UID requesterId) {
+	ASSERT(requesterId != UID());
+	// disabling DD
+	if (ddEnabledStatusUID != UID()) {
+		// only allow state modification to disabled when the state is not modified by others
+		return false;
 	}
+	ddEnabledStatusUID = requesterId;
+	stateValue = SNAPSHOT;
+	TraceEvent("SetDDSnapshot").detail("RequesterUID", requesterId);
+
+	return true;
+}
+
+bool DDEnabledState::setDDEnabled(UID requesterId) {
+	ASSERT(requesterId != UID());
 	// enabling DD
-	if (snapUID != ddEnabledStatusUID) {
-		// enabling DD not allowed if UID does not match with the disable request
+	if (requesterId != ddEnabledStatusUID) {
+		// enabling DD not allowed if UID does not match with the previous request
 		return false;
 	}
 	// reset to default status
-	ddEnabled = status;
 	ddEnabledStatusUID = UID();
+	stateValue = ENABLED;
+	TraceEvent("SetDDEnabled").detail("RequesterUID", requesterId);
+	return true;
+}
+
+bool DDEnabledState::setDDRestorePreparing(UID requesterId) {
+	ASSERT(requesterId != UID());
+	if (ddEnabledStatusUID != UID()) {
+		// only allow state modification to restore preparing when the state is not modified by others
+		return false;
+	}
+	ddEnabledStatusUID = requesterId;
+	stateValue = RESTORE_PREPARING;
+	TraceEvent("SetDDRestorePreparing").detail("RequesterUID", requesterId);
 	return true;
 }
 
@@ -266,15 +295,9 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 	}
 }
 
-ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
-                                            MoveKeysLock lock,
-                                            const DDEnabledState* ddEnabledState,
-                                            bool isWrite = true) {
+ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr, MoveKeysLock lock, bool isWrite = true) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	if (!ddEnabledState->isDDEnabled()) {
-		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck").log();
-		throw movekeys_conflict();
-	}
+
 	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
 	UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 
@@ -319,6 +342,17 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 		CODE_PROBE(true, "checkMoveKeysLock: Conflict with new owner");
 		throw movekeys_conflict();
 	}
+}
+
+Future<Void> checkMoveKeysLock(Transaction* tr,
+                               MoveKeysLock const& lock,
+                               const DDEnabledState* ddEnabledState,
+                               bool isWrite = true) {
+	if (!ddEnabledState->isEnabled()) {
+		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck").log();
+		throw movekeys_conflict();
+	}
+	return checkPersistentMoveKeysLock(tr, lock, isWrite);
 }
 
 Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock, const DDEnabledState* ddEnabledState) {
@@ -2899,6 +2933,87 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 		for (auto& s : servers) {
 			krmSetPreviouslyEmptyRange(
 			    tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysTrue, serverKeysFalse);
+		}
+	}
+}
+
+// Unassign given key range from its current storage servers
+ACTOR template <typename TrType = Transaction*>
+Future<Void> unassignServerKeys(UID traceId, TrType tr, KeyRangeRef keys, std::set<UID> ignoreServers) {
+	state RangeResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY, Snapshot::True));
+	ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+	for (auto& server : serverList) {
+		state UID id = decodeServerListValue(server.value).id();
+		Optional<Value> tag = wait(tr->get(serverTagKeyFor(id)));
+		if (!tag.present()) {
+			dprint("Server {} no tag\n", id.shortString());
+			continue;
+		}
+
+		if (ignoreServers.count(id)) {
+			dprint("Ignore un-assignment from {} .\n", id.toString());
+			continue;
+		}
+		RangeResult ranges = wait(krmGetRanges(tr, serverKeysPrefixFor(id), keys));
+
+		bool owning = false;
+		for (auto& r : ranges) {
+			if (r.value != serverKeysFalse) {
+				owning = true;
+				break;
+			}
+		}
+		if (owning) {
+			wait(krmSetRangeCoalescing(tr, serverKeysPrefixFor(id), keys, allKeys, serverKeysFalse));
+			dprint("Unassign {} from storage server {}\n", keys.toString(), id.toString());
+			TraceEvent("UnassignKeys", traceId).detail("Keys", keys).detail("SS", id);
+		}
+	}
+	return Void();
+}
+
+// Assign given key range to specified storage server.
+ACTOR template <typename TrType = Transaction*>
+Future<Void> assignKeysToServer(UID traceId, TrType tr, KeyRangeRef keys, UID serverUID) {
+	state Value value = keyServersValue(std::vector<UID>({ serverUID }), std::vector<UID>(), UID(), UID());
+	wait(krmSetRangeCoalescing(tr, keyServersPrefix, keys, allKeys, value));
+	wait(krmSetRangeCoalescing(tr, serverKeysPrefixFor(serverUID), keys, allKeys, serverKeysTrue));
+	dprint("Assign {} to server {}\n", normalKeys.toString(), serverUID.toString());
+	TraceEvent("AssignKeys", traceId).detail("Keys", keys).detail("SS", serverUID);
+	return Void();
+}
+
+ACTOR Future<Void> prepareBlobRestore(Database occ,
+                                      MoveKeysLock lock,
+                                      const DDEnabledState* ddEnabledState,
+                                      UID traceId,
+                                      KeyRangeRef keys,
+                                      UID bmId,
+                                      UID reqId) {
+	state int retries = 0;
+	state Transaction tr = Transaction(occ);
+	ASSERT(ddEnabledState->isRestorePreparing());
+	loop {
+		tr.debugTransaction(reqId);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			wait(checkPersistentMoveKeysLock(&tr, lock));
+			wait(unassignServerKeys(traceId, &tr, keys, { bmId }));
+			wait(assignKeysToServer(traceId, &tr, keys, bmId));
+			wait(tr.commit());
+			TraceEvent("BlobRestorePrepare", traceId)
+			    .detail("State", "PrepareTxnCommitted")
+			    .detail("ReqId", reqId)
+			    .detail("BM", bmId);
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+
+			if (++retries > SERVER_KNOBS->BLOB_MIGRATOR_ERROR_RETRIES) {
+				throw restore_error();
+			}
 		}
 	}
 }
