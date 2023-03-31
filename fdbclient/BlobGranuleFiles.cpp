@@ -36,7 +36,6 @@
 #include "flow/Trace.h"
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
-#include "flow/xxhash.h"
 
 #include "fmt/format.h"
 
@@ -1878,7 +1877,7 @@ const EncryptCipherBaseKeyId encryptBaseCipherId = deterministicRandom()->random
 const EncryptCipherRandomSalt encryptSalt = deterministicRandom()->randomUInt64();
 
 Standalone<StringRef> getBaseCipher() {
-	Standalone<StringRef> baseCipher = makeString(AES_256_KEY_LENGTH);
+	Standalone<StringRef> baseCipher = makeString(deterministicRandom()->randomInt(4, 256));
 	deterministicRandom()->randomBytes(mutateString(baseCipher), baseCipher.size());
 	return baseCipher;
 }

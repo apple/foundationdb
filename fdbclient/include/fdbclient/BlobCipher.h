@@ -594,7 +594,7 @@ public:
 	BlobCipherKey(const EncryptCipherDomainId& domainId,
 	              const EncryptCipherBaseKeyId& baseCiphId,
 	              const uint8_t* baseCiph,
-	              int baseCiphLen,
+	              const int baseCiphLen,
 	              const int64_t refreshAt,
 	              int64_t expireAt);
 	BlobCipherKey(const EncryptCipherDomainId& domainId,
@@ -662,7 +662,7 @@ private:
 
 	void initKey(const EncryptCipherDomainId& domainId,
 	             const uint8_t* baseCiph,
-	             int baseCiphLen,
+	             const int baseCiphLen,
 	             const EncryptCipherBaseKeyId& baseCiphId,
 	             const EncryptCipherRandomSalt& salt,
 	             const int64_t refreshAt,
