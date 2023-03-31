@@ -1611,9 +1611,7 @@ public:
 	StorageBytes getStorageBytes() const override;
 
 	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override;
-	void clear(KeyRangeRef range,
-	           const StorageServerMetrics* storageMetrics = nullptr,
-	           const Arena* arena = nullptr) override;
+	void clear(KeyRangeRef range, const Arena* arena = nullptr) override;
 	Future<Void> commit(bool sequential = false) override;
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> optionss) override;
@@ -2229,7 +2227,7 @@ void KeyValueStoreSQLite::set(KeyValueRef keyValue, const Arena* arena) {
 	++writesRequested;
 	writeThread->post(new Writer::SetAction(keyValue));
 }
-void KeyValueStoreSQLite::clear(KeyRangeRef range, const StorageServerMetrics* storageMetrics, const Arena* arena) {
+void KeyValueStoreSQLite::clear(KeyRangeRef range, const Arena* arena) {
 	++writesRequested;
 	writeThread->post(new Writer::ClearAction(range));
 }
