@@ -27,6 +27,7 @@ import base64
 import glob
 import time
 import ipaddress
+import random
 from local_cluster import TLSConfig
 from tmp_cluster import TempCluster
 from typing import Union
@@ -319,7 +320,7 @@ def token_claim_1h(tenant_id_from_name):
         return {
             "iss": "fdb-authz-tester",
             "sub": "authz-test",
-            "aud": ["tmp-cluster"],
+            "aud": ["tmp-cluster"] if random.choice([True, False]) else "tmp-cluster", # too expensive to parameterize just for this
             "iat": now,
             "nbf": now - 1,
             "exp": now + 60 * 60,
