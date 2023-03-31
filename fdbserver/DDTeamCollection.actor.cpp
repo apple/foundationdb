@@ -1229,7 +1229,7 @@ public:
 						    .detail("Server", server->getId())
 						    .detail("Excluded", worstAddr.toString());
 						wait(delay(0.0)); // Do not throw an error while still inside trackExcludedServers
-						while (!ddEnabledState->isDDEnabled()) {
+						while (!ddEnabledState->isEnabled()) {
 							wait(delay(1.0));
 						}
 						if (self->removeFailedServer.canBeSet()) {

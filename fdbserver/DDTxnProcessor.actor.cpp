@@ -287,8 +287,8 @@ class DDTxnProcessorImpl {
 					BinaryReader rd(mode.get(), Unversioned());
 					rd >> result->mode;
 				}
-				if ((!skipDDModeCheck && !result->mode) || !ddEnabledState->isDDEnabled()) {
-					// DD can be disabled persistently (result->mode = 0) or transiently (isDDEnabled() = 0)
+				if ((!skipDDModeCheck && !result->mode) || !ddEnabledState->isEnabled()) {
+					// DD can be disabled persistently (result->mode = 0) or transiently (isEnabled() = 0)
 					TraceEvent(SevDebug, "GetInitialDataDistribution_DisabledDD").log();
 					return result;
 				}
@@ -506,7 +506,7 @@ class DDTxnProcessorImpl {
 
 			try {
 				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
-				if (!mode.present() && ddEnabledState->isDDEnabled()) {
+				if (!mode.present() && ddEnabledState->isEnabled()) {
 					TraceEvent("WaitForDDEnabledSucceeded").log();
 					return Void();
 				}
@@ -516,8 +516,8 @@ class DDTxnProcessorImpl {
 					rd >> m;
 					TraceEvent(SevDebug, "WaitForDDEnabled")
 					    .detail("Mode", m)
-					    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
-					if (m && ddEnabledState->isDDEnabled()) {
+					    .detail("IsDDEnabled", ddEnabledState->isEnabled());
+					if (m && ddEnabledState->isEnabled()) {
 						TraceEvent("WaitForDDEnabledSucceeded").log();
 						return Void();
 					}
@@ -539,16 +539,16 @@ class DDTxnProcessorImpl {
 
 			try {
 				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
-				if (!mode.present() && ddEnabledState->isDDEnabled())
+				if (!mode.present() && ddEnabledState->isEnabled())
 					return true;
 				if (mode.present()) {
 					BinaryReader rd(mode.get(), Unversioned());
 					int m;
 					rd >> m;
-					if (m && ddEnabledState->isDDEnabled()) {
+					if (m && ddEnabledState->isEnabled()) {
 						TraceEvent(SevDebug, "IsDDEnabledSucceeded")
 						    .detail("Mode", m)
-						    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
+						    .detail("IsDDEnabled", ddEnabledState->isEnabled());
 						return true;
 					}
 				}
@@ -556,17 +556,17 @@ class DDTxnProcessorImpl {
 				Optional<Value> readVal = wait(tr.get(moveKeysLockOwnerKey));
 				UID currentOwner =
 				    readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
-				if (ddEnabledState->isDDEnabled() && (currentOwner != dataDistributionModeLock)) {
+				if (ddEnabledState->isEnabled() && (currentOwner != dataDistributionModeLock)) {
 					TraceEvent(SevDebug, "IsDDEnabledSucceeded")
 					    .detail("CurrentOwner", currentOwner)
 					    .detail("DDModeLock", dataDistributionModeLock)
-					    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
+					    .detail("IsDDEnabled", ddEnabledState->isEnabled());
 					return true;
 				}
 				TraceEvent(SevDebug, "IsDDEnabledFailed")
 				    .detail("CurrentOwner", currentOwner)
 				    .detail("DDModeLock", dataDistributionModeLock)
-				    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
+				    .detail("IsDDEnabled", ddEnabledState->isEnabled());
 				return false;
 			} catch (Error& e) {
 				wait(tr.onError(e));
