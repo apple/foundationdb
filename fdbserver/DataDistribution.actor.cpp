@@ -70,11 +70,9 @@ ShardSizeBounds ShardSizeBounds::shardSizeBoundsBeforeTrack() {
 
 struct DDAudit {
 	DDAudit(UID id, KeyRange range, AuditType type)
-	  : coreState(id, range, type), auditMap(AuditPhase::Invalid, allKeys.end), actors(true), foundError(false),
-	    retryCount(0) {}
+	  : coreState(id, range, type), actors(true), foundError(false), retryCount(0) {}
 
 	AuditStorageState coreState;
-	KeyRangeMap<AuditPhase> auditMap;
 	ActorCollection actors;
 	bool foundError;
 	int retryCount;
@@ -1643,6 +1641,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self, TriggerAudi
 				    .detail("Async", req.async);
 			}
 		} else {
+			audit->retryCount++;
 			throw retry();
 		}
 	}
@@ -1671,15 +1670,17 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			    .detail("AuditType", req.getType())
 			    .detail("Range", req.range)
 			    .detail("Async", req.async);
-			ASSERT(e.code() == error_code_actor_cancelled || e.code() == error_code_retry);
+			ASSERT_WE_THINK(e.code() == error_code_actor_cancelled || e.code() == error_code_retry);
 			if (e.code() == error_code_retry) {
 				if (retryCount > SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
 					// A guard to make sure no infinite loop
 					// If this gets reached, audit is nullptr in auditStorageCore
 					// In this case, persistNewAuditState must get failed
-					// req.reply is impossible to be set
-					ASSERT(!req.reply.isSet());
-					req.reply.sendError(broken_promise());
+					// req.reply has impossible to be set
+					ASSERT_WE_THINK(!req.reply.isSet());
+					if (!req.reply.isSet()) {
+						req.reply.sendError(audit_storage_failed());
+					}
 				}
 				retryCount++;
 				wait(delay(5));
@@ -1733,7 +1734,6 @@ ACTOR Future<Void> loadAndDispatchAuditRange(Reference<DataDistributor> self,
 		begin = auditStates.back().range.end;
 		for (const auto& auditState : auditStates) {
 			const AuditPhase phase = auditState.getPhase();
-			// audit->auditMap.insert(auditState.range, phase);
 			ASSERT(phase != AuditPhase::Running && phase != AuditPhase::Failed);
 			if (phase == AuditPhase::Complete) {
 				continue;
@@ -1901,7 +1901,6 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 	    .detail("TargetServers", describe(req.targetServers));
 
 	try {
-		// audit->auditMap.insert(req.range, AuditPhase::Running);
 		ErrorOr<AuditStorageState> vResult = wait(ssi.auditStorage.getReplyUnlessFailedFor(
 		    req, /*sustainedFailureDuration=*/2.0, /*sustainedFailureSlope=*/0));
 		if (vResult.isError()) {
@@ -1927,7 +1926,6 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		} else if (audit->retryCount > SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
 			throw audit_storage_failed();
 		} else {
-			// audit->auditMap.insert(req.range, AuditPhase::Failed);
 			wait(delay(1));
 			audit->retryCount++;
 			audit->actors.add(loadAndDispatchAuditRange(self, audit, req.range));
