@@ -41,8 +41,8 @@ standard API and some knowledge of the contents of the system key space.
 #include "fdbclient/MonitorLeader.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr);
-ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx);
+ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr, bool useSystemPriority = false);
+ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx, bool useSystemPriority = false);
 ACTOR Future<Void> waitForFullReplication(Database cx);
 
 struct IQuorumChange : ReferenceCounted<IQuorumChange> {

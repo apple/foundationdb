@@ -5573,11 +5573,14 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	state Reference<BlobWorkerData> self(new BlobWorkerData(bwInterf.id(), dbInfo, cx, persistentData));
 	self->id = bwInterf.id();
 	self->locality = bwInterf.locality;
+
+	TraceEvent("BlobWorkerInitStart", self->id).detail("Recovering", false).log();
+
 	try {
 		// Since the blob worker gets initalized through the blob manager it is more reliable to fetch the encryption
 		// state using the DB Config rather than passing it through the initalization request for the blob manager and
 		// blob worker
-		state Future<DatabaseConfiguration> configFuture = getDatabaseConfiguration(cx);
+		state Future<DatabaseConfiguration> configFuture = getDatabaseConfiguration(cx, true);
 
 		if (self->storage) {
 			wait(self->storage->init());
@@ -5657,6 +5660,8 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	state Reference<BlobWorkerData> self(new BlobWorkerData(bwInterf.id(), dbInfo, cx, persistentData));
 	self->id = bwInterf.id();
 	self->locality = bwInterf.locality;
+	TraceEvent("BlobWorkerInitStart", self->id).detail("Recovering", true).log();
+
 	try {
 		wait(self->storage->init());
 		wait(self->storage->commit());
@@ -5670,7 +5675,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		// Since the blob worker gets initalized through the blob manager it is more reliable to fetch the encryption
 		// state using the DB Config rather than passing it through the initalization request for the blob manager and
 		// blob worker
-		state Future<DatabaseConfiguration> configFuture = getDatabaseConfiguration(cx);
+		state Future<DatabaseConfiguration> configFuture = getDatabaseConfiguration(cx, true);
 
 		if (BW_DEBUG) {
 			printf("Initializing blob worker s3 stuff\n");
