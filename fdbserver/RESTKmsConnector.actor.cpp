@@ -109,6 +109,12 @@ bool isKmsNotReachable(const int errCode) {
 	return errCode == error_code_timed_out || errCode == error_code_connection_failed;
 }
 
+void removeTrailingChar(std::string& str, char c) {
+	while (!str.empty() && str[str.length() - 1] == c) {
+		str.erase(str.length() - 1);
+	}
+}
+
 } // namespace
 
 struct KmsUrlCtx {
@@ -1079,6 +1085,10 @@ ACTOR Future<Void> procureValidationTokensFromFiles(Reference<RESTKmsConnectorCt
 		memcpy(tokenCtx.value.data(), buff.begin(), fSize);
 		tokenCtx.filePath = tokenFile;
 
+		if (SERVER_KNOBS->REST_KMS_CONNECTOR_REMOVE_TRAILING_NEWLINE) {
+			removeTrailingChar(tokenCtx.value, '\n');
+		}
+
 		// NOTE: avoid logging token-value to prevent token leaks in log files..
 		TraceEvent("RESTValidationTokenReadFile", ctx->uid)
 		    .detail("TokenName", tokenCtx.name)
@@ -1245,19 +1255,25 @@ ACTOR Future<Void> testMultiValidationFileTokenFiles(Reference<RESTKmsConnectorC
 	state std::unordered_map<std::string, std::shared_ptr<platform::TmpFile>> tokenFiles;
 	state std::unordered_map<std::string, std::string> tokenNameValueMap;
 	state std::string tokenDetailsStr;
+	state bool newLineAppended = BUGGIFY ? true : false;
 
 	deterministicRandom()->randomBytes(mutateString(buff), tokenLen);
+	std::string token((char*)buff.begin(), tokenLen);
+	std::string tokenWithNewLine(token);
+	tokenWithNewLine.push_back('\n');
 
 	for (int i = 1; i <= numFiles; i++) {
 		std::string tokenName = std::to_string(i);
-		std::shared_ptr<platform::TmpFile> tokenfile = prepareTokenFile(buff.begin(), tokenLen);
+		std::shared_ptr<platform::TmpFile> tokenfile =
+		    newLineAppended ? prepareTokenFile(reinterpret_cast<uint8_t*>(tokenWithNewLine.data()), tokenLen + 1)
+		                    : prepareTokenFile(reinterpret_cast<uint8_t*>(token.data()), tokenLen);
 
-		std::string token((char*)buff.begin(), tokenLen);
 		tokenFiles.emplace(tokenName, tokenfile);
-		tokenNameValueMap.emplace(std::to_string(i), token);
 		tokenDetailsStr.append(tokenName).append(TOKEN_NAME_FILE_SEP).append(tokenfile->getFileName());
 		if (i < numFiles)
 			tokenDetailsStr.append(TOKEN_TUPLE_SEP);
+
+		tokenNameValueMap.emplace(std::to_string(i), token);
 	}
 
 	wait(procureValidationTokensFromFiles(ctx, tokenDetailsStr));
@@ -1276,6 +1292,8 @@ ACTOR Future<Void> testMultiValidationFileTokenFiles(Reference<RESTKmsConnectorC
 		ASSERT_EQ(tokenCtx.filePath.compare(tokenFiles[tokenCtx.name]->getFileName()), 0);
 		ASSERT_NE(tokenCtx.getReadTS(), 0);
 	}
+
+	CODE_PROBE(newLineAppended, "RESTKmsConnector remove trailing newline");
 
 	return Void();
 }
@@ -1778,6 +1796,7 @@ void setKnobs() {
 	g_knobs.setKnob("rest_kms_current_cipher_request_version", KnobValueRef::create(int{ 1 }));
 	g_knobs.setKnob("rest_kms_current_blob_metadata_request_version", KnobValueRef::create(int{ 1 }));
 	g_knobs.setKnob("rest_log_level", KnobValueRef::create(int{ 3 }));
+	g_knobs.setKnob("rest_kms_connector_remove_trailing_newline", KnobValueRef::create(bool{ true }));
 }
 
 } // namespace
