@@ -5226,11 +5226,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			    .detail("ShardInfoAtVersion", VersionBeforeWait)
 			    .detail("ServerKeysAtVersion", toReadVersion);
 		} catch (Error& e) {
-			if (e.code() == error_code_transaction_too_old) {
-				req.reply.sendError(e);
-			} else {
-				req.reply.sendError(audit_storage_failed());
-			}
+			req.reply.sendError(audit_storage_failed());
 			return Void(); // give up for many retries or transaction too old
 		}
 

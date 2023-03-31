@@ -1926,12 +1926,6 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 			audit->foundError = true;
 		} else if (audit->retryCount > SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
 			throw audit_storage_failed();
-		} else if (e.code() == error_code_transaction_too_old) {
-			// some storage server fail behind, do not retry
-			// we set audit->retryCount to the max
-			// then this audit will not retry
-			audit->retryCount = SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX + 1;
-			throw audit_storage_failed();
 		} else {
 			// audit->auditMap.insert(req.range, AuditPhase::Failed);
 			wait(delay(1));
