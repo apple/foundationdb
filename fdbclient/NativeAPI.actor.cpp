@@ -8264,7 +8264,6 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 	TraceEvent("ExclusionSafetyCheckBegin")
 	    .detail("NumExclusion", exclusions.size())
 	    .detail("Exclusions", describe(exclusions));
-	state ExclusionSafetyCheckRequest req(exclusions);
 	state bool ddCheck;
 	try {
 		loop {
@@ -8273,7 +8272,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 				when(ExclusionSafetyCheckReply _ddCheck =
 				         wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
 				                               &CommitProxyInterface::exclusionSafetyCheckReq,
-				                               req,
+				                               ExclusionSafetyCheckRequest(exclusions),
 				                               cx->taskID))) {
 					ddCheck = _ddCheck.safe;
 					break;
