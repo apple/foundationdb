@@ -131,31 +131,52 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 		// "Exclude" same address multiple times, and only the first excluson should trigger a system metadata update.
 		{
 			try {
-				std::vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
-				state std::string workerAddress = "123.4.56.7:9876"; // Use a random address to not impact the cluster.
+				state std::string excludeWorker;
+				state std::string excludeCommand;
+				state std::string failedCommand;
+				state KeyRef excludeVersionKey;
+				state KeyRef failedVersionKey;
+				if (deterministicRandom()->coinflip()) {
+					excludeWorker = "123.4.56.7:9876"; // Use a random address to not impact the cluster.
+					excludeCommand = "exclude";
+					failedCommand = "failed";
+					excludeVersionKey = excludedServersVersionKey;
+					failedVersionKey = failedServersVersionKey;
+				} else {
+					excludeWorker = "locality_zoneid:12345"; // Use a random locality to not impact the cluster.
+					excludeCommand = "excludedlocality";
+					failedCommand = "failedlocality";
+					excludeVersionKey = excludedLocalityVersionKey;
+					failedVersionKey = failedLocalityVersionKey;
+				}
+
+				TraceEvent(SevDebug, "ManagementAPITestExclude")
+				    .detail("ExcludeWorker", excludeWorker)
+				    .detail("ExcludeCommand", excludeCommand)
+				    .detail("ExcludeFailedCommand", failedCommand);
 
 				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				state Optional<Value> versionKey0 = wait(tx->get(excludedServersVersionKey));
+				state Optional<Value> versionKey0 = wait(tx->get(excludeVersionKey));
 
 				state Optional<Value> versionKey1 =
-				    wait(runExcludeAndGetVersionKey(tx, workerAddress, "exclude", excludedServersVersionKey));
+				    wait(runExcludeAndGetVersionKey(tx, excludeWorker, excludeCommand, excludeVersionKey));
 				ASSERT(versionKey1.present());
 				ASSERT(versionKey0 != versionKey1);
 				Optional<Value> versionKey2 =
-				    wait(runExcludeAndGetVersionKey(tx, workerAddress, "exclude", excludedServersVersionKey));
+				    wait(runExcludeAndGetVersionKey(tx, excludeWorker, excludeCommand, excludeVersionKey));
 				ASSERT(versionKey2.present());
 				// Exclude the same worker twice. The second exclusion shouldn't trigger a system metadata update.
 				ASSERT(versionKey1 == versionKey2);
 
 				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				state Optional<Value> versionKey3 = wait(tx->get(failedServersVersionKey));
+				state Optional<Value> versionKey3 = wait(tx->get(failedVersionKey));
 
 				state Optional<Value> versionKey4 =
-				    wait(runExcludeAndGetVersionKey(tx, workerAddress, "failed", failedServersVersionKey));
+				    wait(runExcludeAndGetVersionKey(tx, excludeWorker, failedCommand, failedVersionKey));
 				ASSERT(versionKey4.present());
 				ASSERT(versionKey3 != versionKey4);
 				Optional<Value> versionKey5 =
-				    wait(runExcludeAndGetVersionKey(tx, workerAddress, "failed", failedServersVersionKey));
+				    wait(runExcludeAndGetVersionKey(tx, excludeWorker, failedCommand, failedVersionKey));
 				ASSERT(versionKey5.present());
 				// Exclude the same worker twice. The second exclusion shouldn't trigger a system metadata update.
 				ASSERT(versionKey4 == versionKey5);
