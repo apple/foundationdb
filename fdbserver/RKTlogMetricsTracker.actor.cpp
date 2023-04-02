@@ -43,10 +43,12 @@ public:
 				     IFailureMonitor::failureMonitor().onStateEqual(tli.getQueuingMetrics.getEndpoint(),
 				                                                    FailureStatus(false)));
 			}
-		} catch (...) {
+		} catch (Error& e) {
 			// including cancellation
-			self->tlogQueueInfo.erase(myQueueInfo);
-			throw;
+			if (e.code() != error_code_actor_cancelled) {
+				self->tlogQueueInfo.erase(myQueueInfo);
+			}
+			throw e;
 		}
 	}
 
