@@ -136,6 +136,8 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 				state std::string failedCommand;
 				state KeyRef excludeVersionKey;
 				state KeyRef failedVersionKey;
+
+				// Test exclude servers and exclude localities randomly.
 				if (deterministicRandom()->coinflip()) {
 					excludeWorker = "123.4.56.7:9876"; // Use a random address to not impact the cluster.
 					excludeCommand = "exclude";
