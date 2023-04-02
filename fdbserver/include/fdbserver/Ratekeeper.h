@@ -28,6 +28,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Smoother.h"
+#include "fdbserver/IRKTlogMetricsTracker.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -94,28 +95,6 @@ public:
 	Optional<double> getTagThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const;
 };
 
-class TLogQueueInfo {
-	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
-	Smoother smoothFreeSpace;
-	Smoother smoothTotalSpace;
-
-public:
-	TLogQueuingMetricsReply lastReply;
-	bool valid;
-	UID id;
-
-	// Accessor methods for Smoothers
-	double getSmoothFreeSpace() const { return smoothFreeSpace.smoothTotal(); }
-	double getSmoothTotalSpace() const { return smoothTotalSpace.smoothTotal(); }
-	double getSmoothDurableBytes() const { return smoothDurableBytes.smoothTotal(); }
-	double getSmoothInputBytesRate() const { return smoothInputBytes.smoothRate(); }
-	double getVerySmoothDurableBytesRate() const { return verySmoothDurableBytes.smoothRate(); }
-
-	TLogQueueInfo(UID id);
-	Version getLastCommittedVersion() const { return lastReply.v; }
-	void update(TLogQueuingMetricsReply const& reply, Smoother& smoothTotalDurableBytes);
-};
-
 struct RatekeeperLimits {
 	double tpsLimit;
 	Int64MetricHandle tpsLimitMetric;
@@ -178,7 +157,7 @@ class Ratekeeper {
 	Database db;
 
 	Map<UID, StorageQueueInfo> storageQueueInfo;
-	Map<UID, TLogQueueInfo> tlogQueueInfo;
+	std::unique_ptr<IRKTlogMetricsTracker> tlogMetricsTracker;
 
 	std::map<UID, Ratekeeper::GrvProxyInfo> grvProxyInfo;
 	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
@@ -223,7 +202,7 @@ class Ratekeeper {
 		return recoveryDuration;
 	}
 
-	Ratekeeper(UID id, Database db);
+	Ratekeeper(UID, Database, Reference<AsyncVar<ServerDBInfo> const>);
 
 	Future<Void> configurationMonitor();
 	void updateCommitCostEstimation(UIDTransactionTagMap<TransactionCommitCostEstimation> const& costEstimation);
@@ -233,7 +212,6 @@ class Ratekeeper {
 
 	// SOMEDAY: template trackStorageServerQueueInfo and trackTLogQueueInfo into one function
 	Future<Void> trackStorageServerQueueInfo(StorageServerInterface);
-	Future<Void> trackTLogQueueInfo(TLogInterface);
 
 	void tryAutoThrottleTag(TransactionTag, double rate, double busyness, TagThrottledReason);
 	void tryAutoThrottleTag(StorageQueueInfo&, int64_t storageQueue, int64_t storageDurabilityLag);

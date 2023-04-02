@@ -188,34 +188,6 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> trackTLogQueueInfo(Ratekeeper* self, TLogInterface tli) {
-		self->tlogQueueInfo.insert(mapPair(tli.id(), TLogQueueInfo(tli.id())));
-		state Map<UID, TLogQueueInfo>::iterator myQueueInfo = self->tlogQueueInfo.find(tli.id());
-		TraceEvent("RkTracking", self->id).detail("TransactionLog", tli.id());
-		try {
-			loop {
-				ErrorOr<TLogQueuingMetricsReply> reply = wait(tli.getQueuingMetrics.getReplyUnlessFailedFor(
-				    TLogQueuingMetricsRequest(), 0, 0)); // SOMEDAY: or tryGetReply?
-				if (reply.present()) {
-					myQueueInfo->value.update(reply.get(), self->smoothTotalDurableBytes);
-				} else {
-					if (myQueueInfo->value.valid) {
-						TraceEvent("RkTLogDidNotRespond", self->id).detail("TransactionLog", tli.id());
-					}
-					myQueueInfo->value.valid = false;
-				}
-
-				wait(delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE) &&
-				     IFailureMonitor::failureMonitor().onStateEqual(tli.getQueuingMetrics.getEndpoint(),
-				                                                    FailureStatus(false)));
-			}
-		} catch (...) {
-			// including cancellation
-			self->tlogQueueInfo.erase(myQueueInfo);
-			throw;
-		}
-	}
-
 	ACTOR static Future<Void> trackEachStorageServer(
 	    ActorWeakSelfRef<Ratekeeper> self,
 	    FutureStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
@@ -358,13 +330,10 @@ public:
 	}
 
 	ACTOR static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-		state ActorOwningSelfRef<Ratekeeper> pSelf(
-		    new Ratekeeper(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
+		state ActorOwningSelfRef<Ratekeeper> pSelf(new Ratekeeper(
+		    rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True), dbInfo));
 		state Ratekeeper& self = *pSelf;
 		state Future<Void> timeout = Void();
-		state std::vector<Future<Void>> tlogTrackers;
-		state std::vector<TLogInterface> tlogInterfs;
-		state Promise<Void> err;
 		state Future<Void> collection = actorCollection(self.addActor.getFuture());
 
 		TraceEvent("RatekeeperStarting", rkInterf.id());
@@ -381,6 +350,7 @@ public:
 			self.addActor.send(self.monitorBlobWorkers(dbInfo));
 		}
 		self.addActor.send(self.refreshStorageServerCommitCosts());
+		self.addActor.send(self.tlogMetricsTracker->run(self.smoothTotalDurableBytes));
 
 		TraceEvent("RkTLogQueueSizeParameters", rkInterf.id())
 		    .detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG)
@@ -400,12 +370,6 @@ public:
 		        (SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER - SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER) /
 		            ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) +
 		             2.0));
-
-		tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
-		tlogTrackers.reserve(tlogInterfs.size());
-		for (int i = 0; i < tlogInterfs.size(); i++) {
-			tlogTrackers.push_back(splitError(self.trackTLogQueueInfo(tlogInterfs[i]), err));
-		}
 
 		self.remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
 
@@ -542,7 +506,6 @@ public:
 					self.updateCommitCostEstimation(req.ssTrTagCommitCost);
 					req.reply.send(Void());
 				}
-				when(wait(err.getFuture())) {}
 				when(wait(dbInfo->onChange())) {
 					if (!recovering && dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 						recovering = true;
@@ -565,12 +528,6 @@ public:
 						self.version_recovery[recoveryVersion].second = now();
 					}
 
-					if (tlogInterfs != dbInfo->get().logSystemConfig.allLocalLogs()) {
-						tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
-						tlogTrackers = std::vector<Future<Void>>();
-						for (int i = 0; i < tlogInterfs.size(); i++)
-							tlogTrackers.push_back(splitError(self.trackTLogQueueInfo(tlogInterfs[i]), err));
-					}
 					self.remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
 				}
 				when(wait(collection)) {
@@ -614,10 +571,6 @@ Future<Void> Ratekeeper::monitorServerListChange(
 	return RatekeeperImpl::monitorServerListChange(this, serverChanges);
 }
 
-Future<Void> Ratekeeper::trackTLogQueueInfo(TLogInterface tli) {
-	return RatekeeperImpl::trackTLogQueueInfo(this, tli);
-}
-
 Future<Void> Ratekeeper::monitorThrottlingChanges() {
 	return tagThrottler->monitorThrottlingChanges();
 }
@@ -630,7 +583,7 @@ Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<Se
 	return RatekeeperImpl::run(rkInterf, dbInfo);
 }
 
-Ratekeeper::Ratekeeper(UID id, Database db)
+Ratekeeper::Ratekeeper(UID id, Database db, Reference<AsyncVar<ServerDBInfo> const> dbInfo)
   : id(id), db(db), smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
     smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
     smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), actualTpsMetric("Ratekeeper.ActualTPS"_sr),
@@ -658,6 +611,7 @@ Ratekeeper::Ratekeeper(UID id, Database db)
 	} else {
 		tagThrottler = std::make_unique<TagThrottler>(db, id);
 	}
+	tlogMetricsTracker = std::make_unique<RKTlogMetricsTracker>(id, dbInfo);
 }
 
 void Ratekeeper::updateCommitCostEstimation(
@@ -1073,7 +1027,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		}
 
 		Version maxTLVer = std::numeric_limits<Version>::min();
-		for (const auto& it : tlogQueueInfo) {
+		for (const auto& it : tlogMetricsTracker->getTlogQueueInfo()) {
 			auto& tl = it.value;
 			if (!tl.valid)
 				continue;
@@ -1093,7 +1047,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	int64_t worstFreeSpaceTLog = std::numeric_limits<int64_t>::max();
 	int64_t worstStorageQueueTLog = 0;
 	int tlcount = 0;
-	for (auto& it : tlogQueueInfo) {
+	for (auto& it : tlogMetricsTracker->getTlogQueueInfo()) {
 		auto const& tl = it.value;
 		if (!tl.valid)
 			continue;
@@ -1226,7 +1180,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	}
 
 	int64_t totalDiskUsageBytes = 0;
-	for (auto& t : tlogQueueInfo) {
+	for (auto& t : tlogMetricsTracker->getTlogQueueInfo()) {
 		if (t.value.valid) {
 			totalDiskUsageBytes += t.value.lastReply.storageBytes.used;
 		}
@@ -1387,35 +1341,6 @@ Optional<double> StorageQueueInfo::getTagThrottlingRatio(int64_t storageTargetBy
 	} else {
 		return std::max(
 		    0.0, static_cast<double>((storageTargetBytes + storageSpringBytes) - storageQueue) / storageSpringBytes);
-	}
-}
-
-TLogQueueInfo::TLogQueueInfo(UID id)
-  : valid(false), id(id), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT) {
-	// FIXME: this is a tacky workaround for a potential uninitialized use in trackTLogQueueInfo (copied
-	// from storageQueueInfO)
-	lastReply.instanceID = -1;
-}
-
-void TLogQueueInfo::update(TLogQueuingMetricsReply const& reply, Smoother& smoothTotalDurableBytes) {
-	valid = true;
-	auto prevReply = std::move(lastReply);
-	lastReply = reply;
-	if (prevReply.instanceID != reply.instanceID) {
-		smoothDurableBytes.reset(reply.bytesDurable);
-		verySmoothDurableBytes.reset(reply.bytesDurable);
-		smoothInputBytes.reset(reply.bytesInput);
-		smoothFreeSpace.reset(reply.storageBytes.available);
-		smoothTotalSpace.reset(reply.storageBytes.total);
-	} else {
-		smoothTotalDurableBytes.addDelta(reply.bytesDurable - prevReply.bytesDurable);
-		smoothDurableBytes.setTotal(reply.bytesDurable);
-		verySmoothDurableBytes.setTotal(reply.bytesDurable);
-		smoothInputBytes.setTotal(reply.bytesInput);
-		smoothFreeSpace.setTotal(reply.storageBytes.available);
-		smoothTotalSpace.setTotal(reply.storageBytes.total);
 	}
 }
 
