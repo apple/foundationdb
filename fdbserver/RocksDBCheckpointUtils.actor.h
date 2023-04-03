@@ -28,51 +28,100 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/ServerCheckpoint.actor.h"
 #include "flow/flow.h"
+#include "rocksdb/types.h"
+#include "rocksdb/options.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
 // Copied from rocksdb/metadata.h, so that we can add serializer.
+//
+// Basic identifiers and metadata for a file in a DB. This only includes
+// information considered relevant for taking backups, checkpoints, or other
+// services relating to DB file storage.
+// This is only appropriate for immutable files, such as SST files or all
+// files in a backup. See also LiveFileStorageInfo.
 struct SstFileMetaData {
 	constexpr static FileIdentifier file_identifier = 3804347;
 	SstFileMetaData()
-	  : size(0), file_number(0), smallest_seqno(0), largest_seqno(0), num_reads_sampled(0), being_compacted(false),
-	    num_entries(0), num_deletions(0), temperature(0), oldest_blob_file_number(0), oldest_ancester_time(0),
-	    file_creation_time(0) {}
+	  : file_number(0), size(0), temperature(rocksdb::Temperature::kUnknown),
+       smallest_seqno(0), largest_seqno(0), num_reads_sampled(0),
+       being_compacted(false), num_entries(0), num_deletions(0),
+       oldest_blob_file_number(0), oldest_ancester_time(0),
+       file_creation_time(0) {}
 
 	SstFileMetaData(const std::string& _file_name,
 	                uint64_t _file_number,
-	                const std::string& _path,
+	                const std::string& _directory,
 	                size_t _size,
-	                uint64_t _smallest_seqno,
-	                uint64_t _largest_seqno,
+	                rocksdb::SequenceNumber _smallest_seqno,
+	                rocksdb::SequenceNumber _largest_seqno,
 	                const std::string& _smallestkey,
 	                const std::string& _largestkey,
 	                uint64_t _num_reads_sampled,
 	                bool _being_compacted,
-	                int _temperature,
+	                rocksdb::Temperature _temperature,
 	                uint64_t _oldest_blob_file_number,
 	                uint64_t _oldest_ancester_time,
 	                uint64_t _file_creation_time,
 	                std::string& _file_checksum,
 	                std::string& _file_checksum_func_name)
-	  : size(_size), name(_file_name), file_number(_file_number), db_path(_path), smallest_seqno(_smallest_seqno),
-	    largest_seqno(_largest_seqno), smallestkey(_smallestkey), largestkey(_largestkey),
-	    num_reads_sampled(_num_reads_sampled), being_compacted(_being_compacted), num_entries(0), num_deletions(0),
-	    temperature(_temperature), oldest_blob_file_number(_oldest_blob_file_number),
-	    oldest_ancester_time(_oldest_ancester_time), file_creation_time(_file_creation_time),
-	    file_checksum(_file_checksum), file_checksum_func_name(_file_checksum_func_name) {}
+	  : smallest_seqno(_smallest_seqno), largest_seqno(_largest_seqno), smallestkey(_smallestkey),
+	    largestkey(_largestkey), num_reads_sampled(_num_reads_sampled), being_compacted(_being_compacted),
+	    num_entries(0), num_deletions(0), oldest_blob_file_number(_oldest_blob_file_number),
+	    oldest_ancester_time(_oldest_ancester_time), file_creation_time(_file_creation_time) {
+		if (!_file_name.empty()) {
+			if (_file_name[0] == '/') {
+				relative_filename = _file_name.substr(1);
+				name = _file_name; // Deprecated field
+			} else {
+				relative_filename = _file_name;
+				name = std::string("/") + _file_name; // Deprecated field
+			}
+			assert(relative_filename.size() + 1 == name.size());
+			assert(relative_filename[0] != '/');
+			assert(name[0] == '/');
+		}
+		directory = _directory;
+		db_path = _directory; // Deprecated field
+		file_number = _file_number;
+		file_type = rocksdb::kTableFile;
+		size = _size;
+		temperature = _temperature;
+		file_checksum = _file_checksum;
+		file_checksum_func_name = _file_checksum_func_name;
+	}
 
-	// File size in bytes.
-	size_t size;
-	// The name of the file.
-	std::string name;
-	// The id of the file.
-	uint64_t file_number;
-	// The full path where the file locates.
-	std::string db_path;
+	// The name of the file within its directory (e.g. "123456.sst")
+	std::string relative_filename;
+	// The directory containing the file, without a trailing '/'. This could be
+	// a DB path, wal_dir, etc.
+	std::string directory;
 
-	uint64_t smallest_seqno; // Smallest sequence number in file.
-	uint64_t largest_seqno; // Largest sequence number in file.
+	// The id of the file within a single DB. Set to 0 if the file does not have
+	// a number (e.g. CURRENT)
+	uint64_t file_number = 0;
+	// The type of the file as part of a DB.
+	rocksdb::FileType file_type = rocksdb::kTempFile;
+
+	// File size in bytes. See also `trim_to_size`.
+	uint64_t size = 0;
+
+	// This feature is experimental and subject to change.
+	rocksdb::Temperature temperature = rocksdb::Temperature::kUnknown;
+
+	// The checksum of a SST file, the value is decided by the file content and
+	// the checksum algorithm used for this SST file. The checksum function is
+	// identified by the file_checksum_func_name. If the checksum function is
+	// not specified, file_checksum is "0" by default.
+	std::string file_checksum;
+
+	// The name of the checksum function used to generate the file checksum
+	// value. If file checksum is not enabled (e.g., sst_file_checksum_func is
+	// null), file_checksum_func_name is UnknownFileChecksumFuncName, which is
+	// "Unknown".
+	std::string file_checksum_func_name;
+	rocksdb::SequenceNumber smallest_seqno; // Smallest sequence number in file.
+	rocksdb::SequenceNumber largest_seqno; // Largest sequence number in file.
 	std::string smallestkey; // Smallest user defined key in the file.
 	std::string largestkey; // Largest user defined key in the file.
 	uint64_t num_reads_sampled; // How many times the file is read.
@@ -80,9 +129,6 @@ struct SstFileMetaData {
 
 	uint64_t num_entries;
 	uint64_t num_deletions;
-
-	// This feature is experimental and subject to change.
-	int temperature;
 
 	uint64_t oldest_blob_file_number; // The id of the oldest blob file
 	                                  // referenced by the file.
@@ -98,17 +144,13 @@ struct SstFileMetaData {
 	// SystemClock::GetCurrentTime(). 0 if the information is not available.
 	uint64_t file_creation_time;
 
-	// The checksum of a SST file, the value is decided by the file content and
-	// the checksum algorithm used for this SST file. The checksum function is
-	// identified by the file_checksum_func_name. If the checksum function is
-	// not specified, file_checksum is "0" by default.
-	std::string file_checksum;
+	// DEPRECATED: The name of the file within its directory with a
+	// leading slash (e.g. "/123456.sst"). Use relative_filename from base struct
+	// instead.
+	std::string name;
 
-	// The name of the checksum function used to generate the file checksum
-	// value. If file checksum is not enabled (e.g., sst_file_checksum_func is
-	// null), file_checksum_func_name is UnknownFileChecksumFuncName, which is
-	// "Unknown".
-	std::string file_checksum_func_name;
+	// DEPRECATED: replaced by `directory` in base struct
+	std::string db_path;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
