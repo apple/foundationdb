@@ -10,7 +10,8 @@
 # the debian-policy package
 
 if [ "$1" = upgrade ]; then
-    invoke-rc.d foundationdb stop || :
+    # XDB-130: Restart FDB now is conditional, so do not stop it here
+    # invoke-rc.d foundationdb stop || :
     # old versions could leave this behind
     rm -f /usr/lib/foundationdb/argparse.py /usr/lib/foundationdb/argparse.pyc
 fi
