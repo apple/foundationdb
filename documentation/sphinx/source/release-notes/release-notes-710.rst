@@ -15,6 +15,8 @@ Release Notes
 * Fixed unnecessary transaction system recovery when excluding the servers that are already excluded/failed. `(PR #9809) <https://github.com/apple/foundationdb/pull/9809>`_
 * Fixed the exclusion of stateless processes by skipping the free capacity check. `(PR #9789) <https://github.com/apple/foundationdb/pull/9789>`_
 * Fixed an issue where the new worker cannot get ServerDBInfo update. `(PR #9778) <https://github.com/apple/foundationdb/pull/9778>`_
+* Added RocksDB bloom filter knobs. `(PR #9770) <https://github.com/apple/foundationdb/pull/9770>`_
+* Upgraded RocksDB to version 7.10.2. `(PR #9829) <https://github.com/apple/foundationdb/pull/9829>`_
 
 7.1.29
 ======
