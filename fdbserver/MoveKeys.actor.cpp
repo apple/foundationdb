@@ -1458,7 +1458,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						}
 
 						// Update dest servers for this range to be equal to servers
-						krmSetPreviouslyEmptyRange(&(tr.getTransaction()),
+						krmSetPreviouslyEmptyRange(&tr,
 						                           keyServersPrefix,
 						                           rangeIntersectKeys,
 						                           keyServersValue(src, servers, srcId, dataMoveId),
