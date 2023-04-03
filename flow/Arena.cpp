@@ -996,6 +996,10 @@ TEST_CASE("/flow/Arena/OptionalMap") {
 	return Void();
 }
 
+// TODO: remove the following `#if 0 ... #endif` once we come up with a way of reliably, temporarily swapping
+// Arena alloc/free implementation for the duration of a test run.
+// See https://github.com/apple/foundationdb/pull/9865/files#r1155735635.
+#if 0
 TEST_CASE("/flow/Arena/Secure") {
 #if !defined(USE_SANITIZER) && !defined(VALGRIND)
 	// Note: Assumptions underlying this unit test are speculative.
@@ -1053,3 +1057,4 @@ TEST_CASE("/flow/Arena/Secure") {
 #endif // !defined(USE_SANITIZER) && !defind(VALGRIND)
 	return Void();
 }
+#endif // 0
