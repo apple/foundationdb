@@ -1926,32 +1926,25 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 		TraceEvent(SevVerbose, "CCTriggerAuditStorageBegin", self->id)
 		    .detail("Range", req.range)
 		    .detail("AuditType", req.type)
-		    .detail("Async", req.async)
 		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
-		TriggerAuditRequest fReq(req.getType(), req.range, req.async);
+		TriggerAuditRequest fReq(req.getType(), req.range);
 		UID auditId_ = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
 		auditId = auditId_;
 		TraceEvent(SevVerbose, "CCTriggerAuditStorageEnd", self->id)
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)
-		    .detail("AuditType", req.type)
-		    .detail("Async", req.async);
-		if (!req.reply.isSet()) {
-			req.reply.send(auditId);
-		}
+		    .detail("AuditType", req.type);
+		req.reply.send(auditId);
 	} catch (Error& e) {
 		TraceEvent(SevInfo, "CCTriggerAuditStorageFailed", self->id)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)
-		    .detail("AuditType", req.type)
-		    .detail("Async", req.async);
-		if (!req.reply.isSet()) {
-			if (e.code() == error_code_broken_promise) {
-				req.reply.sendError(request_maybe_delivered()); // we do not know whether the result is persist
-			} else {
-				req.reply.sendError(audit_storage_failed());
-			}
+		    .detail("AuditType", req.type);
+		if (e.code() == error_code_broken_promise) {
+			req.reply.sendError(request_maybe_delivered()); // we do not know whether the result is persist
+		} else {
+			req.reply.sendError(audit_storage_failed());
 		}
 	}
 
@@ -1964,8 +1957,7 @@ ACTOR Future<Void> handleTriggerAuditStorage(ClusterControllerData* self, Cluste
 		TraceEvent(SevVerbose, "CCTriggerAuditStorageReceived", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("Range", req.range)
-		    .detail("AuditType", req.type)
-		    .detail("Async", req.async);
+		    .detail("AuditType", req.type);
 		self->addActor.send(triggerAuditStorage(self, req));
 	}
 }

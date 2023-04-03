@@ -73,29 +73,36 @@ struct ValidateStorage : TestWorkload {
 		return _start(this, cx);
 	}
 
-	ACTOR Future<Void> auditStorageForType(Database cx, AuditType type) {
-		state UID auditId;
+	ACTOR Future<UID> auditStorageForType(Database cx, AuditType type, std::string context) {
 		loop {
 			try {
-				UID auditId_ = wait(auditStorage(cx->getConnectionRecord(),
-				                                 allKeys,
-				                                 type,
-				                                 /*timeoutSecond=*/120,
-				                                 /*async=*/true));
-				auditId = auditId_;
-				TraceEvent("TestStartValidateFirstEnd").detail("AuditID", auditId).detail("AuditType", type);
+				state UID auditId = wait(auditStorage(cx->getConnectionRecord(),
+				                                      allKeys,
+				                                      type,
+				                                      /*timeoutSecond=*/300));
+				TraceEvent("TestAuditStorageTriggered")
+				    .detail("Context", context)
+				    .detail("AuditID", auditId)
+				    .detail("AuditType", type);
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevWarn, "TestStartAuditStorageFirstError").errorUnsuppressed(e).detail("AuditType", type);
+				TraceEvent(SevWarn, "TestAuditStorageError")
+				    .errorUnsuppressed(e)
+				    .detail("Context", context)
+				    .detail("AuditType", type);
 				wait(delay(1));
 			}
 		}
 		loop {
 			try {
-				AuditStorageState auditState = wait(getAuditState(cx, type, auditId));
+				state AuditStorageState auditState = wait(getAuditState(cx, type, auditId));
 				if (auditState.getPhase() == AuditPhase::Complete) {
 					break;
 				} else if (auditState.getPhase() == AuditPhase::Running) {
+					TraceEvent("TestAuditStorageWait")
+					    .detail("Context", context)
+					    .detail("AuditID", auditId)
+					    .detail("AuditType", type);
 					wait(delay(30));
 					continue;
 				} else if (auditState.getPhase() == AuditPhase::Error) {
@@ -106,29 +113,32 @@ struct ValidateStorage : TestWorkload {
 					UNREACHABLE();
 				}
 			} catch (Error& e) {
-				TraceEvent("WaitAuditStorageError")
+				TraceEvent("TestAuditStorageWaitError")
 				    .errorUnsuppressed(e)
+				    .detail("Context", context)
 				    .detail("AuditID", auditId)
-				    .detail("AuditType", type);
+				    .detail("AuditType", type)
+				    .detail("AuditState", auditState.toString());
 				wait(delay(1));
 			}
 		}
-		loop {
-			try {
-				UID auditId_ = wait(auditStorage(cx->getConnectionRecord(),
-				                                 allKeys,
-				                                 type,
-				                                 /*timeoutSeconds=*/120,
-				                                 /*async=*/false));
-				ASSERT(auditId_ != auditId);
-				TraceEvent("TestStartValidateSecondEnd").detail("AuditID", auditId_).detail("AuditType", type);
-				break;
-			} catch (Error& e) {
-				TraceEvent(SevWarn, "TestStartAuditStorageSecondError").errorUnsuppressed(e).detail("AuditType", type);
-				wait(delay(1));
-			}
-		}
+		TraceEvent("TestAuditStorageEnd")
+		    .detail("Context", context)
+		    .detail("AuditID", auditId)
+		    .detail("AuditType", type)
+		    .detail("AuditState", auditState.toString());
+		return auditId;
+	}
 
+	ACTOR Future<Void> testAuditStorageForType(ValidateStorage* self, Database cx, AuditType type) {
+		state UID auditIdA = wait(self->auditStorageForType(cx, type, "FirstRun"));
+		state UID auditIdB = wait(self->auditStorageForType(cx, type, "SecondRun"));
+		if (auditIdA == auditIdB) {
+			TraceEvent(SevError, "TestAuditStorageAuditIdError")
+			    .detail("AuditType", type)
+			    .detail("AuditIDA", auditIdA)
+			    .detail("AuditIDB", auditIdB);
+		}
 		return Void();
 	}
 
@@ -153,16 +163,16 @@ struct ValidateStorage : TestWorkload {
 		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
 		TraceEvent("TestValueVerified");
 
-		wait(self->auditStorageForType(cx, AuditType::ValidateHA));
+		wait(self->testAuditStorageForType(self, cx, AuditType::ValidateHA));
 		TraceEvent("TestValidateHADone");
 
-		wait(self->auditStorageForType(cx, AuditType::ValidateReplica));
+		wait(self->testAuditStorageForType(self, cx, AuditType::ValidateReplica));
 		TraceEvent("TestValidateReplicaDone");
 
-		wait(self->auditStorageForType(cx, AuditType::ValidateLocationMetadata));
+		wait(self->testAuditStorageForType(self, cx, AuditType::ValidateLocationMetadata));
 		TraceEvent("TestValidateShardKeyServersDone");
 
-		wait(self->auditStorageForType(cx, AuditType::ValidateStorageServerShard));
+		wait(self->testAuditStorageForType(self, cx, AuditType::ValidateStorageServerShard));
 		TraceEvent("TestValidateShardSSShardInfoDone");
 
 		return Void();

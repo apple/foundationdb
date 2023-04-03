@@ -1159,104 +1159,59 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 }
 
 ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo, AuditType auditType) {
-	TraceEvent(SevDebug, "AuditStorageCorrectnessBegin");
-	state TriggerAuditRequest req;
-	state bool auditTrigger;
-	state UID auditId;
+	TraceEvent(SevDebug, "AuditStorageCorrectnessBegin").detail("AuditID", auditId).detail("AuditType", auditType);
 	state Database cx;
-	state Optional<AuditStorageState> readLatestResult;
-
+	state UID auditId;
+	state AuditStorageState auditState;
 	loop {
 		try {
-			req = TriggerAuditRequest(auditType, allKeys, true);
+			TriggerAuditRequest req(auditType, allKeys);
 			UID auditId_ =
-			    wait(timeoutError(dbInfo->get().clusterInterface.clientInterface.triggerAudit.getReply(req), 120));
+			    wait(timeoutError(dbInfo->get().clusterInterface.clientInterface.triggerAudit.getReply(req), 300));
 			auditId = auditId_;
-			auditTrigger = true;
-			TraceEvent(SevDebug, "AuditStorageCorrectnessTriggered").detail("AuditID", auditId);
+			TraceEvent(SevDebug, "AuditStorageCorrectnessTriggered")
+			    .detail("AuditID", auditId)
+			    .detail("AuditType", auditType);
 			break;
 		} catch (Error& e) {
-			if (e.code() == error_code_timed_out) {
-				TraceEvent(SevDebug, "AuditStorageCorrectnessTimedout")
-				    .detail("Range", req.range)
-				    .detail("AuditType", req.getType());
-				auditTrigger = false;
+			TraceEvent(SevWarn, "AuditStorageCorrectnessTriggerError")
+			    .errorUnsuppressed(e)
+			    .detail("AuditID", auditId)
+			    .detail("AuditType", auditType);
+			wait(delay(1));
+		}
+	}
+	loop {
+		try {
+			cx = openDBOnServer(dbInfo);
+			AuditStorageState auditState_ = wait(getAuditState(cx, auditType, auditId));
+			auditState = auditState_;
+			if (auditState.getPhase() == AuditPhase::Complete) {
+				break;
+			} else if (auditState.getPhase() == AuditPhase::Running) {
+				TraceEvent("AuditStorageCorrectnessWait").detail("AuditID", auditId).detail("AuditType", auditType);
+				wait(delay(30));
+				continue;
+			} else if (auditState.getPhase() == AuditPhase::Error) {
+				break;
+			} else if (auditState.getPhase() == AuditPhase::Failed) {
 				break;
 			} else {
-				TraceEvent(SevWarn, "AuditStorageCorrectnessTriggerError").errorUnsuppressed(e);
-				wait(delay(1));
+				UNREACHABLE();
 			}
+		} catch (Error& e) {
+			TraceEvent("AuditStorageCorrectnessWaitError")
+			    .errorUnsuppressed(e)
+			    .detail("AuditID", auditId)
+			    .detail("AuditType", auditType)
+			    .detail("AuditState", auditState.toString());
+			wait(delay(1));
 		}
 	}
-
-	if (auditTrigger) {
-		loop {
-			try {
-				cx = openDBOnServer(dbInfo);
-				TraceEvent(SevDebug, "AuditStorageCorrectnessCheck").detail("AuditID", auditId);
-				AuditStorageState auditState = wait(getAuditState(cx, req.getType(), auditId));
-				TraceEvent(SevInfo, "AuditStorageCorrectnessResult").detail("AuditStorageState", auditState.toString());
-				const AuditPhase phase = auditState.getPhase();
-				if (phase == AuditPhase::Running) {
-					wait(delay(30));
-				} else if (phase == AuditPhase::Failed) {
-					TraceEvent(SevWarnAlways, "AuditStorageCorrectnessFailed").detail("AuditID", auditId);
-					break;
-				} else if (phase == AuditPhase::Error) {
-					TraceEvent(SevError, "AuditStorageCorrectnessError").detail("AuditID", auditId);
-					break;
-				} else {
-					ASSERT(phase == AuditPhase::Complete);
-					break;
-				}
-			} catch (Error& e) {
-				TraceEvent("AuditStorageCorrectnessCheckError").errorUnsuppressed(e).detail("AuditID", auditId);
-				wait(delay(1));
-			}
-		}
-	} else {
-		loop {
-			try {
-				cx = openDBOnServer(dbInfo);
-				TraceEvent(SevDebug, "AuditStorageCorrectnessReadBegin");
-				std::vector<AuditStorageState> auditStates = wait(getLatestAuditStates(cx, req.getType(), 120));
-				readLatestResult = Optional<AuditStorageState>();
-				for (const auto& auditState : auditStates) {
-					if (auditState.range.contains(req.range)) {
-						if (!readLatestResult.present() ||
-						    (readLatestResult.present() && auditState.id > readLatestResult.get().id)) {
-							readLatestResult = auditState;
-						}
-					}
-				}
-				if (readLatestResult.present()) {
-					if (readLatestResult.get().getPhase() == AuditPhase::Running) {
-						TraceEvent(SevDebug, "AuditStorageCorrectnessReadWaitForRunning")
-						    .detail("AuditStorageState", readLatestResult.get().toString());
-						wait(delay(30));
-						continue;
-					}
-					ASSERT(readLatestResult.get().getPhase() == AuditPhase::Complete ||
-					       readLatestResult.get().getPhase() == AuditPhase::Failed);
-					if (readLatestResult.get().getPhase() == AuditPhase::Failed) {
-						TraceEvent(SevWarnAlways, "AuditStorageCorrectnessReadLatestFailed")
-						    .detail("AuditStorageState", readLatestResult.get().toString());
-					} else {
-						ASSERT(readLatestResult.get().getPhase() == AuditPhase::Complete);
-						TraceEvent("AuditStorageCorrectnessReadLatestResult")
-						    .detail("AuditStorageState", readLatestResult.get().toString());
-					}
-				} else {
-					TraceEvent(SevWarnAlways, "AuditStorageCorrectnessReadLatestNotFound");
-					wait(delay(30));
-				}
-				break;
-			} catch (Error& e) {
-				TraceEvent("AuditStorageCorrectnessReadLatestError").errorUnsuppressed(e);
-				wait(delay(1));
-			}
-		}
-	}
+	TraceEvent("AuditStorageCorrectnessWaitEnd")
+	    .detail("AuditID", auditId)
+	    .detail("AuditType", auditType)
+	    .detail("AuditState", auditState.toString());
 
 	return Void();
 }
@@ -1403,13 +1358,13 @@ ACTOR Future<bool> runTest(Database cx,
 				try {
 					TraceEvent("RunAuditStorage");
 					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateHA), 1000.0));
-					TraceEvent("ValidateHADone");
+					TraceEvent("AuditStorageCorrectnessHADone");
 					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateReplica), 1000.0));
-					TraceEvent("ValidateReplicaDone");
+					TraceEvent("AuditStorageCorrectnessReplicaDone");
 					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateLocationMetadata), 1000.0));
-					TraceEvent("ValidateLocationMetadataDone");
+					TraceEvent("AuditStorageCorrectnessLocationMetadataDone");
 					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateStorageServerShard), 1000.0));
-					TraceEvent("ValidateStorageServerShardDone");
+					TraceEvent("AuditStorageCorrectnessStorageServerShardDone");
 				} catch (Error& e) {
 					ok = false;
 					TraceEvent(SevError, "TestFailure")

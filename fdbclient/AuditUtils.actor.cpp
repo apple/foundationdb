@@ -71,15 +71,26 @@ ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState
 	return auditId;
 }
 
-ACTOR Future<Void> persistAuditState(Database cx, AuditStorageState auditState) {
+ACTOR Future<Void> persistAuditState(Database cx, AuditStorageState auditState, std::string context) {
 	state Transaction tr(cx);
 
 	loop {
 		try {
 			tr.set(auditKey(auditState.getType(), auditState.id), auditStorageStateValue(auditState));
 			wait(tr.commit());
+			TraceEvent(SevDebug, "PersistAuditState", auditState.id)
+			    .detail("AuditID", auditState.id)
+			    .detail("AuditType", auditState.getType())
+			    .detail("AuditKey", auditKey(auditState.getType(), auditState.id))
+			    .detail("Context", context);
 			break;
 		} catch (Error& e) {
+			TraceEvent(SevDebug, "PersistAuditStateError", auditState.id)
+			    .errorUnsuppressed(e)
+			    .detail("AuditID", auditState.id)
+			    .detail("AuditType", auditState.getType())
+			    .detail("AuditKey", auditKey(auditState.getType(), auditState.id))
+			    .detail("Context", context);
 			wait(tr.onError(e));
 		}
 	}
@@ -95,9 +106,17 @@ ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID i
 		try {
 			Optional<Value> res_ = wait(tr.get(auditKey(type, id)));
 			res = res_;
-			TraceEvent("ReadAuditState", id).detail("AuditKey", auditKey(type, id));
+			TraceEvent(SevDebug, "ReadAuditState", id)
+			    .detail("AuditID", id)
+			    .detail("AuditType", type)
+			    .detail("AuditKey", auditKey(type, id));
 			break;
 		} catch (Error& e) {
+			TraceEvent(SevDebug, "ReadAuditStateError", id)
+			    .errorUnsuppressed(e)
+			    .detail("AuditID", id)
+			    .detail("AuditType", type)
+			    .detail("AuditKey", auditKey(type, id));
 			wait(tr.onError(e));
 		}
 	}
