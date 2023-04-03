@@ -325,6 +325,7 @@ public:
 	bool speedUpSimulation;
 	BackupAgentType backupAgents;
 	BackupAgentType drAgents;
+	bool willRestart = false;
 	bool restarted = false;
 	ValidationData validationData;
 
