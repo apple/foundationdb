@@ -906,7 +906,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		self->db.logGenerations = 0;
 		ASSERT(!req.logSystemConfig.oldTLogs.size());
 	} else {
-		self->db.logGenerations = std::max<int>(self->db.logGenerations, req.logSystemConfig.oldTLogs.size());
+		// TODO(zhewu): Remove logGenerations. It is not used anywhere.
+		self->db.logGenerations = req.logSystemConfig.oldTLogs.size();
 	}
 
 	db->masterRegistrationCount = req.registrationCount;
@@ -2692,7 +2693,6 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 
 		TraceEvent("DBInfoStartBroadcast", self->id)
 		    .detail("MasterLifetime", self->db.serverInfo->get().masterLifetime.toString());
-		;
 		choose {
 			when(std::vector<Endpoint> notUpdated =
 			         wait(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, Optional<Endpoint>(), false))) {

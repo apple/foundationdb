@@ -211,6 +211,10 @@ inline std::string describe(const int item) {
 	return format("%d", item);
 }
 
+inline std::string describe(const Version item) {
+	return format("%ld", item);
+}
+
 // Allows describeList to work on a vector of std::string
 std::string describe(const std::string& s);
 

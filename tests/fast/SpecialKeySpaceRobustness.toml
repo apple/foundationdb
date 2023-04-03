@@ -1,6 +1,5 @@
 [configuration]
 tenantModes = ['optional', 'required']
-extraMachineCountDC = 2
 
 [[test]]
 testTitle = 'SpecialKeySpaceRobustnessTest'
