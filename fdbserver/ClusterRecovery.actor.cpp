@@ -457,6 +457,7 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 	    self->configuration; // self-configuration can be changed by configurationMonitor so we need a copy
 	loop {
 		state DBCoreState newState;
+		self->logSystem->purgeOldRecoveredGenerations();
 		self->logSystem->toCoreState(newState);
 		newState.recoveryCount = recoverCount;
 
@@ -478,7 +479,8 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		    .detail("NewState.OldTLogs", newState.oldTLogData.size())
 		    .detail("NewState.EncryptionAtRestMode", newState.encryptionAtRestMode.toString())
 		    .detail("Expected.tlogs",
-		            configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>()));
+		            configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>()))
+		    .detail("RecoveryCount", newState.recoveryCount);
 		wait(self->cstate.write(newState, finalUpdate));
 		if (self->cstateUpdated.canBeSet()) {
 			self->cstateUpdated.send(Void());
@@ -819,6 +821,7 @@ ACTOR Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Refer
 		    .detail("RecoveryCount", self->cstate.myDBState.recoveryCount)
 		    .detail("OldestBackupEpoch", logSystemConfig.oldestBackupEpoch)
 		    .detail("Logs", describe(logSystemConfig.tLogs))
+		    .detail("OldGenerations", logSystemConfig.oldTLogs.size())
 		    .detail("CStateUpdated", self->cstateUpdated.isSet())
 		    .detail("RecoveryTxnVersion", self->recoveryTransactionVersion)
 		    .detail("LastEpochEnd", self->lastEpochEnd);
