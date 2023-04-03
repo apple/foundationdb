@@ -84,7 +84,7 @@ public:
 };
 
 // Tracks the current set of storage servers in a database and periodically
-// pulls throttling-relevant statistics from these tlogs
+// pulls throttling-relevant statistics from these storage servers.
 class RKStorageMetricsTracker : public IRKStorageMetricsTracker {
 	friend class RKStorageMetricsTrackerImpl;
 	ActorCollection actors;
