@@ -20,7 +20,6 @@
 
 // There's something in one of the files below that defines a macros
 // a macro that makes boost interprocess break on Windows.
-#include "flow/Trace.h"
 #define BOOST_DATE_TIME_NO_LIB
 
 #include <algorithm>

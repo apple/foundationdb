@@ -21,7 +21,6 @@
 #include "fdbclient/BlobMetadataUtils.h"
 #include "fdbclient/EncryptKeyProxyInterface.h"
 
-#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "fdbserver/KmsConnector.h"
 #include "fdbserver/KmsConnectorInterface.h"
