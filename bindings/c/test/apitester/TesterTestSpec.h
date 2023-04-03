@@ -56,6 +56,9 @@ struct TestSpec {
 	// rather than on the main thread of the local FDB client library
 	bool fdbCallbacksOnExternalThreads = false;
 
+	// Enable Flow loop profiling (for slow tasks & thread saturation)
+	bool runLoopProfiler = false;
+
 	// Execute each transaction in a separate database instance
 	bool databasePerTransaction = false;
 
@@ -85,6 +88,10 @@ struct TestSpec {
 	// Number of tenants (a random number in the [min,max] range)
 	int minTenants = 0;
 	int maxTenants = 0;
+
+	// Overridden knob values
+	using KnobKeyValues = std::vector<std::pair<std::string, std::string>>;
+	KnobKeyValues knobs;
 
 	// List of workloads with their options
 	std::vector<WorkloadSpec> workloads;

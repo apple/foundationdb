@@ -2693,6 +2693,11 @@ void stopNetwork() {
 		throw network_not_setup();
 
 	TraceEvent("ClientStopNetwork").log();
+
+	if (networkOptions.traceDirectory.present() && networkOptions.runLoopProfilingEnabled) {
+		stopRunLoopProfiler();
+	}
+
 	g_network->stop();
 }
 
