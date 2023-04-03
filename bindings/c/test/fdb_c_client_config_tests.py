@@ -29,6 +29,8 @@ def version_from_str(ver_str):
 
 def api_version_from_str(ver_str):
     ver_tuple = version_from_str(ver_str)
+    if ver_tuple[0] > 70:
+        return ver_tuple[0] * 10000 + ver_tuple[1] * 100
     return ver_tuple[0] * 100 + ver_tuple[1] * 10
 
 
@@ -155,7 +157,6 @@ class ClientConfigTest:
         self.test_cluster_file = self.test_dir.joinpath(
             "{}.cluster".format(random_alphanum_string(16))
         )
-        port = self.cluster.port_provider.get_free_port()
         with open(self.test_cluster_file, "w") as file:
             file.write("abcde:fghijk@")
 
@@ -610,9 +611,9 @@ class ClientTracingTests(unittest.TestCase):
             with_ip=True, version=CURRENT_VERSION, thread_idx=0
         )
         self.find_and_check_event(cur_ver_trace, "ClientStart", ["Machine"], [])
-        prev_ver_trace = self.find_trace_file(
-            with_ip=True, version=PREV_RELEASE_VERSION, thread_idx=0
-        )
+        # prev_ver_trace = self.find_trace_file(
+        #   with_ip=True, version=PREV_RELEASE_VERSION, thread_idx=0
+        # )
         # there have been sporadic check failures in the trace check below, so we comment this out for the time being
         # previous release version was likely not flushing trace correctly when network::stop() is called
         # TODO: re-enable this check when we bump up PREV_RELEASE_VERSION to one where there is such a guarantee
@@ -771,7 +772,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="""
-        Unit tests for running FDB client with different configurations. 
+        Unit tests for running FDB client with different configurations.
         Also accepts python unit tests command line arguments.
         """,
     )

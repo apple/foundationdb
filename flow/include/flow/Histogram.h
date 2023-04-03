@@ -123,13 +123,18 @@ public:
 	}
 
 	inline void sampleSeconds(double delta) {
-		uint64_t delta_usec = (delta * 1000000);
-		if (delta_usec > UINT32_MAX) {
+		// convert to microseconds and truncate to integer
+		double delta_usec = delta * 1e6;
+		if (delta_usec < 0) {
+			// Timers can sometimes go backwards. Clamp to 0.
+			sample(0);
+		} else if (delta_usec > UINT32_MAX) {
 			sample(UINT32_MAX);
 		} else {
-			sample((uint32_t)(delta * 1000000)); // convert to microseconds and truncate to integer
+			sample((uint32_t)delta_usec);
 		}
 	}
+
 	// Histogram buckets samples into linear interval of size 4 percent.
 	inline void samplePercentage(double pct) {
 		ASSERT(pct >= 0.0);

@@ -38,6 +38,7 @@
 #include "flow/DebugTrace.h"
 #include "fdbserver/DDRelocationQueue.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "fdbserver/DDRelocationQueue.h"
 
 #define WORK_FULL_UTILIZATION 10000 // This is not a knob; it is a fixed point scaling factor!
 
