@@ -22,6 +22,21 @@
 #define METACLUSTER_METACLUSTER_H
 #pragma once
 
+// Including this file exposes most of the public Metacluster API. All of the included functionality should be part of
+// the metacluster namespace. It should not be necessary to include any of the below included files directly in any
+// external source file.
+//
+// There are a few headers that may be useful externally and are not exposed here:
+//
+// * MetaclusterUtil.actor.h - provides the metacluster::util namespace that includes some additional utility functions
+// * MetaclusterMetrics.h - some functionality to get basic data about the metacluster for status, etc.
+//
+// A few more headers are useful for testing:
+//
+// * MetaclusterConsistency.actor.h - a metadata consistency check useful for testing of the metacluster
+// * TenantConsistency.actor.h - a metadata consistency check useful for testing of tenants
+// * MetaclusterData.actor.h - functionality to read all metacluster metadata into objects
+
 #include "metacluster/ConfigureCluster.h"
 #include "metacluster/ConfigureTenant.actor.h"
 #include "metacluster/CreateMetacluster.actor.h"
