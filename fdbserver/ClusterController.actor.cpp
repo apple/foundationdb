@@ -2243,10 +2243,9 @@ ACTOR Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, double waitTime) {
+ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self) {
 	// If master fails at the same time, give it a chance to clear master PID.
-	// Also wait to avoid too many consecutive recruits in a small time window.
-	wait(delay(waitTime));
+	wait(delay(0.0));
 
 	TraceEvent("CCEKP_Start", self->id).log();
 	loop {
@@ -2327,18 +2326,21 @@ ACTOR Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
 	state SingletonRecruitThrottler recruitThrottler;
 	loop {
 		if (self->db.serverInfo->get().encryptKeyProxy.present() && !self->recruitEncryptKeyProxy.get()) {
-			choose {
+			loop choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().encryptKeyProxy.get().waitFailure,
 				                            SERVER_KNOBS->ENCRYPT_KEY_PROXY_FAILURE_TIME))) {
-					TraceEvent("CCEKP_Died", self->id);
 					const auto& encryptKeyProxy = self->db.serverInfo->get().encryptKeyProxy;
 					EncryptKeyProxySingleton(encryptKeyProxy).halt(*self, encryptKeyProxy.get().locality.processId());
 					self->db.clearInterf(ProcessClass::EncryptKeyProxyClass);
+					TraceEvent("CCEKP_Died", self->id);
+					break;
 				}
-				when(wait(self->recruitEncryptKeyProxy.onChange())) {}
+				when(wait(self->recruitEncryptKeyProxy.onChange())) {
+					break;
+				}
 			}
 		} else {
-			wait(startEncryptKeyProxy(self, recruitThrottler.newRecruitment()));
+			wait(startEncryptKeyProxy(self));
 		}
 	}
 }
@@ -2434,7 +2436,7 @@ ACTOR Future<Void> startBlobMigrator(ClusterControllerData* self, double waitTim
 			                                                                          ProcessClass::NeverAssign,
 			                                                                          self->db.config,
 			                                                                          id_used);
-			InitializeBlobMigratorRequest req(deterministicRandom()->randomUniqueID());
+			InitializeBlobMigratorRequest req(BlobMigratorInterface::newId());
 			state WorkerDetails worker = blobMigratorWorker.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::BlobMigrator)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;

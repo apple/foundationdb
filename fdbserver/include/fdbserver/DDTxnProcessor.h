@@ -26,7 +26,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/MockGlobalState.h"
 
-FDB_DECLARE_BOOLEAN_PARAM(SkipDDModeCheck);
+FDB_BOOLEAN_PARAM(SkipDDModeCheck);
 
 struct InitialDataDistribution;
 struct DDShardInfo;

@@ -42,8 +42,6 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-FDB_DEFINE_BOOLEAN_PARAM(CheckpointAsKeyValues);
-
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 // Enforcing rocksdb version to be 7.7.3.
 static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 7 && ROCKSDB_PATCH == 3),

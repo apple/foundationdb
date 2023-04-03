@@ -34,8 +34,8 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-variable"
 
-FDB_DECLARE_BOOLEAN_PARAM(AssignEmptyRange);
-FDB_DECLARE_BOOLEAN_PARAM(UnassignShard);
+FDB_BOOLEAN_PARAM(AssignEmptyRange);
+FDB_BOOLEAN_PARAM(UnassignShard);
 
 struct RestoreLoaderInterface;
 struct RestoreApplierInterface;

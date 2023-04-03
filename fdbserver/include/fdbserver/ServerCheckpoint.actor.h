@@ -31,7 +31,7 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-FDB_DECLARE_BOOLEAN_PARAM(CheckpointAsKeyValues);
+FDB_BOOLEAN_PARAM(CheckpointAsKeyValues);
 
 class ICheckpointIterator {
 public:

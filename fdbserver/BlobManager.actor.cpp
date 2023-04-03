@@ -3181,12 +3181,12 @@ ACTOR Future<Void> checkBlobWorkerList(Reference<BlobManagerData> bmData, Promis
 			// Get list of last known blob workers
 			// note: the list will include every blob worker that the old manager knew about,
 			// but it might also contain blob workers that died while the new manager was being recruited
-			state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db));
+			state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db, true));
 
 			// We could get the affinity list transactionally with the blob workers, however it is simpilier from an API
 			// perspective to get the affinities after the blob worker list, which ensures we will have the affinity for
 			// every worker returned.
-			std::vector<std::pair<UID, UID>> blobWorkerAffinities = wait(getBlobWorkerAffinity(bmData->db));
+			std::vector<std::pair<UID, UID>> blobWorkerAffinities = wait(getBlobWorkerAffinity(bmData->db, true));
 			bmData->workerAffinities.clear();
 			for (auto& it : blobWorkerAffinities) {
 				bmData->workerAffinities[it.second] = it.first;
@@ -4145,7 +4145,7 @@ ACTOR Future<Void> blobWorkerRecruiter(
 }
 
 ACTOR Future<Void> haltBlobGranules(Reference<BlobManagerData> bmData) {
-	std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db));
+	std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db, true));
 	std::vector<Future<Void>> deregisterBlobWorkers;
 	for (auto& worker : blobWorkers) {
 		bmData->addActor.send(haltBlobWorker(bmData, worker));

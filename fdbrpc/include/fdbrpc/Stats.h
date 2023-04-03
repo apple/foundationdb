@@ -192,7 +192,7 @@ static void specialCounter(CounterCollection& collection, std::string const& nam
 	new SpecialCounter<F>(collection, name, std::move(f));
 }
 
-FDB_DECLARE_BOOLEAN_PARAM(Filtered);
+FDB_BOOLEAN_PARAM(Filtered);
 
 class LatencyBands {
 	std::map<double, std::unique_ptr<Counter>> bands;
