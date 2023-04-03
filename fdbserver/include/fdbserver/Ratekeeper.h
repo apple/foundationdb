@@ -28,8 +28,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Smoother.h"
-#include "fdbserver/IRKStorageMetricsTracker.h"
-#include "fdbserver/IRKTlogMetricsTracker.h"
+#include "fdbserver/IRKMetricsTracker.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -96,8 +95,7 @@ class Ratekeeper {
 	UID id;
 	Database db;
 
-	std::unique_ptr<IRKStorageMetricsTracker> storageMetricsTracker;
-	std::unique_ptr<IRKTlogMetricsTracker> tlogMetricsTracker;
+	std::unique_ptr<IRKMetricsTracker> metricsTracker;
 
 	std::map<UID, Ratekeeper::GrvProxyInfo> grvProxyInfo;
 	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;

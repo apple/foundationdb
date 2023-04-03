@@ -1,8 +1,8 @@
 /**
- * RKStorageMetricsTracker.actor.cpp
+ * RKMetricsTracker.actor.cpp
  */
 
-#include "fdbserver/IRKStorageMetricsTracker.h"
+#include "fdbserver/IRKMetricsTracker.h"
 #include "fdbserver/Knobs.h"
 
 // FIXME: Remove duplicate code from Ratekeeper.actor.cpp
@@ -17,9 +17,9 @@ ACTOR static Future<Void> splitError(Future<Void> in, Promise<Void> errOut) {
 	}
 }
 
-class RKStorageMetricsTrackerImpl {
+class RKMetricsTrackerImpl {
 public:
-	ACTOR static Future<Void> monitorServerListChange(RKStorageMetricsTracker* self) {
+	ACTOR static Future<Void> monitorServerListChange(RKMetricsTracker* self) {
 		state std::map<UID, StorageServerInterface> oldServers;
 		state Transaction tr(self->db);
 
@@ -66,7 +66,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> trackStorageServerQueueInfo(RKStorageMetricsTracker* self,
+	ACTOR static Future<Void> trackStorageServerQueueInfo(RKMetricsTracker* self,
 	                                                      StorageServerInterface ssi,
 	                                                      Smoother* smoothTotalDurableBytes) {
 		self->storageQueueInfo.insert(mapPair(ssi.id(), StorageQueueInfo(self->ratekeeperId, ssi.id(), ssi.locality)));
@@ -102,7 +102,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> trackEachStorageServer(RKStorageMetricsTracker* self, Smoother* smoothTotalDurableBytes) {
+	ACTOR static Future<Void> trackEachStorageServer(RKMetricsTracker* self, Smoother* smoothTotalDurableBytes) {
 		state std::unordered_map<UID, Future<Void>> storageServerTrackers;
 		state Promise<Void> err;
 
@@ -132,7 +132,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> refreshStorageServerCommitCosts(RKStorageMetricsTracker* self) {
+	ACTOR static Future<Void> refreshStorageServerCommitCosts(RKMetricsTracker* self) {
 		state double lastBusiestCommitTagPick;
 		state std::vector<Future<Void>> replies;
 		loop {
@@ -152,21 +152,82 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> receiveCommitCostEstimations(RKStorageMetricsTracker* self) {
+	ACTOR static Future<Void> receiveCommitCostEstimations(RKMetricsTracker* self) {
 		loop {
 			ReportCommitCostEstimationRequest req = waitNext(self->rkInterf.reportCommitCostEstimation.getFuture());
 			self->updateCommitCostEstimation(req.ssTrTagCommitCost);
 			req.reply.send(Void());
 		}
 	}
-}; // class RKStorageMetricsTrackerImpl
 
-RKStorageMetricsTracker::RKStorageMetricsTracker(UID ratekeeperId, Database db, RatekeeperInterface rkInterf)
-  : ratekeeperId(ratekeeperId), db(db), rkInterf(rkInterf), lastSSListFetchedTimestamp(now()) {}
+	ACTOR static Future<Void> trackTLogQueueInfo(RKMetricsTracker* self,
+	                                             TLogInterface tli,
+	                                             Smoother* smoothTotalDurableBytes) {
+		self->tlogQueueInfo.insert(mapPair(tli.id(), TLogQueueInfo(tli.id())));
+		state Map<UID, TLogQueueInfo>::iterator myQueueInfo = self->tlogQueueInfo.find(tli.id());
+		TraceEvent("RkTracking", self->ratekeeperId).detail("TransactionLog", tli.id());
+		try {
+			loop {
+				ErrorOr<TLogQueuingMetricsReply> reply = wait(tli.getQueuingMetrics.getReplyUnlessFailedFor(
+				    TLogQueuingMetricsRequest(), 0, 0)); // SOMEDAY: or tryGetReply?
+				if (reply.present()) {
+					myQueueInfo->value.update(reply.get(), *smoothTotalDurableBytes);
+				} else {
+					if (myQueueInfo->value.valid) {
+						TraceEvent("RkTLogDidNotRespond", self->ratekeeperId).detail("TransactionLog", tli.id());
+					}
+					myQueueInfo->value.valid = false;
+				}
 
-RKStorageMetricsTracker::~RKStorageMetricsTracker() = default;
+				wait(delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE) &&
+				     IFailureMonitor::failureMonitor().onStateEqual(tli.getQueuingMetrics.getEndpoint(),
+				                                                    FailureStatus(false)));
+			}
+		} catch (Error& e) {
+			// including cancellation
+			if (e.code() != error_code_actor_cancelled) {
+				self->tlogQueueInfo.erase(myQueueInfo);
+			}
+			throw e;
+		}
+	}
 
-void RKStorageMetricsTracker::updateCommitCostEstimation(
+	ACTOR static Future<Void> runTlogTrackers(RKMetricsTracker* self, Smoother* smoothTotalDurableBytes) {
+		state std::vector<Future<Void>> tlogTrackers;
+		state std::vector<TLogInterface> tlogInterfs;
+		state Promise<Void> err;
+
+		tlogInterfs = self->dbInfo->get().logSystemConfig.allLocalLogs();
+		tlogTrackers.reserve(tlogInterfs.size());
+		for (auto tli : tlogInterfs) {
+			tlogTrackers.push_back(splitError(trackTLogQueueInfo(self, tli, smoothTotalDurableBytes), err));
+		}
+		loop choose {
+			when(wait(self->dbInfo->onChange())) {
+				if (tlogInterfs != self->dbInfo->get().logSystemConfig.allLocalLogs()) {
+					tlogInterfs = self->dbInfo->get().logSystemConfig.allLocalLogs();
+					tlogTrackers = std::vector<Future<Void>>();
+					for (auto tli : tlogInterfs) {
+						tlogTrackers.push_back(splitError(trackTLogQueueInfo(self, tli, smoothTotalDurableBytes), err));
+					}
+				}
+			}
+			when(wait(err.getFuture())) {
+				ASSERT(false);
+			}
+		}
+	}
+}; // class RKMetricsTrackerImpl
+
+RKMetricsTracker::RKMetricsTracker(UID ratekeeperId,
+                                   Database db,
+                                   RatekeeperInterface rkInterf,
+                                   Reference<AsyncVar<ServerDBInfo> const> dbInfo)
+  : ratekeeperId(ratekeeperId), db(db), rkInterf(rkInterf), lastSSListFetchedTimestamp(now()), dbInfo(dbInfo) {}
+
+RKMetricsTracker::~RKMetricsTracker() = default;
+
+void RKMetricsTracker::updateCommitCostEstimation(
     UIDTransactionTagMap<TransactionCommitCostEstimation> const& costEstimation) {
 	for (auto it = storageQueueInfo.begin(); it != storageQueueInfo.end(); ++it) {
 		auto tagCostIt = costEstimation.find(it->key);
@@ -178,19 +239,24 @@ void RKStorageMetricsTracker::updateCommitCostEstimation(
 	}
 }
 
-Map<UID, StorageQueueInfo> const& RKStorageMetricsTracker::getStorageQueueInfo() const {
+Map<UID, StorageQueueInfo> const& RKMetricsTracker::getStorageQueueInfo() const {
 	return storageQueueInfo;
 }
 
-bool RKStorageMetricsTracker::ssListFetchTimedOut() const {
+bool RKMetricsTracker::ssListFetchTimedOut() const {
 	return now() - lastSSListFetchedTimestamp > SERVER_KNOBS->STORAGE_SERVER_LIST_FETCH_TIMEOUT;
 }
 
-Future<Void> RKStorageMetricsTracker::run(Smoother& smoothTotalDurableBytes) {
-	actors.add(RKStorageMetricsTrackerImpl::monitorServerListChange(this));
-	actors.add(RKStorageMetricsTrackerImpl::trackEachStorageServer(this, &smoothTotalDurableBytes));
-	actors.add(RKStorageMetricsTrackerImpl::refreshStorageServerCommitCosts(this));
-	actors.add(RKStorageMetricsTrackerImpl::receiveCommitCostEstimations(this));
+Map<UID, TLogQueueInfo> const& RKMetricsTracker::getTlogQueueInfo() const {
+	return tlogQueueInfo;
+}
+
+Future<Void> RKMetricsTracker::run(Smoother& smoothTotalDurableBytes) {
+	actors.add(RKMetricsTrackerImpl::monitorServerListChange(this));
+	actors.add(RKMetricsTrackerImpl::trackEachStorageServer(this, &smoothTotalDurableBytes));
+	actors.add(RKMetricsTrackerImpl::refreshStorageServerCommitCosts(this));
+	actors.add(RKMetricsTrackerImpl::receiveCommitCostEstimations(this));
+	actors.add(RKMetricsTrackerImpl::runTlogTrackers(this, &smoothTotalDurableBytes));
 	return actors.getResult();
 }
 
@@ -284,5 +350,34 @@ Optional<double> StorageQueueInfo::getTagThrottlingRatio(int64_t storageTargetBy
 	} else {
 		return std::max(
 		    0.0, static_cast<double>((storageTargetBytes + storageSpringBytes) - storageQueue) / storageSpringBytes);
+	}
+}
+
+TLogQueueInfo::TLogQueueInfo(UID id)
+  : valid(false), id(id), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
+    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT) {
+	// FIXME: this is a tacky workaround for a potential uninitialized use in trackTLogQueueInfo (copied
+	// from storageQueueInfO)
+	lastReply.instanceID = -1;
+}
+
+void TLogQueueInfo::update(TLogQueuingMetricsReply const& reply, Smoother& smoothTotalDurableBytes) {
+	valid = true;
+	auto prevReply = std::move(lastReply);
+	lastReply = reply;
+	if (prevReply.instanceID != reply.instanceID) {
+		smoothDurableBytes.reset(reply.bytesDurable);
+		verySmoothDurableBytes.reset(reply.bytesDurable);
+		smoothInputBytes.reset(reply.bytesInput);
+		smoothFreeSpace.reset(reply.storageBytes.available);
+		smoothTotalSpace.reset(reply.storageBytes.total);
+	} else {
+		smoothTotalDurableBytes.addDelta(reply.bytesDurable - prevReply.bytesDurable);
+		smoothDurableBytes.setTotal(reply.bytesDurable);
+		verySmoothDurableBytes.setTotal(reply.bytesDurable);
+		smoothInputBytes.setTotal(reply.bytesInput);
+		smoothFreeSpace.setTotal(reply.storageBytes.available);
+		smoothTotalSpace.setTotal(reply.storageBytes.total);
 	}
 }

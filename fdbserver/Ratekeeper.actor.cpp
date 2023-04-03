@@ -216,14 +216,13 @@ public:
 		self.addActor.send(waitFailureServer(rkInterf.waitFailure.getFuture()));
 		self.addActor.send(self.configurationMonitor());
 
-		self.addActor.send(self.storageMetricsTracker->run(self.smoothTotalDurableBytes));
+		self.addActor.send(self.metricsTracker->run(self.smoothTotalDurableBytes));
 		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
 
 		self.addActor.send(self.monitorThrottlingChanges());
 		if (SERVER_KNOBS->BW_THROTTLING_ENABLED) {
 			self.addActor.send(self.monitorBlobWorkers(dbInfo));
 		}
-		self.addActor.send(self.tlogMetricsTracker->run(self.smoothTotalDurableBytes));
 
 		TraceEvent("RkTLogQueueSizeParameters", rkInterf.id())
 		    .detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG)
@@ -457,8 +456,7 @@ Ratekeeper::Ratekeeper(UID id,
 	} else {
 		tagThrottler = std::make_unique<TagThrottler>(db, id);
 	}
-	storageMetricsTracker = std::make_unique<RKStorageMetricsTracker>(id, db, rkInterf);
-	tlogMetricsTracker = std::make_unique<RKTlogMetricsTracker>(id, dbInfo);
+	metricsTracker = std::make_unique<RKMetricsTracker>(id, db, rkInterf, dbInfo);
 }
 
 void Ratekeeper::updateRate(RatekeeperLimits* limits) {
@@ -493,7 +491,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 
 	// Look at each storage server's write queue and local rate, compute and store the desired rate
 	// ratio
-	auto const& storageQueueInfo = storageMetricsTracker->getStorageQueueInfo();
+	auto const& storageQueueInfo = metricsTracker->getStorageQueueInfo();
 	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
 		auto const& ss = i->value;
 		if (!ss.valid || !ss.acceptingRequests || (remoteDC.present() && ss.locality.dcId() == remoteDC))
@@ -849,7 +847,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	{
 		Version minSSVer = std::numeric_limits<Version>::max();
 		Version minLimitingSSVer = std::numeric_limits<Version>::max();
-		for (const auto& it : storageMetricsTracker->getStorageQueueInfo()) {
+		for (const auto& it : metricsTracker->getStorageQueueInfo()) {
 			auto& ss = it.value;
 			if (!ss.valid || (remoteDC.present() && ss.locality.dcId() == remoteDC))
 				continue;
@@ -863,7 +861,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		}
 
 		Version maxTLVer = std::numeric_limits<Version>::min();
-		for (const auto& it : tlogMetricsTracker->getTlogQueueInfo()) {
+		for (const auto& it : metricsTracker->getTlogQueueInfo()) {
 			auto& tl = it.value;
 			if (!tl.valid)
 				continue;
@@ -883,7 +881,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	int64_t worstFreeSpaceTLog = std::numeric_limits<int64_t>::max();
 	int64_t worstStorageQueueTLog = 0;
 	int tlcount = 0;
-	for (auto& it : tlogMetricsTracker->getTlogQueueInfo()) {
+	for (auto& it : metricsTracker->getTlogQueueInfo()) {
 		auto const& tl = it.value;
 		if (!tl.valid)
 			continue;
@@ -1016,18 +1014,18 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	}
 
 	int64_t totalDiskUsageBytes = 0;
-	for (auto& t : tlogMetricsTracker->getTlogQueueInfo()) {
+	for (auto& t : metricsTracker->getTlogQueueInfo()) {
 		if (t.value.valid) {
 			totalDiskUsageBytes += t.value.lastReply.storageBytes.used;
 		}
 	}
-	for (auto& s : storageMetricsTracker->getStorageQueueInfo()) {
+	for (auto& s : metricsTracker->getStorageQueueInfo()) {
 		if (s.value.valid) {
 			totalDiskUsageBytes += s.value.lastReply.storageBytes.used;
 		}
 	}
 
-	if (storageMetricsTracker->ssListFetchTimedOut()) {
+	if (metricsTracker->ssListFetchTimedOut()) {
 		limits->tpsLimit = 0.0;
 		limitReason = limitReason_t::storage_server_list_fetch_failed;
 		reasonID = UID();

@@ -8,6 +8,8 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbserver/RatekeeperInterface.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/TLogInterface.h"
 #include "flow/IndexedSet.h"
 #include "flow/IRandom.h"
 
@@ -73,22 +75,59 @@ public:
 	Optional<double> getTagThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const;
 };
 
-// Responsible for tracking the current throttling-relevant statistics
-// for all storage servers in a database.
-class IRKStorageMetricsTracker {
+// Stores statistics for an individual tlog that are relevant for ratekeeper throttling
+class TLogQueueInfo {
+	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
+	Smoother smoothFreeSpace;
+	Smoother smoothTotalSpace;
+
 public:
-	virtual ~IRKStorageMetricsTracker() = default;
-	virtual Map<UID, StorageQueueInfo> const& getStorageQueueInfo() const = 0;
-	virtual Future<Void> run(Smoother& smoothTotalDurableBytes) = 0;
-	virtual bool ssListFetchTimedOut() const = 0;
+	TLogQueuingMetricsReply lastReply;
+	bool valid;
+	UID id;
+
+	// Accessor methods for Smoothers
+	double getSmoothFreeSpace() const { return smoothFreeSpace.smoothTotal(); }
+	double getSmoothTotalSpace() const { return smoothTotalSpace.smoothTotal(); }
+	double getSmoothDurableBytes() const { return smoothDurableBytes.smoothTotal(); }
+	double getSmoothInputBytesRate() const { return smoothInputBytes.smoothRate(); }
+	double getVerySmoothDurableBytesRate() const { return verySmoothDurableBytes.smoothRate(); }
+
+	explicit TLogQueueInfo(UID id);
+	Version getLastCommittedVersion() const { return lastReply.v; }
+	void update(TLogQueuingMetricsReply const& reply, Smoother& smoothTotalDurableBytes);
 };
 
-// Tracks the current set of storage servers in a database and periodically
+// Responsible for tracking the current throttling-relevant statistics
+// for all storage servers and tlogs in a database.
+class IRKMetricsTracker {
+public:
+	virtual ~IRKMetricsTracker() = default;
+
+	// Returns a map of storage server id to throttling-relevant statistics
+	// for all storage servers in the cluster.
+	virtual Map<UID, StorageQueueInfo> const& getStorageQueueInfo() const = 0;
+
+	// Returns true iff the list of storage servers is too stale.
+	virtual bool ssListFetchTimedOut() const = 0;
+
+	// Returns a map of tlog id to throttling-relevant statistics for all tlogs
+	// in the cluster.
+	virtual Map<UID, TLogQueueInfo> const& getTlogQueueInfo() const = 0;
+
+	// Run actors to periodically refresh throttling-relevant statistics
+	virtual Future<Void> run(Smoother& smoothTotalDurableBytes) = 0;
+};
+
+// Tracks the current set of storage servers and tlogs in a database and periodically
 // pulls throttling-relevant statistics from these storage servers.
-class RKStorageMetricsTracker : public IRKStorageMetricsTracker {
-	friend class RKStorageMetricsTrackerImpl;
+//
+// Also periodically receives write cost estimations for tags from commit proxies.
+class RKMetricsTracker : public IRKMetricsTracker {
+	friend class RKMetricsTrackerImpl;
 	ActorCollection actors;
 	UID ratekeeperId;
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	Database db;
 	RatekeeperInterface rkInterf; // TODO: Only hold needed RequestStream?
 	double lastSSListFetchedTimestamp;
@@ -96,13 +135,15 @@ class RKStorageMetricsTracker : public IRKStorageMetricsTracker {
 	// Maps storage server ID to storage server interface
 	std::unordered_map<UID, StorageServerInterface> storageServerInterfaces;
 	Map<UID, StorageQueueInfo> storageQueueInfo;
+	Map<UID, TLogQueueInfo> tlogQueueInfo;
 
 	void updateCommitCostEstimation(UIDTransactionTagMap<TransactionCommitCostEstimation> const& costEstimation);
 
 public:
-	explicit RKStorageMetricsTracker(UID ratekeeperId, Database, RatekeeperInterface);
-	~RKStorageMetricsTracker();
+	RKMetricsTracker(UID ratekeeperId, Database, RatekeeperInterface, Reference<AsyncVar<ServerDBInfo> const>);
+	~RKMetricsTracker();
 	Map<UID, StorageQueueInfo> const& getStorageQueueInfo() const override;
-	Future<Void> run(Smoother& smoothTotalDurableBytes) override;
 	bool ssListFetchTimedOut() const override;
+	Map<UID, TLogQueueInfo> const& getTlogQueueInfo() const override;
+	Future<Void> run(Smoother& smoothTotalDurableBytes) override;
 };
