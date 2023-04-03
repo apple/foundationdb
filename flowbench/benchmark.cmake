@@ -9,7 +9,7 @@ ExternalProject_Add(googlebenchmark
   GIT_CONFIG        advice.detachedHead=false
   SOURCE_DIR        "${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-src"
   BINARY_DIR        "${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-build"
-  CMAKE_ARGS        "-DCMAKE_BUILD_TYPE=Release -DBENCHMARK_ENABLE_LTO=true"
+  CMAKE_ARGS        "-DCMAKE_BUILD_TYPE=Release -DBENCHMARK_ENABLE_LTO=true -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER} -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
   CONFIGURE_COMMAND ""
   BUILD_COMMAND     ""
   INSTALL_COMMAND   ""
@@ -24,6 +24,7 @@ ExternalProject_Add(googletest DEPENDS googlebenchmark
   GIT_CONFIG        advice.detachedHead=false
   SOURCE_DIR        "${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-src/googletest"
   BINARY_DIR        "${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-build/googletest"
+  CMAKE_ARGS        "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER} -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
   CONFIGURE_COMMAND ""
   BUILD_COMMAND     ""
   INSTALL_COMMAND   ""

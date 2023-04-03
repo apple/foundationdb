@@ -164,13 +164,12 @@ endif()
 set(SSD_ROCKSDB_EXPERIMENTAL ON CACHE BOOL "Build with experimental RocksDB support")
 set(PORTABLE_ROCKSDB ON CACHE BOOL "Compile RocksDB in portable mode") # Set this to OFF to compile RocksDB with `-march=native`
 set(WITH_LIBURING OFF CACHE BOOL "Build with liburing enabled") # Set this to ON to include liburing
-# RocksDB is currently enabled by default for GCC but does not build with the latest
-# Clang.
-if (SSD_ROCKSDB_EXPERIMENTAL AND GCC)
+# RocksDB is currently enabled by default for all compilers. Clang 14 could build it too.
+#if (SSD_ROCKSDB_EXPERIMENTAL AND GCC)
   set(WITH_ROCKSDB_EXPERIMENTAL ON)
-else()
-  set(WITH_ROCKSDB_EXPERIMENTAL OFF)
-endif()
+#else()
+#  set(WITH_ROCKSDB_EXPERIMENTAL OFF)
+#endif()
 
 ################################################################################
 # TOML11
@@ -188,9 +187,11 @@ else()
   ExternalProject_add(toml11Project
     URL "https://github.com/ToruNiina/toml11/archive/v3.4.0.tar.gz"
     URL_HASH SHA256=bc6d733efd9216af8c119d8ac64a805578c79cc82b813e4d1d880ca128bd154d
-    CMAKE_CACHE_ARGS
-      -DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_CURRENT_BINARY_DIR}/toml11
-      -Dtoml11_BUILD_TEST:BOOL=OFF
+    CMAKE_ARGS -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+               -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+               -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+               -DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/toml11
+               -Dtoml11_BUILD_TEST=OFF
     BUILD_ALWAYS ON)
   add_library(toml11_target INTERFACE)
   add_dependencies(toml11_target toml11Project)
