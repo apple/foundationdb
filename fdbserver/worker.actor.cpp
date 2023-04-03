@@ -2504,7 +2504,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.getLatestBaseCipherKeys);
 					DUMPTOKEN(recruited.getLatestBlobMetadata);
 
-					Future<Void> encryptKeyProxyProcess = encryptKeyProxyServer(recruited, dbInfo);
+					Future<Void> encryptKeyProxyProcess = encryptKeyProxyServer(recruited, dbInfo, req.encryptMode);
 					errorForwarders.add(forwardError(
 					    errors,
 					    Role::ENCRYPT_KEY_PROXY,

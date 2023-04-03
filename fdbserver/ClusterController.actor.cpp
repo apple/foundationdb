@@ -522,7 +522,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 
 	WorkerDetails newEKPWorker;
 	EncryptionAtRestMode encryptMode = self->db.config.encryptionAtRestMode;
-	if (encryptMode.isEncryptionEnabled()) {
+	if (encryptMode.isEncryptionEnabled() || SERVER_KNOBS->REST_KMS_ENABLE_RECRUITMENT) {
 		newEKPWorker = findNewProcessForSingleton(self, ProcessClass::EncryptKeyProxy, id_used);
 	}
 
@@ -541,7 +541,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	ProcessClass::Fitness bestFitnessForEKP;
-	if (encryptMode.isEncryptionEnabled()) {
+	if (encryptMode.isEncryptionEnabled() || SERVER_KNOBS->REST_KMS_ENABLE_RECRUITMENT) {
 		bestFitnessForEKP = findBestFitnessForSingleton(self, newEKPWorker, ProcessClass::EncryptKeyProxy);
 	}
 
@@ -576,7 +576,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	bool ekpHealthy = true;
-	if (encryptMode.isEncryptionEnabled()) {
+	if (encryptMode.isEncryptionEnabled() || SERVER_KNOBS->REST_KMS_ENABLE_RECRUITMENT) {
 		ekpHealthy = isHealthySingleton<EncryptKeyProxySingleton>(
 		    self, newEKPWorker, ekpSingleton, bestFitnessForEKP, self->recruitingEncryptKeyProxyID);
 	}
@@ -607,7 +607,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	Optional<Standalone<StringRef>> currEKPProcessId, newEKPProcessId;
-	if (encryptMode.isEncryptionEnabled()) {
+	if (encryptMode.isEncryptionEnabled() || SERVER_KNOBS->REST_KMS_ENABLE_RECRUITMENT) {
 		currEKPProcessId = ekpSingleton.getInterface().locality.processId();
 		newEKPProcessId = newEKPWorker.interf.locality.processId();
 	}
@@ -623,7 +623,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 		}
 	}
 
-	if (encryptMode.isEncryptionEnabled()) {
+	if (encryptMode.isEncryptionEnabled() || SERVER_KNOBS->REST_KMS_ENABLE_RECRUITMENT) {
 		currPids.emplace_back(currEKPProcessId);
 		newPids.emplace_back(newEKPProcessId);
 	}
@@ -642,7 +642,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	// if the knob is disabled, the EKP coloc counts should have no affect on the coloc counts check below
-	if (!encryptMode.isEncryptionEnabled()) {
+	if (!encryptMode.isEncryptionEnabled() && !SERVER_KNOBS->REST_KMS_ENABLE_RECRUITMENT) {
 		ASSERT(currColocMap[currEKPProcessId] == 0);
 		ASSERT(newColocMap[newEKPProcessId] == 0);
 	}
@@ -664,7 +664,8 @@ void checkBetterSingletons(ClusterControllerData* self) {
 		} else if (self->db.blobGranulesEnabled.get() && self->db.blobRestoreEnabled.get() &&
 		           newColocMap[newMGProcessId] < currColocMap[currMGProcessId]) {
 			mgSingleton.recruit(*self);
-		} else if (encryptMode.isEncryptionEnabled() && newColocMap[newEKPProcessId] < currColocMap[currEKPProcessId]) {
+		} else if ((encryptMode.isEncryptionEnabled() || SERVER_KNOBS->REST_KMS_ENABLE_RECRUITMENT) &&
+		           newColocMap[newEKPProcessId] < currColocMap[currEKPProcessId]) {
 			ekpSingleton.recruit(*self);
 		} else if (newColocMap[newCSProcessId] < currColocMap[currCSProcessId]) {
 			csSingleton.recruit(*self);
@@ -2274,7 +2275,9 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self) {
 			                                                                       self->db.config,
 			                                                                       id_used);
 
+			state EncryptionAtRestMode encryptMode = wait(self->encryptionAtRestMode.getFuture());
 			InitializeEncryptKeyProxyRequest req(deterministicRandom()->randomUniqueID());
+			req.encryptMode = encryptMode;
 			state WorkerDetails worker = ekpWorker.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::EncryptKeyProxy)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
@@ -2320,7 +2323,7 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self) {
 
 ACTOR Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
 	state EncryptionAtRestMode encryptMode = wait(self->encryptionAtRestMode.getFuture());
-	if (!encryptMode.isEncryptionEnabled()) {
+	if (!encryptMode.isEncryptionEnabled() && !SERVER_KNOBS->REST_KMS_ENABLE_RECRUITMENT) {
 		return Void();
 	}
 	state SingletonRecruitThrottler recruitThrottler;

@@ -1,8 +1,5 @@
-[configuration]
-encryptModes = ['domain_aware', 'cluster_aware']
-
 [[knobs]]
-enable_blob_file_compression = true
+rest_kms_enable_recruitment = true
 
 [[test]]
 testTitle = 'BlobGranuleFileUnit'
