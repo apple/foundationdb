@@ -30,6 +30,7 @@
 #include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/BlobCipher.h"    /* AES_256_KEY_LENGTH */
 
 struct SimEncryptKeyCtx {
 	SimEncryptKeyId id;

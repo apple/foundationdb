@@ -220,6 +220,9 @@ endif()
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
 add_dependencies(fdbclient fdboptions)
 target_link_libraries(fdbclient PUBLIC fdbrpc msgpack)
+if(WITH_TLS)
+  target_link_libraries(fdbclient PRIVATE OpenSSL::Crypto)
+endif()
 
 # Create a separate fdbclient library with sampling enabled. This lets
 # fdbserver retain sampling functionality in client code while disabling

@@ -30,6 +30,8 @@
 #define ENCRYPTION_ENABLED 0
 #endif
 
+#define AES_256_KEY_LENGTH 32
+
 #if ENCRYPTION_ENABLED
 
 #include "flow/Arena.h"
@@ -44,7 +46,6 @@
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
 
-#define AES_256_KEY_LENGTH 32
 #define AES_256_IV_LENGTH 16
 
 // Encryption operations buffer management
