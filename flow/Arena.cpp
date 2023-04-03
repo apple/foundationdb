@@ -996,6 +996,10 @@ TEST_CASE("/flow/Arena/OptionalMap") {
 	return Void();
 }
 
+// TODO: remove the following `#if 0 ... #endif` once we come up with a way of reliably, temporarily swapping
+// Arena alloc/free implementation for the duration of a test run.
+// See https://github.com/apple/foundationdb/pull/9865/files#r1155735635.
+#if 0
 TEST_CASE("/flow/Arena/Secure") {
 #if !defined(USE_SANITIZER) && !defined(VALGRIND)
 	// Note: Assumptions underlying this unit test are speculative.
@@ -1027,7 +1031,7 @@ TEST_CASE("/flow/Arena/Secure") {
 				} else {
 					newBuf = new (arena) uint8_t[len];
 				}
-				// ASSERT(newBuf == buf);
+				ASSERT(newBuf == buf);
 				// there's no hard guarantee about the above equality and the result could vary by platform,
 				// malloc implementation, and tooling instrumentation (e.g. ASAN, valgrind)
 				// but it is practically likely because of
@@ -1043,7 +1047,7 @@ TEST_CASE("/flow/Arena/Secure") {
 				for (auto i = 0; i < len; i++) {
 					if (newBuf[i] != 0) {
 						fmt::print("Non-zero byte found at iter {} size {} offset {}\n", iter + 1, len, i);
-						// ASSERT(false);
+						ASSERT(false);
 					}
 				}
 			}
@@ -1054,3 +1058,4 @@ TEST_CASE("/flow/Arena/Secure") {
 #endif // !defined(USE_SANITIZER) && !defind(VALGRIND)
 	return Void();
 }
+#endif  // 0
