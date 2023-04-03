@@ -1,0 +1,62 @@
+---
+name: Make a build image
+
+on:
+  push:
+    branches: ["ow-build-image*"]
+
+jobs:
+  calc_ver:
+    # calculate versions from git tags
+    runs-on: ubuntu-latest
+    outputs:
+      project_ver: ${{steps.vers.outputs.project_ver}}
+      build_ver: ${{steps.vers.outputs.build_ver}}
+      full_ver: ${{steps.vers.outputs.full_ver}}
+      release_flag: ${{steps.vers.outputs.release_flag}}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Calculate versions
+        id: vers
+        shell: bash
+        run: ${{github.workspace}}/build-scripts/for-github/calc-version-from-git.bash
+
+  build-image:
+    needs: [calc_ver]
+
+    strategy:
+      matrix:
+        include:
+          - run_on: ubuntu-latest
+            for: linux
+            prepare: debian-based
+            base_image: ubuntu:18.04
+            image_name: foundationdb-build
+
+    env:
+      IMAGE_NAME: ${{ matrix.image_name }}:${{ needs.calc_ver.outputs.full_ver }}
+
+    runs-on: ${{ matrix.run_on }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Build an image
+        run: |
+          podman build \
+            -v ${{github.workspace}}:/mnt/project:ro,Z \
+            -f ${{github.workspace}}/build-scripts/for-${{ matrix.for }}/build-${{ matrix.prepare }}.Dockerfile \
+            --build-arg IMAGE=${{ matrix.base_image }} \
+            --build-arg PROJECT_NAME=foundationdb \
+            --build-arg FOR_OS=${{ matrix.for }} \
+            -t $IMAGE_NAME
+
+      - name: Log in to registry
+        # This is where you will update the personal access token to GITHUB_TOKEN
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u $ --password-stdin
+
+      - name: Push image
+        run: podman push $IMAGE_NAME ghcr.io/${{ github.repository_owner }}/$IMAGE_NAME

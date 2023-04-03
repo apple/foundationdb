@@ -1,0 +1,230 @@
+---
+name: Build
+
+on:
+  push:
+    branches: ["ow-fork-*"]
+    tags: ["*-*ow"]
+
+jobs:
+  calc_ver:
+    # calculate versions from git tags
+    runs-on: ubuntu-latest
+    outputs:
+      project_ver: ${{steps.vers.outputs.project_ver}}
+      build_ver: ${{steps.vers.outputs.build_ver}}
+      full_ver: ${{steps.vers.outputs.full_ver}}
+      release_flag: ${{steps.vers.outputs.release_flag}}
+      release_id: ${{ steps.create_release.outputs.id }}
+      release_upload_url: ${{ steps.create_release.outputs.upload_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Calculate versions
+        id: vers
+        shell: bash
+        run: ${{github.workspace}}/build-scripts/for-github/calc-version-from-git.bash
+
+      - name: Create Draft Release
+        if: ${{ steps.vers.outputs.release_flag == 'ON' }}
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: "${{ steps.vers.outputs.full_ver }}"
+          release_name: "v${{ steps.vers.outputs.full_ver }}"
+          draft: true
+          prerelease: false
+
+  build:
+    needs: [calc_ver]
+
+    strategy:
+      matrix:
+        include:
+          - run_on: ubuntu-latest
+            for: linux
+            prepare: "debian-based"
+            build_on: linux
+            use_image: ghcr.io/owtech/foundationdb-build:6.3.25-5.ow.1
+            parallel: 3
+
+    runs-on: ${{ matrix.run_on }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Build
+        run: |
+          mkdir -p ${{github.workspace}}/bld
+          chmod 777 ${{github.workspace}}/bld
+          podman run --rm \
+            --name build \
+            --mount=type=tmpfs,dst=/tmp \
+            --mount=type=tmpfs,dst=/var/tmp \
+            --security-opt label=disable \
+            --mount=type=bind,src=${{github.workspace}},dst=/home/runner/src,readonly \
+            --mount=type=bind,src=${{github.workspace}}/bld,dst=/home/runner/bld \
+            ${{ matrix.use_image }} \
+            /home/runner/src/build-scripts/for-${{ matrix.for }}/build-on-${{ matrix.build_on }}.bash \
+            ${{needs.calc_ver.outputs.project_ver}} \
+            ${{needs.calc_ver.outputs.build_ver}} \
+            ${{needs.calc_ver.outputs.release_flag}} \
+            ${{ matrix.parallel }}
+
+      # - name: Minimal tests
+      #  working-directory: ${{github.workspace}}/bld
+      #  shell: bash
+      #  run: ctest --output-on-failure -V
+
+      - name: Upload result
+        uses: nanoufo/action-upload-artifacts-and-release-assets@v1.8
+        with:
+          path: |
+            ${{github.workspace}}/bld/linux/packages/*${{needs.calc_ver.outputs.full_ver}}*
+          upload-release-files: ${{ needs.calc_ver.outputs.release_flag }}
+          release-upload-url: ${{ needs.calc_ver.outputs.release_upload_url }}
+          if-no-files-found: error
+
+  test_deploy:
+    needs: [calc_ver, build]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Download the foundationdb distro
+        uses: actions/download-artifact@v3
+        with:
+          path: ${{github.workspace}}/bld/download
+
+      - name: Make a normal distro directory from the downloaded artifacts
+        shell: bash
+        run: |
+          ls -Rl ${{github.workspace}}/bld/download
+          mkdir -p ${{github.workspace}}/bld/linux/packages
+          mv -v ${{github.workspace}}/bld/download/*/* ${{github.workspace}}/bld/linux/packages/
+
+      - name: Run tests
+        shell: bash
+        run: ${{github.workspace}}/build-scripts/for-linux/test-deploy.bash ${{ needs.calc_ver.outputs.full_ver }} ${{github.workspace}}/bld/linux/packages
+
+  release:
+    needs: [calc_ver, build]
+    if: ${{ needs.calc_ver.outputs.release_flag == 'ON' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: eregon/publish-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          release_id: ${{ needs.calc_ver.outputs.release_id }}
+
+  publish_images:
+    needs: [calc_ver, build]
+    if: ${{ needs.calc_ver.outputs.release_flag == 'ON' }}
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_REGISTRY: ghcr.io
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Download the foundationdb distro
+        uses: actions/download-artifact@v3
+        with:
+          path: ${{github.workspace}}/bld/download
+
+      - name: Listing the downloaded artifacts
+        # This is where you will update the personal access token to GITHUB_TOKEN
+        run: ls -Rl ${{github.workspace}}/bld/download
+
+      - name: Make a normal distro directory from downloaded artifacts
+        shell: bash
+        run: |
+          mkdir -p ${{github.workspace}}/bld/linux/packages
+          mv -v ${{github.workspace}}/bld/download/*/* ${{github.workspace}}/bld/linux/packages/
+
+      - name: Log in to registry
+        # This is where you will update the personal access token to GITHUB_TOKEN
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login $DOCKER_REGISTRY -u $ --password-stdin
+
+      - name: Build and push images
+        shell: bash
+        run: |
+          ${{github.workspace}}/packaging/docker/build-images-for-owtech.bash \
+            ${{needs.calc_ver.outputs.full_ver}} \
+            ${{github.workspace}}/bld/linux/packages \
+            ghcr.io/${{ github.repository_owner }}
+
+  tests:
+    needs: [calc_ver, build]
+    runs-on: ubuntu-latest
+    env:
+      JOSHUA_DB_VER: "6.3.15"
+      N_OF_TESTS: 600  # to fit in 360 minutes job run limit
+      JOSHUA_AGENT_URL: "docker.io/1inker"
+      JOSHUA_AGENT_TAG: "rhel8-20220816"
+
+    steps:
+      - name: Install dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sudo wget crudini git python3 python3-pip
+          sudo pip3 install wheel setuptools python-dateutil lxml boto3
+
+      - name: Install FoundationDb
+        shell: bash
+        run: |
+          mkdir deb
+          pushd deb
+          MY_ARCH=`dpkg-architecture -q DEB_BUILD_ARCH`
+          wget https://github.com/apple/foundationdb/releases/download/${{ env.JOSHUA_DB_VER }}/foundationdb-clients_${{ env.JOSHUA_DB_VER }}-1_${MY_ARCH}.deb https://github.com/apple/foundationdb/releases/download/${{ env.JOSHUA_DB_VER }}/foundationdb-server_${{ env.JOSHUA_DB_VER }}-1_${MY_ARCH}.deb
+          sudo apt-get install -y ./foundationdb-clients_${{ env.JOSHUA_DB_VER }}-1_${MY_ARCH}.deb ./foundationdb-server_${{ env.JOSHUA_DB_VER }}-1_${MY_ARCH}.deb
+          popd
+          sudo systemctl stop foundationdb
+          MY_IP=`hostname -I | awk '{print $1}'`
+          sudo sed -i s/127.0.0.1/$MY_IP/ /etc/foundationdb/fdb.cluster
+          sudo crudini --set /etc/foundationdb/foundationdb.conf fdbserver memory 4GiB
+          sudo systemctl start foundationdb
+          pip3 install 'foundationdb==${{ env.JOSHUA_DB_VER }}'
+
+      - name: Download the correctness package
+        uses: actions/download-artifact@v3
+        id: download_correctness
+        with:
+          name: correctness-${{needs.calc_ver.outputs.full_ver}}.tar.gz
+
+      - name: 'Echo download path'
+        run: echo ${{steps.download_correctness.outputs.download-path}}
+
+      - name: Display structure of downloaded files
+        run: ls -R
+        working-directory: ${{github.workspace}}
+
+      - name: Download joshua
+        shell: bash
+        run: |
+          git clone https://github.com/FoundationDB/fdb-joshua.git
+
+      - name: run joshua-agent
+        shell: bash
+        run: |
+          podman pull ${{ env.JOSHUA_AGENT_URL }}/joshua-agent:${{ env.JOSHUA_AGENT_TAG }}
+          podman create --name joshua-agent -v /etc/foundationdb:/etc/foundationdb -it joshua-agent:${{ env.JOSHUA_AGENT_TAG }}
+          podman start joshua-agent
+
+      - name: run tests
+        shell: bash
+        working-directory: ${{github.workspace}}/fdb-joshua
+        run: |
+          podman ps
+          python3 -m joshua.joshua start --tarball ${{github.workspace}}/correctness-${{needs.calc_ver.outputs.full_ver}}.tar.gz --max-runs ${{ env.N_OF_TESTS }} && \
+            python3 -m joshua.joshua tail
