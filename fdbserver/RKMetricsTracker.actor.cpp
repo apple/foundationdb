@@ -65,8 +65,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> trackStorageServerQueueInfo(RKMetricsTracker* self,
-	                                                      StorageServerInterface ssi) {
+	ACTOR static Future<Void> trackStorageServerQueueInfo(RKMetricsTracker* self, StorageServerInterface ssi) {
 		self->storageQueueInfo.insert(mapPair(ssi.id(), StorageQueueInfo(self->ratekeeperId, ssi.id(), ssi.locality)));
 		TraceEvent("RkTracking", self->ratekeeperId)
 		    .detail("StorageServer", ssi.id())
@@ -115,8 +114,7 @@ public:
 
 						auto& a = storageServerTrackers[change.first];
 						a = Future<Void>();
-						a = splitError(trackStorageServerQueueInfo(self, change.second.get()),
-						               err);
+						a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
 
 						self->storageServerInterfaces[id] = change.second.get();
 					}
@@ -158,8 +156,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> trackTLogQueueInfo(RKMetricsTracker* self,
-	                                             TLogInterface tli) {
+	ACTOR static Future<Void> trackTLogQueueInfo(RKMetricsTracker* self, TLogInterface tli) {
 		self->tlogQueueInfo.insert(mapPair(tli.id(), TLogQueueInfo(tli.id())));
 		state Map<UID, TLogQueueInfo>::iterator myQueueInfo = self->tlogQueueInfo.find(tli.id());
 		TraceEvent("RkTracking", self->ratekeeperId).detail("TransactionLog", tli.id());
@@ -220,7 +217,8 @@ RKMetricsTracker::RKMetricsTracker(UID ratekeeperId,
                                    Database db,
                                    RatekeeperInterface rkInterf,
                                    Reference<AsyncVar<ServerDBInfo> const> dbInfo)
-  : ratekeeperId(ratekeeperId), db(db), rkInterf(rkInterf), lastSSListFetchedTimestamp(now()), dbInfo(dbInfo), smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT) {}
+  : ratekeeperId(ratekeeperId), db(db), rkInterf(rkInterf), lastSSListFetchedTimestamp(now()), dbInfo(dbInfo),
+    smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT) {}
 
 RKMetricsTracker::~RKMetricsTracker() = default;
 
