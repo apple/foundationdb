@@ -9,7 +9,7 @@ injectSSDelay = true
 bg_metadata_source = "tenant"
 bg_key_tuple_truncate_offset = 1
 enable_configurable_encryption = true
-rest_kms_enable_recruitment = true
+enable_rest_kms_communication = true
 
 [[test]]
 testTitle = 'BlobGranuleCorrectness'

@@ -1,5 +1,5 @@
 [[knobs]]
-rest_kms_enable_recruitment = true
+enable_rest_kms_communication = true
 
 [[test]]
 testTitle = 'BlobGranuleFileUnit'

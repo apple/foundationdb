@@ -869,7 +869,7 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface,
 	                                        CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL,
 	                                        TaskPriority::Worker);
 
-	CODE_PROBE(!encryptMode.isEncryptionEnabled() && SERVER_KNOBS->REST_KMS_ENABLE_RECRUITMENT,
+	CODE_PROBE(!encryptMode.isEncryptionEnabled() && SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION,
 	           "Encryption disabled and EKP Recruited");
 	try {
 		loop choose {
@@ -882,11 +882,11 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface,
 				self->addActor.send(getLatestCipherKeys(self, kmsConnectorInf, req));
 			}
 			when(EKPGetLatestBlobMetadataRequest req = waitNext(ekpInterface.getLatestBlobMetadata.getFuture())) {
-				ASSERT(encryptMode.isEncryptionEnabled() || SERVER_KNOBS->REST_KMS_ENABLE_RECRUITMENT);
+				ASSERT(encryptMode.isEncryptionEnabled() || SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION);
 				self->addActor.send(getLatestBlobMetadata(self, kmsConnectorInf, req));
 			}
 			when(HaltEncryptKeyProxyRequest req = waitNext(ekpInterface.haltEncryptKeyProxy.getFuture())) {
-				ASSERT(encryptMode.isEncryptionEnabled() || SERVER_KNOBS->REST_KMS_ENABLE_RECRUITMENT);
+				ASSERT(encryptMode.isEncryptionEnabled() || SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION);
 				TraceEvent("EKPHalted", self->myId).detail("ReqID", req.requesterID);
 				req.reply.send(Void());
 				break;
