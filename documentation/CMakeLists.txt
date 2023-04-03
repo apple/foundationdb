@@ -19,7 +19,7 @@ add_custom_command(OUTPUT ${venv_dir}/venv_setup
           ${CMAKE_COMMAND} -E copy ${sphinx_dir}/.pip.conf ${venv_dir}/pip.conf &&
           ${activate_script} &&
           ${python_command} -m pip install --upgrade pip &&
-          ${pip_command} install --upgrade -r ${sphinx_dir}/requirements.txt &&
+          ${pip_command} install --upgrade -r ${sphinx_dir}/requirements.txt -v &&
           ${pip_command} install sphinx-autobuild && # somehow this is missing in requirements.txt
           ${CMAKE_COMMAND} -E touch ${venv_dir}/venv_setup
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -96,7 +96,7 @@ add_custom_target(docpreview
   USES_TERMINAL)
 add_dependencies(docpreview html)
 
-set(tar_file ${CMAKE_BINARY_DIR}/packages/${CMAKE_PROJECT_NAME}-docs-${FDB_VERSION}.tar.gz)
+set(tar_file ${CMAKE_BINARY_DIR}/packages/${CMAKE_PROJECT_NAME}-docs-${FDB_VERSION}.tgz)
 add_custom_command(
   OUTPUT ${tar_file}
   COMMAND ${CMAKE_COMMAND} -E tar czf ${tar_file} .
