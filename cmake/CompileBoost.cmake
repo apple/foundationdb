@@ -9,7 +9,7 @@ function(compile_boost)
 
   # Configure bootstrap command
   set(BOOTSTRAP_COMMAND "./bootstrap.sh")
-  set(BOOTSTRAP_LIBRARIES "context")
+  set(BOOTSTRAP_LIBRARIES "context,filesystem,iostreams")
 
   set(BOOST_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
   if(CLANG)
@@ -29,7 +29,7 @@ function(compile_boost)
   set(B2_COMMAND "./b2")
   set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++17 -w)
   set(BOOST_LINK_FLAGS "")
-  if(APPLE OR CLANG OR USE_LIBCXX)
+  if(APPLE OR USE_LIBCXX)
     list(APPEND BOOST_COMPILER_FLAGS -stdlib=libc++ -nostdlib++)
     list(APPEND BOOST_LINK_FLAGS -static-libgcc -lc++ -lc++abi)
   endif()
@@ -52,20 +52,30 @@ function(compile_boost)
     URL "https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.bz2"
     URL_HASH SHA256=8681f175d4bdb26c52222665793eef08490d7758529330f98d3b29dd0735bccc
     CONFIGURE_COMMAND ${BOOTSTRAP_COMMAND} ${BOOTSTRAP_ARGS} --with-libraries=${BOOTSTRAP_LIBRARIES} --with-toolset=${BOOST_TOOLSET}
-    BUILD_COMMAND ${B2_COMMAND} link=static ${COMPILE_BOOST_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
+    BUILD_COMMAND ${B2_COMMAND} toolset=${BOOST_TOOLSET} link=static ${COMPILE_BOOST_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
     BUILD_IN_SOURCE ON
     INSTALL_COMMAND ""
     UPDATE_COMMAND ""
     BUILD_BYPRODUCTS "${BOOST_INSTALL_DIR}/boost/config.hpp"
-                     "${BOOST_INSTALL_DIR}/lib/libboost_context.a")
+                     "${BOOST_INSTALL_DIR}/lib/libboost_context.a"
+                     "${BOOST_INSTALL_DIR}/lib/libboost_filesystem.a"
+                     "${BOOST_INSTALL_DIR}/lib/libboost_iostreams.a")
 
   add_library(${COMPILE_BOOST_TARGET}_context STATIC IMPORTED)
   add_dependencies(${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}Project)
   set_target_properties(${COMPILE_BOOST_TARGET}_context PROPERTIES IMPORTED_LOCATION "${BOOST_INSTALL_DIR}/lib/libboost_context.a")
 
+  add_library(${COMPILE_BOOST_TARGET}_filesystem STATIC IMPORTED)
+  add_dependencies(${COMPILE_BOOST_TARGET}_filesystem ${COMPILE_BOOST_TARGET}Project)
+  set_target_properties(${COMPILE_BOOST_TARGET}_filesystem PROPERTIES IMPORTED_LOCATION "${BOOST_INSTALL_DIR}/lib/libboost_filesystem.a")
+
+  add_library(${COMPILE_BOOST_TARGET}_iostreams STATIC IMPORTED)
+  add_dependencies(${COMPILE_BOOST_TARGET}_iostreams ${COMPILE_BOOST_TARGET}Project)
+  set_target_properties(${COMPILE_BOOST_TARGET}_iostreams PROPERTIES IMPORTED_LOCATION "${BOOST_INSTALL_DIR}/lib/libboost_iostreams.a")
+
   add_library(${COMPILE_BOOST_TARGET} INTERFACE)
   target_include_directories(${COMPILE_BOOST_TARGET} SYSTEM INTERFACE ${BOOST_INSTALL_DIR}/include)
-  target_link_libraries(${COMPILE_BOOST_TARGET} INTERFACE ${COMPILE_BOOST_TARGET}_context)
+  target_link_libraries(${COMPILE_BOOST_TARGET} INTERFACE ${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}_filesystem ${COMPILE_BOOST_TARGET}_iostreams)
 
 endfunction(compile_boost)
 
@@ -91,11 +101,11 @@ set(Boost_USE_STATIC_LIBS ON)
 if (UNIX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$")
   list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_78_0_clang)
   set(BOOST_HINT_PATHS /opt/boost_1_78_0_clang)
-  message(STATUS "Using Clang version of boost::context")
+  message(STATUS "Using Clang version of boost::context boost::filesystem and boost::iostreams")
 else ()
   list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_78_0)
   set(BOOST_HINT_PATHS /opt/boost_1_78_0)
-  message(STATUS "Using g++ version of boost::context")
+  message(STATUS "Using g++ version of boost::context boost::filesystem and boost::iostreams")
 endif ()
 
 if(BOOST_ROOT)
@@ -107,18 +117,18 @@ if(WIN32)
   # properly for config mode. So we use the old way on Windows
   #  find_package(Boost 1.72.0 EXACT QUIET REQUIRED CONFIG PATHS ${BOOST_HINT_PATHS})
   # I think depending on the cmake version this will cause weird warnings
-  find_package(Boost 1.72)
+  find_package(Boost 1.72 COMPONENTS filesystem iostreams)
   add_library(boost_target INTERFACE)
-  target_link_libraries(boost_target INTERFACE Boost::boost)
+  target_link_libraries(boost_target INTERFACE Boost::boost Boost::filesystem Boost::iostreams)
   return()
 endif()
 
-find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context CONFIG PATHS ${BOOST_HINT_PATHS})
+find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem iostreams CONFIG PATHS ${BOOST_HINT_PATHS})
 set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
 
-if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
+if(Boost_FOUND AND Boost_filesystem_FOUND AND Boost_context_FOUND AND Boost_iostreams_FOUND AND NOT FORCE_BOOST_BUILD)
   add_library(boost_target INTERFACE)
-  target_link_libraries(boost_target INTERFACE Boost::boost Boost::context)
+  target_link_libraries(boost_target INTERFACE Boost::boost Boost::context Boost::filesystem Boost::iostreams)
 elseif(WIN32)
   message(FATAL_ERROR "Could not find Boost")
 else()
