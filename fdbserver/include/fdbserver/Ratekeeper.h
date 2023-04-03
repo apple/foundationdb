@@ -98,7 +98,7 @@ class Ratekeeper {
 	std::unique_ptr<IRKMetricsTracker> metricsTracker;
 
 	std::map<UID, Ratekeeper::GrvProxyInfo> grvProxyInfo;
-	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
+	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions;
 	HealthMetrics healthMetrics;
 	DatabaseConfiguration configuration;
 	PromiseStream<Future<Void>> addActor;

@@ -216,7 +216,7 @@ public:
 		self.addActor.send(waitFailureServer(rkInterf.waitFailure.getFuture()));
 		self.addActor.send(self.configurationMonitor());
 
-		self.addActor.send(self.metricsTracker->run(self.smoothTotalDurableBytes));
+		self.addActor.send(self.metricsTracker->run());
 		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
 
 		self.addActor.send(self.monitorThrottlingChanges());
@@ -258,7 +258,7 @@ public:
 					double actualTps = self.smoothReleasedTransactions.smoothRate();
 					actualTps =
 					    std::max(std::max(1.0, actualTps),
-					             self.smoothTotalDurableBytes.smoothRate() / CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
+					             self.metricsTracker->getSmoothTotalDurableBytesRate() / CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
 
 					if (self.actualTpsHistory.size() > SERVER_KNOBS->MAX_TPS_HISTORY_SAMPLES) {
 						self.actualTpsHistory.pop_front();
@@ -431,7 +431,7 @@ Ratekeeper::Ratekeeper(UID id,
                        RatekeeperInterface rkInterf)
   : id(id), db(db), smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
     smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), actualTpsMetric("Ratekeeper.ActualTPS"_sr),
+    actualTpsMetric("Ratekeeper.ActualTPS"_sr),
     lastWarning(0), normalLimits(TransactionPriority::DEFAULT,
                                  "",
                                  SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
@@ -467,7 +467,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	// SOMEDAY: Remove the max( 1.0, ... ) since the below calculations _should_ be able to recover back
 	// up from this value
 	actualTps =
-	    std::max(std::max(1.0, actualTps), smoothTotalDurableBytes.smoothRate() / CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
+	    std::max(std::max(1.0, actualTps), metricsTracker->getSmoothTotalDurableBytesRate() / CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
 
 	limits->tpsLimit = std::numeric_limits<double>::infinity();
 	UID reasonID = UID();

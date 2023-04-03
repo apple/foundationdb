@@ -5,7 +5,6 @@
 #include "fdbserver/IRKMetricsTracker.h"
 #include "fdbserver/Knobs.h"
 
-// FIXME: Remove duplicate code from Ratekeeper.actor.cpp
 ACTOR static Future<Void> splitError(Future<Void> in, Promise<Void> errOut) {
 	try {
 		wait(in);
@@ -67,8 +66,7 @@ public:
 	}
 
 	ACTOR static Future<Void> trackStorageServerQueueInfo(RKMetricsTracker* self,
-	                                                      StorageServerInterface ssi,
-	                                                      Smoother* smoothTotalDurableBytes) {
+	                                                      StorageServerInterface ssi) {
 		self->storageQueueInfo.insert(mapPair(ssi.id(), StorageQueueInfo(self->ratekeeperId, ssi.id(), ssi.locality)));
 		TraceEvent("RkTracking", self->ratekeeperId)
 		    .detail("StorageServer", ssi.id())
@@ -79,7 +77,7 @@ public:
 				    StorageQueuingMetricsRequest(), 0, 0)); // SOMEDAY: or tryGetReply?
 				Map<UID, StorageQueueInfo>::iterator myQueueInfo = self->storageQueueInfo.find(ssi.id());
 				if (reply.present()) {
-					myQueueInfo->value.update(reply.get(), *smoothTotalDurableBytes);
+					myQueueInfo->value.update(reply.get(), self->smoothTotalDurableBytes);
 					myQueueInfo->value.acceptingRequests = ssi.isAcceptingRequests();
 				} else {
 					if (myQueueInfo->value.valid) {
@@ -102,7 +100,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> trackEachStorageServer(RKMetricsTracker* self, Smoother* smoothTotalDurableBytes) {
+	ACTOR static Future<Void> trackEachStorageServer(RKMetricsTracker* self) {
 		state std::unordered_map<UID, Future<Void>> storageServerTrackers;
 		state Promise<Void> err;
 
@@ -117,7 +115,7 @@ public:
 
 						auto& a = storageServerTrackers[change.first];
 						a = Future<Void>();
-						a = splitError(trackStorageServerQueueInfo(self, change.second.get(), smoothTotalDurableBytes),
+						a = splitError(trackStorageServerQueueInfo(self, change.second.get()),
 						               err);
 
 						self->storageServerInterfaces[id] = change.second.get();
@@ -161,8 +159,7 @@ public:
 	}
 
 	ACTOR static Future<Void> trackTLogQueueInfo(RKMetricsTracker* self,
-	                                             TLogInterface tli,
-	                                             Smoother* smoothTotalDurableBytes) {
+	                                             TLogInterface tli) {
 		self->tlogQueueInfo.insert(mapPair(tli.id(), TLogQueueInfo(tli.id())));
 		state Map<UID, TLogQueueInfo>::iterator myQueueInfo = self->tlogQueueInfo.find(tli.id());
 		TraceEvent("RkTracking", self->ratekeeperId).detail("TransactionLog", tli.id());
@@ -171,7 +168,7 @@ public:
 				ErrorOr<TLogQueuingMetricsReply> reply = wait(tli.getQueuingMetrics.getReplyUnlessFailedFor(
 				    TLogQueuingMetricsRequest(), 0, 0)); // SOMEDAY: or tryGetReply?
 				if (reply.present()) {
-					myQueueInfo->value.update(reply.get(), *smoothTotalDurableBytes);
+					myQueueInfo->value.update(reply.get(), self->smoothTotalDurableBytes);
 				} else {
 					if (myQueueInfo->value.valid) {
 						TraceEvent("RkTLogDidNotRespond", self->ratekeeperId).detail("TransactionLog", tli.id());
@@ -192,7 +189,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> runTlogTrackers(RKMetricsTracker* self, Smoother* smoothTotalDurableBytes) {
+	ACTOR static Future<Void> runTlogTrackers(RKMetricsTracker* self) {
 		state std::vector<Future<Void>> tlogTrackers;
 		state std::vector<TLogInterface> tlogInterfs;
 		state Promise<Void> err;
@@ -200,7 +197,7 @@ public:
 		tlogInterfs = self->dbInfo->get().logSystemConfig.allLocalLogs();
 		tlogTrackers.reserve(tlogInterfs.size());
 		for (auto tli : tlogInterfs) {
-			tlogTrackers.push_back(splitError(trackTLogQueueInfo(self, tli, smoothTotalDurableBytes), err));
+			tlogTrackers.push_back(splitError(trackTLogQueueInfo(self, tli), err));
 		}
 		loop choose {
 			when(wait(self->dbInfo->onChange())) {
@@ -208,7 +205,7 @@ public:
 					tlogInterfs = self->dbInfo->get().logSystemConfig.allLocalLogs();
 					tlogTrackers = std::vector<Future<Void>>();
 					for (auto tli : tlogInterfs) {
-						tlogTrackers.push_back(splitError(trackTLogQueueInfo(self, tli, smoothTotalDurableBytes), err));
+						tlogTrackers.push_back(splitError(trackTLogQueueInfo(self, tli), err));
 					}
 				}
 			}
@@ -223,7 +220,7 @@ RKMetricsTracker::RKMetricsTracker(UID ratekeeperId,
                                    Database db,
                                    RatekeeperInterface rkInterf,
                                    Reference<AsyncVar<ServerDBInfo> const> dbInfo)
-  : ratekeeperId(ratekeeperId), db(db), rkInterf(rkInterf), lastSSListFetchedTimestamp(now()), dbInfo(dbInfo) {}
+  : ratekeeperId(ratekeeperId), db(db), rkInterf(rkInterf), lastSSListFetchedTimestamp(now()), dbInfo(dbInfo), smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT) {}
 
 RKMetricsTracker::~RKMetricsTracker() = default;
 
@@ -251,12 +248,16 @@ Map<UID, TLogQueueInfo> const& RKMetricsTracker::getTlogQueueInfo() const {
 	return tlogQueueInfo;
 }
 
-Future<Void> RKMetricsTracker::run(Smoother& smoothTotalDurableBytes) {
+double RKMetricsTracker::getSmoothTotalDurableBytesRate() const {
+	return smoothTotalDurableBytes.smoothRate();
+}
+
+Future<Void> RKMetricsTracker::run() {
 	actors.add(RKMetricsTrackerImpl::monitorServerListChange(this));
-	actors.add(RKMetricsTrackerImpl::trackEachStorageServer(this, &smoothTotalDurableBytes));
+	actors.add(RKMetricsTrackerImpl::trackEachStorageServer(this));
 	actors.add(RKMetricsTrackerImpl::refreshStorageServerCommitCosts(this));
 	actors.add(RKMetricsTrackerImpl::receiveCommitCostEstimations(this));
-	actors.add(RKMetricsTrackerImpl::runTlogTrackers(this, &smoothTotalDurableBytes));
+	actors.add(RKMetricsTrackerImpl::runTlogTrackers(this));
 	return actors.getResult();
 }
 

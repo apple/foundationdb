@@ -115,8 +115,12 @@ public:
 	// in the cluster.
 	virtual Map<UID, TLogQueueInfo> const& getTlogQueueInfo() const = 0;
 
+	// Returns the smoothed rate at which bytes are being made durable
+	// on the whole cluster
+	virtual double getSmoothTotalDurableBytesRate() const = 0;
+
 	// Run actors to periodically refresh throttling-relevant statistics
-	virtual Future<Void> run(Smoother& smoothTotalDurableBytes) = 0;
+	virtual Future<Void> run() = 0;
 };
 
 // Tracks the current set of storage servers and tlogs in a database and periodically
@@ -136,6 +140,7 @@ class RKMetricsTracker : public IRKMetricsTracker {
 	std::unordered_map<UID, StorageServerInterface> storageServerInterfaces;
 	Map<UID, StorageQueueInfo> storageQueueInfo;
 	Map<UID, TLogQueueInfo> tlogQueueInfo;
+	Smoother smoothTotalDurableBytes;
 
 	void updateCommitCostEstimation(UIDTransactionTagMap<TransactionCommitCostEstimation> const& costEstimation);
 
@@ -145,5 +150,6 @@ public:
 	Map<UID, StorageQueueInfo> const& getStorageQueueInfo() const override;
 	bool ssListFetchTimedOut() const override;
 	Map<UID, TLogQueueInfo> const& getTlogQueueInfo() const override;
-	Future<Void> run(Smoother& smoothTotalDurableBytes) override;
+	double getSmoothTotalDurableBytesRate() const override;
+	Future<Void> run() override;
 };
