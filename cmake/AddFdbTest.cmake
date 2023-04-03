@@ -130,7 +130,7 @@ function(add_fdb_test)
       -b ${PROJECT_BINARY_DIR}
       -t ${test_type}
       -O ${OLD_FDBSERVER_BINARY}
-      --config "@CTEST_CONFIGURATION_TYPE@"
+      --config "${CTEST_CONFIGURATION_TYPE}"
       --crash
       --aggregate-traces ${TEST_AGGREGATE_TRACES}
       --log-format ${TEST_LOG_FORMAT}
@@ -355,11 +355,7 @@ function(package_bindingtester)
 
   set(generated_binding_files python/fdb/fdboptions.py)
   if(WITH_JAVA_BINDING)
-    if(NOT FDB_RELEASE)
-      set(not_fdb_release_string "-SNAPSHOT")
-    else()
-      set(not_fdb_release_string "")
-    endif()
+    set(not_fdb_release_string "")
     add_custom_command(
       TARGET copy_binding_output_files
       COMMAND ${CMAKE_COMMAND} -E copy

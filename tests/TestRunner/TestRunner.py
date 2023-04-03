@@ -276,7 +276,7 @@ class RestartTestPolicy:
         if old_binary is None:
             _logger.info("No old binary provided")
         old_binary_version_raw = subprocess.check_output([old_binary, '--version']).decode('utf-8')
-        match = re.match('FoundationDB.*\(v([0-9]+\.[0-9]+\.[0-9]+)\)', old_binary_version_raw)
+        match = re.match('FoundationDB.*\(v([0-9]+\.[0-9]+\.[0-9]+)(-0\.[0-9a-f]{40}\.PRERELEASE|-[0-9]+\.ow.*)?\)', old_binary_version_raw)
         assert match, old_binary_version_raw
         old_binary_version = tuple(map(int, match.group(1).split('.')))
         match = re.match('.*/restarting/from_([0-9]+\.[0-9]+\.[0-9]+)/', name)

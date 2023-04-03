@@ -36,11 +36,7 @@ if(NOT OPEN_FOR_IDE)
     endif()
   endforeach()
 
-  if(NOT FDB_RELEASE)
-    set(not_fdb_release_string "-SNAPSHOT")
-  else()
-    set(not_fdb_release_string "")
-  endif()
+  set(not_fdb_release_string "")
 
   file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/packages)
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packages)

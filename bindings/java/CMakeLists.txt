@@ -257,11 +257,7 @@ if(NOT OPEN_FOR_IDE)
     COMMENT "Copy jni library for fat jar")
   add_custom_target(copy_lib DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib_copied)
   add_dependencies(copy_lib unpack_jar)
-  if(NOT FDB_RELEASE)
-    set(not_fdb_release_string "-SNAPSHOT")
-  else()
-    set(not_fdb_release_string "")
-  endif()
+  set(not_fdb_release_string "")
   set(target_jar ${jar_destination}/fdb-java-${FDB_VERSION}${not_fdb_release_string}.jar)
   add_custom_command(OUTPUT ${target_jar}
     COMMAND ${Java_JAR_EXECUTABLE} cfm ${target_jar} ${unpack_dir}/META-INF/MANIFEST.MF .
