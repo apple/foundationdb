@@ -280,7 +280,9 @@ protected:
 	AsyncVar<Optional<Key>> healthyZone;
 	Future<bool> clearHealthyZoneFuture;
 	double pivotAvailableSpaceRatio;
-	double lastPivotAvailableSpaceUpdate;
+	double lastPivotValuesUpdate;
+
+	double pivotReadBandwidth;
 
 	int lowestUtilizationTeam;
 	int highestUtilizationTeam;
@@ -320,6 +322,9 @@ protected:
 	// Returns a server team from given "servers", empty team if not found.
 	// When "wantHealthy" is true, only return if the team is healthy.
 	Optional<Reference<IDataDistributionTeam>> findTeamFromServers(const std::vector<UID>& servers, bool wantHealthy);
+
+	// Find the healthy team with the most overlapped teamList as completeSources
+	Optional<Reference<IDataDistributionTeam>> findTheMostOverlappedTeam(const std::vector<UID>& completeSources);
 
 	Future<Void> logOnCompletion(Future<Void> signal);
 
@@ -644,7 +649,9 @@ protected:
 	Reference<TCTeamInfo> buildLargeTeam(int size);
 
 	// get the min available space ratio from every healthy team and update the pivot ratio `pivotAvailableSpaceRatio`
-	void updatePivotAvailableSpaceRatio();
+	void updateTeamPivotValues();
+	void updateAvailableSpacePivotValues();
+	void updateReadBandwidthPivotValues();
 
 public:
 	Reference<IDDTxnProcessor> db;

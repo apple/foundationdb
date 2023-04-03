@@ -190,10 +190,9 @@ public:
 	// Data distribution
 	// DD won't move shard to teams that has availableSpaceRatio < max(0.05,  AllTeamAvailSpaceRatio[pivot]), where
 	// pivot = pivot percent * team count.
-	double AVAILABLE_SPACE_PIVOT_PERCENT;
-	// DD won't move shard to teams that has readLoad > AllTeamReadLoad[pivot], where pivot = pivot percent *
-	// team count.
-	double READ_LOAD_PIVOT_PERCENT;
+	double AVAILABLE_SPACE_PIVOT_RATIO;
+	// pivot ratio for ReadBandwidth across all teams
+	double READ_BANDWIDTH_PIVOT_RATIO;
 
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
@@ -737,7 +736,7 @@ public:
 	double MIN_AVAILABLE_SPACE_RATIO;
 	double MIN_AVAILABLE_SPACE_RATIO_SAFETY_BUFFER;
 	double TARGET_AVAILABLE_SPACE_RATIO;
-	double AVAILABLE_SPACE_UPDATE_DELAY;
+	double DD_TEAM_PIVOT_VALUES_UPDATE_DELAY;
 
 	double MAX_TL_SS_VERSION_DIFFERENCE; // spring starts at half this value
 	double MAX_TL_SS_VERSION_DIFFERENCE_BATCH;

@@ -24,6 +24,7 @@
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include <climits>
+#include <utility>
 
 namespace {
 
@@ -178,8 +179,8 @@ public:
 				return Void();
 			}
 
-			// report the pivot available space
-			self->updatePivotAvailableSpaceRatio();
+			// report the pivot values of all the teams
+			self->updateTeamPivotValues();
 
 			bool foundSrc = false;
 			for (const auto& id : req.src) {
@@ -208,6 +209,7 @@ public:
 			Optional<Reference<IDataDistributionTeam>> bestOption;
 			std::vector<Reference<TCTeamInfo>> randomTeams;
 
+			// For custom replication
 			if (ddLargeTeamEnabled() && req.keys.present()) {
 				int customReplicas = self->configuration.storageTeamSize;
 				for (auto& it : self->customReplication->intersectingRanges(req.keys.get())) {
@@ -250,6 +252,28 @@ public:
 						    .detail("LargeTeamDiff", now() - self->firstLargeTeamFailure.get());
 						self->underReplication.insert(req.keys.get(), true);
 					}
+				}
+			}
+
+			// When relocating shards, DD would evaluate the utilization of theMostOverlappedTeam. If its ReadBandwidth
+			// is smaller than AllTeamReadBandwidth[pivot](where pivot = READ_BANDWIDTH_PIVOT_RATIO * team count), we
+			// would return it as destination team to dataDistributionRelcator.
+			if (req.teamSelect.isRelocateTeam()) {
+				auto mostOverlappedTeam = self->findTheMostOverlappedTeam(req.completeSources);
+				if (mostOverlappedTeam.present()) {
+					if (mostOverlappedTeam.get()->getLoadReadBandwidth() < self->pivotReadBandwidth &&
+					    mostOverlappedTeam.get()->getMinAvailableSpaceRatio() > self->pivotAvailableSpaceRatio) {
+						TraceEvent(SevInfo, "DDGetTeamReturnOverlappedTeamToRelocator", self->distributorId)
+						    .detail("TeamServerList", mostOverlappedTeam.get()->getServerIDs())
+						    .detail("TeamReadBandwidth", mostOverlappedTeam.get()->getLoadReadBandwidth())
+						    .detail("PivotReadBandwidth", self->pivotReadBandwidth)
+						    .detail("TeamAvailableSpaceRatio", mostOverlappedTeam.get()->getMinAvailableSpaceRatio())
+						    .detail("PivotAvailableSpaceRatio", self->pivotAvailableSpaceRatio);
+						req.reply.send(std::make_pair(mostOverlappedTeam, foundSrc));
+						return Void();
+					}
+				} else {
+					// Trace;
 				}
 			}
 
@@ -3213,33 +3237,69 @@ public:
 	}
 }; // class DDTeamCollectionImpl
 
-void DDTeamCollection::updatePivotAvailableSpaceRatio() {
-	if (now() - lastPivotAvailableSpaceUpdate > SERVER_KNOBS->AVAILABLE_SPACE_UPDATE_DELAY) {
-		lastPivotAvailableSpaceUpdate = now();
-		std::vector<double> teamAvailableSpace;
-		teamAvailableSpace.reserve(teams.size());
-		for (const auto& team : teams) {
-			if (team->isHealthy()) {
-				teamAvailableSpace.push_back(team->getMinAvailableSpaceRatio());
-			}
-		}
+// Update pivot values across all the teams.
+// For now, it mainly includes two dimensions: AvailableSpace and ReadBandwidth pivot. We may add
+// CPU utilization, writeBandwidth...later.
+void DDTeamCollection::updateTeamPivotValues() {
+	if (now() - lastPivotValuesUpdate > SERVER_KNOBS->DD_TEAM_PIVOT_VALUES_UPDATE_DELAY) {
+		lastPivotValuesUpdate = now();
+		updateAvailableSpacePivotValues();
+		updateReadBandwidthPivotValues();
+	}
+}
 
-		size_t pivot = teamAvailableSpace.size() * std::min(1.0, SERVER_KNOBS->AVAILABLE_SPACE_PIVOT_PERCENT);
-		if (teamAvailableSpace.size() > 1) {
-			std::nth_element(teamAvailableSpace.begin(), teamAvailableSpace.begin() + pivot, teamAvailableSpace.end());
-			pivotAvailableSpaceRatio =
-			    std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO,
-			             std::min(SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO, teamAvailableSpace[pivot]));
-		} else {
-			pivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
+void DDTeamCollection::updateReadBandwidthPivotValues() {
+	std::vector<double> teamReadBandwidth;
+	teamReadBandwidth.reserve(teams.size());
+
+	for (const auto& team : teams) {
+		if (team->isHealthy()) {
+			teamReadBandwidth.push_back(team->getLoadReadBandwidth());
 		}
-		if (pivotAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
-			TraceEvent(SevWarn, "DDTeamMedianAvailableSpaceTooSmall", distributorId)
-			    .detail("PivotAvailableSpaceRatio", pivotAvailableSpaceRatio)
-			    .detail("TargetAvailableSpaceRatio", SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO)
-			    .detail("Primary", primary);
-			printDetailedTeamsInfo.trigger();
+	}
+
+	size_t readBandwidthIndex = teamReadBandwidth.size() * std::min(1.0, SERVER_KNOBS->READ_BANDWIDTH_PIVOT_RATIO);
+	if (teamReadBandwidth.empty()) {
+		TraceEvent(SevWarn, "DDTeamCollectionNoHealthyTeam", distributorId)
+		    .detail("TotalTeamSize", teams.size())
+		    .detail("Primary", primary);
+		printDetailedTeamsInfo.trigger();
+	} else {
+		std::nth_element(
+		    teamReadBandwidth.begin(), teamReadBandwidth.begin() + readBandwidthIndex, teamReadBandwidth.end());
+		pivotReadBandwidth = teamReadBandwidth[readBandwidthIndex];
+		TraceEvent(SevInfo, "DDTeamCollectionUpdateReadBandwidthPivot", distributorId)
+		    .detail("HealthTeamSize", teamReadBandwidth.size())
+		    .detail("ReadBandwidthIndex", readBandwidthIndex)
+		    .detail("PivotReadBandwidth", pivotReadBandwidth);
+	}
+}
+
+void DDTeamCollection::updateAvailableSpacePivotValues() {
+	std::vector<double> teamAvailableSpace;
+	teamAvailableSpace.reserve(teams.size());
+	for (const auto& team : teams) {
+		if (team->isHealthy()) {
+			teamAvailableSpace.push_back(team->getMinAvailableSpaceRatio());
 		}
+	}
+
+	size_t availableSpacePivot = teamAvailableSpace.size() * std::min(1.0, SERVER_KNOBS->AVAILABLE_SPACE_PIVOT_RATIO);
+	if (teamAvailableSpace.size() > 1) {
+		std::nth_element(
+		    teamAvailableSpace.begin(), teamAvailableSpace.begin() + availableSpacePivot, teamAvailableSpace.end());
+		pivotAvailableSpaceRatio =
+		    std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO,
+		             std::min(SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO, teamAvailableSpace[availableSpacePivot]));
+	} else {
+		pivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
+	}
+	if (pivotAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
+		TraceEvent(SevWarn, "DDTeamMedianAvailableSpaceTooSmall", distributorId)
+		    .detail("PivotAvailableSpaceRatio", pivotAvailableSpaceRatio)
+		    .detail("TargetAvailableSpaceRatio", SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO)
+		    .detail("Primary", primary);
+		printDetailedTeamsInfo.trigger();
 	}
 }
 
@@ -3394,6 +3454,43 @@ Optional<Reference<IDataDistributionTeam>> DDTeamCollection::findTeamFromServers
 		}
 	}
 	return Optional<Reference<IDataDistributionTeam>>();
+}
+
+// Find the healthy team with the most overlapped teamList as completeSources
+Optional<Reference<IDataDistributionTeam>> DDTeamCollection::findTheMostOverlappedTeam(
+    const std::vector<UID>& completeSources) {
+
+	const std::set<UID> serverList(completeSources.begin(), completeSources.end());
+	std::pair<int, Optional<Reference<IDataDistributionTeam>>> result =
+	    std::make_pair(0, Optional<Reference<IDataDistributionTeam>>());
+
+	for (const auto& server : completeSources) {
+		if (!server_info.count(server)) {
+			// do nothing
+		} else {
+			auto const& teamList = server_info[server]->getTeams();
+			for (const auto& team : teamList) {
+				if (!team->isHealthy()) {
+					// do nothing
+				} else {
+					int overlappedCount = 0;
+					for (const UID& serverID : team->getServerIDs()) {
+						if (serverList.count(serverID)) {
+							overlappedCount++;
+						}
+					}
+					if (overlappedCount > result.first) {
+						result = std::make_pair(overlappedCount, team);
+						TraceEvent(SevInfo, "DDGetTeamUpdateMostOverlappedTeam", distributorId)
+						    .detail("CompleteSources", completeSources)
+						    .detail("OverlappedCount", overlappedCount)
+						    .detail("OverlappedTeamServerList", team->getServerIDs());
+					}
+				}
+			}
+		}
+	}
+	return result.second;
 }
 
 Future<Void> DDTeamCollection::logOnCompletion(Future<Void> signal) {
@@ -3701,7 +3798,7 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
     readyToStart(params.readyToStart),
     checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)), badTeamRemover(Void()),
     checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()), clearHealthyZoneFuture(true),
-    pivotAvailableSpaceRatio(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastPivotAvailableSpaceUpdate(0),
+    pivotAvailableSpaceRatio(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastPivotValuesUpdate(0),
     lowestUtilizationTeam(0), highestUtilizationTeam(0), getShardMetrics(params.getShardMetrics),
     getUnhealthyRelocationCount(params.getUnhealthyRelocationCount), removeFailedServer(params.removeFailedServer),
     ddTrackerStartingEventHolder(makeReference<EventCacheHolder>("DDTrackerStarting")),
@@ -3709,7 +3806,7 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
     storageServerRecruitmentEventHolder(
         makeReference<EventCacheHolder>("StorageServerRecruitment_" + params.distributorId.toString())),
     primary(params.primary), distributorId(params.distributorId), underReplication(false),
-    configuration(params.configuration), storageServerSet(new LocalityMap<UID>()) {
+    configuration(params.configuration), storageServerSet(new LocalityMap<UID>()), pivotReadBandwidth(0) {
 
 	if (!primary || configuration.usableRegions == 1) {
 		TraceEvent("DDTrackerStarting", distributorId)
