@@ -1159,7 +1159,7 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 }
 
 ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo, AuditType auditType) {
-	TraceEvent(SevDebug, "AuditStorageCorrectnessBegin").detail("AuditID", auditId).detail("AuditType", auditType);
+	TraceEvent(SevDebug, "AuditStorageCorrectnessBegin").detail("AuditType", auditType);
 	state Database cx;
 	state UID auditId;
 	state AuditStorageState auditState;

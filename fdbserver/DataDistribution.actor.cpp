@@ -1477,12 +1477,11 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
                                     UID auditID,
                                     AuditType auditType,
                                     std::string context) {
+	// At this point, audit must be launched
+	ASSERT(auditID.isValid());
+	ASSERT(self->audits.contains(auditType) && self->audits[auditType].contains(auditID));
+	state std::shared_ptr<DDAudit> audit = self->audits[auditType][auditID];
 	try {
-		// At this point, audit launched
-		// We wait for the actor and see if retry is needed
-		ASSERT(auditID.isValid());
-		ASSERT(self->audits.contains(auditType) && self->audits[auditType].contains(auditID));
-		state std::shared_ptr<DDAudit> audit = self->audits[auditType][auditID];
 		TraceEvent(SevVerbose, "DDAuditStorageCoreStart", self->ddId)
 		    .detail("Context", context)
 		    .detail("AuditID", auditID)
