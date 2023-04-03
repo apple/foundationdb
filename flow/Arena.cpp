@@ -1042,7 +1042,6 @@ TEST_CASE("/flow/Arena/Secure") {
 				// in the same vein, it is speculative but likely that if buf == newBuf,
 				// the memory backing the address is the same and remained untouched,
 				// because FDB servers are single-threaded
-				// Since there is no hard guarantee, it is an UB which should not be asserted.
 				samePtrCount++;
 				for (auto i = 0; i < len; i++) {
 					if (newBuf[i] != 0) {
