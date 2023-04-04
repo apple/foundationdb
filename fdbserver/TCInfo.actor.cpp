@@ -106,13 +106,6 @@ public:
 			wait(server->updateServerMetrics() &&
 			     store(server->storageStats,
 			           txnProcessor->getStorageStats(server->getId(), SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE)));
-			if (server->storageStats.present()) {
-				server->smoothedCPU.setTotal(server->storageStats.get().cpuUsage);
-			} else {
-				// If =storage server hasn't gotten the health metrics updated, we assume it's too busy to respond so
-				// return 100.0;
-				server->smoothedCPU.setTotal(100.0);
-			}
 			wait(delayUntil(lastUpdate + SERVER_KNOBS->STORAGE_METRICS_POLLING_DELAY +
 			                    SERVER_KNOBS->STORAGE_METRICS_RANDOM_DELAY * deterministicRandom()->random01(),
 			                TaskPriority::DataDistributionLaunch));
@@ -141,8 +134,7 @@ TCServerInfo::TCServerInfo(StorageServerInterface ssi,
                            Version addedVersion)
   : id(ssi.id()), inDesiredDC(inDesiredDC), collection(collection), addedVersion(addedVersion), lastKnownInterface(ssi),
     lastKnownClass(processClass), storeType(KeyValueStoreType::END), dataInFlightToServer(0),
-    smoothedCPU(SERVER_KNOBS->CPU_STABLE_INTERVAL), onInterfaceChanged(interfaceChanged.getFuture()),
-    onRemoved(removed.getFuture()), onTSSPairRemoved(Never()) {
+    onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()), onTSSPairRemoved(Never()) {
 
 	if (!ssi.isTss()) {
 		localityEntry = ((LocalityMap<UID>*)storageServerSet.getPtr())->add(ssi.locality, &id);
@@ -425,7 +417,10 @@ double TCTeamInfo::getReadLoad(bool includeInFlight, double inflightPenalty) con
 double TCTeamInfo::getAverageCPU() const {
 	double sum = 0;
 	for (const auto& server : servers) {
-		sum += server->getSmoothedCPU();
+		auto& stats = server->getStorageStats();
+		// If storage server hasn't gotten the health metrics updated, we assume it's too busy to respond so
+		// return 100.0;
+		sum += stats.present() ? stats.get().cpuUsage : 100.0;
 	}
 	return servers.empty() ? 0.0 : sum / servers.size();
 }
