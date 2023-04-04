@@ -171,9 +171,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( AVAILABLE_SPACE_PIVOT_RATIO,                         0.5 );
 	init( CPU_PIVOT_RATIO,                                     0.9 );
 	// In order to make sure GetTeam has enough eligible destination team:
-	ASSERT_GT(1 - AVAILABLE_SPACE_PIVOT_RATIO + CPU_PIVOT_RATIO, 1.0 );
+	ASSERT_GT(AVAILABLE_SPACE_PIVOT_RATIO + CPU_PIVOT_RATIO, 1.0 );
 	// In simulation, the CPU percent of every storage server is hard-coded as 100.0%. It is difficult to test pivot CPU in normal simulation. TODO: add mock DD Test case for it.
-	init( MAX_DEST_CPU_PERCENT, 		   isSimulated ? 100.0:	98.0 );
+	// TODO: choose a meaning value for real cluster
+	init( MAX_DEST_CPU_PERCENT, 		  					   100.0 );
 	init( CPU_STABLE_INTERVAL,            isSimulated ?  0.0 : 300.0 );
 	init( DD_TEAM_PIVOT_UPDATE_DELAY,                            5.0 );
 
