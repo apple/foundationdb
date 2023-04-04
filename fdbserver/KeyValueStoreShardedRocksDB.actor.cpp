@@ -672,7 +672,8 @@ public:
 						                              rocksdb::DB::Properties::kCompressionRatioAtLevelPrefix +
 						                                  std::to_string(it->level),
 						                              &propValue));
-						e.detail("Level" + std::to_string(it->level), std::to_string(it->size) + " " + propValue);
+						e.detail("Level" + std::to_string(it->level),
+						         std::to_string(it->size) + " " + std::to_string(it->files.size()) + " " + propValue);
 					}
 				}
 			}
