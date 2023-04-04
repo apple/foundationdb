@@ -29,8 +29,6 @@
 #include "flow/ApiVersion.h"
 #include "flow/UnitTest.h"
 
-FDB_DEFINE_BOOLEAN_PARAM(EnforceValidTenantId);
-
 namespace TenantAPI {
 
 KeyRef idToPrefix(Arena& p, int64_t id) {

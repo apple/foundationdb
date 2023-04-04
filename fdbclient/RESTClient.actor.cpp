@@ -174,10 +174,11 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<RESTClient> cli
 		statsPtr->requests_failed++;
 
 		// All errors in err are potentially retryable as well as certain HTTP response codes...
-		bool retryable = err.present() || r->code == HTTP::HTTP_STATUS_CODE_INTERNAL_SERVER_ERROR ||
-		                 r->code == HTTP::HTTP_STATUS_CODE_BAD_GATEWAY ||
-		                 r->code == HTTP::HTTP_STATUS_CODE_SERVICE_UNAVAILABLE ||
-		                 r->code == HTTP::HTTP_STATUS_CODE_TOO_MANY_REQUESTS;
+		bool retryable =
+		    err.present() || r->code == HTTP::HTTP_STATUS_CODE_INTERNAL_SERVER_ERROR ||
+		    r->code == HTTP::HTTP_STATUS_CODE_BAD_GATEWAY || r->code == HTTP::HTTP_STATUS_CODE_BAD_GATEWAY ||
+		    r->code == HTTP::HTTP_STATUS_CODE_SERVICE_UNAVAILABLE ||
+		    r->code == HTTP::HTTP_STATUS_CODE_TOO_MANY_REQUESTS || r->code == HTTP::HTTP_STATUS_CODE_TIMEOUT;
 
 		// But only if our previous attempt was not the last allowable try.
 		retryable = retryable && (thisTry < maxTries);

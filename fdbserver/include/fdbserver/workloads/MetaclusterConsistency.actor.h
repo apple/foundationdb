@@ -39,7 +39,7 @@
 #include "fdbserver/workloads/TenantConsistency.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-FDB_DECLARE_BOOLEAN_PARAM(AllowPartialMetaclusterOperations);
+FDB_BOOLEAN_PARAM(AllowPartialMetaclusterOperations);
 
 template <class DB>
 class MetaclusterConsistencyCheck {

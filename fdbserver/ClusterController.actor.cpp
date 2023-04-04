@@ -906,7 +906,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		self->db.logGenerations = 0;
 		ASSERT(!req.logSystemConfig.oldTLogs.size());
 	} else {
-		self->db.logGenerations = std::max<int>(self->db.logGenerations, req.logSystemConfig.oldTLogs.size());
+		// TODO(zhewu): Remove logGenerations. It is not used anywhere.
+		self->db.logGenerations = req.logSystemConfig.oldTLogs.size();
 	}
 
 	db->masterRegistrationCount = req.registrationCount;
@@ -2243,10 +2244,9 @@ ACTOR Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, double waitTime) {
+ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self) {
 	// If master fails at the same time, give it a chance to clear master PID.
-	// Also wait to avoid too many consecutive recruits in a small time window.
-	wait(delay(waitTime));
+	wait(delay(0.0));
 
 	TraceEvent("CCEKP_Start", self->id).log();
 	loop {
@@ -2327,18 +2327,21 @@ ACTOR Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
 	state SingletonRecruitThrottler recruitThrottler;
 	loop {
 		if (self->db.serverInfo->get().encryptKeyProxy.present() && !self->recruitEncryptKeyProxy.get()) {
-			choose {
+			loop choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().encryptKeyProxy.get().waitFailure,
 				                            SERVER_KNOBS->ENCRYPT_KEY_PROXY_FAILURE_TIME))) {
-					TraceEvent("CCEKP_Died", self->id);
 					const auto& encryptKeyProxy = self->db.serverInfo->get().encryptKeyProxy;
 					EncryptKeyProxySingleton(encryptKeyProxy).halt(*self, encryptKeyProxy.get().locality.processId());
 					self->db.clearInterf(ProcessClass::EncryptKeyProxyClass);
+					TraceEvent("CCEKP_Died", self->id);
+					break;
 				}
-				when(wait(self->recruitEncryptKeyProxy.onChange())) {}
+				when(wait(self->recruitEncryptKeyProxy.onChange())) {
+					break;
+				}
 			}
 		} else {
-			wait(startEncryptKeyProxy(self, recruitThrottler.newRecruitment()));
+			wait(startEncryptKeyProxy(self));
 		}
 	}
 }
@@ -2690,7 +2693,6 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 
 		TraceEvent("DBInfoStartBroadcast", self->id)
 		    .detail("MasterLifetime", self->db.serverInfo->get().masterLifetime.toString());
-		;
 		choose {
 			when(std::vector<Endpoint> notUpdated =
 			         wait(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, Optional<Endpoint>(), false))) {
