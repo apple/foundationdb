@@ -291,18 +291,6 @@ public:
 		return sum<double>([](IDataDistributionTeam const& team) { return team.getAverageCPU(); }) / teams.size();
 	}
 
-	void setLastHighCPUTime(double time) override {
-		for (auto& team : teams) {
-			team->setLastHighCPUTime(time);
-		}
-	}
-
-	bool hasLowCpuFor(double cpuThreshold, double duration) const override {
-		return all([cpuThreshold, duration](IDataDistributionTeam const& team) {
-			return team.hasLowCpuFor(cpuThreshold, duration);
-		});
-	}
-
 	int64_t getMinAvailableSpace(bool includeInFlight = true) const override {
 		int64_t result = std::numeric_limits<int64_t>::max();
 		for (const auto& team : teams) {

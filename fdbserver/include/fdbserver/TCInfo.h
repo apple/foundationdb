@@ -180,8 +180,7 @@ class TCTeamInfo final : public ReferenceCounted<TCTeamInfo>, public IDataDistri
 	int priority;
 	UID id;
 
-	// the last time stamp when the team's CPU > pivot CPU
-	double lastHighCPUTime = 0;
+	data_distribution::EligibilityCounter eligibilityCounter;
 
 public:
 	Reference<TCMachineTeamInfo> machineTeam;
@@ -220,11 +219,8 @@ public:
 
 	double getAverageCPU() const override;
 
-	void setLastHighCPUTime(double time) override { lastHighCPUTime = time; }
-
-	bool hasLowCpuFor(double cpuThreshold, double duration) const override {
-		return getAverageCPU() <= std::min(cpuThreshold, SERVER_KNOBS->MAX_DEST_CPU_PERCENT) &&
-		       now() - lastHighCPUTime >= duration;
+	bool hasLowCpu(double cpuThreshold) const {
+		return getAverageCPU() <= std::min(cpuThreshold, SERVER_KNOBS->MAX_DEST_CPU_PERCENT);
 	}
 
 	int64_t getReadInFlightToTeam() const override;
@@ -234,6 +230,10 @@ public:
 	double getMinAvailableSpaceRatio(bool includeInFlight = true) const override;
 
 	bool hasHealthyAvailableSpace(double minRatio) const override;
+
+	unsigned getEligiblilityCount(int combinedType) { return eligibilityCounter.getCount(combinedType); }
+	void increaseEligibilityCount(data_distribution::EligibilityCounter::Type t) { eligibilityCounter.increase(t); }
+	void resetEligibilityCount(data_distribution::EligibilityCounter::Type t) { eligibilityCounter.reset(t); }
 
 	Future<Void> updateStorageMetrics() override;
 
