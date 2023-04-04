@@ -3801,7 +3801,7 @@ int64_t getNumProfilesCaptured() {
 void profileHandler(int sig) {
 #ifdef __linux__
 	if (chainedAction.sa_handler != SIG_DFL && chainedAction.sa_handler != SIG_IGN &&
-	    chainedAction.sa_handler != NULL) {
+	    chainedAction.sa_handler != nullptr) {
 		chainedAction.sa_handler(sig);
 	}
 
@@ -3997,6 +3997,8 @@ std::string getExecPath() {
 void setupRunLoopProfiler() {
 #ifdef __linux__
 	if (profileThreadId == -1 && FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
+		chainedAction.sa_handler = SIG_DFL;
+
 		TraceEvent("StartingRunLoopProfilingThread").detail("Interval", FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
 
 		profileThread = true;
