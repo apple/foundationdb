@@ -53,10 +53,9 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	KeyValueStoreType storeType; // Storage engine type
 
 	int64_t dataInFlightToServer = 0, readInFlightToServer = 0;
-	std::vector<Reference<TCTeamInfo>> teams;
+	std::vector<Reference<TCTeamInfo>> teams{};
 	ErrorOr<GetStorageMetricsReply> metrics;
 	Optional<HealthMetrics::StorageStats> storageStats;
-	Smoother smoothedCPU;
 
 	void setMetrics(GetStorageMetricsReply serverMetrics) { this->metrics = serverMetrics; }
 	void markTeamUnhealthy(int teamIndex);
@@ -83,7 +82,7 @@ public:
 	             Version addedVersion = 0);
 
 	GetStorageMetricsReply const& getMetrics() const { return metrics.get(); }
-	double getSmoothedCPU() const { return smoothedCPU.smoothTotal(); }
+	Optional<HealthMetrics::StorageStats> const& getStorageStats() const { return storageStats; }
 
 	UID const& getId() const { return id; }
 	bool isInDesiredDC() const { return inDesiredDC; }
