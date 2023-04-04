@@ -67,6 +67,20 @@ struct RatekeeperLimits {
 	                 double bwLagTarget);
 };
 
+/**
+ * The Ratekeeper class is responsible for:
+ *
+ * - Fetching metrics from storage servers, tlogs, and commit proxies.
+ *   This responsiblity is managed through the metricsTracker object.
+ *
+ * - Calculating cluster-wide rates for each priority and tag. The
+ *   responsibility of calculating per-tag rates is handled through
+ *   the tagThrottler object.
+ *
+ * - Serving the RatekeeperInterface. This interface is used to distribute
+ *   transaction rates and health metrics to GRV proxies. Commit proxies also
+ *   use this interface to send commit cost estimations to the metricsTracker.
+ */
 class Ratekeeper {
 	friend class RatekeeperImpl;
 
