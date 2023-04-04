@@ -65,7 +65,7 @@ void managementClusterAddTenantToGroup(Transaction tr,
 			    tr, Tuple::makeTuple(tenantEntry.assignedCluster, tenantEntry.tenantGroup.get()));
 		}
 		metadata::management::tenantMetadata().tenantGroupTenantIndex.insert(
-		    tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), tenantEntry.id));
+		    tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), tenantEntry.tenantName, tenantEntry.id));
 	}
 
 	if (!groupAlreadyExists && !isRestoring) {
@@ -88,7 +88,7 @@ Future<Void> managementClusterRemoveTenantFromGroup(Transaction tr,
 	state bool updateClusterCapacity = !tenantEntry.tenantGroup.present();
 	if (tenantEntry.tenantGroup.present()) {
 		metadata::management::tenantMetadata().tenantGroupTenantIndex.erase(
-		    tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), tenantEntry.id));
+		    tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), tenantEntry.tenantName, tenantEntry.id));
 
 		state KeyBackedSet<Tuple>::RangeResultType result =
 		    wait(metadata::management::tenantMetadata().tenantGroupTenantIndex.getRange(

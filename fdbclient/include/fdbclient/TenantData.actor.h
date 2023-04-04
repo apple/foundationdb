@@ -110,11 +110,14 @@ private:
 
 		self->tenantGroupIndex.clear();
 		for (auto t : tenantGroupTenantTuples.results) {
-			ASSERT_EQ(t.size(), 2);
+			ASSERT_EQ(t.size(), 3);
 			TenantGroupName tenantGroupName = t.getString(0);
-			int64_t tenantId = t.getInt(1);
+			TenantName tenantName = t.getString(1);
+			int64_t tenantId = t.getInt(2);
 			ASSERT(self->tenantGroupMap.count(tenantGroupName));
-			ASSERT(self->tenantMap.count(tenantId));
+			auto tenantItr = self->tenantMap.find(tenantId);
+			ASSERT(tenantItr != self->tenantMap.end());
+			ASSERT_EQ(tenantItr->second.tenantName, tenantName);
 			self->tenantGroupIndex[tenantGroupName].insert(tenantId);
 		}
 		ASSERT_EQ(self->tenantGroupIndex.size(), self->tenantGroupMap.size());
