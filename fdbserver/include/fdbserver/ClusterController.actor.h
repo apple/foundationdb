@@ -1119,8 +1119,9 @@ public:
 		// check for disconnection since the latency between prmary and satellite is across WAN and may not be very
 		// stable.
 		return transactionWorkerInList(degradationInfo.degradedServers, /*skipSatellite=*/true, /*skipRemote=*/true) ||
-		       transactionWorkerInList(
-		           degradationInfo.disconnectedServers, /*skipSatellite=*/false, /*skipRemote=*/!SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING);
+		       transactionWorkerInList(degradationInfo.disconnectedServers,
+		                               /*skipSatellite=*/false,
+		                               /*skipRemote=*/!SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING);
 	}
 
 	// Whether transaction system in the remote DC, e.g. log router and tlogs in the remote DC, contains degraded
