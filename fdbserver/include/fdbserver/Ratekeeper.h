@@ -28,93 +28,11 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Smoother.h"
+#include "fdbserver/IRKMetricsTracker.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/TLogInterface.h"
-
-enum limitReason_t {
-	unlimited, // TODO: rename to workload?
-	storage_server_write_queue_size, // 1
-	storage_server_write_bandwidth_mvcc,
-	storage_server_readable_behind,
-	log_server_mvcc_write_bandwidth,
-	log_server_write_queue, // 5
-	storage_server_min_free_space, // a storage server's normal limits are being reduced by low free space
-	storage_server_min_free_space_ratio, // a storage server's normal limits are being reduced by a low free space ratio
-	log_server_min_free_space,
-	log_server_min_free_space_ratio,
-	storage_server_durability_lag, // 10
-	storage_server_list_fetch_failed,
-	blob_worker_lag,
-	blob_worker_missing,
-	limitReason_t_end
-};
-
-class StorageQueueInfo {
-	uint64_t totalWriteCosts{ 0 };
-	int totalWriteOps{ 0 };
-
-	// refresh periodically
-	TransactionTagMap<TransactionCommitCostEstimation> tagCostEst;
-
-	UID ratekeeperID;
-	Smoother smoothFreeSpace, smoothTotalSpace;
-	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
-
-	// Currently unused
-	Smoother smoothDurableVersion, smoothLatestVersion;
-
-public:
-	bool valid;
-	UID id;
-	LocalityData locality;
-	StorageQueuingMetricsReply lastReply;
-	bool acceptingRequests;
-	limitReason_t limitReason;
-	std::vector<StorageQueuingMetricsReply::TagInfo> busiestReadTags, busiestWriteTags;
-
-	StorageQueueInfo(const UID& id, const LocalityData& locality);
-	StorageQueueInfo(const UID& rateKeeperID, const UID& id, const LocalityData& locality);
-	// Summarizes up the commit cost per storage server. Returns the UpdateCommitCostRequest for corresponding SS.
-	UpdateCommitCostRequest refreshCommitCost(double elapsed);
-	int64_t getStorageQueueBytes() const { return lastReply.bytesInput - smoothDurableBytes.smoothTotal(); }
-	int64_t getDurabilityLag() const { return smoothLatestVersion.smoothTotal() - smoothDurableVersion.smoothTotal(); }
-	void update(StorageQueuingMetricsReply const&, Smoother& smoothTotalDurableBytes);
-	void addCommitCost(TransactionTagRef tagName, TransactionCommitCostEstimation const& cost);
-
-	// Accessor methods for Smoothers
-	double getSmoothFreeSpace() const { return smoothFreeSpace.smoothTotal(); }
-	double getSmoothTotalSpace() const { return smoothTotalSpace.smoothTotal(); }
-	double getSmoothDurableBytes() const { return smoothDurableBytes.smoothTotal(); }
-	double getSmoothInputBytesRate() const { return smoothInputBytes.smoothRate(); }
-	double getVerySmoothDurableBytesRate() const { return verySmoothDurableBytes.smoothRate(); }
-
-	// Determine the ratio (limit / current throughput) for throttling based on write queue size
-	Optional<double> getTagThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const;
-};
-
-class TLogQueueInfo {
-	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
-	Smoother smoothFreeSpace;
-	Smoother smoothTotalSpace;
-
-public:
-	TLogQueuingMetricsReply lastReply;
-	bool valid;
-	UID id;
-
-	// Accessor methods for Smoothers
-	double getSmoothFreeSpace() const { return smoothFreeSpace.smoothTotal(); }
-	double getSmoothTotalSpace() const { return smoothTotalSpace.smoothTotal(); }
-	double getSmoothDurableBytes() const { return smoothDurableBytes.smoothTotal(); }
-	double getSmoothInputBytesRate() const { return smoothInputBytes.smoothRate(); }
-	double getVerySmoothDurableBytesRate() const { return verySmoothDurableBytes.smoothRate(); }
-
-	TLogQueueInfo(UID id);
-	Version getLastCommittedVersion() const { return lastReply.v; }
-	void update(TLogQueuingMetricsReply const& reply, Smoother& smoothTotalDurableBytes);
-};
 
 struct RatekeeperLimits {
 	double tpsLimit;
@@ -149,6 +67,20 @@ struct RatekeeperLimits {
 	                 double bwLagTarget);
 };
 
+/**
+ * The Ratekeeper class is responsible for:
+ *
+ * - Fetching metrics from storage servers, tlogs, and commit proxies.
+ *   This responsiblity is managed through the metricsTracker object.
+ *
+ * - Calculating cluster-wide rates for each priority and tag. The
+ *   responsibility of calculating per-tag rates is handled through
+ *   the tagThrottler object.
+ *
+ * - Serving the RatekeeperInterface. This interface is used to distribute
+ *   transaction rates and health metrics to GRV proxies. Commit proxies also
+ *   use this interface to send commit cost estimations to the metricsTracker.
+ */
 class Ratekeeper {
 	friend class RatekeeperImpl;
 
@@ -177,11 +109,10 @@ class Ratekeeper {
 	UID id;
 	Database db;
 
-	Map<UID, StorageQueueInfo> storageQueueInfo;
-	Map<UID, TLogQueueInfo> tlogQueueInfo;
+	std::unique_ptr<IRKMetricsTracker> metricsTracker;
 
 	std::map<UID, Ratekeeper::GrvProxyInfo> grvProxyInfo;
-	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
+	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions;
 	HealthMetrics healthMetrics;
 	DatabaseConfiguration configuration;
 	PromiseStream<Future<Void>> addActor;
@@ -189,12 +120,8 @@ class Ratekeeper {
 	Int64MetricHandle actualTpsMetric;
 
 	double lastWarning;
-	double lastSSListFetchedTimestamp;
 
 	std::unique_ptr<class ITagThrottler> tagThrottler;
-
-	// Maps storage server ID to storage server interface
-	std::unordered_map<UID, StorageServerInterface> storageServerInterfaces;
 
 	RatekeeperLimits normalLimits;
 	RatekeeperLimits batchLimits;
@@ -223,17 +150,10 @@ class Ratekeeper {
 		return recoveryDuration;
 	}
 
-	Ratekeeper(UID id, Database db);
+	Ratekeeper(UID, Database, Reference<AsyncVar<ServerDBInfo> const>, RatekeeperInterface);
 
 	Future<Void> configurationMonitor();
-	void updateCommitCostEstimation(UIDTransactionTagMap<TransactionCommitCostEstimation> const& costEstimation);
 	void updateRate(RatekeeperLimits* limits);
-	Future<Void> refreshStorageServerCommitCosts();
-	Future<Void> monitorServerListChange(PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges);
-
-	// SOMEDAY: template trackStorageServerQueueInfo and trackTLogQueueInfo into one function
-	Future<Void> trackStorageServerQueueInfo(StorageServerInterface);
-	Future<Void> trackTLogQueueInfo(TLogInterface);
 
 	void tryAutoThrottleTag(TransactionTag, double rate, double busyness, TagThrottledReason);
 	void tryAutoThrottleTag(StorageQueueInfo&, int64_t storageQueue, int64_t storageDurabilityLag);
