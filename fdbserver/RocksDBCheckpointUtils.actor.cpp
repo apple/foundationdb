@@ -844,7 +844,7 @@ private:
 			self->file_ = _file;
 			TraceEvent("RocksDBCheckpointReaderOpenFile").detail("File", self->path_);
 		} catch (Error& e) {
-			TraceEvent(SevWarnAlways, "ServerGetCheckpointFileFailure")
+			TraceEvent(SevWarnAlways, "RocksDBCFCheckpointReaderInitError")
 			    .errorUnsuppressed(e)
 			    .detail("File", self->path_);
 			throw e;
