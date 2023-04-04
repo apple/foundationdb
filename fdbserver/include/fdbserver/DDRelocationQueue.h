@@ -238,7 +238,6 @@ public:
 	int activeRelocations;
 	int queuedRelocations;
 	int64_t bytesWritten;
-	MovingWindow<int64_t> moveBytesRate;
 	int teamSize;
 	int singleRegionTeamSize;
 
