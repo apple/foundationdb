@@ -455,7 +455,8 @@ Ratekeeper::Ratekeeper(UID id,
 	} else {
 		tagThrottler = std::make_unique<TagThrottler>(db, id);
 	}
-	metricsTracker = std::make_unique<RKMetricsTracker>(id, db, rkInterf, dbInfo);
+	metricsTracker =
+	    std::make_unique<RKMetricsTracker>(id, db, rkInterf.reportCommitCostEstimation.getFuture(), dbInfo);
 }
 
 void Ratekeeper::updateRate(RatekeeperLimits* limits) {

@@ -120,6 +120,7 @@ public:
 	virtual double getSmoothTotalDurableBytesRate() const = 0;
 
 	// Run actors to periodically refresh throttling-relevant statistics
+	// Returned Future should never be ready, but can be used to propagate errors
 	virtual Future<Void> run() = 0;
 };
 
@@ -133,7 +134,7 @@ class RKMetricsTracker : public IRKMetricsTracker {
 	UID ratekeeperId;
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	Database db;
-	RatekeeperInterface rkInterf; // TODO: Only hold needed RequestStream?
+	FutureStream<ReportCommitCostEstimationRequest> reportCommitCostEstimation;
 	double lastSSListFetchedTimestamp;
 	PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges;
 	// Maps storage server ID to storage server interface
@@ -145,7 +146,10 @@ class RKMetricsTracker : public IRKMetricsTracker {
 	void updateCommitCostEstimation(UIDTransactionTagMap<TransactionCommitCostEstimation> const& costEstimation);
 
 public:
-	RKMetricsTracker(UID ratekeeperId, Database, RatekeeperInterface, Reference<AsyncVar<ServerDBInfo> const>);
+	RKMetricsTracker(UID ratekeeperId,
+	                 Database,
+	                 FutureStream<ReportCommitCostEstimationRequest>,
+	                 Reference<AsyncVar<ServerDBInfo> const>);
 	~RKMetricsTracker();
 	Map<UID, StorageQueueInfo> const& getStorageQueueInfo() const override;
 	bool ssListFetchTimedOut() const override;

@@ -150,7 +150,7 @@ public:
 
 	ACTOR static Future<Void> receiveCommitCostEstimations(RKMetricsTracker* self) {
 		loop {
-			ReportCommitCostEstimationRequest req = waitNext(self->rkInterf.reportCommitCostEstimation.getFuture());
+			ReportCommitCostEstimationRequest req = waitNext(self->reportCommitCostEstimation);
 			self->updateCommitCostEstimation(req.ssTrTagCommitCost);
 			req.reply.send(Void());
 		}
@@ -215,10 +215,10 @@ public:
 
 RKMetricsTracker::RKMetricsTracker(UID ratekeeperId,
                                    Database db,
-                                   RatekeeperInterface rkInterf,
+                                   FutureStream<ReportCommitCostEstimationRequest> reportCommitCostEstimation,
                                    Reference<AsyncVar<ServerDBInfo> const> dbInfo)
-  : ratekeeperId(ratekeeperId), db(db), rkInterf(rkInterf), lastSSListFetchedTimestamp(now()), dbInfo(dbInfo),
-    smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT) {}
+  : ratekeeperId(ratekeeperId), db(db), reportCommitCostEstimation(reportCommitCostEstimation),
+    lastSSListFetchedTimestamp(now()), dbInfo(dbInfo), smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT) {}
 
 RKMetricsTracker::~RKMetricsTracker() = default;
 
