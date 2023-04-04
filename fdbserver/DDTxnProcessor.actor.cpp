@@ -267,7 +267,7 @@ class DDTxnProcessorImpl {
 			}
 			try {
 				// Read healthyZone value which is later used to determine on/off of failure triggered DD
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				Optional<Value> val = wait(tr.get(healthyZoneKey));
@@ -320,10 +320,13 @@ class DDTxnProcessorImpl {
 					auto dataMove = std::make_shared<DataMove>(decodeDataMoveValue(dms[i].value), true);
 					const DataMoveMetaData& meta = dataMove->meta;
 					if (meta.ranges.empty()) {
-						// This dataMove cancellation is delayed to background cancellation
-						// For this case, the dataMove has empty ranges but it is in Deleting phase
-						// We simply bypass this case
+						// Any persisted datamove with an empty range must be an tombstone persisted by
+						// a background cleanup (with retry_clean_up_datamove_tombstone_added),
+						// and this datamove must be in DataMoveMetaData::Deleting state
+						// A datamove without processed by a background cleanup must have a non-empty range
+						// For this case, we simply clear the range
 						ASSERT(meta.getPhase() == DataMoveMetaData::Deleting);
+						tr.clear(dataMoveKeyFor(meta.id));
 						continue;
 					}
 					ASSERT(!meta.ranges.empty());
@@ -361,6 +364,8 @@ class DDTxnProcessorImpl {
 				for (int i = 0; i < ads.size(); ++i) {
 					result->auditStates.push_back(decodeAuditStorageState(ads[i].value));
 				}
+
+				wait(tr.commit());
 
 				succeeded = true;
 
