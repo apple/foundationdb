@@ -204,12 +204,12 @@ add_swift_to_cxx_header_gen_target(
 -Xcc -std=c++17 -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml
 )
 
-add_dependencies(flow_swift_checked_continuation_header flow_actors boost_targetProject)
+add_dependencies(flow_swift_checked_continuation_header flow_actors boost_target)
 add_dependencies(flow_swift_header flow_swift_checked_continuation_header)
 add_dependencies(flow_swift flow_swift_header)
 
 add_dependencies(flow_swift flow_actors)
-add_dependencies(flow_swift boost_targetProject)
+add_dependencies(flow_swift boost_target)
 # TODO(swift): rdar://99107402 - this will only work once CMake 3.25 is released:
 # target_link_libraries(flow PRIVATE flow_swift)
 add_dependencies(flow flow_swift)
