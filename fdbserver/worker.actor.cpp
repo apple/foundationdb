@@ -1043,6 +1043,68 @@ TEST_CASE("/fdbserver/worker/addressInDbAndRemoteDc") {
 
 } // namespace
 
+bool addressIsRemoteLogRouter(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	const auto& dbi = dbInfo->get();
+
+	for (const auto& logSet : dbi.logSystemConfig.tLogs) {
+		if (logSet.isLocal || logSet.locality == tagLocalitySatellite) {
+			continue;
+		}
+
+		for (const auto& logRouter : logSet.logRouters) {
+			if (logRouter.present() && logRouter.interf().addresses().contains(address)) {
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+namespace {
+
+TEST_CASE("/fdbserver/worker/addressIsRemoteLogRouter") {
+	// Setup a ServerDBInfo for test.
+	ServerDBInfo testDbInfo;
+	LocalityData testLocal;
+	testLocal.set("dcid"_sr, StringRef(std::to_string(1)));
+	testDbInfo.master.locality = testLocal;
+
+	// First, create an empty TLogInterface, and check that it shouldn't be considered as remote log router.
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().isLocal = true;
+	testDbInfo.logSystemConfig.tLogs.back().logRouters.push_back(OptionalInterface<TLogInterface>());
+	ASSERT(!addressIsRemoteLogRouter(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	TLogInterface localLogRouter(testLocal);
+	localLogRouter.initEndpoints();
+	testDbInfo.logSystemConfig.tLogs.back().logRouters.push_back(OptionalInterface(localLogRouter));
+	ASSERT(!addressIsRemoteLogRouter(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a remote TLog, and it shouldn't be considered as remote log router.
+	LocalityData fakeRemote;
+	fakeRemote.set("dcid"_sr, StringRef(std::to_string(2)));
+	TLogInterface remoteTlog(fakeRemote);
+	remoteTlog.initEndpoints();
+
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().isLocal = false;
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(remoteTlog));
+	ASSERT(!addressIsRemoteLogRouter(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a remote log router, and it should be considered as remote log router.
+	NetworkAddress logRouterAddress(IPAddress(0x26262626), 1);
+	TLogInterface remoteLogRouter(fakeRemote);
+	remoteLogRouter.initEndpoints();
+	remoteLogRouter.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ logRouterAddress }, UID(1, 2)));
+	testDbInfo.logSystemConfig.tLogs.back().logRouters.push_back(OptionalInterface(remoteLogRouter));
+	ASSERT(addressIsRemoteLogRouter(logRouterAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	return Void();
+}
+
+} // namespace
+
 // The actor that actively monitors the health of local and peer servers, and reports anomaly to the cluster controller.
 ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                  WorkerInterface interf,
@@ -1053,14 +1115,20 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS && ccInterface->get().present()) {
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
 			const auto& allPeers = FlowTransport::transport().getAllPeers();
+
+			// Check remote log router connectivity only when remote TLogs are recruited and in use.
+			bool checkRemoteLogRouterConnectivity = dbInfo->get().recoveryState == RecoveryState::ALL_LOGS_RECRUITED ||
+			                                        dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED;
 			UpdateWorkerHealthRequest req;
 
-			enum WorkerLocation { None, Primary, Remote };
+			enum WorkerLocation { None, Primary, Satellite, Remote };
 			WorkerLocation workerLocation = None;
 			if (addressesInDbAndPrimaryDc(interf.addresses(), dbInfo)) {
 				workerLocation = Primary;
 			} else if (addressesInDbAndRemoteDc(interf.addresses(), dbInfo)) {
 				workerLocation = Remote;
+			} else if (addressesInDbAndPrimarySatelliteDc(interf.addresses(), dbInfo)) {
+				workerLocation = Satellite;
 			}
 
 			if (workerLocation != None) {
@@ -1069,11 +1137,10 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 					    peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
 						// Ignore peers that don't have enough samples.
 						// TODO(zhewu): Currently, FlowTransport latency monitor clears ping latency samples on a
-						// regular
-						//              basis, which may affect the measurement count. Currently,
-						//              WORKER_HEALTH_MONITOR_INTERVAL is much smaller than the ping clearance interval,
-						//              so it may be ok. If this ends to be a problem, we need to consider keep track of
-						//              last ping latencies logged.
+						// regular basis, which may affect the measurement count. Currently,
+						// WORKER_HEALTH_MONITOR_INTERVAL is much smaller than the ping clearance interval, so it may be
+						// ok. If this ends to be a problem, we need to consider keep track of last ping latencies
+						// logged.
 						continue;
 					}
 					bool degradedPeer = false;
@@ -1144,6 +1211,28 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 							    .detail("PingTimeoutCount", peer->timeoutCount)
 							    .detail("ConnectionFailureCount", peer->connectFailedCount);
 						}
+					} else if (checkRemoteLogRouterConnectivity &&
+					           (workerLocation == Primary || workerLocation == Satellite) &&
+					           addressIsRemoteLogRouter(address, dbInfo)) {
+						// Monitor remote log router's connectivity to the primary DCs' transaction system. We ignore
+						// latency based degradation between primary region and remote region due to that remote region
+						// may be distant from primary region.
+						if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT) {
+							TraceEvent("HealthMonitorDetectDegradedPeer")
+							    .detail("WorkerLocation", workerLocation)
+							    .detail("Peer", address)
+							    .detail("RemoteLogRouter", true)
+							    .detail("Elapsed", now() - lastLoggedTime)
+							    .detail("Disconnected", true)
+							    .detail("MinLatency", peer->pingLatencies.min())
+							    .detail("MaxLatency", peer->pingLatencies.max())
+							    .detail("MeanLatency", peer->pingLatencies.mean())
+							    .detail("MedianLatency", peer->pingLatencies.median())
+							    .detail("PingCount", peer->pingLatencies.getPopulationSize())
+							    .detail("PingTimeoutCount", peer->timeoutCount)
+							    .detail("ConnectionFailureCount", peer->connectFailedCount);
+							disconnectedPeer = true;
+						}
 					}
 
 					if (disconnectedPeer) {
@@ -1167,7 +1256,10 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 
 						if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
 						    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo)) ||
-						    (workerLocation == Primary && addressInDbAndPrimarySatelliteDc(address, dbInfo))) {
+						    (workerLocation == Primary && addressInDbAndPrimarySatelliteDc(address, dbInfo)) ||
+						    (checkRemoteLogRouterConnectivity &&
+						     (workerLocation == Primary || workerLocation == Satellite) &&
+						     addressIsRemoteLogRouter(address, dbInfo))) {
 							TraceEvent("HealthMonitorDetectRecentClosedPeer").suppressFor(30).detail("Peer", address);
 							req.disconnectedPeers.push_back(address);
 						}
