@@ -74,12 +74,14 @@ struct ValidateStorage : TestWorkload {
 	}
 
 	ACTOR Future<UID> auditStorageForType(Database cx, AuditType type, std::string context) {
+		state UID auditId;
 		loop {
 			try {
-				state UID auditId = wait(auditStorage(cx->getConnectionRecord(),
-				                                      allKeys,
-				                                      type,
-				                                      /*timeoutSecond=*/300));
+				UID auditId_ = wait(auditStorage(cx->getConnectionRecord(),
+				                                 allKeys,
+				                                 type,
+				                                 /*timeoutSecond=*/300));
+				auditId = auditId_;
 				TraceEvent("TestAuditStorageTriggered")
 				    .detail("Context", context)
 				    .detail("AuditID", auditId)
@@ -93,9 +95,11 @@ struct ValidateStorage : TestWorkload {
 				wait(delay(1));
 			}
 		}
+		state AuditStorageState auditState;
 		loop {
 			try {
-				state AuditStorageState auditState = wait(getAuditState(cx, type, auditId));
+				AuditStorageState auditState_ = wait(getAuditState(cx, type, auditId));
+				auditState = auditState_;
 				if (auditState.getPhase() == AuditPhase::Complete) {
 					break;
 				} else if (auditState.getPhase() == AuditPhase::Running) {
@@ -151,9 +155,9 @@ struct ValidateStorage : TestWorkload {
 		                                 { "TestKeyE"_sr, "TestValueE"_sr },
 		                                 { "TestKeyF"_sr, "TestValueF"_sr } });
 
-		Version _ = wait(self->populateData(self, cx, &kvs));
+		Version ver = wait(self->populateData(self, cx, &kvs));
 
-		TraceEvent("TestValueWritten");
+		TraceEvent("TestValueWritten").detail("AtVersion", ver);
 
 		if (g_network->isSimulated()) {
 			// NOTE: the value will be reset after consistency check
