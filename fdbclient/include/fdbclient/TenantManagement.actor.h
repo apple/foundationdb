@@ -19,23 +19,23 @@
  */
 
 #pragma once
-#include "fdbclient/ClientBooleanParams.h"
-#include "fdbclient/Knobs.h"
-#include "fdbclient/Tenant.h"
-#include "flow/IRandom.h"
-#include "flow/ThreadHelper.actor.h"
-#include <algorithm>
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_TENANT_MANAGEMENT_ACTOR_G_H)
 #define FDBCLIENT_TENANT_MANAGEMENT_ACTOR_G_H
 #include "fdbclient/TenantManagement.actor.g.h"
 #elif !defined(FDBCLIENT_TENANT_MANAGEMENT_ACTOR_H)
 #define FDBCLIENT_TENANT_MANAGEMENT_ACTOR_H
 
+#include <algorithm>
 #include <string>
 #include <map>
+#include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/GenericTransactionHelper.h"
-#include "fdbclient/Metacluster.h"
+#include "fdbclient/Knobs.h"
+#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/Tenant.h"
+#include "flow/IRandom.h"
+#include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace TenantAPI {
@@ -100,7 +100,7 @@ Future<TenantMapEntry> getTenant(Reference<DB> db, Tenant tenant) {
 ACTOR template <class Transaction>
 Future<ClusterType> getClusterType(Transaction tr) {
 	Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
-	    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
+	    wait(metacluster::metadata::metaclusterRegistration().get(tr));
 
 	return metaclusterRegistration.present() ? metaclusterRegistration.get().clusterType : ClusterType::STANDALONE;
 }

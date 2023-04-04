@@ -29,13 +29,14 @@
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/Metacluster.h"
+#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
-#include "flow/actorcompiler.h" // has to be last include
 #include "flow/network.h"
+
+#include "flow/actorcompiler.h" // has to be last include
 
 std::string BackupAgentBase::formatTime(int64_t epochs) {
 	time_t curTime = (time_t)epochs;
@@ -1371,7 +1372,7 @@ VectorRef<KeyRangeRef> const& getSystemBackupRanges() {
 	if (systemBackupRanges.empty()) {
 		systemBackupRanges.push_back_deep(systemBackupRanges.arena(), prefixRange(TenantMetadata::subspace()));
 		systemBackupRanges.push_back_deep(systemBackupRanges.arena(),
-		                                  singleKeyRange(MetaclusterMetadata::metaclusterRegistration().key));
+		                                  singleKeyRange(metacluster::metadata::metaclusterRegistration().key));
 	}
 
 	return systemBackupRanges;
