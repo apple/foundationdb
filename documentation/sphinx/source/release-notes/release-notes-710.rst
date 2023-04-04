@@ -18,7 +18,7 @@ Release Notes
 * Added RocksDB bloom filter knobs. `(PR #9770) <https://github.com/apple/foundationdb/pull/9770>`_
 * Upgraded RocksDB to version 7.10.2. `(PR #9829) <https://github.com/apple/foundationdb/pull/9829>`_
 * Fixed an issue where ExclusionSafetyCheckRequest could be blocked forever. `(PR #9871) <https://github.com/apple/foundationdb/pull/9871>`_
-* Fixed fdbserver not able to join the cluster if the majority of coordinators in its connection string have changed. `(PR #9883) <https://github.com/apple/foundationdb/pull/9883>`_
+* Fixed fdbserver not able to join the cluster if the majority of coordinators in its connection string have failed. `(PR #9883) <https://github.com/apple/foundationdb/pull/9883>`_
 
 7.1.29
 ======
