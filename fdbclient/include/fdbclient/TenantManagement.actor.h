@@ -457,10 +457,8 @@ Future<Void> configureTenantTransaction(Transaction tr,
 		}
 		if (originalEntry.tenantGroup.present()) {
 			// Remove this tenant from the original tenant group index
-			TenantMetadata::tenantGroupTenantIndex().erase(tr,
-			                                               Tuple::makeTuple(originalEntry.tenantGroup.get(),
-			                                                                originalEntry.tenantName,
-			                                                                updatedTenantEntry.id));
+			TenantMetadata::tenantGroupTenantIndex().erase(
+			    tr, Tuple::makeTuple(originalEntry.tenantGroup.get(), originalEntry.tenantName, updatedTenantEntry.id));
 
 			// Check if the original tenant group is now empty. If so, remove the tenant group.
 			KeyBackedSet<Tuple>::RangeResultType tenants = wait(TenantMetadata::tenantGroupTenantIndex().getRange(
