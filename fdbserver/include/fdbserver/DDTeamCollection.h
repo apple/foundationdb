@@ -279,10 +279,15 @@ protected:
 
 	AsyncVar<Optional<Key>> healthyZone;
 	Future<bool> clearHealthyZoneFuture;
-	double pivotAvailableSpaceRatio;
-	double lastPivotValuesUpdate;
-	double pivotCPU = 0.0;
-	double minTeamAvgCPU = 101.0;
+
+	// team pivot values
+	struct {
+		double lastPivotValuesUpdate = 0.0;
+
+		double pivotAvailableSpaceRatio = 0.0;
+		double pivotCPU = 0.0;
+		double minTeamAvgCPU = -1.0;
+	} teamPivots;
 
 	int lowestUtilizationTeam;
 	int highestUtilizationTeam;
@@ -647,6 +652,10 @@ protected:
 
 	// get the min available space ratio from every healthy team and update the pivot ratio `pivotAvailableSpaceRatio`
 	void updateTeamPivotValues();
+
+	void updateCpuPivots();
+
+	void updateTeamEligibility();
 
 public:
 	Reference<IDDTxnProcessor> db;
