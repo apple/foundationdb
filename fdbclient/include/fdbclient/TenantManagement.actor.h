@@ -459,7 +459,7 @@ Future<Void> configureTenantTransaction(Transaction tr,
 			// Remove this tenant from the original tenant group index
 			TenantMetadata::tenantGroupTenantIndex().erase(tr,
 			                                               Tuple::makeTuple(originalEntry.tenantGroup.get(),
-			                                                                updatedTenantEntry.tenantName,
+			                                                                originalEntry.tenantName,
 			                                                                updatedTenantEntry.id));
 
 			// Check if the original tenant group is now empty. If so, remove the tenant group.
