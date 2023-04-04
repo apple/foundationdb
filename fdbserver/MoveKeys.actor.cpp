@@ -2408,7 +2408,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 	return Void();
 }
 
-// In cleanUpDataMoveCore, to do the actual cleanup, we suppose the target data move already put its
+// In cleanUpDataMoveCore, to do the actual cleanup, we suppose the target data move already update its
 // information to the metadata. However, this does not always happen.
 // Background cleanup is used to handle the case where the normal cleanup (cleanUpDataMoveCore)
 // and the moveShard (startMoveShard) has race on update of metadata.
@@ -2416,13 +2416,13 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 // is failed to see the update of metadata (datamove key space) by the startMoveShard
 // For this case, the startMoveShard must exit without update the meta data
 // This background cleanup is used to clean the placehold left by the normal cleanup
-// To understand this trick, we have three cases:
+// To understand this trick of cleanup place holder, we have three cases:
 // (1) Race condition of dataMove metadata between cleanUpDataMoveCore and startMoveShard, and
 // cleanUpDataMoveCore wins the race. Then startMoveShard retries and see the place holder on the metadata
 // put by cleanUpDataMoveCore, and startMoveShard gives up and exits. No update to the metadata
 // (2) Race condition of dataMove metadata between cleanUpDataMoveCore and startMoveShard, and
 // startMoveShard wins the race. Then cleanUpDataMoveCore retries and see the update of metadata by
-// startMoveShard. Then cleanUpDataMoveCore successfully does the cleanup as normal
+// startMoveShard. Then cleanUpDataMoveCore does the cleanup as normal
 // (3) cleanUpDataMoveCore happens before startMoveShard. No race happens. Then, cleanUpDataMoveCore sees
 // the place holder on the metadata put by cleanUpDataMoveCore. Then, startMoveShard gives up and exits.
 // No update to the metadata by the startMoveShard
@@ -2505,8 +2505,8 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 				if (val.present()) {
 					dataMove = decodeDataMoveValue(val.get());
 					if (dataMove.ranges.empty()) {
-						// If a background cleanup has been triggered, safely do nothing
-						break;
+						// Need a background cleanup
+						throw retry_clean_up_datamove_tombstone_added();
 					}
 					TraceEvent(SevDebug, "CleanUpDataMoveMetaData", dataMoveId)
 					    .detail("DataMoveID", dataMoveId)
@@ -2521,7 +2521,7 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 					tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
 					wait(tr.commit());
 					TraceEvent(SevDebug, "CleanUpDataMovePlaceHolder", dataMoveId).detail("DataMoveID", dataMoveId);
-					throw need_background_datamove_cleanup();
+					throw retry_clean_up_datamove_tombstone_added();
 				}
 
 				dataMove.setPhase(DataMoveMetaData::Deleting);
@@ -2619,7 +2619,7 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 				}
 			} catch (Error& e) {
 				state Error err = e;
-				wait(tr.onError(e)); // throw error if need_background_datamove_cleanup
+				wait(tr.onError(e)); // throw error if retry_clean_up_datamove_tombstone_added
 				TraceEvent(SevWarn, "CleanUpDataMoveRetriableError", dataMoveId)
 				    .error(err)
 				    .detail("DataMoveRange", range.toString());
@@ -2646,7 +2646,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 	try {
 		wait(cleanUpDataMoveCore(occ, dataMoveId, lock, cleanUpDataMoveParallelismLock, keys, ddEnabledState));
 	} catch (Error& e) {
-		if (e.code() == error_code_need_background_datamove_cleanup) {
+		if (e.code() == error_code_retry_clean_up_datamove_tombstone_added) {
 			ASSERT(addCleanUpDataMoveActor.present());
 			TraceEvent(SevDebug, "CleanUpDataMoveTriggerBackground", dataMoveId).detail("DataMoveID", dataMoveId);
 			addCleanUpDataMoveActor.get().send(cleanUpDataMoveBackground(occ,

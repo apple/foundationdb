@@ -141,7 +141,7 @@ ERROR( storage_quota_exceeded, 1225, "Exceeded the maximum storage quota allocat
 ERROR( audit_storage_error, 1226, "Found data corruption" )
 ERROR( master_failed, 1227, "Cluster recovery terminating because master has failed")
 ERROR( test_failed, 1228, "Test failed" )
-ERROR( need_background_datamove_cleanup, 1229, "Need background datamove cleanup" )
+ERROR( retry_clean_up_datamove_tombstone_added, 1229, "Need background datamove cleanup" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
