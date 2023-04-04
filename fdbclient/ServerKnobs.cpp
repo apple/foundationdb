@@ -679,7 +679,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DBINFO_SEND_AMOUNT,                                      5 );
 	init( DBINFO_BATCH_DELAY,                                    0.1 );
 	init( SINGLETON_RECRUIT_BME_DELAY,                          10.0 );
-	init( TRACK_TLOG_RECOVERY,                                  true );
+	init( TRACK_TLOG_RECOVERY,                                 false );
 
 	//Move Keys
 	init( SHARD_READY_DELAY,                                    0.25 );
