@@ -1069,11 +1069,11 @@ public:
 				}
 
 				for (const auto& logSet : dbi.logSystemConfig.tLogs) {
-					if (skipRemote && !logSet.isLocal) {
+					if (skipSatellite && logSet.locality == tagLocalitySatellite) {
 						continue;
 					}
 
-					if (skipSatellite && logSet.locality == tagLocalitySatellite) {
+					if (skipRemote && !logSet.isLocal) {
 						continue;
 					}
 
@@ -1120,7 +1120,7 @@ public:
 		// stable.
 		return transactionWorkerInList(degradationInfo.degradedServers, /*skipSatellite=*/true, /*skipRemote=*/true) ||
 		       transactionWorkerInList(
-		           degradationInfo.disconnectedServers, /*skipSatellite=*/false, /*skipRemote=*/false);
+		           degradationInfo.disconnectedServers, /*skipSatellite=*/false, /*skipRemote=*/!SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING);
 	}
 
 	// Whether transaction system in the remote DC, e.g. log router and tlogs in the remote DC, contains degraded
