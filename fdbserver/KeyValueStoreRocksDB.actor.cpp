@@ -1884,6 +1884,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> openFuture;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 	std::set<Key> keysSet;
+	// maximum number of single key deletes in a commit, if ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE is enabled.
+	int maxDeletes;
 	Optional<Future<Void>> metrics;
 	FlowLock readSemaphore;
 	int numReadWaiters;
@@ -2072,6 +2074,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (writeBatch == nullptr) {
 			writeBatch.reset(new rocksdb::WriteBatch());
 			keysSet.clear();
+			maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
 		}
 		ASSERT(defaultFdbCF != nullptr);
 		writeBatch->Put(defaultFdbCF, toSlice(kv.key), toSlice(kv.value));
@@ -2080,23 +2083,24 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
-	void clear(KeyRangeRef keyRange, const StorageServerMetrics* storageMetrics, const Arena*) override {
+	void clear(KeyRangeRef keyRange, const Arena*) override {
 		if (writeBatch == nullptr) {
 			writeBatch.reset(new rocksdb::WriteBatch());
 			keysSet.clear();
+			maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
 		}
 
 		ASSERT(defaultFdbCF != nullptr);
 		// Number of deletes to rocksdb = counters.deleteKeyReqs + convertedDeleteKeyReqs;
 		// Number of deleteRanges to rocksdb = counters.deleteRangeReqs - counters.convertedDeleteRangeReqs;
-		if (keyRange.singleKeyRange()) {
+		if (keyRange.singleKeyRange() && !SERVER_KNOBS->ROCKSDB_FORCE_DELETERANGE_FOR_CLEARRANGE) {
 			writeBatch->Delete(defaultFdbCF, toSlice(keyRange.begin));
 			++counters.deleteKeyReqs;
+			--maxDeletes;
 		} else {
 			++counters.deleteRangeReqs;
-			if (SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE && storageMetrics != nullptr &&
-			    storageMetrics->byteSample.getEstimate(keyRange) <
-			        SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_BYTES_LIMIT) {
+			if (SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE &&
+			    !SERVER_KNOBS->ROCKSDB_FORCE_DELETERANGE_FOR_CLEARRANGE && maxDeletes > 0) {
 				++counters.convertedDeleteRangeReqs;
 				rocksdb::ReadOptions options = getReadOptions();
 				auto beginSlice = toSlice(keyRange.begin);
@@ -2105,12 +2109,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				options.iterate_upper_bound = &endSlice;
 				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options, defaultFdbCF));
 				cursor->Seek(toSlice(keyRange.begin));
-				while (cursor->Valid() && toStringRef(cursor->key()) < keyRange.end) {
+				while (cursor->Valid() && toStringRef(cursor->key()) < keyRange.end && maxDeletes > 0) {
 					writeBatch->Delete(defaultFdbCF, cursor->key());
 					++counters.convertedDeleteKeyReqs;
+					--maxDeletes;
 					cursor->Next();
 				}
-				if (!cursor->status().ok()) {
+				if (!cursor->status().ok() || maxDeletes <= 0) {
 					// if readrange iteration fails, then do a deleteRange.
 					writeBatch->DeleteRange(defaultFdbCF, toSlice(keyRange.begin), toSlice(keyRange.end));
 				} else {
@@ -2118,6 +2123,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					while (it != keysSet.end() && *it < keyRange.end) {
 						writeBatch->Delete(defaultFdbCF, toSlice(*it));
 						++counters.convertedDeleteKeyReqs;
+						--maxDeletes;
 						it++;
 					}
 				}
@@ -2156,6 +2162,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		auto a = new Writer::CommitAction();
 		a->batchToCommit = std::move(writeBatch);
 		keysSet.clear();
+		maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
 		auto res = a->done.getFuture();
 		writeThread->post(a);
 		return res;
