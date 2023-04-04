@@ -233,7 +233,7 @@ public:
 
 	bool hasHealthyAvailableSpace(double minRatio) const override;
 
-	unsigned getEligiblilityCount(int combinedType) { return eligibilityCounter.getCount(combinedType); }
+	unsigned getEligibilityCount(int combinedType) { return eligibilityCounter.getCount(combinedType); }
 	void increaseEligibilityCount(data_distribution::EligibilityCounter::Type t) { eligibilityCounter.increase(t); }
 	void resetEligibilityCount(data_distribution::EligibilityCounter::Type t) { eligibilityCounter.reset(t); }
 
