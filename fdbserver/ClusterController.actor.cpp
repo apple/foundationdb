@@ -522,7 +522,8 @@ void checkBetterSingletons(ClusterControllerData* self) {
 
 	WorkerDetails newEKPWorker;
 	EncryptionAtRestMode encryptMode = self->db.config.encryptionAtRestMode;
-	bool enableKmsCommunication = encryptMode.isEncryptionEnabled() || SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION;
+	const bool enableKmsCommunication =
+	    encryptMode.isEncryptionEnabled() || SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION;
 	if (enableKmsCommunication) {
 		newEKPWorker = findNewProcessForSingleton(self, ProcessClass::EncryptKeyProxy, id_used);
 	}
@@ -2323,6 +2324,7 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, EncryptionA
 ACTOR Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
 	state EncryptionAtRestMode encryptMode = wait(self->encryptionAtRestMode.getFuture());
 	if (!encryptMode.isEncryptionEnabled() && !SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION) {
+		TraceEvent("EKPNotConfigured");
 		return Void();
 	}
 	state SingletonRecruitThrottler recruitThrottler;
