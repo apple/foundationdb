@@ -1273,6 +1273,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
                                           MoveKeysLock lock,
                                           FlowLock* startMoveKeysLock,
                                           UID relocationIntervalId,
+                                          std::map<UID, StorageServerInterface>* tssMapping,
                                           const DDEnabledState* ddEnabledState,
                                           CancelConflictingDataMoves cancelConflictingDataMoves) {
 	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
@@ -1280,6 +1281,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 
 	wait(startMoveKeysLock->take(TaskPriority::DataDistributionLaunch));
 	state FlowLock::Releaser releaser(*startMoveKeysLock);
+	state bool loadedTssMapping = false;
 	state DataMoveMetaData dataMove;
 	state Severity sevDm = SERVER_KNOBS->PHYSICAL_SHARD_MOVE_VERBOSE_TRACKING ? SevInfo : SevDebug;
 
@@ -1295,7 +1297,6 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 		loop {
 			state Key begin = keys.begin;
 			state KeyRange currentKeys = keys;
-			state int maxRetries = 0;
 			state bool complete = false;
 
 			state Transaction tr(occ);
@@ -1350,13 +1351,19 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					    .detail("DataMoveID", dataMoveId);
 				}
 
+				if (!loadedTssMapping) {
+					// share transaction for loading tss mapping with the rest of start move keys
+					wait(readTSSMapping(&tr, tssMapping));
+					loadedTssMapping = true;
+				}
+
 				std::vector<Future<Optional<Value>>> serverListEntries;
 				serverListEntries.reserve(servers.size());
 				for (int s = 0; s < servers.size(); s++) {
 					serverListEntries.push_back(tr.get(serverListKeyFor(servers[s])));
 				}
-
 				std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+
 				for (int s = 0; s < serverListValues.size(); s++) {
 					if (!serverListValues[s].present()) {
 						// Attempt to move onto a server that isn't in serverList (removed or never added to the
@@ -1654,6 +1661,9 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 	wait(finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
 	state FlowLock::Releaser releaser = FlowLock::Releaser(*finishMoveKeysParallelismLock);
+	state std::unordered_set<UID> tssToIgnore;
+	// try waiting for tss for a 2 loops, give up if they're behind to not affect the rest of the cluster
+	state int waitForTSSCounter = 2;
 
 	ASSERT(!destinationTeam.empty());
 
@@ -1759,6 +1769,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				// They must also have at least the transaction read version so they can't "forget" the shard
 				// between now and when this transaction commits.
 				state std::vector<Future<Void>> serverReady; // only for count below
+				state std::vector<Future<Void>> tssReady; // for waiting in parallel with tss
+				state std::vector<StorageServerInterface> tssReadyInterfs;
 				state std::vector<UID> newDestinations;
 				std::set<UID> completeSrcSet(completeSrc.begin(), completeSrc.end());
 				for (const UID& id : destServers) {
@@ -1787,11 +1799,24 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					storageServerInterfaces.push_back(si);
 				}
 
+				// update client info in case tss mapping changed or server got updated
+
 				// Wait for new destination servers to fetch the data range.
 				serverReady.reserve(storageServerInterfaces.size());
+				tssReady.reserve(storageServerInterfaces.size());
+				tssReadyInterfs.reserve(storageServerInterfaces.size());
 				for (int s = 0; s < storageServerInterfaces.size(); s++) {
 					serverReady.push_back(waitForShardReady(
 					    storageServerInterfaces[s], range, tr.getReadVersion().get(), GetShardStateRequest::READABLE));
+
+					auto tssPair = tssMapping.find(storageServerInterfaces[s].id());
+
+					if (tssPair != tssMapping.end() && waitForTSSCounter > 0 &&
+					    !tssToIgnore.count(tssPair->second.id())) {
+						tssReadyInterfs.push_back(tssPair->second);
+						tssReady.push_back(waitForShardReady(
+						    tssPair->second, range, tr.getReadVersion().get(), GetShardStateRequest::READABLE));
+					}
 				}
 
 				TraceEvent(SevDebug, "FinishMoveShardsWaitingServers", relocationIntervalId)
@@ -1800,10 +1825,43 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 				// Wait for all storage server moves, and explicitly swallow errors for tss ones with
 				// waitForAllReady If this takes too long the transaction will time out and retry, which is ok
-				wait(timeout(waitForAll(serverReady),
+				wait(timeout(waitForAll(serverReady) && waitForAllReady(tssReady),
 				             SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT,
 				             Void(),
 				             TaskPriority::MoveKeys));
+
+				// Check to see if we're waiting only on tss. If so, decrement the waiting counter.
+				// If the waiting counter is zero, ignore the slow/non-responsive tss processes before finalizing
+				// the data move.
+				if (tssReady.size()) {
+					bool allSSDone = true;
+					for (auto& f : serverReady) {
+						allSSDone &= f.isReady() && !f.isError();
+						if (!allSSDone) {
+							break;
+						}
+					}
+
+					if (allSSDone) {
+						bool anyTssNotDone = false;
+
+						for (auto& f : tssReady) {
+							if (!f.isReady() || f.isError()) {
+								anyTssNotDone = true;
+								waitForTSSCounter--;
+								break;
+							}
+						}
+
+						if (anyTssNotDone && waitForTSSCounter == 0) {
+							for (int i = 0; i < tssReady.size(); i++) {
+								if (!tssReady[i].isReady() || tssReady[i].isError()) {
+									tssToIgnore.insert(tssReadyInterfs[i].id());
+								}
+							}
+						}
+					}
+				}
 
 				std::vector<UID> readyServers;
 				for (int s = 0; s < serverReady.size(); ++s) {
@@ -1811,11 +1869,16 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						readyServers.push_back(storageServerInterfaces[s].uniqueID);
 					}
 				}
+				int tssCount = 0;
+				for (int s = 0; s < tssReady.size(); s++) {
+					tssCount += tssReady[s].isReady() && !tssReady[s].isError();
+				}
 
 				TraceEvent(SevDebug, "FinishMoveShardsWaitedServers", relocationIntervalId)
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("ReadyServers", describe(readyServers))
-				    .detail("NewDestinations", describe(newDestinations));
+				    .detail("NewDestinations", describe(newDestinations))
+				    .detail("ReadyTSS", tssCount);
 
 				if (readyServers.size() == newDestinations.size()) {
 
@@ -2568,6 +2631,7 @@ Future<Void> rawStartMovement(Database occ,
 		                       params.lock,
 		                       params.startMoveKeysParallelismLock,
 		                       params.relocationIntervalId,
+		                       &tssMapping,
 		                       params.ddEnabledState,
 		                       params.cancelConflictingDataMoves);
 	}
