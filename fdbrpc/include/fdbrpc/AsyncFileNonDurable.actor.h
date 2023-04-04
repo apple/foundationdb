@@ -71,7 +71,7 @@ private:
 	bool assertOnReadWriteCancel;
 
 public:
-	explicit AsyncFileDetachable(Reference<IAsyncFile> file) : file(file), assertOnReadWriteCancel(true) {
+	explicit AsyncFileDetachable(Reference<IAsyncFile> file) : file(file), assertOnReadWriteCancel(false) {
 		shutdown = doShutdown(this);
 	}
 

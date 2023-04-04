@@ -209,6 +209,7 @@ static const std::string serverCheckpointFolder = "serverCheckpoints";
 static const std::string checkpointBytesSampleTempFolder = "/metadata_temp";
 static const std::string fetchedCheckpointFolder = "fetchedCheckpoints";
 
+// MoveInUpdates caches new updates of a move-in shard, before that shard is ready to accept writes.
 struct MoveInUpdates {
 	MoveInUpdates() = default;
 	MoveInUpdates(UID id, Version version, struct StorageServer* data, IKeyValueStore* store)
@@ -237,11 +238,9 @@ struct MoveInUpdates {
 
 private:
 	ACTOR static Future<Void> doRestore(MoveInUpdates* self, Version begin) {
-		// ASSERT(self->updates.empty());
-		// TODO: read from `begin`.
 		RangeResult res = wait(self->store->readRange(self->range));
-		ASSERT(!res.more);
-		// state int i = 0;
+		ASSERT(!res.more); // TODO: support partial restore, and it is important we load mutations with a version >
+		                   // oldestVersion if mutations are applied in different batches.
 		std::map<Version, Standalone<VerUpdateRef>> restored;
 		for (int i = 0; i < res.size(); ++i) {
 			BinaryReader rd(res[i].key.removePrefix(self->range.begin), Unversioned());
@@ -250,14 +249,9 @@ private:
 			Standalone<MutationRef> mutation =
 			    BinaryReader::fromStringRef<Standalone<MutationRef>>(res[i].value, IncludeVersion());
 			DEBUG_MUTATION("MoveInUpdatesRestore", version, mutation, self->id);
-			// TraceEvent(SevDebug, "MoveInUpdatesRestore", self->id)
-			//     .detail("Version", version)
-			//     .detail("Mutation", mutation);
 			auto& vur = restored[version];
 			vur.version = version;
 			vur.push_back_deep(vur.arena(), mutation);
-			// restored[version].push_back_deep(restored[version].arena(), mutation);
-			// wait(yield());
 		}
 		TraceEvent(SevDebug, "MoveInUpdatesRestored", self->id).detail("Size", res.size());
 
@@ -284,8 +278,6 @@ private:
 	}
 
 	Key getPersistKey(const Version version, const int idx);
-	// std::string prefix;
-	// bool receivedUpdates = false;
 };
 
 bool MoveInUpdates::hasNext() const {
@@ -308,6 +300,7 @@ void MoveInUpdates::clear() {
 	updates.clear();
 }
 
+// MoveInShard corresponds to a move-in physical shard, a class representation of MoveInShardMetaData.
 struct MoveInShard {
 	std::shared_ptr<MoveInShardMetaData> meta;
 	struct StorageServer* server;
@@ -317,7 +310,6 @@ struct MoveInShard {
 	Future<Void> fetchClient; // holds FetchShard() actor
 	Promise<Void> fetchComplete;
 	Promise<Void> readWrite;
-	PromiseStream<Key> changeFeedRemovals;
 
 	Severity logSev = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
 
@@ -325,14 +317,7 @@ struct MoveInShard {
 	MoveInShard(StorageServer* server, const UID& id, const UID& dataMoveId, const Version version, MoveInPhase phase);
 	MoveInShard(StorageServer* server, const UID& id, const UID& dataMoveId, const Version version);
 	MoveInShard(StorageServer* server, MoveInShardMetaData meta);
-	~MoveInShard() {
-		if (!fetchComplete.isSet()) {
-			fetchComplete.send(Void());
-		}
-		if (!readWrite.isSet()) {
-			readWrite.send(Void());
-		}
-	}
+	~MoveInShard();
 
 	UID id() const { return this->meta->id; }
 	UID dataMoveId() const { return this->meta->dataMoveId; }
@@ -350,63 +335,9 @@ struct MoveInShard {
 	                 MutationRef const& mutation,
 	                 MutationRefAndCipherKeys const& encryptedMutation);
 
-	KeyRangeRef getAffectedRange(const MutationRef& mutation) const {
-		ASSERT(meta != nullptr);
-		KeyRangeRef res;
-		if (mutation.type == mutation.ClearRange) {
-			const KeyRangeRef mr(mutation.param1, mutation.param2);
-			for (const auto& range : meta->ranges) {
-				if (range.intersects(mr)) {
-					ASSERT(range.contains(mr));
-					res = range;
-					break;
-				}
-			}
-			// ASSERT(meta->range.begin <= mutation.param1 && mutation.param2 <= meta->range.end);
-		} else if (isSingleKeyMutation((MutationRef::Type)mutation.type)) {
-			// ASSERT(meta->range.contains(mutation.param1));
-			for (const auto& range : meta->ranges) {
-				if (range.contains(mutation.param1)) {
-					res = range;
-					break;
-				}
-			}
-		}
-		return res;
-	}
+	KeyRangeRef getAffectedRange(const MutationRef& mutation) const;
 
-	std::string toString() const {
-		if (meta != nullptr) {
-			return meta->toString();
-		} else {
-			return "Empty";
-		}
-	}
-
-	// Key moveInShardKey() const {
-	// 	BinaryWriter wr(Unversioned());
-	// 	wr.serializeBytes(persistMoveInShardKeys.begin);
-	// 	wr << this->meta->id;
-	// 	return wr.toValue();
-	// }
-
-	// Value moveInShardValue() const { return ObjectWriter::toValue(*this->meta, IncludeVersion()); }
-
-	// static UID decodeMoveInShardKey(const KeyRef& key) {
-	// 	UID id;
-	// 	BinaryReader rd(key.removePrefix(persistMoveInShardKeys.begin), Unversioned());
-	// 	rd >> id;
-	// 	return id;
-	// }
-
-	// static MoveInShardMetaData decodeMoveInShardValue(const ValueRef& value) {
-	// 	MoveInShardMetaData shard;
-	// 	ObjectReader reader(value.begin(), IncludeVersion());
-	// 	reader.deserialize(shard);
-	// 	return shard;
-	// }
-
-	// bool operator<(const MoveInShard& rhs) const { return this->meta->ranges.begin < rhs.meta->ranges.begin; }
+	std::string toString() const { return meta != nullptr ? meta->toString() : "Empty"; }
 };
 
 struct AddingShard : NonCopyable {
@@ -523,9 +454,6 @@ public:
 				st = StorageServerShard::ReadWritePending;
 			} else if (phase == MoveInPhase::Complete) {
 				st = StorageServerShard::ReadWrite;
-			} else if (phase == MoveInPhase::Fail) {
-				// st = StorageServerShard::Error;
-				st = StorageServerShard::MovingIn;
 			} else {
 				st = StorageServerShard::MovingIn;
 			}
@@ -8547,7 +8475,6 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 			continue;
 		}
 		std::unique_ptr<ICheckpointByteSampleReader> reader = newCheckpointByteSampleReader(checkpoint);
-		int64_t bytesSum = 0;
 		while (reader->hasNext()) {
 			KeyValue kv = reader->next();
 			int64_t size = BinaryReader::fromStringRef<int64_t>(kv.value, Unversioned());
@@ -8568,26 +8495,6 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 			data->metrics.notifyBytes(key, size);
 			data->addMutationToMutationLogOrStorage(invalidVersion,
 			                                        MutationRef(MutationRef::SetValue, kv.key, kv.value));
-			bytesSum += size;
-		}
-
-		if (g_network->isSimulated()) {
-			int64_t checkpointBytes = 0;
-			for (const auto& range : checkpoint.ranges) {
-				checkpointBytes += data->metrics.byteSample.getEstimate(range);
-			}
-			ASSERT(checkpoint.estimatedSize.present());
-			// TraceEvent(moveInShard->logSev, "StorageRestoreCheckpointStats", data->thisServerID)
-			//     .detail("Checkpoint", checkpoint.toString())
-			//     .detail("Bytes", checkpointBytes)
-			//     .detail("CheckpointEstimatedSize", checkpoint.estimatedSize.get());
-			ASSERT(bytesSum == checkpointBytes);
-			if (checkpoint.estimatedSize.get() != checkpointBytes) {
-				TraceEvent(moveInShard->logSev, "CheckpointByteSampleMismatch", data->thisServerID)
-				    .detail("Checkpoint", checkpoint.toString())
-				    .detail("Bytes", checkpointBytes)
-				    .detail("CheckpointEstimatedSize", checkpoint.estimatedSize.get());
-			}
 		}
 	}
 	shard->setPhase(MoveInPhase::ApplyingUpdates);
@@ -8681,13 +8588,7 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 		for (auto b = batch->changes.begin() + startSize; b != batch->changes.end(); ++b) {
 			ASSERT(b->version >= checkv);
 			checkv = b->version;
-			for (auto& m : b->mutations) {
-				TraceEvent(moveInShard->logSev, "FetchShardFinalCommitInject", data->thisServerID)
-				    .detail("Mutation", m)
-				    .detail("Version", batch->changes[0].version);
-			}
 		}
-		// }
 
 		// ASSERT(shard->meta->highWatermark <= data->data().getLatestVersion());
 
@@ -8940,6 +8841,17 @@ MoveInShard::MoveInShard(StorageServer* server, MoveInShardMetaData meta)
 	}
 }
 
+MoveInShard::~MoveInShard() {
+	// Note even if the MoveInShard is cancelled, the following are used as signals of changes, not
+	// necessarily fetch complete.
+	if (!fetchComplete.isSet()) {
+		fetchComplete.send(Void());
+	}
+	if (!readWrite.isSet()) {
+		readWrite.send(Void());
+	}
+}
+
 void MoveInShard::addRange(const KeyRangeRef range) {
 	for (const auto& kr : this->meta->ranges) {
 		if (kr.intersects(range)) {
@@ -9022,6 +8934,31 @@ void MoveInShard::addMutation(Version version,
 		// updates.addMutation(version, fromFetch, mutation);
 		server->addMutation(version, fromFetch, mutation, encryptedMutation, range, server->updateEagerReads);
 	}
+}
+
+KeyRangeRef MoveInShard::getAffectedRange(const MutationRef& mutation) const {
+	ASSERT(meta != nullptr);
+	KeyRangeRef res;
+	if (mutation.type == mutation.ClearRange) {
+		const KeyRangeRef mr(mutation.param1, mutation.param2);
+		for (const auto& range : meta->ranges) {
+			if (range.intersects(mr)) {
+				ASSERT(range.contains(mr));
+				res = range;
+				break;
+			}
+		}
+		// ASSERT(meta->range.begin <= mutation.param1 && mutation.param2 <= meta->range.end);
+	} else if (isSingleKeyMutation((MutationRef::Type)mutation.type)) {
+		// ASSERT(meta->range.contains(mutation.param1));
+		for (const auto& range : meta->ranges) {
+			if (range.contains(mutation.param1)) {
+				res = range;
+				break;
+			}
+		}
+	}
+	return res;
 }
 
 // static
@@ -10837,8 +10774,7 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 	state Key readBegin;
 	state Key readEnd;
 	state bool anyFileCreated;
-	TraceEvent(SevDebug, "CheckpointbytesSampleBegin", data->thisServerID)
-	    .detail("Checkpoint", metaData.toString());
+	TraceEvent(SevDebug, "CheckpointbytesSampleBegin", data->thisServerID).detail("Checkpoint", metaData.toString());
 
 	loop {
 		try {
@@ -10976,15 +10912,6 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		checkpointResult.src.push_back(data->thisServerID);
 		checkpointResult.actionId = metaData.actionId;
 		checkpointResult.dir = checkpointDir;
-		int64_t checkpointBytes = 0;
-		for (const auto& range : checkpointResult.ranges) {
-			checkpointBytes += data->metrics.byteSample.getEstimate(range);
-		}
-		checkpointResult.estimatedSize = checkpointBytes;
-		TraceEvent(SevDebug, "StorageCreatedCheckpointStats", data->thisServerID)
-		    .detail("Checkpoint", checkpointResult.toString())
-		    .detail("Bytes", checkpointBytes)
-		    .detail("Version", data->version.get());
 		data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
 
 		TraceEvent("StorageCreatedCheckpoint", data->thisServerID)
@@ -12061,7 +11988,7 @@ ByteSampleInfo isKeyValueInSample(const KeyRef key, int64_t totalKvSize) {
 	if (SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY != 0) {
 		ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	}
-	info.probability = std::min(info.probability, 1.0);
+	info.probability = std::clamp(info.probability, SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY, 1.0);
 	info.inSample = a / ((1 << 30) * 4.0) < info.probability;
 	info.sampledSize = info.size / info.probability;
 

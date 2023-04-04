@@ -64,8 +64,6 @@ struct CheckpointMetaData {
 
 	std::string dir;
 
-	Optional<int64_t> estimatedSize;
-
 	CheckpointMetaData() = default;
 	CheckpointMetaData(const std::vector<KeyRange>& ranges,
 	                   CheckpointFormat format,
@@ -126,7 +124,6 @@ struct CheckpointMetaData {
 		                  " [Checkpoint Dir:] " + dir + " [Server]: " + describe(src) +
 		                  " [ID]: " + checkpointID.toString() + " [State]: " + std::to_string(static_cast<int>(state)) +
 		                  (actionId.present() ? (" [Action ID]: " + actionId.get().toString()) : "") +
-						  (estimatedSize.present() ? (" [BytesSampleEstimatedSize]: " + std::to_string(estimatedSize.get())) : "") +
 		                  (bytesSampleFile.present() ? " [bytesSampleFile]: " + bytesSampleFile.get() : "");
 		;
 		return res;
@@ -144,8 +141,7 @@ struct CheckpointMetaData {
 		           serializedCheckpoint,
 		           actionId,
 		           bytesSampleFile,
-		           dir,
-		           estimatedSize);
+		           dir);
 	}
 };
 

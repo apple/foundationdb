@@ -76,7 +76,6 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 
 	for (const LiveFileMetaData& fileMetaData : rocksCF.sstFiles) {
 		rocksdb::LiveFileMetaData liveFileMetaData;
-		liveFileMetaData.file_type = rocksdb::kTableFile;
 		liveFileMetaData.size = fileMetaData.size;
 		liveFileMetaData.name = fileMetaData.name;
 		liveFileMetaData.file_number = fileMetaData.file_number;
@@ -97,6 +96,10 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
 		liveFileMetaData.smallest = fileMetaData.smallest;
 		liveFileMetaData.largest = fileMetaData.largest;
+		liveFileMetaData.relative_filename = fileMetaData.relative_filename;
+		liveFileMetaData.directory = fileMetaData.directory;
+		liveFileMetaData.file_type = rocksdb::kTableFile;
+		liveFileMetaData.epoch_number = fileMetaData.epoch_number;
 		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
 		liveFileMetaData.level = fileMetaData.level;
 		metaData.files.push_back(liveFileMetaData);
@@ -177,6 +180,7 @@ ACTOR Future<int64_t> doFetchCheckpointFile(Database cx,
 	state int attempt = 0;
 	state int64_t offset = 0;
 	state Reference<IAsyncFile> asyncFile;
+	state Future<Void> writeFuture;
 	loop {
 		offset = 0;
 		try {
@@ -204,12 +208,17 @@ ACTOR Future<int64_t> doFetchCheckpointFile(Database cx,
 			    .detail("Attempt", attempt);
 			loop {
 				state FetchCheckpointReply rep = waitNext(stream.getFuture());
-				wait(asyncFile->write(rep.data.begin(), rep.data.size(), offset));
+				writeFuture = asyncFile->write(rep.data.begin(), rep.data.size(), offset);
+				wait(writeFuture);
 				wait(asyncFile->flush());
 				offset += rep.data.size();
 			}
-		} catch (Error& e) {
+		} catch (Error& err) {
+			state Error e = err;
 			if (e.code() == error_code_actor_cancelled) {
+				if (g_network->isSimulated() && writeFuture.isValid() && !writeFuture.isReady()) {
+					wait(writeFuture);
+				}
 				throw e;
 			} else if (e.code() != error_code_end_of_stream ||
 			           (g_network->isSimulated() && attempt == 1 && deterministicRandom()->coinflip())) {
@@ -608,10 +617,6 @@ rocksdb::Status RocksDBColumnFamilyReader::Reader::importCheckpoint(const std::s
 	std::vector<std::string> columnFamilies;
 	const rocksdb::Options options = getOptions();
 	rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, path, &columnFamilies);
-	// if (!status.ok()) {
-	// 	logRocksDBError(status, "CheckpointReaderListColumnFamilies", logId);
-	// 	return status;
-	// }
 	if (std::find(columnFamilies.begin(), columnFamilies.end(), rocksDefaultCf) == columnFamilies.end()) {
 		columnFamilies.push_back(rocksDefaultCf);
 	}
@@ -625,7 +630,10 @@ rocksdb::Status RocksDBColumnFamilyReader::Reader::importCheckpoint(const std::s
 
 	status = rocksdb::DB::Open(options, path, descriptors, &handles, &db);
 	if (!status.ok()) {
-		// logRocksDBError(status, "CheckpointReaderOpen", logId);
+		TraceEvent(SevWarn, "CheckpointReaderOpenedFailed", logId)
+		    .detail("Status", status.ToString())
+		    .detail("Path", path)
+		    .detail("Checkpoint", checkpoint.toString());
 		return status;
 	}
 
@@ -845,7 +853,8 @@ private:
 		return Void();
 	}
 
-	ACTOR static Future<Standalone<StringRef>> getNextChunk(RocksDBCFCheckpointReader* self, int byteLimit) {
+	ACTOR static UNCANCELLABLE Future<Standalone<StringRef>> getNextChunk(RocksDBCFCheckpointReader* self,
+	                                                                      int byteLimit) {
 		int blockSize = std::min(64 * 1024, byteLimit); // Block size read from disk.
 		state Standalone<StringRef> buf = makeAlignedString(_PAGE_SIZE, blockSize);
 		int bytesRead = wait(self->file_->read(mutateString(buf), blockSize, self->offset_));

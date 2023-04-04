@@ -2666,9 +2666,9 @@ ACTOR void setupAndRun(std::string dataFolder,
  		testConfig.storageEngineExcludeTypes.push_back(5);
  	}
 
- 	if (std::string_view(testFile).find("Backup") != std::string_view::npos) {
- 		testConfig.storageEngineExcludeTypes.push_back(5);
- 	}
+ 	// if (std::string_view(testFile).find("Backup") != std::string_view::npos) {
+ 	// 	testConfig.storageEngineExcludeTypes.push_back(5);
+ 	// }
 
  	if (std::string_view(testFile).find("BlobGranule") != std::string_view::npos) {
  		testConfig.storageEngineExcludeTypes.push_back(5);

@@ -158,6 +158,19 @@ struct SstFileMetaData {
 	std::string smallest{}; // Smallest internal key served by table
 	std::string largest{}; // Largest internal key served by table
 
+	// The name of the file within its directory (e.g. "123456.sst")
+	std::string relative_filename;
+	// The directory containing the file, without a trailing '/'. This could be
+	// a DB path, wal_dir, etc.
+	std::string directory;
+
+	// The order of a file being flushed or ingested/imported.
+	// Compaction output file will be assigned with the minimum `epoch_number`
+	// among input files'.
+	// For L0, larger `epoch_number` indicates newer L0 file.
+	// 0 if the information is not available.
+	uint64_t epoch_number = 0;
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -180,7 +193,10 @@ struct SstFileMetaData {
 		           file_checksum,
 		           file_checksum_func_name,
 		           smallest,
-		           largest);
+		           largest,
+		           directory,
+		           relative_filename,
+		           epoch_number);
 	}
 };
 
@@ -215,6 +231,9 @@ struct LiveFileMetaData : public SstFileMetaData {
 		           SstFileMetaData::file_checksum_func_name,
 		           SstFileMetaData::smallest,
 		           SstFileMetaData::largest,
+		           SstFileMetaData::directory,
+		           SstFileMetaData::relative_filename,
+		           SstFileMetaData::epoch_number,
 		           column_family_name,
 		           level,
 		           fetched);
