@@ -20,7 +20,7 @@ target_include_directories(swifttestapp PUBLIC
     "${CMAKE_BINARY_DIR}/fdbrpc/include"
     "${CMAKE_SOURCE_DIR}/contrib/fmt-8.1.1/include"
     "${CMAKE_SOURCE_DIR}/contrib/sqlite"
-    "${CMAKE_BINARY_DIR}/boost_install/include"
+    "${Boost_DIR}/../../../include"
     "${msgpack_DIR}/include"
 )
 
