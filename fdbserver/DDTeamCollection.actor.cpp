@@ -64,9 +64,9 @@ void EligibilityCounter::reset(Type type) {
 }
 
 unsigned EligibilityCounter::getCount(int combinedType) const {
-	unsigned minCount = 0;
+	unsigned minCount = std::numeric_limits<unsigned>::max();
 	for (auto& [t, c] : type_count) {
-		if ((combinedType & t) && minCount > c) {
+		if ((combinedType & t) > 0 && minCount > c) {
 			minCount = c;
 		}
 	}
@@ -270,7 +270,7 @@ public:
 					if (self->teams[currentIndex]->isHealthy()) {
 						int eligibilityType = data_distribution::EligibilityCounter::fromGetTeamRequest(req);
 						bool eligible = eligibilityType == data_distribution::EligibilityCounter::NONE ||
-						                self->teams[currentIndex]->getEligiblilityCount(eligibilityType) > 0;
+						                self->teams[currentIndex]->getEligibilityCount(eligibilityType) > 0;
 						if (!eligible) {
 							continue;
 						}
@@ -309,7 +309,7 @@ public:
 					if (ok) {
 						int eligibilityType = data_distribution::EligibilityCounter::fromGetTeamRequest(req);
 						ok = eligibilityType == data_distribution::EligibilityCounter::NONE ||
-						     dest->getEligiblilityCount(eligibilityType) > 0;
+						     dest->getEligibilityCount(eligibilityType) > 0;
 					}
 
 					for (int i = 0; ok && i < randomTeams.size(); i++) {
@@ -387,7 +387,7 @@ public:
 				    .detail("HealthyTeams", self->healthyTeamCount)
 				    .detail("PivotCPU", self->teamPivots.pivotCPU)
 				    .detail("PivotDiskSpace", self->teamPivots.pivotAvailableSpaceRatio);
-				self->traceAllInfo(true);
+				// self->traceAllInfo(true);
 			}
 
 			req.reply.send(std::make_pair(bestOption, foundSrc));
