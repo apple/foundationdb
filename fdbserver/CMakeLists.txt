@@ -67,6 +67,7 @@ add_swift_to_cxx_header_gen_target(
   SOURCES
    "${CMAKE_CURRENT_SOURCE_DIR}/swift_fdbserver_cxx_swift_value_conformance.swift"
    FLAGS
+-Xcc -fmodules-cache-path=${CLANG_MODULE_CACHE_PATH}
 -Xcc -std=c++17 -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml
 # Important: This is needed to avoid including header that depends on this generated header.
 -Xcc -DFDBSERVER_FORWARD_DECLARE_SWIFT_APIS
@@ -78,6 +79,7 @@ add_swift_to_cxx_header_gen_target(
   fdbserver_swift_header
   "${CMAKE_CURRENT_BINARY_DIR}/include/SwiftModules/FDBServer"
    FLAGS
+-Xcc -fmodules-cache-path=${CLANG_MODULE_CACHE_PATH}
 -Xcc -std=c++17 -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml
 # Important: This is needed to avoid including the generated header while generating it.
 -DFDBSERVER_FORWARD_DECLARE_SWIFT_APIS
