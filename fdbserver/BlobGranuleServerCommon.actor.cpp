@@ -18,16 +18,29 @@
  * limitations under the License.
  */
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
-#include "fdbclient/SystemData.h"
+#include "fmt/format.h"
 #include "fdbclient/BlobGranuleCommon.h"
-#include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/SystemData.h"
+#include "fdbserver/BlobGranuleServerCommon.actor.h"
+#include "fdbserver/Knobs.h"
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
+
+// serialize change feed key as UID bytes, to use 16 bytes on disk
+Key granuleIDToCFKey(UID granuleID) {
+	BinaryWriter wr(Unversioned());
+	wr << granuleID;
+	return wr.toValue();
+}
+
+// parse change feed key back to UID, to be human-readable
+UID cfKeyToGranuleID(Key cfKey) {
+	return BinaryReader::fromStringRef<UID>(cfKey, Unversioned());
+}
 
 // Gets the latest granule history node for range that was persisted
 ACTOR Future<Optional<GranuleHistory>> getLatestGranuleHistory(Transaction* tr, KeyRange range) {
@@ -61,13 +74,14 @@ ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, 
 			int64_t offset;
 			int64_t length;
 			int64_t fullFileLength;
+			Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 
 			std::tie(gid, version, fileType) = decodeBlobGranuleFileKey(it.key);
 			ASSERT(gid == granuleID);
 
-			std::tie(filename, offset, length, fullFileLength) = decodeBlobGranuleFileValue(it.value);
+			std::tie(filename, offset, length, fullFileLength, cipherKeysMeta) = decodeBlobGranuleFileValue(it.value);
 
-			BlobFileIndex idx(version, filename.toString(), offset, length, fullFileLength);
+			BlobFileIndex idx(version, filename.toString(), offset, length, fullFileLength, cipherKeysMeta);
 			if (fileType == 'S') {
 				ASSERT(files->snapshotFiles.empty() || files->snapshotFiles.back().version < idx.version);
 				files->snapshotFiles.push_back(idx);
@@ -98,11 +112,26 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Database cx, UID granuleID) {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(readGranuleFiles(&tr, &startKey, range.end, &files, granuleID));
 			return files;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
+	}
+}
+
+ACTOR Future<ForcedPurgeState> getForcePurgedState(Transaction* tr, KeyRange keyRange) {
+	// because map is coalesced, if the result returns more than 1, they must be alternating
+	RangeResult values =
+	    wait(krmGetRanges(tr, blobGranuleForcePurgedKeys.begin, keyRange, 3, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+
+	ASSERT(!values.empty());
+	if (values.size() > 2) {
+		ASSERT(values[0].value != values[1].value);
+		return ForcedPurgeState::SomePurged;
+	} else {
+		return values[0].value == "1"_sr ? ForcedPurgeState::AllPurged : ForcedPurgeState::NonePurged;
 	}
 }
 
@@ -114,14 +143,19 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Database cx, UID granuleID) {
 // key range, the granule may have a snapshot file at version X, where beginVersion < X <= readVersion. In this case, if
 // the number of bytes in delta files between beginVersion and X is larger than the snapshot file at version X, it is
 // strictly more efficient (in terms of files and bytes read) to just use the snapshot file at version X instead.
+//
+// To assist BlobGranule file (snapshot and/or delta) file encryption, the routine while populating snapshot and/or
+// delta files, constructs BlobFilePointerRef->cipherKeysMeta field. Approach avoids this method to be defined as an
+// ACTOR, as fetching desired EncryptionKey may potentially involve reaching out to EncryptKeyProxy or external KMS.
 void GranuleFiles::getFiles(Version beginVersion,
                             Version readVersion,
                             bool canCollapse,
                             BlobGranuleChunkRef& chunk,
                             Arena& replyArena,
-                            int64_t& deltaBytesCounter) const {
+                            int64_t& deltaBytesCounter,
+                            bool summarize) const {
 	BlobFileIndex dummyIndex; // for searching
-
+	ASSERT(!snapshotFiles.empty());
 	// if beginVersion == 0 or we can collapse, find the latest snapshot <= readVersion
 	auto snapshotF = snapshotFiles.end();
 	if (beginVersion == 0 || canCollapse) {
@@ -169,28 +203,43 @@ void GranuleFiles::getFiles(Version beginVersion,
 	Version lastIncluded = invalidVersion;
 	if (snapshotF != snapshotFiles.end()) {
 		chunk.snapshotVersion = snapshotF->version;
-		chunk.snapshotFile = BlobFilePointerRef(
-		    replyArena, snapshotF->filename, snapshotF->offset, snapshotF->length, snapshotF->fullFileLength);
+		chunk.snapshotFile =
+		    BlobFilePointerRef(replyArena,
+		                       summarize ? "" : snapshotF->filename,
+		                       snapshotF->offset,
+		                       snapshotF->length,
+		                       snapshotF->fullFileLength,
+		                       summarize ? Optional<BlobGranuleCipherKeysMeta>() : snapshotF->cipherKeysMeta);
 		lastIncluded = chunk.snapshotVersion;
 	} else {
 		chunk.snapshotVersion = invalidVersion;
 	}
 
 	while (deltaF != deltaFiles.end() && deltaF->version < readVersion) {
-		chunk.deltaFiles.emplace_back_deep(
-		    replyArena, deltaF->filename, deltaF->offset, deltaF->length, deltaF->fullFileLength);
+		chunk.deltaFiles.emplace_back_deep(replyArena,
+		                                   summarize ? "" : deltaF->filename,
+		                                   deltaF->offset,
+		                                   deltaF->length,
+		                                   deltaF->fullFileLength,
+		                                   summarize ? Optional<BlobGranuleCipherKeysMeta>() : deltaF->cipherKeysMeta);
 		deltaBytesCounter += deltaF->length;
 		ASSERT(lastIncluded < deltaF->version);
 		lastIncluded = deltaF->version;
 		deltaF++;
 	}
 	// include last delta file that passes readVersion, if it exists
-	if (deltaF != deltaFiles.end() && lastIncluded < readVersion) {
-		chunk.deltaFiles.emplace_back_deep(
-		    replyArena, deltaF->filename, deltaF->offset, deltaF->length, deltaF->fullFileLength);
+	if (deltaF != deltaFiles.end() &&
+	    ((!summarize && lastIncluded < readVersion) || (summarize && deltaF->version == readVersion))) {
+		chunk.deltaFiles.emplace_back_deep(replyArena,
+		                                   deltaF->filename,
+		                                   deltaF->offset,
+		                                   deltaF->length,
+		                                   deltaF->fullFileLength,
+		                                   deltaF->cipherKeysMeta);
 		deltaBytesCounter += deltaF->length;
 		lastIncluded = deltaF->version;
 	}
+	chunk.includedVersion = lastIncluded;
 }
 
 static std::string makeTestFileName(Version v) {
@@ -214,7 +263,7 @@ static void checkFiles(const GranuleFiles& f,
 	Arena a;
 	BlobGranuleChunkRef chunk;
 	int64_t deltaBytes = 0;
-	f.getFiles(beginVersion, readVersion, canCollapse, chunk, a, deltaBytes);
+	f.getFiles(beginVersion, readVersion, canCollapse, chunk, a, deltaBytes, false);
 	fmt::print("results({0}, {1}, {2}):\nEXPECTED:\n    snapshot={3}\n    deltas ({4}):\n",
 	           beginVersion,
 	           readVersion,
@@ -356,4 +405,170 @@ TEST_CASE("/blobgranule/server/common/granulefiles") {
 	checkFiles(files, 351, 400, true, Optional<int>(), {});
 
 	return Void();
+}
+
+static void checkSummary(const GranuleFiles& f,
+                         Version summaryVersion,
+                         Version expectedSnapshotVersion,
+                         int64_t expectedSnapshotSize,
+                         Version expectedDeltaVersion,
+                         Version expectedDeltaSize) {
+	Arena fileArena, summaryArena;
+	BlobGranuleChunkRef chunk;
+	int64_t deltaBytes = 0;
+	f.getFiles(0, summaryVersion, true, chunk, fileArena, deltaBytes, true);
+
+	BlobGranuleSummaryRef summary = summarizeGranuleChunk(summaryArena, chunk);
+
+	ASSERT(expectedSnapshotVersion == summary.snapshotVersion);
+	ASSERT(expectedSnapshotSize == summary.snapshotSize);
+	ASSERT(expectedDeltaVersion == summary.deltaVersion);
+	ASSERT(expectedDeltaSize == summary.deltaSize);
+	ASSERT(deltaBytes == expectedDeltaSize);
+}
+
+/*
+ * This should technically be in client unit tests but we don't have a unit test there
+ * Files:
+ * S @ 100 (10 bytes)
+ * D @ 150 (5 bytes)
+ * D @ 200 (6 bytes)
+ */
+TEST_CASE("/blobgranule/server/common/granulesummary") {
+	GranuleFiles files;
+	files.snapshotFiles.push_back(makeTestFile(100, 10));
+	files.deltaFiles.push_back(makeTestFile(150, 5));
+	files.deltaFiles.push_back(makeTestFile(200, 6));
+
+	checkSummary(files, 100, 100, 10, 100, 0);
+	checkSummary(files, 149, 100, 10, 100, 0);
+	checkSummary(files, 150, 100, 10, 150, 5);
+	checkSummary(files, 199, 100, 10, 150, 5);
+	checkSummary(files, 200, 100, 10, 200, 11);
+	checkSummary(files, 700, 100, 10, 200, 11);
+
+	return Void();
+}
+
+// FIXME: if credentials can expire, refresh periodically
+ACTOR Future<Void> loadBlobMetadataForTenants(
+    BGTenantMap* self,
+    std::vector<std::pair<BlobMetadataDomainId, BlobMetadataDomainName>> tenantsToLoad) {
+	ASSERT(SERVER_KNOBS->BG_METADATA_SOURCE == "tenant");
+	ASSERT(!tenantsToLoad.empty());
+	state EKPGetLatestBlobMetadataRequest req;
+	for (auto& tenant : tenantsToLoad) {
+		req.domainInfos.emplace_back_deep(req.domainInfos.arena(), tenant.first, StringRef(tenant.second));
+	}
+
+	// FIXME: if one tenant gets an error, don't kill whole process
+	// TODO: add latency metrics
+	loop {
+		Future<EKPGetLatestBlobMetadataReply> requestFuture;
+		if (self->dbInfo.isValid() && self->dbInfo->get().encryptKeyProxy.present()) {
+			req.reply.reset();
+			requestFuture =
+			    brokenPromiseToNever(self->dbInfo->get().encryptKeyProxy.get().getLatestBlobMetadata.getReply(req));
+		} else {
+			requestFuture = Never();
+		}
+		choose {
+			when(EKPGetLatestBlobMetadataReply rep = wait(requestFuture)) {
+				ASSERT(rep.blobMetadataDetails.size() == req.domainInfos.size());
+				// not guaranteed to be in same order in the request as the response
+				for (auto& metadata : rep.blobMetadataDetails) {
+					auto info = self->tenantInfoById.find(metadata.domainId);
+					if (info == self->tenantInfoById.end()) {
+						continue;
+					}
+					auto dataEntry = self->tenantData.rangeContaining(info->second.prefix);
+					ASSERT(dataEntry.begin() == info->second.prefix);
+					dataEntry.cvalue()->updateBStore(metadata);
+				}
+				return Void();
+			}
+			when(wait(self->dbInfo->onChange())) {}
+		}
+	}
+}
+
+Future<Void> loadBlobMetadataForTenant(BGTenantMap* self,
+                                       BlobMetadataDomainId domainId,
+                                       BlobMetadataDomainName domainName) {
+	std::vector<std::pair<BlobMetadataDomainId, BlobMetadataDomainName>> toLoad;
+	toLoad.push_back({ domainId, domainName });
+	return loadBlobMetadataForTenants(self, toLoad);
+}
+
+// list of tenants that may or may not already exist
+void BGTenantMap::addTenants(std::vector<std::pair<TenantName, TenantMapEntry>> tenants) {
+	std::vector<std::pair<BlobMetadataDomainId, BlobMetadataDomainName>> tenantsToLoad;
+	for (auto entry : tenants) {
+		if (tenantInfoById.insert({ entry.second.id, entry.second }).second) {
+			auto r = makeReference<GranuleTenantData>(entry.first, entry.second);
+			tenantData.insert(KeyRangeRef(entry.second.prefix, entry.second.prefix.withSuffix(normalKeys.end)), r);
+			if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
+				r->bstoreLoaded.send(Void());
+			} else {
+				tenantsToLoad.push_back({ entry.second.id, entry.first });
+			}
+		}
+	}
+
+	if (!tenantsToLoad.empty()) {
+		addActor.send(loadBlobMetadataForTenants(this, tenantsToLoad));
+	}
+}
+
+// TODO: implement
+void BGTenantMap::removeTenants(std::vector<int64_t> tenantIds) {
+	throw not_implemented();
+}
+
+Optional<TenantMapEntry> BGTenantMap::getTenantById(int64_t id) {
+	auto tenant = tenantInfoById.find(id);
+	if (tenant == tenantInfoById.end()) {
+		return {};
+	} else {
+		return tenant->second;
+	}
+}
+
+// FIXME: batch requests for refresh?
+// FIXME: don't double fetch if multiple accesses to refreshing/expired metadata
+// FIXME: log warning if after refresh, data is still expired!
+ACTOR Future<Reference<GranuleTenantData>> getDataForGranuleActor(BGTenantMap* self, KeyRange keyRange) {
+	state int loopCount = 0;
+	loop {
+		loopCount++;
+		auto tenant = self->tenantData.rangeContaining(keyRange.begin);
+		ASSERT(tenant.begin() <= keyRange.begin);
+		ASSERT(tenant.end() >= keyRange.end);
+
+		if (!tenant.cvalue().isValid() || !tenant.cvalue()->bstore.isValid()) {
+			return tenant.cvalue();
+		} else if (tenant.cvalue()->bstore->isExpired()) {
+			CODE_PROBE(true, "re-fetching expired blob metadata");
+			// fetch again
+			Future<Void> reload = loadBlobMetadataForTenant(self, tenant.cvalue()->entry.id, tenant->cvalue()->name);
+			wait(reload);
+			if (loopCount > 1) {
+				TraceEvent(SevWarn, "BlobMetadataStillExpired").suppressFor(5.0).detail("LoopCount", loopCount);
+				wait(delay(0.001));
+			}
+		} else {
+			// handle refresh in background if tenant needs refres
+			if (tenant.cvalue()->bstore->needsRefresh()) {
+				Future<Void> reload =
+				    loadBlobMetadataForTenant(self, tenant.cvalue()->entry.id, tenant->cvalue()->name);
+				self->addActor.send(reload);
+			}
+			return tenant.cvalue();
+		}
+	}
+}
+
+// TODO: handle case where tenant isn't loaded yet
+Future<Reference<GranuleTenantData>> BGTenantMap::getDataForGranule(const KeyRangeRef& keyRange) {
+	return getDataForGranuleActor(this, keyRange);
 }

@@ -24,7 +24,6 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/QuietDatabase.h"
-#include "fdbserver/ServerDBInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct PingWorkloadInterface {
@@ -39,6 +38,8 @@ struct PingWorkloadInterface {
 };
 
 struct PingWorkload : TestWorkload {
+	static constexpr auto NAME = "Ping";
+
 	double testDuration, operationsPerSecond;
 	PingWorkloadInterface interf;
 	bool logging, pingWorkers, registerInterface, broadcastTest, usePayload, parallelBroadcast, workerBroadcast;
@@ -53,23 +54,22 @@ struct PingWorkload : TestWorkload {
 	PingWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), messages("Messages"), totalMessageLatency("TotalLatency"),
 	    maxMessageLatency("Max Latency (ms)") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		operationsPerSecond = getOption(options, LiteralStringRef("operationsPerSecondPerClient"), 50.0);
-		usePayload = getOption(options, LiteralStringRef("usePayload"), false);
-		logging = getOption(options, LiteralStringRef("logging"), false);
-		pingWorkers = getOption(options, LiteralStringRef("pingWorkers"), false);
-		registerInterface = getOption(options, LiteralStringRef("registerInterface"), true);
-		broadcastTest = getOption(options, LiteralStringRef("broadcastTest"), false);
-		parallelBroadcast = getOption(options, LiteralStringRef("parallelBroadcast"), false);
-		workerBroadcast = getOption(options, LiteralStringRef("workerBroadcast"), false);
-		int payloadSize = getOption(options, LiteralStringRef("payloadSizeOut"), 1024);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		operationsPerSecond = getOption(options, "operationsPerSecondPerClient"_sr, 50.0);
+		usePayload = getOption(options, "usePayload"_sr, false);
+		logging = getOption(options, "logging"_sr, false);
+		pingWorkers = getOption(options, "pingWorkers"_sr, false);
+		registerInterface = getOption(options, "registerInterface"_sr, true);
+		broadcastTest = getOption(options, "broadcastTest"_sr, false);
+		parallelBroadcast = getOption(options, "parallelBroadcast"_sr, false);
+		workerBroadcast = getOption(options, "workerBroadcast"_sr, false);
+		int payloadSize = getOption(options, "payloadSizeOut"_sr, 1024);
 		payloadOut = std::string(payloadSize, '.');
-		payloadSize = getOption(options, LiteralStringRef("payloadSizeBack"), 1024);
+		payloadSize = getOption(options, "payloadSizeBack"_sr, 1024);
 		payloadBack = std::string(payloadSize, '.');
-		actorCount = getOption(options, LiteralStringRef("actorCount"), 1);
+		actorCount = getOption(options, "actorCount"_sr, 1);
 	}
 
-	std::string description() const override { return "PingWorkload"; }
 	Future<Void> setup(Database const& cx) override {
 		if (pingWorkers || !registerInterface)
 			return Void();
@@ -155,7 +155,7 @@ struct PingWorkload : TestWorkload {
 
 			LoadedPingRequest req;
 			req.id = deterministicRandom()->randomUniqueID();
-			req.payload = self->usePayload ? self->payloadOut : LiteralStringRef("");
+			req.payload = self->usePayload ? self->payloadOut : ""_sr;
 			req.loadReply = self->usePayload;
 			LoadedReply rep = wait(peer.getReply(req));
 
@@ -275,7 +275,7 @@ struct PingWorkload : TestWorkload {
 
 	// 	LoadedReply rep;
 	// 	rep.id = req.id;
-	// 	rep.payload = req.loadReply ? self->payloadBack : LiteralStringRef("");
+	// 	rep.payload = req.loadReply ? self->payloadBack : ""_sr;
 	// 	req.reply.send( rep );
 
 	// 	return Void();
@@ -296,7 +296,7 @@ struct PingWorkload : TestWorkload {
 
 			LoadedReply rep;
 			rep.id = req.id;
-			rep.payload = req.loadReply ? self->payloadBack : LiteralStringRef("");
+			rep.payload = req.loadReply ? self->payloadBack : ""_sr;
 			req.reply.send(rep);
 
 			// addActor.send( self->packetPonger( self, req ) );
@@ -304,4 +304,4 @@ struct PingWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<PingWorkload> PingWorkloadFactory("Ping");
+WorkloadFactory<PingWorkload> PingWorkloadFactory;

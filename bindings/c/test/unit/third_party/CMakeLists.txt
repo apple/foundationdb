@@ -3,7 +3,7 @@ include(ExternalProject)
 find_package(Git REQUIRED)
 
 ExternalProject_Add(
-    doctest
+    doctest_proj
     PREFIX ${CMAKE_BINARY_DIR}/doctest
     GIT_REPOSITORY https://github.com/onqtam/doctest.git
     GIT_TAG b7c21ec5ceeadb4951b00396fc1e4642dd347e5f # v2.4.9
@@ -14,5 +14,8 @@ ExternalProject_Add(
     LOG_DOWNLOAD ON
 )
 
-ExternalProject_Get_Property(doctest source_dir)
-set(DOCTEST_INCLUDE_DIR ${source_dir}/doctest CACHE INTERNAL "Path to include folder for doctest")
+ExternalProject_Get_Property(doctest_proj source_dir)
+set(DOCTEST_INCLUDE_DIR "${source_dir}/doctest" CACHE INTERNAL "Path to include folder for doctest")
+add_library(doctest INTERFACE)
+add_dependencies(doctest doctest_proj)
+target_include_directories(doctest INTERFACE "${DOCTEST_INCLUDE_DIR}")

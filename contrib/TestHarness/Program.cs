@@ -19,6 +19,7 @@
  */
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -302,6 +303,7 @@ namespace SummarizeTest
                         uniqueFileSet.Add(file.Substring(0, file.LastIndexOf("-"))); // all restarting tests end with -1.txt or -2.txt
                     }
                     uniqueFiles = uniqueFileSet.ToArray();
+                    Array.Sort(uniqueFiles);
                     testFile = random.Choice(uniqueFiles);
                     // The on-disk format changed in 4.0.0, and 5.x can't load files from 3.x.
                     string oldBinaryVersionLowerBound = "4.0.0";
@@ -334,8 +336,9 @@ namespace SummarizeTest
                         // thus, by definition, if "until_" appears, we do not want to run with the current binary version
                         oldBinaries = oldBinaries.Concat(currentBinary);
                     }
-                    List<string> oldBinariesList = oldBinaries.ToList<string>();
-                    if (oldBinariesList.Count == 0) {
+                    string[] oldBinariesList = oldBinaries.ToArray<string>();
+                    Array.Sort(oldBinariesList);
+                    if (oldBinariesList.Count() == 0) {
                         // In theory, restarting tests are named to have at least one old binary version to run
                         // But if none of the provided old binaries fall in the range, we just skip the test
                         Console.WriteLine("No available old binary version from {0} to {1}", oldBinaryVersionLowerBound, oldBinaryVersionUpperBound);
@@ -347,6 +350,7 @@ namespace SummarizeTest
                 else
                 {
                     uniqueFiles = Directory.GetFiles(testDir);
+                    Array.Sort(uniqueFiles);
                     testFile = random.Choice(uniqueFiles);
                 }
             }
@@ -376,11 +380,13 @@ namespace SummarizeTest
                     bool useNewPlugin = (oldServerName == fdbserverName) || versionGreaterThanOrEqual(oldServerName.Split('-').Last(), "5.2.0");
                     bool useToml = File.Exists(testFile + "-1.toml");
                     string testFile1 = useToml ? testFile + "-1.toml" : testFile + "-1.txt";
-                    result = RunTest(firstServerName, useNewPlugin ? tlsPluginFile : tlsPluginFile_5_1, summaryFileName, errorFileName, seed, buggify, testFile1, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, false, true, oldServerName, traceToStdout, noSim, faultInjectionEnabled);
+                    bool useValgrindRunOne = useValgrind && firstServerName == fdbserverName;
+                    bool useValgrindRunTwo = useValgrind && secondServerName == fdbserverName;
+                    result = RunTest(firstServerName, useNewPlugin ? tlsPluginFile : tlsPluginFile_5_1, summaryFileName, errorFileName, seed, buggify, testFile1, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrindRunOne, false, true, oldServerName, traceToStdout, noSim, faultInjectionEnabled);
                     if (result == 0)
                     {
                         string testFile2 = useToml ? testFile + "-2.toml" : testFile + "-2.txt";
-                        result = RunTest(secondServerName, tlsPluginFile, summaryFileName, errorFileName, seed+1, buggify, testFile2, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, true, false, oldServerName, traceToStdout, noSim, faultInjectionEnabled);
+                        result = RunTest(secondServerName, tlsPluginFile, summaryFileName, errorFileName, seed+1, buggify, testFile2, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrindRunTwo, true, false, oldServerName, traceToStdout, noSim, faultInjectionEnabled);
                     }
                 }
                 else
@@ -458,7 +464,7 @@ namespace SummarizeTest
                             role, IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", faultInjectionArg, tlsPluginArg);
                     }
                     if (restarting) args = args + " --restarting";
-                    if (useValgrind && !willRestart)
+                    if (useValgrind)
                     {
                         valgrindOutputFile = string.Format("valgrind-{0}.xml", seed);
                         process.StartInfo.FileName = "valgrind";
@@ -483,6 +489,16 @@ namespace SummarizeTest
                         process.StartInfo.FileName, process.StartInfo.Arguments, tempPath,
                         buggify ? "on" : "off",
                         useValgrind ? "on" : "off");
+                    }
+
+                    IDictionary data = Environment.GetEnvironmentVariables();
+                    foreach (DictionaryEntry i in data)
+                    {
+                        string k=(string)i.Key;
+                        string v=(string)i.Value;
+                        if (k.StartsWith("FDB_KNOB")) {
+                           process.StartInfo.EnvironmentVariables[k]=v;
+                        }
                     }
 
                     process.Start();
@@ -716,7 +732,7 @@ namespace SummarizeTest
                         process.Refresh();
                         if (process.HasExited)
                             return;
-                        long mem = process.PrivateMemorySize64;
+                        long mem = process.PagedMemorySize64;
                         MaxMem = Math.Max(MaxMem, mem);
                         //Console.WriteLine(string.Format("Process used {0} bytes", MaxMem));
                         Thread.Sleep(1000);
@@ -742,16 +758,28 @@ namespace SummarizeTest
             AppendToSummary(summaryFileName, xout);
         }
 
-        // Parses the valgrind XML file and returns a list of "what" tags for each error.
+        static string ParseValgrindStack(XElement stackElement) {
+            string backtrace = "";
+            foreach (XElement frame in stackElement.Elements()) {
+                backtrace += " " + frame.Element("ip").Value.ToLower();
+            }
+            if (backtrace.Length > 0) {
+                backtrace = "addr2line -e fdbserver.debug -p -C -f -i" + backtrace;
+            }
+
+            return backtrace;
+        }
+
+        // Parses the valgrind XML file and returns a list of error elements.
         //  All errors for which the "kind" tag starts with "Leak" are ignored
-        static string[] ParseValgrindOutput(string valgrindOutputFileName, bool traceToStdout)
+        static XElement[] ParseValgrindOutput(string valgrindOutputFileName, bool traceToStdout)
         {
             if (!traceToStdout)
             {
                 Console.WriteLine("Reading vXML file: " + valgrindOutputFileName);
             }
 
-            ISet<string> whats = new HashSet<string>();
+            IList<XElement> errors = new List<XElement>();
             XElement xdoc = XDocument.Load(valgrindOutputFileName).Element("valgrindoutput");
             foreach(var elem in xdoc.Elements()) {
                 if (elem.Name != "error")
@@ -759,9 +787,29 @@ namespace SummarizeTest
                 string kind = elem.Element("kind").Value;
                 if(kind.StartsWith("Leak"))
                     continue;
-                whats.Add(elem.Element("what").Value);
+
+                XElement errorElement = new XElement("ValgrindError",
+                                new XAttribute("Severity", (int)Magnesium.Severity.SevError));
+
+                int num = 1;
+                string suffix = "";
+                foreach (XElement sub in elem.Elements()) {
+                    if (sub.Name == "what") {
+                        errorElement.SetAttributeValue("What", sub.Value);
+                    } else if (sub.Name == "auxwhat") {
+                        suffix = "Aux" + num++;
+                        errorElement.SetAttributeValue("What" + suffix, sub.Value);
+                    } else if (sub.Name == "stack") {
+                        errorElement.SetAttributeValue("Backtrace" + suffix, ParseValgrindStack(sub));
+                    } else if (sub.Name == "origin") {
+                        errorElement.SetAttributeValue("WhatOrigin", sub.Element("what").Value);
+                        errorElement.SetAttributeValue("BacktraceOrigin", ParseValgrindStack(sub.Element("stack")));
+                    }
+                }
+
+                errors.Add(errorElement);
             }
-            return whats.ToArray();
+            return errors.ToArray();
         }
 
         delegate IEnumerable<Magnesium.Event> parseDelegate(System.IO.Stream stream, string file,
@@ -786,8 +834,15 @@ namespace SummarizeTest
             string firstRetryableError = "";
             int stderrSeverity = (int)Magnesium.Severity.SevError;
 
+            xout.Add(new XAttribute("DeterminismCheck", expectedUnseed != -1 ? "1" : "0"));
+            xout.Add(new XAttribute("OldBinary", Path.GetFileName(oldBinaryName)));
+
+            if (traceFiles.Length == 0) {
+                xout.Add(new XElement("NoTraceFilesFound"));
+            }
+
             Dictionary<KeyValuePair<string, Magnesium.Severity>, Magnesium.Severity> severityMap = new Dictionary<KeyValuePair<string, Magnesium.Severity>, Magnesium.Severity>();
-            Dictionary<Tuple<string, string>, bool> codeCoverage = new Dictionary<Tuple<string, string>, bool>();
+            var codeCoverage = new Dictionary<Tuple<string, string, string>, bool>();
 
             foreach (var traceFileName in traceFiles)
             {
@@ -822,9 +877,7 @@ namespace SummarizeTest
                                     new XAttribute("RandomSeed", ev.Details.RandomSeed),
                                     new XAttribute("SourceVersion", ev.Details.SourceVersion),
                                     new XAttribute("Time", ev.Details.ActualTime),
-                                    new XAttribute("BuggifyEnabled", ev.Details.BuggifyEnabled),
-                                    new XAttribute("DeterminismCheck", expectedUnseed != -1 ? "1" : "0"),
-                                    new XAttribute("OldBinary", Path.GetFileName(oldBinaryName)));
+                                    new XAttribute("BuggifyEnabled", ev.Details.BuggifyEnabled));
                                 testBeginFound = true;
                                 if (ev.DDetails.ContainsKey("FaultInjectionEnabled"))
                                     xout.Add(new XAttribute("FaultInjectionEnabled", ev.Details.FaultInjectionEnabled));
@@ -900,12 +953,17 @@ namespace SummarizeTest
                             if (ev.Type == "CodeCoverage" && !willRestart)
                             {
                                 bool covered = true;
-                                if(ev.DDetails.ContainsKey("Covered"))
+                                if (ev.DDetails.ContainsKey("Covered"))
                                 {
                                     covered = int.Parse(ev.Details.Covered) != 0;
                                 }
 
-                                var key = new Tuple<string, string>(ev.Details.File, ev.Details.Line);
+                                var comment = "";
+                                if (ev.DDetails.ContainsKey("Comment"))
+                                {
+                                    comment = ev.Details.Comment;
+                                }
+                                var key = new Tuple<string, string, string>(ev.Details.File, ev.Details.Line, comment);
                                 if (covered || !codeCoverage.ContainsKey(key))
                                 {
                                     codeCoverage[key] = covered;
@@ -914,6 +972,10 @@ namespace SummarizeTest
                             if (ev.Type == "FaultInjected" || (ev.Type == "BuggifySection" && ev.Details.Activated == "1"))
                             {
                                 xout.Add(new XElement(ev.Type, new XAttribute("File", ev.Details.File), new XAttribute("Line", ev.Details.Line)));
+                            }
+                            if (ev.Type == "RunningUnitTest") 
+                            {
+                                xout.Add(new XElement(ev.Type, new XAttribute("Name", ev.Details.Name), new XAttribute("File", ev.Details.File), new XAttribute("Line", ev.Details.Line)));
                             }
                             if (ev.Type == "TestsExpectedToPass")
                                 testCount = int.Parse(ev.Details.Count);
@@ -952,12 +1014,21 @@ namespace SummarizeTest
                 xout.Add(new XElement(externalError, new XAttribute("Severity", (int)Magnesium.Severity.SevError)));
             }
 
+            string joshuaSeed = System.Environment.GetEnvironmentVariable("JOSHUA_SEED");
+
+            if (joshuaSeed != null) {
+                xout.Add(new XAttribute("JoshuaSeed", joshuaSeed));
+            }
+
             foreach(var kv in codeCoverage)
             {
                 var element = new XElement("CodeCoverage", new XAttribute("File", kv.Key.Item1), new XAttribute("Line", kv.Key.Item2));
                 if(!kv.Value)
                 {
                     element.Add(new XAttribute("Covered", "0"));
+                }
+                if (kv.Key.Item3.Length > 0) {
+                    element.Add(new XAttribute("Comment", kv.Key.Item3));
                 }
 
                 xout.Add(element);
@@ -1044,12 +1115,10 @@ namespace SummarizeTest
                 try
                 {
                     // If there are any errors reported "ok" will be set to false
-                    var whats = ParseValgrindOutput(valgrindOutputFileName, traceToStdout);
-                    foreach (var what in whats)
+                    var valgrindErrors = ParseValgrindOutput(valgrindOutputFileName, traceToStdout);
+                    foreach (var vError in valgrindErrors)
                     {
-                        xout.Add(new XElement("ValgrindError",
-                                new XAttribute("Severity", (int)Magnesium.Severity.SevError),
-                                new XAttribute("What", what)));
+                        xout.Add(vError);
                         ok = false;
                         error = true;
                     }

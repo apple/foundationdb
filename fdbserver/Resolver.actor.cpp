@@ -18,12 +18,15 @@
  * limitations under the License.
  */
 
+#include <memory>
+
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
+#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
@@ -136,6 +139,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 	LogSystemDiskQueueAdapter* logAdapter = nullptr;
 	Reference<ILogSystem> logSystem;
 	IKeyValueStore* txnStateStore = nullptr;
+	int localTLogCount = -1;
 
 	std::map<UID, Reference<StorageInfo>> storageCache;
 	KeyRangeMap<ServerCacheInfo> keyInfo; // keyrange -> all storage servers in all DCs for the keyrange
@@ -190,7 +194,9 @@ struct Resolver : ReferenceCounted<Resolver> {
 };
 } // namespace
 
-ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatchRequest req) {
+ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
+                                ResolveTransactionBatchRequest req,
+                                Reference<AsyncVar<ServerDBInfo> const> db) {
 	state Optional<UID> debugID;
 	state Span span("R:resolveBatch"_loc, req.spanContext);
 
@@ -272,8 +278,9 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;
 		ConflictBatch conflictBatch(self->conflictSet, &reply.conflictingKeyRangeMap, &reply.arena);
+		const Version newOldestVersion = req.version - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
 		for (int t = 0; t < req.transactions.size(); t++) {
-			conflictBatch.addTransaction(req.transactions[t]);
+			conflictBatch.addTransaction(req.transactions[t], newOldestVersion);
 			self->resolvedReadConflictRanges += req.transactions[t].read_conflict_ranges.size();
 			self->resolvedWriteConflictRanges += req.transactions[t].write_conflict_ranges.size();
 
@@ -286,8 +293,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 					    it.begin, SERVER_KNOBS->SAMPLE_OFFSET_PER_KEY + it.begin.size(), expire);
 			}
 		}
-		conflictBatch.detectConflicts(
-		    req.version, req.version - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS, commitList, &tooOldList);
+		conflictBatch.detectConflicts(req.version, newOldestVersion, commitList, &tooOldList);
 
 		reply.debugID = req.debugID;
 		reply.committed.resize(reply.arena, req.transactions.size());
@@ -310,20 +316,22 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		auto& stateTransactions = stateTransactionsPair.second;
 		int64_t stateMutations = 0;
 		int64_t stateBytes = 0;
-		LogPushData toCommit(self->logSystem); // For accumulating private mutations
-		ResolverData resolverData(self->dbgid,
-		                          self->logSystem,
-		                          self->txnStateStore,
-		                          &self->keyInfo,
-		                          &toCommit,
-		                          self->forceRecovery,
-		                          req.version + 1,
-		                          &self->storageCache,
-		                          &self->tssMapping);
+		std::unique_ptr<LogPushData> toCommit(nullptr); // For accumulating private mutations
+		std::unique_ptr<ResolverData> resolverData(nullptr);
 		bool isLocked = false;
 		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 			auto lockedKey = self->txnStateStore->readValue(databaseLockedKey).get();
 			isLocked = lockedKey.present() && lockedKey.get().size();
+			toCommit.reset(new LogPushData(self->logSystem, self->localTLogCount));
+			resolverData.reset(new ResolverData(self->dbgid,
+			                                    self->logSystem,
+			                                    self->txnStateStore,
+			                                    &self->keyInfo,
+			                                    toCommit.get(),
+			                                    self->forceRecovery,
+			                                    req.version + 1,
+			                                    &self->storageCache,
+			                                    &self->tssMapping));
 		}
 		for (int t : req.txnStateTransactions) {
 			stateMutations += req.transactions[t].mutations.size();
@@ -340,12 +348,12 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			// The condition here must match CommitBatch::applyMetadataToCommittedTransactions()
 			if (reply.committed[t] == ConflictBatch::TransactionCommitted && !self->forceRecovery &&
 			    SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && (!isLocked || req.transactions[t].lock_aware)) {
-				SpanID spanContext =
-				    req.transactions[t].spanContext.present() ? req.transactions[t].spanContext.get() : SpanID();
+				SpanContext spanContext =
+				    req.transactions[t].spanContext.present() ? req.transactions[t].spanContext.get() : SpanContext();
 
-				applyMetadataMutations(spanContext, resolverData, req.transactions[t].mutations);
+				applyMetadataMutations(spanContext, *resolverData, req.transactions[t].mutations);
 			}
-			TEST(self->forceRecovery); // Resolver detects forced recovery
+			CODE_PROBE(self->forceRecovery, "Resolver detects forced recovery");
 		}
 
 		self->resolvedStateTransactions += req.txnStateTransactions.size();
@@ -357,24 +365,24 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		ASSERT(req.version >= firstUnseenVersion);
 		ASSERT(firstUnseenVersion >= self->debugMinRecentStateVersion);
 
-		TEST(firstUnseenVersion == req.version); // Resolver first unseen version is current version
+		CODE_PROBE(firstUnseenVersion == req.version, "Resolver first unseen version is current version");
 
 		// If shardChanged at or before this commit version, the proxy may have computed
 		// the wrong set of groups. Then we need to broadcast to all groups below.
-		stateTransactionsPair.first = toCommit.isShardChanged();
+		stateTransactionsPair.first = toCommit && toCommit->isShardChanged();
 		bool shardChanged = self->recentStateTransactionsInfo.applyStateTxnsToBatchReply(
-		    &reply, firstUnseenVersion, req.version, toCommit.isShardChanged());
+		    &reply, firstUnseenVersion, req.version, toCommit && toCommit->isShardChanged());
 
 		// Adds private mutation messages to the reply message.
 		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
-			auto privateMutations = toCommit.getAllMessages();
+			auto privateMutations = toCommit->getAllMessages();
 			for (const auto& mutations : privateMutations) {
 				reply.privateMutations.push_back(reply.arena, mutations);
 				reply.arena.dependsOn(mutations.arena());
 			}
 			// merge mutation tags with sent client tags
-			toCommit.saveTags(reply.writtenTags);
-			reply.privateMutationCount = toCommit.getMutationCount();
+			toCommit->saveTags(reply.writtenTags);
+			reply.privateMutationCount = toCommit->getMutationCount();
 		}
 
 		//TraceEvent("ResolveBatch", self->dbgid).detail("PrevVersion", req.prevVersion).detail("Version", req.version).detail("StateTransactionVersions", self->recentStateTransactionsInfo.size()).detail("StateBytes", stateBytes).detail("FirstVersion", self->recentStateTransactionsInfo.empty() ? -1 : self->recentStateTransactionsInfo.firstVersion()).detail("StateMutationsIn", req.txnStateTransactions.size()).detail("StateMutationsOut", reply.stateMutations.size()).detail("From", proxyAddress);
@@ -395,16 +403,17 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			}
 		}
 
-		TEST(oldestProxyVersion == req.version); // The proxy that sent this request has the oldest current version
-		TEST(oldestProxyVersion !=
-		     req.version); // The proxy that sent this request does not have the oldest current version
+		CODE_PROBE(oldestProxyVersion == req.version,
+		           "The proxy that sent this request has the oldest current version");
+		CODE_PROBE(oldestProxyVersion != req.version,
+		           "The proxy that sent this request does not have the oldest current version");
 
 		bool anyPopped = false;
 		if (firstUnseenVersion <= oldestProxyVersion && self->proxyInfoMap.size() == self->commitProxyCount + 1) {
-			TEST(true); // Deleting old state transactions
+			CODE_PROBE(true, "Deleting old state transactions");
 			int64_t erasedBytes = self->recentStateTransactionsInfo.eraseUpTo(oldestProxyVersion);
 			self->debugMinRecentStateVersion = oldestProxyVersion + 1;
-			anyPopped = erasedBytes = 0;
+			anyPopped = erasedBytes > 0;
 			stateBytes -= erasedBytes;
 		}
 
@@ -418,7 +427,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 						writtenTLogs.insert(i);
 					}
 				} else {
-					toCommit.getLocations(reply.writtenTags, writtenTLogs);
+					toCommit->getLocations(reply.writtenTags, writtenTLogs);
 				}
 				if (self->tpcvVector[0] == invalidVersion) {
 					std::fill(self->tpcvVector.begin(), self->tpcvVector.end(), req.prevVersion);
@@ -440,7 +449,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		if (req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.After");
 	} else {
-		TEST(true); // Duplicate resolve batch request
+		CODE_PROBE(true, "Duplicate resolve batch request");
 		//TraceEvent("DupResolveBatchReq", self->dbgid).detail("From", proxyAddress);
 	}
 
@@ -451,13 +460,13 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		if (batchItr != proxyInfoItr->second.outstandingBatches.end()) {
 			req.reply.send(batchItr->second);
 		} else {
-			TEST(true); // No outstanding batches for version on proxy
+			CODE_PROBE(true, "No outstanding batches for version on proxy");
 			req.reply.send(Never());
 		}
 	} else {
 		ASSERT_WE_THINK(false); // The first non-duplicate request with this proxyAddress, including this one, should
 		                        // have inserted this item in the map!
-		// TEST(true); // No prior proxy requests
+		// CODE_PROBE(true, "No prior proxy requests");
 		req.reply.send(Never());
 	}
 
@@ -497,7 +506,8 @@ struct TransactionStateResolveContext {
 	}
 };
 
-ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveContext* pContext) {
+ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolveContext* pContext,
+                                                          Reference<AsyncVar<ServerDBInfo> const> db) {
 	state KeyRange txnKeys = allKeys;
 	state std::map<Tag, UID> tag_uid;
 
@@ -523,9 +533,9 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		std::vector<UID> src, dest;
 		ServerCacheInfo info;
 		// NOTE: An ACTOR will be compiled into several classes, the this pointer is from one of them.
-		auto updateTagInfo = [this](const std::vector<UID>& uids,
-		                            std::vector<Tag>& tags,
-		                            std::vector<Reference<StorageInfo>>& storageInfoItems) {
+		auto updateTagInfo = [pContext = pContext](const std::vector<UID>& uids,
+		                                           std::vector<Tag>& tags,
+		                                           std::vector<Reference<StorageInfo>>& storageInfoItems) {
 			for (const auto& id : uids) {
 				auto storageInfo = getStorageInfo(id, &pContext->pResolverData->storageCache, pContext->pTxnStateStore);
 				ASSERT(storageInfo->tag != invalidTag);
@@ -564,8 +574,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		bool confChanges; // Ignore configuration changes for initial commits.
 		ResolverData resolverData(
 		    pContext->pResolverData->dbgid, pContext->pTxnStateStore, &pContext->pResolverData->keyInfo, confChanges);
-
-		applyMetadataMutations(SpanID(), resolverData, mutations);
+		applyMetadataMutations(SpanContext(), resolverData, mutations);
 	} // loop
 
 	auto lockedKey = pContext->pTxnStateStore->readValue(databaseLockedKey).get();
@@ -578,14 +587,8 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 }
 
 ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveContext* pContext,
-                                                      TxnStateRequest request) {
-	state const TxnStateRequest& req = request;
-	state Resolver& resolverData = *pContext->pResolverData;
-	state PromiseStream<Future<Void>>& addActor = *pContext->pActors;
-	state Sequence& maxSequence = pContext->maxSequence;
-	state ReplyPromise<Void> reply = req.reply;
-	state std::unordered_set<Sequence>& txnSequences = pContext->receivedSequences;
-
+                                                      TxnStateRequest request,
+                                                      Reference<AsyncVar<ServerDBInfo> const> db) {
 	ASSERT(pContext->pResolverData.getPtr() != nullptr);
 	ASSERT(pContext->pActors != nullptr);
 
@@ -612,7 +615,7 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 	if (pContext->receivedSequences.size() == pContext->maxSequence) {
 		// Received all components of the txnStateRequest
 		ASSERT(!pContext->processed);
-		wait(processCompleteTransactionStateRequest(pContext));
+		wait(processCompleteTransactionStateRequest(pContext, db));
 		pContext->processed = true;
 	}
 
@@ -629,6 +632,7 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	state Reference<Resolver> self(new Resolver(resolver.id(), initReq.commitProxyCount, initReq.resolverCount));
 	state ActorCollection actors(false);
 	state Future<Void> doPollMetrics = self->resolverCount > 1 ? Void() : Future<Void>(Never());
+	state PromiseStream<Future<Void>> addActor;
 	actors.add(waitFailureServer(resolver.waitFailure.getFuture()));
 	actors.add(traceRole(Role::RESOLVER, resolver.id()));
 
@@ -643,13 +647,20 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 
 	// Initialize txnStateStore
 	self->logSystem = ILogSystem::fromServerDBInfo(resolver.id(), db->get(), false, addActor);
-	state PromiseStream<Future<Void>> addActor;
+	self->localTLogCount = db->get().logSystemConfig.numLogs();
 	state Future<Void> onError =
 	    transformError(actorCollection(addActor.getFuture()), broken_promise(), resolver_failed());
 	state TransactionStateResolveContext transactionStateResolveContext;
 	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 		self->logAdapter = new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
-		self->txnStateStore = keyValueStoreLogSystem(self->logAdapter, resolver.id(), 2e9, true, true, true);
+		self->txnStateStore = keyValueStoreLogSystem(self->logAdapter,
+		                                             db,
+		                                             resolver.id(),
+		                                             2e9,
+		                                             true,
+		                                             true,
+		                                             true,
+		                                             isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION));
 
 		// wait for txnStateStore recovery
 		wait(success(self->txnStateStore->readValue(StringRef())));
@@ -666,7 +677,7 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 
 	loop choose {
 		when(ResolveTransactionBatchRequest batch = waitNext(resolver.resolve.getFuture())) {
-			actors.add(resolveBatch(self, batch));
+			actors.add(resolveBatch(self, batch, db));
 		}
 		when(ResolutionMetricsRequest req = waitNext(resolver.metrics.getFuture())) {
 			++self->metricsRequests;
@@ -689,7 +700,7 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 		}
 		when(TxnStateRequest request = waitNext(resolver.txnState.getFuture())) {
 			if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
-				addActor.send(processTransactionStateRequestPart(&transactionStateResolveContext, request));
+				addActor.send(processTransactionStateRequestPart(&transactionStateResolveContext, request, db));
 			} else {
 				ASSERT(false);
 			}

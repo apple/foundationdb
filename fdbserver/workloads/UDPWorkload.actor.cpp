@@ -40,7 +40,7 @@
 namespace {
 
 struct UDPWorkload : TestWorkload {
-	constexpr static const char* name = "UDPWorkload";
+	constexpr static auto NAME = "UDPWorkload";
 	// config
 	Key keyPrefix;
 	double runFor;
@@ -61,7 +61,6 @@ struct UDPWorkload : TestWorkload {
 		}
 	}
 
-	std::string description() const override { return name; }
 	ACTOR static Future<Void> _setup(UDPWorkload* self, Database cx) {
 		state NetworkAddress localAddress(g_network->getLocalAddress().ip,
 		                                  deterministicRandom()->randomInt(self->minPort, self->maxPort + 1),
@@ -262,4 +261,4 @@ struct UDPWorkload : TestWorkload {
 
 } // namespace
 
-WorkloadFactory<UDPWorkload> UDPWorkloadFactory(UDPWorkload::name);
+WorkloadFactory<UDPWorkload> UDPWorkloadFactory;

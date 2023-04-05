@@ -1,5 +1,7 @@
 [configuration]
 StderrSeverity = 30
+# tenants are not supported with parallel restore
+allowDefaultTenant = false
 
 [[test]]
 testTitle = 'WriteDuringReadTest'

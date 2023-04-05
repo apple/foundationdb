@@ -22,7 +22,7 @@
 // version.
 #if defined(NO_INTELLISENSE) && !defined(FDB_FLOW_TESTER_TESTER_ACTOR_G_H)
 #define FDB_FLOW_TESTER_TESTER_ACTOR_G_H
-#include "Tester.actor.g.h"
+#include "tester/Tester.actor.g.h"
 #elif !defined(FDB_FLOW_TESTER_TESTER_ACTOR_H)
 #define FDB_FLOW_TESTER_TESTER_ACTOR_H
 
@@ -71,7 +71,7 @@ struct FlowTesterStack {
 
 	void pushError(int errorCode) {
 		FDB::Tuple t;
-		t.append(LiteralStringRef("ERROR"));
+		t.append("ERROR"_sr);
 		t.append(format("%d", errorCode));
 		// pack above as error string into another tuple
 		pushTuple(t.pack().toString());

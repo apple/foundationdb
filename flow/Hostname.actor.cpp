@@ -39,58 +39,32 @@ Hostname Hostname::parse(const std::string& s) {
 	return Hostname(f.substr(0, colonPos), f.substr(colonPos + 1), isTLS);
 }
 
-void Hostname::resetToUnresolved() {
-	if (status == Hostname::RESOLVED) {
-		status = UNRESOLVED;
-		resolvedAddress = Optional<NetworkAddress>();
-	}
-}
-
 ACTOR Future<Optional<NetworkAddress>> resolveImpl(Hostname* self) {
-	loop {
-		if (self->status == Hostname::UNRESOLVED) {
-			self->status = Hostname::RESOLVING;
-			try {
-				std::vector<NetworkAddress> addresses =
-				    wait(INetworkConnections::net()->resolveTCPEndpointWithDNSCache(self->host, self->service));
-				NetworkAddress address = addresses[deterministicRandom()->randomInt(0, addresses.size())];
-				address.flags = 0; // Reset the parsed address to public
-				address.fromHostname = NetworkAddressFromHostname::True;
-				if (self->isTLS) {
-					address.flags |= NetworkAddress::FLAG_TLS;
-				}
-				self->resolvedAddress = address;
-				self->status = Hostname::RESOLVED;
-				self->resolveFinish.trigger();
-				return self->resolvedAddress.get();
-			} catch (...) {
-				self->status = Hostname::UNRESOLVED;
-				self->resolveFinish.trigger();
-				self->resolvedAddress = Optional<NetworkAddress>();
-				return Optional<NetworkAddress>();
-			}
-		} else if (self->status == Hostname::RESOLVING) {
-			wait(self->resolveFinish.onTrigger());
-			if (self->status == Hostname::RESOLVED) {
-				return self->resolvedAddress.get();
-			}
-			// Otherwise, this means other threads failed on resolve, so here we go back to the loop and try to resolve
-			// again.
-		} else {
-			// status is RESOLVED, nothing to do.
-			return self->resolvedAddress.get();
+	try {
+		std::vector<NetworkAddress> addresses =
+		    wait(INetworkConnections::net()->resolveTCPEndpointWithDNSCache(self->host, self->service));
+		NetworkAddress address = INetworkConnections::pickOneAddress(addresses);
+		address.flags = 0; // Reset the parsed address to public
+		address.fromHostname = NetworkAddressFromHostname::True;
+		if (self->isTLS) {
+			address.flags |= NetworkAddress::FLAG_TLS;
 		}
+		return address;
+	} catch (...) {
+		return Optional<NetworkAddress>();
 	}
 }
 
 ACTOR Future<NetworkAddress> resolveWithRetryImpl(Hostname* self) {
+	state double resolveInterval = FLOW_KNOBS->HOSTNAME_RESOLVE_INIT_INTERVAL;
 	loop {
 		try {
 			Optional<NetworkAddress> address = wait(resolveImpl(self));
 			if (address.present()) {
 				return address.get();
 			}
-			wait(delay(FLOW_KNOBS->HOSTNAME_RESOLVE_DELAY));
+			wait(delay(resolveInterval));
+			resolveInterval = std::min(2 * resolveInterval, FLOW_KNOBS->HOSTNAME_RESOLVE_MAX_INTERVAL);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_actor_cancelled);
 			throw;
@@ -107,24 +81,19 @@ Future<NetworkAddress> Hostname::resolveWithRetry() {
 }
 
 Optional<NetworkAddress> Hostname::resolveBlocking() {
-	if (status != RESOLVED) {
-		try {
-			std::vector<NetworkAddress> addresses =
-			    INetworkConnections::net()->resolveTCPEndpointBlockingWithDNSCache(host, service);
-			NetworkAddress address = addresses[deterministicRandom()->randomInt(0, addresses.size())];
-			address.flags = 0; // Reset the parsed address to public
-			address.fromHostname = NetworkAddressFromHostname::True;
-			if (isTLS) {
-				address.flags |= NetworkAddress::FLAG_TLS;
-			}
-			resolvedAddress = address;
-			status = RESOLVED;
-		} catch (...) {
-			status = UNRESOLVED;
-			resolvedAddress = Optional<NetworkAddress>();
+	try {
+		std::vector<NetworkAddress> addresses =
+		    INetworkConnections::net()->resolveTCPEndpointBlockingWithDNSCache(host, service);
+		NetworkAddress address = INetworkConnections::pickOneAddress(addresses);
+		address.flags = 0; // Reset the parsed address to public
+		address.fromHostname = NetworkAddressFromHostname::True;
+		if (isTLS) {
+			address.flags |= NetworkAddress::FLAG_TLS;
 		}
+		return address;
+	} catch (...) {
+		return Optional<NetworkAddress>();
 	}
-	return resolvedAddress;
 }
 
 TEST_CASE("/flow/Hostname/hostname") {
@@ -177,49 +146,36 @@ TEST_CASE("/flow/Hostname/hostname") {
 	ASSERT(!Hostname::isHostname(hn12s));
 	ASSERT(!Hostname::isHostname(hn13s));
 
-	ASSERT(hn1.status == Hostname::UNRESOLVED && !hn1.resolvedAddress.present());
-	ASSERT(hn2.status == Hostname::UNRESOLVED && !hn2.resolvedAddress.present());
-	ASSERT(hn3.status == Hostname::UNRESOLVED && !hn3.resolvedAddress.present());
-	ASSERT(hn4.status == Hostname::UNRESOLVED && !hn4.resolvedAddress.present());
+	state Optional<NetworkAddress> optionalAddress = wait(hn2.resolve());
+	ASSERT(!optionalAddress.present());
 
-	state Optional<NetworkAddress> emptyAddress = wait(hn2.resolve());
-	ASSERT(hn2.status == Hostname::UNRESOLVED && !hn2.resolvedAddress.present() && !emptyAddress.present());
+	optionalAddress = hn2.resolveBlocking();
+	ASSERT(!optionalAddress.present());
 
+	state NetworkAddress address;
 	try {
-		NetworkAddress _ = wait(timeoutError(hn2.resolveWithRetry(), 1));
+		wait(timeoutError(store(address, hn2.resolveWithRetry()), 1));
 	} catch (Error& e) {
 		ASSERT(e.code() == error_code_timed_out);
 	}
-	ASSERT(hn2.status == Hostname::UNRESOLVED && !hn2.resolvedAddress.present());
-
-	emptyAddress = hn2.resolveBlocking();
-	ASSERT(hn2.status == Hostname::UNRESOLVED && !hn2.resolvedAddress.present() && !emptyAddress.present());
+	ASSERT(address == NetworkAddress());
 
 	state NetworkAddress addressSource = NetworkAddress::parse("127.0.0.0:1234");
 	INetworkConnections::net()->addMockTCPEndpoint("host-name", "1234", { addressSource });
 
 	// Test resolve.
-	state Optional<NetworkAddress> optionalAddress = wait(hn2.resolve());
-	ASSERT(hn2.status == Hostname::RESOLVED);
-	ASSERT(hn2.resolvedAddress.get() == addressSource && optionalAddress.get() == addressSource);
+	wait(store(optionalAddress, hn2.resolve()));
+	ASSERT(optionalAddress.present() && optionalAddress.get() == addressSource);
+	optionalAddress = Optional<NetworkAddress>();
+
+	// Test resolveBlocking.
+	optionalAddress = hn2.resolveBlocking();
+	ASSERT(optionalAddress.present() && optionalAddress.get() == addressSource);
 	optionalAddress = Optional<NetworkAddress>();
 
 	// Test resolveWithRetry.
-	hn2.resetToUnresolved();
-	ASSERT(hn2.status == Hostname::UNRESOLVED && !hn2.resolvedAddress.present());
-
-	state NetworkAddress address = wait(hn2.resolveWithRetry());
-	ASSERT(hn2.status == Hostname::RESOLVED);
-	ASSERT(hn2.resolvedAddress.get() == addressSource && address == addressSource);
-
-	// Test resolveBlocking.
-	hn2.resetToUnresolved();
-	ASSERT(hn2.status == Hostname::UNRESOLVED && !hn2.resolvedAddress.present());
-
-	optionalAddress = hn2.resolveBlocking();
-	ASSERT(hn2.status == Hostname::RESOLVED);
-	ASSERT(hn2.resolvedAddress.get() == addressSource && optionalAddress.get() == addressSource);
-	optionalAddress = Optional<NetworkAddress>();
+	wait(store(address, hn2.resolveWithRetry()));
+	ASSERT(address == addressSource);
 
 	return Void();
 }

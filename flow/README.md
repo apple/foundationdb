@@ -538,7 +538,6 @@ convenience types for their `Standalone` versions (not a complete list):
 |        T         | Standalone<T> alias |
 |:----------------:|:-------------------:|
 | StringRef        | N/A                 |
-| LiteralStringRef | N/A                 |
 | KeyRef           | Key                 |
 | ValueRef         | Value               |
 | KeyValueRef      | KeyValue            |

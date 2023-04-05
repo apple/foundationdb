@@ -10,3 +10,4 @@ set(SRCS
 
 add_library(FDBLibTLS STATIC ${SRCS})
 target_link_libraries(FDBLibTLS PUBLIC OpenSSL::SSL boost_target PRIVATE flow)
+target_include_directories(FDBLibTLS INTERFACE OpenSSL::SSL boost_target PRIVATE flow)

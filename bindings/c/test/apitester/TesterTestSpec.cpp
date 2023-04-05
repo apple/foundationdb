@@ -45,10 +45,6 @@ std::unordered_map<std::string, std::function<void(const std::string& value, Tes
 	  [](const std::string& value, TestSpec* spec) { //
 	      spec->title = value;
 	  } },
-	{ "apiVersion",
-	  [](const std::string& value, TestSpec* spec) { //
-	      processIntOption(value, "apiVersion", spec->apiVersion, 700, 710);
-	  } },
 	{ "blockOnFutures",
 	  [](const std::string& value, TestSpec* spec) { //
 	      spec->blockOnFutures = (value == "true");
@@ -68,6 +64,10 @@ std::unordered_map<std::string, std::function<void(const std::string& value, Tes
 	{ "databasePerTransaction",
 	  [](const std::string& value, TestSpec* spec) { //
 	      spec->databasePerTransaction = (value == "true");
+	  } },
+	{ "tamperClusterFile",
+	  [](const std::string& value, TestSpec* spec) { //
+	      spec->tamperClusterFile = (value == "true");
 	  } },
 	{ "minFdbThreads",
 	  [](const std::string& value, TestSpec* spec) { //
@@ -100,6 +100,18 @@ std::unordered_map<std::string, std::function<void(const std::string& value, Tes
 	{ "maxClients",
 	  [](const std::string& value, TestSpec* spec) { //
 	      processIntOption(value, "maxClients", spec->maxClients, 1, 1000);
+	  } },
+	{ "disableClientBypass",
+	  [](const std::string& value, TestSpec* spec) { //
+	      spec->disableClientBypass = (value == "true");
+	  } },
+	{ "minTenants",
+	  [](const std::string& value, TestSpec* spec) { //
+	      processIntOption(value, "minTenants", spec->minTenants, 1, 1000);
+	  } },
+	{ "maxTenants",
+	  [](const std::string& value, TestSpec* spec) { //
+	      processIntOption(value, "maxTenants", spec->maxTenants, 1, 1000);
 	  } }
 };
 

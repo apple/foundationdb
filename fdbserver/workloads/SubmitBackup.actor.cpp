@@ -23,10 +23,12 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct SubmitBackupWorkload final : TestWorkload {
+struct SubmitBackupWorkload : TestWorkload {
+	static constexpr auto NAME = "SubmitBackup";
 
 	FileBackupAgent backupAgent;
 
@@ -39,21 +41,19 @@ struct SubmitBackupWorkload final : TestWorkload {
 	IncrementalBackupOnly incremental{ false };
 
 	SubmitBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		backupDir = getOption(options, LiteralStringRef("backupDir"), LiteralStringRef("file://simfdb/backups/"));
-		tag = getOption(options, LiteralStringRef("tag"), LiteralStringRef("default"));
-		delayFor = getOption(options, LiteralStringRef("delayFor"), 10.0);
-		initSnapshotInterval = getOption(options, LiteralStringRef("initSnapshotInterval"), 0);
-		snapshotInterval = getOption(options, LiteralStringRef("snapshotInterval"), 1e8);
-		stopWhenDone.set(getOption(options, LiteralStringRef("stopWhenDone"), true));
-		incremental.set(getOption(options, LiteralStringRef("incremental"), false));
+		backupDir = getOption(options, "backupDir"_sr, "file://simfdb/backups/"_sr);
+		tag = getOption(options, "tag"_sr, "default"_sr);
+		delayFor = getOption(options, "delayFor"_sr, 10.0);
+		initSnapshotInterval = getOption(options, "initSnapshotInterval"_sr, 0);
+		snapshotInterval = getOption(options, "snapshotInterval"_sr, 1e8);
+		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, true));
+		incremental.set(getOption(options, "incremental"_sr, false));
 	}
-
-	static constexpr const char* DESCRIPTION = "SubmitBackup";
 
 	ACTOR static Future<Void> _start(SubmitBackupWorkload* self, Database cx) {
 		wait(delay(self->delayFor));
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
-		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
+		addDefaultBackupRanges(backupRanges);
 		try {
 			wait(self->backupAgent.submitBackup(cx,
 			                                    self->backupDir,
@@ -62,6 +62,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 			                                    self->snapshotInterval,
 			                                    self->tag.toString(),
 			                                    backupRanges,
+			                                    SERVER_KNOBS->ENABLE_ENCRYPTION,
 			                                    self->stopWhenDone,
 			                                    UsePartitionedLog::False,
 			                                    self->incremental));
@@ -74,11 +75,10 @@ struct SubmitBackupWorkload final : TestWorkload {
 		return Void();
 	}
 
-	std::string description() const override { return DESCRIPTION; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return clientId ? Void() : _start(this, cx); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<SubmitBackupWorkload> SubmitBackupWorkloadFactory(SubmitBackupWorkload::DESCRIPTION);
+WorkloadFactory<SubmitBackupWorkload> SubmitBackupWorkloadFactory;

@@ -28,28 +28,46 @@
 
 #include "fdbclient/CoordinationInterface.h"
 
-// Determine public IP address by calling the first coordinator.
+// Determine public IP address by calling the first available coordinator.
+// If fail connecting all coordinators, throw bind_failed().
 IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs) {
-	try {
-		using namespace boost::asio;
+	int size = ccs.coords.size() + ccs.hostnames.size();
+	int index = 0;
+	loop {
+		try {
+			using namespace boost::asio;
 
-		io_service ioService;
-		ip::udp::socket socket(ioService);
+			io_service ioService;
+			ip::udp::socket socket(ioService);
 
-		ccs.resolveHostnamesBlocking();
-		const auto& coordAddr = ccs.coordinators()[0];
-		const auto boostIp = coordAddr.ip.isV6() ? ip::address(ip::address_v6(coordAddr.ip.toV6()))
-		                                         : ip::address(ip::address_v4(coordAddr.ip.toV4()));
+			NetworkAddress coordAddr;
+			// Try coords first, because they don't need to be resolved.
+			if (index < ccs.coords.size()) {
+				coordAddr = ccs.coords[index];
+			} else {
+				Hostname& h = ccs.hostnames[index - ccs.coords.size()];
+				Optional<NetworkAddress> resolvedAddr = h.resolveBlocking();
+				if (!resolvedAddr.present()) {
+					throw lookup_failed();
+				}
+				coordAddr = resolvedAddr.get();
+			}
+			const auto boostIp = coordAddr.ip.isV6() ? ip::address(ip::address_v6(coordAddr.ip.toV6()))
+			                                         : ip::address(ip::address_v4(coordAddr.ip.toV4()));
 
-		ip::udp::endpoint endpoint(boostIp, coordAddr.port);
-		socket.connect(endpoint);
-		IPAddress ip = coordAddr.ip.isV6() ? IPAddress(socket.local_endpoint().address().to_v6().to_bytes())
-		                                   : IPAddress(socket.local_endpoint().address().to_v4().to_ulong());
-		socket.close();
+			ip::udp::endpoint endpoint(boostIp, coordAddr.port);
+			socket.connect(endpoint);
+			IPAddress ip = coordAddr.ip.isV6() ? IPAddress(socket.local_endpoint().address().to_v6().to_bytes())
+			                                   : IPAddress(socket.local_endpoint().address().to_v4().to_ulong());
+			socket.close();
 
-		return ip;
-	} catch (boost::system::system_error e) {
-		fprintf(stderr, "Error determining public address: %s\n", e.what());
-		throw bind_failed();
+			return ip;
+		} catch (...) {
+			++index;
+			if (index == size) {
+				fprintf(stderr, "Error determining public address.\n");
+				throw bind_failed();
+			}
+		}
 	}
 }

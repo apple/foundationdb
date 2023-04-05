@@ -28,21 +28,42 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-const KeyRef fdbClientInfoTxnSampleRate = LiteralStringRef("config/fdb_client_info/client_txn_sample_rate");
-const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("config/fdb_client_info/client_txn_size_limit");
+const KeyRef fdbClientInfoTxnSampleRate = "config/fdb_client_info/client_txn_sample_rate"_sr;
+const KeyRef fdbClientInfoTxnSizeLimit = "config/fdb_client_info/client_txn_size_limit"_sr;
 
-const KeyRef transactionTagSampleRate = LiteralStringRef("config/transaction_tag_sample_rate");
-const KeyRef transactionTagSampleCost = LiteralStringRef("config/transaction_tag_sample_cost");
+const KeyRef transactionTagSampleRate = "config/transaction_tag_sample_rate"_sr;
+const KeyRef transactionTagSampleCost = "config/transaction_tag_sample_cost"_sr;
 
-const KeyRef samplingFrequency = LiteralStringRef("visibility/sampling/frequency");
-const KeyRef samplingWindow = LiteralStringRef("visibility/sampling/window");
+const KeyRef samplingFrequency = "visibility/sampling/frequency"_sr;
+const KeyRef samplingWindow = "visibility/sampling/window"_sr;
 
-GlobalConfig::GlobalConfig(Database& cx) : cx(cx), lastUpdate(0) {}
+GlobalConfig::GlobalConfig(DatabaseContext* cx) : cx(cx), lastUpdate(0) {}
 
-GlobalConfig& GlobalConfig::globalConfig() {
-	void* res = g_network->global(INetwork::enGlobalConfig);
-	ASSERT(res);
-	return *reinterpret_cast<GlobalConfig*>(res);
+void GlobalConfig::applyChanges(Transaction& tr,
+                                const VectorRef<KeyValueRef>& insertions,
+                                const VectorRef<KeyRangeRef>& clears) {
+	VersionHistory vh{ 0 };
+	for (const auto& kv : insertions) {
+		vh.mutations.emplace_back_deep(vh.mutations.arena(), MutationRef(MutationRef::SetValue, kv.key, kv.value));
+		tr.set(kv.key.withPrefix(globalConfigKeysPrefix), kv.value);
+	}
+	for (const auto& range : clears) {
+		vh.mutations.emplace_back_deep(vh.mutations.arena(),
+		                               MutationRef(MutationRef::ClearRange, range.begin, range.end));
+		tr.clear(
+		    KeyRangeRef(range.begin.withPrefix(globalConfigKeysPrefix), range.end.withPrefix(globalConfigKeysPrefix)));
+	}
+
+	// Record the mutations in this commit into the global configuration history.
+	Key historyKey = addVersionStampAtEnd(globalConfigHistoryPrefix);
+	ObjectWriter historyWriter(IncludeVersion());
+	historyWriter.serialize(vh);
+	tr.atomicOp(historyKey, historyWriter.toStringRef(), MutationRef::SetVersionstampedKey);
+
+	// Write version key to trigger update in cluster controller.
+	tr.atomicOp(globalConfigVersionKey,
+	            "0123456789\x00\x00\x00\x00"_sr, // versionstamp
+	            MutationRef::SetVersionstampedValue);
 }
 
 Key GlobalConfig::prefixedKey(KeyRef key) {
@@ -80,7 +101,7 @@ void GlobalConfig::trigger(KeyRef key, std::function<void(std::optional<std::any
 }
 
 void GlobalConfig::insert(KeyRef key, ValueRef value) {
-	// TraceEvent(SevInfo, "GlobalConfig_Insert").detail("Key", key).detail("Value", value);
+	// TraceEvent(SevInfo, "GlobalConfigInsert").detail("Key", key).detail("Value", value);
 	data.erase(key);
 
 	Arena arena(key.expectedSize() + value.expectedSize());
@@ -98,6 +119,8 @@ void GlobalConfig::insert(KeyRef key, ValueRef value) {
 			any = t.getFloat(0);
 		} else if (t.getType(0) == Tuple::ElementType::DOUBLE) {
 			any = t.getDouble(0);
+		} else if (t.getType(0) == Tuple::ElementType::VERSIONSTAMP) {
+			any = t.getVersionstamp(0);
 		} else {
 			ASSERT(false);
 		}
@@ -116,7 +139,7 @@ void GlobalConfig::erase(Key key) {
 }
 
 void GlobalConfig::erase(KeyRangeRef range) {
-	// TraceEvent(SevInfo, "GlobalConfig_Erase").detail("Range", range);
+	// TraceEvent(SevInfo, "GlobalConfigErase").detail("Range", range);
 	auto it = data.begin();
 	while (it != data.end()) {
 		if (range.contains(it->first)) {
@@ -130,121 +153,94 @@ void GlobalConfig::erase(KeyRangeRef range) {
 	}
 }
 
-// Older FDB versions used different keys for client profiling data. This
-// function performs a one-time migration of data in these keys to the new
-// global configuration key space.
-ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-	state Key migratedKey("\xff\x02/fdbClientInfo/migrated/"_sr);
-	state Optional<Value> migrated = wait(tr->get(migratedKey));
-	if (migrated.present()) {
-		// Already performed migration.
-		return Void();
-	}
-
-	state Optional<Value> sampleRate = wait(tr->get(Key("\xff\x02/fdbClientInfo/client_txn_sample_rate/"_sr)));
-	state Optional<Value> sizeLimit = wait(tr->get(Key("\xff\x02/fdbClientInfo/client_txn_size_limit/"_sr)));
-
-	try {
-		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-		// The value doesn't matter too much, as long as the key is set.
-		tr->set(migratedKey.contents(), "1"_sr);
-		if (sampleRate.present()) {
-			const double sampleRateDbl =
-			    BinaryReader::fromStringRef<double>(sampleRate.get().contents(), Unversioned());
-			Tuple rate = Tuple().appendDouble(sampleRateDbl);
-			tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate), rate.pack());
-		}
-		if (sizeLimit.present()) {
-			const int64_t sizeLimitInt =
-			    BinaryReader::fromStringRef<int64_t>(sizeLimit.get().contents(), Unversioned());
-			Tuple size = Tuple().append(sizeLimitInt);
-			tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());
-		}
-
-		wait(tr->commit());
-	} catch (Error& e) {
-		// If multiple fdbserver processes are started at once, they will all
-		// attempt this migration at the same time, sometimes resulting in
-		// aborts due to conflicts. Purposefully avoid retrying, making this
-		// migration best-effort.
-		TraceEvent(SevInfo, "GlobalConfig_MigrationError").detail("What", e.what());
-	}
-
-	return Void();
-}
-
 // Updates local copy of global configuration by reading the entire key-range
-// from storage.
-ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
-	// TraceEvent trace(SevInfo, "GlobalConfig_Refresh");
+// from storage (proxied through the GrvProxies).
+ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self, Version lastKnown) {
+	// TraceEvent trace(SevInfo, "GlobalConfigRefresh");
 	self->erase(KeyRangeRef(""_sr, "\xff"_sr));
 
-	Transaction tr(self->cx);
-	tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	RangeResult result = wait(tr.getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
-	for (const auto& kv : result) {
-		KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);
-		self->insert(systemKey, kv.value);
+	state Backoff backoff(CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_BACKOFF, CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_MAX_BACKOFF);
+	loop {
+		try {
+			GlobalConfigRefreshReply reply =
+			    wait(timeoutError(basicLoadBalance(self->cx->getGrvProxies(UseProvisionalProxies::False),
+			                                       &GrvProxyInterface::refreshGlobalConfig,
+			                                       GlobalConfigRefreshRequest{ lastKnown }),
+			                      CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT));
+			for (const auto& kv : reply.result) {
+				KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);
+				self->insert(systemKey, kv.value);
+			}
+			return Void();
+		} catch (Error& e) {
+			wait(backoff.onError());
+		}
 	}
-	return Void();
 }
 
 // Applies updates to the local copy of the global configuration when this
 // process receives an updated history.
 ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, const ClientDBInfo* dbInfo) {
-	wait(self->cx->onConnected());
-	wait(self->migrate(self));
-
-	wait(self->refresh(self));
-	self->initialized.send(Void());
-
 	loop {
 		try {
-			wait(self->dbInfoChanged.onTrigger());
+			if (self->initialized.canBeSet()) {
+				wait(self->cx->onConnected());
 
-			auto& history = dbInfo->history;
-			if (history.size() == 0) {
-				continue;
+				wait(self->refresh(self, -1));
+				self->initialized.send(Void());
 			}
 
-			if (self->lastUpdate < history[0].version) {
-				// This process missed too many global configuration
-				// history updates or the protocol version changed, so it
-				// must re-read the entire configuration range.
-				wait(self->refresh(self));
-				if (dbInfo->history.size() > 0) {
-					self->lastUpdate = dbInfo->history.back().version;
-				}
-			} else {
-				// Apply history in order, from lowest version to highest
-				// version. Mutation history should already be stored in
-				// ascending version order.
-				for (const auto& vh : history) {
-					if (vh.version <= self->lastUpdate) {
-						continue; // already applied this mutation
+			loop {
+				try {
+					wait(self->dbInfoChanged.onTrigger());
+
+					auto& history = dbInfo->history;
+					if (history.size() == 0) {
+						continue;
 					}
 
-					for (const auto& mutation : vh.mutations.contents()) {
-						if (mutation.type == MutationRef::SetValue) {
-							self->insert(mutation.param1, mutation.param2);
-						} else if (mutation.type == MutationRef::ClearRange) {
-							self->erase(KeyRangeRef(mutation.param1, mutation.param2));
-						} else {
-							ASSERT(false);
+					if (self->lastUpdate < history[0].version) {
+						// This process missed too many global configuration
+						// history updates or the protocol version changed, so it
+						// must re-read the entire configuration range.
+						wait(self->refresh(self, history.back().version));
+						if (dbInfo->history.size() > 0) {
+							self->lastUpdate = dbInfo->history.back().version;
+						}
+					} else {
+						// Apply history in order, from lowest version to highest
+						// version. Mutation history should already be stored in
+						// ascending version order.
+						for (const auto& vh : history) {
+							if (vh.version <= self->lastUpdate) {
+								continue; // already applied this mutation
+							}
+
+							for (const auto& mutation : vh.mutations.contents()) {
+								if (mutation.type == MutationRef::SetValue) {
+									self->insert(mutation.param1, mutation.param2);
+								} else if (mutation.type == MutationRef::ClearRange) {
+									self->erase(KeyRangeRef(mutation.param1, mutation.param2));
+								} else {
+									ASSERT(false);
+								}
+							}
+
+							ASSERT(vh.version > self->lastUpdate);
+							self->lastUpdate = vh.version;
 						}
 					}
 
-					ASSERT(vh.version > self->lastUpdate);
-					self->lastUpdate = vh.version;
+					self->configChanged.trigger();
+				} catch (Error& e) {
+					throw;
 				}
 			}
-
-			self->configChanged.trigger();
 		} catch (Error& e) {
-			throw;
+			// There shouldn't be any uncaught errors that fall to this point,
+			// but in case there are, catch them and restart the updater.
+			TraceEvent("GlobalConfigUpdaterError").error(e);
+			wait(delay(1.0));
 		}
 	}
 }

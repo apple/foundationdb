@@ -71,6 +71,11 @@ import types
 import struct
 
 
+def remove_prefix(text, prefix):
+    if text.startswith(prefix):
+        return text[len(prefix):]
+    return text
+
 def option_wrap(code):
     def setfunc(self):
         self._parent._set_option(code, None, 0)
@@ -255,7 +260,7 @@ def transactional(*tr_args, **tr_kwargs):
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
                 # We can't throw this from the decorator, as when a user runs
-                # >>> import fdb ; fdb.api_version(710)
+                # >>> import fdb ; fdb.api_version(720)
                 # the code above uses @transactional before the API version is set
                 if fdb.get_api_version() >= 630 and inspect.isgeneratorfunction(func):
                     raise ValueError("Generators can not be wrapped with fdb.transactional")
@@ -1354,7 +1359,7 @@ else:
     except:
         # The system python on OS X can't find the library installed to /usr/local/lib if SIP is enabled
         # find_library does find the location in /usr/local/lib, so if the above fails fallback to using it
-        lib_path = ctypes.util.find_library(capi_name)
+        lib_path = ctypes.util.find_library("fdb_c")
         if lib_path is not None:
             try:
                 _capi = ctypes.CDLL(lib_path)

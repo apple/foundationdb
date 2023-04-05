@@ -20,22 +20,30 @@
 
 #include "fdbclient/S3BlobStore.h"
 
-#include "fdbclient/md5/md5.h"
-#include "fdbclient/libb64/encode.h"
+#include "md5/md5.h"
+#include "libb64/encode.h"
 #include "fdbclient/sha1/SHA1.h"
 #include <time.h>
 #include <iomanip>
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
 #include <openssl/sha.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
+#if defined(HAVE_WOLFSSL)
+#undef SHA1 // wolfSSL will will shadow FDB SHA1.h
+#endif
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string.hpp>
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/Hostname.h"
 #include "flow/UnitTest.h"
-#include "fdbclient/rapidxml/rapidxml.hpp"
+#include "rapidxml/rapidxml.hpp"
+#ifdef BUILD_AWS_BACKUP
 #include "fdbclient/FDBAWSCredentialsProvider.h"
+#endif
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -90,7 +98,7 @@ S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 
 bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 #define TRY_PARAM(n, sn)                                                                                               \
-	if (name == LiteralStringRef(#n) || name == LiteralStringRef(#sn)) {                                               \
+	if (name == #n || name == #sn) {                                                                                   \
 		n = value;                                                                                                     \
 		return true;                                                                                                   \
 	}
@@ -101,7 +109,7 @@ bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(request_tries, rt);
 	TRY_PARAM(request_timeout_min, rtom);
 	// TODO: For backward compatibility because request_timeout was renamed to request_timeout_min
-	if (name == LiteralStringRef("request_timeout") || name == LiteralStringRef("rto")) {
+	if (name == "request_timeout"_sr || name == "rto"_sr) {
 		request_timeout_min = value;
 		return true;
 	}
@@ -163,6 +171,32 @@ std::string S3BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	return r;
 }
 
+std::string guessRegionFromDomain(std::string domain) {
+	static const std::vector<const char*> knownServices = { "s3.", "cos.", "oss-", "obs." };
+	boost::algorithm::to_lower(domain);
+
+	for (int i = 0; i < knownServices.size(); ++i) {
+		const char* service = knownServices[i];
+
+		std::size_t p = domain.find(service);
+
+		if (p == std::string::npos || (p >= 1 && domain[p - 1] != '.')) {
+			// eg. 127.0.0.1, example.com, s3-service.example.com, mys3.example.com
+			continue;
+		}
+
+		StringRef h(domain.c_str() + p);
+
+		if (!h.startsWith("oss-"_sr)) {
+			h.eat(service); // ignore s3 service
+		}
+
+		return h.eat(".").toString();
+	}
+
+	return "";
+}
+
 Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string& url,
                                                                const Optional<std::string>& proxy,
                                                                std::string* resourceFromURL,
@@ -174,16 +208,25 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 	try {
 		StringRef t(url);
 		StringRef prefix = t.eat("://");
-		if (prefix != LiteralStringRef("blobstore"))
+		if (prefix != "blobstore"_sr)
 			throw format("Invalid blobstore URL prefix '%s'", prefix.toString().c_str());
 
 		Optional<std::string> proxyHost, proxyPort;
 		if (proxy.present()) {
-			if (!Hostname::isHostname(proxy.get()) && !NetworkAddress::parseOptional(proxy.get()).present()) {
-				throw format("'%s' is not a valid value for proxy. Format should be either IP:port or host:port.",
-				             proxy.get().c_str());
+			StringRef proxyRef(proxy.get());
+			if (proxy.get().find("://") != std::string::npos) {
+				StringRef proxyPrefix = proxyRef.eat("://");
+				if (proxyPrefix != "http"_sr) {
+					throw format("Invalid proxy URL prefix '%s'. Either don't use a prefix, or use http://",
+					             proxyPrefix.toString().c_str());
+				}
 			}
-			StringRef p(proxy.get());
+			std::string proxyBody = proxyRef.eat().toString();
+			if (!Hostname::isHostname(proxyBody) && !NetworkAddress::parseOptional(proxyBody).present()) {
+				throw format("'%s' is not a valid value for proxy. Format should be either IP:port or host:port.",
+				             proxyBody.c_str());
+			}
+			StringRef p(proxyBody);
 			proxyHost = p.eat(":").toString();
 			proxyPort = p.eat().toString();
 		}
@@ -207,6 +250,8 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 
 		StringRef service = h.eat();
 
+		std::string region = guessRegionFromDomain(host.toString());
+
 		BlobKnobs knobs;
 		HTTP::Headers extraHeaders;
 		while (1) {
@@ -216,7 +261,7 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 			StringRef value = t.eat("&");
 
 			// Special case for header
-			if (name == LiteralStringRef("header")) {
+			if (name == "header"_sr) {
 				StringRef originalValue = value;
 				StringRef headerFieldName = value.eat(":");
 				StringRef headerFieldValue = value;
@@ -233,6 +278,12 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 					fieldValue.append(",");
 				}
 				fieldValue.append(headerFieldValue.toString());
+				continue;
+			}
+
+			// overwrite s3 region from parameter
+			if (name == "region"_sr) {
+				region = value.toString();
 				continue;
 			}
 
@@ -274,8 +325,13 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 			creds = S3BlobStoreEndpoint::Credentials{ key.toString(), secret.toString(), securityToken.toString() };
 		}
 
+		if (region.empty() && CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER) {
+			throw std::string(
+			    "Failed to get region from host or parameter in url, region is required for aws v4 signature");
+		}
+
 		return makeReference<S3BlobStoreEndpoint>(
-		    host.toString(), service.toString(), proxyHost, proxyPort, creds, knobs, extraHeaders);
+		    host.toString(), service.toString(), region, proxyHost, proxyPort, creds, knobs, extraHeaders);
 
 	} catch (std::string& err) {
 		if (error != nullptr)
@@ -330,9 +386,9 @@ std::string S3BlobStoreEndpoint::getResourceURL(std::string resource, std::strin
 			params.append("&");
 		}
 		params.append("header=");
-		params.append(HTTP::urlEncode(k));
+		params.append(k);
 		params.append(":");
-		params.append(HTTP::urlEncode(v));
+		params.append(v);
 	}
 
 	if (!params.empty())
@@ -341,10 +397,27 @@ std::string S3BlobStoreEndpoint::getResourceURL(std::string resource, std::strin
 	return r;
 }
 
+std::string constructResourcePath(Reference<S3BlobStoreEndpoint> b,
+                                  const std::string& bucket,
+                                  const std::string& object) {
+	std::string resource;
+
+	if (b->getHost().find(bucket + ".") != 0) {
+		resource += std::string("/") + bucket; // not virtual hosting mode
+	}
+
+	if (!object.empty()) {
+		resource += "/";
+		resource += object;
+	}
+
+	return resource;
+}
+
 ACTOR Future<bool> bucketExists_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket) {
 	wait(b->requestRateRead->getAllowance(1));
 
-	std::string resource = std::string("/") + bucket;
+	std::string resource = constructResourcePath(b, bucket, "");
 	HTTP::Headers headers;
 
 	Reference<HTTP::Response> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
@@ -358,7 +431,7 @@ Future<bool> S3BlobStoreEndpoint::bucketExists(std::string const& bucket) {
 ACTOR Future<bool> objectExists_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket, std::string object) {
 	wait(b->requestRateRead->getAllowance(1));
 
-	std::string resource = std::string("/") + bucket + "/" + object;
+	std::string resource = constructResourcePath(b, bucket, object);
 	HTTP::Headers headers;
 
 	Reference<HTTP::Response> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
@@ -372,7 +445,7 @@ Future<bool> S3BlobStoreEndpoint::objectExists(std::string const& bucket, std::s
 ACTOR Future<Void> deleteObject_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket, std::string object) {
 	wait(b->requestRateDelete->getAllowance(1));
 
-	std::string resource = std::string("/") + bucket + "/" + object;
+	std::string resource = constructResourcePath(b, bucket, object);
 	HTTP::Headers headers;
 	// 200 or 204 means object successfully deleted, 404 means it already doesn't exist, so any of those are considered
 	// successful
@@ -403,7 +476,7 @@ ACTOR Future<Void> deleteRecursively_impl(Reference<S3BlobStoreEndpoint> b,
 	state Future<Void> done = b->listObjectsStream(bucket, resultStream, prefix, '/', std::numeric_limits<int>::max());
 	// Wrap done in an actor which will send end_of_stream since listObjectsStream() does not (so that many calls can
 	// write to the same stream)
-	done = map(done, [=](Void) {
+	done = map(done, [=](Void) mutable {
 		resultStream.sendError(end_of_stream());
 		return Void();
 	});
@@ -462,9 +535,24 @@ ACTOR Future<Void> createBucket_impl(Reference<S3BlobStoreEndpoint> b, std::stri
 
 	bool exists = wait(b->bucketExists(bucket));
 	if (!exists) {
-		std::string resource = std::string("/") + bucket;
+		std::string resource = constructResourcePath(b, bucket, "");
 		HTTP::Headers headers;
-		Reference<HTTP::Response> r = wait(b->doRequest("PUT", resource, headers, nullptr, 0, { 200, 409 }));
+
+		std::string region = b->getRegion();
+		if (region.empty()) {
+			Reference<HTTP::Response> r = wait(b->doRequest("PUT", resource, headers, nullptr, 0, { 200, 409 }));
+		} else {
+			UnsentPacketQueue packets;
+			StringRef body(format("<CreateBucketConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">"
+			                      "  <LocationConstraint>%s</LocationConstraint>"
+			                      "</CreateBucketConfiguration>",
+			                      region.c_str()));
+			PacketWriter pw(packets.getWriteBuffer(), nullptr, Unversioned());
+			pw.serializeBytes(body);
+
+			Reference<HTTP::Response> r =
+			    wait(b->doRequest("PUT", resource, headers, &packets, body.size(), { 200, 409 }));
+		}
 	}
 	return Void();
 }
@@ -476,7 +564,7 @@ Future<Void> S3BlobStoreEndpoint::createBucket(std::string const& bucket) {
 ACTOR Future<int64_t> objectSize_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket, std::string object) {
 	wait(b->requestRateRead->getAllowance(1));
 
-	std::string resource = std::string("/") + bucket + "/" + object;
+	std::string resource = constructResourcePath(b, bucket, object);
 	HTTP::Headers headers;
 
 	Reference<HTTP::Response> r = wait(b->doRequest("HEAD", resource, headers, nullptr, 0, { 200, 404 }));
@@ -639,10 +727,29 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 		}
 	}
 	std::string host = b->host, service = b->service;
-	if (service.empty())
+	if (service.empty()) {
+		if (b->useProxy) {
+			fprintf(stderr, "ERROR: Port can't be empty when using HTTP proxy.\n");
+			throw connection_failed();
+		}
 		service = b->knobs.secure_connection ? "https" : "http";
-	state Reference<IConnection> conn =
-	    wait(INetworkConnections::net()->connect(host, service, b->knobs.secure_connection ? true : false));
+	}
+	bool isTLS = b->knobs.secure_connection == 1;
+	state Reference<IConnection> conn;
+	if (b->useProxy) {
+		if (isTLS) {
+			Reference<IConnection> _conn =
+			    wait(HTTP::proxyConnect(host, service, b->proxyHost.get(), b->proxyPort.get()));
+			conn = _conn;
+		} else {
+			host = b->proxyHost.get();
+			service = b->proxyPort.get();
+			Reference<IConnection> _conn = wait(INetworkConnections::net()->connect(host, service, false));
+			conn = _conn;
+		}
+	} else {
+		wait(store(conn, INetworkConnections::net()->connect(host, service, isTLS)));
+	}
 	wait(conn->connectHandshake());
 
 	TraceEvent("S3BlobStoreEndpointNewConnection")
@@ -665,6 +772,42 @@ void S3BlobStoreEndpoint::returnConnection(ReusableConnection& rconn) {
 	if (rconn.expirationTime > now())
 		connectionPool.push(rconn);
 	rconn.conn = Reference<IConnection>();
+}
+
+std::string awsCanonicalURI(const std::string& resource, std::vector<std::string>& queryParameters, bool isV4) {
+	StringRef resourceRef(resource);
+	resourceRef.eat("/");
+	std::string canonicalURI("/" + resourceRef.toString());
+	size_t q = canonicalURI.find_last_of('?');
+	if (q != canonicalURI.npos)
+		canonicalURI.resize(q);
+	if (isV4) {
+		canonicalURI = HTTP::awsV4URIEncode(canonicalURI, false);
+	} else {
+		canonicalURI = HTTP::urlEncode(canonicalURI);
+	}
+
+	// Create the canonical query string
+	std::string queryString;
+	q = resource.find_last_of('?');
+	if (q != queryString.npos)
+		queryString = resource.substr(q + 1);
+
+	StringRef qStr(queryString);
+	StringRef queryParameter;
+	while ((queryParameter = qStr.eat("&")) != StringRef()) {
+		StringRef param = queryParameter.eat("=");
+		StringRef value = queryParameter.eat();
+
+		if (isV4) {
+			queryParameters.push_back(HTTP::awsV4URIEncode(param.toString(), true) + "=" +
+			                          HTTP::awsV4URIEncode(value.toString(), true));
+		} else {
+			queryParameters.push_back(HTTP::urlEncode(param.toString()) + "=" + HTTP::urlEncode(value.toString()));
+		}
+	}
+
+	return canonicalURI;
 }
 
 // Do a request, get a Response.
@@ -710,6 +853,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 		state Optional<NetworkAddress> remoteAddress;
 		state bool connectionEstablished = false;
 		state Reference<HTTP::Response> r;
+		state std::string canonicalURI = resource;
 
 		try {
 			// Start connecting
@@ -746,11 +890,23 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 				bstore->setAuthHeaders(verb, resource, headers);
 			}
 
+			std::vector<std::string> queryParameters;
+			canonicalURI = awsCanonicalURI(resource, queryParameters, CLIENT_KNOBS->HTTP_REQUEST_AWS_V4_HEADER);
+			if (!queryParameters.empty()) {
+				canonicalURI += "?";
+				canonicalURI += boost::algorithm::join(queryParameters, "&");
+			}
+
+			if (bstore->useProxy && bstore->knobs.secure_connection == 0) {
+				// Has to be in absolute-form.
+				canonicalURI = "http://" + bstore->host + ":" + bstore->service + canonicalURI;
+			}
+
 			remoteAddress = rconn.conn->getPeerAddress();
 			wait(bstore->requestRate->getAllowance(1));
 			Reference<HTTP::Response> _r = wait(timeoutError(HTTP::doRequest(rconn.conn,
 			                                                                 verb,
-			                                                                 resource,
+			                                                                 canonicalURI,
 			                                                                 headers,
 			                                                                 &contentCopy,
 			                                                                 contentLen,
@@ -888,13 +1044,13 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
                                           int maxDepth,
                                           std::function<bool(std::string const&)> recurseFilter) {
 	// Request 1000 keys at a time, the maximum allowed
-	state std::string resource = "/";
-	resource.append(bucket);
+	state std::string resource = constructResourcePath(bstore, bucket, "");
+
 	resource.append("/?max-keys=1000");
 	if (prefix.present())
-		resource.append("&prefix=").append(HTTP::urlEncode(prefix.get()));
+		resource.append("&prefix=").append(prefix.get());
 	if (delimiter.present())
-		resource.append("&delimiter=").append(HTTP::urlEncode(std::string(1, delimiter.get())));
+		resource.append("&delimiter=").append(std::string(1, delimiter.get()));
 	resource.append("&marker=");
 	state std::string lastFile;
 	state bool more = true;
@@ -906,7 +1062,7 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 		state FlowLock::Releaser listReleaser(bstore->concurrentLists, 1);
 
 		HTTP::Headers headers;
-		state std::string fullResource = resource + HTTP::urlEncode(lastFile);
+		state std::string fullResource = resource + lastFile;
 		lastFile.clear();
 		Reference<HTTP::Response> r = wait(bstore->doRequest("GET", fullResource, headers, nullptr, 0, { 200 }));
 		listReleaser.release();
@@ -1037,7 +1193,7 @@ ACTOR Future<S3BlobStoreEndpoint::ListResult> listObjects_impl(Reference<S3BlobS
 	    bstore->listObjectsStream(bucket, resultStream, prefix, delimiter, maxDepth, recurseFilter);
 	// Wrap done in an actor which sends end_of_stream because list does not so that many lists can write to the same
 	// stream
-	done = map(done, [=](Void) {
+	done = map(done, [=](Void) mutable {
 		resultStream.sendError(end_of_stream());
 		return Void();
 	});
@@ -1084,7 +1240,7 @@ ACTOR Future<std::vector<std::string>> listBuckets_impl(Reference<S3BlobStoreEnd
 		state FlowLock::Releaser listReleaser(bstore->concurrentLists, 1);
 
 		HTTP::Headers headers;
-		state std::string fullResource = resource + HTTP::urlEncode(lastName);
+		state std::string fullResource = resource + lastName;
 		Reference<HTTP::Response> r = wait(bstore->doRequest("GET", fullResource, headers, nullptr, 0, { 200 }));
 		listReleaser.release();
 
@@ -1246,36 +1402,18 @@ void S3BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb,
 		amzDate = date;
 		dateStamp = datestamp;
 	}
-	// Extract service and region
-	StringRef hostRef(host);
-	std::string service = hostRef.eat(".").toString();
-	std::string region = hostRef.eat(".").toString();
 
 	// ************* TASK 1: CREATE A CANONICAL REQUEST *************
 	// Create Create canonical URI--the part of the URI from domain to query string (use '/' if no path)
-	StringRef resourceRef(resource);
-	resourceRef.eat("/");
-	std::string canonicalURI("/" + resourceRef.toString());
-	size_t q = canonicalURI.find_last_of('?');
-	if (q != canonicalURI.npos)
-		canonicalURI.resize(q);
-	canonicalURI = HTTP::awsV4URIEncode(canonicalURI, false);
-	// Create the canonical query string
-	std::string queryString;
-	q = resource.find_last_of('?');
-	if (q != queryString.npos)
-		queryString = resource.substr(q + 1);
 	std::vector<std::string> queryParameters;
-	StringRef qStr(queryString);
-	StringRef queryParameter;
-	while ((queryParameter = qStr.eat("&")) != StringRef()) {
-		StringRef param = queryParameter.eat("=");
-		StringRef value = queryParameter.eat();
-		queryParameters.push_back(HTTP::awsV4URIEncode(param.toString(), true) + "=" +
-		                          HTTP::awsV4URIEncode(value.toString(), true));
+	std::string canonicalURI = awsCanonicalURI(resource, queryParameters, true);
+
+	std::string canonicalQueryString;
+	if (!queryParameters.empty()) {
+		std::sort(queryParameters.begin(), queryParameters.end());
+		canonicalQueryString = boost::algorithm::join(queryParameters, "&");
 	}
-	std::sort(queryParameters.begin(), queryParameters.end());
-	std::string canonicalQueryString = boost::algorithm::join(queryParameters, "&");
+
 	using namespace boost::algorithm;
 	// Create the canonical headers and signed headers
 	ASSERT(!headers["Host"].empty());
@@ -1290,7 +1428,7 @@ void S3BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb,
 	if (headers.find("Content-MD5") != headers.end())
 		headersList.push_back({ "content-md5", trim_copy(headers["Content-MD5"]) + "\n" });
 	for (auto h : headers) {
-		if (StringRef(h.first).startsWith(LiteralStringRef("x-amz")))
+		if (StringRef(h.first).startsWith("x-amz"_sr))
 			headersList.push_back({ to_lower_copy(h.first), trim_copy(h.second) + "\n" });
 	}
 	std::sort(headersList.begin(), headersList.end());
@@ -1306,14 +1444,14 @@ void S3BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb,
 
 	// ************* TASK 2: CREATE THE STRING TO SIGN*************
 	std::string algorithm = "AWS4-HMAC-SHA256";
-	std::string credentialScope = dateStamp + "/" + region + "/" + service + "/" + "aws4_request";
+	std::string credentialScope = dateStamp + "/" + region + "/s3/" + "aws4_request";
 	std::string stringToSign =
 	    algorithm + "\n" + amzDate + "\n" + credentialScope + "\n" + sha256_hex(canonicalRequest);
 
 	// ************* TASK 3: CALCULATE THE SIGNATURE *************
 	// Create the signing key using the function defined above.
-	std::string signingKey = hmac_sha256(
-	    hmac_sha256(hmac_sha256(hmac_sha256("AWS4" + secretKey, dateStamp), region), service), "aws4_request");
+	std::string signingKey =
+	    hmac_sha256(hmac_sha256(hmac_sha256(hmac_sha256("AWS4" + secretKey, dateStamp), region), "s3"), "aws4_request");
 	// Sign the string_to_sign using the signing_key
 	std::string signature = hmac_sha256_hex(signingKey, stringToSign);
 	// ************* TASK 4: ADD SIGNING INFORMATION TO THE Header *************
@@ -1330,11 +1468,10 @@ void S3BlobStoreEndpoint::setAuthHeaders(std::string const& verb, std::string co
 
 	std::string& date = headers["Date"];
 
-	char dateBuf[20];
+	char dateBuf[64];
 	time_t ts;
 	time(&ts);
-	// ISO 8601 format YYYYMMDD'T'HHMMSS'Z'
-	strftime(dateBuf, 20, "%Y%m%dT%H%M%SZ", gmtime(&ts));
+	strftime(dateBuf, 64, "%a, %d %b %Y %H:%M:%S GMT", gmtime(&ts));
 	date = dateBuf;
 
 	std::string msg;
@@ -1352,7 +1489,7 @@ void S3BlobStoreEndpoint::setAuthHeaders(std::string const& verb, std::string co
 	msg.append("\n");
 	for (auto h : headers) {
 		StringRef name = h.first;
-		if (name.startsWith(LiteralStringRef("x-amz")) || name.startsWith(LiteralStringRef("x-icloud"))) {
+		if (name.startsWith("x-amz"_sr) || name.startsWith("x-icloud"_sr)) {
 			msg.append(h.first);
 			msg.append(":");
 			msg.append(h.second);
@@ -1382,7 +1519,7 @@ ACTOR Future<std::string> readEntireFile_impl(Reference<S3BlobStoreEndpoint> bst
                                               std::string object) {
 	wait(bstore->requestRateRead->getAllowance(1));
 
-	std::string resource = std::string("/") + bucket + "/" + object;
+	std::string resource = constructResourcePath(bstore, bucket, object);
 	HTTP::Headers headers;
 	Reference<HTTP::Response> r = wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200, 404 }));
 	if (r->code == 404)
@@ -1407,7 +1544,7 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<S3BlobStoreEndpoint>
 	wait(bstore->concurrentUploads.take());
 	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 
-	std::string resource = std::string("/") + bucket + "/" + object;
+	std::string resource = constructResourcePath(bstore, bucket, object);
 	HTTP::Headers headers;
 	// Send MD5 sum for content so blobstore can verify it
 	headers["Content-MD5"] = contentMD5;
@@ -1477,7 +1614,7 @@ ACTOR Future<int> readObject_impl(Reference<S3BlobStoreEndpoint> bstore,
 		return 0;
 	wait(bstore->requestRateRead->getAllowance(1));
 
-	std::string resource = std::string("/") + bucket + "/" + object;
+	std::string resource = constructResourcePath(bstore, bucket, object);
 	HTTP::Headers headers;
 	headers["Range"] = format("bytes=%lld-%lld", offset, offset + length - 1);
 	Reference<HTTP::Response> r = wait(bstore->doRequest("GET", resource, headers, nullptr, 0, { 200, 206, 404 }));
@@ -1504,7 +1641,8 @@ ACTOR static Future<std::string> beginMultiPartUpload_impl(Reference<S3BlobStore
                                                            std::string object) {
 	wait(bstore->requestRateWrite->getAllowance(1));
 
-	std::string resource = std::string("/") + bucket + "/" + object + "?uploads";
+	std::string resource = constructResourcePath(bstore, bucket, object);
+	resource += "?uploads";
 	HTTP::Headers headers;
 	if (!CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE.empty())
 		headers["x-amz-server-side-encryption"] = CLIENT_KNOBS->BLOBSTORE_ENCRYPTION_TYPE;
@@ -1546,8 +1684,8 @@ ACTOR Future<std::string> uploadPart_impl(Reference<S3BlobStoreEndpoint> bstore,
 	wait(bstore->concurrentUploads.take());
 	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 
-	std::string resource =
-	    format("/%s/%s?partNumber=%d&uploadId=%s", bucket.c_str(), object.c_str(), partNumber, uploadID.c_str());
+	std::string resource = constructResourcePath(bstore, bucket, object);
+	resource += format("?partNumber=%d&uploadId=%s", partNumber, uploadID.c_str());
 	HTTP::Headers headers;
 	// Send MD5 sum for content so blobstore can verify it
 	headers["Content-MD5"] = contentMD5;
@@ -1599,7 +1737,8 @@ ACTOR Future<Void> finishMultiPartUpload_impl(Reference<S3BlobStoreEndpoint> bst
 		manifest += format("<Part><PartNumber>%d</PartNumber><ETag>%s</ETag></Part>\n", p.first, p.second.c_str());
 	manifest += "</CompleteMultipartUpload>";
 
-	std::string resource = format("/%s/%s?uploadId=%s", bucket.c_str(), object.c_str(), uploadID.c_str());
+	std::string resource = constructResourcePath(bstore, bucket, object);
+	resource += format("?uploadId=%s", uploadID.c_str());
 	HTTP::Headers headers;
 	PacketWriter pw(part_list.getWriteBuffer(manifest.size()), nullptr, Unversioned());
 	pw.serializeBytes(manifest);
@@ -1620,10 +1759,10 @@ Future<Void> S3BlobStoreEndpoint::finishMultiPartUpload(std::string const& bucke
 }
 
 TEST_CASE("/backup/s3/v4headers") {
-	S3BlobStoreEndpoint::Credentials creds{ "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "" }
+	S3BlobStoreEndpoint::Credentials creds{ "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "" };
 	// GET without query parameters
 	{
-		S3BlobStoreEndpoint s3("s3.amazonaws.com", "s3", "proxy", "port", creds);
+		S3BlobStoreEndpoint s3("s3.amazonaws.com", "443", "amazonaws", "proxy", "port", creds);
 		std::string verb("GET");
 		std::string resource("/test.txt");
 		HTTP::Headers headers;
@@ -1638,7 +1777,7 @@ TEST_CASE("/backup/s3/v4headers") {
 
 	// GET with query parameters
 	{
-		S3BlobStoreEndpoint s3("s3.amazonaws.com", "s3", "proxy", "port", creds);
+		S3BlobStoreEndpoint s3("s3.amazonaws.com", "443", "amazonaws", "proxy", "port", creds);
 		std::string verb("GET");
 		std::string resource("/test/examplebucket?Action=DescribeRegions&Version=2013-10-15");
 		HTTP::Headers headers;
@@ -1653,7 +1792,7 @@ TEST_CASE("/backup/s3/v4headers") {
 
 	// POST
 	{
-		S3BlobStoreEndpoint s3("s3.us-west-2.amazonaws.com", "s3", "proxy", "port", creds);
+		S3BlobStoreEndpoint s3("s3.us-west-2.amazonaws.com", "443", "us-west-2", "proxy", "port", creds);
 		std::string verb("POST");
 		std::string resource("/simple.json");
 		HTTP::Headers headers;

@@ -113,8 +113,8 @@ Implementing a C++ Workload
 ===========================
 
 In order to implement a workload, one has to build a shared library that links against the fdb client library. This library has to
-exppse a function (with C linkage) called workloadFactory which needs to return a pointer to an object of type ``FDBWorkloadFactory``.
-This mechanism allows the other to implement as many workloads within one library as she wants. To do this the pure virtual classes
+expose a function (with C linkage) called workloadFactory which needs to return a pointer to an object of type ``FDBWorkloadFactory``.
+This mechanism allows the author to implement as many workloads within one library as she wants. To do this the pure virtual classes
 ``FDBWorkloadFactory`` and ``FDBWorkload`` have to be implemented.
 
 .. function:: FDBWorkloadFactory* workloadFactory(FDBLogger*)
@@ -373,3 +373,302 @@ with the ``multitest`` role:
    fdbserver -r multitest -f testfile.txt
 
 This command will block until all tests are completed.
+
+##########
+API Tester
+##########
+
+Introduction
+============
+
+API tester is a framework for implementing end-to-end tests of FDB C API, i.e. testing the API on a real
+FDB cluster through all layers of the FDB client. Its executable is ``fdb_c_api_tester``, and the source
+code is located in ``bindings/c/test/apitester``. The structure of API Tests is similar to that of the 
+Simulation Tests. The tests are implemented as workloads using FDB API, which are all built into the 
+``fdb_c_api_tester``. A concrete test configuration is defined as a TOML file, which specifies the
+combination of workloads to be executed by the test together with their parameters. The test can be then
+executed by passing the TOML file as a parameter to ``fdb_c_api_tester``. 
+
+Since simulation tests rely on the actor model to execute the tests deterministically in single-threaded
+mode, they are not suitable for testing various multi-threaded aspects of the FDB client. End-to-end API
+tests complement the simulation tests by testing the FDB Client layers above the single-threaded Native
+Client. 
+
+- The specific testing goals of the end-to-end tests are:
+- Check functional correctness of the Multi-Version Client (MVC) and Thread-Safe Client 
+- Detecting race conditions. They can be caused by accessing the state of the Native Client from wrong
+  threads or introducing other shared state without proper synchronization
+- Detecting memory management errors. Thread-safe reference counting must be used where necessary. MVC
+  works with multiple client libraries. Memory allocated by one client library must be also deallocated
+  by the same library.
+- Maintaining interoperability with other client versions.  The client functionality is made available
+  depending on the selected API version. The API changes are correctly adapted. 
+- Client API behaves correctly in case of cluster upgrades. Database and transaction state is correctly
+  migrated to the upgraded connections. Pending operations are canceled and successfully retried on the
+  upgraded connections.
+
+Implementing a Workload
+=======================
+
+Each workload is declared as a direct or indirect subclass of ``WorkloadBase`` implementing a constructor
+with ``WorkloadConfig`` as a parameter and the method ``start()``, which defines the entry point of the
+workload. 
+
+``WorkloadBase`` provides a set of methods that serve as building blocks for implementation of a workload:
+
+.. function:: execTransaction(start, cont, failOnError = true)
+
+   creates and executes an FDB transaction. Here ``start`` is a function that takes a transaction context
+   as parameter and implements the starting point of the transaction, and ``cont`` is a function implementing
+   a continuation to be executed after finishing the transaction execution. Transactions are automatically
+   retried on retryable errors. Transactions are retried by calling the ``start`` function again. In case
+   of a fatal error, the entire workload is considered as failed unless ``failOnError`` is set to ``false``.
+
+.. function:: schedule(task)
+
+   schedules a task for asynchronous execution. It is usually used in the continuations to schedule 
+   the next step of the workload.
+
+.. function:: info(msg) 
+              error(msg) 
+              
+   are used for logging a message with a tag identifying the workload. Issuing an error message marks
+   the workload as failed.
+
+The transaction context provides methods for implementation of the transaction logics:
+
+.. function:: tx()
+   
+   the reference to the FDB transaction object
+
+.. function:: continueAfter(future, cont, retryOnError = true)
+   
+   set a continuation to be executed when the future is ready. The ``retryOnError`` flag controls whether
+   the transaction should be automatically retried in case the future results in a retriable error.
+
+.. function:: continueAfterAll(futures, cont)
+   
+   takes a vector of futures and sets a continuation to be executed when all of the futures get ready.
+   The transaction is retried if at least one of the futures results in an error. This method is useful 
+   for handling multiple concurrent reads.
+
+.. function:: commit() 
+   
+   commit and finish the transaction. If the commit is successful, the execution proceeds to the
+   continuation of ``execTransaction()``. In case of a retriable error the transaction is
+   automatically retried. A fatal error results in a failure of the workoad.
+
+
+.. function:: done() 
+   
+   finish the transaction without committing. This method should be used to finish read transactions. 
+   The transaction gets destroyed and execution proceeds to the continuation of ``execTransaction()``.
+   Each transaction must be finished either by ``commit()`` or ``done()``, because otherwise
+   the framework considers that the transaction is still being executed, so it won't destroy it and
+   won't call the continuation.
+
+.. function:: onError(err) 
+   
+   Handle an error: restart the transaction in case of a retriable error, otherwise fail the workload.
+   This method is typically used in the continuation of ``continueAfter`` called with
+   ``retryOnError=false`` as a fallback to the default error handling.
+
+A workload execution ends automatically when it is marked as failed or its last continuation does not
+schedule any new task or transaction. 
+
+The workload class should be defined in the namespace FdbApiTester. The file name convention is
+``Tester{Name}Workload.cpp`` so that we distinguish them from the source files of simulation workloads.
+
+Basic Workload Example
+======================
+
+The code below implements a workload that consists of only two transactions. The first one sets a
+randomly generated key to a randomly generated value, and the second one reads the key and checks if
+the returned value matches the written one.
+
+.. literalinclude:: ../../../bindings/c/test/apitester/TesterExampleWorkload.cpp
+   :language: C++
+   :lines: 21-
+
+The workload is implemented in the method ``setAndGet``. It generates a random key and a random value
+and executes a transaction that writes that key-value pair and commits. In the continuation of the
+first ``execTransaction`` call, we execute the second transaction that reads the same key. The read
+operation returns a future. So we call ``continueAfter`` to set a continuation for that future. In the
+continuation we check if the returned value matches the written one and finish the transaction by
+calling ``ctx->done()``. After completing the second transaction we execute the continuation passed
+as parameter to the ``setAndGet`` method by the start method. In this case it is ``NO_OP_TASK``, which
+does nothing and so finishes the workload.
+
+Finally, we declare an instance ``WorkloadFactory`` to register this workload with the name ``SetAndGet``.
+
+Note that we use ``workloadId`` as a key prefix. This is necessary for isolating the key space of this
+workload, because the framework may be instructed to create multiple instances of the ``SetAndGet``
+workload. If we do not isolate the key space, another workload can write a different value for the
+same key and so break the assumption of the test.
+
+The workload is implemented using the internal C++ API, implemented in ``fdb_api.hpp``. It introduces
+a set of classes representing the FDB objects (transactions, futures, etc.). These classes provide C++-style 
+methods wrapping FDB C API calls and automate memory management by means of reference counting.
+
+Implementing Control Structures
+===============================
+
+Our basic workload executes just 2 transactions, but in practice we want to have workloads that generate
+multiple transactions. The following code demonstrates how we can modify our basic workload to generate
+multiple transactions in a loop. 
+
+.. code-block:: C++
+
+   class SetAndGetWorkload : public WorkloadBase {
+   public:
+      ...
+      int numIterations;
+      int iterationsLeft;
+
+      SetAndGetWorkload(const WorkloadConfig& config) : WorkloadBase(config) {
+         keyPrefix = fdb::toBytesRef(fmt::format("{}/", workloadId));
+         numIterations = config.getIntOption("numIterations", 1000);
+      }
+
+      void start() override {
+         iterationsLeft = numIterations;
+         setAndGetLoop();
+      }
+
+      void setAndGetLoop() {
+         if (iterationsLeft == 0) {
+            return;
+         }
+         iterationsLeft--;
+         setAndGet([this]() { setAndGetLoop(); });
+      }
+      ...
+   }
+
+We introduce a workload parameter ``numIterations`` to specify the number of iterations. If not specified
+in the test configuration it defaults to 1000.
+
+The method ``setAndGetLoop`` implements the loop that decrements iterationsLeft counter until it reaches 0
+and each iteration calls setAndGet with a continuation that returns the execution to the loop. As you
+can see we don't need any change in ``setAndGet``, just call it with another continuation. 
+
+The pattern of passing a continuation as a parameter also can be used to decompose the workload into a
+sequence of steps. For example,  we can introduce setup and cleanUp steps to our workload and modify the
+``setAndGetLoop`` to make it composable with an arbitrary continuation:
+
+.. code-block:: C++
+
+    void start() override {
+       setup([this](){
+           iterationsLeft = numIterations;
+           setAndGetLoop([this](){
+               cleanup(NO_OP_TASK);
+           });
+       });
+    }
+
+    void setAndGetLoop(TTaskFct cont) {
+       if (iterationsLeft == 0) {
+           schedule(cont);
+       }
+       iterationsLeft--;
+       setAndGet([this, cont]() { setAndGetLoop(cont); });
+   }
+
+   void setup(TTaskFct cont) { ... }
+
+   void cleanup(TTaskFct cont) {  ... }
+
+Note that we call ``schedule(cont)`` in ``setAndGetLoop`` instead of calling the continuation directly.
+In this way we avoid keeping ``setAndGetLoop`` in the call stack, when executing the next step.
+
+Subclassing ApiWorkload
+=======================
+
+``ApiWorkload`` is an abstract subclass of ``WorkloadBase`` that provides a framework for a typical
+implementation of API test workloads. It implements a workflow consisting of cleaning up the key space
+of the workload, populating it with newly generated data and then running a loop consisting of random
+database operations. The concrete subclasses of ``ApiWorkload`` are expected to override the method
+``randomOperation`` with an implementation of concrete random operations.
+
+The ``ApiWorkload`` maintains a local key-value store that mirrors the part of the database state
+relevant to the workload. A successful database write operation should be followed by a continuation
+that performs equivalent changes in the local store, and the results of a database read operation should
+be validated against the values from the local store. 
+
+Test Configuration
+==================
+
+A concrete test configuration is specified by a TOML file. The file must contain one ``[[test]]`` section
+specifying the general settings for test execution followed by one or more ``[[test.workload]]``
+configuration sessions, specifying the workloads to be executed and their parameters. The specified
+workloads are started all at once and executed concurrently.
+
+The ``[[test]]`` section can contain the following options:
+
+- ``title``: descriptive title of the test
+- ``multiThreaded``: enable multi-threading (default: false)
+- ``minFdbThreads`` and ``maxFdbThreads``: the number of FDB (network) threads to be randomly selected
+  from the given range (default: 1-1). Used only if ``multiThreaded=true``. It is also important to use
+  multiple database instances to make use of the multithreading.
+- ``minDatabases`` and ``maxDatabases``: the number of database instances to be randomly selected from
+  the given range (default 1-1). The transactions of all workloads are randomly load-balanced over the
+  pool of database instances.
+- ``minClients`` and ``maxClients``: the number of clients, i.e. instances of each workload, to be
+  randomly selected from the given range (default 1-8).
+- ``minClientThreads`` and ``maxClientThreads``: the number of client threads, i.e. the threads used
+  for execution of the workload, to be randomly selected from the given range (default 1-1).
+- ``blockOnFutures``: use blocking waits on futures instead of scheduling future callbacks asynchronously
+  (default: false)
+- ``buggify``: Enable client-side failure injection (default: false)
+- ``databasePerTransaction``: Create a separate database instance for each transaction (default: false).
+  It is a special mode useful for testing bugs related to creation and destruction of database instances. 
+- ``fdbCallbacksOnExternalThreads``: Enables the option ``FDB_NET_OPTION_CALLBACKS_ON_EXTERNAL_THREADS``
+  causting the callbacks of futures to be executed directly on the threads of the external FDB clients 
+  rather than on the thread of the local FDB client. 
+
+The workload section ``[[test.workload]]`` must contain the attribute name matching the registered name
+of the workload to be executed. Other options are workload-specific. 
+
+The subclasses of the ``ApiWorkload`` inherit the following configuration options:
+
+- ``minKeyLength`` and ``maxKeyLength``: the size range of randomly generated keys (default: 1-64)
+- ``minValueLength`` and ``maxValueLength``:  the size range of randomly generated values 
+  (default: 1-1000)
+- ``maxKeysPerTransaction``: the maximum number of keys per transaction (default: 50)
+- ``initialSize``: the number of key-value pairs in the initially populated database (default: 1000)
+- ``readExistingKeysRatio``: the probability of choosing an existing key for read operations 
+  (default: 0.9)
+- ``numRandomOperations``: the number of random operations to be executed per workload (default: 1000)
+- ``runUntilStop``: run the workload indefinitely until the stop command is received (default: false).
+   This execution mode in upgrade tests and other scripted tests, where the workload needs to
+   be generated continously until completion of the scripted test.
+- ``numOperationsForProgressCheck``: the number of operations to be performed to confirm a progress 
+   check (default: 10). This option is used in combination with ``runUntilStop``. Progress checks are
+   initiated by a test script to check if the client workload is successfully progressing after a
+   cluster change.
+
+Executing the Tests
+===================
+
+The ``fdb_c_api_tester`` executable takes a single TOML file as a parameter and executes the test
+according to its specification. Before that we must create a FDB cluster and pass its cluster file as
+a parameter to ``fdb_c_api_tester``. Note that multithreaded tests also need to be provided with an
+external client library. 
+
+For example, we can create a temporary cluster and use it for execution of one of the existing API tests:
+
+.. code-block:: bash
+
+   ${srcDir}/tests/TestRunner/tmp_cluster.py --build-dir ${buildDir} -- \
+      ${buildDir}/bin/fdb_c_api_tester \
+      --cluster-file @CLUSTER_FILE@ \
+      --external-client-library=${buildDir}/bindings/c/libfdb_c_external.so \
+      --test-file ${srcDir}/bindings/c/test/apitester/tests/CApiCorrectnessMultiThr.toml
+
+The test specifications added to the ``bindings/c/test/apitester/tests/`` directory are executed as a part
+of the regression test suite. They can be executed using the ``ctest`` target ``fdb_c_api_tests``:
+
+.. code-block:: bash
+   
+   ctest -R fdb_c_api_tests -VV

@@ -5,6 +5,8 @@
 # define FDB_CLEAN_BUILD
 #endif // FDB_RELEASE
 #cmakedefine OPEN_FOR_IDE
+#define FDB_SOURCE_DIR "${CMAKE_SOURCE_DIR}"
+#define FDB_BINARY_DIR "${CMAKE_BINARY_DIR}"
 #ifdef WIN32
 # define _WIN32_WINNT ${WINDOWS_TARGET}
 # define WINVER ${WINDOWS_TARGET}

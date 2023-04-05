@@ -30,7 +30,7 @@
 
 #if __unixish__
 #define HAVE_LINENOISE 1
-#include "fdbcli/linenoise/linenoise.h"
+#include "linenoise/linenoise.h"
 #else
 #define HAVE_LINENOISE 0
 #endif

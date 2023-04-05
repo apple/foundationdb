@@ -1,28 +1,7 @@
-set(FLOWBENCH_SRCS
-  flowbench.actor.cpp
-  BenchCallback.actor.cpp
-  BenchHash.cpp
-  BenchIterate.cpp
-  BenchIONet2.actor.cpp
-  BenchMem.cpp
-  BenchMetadataCheck.cpp
-  BenchNet2.actor.cpp
-  BenchPopulate.cpp
-  BenchRandom.cpp
-  BenchRef.cpp
-  BenchStream.actor.cpp
-  BenchTimer.cpp
-  BenchVersionVector.cpp
-  GlobalData.h
-  GlobalData.cpp)
-
-if(WITH_TLS AND NOT WIN32)
-  set(FLOWBENCH_SRCS
-    ${FLOWBENCH_SRCS}
-    BenchEncrypt.cpp)
-endif()
-
 project (flowbench)
+
+fdb_find_sources(FLOWBENCH_SRCS)
+
 # include the configurations from benchmark.cmake
 configure_file(benchmark.cmake googlebenchmark-download/CMakeLists.txt)
 # executing the configuration step
@@ -51,6 +30,9 @@ add_subdirectory(
   ${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-build
   EXCLUDE_FROM_ALL
 )
-include_directories(${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-src/include)
 add_flow_target(EXECUTABLE NAME flowbench SRCS ${FLOWBENCH_SRCS})
+target_include_directories(flowbench PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include"  ${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-src/include)
+if(FLOW_USE_ZSTD)
+   target_include_directories(flowbench PRIVATE ${ZSTD_LIB_INCLUDE_DIR})
+endif()
 target_link_libraries(flowbench benchmark pthread flow fdbclient)

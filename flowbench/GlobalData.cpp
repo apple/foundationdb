@@ -28,7 +28,7 @@ static inline void initGlobalData() {
 	if (!globalData) {
 		globalData = static_cast<uint8_t*>(allocateFast(globalDataSize));
 	}
-	generateRandomData(globalData, globalDataSize);
+	deterministicRandom()->randomBytes(globalData, globalDataSize);
 }
 
 KeyValueRef getKV(size_t keySize, size_t valueSize) {

@@ -184,7 +184,7 @@ ErrorCodeTable::ErrorCodeTable() {
 #define ERROR(name, number, description)                                                                               \
 	addCode(number, #name, description);                                                                               \
 	enum { Duplicate_Error_Code_##number = 0 };
-#include "error_definitions.h"
+#include "flow/error_definitions.h"
 }
 
 void ErrorCodeTable::addCode(int code, const char* name, const char* description) {
@@ -198,6 +198,20 @@ bool isAssertDisabled(int line) {
 void breakpoint_me() {
 	return;
 }
+
+// FIXME: combine with bindings/c/fdb_c.cpp fdb_error_predicate function
+const std::set<int> transactionRetryableErrors = { error_code_not_committed,
+	                                               error_code_transaction_too_old,
+	                                               error_code_future_version,
+	                                               error_code_commit_proxy_memory_limit_exceeded,
+	                                               error_code_grv_proxy_memory_limit_exceeded,
+	                                               error_code_process_behind,
+	                                               error_code_batch_transaction_throttled,
+	                                               error_code_tag_throttled,
+	                                               error_code_unknown_tenant,
+	                                               // maybe committed error
+	                                               error_code_cluster_version_changed,
+	                                               error_code_commit_unknown_result };
 
 TEST_CASE("/flow/AssertTest") {
 	// this is mostly checking bug for bug compatibility with the C integer / sign promotion rules.

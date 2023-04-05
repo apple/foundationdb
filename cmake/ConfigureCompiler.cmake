@@ -25,6 +25,8 @@ env_set(STATIC_LINK_LIBCXX "${_static_link_libcxx}" BOOL "Statically link libstd
 env_set(TRACE_PC_GUARD_INSTRUMENTATION_LIB "" STRING "Path to a library containing an implementation for __sanitizer_cov_trace_pc_guard. See https://clang.llvm.org/docs/SanitizerCoverage.html for more info.")
 env_set(PROFILE_INSTR_GENERATE OFF BOOL "If set, build FDB as an instrumentation build to generate profiles")
 env_set(PROFILE_INSTR_USE "" STRING "If set, build FDB with profile")
+env_set(FULL_DEBUG_SYMBOLS OFF BOOL "Generate full debug symbols")
+env_set(ENABLE_LONG_RUNNING_TESTS OFF BOOL "Add a long running tests package")
 
 set(USE_SANITIZER OFF)
 if(USE_ASAN OR USE_VALGRIND OR USE_MSAN OR USE_TSAN OR USE_UBSAN)
@@ -64,12 +66,12 @@ add_compile_definitions(BOOST_ERROR_CODE_HEADER_ONLY BOOST_SYSTEM_NO_DEPRECATED 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-include_directories(${CMAKE_SOURCE_DIR})
-include_directories(${CMAKE_BINARY_DIR})
-
 if(WIN32)
   add_definitions(-DBOOST_USE_WINDOWS_H)
   add_definitions(-DWIN32_LEAN_AND_MEAN)
+  add_definitions(-D_ITERATOR_DEBUG_LEVEL=0)
+  add_definitions(-DNOGDI) # WinGDI.h defines macro ERROR
+  add_definitions(-D_USE_MATH_DEFINES) # Math constants
 endif()
 
 if (USE_CCACHE)
@@ -116,11 +118,12 @@ if(WIN32)
 else()
   set(GCC NO)
   set(CLANG NO)
-  set(ICC NO)
-  if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
+  set(ICX NO)
+  # CMAKE_CXX_COMPILER_ID is set to Clang even if CMAKE_CXX_COMPILER points to ICPX, so we have to check the compiler too.
+  if (${CMAKE_CXX_COMPILER} MATCHES ".*icpx")
+    set(ICX YES)
+  elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
     set(CLANG YES)
-  elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
-    set(ICC YES)
   else()
     # This is not a very good test. However, as we do not really support many architectures
     # this is good enough for now
@@ -163,9 +166,20 @@ else()
   set(SANITIZER_COMPILE_OPTIONS)
   set(SANITIZER_LINK_OPTIONS)
 
-  # we always compile with debug symbols. CPack will strip them out
+  # we always compile with debug symbols. For release builds CPack will strip them out
   # and create a debuginfo rpm
-  add_compile_options(-ggdb -fno-omit-frame-pointer)
+  add_compile_options(-fno-omit-frame-pointer -gz)
+  add_link_options(-gz)
+  if(FDB_RELEASE OR FULL_DEBUG_SYMBOLS OR CMAKE_BUILD_TYPE STREQUAL "Debug")
+    # Configure with FULL_DEBUG_SYMBOLS=ON to generate all symbols for debugging with gdb
+    # Also generating full debug symbols in release builds, because they are packaged
+    # separately and installed optionally
+    add_compile_options(-ggdb)
+  else()
+    # Generating minimal debug symbols by default. They are sufficient for testing purposes
+    add_compile_options(-ggdb1)
+  endif()
+
   if(TRACE_PC_GUARD_INSTRUMENTATION_LIB)
       add_compile_options(-fsanitize-coverage=trace-pc-guard)
       link_libraries(${TRACE_PC_GUARD_INSTRUMENTATION_LIB})
@@ -191,6 +205,7 @@ else()
   endif()
 
   if(USE_GCOV)
+    add_compile_options(--coverage)
     add_link_options(--coverage)
   endif()
 
@@ -199,6 +214,8 @@ else()
       -fsanitize=undefined
       # TODO(atn34) Re-enable -fsanitize=alignment once https://github.com/apple/foundationdb/issues/1434 is resolved
       -fno-sanitize=alignment
+      # https://github.com/apple/foundationdb/issues/7955
+      -fno-sanitize=function
       -DBOOST_USE_UCONTEXT)
     list(APPEND SANITIZER_LINK_OPTIONS -fsanitize=undefined)
   endif()
@@ -275,16 +292,35 @@ else()
   # for more information.
   #add_compile_options(-fno-builtin-memcpy)
 
-  if (CLANG)
-    add_compile_options()
+  if (USE_LIBCXX)
+    # Make sure that libc++ can be found be the platform's loader, so that thing's like cmake's "try_run" work.
+    find_library(LIBCXX_SO_PATH c++ /usr/local/lib)
+    if (LIBCXX_SO_PATH)
+      get_filename_component(LIBCXX_SO_DIR ${LIBCXX_SO_PATH} DIRECTORY)
+      if (APPLE)
+        set(ENV{DYLD_LIBRARY_PATH} "$ENV{DYLD_LIBRARY_PATH}:${LIBCXX_SO_DIR}")
+      else()
+        set(ENV{LD_LIBRARY_PATH} "$ENV{LD_LIBRARY_PATH}:${LIBCXX_SO_DIR}")
+      endif()
+    endif()
+  endif()
+
+  if (CLANG OR ICX)
     if (APPLE OR USE_LIBCXX)
-      add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
       if (NOT APPLE)
         if (STATIC_LINK_LIBCXX)
-          add_link_options(-static-libgcc -nostdlib++  -Wl,-Bstatic -lc++ -lc++abi -Wl,-Bdynamic)
+          set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -nostdlib++ -Wl,-Bstatic -lc++ -lc++abi -Wl,-Bdynamic")
+          set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libgcc -nostdlib++ -Wl,-Bstatic -lc++ -lc++abi -Wl,-Bdynamic")
         endif()
-        add_link_options(-stdlib=libc++ -Wl,-build-id=sha1)
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -Wl,-build-id=sha1")
+        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++ -Wl,-build-id=sha1")
       endif()
+    endif()
+    if (NOT APPLE AND NOT USE_LIBCXX)
+      message(STATUS "Linking libatomic")
+      set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -latomic")
+      set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -latomic")
     endif()
     if (OPEN_FOR_IDE)
       add_compile_options(
@@ -303,11 +339,19 @@ else()
       -Wno-unknown-warning-option
       -Wno-unused-parameter
       -Wno-constant-logical-operand
+      # These need to be disabled for FDB's RocksDB storage server implementation
+      -Wno-deprecated-copy
+      -Wno-delete-non-abstract-non-virtual-dtor
+      -Wno-range-loop-construct
+      -Wno-reorder-ctor
+      # Needed for clang 13 (todo: Update above logic so that it figures out when to pass in -static-libstdc++ and when it will be ignored)
+      # When you remove this, you might need to move it back to the USE_CCACHE stanza.  It was (only) there before I moved it here.
+      -Wno-unused-command-line-argument
       )
     if (USE_CCACHE)
       add_compile_options(
         -Wno-register
-        -Wno-unused-command-line-argument)
+      )
     endif()
     if (PROFILE_INSTR_GENERATE)
       add_compile_options(-fprofile-instr-generate)
@@ -330,9 +374,6 @@ else()
     # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
     # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
     add_compile_options(-Wno-attributes)
-  elseif(ICC)
-    add_compile_options(-wd1879 -wd1011)
-    add_link_options(-static-intel)
   endif()
   add_compile_options(-Wno-error=format
     -Wunused-variable
@@ -340,7 +381,7 @@ else()
     -fvisibility=hidden
     -Wreturn-type
     -fPIC)
-  if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86" AND CMAKE_COMPILER_IS_GNUCC AND NOT CLANG AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "8.0.0")
+  if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86" AND CMAKE_COMPILER_IS_GNUCC AND NOT CLANG AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "8.0.0" AND NOT ICX)
     add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wclass-memaccess>)
   endif()
   if (GPERFTOOLS_FOUND AND GCC)
@@ -349,6 +390,15 @@ else()
       -fno-builtin-calloc
       -fno-builtin-realloc
       -fno-builtin-free)
+  endif()
+  
+  if (ICX)
+    find_library(CXX_LIB NAMES c++ PATHS "/usr/local/lib" REQUIRED)
+    find_library(CXX_ABI_LIB NAMES c++abi PATHS "/usr/local/lib" REQUIRED)
+    add_compile_options($<$<COMPILE_LANGUAGE:C>:-ffp-contract=on>)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=on>)
+    # No libc++ and libc++abi in Intel LIBRARY_PATH
+    link_libraries(${CXX_LIB} ${CXX_ABI_LIB})
   endif()
 
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")

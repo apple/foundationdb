@@ -23,6 +23,9 @@
 #include "flow/flow.h"
 #include "flow/Trace.h"
 
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/pem.h>

@@ -1,0 +1,873 @@
+<form theme="dark">
+  <label>FoundationDB - Long Recovery (Dev)</label>
+  <fieldset submitButton="false" autoRun="false"></fieldset>
+  <row>
+    <panel>
+      <title>Table 1: Find long recovery (Input Index and LogGroup and Select a time span).</title>
+      <input type="text" token="IndexForOverview" searchWhenChanged="true">
+        <label>Index</label>
+        <default>*</default>
+      </input>
+      <input type="text" token="LogGroupForOverview" searchWhenChanged="true">
+        <label>LogGroup</label>
+        <default></default>
+      </input>
+      <input type="time" token="time_token_for_recoveryhistorytable" searchWhenChanged="true">
+        <label>Select a time span</label>
+        <default>
+          <earliest>-0s</earliest>
+          <latest>now</latest>
+        </default>
+      </input>
+      <table>
+        <search>
+          <query>index=$IndexForOverview$ LogGroup=$LogGroupForOverview$
+    ((Type="MasterRecoveryState" AND (Status="reading_coordinated_state" OR Status="fully_recovered" OR Status="accepting_commits")) OR (Type="Role" AND As="MasterServer" AND ("Transition"="Begin" OR "Transition"="End")) OR Type="MasterTerminated") AND (NOT TrackLatestType="Rolled") | eval DateTime=strftime(Time, "%Y-%m-%d %H:%M:%S.%Q (%Z)")
+| table ID Machine Type Transition As Status DateTime Time ErrorDescription LogGroup
+| search NOT ErrorDescription="Success"
+| eval EventType=case(Transition="Begin" AND As="MasterServer" AND Type="Role", "MasterStart", Type="MasterRecoveryState" AND Status="fully_recovered", "FullRecovery", Type="MasterRecoveryState" AND Status="reading_coordinated_state", "StartRecoveryAttempt", Transition="End" AND As="MasterServer" AND Type="Role", "MasterTerminated", Type="MasterTerminated", "MasterTerminated", Type="MasterRecoveryState" AND Status="accepting_commits", "AcceptingCommits") 
+| table ID Machine EventType DateTime Time ErrorDescription LogGroup
+| fillnull value="-" 
+| sort -Time 
+| eval ifMasterTerminatedEvent=if(EventType="MasterTerminated", 1, 0) 
+| stats list(*) by ID Machine ifMasterTerminatedEvent 
+| rename list(*) as * 
+| table ID Machine EventType DateTime Time ErrorDescription LogGroup
+| sort -Time 
+| eval LastTime=mvindex(Time, 0), FirstTime=mvindex(Time, -1), Duration=LastTime-FirstTime 
+| table ID Machine Duration EventType DateTime Time ErrorDescription LogGroup</query>
+          <earliest>$time_token_for_recoveryhistorytable.earliest$</earliest>
+          <latest>$time_token_for_recoveryhistorytable.latest$</latest>
+        </search>
+        <option name="count">15</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Table 2: Select timespan containing the long recovery and see all recovery attempts in the time span (The input Index and LogGroup and Timespan are for all following tables and charts)</title>
+      <input type="text" token="Index" searchWhenChanged="true">
+        <label>Index</label>
+        <default>*</default>
+      </input>
+      <input type="text" searchWhenChanged="true" token="LogGroup">
+        <label>LogGroup</label>
+      </input>
+      <input type="time" token="ReoveryTime" searchWhenChanged="true">
+        <label>ReoveryTimeSpan</label>
+        <default>
+          <earliest>-0s@s</earliest>
+          <latest>now</latest>
+        </default>
+      </input>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (Type="MasterRecoveryState" OR (Type="MasterTerminated") OR (Type="Role" AND As="MasterServer" AND "Transition"="End") OR Type="RecoveryInternal" OR Type="ProxyReplies" OR Type="CommitProxyReplies" OR Type="ResolverReplies" OR Type="MasterRecruitedInitialStorageServers") AND (NOT TrackLatestType="Rolled") 
+| rename ID as MasterID 
+| eval DateTime=strftime(Time, "%Y-%m-%d %H:%M:%S.%Q (%Z)") 
+| table MasterID Machine Status Step Type DateTime Time StatusCode MyRecoveryCount ErrorDescription Reason ErrorCode 
+| fillnull value="-" ErrorDescription Reason ErrorCode 
+| eval Status=case(Type=="MasterRecoveryState", Status, Type=="Role", "RoleEnd", Type=="MasterTerminated", "MasterTerminated", Type=="RecoveryInternal", Status."/".Step, Type=="ProxyReplies" OR Type=="CommitProxyReplies", "initializing_transaction_servers/ProxyReplies", Type="ResolverReplies", "initializing_transaction_servers/ResolverReplies", Type=="MasterRecruitedInitialStorageServers", "initializing_transaction_servers/MasterRecruitedInitialStorageServers"), StatusCode=case(Type=="ProxyReplies" OR Type=="CommitProxyReplies" OR Type=="ResolverReplies" OR Type=="MasterRecruitedInitialStorageServers", "8", Type!="ProxyReplies" AND Type!="CommitProxyReplies" AND Type!="ResolverReplies" AND Type!="MasterRecruitedInitialStorageServers", StatusCode)
+| fillnull value="-" StatusCode 
+| sort 0 -Time -StatusCode
+| stats list(*) by MasterID Machine 
+| rename list(*) as * 
+| eval FirstTime=mvindex(Time, -1), LastTime=mvindex(Time, 0), Duration=LastTime-FirstTime 
+| table MasterID Machine MyRecoveryCount Duration ErrorDescription Reason ErrorCode StatusCode Status DateTime Time 
+| sort -MyRecoveryCount 
+| fillnull value="-" MyRecoveryCount</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="count">3</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">false</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Table 3: Why recovery is triggered? Using WaitFailureClient event. Machine A detects Machine B's failure. First column is the time when WaitFailureClient happens. Columns of 2,3,4,5 are for A. Columns of 6,7 are for B.</title>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    Type="WaitFailureClient" 
+| table Type Time Machine FailedEndpoint 
+| replace *:tls with * in FailedEndpoint 
+| join Machine type=left 
+    [ search index=$Index$ LogGroup=$LogGroup$ Type="Role" AND Transition="End" 
+    | eval EndTime=strftime(Time, "%Y-%m-%d %H:%M:%S.%Q (%Z)") 
+    | rename As as Role 
+    | table ID EndTime Machine Role] 
+| join FailedEndpoint type=left 
+    [ search index=$Index$ LogGroup=$LogGroup$ Type="Role" 
+    | stats latest(*) by ID | rename latest(*) as *
+    | rename Machine as FailedEndpoint 
+    | eval FailedEndpointLatestRoleEventInfo=As."/".ID."/".Type.Transition."/".strftime(Time, "%Y-%m-%d %H:%M:%S.%Q (%Z)") 
+    | stats list(*) by FailedEndpoint 
+    | rename list(*) as * 
+    | table FailedEndpoint FailedEndpointLatestRoleEventInfo] 
+| eval FailureDetectedTime=strftime(Time, "%Y-%m-%d %H:%M:%S.%Q (%Z)") 
+| makemv delim=" " FailedEndpointLatestRoleEventInfo 
+| table FailureDetectedTime Machine ID Role EndTime FailedEndpoint FailedEndpointLatestRoleEventInfo</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="wrap">false</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Table 4: New Recruitment Configuration (using MasterRecoveredConfig event)</title>
+      <event>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    Type="MasterRecoveredConfig" AND TrackLatestType="Original" 
+| eval Configuration=replace(Conf, "&amp;quot;", "\"") 
+| rename Configuration as _raw</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="list.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </event>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Table 5: Data Centers (using ProcessMetrics event)</title>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    Type=ProcessMetrics 
+| dedup DCID 
+| rename DCID as DataCenterID 
+| table DataCenterID pie_work_unit
+| fillnull value="-"</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+    <panel>
+      <title>Table 6: New Role (using Role event joined by ProcessMetrics event)</title>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (Type="Role" AND ((As="ClusterController") OR (As="MasterServer") OR (As="TLog") OR (As="Resolver") OR (As="MasterProxyServer") OR (As="CommitProxyServer") OR (As="GrvProxyServer") OR (As="LogRouter")) AND (NOT TrackLatestType="Rolled") AND (NOT Transition="Refresh")) 
+| eventstats count by ID 
+| rename As as Role 
+| search count=1 AND Transition="Begin" 
+| table ID Role Machine 
+| join type=left Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$ Type=ProcessMetrics 
+    | dedup Machine, DCID 
+    | rename DCID as DataCenter 
+    | table Machine DataCenter] 
+| table ID Role Machine DataCenter 
+| fillnull value="null" DataCenter 
+| stats count by Role DataCenter</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Table 7: Role Details</title>
+      <input type="multiselect" token="RolesToken" searchWhenChanged="true">
+        <label>Roles</label>
+        <choice value="MasterServer">MasterServer</choice>
+        <choice value="TLog">TLog</choice>
+        <choice value="Resolver">Resolver</choice>
+        <choice value="MasterProxyServer">MasterProxyServer (for &lt;7.0)</choice>
+        <choice value="LogRouter">LogRouter</choice>
+        <choice value="CommitProxyServer">CommitProxyServer (for 7.0+)</choice>
+        <choice value="GrvProxyServer">GrvProxyServer (for 7.0+)</choice>
+        <valuePrefix>As="</valuePrefix>
+        <valueSuffix>"</valueSuffix>
+        <delimiter> OR </delimiter>
+      </input>
+      <input type="dropdown" token="RoleDetailTableWhichRoleToken" searchWhenChanged="true">
+        <label>Begin/End</label>
+        <choice value="count=1 AND Transition=&quot;Begin&quot;">Begin</choice>
+        <choice value="count=1 AND Transition=&quot;End&quot;">End</choice>
+        <choice value="count=2">Begin-&gt;End</choice>
+        <default>count=1 AND Transition="Begin"</default>
+      </input>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (Type="Role" AND ($RolesToken$) AND (NOT TrackLatestType="Rolled") AND (NOT Transition="Refresh")) 
+| eventstats count by ID 
+| rename As as Role 
+| search $RoleDetailTableWhichRoleToken$
+| table ID Role Machine Time
+| join type=left Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$ Type=ProcessMetrics 
+    | dedup Machine, DCID 
+    | rename DCID as DataCenter 
+    | table Machine DataCenter] 
+| table ID Role Machine DataCenter Time
+| fillnull value="null" DataCenter 
+| eval DateTime=strftime(Time, "%Y-%m-%d %H:%M:%S.%Q (%Z)") 
+| table ID Role Machine DataCenter DateTime 
+| sort 0 -DateTime</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Table 8: CC Recruitment SevWarn OR SevError (use events in clusterRecruitFromConfiguration and clusterRecruitRemoteFromConfiguration)</title>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    Type="RecruitFromConfigurationNotAvailable" OR Type="RecruitFromConfigurationRetry" OR Type="RecruitFromConfigurationError" OR Type="RecruitRemoteFromConfigurationNotAvailable" OR Type="RecruitRemoteFromConfigurationRetry" OR Type="RecruitRemoteFromConfigurationError"
+    | eval DateTime=strftime(Time, "%Y-%m-%d %H:%M:%S.%Q (%Z)"), GoodRecruitmentTimeReady=case(Type=="RecruitFromConfigurationNotAvailable" OR Type=="RecruitRemoteFromConfigurationNotAvailable", "True", Type=="RecruitFromConfigurationRetry" OR Type=="RecruitRemoteFromConfigurationRetry", GoodRecruitmentTimeReady, Type=="RecruitFromConfigurationError" OR Type=="RecruitRemoteFromConfigurationError", "-")
+    | table Type GoodRecruitmentTimeReady Time DateTime</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Table 9: RecoveryCount of the selected TLog (in Table 11)</title>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (ID=$row.TLogID$ AND Type="TLogStart") OR (LogId=$row.TLogID$ AND Type="TLogPersistentStateRestore") 
+| eval ID=if(Type="TLogStart", ID, LogId), DateTime=strftime(Time, "%Y-%m-%d %H:%M:%S.%Q (%Z)")  
+| table ID RecoveryCount Type DateTime | fillnull value="Not found. The fdb version is somewhat old."</query>
+          <earliest>-7d@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+    <panel>
+      <title>Table 10: Which roles the selected TLog (in Table 11) talks to</title>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    ((Type="TLogRejoining" AND ID=$row.TLogID$) OR ((Type="TLogJoinedMe" OR Type="TLogJoinedMeUnknown" OR Type="TLogRejoinSlow") AND TLog=$row.TLogID$) OR ((Type="TLogLockStarted" OR Type="TLogLocked") AND TLog=$row.TLogID$) OR (Type="TLogStop" AND ID=$row.TLogID$) OR (Type="TLogStop2" AND LogId=$row.TLogID$) OR (Type="Role" AND As="TLog" AND NOT Transition="Refresh" AND ID=$row.TLogID$)) AND (NOT TrackLatestType="Rolled") 
+| sort -Time 
+| eval TLogID=case((Type="TLogRejoining"), ID, (Type="TLogJoinedMe") OR (Type="TLogJoinedMeUnknown") OR (Type="TLogRejoinSlow"), TLog, (Type="TLogLockStarted") OR (Type="TLogLocked"), TLog, (Type="TLogStop"), ID, (Type="TLogStop2"), LogId, Type="Role", ID), TLogEvents=case((Type="TLogRejoining"), Time." ".Type." ".Master, (Type="TLogJoinedMe") OR (Type="TLogJoinedMeUnknown") OR (Type="TLogRejoinSlow") OR (Type="TLogLockStarted") OR (Type="TLogLocked"), Time." ".Type." ".ID." "."Null", (Type="TLogStop") OR (Type="TLogStop2"), Time." ".Type." "."Null", (Type="Role" AND As="TLog" AND NOT Transition="Refresh" AND NOT TrackLatestType="Rolled"), Time." "."Role".Transition." "."Null") 
+| stats list(*) by TLogID 
+| rename list(*) As * 
+| table TLogID TLogEvents 
+| eval ignore = if(mvcount(TLogEvents)==1 AND like(mvindex(TLogEvents, 0), "% RoleEnd"), 1, 0) 
+| search ignore=0 
+| sort TLogID 
+| table TLogID TLogEvents 
+| mvexpand TLogEvents 
+| eval temp=split(TLogEvents," "), Time=mvindex(temp,0), Event=mvindex(temp,1), MasterID=mvindex(temp,2) 
+| fields - temp - TLogEvents 
+| sort 0 -Time 
+| search NOT MasterID="NULL" 
+| dedup MasterID 
+| rename MasterID as ID 
+| join type=left ID 
+    [ search index=$Index$ LogGroup=$LogGroup$ 
+        (Type="Role")
+    | sort 0 -Time 
+    | dedup ID 
+    | table ID Machine As] 
+| table ID Machine As | fillnull value="null" Machine As</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Table 11: TLog Events (Collecting all TLogs that produce interesting events during the time span)</title>
+      <input type="text" token="SeeLogEventDetailTableToken" searchWhenChanged="true">
+        <label>Input * to do search</label>
+      </input>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (Type="TLogRecover") OR (Type="TLogReady") OR (Type="TLogStart") OR
+    ((Type="TLogLockStarted") OR (Type="TLogLocked") OR (Type="TLogStop") OR (Type="TLogStop2")) OR (Type="Role" AND As="TLog" AND NOT Transition="Refresh") AND (NOT TrackLatestType="Rolled") AND $SeeLogEventDetailTableToken$
+| sort -Time 
+| eval TLogID=case((Type="TLogRecover"), LogId, (Type="TLogReady"), ID, (Type="TLogStart"), ID, (Type="TLogLockStarted") OR (Type="TLogLocked"), TLog, (Type="TLogStop"), ID, (Type="TLogStop2"), LogId, Type="Role", ID), TLogEvents=case((Type="TLogRecover"), Time." ".Type." "."null", (Type="TLogReady"), Time." ".Type." "."null", (Type="TLogStart"), Time." ".Type." "."null", (Type="TLogLockStarted") OR (Type="TLogLocked"), Time." ".Type." ".ID." "."null", (Type="TLogStop") OR (Type="TLogStop2"), Time." ".Type." "."null", (Type="Role" AND As="TLog" AND NOT Transition="Refresh" AND NOT TrackLatestType="Rolled"), Time." "."Role".Transition." "."null") 
+| stats list(TLogEvents) by TLogID 
+| rename list(TLogEvents) As TLogEvents 
+| eval EarliestEvent=mvindex(TLogEvents, -1) , LatestEvent=mvindex(TLogEvents, 0) 
+| table TLogID TLogEvents EarliestEvent LatestEvent 
+| eval ignore = if(mvcount(TLogEvents)==1 AND like(mvindex(TLogEvents, 0), "% RoleEnd"), 1, 0) 
+| search ignore=0 
+| sort TLogID 
+| join type=left TLogID 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="Role" AND As="TLog") 
+    | sort 0 -Time 
+    | dedup ID 
+    | rename ID as TLogID 
+    | table TLogID host LogGroup Machine] 
+| table TLogID Machine LogGroup host EarliestEvent LatestEvent 
+| fillnull value="null" Machine host LogGroup
+| eval temp=split(LatestEvent," "), LatestTime=mvindex(temp,0), LatestEvent=mvindex(temp,1), temp2=split(EarliestEvent," "), EarliestTime=mvindex(temp2,0), EarliestEvent=mvindex(temp2,1), Duration=LatestTime-EarliestTime 
+| table TLogID Machine EarliestTime Duration LogGroup host 
+| join type=left Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$ 
+        Type=ProcessMetrics 
+    | dedup Machine, DCID 
+    | rename DCID as DataCenter 
+    | table Machine DataCenter] 
+| fillnull value="null" DataCenter 
+| table TLogID Machine DataCenter EarliestTime Duration host LogGroup 
+| join type=left TLogID 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        ((Type="TLogRejoining") OR ((Type="TLogJoinedMe" OR Type="TLogJoinedMeUnknown" OR Type="TLogRejoinSlow")) OR ((Type="TLogLockStarted" OR Type="TLogLocked")) OR (Type="TLogStop") OR (Type="TLogStop2") OR (Type="Role" AND As="TLog" AND NOT Transition="Refresh")) AND (NOT TrackLatestType="Rolled") 
+    | sort -Time 
+    | eval TLogID=case((Type="TLogRejoining"), ID, (Type="TLogJoinedMe") OR (Type="TLogJoinedMeUnknown") OR (Type="TLogRejoinSlow"), TLog, (Type="TLogLockStarted") OR (Type="TLogLocked"), TLog, (Type="TLogStop"), ID, (Type="TLogStop2"), LogId, Type="Role", ID), TLogEvents=case((Type="TLogRejoining"), Time." ".Type." ".Master, (Type="TLogJoinedMe") OR (Type="TLogJoinedMeUnknown") OR (Type="TLogRejoinSlow") OR (Type="TLogLockStarted") OR (Type="TLogLocked"), Time." ".Type." ".ID." "."Null", (Type="TLogStop") OR (Type="TLogStop2"), Time." ".Type." "."Null", (Type="Role" AND As="TLog" AND NOT Transition="Refresh" AND NOT TrackLatestType="Rolled"), Time." "."Role".Transition." "."Null") 
+    | stats list(*) by TLogID 
+    | rename list(*) As * 
+    | table TLogID TLogEvents 
+    | eval ignore = if(mvcount(TLogEvents)==1 AND like(mvindex(TLogEvents, 0), "% RoleEnd"), 1, 0) 
+    | search ignore=0 
+    | sort TLogID 
+    | table TLogID TLogEvents 
+    | mvexpand TLogEvents 
+    | eval temp=split(TLogEvents," "), Time=mvindex(temp,0), Event=mvindex(temp,1), RoleID=mvindex(temp,2) 
+    | fields - temp - TLogEvents 
+    | sort 0 -Time 
+    | search NOT RoleID="NULL" 
+    | table TLogID RoleID MasterMachine 
+    | stats list(*) by TLogID 
+    | rename list(*) as * 
+    | streamstats count 
+    | mvexpand RoleID 
+    | dedup count RoleID 
+    | fields - count 
+    | stats count by TLogID 
+    | rename count as Roles 
+    | table TLogID Roles] 
+| table TLogID Machine DataCenter Roles EarliestTime Duration host LogGroup 
+| join type=left TLogID 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="TLogRecover") OR (Type="TLogReady") OR (Type="TLogStart") OR
+        ((Type="TLogRejoinSlow") OR (Type="TLogLockStarted") OR (Type="TLogLocked") OR (Type="TLogStop") OR (Type="TLogStop2") OR (Type="Role" AND As="TLog" AND NOT Transition="Refresh") AND (NOT TrackLatestType="Rolled")) 
+    | sort -Time 
+    | eval TLogID=case((Type="TLogRecover"), LogId, (Type="TLogReady"), ID, (Type="TLogStart"), ID, (Type="TLogRejoinSlow"), TLog, (Type="TLogLockStarted") OR (Type="TLogLocked"), TLog, (Type="TLogStop"), ID, (Type="TLogStop2"), LogId, Type="Role", ID), TLogEvents=if(Type="Role", Type.Transition, Type) 
+    | sort 0 TLogEvents 
+    | stats list(TLogEvents) by TLogID 
+    | rename list(TLogEvents) As TLogEvents 
+    | table TLogID TLogEvents 
+    | eval ignore = if(mvcount(TLogEvents)==1 AND like(mvindex(TLogEvents, 0), "% RoleEnd"), 1, 0) 
+    | search ignore=0 
+    | mvcombine delim=" " TLogEvents 
+    | table TLogID TLogEvents] 
+| table TLogID Machine DataCenter Roles Duration TLogEvents EarliestTime host LogGroup 
+| eval EarliestDateTime=strftime(EarliestTime, "%Y-%m-%d %H:%M:%S.%Q (%Z)") 
+| table TLogID Machine DataCenter Roles Duration TLogEvents EarliestDateTime host LogGroup
+| join type=left TLogID 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="TLogStart") OR (Type="TLogPersistentStateRestore") 
+    | eval TLogID=if(Type="TLogStart", ID, LogId) 
+    | table TLogID RecoveryCount] 
+| table TLogID RecoveryCount Machine DataCenter Roles Duration TLogEvents EarliestDateTime host LogGroup 
+| fillnull value="TLog too old, click and see details" RecoveryCount</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">cell</option>
+        <option name="wrap">false</option>
+        <drilldown>
+          <set token="row.TLogID">$click.value$</set>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <title>Table 12: Event Details (Including rejoining events) of the selected TLog (in Table 11)</title>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (Type="TLogRecover" AND LogId=$row.TLogID$) OR (Type="TLogReady" AND ID=$row.TLogID$) OR (Type="TLogStart" AND ID=$row.TLogID$) OR
+    ((Type="TLogRejoining" AND ID=$row.TLogID$) OR ((Type="TLogJoinedMe" OR Type="TLogJoinedMeUnknown" OR Type="TLogRejoinSlow") AND TLog=$row.TLogID$) OR ((Type="TLogLockStarted" OR Type="TLogLocked") AND TLog=$row.TLogID$) OR (Type="TLogStop" AND ID=$row.TLogID$) OR (Type="TLogStop2" AND LogId=$row.TLogID$) OR (Type="Role" AND As="TLog" AND NOT Transition="Refresh" AND ID=$row.TLogID$)) AND (NOT TrackLatestType="Rolled") 
+| sort -Time 
+| eval TLogID=case((Type="TLogRecover"), LogId, (Type="TLogReady"), ID, (Type="TLogStart"), ID, (Type="TLogRejoining"), ID, (Type="TLogJoinedMe") OR (Type="TLogJoinedMeUnknown") OR (Type="TLogRejoinSlow"), TLog, (Type="TLogLockStarted") OR (Type="TLogLocked"), TLog, (Type="TLogStop"), ID, (Type="TLogStop2"), LogId, Type="Role", ID), TLogEvents=case((Type="TLogRecover"), Time." ".Type." "."-"." "."-", (Type="TLogReady"), Time." ".Type." "."-"." "."-", (Type="TLogStart"), Time." ".Type." "."-"." "."-", (Type="TLogRejoining"), Time." ".Type." ".Master." "."-", (Type="TLogJoinedMe") OR (Type="TLogJoinedMeUnknown") OR (Type="TLogRejoinSlow") OR (Type="TLogLockStarted") OR (Type="TLogLocked"), Time." ".Type." ".ID." "."-", (Type="TLogStop") OR (Type="TLogStop2"), Time." ".Type." "."-"." "."-", (Type="Role" AND As="TLog" AND Transition="Begin" AND NOT TrackLatestType="Rolled"), Time." "."Role".Transition." "."-"." ".Origination, (Type="Role" AND As="TLog" AND Transition="End" AND NOT TrackLatestType="Rolled"), Time." "."Role".Transition." "."-"." "."-") 
+| stats list(*) by TLogID 
+| rename list(*) As * 
+| table TLogID TLogEvents 
+| eval ignore = if(mvcount(TLogEvents)==1 AND like(mvindex(TLogEvents, 0), "% RoleEnd"), 1, 0) 
+| search ignore=0 
+| sort TLogID 
+| join type=left TLogID 
+    [ search index=$Index$ LogGroup=$LogGroup$ (Type="Role" AND As="TLog" AND ID=$row.TLogID$) 
+    | dedup ID 
+    | rename ID as TLogID 
+    | table TLogID Machine] 
+| table TLogID Machine TLogEvents 
+| fillnull value="-" Machine 
+| mvexpand TLogEvents 
+| eval temp=split(TLogEvents," "), Time=mvindex(temp,0), Event=mvindex(temp,1), ToID=mvindex(temp,2), Origination= mvindex(temp,3) 
+| fields - temp - TLogEvents 
+| join type=left 
+    [ search index=$Index$ LogGroup=$LogGroup$ (Type="Role") 
+    | dedup ID 
+    | rename ID as ToID 
+    | rename As as ToRole 
+    | rename Machine as ToMachine 
+    | table ToID ToRole ToMachine] 
+| sort 0 -Time 
+| fillnull value="-" ToRole ToMachine 
+| eval DateTime=strftime(Time, "%Y-%m-%d %H:%M:%S.%Q (%Z)") 
+| table TLogID Machine Event DateTime ToID ToRole ToMachine Time DateTime</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="count">14</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">false</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Table 13: All Tags of the selected TLog (in Table 11) that have been popped by SSes (using TLogPoppedTag event)</title>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (ID=$row.TLogID$ AND Type="TLogPoppedTag") 
+| eval DateTime=strftime(Time, "%Y-%m-%d %H:%M:%S.%Q (%Z)") 
+| rename ID as TLogID 
+| rename Tags as UnpoppedRecoveredTagCount 
+| rename Tag as TagPopped 
+| rename DurableKCVer as DurableKnownCommittedVersion 
+| search TagPopped!="-1:2" 
+| table TLogID DateTime UnpoppedRecoveredTagCount TagPopped DurableKnownCommittedVersion RecoveredAt 
+| sort 0 -UnpoppedRecoveredTagCount 
+| join TagPopped type=left 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="StorageMetrics") 
+    | stats latest(*) by Machine 
+    | rename latest(*) as * 
+    | rename Tag as TagPopped 
+    | table TagPopped ID Machine] 
+| table TLogID DateTime UnpoppedRecoveredTagCount TagPopped DurableKnownCommittedVersion RecoveredAt ID Machine
+| join type=left Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        Type=ProcessMetrics
+    | dedup Machine, DCID 
+    | rename DCID as DataCenter 
+    | table Machine DataCenter] 
+| rename ID as SSID 
+| rename Machine as SSMachine 
+| rename DataCenter as SSDataCenter 
+| table TLogID DateTime UnpoppedRecoveredTagCount TagPopped SSID SSMachine SSDataCenter DurableKnownCommittedVersion RecoveredAt 
+| fillnull value="-"</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">false</option>
+      </table>
+    </panel>
+    <panel>
+      <title>Table 14: All Tags of the selected TLog (in Table 11) to be popped by SSes (using TLogReady event)</title>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (ID=$row.TLogID$ AND Type="TLogReady") 
+| eval DateTime=strftime(Time, "%Y-%m-%d %H:%M:%S.%Q (%Z)") 
+| rename ID as TLogID 
+| table TLogID Type AllTags Locality 
+| makemv delim="," AllTags 
+| mvexpand AllTags 
+| rename AllTags as Tag | sort 0 Tag
+| join Tag type=left 
+    [ search index=$Index$ LogGroup=$LogGroup$ 
+        (Type="StorageMetrics") 
+    | stats latest(*) by Machine 
+    | rename latest(*) as * 
+    | table Tag ID Machine] 
+| table TLogID Tag ID Machine
+| join type=left Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        Type=ProcessMetrics 
+    | dedup Machine, DCID 
+    | rename DCID as DataCenter 
+    | table Machine DataCenter] 
+| fillnull value="-"
+| table TLogID Tag ID Machine DataCenter 
+| rename ID as SSID | rename Machine as SSMachine | rename DataCenter as SSDataCenter
+| search Tag!="-1:2"</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Table 15: The Tags of the selected TLog (in Table 11) that are not popped by SSes (using set diff tags in Table 13 and Table 14) (if result contains "...", the result of Table 15 is wrong)</title>
+      <table>
+        <search>
+          <query>| set diff 
+    [ search index=$Index$ LogGroup=$LogGroup$ 
+        (ID=$row.TLogID$ AND Type="TLogReady") 
+    | table AllTags  
+    | makemv delim="," AllTags 
+    | mvexpand AllTags 
+    | rename AllTags as Tag 
+    | table Tag] 
+    [ search index=$Index$ LogGroup=$LogGroup$ 
+        (ID=$row.TLogID$ AND Type="TLogPoppedTag") 
+    | table Tag]</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+    <panel>
+      <title>Table 16: All Current Storage Servers (assume each machine has at most one SS)</title>
+      <input type="text" token="TriggerSSTableToken" searchWhenChanged="true">
+        <label>Input * to search</label>
+      </input>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (Type="StorageMetrics") AND $TriggerSSTableToken$ 
+| stats latest(*) by Machine 
+| rename latest(*) as * 
+| table Tag ID Machine 
+| join type=left Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        Type=ProcessMetrics 
+    | dedup Machine, DCID 
+    | rename DCID as DataCenter 
+    | table Machine DataCenter] 
+| table ID Machine DataCenter Tag 
+| join ID 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="Role" AND ((As="StorageServer")) AND (NOT TrackLatestType="Rolled")) 
+    | stats latest(*) by Machine 
+    | rename latest(*) as * 
+    | rename As as Role 
+    | table ID Role Machine 
+    | join type=left Machine 
+        [ search index=$Index$ LogGroup=$LogGroup$
+            Type=ProcessMetrics 
+        | dedup Machine, DCID 
+        | rename DCID as DataCenter 
+        | table Machine DataCenter] 
+    | table ID Role Machine DataCenter 
+    | fillnull value="null" DataCenter] 
+| sort 0 DataCenter
+| table Tag ID Machine DataCenter | sort 0 Tag</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 1: Timeout/TimedOut event distribution grouped by source (Machine)</title>
+      <input type="text" token="TimeoutEventByMachineTableTimeSpanToken" searchWhenChanged="true">
+        <label>TimeSpan</label>
+        <default>5s</default>
+      </input>
+      <input type="multiselect" token="TimeoutbyMachineTableSourceRoleToken" searchWhenChanged="true">
+        <label>Select Source Roles</label>
+        <choice value="TLog">TLog</choice>
+        <choice value="MasterServer">MasterServer</choice>
+        <choice value="MasterProxyServer">MasterProxyServer (for version &lt; 7)</choice>
+        <choice value="Resolver">Resolver</choice>
+        <choice value="ClusterController">ClusterController</choice>
+        <choice value="SharedTLog">SharedTLog</choice>
+        <choice value="LogRouter">LogRouter</choice>
+        <choice value="Coordinator">Coordinator</choice>
+        <choice value="StorageServer">StorageServer</choice>
+        <choice value="CommitProxyServer">CommitProxyServer (for version 7+)</choice>
+        <choice value="GrvProxyServer">GrvProxyServer (for ver 7+)</choice>
+        <valuePrefix>As="</valuePrefix>
+        <valueSuffix>"</valueSuffix>
+        <delimiter> OR </delimiter>
+      </input>
+      <input type="multiselect" token="TimeoutbyMachineTableDestinationRoleToken" searchWhenChanged="true">
+        <label>Select Destination Roles</label>
+        <choice value="TLog">TLog</choice>
+        <choice value="MasterServer">MasterServer</choice>
+        <choice value="MasterProxyServer">MasterProxyServer (for version &lt;7)</choice>
+        <choice value="Resolver">Resolver</choice>
+        <choice value="ClusterController">ClusterController</choice>
+        <choice value="SharedTLog">SharedTLog</choice>
+        <choice value="LogRouter">LogRouter</choice>
+        <choice value="Coordinator">Coordinator</choice>
+        <choice value="StorageServer">StorageServer</choice>
+        <choice value="CommitProxyServer">CommitProxyServer (for version 7+)</choice>
+        <choice value="GrvProxyServer">GrvProxyServer (for version 7+)</choice>
+        <valuePrefix>As="</valuePrefix>
+        <valueSuffix>"</valueSuffix>
+        <delimiter> OR </delimiter>
+      </input>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (Type=ConnectionTimedOut OR Type=ConnectionTimeout) 
+| replace *:tls with * in PeerAddr 
+| join Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="Role" AND ($TimeoutbyMachineTableSourceRoleToken$)) 
+    | dedup ID] 
+| join PeerAddr 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="Role" AND ($TimeoutbyMachineTableDestinationRoleToken$)) 
+    | dedup ID 
+    | rename Machine as PeerAddr] 
+| timechart useother=0 span=$TimeoutEventByMachineTableTimeSpanToken$ count by Machine</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="height">233</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 2: Timeout/TimedOut event distribution grouped by destination (PeerAddr)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (Type=ConnectionTimedOut OR Type=ConnectionTimeout) 
+| replace *:tls with * in PeerAddr 
+| join Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="Role" AND ($TimeoutbyMachineTableSourceRoleToken$)) 
+    | dedup ID] 
+| join PeerAddr 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="Role" AND ($TimeoutbyMachineTableDestinationRoleToken$)) 
+    | dedup ID 
+    | rename Machine as PeerAddr] 
+| timechart useother=0 span=$TimeoutEventByMachineTableTimeSpanToken$ count by PeerAddr</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="height">219</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Table 17: Check Type=ConnectionTimedOut OR Type=ConnectionTimeout events between transaction roles in the recovery (including the role that refresh/begin/end in the timespan)</title>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (Type=ConnectionTimedOut OR Type=ConnectionTimeout) 
+| replace *:tls with * in PeerAddr 
+| stats count as TotalTimeouts by Machine PeerAddr 
+| table Machine PeerAddr TotalTimeouts 
+| join Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="Role" AND ($TimeoutbyMachineTableSourceRoleToken$)) 
+    | stats latest(*) by ID 
+    | rename latest(*) as * 
+    | eval Role = As."/".ID."/".Type.Transition."/".strftime(Time, "%Y-%m-%d %H:%M:%S.%Q (%Z)") 
+    | stats list(Role) AS MachineRoleLatestEvent BY Machine 
+        ] 
+| join PeerAddr 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="Role" AND ($TimeoutbyMachineTableDestinationRoleToken$)) 
+    | stats latest(*) by ID 
+    | rename latest(*) as * 
+    | eval Role = As."/".ID."/".Type.Transition."/".strftime(Time, "%Y-%m-%d %H:%M:%S.%Q (%Z)") 
+    | stats list(Role) AS PeerRoleLatestEvent BY Machine 
+    | rename Machine AS PeerAddr
+        ] 
+| table Machine PeerAddr TotalTimeouts MachineRoleLatestEvent PeerRoleLatestEvent</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Table 18: Proxy 0</title>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (Type="ProxyReplies" OR Type="CommitProxyReplies") AND FirstProxy="True" 
+| eval DateTime=strftime(Time, "%Y-%m-%d %H:%M:%S.%Q (%Z)") 
+| table WorkerID LogGroup FirstProxy Time DateTime 
+| sort 0 -Time 
+| join type=left WorkerID 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        Type="Role" AND As="Worker" AND Transition="Refresh" 
+    | dedup ID 
+    | rename ID as WorkerID 
+    | stats list(*) by WorkerID 
+    | rename list(*) as * 
+    | table WorkerID Machine Roles] 
+| table WorkerID Machine Roles LogGroup FirstProxy Time DateTime 
+| join type=left Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        Type="Role" AND (As="MasterProxyServer" OR As="CommitProxyServer") AND Transition="Refresh" 
+    | dedup ID 
+    | rename ID as ProxyID 
+    | table Machine ProxyID] 
+| table ProxyID Machine LogGroup FirstProxy</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Table 19: Latest Role Events on the input Machine (Input Machine, like 172.27.113.121:4500)</title>
+      <input type="text" token="SearchMachineToken" searchWhenChanged="true">
+        <label>Machine (IP:PORT)</label>
+      </input>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    Type="Role" AND Machine=$SearchMachineToken$ 
+| stats latest(*) by ID Transition 
+| rename latest(*) as * 
+| eval DateTime=strftime(Time, "%Y-%m-%d %H:%M:%S.%Q (%Z)") 
+| table DateTime Machine ID Transition As Roles LogGroup Error ErrorDescription Reason 
+| sort 0 -DateTime 
+| fillnull value="-"</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 3: severity&gt;=20 event distribution (including roles that refresh/begin/end in the timespan)</title>
+      <input type="text" token="BadEvents" searchWhenChanged="true">
+        <label>Events</label>
+        <default>*</default>
+      </input>
+      <input type="multiselect" token="BadEventRoleToken" searchWhenChanged="true">
+        <label>Roles</label>
+        <choice value="TLog">TLog</choice>
+        <choice value="MasterServer">MasterServer</choice>
+        <choice value="MasterProxyServer">MasterProxyServer (for version &lt;7)</choice>
+        <choice value="Resolver">Resolver</choice>
+        <choice value="ClusterController">ClusterController</choice>
+        <choice value="SharedTLog">SharedTLog</choice>
+        <choice value="LogRouter">LogRouter</choice>
+        <choice value="Coordinator">Coordinator</choice>
+        <choice value="StorageServer">StorageServer</choice>
+        <choice value="CommitProxyServer">CommitProxyServer (for version 7+)</choice>
+        <choice value="GrvProxyServer">GrvProxyServer (for version 7+)</choice>
+        <valuePrefix>As="</valuePrefix>
+        <valueSuffix>"</valueSuffix>
+        <delimiter> OR </delimiter>
+      </input>
+      <input type="dropdown" token="BadEventChartBy" searchWhenChanged="true">
+        <label>By</label>
+        <choice value="Type">EventType</choice>
+        <choice value="Machine">Machine</choice>
+        <choice value="Severity">Severity</choice>
+        <default>Type</default>
+      </input>
+      <input type="text" token="BadEventChartTimeSpanToken" searchWhenChanged="true">
+        <label>TimeSpan</label>
+        <default>5s</default>
+      </input>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    Severity&gt;10 AND $BadEvents$
+| join Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        Type="Role" AND ($BadEventRoleToken$)
+    | dedup ID | table Machine] 
+| table Machine Type Severity _time
+| timechart useother=0 span=$BadEventChartTimeSpanToken$ count by $BadEventChartBy$</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="height">305</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Table 20: Check severity&gt;20 events of roles in the recovery (including the role that refresh/begin/end in the timespan)</title>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ 
+    Severity&gt;10 
+| stats count by Machine Type 
+| rename count as Count 
+| join Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$ 
+        Type="Role" AND ($BadEventRoleToken$)
+    | dedup ID 
+    | eval Role=As."-".ID 
+    | stats list(Role) by Machine 
+    | rename list(Role) as Roles 
+    | table Machine Roles] 
+| table Type Count Roles Machine 
+| sort -Count</query>
+          <earliest>$ReoveryTime.earliest$</earliest>
+          <latest>$ReoveryTime.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">false</option>
+      </table>
+    </panel>
+  </row>
+</form>

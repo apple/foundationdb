@@ -21,52 +21,58 @@
 #ifdef _WIN32
 // This has to come as the first include on Win32 for rand_s() to be found
 #define _CRT_RAND_S
-#include <stdlib.h>
-#include <math.h> // For _set_FMA3_enable workaround in platformInit
-#endif
+#endif // _WIN32
 
-#include <errno.h>
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "flow/Platform.h"
-#include "flow/Platform.actor.h"
-#include "flow/Arena.h"
 
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
-#include "flow/StreamCipher.h"
-#include "flow/BlobCipher.h"
-#endif
-#include "flow/Trace.h"
-#include "flow/Error.h"
-
-#include "flow/Knobs.h"
-
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <cstring>
-#include <algorithm>
+#include <string>
+#include <string_view>
+#include <vector>
 
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include "flow/UnitTest.h"
+
+#include <boost/format.hpp>
+#include <boost/filesystem.hpp>
+#include <boost/filesystem/operations.hpp>
+#include <boost/algorithm/string.hpp>
+
+#include "fmt/format.h"
+
+#include "flow/Arena.h"
+#include "flow/Error.h"
 #include "flow/FaultInjection.h"
-
-#include "fdbrpc/IAsyncFile.h"
-
-#include "fdbclient/AnnotateActor.h"
+#include "flow/Knobs.h"
+#include "flow/Platform.actor.h"
+#include "flow/ScopeExit.h"
+#include "flow/StreamCipher.h"
+#include "flow/Trace.h"
+#include "flow/Trace.h"
+#include "flow/UnitTest.h"
+#include "flow/Util.h"
 
 #ifdef _WIN32
-#include <windows.h>
-#include <winioctl.h>
-#include <io.h>
-#include <psapi.h>
-#include <stdio.h>
+
 #include <conio.h>
 #include <direct.h>
+#include <io.h>
+#include <math.h> // For _set_FMA3_enable workaround in platformInit
 #include <pdh.h>
 #include <pdhmsg.h>
+#include <processenv.h>
+#include <psapi.h>
+#include <stdlib.h>
+#include <windows.h>
+#include <winioctl.h>
+
 #pragma comment(lib, "pdh.lib")
 
 // for SHGetFolderPath
@@ -81,25 +87,24 @@
 #define CANONICAL_PATH_SEPARATOR '/'
 
 #include <dirent.h>
-#include <sys/time.h>
-#include <sys/mman.h>
-#include <unistd.h>
 #include <ftw.h>
 #include <pwd.h>
 #include <sched.h>
+#include <sys/mman.h>
+#include <sys/time.h>
+#include <unistd.h>
+#include <sys/statvfs.h> /* Needed for disk capacity */
+
 #if !defined(__aarch64__) && !defined(__powerpc64__)
 #include <cpuid.h>
 #endif
-
-/* Needed for disk capacity */
-#include <sys/statvfs.h>
 
 /* getifaddrs */
 #include <sys/socket.h>
 #include <ifaddrs.h>
 #include <arpa/inet.h>
 
-#include "flow/stacktrace.h"
+#include "stacktrace/stacktrace.h"
 
 #ifdef __linux__
 /* Needed for memory allocation */
@@ -114,7 +119,7 @@
 #include <signal.h>
 /* Needed for gnu_dev_{major,minor} */
 #include <sys/sysmacros.h>
-#endif
+#endif // __linux__
 
 #ifdef __FreeBSD__
 /* Needed for processor affinity */
@@ -147,29 +152,31 @@
 #include <devstat.h>
 #include <kvm.h>
 #include <libutil.h>
-#endif
+#endif // __FreeBSD__
 
 #ifdef __APPLE__
-#include <sys/uio.h>
-#include <sys/syslimits.h>
-#include <mach/mach.h>
+/* Needed for cross-platform 'environ' */
+#include <crt_externs.h>
 #include <mach-o/dyld.h>
-#include <sys/param.h>
-#include <sys/mount.h>
-#include <sys/sysctl.h>
-#include <netinet/in.h>
-#include <net/if.h>
+#include <mach/mach.h>
 #include <net/if_dl.h>
+#include <net/if.h>
 #include <net/route.h>
+#include <netinet/in.h>
+#include <sys/mount.h>
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#include <sys/syslimits.h>
+#include <sys/uio.h>
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
 #include <IOKit/storage/IOBlockStorageDriver.h>
 #include <IOKit/storage/IOMedia.h>
 #include <IOKit/IOBSD.h>
-#endif
+#endif // __APPLE_
 
-#endif
+#endif // __unixish__
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -403,25 +410,24 @@ uint64_t getMemoryUsage() {
 #endif
 }
 
-#if defined(__linux__)
+#ifdef __linux__
+namespace linux_os {
+
+namespace {
+
 void getMemoryInfo(std::map<StringRef, int64_t>& request, std::stringstream& memInfoStream) {
 	size_t count = request.size();
 	if (count == 0)
 		return;
 
-	while (count > 0 && !memInfoStream.eof()) {
-		std::string key;
-
-		memInfoStream >> key;
+	keyValueReader<std::string, int64_t>(memInfoStream, [&](const std::string& key, const int64_t& value) -> bool {
 		auto item = request.find(StringRef(key));
-		if (item != request.end()) {
-			int64_t value;
-			memInfoStream >> value;
+		if (item != std::end(request)) {
 			item->second = value;
-			count--;
+			--count;
 		}
-		memInfoStream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-	}
+		return count != 0;
+	});
 }
 
 int64_t getLowWatermark(std::stringstream& zoneInfoStream) {
@@ -441,10 +447,8 @@ int64_t getLowWatermark(std::stringstream& zoneInfoStream) {
 
 	return lowWatermark;
 }
-#endif
 
-void getMachineRAMInfo(MachineRAMInfo& memInfo) {
-#if defined(__linux__)
+void getMachineRAMInfoImpl(MachineRAMInfo& memInfo) {
 	std::ifstream zoneInfoFileStream("/proc/zoneinfo", std::ifstream::in);
 	int64_t lowWatermark = 0;
 	if (!zoneInfoFileStream.good()) {
@@ -462,24 +466,22 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 	}
 
 	std::map<StringRef, int64_t> request = {
-		{ LiteralStringRef("MemTotal:"), 0 },       { LiteralStringRef("MemFree:"), 0 },
-		{ LiteralStringRef("MemAvailable:"), -1 },  { LiteralStringRef("Active(file):"), 0 },
-		{ LiteralStringRef("Inactive(file):"), 0 }, { LiteralStringRef("SwapTotal:"), 0 },
-		{ LiteralStringRef("SwapFree:"), 0 },       { LiteralStringRef("SReclaimable:"), 0 },
+		{ "MemTotal:"_sr, 0 },       { "MemFree:"_sr, 0 },   { "MemAvailable:"_sr, -1 }, { "Active(file):"_sr, 0 },
+		{ "Inactive(file):"_sr, 0 }, { "SwapTotal:"_sr, 0 }, { "SwapFree:"_sr, 0 },      { "SReclaimable:"_sr, 0 },
 	};
 
 	std::stringstream memInfoStream;
 	memInfoStream << fileStream.rdbuf();
 	getMemoryInfo(request, memInfoStream);
 
-	int64_t memFree = request[LiteralStringRef("MemFree:")];
-	int64_t pageCache = request[LiteralStringRef("Active(file):")] + request[LiteralStringRef("Inactive(file):")];
-	int64_t slabReclaimable = request[LiteralStringRef("SReclaimable:")];
-	int64_t usedSwap = request[LiteralStringRef("SwapTotal:")] - request[LiteralStringRef("SwapFree:")];
+	int64_t memFree = request["MemFree:"_sr];
+	int64_t pageCache = request["Active(file):"_sr] + request["Inactive(file):"_sr];
+	int64_t slabReclaimable = request["SReclaimable:"_sr];
+	int64_t usedSwap = request["SwapTotal:"_sr] - request["SwapFree:"_sr];
 
-	memInfo.total = 1024 * request[LiteralStringRef("MemTotal:")];
-	if (request[LiteralStringRef("MemAvailable:")] != -1) {
-		memInfo.available = 1024 * (request[LiteralStringRef("MemAvailable:")] - usedSwap);
+	memInfo.total = 1024 * request["MemTotal:"_sr];
+	if (request["MemAvailable:"_sr] != -1) {
+		memInfo.available = 1024 * (request["MemAvailable:"_sr] - usedSwap);
 	} else {
 		memInfo.available =
 		    1024 * (std::max<int64_t>(0,
@@ -489,6 +491,35 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 	}
 
 	memInfo.committed = memInfo.total - memInfo.available;
+}
+
+} // anonymous namespace
+
+std::map<std::string, int64_t> reportCGroupCpuStat() {
+	// Default path to the cpu,cpuacct
+	// See manpages for cgroup
+	static const std::string PATH_TO_CPU_CPUACCT = "/sys/fs/cgroup/cpu,cpuacct/cpu.stat";
+
+	std::map<std::string, int64_t> result;
+	std::ifstream ifs(PATH_TO_CPU_CPUACCT);
+	if (!ifs.is_open()) {
+		return result;
+	}
+
+	keyValueReader<std::string, int64_t>(ifs, [&](const std::string& key, const int64_t& value) -> bool {
+		result[key] = value;
+		return true;
+	});
+
+	return result;
+}
+
+} // namespace linux_os
+#endif // #ifdef __linux__
+
+void getMachineRAMInfo(MachineRAMInfo& memInfo) {
+#if defined(__linux__)
+	linux_os::getMachineRAMInfoImpl(memInfo);
 #elif defined(__FreeBSD__)
 	int status;
 
@@ -1734,15 +1765,10 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 			    0,
 			    returnStats.elapsed -
 			        std::min<double>(returnStats.elapsed, (nowIOMilliSecs - (*statState)->lastIOMilliSecs) / 1000.0));
-			returnStats.processDiskReadSeconds = std::max<double>(
-			    0,
-			    returnStats.elapsed - std::min<double>(returnStats.elapsed,
-			                                           (nowReadMilliSecs - (*statState)->lastReadMilliSecs) / 1000.0));
+			returnStats.processDiskReadSeconds =
+			    std::min<double>(returnStats.elapsed, (nowReadMilliSecs - (*statState)->lastReadMilliSecs) / 1000.0);
 			returnStats.processDiskWriteSeconds =
-			    std::max<double>(0,
-			                     returnStats.elapsed -
-			                         std::min<double>(returnStats.elapsed,
-			                                          (nowWriteMilliSecs - (*statState)->lastWriteMilliSecs) / 1000.0));
+			    std::min<double>(returnStats.elapsed, (nowWriteMilliSecs - (*statState)->lastWriteMilliSecs) / 1000.0);
 			returnStats.processDiskRead = (nowReads - (*statState)->lastReads);
 			returnStats.processDiskWrite = (nowWrites - (*statState)->lastWrites);
 			returnStats.processDiskWriteSectors = (nowWriteSectors - (*statState)->lastWriteSectors);
@@ -1941,6 +1967,39 @@ std::string epochsToGMTString(double epochs) {
 	return timeString;
 }
 
+std::vector<std::string> getEnvironmentKnobOptions() {
+	constexpr const size_t ENVKNOB_PREFIX_LEN = sizeof(ENVIRONMENT_KNOB_OPTION_PREFIX) - 1;
+	std::vector<std::string> knobOptions;
+#if defined(_WIN32)
+	auto e = GetEnvironmentStrings();
+	if (e == nullptr)
+		return {};
+	auto cleanup = ScopeExit([e]() { FreeEnvironmentStrings(e); });
+	while (*e) {
+		auto candidate = std::string_view(e);
+		if (boost::starts_with(candidate, ENVIRONMENT_KNOB_OPTION_PREFIX))
+			knobOptions.emplace_back(candidate.substr(ENVKNOB_PREFIX_LEN));
+		e += (candidate.size() + 1);
+	}
+#else
+	char** e = nullptr;
+#ifdef __linux__
+	e = environ;
+#elif defined(__APPLE__)
+	e = *_NSGetEnviron();
+#else
+#error Port me!
+#endif
+	for (; e && *e; e++) {
+		std::string_view envOption(*e);
+		if (boost::starts_with(envOption, ENVIRONMENT_KNOB_OPTION_PREFIX)) {
+			knobOptions.emplace_back(envOption.substr(ENVKNOB_PREFIX_LEN));
+		}
+	}
+#endif
+	return knobOptions;
+}
+
 void setMemoryQuota(size_t limit) {
 	if (limit == 0) {
 		return;
@@ -2037,7 +2096,53 @@ static void enableLargePages() {
 #endif
 }
 
-static void* allocateInternal(size_t length, bool largePages) {
+#ifndef _WIN32
+static void* mmapSafe(void* addr, size_t len, int prot, int flags, int fd, off_t offset) {
+	void* result = mmap(addr, len, prot, flags, fd, offset);
+	if (result == MAP_FAILED) {
+		int err = errno;
+		fprintf(stderr,
+		        "Error calling mmap(%p, %zu, %d, %d, %d, %jd): %s\n",
+		        addr,
+		        len,
+		        prot,
+		        flags,
+		        fd,
+		        (intmax_t)offset,
+		        strerror(err));
+		fflush(stderr);
+		std::abort();
+	}
+	return result;
+}
+
+static void mprotectSafe(void* p, size_t s, int prot) {
+	if (mprotect(p, s, prot) != 0) {
+		int err = errno;
+		fprintf(stderr, "Error calling mprotect(%p, %zu, %d): %s\n", p, s, prot, strerror(err));
+		fflush(stderr);
+		std::abort();
+	}
+}
+
+static void* mmapInternal(size_t length, int flags, bool guardPages) {
+	if (guardPages && FLOW_KNOBS->FAST_ALLOC_ALLOW_GUARD_PAGES) {
+		static size_t pageSize = sysconf(_SC_PAGESIZE);
+		length = RightAlign(length, pageSize);
+		length += 2 * pageSize; // Map enough for the guard pages
+		void* resultWithGuardPages = mmapSafe(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
+		// left guard page
+		mprotectSafe(resultWithGuardPages, pageSize, PROT_NONE);
+		// right guard page
+		mprotectSafe((void*)(uintptr_t(resultWithGuardPages) + length - pageSize), pageSize, PROT_NONE);
+		return (void*)(uintptr_t(resultWithGuardPages) + pageSize);
+	} else {
+		return mmapSafe(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
+	}
+}
+#endif
+
+static void* allocateInternal(size_t length, bool largePages, bool guardPages) {
 
 #ifdef _WIN32
 	DWORD allocType = MEM_COMMIT | MEM_RESERVE;
@@ -2052,31 +2157,31 @@ static void* allocateInternal(size_t length, bool largePages) {
 	if (largePages)
 		flags |= MAP_HUGETLB;
 
-	return mmap(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
+	return mmapInternal(length, flags, guardPages);
 #elif defined(__APPLE__) || defined(__FreeBSD__)
 	int flags = MAP_PRIVATE | MAP_ANON;
 
-	return mmap(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
+	return mmapInternal(length, flags, guardPages);
 #else
 #error Port me!
 #endif
 }
 
 static bool largeBlockFail = false;
-void* allocate(size_t length, bool allowLargePages) {
+void* allocate(size_t length, bool allowLargePages, bool includeGuardPages) {
 	if (allowLargePages)
 		enableLargePages();
 
 	void* block = ALLOC_FAIL;
 
 	if (allowLargePages && !largeBlockFail) {
-		block = allocateInternal(length, true);
+		block = allocateInternal(length, true, includeGuardPages);
 		if (block == ALLOC_FAIL)
 			largeBlockFail = true;
 	}
 
 	if (block == ALLOC_FAIL)
-		block = allocateInternal(length, false);
+		block = allocateInternal(length, false, includeGuardPages);
 
 	// FIXME: SevWarnAlways trace if "close" to out of memory
 
@@ -2191,7 +2296,9 @@ void renamedFile() {
 void renameFile(std::string const& fromPath, std::string const& toPath) {
 	INJECT_FAULT(io_error, "renameFile"); // rename file failed
 #ifdef _WIN32
-	if (MoveFile(fromPath.c_str(), toPath.c_str())) {
+	if (MoveFileExA(fromPath.c_str(),
+	                toPath.c_str(),
+	                MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
 		// renamedFile();
 		return;
 	}
@@ -2284,8 +2391,11 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 		}
 		f = 0;
 
-		if (!ReplaceFile(path.c_str(), tempfilename.c_str(), nullptr, NULL, nullptr, nullptr))
+		if (!MoveFileExA(tempfilename.c_str(),
+		                 path.c_str(),
+		                 MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
 			throw io_error();
+		}
 #elif defined(__unixish__)
 		if (!g_network->isSimulated()) {
 			if (fsync(fileno(f)) != 0)
@@ -2408,7 +2518,7 @@ bool createDirectory(std::string const& directory) {
 
 const uint8_t separatorChar = CANONICAL_PATH_SEPARATOR;
 StringRef separator(&separatorChar, 1);
-StringRef dotdot = LiteralStringRef("..");
+StringRef dotdot = ".."_sr;
 
 std::string cleanPath(std::string const& path) {
 	std::vector<StringRef> finalParts;
@@ -2476,14 +2586,14 @@ std::string popPath(const std::string& path) {
 	return path.substr(0, i + 1);
 }
 
-std::string abspath(std::string const& path, bool resolveLinks, bool mustExist) {
-	if (path.empty()) {
+std::string abspath(std::string const& path_, bool resolveLinks, bool mustExist) {
+	if (path_.empty()) {
 		Error e = platform_error();
 		Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
-		TraceEvent(sev, "AbsolutePathError").error(e).detail("Path", path);
+		TraceEvent(sev, "AbsolutePathError").error(e).detail("Path", path_);
 		throw e;
 	}
-
+	std::string path = path_.back() == '\\' ? path_.substr(0, path_.size() - 1) : path_;
 	// Returns an absolute path canonicalized to use only CANONICAL_PATH_SEPARATOR
 	INJECT_FAULT(platform_error, "abspath"); // abspath failed
 
@@ -2903,54 +3013,54 @@ int64_t fileSize(std::string const& filename) {
 #endif
 }
 
-std::string readFileBytes(std::string const& filename, int maxSize) {
-	std::string s;
-	FILE* f = fopen(filename.c_str(), "rb" FOPEN_CLOEXEC_MODE);
-	if (!f) {
-		TraceEvent(SevWarn, "FileOpenError")
+size_t readFileBytes(std::string const& filename, uint8_t* buff, size_t len) {
+	std::fstream ifs(filename, std::fstream::in | std::fstream::binary);
+	if (!ifs.good()) {
+		TraceEvent("ileBytes_FileOpenError").detail("Filename", filename).GetLastError();
+		throw io_error();
+	}
+
+	size_t bytesRead = len;
+	ifs.seekg(0, std::fstream::beg);
+	ifs.read((char*)buff, len);
+	if (!ifs) {
+		bytesRead = ifs.gcount();
+		TraceEvent("ReadFileBytes_ShortRead")
 		    .detail("Filename", filename)
-		    .detail("Errno", errno)
-		    .detail("ErrorDescription", strerror(errno));
-		throw file_not_readable();
+		    .detail("Requested", len)
+		    .detail("Actual", bytesRead);
 	}
-	try {
-		fseek(f, 0, SEEK_END);
-		size_t size = ftell(f);
-		if (size > maxSize)
-			throw file_too_large();
-		s.resize(size);
-		fseek(f, 0, SEEK_SET);
-		if (!fread(&s[0], size, 1, f))
-			throw file_not_readable();
-	} catch (...) {
-		fclose(f);
-		throw;
+
+	return bytesRead;
+}
+
+std::string readFileBytes(std::string const& filename, int maxSize) {
+	if (!fileExists(filename)) {
+		TraceEvent("ReadFileBytes_FileNotFound").detail("Filename", filename);
+		throw file_not_found();
 	}
-	fclose(f);
-	return s;
+
+	size_t size = fileSize(filename);
+	if (size > maxSize) {
+		TraceEvent("ReadFileBytes_FileTooLarge").detail("Filename", filename);
+		throw file_too_large();
+	}
+
+	std::string ret;
+	ret.resize(size);
+	readFileBytes(filename, (uint8_t*)ret.data(), size);
+
+	return ret;
 }
 
 void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count) {
-	FILE* f = fopen(filename.c_str(), "wb" FOPEN_CLOEXEC_MODE);
-	if (!f) {
-		TraceEvent(SevError, "WriteFileBytes").detail("Filename", filename).GetLastError();
-		throw file_not_writable();
+	std::ofstream ofs(filename, std::fstream::out | std::fstream::binary);
+	if (!ofs.good()) {
+		TraceEvent("WriteFileBytes_FileOpenError").detail("Filename", filename).GetLastError();
+		throw io_error();
 	}
 
-	try {
-		size_t length = fwrite(data, sizeof(uint8_t), count, f);
-		if (length != count) {
-			TraceEvent(SevError, "WriteFileBytes")
-			    .detail("Filename", filename)
-			    .detail("WrittenLength", length)
-			    .GetLastError();
-			throw file_not_writable();
-		}
-	} catch (...) {
-		fclose(f);
-		throw;
-	}
-	fclose(f);
+	ofs.write((const char*)data, count);
 }
 
 void writeFile(std::string const& filename, std::string const& content) {
@@ -3072,19 +3182,19 @@ void outOfMemory() {
 		char* demangled = abi::__cxa_demangle(i->first, nullptr, nullptr, nullptr);
 		if (demangled) {
 			s = demangled;
-			if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))
-				s = s.substr(LiteralStringRef("(anonymous namespace)::").size());
+			if (StringRef(s).startsWith("(anonymous namespace)::"_sr))
+				s = s.substr("(anonymous namespace)::"_sr.size());
 			free(demangled);
 		} else
 			s = i->first;
 #else
 		s = i->first;
-		if (StringRef(s).startsWith(LiteralStringRef("class `anonymous namespace'::")))
-			s = s.substr(LiteralStringRef("class `anonymous namespace'::").size());
-		else if (StringRef(s).startsWith(LiteralStringRef("class ")))
-			s = s.substr(LiteralStringRef("class ").size());
-		else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
-			s = s.substr(LiteralStringRef("struct ").size());
+		if (StringRef(s).startsWith("class `anonymous namespace'::"_sr))
+			s = s.substr("class `anonymous namespace'::"_sr.size());
+		else if (StringRef(s).startsWith("class "_sr))
+			s = s.substr("class "_sr.size());
+		else if (StringRef(s).startsWith("struct "_sr))
+			s = s.substr("struct "_sr.size());
 #endif
 		typeNames.emplace_back(s, i->first);
 	}
@@ -3164,10 +3274,10 @@ void outOfMemory() {
 }
 
 // Because the lambda used with nftw below cannot capture
-int __eraseDirectoryRecurseiveCount;
+int __eraseDirectoryRecursiveCount;
 
 int eraseDirectoryRecursive(std::string const& dir) {
-	__eraseDirectoryRecurseiveCount = 0;
+	__eraseDirectoryRecursiveCount = 0;
 #ifdef _WIN32
 	system(("rd /s /q \"" + dir + "\"").c_str());
 #elif defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
@@ -3176,7 +3286,7 @@ int eraseDirectoryRecursive(std::string const& dir) {
 	    [](const char* fpath, const struct stat* sb, int typeflag, struct FTW* ftwbuf) -> int {
 		    int r = remove(fpath);
 		    if (r == 0)
-			    ++__eraseDirectoryRecurseiveCount;
+			    ++__eraseDirectoryRecursiveCount;
 		    return r;
 	    },
 	    64,
@@ -3193,25 +3303,62 @@ int eraseDirectoryRecursive(std::string const& dir) {
 #error Port me!
 #endif
 	// INJECT_FAULT( platform_error, "eraseDirectoryRecursive" );
-	return __eraseDirectoryRecurseiveCount;
+	return __eraseDirectoryRecursiveCount;
 }
 
-bool isHwCrcSupported() {
-#if defined(_WIN32)
-	int info[4];
-	__cpuid(info, 1);
-	return (info[2] & (1 << 20)) != 0;
-#elif defined(__aarch64__)
-	return true; /* force to use crc instructions */
-#elif defined(__powerpc64__)
-	return false; /* force not to use crc instructions */
-#elif defined(__unixish__)
-	uint32_t eax, ebx, ecx, edx, level = 1, count = 0;
-	__cpuid_count(level, count, eax, ebx, ecx, edx);
-	return ((ecx >> 20) & 1) != 0;
-#else
-#error Port me!
-#endif
+TmpFile::TmpFile() : filename("") {
+	createTmpFile(boost::filesystem::temp_directory_path().string(), TmpFile::defaultPrefix);
+}
+
+TmpFile::TmpFile(const std::string& tmpDir) : filename("") {
+	std::string dir = removeWhitespace(tmpDir);
+	createTmpFile(dir, TmpFile::defaultPrefix);
+}
+
+TmpFile::TmpFile(const std::string& tmpDir, const std::string& prefix) : filename("") {
+	std::string dir = removeWhitespace(tmpDir);
+	createTmpFile(dir, prefix);
+}
+
+TmpFile::~TmpFile() {
+	if (!filename.empty()) {
+		destroyFile();
+	}
+}
+
+void TmpFile::createTmpFile(const std::string_view dir, const std::string_view prefix) {
+	std::string modelPattern = "%%%%-%%%%-%%%%-%%%%";
+	boost::format fmter("%s/%s-%s");
+	std::string modelPath = boost::str(boost::format(fmter % dir % prefix % modelPattern));
+	boost::filesystem::path filePath = boost::filesystem::unique_path(modelPath);
+
+	filename = filePath.string();
+
+	// Create empty tmp file
+	std::fstream tmpFile(filename, std::fstream::out);
+	if (!tmpFile.good()) {
+		TraceEvent("TmpFile_CreateFileError").detail("Filename", filename);
+		throw io_error();
+	}
+	TraceEvent("TmpFile_CreateSuccess").detail("Filename", filename);
+}
+
+size_t TmpFile::read(uint8_t* buff, size_t len) {
+	return readFileBytes(filename, buff, len);
+}
+
+void TmpFile::write(const uint8_t* buff, size_t len) {
+	writeFileBytes(filename, buff, len);
+}
+
+bool TmpFile::destroyFile() {
+	bool deleted = deleteFile(filename);
+	if (deleted) {
+		TraceEvent("TmpFileDestory_Success").detail("Filename", filename);
+	} else {
+		TraceEvent("TmpFileDestory_Failed").detail("Filename", filename);
+	}
+	return deleted;
 }
 
 } // namespace platform
@@ -3384,7 +3531,12 @@ void* loadLibrary(const char* lib_path) {
 	void* dlobj = nullptr;
 
 #if defined(__unixish__)
-	dlobj = dlopen(lib_path, RTLD_LAZY | RTLD_LOCAL);
+	dlobj = dlopen(lib_path,
+	               RTLD_LAZY | RTLD_LOCAL
+#ifdef USE_SANITIZER // Keep alive dlopen()-ed libs for symbolized XSAN backtrace
+	                   | RTLD_NODELETE
+#endif
+	);
 	if (dlobj == nullptr) {
 		TraceEvent(SevWarn, "LoadLibraryFailed").detail("Library", lib_path).detail("Error", dlerror());
 	}
@@ -3496,6 +3648,12 @@ void platformInit() {
 #endif
 }
 
+std::vector<std::function<void()>> g_crashHandlerCallbacks;
+
+void registerCrashHandlerCallback(void (*f)()) {
+	g_crashHandlerCallbacks.push_back(f);
+}
+
 // The crashHandler function is registered to handle signals before the process terminates.
 // Basic information about the crash is printed/traced, and stdout and trace events are flushed.
 void crashHandler(int sig) {
@@ -3504,13 +3662,19 @@ void crashHandler(int sig) {
 	//  but the idea is that we're about to crash anyway...
 	std::string backtrace = platform::get_backtrace();
 
-	bool error = (sig != SIGUSR2);
+	bool error = (sig != SIGUSR2 && sig != SIGTERM);
 
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 	StreamCipherKey::cleanup();
 	StreamCipher::cleanup();
-	BlobCipherKeyCache::cleanup();
-#endif
+
+	for (auto& f : g_crashHandlerCallbacks) {
+		f();
+	}
+
+	fprintf(error ? stderr : stdout, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
+	if (error) {
+		fprintf(stderr, "Trace: %s\n", backtrace.c_str());
+	}
 
 	fflush(stdout);
 	{
@@ -3522,8 +3686,9 @@ void crashHandler(int sig) {
 	}
 	flushTraceFileVoid();
 
-	fprintf(stderr, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
-	fprintf(stderr, "Trace: %s\n", backtrace.c_str());
+#ifdef USE_GCOV
+	__gcov_flush();
+#endif
 
 	struct sigaction sa;
 	sa.sa_handler = SIG_DFL;
@@ -3563,6 +3728,15 @@ void registerCrashHandler() {
 	sigaction(SIGSEGV, &action, nullptr);
 	sigaction(SIGBUS, &action, nullptr);
 	sigaction(SIGUSR2, &action, nullptr);
+#ifdef USE_GCOV
+	// SIGTERM is the "graceful" way to end an fdbserver process, so we actually
+	// don't want to invoke crashHandler. crashHandler is not actually
+	// async-signal-safe, so we can only justify calling it if we were going to
+	// crash anyway. For USE_GCOV though we need to flush coverage info, which
+	// we do through crashHandler.
+	sigaction(SIGTERM, &action, nullptr);
+#endif
+	sigaction(SIGABRT, &action, nullptr);
 #else
 	// No crash handler for other platforms!
 #endif
@@ -3858,21 +4032,19 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 	                        "VmallocUsed:      410576 kB\n";
 
 	std::map<StringRef, int64_t> request = {
-		{ LiteralStringRef("MemTotal:"), 0 },     { LiteralStringRef("MemFree:"), 0 },
-		{ LiteralStringRef("MemAvailable:"), 0 }, { LiteralStringRef("Buffers:"), 0 },
-		{ LiteralStringRef("Cached:"), 0 },       { LiteralStringRef("SwapTotal:"), 0 },
-		{ LiteralStringRef("SwapFree:"), 0 },
+		{ "MemTotal:"_sr, 0 }, { "MemFree:"_sr, 0 },   { "MemAvailable:"_sr, 0 }, { "Buffers:"_sr, 0 },
+		{ "Cached:"_sr, 0 },   { "SwapTotal:"_sr, 0 }, { "SwapFree:"_sr, 0 },
 	};
 
 	std::stringstream memInfoStream(memString);
-	getMemoryInfo(request, memInfoStream);
-	ASSERT(request[LiteralStringRef("MemTotal:")] == 24733228);
-	ASSERT(request[LiteralStringRef("MemFree:")] == 2077580);
-	ASSERT(request[LiteralStringRef("MemAvailable:")] == 0);
-	ASSERT(request[LiteralStringRef("Buffers:")] == 266940);
-	ASSERT(request[LiteralStringRef("Cached:")] == 16798292);
-	ASSERT(request[LiteralStringRef("SwapTotal:")] == 25165820);
-	ASSERT(request[LiteralStringRef("SwapFree:")] == 23680228);
+	linux_os::getMemoryInfo(request, memInfoStream);
+	ASSERT(request["MemTotal:"_sr] == 24733228);
+	ASSERT(request["MemFree:"_sr] == 2077580);
+	ASSERT(request["MemAvailable:"_sr] == 0);
+	ASSERT(request["Buffers:"_sr] == 266940);
+	ASSERT(request["Cached:"_sr] == 16798292);
+	ASSERT(request["SwapTotal:"_sr] == 25165820);
+	ASSERT(request["SwapFree:"_sr] == 23680228);
 	for (auto& item : request) {
 		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}
@@ -3916,14 +4088,14 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 	                         "AnonHugePages:   1275904 kB\n";
 
 	std::stringstream memInfoStream1(memString1);
-	getMemoryInfo(request, memInfoStream1);
-	ASSERT(request[LiteralStringRef("MemTotal:")] == 31856496);
-	ASSERT(request[LiteralStringRef("MemFree:")] == 25492716);
-	ASSERT(request[LiteralStringRef("MemAvailable:")] == 28470756);
-	ASSERT(request[LiteralStringRef("Buffers:")] == 313644);
-	ASSERT(request[LiteralStringRef("Cached:")] == 2956444);
-	ASSERT(request[LiteralStringRef("SwapTotal:")] == 0);
-	ASSERT(request[LiteralStringRef("SwapFree:")] == 0);
+	linux_os::getMemoryInfo(request, memInfoStream1);
+	ASSERT(request["MemTotal:"_sr] == 31856496);
+	ASSERT(request["MemFree:"_sr] == 25492716);
+	ASSERT(request["MemAvailable:"_sr] == 28470756);
+	ASSERT(request["Buffers:"_sr] == 313644);
+	ASSERT(request["Cached:"_sr] == 2956444);
+	ASSERT(request["SwapTotal:"_sr] == 0);
+	ASSERT(request["SwapFree:"_sr] == 0);
 	for (auto& item : request) {
 		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}

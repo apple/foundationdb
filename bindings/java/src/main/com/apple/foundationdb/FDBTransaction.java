@@ -32,6 +32,12 @@ import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionConsumer {
+
+	static public final int MATCH_INDEX_ALL = 0;
+	static public final int MATCH_INDEX_NONE = 1;
+	static public final int MATCH_INDEX_MATCHED_ONLY = 2;
+	static public final int MATCH_INDEX_UNMATCHED_ONLY = 3;
+
 	private final Database database;
 	private final Executor executor;
 	private final TransactionOptions options;
@@ -92,8 +98,14 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		}
 
 		@Override
+		public CompletableFuture<KeyRangeArrayResult> getBlobGranuleRanges(byte[] begin, byte[] end, int rowLimit) {
+			return FDBTransaction.this.getBlobGranuleRanges(begin, end, rowLimit);
+		}
+
+		@Override
 		public AsyncIterable<MappedKeyValue> getMappedRange(KeySelector begin, KeySelector end, byte[] mapper,
-		                                                        int limit, boolean reverse, StreamingMode mode) {
+		                                                    int limit, int matchIndex, boolean reverse,
+		                                                    StreamingMode mode) {
 
 			throw new UnsupportedOperationException("getMappedRange is only supported in serializable");
 		}
@@ -346,12 +358,23 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	@Override
-	public AsyncIterable<MappedKeyValue> getMappedRange(KeySelector begin, KeySelector end, byte[] mapper,
-	                                                        int limit, boolean reverse, StreamingMode mode) {
+	public CompletableFuture<KeyRangeArrayResult> getBlobGranuleRanges(byte[] begin, byte[] end, int rowLimit) {
+		pointerReadLock.lock();
+		try {
+			return new FutureKeyRangeArray(Transaction_getBlobGranuleRanges(getPtr(), begin, end, rowLimit), executor);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
+	public AsyncIterable<MappedKeyValue> getMappedRange(KeySelector begin, KeySelector end, byte[] mapper, int limit,
+	                                                    int matchIndex, boolean reverse, StreamingMode mode) {
 		if (mapper == null) {
 			throw new IllegalArgumentException("Mapper must be non-null");
 		}
-		return new MappedRangeQuery(FDBTransaction.this, false, begin, end, mapper, limit, reverse, mode, eventKeeper);
+		return new MappedRangeQuery(FDBTransaction.this, false, begin, end, mapper, limit, matchIndex, reverse, mode,
+		                            eventKeeper);
 	}
 
 	///////////////////
@@ -456,7 +479,8 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	protected FutureMappedResults getMappedRange_internal(KeySelector begin, KeySelector end,
 	                                                      byte[] mapper, // Nullable
 	                                                      int rowLimit, int targetBytes, int streamingMode,
-	                                                      int iteration, boolean isSnapshot, boolean reverse) {
+	                                                      int iteration, boolean isSnapshot, boolean reverse,
+	                                                      int matchIndex) {
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
 		}
@@ -467,9 +491,9 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			    begin.toString(), end.toString(), rowLimit, targetBytes, streamingMode,
 			    iteration, Boolean.toString(isSnapshot), Boolean.toString(reverse)));*/
 			return new FutureMappedResults(
-			    Transaction_getMappedRange(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
-			                                   end.getKey(), end.orEqual(), end.getOffset(), mapper, rowLimit,
-			                                   targetBytes, streamingMode, iteration, isSnapshot, reverse),
+			    Transaction_getMappedRange(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(), end.getKey(),
+			                               end.orEqual(), end.getOffset(), mapper, rowLimit, targetBytes, streamingMode,
+			                               iteration, matchIndex, isSnapshot, reverse),
 			    FDB.instance().isDirectBufferQueriesEnabled(), executor, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
@@ -809,12 +833,11 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			byte[] keyEnd, boolean orEqualEnd, int offsetEnd,
 			int rowLimit, int targetBytes, int streamingMode, int iteration,
 			boolean isSnapshot, boolean reverse);
-	private native long Transaction_getMappedRange(long cPtr, byte[] keyBegin, boolean orEqualBegin,
-	                                                   int offsetBegin, byte[] keyEnd, boolean orEqualEnd,
-	                                                   int offsetEnd,
-	                                                   byte[] mapper, // Nonnull
-	                                                   int rowLimit, int targetBytes, int streamingMode, int iteration,
-	                                                   boolean isSnapshot, boolean reverse);
+	private native long Transaction_getMappedRange(long cPtr, byte[] keyBegin, boolean orEqualBegin, int offsetBegin,
+	                                               byte[] keyEnd, boolean orEqualEnd, int offsetEnd,
+	                                               byte[] mapper, // Nonnull
+	                                               int rowLimit, int targetBytes, int streamingMode, int iteration,
+	                                               int matchIndex, boolean isSnapshot, boolean reverse);
 	private native void Transaction_addConflictRange(long cPtr,
 			byte[] keyBegin, byte[] keyEnd, int conflictRangeType);
 	private native void Transaction_set(long cPtr, byte[] key, byte[] value);
@@ -834,4 +857,5 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	private native long Transaction_getKeyLocations(long cPtr, byte[] key);
 	private native long Transaction_getEstimatedRangeSizeBytes(long cPtr, byte[] keyBegin, byte[] keyEnd);
 	private native long Transaction_getRangeSplitPoints(long cPtr, byte[] keyBegin, byte[] keyEnd, long chunkSize);
+	private native long Transaction_getBlobGranuleRanges(long cPtr, byte[] keyBegin, byte[] keyEnd, int rowLimit);
 }

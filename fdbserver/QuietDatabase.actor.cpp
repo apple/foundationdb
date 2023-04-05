@@ -20,6 +20,7 @@
 
 #include <cinttypes>
 #include <vector>
+#include <type_traits>
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/SystemData.h"
@@ -34,10 +35,11 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/Status.h"
+#include "fdbserver/Status.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include <boost/lexical_cast.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/flow.h"
 
 ACTOR Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags = 0) {
 	loop {
@@ -109,8 +111,8 @@ ACTOR Future<WorkerInterface> getDataDistributorWorker(Database cx, Reference<As
 ACTOR Future<int64_t> getDataInFlight(Database cx, WorkerInterface distributorWorker) {
 	try {
 		TraceEvent("DataInFlight").detail("Stage", "ContactingDataDistributor");
-		TraceEventFields md = wait(timeoutError(
-		    distributorWorker.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlight"))), 1.0));
+		TraceEventFields md = wait(
+		    timeoutError(distributorWorker.eventLogRequest.getReply(EventLogRequest("TotalDataInFlight"_sr)), 1.0));
 		int64_t dataInFlight = boost::lexical_cast<int64_t>(md.getValue("TotalBytes"));
 		return dataInFlight;
 	} catch (Error& e) {
@@ -140,6 +142,10 @@ int64_t getQueueSize(const TraceEventFields& md) {
 	return inputBytes - durableBytes;
 }
 
+int64_t getDurableVersion(const TraceEventFields& md) {
+	return boost::lexical_cast<int64_t>(md.getValue("DurableVersion"));
+}
+
 // Computes the popped version lag for tlogs
 int64_t getPoppedVersionLag(const TraceEventFields& md) {
 	int64_t persistentDataDurableVersion = boost::lexical_cast<int64_t>(md.getValue("PersistentDataDurableVersion"));
@@ -161,9 +167,8 @@ ACTOR Future<std::vector<WorkerInterface>> getCoordWorkers(Database cx,
 	if (!coordinators.present()) {
 		throw operation_failed();
 	}
-	state ClusterConnectionString ccs(coordinators.get().toString());
-	wait(ccs.resolveHostnames());
-	std::vector<NetworkAddress> coordinatorsAddr = ccs.coordinators();
+	ClusterConnectionString ccs(coordinators.get().toString());
+	std::vector<NetworkAddress> coordinatorsAddr = wait(ccs.tryResolveHostnames());
 	std::set<NetworkAddress> coordinatorsAddrSet;
 	for (const auto& addr : coordinatorsAddr) {
 		TraceEvent(SevDebug, "CoordinatorAddress").detail("Addr", addr);
@@ -230,7 +235,9 @@ ACTOR Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
 }
 
 // Returns a vector of blob worker interfaces which have been persisted under the system key space
-ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx, bool use_system_priority = false) {
+ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx,
+                                                              bool use_system_priority = false,
+                                                              Version* grv = nullptr) {
 	state Transaction tr(cx);
 	loop {
 		if (use_system_priority) {
@@ -246,6 +253,9 @@ ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx, bool 
 			blobWorkers.reserve(blobWorkersList.size());
 			for (int i = 0; i < blobWorkersList.size(); i++) {
 				blobWorkers.push_back(decodeBlobWorkerListValue(blobWorkersList[i].value));
+			}
+			if (grv) {
+				*grv = tr.getReadVersion().get();
 			}
 			return blobWorkers;
 		} catch (Error& e) {
@@ -290,7 +300,7 @@ getStorageWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo, b
 	    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
 		    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		    return tr->get(LiteralStringRef("usable_regions").withPrefix(configKeysPrefix));
+		    return tr->get("usable_regions"_sr.withPrefix(configKeysPrefix));
 	    }));
 	int usableRegions = 1;
 	if (regionsValue.present()) {
@@ -354,23 +364,42 @@ int64_t extractMaxQueueSize(const std::vector<Future<TraceEventFields>>& message
 }
 
 // Timeout wrapper when getting the storage metrics. This will do some additional tracing
-ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInterface wi) {
-	state Future<TraceEventFields> result =
-	    wi.eventLogRequest.getReply(EventLogRequest(StringRef(storage.toString() + "/StorageMetrics")));
-	state Future<Void> timeout = delay(1.0);
-	choose {
-		when(TraceEventFields res = wait(result)) { return res; }
-		when(wait(timeout)) {
+ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInterface wi, Version version) {
+	state int retries = 0;
+	loop {
+		++retries;
+		state Future<TraceEventFields> result =
+		    wi.eventLogRequest.getReply(EventLogRequest(StringRef(storage.toString() + "/StorageMetrics")));
+		state Future<Void> timeout = delay(30.0);
+		choose {
+			when(TraceEventFields res = wait(result)) {
+				if (version == invalidVersion || getDurableVersion(res) >= static_cast<int64_t>(version)) {
+					return res;
+				}
+			}
+			when(wait(timeout)) {
+				TraceEvent("QuietDatabaseFailure")
+				    .detail("Reason", "Could not fetch StorageMetrics")
+				    .detail("Storage", format("%016" PRIx64, storage.first()));
+				throw timed_out();
+			}
+		}
+		if (retries > 30) {
 			TraceEvent("QuietDatabaseFailure")
-			    .detail("Reason", "Could not fetch StorageMetrics")
-			    .detail("Storage", format("%016" PRIx64, storage.first()));
+			    .detail("Reason", "Could not fetch StorageMetrics x30")
+			    .detail("Storage", format("%016" PRIx64, storage.first()))
+			    .detail("Version", version);
 			throw timed_out();
 		}
+		wait(delay(1.0));
 	}
-};
+}
 
 // Gets the maximum size of all the storage server queues
-ACTOR Future<int64_t> getMaxStorageServerQueueSize(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+ACTOR Future<int64_t> getMaxStorageServerQueueSize(Database cx,
+                                                   Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                                   Version version) {
+
 	TraceEvent("MaxStorageServerQueueSize").detail("Stage", "ContactingStorageServers");
 
 	Future<std::vector<StorageServerInterface>> serversFuture = getStorageServers(cx);
@@ -393,7 +422,7 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize(Database cx, Reference<AsyncV
 			    .detail("SS", servers[i].id());
 			throw attribute_not_found();
 		}
-		messages.push_back(getStorageMetricsTimeout(servers[i].id(), itr->second));
+		messages.push_back(getStorageMetricsTimeout(servers[i].id(), itr->second, version));
 	}
 
 	wait(waitForAll(messages));
@@ -411,8 +440,8 @@ ACTOR Future<int64_t> getDataDistributionQueueSize(Database cx,
 	try {
 		TraceEvent("DataDistributionQueueSize").detail("Stage", "ContactingDataDistributor");
 
-		TraceEventFields movingDataMessage = wait(timeoutError(
-		    distributorWorker.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MovingData"))), 1.0));
+		TraceEventFields movingDataMessage =
+		    wait(timeoutError(distributorWorker.eventLogRequest.getReply(EventLogRequest("MovingData"_sr)), 1.0));
 
 		TraceEvent("DataDistributionQueueSize").detail("Stage", "GotString");
 
@@ -454,8 +483,7 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "ContactingMaster");
 
 			TraceEventFields teamCollectionInfoMessage = wait(timeoutError(
-			    dataDistributorWorker.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TeamCollectionInfo"))),
-			    1.0));
+			    dataDistributorWorker.eventLogRequest.getReply(EventLogRequest("TeamCollectionInfo"_sr)), 1.0));
 
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "GotString");
 
@@ -562,8 +590,8 @@ ACTOR Future<bool> getDataDistributionActive(Database cx, WorkerInterface distri
 	try {
 		TraceEvent("DataDistributionActive").detail("Stage", "ContactingDataDistributor");
 
-		TraceEventFields activeMessage = wait(timeoutError(
-		    distributorWorker.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStarting"))), 1.0));
+		TraceEventFields activeMessage = wait(
+		    timeoutError(distributorWorker.eventLogRequest.getReply(EventLogRequest("DDTrackerStarting"_sr)), 1.0));
 
 		return activeMessage.getValue("State") == "Active";
 	} catch (Error& e) {
@@ -628,9 +656,9 @@ ACTOR Future<int64_t> getVersionOffset(Database cx,
 ACTOR Future<Void> repairDeadDatacenter(Database cx,
                                         Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                         std::string context) {
-	if (g_network->isSimulated() && g_simulator.usableRegions > 1) {
-		bool primaryDead = g_simulator.datacenterDead(g_simulator.primaryDcId);
-		bool remoteDead = g_simulator.datacenterDead(g_simulator.remoteDcId);
+	if (g_network->isSimulated() && g_simulator->usableRegions > 1) {
+		bool primaryDead = g_simulator->datacenterDead(g_simulator->primaryDcId);
+		bool remoteDead = g_simulator->datacenterDead(g_simulator->remoteDcId);
 
 		// FIXME: the primary and remote can both be considered dead because excludes are not handled properly by the
 		// datacenterDead function
@@ -644,10 +672,10 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
 			    .detail("Stage", "Repopulate")
 			    .detail("RemoteDead", remoteDead)
 			    .detail("PrimaryDead", primaryDead);
-			g_simulator.usableRegions = 1;
+			g_simulator->usableRegions = 1;
 			wait(success(ManagementAPI::changeConfig(
 			    cx.getReference(),
-			    (primaryDead ? g_simulator.disablePrimary : g_simulator.disableRemote) + " repopulate_anti_quorum=1",
+			    (primaryDead ? g_simulator->disablePrimary : g_simulator->disableRemote) + " repopulate_anti_quorum=1",
 			    true)));
 			while (dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED) {
 				wait(dbInfo->onChange());
@@ -670,6 +698,64 @@ ACTOR Future<Void> reconfigureAfter(Database cx,
 	return Void();
 }
 
+struct QuietDatabaseChecker {
+	double start = now();
+	double maxDDRunTime;
+
+	QuietDatabaseChecker(double maxDDRunTime) : maxDDRunTime(maxDDRunTime) {}
+
+	struct Impl {
+		double start;
+		std::string const& phase;
+		double maxDDRunTime;
+		std::vector<std::string> failReasons;
+
+		Impl(double start, const std::string& phase, const double maxDDRunTime)
+		  : start(start), phase(phase), maxDDRunTime(maxDDRunTime) {}
+
+		template <class T, class Comparison = std::less_equal<>>
+		Impl& add(BaseTraceEvent& evt,
+		          const char* name,
+		          T value,
+		          T expected,
+		          Comparison const& cmp = std::less_equal<>()) {
+			std::string k = fmt::format("{}Gate", name);
+			evt.detail(name, value).detail(k.c_str(), expected);
+			if (!cmp(value, expected)) {
+				failReasons.push_back(name);
+			}
+			return *this;
+		}
+
+		bool success() {
+			bool timedOut = now() - start > maxDDRunTime;
+			if (!failReasons.empty()) {
+				std::string traceMessage = fmt::format("QuietDatabase{}Fail", phase);
+				std::string reasons = fmt::format("{}", fmt::join(failReasons, ", "));
+				TraceEvent(timedOut ? SevError : SevWarnAlways, traceMessage.c_str())
+				    .detail("Reasons", reasons)
+				    .detail("FailedAfter", now() - start)
+				    .detail("Timeout", maxDDRunTime);
+				if (timedOut) {
+					// this bool is just created to make the assertion more readable
+					bool ddGotStuck = true;
+					// This assertion is here to make the test fail more quickly. If quietDatabase takes this
+					// long without completing, we can assume that the test will eventually time out. However,
+					// time outs are more annoying to debug. This will hopefully be easier to track down.
+					ASSERT(!ddGotStuck || !g_network->isSimulated());
+				}
+				return false;
+			}
+			return true;
+		}
+	};
+
+	Impl startIteration(std::string const& phase) const {
+		Impl res(start, phase, maxDDRunTime);
+		return res;
+	}
+};
+
 // Waits until a database quiets down (no data in flight, small tlog queue, low SQ, no active data distribution). This
 // requires the database to be available and healthy in order to succeed.
 ACTOR Future<Void> waitForQuietDatabase(Database cx,
@@ -681,6 +767,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
                                         int64_t maxDataDistributionQueueSize = 0,
                                         int64_t maxPoppedVersionLag = 30e6,
                                         int64_t maxVersionOffset = 1e6) {
+	state QuietDatabaseChecker checker(isBuggifyEnabled(BuggifyType::General) ? 4000.0 : 1000.0);
 	state Future<Void> reconfig =
 	    reconfigureAfter(cx, 100 + (deterministicRandom()->random01() * 100), dbInfo, "QuietDatabase");
 	state Future<int64_t> dataInFlight;
@@ -707,7 +794,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	// To get around this, quiet Database will disable the perpetual wiggle in the setup phase.
 
 	printf("Set perpetual_storage_wiggle=0 ...\n");
-	wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
+	state Version version = wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
 	printf("Set perpetual_storage_wiggle=0 Done.\n");
 
 	// Require 3 consecutive successful quiet database checks spaced 2 second apart
@@ -724,7 +811,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 			tLogQueueInfo = getTLogQueueInfo(cx, dbInfo);
 			dataDistributionQueueSize = getDataDistributionQueueSize(cx, distributorWorker, dataInFlightGate == 0);
 			teamCollectionValid = getTeamCollectionValid(cx, distributorWorker);
-			storageQueueSize = getMaxStorageServerQueueSize(cx, dbInfo);
+			storageQueueSize = getMaxStorageServerQueueSize(cx, dbInfo, version);
 			dataDistributionActive = getDataDistributionActive(cx, distributorWorker);
 			storageServersRecruiting = getStorageServersRecruiting(cx, distributorWorker, distributorUID);
 			versionOffset = getVersionOffset(cx, distributorWorker, dbInfo);
@@ -733,35 +820,26 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 			     success(teamCollectionValid) && success(storageQueueSize) && success(dataDistributionActive) &&
 			     success(storageServersRecruiting) && success(versionOffset));
 
-			TraceEvent(("QuietDatabase" + phase).c_str())
-			    .detail("DataInFlight", dataInFlight.get())
-			    .detail("DataInFlightGate", dataInFlightGate)
-			    .detail("MaxTLogQueueSize", tLogQueueInfo.get().first)
-			    .detail("MaxTLogQueueGate", maxTLogQueueGate)
-			    .detail("MaxTLogPoppedVersionLag", tLogQueueInfo.get().second)
-			    .detail("MaxTLogPoppedVersionLagGate", maxPoppedVersionLag)
-			    .detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
-			    .detail("DataDistributionQueueSizeGate", maxDataDistributionQueueSize)
-			    .detail("TeamCollectionValid", teamCollectionValid.get())
-			    .detail("MaxStorageQueueSize", storageQueueSize.get())
-			    .detail("MaxStorageServerQueueGate", maxStorageServerQueueGate)
-			    .detail("DataDistributionActive", dataDistributionActive.get())
-			    .detail("StorageServersRecruiting", storageServersRecruiting.get())
-			    .detail("RecoveryCount", dbInfo->get().recoveryCount)
-			    .detail("VersionOffset", versionOffset.get())
-			    .detail("NumSuccesses", numSuccesses);
-
 			maxVersionOffset += dbInfo->get().recoveryCount * SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT;
-			if (dataInFlight.get() > dataInFlightGate || tLogQueueInfo.get().first > maxTLogQueueGate ||
-			    tLogQueueInfo.get().second > maxPoppedVersionLag ||
-			    dataDistributionQueueSize.get() > maxDataDistributionQueueSize ||
-			    storageQueueSize.get() > maxStorageServerQueueGate || !dataDistributionActive.get() ||
-			    storageServersRecruiting.get() || versionOffset.get() > maxVersionOffset ||
-			    !teamCollectionValid.get()) {
 
-				wait(delay(1.0));
-				numSuccesses = 0;
-			} else {
+			auto check = checker.startIteration(phase);
+
+			std::string evtType = "QuietDatabase" + phase;
+			TraceEvent evt(evtType.c_str());
+			check.add(evt, "DataInFlight", dataInFlight.get(), dataInFlightGate)
+			    .add(evt, "MaxTLogQueueSize", tLogQueueInfo.get().first, maxTLogQueueGate)
+			    .add(evt, "MaxTLogPoppedVersionLag", tLogQueueInfo.get().second, maxPoppedVersionLag)
+			    .add(evt, "DataDistributionQueueSize", dataDistributionQueueSize.get(), maxDataDistributionQueueSize)
+			    .add(evt, "TeamCollectionValid", teamCollectionValid.get(), true, std::equal_to<>())
+			    .add(evt, "MaxStorageQueueSize", storageQueueSize.get(), maxStorageServerQueueGate)
+			    .add(evt, "DataDistributionActive", dataDistributionActive.get(), true, std::equal_to<>())
+			    .add(evt, "StorageServersRecruiting", storageServersRecruiting.get(), false, std::equal_to<>())
+			    .add(evt, "VersionOffset", versionOffset.get(), maxVersionOffset);
+
+			evt.detail("RecoveryCount", dbInfo->get().recoveryCount).detail("NumSuccesses", numSuccesses);
+			evt.log();
+
+			if (check.success()) {
 				if (++numSuccesses == 3) {
 					auto msg = "QuietDatabase" + phase + "Done";
 					TraceEvent(msg.c_str()).log();
@@ -769,6 +847,9 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 				} else {
 					wait(delay(g_network->isSimulated() ? 2.0 : 30.0));
 				}
+			} else {
+				wait(delay(1.0));
+				numSuccesses = 0;
 			}
 		} catch (Error& e) {
 			TraceEvent(("QuietDatabase" + phase + "Error").c_str()).errorUnsuppressed(e);

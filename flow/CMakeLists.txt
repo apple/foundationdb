@@ -1,194 +1,122 @@
 find_package(Threads REQUIRED)
 
-set(FLOW_SRCS
-  ActorCollection.actor.cpp
-  ActorCollection.h
-  Arena.cpp
-  Arena.h
-  ArgParseUtil.h
-  AsioReactor.h
-  BooleanParam.h
-  BlobCipher.h
-  BlobCipher.cpp
-  CompressedInt.actor.cpp
-  CompressedInt.h
-  Deque.cpp
-  Deque.h
-  DeterministicRandom.cpp
-  DeterministicRandom.h
-  Error.cpp
-  Error.h
-  EventTypes.actor.h
-  FastAlloc.cpp
-  FastAlloc.h
-  FastRef.h
-  FaultInjection.cpp
-  FaultInjection.h
-  FileTraceLogWriter.cpp
-  FileTraceLogWriter.h
-  Hash3.c
-  Hash3.h
-  Histogram.cpp
-  Histogram.h
-  Hostname.actor.cpp
-  Hostname.h
-  IDispatched.h
-  IRandom.h
-  IThreadPoolTest.actor.cpp
-  IThreadPool.cpp
-  IThreadPool.h
-  ITrace.h
-  IndexedSet.actor.h
-  IndexedSet.cpp
-  IndexedSet.h
-  JsonTraceLogFormatter.cpp
-  JsonTraceLogFormatter.h
-  Knobs.cpp
-  Knobs.h
-  MetricSample.h
-  Net2.actor.cpp
-  Net2Packet.cpp
-  Net2Packet.h
-  Platform.actor.cpp
-  Platform.actor.h
-  Platform.h
-  Profiler.actor.cpp
-  Profiler.h
-  SendBufferIterator.h
-  SignalSafeUnwind.cpp
-  SignalSafeUnwind.h
-  SimpleOpt.h
-  StreamCipher.h
-  SystemMonitor.cpp
-  SystemMonitor.h
-  TDMetric.actor.h
-  TDMetric.cpp
-  TLSConfig.actor.cpp
-  TLSConfig.actor.h
-  ThreadHelper.actor.h
-  ThreadHelper.actor.cpp
-  ThreadPrimitives.cpp
-  ThreadPrimitives.h
-  ThreadSafeQueue.h
-  Trace.cpp
-  Trace.h
-  Tracing.h
-  Tracing.actor.cpp
-  TreeBenchmark.h
-  TypeTraits.h
-  UnitTest.cpp
-  UnitTest.h
-  WriteOnlySet.actor.cpp
-  XmlTraceLogFormatter.cpp
-  XmlTraceLogFormatter.h
-  actorcompiler.h
-  crc32c.h
-  crc32c.cpp
-  error_definitions.h
-  ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h
-  flat_buffers.cpp
-  flat_buffers.h
-  flow.cpp
-  flow.h
-  genericactors.actor.cpp
-  genericactors.actor.h
-  network.cpp
-  network.h
-  rte_memcpy.h
-  serialize.cpp
-  serialize.h
-  stacktrace.h
-  test_memcpy.cpp
-  test_memcpy_perf.cpp
-  version.cpp
-  xxhash.c
-  xxhash.h)
+option(FLOW_USE_ZSTD "Enable zstd compression in flow" OFF)
 
-if(WITH_TLS)
-  set(FLOW_SRCS
-    ${FLOW_SRCS}
-    StreamCipher.cpp)
+fdb_find_sources(FLOW_SRCS)
+
+if (FLOW_USE_ZSTD)
+  # NOTE: To enable boost::iostreams with zstd library support, manually add
+  # zstd.cpp to source files is required. Ref:
+  #   https://www.boost.org/doc/libs/1_79_0/libs/iostreams/doc/installation.html
+  list(APPEND FLOW_SRCS ../contrib/boost_zstd/zstd.cpp)
 endif()
 
-add_library(stacktrace stacktrace.amalgamation.cpp stacktrace.h)
-if (USE_ASAN)
-  target_compile_definitions(stacktrace PRIVATE ADDRESS_SANITIZER)
-elseif(USE_MSAN)
-  target_compile_definitions(stacktrace PRIVATE MEMORY_SANITIZER)
-elseif(USE_UBSAN)
-  target_compile_definitions(stacktrace PRIVATE UNDEFINED_BEHAVIOR_SANITIZER)
-elseif(USE_TSAN)
-  target_compile_definitions(stacktrace PRIVATE THREAD_SANITIZER DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL=1)
-endif()
-
-if(UNIX AND NOT APPLE)
-  list(APPEND FLOW_SRCS folly_memcpy.S)
-endif()
+# Remove files with `main` defined so we can create a link test executable.
+list(REMOVE_ITEM FLOW_SRCS TLSTest.cpp)
+list(REMOVE_ITEM FLOW_SRCS MkCertCli.cpp)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  list(APPEND FLOW_SRCS aarch64/memcmp.S aarch64/memcpy.S)
+    list(APPEND FLOW_SRCS aarch64/memcmp.S aarch64/memcpy.S)
 endif()
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config.h)
+make_directory(${CMAKE_CURRENT_BINARY_DIR}/include/flow)
+set(FDB_API_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/ApiVersions.cmake" CACHE STRING "Api version cmake file." FORCE)
+include(${FDB_API_VERSION_FILE})
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ApiVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/flow/ApiVersion.h)
+set(FDB_PROTOCOL_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/ProtocolVersions.cmake" CACHE STRING "Protocol version cmake file." FORCE)
+include(${FDB_PROTOCOL_VERSION_FILE})
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ProtocolVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/flow/ProtocolVersion.h)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/flow/SourceVersion.h)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/flow/config.h)
 
 add_flow_target(STATIC_LIBRARY NAME flow SRCS ${FLOW_SRCS})
-target_link_libraries(flow PRIVATE stacktrace)
-target_link_libraries(flow PUBLIC fmt::fmt)
-
 add_flow_target(STATIC_LIBRARY NAME flow_sampling SRCS ${FLOW_SRCS})
-target_link_libraries(flow_sampling PRIVATE stacktrace)
+
+if (FLOW_USE_ZSTD)
+  include(CompileZstd)
+  compile_zstd()
+
+  target_link_libraries(flow PRIVATE libzstd_static)
+  target_compile_definitions(flow PUBLIC ZSTD_LIB_SUPPORTED)
+endif()
+
+# When creating a static or shared library, undefined symbols will be ignored.
+# Since we want to ensure no symbols from other modules are used, create an
+# executable so the linker will throw errors if it can't find the declaration
+# of a symbol.
+add_flow_target(LINK_TEST NAME flowlinktest SRCS LinkTest.cpp)
+target_link_libraries(flowlinktest PRIVATE flow stacktrace)
+
+#find_package(ZLIB)
+#if(ZLIB_FOUND)
+#  target_compile_definitions(flow PUBLIC ZLIB_LIB_SUPPORTED)
+#  target_link_libraries(flow PUBLIC ZLIB::ZLIB)
+#else()
+#  message(STATUS "ZLIB package not found")
+#endif()
+
+set(IS_ARM_MAC NO)
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+    set(IS_ARM_MAC YES)
+endif()
+
+foreach(ft flow flow_sampling flowlinktest)
+    target_include_directories(${ft} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+    if (FLOW_USE_ZSTD)
+        target_include_directories(${ft} PRIVATE SYSTEM ${ZSTD_LIB_INCLUDE_DIR})
+    endif()
+
+    target_link_libraries(${ft} PRIVATE stacktrace)
+    target_link_libraries(${ft} PUBLIC fmt::fmt SimpleOpt crc32)
+    if(UNIX AND NOT APPLE)
+        target_link_libraries(${ft} PRIVATE folly_memcpy)
+        target_compile_definitions(${ft} PRIVATE WITH_FOLLY_MEMCPY)
+    endif()
+
+    if(NOT APPLE AND NOT WIN32)
+        set(FLOW_LIBS ${FLOW_LIBS} rt)
+    elseif(WIN32)
+        target_link_libraries(${ft} PUBLIC winmm.lib)
+        target_link_libraries(${ft} PUBLIC psapi.lib)
+    endif()
+
+    if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+        set(FLOW_LIBS ${FLOW_LIBS} execinfo devstat)
+        find_library(EIO eio)
+        if(EIO)
+            target_link_libraries(${ft} PUBLIC ${EIO})
+        endif()
+    endif()
+    target_link_libraries(${ft} PRIVATE ${FLOW_LIBS})
+
+    if(USE_VALGRIND)
+        target_link_libraries(${ft} PUBLIC Valgrind)
+    endif()
+    target_link_libraries(${ft} PUBLIC OpenSSL::SSL)
+    if(USE_WOLFSSL)
+        target_include_directories(${ft} SYSTEM BEFORE PUBLIC ${WOLFSSL_INCLUDE_DIR}/wolfssl)
+    endif()
+    target_link_libraries(${ft} PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+    target_link_libraries(${ft} PUBLIC boost_target)
+    if(USE_VALGRIND)
+        target_link_libraries(${ft} PUBLIC Valgrind)
+    endif()
+
+    if(APPLE)
+        find_library(IO_KIT IOKit)
+        find_library(CORE_FOUNDATION CoreFoundation)
+        target_link_libraries(${ft} PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
+    endif()
+endforeach()
+
 target_compile_definitions(flow_sampling PRIVATE -DENABLE_SAMPLING)
 if(WIN32)
-  add_dependencies(flow_sampling_actors flow_actors)
+    add_dependencies(flow_sampling_actors flow_actors)
 endif()
 
-if (NOT APPLE AND NOT WIN32)
-  set (FLOW_LIBS ${FLOW_LIBS} rt)
-elseif(WIN32)
-  target_link_libraries(flow PUBLIC winmm.lib)
-  target_link_libraries(flow PUBLIC psapi.lib)
-  target_link_libraries(flow_sampling PUBLIC winmm.lib)
-  target_link_libraries(flow_sampling PUBLIC psapi.lib)
-endif()
-if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
-  set (FLOW_LIBS ${FLOW_LIBS} execinfo devstat)
-  find_library(EIO eio)
-  if(EIO)
-    target_link_libraries(flow PUBLIC ${EIO})
-    target_link_libraries(flow_sampling PUBLIC ${EIO})
-  endif()
-endif()
-target_link_libraries(flow PRIVATE ${FLOW_LIBS})
-target_link_libraries(flow_sampling PRIVATE ${FLOW_LIBS})
-if(USE_VALGRIND)
-  target_link_libraries(flow PUBLIC Valgrind)
-  target_link_libraries(flow_sampling PUBLIC Valgrind)
-endif()
-if(NOT WITH_TLS)
-  target_compile_definitions(flow PUBLIC TLS_DISABLED)
-  target_compile_definitions(flow_sampling PUBLIC TLS_DISABLED)
+if(OPEN_FOR_IDE)
+    add_library(mkcert OBJECT MkCertCli.cpp)
 else()
-  target_link_libraries(flow PUBLIC OpenSSL::SSL)
-  target_link_libraries(flow_sampling PUBLIC OpenSSL::SSL)
+    add_executable(mkcert MkCertCli.cpp)
 endif()
-target_link_libraries(flow PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
-target_link_libraries(flow_sampling PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
-if(USE_SANITIZER)
-  target_link_libraries(flow PUBLIC boost_asan)
-  target_link_libraries(flow_sampling PUBLIC boost_asan)
-else()
-  target_link_libraries(flow PUBLIC boost_target)
-  target_link_libraries(flow_sampling PUBLIC boost_target)
-endif()
-if(USE_VALGRIND)
-  target_link_libraries(flow PUBLIC Valgrind)
-  target_link_libraries(flow_sampling PUBLIC Valgrind)
-endif()
-
-if(APPLE)
-  find_library(IO_KIT IOKit)
-  find_library(CORE_FOUNDATION CoreFoundation)
-  target_link_libraries(flow PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
-  target_link_libraries(flow_sampling PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
-endif()
+target_link_libraries(mkcert PUBLIC flow)

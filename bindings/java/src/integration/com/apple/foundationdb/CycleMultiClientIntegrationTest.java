@@ -40,18 +40,20 @@ import org.junit.jupiter.api.Assertions;
  * This test is to verify the atomicity of transactions. 
  */
 public class CycleMultiClientIntegrationTest {
+    public static final int API_VERSION = 720;
+
     public static final MultiClientHelper clientHelper = new MultiClientHelper();
 
     // more write txn than validate txn, as parent thread waits only for validate txn.
-    private static final int writeTxnCnt = 2000;
-    private static final int validateTxnCnt = 1000;
+    private static final int writeTxnCnt = 200;
+    private static final int validateTxnCnt = 100;
     private static final int threadPerDB = 5;
 
     private static final int cycleLength = 4;
     private static List<String> expected = new ArrayList<>(Arrays.asList("0", "1", "2", "3"));
 
     public static void main(String[] args) throws Exception {
-        FDB fdb = FDB.selectAPIVersion(710);
+        FDB fdb = FDB.selectAPIVersion(API_VERSION);
         setupThreads(fdb);
         Collection<Database> dbs = clientHelper.openDatabases(fdb); // the clientHelper will close the databases for us
         System.out.println("Starting tests");

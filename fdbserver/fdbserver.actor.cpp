@@ -35,6 +35,8 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 
+#include <fmt/printf.h>
+
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/IKnobCollection.h"
@@ -42,9 +44,10 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
-#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
+#include "fdbrpc/IPAllowList.h"
 #include "fdbrpc/FlowProcess.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/PerfMetric.h"
@@ -62,19 +65,20 @@
 #include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/SimulatedCluster.h"
-#include "fdbserver/Status.h"
+#include "fdbserver/Status.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/pubsub.h"
+#include "fdbserver/OnDemandStore.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/SimpleOpt.h"
+#include "SimpleOpt/SimpleOpt.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
-#include "flow/Tracing.h"
+#include "fdbclient/Tracing.h"
 #include "flow/WriteOnlySet.h"
 #include "flow/UnitTest.h"
 #include "flow/FaultInjection.h"
@@ -84,7 +88,11 @@
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
 #include <signal.h>
+#if defined(__linux__)
 #include <sys/prctl.h>
+#elif defined(__FreeBSD__)
+#include <sys/procctl.h>
+#endif
 #ifdef ALLOC_INSTRUMENTATION
 #include <cxxabi.h>
 #endif
@@ -105,9 +113,11 @@ enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
 	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_VMEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
-	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
+	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME, OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
+	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONNECTOR_TYPE, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,
+	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -122,8 +132,8 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_LISTEN,                "-l",                          SO_REQ_SEP },
 	{ OPT_LISTEN,                "--listen-address",            SO_REQ_SEP },
 #ifdef __linux__
-	{ OPT_FILESYSTEM,           "--data-filesystem",           SO_REQ_SEP },
-	{ OPT_PROFILER_RSS_SIZE,    "--rsssize",                   SO_REQ_SEP },
+	{ OPT_FILESYSTEM,           "--data-filesystem",            SO_REQ_SEP },
+	{ OPT_PROFILER_RSS_SIZE,    "--rsssize",                    SO_REQ_SEP },
 #endif
 	{ OPT_DATAFOLDER,            "-d",                          SO_REQ_SEP },
 	{ OPT_DATAFOLDER,            "--datadir",                   SO_REQ_SEP },
@@ -179,6 +189,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_HELP,                  "-h",                          SO_NONE },
 	{ OPT_HELP,                  "--help",                      SO_NONE },
 	{ OPT_DEVHELP,               "--dev-help",                  SO_NONE },
+	{ OPT_PRINT_CODE_PROBES,     "--code-probes",               SO_REQ_SEP },
 	{ OPT_KNOB,                  "--knob-",                     SO_REQ_SEP },
 	{ OPT_UNITTESTPARAM,         "--test-",                     SO_REQ_SEP },
 	{ OPT_LOCALITY,              "--locality-",                 SO_REQ_SEP },
@@ -193,17 +204,23 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob-credential-file",      SO_REQ_SEP },
 	{ OPT_CONFIG_PATH,           "--config-path",               SO_REQ_SEP },
 	{ OPT_USE_TEST_CONFIG_DB,    "--use-test-config-db",        SO_NONE },
+	{ OPT_NO_CONFIG_DB,          "--no-config-db",              SO_NONE },
 	{ OPT_FAULT_INJECTION,       "-fi",                         SO_REQ_SEP },
 	{ OPT_FAULT_INJECTION,       "--fault-injection",           SO_REQ_SEP },
 	{ OPT_PROFILER,	             "--profiler-",                 SO_REQ_SEP },
 	{ OPT_PRINT_SIMTIME,         "--print-sim-time",             SO_NONE },
 	{ OPT_FLOW_PROCESS_NAME,     "--process-name",              SO_REQ_SEP },
 	{ OPT_FLOW_PROCESS_ENDPOINT, "--process-endpoint",          SO_REQ_SEP },
-
-#ifndef TLS_DISABLED
-	TLS_OPTION_FLAGS
-#endif
-
+	{ OPT_IP_TRUSTED_MASK,       "--trusted-subnet-",           SO_REQ_SEP },
+	{ OPT_NEW_CLUSTER_KEY,       "--new-cluster-key",           SO_REQ_SEP },
+	{ OPT_AUTHZ_PUBLIC_KEY_FILE, "--authorization-public-key-file", SO_REQ_SEP },
+	{ OPT_KMS_CONN_DISCOVERY_URL_FILE,           "--discover-kms-conn-url-file",            SO_REQ_SEP },
+	{ OPT_KMS_CONNECTOR_TYPE,    "--kms-connector-type",        SO_REQ_SEP },
+	{ OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,     "--kms-conn-validation-token-details",     SO_REQ_SEP },
+	{ OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-encryption-keys-endpoint", SO_REQ_SEP },
+	{ OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT,   "--kms-conn-get-blob-metadata-endpoint",   SO_REQ_SEP },
+	{ OPT_USE_FUTURE_PROTOCOL_VERSION, 			 "--use-future-protocol-version",			SO_REQ_SEP },
+	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
 
@@ -311,7 +328,7 @@ UID getSharedMemoryMachineId() {
 	std::string sharedMemoryIdentifier = "fdbserver_shared_memory_id";
 	loop {
 		try {
-			// "0" is the default parameter "addr"
+			// "0" is the default netPrefix "addr"
 			boost::interprocess::managed_shared_memory segment(
 			    boost::interprocess::open_or_create, sharedMemoryIdentifier.c_str(), 1000, 0, p.permission);
 			machineId = segment.find_or_construct<UID>("machineId")(newUID);
@@ -341,17 +358,17 @@ UID getSharedMemoryMachineId() {
 #endif
 }
 
-ACTOR void failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simulator.getCurrentProcess()) {
+ACTOR void failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simulator->getCurrentProcess()) {
 	wait(trigger);
 	if (enableFailures) {
 		printf("Killing machine: %s at %f\n", m->address.toString().c_str(), now());
-		g_simulator.killProcess(m, ISimulator::KillInstantly);
+		g_simulator->killProcess(m, ISimulator::KillInstantly);
 	}
 }
 
 void failAfter(Future<Void> trigger, Endpoint e) {
-	if (g_network == &g_simulator)
-		failAfter(trigger, g_simulator.getProcess(e));
+	if (g_network == g_simulator)
+		failAfter(trigger, g_simulator->getProcess(e));
 }
 
 ACTOR Future<Void> histogramReport() {
@@ -378,12 +395,10 @@ void testSerializationSpeed() {
 				CommitTransactionRef& tr = batch[t];
 				tr.read_snapshot = 0;
 				for (int i = 0; i < 2; i++)
-					tr.mutations.push_back_deep(
-					    batchArena,
-					    MutationRef(MutationRef::SetValue, LiteralStringRef("KeyABCDE"), LiteralStringRef("SomeValu")));
-				tr.mutations.push_back_deep(
-				    batchArena,
-				    MutationRef(MutationRef::ClearRange, LiteralStringRef("BeginKey"), LiteralStringRef("EndKeyAB")));
+					tr.mutations.push_back_deep(batchArena,
+					                            MutationRef(MutationRef::SetValue, "KeyABCDE"_sr, "SomeValu"_sr));
+				tr.mutations.push_back_deep(batchArena,
+				                            MutationRef(MutationRef::ClearRange, "BeginKey"_sr, "EndKeyAB"_sr));
 			}
 
 			build += timer() - tstart;
@@ -530,7 +545,7 @@ static void printBuildInformation() {
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getSourceVersion());
-	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion().version());
 }
 
 static void printHelpTeaser(const char* name) {
@@ -657,9 +672,7 @@ static void printUsage(const char* name, bool devhelp) {
 	                 "  collector -- None or FluentD (FluentD requires collector_endpoint to be set)\n"
 	                 "  collector_endpoint -- IP:PORT of the fluentd server\n"
 	                 "  collector_protocol -- UDP or TCP (default is UDP)");
-#ifndef TLS_DISABLED
-	printf(TLS_HELP);
-#endif
+	printf("%s", TLS_HELP);
 	printOptionUsage("-v, --version", "Print version information and exit.");
 	printOptionUsage("-h, -?, --help", "Display this help and exit.");
 	if (devhelp) {
@@ -725,6 +738,9 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("--io-trust-warn-only",
 		                 " Instead of failing when an I/O operation exceeds io_trust_seconds, just"
 		                 " log a warning to the trace log. Has no effect if io_trust_seconds is unspecified.");
+		printOptionUsage("--use-future-protocol-version [true,false]",
+		                 " Run the process with a simulated future protocol version."
+		                 " This option can be used testing purposes only!");
 		printf("\n"
 		       "The 'kvfiledump' role dump all key-values from kvfile to stdout in binary format:\n"
 		       "{key length}{key binary}{value length}{value binary}, length is 4 bytes int\n"
@@ -732,6 +748,18 @@ static void printUsage(const char* name, bool devhelp) {
 		       " - FDB_DUMP_STARTKEY: start key for the dump, default is empty\n"
 		       " - FDB_DUMP_ENDKEY: end key for the dump, default is \"\\xff\\xff\"\n"
 		       " - FDB_DUMP_DEBUG: print key-values to stderr in escaped format\n");
+
+		printf(
+		    "\n"
+		    "The 'changedescription' role replaces the old cluster key in all coordinators' data file to the specified "
+		    "new cluster key,\n"
+		    "which is passed in by '--new-cluster-key'. In particular, cluster key means '[description]:[id]'.\n"
+		    "'--datadir' is supposed to point to the top level directory of FDB's data, where subdirectories are for "
+		    "each process's data.\n"
+		    "The given cluster file passed in by '-C, --cluster-file' is considered to contain the old cluster key.\n"
+		    "It is used before restoring a snapshotted cluster to let the cluster have a different cluster key.\n"
+		    "Please make sure run it on every host in the cluster with the same '--new-cluster-key'.\n");
+
 	} else {
 		printOptionUsage("--dev-help", "Display developer-specific help and exit.");
 	}
@@ -854,13 +882,13 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 	NetworkAddressList publicNetworkAddresses;
 	NetworkAddressList listenNetworkAddresses;
 
-	connectionRecord.resolveHostnamesBlocking();
-	auto& coordinators = connectionRecord.getConnectionString().coordinators();
-	ASSERT(coordinators.size() > 0);
+	std::vector<Hostname>& hostnames = connectionRecord.getConnectionString().hostnames;
+	const std::vector<NetworkAddress>& coords = connectionRecord.getConnectionString().coords;
+	ASSERT(hostnames.size() + coords.size() > 0);
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
 		const std::string& publicAddressStr = publicAddressStrs[ii];
-		bool autoPublicAddress = StringRef(publicAddressStr).startsWith(LiteralStringRef("auto:"));
+		bool autoPublicAddress = StringRef(publicAddressStr).startsWith("auto:"_sr);
 		NetworkAddress currentPublicAddress;
 		if (autoPublicAddress) {
 			try {
@@ -925,13 +953,26 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 			listenNetworkAddresses.secondaryAddress = currentListenAddress;
 		}
 
-		bool hasSameCoord = std::all_of(coordinators.begin(), coordinators.end(), [&](const NetworkAddress& address) {
+		bool matchCoordinatorsTls = std::all_of(coords.begin(), coords.end(), [&](const NetworkAddress& address) {
 			if (address.ip == currentPublicAddress.ip && address.port == currentPublicAddress.port) {
 				return address.isTLS() == currentPublicAddress.isTLS();
 			}
 			return true;
 		});
-		if (!hasSameCoord) {
+		// If true, further check hostnames.
+		if (matchCoordinatorsTls) {
+			matchCoordinatorsTls = std::all_of(hostnames.begin(), hostnames.end(), [&](Hostname& hostname) {
+				Optional<NetworkAddress> resolvedAddress = hostname.resolveBlocking();
+				if (resolvedAddress.present()) {
+					NetworkAddress address = resolvedAddress.get();
+					if (address.ip == currentPublicAddress.ip && address.port == currentPublicAddress.port) {
+						return address.isTLS() == currentPublicAddress.isTLS();
+					}
+				}
+				return true;
+			});
+		}
+		if (!matchCoordinatorsTls) {
 			fprintf(stderr,
 			        "ERROR: TLS state of public address %s does not match in coordinator list.\n",
 			        publicAddressStr.c_str());
@@ -964,10 +1005,12 @@ void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::stri
 
 namespace {
 enum class ServerRole {
+	ChangeClusterKey,
 	ConsistencyCheck,
 	CreateTemplateDatabase,
 	DSLTest,
 	FDBD,
+	FlowProcess,
 	KVFileGenerateIOLogChecksums,
 	KVFileIntegrityCheck,
 	KVFileDump,
@@ -980,13 +1023,12 @@ enum class ServerRole {
 	SkipListTest,
 	Test,
 	VersionedMapTest,
-	UnitTests,
-	FlowProcess
+	UnitTests
 };
 struct CLIOptions {
 	std::string commandLine;
-	std::string fileSystemPath, dataFolder, connFile, seedConnFile, seedConnString, logFolder = ".", metricsConnFile,
-	                                                                                metricsPrefix;
+	std::string fileSystemPath, dataFolder, connFile, seedConnFile, seedConnString,
+	    logFolder = ".", metricsConnFile, metricsPrefix, newClusterKey, authzPublicKeyFile;
 	std::string logGroup = "default";
 	uint64_t rollsize = TRACE_DEFAULT_ROLL_SIZE;
 	uint64_t maxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
@@ -1031,7 +1073,7 @@ struct CLIOptions {
 	const char* blobCredsFromENV = nullptr;
 
 	std::string configPath;
-	ConfigDBType configDBType{ ConfigDBType::DISABLED };
+	ConfigDBType configDBType{ ConfigDBType::PAXOS };
 
 	Reference<IClusterConnectionRecord> connectionFile;
 	Standalone<StringRef> machineId;
@@ -1041,10 +1083,12 @@ struct CLIOptions {
 	std::string flowProcessName;
 	Endpoint flowProcessEndpoint;
 	bool printSimTime = false;
+	IPAllowList allowList;
 
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
 		opts.parseArgsInternal(argc, argv);
+		opts.parseEnvInternal();
 		return opts;
 	}
 
@@ -1073,6 +1117,25 @@ struct CLIOptions {
 
 private:
 	CLIOptions() = default;
+
+	void parseEnvInternal() {
+		for (const std::string& knob : getEnvironmentKnobOptions()) {
+			auto pos = knob.find_first_of("=");
+			if (pos == std::string::npos) {
+				fprintf(stderr,
+				        "Error: malformed environment knob option: %s%s\n",
+				        ENVIRONMENT_KNOB_OPTION_PREFIX,
+				        knob.c_str());
+				TraceEvent(SevWarnAlways, "MalformedEnvironmentVariableKnob")
+				    .detail("Key", ENVIRONMENT_KNOB_OPTION_PREFIX + knob);
+			} else {
+				std::string k = knob.substr(0, pos);
+				std::string v = knob.substr(pos + 1, knob.length());
+				knobs.emplace_back(k, v);
+				manualKnobOverrides[k] = v;
+			}
+		}
+	}
 
 	void parseArgsInternal(int argc, char* argv[]) {
 		for (int a = 0; a < argc; a++) {
@@ -1128,6 +1191,10 @@ private:
 				printUsage(argv[0], true);
 				flushAndExit(FDB_EXIT_SUCCESS);
 				break;
+			case OPT_PRINT_CODE_PROBES:
+				probe::ICodeProbe::printProbesJSON({ std::string(args.OptionArg()) });
+				flushAndExit(FDB_EXIT_SUCCESS);
+				break;
 			case OPT_KNOB: {
 				Optional<std::string> knobName = extractPrefixedArgument("--knob", args.OptionSyntax());
 				if (!knobName.present()) {
@@ -1165,6 +1232,15 @@ private:
 				Standalone<StringRef> key = StringRef(localityKey.get());
 				std::transform(key.begin(), key.end(), mutateString(key), ::tolower);
 				localities.set(key, Standalone<StringRef>(std::string(args.OptionArg())));
+				break;
+			}
+			case OPT_IP_TRUSTED_MASK: {
+				Optional<std::string> subnetKey = extractPrefixedArgument("--trusted-subnet", args.OptionSyntax());
+				if (!subnetKey.present()) {
+					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", args.OptionSyntax());
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				allowList.addTrustedSubnet(args.OptionArg());
 				break;
 			}
 			case OPT_VERSION:
@@ -1220,6 +1296,8 @@ private:
 					role = ServerRole::UnitTests;
 				else if (!strcmp(sRole, "flowprocess"))
 					role = ServerRole::FlowProcess;
+				else if (!strcmp(sRole, "changeclusterkey"))
+					role = ServerRole::ChangeClusterKey;
 				else {
 					fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
 					printHelpTeaser(argv[0]);
@@ -1553,6 +1631,9 @@ private:
 			case OPT_USE_TEST_CONFIG_DB:
 				configDBType = ConfigDBType::SIMPLE;
 				break;
+			case OPT_NO_CONFIG_DB:
+				configDBType = ConfigDBType::DISABLED;
+				break;
 			case OPT_FLOW_PROCESS_NAME:
 				flowProcessName = args.OptionArg();
 				std::cout << flowProcessName << std::endl;
@@ -1593,7 +1674,6 @@ private:
 				printSimTime = true;
 				break;
 
-#ifndef TLS_DISABLED
 			case TLSConfig::OPT_TLS_PLUGIN:
 				args.OptionArg();
 				break;
@@ -1612,7 +1692,49 @@ private:
 			case TLSConfig::OPT_TLS_VERIFY_PEERS:
 				tlsConfig.addVerifyPeers(args.OptionArg());
 				break;
-#endif
+			case OPT_KMS_CONN_DISCOVERY_URL_FILE: {
+				knobs.emplace_back("rest_kms_connector_discover_kms_url_file", args.OptionArg());
+				break;
+			}
+			case OPT_KMS_CONNECTOR_TYPE: {
+				knobs.emplace_back("kms_connector_type", args.OptionArg());
+				break;
+			}
+			case OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS: {
+				knobs.emplace_back("rest_kms_connector_validation_token_details", args.OptionArg());
+				break;
+			}
+			case OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT: {
+				knobs.emplace_back("rest_kms_connector_get_encryption_keys_endpoint", args.OptionArg());
+				break;
+			}
+			case OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT: {
+				knobs.emplace_back("rest_kms_connector_get_blob_metadata_endpoint", args.OptionArg());
+				break;
+			}
+			case OPT_NEW_CLUSTER_KEY: {
+				newClusterKey = args.OptionArg();
+				try {
+					ClusterConnectionString ccs;
+					// make sure the new cluster key is in valid format
+					ccs.parseKey(newClusterKey);
+				} catch (Error& e) {
+					std::cerr << "Invalid cluster key(description:id) '" << newClusterKey << "' from --new-cluster-key"
+					          << std::endl;
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
+			}
+			case OPT_AUTHZ_PUBLIC_KEY_FILE: {
+				authzPublicKeyFile = args.OptionArg();
+				break;
+			}
+			case OPT_USE_FUTURE_PROTOCOL_VERSION: {
+				if (!strcmp(args.OptionArg(), "true")) {
+					::useFutureProtocolVersion();
+				}
+				break;
+			}
 			}
 		}
 
@@ -1648,7 +1770,7 @@ private:
 
 		bool autoPublicAddress =
 		    std::any_of(publicAddressStrs.begin(), publicAddressStrs.end(), [](const std::string& addr) {
-			    return StringRef(addr).startsWith(LiteralStringRef("auto:"));
+			    return StringRef(addr).startsWith("auto:"_sr);
 		    });
 		if ((role != ServerRole::Simulation && role != ServerRole::CreateTemplateDatabase &&
 		     role != ServerRole::KVFileIntegrityCheck && role != ServerRole::KVFileGenerateIOLogChecksums &&
@@ -1708,6 +1830,21 @@ private:
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
+		if (role == ServerRole::ChangeClusterKey) {
+			bool error = false;
+			if (!newClusterKey.size()) {
+				fprintf(stderr, "ERROR: please specify --new-cluster-key\n");
+				error = true;
+			} else if (connectionFile->getConnectionString().clusterKey() == newClusterKey) {
+				fprintf(stderr, "ERROR: the new cluster key is the same as the old one\n");
+				error = true;
+			}
+			if (error) {
+				printHelpTeaser(argv[0]);
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+		}
+
 		// Interpret legacy "maxLogs" option in the most sensible and unsurprising way we can while eliminating its code
 		// path
 		if (maxLogsSet) {
@@ -1740,6 +1877,30 @@ private:
 			localities.set(LocalityData::keyDcId, dcId);
 	}
 };
+
+// Returns true iff validation is successful
+bool validateSimulationDataFiles(std::string const& dataFolder, bool isRestarting) {
+	std::vector<std::string> files = platform::listFiles(dataFolder);
+	if (!isRestarting) {
+		for (const auto& file : files) {
+			if (file != "restartInfo.ini" && file != getTestEncryptionFileName()) {
+				TraceEvent(SevError, "IncompatibleFileFound").detail("DataFolder", dataFolder).detail("FileName", file);
+				fprintf(stderr,
+				        "ERROR: Data folder `%s' is non-empty; please use clean, fdb-only folder\n",
+				        dataFolder.c_str());
+				return false;
+			}
+		}
+	} else if (isRestarting && files.empty()) {
+		TraceEvent(SevWarnAlways, "FileNotFound").detail("DataFolder", dataFolder);
+		printf("ERROR: Data folder `%s' is empty, but restarting option selected. Run Phase 1 test first\n",
+		       dataFolder.c_str());
+		return false;
+	}
+
+	return true;
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -1771,16 +1932,10 @@ int main(int argc, char* argv[]) {
 		auto opts = CLIOptions::parseArgs(argc, argv);
 		const auto role = opts.role;
 
-#ifdef _WIN32
-		// For now, ignore all tests for Windows
-		if (role == ServerRole::Simulation || role == ServerRole::UnitTests || role == ServerRole::Test) {
-			printf("Windows tests are not supported yet\n");
-			flushAndExit(FDB_EXIT_SUCCESS);
-		}
-#endif
-
-		if (role == ServerRole::Simulation)
+		if (role == ServerRole::Simulation) {
 			printf("Random seed is %u...\n", opts.randomSeed);
+			bindDeterministicRandomToOpenssl();
+		}
 
 		if (opts.zoneId.present())
 			printf("ZoneId set to %s, dcId to %s\n", printable(opts.zoneId).c_str(), printable(opts.dcId).c_str());
@@ -1806,6 +1961,27 @@ int main(int argc, char* argv[]) {
 		g_knobs.setKnob("server_mem_limit", KnobValue::create(static_cast<int64_t>(opts.memLimit)));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
 		g_knobs.initialize(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
+
+		if (!SERVER_KNOBS->ALLOW_DANGEROUS_KNOBS) {
+			if (SERVER_KNOBS->FETCH_USING_STREAMING) {
+				fprintf(stderr,
+				        "ERROR : explicitly setting FETCH_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
+				        "proceed anyways\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+			if (SERVER_KNOBS->PEEK_USING_STREAMING) {
+				fprintf(stderr,
+				        "ERROR : explicitly setting PEEK_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
+				        "proceed anyways\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+			if (SERVER_KNOBS->REMOTE_KV_STORE) {
+				fprintf(stderr,
+				        "ERROR : explicitly setting REMOTE_KV_STORE is dangerous! set ALLOW_DANGEROUS_KNOBS to "
+				        "proceed anyways\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+		}
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
@@ -1853,7 +2029,7 @@ int main(int argc, char* argv[]) {
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 			g_network->addStopCallback(Net2FileSystem::stop);
-			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
+			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT, &opts.allowList);
 			opts.buildNetwork(argv[0]);
 
 			const bool expectsPublicAddress = (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer ||
@@ -1869,6 +2045,16 @@ int main(int argc, char* argv[]) {
 			openTraceFile(
 			    opts.publicAddresses.address, opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			g_network->initTLS();
+			if (!opts.authzPublicKeyFile.empty()) {
+				try {
+					FlowTransport::transport().loadPublicKeyFile(opts.authzPublicKeyFile);
+				} catch (Error& e) {
+					TraceEvent("AuthzPublicKeySetLoadError").error(e);
+				}
+				FlowTransport::transport().watchPublicKeyFile(opts.authzPublicKeyFile);
+			} else {
+				TraceEvent(SevInfo, "AuthzPublicKeyFileNotSet");
+			}
 
 			if (expectsPublicAddress) {
 				for (int ii = 0; ii < (opts.publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {
@@ -1913,6 +2099,14 @@ int main(int argc, char* argv[]) {
 				throw;
 		}
 
+		std::string environmentKnobOptions;
+		for (const std::string& knobOption : getEnvironmentKnobOptions()) {
+			environmentKnobOptions += knobOption + " ";
+		}
+		if (environmentKnobOptions.length()) {
+			environmentKnobOptions.pop_back();
+		}
+
 		TraceEvent("ProgramStart")
 		    .setMaxEventLength(12000)
 		    .detail("RandomSeed", opts.randomSeed)
@@ -1927,12 +2121,14 @@ int main(int argc, char* argv[]) {
 		            opts.connectionFile ? opts.connectionFile->getConnectionString().toString() : "")
 		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 		    .setMaxFieldLength(10000)
+		    .detail("EnvironmentKnobOptions", environmentKnobOptions.length() ? environmentKnobOptions : "none")
 		    .detail("CommandLine", opts.commandLine)
 		    .setMaxFieldLength(0)
 		    .detail("BuggifyEnabled", opts.buggifyEnabled)
 		    .detail("FaultInjectionEnabled", opts.faultInjectionEnabled)
 		    .detail("MemoryLimit", opts.memLimit)
 		    .detail("VirtualMemoryLimit", opts.virtualMemLimit)
+		    .detail("ProtocolVersion", currentProtocolVersion())
 		    .trackLatest("ProgramStart");
 
 		Error::init();
@@ -1970,17 +2166,8 @@ int main(int argc, char* argv[]) {
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 			}
-			std::vector<std::string> files = platform::listFiles(dataFolder);
-			if ((files.size() > 1 || (files.size() == 1 && files[0] != "restartInfo.ini")) && !opts.restarting) {
-				TraceEvent(SevError, "IncompatibleFileFound").detail("DataFolder", dataFolder);
-				fprintf(stderr,
-				        "ERROR: Data folder `%s' is non-empty; please use clean, fdb-only folder\n",
-				        dataFolder.c_str());
-				flushAndExit(FDB_EXIT_ERROR);
-			} else if (files.empty() && opts.restarting) {
-				TraceEvent(SevWarnAlways, "FileNotFound").detail("DataFolder", dataFolder);
-				printf("ERROR: Data folder `%s' is empty, but restarting option selected. Run Phase 1 test first\n",
-				       dataFolder.c_str());
+
+			if (!validateSimulationDataFiles(dataFolder, opts.restarting)) {
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 
@@ -2073,9 +2260,19 @@ int main(int argc, char* argv[]) {
 						}
 					}
 				}
+				g_knobs.setKnob("enable_encryption",
+				                KnobValue::create(ini.GetBoolValue("META", "enableEncryption", false)));
+				g_knobs.setKnob("enable_tlog_encryption",
+				                KnobValue::create(ini.GetBoolValue("META", "enableTLogEncryption", false)));
+				g_knobs.setKnob("enable_storage_server_encryption",
+				                KnobValue::create(ini.GetBoolValue("META", "enableStorageServerEncryption", false)));
+				g_knobs.setKnob("enable_blob_granule_encryption",
+				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
+				g_knobs.setKnob("enable_blob_granule_compression",
+				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
 			}
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
-			g_simulator.run();
+			g_simulator->run();
 		} else if (role == ServerRole::FDBD) {
 			// Update the global blob credential files list so that both fast
 			// restore workers and backup workers can access blob storage.
@@ -2196,10 +2393,26 @@ int main(int argc, char* argv[]) {
 
 			f = result;
 		} else if (role == ServerRole::FlowProcess) {
-			TraceEvent(SevDebug, "StartingFlowProcess").detail("From", "fdbserver");
-#if defined(__linux__) || defined(__FreeBSD__)
+			std::string traceFormat = getTraceFormatExtension();
+			// close and reopen trace file with the correct process listen address to name the file
+			closeTraceFile();
+			// writer is not shutdown immediately, addref on it
+			disposeTraceFileWriter();
+			// use the same trace format as before
+			selectTraceFormatter(traceFormat);
+			// create the trace file with the correct process address
+			openTraceFile(
+			    g_network->getLocalAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
+			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
+			TraceEvent(SevDebug, "StartingFlowProcess").detail("FlowProcessName", opts.flowProcessName);
+#if defined(__linux__)
 			prctl(PR_SET_PDEATHSIG, SIGTERM);
 			if (getppid() == 1) /* parent already died before prctl */
+				flushAndExit(FDB_EXIT_SUCCESS);
+#elif defined(__FreeBSD__)
+			const int sig = SIGTERM;
+			procctl(P_PID, 0, PROC_PDEATHSIG_CTL, (void*)&sig);
+			if (getppid() == 1) /* parent already died before procctl */
 				flushAndExit(FDB_EXIT_SUCCESS);
 #endif
 
@@ -2210,6 +2423,11 @@ int main(int argc, char* argv[]) {
 			g_network->run();
 		} else if (role == ServerRole::KVFileDump) {
 			f = stopAfter(KVFileDump(opts.kvFile));
+			g_network->run();
+		} else if (role == ServerRole::ChangeClusterKey) {
+			Key newClusterKey(opts.newClusterKey);
+			Key oldClusterKey = opts.connectionFile->getConnectionString().clusterKey();
+			f = stopAfter(coordChangeClusterKey(opts.dataFolder, newClusterKey, oldClusterKey));
 			g_network->run();
 		}
 
@@ -2269,7 +2487,7 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		// g_simulator.run();
+		// g_simulator->run();
 
 #ifdef ALLOC_INSTRUMENTATION
 		{
@@ -2288,19 +2506,19 @@ int main(int argc, char* argv[]) {
 				char* demangled = abi::__cxa_demangle(i->first, nullptr, nullptr, nullptr);
 				if (demangled) {
 					s = demangled;
-					if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))
-						s = s.substr(LiteralStringRef("(anonymous namespace)::").size());
+					if (StringRef(s).startsWith("(anonymous namespace)::"_sr))
+						s = s.substr("(anonymous namespace)::"_sr.size());
 					free(demangled);
 				} else
 					s = i->first;
 #else
 				s = i->first;
-				if (StringRef(s).startsWith(LiteralStringRef("class `anonymous namespace'::")))
-					s = s.substr(LiteralStringRef("class `anonymous namespace'::").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("class ")))
-					s = s.substr(LiteralStringRef("class ").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
-					s = s.substr(LiteralStringRef("struct ").size());
+				if (StringRef(s).startsWith("class `anonymous namespace'::"_sr))
+					s = s.substr("class `anonymous namespace'::"_sr.size());
+				else if (StringRef(s).startsWith("class "_sr))
+					s = s.substr("class "_sr.size());
+				else if (StringRef(s).startsWith("struct "_sr))
+					s = s.substr("struct "_sr.size());
 #endif
 
 				typeNames.emplace_back(s, i->first);

@@ -5,48 +5,63 @@ import os
 import shutil
 import subprocess
 import sys
-from local_cluster import LocalCluster
+from local_cluster import LocalCluster, TLSConfig, random_secret_string
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
-from random import choice
 from pathlib import Path
 
 
-class TempCluster:
-    def __init__(self, build_dir: str, process_number: int = 1, port: str = None):
+class TempCluster(LocalCluster):
+    def __init__(
+        self,
+        build_dir: str,
+        process_number: int = 1,
+        port: str = None,
+        blob_granules_enabled: bool = False,
+        tls_config: TLSConfig = None,
+        public_key_json_str: str = None,
+        remove_at_exit: bool = True,
+        custom_config: dict = {},
+        enable_tenants: bool = True,
+    ):
         self.build_dir = Path(build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(build_dir)
-        tmp_dir = self.build_dir.joinpath(
-            "tmp",
-            "".join(choice(LocalCluster.valid_letters_for_secret)
-                    for i in range(16)),
-        )
+        tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
         tmp_dir.mkdir(parents=True)
-        self.cluster = LocalCluster(
+        self.tmp_dir = tmp_dir
+        self.remove_at_exit = remove_at_exit
+        self.enable_tenants = enable_tenants
+        super().__init__(
             tmp_dir,
             self.build_dir.joinpath("bin", "fdbserver"),
             self.build_dir.joinpath("bin", "fdbmonitor"),
             self.build_dir.joinpath("bin", "fdbcli"),
             process_number,
             port=port,
+            blob_granules_enabled=blob_granules_enabled,
+            tls_config=tls_config,
+            mkcert_binary=self.build_dir.joinpath("bin", "mkcert"),
+            public_key_json_str=public_key_json_str,
+            custom_config=custom_config,
         )
-        self.log = self.cluster.log
-        self.etc = self.cluster.etc
-        self.data = self.cluster.data
-        self.tmp_dir = tmp_dir
 
     def __enter__(self):
-        self.cluster.__enter__()
-        self.cluster.create_database()
+        super().__enter__()
+        if self.enable_tenants:
+            super().create_database()
+        else:
+            super().create_database(enable_tenants=False)
         return self
 
     def __exit__(self, xc_type, exc_value, traceback):
-        self.cluster.__exit__(xc_type, exc_value, traceback)
-        shutil.rmtree(self.tmp_dir)
+        super().__exit__(xc_type, exc_value, traceback)
+        if self.remove_at_exit:
+            shutil.rmtree(self.tmp_dir)
 
     def close(self):
-        self.cluster.__exit__(None, None, None)
-        shutil.rmtree(self.tmp_dir)
+        super().__exit__(None, None, None)
+        if self.remove_at_exit:
+            shutil.rmtree(self.tmp_dir)
 
 
 if __name__ == "__main__":
@@ -76,8 +91,7 @@ if __name__ == "__main__":
         help="FDB build directory",
         required=True,
     )
-    parser.add_argument("cmd", metavar="COMMAND",
-                        nargs="+", help="The command to run")
+    parser.add_argument("cmd", metavar="COMMAND", nargs="+", help="The command to run")
     parser.add_argument(
         "--process-number",
         "-p",
@@ -86,32 +100,93 @@ if __name__ == "__main__":
         default=1,
     )
     parser.add_argument(
-        '--disable-log-dump',
-        help='Do not dump cluster log on error',
-        action="store_true"
+        "--disable-log-dump",
+        help="Do not dump cluster log on error",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--disable-tenants",
+        help="Do not enable tenant mode",
+        action="store_true",
+        default=False
+    )
+    parser.add_argument(
+        "--blob-granules-enabled", help="Enable blob granules", action="store_true"
+    )
+    parser.add_argument(
+        "--tls-enabled", help="Enable TLS (with test-only certificates)", action="store_true")
+    parser.add_argument(
+        "--server-cert-chain-len",
+        help="Length of server TLS certificate chain including root CA. Negative value deliberately generates expired leaf certificate for TLS testing. Only takes effect with --tls-enabled.",
+        type=int,
+        default=3,
+    )
+    parser.add_argument(
+        "--client-cert-chain-len",
+        help="Length of client TLS certificate chain including root CA. Negative value deliberately generates expired leaf certificate for TLS testing. Only takes effect with --tls-enabled.",
+        type=int,
+        default=2,
+    )
+    parser.add_argument(
+        "--tls-verify-peer",
+        help="Rules to verify client certificate chain. See https://apple.github.io/foundationdb/tls.html#peer-verification",
+        type=str,
+        default="Check.Valid=1",
     )
     args = parser.parse_args()
+
+    if args.disable_tenants:
+        enable_tenants = False
+    else:
+        enable_tenants = True
+
+    tls_config = None
+    if args.tls_enabled:
+        tls_config = TLSConfig(server_chain_len=args.server_cert_chain_len,
+                               client_chain_len=args.client_cert_chain_len)
     errcode = 1
-    with TempCluster(args.build_dir, args.process_number) as cluster:
+    with TempCluster(
+        args.build_dir,
+        args.process_number,
+        blob_granules_enabled=args.blob_granules_enabled,
+        tls_config=tls_config,
+        enable_tenants=enable_tenants,
+    ) as cluster:
         print("log-dir: {}".format(cluster.log))
         print("etc-dir: {}".format(cluster.etc))
         print("data-dir: {}".format(cluster.data))
-        print("cluster-file: {}".format(cluster.etc.joinpath("fdb.cluster")))
+        print("cluster-file: {}".format(cluster.cluster_file))
         cmd_args = []
         for cmd in args.cmd:
             if cmd == "@CLUSTER_FILE@":
-                cmd_args.append(str(cluster.etc.joinpath("fdb.cluster")))
+                cmd_args.append(str(cluster.cluster_file))
             elif cmd == "@DATA_DIR@":
                 cmd_args.append(str(cluster.data))
             elif cmd == "@LOG_DIR@":
                 cmd_args.append(str(cluster.log))
             elif cmd == "@ETC_DIR@":
                 cmd_args.append(str(cluster.etc))
+            elif cmd == "@TMP_DIR@":
+                cmd_args.append(str(cluster.tmp_dir))
+            elif cmd == "@SERVER_CERT_FILE@":
+                cmd_args.append(str(cluster.server_cert_file))
+            elif cmd == "@SERVER_KEY_FILE@":
+                cmd_args.append(str(cluster.server_key_file))
+            elif cmd == "@SERVER_CA_FILE@":
+                cmd_args.append(str(cluster.server_ca_file))
+            elif cmd == "@CLIENT_CERT_FILE@":
+                cmd_args.append(str(cluster.client_cert_file))
+            elif cmd == "@CLIENT_KEY_FILE@":
+                cmd_args.append(str(cluster.client_key_file))
+            elif cmd == "@CLIENT_CA_FILE@":
+                cmd_args.append(str(cluster.client_ca_file))
+            elif cmd.startswith("@DATA_DIR@"):
+                cmd_args.append(str(cluster.data) + cmd[len("@DATA_DIR@") :])
             else:
                 cmd_args.append(cmd)
         env = dict(**os.environ)
         env["FDB_CLUSTER_FILE"] = env.get(
-            "FDB_CLUSTER_FILE", cluster.etc.joinpath("fdb.cluster")
+            "FDB_CLUSTER_FILE", cluster.cluster_file
         )
         errcode = subprocess.run(
             cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env
@@ -126,9 +201,11 @@ if __name__ == "__main__":
         )
 
         for line in sev40s:
-            # When running ASAN we expect to see this message. Boost coroutine should be using the correct asan annotations so that it shouldn't produce any false positives.
-            if line.endswith(
+            # When running ASAN we expect to see this message. Boost coroutine should be using the correct asan
+            # annotations so that it shouldn't produce any false positives.
+            if (
                 "WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!"
+                in line
             ):
                 continue
             print(">>>>>>>>>>>>>>>>>>>> Found severity 40 events - the test fails")

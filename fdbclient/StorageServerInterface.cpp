@@ -21,7 +21,7 @@
 // TODO this should really be renamed "TSSComparison.cpp"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/BlobWorkerInterface.h"
-#include "flow/crc32c.h" // for crc32c_append, to checksum values in tss trace events
+#include "crc32/crc32c.h" // for crc32c_append, to checksum values in tss trace events
 
 // Includes template specializations for all tss operations on storage server types.
 // New StorageServerInterface reply types must be added here or it won't compile.
@@ -129,7 +129,7 @@ const char* TSS_mismatchTraceName(const GetKeyValuesRequest& req) {
 static void traceKeyValuesSummary(TraceEvent& event,
                                   const KeySelectorRef& begin,
                                   const KeySelectorRef& end,
-                                  Optional<TenantName> tenant,
+                                  Optional<TenantNameRef> tenant,
                                   Version version,
                                   int limit,
                                   int limitBytes,
@@ -152,7 +152,7 @@ static void traceKeyValuesSummary(TraceEvent& event,
 static void traceKeyValuesDiff(TraceEvent& event,
                                const KeySelectorRef& begin,
                                const KeySelectorRef& end,
-                               Optional<TenantName> tenant,
+                               Optional<TenantNameRef> tenant,
                                Version version,
                                int limit,
                                int limitBytes,
@@ -342,7 +342,7 @@ void TSS_traceMismatch(TraceEvent& event,
 // change feed
 template <>
 bool TSS_doCompare(const OverlappingChangeFeedsReply& src, const OverlappingChangeFeedsReply& tss) {
-	ASSERT(false);
+	// We duplicate for load, no need to validate replies
 	return true;
 }
 

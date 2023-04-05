@@ -20,8 +20,20 @@
 
 #include "TesterUtil.h"
 #include <cstdio>
+#include <algorithm>
+#include <ctype.h>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <string>
 
 namespace FdbApiTester {
+
+fdb::ByteString lowerCase(fdb::BytesRef str) {
+	fdb::ByteString res(str);
+	std::transform(res.begin(), res.end(), res.begin(), ::tolower);
+	return res;
+}
 
 Random::Random() {
 	std::random_device dev;
@@ -37,22 +49,102 @@ Random& Random::get() {
 	return random;
 }
 
-std::string Random::randomStringLowerCase(int minLength, int maxLength) {
-	int length = randomInt(minLength, maxLength);
-	std::string str;
-	str.reserve(length);
-	for (int i = 0; i < length; i++) {
-		str += (char)randomInt('a', 'z');
-	}
-	return str;
-}
-
 bool Random::randomBool(double trueRatio) {
 	return std::uniform_real_distribution<double>(0.0, 1.0)(random) <= trueRatio;
 }
 
 void print_internal_error(const char* msg, const char* file, int line) {
 	fprintf(stderr, "Assertion %s failed @ %s %d:\n", msg, file, line);
+	fflush(stderr);
+}
+
+std::optional<fdb::Value> copyValueRef(fdb::future_var::ValueRef::Type value) {
+	if (value) {
+		return std::make_optional(fdb::Value(value.value()));
+	} else {
+		return std::nullopt;
+	}
+}
+
+KeyValueArray copyKeyValueArray(fdb::future_var::KeyValueRefArray::Type array) {
+	auto& [in_kvs, in_count, in_more] = array;
+
+	KeyValueArray out;
+	auto& [out_kv, out_more] = out;
+
+	out_more = in_more;
+	out_kv.clear();
+	for (int i = 0; i < in_count; ++i) {
+		fdb::native::FDBKeyValue nativeKv = *in_kvs++;
+		fdb::KeyValue kv;
+		kv.key = fdb::Key(nativeKv.key, nativeKv.key_length);
+		kv.value = fdb::Value(nativeKv.value, nativeKv.value_length);
+		out_kv.push_back(kv);
+	}
+	return out;
+};
+
+KeyRangeArray copyKeyRangeArray(fdb::future_var::KeyRangeRefArray::Type array) {
+	auto& [in_ranges, in_count] = array;
+
+	KeyRangeArray out;
+
+	for (int i = 0; i < in_count; ++i) {
+		fdb::native::FDBKeyRange nativeKr = *in_ranges++;
+		fdb::KeyRange range;
+		range.beginKey = fdb::Key(nativeKr.begin_key, nativeKr.begin_key_length);
+		range.endKey = fdb::Key(nativeKr.end_key, nativeKr.end_key_length);
+		out.push_back(range);
+	}
+	return out;
+};
+
+GranuleSummaryArray copyGranuleSummaryArray(fdb::future_var::GranuleSummaryRefArray::Type array) {
+	auto& [in_summaries, in_count] = array;
+
+	GranuleSummaryArray out;
+
+	for (int i = 0; i < in_count; ++i) {
+		fdb::native::FDBGranuleSummary nativeSummary = *in_summaries++;
+		fdb::GranuleSummary summary(nativeSummary);
+		out.push_back(summary);
+	}
+	return out;
+};
+
+TmpFile::~TmpFile() {
+	if (!filename.empty()) {
+		remove();
+	}
+}
+
+void TmpFile::create(std::string_view dir, std::string_view prefix) {
+	while (true) {
+		filename = fmt::format("{}/{}-{}", dir, prefix, Random::get().randomStringLowerCase<std::string>(6, 6));
+		if (!std::filesystem::exists(std::filesystem::path(filename))) {
+			break;
+		}
+	}
+
+	// Create an empty tmp file
+	std::fstream tmpFile(filename, std::fstream::out);
+	if (!tmpFile.good()) {
+		throw TesterError(fmt::format("Failed to create temporary file {}\n", filename));
+	}
+}
+
+void TmpFile::write(std::string_view data) {
+	std::ofstream ofs(filename, std::fstream::out | std::fstream::binary);
+	if (!ofs.good()) {
+		throw TesterError(fmt::format("Failed to write to the temporary file {}\n", filename));
+	}
+	ofs.write(data.data(), data.size());
+}
+
+void TmpFile::remove() {
+	if (!std::filesystem::remove(std::filesystem::path(filename))) {
+		fmt::print(stderr, "Failed to remove file {}\n", filename);
+	}
 }
 
 } // namespace FdbApiTester

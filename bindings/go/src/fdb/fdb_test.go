@@ -29,10 +29,12 @@ import (
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 )
 
+const API_VERSION int = 720
+
 func ExampleOpenDefault() {
 	var e error
 
-	e = fdb.APIVersion(710)
+	e = fdb.APIVersion(API_VERSION)
 	if e != nil {
 		fmt.Printf("Unable to set API version: %v\n", e)
 		return
@@ -52,7 +54,7 @@ func ExampleOpenDefault() {
 }
 
 func TestVersionstamp(t *testing.T) {
-	fdb.MustAPIVersion(710)
+	fdb.MustAPIVersion(API_VERSION)
 	db := fdb.MustOpenDefault()
 
 	setVs := func(t fdb.Transactor, key fdb.Key) (fdb.FutureKey, error) {
@@ -98,10 +100,10 @@ func TestVersionstamp(t *testing.T) {
 }
 
 func TestReadTransactionOptions(t *testing.T) {
-	fdb.MustAPIVersion(710)
+	fdb.MustAPIVersion(API_VERSION)
 	db := fdb.MustOpenDefault()
 	_, e := db.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
-		rtr.Options().SetAccessSystemKeys();
+		rtr.Options().SetAccessSystemKeys()
 		return rtr.Get(fdb.Key("\xff/")).MustGet(), nil
 	})
 	if e != nil {
@@ -109,9 +111,8 @@ func TestReadTransactionOptions(t *testing.T) {
 	}
 }
 
-
 func ExampleTransactor() {
-	fdb.MustAPIVersion(710)
+	fdb.MustAPIVersion(API_VERSION)
 	db := fdb.MustOpenDefault()
 
 	setOne := func(t fdb.Transactor, key fdb.Key, value []byte) error {
@@ -162,7 +163,7 @@ func ExampleTransactor() {
 }
 
 func ExampleReadTransactor() {
-	fdb.MustAPIVersion(710)
+	fdb.MustAPIVersion(API_VERSION)
 	db := fdb.MustOpenDefault()
 
 	getOne := func(rt fdb.ReadTransactor, key fdb.Key) ([]byte, error) {
@@ -215,7 +216,7 @@ func ExampleReadTransactor() {
 }
 
 func ExamplePrefixRange() {
-	fdb.MustAPIVersion(710)
+	fdb.MustAPIVersion(API_VERSION)
 	db := fdb.MustOpenDefault()
 
 	tr, e := db.CreateTransaction()
@@ -254,7 +255,7 @@ func ExamplePrefixRange() {
 }
 
 func ExampleRangeIterator() {
-	fdb.MustAPIVersion(710)
+	fdb.MustAPIVersion(API_VERSION)
 	db := fdb.MustOpenDefault()
 
 	tr, e := db.CreateTransaction()

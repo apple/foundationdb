@@ -1,3 +1,10 @@
+[configuration]
+buggify = false
+testClass = "Encryption"
+
+[[knobs]]
+enable_encryption = false
+
 [[test]]
 testTitle = 'EncryptDecrypt'
 

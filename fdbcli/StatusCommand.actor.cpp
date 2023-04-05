@@ -411,6 +411,7 @@ void printStatus(StatusObjectReader statusObj,
 			outputString += "\nConfiguration:";
 			std::string outputStringCache = outputString;
 			bool isOldMemory = false;
+			bool blobGranuleEnabled{ false };
 			try {
 				// Configuration section
 				// FIXME: Should we suppress this if there are cluster messages implying that the database has no
@@ -433,7 +434,21 @@ void printStatus(StatusObjectReader statusObj,
 				} else
 					outputString += "unknown";
 
-				int intVal;
+				int intVal = 0;
+				if (statusObjConfig.get("blob_granules_enabled", intVal) && intVal) {
+					blobGranuleEnabled = true;
+				}
+				if (blobGranuleEnabled) {
+					outputString += "\n  Blob granules          - enabled";
+				}
+
+				outputString += "\n  Encryption at-rest     - ";
+				if (statusObjConfig.get("encryption_at_rest_mode", strVal)) {
+					outputString += strVal;
+				} else {
+					outputString += "disabled";
+				}
+
 				outputString += "\n  Coordinators           - ";
 				if (statusObjConfig.get("coordinators_count", intVal)) {
 					outputString += std::to_string(intVal);
@@ -1102,6 +1117,15 @@ void printStatus(StatusObjectReader statusObj,
 					outputString += "\n\nCoordination servers:";
 					outputString += getCoordinatorsInfoString(statusObj);
 				}
+
+				if (blobGranuleEnabled) {
+					outputString += "\n\nBlob Granules:";
+					StatusObjectReader statusObjBlobGranules = statusObjCluster["blob_granules"];
+					auto numWorkers = statusObjBlobGranules["number_of_blob_workers"].get_int();
+					outputString += "\n  Number of Workers      - " + format("%d", numWorkers);
+					auto numKeyRanges = statusObjBlobGranules["number_of_key_ranges"].get_int();
+					outputString += "\n  Number of Key Ranges   - " + format("%d", numKeyRanges);
+				}
 			}
 
 			// client time
@@ -1128,8 +1152,12 @@ void printStatus(StatusObjectReader statusObj,
 					                "storage server failures.";
 				}
 				if (statusObjCluster.has("data_distribution_disabled_for_rebalance")) {
-					outputString += "\n\nWARNING: Data distribution is currently turned on but shard size balancing is "
-					                "currently disabled.";
+					outputString += "\n\nWARNING: Data distribution is currently turned on but one or both of shard "
+					                "size and read-load based balancing are disabled.";
+					// data_distribution_disabled_hex
+					if (statusObjCluster.has("data_distribution_disabled_hex")) {
+						outputString += " Ignore code: " + statusObjCluster["data_distribution_disabled_hex"].get_str();
+					}
 				}
 			}
 
@@ -1228,7 +1256,7 @@ ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
 		StatusObject _s = wait(StatusClient::statusFetcher(localDb));
 		s = _s;
 	} else {
-		state ThreadFuture<Optional<Value>> statusValueF = tr->get(LiteralStringRef("\xff\xff/status/json"));
+		state ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
 		Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
 		if (!statusValue.present()) {
 			fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
@@ -1246,6 +1274,16 @@ ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
 	return true;
 }
 
+void statusGenerator(const char* text,
+                     const char* line,
+                     std::vector<std::string>& lc,
+                     std::vector<StringRef> const& tokens) {
+	if (tokens.size() == 1) {
+		const char* opts[] = { "minimal", "details", "json", nullptr };
+		arrayGenerator(text, line, opts, lc);
+	}
+}
+
 CommandFactory statusFactory(
     "status",
     CommandHelp("status [minimal|details|json]",
@@ -1254,5 +1292,6 @@ CommandFactory statusFactory(
                 "what is wrong. If the cluster is running, this command will print cluster "
                 "statistics.\n\nSpecifying `minimal' will provide a minimal description of the status of your "
                 "database.\n\nSpecifying `details' will provide load information for individual "
-                "workers.\n\nSpecifying `json' will provide status information in a machine readable JSON format."));
+                "workers.\n\nSpecifying `json' will provide status information in a machine readable JSON format."),
+    &statusGenerator);
 } // namespace fdb_cli

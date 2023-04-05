@@ -23,17 +23,17 @@
 
 namespace FDB {
 const uint8_t DirectoryLayer::LITTLE_ENDIAN_LONG_ONE[8] = { 1, 0, 0, 0, 0, 0, 0, 0 };
-const StringRef DirectoryLayer::HIGH_CONTENTION_KEY = LiteralStringRef("hca");
-const StringRef DirectoryLayer::LAYER_KEY = LiteralStringRef("layer");
-const StringRef DirectoryLayer::VERSION_KEY = LiteralStringRef("version");
+const StringRef DirectoryLayer::HIGH_CONTENTION_KEY = "hca"_sr;
+const StringRef DirectoryLayer::LAYER_KEY = "layer"_sr;
+const StringRef DirectoryLayer::VERSION_KEY = "version"_sr;
 const int64_t DirectoryLayer::SUB_DIR_KEY = 0;
 
 const uint32_t DirectoryLayer::VERSION[3] = { 1, 0, 0 };
 
-const StringRef DirectoryLayer::DEFAULT_NODE_SUBSPACE_PREFIX = LiteralStringRef("\xfe");
+const StringRef DirectoryLayer::DEFAULT_NODE_SUBSPACE_PREFIX = "\xfe"_sr;
 const Subspace DirectoryLayer::DEFAULT_NODE_SUBSPACE = Subspace(DEFAULT_NODE_SUBSPACE_PREFIX);
 const Subspace DirectoryLayer::DEFAULT_CONTENT_SUBSPACE = Subspace();
-const StringRef DirectoryLayer::PARTITION_LAYER = LiteralStringRef("partition");
+const StringRef DirectoryLayer::PARTITION_LAYER = "partition"_sr;
 
 DirectoryLayer::DirectoryLayer(Subspace nodeSubspace, Subspace contentSubspace, bool allowManualPrefixes)
   : rootNode(nodeSubspace.get(nodeSubspace.key())), nodeSubspace(nodeSubspace), contentSubspace(contentSubspace),

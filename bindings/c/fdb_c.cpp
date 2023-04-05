@@ -21,7 +21,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "flow/ProtocolVersion.h"
 #include <cstdint>
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 #define FDB_INCLUDE_LEGACY_TYPES
 
 #include "fdbclient/MultiVersionTransaction.h"
@@ -79,9 +79,10 @@ extern "C" DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_erro
 	if (predicate_test == FDBErrorPredicates::RETRYABLE_NOT_COMMITTED) {
 		return code == error_code_not_committed || code == error_code_transaction_too_old ||
 		       code == error_code_future_version || code == error_code_database_locked ||
-		       code == error_code_proxy_memory_limit_exceeded || code == error_code_batch_transaction_throttled ||
-		       code == error_code_process_behind || code == error_code_tag_throttled ||
-		       code == error_code_unknown_tenant;
+		       code == error_code_grv_proxy_memory_limit_exceeded ||
+		       code == error_code_commit_proxy_memory_limit_exceeded ||
+		       code == error_code_batch_transaction_throttled || code == error_code_process_behind ||
+		       code == error_code_tag_throttled || code == error_code_unknown_tenant;
 	}
 	return false;
 }
@@ -238,6 +239,10 @@ fdb_error_t fdb_future_get_version_v619(FDBFuture* f, int64_t* out_version) {
 	CATCH_AND_RETURN(*out_version = TSAV(Version, f)->get(););
 }
 
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_bool(FDBFuture* f, fdb_bool_t* out_value) {
+	CATCH_AND_RETURN(*out_value = TSAV(bool, f)->get(););
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_future_get_int64(FDBFuture* f, int64_t* out_value) {
 	CATCH_AND_RETURN(*out_value = TSAV(int64_t, f)->get(););
 }
@@ -319,6 +324,15 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_key_array(FDBFuture* f, FDBKey c
 	                 *out_count = na.size(););
 }
 
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_granule_summary_array(FDBFuture* f,
+                                                                      FDBGranuleSummary const** out_ranges,
+                                                                      int* out_count) {
+	CATCH_AND_RETURN(Standalone<VectorRef<BlobGranuleSummaryRef>> na =
+	                     TSAV(Standalone<VectorRef<BlobGranuleSummaryRef>>, f)->get();
+	                 *out_ranges = (FDBGranuleSummary*)na.begin();
+	                 *out_count = na.size(););
+}
+
 extern "C" DLLEXPORT void fdb_result_destroy(FDBResult* r) {
 	CATCH_AND_DIE(TSAVB(r)->cancel(););
 }
@@ -380,6 +394,12 @@ FDBFuture* fdb_cluster_create_database_v609(FDBCluster* c, uint8_t const* db_nam
 
 extern "C" DLLEXPORT fdb_error_t fdb_create_database(const char* cluster_file_path, FDBDatabase** out_database) {
 	return fdb_create_database_impl(cluster_file_path, out_database);
+}
+
+extern "C" DLLEXPORT fdb_error_t fdb_create_database_from_connection_string(const char* connection_string,
+                                                                            FDBDatabase** out_database) {
+	CATCH_AND_RETURN(*out_database =
+	                     (FDBDatabase*)API->createDatabaseFromConnectionString(connection_string).extractPtr(););
 }
 
 extern "C" DLLEXPORT fdb_error_t fdb_database_set_option(FDBDatabase* d,
@@ -487,8 +507,134 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_wait_purge_granules_complete(FDBDat
 	    FDBFuture*)(DB(db)->waitPurgeGranulesComplete(StringRef(purge_key_name, purge_key_name_length)).extractPtr());
 }
 
+extern "C" DLLEXPORT FDBFuture* fdb_database_blobbify_range(FDBDatabase* db,
+                                                            uint8_t const* begin_key_name,
+                                                            int begin_key_name_length,
+                                                            uint8_t const* end_key_name,
+                                                            int end_key_name_length) {
+	return (FDBFuture*)(DB(db)
+	                        ->blobbifyRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                    StringRef(end_key_name, end_key_name_length)))
+	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_unblobbify_range(FDBDatabase* db,
+                                                              uint8_t const* begin_key_name,
+                                                              int begin_key_name_length,
+                                                              uint8_t const* end_key_name,
+                                                              int end_key_name_length) {
+	return (FDBFuture*)(DB(db)
+	                        ->unblobbifyRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                      StringRef(end_key_name, end_key_name_length)))
+	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_list_blobbified_ranges(FDBDatabase* db,
+                                                                    uint8_t const* begin_key_name,
+                                                                    int begin_key_name_length,
+                                                                    uint8_t const* end_key_name,
+                                                                    int end_key_name_length,
+                                                                    int rangeLimit) {
+	return (FDBFuture*)(DB(db)
+	                        ->listBlobbifiedRanges(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                           StringRef(end_key_name, end_key_name_length)),
+	                                               rangeLimit)
+	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_verify_blob_range(FDBDatabase* db,
+                                                                                  uint8_t const* begin_key_name,
+                                                                                  int begin_key_name_length,
+                                                                                  uint8_t const* end_key_name,
+                                                                                  int end_key_name_length,
+                                                                                  int64_t version) {
+	Optional<Version> rv;
+	if (version != latestVersion) {
+		rv = version;
+	}
+	return (FDBFuture*)(DB(db)
+	                        ->verifyBlobRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                      StringRef(end_key_name, end_key_name_length)),
+	                                          rv)
+	                        .extractPtr());
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant, FDBTransaction** out_transaction) {
 	CATCH_AND_RETURN(*out_transaction = (FDBTransaction*)TENANT(tenant)->createTransaction().extractPtr(););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_tenant_purge_blob_granules(FDBTenant* tenant,
+                                                               uint8_t const* begin_key_name,
+                                                               int begin_key_name_length,
+                                                               uint8_t const* end_key_name,
+                                                               int end_key_name_length,
+                                                               int64_t purge_version,
+                                                               fdb_bool_t force) {
+	return (FDBFuture*)(TENANT(tenant)
+	                        ->purgeBlobGranules(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                        StringRef(end_key_name, end_key_name_length)),
+	                                            purge_version,
+	                                            force)
+	                        .extractPtr());
+}
+extern "C" DLLEXPORT FDBFuture* fdb_tenant_wait_purge_granules_complete(FDBTenant* tenant,
+                                                                        uint8_t const* purge_key_name,
+                                                                        int purge_key_name_length) {
+	return (FDBFuture*)(TENANT(tenant)
+	                        ->waitPurgeGranulesComplete(StringRef(purge_key_name, purge_key_name_length))
+	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_tenant_blobbify_range(FDBTenant* tenant,
+                                                          uint8_t const* begin_key_name,
+                                                          int begin_key_name_length,
+                                                          uint8_t const* end_key_name,
+                                                          int end_key_name_length) {
+	return (FDBFuture*)(TENANT(tenant)
+	                        ->blobbifyRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                    StringRef(end_key_name, end_key_name_length)))
+	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_tenant_unblobbify_range(FDBTenant* tenant,
+                                                            uint8_t const* begin_key_name,
+                                                            int begin_key_name_length,
+                                                            uint8_t const* end_key_name,
+                                                            int end_key_name_length) {
+	return (FDBFuture*)(TENANT(tenant)
+	                        ->unblobbifyRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                      StringRef(end_key_name, end_key_name_length)))
+	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_tenant_list_blobbified_ranges(FDBTenant* tenant,
+                                                                  uint8_t const* begin_key_name,
+                                                                  int begin_key_name_length,
+                                                                  uint8_t const* end_key_name,
+                                                                  int end_key_name_length,
+                                                                  int rangeLimit) {
+	return (FDBFuture*)(TENANT(tenant)
+	                        ->listBlobbifiedRanges(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                           StringRef(end_key_name, end_key_name_length)),
+	                                               rangeLimit)
+	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_verify_blob_range(FDBTenant* tenant,
+                                                                                uint8_t const* begin_key_name,
+                                                                                int begin_key_name_length,
+                                                                                uint8_t const* end_key_name,
+                                                                                int end_key_name_length,
+                                                                                int64_t version) {
+	Optional<Version> rv;
+	if (version != latestVersion) {
+		rv = version;
+	}
+	return (FDBFuture*)(TENANT(tenant)
+	                        ->verifyBlobRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                      StringRef(end_key_name, end_key_name_length)),
+	                                          rv)
+	                        .extractPtr());
 }
 
 extern "C" DLLEXPORT void fdb_tenant_destroy(FDBTenant* tenant) {
@@ -655,6 +801,7 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_mapped_range(FDBTransaction*
                                                                  int target_bytes,
                                                                  FDBStreamingMode mode,
                                                                  int iteration,
+                                                                 int matchIndex,
                                                                  fdb_bool_t snapshot,
                                                                  fdb_bool_t reverse) {
 	FDBFuture* r = validate_and_update_parameters(limit, target_bytes, mode, iteration, reverse);
@@ -667,30 +814,10 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_mapped_range(FDBTransaction*
 	                        KeySelectorRef(KeyRef(end_key_name, end_key_name_length), end_or_equal, end_offset),
 	                        StringRef(mapper_name, mapper_name_length),
 	                        GetRangeLimits(limit, target_bytes),
+	                        matchIndex,
 	                        snapshot,
 	                        reverse)
 	                    .extractPtr());
-}
-
-FDBFuture* fdb_transaction_get_range_and_flat_map_v709(FDBTransaction* tr,
-                                                       uint8_t const* begin_key_name,
-                                                       int begin_key_name_length,
-                                                       fdb_bool_t begin_or_equal,
-                                                       int begin_offset,
-                                                       uint8_t const* end_key_name,
-                                                       int end_key_name_length,
-                                                       fdb_bool_t end_or_equal,
-                                                       int end_offset,
-                                                       uint8_t const* mapper_name,
-                                                       int mapper_name_length,
-                                                       int limit,
-                                                       int target_bytes,
-                                                       FDBStreamingMode mode,
-                                                       int iteration,
-                                                       fdb_bool_t snapshot,
-                                                       fdb_bool_t reverse) {
-	fprintf(stderr, "GetRangeAndFlatMap is removed from 7.0. Please upgrade to 7.1 and use GetMappedRange\n");
-	abort();
 }
 
 FDBFuture* fdb_transaction_get_range_selector_v13(FDBTransaction* tr,
@@ -846,11 +973,12 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_blob_granule_ranges(FDBTrans
                                                                         uint8_t const* begin_key_name,
                                                                         int begin_key_name_length,
                                                                         uint8_t const* end_key_name,
-                                                                        int end_key_name_length) {
+                                                                        int end_key_name_length,
+                                                                        int rangeLimit) {
 	RETURN_FUTURE_ON_ERROR(
 	    Standalone<VectorRef<KeyRangeRef>>,
 	    KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
-	    return (FDBFuture*)(TXN(tr)->getBlobGranuleRanges(range).extractPtr()););
+	    return (FDBFuture*)(TXN(tr)->getBlobGranuleRanges(range, rangeLimit).extractPtr()););
 }
 
 extern "C" DLLEXPORT FDBResult* fdb_transaction_read_blob_granules(FDBTransaction* tr,
@@ -878,6 +1006,74 @@ extern "C" DLLEXPORT FDBResult* fdb_transaction_read_blob_granules(FDBTransactio
 	    if (readVersion != latestVersion) { rv = readVersion; }
 
 	    return (FDBResult*)(TXN(tr)->readBlobGranules(range, beginVersion, rv, context).extractPtr()););
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules_start(FDBTransaction* tr,
+                                                                         uint8_t const* begin_key_name,
+                                                                         int begin_key_name_length,
+                                                                         uint8_t const* end_key_name,
+                                                                         int end_key_name_length,
+                                                                         int64_t beginVersion,
+                                                                         int64_t readVersion,
+                                                                         int64_t* readVersionOut) {
+	Optional<Version> rv;
+	if (readVersion != latestVersion) {
+		rv = readVersion;
+	}
+	return (FDBFuture*)(TXN(tr)
+	                        ->readBlobGranulesStart(KeyRangeRef(KeyRef(begin_key_name, begin_key_name_length),
+	                                                            KeyRef(end_key_name, end_key_name_length)),
+	                                                beginVersion,
+	                                                rv,
+	                                                readVersionOut)
+	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT FDBResult* fdb_transaction_read_blob_granules_finish(FDBTransaction* tr,
+                                                                          FDBFuture* f,
+                                                                          uint8_t const* begin_key_name,
+                                                                          int begin_key_name_length,
+                                                                          uint8_t const* end_key_name,
+                                                                          int end_key_name_length,
+                                                                          int64_t beginVersion,
+                                                                          int64_t readVersion,
+                                                                          FDBReadBlobGranuleContext* granule_context) {
+	// FIXME: better way to convert?
+	ReadBlobGranuleContext context;
+	context.userContext = granule_context->userContext;
+	context.start_load_f = granule_context->start_load_f;
+	context.get_load_f = granule_context->get_load_f;
+	context.free_load_f = granule_context->free_load_f;
+	context.debugNoMaterialize = granule_context->debugNoMaterialize;
+	context.granuleParallelism = granule_context->granuleParallelism;
+	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture(
+	    TSAV(Standalone<VectorRef<BlobGranuleChunkRef>>, f));
+
+	return (FDBResult*)(TXN(tr)
+	                        ->readBlobGranulesFinish(startFuture,
+	                                                 KeyRangeRef(KeyRef(begin_key_name, begin_key_name_length),
+	                                                             KeyRef(end_key_name, end_key_name_length)),
+	                                                 beginVersion,
+	                                                 readVersion,
+	                                                 context)
+	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_summarize_blob_granules(FDBTransaction* tr,
+                                                                        uint8_t const* begin_key_name,
+                                                                        int begin_key_name_length,
+                                                                        uint8_t const* end_key_name,
+                                                                        int end_key_name_length,
+                                                                        int64_t summaryVersion,
+                                                                        int rangeLimit) {
+	RETURN_FUTURE_ON_ERROR(
+	    Standalone<VectorRef<BlobGranuleSummaryRef>>,
+	    KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+
+	    Optional<Version> sv;
+	    if (summaryVersion != latestVersion) { sv = summaryVersion; }
+
+	    return (FDBFuture*)(TXN(tr)->summarizeBlobGranules(range, sv, rangeLimit).extractPtr()););
 }
 
 #include "fdb_c_function_pointers.g.h"
@@ -926,7 +1122,6 @@ extern "C" DLLEXPORT fdb_error_t fdb_select_api_version_impl(int runtime_version
 	// WARNING: use caution when implementing removed functions by calling public API functions. This can lead to
 	// undesired behavior when using the multi-version API. Instead, it is better to have both the removed and public
 	// functions call an internal implementation function. See fdb_create_database_impl for an example.
-	FDB_API_REMOVED(fdb_transaction_get_range_and_flat_map, 710);
 	FDB_API_REMOVED(fdb_future_get_version, 620);
 	FDB_API_REMOVED(fdb_create_cluster, 610);
 	FDB_API_REMOVED(fdb_cluster_create_database, 610);
@@ -954,6 +1149,10 @@ extern "C" DLLEXPORT int fdb_get_max_api_version() {
 
 extern "C" DLLEXPORT const char* fdb_get_client_version() {
 	return API->getClientVersion();
+}
+
+extern "C" DLLEXPORT void fdb_use_future_protocol_version() {
+	API->useFutureProtocolVersion();
 }
 
 #if defined(__APPLE__)

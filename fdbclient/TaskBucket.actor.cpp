@@ -66,7 +66,7 @@ struct UnblockFutureTaskFunc : TaskFuncBase {
 		return Void();
 	}
 };
-StringRef UnblockFutureTaskFunc::name = LiteralStringRef("UnblockFuture");
+StringRef UnblockFutureTaskFunc::name = "UnblockFuture"_sr;
 REGISTER_TASKFUNC(UnblockFutureTaskFunc);
 
 struct AddTaskFunc : TaskFuncBase {
@@ -88,7 +88,7 @@ struct AddTaskFunc : TaskFuncBase {
 		return Void();
 	};
 };
-StringRef AddTaskFunc::name = LiteralStringRef("AddTask");
+StringRef AddTaskFunc::name = "AddTask"_sr;
 REGISTER_TASKFUNC(AddTaskFunc);
 
 struct IdleTaskFunc : TaskFuncBase {
@@ -109,18 +109,18 @@ struct IdleTaskFunc : TaskFuncBase {
 		return tb->finish(tr, task);
 	};
 };
-StringRef IdleTaskFunc::name = LiteralStringRef("idle");
+StringRef IdleTaskFunc::name = "idle"_sr;
 REGISTER_TASKFUNC(IdleTaskFunc);
 
-Key Task::reservedTaskParamKeyType = LiteralStringRef("type");
-Key Task::reservedTaskParamKeyAddTask = LiteralStringRef("_add_task");
-Key Task::reservedTaskParamKeyDone = LiteralStringRef("done");
-Key Task::reservedTaskParamKeyPriority = LiteralStringRef("priority");
-Key Task::reservedTaskParamKeyFuture = LiteralStringRef("future");
-Key Task::reservedTaskParamKeyBlockID = LiteralStringRef("blockid");
-Key Task::reservedTaskParamKeyVersion = LiteralStringRef("version");
-Key Task::reservedTaskParamValidKey = LiteralStringRef("_validkey");
-Key Task::reservedTaskParamValidValue = LiteralStringRef("_validvalue");
+Key Task::reservedTaskParamKeyType = "type"_sr;
+Key Task::reservedTaskParamKeyAddTask = "_add_task"_sr;
+Key Task::reservedTaskParamKeyDone = "done"_sr;
+Key Task::reservedTaskParamKeyPriority = "priority"_sr;
+Key Task::reservedTaskParamKeyFuture = "future"_sr;
+Key Task::reservedTaskParamKeyBlockID = "blockid"_sr;
+Key Task::reservedTaskParamKeyVersion = "version"_sr;
+Key Task::reservedTaskParamValidKey = "_validkey"_sr;
+Key Task::reservedTaskParamValidValue = "_validvalue"_sr;
 
 // IMPORTANT:  Task() must result in an EMPTY parameter set, so params should only
 // be set for non-default constructor arguments.  To change this behavior look at all
@@ -199,7 +199,7 @@ public:
 		// many other new tasks get added so that the timed out tasks never get chances to re-run
 		if (deterministicRandom()->random01() < CLIENT_KNOBS->TASKBUCKET_CHECK_TIMEOUT_CHANCE) {
 			bool anyTimeouts = wait(requeueTimedOutTasks(tr, taskBucket));
-			TEST(anyTimeouts); // Found a task that timed out
+			CODE_PROBE(anyTimeouts, "Found a task that timed out");
 		}
 
 		state std::vector<Future<Optional<Key>>> taskKeyFutures(CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY + 1);
@@ -233,7 +233,7 @@ public:
 			bool anyTimeouts = wait(requeueTimedOutTasks(tr, taskBucket));
 			// If there were timeouts, try to get a task since there should now be one in one of the available spaces.
 			if (anyTimeouts) {
-				TEST(true); // Try to get one task from timeouts subspace
+				CODE_PROBE(true, "Try to get one task from timeouts subspace");
 				Reference<Task> task = wait(getOne(tr, taskBucket));
 				return task;
 			}
@@ -412,7 +412,7 @@ public:
 	                                 Reference<FutureBucket> futureBucket,
 	                                 Reference<Task> task) {
 		state Reference<TaskFuncBase> taskFunc;
-		state VerifyTask verifyTask = false;
+		state VerifyTask verifyTask(false);
 
 		if (!task || !TaskFuncBase::isValidTask(task))
 			return false;
@@ -651,10 +651,7 @@ public:
 	                                     Reference<Task> task) {
 		taskBucket->setOptions(tr);
 
-		Tuple t;
-		t.append(task->timeoutVersion);
-		t.append(task->key);
-
+		Tuple t = Tuple::makeTuple(task->timeoutVersion, task->key);
 		RangeResult values = wait(tr->getRange(taskBucket->timeouts.range(t), 1));
 		if (values.size() > 0)
 			return false;
@@ -707,7 +704,7 @@ public:
 					wait(delay(CLIENT_KNOBS->TASKBUCKET_CHECK_ACTIVE_DELAY));
 					bool isActiveKey = wait(getActiveKey(tr, taskBucket, startingValue));
 					if (isActiveKey) {
-						TEST(true); // checkActive return true
+						CODE_PROBE(true, "checkActive return true");
 						return true;
 					}
 					break;
@@ -717,7 +714,7 @@ public:
 			}
 		}
 
-		TEST(true); // checkActive return false
+		CODE_PROBE(true, "checkActive return false");
 		return false;
 	}
 
@@ -725,7 +722,7 @@ public:
 	                                          Reference<TaskBucket> taskBucket) {
 		taskBucket->setOptions(tr);
 
-		Optional<Value> val = wait(tr->get(taskBucket->prefix.pack(LiteralStringRef("task_count"))));
+		Optional<Value> val = wait(tr->get(taskBucket->prefix.pack("task_count"_sr)));
 
 		if (!val.present())
 			return 0;
@@ -742,7 +739,7 @@ public:
 	// Returns True if any tasks were affected.
 	ACTOR static Future<bool> requeueTimedOutTasks(Reference<ReadYourWritesTransaction> tr,
 	                                               Reference<TaskBucket> taskBucket) {
-		TEST(true); // Looks for tasks that have timed out and returns them to be available tasks.
+		CODE_PROBE(true, "Looks for tasks that have timed out and returns them to be available tasks.");
 		Version end = wait(tr->getReadVersion());
 		state KeyRange range(
 		    KeyRangeRef(taskBucket->timeouts.get(0).range().begin, taskBucket->timeouts.get(end).range().end));
@@ -849,12 +846,12 @@ public:
 
 		// If we're updating the task params the clear the old space and write params to the new space
 		if (updateParams) {
-			TEST(true); // Extended a task while updating parameters
+			CODE_PROBE(true, "Extended a task while updating parameters");
 			for (auto& p : task->params) {
 				tr->set(newTimeoutSpace.pack(p.key), p.value);
 			}
 		} else {
-			TEST(true); // Extended a task without updating parameters
+			CODE_PROBE(true, "Extended a task without updating parameters");
 			// Otherwise, read and transplant the params from the old to new timeout spaces
 			RangeResult params = wait(tr->getRange(oldTimeoutSpace.range(), CLIENT_KNOBS->TOO_MANY));
 			for (auto& kv : params) {
@@ -876,10 +873,10 @@ TaskBucket::TaskBucket(const Subspace& subspace,
   : cc("TaskBucket"), dispatchSlotChecksStarted("DispatchSlotChecksStarted", cc), dispatchErrors("DispatchErrors", cc),
     dispatchDoTasks("DispatchDoTasks", cc), dispatchEmptyTasks("DispatchEmptyTasks", cc),
     dispatchSlotChecksComplete("DispatchSlotChecksComplete", cc), dbgid(deterministicRandom()->randomUniqueID()),
-    prefix(subspace), active(prefix.get(LiteralStringRef("ac"))), pauseKey(prefix.pack(LiteralStringRef("pause"))),
-    available(prefix.get(LiteralStringRef("av"))), available_prioritized(prefix.get(LiteralStringRef("avp"))),
-    timeouts(prefix.get(LiteralStringRef("to"))), timeout(CLIENT_KNOBS->TASKBUCKET_TIMEOUT_VERSIONS),
-    system_access(sysAccess), priority_batch(priorityBatch), lockAware(lockAware) {}
+    prefix(subspace), active(prefix.get("ac"_sr)), pauseKey(prefix.pack("pause"_sr)), available(prefix.get("av"_sr)),
+    available_prioritized(prefix.get("avp"_sr)), timeouts(prefix.get("to"_sr)),
+    timeout(CLIENT_KNOBS->TASKBUCKET_TIMEOUT_VERSIONS), system_access(sysAccess), priority_batch(priorityBatch),
+    lockAware(lockAware) {}
 
 TaskBucket::~TaskBucket() {}
 
@@ -922,9 +919,7 @@ Key TaskBucket::addTask(Reference<ReadYourWritesTransaction> tr, Reference<Task>
 	for (auto& param : task->params)
 		tr->set(taskSpace.pack(param.key), param.value);
 
-	tr->atomicOp(prefix.pack(LiteralStringRef("task_count")),
-	             LiteralStringRef("\x01\x00\x00\x00\x00\x00\x00\x00"),
-	             MutationRef::AddValue);
+	tr->atomicOp(prefix.pack("task_count"_sr), "\x01\x00\x00\x00\x00\x00\x00\x00"_sr, MutationRef::AddValue);
 
 	return key;
 }
@@ -996,13 +991,9 @@ Future<bool> TaskBucket::isEmpty(Reference<ReadYourWritesTransaction> tr) {
 Future<Void> TaskBucket::finish(Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
 	setOptions(tr);
 
-	Tuple t;
-	t.append(task->timeoutVersion);
-	t.append(task->key);
+	Tuple t = Tuple::makeTuple(task->timeoutVersion, task->key);
 
-	tr->atomicOp(prefix.pack(LiteralStringRef("task_count")),
-	             LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff"),
-	             MutationRef::AddValue);
+	tr->atomicOp(prefix.pack("task_count"_sr), "\xff\xff\xff\xff\xff\xff\xff\xff"_sr, MutationRef::AddValue);
 	tr->clear(timeouts.range(t));
 
 	return Void();
@@ -1033,7 +1024,7 @@ Future<int64_t> TaskBucket::getTaskCount(Reference<ReadYourWritesTransaction> tr
 }
 
 Future<Void> TaskBucket::watchTaskCount(Reference<ReadYourWritesTransaction> tr) {
-	return tr->watch(prefix.pack(LiteralStringRef("task_count")));
+	return tr->watch(prefix.pack("task_count"_sr));
 }
 
 Future<Void> TaskBucket::debugPrintRange(Reference<ReadYourWritesTransaction> tr, Subspace subspace, Key msg) {
@@ -1108,7 +1099,7 @@ public:
 			Key key = StringRef(deterministicRandom()->randomUniqueID().toString());
 			taskFuture->addBlock(tr, key);
 			auto task = makeReference<Task>();
-			task->params[Task::reservedTaskParamKeyType] = LiteralStringRef("UnblockFuture");
+			task->params[Task::reservedTaskParamKeyType] = "UnblockFuture"_sr;
 			task->params[Task::reservedTaskParamKeyFuture] = taskFuture->key;
 			task->params[Task::reservedTaskParamKeyBlockID] = key;
 			onSetFutures.push_back(vectorFuture[i]->onSet(tr, taskBucket, task));
@@ -1138,10 +1129,10 @@ public:
 		bool is_set = wait(isSet(tr, taskFuture));
 
 		if (is_set) {
-			TEST(true); // is_set == true
+			CODE_PROBE(true, "is_set == true");
 			wait(performAction(tr, taskBucket, taskFuture, task));
 		} else {
-			TEST(true); // is_set == false
+			CODE_PROBE(true, "is_set == false");
 			Subspace callbackSpace =
 			    taskFuture->callbacks.get(StringRef(deterministicRandom()->randomUniqueID().toString()));
 			for (auto& v : task->params) {
@@ -1222,7 +1213,7 @@ public:
 		taskFuture->futureBucket->setOptions(tr);
 
 		task->params[Task::reservedTaskParamKeyAddTask] = task->params[Task::reservedTaskParamKeyType];
-		task->params[Task::reservedTaskParamKeyType] = LiteralStringRef("AddTask");
+		task->params[Task::reservedTaskParamKeyType] = "AddTask"_sr;
 		wait(onSet(tr, taskBucket, taskFuture, task));
 
 		return Void();
@@ -1287,14 +1278,14 @@ TaskFuture::TaskFuture(const Reference<FutureBucket> bucket, Key k) : futureBuck
 	}
 
 	prefix = futureBucket->prefix.get(key);
-	blocks = prefix.get(LiteralStringRef("bl"));
-	callbacks = prefix.get(LiteralStringRef("cb"));
+	blocks = prefix.get("bl"_sr);
+	callbacks = prefix.get("cb"_sr);
 }
 
 TaskFuture::~TaskFuture() {}
 
 void TaskFuture::addBlock(Reference<ReadYourWritesTransaction> tr, StringRef block_id) {
-	tr->set(blocks.pack(block_id), LiteralStringRef(""));
+	tr->set(blocks.pack(block_id), ""_sr);
 }
 
 Future<Void> TaskFuture::set(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket) {

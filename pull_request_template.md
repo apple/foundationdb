@@ -1,8 +1,8 @@
-Put description here...
+Replace this text with your description here...
 
 # Code-Reviewer Section
 
-The general guidelines can be found [here](https://github.com/apple/foundationdb/wiki/FoundationDB-Commit-Process).
+The general pull request guidelines can be found [here](https://github.com/apple/foundationdb/wiki/FoundationDB-Commit-Process).
 
 Please check each of the following things and check *all* boxes before accepting a PR.
 
@@ -14,5 +14,5 @@ Please check each of the following things and check *all* boxes before accepting
 
 If this PR is made against a release-branch, please also check the following:
 
-- [ ] This change/bugfix is a cherry-pick from the next younger branch (younger `release-branch` or `master` if this is the youngest branch)
+- [ ] This change/bugfix is a cherry-pick from the next younger branch (younger `release-branch` or `main` if this is the youngest branch)
 - [ ] There is a good reason why this PR needs to go into a release branch and this reason is documented (either in the description above or in a linked GitHub issue)

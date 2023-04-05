@@ -1,0 +1,54 @@
+issues:
+  # don't skip warning about doc comments
+  # don't exclude the default set of lint
+  exclude-use-default: false
+  exclude-rules:
+  # exclude deprecation warning otherwise we get an error for our own deprecations
+  - linters: [staticcheck]
+    text: "SA1019:"
+  - linters: [ govet ]
+    text: 'declaration of "(err|ctx)" shadows declaration at'
+
+linters:
+  disable-all: true
+  # TODO(johscheuer): activate linters again and fix issues
+  enable:
+    - deadcode
+    #- dupl
+    - errcheck
+    #- goconst
+    #- gocyclo
+    - gofmt
+    - goimports
+    - revive
+    #- gosec
+    - gosimple
+    - govet
+    - ineffassign
+    #- interfacer
+    #- lll
+    #- maligned
+    - misspell
+    - nakedret
+    - prealloc
+    - exportloopref
+    - staticcheck
+    - structcheck
+    - typecheck
+    - unconvert
+    - unparam
+    - unused
+    - varcheck
+
+linters-settings:
+  errcheck:
+    # path to a file containing a list of functions to exclude from checking
+    # see https://github.com/kisielk/errcheck#excluding-functions for details
+    exclude: errcheck_excludes.txt
+  govet:
+    enable:
+      - shadow
+run:
+  deadline: 5m
+  skip-files:
+    - ".*_generated.*.go$"

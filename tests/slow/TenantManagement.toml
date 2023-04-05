@@ -1,5 +1,8 @@
 [configuration]
+allowDefaultTenant = false
 allowDisablingTenants = false
+allowCreatingTenants = false
+extraDatabaseMode = 'Single'
 
 [[test]]
 testTitle = 'TenantManagementTest'
@@ -9,5 +12,5 @@ runSetup = true
 
     [[test.workload]]
     testName = 'TenantManagement'
-	maxTenants = 1000
-	testDuration = 60
+    maxTenants = 1000
+    testDuration = 120

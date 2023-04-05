@@ -20,27 +20,26 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
-#include "fdbserver/Status.h"
+#include "fdbserver/Status.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct DDMetricsWorkload : TestWorkload {
+	static constexpr auto NAME = "DDMetrics";
 	double startDelay, ddDone;
 
 	DDMetricsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), ddDone(0.0) {
-		startDelay = getOption(options, LiteralStringRef("beginPoll"), 10.0);
+		startDelay = getOption(options, "beginPoll"_sr, 10.0);
 	}
-
-	std::string description() const override { return "Data Distribution Metrics"; }
 
 	ACTOR Future<int> getHighPriorityRelocationsInFlight(Database cx, DDMetricsWorkload* self) {
 		WorkerInterface masterWorker = wait(getMasterWorker(cx, self->dbInfo));
 
 		TraceEvent("GetHighPriorityReliocationsInFlight").detail("Stage", "ContactingMaster");
-		TraceEventFields md = wait(
-		    timeoutError(masterWorker.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MovingData"))), 1.0));
+		TraceEventFields md =
+		    wait(timeoutError(masterWorker.eventLogRequest.getReply(EventLogRequest("MovingData"_sr)), 1.0));
 		int relocations;
 		sscanf(md.getValue("UnhealthyRelocations").c_str(), "%d", &relocations);
 		return relocations;
@@ -74,4 +73,4 @@ struct DDMetricsWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override { m.emplace_back("DDDuration", ddDone, Averaged::False); }
 };
 
-WorkloadFactory<DDMetricsWorkload> DDMetricsWorkloadFactory("DDMetrics");
+WorkloadFactory<DDMetricsWorkload> DDMetricsWorkloadFactory;

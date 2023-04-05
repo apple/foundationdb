@@ -20,17 +20,16 @@
 
 #include <cinttypes>
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/SignalSafeUnwind.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Stress test the slow task profiler or flow profiler
 struct SlowTaskWorkload : TestWorkload {
+	static constexpr auto NAME = "SlowTaskWorkload";
 
 	SlowTaskWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
-
-	std::string description() const override { return "SlowTaskWorkload"; }
 
 	Future<Void> start(Database const& cx) override {
 		setupRunLoopProfiler();
@@ -79,4 +78,4 @@ struct SlowTaskWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<SlowTaskWorkload> SlowTaskWorkloadFactory("SlowTaskWorkload");
+WorkloadFactory<SlowTaskWorkload> SlowTaskWorkloadFactory;

@@ -77,7 +77,7 @@ Here’s the basic pattern:
         private static final Subspace vector;
 
         static {
-            fdb = FDB.selectAPIVersion(710);
+            fdb = FDB.selectAPIVersion(720);
             db = fdb.open();
             vector = new Subspace(Tuple.from("V"));
         }

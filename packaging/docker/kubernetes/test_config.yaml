@@ -43,7 +43,7 @@ spec:
     spec:
       containers:
         - name: foundationdb
-          image: foundationdb/foundationdb-kubernetes:6.3.13-local
+          image: foundationdb/foundationdb-kubernetes:7.1.5-local
           imagePullPolicy: IfNotPresent
           args:
             - --input-dir
@@ -91,13 +91,13 @@ spec:
             - name: logs
               mountPath: /var/fdb/logs
         - name: foundationdb-sidecar
-          image: foundationdb/foundationdb-kubernetes:6.3.15-local
+          image: foundationdb/foundationdb-kubernetes:7.1.6-local
           imagePullPolicy: IfNotPresent
           args:
             - --mode
             - sidecar
             - --main-container-version
-            - 6.3.13
+            - 7.1.5
             - --output-dir
             - /var/fdb/shared-binaries
             - --copy-binary
@@ -139,7 +139,7 @@ data:
   config.json: |
     {
       "runProcesses": false,
-      "version": "6.3.13",
+      "version": "7.1.5",
       "arguments": [
         {"value": "--cluster-file"},
         {"value": "/var/fdb/data/fdb.cluster"},
@@ -199,6 +199,7 @@ rules:
       - "get"
       - "watch"
       - "update"
+      - "patch"
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -239,7 +240,7 @@ spec:
           emptyDir: {}
       initContainers:
         - name: foundationdb-kubernetes-init
-          image: foundationdb/foundationdb-kubernetes:6.3.13-local
+          image: foundationdb/foundationdb-kubernetes:7.1.5-local
           imagePullPolicy: IfNotPresent
           args:
             - "--mode"
@@ -253,11 +254,9 @@ spec:
             - "--require-not-empty"
             - "fdb.cluster"
             - "--copy-library"
-            - "6.1"
-            - "--copy-library"
-            - "6.2"
-            - "--copy-primary-library"
             - "6.3"
+            - "--copy-primary-library"
+            - "7.1"
             - "--copy-binary"
             - "fdbcli"
           volumeMounts:

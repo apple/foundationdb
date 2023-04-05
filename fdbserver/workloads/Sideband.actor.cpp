@@ -50,6 +50,8 @@ struct SidebandInterface {
 };
 
 struct SidebandWorkload : TestWorkload {
+	static constexpr auto NAME = "Sideband";
+
 	double testDuration, operationsPerSecond;
 	SidebandInterface interf;
 
@@ -59,11 +61,10 @@ struct SidebandWorkload : TestWorkload {
 	SidebandWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), messages("Messages"), consistencyErrors("Causal Consistency Errors"),
 	    keysUnexpectedlyPresent("KeysUnexpectedlyPresent") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		operationsPerSecond = getOption(options, LiteralStringRef("operationsPerSecond"), 50.0);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		operationsPerSecond = getOption(options, "operationsPerSecond"_sr, 50.0);
 	}
 
-	std::string description() const override { return "SidebandWorkload"; }
 	Future<Void> setup(Database const& cx) override { return persistInterface(this, cx->clone()); }
 	Future<Void> start(Database const& cx) override {
 		clients.push_back(mutator(this, cx->clone()));
@@ -151,7 +152,7 @@ struct SidebandWorkload : TestWorkload {
 						++self->keysUnexpectedlyPresent;
 						break;
 					}
-					tr.set(messageKey, LiteralStringRef("deadbeef"));
+					tr.set(messageKey, "deadbeef"_sr);
 					wait(tr.commit());
 					commitVersion = tr.getCommittedVersion();
 					break;
@@ -189,4 +190,4 @@ struct SidebandWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<SidebandWorkload> SidebandWorkloadFactory("Sideband");
+WorkloadFactory<SidebandWorkload> SidebandWorkloadFactory;

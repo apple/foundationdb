@@ -26,7 +26,7 @@
 #include "flow/DeterministicRandom.h"
 #include "flow/network.h"
 #include "flow/ThreadHelper.actor.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

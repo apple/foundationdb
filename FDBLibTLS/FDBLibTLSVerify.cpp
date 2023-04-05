@@ -20,11 +20,15 @@
 
 #include "FDBLibTLS/FDBLibTLSVerify.h"
 
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
 #include <openssl/objects.h>
 
 #include <algorithm>
 #include <exception>
 #include <cstring>
+#include <stdexcept>
 
 static int hexValue(char c) {
 	static char const digits[] = "0123456789ABCDEF";

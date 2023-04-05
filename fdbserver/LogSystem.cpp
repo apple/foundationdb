@@ -19,6 +19,9 @@
  */
 
 #include "fdbserver/LogSystem.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbserver/OTELSpanContextMessage.h"
+#include "fdbserver/SpanContextMessage.h"
 #include "flow/serialize.h"
 
 std::string LogSet::logRouterString() {
@@ -269,6 +272,15 @@ void LogSet::getPushLocations(VectorRef<Tag> tags, std::vector<int>& locations, 
 	//	.detail("Included", alsoServers.size()).detail("Duration", timer() - t);
 }
 
+LogPushData::LogPushData(Reference<ILogSystem> logSystem, int tlogCount) : logSystem(logSystem), subsequence(1) {
+	ASSERT(tlogCount > 0);
+	messagesWriter.reserve(tlogCount);
+	for (int i = 0; i < tlogCount; i++) {
+		messagesWriter.emplace_back(AssumeVersion(g_network->protocolVersion()));
+	}
+	messagesWritten = std::vector<bool>(tlogCount, false);
+}
+
 void LogPushData::addTxsTag() {
 	if (logSystem->getTLogVersion() >= TLogVersion::V4) {
 		next_message_tags.push_back(logSystem->getRandomTxsTag());
@@ -277,8 +289,8 @@ void LogPushData::addTxsTag() {
 	}
 }
 
-void LogPushData::addTransactionInfo(SpanID const& context) {
-	TEST(!spanContext.isValid()); // addTransactionInfo with invalid SpanID
+void LogPushData::addTransactionInfo(SpanContext const& context) {
+	CODE_PROBE(!spanContext.isValid(), "addTransactionInfo with invalid SpanContext");
 	spanContext = context;
 	writtenLocations.clear();
 }
@@ -340,17 +352,37 @@ bool LogPushData::writeTransactionInfo(int location, uint32_t subseq) {
 		return false;
 	}
 
-	TEST(true); // Wrote SpanContextMessage to a transaction log
+	CODE_PROBE(true, "Wrote SpanContextMessage to a transaction log");
 	writtenLocations.insert(location);
 
 	BinaryWriter& wr = messagesWriter[location];
-	SpanContextMessage contextMessage(spanContext);
-
 	int offset = wr.getLength();
 	wr << uint32_t(0) << subseq << uint16_t(prev_tags.size());
 	for (auto& tag : prev_tags)
 		wr << tag;
-	wr << contextMessage;
+	if (logSystem->getTLogVersion() >= TLogVersion::V7) {
+		OTELSpanContextMessage contextMessage(spanContext);
+		wr << contextMessage;
+	} else {
+		// When we're on a TLog version below 7, but the front end of the system (i.e. proxy, sequencer, resolver)
+		// is using OpenTelemetry tracing (i.e on or above 7.2), we need to convert the OpenTelemetry Span data model
+		// i.e. 16 bytes for traceId, 8 bytes for spanId, to the OpenTracing spec, which is 8 bytes for traceId
+		// and 8 bytes for spanId. That means we need to drop some data.
+		//
+		// As a workaround for this special case we've decided to drop is the 8 bytes
+		// for spanId. Therefore we're passing along the full 16 byte traceId to the storage server with 0 for spanID.
+		// This will result in a follows from relationship for the storage span within the trace rather than a
+		// parent->child.
+		SpanContextMessage contextMessage;
+		if (spanContext.isSampled()) {
+			CODE_PROBE(true, "Converting OTELSpanContextMessage to traced SpanContextMessage", probe::decoration::rare);
+			contextMessage = SpanContextMessage(UID(spanContext.traceID.first(), spanContext.traceID.second()));
+		} else {
+			CODE_PROBE(true, "Converting OTELSpanContextMessage to untraced SpanContextMessage");
+			contextMessage = SpanContextMessage(UID(0, 0));
+		}
+		wr << contextMessage;
+	}
 	int length = wr.getLength() - offset;
 	*(uint32_t*)((uint8_t*)wr.getData() + offset) = length - sizeof(uint32_t);
 	return true;

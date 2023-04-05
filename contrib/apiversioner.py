@@ -50,7 +50,7 @@ EXCLUDED_FILES = list(map(re.compile, [
     r'bindings/go/godoc-resources/.*',
     r'bindings/go/src/fdb/tuple/testdata/tuples.golden',
     r'fdbcli/linenoise/.*',
-    r'fdbrpc/rapidjson/.*', r'fdbrpc/rapidxml/.*', r'fdbrpc/zlib/.*', r'fdbrpc/sha1/.*',
+    r'contrib/rapidjson/.*', r'fdbrpc/rapidxml/.*', r'fdbrpc/zlib/.*', r'fdbrpc/sha1/.*',
     r'fdbrpc/xml2json.hpp$', r'fdbrpc/libcoroutine/.*', r'fdbrpc/libeio/.*', r'fdbrpc/lib64/.*',
     r'fdbrpc/generated-constants.cpp$',
 

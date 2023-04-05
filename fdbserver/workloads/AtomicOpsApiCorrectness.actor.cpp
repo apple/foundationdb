@@ -25,13 +25,14 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct AtomicOpsApiCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "AtomicOpsApiCorrectness";
 	bool testFailed = false;
 	uint32_t opType;
 
 private:
-	static int getApiVersion(const Database& cx) { return cx->apiVersion; }
+	static int getApiVersion(const Database& cx) { return cx->apiVersion.version(); }
 
-	static void setApiVersion(Database* cx, int version) { (*cx)->apiVersion = version; }
+	static void setApiVersion(Database* cx, int version) { (*cx)->apiVersion = ApiVersion(version); }
 
 	Key getTestKey(std::string prefix) {
 		std::string key = prefix + std::to_string(clientId);
@@ -40,10 +41,8 @@ private:
 
 public:
 	AtomicOpsApiCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		opType = getOption(options, LiteralStringRef("opType"), -1);
+		opType = getOption(options, "opType"_sr, -1);
 	}
-
-	std::string description() const override { return "AtomicOpsApiCorrectness"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -53,31 +52,31 @@ public:
 
 		switch (opType) {
 		case 0:
-			TEST(true); // Testing atomic Min
+			CODE_PROBE(true, "Testing atomic Min");
 			return testMin(cx->clone(), this);
 		case 1:
-			TEST(true); // Testing atomic And
+			CODE_PROBE(true, "Testing atomic And");
 			return testAnd(cx->clone(), this);
 		case 2:
-			TEST(true); // Testing atomic ByteMin
+			CODE_PROBE(true, "Testing atomic ByteMin");
 			return testByteMin(cx->clone(), this);
 		case 3:
-			TEST(true); // Testing atomic ByteMax
+			CODE_PROBE(true, "Testing atomic ByteMax");
 			return testByteMax(cx->clone(), this);
 		case 4:
-			TEST(true); // Testing atomic Or
+			CODE_PROBE(true, "Testing atomic Or");
 			return testOr(cx->clone(), this);
 		case 5:
-			TEST(true); // Testing atomic Max
+			CODE_PROBE(true, "Testing atomic Max");
 			return testMax(cx->clone(), this);
 		case 6:
-			TEST(true); // Testing atomic Xor
+			CODE_PROBE(true, "Testing atomic Xor");
 			return testXor(cx->clone(), this);
 		case 7:
-			TEST(true); // Testing atomic Add
+			CODE_PROBE(true, "Testing atomic Add");
 			return testAdd(cx->clone(), this);
 		case 8:
-			TEST(true); // Testing atomic CompareAndClear
+			CODE_PROBE(true, "Testing atomic CompareAndClear");
 			return testCompareAndClear(cx->clone(), this);
 		default:
 			ASSERT(false);
@@ -640,4 +639,4 @@ public:
 	}
 };
 
-WorkloadFactory<AtomicOpsApiCorrectnessWorkload> AtomicOpsApiCorrectnessWorkloadFactory("AtomicOpsApiCorrectness");
+WorkloadFactory<AtomicOpsApiCorrectnessWorkload> AtomicOpsApiCorrectnessWorkloadFactory;

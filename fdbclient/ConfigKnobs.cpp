@@ -44,19 +44,20 @@ ConfigKey ConfigKeyRef::decodeKey(KeyRef const& key) {
 }
 
 Value KnobValueRef::ToValueFunc::operator()(int v) const {
-	return BinaryWriter::toValue(v, Unversioned());
+	// return BinaryWriter::toValue(v, Unversioned());
+	return Tuple::makeTuple(v).pack();
 }
 Value KnobValueRef::ToValueFunc::operator()(int64_t v) const {
-	return BinaryWriter::toValue(v, Unversioned());
+	return Tuple::makeTuple(v).pack();
 }
 Value KnobValueRef::ToValueFunc::operator()(bool v) const {
-	return BinaryWriter::toValue(v, Unversioned());
+	return Tuple::makeTuple(v).pack();
 }
 Value KnobValueRef::ToValueFunc::operator()(ValueRef v) const {
-	return v;
+	return Tuple::makeTuple(v).pack();
 }
 Value KnobValueRef::ToValueFunc::operator()(double v) const {
-	return BinaryWriter::toValue(v, Unversioned());
+	return Tuple::makeTuple(v).pack();
 }
 
 KnobValue KnobValueRef::CreatorFunc::operator()(NoKnobFound) const {
@@ -144,10 +145,7 @@ std::string configDBTypeToString(ConfigDBType configDBType) {
 }
 
 TEST_CASE("/fdbclient/ConfigDB/ConfigKey/EncodeDecode") {
-	Tuple tuple;
-	tuple << "class-A"_sr
-	      << "test_long"_sr;
-	auto packed = tuple.pack();
+	auto packed = Tuple::makeTuple("class-A"_sr, "test_long"_sr).pack();
 	auto unpacked = ConfigKeyRef::decodeKey(packed);
 	ASSERT(unpacked.configClass.get() == "class-A"_sr);
 	ASSERT(unpacked.knobName == "test_long"_sr);
@@ -169,18 +167,8 @@ void decodeFailureTest(KeyRef key) {
 } // namespace
 
 TEST_CASE("/fdbclient/ConfigDB/ConfigKey/DecodeFailure") {
-	{
-		Tuple tuple;
-		tuple << "s1"_sr
-		      << "s2"_sr
-		      << "s3"_sr;
-		decodeFailureTest(tuple.pack());
-	}
-	{
-		Tuple tuple;
-		tuple << "s1"_sr << 5;
-		decodeFailureTest(tuple.pack());
-	}
+	decodeFailureTest(Tuple::makeTuple("s1"_sr, "s2"_sr, "s3"_sr).pack());
+	decodeFailureTest(Tuple::makeTuple("s1"_sr, 5).pack());
 	decodeFailureTest("non-tuple-key"_sr);
 	return Void();
 }

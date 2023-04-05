@@ -12,6 +12,7 @@ Administration
    configuration
    moving-a-cluster
    tls
+   authorization
 
 This document covers the administration of an existing FoundationDB cluster. We recommend you read this document before setting up a cluster for performance testing or production use.
 
@@ -761,6 +762,11 @@ You can now remove old client library versions from your clients. This is only t
 
 Version-specific notes on upgrading
 ===================================
+
+Upgrading to 7.1.x
+--------------------
+
+Upgrades to 7.1.0 or later will break any client using ``fdb_transaction_get_range_and_flat_map``, as it is removed in version 7.1.0.
 
 Upgrading from 6.2.x
 --------------------

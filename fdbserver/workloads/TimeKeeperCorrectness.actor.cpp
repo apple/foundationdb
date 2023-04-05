@@ -25,14 +25,14 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 struct TimeKeeperCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "TimeKeeperCorrectness";
+
 	double testDuration;
 	std::map<int64_t, Version> inMemTimeKeeper;
 
 	TimeKeeperCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 20.0);
+		testDuration = getOption(options, "testDuration"_sr, 20.0);
 	}
-
-	std::string description() const override { return "TimeKeeperCorrectness"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -79,23 +79,23 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				std::vector<std::pair<int64_t, Version>> allItems =
+				KeyBackedRangeResult<std::pair<int64_t, Version>> allItems =
 				    wait(dbTimeKeeper.getRange(tr, 0, Optional<int64_t>(), self->inMemTimeKeeper.size() + 2));
 
-				if (allItems.size() > SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES + 1) {
+				if (allItems.results.size() > SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES + 1) {
 					TraceEvent(SevError, "TKCorrectness_TooManyEntries")
 					    .detail("Expected", SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES + 1)
-					    .detail("Found", allItems.size());
+					    .detail("Found", allItems.results.size());
 					return false;
 				}
 
-				if (allItems.size() < self->testDuration / SERVER_KNOBS->TIME_KEEPER_DELAY) {
+				if (allItems.results.size() < self->testDuration / SERVER_KNOBS->TIME_KEEPER_DELAY) {
 					TraceEvent(SevWarnAlways, "TKCorrectness_TooFewEntries")
 					    .detail("Expected", self->testDuration / SERVER_KNOBS->TIME_KEEPER_DELAY)
-					    .detail("Found", allItems.size());
+					    .detail("Found", allItems.results.size());
 				}
 
-				for (auto item : allItems) {
+				for (auto item : allItems.results) {
 					auto it = self->inMemTimeKeeper.lower_bound(item.first);
 					if (it == self->inMemTimeKeeper.end()) {
 						continue;
@@ -122,4 +122,4 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 };
 
-WorkloadFactory<TimeKeeperCorrectnessWorkload> TimeKeeperCorrectnessWorkloadFactory("TimeKeeperCorrectness");
+WorkloadFactory<TimeKeeperCorrectnessWorkload> TimeKeeperCorrectnessWorkloadFactory;

@@ -39,6 +39,7 @@ const KeyRef RECORD = "RECORD"_sr;
 const KeyRef INDEX = "INDEX"_sr;
 
 struct GetMappedRangeWorkload : ApiWorkload {
+	static constexpr auto NAME = "GetMappedRange";
 	bool enabled;
 	Snapshot snapshot = Snapshot::False;
 
@@ -51,8 +52,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	GetMappedRangeWorkload(WorkloadContext const& wcx) : ApiWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 	}
-
-	std::string description() const override { return "GetMappedRange"; }
 
 	Future<Void> start(Database const& cx) override {
 		// This workload is generated different from typical ApiWorkload. So don't use ApiWorkload::_start.
@@ -83,15 +82,11 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	static Value dataOfRecord(int i) { return Key(format("data-of-record-%08d", i)); }
 	static Value dataOfRecord(int i, int split) { return Key(format("data-of-record-%08d-split-%08d", i, split)); }
 
-	static Key indexEntryKey(int i) {
-		return Tuple().append(prefix).append(INDEX).append(indexKey(i)).append(primaryKey(i)).pack();
-	}
-	static Key recordKey(int i) { return Tuple().append(prefix).append(RECORD).append(primaryKey(i)).pack(); }
-	static Key recordKey(int i, int split) {
-		return Tuple().append(prefix).append(RECORD).append(primaryKey(i)).append(split).pack();
-	}
-	static Value recordValue(int i) { return Tuple().append(dataOfRecord(i)).pack(); }
-	static Value recordValue(int i, int split) { return Tuple().append(dataOfRecord(i, split)).pack(); }
+	static Key indexEntryKey(int i) { return Tuple::makeTuple(prefix, INDEX, indexKey(i), primaryKey(i)).pack(); }
+	static Key recordKey(int i) { return Tuple::makeTuple(prefix, RECORD, primaryKey(i)).pack(); }
+	static Key recordKey(int i, int split) { return Tuple::makeTuple(prefix, RECORD, primaryKey(i), split).pack(); }
+	static Value recordValue(int i) { return Tuple::makeTuple(dataOfRecord(i)).pack(); }
+	static Value recordValue(int i, int split) { return Tuple::makeTuple(dataOfRecord(i, split)).pack(); }
 
 	ACTOR Future<Void> fillInRecords(Database cx, int n, GetMappedRangeWorkload* self) {
 		state Transaction tr(cx);
@@ -144,29 +139,52 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		return Void();
 	}
 
-	static void validateRecord(int expectedId, const MappedKeyValueRef* it, GetMappedRangeWorkload* self) {
+	// Return true if need to retry.
+	static bool validateRecord(int expectedId,
+	                           const MappedKeyValueRef* it,
+	                           GetMappedRangeWorkload* self,
+	                           int matchIndex,
+	                           bool isBoundary,
+	                           bool allMissing) {
 		//		std::cout << "validateRecord expectedId " << expectedId << " it->key " << printable(it->key) << "
 		// indexEntryKey(expectedId) " << printable(indexEntryKey(expectedId)) << std::endl;
-		ASSERT(it->key == indexEntryKey(expectedId));
+		if (matchIndex == MATCH_INDEX_ALL || isBoundary) {
+			ASSERT(it->key == indexEntryKey(expectedId));
+		} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
+			ASSERT(it->key == (allMissing ? EMPTY : indexEntryKey(expectedId)));
+		} else if (matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
+			ASSERT(it->key == (allMissing ? indexEntryKey(expectedId) : EMPTY));
+		} else {
+			ASSERT(it->key == EMPTY);
+		}
 		ASSERT(it->value == EMPTY);
 
 		if (self->SPLIT_RECORDS) {
 			ASSERT(std::holds_alternative<GetRangeReqAndResultRef>(it->reqAndResult));
 			auto& getRange = std::get<GetRangeReqAndResultRef>(it->reqAndResult);
 			auto& rangeResult = getRange.result;
+			ASSERT(it->boundaryAndExist == (isBoundary && !rangeResult.empty()));
 			//					std::cout << "rangeResult.size()=" << rangeResult.size() << std::endl;
-			ASSERT(rangeResult.more == false);
-			ASSERT(rangeResult.size() == SPLIT_SIZE);
-			for (int split = 0; split < SPLIT_SIZE; split++) {
-				auto& kv = rangeResult[split];
-				//						std::cout << "kv.key=" << printable(kv.key)
-				//						          << ", recordKey(id, split)=" << printable(recordKey(id, split)) <<
-				// std::endl; std::cout << "kv.value=" << printable(kv.value)
-				//						          << ", recordValue(id, split)=" << printable(recordValue(id, split)) <<
-				// std::endl;
-				ASSERT(kv.key == recordKey(expectedId, split));
-				ASSERT(kv.value == recordValue(expectedId, split));
+			// In the future, we may be able to do the continuation more efficiently by combining partial results
+			// together and then validate.
+			if (rangeResult.more) {
+				// Retry if the underlying request is not fully completed.
+				return true;
 			}
+			if (!allMissing) {
+				ASSERT(rangeResult.size() == SPLIT_SIZE);
+				for (int split = 0; split < SPLIT_SIZE; split++) {
+					auto& kv = rangeResult[split];
+					//				std::cout << "kv.key=" << printable(kv.key)
+					//						   << ", recordKey(id, split)=" << printable(recordKey(id, split)) <<
+					// std::endl; std::cout << "kv.value=" << printable(kv.value)
+					//						   << ", recordValue(id, split)=" << printable(recordValue(id,split)) <<
+					// std::endl;
+					ASSERT(kv.key == recordKey(expectedId, split));
+					ASSERT(kv.value == recordValue(expectedId, split));
+				}
+			}
+
 		} else {
 			ASSERT(std::holds_alternative<GetValueReqAndResultRef>(it->reqAndResult));
 			auto& getValue = std::get<GetValueReqAndResultRef>(it->reqAndResult);
@@ -174,6 +192,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			ASSERT(getValue.result.present());
 			ASSERT(getValue.result.get() == recordValue(expectedId));
 		}
+		return false;
 	}
 
 	ACTOR Future<MappedRangeResult> scanMappedRangeWithLimits(Database cx,
@@ -182,7 +201,9 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	                                                          Key mapper,
 	                                                          int limit,
 	                                                          int expectedBeginId,
-	                                                          GetMappedRangeWorkload* self) {
+	                                                          GetMappedRangeWorkload* self,
+	                                                          int matchIndex,
+	                                                          bool allMissing) {
 
 		std::cout << "start scanMappedRangeWithLimits beginSelector:" << beginSelector.toString()
 		          << " endSelector:" << endSelector.toString() << " expectedBeginId:" << expectedBeginId
@@ -190,8 +211,13 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		loop {
 			state Reference<TransactionWrapper> tr = self->createTransaction();
 			try {
-				MappedRangeResult result = wait(tr->getMappedRange(
-				    beginSelector, endSelector, mapper, GetRangeLimits(limit), self->snapshot, Reverse::False));
+				MappedRangeResult result = wait(tr->getMappedRange(beginSelector,
+				                                                   endSelector,
+				                                                   mapper,
+				                                                   GetRangeLimits(limit),
+				                                                   matchIndex,
+				                                                   self->snapshot,
+				                                                   Reverse::False));
 				//			showResult(result);
 				if (self->BAD_MAPPER) {
 					TraceEvent("GetMappedRangeWorkloadShouldNotReachable").detail("ResultSize", result.size());
@@ -200,9 +226,19 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				std::cout << "result.more=" << result.more << std::endl;
 				ASSERT(result.size() <= limit);
 				int expectedId = expectedBeginId;
-				for (const MappedKeyValueRef* it = result.begin(); it != result.end(); it++) {
-					validateRecord(expectedId, it, self);
+				bool needRetry = false;
+				int cnt = 0;
+				const MappedKeyValueRef* it = result.begin();
+				for (; cnt < result.size(); cnt++, it++) {
+					if (validateRecord(
+					        expectedId, it, self, matchIndex, cnt == 0 || cnt == result.size() - 1, allMissing)) {
+						needRetry = true;
+						break;
+					}
 					expectedId++;
+				}
+				if (needRetry) {
+					continue;
 				}
 				std::cout << "finished scanMappedRangeWithLimits" << std::endl;
 				return result;
@@ -222,22 +258,29 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 	}
 
-	ACTOR Future<Void> scanMappedRange(Database cx, int beginId, int endId, Key mapper, GetMappedRangeWorkload* self) {
-		Key beginTuple = Tuple().append(prefix).append(INDEX).append(indexKey(beginId)).getDataAsStandalone();
+	ACTOR Future<Void> scanMappedRange(Database cx,
+	                                   int beginId,
+	                                   int endId,
+	                                   Key mapper,
+	                                   GetMappedRangeWorkload* self,
+	                                   int matchIndex,
+	                                   bool allMissing = false) {
+		Key beginTuple = Tuple::makeTuple(prefix, INDEX, indexKey(beginId)).getDataAsStandalone();
 		state KeySelector beginSelector = KeySelector(firstGreaterOrEqual(beginTuple));
-		Key endTuple = Tuple().append(prefix).append(INDEX).append(indexKey(endId)).getDataAsStandalone();
+		Key endTuple = Tuple::makeTuple(prefix, INDEX, indexKey(endId)).getDataAsStandalone();
 		state KeySelector endSelector = KeySelector(firstGreaterOrEqual(endTuple));
 		state int limit = 100;
 		state int expectedBeginId = beginId;
 		while (true) {
-			MappedRangeResult result = wait(
-			    self->scanMappedRangeWithLimits(cx, beginSelector, endSelector, mapper, limit, expectedBeginId, self));
+			MappedRangeResult result = wait(self->scanMappedRangeWithLimits(
+			    cx, beginSelector, endSelector, mapper, limit, expectedBeginId, self, matchIndex, allMissing));
 			expectedBeginId += result.size();
 			if (result.more) {
 				if (result.empty()) {
 					// This is usually not expected.
 					std::cout << "not result but have more, try again" << std::endl;
 				} else {
+					// auto& reqAndResult = std::get<GetRangeReqAndResultRef>(result.back().reqAndResult);
 					beginSelector = KeySelector(firstGreaterThan(result.back().key));
 				}
 			} else {
@@ -273,15 +316,16 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	                                                   int endId,
 	                                                   Reference<TransactionWrapper>& tr,
 	                                                   GetMappedRangeWorkload* self) {
-		Key mapper = getMapper(self);
-		Key beginTuple = Tuple().append(prefix).append(INDEX).append(indexKey(beginId)).getDataAsStandalone();
+		Key mapper = getMapper(self, false);
+		Key beginTuple = Tuple::makeTuple(prefix, INDEX, indexKey(beginId)).getDataAsStandalone();
 		KeySelector beginSelector = KeySelector(firstGreaterOrEqual(beginTuple));
-		Key endTuple = Tuple().append(prefix).append(INDEX).append(indexKey(endId)).getDataAsStandalone();
+		Key endTuple = Tuple::makeTuple(prefix, INDEX, indexKey(endId)).getDataAsStandalone();
 		KeySelector endSelector = KeySelector(firstGreaterOrEqual(endTuple));
 		return tr->getMappedRange(beginSelector,
 		                          endSelector,
 		                          mapper,
 		                          GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED),
+		                          MATCH_INDEX_ALL,
 		                          self->snapshot,
 		                          Reverse::False);
 	}
@@ -377,19 +421,34 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		std::cout << "Test configuration: transactionType:" << self->transactionType << " snapshot:" << self->snapshot
 		          << "bad_mapper:" << self->BAD_MAPPER << std::endl;
 
-		Key mapper = getMapper(self);
+		Key mapper = getMapper(self, false);
 		// The scanned range cannot be too large to hit get_mapped_key_values_has_more. We have a unit validating the
 		// error is thrown when the range is large.
-		wait(self->scanMappedRange(cx, 10, 490, mapper, self));
+		const double r = deterministicRandom()->random01();
+		int matchIndex = MATCH_INDEX_ALL;
+		if (r < 0.25) {
+			matchIndex = MATCH_INDEX_NONE;
+		} else if (r < 0.5) {
+			matchIndex = MATCH_INDEX_MATCHED_ONLY;
+		} else if (r < 0.75) {
+			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
+		}
+		wait(self->scanMappedRange(cx, 10, 490, mapper, self, matchIndex));
+
+		{
+			Key mapper = getMapper(self, true);
+			wait(self->scanMappedRange(cx, 10, 490, mapper, self, MATCH_INDEX_UNMATCHED_ONLY, true));
+		}
+
 		return Void();
 	}
 
-	static Key getMapper(GetMappedRangeWorkload* self) {
+	static Key getMapper(GetMappedRangeWorkload* self, bool mapperForAllMissing) {
 		Tuple mapperTuple;
 		if (self->BAD_MAPPER) {
 			mapperTuple << prefix << RECORD << "{K[xxx]}"_sr;
 		} else {
-			mapperTuple << prefix << RECORD << "{K[3]}"_sr;
+			mapperTuple << prefix << RECORD << (mapperForAllMissing ? "{K[2]}"_sr : "{K[3]}"_sr);
 			if (self->SPLIT_RECORDS) {
 				mapperTuple << "{...}"_sr;
 			}
@@ -403,4 +462,4 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<GetMappedRangeWorkload> GetMappedRangeWorkloadFactory("GetMappedRange");
+WorkloadFactory<GetMappedRangeWorkload> GetMappedRangeWorkloadFactory;

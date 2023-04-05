@@ -1,7 +1,6 @@
 .. default-domain:: py
 .. default-domain:: py
 .. highlight:: python
-.. module:: fdb
 
 .. Required substitutions for api-common.rst.inc
 

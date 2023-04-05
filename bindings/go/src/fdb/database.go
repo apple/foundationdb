@@ -22,11 +22,12 @@
 
 package fdb
 
-// #define FDB_API_VERSION 710
+// #define FDB_API_VERSION 720
 // #include <foundationdb/fdb_c.h>
 import "C"
 
 import (
+	"errors"
 	"runtime"
 
 	"golang.org/x/xerrors"
@@ -80,6 +81,32 @@ func (d Database) CreateTransaction() (Transaction, error) {
 	runtime.SetFinalizer(t, (*transaction).destroy)
 
 	return Transaction{t}, nil
+}
+
+// RebootWorker is a wrapper around fdb_database_reboot_worker and allows to reboot processes
+// from the go bindings. If a suspendDuration > 0 is provided the rebooted process will be
+// suspended for suspendDuration seconds. If checkFile is set to true the process will check
+// if the data directory is writeable by creating a validation file. The address must be a
+// process address is the form of IP:Port pair.
+func (d Database) RebootWorker(address string, checkFile bool, suspendDuration int) error {
+	t := &futureInt64{
+		future: newFuture(C.fdb_database_reboot_worker(
+			d.ptr,
+			byteSliceToPtr([]byte(address)),
+			C.int(len(address)),
+			C.fdb_bool_t(boolToInt(checkFile)),
+			C.int(suspendDuration),
+		),
+		),
+	}
+
+	dbVersion, err := t.Get()
+
+	if dbVersion == 0 {
+		return errors.New("failed to send reboot process request")
+	}
+
+	return err
 }
 
 func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNil) (ret interface{}, e error) {

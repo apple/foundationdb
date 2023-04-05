@@ -43,6 +43,7 @@ RUN yum install -y \
     telnet-0.17-66.el7 \
     traceroute-2.0.22-2.el7 \
     unzip-6.0-22.el7_9 \
+    openssl-1.0.2k-24.el7_9.x86_64 \
     vim-enhanced-7.4.629-8.el7_9 && \
     yum clean all && \
     rm -rf /var/cache/yum
@@ -58,7 +59,7 @@ RUN curl -Ls https://github.com/krallin/tini/releases/download/v0.19.0/tini-amd6
 
 WORKDIR /
 
-FROM golang:1.16.7-bullseye AS go-build
+FROM golang:1.17.11-bullseye AS go-build
 
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
@@ -69,7 +70,7 @@ FROM base as foundationdb-base
 WORKDIR /tmp
 ARG FDB_VERSION=6.3.22
 ARG FDB_LIBRARY_VERSIONS="${FDB_VERSION}"
-ARG FDB_WEBSITE=https://www.foundationdb.org
+ARG FDB_WEBSITE=https://github.com/apple/foundationdb/releases/download
 
 RUN mkdir -p /var/fdb/{logs,tmp,lib} && \
     mkdir -p /usr/lib/fdb/multiversion && \
@@ -88,24 +89,29 @@ RUN groupadd --gid 4059 \
 COPY website /tmp/website/
 
 # Install FoundationDB Binaries
-RUN curl -Ls $FDB_WEBSITE/downloads/$FDB_VERSION/linux/fdb_$FDB_VERSION.tar.gz | tar zxf - --strip-components=1 && \
-    for file in fdbbackup fdbcli fdbdr fdbmonitor fdbrestore fdbserver backup_agent dr_agent fastrestore_tool; do \
-        chmod u+x $file; \
+RUN for file in fdbserver fdbbackup fdbcli fdbmonitor; do \
+        curl --fail -Ls ${FDB_WEBSITE}/${FDB_VERSION}/$file.x86_64 -o $file; \
+        chmod +x $file; \
         mv $file /usr/bin; \
+    done
+
+# Setup all symlinks for the other binaries that are a copy of fdbbackup
+RUN for file in fdbdr fdbrestore backup_agent dr_agent fastrestore_tool; do \
+        ln -s /usr/bin/fdbbackup /usr/bin/$file; \
     done
 
 # Install additional FoundationDB Client Libraries
 RUN for version in $FDB_LIBRARY_VERSIONS; do \
-    curl -Ls $FDB_WEBSITE/downloads/$version/linux/libfdb_c_$version.so -o /usr/lib/fdb/multiversion/libfdb_c_${version%.*}.so; \
+    curl --fail -Ls ${FDB_WEBSITE}/${version}/libfdb_c.x86_64.so -o /usr/lib/fdb/multiversion/libfdb_c_${version%.*}.so; \
     done
 
 # Install additional FoundationDB Client Libraries (for sidecar)
 RUN mkdir -p /var/fdb/lib && \
     for version in $FDB_LIBRARY_VERSIONS; do \
-    curl -Ls $FDB_WEBSITE/downloads/$version/linux/libfdb_c_$version.so -o /var/fdb/lib/libfdb_c_${version%.*}.so; \
+    curl --fail -Ls ${FDB_WEBSITE}/${version}/libfdb_c.x86_64.so -o /var/fdb/lib/libfdb_c_${version%.*}.so; \
     done
 
-RUN curl -Ls $FDB_WEBSITE/downloads/$FDB_VERSION/linux/libfdb_c_$FDB_VERSION.so -o /usr/lib/libfdb_c.so
+RUN curl -Ls $FDB_WEBSITE/$FDB_VERSION/libfdb_c.x86_64.so -o /usr/lib/libfdb_c.so
 
 RUN rm -rf /tmp/*
 WORKDIR /

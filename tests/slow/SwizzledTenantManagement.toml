@@ -1,4 +1,5 @@
 [configuration]
+allowDefaultTenant = false
 allowDisablingTenants = false
 
 [[test]]
@@ -9,36 +10,36 @@ runSetup = true
 
     [[test.workload]]
     testName = 'TenantManagement'
-	maxTenants = 1000
-    testDuration = 60
+    maxTenants = 1000
+    testDuration = 120
 
     [[test.workload]]
     testName = 'RandomClogging'
-    testDuration = 120.0
+    testDuration = 180.0
     swizzle = 1
 
     [[test.workload]]
     testName = 'Rollback'
-    testDuration = 120.0
+    testDuration = 180.0
     meanDelay = 10.0
 
     [[test.workload]]
     testName = 'Attrition'
-    testDuration = 120.0
+    testDuration = 180.0
 
     [[test.workload]]
     testName = 'Attrition'
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true
-    testDuration = 120.0
+    testDuration = 180.0
 
     [[test.workload]]
     testName = 'Attrition'
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true
-    testDuration = 120.0
+    testDuration = 180.0
 
     [[test.workload]]
     testName = 'ChangeConfig'

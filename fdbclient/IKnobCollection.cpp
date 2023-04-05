@@ -108,6 +108,11 @@ void IKnobCollection::setupKnobs(const std::vector<std::pair<std::string, std::s
 				TraceEvent(SevWarnAlways, "InvalidKnobValue")
 				    .detail("Knob", printable(knobName))
 				    .detail("Value", printable(knobValueString));
+			} else if (e.code() == error_code_invalid_option) {
+				std::cerr << "WARNING: Invalid knob option '" << knobName << "'\n";
+				TraceEvent(SevWarnAlways, "InvalidKnobName")
+				    .detail("Knob", printable(knobName))
+				    .detail("Value", printable(knobValueString));
 			} else {
 				std::cerr << "ERROR: Failed to set knob option '" << knobName << "': " << e.what() << "\n";
 				TraceEvent(SevError, "FailedToSetKnob")

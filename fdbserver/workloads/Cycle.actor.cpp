@@ -18,21 +18,35 @@
  * limitations under the License.
  */
 
-#include <cstring>
-
+#include "flow/Arena.h"
+#include "flow/IRandom.h"
+#include "flow/Trace.h"
+#include "flow/serialize.h"
+#include "fdbrpc/simulator.h"
+#include "fdbrpc/TokenSign.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
-#include "flow/Arena.h"
-#include "flow/IRandom.h"
-#include "flow/Trace.h"
-#include "flow/serialize.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct CycleWorkload : TestWorkload {
+template <bool MultiTenancy>
+struct CycleMembers {};
+
+template <>
+struct CycleMembers<true> {
+	Arena arena;
+	TenantName tenant;
+	authz::jwt::TokenRef token;
+	StringRef signedToken;
+	bool useToken;
+};
+
+template <bool MultiTenancy>
+struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
+	static constexpr auto NAME = MultiTenancy ? "TenantCycle" : "Cycle";
 	int actorCount, nodeCount;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
 	Key keyPrefix;
@@ -48,20 +62,49 @@ struct CycleWorkload : TestWorkload {
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
 		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
 		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
-		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString());
-		traceParentProbability = getOption(options, "traceParentProbability "_sr, 0.01);
+		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
+		traceParentProbability = getOption(options, "traceParentProbability"_sr, 0.01);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
+		if constexpr (MultiTenancy) {
+			ASSERT(g_network->isSimulated());
+			this->useToken = getOption(options, "useToken"_sr, true);
+			auto k = g_simulator->authKeys.begin();
+			this->tenant = getOption(options, "tenant"_sr, "CycleTenant"_sr);
+			// make it comfortably longer than the timeout of the workload
+			auto currentTime = uint64_t(lround(g_network->timer()));
+			this->token.algorithm = authz::Algorithm::ES256;
+			this->token.issuedAtUnixTime = currentTime;
+			this->token.expiresAtUnixTime =
+			    currentTime + uint64_t(std::lround(getCheckTimeout())) + uint64_t(std::lround(testDuration)) + 100;
+			this->token.keyId = k->first;
+			this->token.notBeforeUnixTime = currentTime - 10;
+			VectorRef<StringRef> tenants;
+			tenants.push_back_deep(this->arena, this->tenant);
+			this->token.tenants = tenants;
+			// we currently don't support this workload to be run outside of simulation
+			this->signedToken = authz::jwt::signToken(this->arena, this->token, k->second);
+		}
 	}
 
-	std::string description() const override { return "CycleWorkload"; }
-	Future<Void> setup(Database const& cx) override { return bulkSetup(cx, this, nodeCount, Promise<double>()); }
+	Future<Void> setup(Database const& cx) override {
+		if constexpr (MultiTenancy) {
+			cx->defaultTenant = this->tenant;
+		}
+		return bulkSetup(cx, this, nodeCount, Promise<double>());
+	}
 	Future<Void> start(Database const& cx) override {
+		if constexpr (MultiTenancy) {
+			cx->defaultTenant = this->tenant;
+		}
 		for (int c = 0; c < actorCount; c++)
 			clients.push_back(
 			    timeout(cycleClient(cx->clone(), this, actorCount / transactionsPerSecond), testDuration, Void()));
 		return delay(testDuration);
 	}
 	Future<bool> check(Database const& cx) override {
+		if constexpr (MultiTenancy) {
+			cx->defaultTenant = this->tenant;
+		}
 		int errors = 0;
 		for (int c = 0; c < clients.size(); c++)
 			errors += clients[c].isError();
@@ -95,6 +138,15 @@ struct CycleWorkload : TestWorkload {
 		    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken);
 	}
 
+	template <bool B = MultiTenancy>
+	std::enable_if_t<B> setAuthToken(Transaction& tr) const {
+		if (this->useToken)
+			tr.setOption(FDBTransactionOptions::AUTHORIZATION_TOKEN, this->signedToken);
+	}
+
+	template <bool B = MultiTenancy>
+	std::enable_if_t<!B> setAuthToken(Transaction& tr) const {}
+
 	ACTOR Future<Void> cycleClient(Database cx, CycleWorkload* self, double delay) {
 		state double lastTime = now();
 		try {
@@ -104,11 +156,12 @@ struct CycleWorkload : TestWorkload {
 				state double tstart = now();
 				state int r = deterministicRandom()->randomInt(0, self->nodeCount);
 				state Transaction tr(cx);
-				if (deterministicRandom()->random01() >= self->traceParentProbability) {
+				self->setAuthToken(tr);
+				if (deterministicRandom()->random01() <= self->traceParentProbability) {
 					state Span span("CycleClient"_loc);
-					TraceEvent("CycleTracingTransaction", span.context).log();
+					TraceEvent("CycleTracingTransaction", span.context.traceID).log();
 					tr.setOption(FDBTransactionOptions::SPAN_PARENT,
-					             BinaryWriter::toValue(span.context, Unversioned()));
+					             BinaryWriter::toValue(span.context, IncludeVersion()));
 				}
 				while (true) {
 					try {
@@ -231,6 +284,7 @@ struct CycleWorkload : TestWorkload {
 		}
 		return true;
 	}
+
 	ACTOR Future<bool> cycleCheck(Database cx, CycleWorkload* self, bool ok) {
 		if (self->transactions.getMetric().value() < self->testDuration * self->minExpectedTransactionsPerSecond) {
 			TraceEvent(SevWarnAlways, "TestFailure")
@@ -249,6 +303,7 @@ struct CycleWorkload : TestWorkload {
 			// One client checks the validity of the cycle
 			state Transaction tr(cx);
 			state int retryCount = 0;
+			self->setAuthToken(tr);
 			loop {
 				try {
 					state Version v = wait(tr.getReadVersion());
@@ -260,6 +315,11 @@ struct CycleWorkload : TestWorkload {
 				} catch (Error& e) {
 					retryCount++;
 					TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "CycleCheckError").error(e);
+					if (g_network->isSimulated() && retryCount > 50) {
+						CODE_PROBE(true, "Cycle check enable speedUpSimulation because too many transaction_too_old()");
+						// try to make the read window back to normal size (5 * version_per_sec)
+						g_simulator->speedUpSimulation = true;
+					}
 					wait(tr.onError(e));
 				}
 			}
@@ -268,4 +328,5 @@ struct CycleWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<CycleWorkload> CycleWorkloadFactory("Cycle");
+WorkloadFactory<CycleWorkload<false>> CycleWorkloadFactory(UntrustedMode::False);
+WorkloadFactory<CycleWorkload<true>> TenantCycleWorkloadFactory(UntrustedMode::True);

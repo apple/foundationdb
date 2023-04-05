@@ -48,15 +48,14 @@ ACTOR Future<double> latencyOfRead(Transaction* tr, Key k) {
 
 // Measure the latency of a storage server making a committed value available for reading.
 struct ReadAfterWriteWorkload : KVWorkload {
+	static constexpr auto NAME = "ReadAfterWrite";
 
 	double testDuration;
 	ContinuousSample<double> propagationLatency;
 
 	ReadAfterWriteWorkload(WorkloadContext const& wcx) : KVWorkload(wcx), propagationLatency(SAMPLE_SIZE) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
 	}
-
-	std::string description() const override { return "ReadAfterWriteWorkload"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -122,4 +121,4 @@ struct ReadAfterWriteWorkload : KVWorkload {
 	}
 };
 
-WorkloadFactory<ReadAfterWriteWorkload> ReadAfterWriteWorkloadFactory("ReadAfterWrite");
+WorkloadFactory<ReadAfterWriteWorkload> ReadAfterWriteWorkloadFactory;

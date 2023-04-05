@@ -26,6 +26,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct StreamingReadWorkload : TestWorkload {
+	static constexpr auto NAME = "StreamingRead";
+
 	int actorCount, keyBytes, valueBytes, readsPerTransaction, nodeCount;
 	int rangesPerTransaction;
 	bool readSequentially;
@@ -40,20 +42,18 @@ struct StreamingReadWorkload : TestWorkload {
 	StreamingReadWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), readKeys("Keys Read"), readValueBytes("Value Bytes Read"),
 	    latencies(2000) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		actorCount = getOption(options, LiteralStringRef("actorCount"), 20);
-		readsPerTransaction = getOption(options, LiteralStringRef("readsPerTransaction"), 10);
-		rangesPerTransaction = getOption(options, LiteralStringRef("rangesPerTransaction"), 1);
-		nodeCount = getOption(options, LiteralStringRef("nodeCount"), 100000);
-		keyBytes = std::max(getOption(options, LiteralStringRef("keyBytes"), 16), 16);
-		valueBytes = std::max(getOption(options, LiteralStringRef("valueBytes"), 96), 16);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		actorCount = getOption(options, "actorCount"_sr, 20);
+		readsPerTransaction = getOption(options, "readsPerTransaction"_sr, 10);
+		rangesPerTransaction = getOption(options, "rangesPerTransaction"_sr, 1);
+		nodeCount = getOption(options, "nodeCount"_sr, 100000);
+		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 16);
+		valueBytes = std::max(getOption(options, "valueBytes"_sr, 96), 16);
 		std::string valueFormat = "%016llx" + std::string(valueBytes - 16, '.');
-		warmingDelay = getOption(options, LiteralStringRef("warmingDelay"), 0.0);
+		warmingDelay = getOption(options, "warmingDelay"_sr, 0.0);
 		constantValue = Value(format(valueFormat.c_str(), 42));
-		readSequentially = getOption(options, LiteralStringRef("readSequentially"), false);
+		readSequentially = getOption(options, "readSequentially"_sr, false);
 	}
-
-	std::string description() const override { return "StreamingRead"; }
 
 	Future<Void> setup(Database const& cx) override {
 		return bulkSetup(cx, this, nodeCount, Promise<double>(), true, warmingDelay);
@@ -150,4 +150,4 @@ struct StreamingReadWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<StreamingReadWorkload> StreamingReadWorkloadFactory("StreamingRead");
+WorkloadFactory<StreamingReadWorkload> StreamingReadWorkloadFactory;

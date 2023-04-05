@@ -30,7 +30,7 @@ ACTOR Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailur
 		ReplyPromise<Void> P = waitNext(waitFailure);
 		queue.push_back(P);
 		if (queue.size() > SERVER_KNOBS->MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS) {
-			TEST(true); // wait server queue full
+			CODE_PROBE(true, "wait server queue full");
 			queue.front().send(Void());
 			queue.pop_front();
 		}

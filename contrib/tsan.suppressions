@@ -1,0 +1,5 @@
+# ThreadSanitizer suppressions file for FDB
+# https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions
+
+# FDB signal handler is not async-signal safe
+signal:crashHandler

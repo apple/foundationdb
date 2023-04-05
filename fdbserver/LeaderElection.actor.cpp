@@ -27,44 +27,29 @@
 
 // Keep trying to become a leader by submitting itself to all coordinators.
 // Monitor the health of all coordinators at the same time.
-// Note: for coordinators whose NetworkAddress is parsed out of a hostname, a connection failure will cause this actor
-// to throw `coordinators_changed()` error
 ACTOR Future<Void> submitCandidacy(Key key,
                                    LeaderElectionRegInterface coord,
                                    LeaderInfo myInfo,
                                    UID prevChangeID,
                                    AsyncTrigger* nomineeChange,
-                                   Optional<LeaderInfo>* nominee,
-                                   Optional<Hostname> hostname = Optional<Hostname>()) {
+                                   Optional<LeaderInfo>* nominee) {
 	loop {
 		state Optional<LeaderInfo> li;
-
-		if (coord.candidacy.getEndpoint().getPrimaryAddress().fromHostname) {
-			state ErrorOr<Optional<LeaderInfo>> rep = wait(coord.candidacy.tryGetReply(
-			    CandidacyRequest(key, myInfo, nominee->present() ? nominee->get().changeID : UID(), prevChangeID),
-			    TaskPriority::CoordinationReply));
-			if (rep.isError()) {
-				// Connecting to nominee failed, most likely due to connection failed.
-				TraceEvent("SubmitCandadicyError")
-				    .error(rep.getError())
-				    .detail("Hostname", hostname.present() ? hostname.get().toString() : "UnknownHostname")
-				    .detail("OldAddr", coord.candidacy.getEndpoint().getPrimaryAddress().toString());
-				if (rep.getError().code() == error_code_request_maybe_delivered) {
-					// Delay to prevent tight resolving loop due to outdated DNS cache
-					wait(delay(FLOW_KNOBS->HOSTNAME_RESOLVE_DELAY));
-					throw coordinators_changed();
-				} else {
-					throw rep.getError();
-				}
-			} else if (rep.present()) {
-				li = rep.get();
-			}
+		if (coord.hostname.present()) {
+			wait(store(
+			    li,
+			    retryGetReplyFromHostname(
+			        CandidacyRequest(key, myInfo, nominee->present() ? nominee->get().changeID : UID(), prevChangeID),
+			        coord.hostname.get(),
+			        WLTOKEN_LEADERELECTIONREG_CANDIDACY,
+			        TaskPriority::CoordinationReply)));
 		} else {
-			Optional<LeaderInfo> tmp = wait(retryBrokenPromise(
-			    coord.candidacy,
-			    CandidacyRequest(key, myInfo, nominee->present() ? nominee->get().changeID : UID(), prevChangeID),
-			    TaskPriority::CoordinationReply));
-			li = tmp;
+			wait(store(
+			    li,
+			    retryBrokenPromise(
+			        coord.candidacy,
+			        CandidacyRequest(key, myInfo, nominee->present() ? nominee->get().changeID : UID(), prevChangeID),
+			        TaskPriority::CoordinationReply)));
 		}
 
 		wait(Future<Void>(Void())); // Make sure we weren't cancelled
@@ -104,20 +89,26 @@ Future<Void> buggifyDelayedAsyncVar(Reference<AsyncVar<T>>& var) {
 ACTOR Future<Void> changeLeaderCoordinators(ServerCoordinators coordinators, Value forwardingInfo) {
 	std::vector<Future<Void>> forwardRequests;
 	forwardRequests.reserve(coordinators.leaderElectionServers.size());
-	for (int i = 0; i < coordinators.leaderElectionServers.size(); i++)
-		forwardRequests.push_back(retryBrokenPromise(coordinators.leaderElectionServers[i].forward,
-		                                             ForwardRequest(coordinators.clusterKey, forwardingInfo)));
+	for (int i = 0; i < coordinators.leaderElectionServers.size(); i++) {
+		if (coordinators.leaderElectionServers[i].hostname.present()) {
+			forwardRequests.push_back(retryGetReplyFromHostname(ForwardRequest(coordinators.clusterKey, forwardingInfo),
+			                                                    coordinators.leaderElectionServers[i].hostname.get(),
+			                                                    WLTOKEN_LEADERELECTIONREG_FORWARD));
+		} else {
+			forwardRequests.push_back(retryBrokenPromise(coordinators.leaderElectionServers[i].forward,
+			                                             ForwardRequest(coordinators.clusterKey, forwardingInfo)));
+		}
+	}
 	int quorum_size = forwardRequests.size() / 2 + 1;
 	wait(quorum(forwardRequests, quorum_size));
 	return Void();
 }
 
-ACTOR Future<Void> tryBecomeLeaderInternal(Reference<IClusterConnectionRecord> connRecord,
+ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
                                            Value proposedSerializedInterface,
                                            Reference<AsyncVar<Value>> outSerializedLeader,
                                            bool hasConnected,
                                            Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo) {
-	state ServerCoordinators coordinators(connRecord);
 	state AsyncTrigger nomineeChange;
 	state std::vector<Optional<LeaderInfo>> nominees;
 	state LeaderInfo myInfo;
@@ -134,6 +125,8 @@ ACTOR Future<Void> tryBecomeLeaderInternal(Reference<IClusterConnectionRecord> c
 		wait(delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
 	}
 
+	nominees.resize(coordinators.leaderElectionServers.size());
+
 	myInfo.serializedInfo = proposedSerializedInterface;
 	outSerializedLeader->set(Value());
 
@@ -141,9 +134,6 @@ ACTOR Future<Void> tryBecomeLeaderInternal(Reference<IClusterConnectionRecord> c
 	    (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY) ? buggifyDelayedAsyncVar(outSerializedLeader) : Void();
 
 	while (!iAmLeader) {
-		wait(connRecord->resolveHostnames());
-		coordinators = ServerCoordinators(connRecord);
-		nominees.resize(coordinators.leaderElectionServers.size());
 		state Future<Void> badCandidateTimeout;
 
 		myInfo.changeID = deterministicRandom()->randomUniqueID();
@@ -153,19 +143,12 @@ ACTOR Future<Void> tryBecomeLeaderInternal(Reference<IClusterConnectionRecord> c
 		std::vector<Future<Void>> cand;
 		cand.reserve(coordinators.leaderElectionServers.size());
 		for (int i = 0; i < coordinators.leaderElectionServers.size(); i++) {
-			Optional<Hostname> hostname;
-			auto r = connRecord->getConnectionString().networkAddressToHostname.find(
-			    coordinators.leaderElectionServers[i].candidacy.getEndpoint().getPrimaryAddress());
-			if (r != connRecord->getConnectionString().networkAddressToHostname.end()) {
-				hostname = r->second;
-			}
 			cand.push_back(submitCandidacy(coordinators.clusterKey,
 			                               coordinators.leaderElectionServers[i],
 			                               myInfo,
 			                               prevChangeID,
 			                               &nomineeChange,
-			                               &nominees[i],
-			                               hostname));
+			                               &nominees[i]));
 		}
 		candidacies = waitForAll(cand);
 
@@ -183,8 +166,8 @@ ACTOR Future<Void> tryBecomeLeaderInternal(Reference<IClusterConnectionRecord> c
 					    .detail("StoredConnectionString", coordinators.ccr->getConnectionString().toString())
 					    .detail("CurrentConnectionString", leader.get().first.serializedInfo.toString());
 				}
-				coordinators.ccr->setAndPersistConnectionString(
-				    ClusterConnectionString(leader.get().first.serializedInfo.toString()));
+				wait(coordinators.ccr->setAndPersistConnectionString(
+				    ClusterConnectionString(leader.get().first.serializedInfo.toString())));
 				TraceEvent("LeaderForwarding")
 				    .detail("ConnStr", coordinators.ccr->getConnectionString().toString())
 				    .trackLatest("LeaderForwarding");
@@ -220,24 +203,15 @@ ACTOR Future<Void> tryBecomeLeaderInternal(Reference<IClusterConnectionRecord> c
 			} else
 				badCandidateTimeout = Future<Void>();
 
-			try {
-				choose {
-					when(wait(nomineeChange.onTrigger())) {}
-					when(wait(badCandidateTimeout.isValid() ? badCandidateTimeout : Never())) {
-						TEST(true); // Bad candidate timeout
-						TraceEvent("LeaderBadCandidateTimeout", myInfo.changeID).log();
-						break;
-					}
-					when(wait(candidacies)) { ASSERT(false); }
-					when(wait(asyncPriorityInfo->onChange())) { break; }
-				}
-			} catch (Error& e) {
-				if (e.code() == error_code_coordinators_changed) {
-					connRecord->getConnectionString().resetToUnresolved();
+			choose {
+				when(wait(nomineeChange.onTrigger())) {}
+				when(wait(badCandidateTimeout.isValid() ? badCandidateTimeout : Never())) {
+					CODE_PROBE(true, "Bad candidate timeout");
+					TraceEvent("LeaderBadCandidateTimeout", myInfo.changeID).log();
 					break;
-				} else {
-					throw e;
 				}
+				when(wait(candidacies)) { ASSERT(false); }
+				when(wait(asyncPriorityInfo->onChange())) { break; }
 			}
 		}
 
@@ -258,10 +232,17 @@ ACTOR Future<Void> tryBecomeLeaderInternal(Reference<IClusterConnectionRecord> c
 		state std::vector<Future<Void>> true_heartbeats;
 		state std::vector<Future<Void>> false_heartbeats;
 		for (int i = 0; i < coordinators.leaderElectionServers.size(); i++) {
-			Future<LeaderHeartbeatReply> hb =
-			    retryBrokenPromise(coordinators.leaderElectionServers[i].leaderHeartbeat,
-			                       LeaderHeartbeatRequest(coordinators.clusterKey, myInfo, prevChangeID),
-			                       TaskPriority::CoordinationReply);
+			Future<LeaderHeartbeatReply> hb;
+			if (coordinators.leaderElectionServers[i].hostname.present()) {
+				hb = retryGetReplyFromHostname(LeaderHeartbeatRequest(coordinators.clusterKey, myInfo, prevChangeID),
+				                               coordinators.leaderElectionServers[i].hostname.get(),
+				                               WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT,
+				                               TaskPriority::CoordinationReply);
+			} else {
+				hb = retryBrokenPromise(coordinators.leaderElectionServers[i].leaderHeartbeat,
+				                        LeaderHeartbeatRequest(coordinators.clusterKey, myInfo, prevChangeID),
+				                        TaskPriority::CoordinationReply);
+			}
 			true_heartbeats.push_back(onEqual(hb, LeaderHeartbeatReply{ true }));
 			false_heartbeats.push_back(onEqual(hb, LeaderHeartbeatReply{ false }));
 		}

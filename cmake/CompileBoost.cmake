@@ -12,7 +12,14 @@ function(compile_boost)
   set(BOOTSTRAP_LIBRARIES "context,filesystem,iostreams")
 
   set(BOOST_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
-  if(CLANG)
+  # Can't build Boost with Intel compiler, use clang instead.
+  if(ICX)
+    execute_process (
+      COMMAND bash -c "which clang++ | tr -d '\n'"
+      OUTPUT_VARIABLE BOOST_CXX_COMPILER
+    )
+    set(BOOST_TOOLSET "clang")
+  elseif(CLANG)
     set(BOOST_TOOLSET "clang")
     if(APPLE)
       # this is to fix a weird macOS issue -- by default
@@ -29,9 +36,12 @@ function(compile_boost)
   set(B2_COMMAND "./b2")
   set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++17 -w)
   set(BOOST_LINK_FLAGS "")
-  if(APPLE OR USE_LIBCXX)
+  if(APPLE OR ICX OR USE_LIBCXX)
     list(APPEND BOOST_COMPILER_FLAGS -stdlib=libc++ -nostdlib++)
-    list(APPEND BOOST_LINK_FLAGS -static-libgcc -lc++ -lc++abi)
+    list(APPEND BOOST_LINK_FLAGS -lc++ -lc++abi)
+    if (NOT APPLE)
+      list(APPEND BOOST_LINK_FLAGS -static-libgcc)
+    endif()
   endif()
 
   # Update the user-config.jam
@@ -39,27 +49,35 @@ function(compile_boost)
   foreach(flag IN LISTS BOOST_COMPILER_FLAGS COMPILE_BOOST_CXXFLAGS)
     string(APPEND BOOST_ADDITIONAL_COMPILE_OPTIONS "<cxxflags>${flag} ")
   endforeach()
-  #foreach(flag IN LISTS BOOST_LINK_FLAGS COMPILE_BOOST_LDFLAGS)
-  # string(APPEND BOOST_ADDITIONAL_COMPILE_OPTIONS "<linkflags>${flag} ")
-  #endforeach()
+  foreach(flag IN LISTS BOOST_LINK_FLAGS COMPILE_BOOST_LDFLAGS)
+    string(APPEND BOOST_ADDITIONAL_COMPILE_OPTIONS "<linkflags>${flag} ")
+  endforeach()
   configure_file(${CMAKE_SOURCE_DIR}/cmake/user-config.jam.cmake ${CMAKE_BINARY_DIR}/user-config.jam)
   set(USER_CONFIG_FLAG --user-config=${CMAKE_BINARY_DIR}/user-config.jam)
 
   # Build boost
   include(ExternalProject)
+
   set(BOOST_INSTALL_DIR "${CMAKE_BINARY_DIR}/boost_install")
   ExternalProject_add("${COMPILE_BOOST_TARGET}Project"
-    URL "https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.bz2"
-    URL_HASH SHA256=8681f175d4bdb26c52222665793eef08490d7758529330f98d3b29dd0735bccc
-    CONFIGURE_COMMAND ${BOOTSTRAP_COMMAND} ${BOOTSTRAP_ARGS} --with-libraries=${BOOTSTRAP_LIBRARIES} --with-toolset=${BOOST_TOOLSET}
-    BUILD_COMMAND ${B2_COMMAND} toolset=${BOOST_TOOLSET} link=static ${COMPILE_BOOST_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
-    BUILD_IN_SOURCE ON
-    INSTALL_COMMAND ""
-    UPDATE_COMMAND ""
-    BUILD_BYPRODUCTS "${BOOST_INSTALL_DIR}/boost/config.hpp"
-                     "${BOOST_INSTALL_DIR}/lib/libboost_context.a"
-                     "${BOOST_INSTALL_DIR}/lib/libboost_filesystem.a"
-                     "${BOOST_INSTALL_DIR}/lib/libboost_iostreams.a")
+    URL                "https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.bz2"
+    URL_HASH           SHA256=8681f175d4bdb26c52222665793eef08490d7758529330f98d3b29dd0735bccc
+    CONFIGURE_COMMAND  ${BOOTSTRAP_COMMAND}
+                       ${BOOTSTRAP_ARGS}
+                       --with-libraries=${BOOTSTRAP_LIBRARIES}
+                       --with-toolset=${BOOST_TOOLSET}
+    BUILD_COMMAND      ${B2_COMMAND}
+                       link=static
+                       ${COMPILE_BOOST_BUILD_ARGS}
+                       --prefix=${BOOST_INSTALL_DIR}
+                       ${USER_CONFIG_FLAG} install
+    BUILD_IN_SOURCE    ON
+    INSTALL_COMMAND    ""
+    UPDATE_COMMAND     ""
+    BUILD_BYPRODUCTS   "${BOOST_INSTALL_DIR}/include/boost/config.hpp"
+                       "${BOOST_INSTALL_DIR}/lib/libboost_context.a"
+                       "${BOOST_INSTALL_DIR}/lib/libboost_filesystem.a"
+                       "${BOOST_INSTALL_DIR}/lib/libboost_iostreams.a")
 
   add_library(${COMPILE_BOOST_TARGET}_context STATIC IMPORTED)
   add_dependencies(${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}Project)
@@ -85,10 +103,10 @@ if(USE_SANITIZER)
   endif()
   message(STATUS "A sanitizer is enabled, need to build boost from source")
   if (USE_VALGRIND)
-    compile_boost(TARGET boost_asan BUILD_ARGS valgrind=on
+    compile_boost(TARGET boost_target BUILD_ARGS valgrind=on
       CXXFLAGS ${SANITIZER_COMPILE_OPTIONS} LDFLAGS ${SANITIZER_LINK_OPTIONS})
   else()
-    compile_boost(TARGET boost_asan BUILD_ARGS context-impl=ucontext
+    compile_boost(TARGET boost_target BUILD_ARGS context-impl=ucontext
       CXXFLAGS ${SANITIZER_COMPILE_OPTIONS} LDFLAGS ${SANITIZER_LINK_OPTIONS})
   endif()
   return()

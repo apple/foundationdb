@@ -32,7 +32,7 @@
 
 namespace fdb_cli {
 
-const KeyRef versionEpochSpecialKey = LiteralStringRef("\xff\xff/management/version_epoch");
+const KeyRef versionEpochSpecialKey = "\xff\xff/management/version_epoch"_sr;
 
 struct VersionInfo {
 	int64_t version;
@@ -158,7 +158,7 @@ ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx
 
 CommandFactory versionEpochFactory(
     "versionepoch",
-    CommandHelp("versionepoch [<enable|commit|set|disable> [EPOCH]]",
+    CommandHelp("versionepoch [<enable|commit|get|set|disable> [EPOCH]]",
                 "Read or write the version epoch",
                 "If no arguments are specified, reports the offset between the expected version "
                 "and the actual version. Otherwise, enables, disables, or commits the version epoch. "

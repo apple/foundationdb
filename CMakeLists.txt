@@ -22,8 +22,13 @@ else()
   cmake_minimum_required(VERSION 3.13)
 endif()
 
+# silence deprecation warnings in newer versions of cmake
+if(POLICY CMP0135)
+  cmake_policy(SET CMP0135 NEW)
+endif()
+
 project(foundationdb
-  VERSION 7.1.0
+  VERSION 7.2.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
   LANGUAGES C CXX ASM)
@@ -106,8 +111,8 @@ if (NOT FDB_RELEASE)
     set(FDB_BUILDTIME_STRING ".${FDB_BUILDTIME}")
     set(PRERELEASE_TAG "prerelease")
 endif()
-set(FDB_VERSION_PLAIN ${FDB_VERSION})
-string(REPLACE "." ";" FDB_VERSION_LIST ${PROJECT_VERSION})
+set(FDB_VERSION_PLAIN ${PROJECT_VERSION})
+string(REPLACE "." ";" FDB_VERSION_LIST ${FDB_VERSION_PLAIN})
 list(GET FDB_VERSION_LIST 0 FDB_MAJOR)
 list(GET FDB_VERSION_LIST 1 FDB_MINOR)
 list(GET FDB_VERSION_LIST 2 FDB_PATCH)
@@ -118,12 +123,11 @@ file(WRITE ${CMAKE_BINARY_DIR}/version.txt ${FDB_VERSION})
 message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")
 message(STATUS "FDB version is ${FDB_VERSION}")
 message(STATUS "FDB_PATCH is ${FDB_PATCH}")
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/versions.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/fdbclient/versions.h)
-
-
 ################################################################################
 # Flow
 ################################################################################
+
+include(utils)
 
 # Flow and other tools are written in C# - so we need that dependency
 include(EnableCsharp)
@@ -183,6 +187,7 @@ endif()
 
 include(CompileBoost)
 include(GetMsgpack)
+add_subdirectory(contrib)
 add_subdirectory(flow)
 add_subdirectory(fdbrpc)
 add_subdirectory(fdbclient)
@@ -194,7 +199,6 @@ else()
   add_subdirectory(fdbservice)
 endif()
 add_subdirectory(fdbbackup)
-add_subdirectory(contrib)
 add_subdirectory(tests)
 add_subdirectory(flowbench EXCLUDE_FROM_ALL)
 if(WITH_PYTHON AND WITH_C_BINDING)
@@ -215,18 +219,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
 endif()
 
 ################################################################################
-# Build information
-################################################################################
-
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/BuildFlags.h.in ${CMAKE_CURRENT_BINARY_DIR}/fdbclient/BuildFlags.h)
-
-################################################################################
 # process compile commands for IDE
 ################################################################################
 if (CMAKE_EXPORT_COMPILE_COMMANDS AND WITH_PYTHON)
   add_custom_command(
 	  OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
-	  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/contrib/gen_compile_db.py
+	  COMMAND $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/contrib/gen_compile_db.py
 	  ARGS -b ${CMAKE_CURRENT_BINARY_DIR} -s ${CMAKE_CURRENT_SOURCE_DIR} -o ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
 	  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/contrib/gen_compile_db.py ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
 	  COMMENT "Build compile commands for IDE"

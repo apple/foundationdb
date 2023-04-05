@@ -75,10 +75,7 @@ void printDecodeUsage() {
 	             "  --crash        Crash on serious error.\n"
 	             "  --blob-credentials FILE\n"
 	             "                 File containing blob credentials in JSON format.\n"
-	             "                 The same credential format/file fdbbackup uses.\n"
-#ifndef TLS_DISABLED
-	    TLS_HELP
-#endif
+	             "                 The same credential format/file fdbbackup uses.\n" TLS_HELP
 	             "  --build-flags  Print build information and exit.\n"
 	             "  --list-only    Print file list and exit.\n"
 	             "  -k KEY_PREFIX  Use the prefix for filtering mutations\n"
@@ -302,7 +299,6 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 			param->save_file_locally = true;
 			break;
 
-#ifndef TLS_DISABLED
 		case TLSConfig::OPT_TLS_PLUGIN:
 			args->OptionArg();
 			break;
@@ -326,7 +322,6 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 		case TLSConfig::OPT_TLS_VERIFY_PEERS:
 			param->tlsConfig.tlsVerifyPeers = args->OptionArg();
 			break;
-#endif
 
 		case OPT_BUILD_FLAGS:
 			printBuildInformation();
@@ -433,7 +428,7 @@ public:
 					platform::createDirectory(path);
 				}
 			}
-			self->lfd = open(self->file.fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+			self->lfd = open(self->file.fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
 			if (self->lfd == -1) {
 				TraceEvent(SevError, "OpenLocalFileFailed").detail("File", self->file.fileName);
 				throw platform_error();

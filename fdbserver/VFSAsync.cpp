@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "sqlite/sqlite3.h"
+#include "sqlite3.h"
 #include <stdio.h>
 #include <string>
 #include <vector>
 #include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
@@ -731,7 +731,7 @@ static int asyncSleep(sqlite3_vfs* pVfs, int microseconds) {
 	try {
 		Future<Void> simCancel = Never();
 		if (g_network->isSimulated())
-			simCancel = success(g_simulator.getCurrentProcess()->shutdownSignal.getFuture());
+			simCancel = success(g_simulator->getCurrentProcess()->shutdownSignal.getFuture());
 		if (simCancel.isReady()) {
 			waitFor(delay(FLOW_KNOBS->MAX_BUGGIFIED_DELAY));
 			return 0;

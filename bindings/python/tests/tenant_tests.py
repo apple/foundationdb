@@ -21,10 +21,11 @@
 import fdb
 import sys
 import json
+import base64
 from fdb.tuple import pack
 
 if __name__ == '__main__':
-    fdb.api_version(710)
+    fdb.api_version(720)
 
 def cleanup_tenant(db, tenant_name):
     try:
@@ -59,6 +60,18 @@ def test_tenant_operations(db):
     fdb.tenant_management.create_tenant(db, b'tenant1')
     fdb.tenant_management.create_tenant(db, b'tenant2')
 
+    tenant_list = fdb.tenant_management.list_tenants(db, b'a', b'z', 10).to_list()
+    assert tenant_list[0].key == b'tenant1'
+    assert tenant_list[1].key == b'tenant2'
+
+    t1_entry = tenant_list[0].value
+    t1_json = json.loads(t1_entry)
+    p1 = base64.b64decode(t1_json['prefix']['base64'])
+
+    t2_entry = tenant_list[1].value
+    t2_json = json.loads(t2_entry)
+    p2 = base64.b64decode(t2_json['prefix']['base64'])
+
     tenant1 = db.open_tenant(b'tenant1')
     tenant2 = db.open_tenant(b'tenant2')
 
@@ -66,13 +79,15 @@ def test_tenant_operations(db):
     tenant1[b'tenant_test_key'] = b'tenant1'
     tenant2[b'tenant_test_key'] = b'tenant2'
 
-    tenant1_entry = db[b'\xff\xff/management/tenant_map/tenant1']
+    tenant1_entry = db[b'\xff\xff/management/tenant/map/tenant1']
     tenant1_json = json.loads(tenant1_entry)
-    prefix1 = tenant1_json['prefix'].encode('utf8')
+    prefix1 = base64.b64decode(tenant1_json['prefix']['base64'])
+    assert prefix1 == p1
 
-    tenant2_entry = db[b'\xff\xff/management/tenant_map/tenant2']
+    tenant2_entry = db[b'\xff\xff/management/tenant/map/tenant2']
     tenant2_json = json.loads(tenant2_entry)
-    prefix2 = tenant2_json['prefix'].encode('utf8')
+    prefix2 = base64.b64decode(tenant2_json['prefix']['base64'])
+    assert prefix2 == p2
 
     assert tenant1[b'tenant_test_key'] == b'tenant1'
     assert db[prefix1 + b'tenant_test_key'] == b'tenant1'

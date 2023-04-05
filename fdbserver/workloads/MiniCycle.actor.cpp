@@ -32,6 +32,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MiniCycleWorkload : TestWorkload {
+	static constexpr auto NAME = "MiniCycle";
+
 	int actorCount, nodeCount;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
 	Key keyPrefix;
@@ -47,12 +49,10 @@ struct MiniCycleWorkload : TestWorkload {
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
 		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
 		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
-		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString());
+		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
 		traceParentProbability = getOption(options, "traceParentProbability "_sr, 0.01);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
 	}
-
-	std::string description() const override { return "MiniCycleWorkload"; }
 
 	Future<Void> setup(Database const& cx) override {
 		return bulkSetup(cx->clone(),
@@ -174,7 +174,7 @@ struct MiniCycleWorkload : TestWorkload {
 				state Transaction tr(cx);
 				if (deterministicRandom()->random01() >= self->traceParentProbability) {
 					state Span span("MiniCycleClient"_loc);
-					TraceEvent("MiniCycleTracingTransaction", span.context).log();
+					TraceEvent("MiniCycleTracingTransaction", span.context.traceID).log();
 					tr.setOption(FDBTransactionOptions::SPAN_PARENT,
 					             BinaryWriter::toValue(span.context, Unversioned()));
 				}
@@ -340,4 +340,4 @@ struct MiniCycleWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<MiniCycleWorkload> MiniCycleWorkloadFactory("MiniCycle");
+WorkloadFactory<MiniCycleWorkload> MiniCycleWorkloadFactory;

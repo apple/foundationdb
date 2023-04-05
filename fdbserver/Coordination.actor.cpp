@@ -27,7 +27,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/OnDemandStore.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/Status.h"
+#include "fdbserver/Status.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
@@ -75,7 +75,7 @@ struct GenerationRegVal {
 	}
 };
 
-GenerationRegInterface::GenerationRegInterface(NetworkAddress remote)
+GenerationRegInterface::GenerationRegInterface(NetworkAddress const& remote)
   : read(Endpoint::wellKnown({ remote }, WLTOKEN_GENERATIONREG_READ)),
     write(Endpoint::wellKnown({ remote }, WLTOKEN_GENERATIONREG_WRITE)) {}
 
@@ -84,7 +84,7 @@ GenerationRegInterface::GenerationRegInterface(INetwork* local) {
 	write.makeWellKnownEndpoint(WLTOKEN_GENERATIONREG_WRITE, TaskPriority::Coordination);
 }
 
-LeaderElectionRegInterface::LeaderElectionRegInterface(NetworkAddress remote)
+LeaderElectionRegInterface::LeaderElectionRegInterface(NetworkAddress const& remote)
   : ClientLeaderRegInterface(remote), candidacy(Endpoint::wellKnown({ remote }, WLTOKEN_LEADERELECTIONREG_CANDIDACY)),
     electionResult(Endpoint::wellKnown({ remote }, WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT)),
     leaderHeartbeat(Endpoint::wellKnown({ remote }, WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT)),
@@ -97,13 +97,22 @@ LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local) : Client
 	forward.makeWellKnownEndpoint(WLTOKEN_LEADERELECTIONREG_FORWARD, TaskPriority::Coordination);
 }
 
-ServerCoordinators::ServerCoordinators(Reference<IClusterConnectionRecord> ccr) : ClientCoordinators(ccr) {
-	ASSERT(ccr->connectionStringStatus() == ClusterConnectionString::RESOLVED);
+ServerCoordinators::ServerCoordinators(Reference<IClusterConnectionRecord> ccr, ConfigDBType configDBType)
+  : ClientCoordinators(ccr) {
 	ClusterConnectionString cs = ccr->getConnectionString();
-	for (auto s = cs.coordinators().begin(); s != cs.coordinators().end(); ++s) {
-		leaderElectionServers.emplace_back(*s);
-		stateServers.emplace_back(*s);
-		configServers.emplace_back(*s);
+	for (auto h : cs.hostnames) {
+		leaderElectionServers.emplace_back(h);
+		stateServers.emplace_back(h);
+		if (configDBType != ConfigDBType::DISABLED) {
+			configServers.emplace_back(h);
+		}
+	}
+	for (auto s : cs.coords) {
+		leaderElectionServers.emplace_back(s);
+		stateServers.emplace_back(s);
+		if (configDBType != ConfigDBType::DISABLED) {
+			configServers.emplace_back(s);
+		}
 	}
 }
 
@@ -179,8 +188,8 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	}
 
 	{
-		UniqueGeneration g = wait(
-		    reg.write.getReply(GenerationRegWriteRequest(KeyValueRef(the_key, LiteralStringRef("Value1")), firstGen)));
+		UniqueGeneration g =
+		    wait(reg.write.getReply(GenerationRegWriteRequest(KeyValueRef(the_key, "Value1"_sr), firstGen)));
 		//   (gen1==gen is considered a "successful" write)
 		ASSERT(g == firstGen);
 	}
@@ -189,7 +198,7 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 		GenerationRegReadReply r = wait(reg.read.getReply(GenerationRegReadRequest(the_key, UniqueGeneration())));
 		// read(key,gen2) returns (value,gen,rgen).
 		//     There was some earlier or concurrent write(key,value,gen).
-		ASSERT(r.value == LiteralStringRef("Value1"));
+		ASSERT(r.value == "Value1"_sr);
 		ASSERT(r.gen == firstGen);
 		//     There was some earlier or concurrent read(key,rgen).
 		ASSERT(r.rgen == firstGen);
@@ -208,10 +217,8 @@ ACTOR Future<Void> openDatabase(ClientData* db,
                                 int* clientCount,
                                 Reference<AsyncVar<bool>> hasConnectedClients,
                                 OpenDatabaseCoordRequest req,
-                                Future<Void> checkStuck,
-                                Reference<AsyncVar<Void>> coordinatorsChanged) {
+                                Future<Void> checkStuck) {
 	state ErrorOr<CachedSerialization<ClientDBInfo>> replyContents;
-	state Future<Void> coordinatorsChangedOnChange = coordinatorsChanged->onChange();
 	state Future<Void> clientInfoOnChange = db->clientInfo->onChange();
 
 	++(*clientCount);
@@ -232,11 +239,6 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 			when(wait(yieldedFuture(clientInfoOnChange))) {
 				clientInfoOnChange = db->clientInfo->onChange();
 				replyContents = db->clientInfo->get();
-			}
-			when(wait(coordinatorsChangedOnChange)) {
-				coordinatorsChangedOnChange = coordinatorsChanged->onChange();
-				replyContents = coordinators_changed();
-				break;
 			}
 			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) {
 				if (db->clientInfo->get().read().id.isValid()) {
@@ -268,10 +270,7 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 ACTOR Future<Void> remoteMonitorLeader(int* clientCount,
                                        Reference<AsyncVar<bool>> hasConnectedClients,
                                        Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader,
-                                       ElectionResultRequest req,
-                                       Reference<AsyncVar<Void>> coordinatorsChanged) {
-	state bool coordinatorsChangeDetected = false;
-	state Future<Void> coordinatorsChangedOnChange = coordinatorsChanged->onChange();
+                                       ElectionResultRequest req) {
 	state Future<Void> currentElectedLeaderOnChange = currentElectedLeader->onChange();
 	++(*clientCount);
 	hasConnectedClients->set(true);
@@ -281,20 +280,11 @@ ACTOR Future<Void> remoteMonitorLeader(int* clientCount,
 			when(wait(yieldedFuture(currentElectedLeaderOnChange))) {
 				currentElectedLeaderOnChange = currentElectedLeader->onChange();
 			}
-			when(wait(coordinatorsChangedOnChange)) {
-				coordinatorsChangedOnChange = coordinatorsChanged->onChange();
-				coordinatorsChangeDetected = true;
-				break;
-			}
 			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) { break; }
 		}
 	}
 
-	if (coordinatorsChangeDetected) {
-		req.reply.sendError(coordinators_changed());
-	} else {
-		req.reply.send(currentElectedLeader->get());
-	}
+	req.reply.send(currentElectedLeader->get());
 
 	if (--(*clientCount) == 0) {
 		hasConnectedClients->set(false);
@@ -325,8 +315,6 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 	state Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader =
 	    makeReference<AsyncVar<Optional<LeaderInfo>>>();
 	state LivenessChecker canConnectToLeader(SERVER_KNOBS->COORDINATOR_LEADER_CONNECTION_TIMEOUT);
-	state Reference<AsyncVar<Void>> coordinatorsChanged = makeReference<AsyncVar<Void>>();
-	state Future<Void> coordinatorsChangedOnChange = coordinatorsChanged->onChange();
 	state Future<Void> hasConnectedClientsOnChange = hasConnectedClients->onChange();
 
 	loop choose {
@@ -338,14 +326,10 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			} else {
 				if (!leaderMon.isValid()) {
 					leaderMon = monitorLeaderAndGetClientInfo(
-					    req.clusterKey, req.coordinators, &clientData, currentElectedLeader, coordinatorsChanged);
+					    req.clusterKey, req.hostnames, req.coordinators, &clientData, currentElectedLeader);
 				}
-				actors.add(openDatabase(&clientData,
-				                        &clientCount,
-				                        hasConnectedClients,
-				                        req,
-				                        canConnectToLeader.checkStuck(),
-				                        coordinatorsChanged));
+				actors.add(
+				    openDatabase(&clientData, &clientCount, hasConnectedClients, req, canConnectToLeader.checkStuck()));
 			}
 		}
 		when(ElectionResultRequest req = waitNext(interf.electionResult.getFuture())) {
@@ -355,10 +339,9 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			} else {
 				if (!leaderMon.isValid()) {
 					leaderMon = monitorLeaderAndGetClientInfo(
-					    req.key, req.coordinators, &clientData, currentElectedLeader, coordinatorsChanged);
+					    req.key, req.hostnames, req.coordinators, &clientData, currentElectedLeader);
 				}
-				actors.add(remoteMonitorLeader(
-				    &clientCount, hasConnectedClients, currentElectedLeader, req, coordinatorsChanged));
+				actors.add(remoteMonitorLeader(&clientCount, hasConnectedClients, currentElectedLeader, req));
 			}
 		}
 		when(GetLeaderRequest req = waitNext(interf.getLeader.getFuture())) {
@@ -415,6 +398,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				notify[i].send(newInfo);
 			notify.clear();
 			ClientDBInfo outInfo;
+			outInfo.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 			outInfo.id = deterministicRandom()->randomUniqueID();
 			outInfo.forward = req.conn.toString();
 			clientData.clientInfo->set(CachedSerialization<ClientDBInfo>(outInfo));
@@ -499,26 +483,22 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			}
 		}
 		when(wait(actors.getResult())) {}
-		when(wait(coordinatorsChangedOnChange)) {
-			leaderMon = Future<Void>();
-			coordinatorsChangedOnChange = coordinatorsChanged->onChange();
-		}
 	}
 }
 
 // Generation register values are stored without prefixing in the coordinated state, but always begin with an
 // alphanumeric character (they are always derived from a ClusterConnectionString key). Forwarding values are stored in
 // this range:
-const KeyRangeRef fwdKeys(LiteralStringRef("\xff"
-                                           "fwd"),
-                          LiteralStringRef("\xff"
-                                           "fwe"));
+const KeyRangeRef fwdKeys("\xff"
+                          "fwd"_sr,
+                          "\xff"
+                          "fwe"_sr);
 
 // The time when forwarding was last set is stored in this range:
-const KeyRangeRef fwdTimeKeys(LiteralStringRef("\xff"
-                                               "fwdTime"),
-                              LiteralStringRef("\xff"
-                                               "fwdTimf"));
+const KeyRangeRef fwdTimeKeys("\xff"
+                              "fwdTime"_sr,
+                              "\xff"
+                              "fwdTimf"_sr);
 struct LeaderRegisterCollection {
 	// SOMEDAY: Factor this into a generic tool?  Extend ActorCollection to support removal actions?  What?
 	ActorCollection actors;
@@ -658,6 +638,7 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 			Optional<LeaderInfo> forward = regs.getForward(req.clusterKey);
 			if (forward.present()) {
 				ClientDBInfo info;
+				info.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 				info.id = deterministicRandom()->randomUniqueID();
 				info.forward = forward.get().serializedInfo;
 				req.reply.send(CachedSerialization<ClientDBInfo>(info));
@@ -749,9 +730,9 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 		}
 		when(ForwardRequest req = waitNext(interf.forward.getFuture())) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
-			if (forward.present())
+			if (forward.present()) {
 				req.reply.send(Void());
-			else {
+			} else {
 				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevWarn, "CCRMismatch")
@@ -785,12 +766,14 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 	state Future<Void> configDatabaseServer = Never();
 	TraceEvent("CoordinationServer", myID)
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())
-	    .detail("Folder", dataFolder);
+	    .detail("Folder", dataFolder)
+	    .detail("ConfigNodeValid", configNode.isValid());
 
 	if (configNode.isValid()) {
 		configTransactionInterface.setupWellKnownEndpoints();
 		configFollowerInterface.setupWellKnownEndpoints();
-		configDatabaseServer = configNode->serve(cbi, configTransactionInterface, configFollowerInterface);
+		configDatabaseServer =
+		    brokenPromiseToNever(configNode->serve(cbi, configTransactionInterface, configFollowerInterface));
 	}
 
 	try {
@@ -801,4 +784,79 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 		TraceEvent("CoordinationServerError", myID).errorUnsuppressed(e);
 		throw;
 	}
+}
+
+ACTOR Future<Void> changeClusterDescription(std::string datafolder, KeyRef newClusterKey, KeyRef oldClusterKey) {
+	state UID myID = deterministicRandom()->randomUniqueID();
+	state OnDemandStore store(datafolder, myID, "coordination-");
+	RangeResult res = wait(store->readRange(allKeys));
+	// Context, in coordinators' kv-store
+	// cluster description and the random id are always appear together as the clusterKey
+	// The old cluster key, (call it oldCKey) below can appear in the following scenarios:
+	// 1. oldCKey is a key in the store: the value is a binary format of _GenerationRegVal_ which contains a different
+	// clusterKey(either movedFrom or moveTo)
+	// 2. oldCKey appears in a key for forwarding message:
+	// 		2.1: the prefix is _fwdKeys.begin_: the value is the new connection string
+	//		2.2: the prefix is _fwdTimeKeys.begin_: the value is the time
+	// 3. oldCKey does not appear in any keys but in a value:
+	// 		3.1: it's in the value of a forwarding message(see 2.1)
+	//		3.2: it's inside the value of _GenerationRegVal_ (see 1), which is a cluster connection string.
+	//		it seems that even we do not change it the cluster should still be good, but to be safe we still update it.
+	for (auto& [key, value] : res) {
+		if (key.startsWith(fwdKeys.begin)) {
+			if (key.removePrefix(fwdKeys.begin) == oldClusterKey) {
+				store->clear(singleKeyRange(key));
+				store->set(KeyValueRef(newClusterKey.withPrefix(fwdKeys.begin), value));
+			} else if (value.startsWith(oldClusterKey)) {
+				store->set(KeyValueRef(key, value.removePrefix(oldClusterKey).withPrefix(newClusterKey)));
+			}
+		} else if (key.startsWith(fwdTimeKeys.begin) && key.removePrefix(fwdTimeKeys.begin) == oldClusterKey) {
+			store->clear(singleKeyRange(key));
+			store->set(KeyValueRef(newClusterKey.withPrefix(fwdTimeKeys.begin), value));
+		} else if (key == oldClusterKey) {
+			store->clear(singleKeyRange(key));
+			store->set(KeyValueRef(newClusterKey, value));
+		} else {
+			// parse the value part
+			GenerationRegVal regVal = BinaryReader::fromStringRef<GenerationRegVal>(value, IncludeVersion());
+			if (regVal.val.present()) {
+				Optional<Value> newVal = updateCCSInMovableValue(regVal.val.get(), oldClusterKey, newClusterKey);
+				if (newVal.present()) {
+					regVal.val = newVal.get();
+					store->set(KeyValueRef(
+					    key, BinaryWriter::toValue(regVal, IncludeVersion(ProtocolVersion::withGenerationRegVal()))));
+				}
+			}
+		}
+	}
+	wait(store->commit());
+	return Void();
+}
+
+Future<Void> coordChangeClusterKey(std::string dataFolder, KeyRef newClusterKey, KeyRef oldClusterKey) {
+	TraceEvent(SevInfo, "CoordChangeClusterKey")
+	    .detail("DataFolder", dataFolder)
+	    .detail("NewClusterKey", newClusterKey)
+	    .detail("OldClusterKey", oldClusterKey);
+	std::string absDataFolder = abspath(dataFolder);
+	std::vector<std::string> returnList = platform::listDirectories(absDataFolder);
+	std::vector<Future<Void>> futures;
+	for (const auto& dirEntry : returnList) {
+		if (dirEntry == "." || dirEntry == "..") {
+			continue;
+		}
+		std::string processDir = dataFolder + "/" + dirEntry;
+		TraceEvent(SevInfo, "UpdatingCoordDataForProcess").detail("ProcessDataDir", processDir);
+		std::vector<std::string> returnFiles = platform::listFiles(processDir, "");
+		bool isCoord = false;
+		for (const auto& fileEntry : returnFiles) {
+			if (fileEntry.rfind("coordination-", 0) == 0) {
+				isCoord = true;
+			}
+		}
+		if (!isCoord)
+			continue;
+		futures.push_back(changeClusterDescription(processDir, newClusterKey, oldClusterKey));
+	}
+	return waitForAll(futures);
 }

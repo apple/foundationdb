@@ -39,7 +39,7 @@
 
 #pragma once
 
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 #include <foundationdb/fdb_c.h>
 
 #include <string>
@@ -98,6 +98,7 @@ public:
 private:
 	friend class Transaction;
 	friend class Database;
+	friend class Tenant;
 	KeyFuture(FDBFuture* f) : Future(f) {}
 };
 
@@ -160,10 +161,23 @@ private:
 	KeyRangeArrayFuture(FDBFuture* f) : Future(f) {}
 };
 
+class GranuleSummaryArrayFuture : public Future {
+public:
+	// Call this function instead of fdb_future_get_granule_summary_array when using
+	// the GranuleSummaryArrayFuture type. It's behavior is identical to
+	// fdb_future_get_granule_summary_array.
+	fdb_error_t get(const FDBGranuleSummary** out_summaries, int* out_count);
+
+private:
+	friend class Transaction;
+	GranuleSummaryArrayFuture(FDBFuture* f) : Future(f) {}
+};
+
 class EmptyFuture : public Future {
 private:
 	friend class Transaction;
 	friend class Database;
+	friend class Tenant;
 	EmptyFuture(FDBFuture* f) : Future(f) {}
 };
 
@@ -220,6 +234,14 @@ public:
 	Tenant& operator=(const Tenant&) = delete;
 	Tenant(Tenant&&) = delete;
 	Tenant& operator=(Tenant&&) = delete;
+
+	static KeyFuture purge_blob_granules(FDBTenant* tenant,
+	                                     std::string_view begin_key,
+	                                     std::string_view end_key,
+	                                     int64_t purge_version,
+	                                     fdb_bool_t force);
+
+	static EmptyFuture wait_purge_granules_complete(FDBTenant* tenant, std::string_view purge_key);
 
 private:
 	friend class Transaction;
@@ -304,6 +326,7 @@ public:
 	                                           int target_bytes,
 	                                           FDBStreamingMode mode,
 	                                           int iteration,
+	                                           int matchIndex,
 	                                           fdb_bool_t snapshot,
 	                                           fdb_bool_t reverse);
 
@@ -337,12 +360,16 @@ public:
 	// Wrapper around fdb_transaction_add_conflict_range.
 	fdb_error_t add_conflict_range(std::string_view begin_key, std::string_view end_key, FDBConflictRangeType type);
 
-	KeyRangeArrayFuture get_blob_granule_ranges(std::string_view begin_key, std::string_view end_key);
+	KeyRangeArrayFuture get_blob_granule_ranges(std::string_view begin_key, std::string_view end_key, int rangeLimit);
 	KeyValueArrayResult read_blob_granules(std::string_view begin_key,
 	                                       std::string_view end_key,
 	                                       int64_t beginVersion,
 	                                       int64_t endVersion,
 	                                       FDBReadBlobGranuleContext granule_context);
+	GranuleSummaryArrayFuture summarize_blob_granules(std::string_view begin_key,
+	                                                  std::string_view end_key,
+	                                                  int64_t summaryVersion,
+	                                                  int rangeLimit);
 
 private:
 	FDBTransaction* tr_;

@@ -42,6 +42,7 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 } // namespace
 
 struct DataLossRecoveryWorkload : TestWorkload {
+	static constexpr auto NAME = "DataLossRecovery";
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
 	const bool enabled;
@@ -49,7 +50,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	NetworkAddress addr;
 
 	DataLossRecoveryWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), startMoveKeysParallelismLock(1), finishMoveKeysParallelismLock(1), enabled(!clientId),
+	  : TestWorkload(wcx), startMoveKeysParallelismLock(5), finishMoveKeysParallelismLock(5), enabled(!clientId),
 	    pass(true) {}
 
 	void validationFailed(ErrorOr<Optional<Value>> expectedValue, ErrorOr<Optional<Value>> actualValue) {
@@ -59,9 +60,9 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		pass = false;
 	}
 
-	std::string description() const override { return "DataLossRecovery"; }
-
 	Future<Void> setup(Database const& cx) override { return Void(); }
+
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("RandomMoveKeys"); }
 
 	Future<Void> start(Database const& cx) override {
 		if (!enabled) {
@@ -78,19 +79,26 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		wait(self->writeAndVerify(self, cx, key, oldValue));
 
+		TraceEvent("DataLossRecovery").detail("Phase", "InitialWrites");
 		// Move [key, endKey) to team: {address}.
 		state NetworkAddress address = wait(self->disableDDAndMoveShard(self, cx, KeyRangeRef(key, endKey)));
+		TraceEvent("DataLossRecovery").detail("Phase", "Moved");
 		wait(self->readAndVerify(self, cx, key, oldValue));
+		TraceEvent("DataLossRecovery").detail("Phase", "ReadAfterMove");
 
 		// Kill team {address}, and expect read to timeout.
 		self->killProcess(self, address);
+		TraceEvent("DataLossRecovery").detail("Phase", "KilledProcess");
 		wait(self->readAndVerify(self, cx, key, timed_out()));
+		TraceEvent("DataLossRecovery").detail("Phase", "VerifiedReadTimeout");
 
 		// Reenable DD and exclude address as fail, so that [key, endKey) will be dropped and moved to a new team.
 		// Expect read to return 'value not found'.
 		int ignore = wait(setDDMode(cx, 1));
 		wait(self->exclude(cx, address));
+		TraceEvent("DataLossRecovery").detail("Phase", "Excluded");
 		wait(self->readAndVerify(self, cx, key, Optional<Value>()));
+		TraceEvent("DataLossRecovery").detail("Phase", "VerifiedDataDropped");
 
 		// Write will scceed.
 		wait(self->writeAndVerify(self, cx, key, newValue));
@@ -106,7 +114,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		loop {
 			try {
-				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
@@ -128,13 +135,12 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
-				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				if (value.present()) {
 					tr.set(key, value.get());
 				} else {
 					tr.clear(key);
 				}
-				wait(timeoutError(tr.commit(), 30.0));
+				wait(tr.commit());
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -174,6 +180,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	ACTOR Future<NetworkAddress> disableDDAndMoveShard(DataLossRecoveryWorkload* self, Database cx, KeyRange keys) {
 		// Disable DD to avoid DD undoing of our move.
 		state int ignore = wait(setDDMode(cx, 0));
+		TraceEvent("DataLossRecovery").detail("Phase", "DisabledDD");
 		state NetworkAddress addr;
 
 		// Pick a random SS as the dest, keys will reside on a single server after the move.
@@ -182,7 +189,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 			std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
 			if (!interfs.empty()) {
 				const auto& interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
-				if (g_simulator.protectedAddresses.count(interf.address()) == 0) {
+				if (g_simulator->protectedAddresses.count(interf.address()) == 0) {
 					dest.push_back(interf.uniqueID);
 					addr = interf.address();
 				}
@@ -205,19 +212,23 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				MoveKeysLock moveKeysLock;
 				moveKeysLock.myOwner = owner;
 
+				TraceEvent("DataLossRecovery").detail("Phase", "StartMoveKeys");
 				wait(moveKeys(cx,
-				              keys,
-				              dest,
-				              dest,
-				              moveKeysLock,
-				              Promise<Void>(),
-				              &self->startMoveKeysParallelismLock,
-				              &self->finishMoveKeysParallelismLock,
-				              false,
-				              UID(), // for logging only
-				              &ddEnabledState));
+				              MoveKeysParams{ deterministicRandom()->randomUniqueID(),
+				                              keys,
+				                              dest,
+				                              dest,
+				                              moveKeysLock,
+				                              Promise<Void>(),
+				                              &self->startMoveKeysParallelismLock,
+				                              &self->finishMoveKeysParallelismLock,
+				                              false,
+				                              UID(), // for logging only
+				                              &ddEnabledState,
+				                              CancelConflictingDataMoves::True }));
 				break;
 			} catch (Error& e) {
+				TraceEvent("DataLossRecovery").error(e).detail("Phase", "MoveRangeError");
 				if (e.code() == error_code_movekeys_conflict) {
 					// Conflict on moveKeysLocks with the current running DD is expected, just retry.
 					tr.reset();
@@ -232,7 +243,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		state Transaction validateTr(cx);
 		loop {
 			try {
-				validateTr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				Standalone<VectorRef<const char*>> addresses = wait(validateTr.getAddressesForKey(keys.begin));
 				// The move function is not what we are testing here, crash the test if the move fails.
 				ASSERT(addresses.size() == 1);
@@ -247,9 +257,9 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	}
 
 	void killProcess(DataLossRecoveryWorkload* self, const NetworkAddress& addr) {
-		ISimulator::ProcessInfo* process = g_simulator.getProcessByAddress(addr);
+		ISimulator::ProcessInfo* process = g_simulator->getProcessByAddress(addr);
 		ASSERT(process->addresses.contains(addr));
-		g_simulator.killProcess(process, ISimulator::KillInstantly);
+		g_simulator->killProcess(process, ISimulator::KillInstantly);
 		TraceEvent("TestTeamKilled").detail("Address", addr);
 	}
 
@@ -258,4 +268,4 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<DataLossRecoveryWorkload> DataLossRecoveryWorkloadFactory("DataLossRecovery");
+WorkloadFactory<DataLossRecoveryWorkload> DataLossRecoveryWorkloadFactory;

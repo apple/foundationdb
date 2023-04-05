@@ -1,5 +1,5 @@
 [configuration]
-extraDB = 2
+extraDatabaseMode = 'Single'
 
 [[test]]
 testTitle = 'VersionStampBackupToDB'

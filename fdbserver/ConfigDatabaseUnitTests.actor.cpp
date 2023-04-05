@@ -114,7 +114,7 @@ public:
 	                         Standalone<VectorRef<VersionedConfigMutationRef>> mutations,
 	                         Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations) {
 		return cfi.rollforward.getReply(
-		    ConfigFollowerRollforwardRequest{ rollback, lastKnownCommitted, target, mutations, annotations });
+		    ConfigFollowerRollforwardRequest{ rollback, lastKnownCommitted, target, mutations, annotations, false });
 	}
 
 	void restartNode() {
@@ -232,7 +232,7 @@ class LocalConfigEnvironment {
 	Future<Void> addMutation(Optional<KeyRef> configClass, KeyRef knobName, Optional<KnobValueRef> value) {
 		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
 		appendVersionedMutation(versionedMutations, ++lastWrittenVersion, configClass, knobName, value);
-		return readFrom.getMutableLocalConfiguration().addChanges(versionedMutations, lastWrittenVersion);
+		return readFrom.getMutableLocalConfiguration().addChanges(versionedMutations, lastWrittenVersion, 0);
 	}
 
 public:
@@ -269,8 +269,8 @@ class BroadcasterToLocalConfigEnvironment {
 		wait(self->readFrom.setup());
 		self->cbi = makeReference<AsyncVar<ConfigBroadcastInterface>>();
 		self->readFrom.connectToBroadcaster(self->cbi);
-		self->broadcastServer = self->broadcaster.registerNode(
-		    WorkerInterface(), 0, configClassSet, self->workerFailure.getFuture(), self->cbi->get());
+		self->broadcastServer =
+		    self->broadcaster.registerNode(self->cbi->get(), 0, configClassSet, self->workerFailure.getFuture(), true);
 		return Void();
 	}
 
@@ -299,15 +299,14 @@ public:
 		return readFrom.checkEventually(member, value);
 	}
 
+	JsonBuilderObject getStatus() const { return broadcaster.getStatus(); }
+
 	void changeBroadcaster() {
 		broadcastServer.cancel();
 		cbi->set(ConfigBroadcastInterface{});
 		readFrom.connectToBroadcaster(cbi);
-		broadcastServer = broadcaster.registerNode(WorkerInterface(),
-		                                           readFrom.lastSeenVersion(),
-		                                           readFrom.configClassSet(),
-		                                           workerFailure.getFuture(),
-		                                           cbi->get());
+		broadcastServer = broadcaster.registerNode(
+		    cbi->get(), readFrom.lastSeenVersion(), readFrom.configClassSet(), workerFailure.getFuture(), true);
 	}
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
@@ -345,7 +344,7 @@ class TransactionEnvironment {
 		state Key configKey = encodeConfigKey(configClass, knobName);
 		state Optional<Value> value = wait(tr->get(configKey));
 		if (expected.present()) {
-			ASSERT_EQ(BinaryReader::fromStringRef<int64_t>(value.get(), Unversioned()), expected.get());
+			ASSERT_EQ(Tuple::unpack(value.get()).getInt(0), expected.get());
 		} else {
 			ASSERT(!value.present());
 		}
@@ -439,8 +438,8 @@ class TransactionToLocalConfigEnvironment {
 		wait(self->readFrom.setup());
 		self->cbi = makeReference<AsyncVar<ConfigBroadcastInterface>>();
 		self->readFrom.connectToBroadcaster(self->cbi);
-		self->broadcastServer = self->broadcaster.registerNode(
-		    WorkerInterface(), 0, configClassSet, self->workerFailure.getFuture(), self->cbi->get());
+		self->broadcastServer =
+		    self->broadcaster.registerNode(self->cbi->get(), 0, configClassSet, self->workerFailure.getFuture(), true);
 		return Void();
 	}
 
@@ -453,15 +452,14 @@ public:
 
 	void restartNode() { writeTo.restartNode(); }
 
+	JsonBuilderObject getStatus() const { return broadcaster.getStatus(); }
+
 	void changeBroadcaster() {
 		broadcastServer.cancel();
 		cbi->set(ConfigBroadcastInterface{});
 		readFrom.connectToBroadcaster(cbi);
-		broadcastServer = broadcaster.registerNode(WorkerInterface(),
-		                                           readFrom.lastSeenVersion(),
-		                                           readFrom.configClassSet(),
-		                                           workerFailure.getFuture(),
-		                                           cbi->get());
+		broadcastServer = broadcaster.registerNode(
+		    cbi->get(), readFrom.lastSeenVersion(), readFrom.configClassSet(), workerFailure.getFuture(), true);
 	}
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
@@ -565,7 +563,7 @@ Future<Void> testRestartLocalConfigAndChangeClass(UnitTestParameters params) {
 }
 
 ACTOR template <class Env>
-Future<Void> testNewLocalConfigAfterCompaction(UnitTestParameters params) {
+Future<std::string> testNewLocalConfigAfterCompaction(UnitTestParameters params) {
 	state Env env(params.getDataDir(), "class-A");
 	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
 	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
@@ -581,7 +579,7 @@ Future<Void> testNewLocalConfigAfterCompaction(UnitTestParameters params) {
 	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
 	wait(set(env, "class-A"_sr, "test_long"_sr, 2));
 	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 2 }));
-	return Void();
+	return env.getStatus().getJson();
 }
 
 ACTOR template <class Env>
@@ -837,7 +835,24 @@ TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/Compact") {
 }
 
 TEST_CASE("/fdbserver/ConfigDB/BroadcasterToLocalConfig/RestartLocalConfigurationAfterCompaction") {
-	wait(testNewLocalConfigAfterCompaction<BroadcasterToLocalConfigEnvironment>(params));
+	std::string statusStr = wait(testNewLocalConfigAfterCompaction<BroadcasterToLocalConfigEnvironment>(params));
+	json_spirit::mValue status;
+	ASSERT(json_spirit::read_string(statusStr, status));
+	ASSERT(status.type() == json_spirit::obj_type);
+	auto lastCompacted = status.get_obj().at("last_compacted_version").get_int64();
+	ASSERT_EQ(lastCompacted, 1);
+	auto mostRecent = status.get_obj().at("most_recent_version").get_int64();
+	ASSERT_EQ(mostRecent, 2);
+	auto commits = status.get_obj().at("commits");
+	// The unit test does not include annotations when running the set
+	// operation.
+	ASSERT_EQ(commits.get_array().size(), 0);
+	auto mutations = status.get_obj().at("mutations");
+	ASSERT_EQ(mutations.get_array().size(), 1);
+	auto snapshot = status.get_obj().at("snapshot");
+	auto classA = snapshot.get_obj().at("class-A");
+	auto value = classA.get_obj().at("test_long").get_str();
+	ASSERT(value == "int64_t:2");
 	return Void();
 }
 
@@ -886,7 +901,10 @@ TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/CompactNode") {
 }
 
 TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartLocalConfigurationAfterCompaction") {
-	wait(testNewLocalConfigAfterCompaction<TransactionToLocalConfigEnvironment>(params));
+	// TransactionToLocalConfigEnvironment only calls into ConfigNode compact.
+	// It does not interact with the broadcaster, thus status json won't be
+	// updated.
+	wait(success(testNewLocalConfigAfterCompaction<TransactionToLocalConfigEnvironment>(params)));
 	return Void();
 }
 
