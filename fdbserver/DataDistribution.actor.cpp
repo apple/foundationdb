@@ -437,6 +437,35 @@ public:
 		return Void();
 	}
 
+	ACTOR static Future<Void> removeDataMoveTombstone(Reference<DataDistributor> self) {
+		try {
+			state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+			state Transaction tr(cx);
+			state UID currentID;
+			loop {
+				try {
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					for (UID& dataMoveID : self->initData->toCleanDataMoveTombstone) {
+						currentID = dataMoveID;
+						tr.clear(dataMoveKeyFor(currentID));
+					}
+					wait(tr.commit());
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "RemoveDataMoveTombstoneError", self->ddId)
+			    .errorUnsuppressed(e)
+			    .detail("CurrentDataMoveID", currentID);
+			throw e;
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> resumeFromShards(Reference<DataDistributor> self, bool traceShard) {
 		// All physicalShard init must be completed before issuing data move
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
@@ -585,7 +614,9 @@ public:
 	Future<Void> resumeRelocations() {
 		ASSERT(shardsAffectedByTeamFailure); // has to be allocated
 		Future<Void> shardsReady = resumeFromShards(Reference<DataDistributor>::addRef(this), g_network->isSimulated());
-		return resumeFromDataMoves(Reference<DataDistributor>::addRef(this), shardsReady);
+		Future<Void> cleanTombstone = removeDataMoveTombstone(Reference<DataDistributor>::addRef(this));
+		std::vector<Future<Void>> toWaitList{ shardsReady, cleanTombstone };
+		return resumeFromDataMoves(Reference<DataDistributor>::addRef(this), waitForAll(toWaitList));
 	}
 
 	Future<Void> pollMoveKeysLock() { return txnProcessor->pollMoveKeysLock(lock, context->ddEnabledState.get()); }
