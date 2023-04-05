@@ -15,7 +15,7 @@ public:
 	// the specified version.
 	virtual double getRecoveryDuration(Version) const = 0;
 
-	// Cleanup the oldest recoveries so that only
+	// Cleanup internal state of oldest recoveries so that only
 	// CLIENT_KNOBS->MAX_GENERATIONS remain.
 	virtual void cleanupOldRecoveries() = 0;
 
@@ -53,7 +53,7 @@ class RKRecoveryTracker : public IRKRecoveryTracker {
 	bool recovering;
 
 public:
-	explicit RKRecoveryTracker(Reference<IAsyncListener<bool>>);
+	explicit RKRecoveryTracker(Reference<IAsyncListener<bool>> inRecovery);
 	~RKRecoveryTracker();
 	double getRecoveryDuration(Version) const override;
 	void cleanupOldRecoveries() override;
