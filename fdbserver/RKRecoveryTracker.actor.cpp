@@ -4,6 +4,7 @@
 
 #include "fdbclient/Knobs.h"
 #include "fdbserver/IRKRecoveryTracker.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include
 
 class RKRecoveryTrackerImpl {
@@ -85,4 +86,37 @@ Version RKRecoveryTracker::getMaxVersion() const {
 
 Future<Void> RKRecoveryTracker::run() {
 	return RKRecoveryTrackerImpl::run(this);
+}
+
+namespace {
+
+void checkApproximatelyEqual(double a, double b) {
+	ASSERT_LT(a, b + 0.01);
+	ASSERT_LT(b, a + 0.01);
+}
+
+} // namespace
+
+TEST_CASE("/fdbserver/RKRecoveryTracker") {
+	state Reference<AsyncVar<bool>> inRecovery = makeReference<AsyncVar<bool>>(false);
+	state RKRecoveryTracker recoveryTracker(IAsyncListener<bool>::create(inRecovery));
+	state Future<Void> f = recoveryTracker.run();
+	ASSERT_EQ(recoveryTracker.getMaxVersion(), 0);
+	recoveryTracker.updateMaxVersion(5);
+	ASSERT_EQ(recoveryTracker.getMaxVersion(), 5);
+	recoveryTracker.updateMaxVersion(3);
+	ASSERT_EQ(recoveryTracker.getMaxVersion(), 5);
+	wait(delay(5.0));
+	inRecovery->set(true);
+	wait(delay(10.0));
+	inRecovery->set(false);
+	checkApproximatelyEqual(recoveryTracker.getRecoveryDuration(5), 10.0);
+	checkApproximatelyEqual(recoveryTracker.getRecoveryDuration(6), 0.0);
+	wait(delay(15.0));
+	recoveryTracker.updateMaxVersion(100);
+	inRecovery->set(true);
+	wait(delay(20.0));
+	checkApproximatelyEqual(recoveryTracker.getRecoveryDuration(5), 10.0 + 20.0);
+	checkApproximatelyEqual(recoveryTracker.getRecoveryDuration(6), 20.0);
+	return Void();
 }

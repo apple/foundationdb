@@ -5,7 +5,6 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/ServerDBInfo.h"
 #include "flow/genericactors.actor.h"
 
 class IRKRecoveryTracker {
@@ -13,7 +12,7 @@ public:
 	virtual ~IRKRecoveryTracker() = default;
 
 	// Returns the sum of the durations of all recoveries since the
-	// the specified version (including the last recovery before the specified version).
+	// the specified version.
 	virtual double getRecoveryDuration(Version) const = 0;
 
 	// Cleanup the oldest recoveries so that only
