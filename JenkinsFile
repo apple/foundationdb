@@ -13,8 +13,6 @@ pipeline {
                     repo_url = "https://github.com/snowflakedb/frostdb.git"
                     scmInfo = checkout scm
                     println("${scmInfo}")
-                    //extracting the LDAP portion from sfc-gh-xxx
-                    user_id=sh(script: "git show -s --pretty=%ae | cut -d '@' -f 1 | cut -d '-' -f 3", returnStdout: true).trim()
                     precommit_job_status = "SUCCESS"
                     labels = getLabels()
                 }
@@ -54,6 +52,9 @@ pipeline {
                     if ("${build_trigger_cause}" == "GitHub pull request comment" &&
                             "${currentBuild.getBuildCauses()[0].commentBody}".contains("${trigger_comment}")) {
                         println("Moving ahead with pipeline")
+
+                        //extracting the LDAP portion from commentAuthor sfc-gh-xxx
+                        user_id = "${currentBuild.getBuildCauses()[0].commentAuthor}".split("-")[2]
                         createCheck("github_comment", "Criteria Satisfied", "", "success");
                     } else {
                         def triggerMessage = "To start Full CI, Please comment: @fdb-ci precommit start"
