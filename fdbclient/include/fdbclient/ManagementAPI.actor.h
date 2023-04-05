@@ -72,7 +72,7 @@ ACTOR Future<Void> excludeServers(Transaction* tr, std::vector<AddressExclusion>
 // Exclude the servers matching the given set of localities from use as state servers.  Returns as soon as the change
 // is durable, without necessarily waiting for the servers to be evacuated.
 ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string> localities, bool failed = false);
-void excludeLocalities(Transaction& tr, std::unordered_set<std::string> localities, bool failed = false);
+ACTOR Future<Void> excludeLocalities(Transaction* tr, std::unordered_set<std::string> localities, bool failed = false);
 
 // Remove the given servers from the exclusion list.  A NetworkAddress with a port of 0 means all servers on the given
 // IP.  A NetworkAddress() means all servers (don't exclude anything)
@@ -99,8 +99,14 @@ ACTOR Future<std::vector<AddressExclusion>> getExcludedServerList(Transaction* t
 ACTOR Future<std::vector<AddressExclusion>> getExcludedFailedServerList(Transaction* tr);
 
 // Get the current list of excluded localities
-ACTOR Future<std::vector<std::string>> getExcludedLocalities(Database cx);
-ACTOR Future<std::vector<std::string>> getExcludedLocalities(Transaction* tr);
+ACTOR Future<std::vector<std::string>> getAllExcludedLocalities(Database cx);
+ACTOR Future<std::vector<std::string>> getAllExcludedLocalities(Transaction* tr);
+
+// Get the current list of excluded localities.
+ACTOR Future<std::vector<std::string>> getExcludedLocalityList(Transaction* tr);
+
+// Get the current list of failed localities.
+ACTOR Future<std::vector<std::string>> getExcludedFailedLocalityList(Transaction* tr);
 
 std::set<AddressExclusion> getAddressesByLocality(const std::vector<ProcessData>& workers, const std::string& locality);
 

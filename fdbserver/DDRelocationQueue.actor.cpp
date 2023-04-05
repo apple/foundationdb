@@ -23,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include "fdbserver/DataDistributionTeam.h"
 #include "flow/ActorCollection.h"
 #include "flow/Deque.h"
 #include "flow/FastRef.h"
@@ -401,6 +402,11 @@ bool canLaunchSrc(RelocateData& relocation,
 	ASSERT(relocation.src.size() != 0);
 	ASSERT(teamSize >= singleRegionTeamSize);
 
+	// Blob migrator is backed by s3 so it can allow unlimited data movements
+	if (relocation.src.size() == 1 && BlobMigratorInterface::isBlobMigrator(relocation.src.back())) {
+		return true;
+	}
+
 	// find the "workFactor" for this, were it launched now
 	int workFactor = getSrcWorkFactor(relocation, singleRegionTeamSize);
 	int neededServers = std::min<int>(relocation.src.size(), teamSize - singleRegionTeamSize + 1);
@@ -424,6 +430,7 @@ bool canLaunchSrc(RelocateData& relocation,
 				return true;
 		}
 	}
+
 	return false;
 }
 
@@ -989,9 +996,6 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			}
 		}
 
-		Future<Void> fCleanup =
-		    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
-
 		// If there is a job in flight that wants data relocation which we are about to cancel/modify,
 		//     make sure that we keep the relocation intent for the job that we launch
 		auto f = inFlight.intersectingRanges(rd.keys);
@@ -1006,6 +1010,9 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		std::vector<KeyRange> ranges;
 		inFlightActors.getRangesAffectedByInsertion(rd.keys, ranges);
 		inFlightActors.cancel(KeyRangeRef(ranges.front().begin, ranges.back().end));
+		Future<Void> fCleanup =
+		    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
+
 		inFlight.insert(rd.keys, rd);
 		for (int r = 0; r < ranges.size(); r++) {
 			RelocateData& rrs = inFlight.rangeContaining(ranges[r].begin)->value();
@@ -1125,28 +1132,71 @@ int DDQueue::getUnhealthyRelocationCount() const {
 }
 
 ACTOR Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState) {
-	std::vector<Future<Void>> cleanup;
-	auto f = self->dataMoves.intersectingRanges(range);
-	for (auto it = f.begin(); it != f.end(); ++it) {
-		if (!it->value().isValid()) {
-			continue;
+	state std::vector<Future<Void>> cleanup;
+	state std::vector<std::pair<KeyRange, UID>> lastObservedDataMoves;
+
+	loop {
+		try {
+			cleanup.clear();
+			lastObservedDataMoves.clear();
+			auto f = self->dataMoves.intersectingRanges(range);
+			for (auto it = f.begin(); it != f.end(); ++it) {
+				if (!it->value().isValid()) {
+					continue;
+				}
+				KeyRange keys = KeyRangeRef(it->range().begin, it->range().end);
+				TraceEvent(SevInfo, "DDQueueCancelDataMove", self->distributorId)
+				    .detail("DataMoveID", it->value().id)
+				    .detail("DataMoveRange", keys)
+				    .detail("Range", range);
+				if (!it->value().cancel.isValid()) {
+					it->value().cancel = cleanUpDataMove(self->cx,
+					                                     it->value().id,
+					                                     self->lock,
+					                                     &self->cleanUpDataMoveParallelismLock,
+					                                     keys,
+					                                     ddEnabledState,
+					                                     self->addBackgroundCleanUpDataMoveActor);
+				}
+				lastObservedDataMoves.push_back(std::make_pair(keys, it->value().id));
+				cleanup.push_back(it->value().cancel);
+			}
+
+			wait(waitForAll(cleanup));
+
+			for (auto observedDataMove : lastObservedDataMoves) {
+				auto f = self->dataMoves.intersectingRanges(observedDataMove.first);
+				for (auto it = f.begin(); it != f.end(); ++it) {
+					if (it->value().id != observedDataMove.second) {
+						// Invariant: When two concurrent cleanups/relocations try to modify on the same range,
+						// the one who set ddQueue->dataMoves at first win the race
+						// the other one does backoff and retry cleanup later
+						// In this case, someone else of the overlapping range has changed the ddQueue->dataMoves
+						// Thus, the cleanup retries later
+						TraceEvent(SevInfo, "DataMoveWrittenByConcurrentDataMove", self->distributorId)
+						    .detail("Range", range)
+						    .detail("OldRange", observedDataMove.first)
+						    .detail("LastObservedDataMoveID", observedDataMove.second)
+						    .detail("CurrentDataMoveID", it->value().id);
+						throw retry();
+					}
+				}
+			}
+			auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(range);
+			if (!ranges.empty()) {
+				self->dataMoves.insert(KeyRangeRef(ranges.front().begin, ranges.back().end), DDQueue::DDDataMove());
+			}
+			break;
+
+		} catch (Error& e) {
+			if (e.code() == error_code_retry) {
+				wait(delay(1));
+			} else {
+				throw e;
+			}
 		}
-		KeyRange keys = KeyRangeRef(it->range().begin, it->range().end);
-		TraceEvent(SevInfo, "DDQueueCancelDataMove", self->distributorId)
-		    .detail("DataMoveID", it->value().id)
-		    .detail("DataMoveRange", keys)
-		    .detail("Range", range);
-		if (!it->value().cancel.isValid()) {
-			it->value().cancel = cleanUpDataMove(
-			    self->cx, it->value().id, self->lock, &self->cleanUpDataMoveParallelismLock, keys, ddEnabledState);
-		}
-		cleanup.push_back(it->value().cancel);
 	}
-	wait(waitForAll(cleanup));
-	auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(range);
-	if (!ranges.empty()) {
-		self->dataMoves.insert(KeyRangeRef(ranges.front().begin, ranges.back().end), DDQueue::DDDataMove());
-	}
+
 	return Void();
 }
 
@@ -1232,6 +1282,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				}
 				self->dataMoves.insert(rd.keys, DDQueue::DDDataMove(rd.dataMoveId));
 			}
+			// TODO: split-brain issue for physical shard move
+			// the update of inflightActor and the update of dataMoves is not atomic
+			// Currently, the relocator is triggered based on the inflightActor info.
+			// In future, we should assert at here that the intersecting DataMove in self->dataMoves
+			// are all invalid. i.e. the range of new relocators is match to the range of prevCleanup.
 		}
 
 		state StorageMetrics metrics =
@@ -1294,8 +1349,15 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
 							inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
-						auto req = GetTeamRequest(WantNewServers(rd.wantsNewServers),
-						                          wantTrueBest,
+						TeamSelect destTeamSelect;
+						if (!rd.wantsNewServers) {
+							destTeamSelect = TeamSelect::WANT_COMPLETE_SRCS;
+						} else if (wantTrueBest) {
+							destTeamSelect = TeamSelect::WANT_TRUE_BEST;
+						} else {
+							destTeamSelect = TeamSelect::ANY;
+						}
+						auto req = GetTeamRequest(destTeamSelect,
 						                          PreferLowerDiskUtil::True,
 						                          TeamMustHaveShards::False,
 						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
@@ -2114,8 +2176,6 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 		state bool moved = false;
 		state Reference<IDataDistributionTeam> sourceTeam;
 		state Reference<IDataDistributionTeam> destTeam;
-		state GetTeamRequest srcReq;
-		state GetTeamRequest destReq;
 		state TraceEvent traceEvent(eventName, self->distributorId);
 		traceEvent.suppressFor(5.0)
 		    .detail("PollingInterval", rebalancePollingInterval)
@@ -2142,18 +2202,16 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 
 			if (self->priority_relocations[ddPriority] < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				bool mcMove = isDataMovementForMountainChopper(reason);
-				srcReq = GetTeamRequest(WantNewServers::True,
-				                        WantTrueBest(mcMove),
-				                        PreferLowerDiskUtil::False,
-				                        TeamMustHaveShards::True,
-				                        ForReadBalance(readRebalance),
-				                        PreferLowerReadUtil::False);
-				destReq = GetTeamRequest(WantNewServers::True,
-				                         WantTrueBest(!mcMove),
-				                         PreferLowerDiskUtil::True,
-				                         TeamMustHaveShards::False,
-				                         ForReadBalance(readRebalance),
-				                         PreferLowerReadUtil::True);
+				GetTeamRequest srcReq = GetTeamRequest(mcMove ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
+				                                       PreferLowerDiskUtil::False,
+				                                       TeamMustHaveShards::True,
+				                                       ForReadBalance(readRebalance),
+				                                       PreferLowerReadUtil::False);
+				GetTeamRequest destReq = GetTeamRequest(!mcMove ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
+				                                        PreferLowerDiskUtil::True,
+				                                        TeamMustHaveShards::False,
+				                                        ForReadBalance(readRebalance),
+				                                        PreferLowerReadUtil::True);
 				state Future<SrcDestTeamPair> getTeamFuture =
 				    self->getSrcDestTeams(teamCollectionIndex, srcReq, destReq, ddPriority, &traceEvent);
 				wait(ready(getTeamFuture));
@@ -2200,6 +2258,8 @@ struct DDQueueImpl {
 
 		state PromiseStream<KeyRange> rangesComplete;
 		state Future<Void> launchQueuedWorkTimeout = Never();
+		state Future<Void> onCleanUpDataMoveActorError =
+		    actorCollection(self->addBackgroundCleanUpDataMoveActor.getFuture());
 
 		for (int i = 0; i < self->teamCollections.size(); i++) {
 			ddQueueFutures.push_back(
@@ -2375,6 +2435,7 @@ struct DDQueueImpl {
 					when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) {
 						r.send(self->getUnhealthyRelocationCount());
 					}
+					when(wait(onCleanUpDataMoveActorError)) {}
 				}
 			}
 		} catch (Error& e) {

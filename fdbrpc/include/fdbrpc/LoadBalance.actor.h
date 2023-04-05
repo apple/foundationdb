@@ -240,8 +240,8 @@ Future<Void> tssComparison(Req req,
 	return Void();
 }
 
-FDB_DECLARE_BOOLEAN_PARAM(AtMostOnce);
-FDB_DECLARE_BOOLEAN_PARAM(TriedAllOptions);
+FDB_BOOLEAN_PARAM(AtMostOnce);
+FDB_BOOLEAN_PARAM(TriedAllOptions);
 
 // Stores state for a request made by the load balancer
 template <class Request, class Interface, class Multi, bool P>

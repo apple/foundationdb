@@ -71,7 +71,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LatencyBandConfig.h"
@@ -1954,8 +1954,9 @@ ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, 
 		when(wait(data->version.whenAtLeast(version))) {
 			// FIXME: A bunch of these can block with or without the following delay 0.
 			// wait( delay(0) );  // don't do a whole bunch of these at once
-			if (version < data->oldestVersion.get())
+			if (version < data->oldestVersion.get()) {
 				throw transaction_too_old(); // just in case
+			}
 			return version;
 		}
 		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
@@ -3057,7 +3058,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherMap;
 		if (cipherDetails.size()) {
 			std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-			    wait(getEncryptCipherKeys(data->db, cipherDetails, BlobCipherMetrics::TLOG));
+			    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+			        data->db, cipherDetails, BlobCipherMetrics::TLOG));
 			cipherMap = getCipherKeysResult;
 		}
 
@@ -9323,7 +9325,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			if (collectingCipherKeys) {
 				std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-				    wait(getEncryptCipherKeys(data->db, cipherDetails, BlobCipherMetrics::TLOG));
+				    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+				        data->db, cipherDetails, BlobCipherMetrics::TLOG));
 				cipherKeys = getCipherKeysResult;
 				collectingCipherKeys = false;
 				eager = UpdateEagerReadInfo(enableClearRangeEagerReads);
@@ -10355,7 +10358,7 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 }
 
 void StorageServerDisk::clearRange(KeyRangeRef keys) {
-	storage->clear(keys, &data->metrics);
+	storage->clear(keys);
 	++(*kvClearRanges);
 	if (keys.singleKeyRange()) {
 		++(*kvClearSingleKey);
@@ -10372,7 +10375,7 @@ void StorageServerDisk::writeMutation(MutationRef mutation) {
 		storage->set(KeyValueRef(mutation.param1, mutation.param2));
 		*kvCommitLogicalBytes += mutation.expectedSize();
 	} else if (mutation.type == MutationRef::ClearRange) {
-		storage->clear(KeyRangeRef(mutation.param1, mutation.param2), &data->metrics);
+		storage->clear(KeyRangeRef(mutation.param1, mutation.param2));
 		++(*kvClearRanges);
 		if (KeyRangeRef(mutation.param1, mutation.param2).singleKeyRange()) {
 			++(*kvClearSingleKey);
@@ -10413,7 +10416,7 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
 			storage->set(KeyValueRef(m.param1, m.param2));
 			*kvCommitLogicalBytes += m.expectedSize();
 		} else if (m.type == MutationRef::ClearRange) {
-			storage->clear(KeyRangeRef(m.param1, m.param2), &data->metrics);
+			storage->clear(KeyRangeRef(m.param1, m.param2));
 			++(*kvClearRanges);
 			if (KeyRangeRef(m.param1, m.param2).singleKeyRange()) {
 				++(*kvClearSingleKey);
@@ -10797,7 +10800,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 				++data->counters.kvSystemClearRanges;
 				// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
 				// DEBUG_KEY_RANGE("clearInvalidVersion", invalidVersion, clearRange);
-				storage->clear(clearRange, &data->metrics);
+				storage->clear(clearRange);
 				++data->counters.kvSystemClearRanges;
 				data->byteSampleApplyClear(clearRange, invalidVersion);
 			}

@@ -23,12 +23,15 @@
 #pragma once
 
 #include "flow/Arena.h"
+#include "flow/xxhash.h"
 
 #include <cstdint>
 #include <limits>
 #include <string>
 #include <string_view>
 #include <unordered_set>
+
+#define DEBUG_ENCRYPT_KEY_CIPHER false
 
 constexpr const int AUTH_TOKEN_HMAC_SHA_SIZE = 32;
 constexpr const int AUTH_TOKEN_AES_CMAC_SIZE = 16;

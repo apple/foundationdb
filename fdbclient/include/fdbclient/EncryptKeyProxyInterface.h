@@ -102,18 +102,17 @@ struct EKPBaseCipherDetails {
 	constexpr static FileIdentifier file_identifier = 2149615;
 	int64_t encryptDomainId;
 	uint64_t baseCipherId;
-	StringRef baseCipherKey;
+	Standalone<StringRef> baseCipherKey;
 	int64_t refreshAt;
 	int64_t expireAt;
 
 	EKPBaseCipherDetails()
-	  : encryptDomainId(0), baseCipherId(0), baseCipherKey(StringRef()), refreshAt(0), expireAt(-1) {}
-	explicit EKPBaseCipherDetails(int64_t dId, uint64_t id, StringRef key, Arena& arena)
-	  : encryptDomainId(dId), baseCipherId(id), baseCipherKey(StringRef(arena, key)),
-	    refreshAt(std::numeric_limits<int64_t>::max()), expireAt(std::numeric_limits<int64_t>::max()) {}
-	explicit EKPBaseCipherDetails(int64_t dId, uint64_t id, StringRef key, Arena& arena, int64_t refAt, int64_t expAt)
-	  : encryptDomainId(dId), baseCipherId(id), baseCipherKey(StringRef(arena, key)), refreshAt(refAt),
-	    expireAt(expAt) {}
+	  : encryptDomainId(0), baseCipherId(0), baseCipherKey(Standalone<StringRef>()), refreshAt(0), expireAt(-1) {}
+	explicit EKPBaseCipherDetails(int64_t dId, uint64_t id, Standalone<StringRef> key)
+	  : encryptDomainId(dId), baseCipherId(id), baseCipherKey(key), refreshAt(std::numeric_limits<int64_t>::max()),
+	    expireAt(std::numeric_limits<int64_t>::max()) {}
+	explicit EKPBaseCipherDetails(int64_t dId, uint64_t id, Standalone<StringRef> key, int64_t refAt, int64_t expAt)
+	  : encryptDomainId(dId), baseCipherId(id), baseCipherKey(key), refreshAt(refAt), expireAt(expAt) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -123,7 +122,6 @@ struct EKPBaseCipherDetails {
 
 struct EKPGetBaseCipherKeysByIdsReply {
 	constexpr static FileIdentifier file_identifier = 9485259;
-	Arena arena;
 	std::vector<EKPBaseCipherDetails> baseCipherDetails;
 	int numHits;
 	Optional<Error> error;
@@ -132,7 +130,7 @@ struct EKPGetBaseCipherKeysByIdsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, baseCipherDetails, numHits, error, arena);
+		serializer(ar, baseCipherDetails, numHits, error);
 	}
 };
 
@@ -160,7 +158,6 @@ struct EKPGetBaseCipherKeysRequestInfo {
 
 struct EKPGetBaseCipherKeysByIdsRequest {
 	constexpr static FileIdentifier file_identifier = 4930263;
-	Arena arena;
 	std::vector<EKPGetBaseCipherKeysRequestInfo> baseCipherInfos;
 	Optional<UID> debugId;
 	ReplyPromise<EKPGetBaseCipherKeysByIdsReply> reply;
@@ -169,13 +166,12 @@ struct EKPGetBaseCipherKeysByIdsRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, baseCipherInfos, debugId, reply, arena);
+		serializer(ar, baseCipherInfos, debugId, reply);
 	}
 };
 
 struct EKPGetLatestBaseCipherKeysReply {
 	constexpr static FileIdentifier file_identifier = 4831583;
-	Arena arena;
 	std::vector<EKPBaseCipherDetails> baseCipherDetails;
 	int numHits;
 	Optional<Error> error;
@@ -186,7 +182,7 @@ struct EKPGetLatestBaseCipherKeysReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, baseCipherDetails, numHits, error, arena);
+		serializer(ar, baseCipherDetails, numHits, error);
 	}
 };
 

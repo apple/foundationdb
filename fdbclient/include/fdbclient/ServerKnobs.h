@@ -188,6 +188,13 @@ public:
 	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD;
 
 	// Data distribution
+	// DD won't move shard to teams that has availableSpaceRatio < max(0.05,  AllTeamAvailSpaceRatio[pivot]), where
+	// pivot = pivot percent * team count.
+	double AVAILABLE_SPACE_PIVOT_PERCENT;
+	// DD won't move shard to teams that has readLoad > AllTeamReadLoad[pivot], where pivot = pivot percent *
+	// team count.
+	double READ_LOAD_PIVOT_PERCENT;
+
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
 	bool ENABLE_DD_PHYSICAL_SHARD_MOVE; // Enable physical shard move.
@@ -415,7 +422,9 @@ public:
 	bool ROCKSDB_DISABLE_WAL_EXPERIMENTAL;
 	bool ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE;
 	int64_t ROCKSDB_SINGLEKEY_DELETES_BYTES_LIMIT;
+	int ROCKSDB_SINGLEKEY_DELETES_MAX;
 	bool ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS;
+	bool ROCKSDB_FORCE_DELETERANGE_FOR_CLEARRANGE;
 	bool ROCKSDB_ENABLE_COMPACT_ON_DELETION;
 	int64_t ROCKSDB_CDCF_SLIDING_WINDOW_SIZE; // CDCF: CompactOnDeletionCollectorFactory
 	int64_t ROCKSDB_CDCF_DELETION_TRIGGER; // CDCF: CompactOnDeletionCollectorFactory
@@ -621,6 +630,7 @@ public:
 	int DBINFO_SEND_AMOUNT;
 	double DBINFO_BATCH_DELAY;
 	double SINGLETON_RECRUIT_BME_DELAY;
+	bool TRACK_TLOG_RECOVERY;
 
 	// Move Keys
 	double SHARD_READY_DELAY;
@@ -1108,6 +1118,8 @@ public:
 	std::string REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE;
 	std::string REST_KMS_CONNECTOR_VALIDATION_TOKEN_MODE;
 	std::string REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS;
+	bool ENABLE_REST_KMS_COMMUNICATION;
+	bool REST_KMS_CONNECTOR_REMOVE_TRAILING_NEWLINE;
 	int REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE;
 	int REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE;
 	bool REST_KMS_CONNECTOR_REFRESH_KMS_URLS;

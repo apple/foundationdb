@@ -25,13 +25,15 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Schemas.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+
+#include "metacluster/Metacluster.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -91,7 +93,7 @@ bool parseTenantListOptions(std::vector<StringRef> const& tokens,
                             int startIndex,
                             int& limit,
                             int& offset,
-                            std::vector<MetaclusterAPI::TenantState>& filters) {
+                            std::vector<metacluster::TenantState>& filters) {
 	for (int tokenNum = startIndex; tokenNum < tokens.size(); ++tokenNum) {
 		Optional<Value> value;
 		StringRef token = tokens[tokenNum];
@@ -123,7 +125,7 @@ bool parseTenantListOptions(std::vector<StringRef> const& tokens,
 			auto filterStrings = value.get().splitAny(","_sr);
 			try {
 				for (auto sref : filterStrings) {
-					filters.push_back(MetaclusterAPI::stringToTenantState(sref.toString()));
+					filters.push_back(metacluster::stringToTenantState(sref.toString()));
 				}
 			} catch (Error& e) {
 				fmt::print(stderr, "ERROR: unrecognized tenant state(s) `{}'.\n", value.get().toString());
@@ -185,16 +187,17 @@ ACTOR Future<bool> tenantCreateCommand(Reference<IDatabase> db, std::vector<Stri
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				MetaclusterTenantMapEntry tenantEntry;
-				AssignClusterAutomatically assignClusterAutomatically = AssignClusterAutomatically::True;
+				metacluster::MetaclusterTenantMapEntry tenantEntry;
+				metacluster::AssignClusterAutomatically assignClusterAutomatically =
+				    metacluster::AssignClusterAutomatically::True;
 				for (auto const& [name, value] : configuration.get()) {
 					if (name == "assigned_cluster"_sr) {
-						assignClusterAutomatically = AssignClusterAutomatically::False;
+						assignClusterAutomatically = metacluster::AssignClusterAutomatically::False;
 					}
 					tenantEntry.configure(name, value);
 				}
 				tenantEntry.tenantName = tokens[2];
-				wait(MetaclusterAPI::createTenant(db, tenantEntry, assignClusterAutomatically));
+				wait(metacluster::createTenant(db, tenantEntry, assignClusterAutomatically));
 			} else {
 				if (!doneExistenceCheck) {
 					// Hold the reference to the standalone's memory
@@ -246,7 +249,7 @@ ACTOR Future<bool> tenantDeleteCommand(Reference<IDatabase> db, std::vector<Stri
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				wait(MetaclusterAPI::deleteTenant(db, tokens[2]));
+				wait(metacluster::deleteTenant(db, tokens[2]));
 			} else {
 				if (!doneExistenceCheck) {
 					// Hold the reference to the standalone's memory
@@ -303,7 +306,7 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 				fmt::print(stderr, "ERROR: invalid ID `{}'\n", tokens[2].toString().c_str());
 				return false;
 			}
-			wait(MetaclusterAPI::deleteTenant(db, tenantId));
+			wait(metacluster::deleteTenant(db, tenantId));
 
 			break;
 		} catch (Error& e) {
@@ -338,7 +341,7 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 	state StringRef endTenant = "\xff\xff"_sr;
 	state int limit = 100;
 	state int offset = 0;
-	state std::vector<MetaclusterAPI::TenantState> filters;
+	state std::vector<metacluster::TenantState> filters;
 
 	if (tokens.size() >= 3) {
 		beginTenant = tokens[2];
@@ -368,13 +371,13 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 				if (filters.empty()) {
 					std::vector<std::pair<TenantName, int64_t>> tenants =
-					    wait(MetaclusterAPI::listTenants(db, beginTenant, endTenant, limit, offset));
+					    wait(metacluster::listTenants(db, beginTenant, endTenant, limit, offset));
 					for (auto tenant : tenants) {
 						tenantNames.push_back(tenant.first);
 					}
 				} else {
-					std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenants =
-					    wait(MetaclusterAPI::listTenantMetadata(db, beginTenant, endTenant, limit, offset, filters));
+					std::vector<std::pair<TenantName, metacluster::MetaclusterTenantMapEntry>> tenants =
+					    wait(metacluster::listTenantMetadata(db, beginTenant, endTenant, limit, offset, filters));
 					for (auto tenant : tenants) {
 						tenantNames.push_back(tenant.first);
 					}
@@ -493,7 +496,7 @@ ACTOR Future<bool> tenantGetCommand(Reference<IDatabase> db, std::vector<StringR
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			state std::string tenantJson;
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				MetaclusterTenantMapEntry entry = wait(MetaclusterAPI::getTenantTransaction(tr, tokens[2]));
+				metacluster::MetaclusterTenantMapEntry entry = wait(metacluster::getTenantTransaction(tr, tokens[2]));
 				tenantJson = entry.toJson();
 			} else {
 				// Hold the reference to the standalone's memory
@@ -567,7 +570,7 @@ ACTOR Future<bool> tenantGetIdCommand(Reference<IDatabase> db, std::vector<Strin
 				TenantMapEntry entry = wait(TenantAPI::getTenantTransaction(tr, tenantId));
 				tenantJson = entry.toJson();
 			} else {
-				MetaclusterTenantMapEntry mEntry = wait(MetaclusterAPI::getTenantTransaction(tr, tenantId));
+				metacluster::MetaclusterTenantMapEntry mEntry = wait(metacluster::getTenantTransaction(tr, tenantId));
 				tenantJson = mEntry.toJson();
 			}
 
@@ -638,8 +641,8 @@ ACTOR Future<bool> tenantConfigureCommand(Reference<IDatabase> db, std::vector<S
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				wait(MetaclusterAPI::configureTenant(
-				    db, tokens[2], configuration.get(), IgnoreCapacityLimit(ignoreCapacityLimit)));
+				wait(metacluster::configureTenant(
+				    db, tokens[2], configuration.get(), metacluster::IgnoreCapacityLimit(ignoreCapacityLimit)));
 			} else {
 				applyConfigurationToSpecialKeys(tr, tokens[2], configuration.get());
 				wait(safeThreadFutureToFuture(tr->commit()));
@@ -690,7 +693,7 @@ ACTOR Future<bool> tenantRenameCommand(Reference<IDatabase> db, std::vector<Stri
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				wait(MetaclusterAPI::renameTenant(db, tokens[2], tokens[3]));
+				wait(metacluster::renameTenant(db, tokens[2], tokens[3]));
 			} else {
 				// Hold the reference to the standalone's memory
 				state ThreadFuture<Optional<Value>> oldEntryFuture = tr->get(tenantOldNameKey);
@@ -812,7 +815,7 @@ ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<String
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				wait(MetaclusterAPI::changeTenantLockState(db, name, desiredLockState, uid));
+				wait(metacluster::changeTenantLockState(db, name, desiredLockState, uid));
 			} else {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				state ThreadFuture<Optional<Value>> tenantFuture = tr->get(nameKey);

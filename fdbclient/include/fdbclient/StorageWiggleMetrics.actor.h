@@ -33,7 +33,7 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "flow/actorcompiler.h"
 
-FDB_DECLARE_BOOLEAN_PARAM(PrimaryRegion);
+FDB_BOOLEAN_PARAM(PrimaryRegion);
 
 struct StorageWiggleMetrics {
 	constexpr static FileIdentifier file_identifier = 4728961;
