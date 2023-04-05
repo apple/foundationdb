@@ -209,9 +209,8 @@ public:
 	}
 
 	ACTOR static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-		state ActorOwningSelfRef<Ratekeeper> pSelf(new Ratekeeper(
-		    rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True), dbInfo, rkInterf));
-		state Ratekeeper& self = *pSelf;
+		state Ratekeeper self(
+		    rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True), dbInfo, rkInterf);
 		state Future<Void> timeout = Void();
 		state Future<Void> collection = actorCollection(self.addActor.getFuture());
 
@@ -222,7 +221,7 @@ public:
 		self.addActor.send(self.metricsTracker->run());
 		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
 
-		self.addActor.send(self.monitorThrottlingChanges());
+		self.addActor.send(self.tagThrottler->monitorThrottlingChanges());
 		if (SERVER_KNOBS->BW_THROTTLING_ENABLED) {
 			self.addActor.send(self.monitorBlobWorkers(dbInfo));
 		}
@@ -414,10 +413,6 @@ public:
 
 Future<Void> Ratekeeper::configurationMonitor() {
 	return RatekeeperImpl::configurationMonitor(this);
-}
-
-Future<Void> Ratekeeper::monitorThrottlingChanges() {
-	return tagThrottler->monitorThrottlingChanges();
 }
 
 Future<Void> Ratekeeper::monitorBlobWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo) {

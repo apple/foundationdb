@@ -157,7 +157,6 @@ class Ratekeeper {
 
 	void tryAutoThrottleTag(TransactionTag, double rate, double busyness, TagThrottledReason);
 	void tryAutoThrottleTag(StorageQueueInfo&, int64_t storageQueue, int64_t storageDurabilityLag);
-	Future<Void> monitorThrottlingChanges();
 	Future<Void> monitorBlobWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 
 public:
