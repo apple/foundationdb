@@ -30,44 +30,12 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbserver/IRKConfigurationMonitor.h"
 #include "fdbserver/IRKMetricsTracker.h"
+#include "fdbserver/IRKRateServer.h"
 #include "fdbserver/IRKRecoveryTracker.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/TLogInterface.h"
-
-struct RatekeeperLimits {
-	double tpsLimit;
-	Int64MetricHandle tpsLimitMetric;
-	Int64MetricHandle reasonMetric;
-
-	int64_t storageTargetBytes;
-	int64_t storageSpringBytes;
-	int64_t logTargetBytes;
-	int64_t logSpringBytes;
-	double maxVersionDifference;
-
-	int64_t durabilityLagTargetVersions;
-	int64_t lastDurabilityLag;
-	double durabilityLagLimit;
-
-	double bwLagTarget;
-
-	TransactionPriority priority;
-	std::string context;
-
-	Reference<EventCacheHolder> rkUpdateEventCacheHolder;
-
-	RatekeeperLimits(TransactionPriority priority,
-	                 std::string context,
-	                 int64_t storageTargetBytes,
-	                 int64_t storageSpringBytes,
-	                 int64_t logTargetBytes,
-	                 int64_t logSpringBytes,
-	                 double maxVersionDifference,
-	                 int64_t durabilityLagTargetVersions,
-	                 double bwLagTarget);
-};
 
 /**
  * The Ratekeeper class is responsible for:
@@ -86,17 +54,6 @@ struct RatekeeperLimits {
 class Ratekeeper {
 	friend class RatekeeperImpl;
 
-	// Differentiate from GrvProxyInfo in DatabaseContext.h
-	struct GrvProxyInfo {
-		int64_t totalTransactions{ 0 };
-		int64_t batchTransactions{ 0 };
-		uint64_t lastThrottledTagChangeId{ 0 };
-
-		double lastUpdateTime{ 0.0 };
-		double lastTagPushTime{ 0.0 };
-		Version version{ 0 };
-	};
-
 	struct VersionInfo {
 		int64_t totalTransactions;
 		int64_t batchTransactions;
@@ -114,9 +71,8 @@ class Ratekeeper {
 	std::unique_ptr<IRKMetricsTracker> metricsTracker;
 	std::unique_ptr<IRKConfigurationMonitor> configurationMonitor;
 	std::unique_ptr<IRKRecoveryTracker> recoveryTracker;
+	std::unique_ptr<IRKRateServer> rateServer;
 
-	std::map<UID, Ratekeeper::GrvProxyInfo> grvProxyInfo;
-	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions;
 	HealthMetrics healthMetrics;
 	PromiseStream<Future<Void>> addActor;
 

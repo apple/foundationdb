@@ -186,6 +186,7 @@ public:
 		    rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True), dbInfo, rkInterf);
 		state Future<Void> timeout = Void();
 		state Future<Void> collection = actorCollection(self.addActor.getFuture());
+		state bool lastLimited = false;
 
 		TraceEvent("RatekeeperStarting", rkInterf.id());
 		self.addActor.send(waitFailureServer(rkInterf.waitFailure.getFuture()));
@@ -193,6 +194,13 @@ public:
 
 		self.addActor.send(self.metricsTracker->run());
 		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
+
+		self.addActor.send(self.rateServer->run(self.healthMetrics,
+		                                        self.normalLimits,
+		                                        self.batchLimits,
+		                                        *self.tagThrottler,
+		                                        *self.recoveryTracker,
+		                                        lastLimited));
 
 		self.addActor.send(self.tagThrottler->monitorThrottlingChanges());
 		if (SERVER_KNOBS->BW_THROTTLING_ENABLED) {
@@ -221,10 +229,9 @@ public:
 		self.remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
 
 		try {
-			state bool lastLimited = false;
 			loop choose {
 				when(wait(timeout)) {
-					double actualTps = self.smoothReleasedTransactions.smoothRate();
+					double actualTps = self.rateServer->getSmoothReleasedTransactionRate();
 					actualTps = std::max(std::max(1.0, actualTps),
 					                     self.metricsTracker->getSmoothTotalDurableBytesRate() /
 					                         CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
@@ -239,69 +246,10 @@ public:
 					self.updateRate(&self.normalLimits);
 					self.updateRate(&self.batchLimits);
 
-					lastLimited = self.smoothReleasedTransactions.smoothRate() >
+					lastLimited = self.rateServer->getSmoothReleasedTransactionRate() >
 					              SERVER_KNOBS->LAST_LIMITED_RATIO * self.batchLimits.tpsLimit;
-					double tooOld = now() - 1.0;
-					for (auto p = self.grvProxyInfo.begin(); p != self.grvProxyInfo.end();) {
-						if (p->second.lastUpdateTime < tooOld)
-							p = self.grvProxyInfo.erase(p);
-						else
-							++p;
-					}
+					self.rateServer->cleanupExpiredGrvProxies();
 					timeout = delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE);
-				}
-				when(GetRateInfoRequest req = waitNext(rkInterf.getRateInfo.getFuture())) {
-					GetRateInfoReply reply;
-
-					auto& p = self.grvProxyInfo[req.requesterID];
-					//TraceEvent("RKMPU", req.requesterID).detail("TRT", req.totalReleasedTransactions).detail("Last", p.totalTransactions).detail("Delta", req.totalReleasedTransactions - p.totalTransactions);
-					if (p.totalTransactions > 0) {
-						self.smoothReleasedTransactions.addDelta(req.totalReleasedTransactions - p.totalTransactions);
-
-						for (auto const& [tag, count] : req.throttledTagCounts) {
-							self.tagThrottler->addRequests(tag, count);
-						}
-					}
-					if (p.batchTransactions > 0) {
-						self.smoothBatchReleasedTransactions.addDelta(req.batchReleasedTransactions -
-						                                              p.batchTransactions);
-					}
-
-					p.totalTransactions = req.totalReleasedTransactions;
-					p.batchTransactions = req.batchReleasedTransactions;
-					p.version = req.version;
-
-					self.recoveryTracker->updateMaxVersion(req.version);
-
-					p.lastUpdateTime = now();
-
-					reply.transactionRate = self.normalLimits.tpsLimit / self.grvProxyInfo.size();
-					reply.batchTransactionRate = self.batchLimits.tpsLimit / self.grvProxyInfo.size();
-					reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
-
-					if (p.lastThrottledTagChangeId != self.tagThrottler->getThrottledTagChangeId() ||
-					    now() > p.lastTagPushTime + SERVER_KNOBS->TAG_THROTTLE_PUSH_INTERVAL) {
-						p.lastThrottledTagChangeId = self.tagThrottler->getThrottledTagChangeId();
-						p.lastTagPushTime = now();
-
-						bool returningTagsToProxy{ false };
-						if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
-							reply.proxyThrottledTags = self.tagThrottler->getProxyRates(self.grvProxyInfo.size());
-							returningTagsToProxy =
-							    reply.proxyThrottledTags.present() && reply.proxyThrottledTags.get().size() > 0;
-						} else {
-							reply.clientThrottledTags = self.tagThrottler->getClientRates();
-							returningTagsToProxy =
-							    reply.clientThrottledTags.present() && reply.clientThrottledTags.get().size() > 0;
-						}
-						CODE_PROBE(returningTagsToProxy, "Returning tag throttles to a proxy");
-					}
-
-					reply.healthMetrics.update(self.healthMetrics, true, req.detailed);
-					reply.healthMetrics.tpsLimit = self.normalLimits.tpsLimit;
-					reply.healthMetrics.batchLimited = lastLimited;
-
-					req.reply.send(reply);
 				}
 				when(HaltRatekeeperRequest req = waitNext(rkInterf.haltRatekeeper.getFuture())) {
 					req.reply.send(Void());
@@ -335,17 +283,16 @@ Ratekeeper::Ratekeeper(UID id,
                        Database db,
                        Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                        RatekeeperInterface rkInterf)
-  : id(id), db(db), smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT), actualTpsMetric("Ratekeeper.ActualTPS"_sr),
-    lastWarning(0), normalLimits(TransactionPriority::DEFAULT,
-                                 "",
-                                 SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
-                                 SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER,
-                                 SERVER_KNOBS->TARGET_BYTES_PER_TLOG,
-                                 SERVER_KNOBS->SPRING_BYTES_TLOG,
-                                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE,
-                                 SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS,
-                                 SERVER_KNOBS->TARGET_BW_LAG),
+  : id(id), db(db), actualTpsMetric("Ratekeeper.ActualTPS"_sr), lastWarning(0),
+    normalLimits(TransactionPriority::DEFAULT,
+                 "",
+                 SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
+                 SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER,
+                 SERVER_KNOBS->TARGET_BYTES_PER_TLOG,
+                 SERVER_KNOBS->SPRING_BYTES_TLOG,
+                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE,
+                 SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS,
+                 SERVER_KNOBS->TARGET_BW_LAG),
     batchLimits(TransactionPriority::BATCH,
                 "Batch",
                 SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH,
@@ -366,12 +313,13 @@ Ratekeeper::Ratekeeper(UID id,
 	configurationMonitor = std::make_unique<RKConfigurationMonitor>(db);
 	recoveryTracker = std::make_unique<RKRecoveryTracker>(IAsyncListener<bool>::create(
 	    dbInfo, [](auto const& info) { return info.recoveryState < RecoveryState::ACCEPTING_COMMITS; }));
+	rateServer = std::make_unique<RKRateServer>(rkInterf.getRateInfo.getFuture());
 }
 
 void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	// double controlFactor = ;  // dt / eFoldingTime
 
-	double actualTps = smoothReleasedTransactions.smoothRate();
+	double actualTps = rateServer->getSmoothReleasedTransactionRate();
 	actualTpsMetric = (int64_t)actualTps;
 	// SOMEDAY: Remove the max( 1.0, ... ) since the below calculations _should_ be able to recover back
 	// up from this value
@@ -616,7 +564,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		Version maxVersion = 0;
 		int64_t totalReleased = 0;
 		int64_t batchReleased = 0;
-		for (auto& it : grvProxyInfo) {
+		for (auto& it : rateServer->getGrvProxyInfo()) {
 			maxVersion = std::max(maxVersion, it.second.version);
 			totalReleased += it.second.totalTransactions;
 			batchReleased += it.second.batchTransactions;
@@ -986,11 +934,11 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		    .detail("TPSLimit", limits->tpsLimit)
 		    .detail("Reason", limitReason)
 		    .detail("ReasonServerID", reasonID == UID() ? std::string() : Traceable<UID>::toString(reasonID))
-		    .detail("ReleasedTPS", smoothReleasedTransactions.smoothRate())
-		    .detail("ReleasedBatchTPS", smoothBatchReleasedTransactions.smoothRate())
+		    .detail("ReleasedTPS", rateServer->getSmoothReleasedTransactionRate())
+		    .detail("ReleasedBatchTPS", rateServer->getSmoothBatchReleasedTransactionRate())
 		    .detail("TPSBasis", actualTps)
 		    .detail("StorageServers", sscount)
-		    .detail("GrvProxies", grvProxyInfo.size())
+		    .detail("GrvProxies", rateServer->getGrvProxyInfo().size())
 		    .detail("TLogs", tlcount)
 		    .detail("WorstFreeSpaceStorageServer", worstFreeSpaceStorageServer)
 		    .detail("WorstFreeSpaceTLog", worstFreeSpaceTLog)
