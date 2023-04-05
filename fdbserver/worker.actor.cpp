@@ -770,7 +770,7 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 		return true;
 	}
 
-	if (dbi.encryptKeyProxy.present() && dbi.encryptKeyProxy.get().address() == address) {
+	if (dbi.client.encryptKeyProxy.present() && dbi.client.encryptKeyProxy.get().address() == address) {
 		return true;
 	}
 
@@ -2397,7 +2397,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						    .detail("BlobMigratorID",
 						            localInfo.blobMigrator.present() ? localInfo.blobMigrator.get().id() : UID())
 						    .detail("EncryptKeyProxyID",
-						            localInfo.encryptKeyProxy.present() ? localInfo.encryptKeyProxy.get().id() : UID());
+						            localInfo.client.encryptKeyProxy.present()
+						                ? localInfo.client.encryptKeyProxy.get().id()
+						                : UID());
 						dbInfo->set(localInfo);
 					}
 					errorForwarders.add(

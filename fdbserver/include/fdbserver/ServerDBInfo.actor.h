@@ -52,7 +52,6 @@ struct ServerDBInfo {
 	Optional<RatekeeperInterface> ratekeeper;
 	Optional<BlobManagerInterface> blobManager;
 	Optional<BlobMigratorInterface> blobMigrator;
-	Optional<EncryptKeyProxyInterface> encryptKeyProxy;
 	Optional<ConsistencyScanInterface> consistencyScan;
 	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount
@@ -87,7 +86,6 @@ struct ServerDBInfo {
 		           ratekeeper,
 		           blobManager,
 		           blobMigrator,
-		           encryptKeyProxy,
 		           consistencyScan,
 		           resolvers,
 		           recoveryCount,
