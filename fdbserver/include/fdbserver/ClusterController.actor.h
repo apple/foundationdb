@@ -205,7 +205,6 @@ public:
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
 			newInfo.client.encryptKeyProxy = interf;
-			newInfo.client.encryptKeyProxy = interf;
 			newClientInfo.encryptKeyProxy = interf;
 			serverInfo->set(newInfo);
 			clientInfo->set(newClientInfo);
@@ -234,7 +233,6 @@ public:
 			} else if (t == ProcessClass::BlobMigratorClass) {
 				newInfo.blobMigrator = Optional<BlobMigratorInterface>();
 			} else if (t == ProcessClass::EncryptKeyProxyClass) {
-				newInfo.client.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 				newInfo.client.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 				newClientInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 			} else if (t == ProcessClass::ConsistencyScanClass) {
