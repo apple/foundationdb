@@ -2,6 +2,8 @@
  * IRKMetricsTracker.h
  */
 
+#pragma once
+
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
