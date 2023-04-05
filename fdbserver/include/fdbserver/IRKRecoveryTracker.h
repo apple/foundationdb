@@ -1,0 +1,55 @@
+/**
+ * IRKRecoveryTracker.h
+ */
+
+#pragma once
+
+#include "fdbclient/FDBTypes.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "flow/genericactors.actor.h"
+
+class IRKRecoveryTracker {
+public:
+	virtual ~IRKRecoveryTracker() = default;
+
+	// Returns the duration of the recovery happening
+	// at the specified version.
+	virtual double getRecoveryDuration(Version) const = 0;
+
+	// Cleanup the oldest recoveries so that only
+	// CLIENT_KNOBS->MAX_GENERATIONS remain.
+	virtual void cleanupOldRecoveries() = 0;
+
+	// Update the maximum seen version based on a new version
+	// seen by a GRV proxy.
+	virtual void updateMaxVersion(Version version) = 0;
+
+	// Returns the largest version received from a GRV proxy
+	// (or 0 if no version has yet been received).
+	virtual Version getMaxVersion() const = 0;
+
+	// Run actors to periodically refresh recovery statistics.
+	// Returned Future should never be ready, but can be used to propagate errors.
+	virtual Future<Void> run() = 0;
+};
+
+class RKRecoveryTracker : public IRKRecoveryTracker {
+	friend class RKRecoveryTrackerImpl;
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
+
+	// Maps recovery versions to recovery start and end times
+	std::map<Version, std::pair<double, Optional<double>>> version_recovery;
+
+	Version maxVersion;
+	Version recoveryVersion;
+	bool recovering;
+
+public:
+	explicit RKRecoveryTracker(Reference<AsyncVar<ServerDBInfo> const>);
+	~RKRecoveryTracker();
+	double getRecoveryDuration(Version) const override;
+	void cleanupOldRecoveries() override;
+	void updateMaxVersion(Version updateVersion) override;
+	Version getMaxVersion() const override;
+	Future<Void> run() override;
+};

@@ -30,6 +30,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbserver/IRKConfigurationMonitor.h"
 #include "fdbserver/IRKMetricsTracker.h"
+#include "fdbserver/IRKRecoveryTracker.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -112,6 +113,7 @@ class Ratekeeper {
 
 	std::unique_ptr<IRKMetricsTracker> metricsTracker;
 	std::unique_ptr<IRKConfigurationMonitor> configurationMonitor;
+	std::unique_ptr<IRKRecoveryTracker> recoveryTracker;
 
 	std::map<UID, Ratekeeper::GrvProxyInfo> grvProxyInfo;
 	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions;
@@ -128,28 +130,12 @@ class Ratekeeper {
 	RatekeeperLimits batchLimits;
 
 	Deque<double> actualTpsHistory;
-	Version maxVersion;
 	double blobWorkerTime;
 	double unblockedAssignmentTime;
 	std::map<Version, Ratekeeper::VersionInfo> version_transactions;
-	std::map<Version, std::pair<double, Optional<double>>> version_recovery;
 	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
 	bool anyBlobRanges;
 	Optional<Key> remoteDC;
-
-	double getRecoveryDuration(Version ver) const {
-		auto it = version_recovery.lower_bound(ver);
-		double recoveryDuration = 0;
-		while (it != version_recovery.end()) {
-			if (it->second.second.present()) {
-				recoveryDuration += it->second.second.get() - it->second.first;
-			} else {
-				recoveryDuration += now() - it->second.first;
-			}
-			++it;
-		}
-		return recoveryDuration;
-	}
 
 	Ratekeeper(UID, Database, Reference<AsyncVar<ServerDBInfo> const>, RatekeeperInterface);
 
