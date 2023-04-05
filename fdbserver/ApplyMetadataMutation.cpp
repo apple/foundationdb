@@ -626,7 +626,7 @@ private:
 					TraceEvent(SevWarn, "CheckpointServerTagNotFound", dbgid)
 					    .detail("StorageServerID", ssID)
 					    .detail("Checkpoint", checkpoint.toString());
-						continue;
+					continue;
 				}
 				const Tag tag = decodeServerTagValue(tagValue.get());
 				MutationRef privatized = m;

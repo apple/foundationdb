@@ -156,9 +156,9 @@ ACTOR Future<Void> unassignServerKeys(Transaction* tr, UID ssId, KeyRange range,
 }
 
 ACTOR Future<Void> deleteCheckpoints(Transaction* tr, std::set<UID> checkpointIds, UID dataMoveId) {
-    if (! physicalShardMoveEnabled(dataMoveId)) {
-        return Void();
-    }
+	if (!physicalShardMoveEnabled(dataMoveId)) {
+		return Void();
+	}
 	TraceEvent(SevDebug, "DataMoveDeleteCheckpoints", dataMoveId).detail("Checkpoints", describe(checkpointIds));
 	std::vector<Future<Optional<Value>>> checkpointEntries;
 	for (const UID& id : checkpointIds) {
@@ -1469,7 +1469,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							physicalShardMap[ssId].emplace_back(rangeIntersectKeys, srcId);
 						}
 
-                        if (physicalShardMoveEnabled(dataMoveId)) {
+						if (physicalShardMoveEnabled(dataMoveId)) {
 							const UID checkpointId = UID(deterministicRandom()->randomUInt64(), srcId.first());
 							CheckpointMetaData checkpoint(std::vector<KeyRange>{ rangeIntersectKeys },
 							                              DataMoveRocksCF,

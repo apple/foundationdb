@@ -324,6 +324,8 @@ struct MoveInShard {
 	void setPhase(const MoveInPhase& phase) { this->meta->setPhase(phase); }
 	MoveInPhase getPhase() const { return this->meta->getPhase(); }
 	const std::vector<KeyRange>& ranges() const { return this->meta->ranges; }
+	const std::vector<CheckpointMetaData>& checkpoints() const { return this->meta->checkpoints; }
+	std::string destShardIdString() const { return this->meta->destShardIdString(); }
 	void addRange(const KeyRangeRef range);
 	void removeRange(const KeyRangeRef range);
 	void cancel();
@@ -8170,21 +8172,21 @@ void AddingShard::addMutation(Version version,
 		ASSERT(false);
 }
 
-ACTOR Future<Void> updateMoveInShardMetaData(StorageServer* data, MoveInShardMetaData* shard) {
-	Optional<Value> pm = wait(data->storage.readValue(persistMoveInShardKey(shard->id)));
+ACTOR Future<Void> updateMoveInShardMetaData(StorageServer* data, MoveInShard* shard) {
+	Optional<Value> pm = wait(data->storage.readValue(persistMoveInShardKey(shard->id())));
 	if (!pm.present()) {
 		TraceEvent(SevWarn, "UpdatedMoveInShardMetaDataNotFound", data->thisServerID)
 		    .detail("Shard", shard->toString())
-		    .detail("ShardKey", persistMoveInShardKey(shard->id))
+		    .detail("ShardKey", persistMoveInShardKey(shard->id()))
 		    .detail("DurableVersion", data->durableVersion.get());
 		throw operation_cancelled();
 	}
 
-	data->storage.writeKeyValue(KeyValueRef(persistMoveInShardKey(shard->id), moveInShardValue(*shard)));
+	data->storage.writeKeyValue(KeyValueRef(persistMoveInShardKey(shard->id()), moveInShardValue(*shard->meta)));
 	wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
 	TraceEvent(SevDebug, "UpdatedMoveInShardMetaData", data->thisServerID)
 	    .detail("Shard", shard->toString())
-	    .detail("ShardKey", persistMoveInShardKey(shard->id))
+	    .detail("ShardKey", persistMoveInShardKey(shard->id()))
 	    .detail("DurableVersion", data->durableVersion.get());
 
 	return Void();
@@ -8199,7 +8201,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
                                         EnablePhysicalShardMove enablePSM);
 
 ACTOR Future<Void> fallBackToAddingShard(StorageServer* data, MoveInShard* moveInShard) {
-    ASSERT(moveInShard->getPhase() == MoveInPhase::Fetching);
+	ASSERT(moveInShard->getPhase() == MoveInPhase::Fetching);
 	auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 	TraceEvent(SevInfo, "FallBackToAddingShardBegin", data->thisServerID)
 	    .detail("Version", mLV.version)
@@ -8228,211 +8230,131 @@ ACTOR Future<Void> fallBackToAddingShard(StorageServer* data, MoveInShard* moveI
 	return Void();
 }
 
-ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
-                                        MoveInShard* moveInShard,
-                                        std::shared_ptr<MoveInShardMetaData> shard,
-                                        std::string dir) {
+ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveInShard, std::string dir) {
 	state std::vector<std::pair<KeyRange, CheckpointMetaData>> records;
 	state int idx = 0;
 	state std::vector<CheckpointMetaData> localRecords;
-	state Severity sevDm = SERVER_KNOBS->PHYSICAL_SHARD_MOVE_VERBOSE_TRACKING ? SevInfo : SevDebug;
-	ASSERT(shard->getPhase() == MoveInPhase::Fetching);
+	ASSERT(moveInShard->getPhase() == MoveInPhase::Fetching);
 
 	TraceEvent(SevInfo, "FetchShardCheckpointMetaDataBegin", data->thisServerID)
-	    .detail("MoveInShard", shard->toString());
+	    .detail("MoveInShard", moveInShard->toString());
 
 	// TODO: use shard->meta->checkpoints to continue the fetch.
 	state int attempt = 0;
+	state double fetchStartTime = now();
 	loop {
+		wait(delay(0, TaskPriority::FetchKeys));
 		if (moveInShard->getPhase() == MoveInPhase::Fail) {
 			return Void();
 		}
 		++attempt;
 		records.clear();
-		for (const auto& range : shard->ranges) {
+		for (const auto& range : moveInShard->ranges()) {
 			data->cx->invalidateCache(/*tenantPrefix=*/Key(), range);
 		}
 		try {
-			wait(delay(0, TaskPriority::FetchKeys));
-			if (moveInShard->getPhase() == MoveInPhase::Fail) {
-				return Void();
-			}
 			wait(store(records,
-			           getCheckpointMetaData(
-			               data->cx, shard->ranges, shard->createVersion, DataMoveRocksCF, shard->dataMoveId)));
+			           getCheckpointMetaData(data->cx,
+			                                 moveInShard->ranges(),
+			                                 moveInShard->meta->createVersion,
+			                                 DataMoveRocksCF,
+			                                 moveInShard->dataMoveId())));
 			if (moveInShard->getPhase() == MoveInPhase::Fail) {
 				return Void();
 			}
-			// ASSERT(records.size() == shard->ranges.size());
+
+			if (g_network->isSimulated()) {
+				for (const auto& [range, record] : records) {
+					TraceEvent(moveInShard->logSev, "FetchShardCheckpointMetaData", data->thisServerID)
+					    .detail("MoveInShardID", moveInShard->id())
+					    .detail("Range", range)
+					    .detail("CheckpointMetaData", record.toString());
+				}
+			}
+
+			platform::eraseDirectoryRecursive(dir);
+			ASSERT(platform::createDirectory(dir));
+
+			TraceEvent(SevInfo, "FetchShardFetchCheckpointsBegin", data->thisServerID)
+			    .detail("MoveInShardID", moveInShard->id());
+			std::vector<Future<CheckpointMetaData>> fFetchCheckpoint;
+			for (const auto& [range, record] : records) {
+				const std::string checkpointDir = joinPath(dir, deterministicRandom()->randomAlphaNumeric(8));
+				if (!platform::createDirectory(checkpointDir)) {
+					throw retry();
+				}
+				fFetchCheckpoint.push_back(fetchCheckpointRanges(data->cx, record, checkpointDir, { range }));
+			}
+			wait(store(localRecords, getAll(fFetchCheckpoint)));
+			if (moveInShard->getPhase() == MoveInPhase::Fail) {
+				return Void();
+			}
 			break;
 		} catch (Error& err) {
-			state Error e(err);
-			TraceEvent(SevWarn, "FetchShardCheckpointMetaDataError", data->thisServerID)
-			    .errorUnsuppressed(e)
-			    .detail("MoveInShardID", shard->id)
-			    .detail("MoveInShard", shard->toString());
-			if (attempt > 10 && e.code() != error_code_operation_cancelled && e.code() != error_code_actor_cancelled) {
-				if (shard->getPhase() == MoveInPhase::Fetching) {
-					wait(fallBackToAddingShard(data, moveInShard));
-					return Void();
-				} else {
-					throw e;
-				}
+			TraceEvent(SevWarn, "FetchShardCheckpointsError", data->thisServerID)
+			    .errorUnsuppressed(err)
+			    .detail("Attempt", attempt)
+			    .detail("MoveInShard", moveInShard->toString());
+			state Error e = err;
+			if ((e.code() == error_code_checkpoint_not_found || attempt > 10) &&
+			    moveInShard->getPhase() == MoveInPhase::Fetching) {
+				wait(fallBackToAddingShard(data, moveInShard));
+				return Void();
 			}
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    e.code() == error_code_connection_failed || e.code() == error_code_broken_promise ||
 			    e.code() == error_code_timed_out) {
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::FetchKeys));
-			} else if (e.code() == error_code_checkpoint_not_found && shard->getPhase() == MoveInPhase::Fetching) {
-				wait(fallBackToAddingShard(data, moveInShard));
-				return Void();
 			} else {
 				throw e;
 			}
 		}
 	}
 
-	for (const auto& [range, record] : records) {
-		TraceEvent(moveInShard->logSev, "FetchShardCheckpointMetaData", data->thisServerID)
-		    .detail("MoveInShardID", moveInShard->id())
-		    .detail("Range", range)
-		    // .setMaxFieldLength(10000)
-		    .detail("CheckpointMetaData", record.toString());
-	}
-
-	wait(delay(0));
-	if (moveInShard->getPhase() == MoveInPhase::Fail) {
-		return Void();
-	}
-
-	state double fetchStartTime = 0;
-	// localRecords.resize(records.size());
-	attempt = 0;
-	loop {
-		if (moveInShard->getPhase() == MoveInPhase::Fail) {
-			return Void();
-		}
-		platform::eraseDirectoryRecursive(dir);
-		ASSERT(platform::createDirectory(dir));
-
-		++attempt;
-		try {
-			TraceEvent(SevInfo, "FetchShardFetchCheckpointsBegin", data->thisServerID)
-			    .detail("MoveInShardID", shard->id);
-			// .detail("CheckpointMetaData", describe(records));
-			// TODO: Persist the progress, for restarts, and fetch checkpoints in parallel.
-			// std::unordered_map<UID, std::vector<KeyRange>> checkpointRangeMap;
-			// for (const auto& range : shard->ranges) {
-			// 	for (const auto& record : records) {
-			// 		for (const auto& cRange : record.ranges) {
-			// 			if (range.intersects(cRange)) {
-			// 				checkpointRangeMap[record.checkpointID].push_back(range & cRange);
-			// 			}
-			// 		}
-			// 	}
-			// }
-			fetchStartTime = now();
-			std::vector<Future<CheckpointMetaData>> fCheckpointMetaData;
-			// for (const auto& record : records) {
-			// 	ASSERT(!checkpointRangeMap[record.checkpointID].empty());
-			// 	fCheckpointMetaData.push_back(
-			// 	    fetchCheckpointRanges(data->cx, record, dir, checkpointRangeMap[record.checkpointID]));
-			// }
-			for (const auto& [range, record] : records) {
-				// ASSERT(!checkpointRangeMap[record.checkpointID].empty());
-				const std::string checkpointDir = joinPath(dir, deterministicRandom()->randomAlphaNumeric(8));
-				ASSERT(!directoryExists(checkpointDir));
-				ASSERT(platform::createDirectory(checkpointDir));
-				fCheckpointMetaData.push_back(fetchCheckpointRanges(data->cx, record, checkpointDir, { range }));
-			}
-			wait(store(localRecords, getAll(fCheckpointMetaData)));
-			if (moveInShard->getPhase() == MoveInPhase::Fail) {
-				return Void();
-			}
-			break;
-		} catch (Error& e) {
-			TraceEvent(SevWarn, "FetchShardFetchCheckpointsError", data->thisServerID)
-			    .errorUnsuppressed(e)
-			    .detail("Attempt", attempt)
-			    .detail("MoveInShardID", shard->id);
-			// .detail("CheckpointMetaData", describe(records));
-			if (attempt > 10 && e.code() != error_code_operation_cancelled && e.code() != error_code_actor_cancelled) {
-				if (shard->getPhase() == MoveInPhase::Fetching) {
-					platform::eraseDirectoryRecursive(dir);
-					wait(fallBackToAddingShard(data, moveInShard));
-					return Void();
-				} else {
-					throw e;
-				}
-			}
-			wait(delay(1));
-		}
-	}
-
 	const double duration = now() - fetchStartTime;
 	const int64_t totalBytes = getTotalFetchedBytes(localRecords);
 	TraceEvent(SevInfo, "FetchCheckpointsStats", data->thisServerID)
-	    .detail("MoveInShardID", shard->id)
-	    .detail("MoveInShard", shard->toString())
+	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("Checkpoint", describe(localRecords))
 	    .detail("Duration", duration)
 	    .detail("TotalBytes", totalBytes)
 	    .detail("Rate", (double)totalBytes / duration);
 
-	// std::vector<std::string> files = platform::listFiles(dir);
-	// std::cout << "Received checkpoint files on disk: " << dir << std::endl;
-	// for (auto& file : files) {
-	// 	std::cout << file << std::endl;
-	// }
-	// std::cout << std::endl;
+	moveInShard->meta->checkpoints = std::move(localRecords);
+	moveInShard->setPhase(MoveInPhase::Ingesting);
 
-	shard->checkpoints = std::move(localRecords);
-	shard->setPhase(MoveInPhase::Ingesting);
+	wait(updateMoveInShardMetaData(data, moveInShard));
 
-	wait(updateMoveInShardMetaData(data, shard.get()));
-
-	TraceEvent(SevInfo, "FetchShardCheckpointsEnd", data->thisServerID).detail("MoveInShard", shard->toString());
+	TraceEvent(SevInfo, "FetchShardCheckpointsEnd", data->thisServerID).detail("MoveInShard", moveInShard->toString());
 	return Void();
 }
 
-ACTOR Future<Void> applyByteSampleResult(StorageServer* data,
-                                         IKeyValueStore* storage,
-                                         Key begin,
-                                         Key end,
-                                         std::vector<Standalone<VectorRef<KeyValueRef>>>* results = nullptr);
-
-ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
-                                              MoveInShard* moveInShard,
-                                              std::shared_ptr<MoveInShardMetaData> shard) {
-	ASSERT(shard->getPhase() == MoveInPhase::Ingesting);
-	state Severity sevDm = SERVER_KNOBS->PHYSICAL_SHARD_MOVE_VERBOSE_TRACKING ? SevInfo : SevDebug;
+ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* moveInShard) {
+	ASSERT(moveInShard->getPhase() == MoveInPhase::Ingesting);
 
 	TraceEvent(SevInfo, "FetchShardIngestCheckpointBegin", data->thisServerID)
-	    .detail("Checkpoints", describe(shard->checkpoints));
+	    .detail("Checkpoints", describe(moveInShard->checkpoints()));
 
 	try {
-		wait(data->storage.restore(shard->destShardIdString(), shard->ranges, shard->checkpoints));
+		wait(
+		    data->storage.restore(moveInShard->destShardIdString(), moveInShard->ranges(), moveInShard->checkpoints()));
 	} catch (Error& e) {
 		state Error err = e;
 		TraceEvent(SevWarn, "FetchShardIngestedCheckpointError", data->thisServerID)
 		    .errorUnsuppressed(e)
-		    .detail("MoveInShard", shard->toString())
-		    .detail("Checkpoints", describe(shard->checkpoints));
-		// if (moveInShard->getPhase() != MoveInPhase::Fail && e.code() == error_code_failed_to_restore_checkpoint) {
-		// 	wait(fallBackToAddingShard(data, moveInShard));
-		// 	return Void();
-		// }
+		    .detail("MoveInShard", moveInShard->toString())
+		    .detail("Checkpoints", describe(moveInShard->checkpoints()));
 		if (e.code() == error_code_failed_to_restore_checkpoint && moveInShard->getPhase() != MoveInPhase::Fail) {
-			shard->setPhase(MoveInPhase::Fetching);
-			wait(updateMoveInShardMetaData(data, shard.get()));
+			moveInShard->setPhase(MoveInPhase::Fetching);
+			wait(updateMoveInShardMetaData(data, moveInShard));
 			return Void();
 		}
 		throw err;
 	}
 
 	TraceEvent(SevInfo, "FetchShardIngestedCheckpoint", data->thisServerID)
-	    .detail("MoveInShard", shard->toString())
-	    .detail("Checkpoints", describe(shard->checkpoints));
+	    .detail("MoveInShard", moveInShard->toString())
+	    .detail("Checkpoints", describe(moveInShard->checkpoints()));
 
 	wait(delay(0));
 	if (moveInShard->getPhase() == MoveInPhase::Fail) {
@@ -8442,7 +8364,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 	for (const auto& range : moveInShard->ranges()) {
 		data->storage.persistRangeMapping(range, true);
 	}
-	for (const auto& checkpoint : shard->checkpoints) {
+	for (const auto& checkpoint : moveInShard->checkpoints()) {
 		if (!checkpoint.bytesSampleFile.present()) {
 			continue;
 		}
@@ -8453,7 +8375,6 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 			KeyRef key = kv.key.removePrefix(persistByteSampleKeys.begin);
 			if (!checkpoint.containsKey(key)) {
 				TraceEvent(moveInShard->logSev, "StorageRestoreCheckpointKeySampleNotInRange", data->thisServerID)
-				    // .setMaxFieldLength(10000)
 				    .detail("Checkpoint", checkpoint.toString())
 				    .detail("SampleKey", key)
 				    .detail("Size", size);
@@ -8469,30 +8390,29 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data,
 			                                        MutationRef(MutationRef::SetValue, kv.key, kv.value));
 		}
 	}
-	shard->setPhase(MoveInPhase::ApplyingUpdates);
-	wait(updateMoveInShardMetaData(data, shard.get()));
+	moveInShard->setPhase(MoveInPhase::ApplyingUpdates);
+	wait(updateMoveInShardMetaData(data, moveInShard));
 
 	// shard->fetchComplete.send(Void());
 
 	TraceEvent(SevInfo, "FetchShardIngestCheckpointEnd", data->thisServerID)
-	    .detail("Checkpoints", describe(shard->checkpoints));
+	    .detail("Checkpoints", describe(moveInShard->checkpoints()));
 
 	return Void();
 }
 
 ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
                                           MoveInShard* moveInShard,
-                                          std::shared_ptr<MoveInShardMetaData> shard,
                                           std::shared_ptr<MoveInUpdates> moveInUpdates) {
-	TraceEvent(SevInfo, "FetchShardApplyUpdatesBegin", data->thisServerID).detail("MoveInShard", shard->toString());
+	TraceEvent(SevInfo, "FetchShardApplyUpdatesBegin", data->thisServerID).detail("MoveInShard", moveInShard->toString());
 	try {
 		// wait(delay(0, TaskPriority::FetchKeys));
-		wait(moveInUpdates->restore(shard->highWatermark));
+		wait(moveInUpdates->restore(moveInShard->meta->highWatermark));
 		if (moveInShard->getPhase() == MoveInPhase::Fail) {
 			return Void();
 		}
 		TraceEvent(moveInShard->logSev, "FetchShardApplyingUpdatesRestored", data->thisServerID)
-		    .detail("MoveInShard", shard->toString());
+		    .detail("MoveInShard", moveInShard->toString());
 		// state Version version = data->version.get() + 1;
 		// while (shard->updates.hasNext()) {
 		Promise<FetchInjectionInfo*> p;
@@ -8564,17 +8484,19 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 
 		// ASSERT(shard->meta->highWatermark <= data->data().getLatestVersion());
 
-		shard->setPhase(MoveInPhase::ReadWritePending);
+		moveInShard->setPhase(MoveInPhase::ReadWritePending);
 		auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 		// KeyRange keys = singleKeyRange(shard->moveInShardKey());
-		MoveInShardMetaData newMoveInShard(*shard);
+		MoveInShardMetaData newMoveInShard(*moveInShard->meta);
 		newMoveInShard.setPhase(MoveInPhase::Complete);
-		data->addMutationToMutationLog(
-		    mLV,
-		    MutationRef(MutationRef::SetValue, persistMoveInShardKey(shard->id), moveInShardValue(newMoveInShard)));
-		std::sort(shard->ranges.begin(), shard->ranges.end(), KeyRangeRef::ArbitraryOrder());
-		ASSERT(std::is_sorted(shard->ranges.begin(), shard->ranges.end(), KeyRangeRef::ArbitraryOrder()));
-		for (const auto& range : shard->ranges) {
+		data->addMutationToMutationLog(mLV,
+		                               MutationRef(MutationRef::SetValue,
+		                                           persistMoveInShardKey(moveInShard->id()),
+		                                           moveInShardValue(newMoveInShard)));
+		std::vector<KeyRange> ranges = moveInShard->ranges();
+		std::sort(ranges.begin(), ranges.end(), KeyRangeRef::ArbitraryOrder());
+		// ASSERT(std::is_sorted(shard->ranges.begin(), shard->ranges.end(), KeyRangeRef::ArbitraryOrder()));
+		for (const auto& range : ranges) {
 			TraceEvent(moveInShard->logSev, "UpdateLocationMetadata").detail("Range", range);
 			ASSERT(data->shards[range.begin]->keys == range);
 			// data->shards[range.begin]->phase = AddingShard::Waiting;
@@ -8591,30 +8513,29 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 		if (moveInShard->getPhase() == MoveInPhase::Fail) {
 			return Void();
 		}
-		shard->setPhase(MoveInPhase::Complete);
+		moveInShard->setPhase(MoveInPhase::Complete);
 		TraceEvent(moveInShard->logSev, "FetchShardApplyUpdatesSuccess", data->thisServerID)
-		    .detail("MoveInShard", shard->toString());
+		    .detail("MoveInShard", moveInShard->toString());
 
-		const double duration = now() - shard->startTime;
-		const int64_t totalBytes = getTotalFetchedBytes(shard->checkpoints);
+		const double duration = now() - moveInShard->meta->startTime;
+		const int64_t totalBytes = getTotalFetchedBytes(moveInShard->checkpoints());
 		TraceEvent(SevInfo, "FetchShardStats", data->thisServerID)
-		    .detail("MoveInShardID", shard->id)
-		    .detail("MoveInShard", shard->toString())
+		    .detail("MoveInShard", moveInShard->toString())
 		    .detail("Duration", duration)
 		    .detail("TotalBytes", totalBytes)
 		    .detail("Rate", (double)totalBytes / duration);
-		for (const auto& range : shard->ranges) {
+		for (const auto& range : moveInShard->ranges()) {
 			const Reference<ShardInfo>& currentShard = data->shards[range.begin];
-			if (!currentShard->moveInShard || currentShard->moveInShard->id() != shard->id) {
+			if (!currentShard->moveInShard || currentShard->moveInShard->id() != moveInShard->id()) {
 				TraceEvent(SevWarn, "MoveInShardChanged", data->thisServerID)
 				    .detail("CurrentShard", currentShard->debugDescribeState())
-				    .detail("MoveInShard", shard->toString());
+				    .detail("MoveInShard", moveInShard->toString());
 				throw operation_cancelled();
 			}
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			ASSERT(newShard.range == range);
 			newShard.setShardState(StorageServerShard::ReadWrite);
-			data->addShard(ShardInfo::newShard(data, newShard)); // invalidates shard!
+			data->addShard(ShardInfo::newShard(data, newShard));
 			data->newestAvailableVersion.insert(range, latestVersion);
 			coalescePhysicalShards(data, range);
 		}
@@ -8622,7 +8543,7 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "FetchShardApplyUpdatesFailure", data->thisServerID)
 		    .errorUnsuppressed(e)
-		    .detail("MoveInShard", shard->toString());
+		    .detail("MoveInShard", moveInShard->toString());
 		throw e;
 	}
 
@@ -8688,13 +8609,13 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 		try {
 			// Pending = 0, Fetching = 1, Ingesting = 2, ApplyingUpdates = 3, Complete = 4, Deleting = 4, Fail = 6,
 			if (phase == MoveInPhase::Fetching) {
-				wait(fetchShardCheckpoint(data, moveInShard, shard, dir));
+				wait(fetchShardCheckpoint(data, moveInShard, dir));
 				attempt = 0;
 			} else if (phase == MoveInPhase::Ingesting) {
-				wait(fetchShardIngestCheckpoint(data, moveInShard, shard));
+				wait(fetchShardIngestCheckpoint(data, moveInShard));
 				attempt = 0;
 			} else if (phase == MoveInPhase::ApplyingUpdates) {
-				wait(fetchShardApplyUpdates(data, moveInShard, shard, moveInUpdates));
+				wait(fetchShardApplyUpdates(data, moveInShard, moveInUpdates));
 				attempt = 0;
 			} else if (phase == MoveInPhase::Complete) {
 				wait(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
@@ -11553,7 +11474,7 @@ ACTOR Future<Void> applyByteSampleResult(StorageServer* data,
                                          IKeyValueStore* storage,
                                          Key begin,
                                          Key end,
-                                         std::vector<Standalone<VectorRef<KeyValueRef>>>* results) {
+                                         std::vector<Standalone<VectorRef<KeyValueRef>>>* results = nullptr) {
 	state int totalFetches = 0;
 	state int totalKeys = 0;
 	state int totalBytes = 0;
