@@ -9,9 +9,9 @@ This document provides an overview of changes that an application developer may 
 
 For more details about API versions, see :ref:`api-versions`.
 
-.. _api-version-upgrade-guide-710300:
+.. _api-version-upgrade-guide-800000:
 
-API version 710300
+API version 800000
 ==================
 
 General
