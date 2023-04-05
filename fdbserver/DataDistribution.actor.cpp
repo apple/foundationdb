@@ -438,10 +438,10 @@ public:
 	}
 
 	ACTOR static Future<Void> removeDataMoveTombstone(Reference<DataDistributor> self) {
+		state UID currentID;
 		try {
 			state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 			state Transaction tr(cx);
-			state UID currentID;
 			loop {
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
