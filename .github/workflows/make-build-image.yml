@@ -3,7 +3,7 @@ name: Make a build image
 
 on:
   push:
-    branches: ["ow-build-image*"]
+    tags: ["*.ow-build-image"]
 
 jobs:
   calc_ver:
