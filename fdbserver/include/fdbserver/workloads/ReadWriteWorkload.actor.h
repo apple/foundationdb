@@ -25,6 +25,7 @@
 #elif !defined(FDBSERVER_READWRITEWORKLOAD_ACTOR_H)
 #define FDBSERVER_READWRITEWORKLOAD_ACTOR_H
 
+#include "fdbrpc/DDSketch.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -46,7 +47,7 @@ DESCR struct ReadMetric {
 
 // Common ReadWrite test settings
 struct ReadWriteCommon : KVWorkload {
-	static constexpr int sampleSize = 10000;
+	static constexpr double sampleError = 0.01;
 	friend struct ReadWriteCommonImpl;
 
 	// general test setting
@@ -75,7 +76,7 @@ struct ReadWriteCommon : KVWorkload {
 	EventMetricHandle<TransactionFailureMetric> transactionFailureMetric;
 	EventMetricHandle<ReadMetric> readMetric;
 	PerfIntCounter aTransactions, bTransactions, retries;
-	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, fullReadLatencies;
+	DDSketch<double> latencies, readLatencies, commitLatencies, GRVLatencies, fullReadLatencies;
 	double readLatencyTotal;
 	int readLatencyCount;
 	std::vector<PerfMetric> periodicMetrics;
@@ -87,9 +88,9 @@ struct ReadWriteCommon : KVWorkload {
 
 	explicit ReadWriteCommon(WorkloadContext const& wcx)
 	  : KVWorkload(wcx), totalReadsMetric("ReadWrite.TotalReads"_sr), totalRetriesMetric("ReadWrite.TotalRetries"_sr),
-	    aTransactions("A Transactions"), bTransactions("B Transactions"), retries("Retries"), latencies(sampleSize),
-	    readLatencies(sampleSize), commitLatencies(sampleSize), GRVLatencies(sampleSize), fullReadLatencies(sampleSize),
-	    readLatencyTotal(0), readLatencyCount(0), loadTime(0.0), clientBegin(0) {
+	    aTransactions("A Transactions"), bTransactions("B Transactions"), retries("Retries"), latencies(sampleError),
+	    readLatencies(sampleError), commitLatencies(sampleError), GRVLatencies(sampleError),
+	    fullReadLatencies(sampleError), readLatencyTotal(0), readLatencyCount(0), loadTime(0.0), clientBegin(0) {
 
 		transactionSuccessMetric.init("ReadWrite.SuccessfulTransaction"_sr);
 		transactionFailureMetric.init("ReadWrite.FailedTransaction"_sr);

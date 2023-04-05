@@ -25,16 +25,34 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Schemas.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+
+#include "metacluster/Metacluster.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
+
+template <class TenantGroupEntryImpl>
+void tenantGroupListOutput(std::vector<std::pair<TenantGroupName, TenantGroupEntryImpl>> tenantGroups, int tokensSize) {
+	if (tenantGroups.empty()) {
+		if (tokensSize == 2) {
+			fmt::print("The cluster has no tenant groups\n");
+		} else {
+			fmt::print("The cluster has no tenant groups in the specified range\n");
+		}
+	}
+
+	int index = 0;
+	for (auto tenantGroup : tenantGroups) {
+		fmt::print("  {}. {}\n", ++index, printable(tenantGroup.first));
+	}
+}
 
 // tenantgroup list command
 ACTOR Future<bool> tenantGroupListCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
@@ -74,27 +92,16 @@ ACTOR Future<bool> tenantGroupListCommand(Reference<IDatabase> db, std::vector<S
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
-			state std::vector<TenantGroupName> tenantGroupNames;
-			state std::vector<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroups;
+
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				wait(store(tenantGroups,
-				           MetaclusterAPI::listTenantGroupsTransaction(tr, beginTenantGroup, endTenantGroup, limit)));
+				std::vector<std::pair<TenantGroupName, metacluster::MetaclusterTenantGroupEntry>>
+				    metaclusterTenantGroups =
+				        wait(metacluster::listTenantGroupsTransaction(tr, beginTenantGroup, endTenantGroup, limit));
+				tenantGroupListOutput(metaclusterTenantGroups, tokens.size());
 			} else {
-				wait(store(tenantGroups,
-				           TenantAPI::listTenantGroupsTransaction(tr, beginTenantGroup, endTenantGroup, limit)));
-			}
-
-			if (tenantGroups.empty()) {
-				if (tokens.size() == 2) {
-					fmt::print("The cluster has no tenant groups\n");
-				} else {
-					fmt::print("The cluster has no tenant groups in the specified range\n");
-				}
-			}
-
-			int index = 0;
-			for (auto tenantGroup : tenantGroups) {
-				fmt::print("  {}. {}\n", ++index, printable(tenantGroup.first));
+				std::vector<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroups =
+				    wait(TenantAPI::listTenantGroupsTransaction(tr, beginTenantGroup, endTenantGroup, limit));
+				tenantGroupListOutput(tenantGroups, tokens.size());
 			}
 
 			return true;
@@ -104,9 +111,32 @@ ACTOR Future<bool> tenantGroupListCommand(Reference<IDatabase> db, std::vector<S
 	}
 }
 
+void tenantGroupGetOutput(metacluster::MetaclusterTenantGroupEntry entry, bool useJson) {
+	if (useJson) {
+		json_spirit::mObject resultObj;
+		resultObj["tenant_group"] = entry.toJson();
+		resultObj["type"] = "success";
+		fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print));
+	} else {
+		fmt::print("  assigned cluster: {}\n", printable(entry.assignedCluster));
+	}
+}
+void tenantGroupGetOutput(TenantGroupEntry entry, bool useJson) {
+	if (useJson) {
+		json_spirit::mObject resultObj;
+		resultObj["tenant_group"] = entry.toJson();
+		resultObj["type"] = "success";
+		fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print));
+	} else {
+		// This is a placeholder output for when a tenant group is read in a non-metacluster, where
+		// it currently has no metadata. When metadata is eventually added, we can print that instead.
+		fmt::print("The tenant group is present in the cluster\n");
+	}
+}
+
 // tenantgroup get command
 ACTOR Future<bool> tenantGroupGetCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() > 4 || (tokens.size() == 4 && tokens[3] != "JSON"_sr)) {
+	if (tokens.size() > 4 || tokens.size() < 3 || (tokens.size() == 4 && tokens[3] != "JSON"_sr)) {
 		fmt::print("Usage: tenantgroup get <NAME> [JSON]\n\n");
 		fmt::print("Prints metadata associated with the given tenant group.\n");
 		fmt::print("If JSON is specified, then the output will be in JSON format.\n");
@@ -120,43 +150,21 @@ ACTOR Future<bool> tenantGroupGetCommand(Reference<IDatabase> db, std::vector<St
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
-			state std::string tenantJson;
-			state Optional<TenantGroupEntry> entry;
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				wait(store(entry, MetaclusterAPI::tryGetTenantGroupTransaction(tr, tokens[2])));
-			} else {
-				wait(store(entry, TenantAPI::tryGetTenantGroupTransaction(tr, tokens[2])));
-				Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
-				    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
-
-				// We don't store assigned clusters in the tenant group entry on data clusters, so we can instead
-				// populate it from the metacluster registration
-				if (entry.present() && metaclusterRegistration.present() &&
-				    metaclusterRegistration.get().clusterType == ClusterType::METACLUSTER_DATA &&
-				    !entry.get().assignedCluster.present()) {
-					entry.get().assignedCluster = metaclusterRegistration.get().name;
+				state Optional<metacluster::MetaclusterTenantGroupEntry> mEntry =
+				    wait(metacluster::tryGetTenantGroupTransaction(tr, tokens[2]));
+				if (!mEntry.present()) {
+					throw tenant_not_found();
 				}
-			}
-
-			if (!entry.present()) {
-				throw tenant_not_found();
-			}
-
-			if (useJson) {
-				json_spirit::mObject resultObj;
-				resultObj["tenant_group"] = entry.get().toJson();
-				resultObj["type"] = "success";
-				fmt::print("{}\n",
-				           json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print));
+				tenantGroupGetOutput(mEntry.get(), useJson);
 			} else {
-				if (entry.get().assignedCluster.present()) {
-					fmt::print("  assigned cluster: {}\n", printable(entry.get().assignedCluster));
-				} else {
-					// This is a placeholder output for when a tenant group is read in a non-metacluster, where
-					// it currently has no metadata. When metadata is eventually added, we can print that instead.
-					fmt::print("The tenant group is present in the cluster\n");
+				state Optional<TenantGroupEntry> entry = wait(TenantAPI::tryGetTenantGroupTransaction(tr, tokens[2]));
+				if (!entry.present()) {
+					throw tenant_not_found();
 				}
+				tenantGroupGetOutput(entry.get(), useJson);
 			}
+
 			return true;
 		} catch (Error& e) {
 			try {

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -189,12 +189,11 @@ struct MeasureSinglePeriod : IMeasurer {
 	double delay, duration;
 	double startT;
 
-	ContinuousSample<double> totalLatency, grvLatency, rowReadLatency, commitLatency;
+	DDSketch<double> totalLatency, grvLatency, rowReadLatency, commitLatency;
 	ITransactor::Stats stats; // totalled over the period
 
 	MeasureSinglePeriod(double delay, double duration)
-	  : delay(delay), duration(duration), totalLatency(2000), grvLatency(2000), rowReadLatency(2000),
-	    commitLatency(2000) {}
+	  : delay(delay), duration(duration), totalLatency(), grvLatency(), rowReadLatency(), commitLatency() {}
 
 	Future<Void> start() override {
 		startT = now();

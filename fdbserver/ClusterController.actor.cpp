@@ -23,8 +23,11 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <tuple>
 #include <vector>
 
+#include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/FailureMonitor.h"
@@ -32,6 +35,7 @@
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -46,8 +50,6 @@
 #include "fdbserver/ClusterRecovery.actor.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/DBCoreState.h"
-#include "fdbclient/Metacluster.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/LeaderElection.h"
 #include "fdbserver/LogSystem.h"
@@ -57,6 +59,7 @@
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/SingletonRoles.h"
 #include "fdbserver/Status.actor.h"
 #include "fdbserver/LatencyBandConfig.h"
 #include "fdbclient/GlobalConfig.actor.h"
@@ -66,190 +69,13 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/KeyBackedTypes.h"
+#include "flow/Error.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
+
+#include "metacluster/MetaclusterMetrics.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
-
-void failAfter(Future<Void> trigger, Endpoint e);
-
-// This is used to artificially amplify the used count for processes
-// occupied by non-singletons. This ultimately makes it less desirable
-// for singletons to use those processes as well. This constant should
-// be increased if we ever have more than 100 singletons (unlikely).
-static const int PID_USED_AMP_FOR_NON_SINGLETON = 100;
-
-// Wrapper for singleton interfaces
-template <class Interface>
-struct Singleton {
-	const Optional<Interface>& interface;
-
-	Singleton(const Optional<Interface>& interface) : interface(interface) {}
-
-	virtual Role getRole() const = 0;
-	virtual ProcessClass::ClusterRole getClusterRole() const = 0;
-
-	virtual void setInterfaceToDbInfo(ClusterControllerData* cc) const = 0;
-	virtual void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const = 0;
-	virtual void recruit(ClusterControllerData* cc) const = 0;
-};
-
-struct RatekeeperSingleton : Singleton<RatekeeperInterface> {
-
-	RatekeeperSingleton(const Optional<RatekeeperInterface>& interface) : Singleton(interface) {}
-
-	Role getRole() const { return Role::RATEKEEPER; }
-	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::Ratekeeper; }
-
-	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
-		if (interface.present()) {
-			TraceEvent("CCRK_SetInf", cc->id).detail("Id", interface.get().id());
-			cc->db.setRatekeeper(interface.get());
-		}
-	}
-	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present() && cc->id_worker.count(pid)) {
-			cc->id_worker[pid].haltRatekeeper =
-			    brokenPromiseToNever(interface.get().haltRatekeeper.getReply(HaltRatekeeperRequest(cc->id)));
-		}
-	}
-	void recruit(ClusterControllerData* cc) const {
-		cc->lastRecruitTime = now();
-		cc->recruitRatekeeper.set(true);
-	}
-};
-
-struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
-
-	DataDistributorSingleton(const Optional<DataDistributorInterface>& interface) : Singleton(interface) {}
-
-	Role getRole() const { return Role::DATA_DISTRIBUTOR; }
-	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::DataDistributor; }
-
-	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
-		if (interface.present()) {
-			TraceEvent("CCDD_SetInf", cc->id).detail("Id", interface.get().id());
-			cc->db.setDistributor(interface.get());
-		}
-	}
-	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present() && cc->id_worker.count(pid)) {
-			cc->id_worker[pid].haltDistributor =
-			    brokenPromiseToNever(interface.get().haltDataDistributor.getReply(HaltDataDistributorRequest(cc->id)));
-		}
-	}
-	void recruit(ClusterControllerData* cc) const {
-		cc->lastRecruitTime = now();
-		cc->recruitDistributor.set(true);
-	}
-};
-
-struct ConsistencyScanSingleton : Singleton<ConsistencyScanInterface> {
-
-	ConsistencyScanSingleton(const Optional<ConsistencyScanInterface>& interface) : Singleton(interface) {}
-
-	Role getRole() const { return Role::CONSISTENCYSCAN; }
-	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::ConsistencyScan; }
-
-	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
-		if (interface.present()) {
-			TraceEvent("CCCK_SetInf", cc->id).detail("Id", interface.get().id());
-			cc->db.setConsistencyScan(interface.get());
-		}
-	}
-	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present()) {
-			cc->id_worker[pid].haltConsistencyScan =
-			    brokenPromiseToNever(interface.get().haltConsistencyScan.getReply(HaltConsistencyScanRequest(cc->id)));
-		}
-	}
-	void recruit(ClusterControllerData* cc) const {
-		cc->lastRecruitTime = now();
-		cc->recruitConsistencyScan.set(true);
-	}
-};
-
-struct BlobManagerSingleton : Singleton<BlobManagerInterface> {
-
-	BlobManagerSingleton(const Optional<BlobManagerInterface>& interface) : Singleton(interface) {}
-
-	Role getRole() const { return Role::BLOB_MANAGER; }
-	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::BlobManager; }
-
-	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
-		if (interface.present()) {
-			TraceEvent("CCBM_SetInf", cc->id).detail("Id", interface.get().id());
-			cc->db.setBlobManager(interface.get());
-		}
-	}
-	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present() && cc->id_worker.count(pid)) {
-			cc->id_worker[pid].haltBlobManager =
-			    brokenPromiseToNever(interface.get().haltBlobManager.getReply(HaltBlobManagerRequest(cc->id)));
-		}
-	}
-	void recruit(ClusterControllerData* cc) const {
-		cc->lastRecruitTime = now();
-		cc->recruitBlobManager.set(true);
-	}
-
-	void haltBlobGranules(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present()) {
-			cc->id_worker[pid].haltBlobManager =
-			    brokenPromiseToNever(interface.get().haltBlobGranules.getReply(HaltBlobGranulesRequest(cc->id)));
-		}
-	}
-};
-
-struct BlobMigratorSingleton : Singleton<BlobMigratorInterface> {
-
-	BlobMigratorSingleton(const Optional<BlobMigratorInterface>& interface) : Singleton(interface) {}
-
-	Role getRole() const { return Role::BLOB_MIGRATOR; }
-	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::BlobMigrator; }
-
-	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
-		if (interface.present()) {
-			TraceEvent("CCMG_SetInf", cc->id).detail("Id", interface.get().id());
-			cc->db.setBlobMigrator(interface.get());
-		}
-	}
-	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present()) {
-			TraceEvent("CCMG_Halt", cc->id).detail("Id", interface.get().id());
-			cc->id_worker[pid].haltBlobMigrator =
-			    brokenPromiseToNever(interface.get().haltBlobMigrator.getReply(HaltBlobMigratorRequest(cc->id)));
-		}
-	}
-	void recruit(ClusterControllerData* cc) const {
-		cc->lastRecruitTime = now();
-		cc->recruitBlobMigrator.set(true);
-	}
-};
-
-struct EncryptKeyProxySingleton : Singleton<EncryptKeyProxyInterface> {
-
-	EncryptKeyProxySingleton(const Optional<EncryptKeyProxyInterface>& interface) : Singleton(interface) {}
-
-	Role getRole() const { return Role::ENCRYPT_KEY_PROXY; }
-	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::EncryptKeyProxy; }
-
-	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
-		if (interface.present()) {
-			TraceEvent("CCEKP_SetInf", cc->id).detail("Id", interface.get().id());
-			cc->db.setEncryptKeyProxy(interface.get());
-		}
-	}
-	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present() && cc->id_worker.count(pid)) {
-			cc->id_worker[pid].haltEncryptKeyProxy =
-			    brokenPromiseToNever(interface.get().haltEncryptKeyProxy.getReply(HaltEncryptKeyProxyRequest(cc->id)));
-		}
-	}
-	void recruit(ClusterControllerData* cc) const {
-		cc->lastRecruitTime = now();
-		cc->recruitEncryptKeyProxy.set(true);
-	}
-};
 
 ACTOR Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* self) {
 	state ReadYourWritesTransaction tr(self->db.db);
@@ -268,8 +94,7 @@ ACTOR Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* sel
 
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
                                         ClusterControllerData::DBInfo* db,
-                                        ServerCoordinators coordinators,
-                                        Future<Void> recoveredDiskFiles) {
+                                        ServerCoordinators coordinators) {
 	state MasterInterface iMaster;
 	state Reference<ClusterRecoveryData> recoveryData;
 	state PromiseStream<Future<Void>> addActor;
@@ -310,7 +135,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			dbInfo.myLocality = db->serverInfo->get().myLocality;
 			dbInfo.client = ClientDBInfo();
 			dbInfo.client.encryptKeyProxy = db->serverInfo->get().encryptKeyProxy;
-			dbInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 			dbInfo.client.tenantMode = TenantAPI::tenantModeForClusterType(db->clusterType, db->config.tenantMode);
 			dbInfo.client.clusterId = db->serverInfo->get().client.clusterId;
 			dbInfo.client.clusterType = db->clusterType;
@@ -366,7 +190,9 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 					req.reply.send(Void());
 					TraceEvent(SevDebug, "BackupWorkerDoneRequest", cluster->id).log();
 				}
-				when(wait(collection)) { throw internal_error(); }
+				when(wait(collection)) {
+					throw internal_error();
+				}
 			}
 			// failed master (better master exists) could happen while change-coordinators request processing is
 			// in-progress
@@ -389,7 +215,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				wait(delay(0.0));
 
 			recoveryCore.cancel();
-			wait(cleanupRecoveryActorCollection(recoveryData, true /* exThrown */));
+			wait(cleanupRecoveryActorCollection(recoveryData, /*exThrown=*/true));
 			ASSERT(addActor.isEmpty());
 
 			CODE_PROBE(err.code() == error_code_tlog_failed, "Terminated due to tLog failure");
@@ -427,7 +253,9 @@ ACTOR Future<Void> clusterGetServerInfo(ClusterControllerData::DBInfo* db,
 	while (db->serverInfo->get().id == knownServerInfoID) {
 		choose {
 			when(wait(yieldedFuture(db->serverInfo->onChange()))) {}
-			when(wait(delayJittered(300))) { break; } // The server might be long gone!
+			when(wait(delayJittered(300))) {
+				break;
+			} // The server might be long gone!
 		}
 	}
 	reply.send(db->serverInfo->get());
@@ -604,22 +432,22 @@ ProcessClass::Fitness findBestFitnessForSingleton(const ClusterControllerData* s
 // Returns true iff the singleton is healthy. "Healthy" here means that
 // the singleton is stable (see below) and doesn't need to be rerecruited.
 // Side effects: (possibly) initiates recruitment
-template <class Interface>
+template <class SingletonClass>
 bool isHealthySingleton(ClusterControllerData* self,
                         const WorkerDetails& newWorker,
-                        const Singleton<Interface>& singleton,
+                        const SingletonClass& singleton,
                         const ProcessClass::Fitness& bestFitness,
                         const Optional<UID> recruitingID) {
 	// A singleton is stable if it exists in cluster, has not been killed off of proc and is not being recruited
-	bool isStableSingleton = singleton.interface.present() &&
-	                         self->id_worker.count(singleton.interface.get().locality.processId()) &&
-	                         (!recruitingID.present() || (recruitingID.get() == singleton.interface.get().id()));
+	bool isStableSingleton = singleton.isPresent() &&
+	                         self->id_worker.count(singleton.getInterface().locality.processId()) &&
+	                         (!recruitingID.present() || (recruitingID.get() == singleton.getInterface().id()));
 
 	if (!isStableSingleton) {
 		return false; // not healthy because unstable
 	}
 
-	auto& currWorker = self->id_worker[singleton.interface.get().locality.processId()];
+	auto& currWorker = self->id_worker[singleton.getInterface().locality.processId()];
 	auto currFitness = currWorker.details.processClass.machineClassFitness(singleton.getClusterRole());
 	if (currWorker.priorityInfo.isExcluded) {
 		currFitness = ProcessClass::ExcludeFit;
@@ -635,11 +463,11 @@ bool isHealthySingleton(ClusterControllerData* self,
 	if (shouldRerecruit) {
 		std::string roleAbbr = singleton.getRole().abbreviation;
 		TraceEvent(("CCHalt" + roleAbbr).c_str(), self->id)
-		    .detail(roleAbbr + "ID", singleton.interface.get().id())
+		    .detail(roleAbbr + "ID", singleton.getInterface().id())
 		    .detail("Excluded", currWorker.priorityInfo.isExcluded)
 		    .detail("Fitness", currFitness)
 		    .detail("BestFitness", bestFitness);
-		singleton.recruit(self); // SIDE EFFECT: initiating recruitment
+		singleton.recruit(*self); // SIDE EFFECT: initiating recruitment
 		return false; // not healthy since needed to be rerecruited
 	} else {
 		return true; // healthy because doesn't need to be rerecruited
@@ -688,13 +516,16 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	WorkerDetails newMGWorker;
 	if (self->db.blobGranulesEnabled.get()) {
 		newBMWorker = findNewProcessForSingleton(self, ProcessClass::BlobManager, id_used);
-		if (isFullRestoreMode()) {
+		if (self->db.blobRestoreEnabled.get()) {
 			newMGWorker = findNewProcessForSingleton(self, ProcessClass::BlobMigrator, id_used);
 		}
 	}
 
 	WorkerDetails newEKPWorker;
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
+	EncryptionAtRestMode encryptMode = self->db.config.encryptionAtRestMode;
+	const bool enableKmsCommunication =
+	    encryptMode.isEncryptionEnabled() || SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION;
+	if (enableKmsCommunication) {
 		newEKPWorker = findNewProcessForSingleton(self, ProcessClass::EncryptKeyProxy, id_used);
 	}
 
@@ -707,13 +538,13 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	ProcessClass::Fitness bestFitnessForMG;
 	if (self->db.blobGranulesEnabled.get()) {
 		bestFitnessForBM = findBestFitnessForSingleton(self, newBMWorker, ProcessClass::BlobManager);
-		if (isFullRestoreMode()) {
+		if (self->db.blobRestoreEnabled.get()) {
 			bestFitnessForMG = findBestFitnessForSingleton(self, newMGWorker, ProcessClass::BlobManager);
 		}
 	}
 
 	ProcessClass::Fitness bestFitnessForEKP;
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
+	if (enableKmsCommunication) {
 		bestFitnessForEKP = findBestFitnessForSingleton(self, newEKPWorker, ProcessClass::EncryptKeyProxy);
 	}
 
@@ -727,29 +558,29 @@ void checkBetterSingletons(ClusterControllerData* self) {
 
 	// Check if the singletons are healthy.
 	// side effect: try to rerecruit the singletons to more optimal processes
-	bool rkHealthy = isHealthySingleton<RatekeeperInterface>(
+	bool rkHealthy = isHealthySingleton<RatekeeperSingleton>(
 	    self, newRKWorker, rkSingleton, bestFitnessForRK, self->recruitingRatekeeperID);
 
-	bool ddHealthy = isHealthySingleton<DataDistributorInterface>(
+	bool ddHealthy = isHealthySingleton<DataDistributorSingleton>(
 	    self, newDDWorker, ddSingleton, bestFitnessForDD, self->recruitingDistributorID);
 
-	bool csHealthy = isHealthySingleton<ConsistencyScanInterface>(
+	bool csHealthy = isHealthySingleton<ConsistencyScanSingleton>(
 	    self, newCSWorker, csSingleton, bestFitnessForCS, self->recruitingConsistencyScanID);
 
 	bool bmHealthy = true;
 	bool mgHealthy = true;
 	if (self->db.blobGranulesEnabled.get()) {
-		bmHealthy = isHealthySingleton<BlobManagerInterface>(
+		bmHealthy = isHealthySingleton<BlobManagerSingleton>(
 		    self, newBMWorker, bmSingleton, bestFitnessForBM, self->recruitingBlobManagerID);
-		if (isFullRestoreMode()) {
-			mgHealthy = isHealthySingleton<BlobMigratorInterface>(
+		if (self->db.blobRestoreEnabled.get()) {
+			mgHealthy = isHealthySingleton<BlobMigratorSingleton>(
 			    self, newMGWorker, mgSingleton, bestFitnessForMG, self->recruitingBlobMigratorID);
 		}
 	}
 
 	bool ekpHealthy = true;
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
-		ekpHealthy = isHealthySingleton<EncryptKeyProxyInterface>(
+	if (enableKmsCommunication) {
+		ekpHealthy = isHealthySingleton<EncryptKeyProxySingleton>(
 		    self, newEKPWorker, ekpSingleton, bestFitnessForEKP, self->recruitingEncryptKeyProxyID);
 	}
 	// if any of the singletons are unhealthy (rerecruited or not stable), then do not
@@ -760,9 +591,9 @@ void checkBetterSingletons(ClusterControllerData* self) {
 
 	// if we reach here, we know that the singletons are healthy so let's
 	// check if we can colocate the singletons in a more optimal way
-	Optional<Standalone<StringRef>> currRKProcessId = rkSingleton.interface.get().locality.processId();
-	Optional<Standalone<StringRef>> currDDProcessId = ddSingleton.interface.get().locality.processId();
-	Optional<Standalone<StringRef>> currCSProcessId = csSingleton.interface.get().locality.processId();
+	Optional<Standalone<StringRef>> currRKProcessId = rkSingleton.getInterface().locality.processId();
+	Optional<Standalone<StringRef>> currDDProcessId = ddSingleton.getInterface().locality.processId();
+	Optional<Standalone<StringRef>> currCSProcessId = csSingleton.getInterface().locality.processId();
 	Optional<Standalone<StringRef>> newRKProcessId = newRKWorker.interf.locality.processId();
 	Optional<Standalone<StringRef>> newDDProcessId = newDDWorker.interf.locality.processId();
 	Optional<Standalone<StringRef>> newCSProcessId = newCSWorker.interf.locality.processId();
@@ -770,17 +601,17 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	Optional<Standalone<StringRef>> currBMProcessId, newBMProcessId;
 	Optional<Standalone<StringRef>> currMGProcessId, newMGProcessId;
 	if (self->db.blobGranulesEnabled.get()) {
-		currBMProcessId = bmSingleton.interface.get().locality.processId();
+		currBMProcessId = bmSingleton.getInterface().locality.processId();
 		newBMProcessId = newBMWorker.interf.locality.processId();
-		if (isFullRestoreMode()) {
-			currMGProcessId = mgSingleton.interface.get().locality.processId();
+		if (self->db.blobRestoreEnabled.get()) {
+			currMGProcessId = mgSingleton.getInterface().locality.processId();
 			newMGProcessId = newMGWorker.interf.locality.processId();
 		}
 	}
 
 	Optional<Standalone<StringRef>> currEKPProcessId, newEKPProcessId;
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
-		currEKPProcessId = ekpSingleton.interface.get().locality.processId();
+	if (enableKmsCommunication) {
+		currEKPProcessId = ekpSingleton.getInterface().locality.processId();
 		newEKPProcessId = newEKPWorker.interf.locality.processId();
 	}
 
@@ -789,13 +620,13 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	if (self->db.blobGranulesEnabled.get()) {
 		currPids.emplace_back(currBMProcessId);
 		newPids.emplace_back(newBMProcessId);
-		if (isFullRestoreMode()) {
+		if (self->db.blobRestoreEnabled.get()) {
 			currPids.emplace_back(currMGProcessId);
 			newPids.emplace_back(newMGProcessId);
 		}
 	}
 
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
+	if (enableKmsCommunication) {
 		currPids.emplace_back(currEKPProcessId);
 		newPids.emplace_back(newEKPProcessId);
 	}
@@ -807,14 +638,14 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	if (!self->db.blobGranulesEnabled.get()) {
 		ASSERT(currColocMap[currBMProcessId] == 0);
 		ASSERT(newColocMap[newBMProcessId] == 0);
-		if (isFullRestoreMode()) {
+		if (self->db.blobRestoreEnabled.get()) {
 			ASSERT(currColocMap[currMGProcessId] == 0);
 			ASSERT(newColocMap[newMGProcessId] == 0);
 		}
 	}
 
 	// if the knob is disabled, the EKP coloc counts should have no affect on the coloc counts check below
-	if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
+	if (!enableKmsCommunication) {
 		ASSERT(currColocMap[currEKPProcessId] == 0);
 		ASSERT(newColocMap[newEKPProcessId] == 0);
 	}
@@ -828,18 +659,18 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	    newColocMap[newCSProcessId] <= currColocMap[currCSProcessId]) {
 		// rerecruit the singleton for which we have found a better process, if any
 		if (newColocMap[newRKProcessId] < currColocMap[currRKProcessId]) {
-			rkSingleton.recruit(self);
+			rkSingleton.recruit(*self);
 		} else if (newColocMap[newDDProcessId] < currColocMap[currDDProcessId]) {
-			ddSingleton.recruit(self);
+			ddSingleton.recruit(*self);
 		} else if (self->db.blobGranulesEnabled.get() && newColocMap[newBMProcessId] < currColocMap[currBMProcessId]) {
-			bmSingleton.recruit(self);
-		} else if (self->db.blobGranulesEnabled.get() && isFullRestoreMode() &&
+			bmSingleton.recruit(*self);
+		} else if (self->db.blobGranulesEnabled.get() && self->db.blobRestoreEnabled.get() &&
 		           newColocMap[newMGProcessId] < currColocMap[currMGProcessId]) {
-			mgSingleton.recruit(self);
-		} else if (SERVER_KNOBS->ENABLE_ENCRYPTION && newColocMap[newEKPProcessId] < currColocMap[currEKPProcessId]) {
-			ekpSingleton.recruit(self);
+			mgSingleton.recruit(*self);
+		} else if (enableKmsCommunication && newColocMap[newEKPProcessId] < currColocMap[currEKPProcessId]) {
+			ekpSingleton.recruit(*self);
 		} else if (newColocMap[newCSProcessId] < currColocMap[currCSProcessId]) {
-			csSingleton.recruit(self);
+			csSingleton.recruit(*self);
 		}
 	}
 }
@@ -1078,7 +909,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		self->db.logGenerations = 0;
 		ASSERT(!req.logSystemConfig.oldTLogs.size());
 	} else {
-		self->db.logGenerations = std::max<int>(self->db.logGenerations, req.logSystemConfig.oldTLogs.size());
+		// TODO(zhewu): Remove logGenerations. It is not used anywhere.
+		self->db.logGenerations = req.logSystemConfig.oldTLogs.size();
 	}
 
 	db->masterRegistrationCount = req.registrationCount;
@@ -1120,7 +952,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	if (db->clientInfo->get().commitProxies != req.commitProxies ||
 	    db->clientInfo->get().grvProxies != req.grvProxies ||
 	    db->clientInfo->get().tenantMode != db->config.tenantMode ||
-	    db->clientInfo->get().isEncryptionEnabled != SERVER_KNOBS->ENABLE_ENCRYPTION ||
+	    db->clientInfo->get().clusterId != db->serverInfo->get().client.clusterId ||
 	    db->clientInfo->get().clusterType != db->clusterType ||
 	    db->clientInfo->get().metaclusterName != db->metaclusterName ||
 	    db->clientInfo->get().encryptKeyProxy != db->serverInfo->get().encryptKeyProxy) {
@@ -1132,7 +964,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		    .detail("ReqCPs", req.commitProxies)
 		    .detail("TenantMode", db->clientInfo->get().tenantMode.toString())
 		    .detail("ReqTenantMode", db->config.tenantMode.toString())
-		    .detail("EncryptionEnabled", SERVER_KNOBS->ENABLE_ENCRYPTION)
+		    .detail("ClusterId", db->serverInfo->get().client.clusterId)
+		    .detail("ClientClusterId", db->clientInfo->get().clusterId)
 		    .detail("ClusterType", db->clientInfo->get().clusterType)
 		    .detail("ReqClusterType", db->clusterType)
 		    .detail("MetaclusterName", db->clientInfo->get().metaclusterName)
@@ -1142,10 +975,10 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		ClientDBInfo clientInfo;
 		clientInfo.encryptKeyProxy = db->serverInfo->get().encryptKeyProxy;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
-		clientInfo.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
 		clientInfo.tenantMode = TenantAPI::tenantModeForClusterType(db->clusterType, db->config.tenantMode);
+		clientInfo.clusterId = db->serverInfo->get().client.clusterId;
 		clientInfo.clusterType = db->clusterType;
 		clientInfo.metaclusterName = db->metaclusterName;
 		db->clientInfo->set(clientInfo);
@@ -1178,14 +1011,14 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 
 // Halts the registering (i.e. requesting) singleton if one is already in the process of being recruited
 // or, halts the existing singleton in favour of the requesting one
-template <class Interface>
+template <class SingletonClass>
 void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
                                        const WorkerInterface& worker,
-                                       const Singleton<Interface>& currSingleton,
-                                       const Singleton<Interface>& registeringSingleton,
+                                       const SingletonClass& currSingleton,
+                                       const SingletonClass& registeringSingleton,
                                        const Optional<UID> recruitingID) {
 	ASSERT(currSingleton.getRole() == registeringSingleton.getRole());
-	const UID registeringID = registeringSingleton.interface.get().id();
+	const UID registeringID = registeringSingleton.getInterface().id();
 	const std::string roleName = currSingleton.getRole().roleName;
 	const std::string roleAbbr = currSingleton.getRole().abbreviation;
 
@@ -1197,22 +1030,22 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 		    .detail("DcID", printable(self->clusterControllerDcId))
 		    .detail("ReqDcID", printable(worker.locality.dcId()))
 		    .detail("Recruiting" + roleAbbr + "ID", recruitingID.present() ? recruitingID.get() : UID());
-		registeringSingleton.halt(self, worker.locality.processId());
+		registeringSingleton.halt(*self, worker.locality.processId());
 	} else if (!recruitingID.present()) {
 		// if not currently recruiting, then halt previous one in favour of requesting one
 		TraceEvent(("CCRegister" + roleName).c_str(), self->id).detail(roleAbbr + "ID", registeringID);
-		if (currSingleton.interface.present() && currSingleton.interface.get().id() != registeringID &&
-		    self->id_worker.count(currSingleton.interface.get().locality.processId())) {
+		if (currSingleton.isPresent() && currSingleton.getInterface().id() != registeringID &&
+		    self->id_worker.count(currSingleton.getInterface().locality.processId())) {
 			TraceEvent(("CCHaltPrevious" + roleName).c_str(), self->id)
-			    .detail(roleAbbr + "ID", currSingleton.interface.get().id())
+			    .detail(roleAbbr + "ID", currSingleton.getInterface().id())
 			    .detail("DcID", printable(self->clusterControllerDcId))
 			    .detail("ReqDcID", printable(worker.locality.dcId()))
 			    .detail("Recruiting" + roleAbbr + "ID", recruitingID.present() ? recruitingID.get() : UID());
-			currSingleton.halt(self, currSingleton.interface.get().locality.processId());
+			currSingleton.halt(*self, currSingleton.getInterface().locality.processId());
 		}
 		// set the curr singleton if it doesn't exist or its different from the requesting one
-		if (!currSingleton.interface.present() || currSingleton.interface.get().id() != registeringID) {
-			registeringSingleton.setInterfaceToDbInfo(self);
+		if (!currSingleton.isPresent() || currSingleton.getInterface().id() != registeringID) {
+			registeringSingleton.setInterfaceToDbInfo(*self);
 		}
 	}
 }
@@ -1386,41 +1219,41 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 	if (req.distributorInterf.present()) {
 		auto currSingleton = DataDistributorSingleton(self->db.serverInfo->get().distributor);
 		auto registeringSingleton = DataDistributorSingleton(req.distributorInterf);
-		haltRegisteringOrCurrentSingleton<DataDistributorInterface>(
+		haltRegisteringOrCurrentSingleton<DataDistributorSingleton>(
 		    self, w, currSingleton, registeringSingleton, self->recruitingDistributorID);
 	}
 
 	if (req.ratekeeperInterf.present()) {
 		auto currSingleton = RatekeeperSingleton(self->db.serverInfo->get().ratekeeper);
 		auto registeringSingleton = RatekeeperSingleton(req.ratekeeperInterf);
-		haltRegisteringOrCurrentSingleton<RatekeeperInterface>(
+		haltRegisteringOrCurrentSingleton<RatekeeperSingleton>(
 		    self, w, currSingleton, registeringSingleton, self->recruitingRatekeeperID);
 	}
 
-	if (self->db.blobGranulesEnabled.get() && isFullRestoreMode() && req.blobManagerInterf.present()) {
+	if (self->db.blobGranulesEnabled.get() && req.blobManagerInterf.present()) {
 		auto currSingleton = BlobManagerSingleton(self->db.serverInfo->get().blobManager);
 		auto registeringSingleton = BlobManagerSingleton(req.blobManagerInterf);
-		haltRegisteringOrCurrentSingleton<BlobManagerInterface>(
+		haltRegisteringOrCurrentSingleton<BlobManagerSingleton>(
 		    self, w, currSingleton, registeringSingleton, self->recruitingBlobManagerID);
 	}
-	if (req.blobMigratorInterf.present()) {
+	if (req.blobMigratorInterf.present() && self->db.blobRestoreEnabled.get()) {
 		auto currSingleton = BlobMigratorSingleton(self->db.serverInfo->get().blobMigrator);
 		auto registeringSingleton = BlobMigratorSingleton(req.blobMigratorInterf);
-		haltRegisteringOrCurrentSingleton<BlobMigratorInterface>(
+		haltRegisteringOrCurrentSingleton<BlobMigratorSingleton>(
 		    self, w, currSingleton, registeringSingleton, self->recruitingBlobMigratorID);
 	}
 
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION && req.encryptKeyProxyInterf.present()) {
+	if (self->db.config.encryptionAtRestMode.isEncryptionEnabled() && req.encryptKeyProxyInterf.present()) {
 		auto currSingleton = EncryptKeyProxySingleton(self->db.serverInfo->get().encryptKeyProxy);
 		auto registeringSingleton = EncryptKeyProxySingleton(req.encryptKeyProxyInterf);
-		haltRegisteringOrCurrentSingleton<EncryptKeyProxyInterface>(
+		haltRegisteringOrCurrentSingleton<EncryptKeyProxySingleton>(
 		    self, w, currSingleton, registeringSingleton, self->recruitingEncryptKeyProxyID);
 	}
 
 	if (req.consistencyScanInterf.present()) {
 		auto currSingleton = ConsistencyScanSingleton(self->db.serverInfo->get().consistencyScan);
 		auto registeringSingleton = ConsistencyScanSingleton(req.consistencyScanInterf);
-		haltRegisteringOrCurrentSingleton<ConsistencyScanInterface>(
+		haltRegisteringOrCurrentSingleton<ConsistencyScanSingleton>(
 		    self, w, currSingleton, registeringSingleton, self->recruitingConsistencyScanID);
 	}
 
@@ -2133,20 +1966,6 @@ ACTOR Future<Void> handleTriggerAuditStorage(ClusterControllerData* self, Cluste
 	}
 }
 
-struct SingletonRecruitThrottler {
-	double lastRecruitStart;
-
-	SingletonRecruitThrottler() : lastRecruitStart(-1) {}
-
-	double newRecruitment() {
-		double n = now();
-		double waitTime =
-		    std::max(0.0, (lastRecruitStart + SERVER_KNOBS->CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL - n));
-		lastRecruitStart = n;
-		return waitTime;
-	}
-};
-
 ACTOR Future<Void> startDataDistributor(ClusterControllerData* self, double waitTime) {
 	// If master fails at the same time, give it a chance to clear master PID.
 	// Also wait to avoid too many consecutive recruits in a small time window.
@@ -2200,7 +2019,7 @@ ACTOR Future<Void> startDataDistributor(ClusterControllerData* self, double wait
 					    .detail("DDID", distributor.get().id())
 					    .detail("DcID", printable(self->clusterControllerDcId));
 
-					DataDistributorSingleton(distributor).halt(self, distributor.get().locality.processId());
+					DataDistributorSingleton(distributor).halt(*self, distributor.get().locality.processId());
 				}
 				if (!distributor.present() || distributor.get().id() != ddInterf.get().id()) {
 					self->db.setDistributor(ddInterf.get());
@@ -2231,7 +2050,7 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 				                            SERVER_KNOBS->DD_FAILURE_TIME))) {
 					const auto& distributor = self->db.serverInfo->get().distributor;
 					TraceEvent("CCDataDistributorDied", self->id).detail("DDID", distributor.get().id());
-					DataDistributorSingleton(distributor).halt(self, distributor.get().locality.processId());
+					DataDistributorSingleton(distributor).halt(*self, distributor.get().locality.processId());
 					self->db.clearInterf(ProcessClass::DataDistributorClass);
 				}
 				when(wait(self->recruitDistributor.onChange())) {}
@@ -2292,7 +2111,7 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime)
 					TraceEvent("CCHaltRatekeeperAfterRecruit", self->id)
 					    .detail("RKID", ratekeeper.get().id())
 					    .detail("DcID", printable(self->clusterControllerDcId));
-					RatekeeperSingleton(ratekeeper).halt(self, ratekeeper.get().locality.processId());
+					RatekeeperSingleton(ratekeeper).halt(*self, ratekeeper.get().locality.processId());
 				}
 				if (!ratekeeper.present() || ratekeeper.get().id() != interf.get().id()) {
 					self->db.setRatekeeper(interf.get());
@@ -2323,7 +2142,7 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData* self) {
 				                            SERVER_KNOBS->RATEKEEPER_FAILURE_TIME))) {
 					const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
 					TraceEvent("CCRatekeeperDied", self->id).detail("RKID", ratekeeper.get().id());
-					RatekeeperSingleton(ratekeeper).halt(self, ratekeeper.get().locality.processId());
+					RatekeeperSingleton(ratekeeper).halt(*self, ratekeeper.get().locality.processId());
 					self->db.clearInterf(ProcessClass::RatekeeperClass);
 				}
 				when(wait(self->recruitRatekeeper.onChange())) {}
@@ -2382,7 +2201,7 @@ ACTOR Future<Void> startConsistencyScan(ClusterControllerData* self) {
 					TraceEvent("CCHaltConsistencyScanAfterRecruit", self->id)
 					    .detail("CKID", consistencyScan.get().id())
 					    .detail("DcID", printable(self->clusterControllerDcId));
-					ConsistencyScanSingleton(consistencyScan).halt(self, consistencyScan.get().locality.processId());
+					ConsistencyScanSingleton(consistencyScan).halt(*self, consistencyScan.get().locality.processId());
 				}
 				if (!consistencyScan.present() || consistencyScan.get().id() != interf.get().id()) {
 					self->db.setConsistencyScan(interf.get());
@@ -2407,7 +2226,6 @@ ACTOR Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
 		TraceEvent("CCMonitorConsistencyScanWaitingForRecovery", self->id).log();
 		wait(self->db.serverInfo->onChange());
 	}
-
 	TraceEvent("CCMonitorConsistencyScan", self->id).log();
 	loop {
 		if (self->db.serverInfo->get().consistencyScan.present() && !self->recruitConsistencyScan.get()) {
@@ -2429,10 +2247,9 @@ ACTOR Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, double waitTime) {
+ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, EncryptionAtRestMode encryptMode) {
 	// If master fails at the same time, give it a chance to clear master PID.
-	// Also wait to avoid too many consecutive recruits in a small time window.
-	wait(delay(waitTime));
+	wait(delay(0.0));
 
 	TraceEvent("CCEKP_Start", self->id).log();
 	loop {
@@ -2462,6 +2279,7 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, double wait
 			                                                                       id_used);
 
 			InitializeEncryptKeyProxyRequest req(deterministicRandom()->randomUniqueID());
+			req.encryptMode = encryptMode;
 			state WorkerDetails worker = ekpWorker.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::EncryptKeyProxy)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
@@ -2485,7 +2303,7 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, double wait
 					TraceEvent("CCEKP_HaltAfterRecruit", self->id)
 					    .detail("Id", encryptKeyProxy.get().id())
 					    .detail("DcId", printable(self->clusterControllerDcId));
-					EncryptKeyProxySingleton(encryptKeyProxy).halt(self, encryptKeyProxy.get().locality.processId());
+					EncryptKeyProxySingleton(encryptKeyProxy).halt(*self, encryptKeyProxy.get().locality.processId());
 				}
 				if (!encryptKeyProxy.present() || encryptKeyProxy.get().id() != interf.get().id()) {
 					self->db.setEncryptKeyProxy(interf.get());
@@ -2506,21 +2324,29 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, double wait
 }
 
 ACTOR Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
+	state EncryptionAtRestMode encryptMode = wait(self->encryptionAtRestMode.getFuture());
+	if (!encryptMode.isEncryptionEnabled() && !SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION) {
+		TraceEvent("EKPNotConfigured");
+		return Void();
+	}
 	state SingletonRecruitThrottler recruitThrottler;
 	loop {
 		if (self->db.serverInfo->get().encryptKeyProxy.present() && !self->recruitEncryptKeyProxy.get()) {
-			choose {
+			loop choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().encryptKeyProxy.get().waitFailure,
 				                            SERVER_KNOBS->ENCRYPT_KEY_PROXY_FAILURE_TIME))) {
-					TraceEvent("CCEKP_Died", self->id);
 					const auto& encryptKeyProxy = self->db.serverInfo->get().encryptKeyProxy;
-					EncryptKeyProxySingleton(encryptKeyProxy).halt(self, encryptKeyProxy.get().locality.processId());
+					EncryptKeyProxySingleton(encryptKeyProxy).halt(*self, encryptKeyProxy.get().locality.processId());
 					self->db.clearInterf(ProcessClass::EncryptKeyProxyClass);
+					TraceEvent("CCEKP_Died", self->id);
+					break;
 				}
-				when(wait(self->recruitEncryptKeyProxy.onChange())) {}
+				when(wait(self->recruitEncryptKeyProxy.onChange())) {
+					break;
+				}
 			}
 		} else {
-			wait(startEncryptKeyProxy(self, recruitThrottler.newRecruitment()));
+			wait(startEncryptKeyProxy(self, encryptMode));
 		}
 	}
 }
@@ -2540,6 +2366,51 @@ ACTOR Future<int64_t> getNextBMEpoch(ClusterControllerData* self) {
 			wait(tr->commit());
 			TraceEvent(SevDebug, "CCNextBlobManagerEpoch", self->id).detail("Epoch", newEpoch);
 			return newEpoch;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+ACTOR Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	state Reference<BlobRestoreController> restoreController =
+	    makeReference<BlobRestoreController>(self->cx, normalKeys);
+	state Key blobRestoreCommandKey = blobRestoreCommandKeyFor(normalKeys);
+	loop {
+		try {
+			tr->reset();
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			Optional<Value> blobRestoreCommand = wait(tr->get(blobRestoreCommandKey));
+			if (blobRestoreCommand.present()) {
+				state Standalone<BlobRestoreState> restoreState = decodeBlobRestoreState(blobRestoreCommand.get());
+				TraceEvent("WatchBlobRestore", self->id).detail("Phase", restoreState.phase);
+				if (restoreState.phase == BlobRestorePhase::INIT) {
+					if (self->db.blobGranulesEnabled.get()) {
+						wait(BlobRestoreController::updateState(restoreController, STARTING_MIGRATOR, {}));
+						const auto& blobManager = self->db.serverInfo->get().blobManager;
+						if (blobManager.present()) {
+							BlobManagerSingleton(blobManager)
+							    .haltBlobGranules(*self, blobManager.get().locality.processId());
+						}
+						const auto& blobMigrator = self->db.serverInfo->get().blobMigrator;
+						if (blobMigrator.present()) {
+							BlobMigratorSingleton(blobMigrator).halt(*self, blobMigrator.get().locality.processId());
+						}
+					} else {
+						TraceEvent("SkipBlobRestoreInitCommand", self->id).log();
+						BlobRestoreState error("Blob granules should be enabled first."_sr);
+						Value value = blobRestoreCommandValueFor(error);
+						tr->set(blobRestoreCommandKey, value);
+					}
+				}
+				self->db.blobRestoreEnabled.set(restoreState.phase < BlobRestorePhase::DONE);
+			}
+
+			state Future<Void> watch = tr->watch(blobRestoreCommandKey);
+			wait(tr->commit());
+			wait(watch);
 		} catch (Error& e) {
 			wait(tr->onError(e));
 		}
@@ -2571,7 +2442,7 @@ ACTOR Future<Void> startBlobMigrator(ClusterControllerData* self, double waitTim
 			                                                                          ProcessClass::NeverAssign,
 			                                                                          self->db.config,
 			                                                                          id_used);
-			InitializeBlobMigratorRequest req(deterministicRandom()->randomUniqueID());
+			InitializeBlobMigratorRequest req(BlobMigratorInterface::newId());
 			state WorkerDetails worker = blobMigratorWorker.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::BlobMigrator)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
@@ -2597,7 +2468,7 @@ ACTOR Future<Void> startBlobMigrator(ClusterControllerData* self, double waitTim
 					TraceEvent("CCHaltBlobMigratorAfterRecruit", self->id)
 					    .detail("MGID", blobMigrator.get().id())
 					    .detail("DcID", printable(self->clusterControllerDcId));
-					BlobMigratorSingleton(blobMigrator).halt(self, blobMigrator.get().locality.processId());
+					BlobMigratorSingleton(blobMigrator).halt(*self, blobMigrator.get().locality.processId());
 				}
 				if (!blobMigrator.present() || blobMigrator.get().id() != interf.get().id()) {
 					self->db.setBlobMigrator(interf.get());
@@ -2627,19 +2498,19 @@ ACTOR Future<Void> monitorBlobMigrator(ClusterControllerData* self) {
 			loop {
 				choose {
 					when(wait(wfClient)) {
-						TraceEvent("CCBlobMigratorDied", self->id)
-						    .detail("MGID", self->db.serverInfo->get().blobMigrator.get().id());
+						UID mgID = self->db.serverInfo->get().blobMigrator.get().id();
+						TraceEvent("CCBlobMigratorDied", self->id).detail("MGID", mgID);
 						self->db.clearInterf(ProcessClass::BlobMigratorClass);
 						break;
 					}
 					when(wait(self->recruitBlobMigrator.onChange())) {}
 				}
 			}
-		} else if (self->db.blobGranulesEnabled.get() && isFullRestoreMode()) {
+		} else if (self->db.blobGranulesEnabled.get() && self->db.blobRestoreEnabled.get()) {
 			// if there is no blob migrator present but blob granules are now enabled, recruit a BM
 			wait(startBlobMigrator(self, recruitThrottler.newRecruitment()));
 		} else {
-			wait(self->db.blobGranulesEnabled.onChange());
+			wait(self->db.blobGranulesEnabled.onChange() || self->db.blobRestoreEnabled.onChange());
 		}
 	}
 }
@@ -2702,7 +2573,7 @@ ACTOR Future<Void> startBlobManager(ClusterControllerData* self, double waitTime
 					TraceEvent("CCHaltBlobManagerAfterRecruit", self->id)
 					    .detail("BMID", blobManager.get().id())
 					    .detail("DcID", printable(self->clusterControllerDcId));
-					BlobManagerSingleton(blobManager).halt(self, blobManager.get().locality.processId());
+					BlobManagerSingleton(blobManager).halt(*self, blobManager.get().locality.processId());
 				}
 				if (!blobManager.present() || blobManager.get().id() != interf.get().id()) {
 					self->db.setBlobManager(interf.get());
@@ -2759,20 +2630,23 @@ ACTOR Future<Void> monitorBlobManager(ClusterControllerData* self) {
 					when(wait(wfClient)) {
 						const auto& blobManager = self->db.serverInfo->get().blobManager;
 						TraceEvent("CCBlobManagerDied", self->id).detail("BMID", blobManager.get().id());
-						BlobManagerSingleton(blobManager).halt(self, blobManager.get().locality.processId());
+						BlobManagerSingleton(blobManager).halt(*self, blobManager.get().locality.processId());
 						self->db.clearInterf(ProcessClass::BlobManagerClass);
 						break;
 					}
-					when(wait(self->recruitBlobManager.onChange())) { break; }
+					when(wait(self->recruitBlobManager.onChange())) {
+						break;
+					}
 					when(wait(self->db.blobGranulesEnabled.onChange())) {
 						// if there is a blob manager present but blob granules are now disabled, stop the BM
 						if (!self->db.blobGranulesEnabled.get()) {
 							const auto& blobManager = self->db.serverInfo->get().blobManager;
 							BlobManagerSingleton(blobManager)
-							    .haltBlobGranules(self, blobManager.get().locality.processId());
-							if (isFullRestoreMode()) {
+							    .haltBlobGranules(*self, blobManager.get().locality.processId());
+							if (self->db.blobRestoreEnabled.get()) {
 								const auto& blobMigrator = self->db.serverInfo->get().blobMigrator;
-								BlobMigratorSingleton(blobMigrator).halt(self, blobMigrator.get().locality.processId());
+								BlobMigratorSingleton(blobMigrator)
+								    .halt(*self, blobMigrator.get().locality.processId());
 							}
 							break;
 						}
@@ -2794,11 +2668,13 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 	state Future<Void> updateDBInfo = self->updateDBInfo.onTrigger();
 	loop {
 		choose {
-			when(wait(updateDBInfo)) { wait(delay(SERVER_KNOBS->DBINFO_BATCH_DELAY) || dbInfoChange); }
+			when(wait(updateDBInfo)) {
+				wait(delay(SERVER_KNOBS->DBINFO_BATCH_DELAY) || dbInfoChange);
+			}
 			when(wait(dbInfoChange)) {}
 		}
 
-		UpdateServerDBInfoRequest req;
+		state UpdateServerDBInfoRequest req;
 		if (dbInfoChange.isReady()) {
 			for (auto& it : self->id_worker) {
 				req.broadcastInfo.push_back(it.second.details.interf.updateServerDBInfo.getEndpoint());
@@ -2820,7 +2696,8 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 		req.serializedDbInfo =
 		    BinaryWriter::toValue(self->db.serverInfo->get(), AssumeVersion(g_network->protocolVersion()));
 
-		TraceEvent("DBInfoStartBroadcast", self->id).log();
+		TraceEvent("DBInfoStartBroadcast", self->id)
+		    .detail("MasterLifetime", self->db.serverInfo->get().masterLifetime.toString());
 		choose {
 			when(std::vector<Endpoint> notUpdated =
 			         wait(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, Optional<Endpoint>(), false))) {
@@ -2831,6 +2708,11 @@ ACTOR Future<Void> dbInfoUpdater(ClusterControllerData* self) {
 				}
 			}
 			when(wait(dbInfoChange)) {}
+			when(wait(updateDBInfo)) {
+				// The current round of broadcast hasn't finished yet. So we need to include all the current broadcast
+				// endpoints in the new round as well.
+				self->updateDBInfoEndpoints.insert(req.broadcastInfo.begin(), req.broadcastInfo.end());
+			}
 		}
 	}
 }
@@ -2927,42 +2809,13 @@ ACTOR Future<Void> metaclusterMetricsUpdater(ClusterControllerData* self) {
 		choose {
 			when(wait(self->db.serverInfo->onChange())) {}
 			when(wait(updaterDelay)) {
-				state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-				loop {
-					try {
-						tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-						state std::map<ClusterName, DataClusterMetadata> clusters;
-						state int64_t tenantCount;
-						wait(store(clusters,
-						           MetaclusterAPI::listClustersTransaction(
-						               tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS)) &&
-						     store(tenantCount,
-						           MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantCount.getD(
-						               tr, Snapshot::False, 0)));
-						state std::pair<ClusterUsage, ClusterUsage> capacityNumbers =
-						    MetaclusterAPI::metaclusterCapacity(clusters);
-
-						MetaclusterMetrics metrics;
-						metrics.numTenants = tenantCount;
-						metrics.numDataClusters = clusters.size();
-						metrics.tenantGroupCapacity = capacityNumbers.first.numTenantGroups;
-						metrics.tenantGroupsAllocated = capacityNumbers.second.numTenantGroups;
-						self->db.metaclusterMetrics = metrics;
-						TraceEvent("MetaclusterCapacity")
-						    .detail("TotalTenants", self->db.metaclusterMetrics.numTenants)
-						    .detail("DataClusters", self->db.metaclusterMetrics.numDataClusters)
-						    .detail("TenantGroupCapacity", self->db.metaclusterMetrics.tenantGroupCapacity)
-						    .detail("TenantGroupsAllocated", self->db.metaclusterMetrics.tenantGroupsAllocated);
-						break;
-					} catch (Error& e) {
-						TraceEvent("MetaclusterUpdaterError").error(e);
-						// Cluster can change types during/before a metacluster transaction
-						// and throw an error due to timing issues.
-						// In such cases, go back to choose loop instead of retrying
-						if (e.code() == error_code_invalid_metacluster_operation) {
-							break;
-						}
-						wait(tr->onError(e));
+				try {
+					wait(store(self->db.metaclusterMetrics,
+					           metacluster::MetaclusterMetrics::getMetaclusterMetrics(self->cx)));
+				} catch (Error& e) {
+					// Ignore errors about the cluster changing type
+					if (e.code() != error_code_invalid_metacluster_operation) {
+						throw;
 					}
 				}
 			}
@@ -3007,6 +2860,11 @@ ACTOR Future<Void> updateClusterId(ClusterControllerData* self) {
 				serverInfo.id = deterministicRandom()->randomUniqueID();
 				serverInfo.client.clusterId = durableClusterId.get();
 				self->db.serverInfo->set(serverInfo);
+
+				ClientDBInfo clientInfo = self->db.clientInfo->get();
+				clientInfo.id = deterministicRandom()->randomUniqueID();
+				clientInfo.clusterId = durableClusterId.get();
+				self->db.clientInfo->set(clientInfo);
 			}
 			return Void();
 		} catch (Error& e) {
@@ -3015,12 +2873,23 @@ ACTOR Future<Void> updateClusterId(ClusterControllerData* self) {
 	}
 }
 
+ACTOR Future<Void> handleGetEncryptionAtRestMode(ClusterControllerData* self, ClusterControllerFullInterface ccInterf) {
+	loop {
+		state GetEncryptionAtRestModeRequest req = waitNext(ccInterf.getEncryptionAtRestMode.getFuture());
+		TraceEvent("HandleGetEncryptionAtRestModeStart").detail("TlogId", req.tlogId);
+		EncryptionAtRestMode mode = wait(self->encryptionAtRestMode.getFuture());
+		GetEncryptionAtRestModeResponse resp;
+		resp.mode = mode;
+		req.reply.send(resp);
+		TraceEvent("HandleGetEncryptionAtRestModeEnd").detail("TlogId", req.tlogId).detail("Mode", resp.mode);
+	}
+}
+
 ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
                                          ServerCoordinators coordinators,
                                          LocalityData locality,
                                          ConfigDBType configDBType,
-                                         Future<Void> recoveredDiskFiles,
                                          Reference<AsyncVar<Optional<UID>>> clusterId) {
 	state ClusterControllerData self(interf, locality, coordinators, clusterId);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
@@ -3032,11 +2901,8 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	}
 
 	// EncryptKeyProxy is necessary for TLog recovery, recruit it as the first process
-	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
-		self.addActor.send(monitorEncryptKeyProxy(&self));
-	}
-	self.addActor.send(
-	    clusterWatchDatabase(&self, &self.db, coordinators, recoveredDiskFiles)); // Start the master database
+	self.addActor.send(monitorEncryptKeyProxy(&self));
+	self.addActor.send(clusterWatchDatabase(&self, &self.db, coordinators)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
 	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(),
 	                                &self,
@@ -3054,17 +2920,18 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorDataDistributor(&self));
 	self.addActor.send(monitorRatekeeper(&self));
 	self.addActor.send(monitorBlobManager(&self));
-	self.addActor.send(monitorBlobMigrator(&self));
 	self.addActor.send(watchBlobGranulesConfigKey(&self));
+	self.addActor.send(monitorBlobMigrator(&self));
+	self.addActor.send(watchBlobRestoreCommand(&self));
 	self.addActor.send(monitorConsistencyScan(&self));
 	self.addActor.send(metaclusterMetricsUpdater(&self));
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(updateClusterId(&self));
-	self.addActor.send(traceCounters("ClusterControllerMetrics",
-	                                 self.id,
-	                                 SERVER_KNOBS->STORAGE_LOGGING_DELAY,
-	                                 &self.clusterControllerMetrics,
-	                                 self.id.toString() + "/ClusterControllerMetrics"));
+	self.addActor.send(handleGetEncryptionAtRestMode(&self, interf));
+	self.addActor.send(self.clusterControllerMetrics.traceCounters("ClusterControllerMetrics",
+	                                                               self.id,
+	                                                               SERVER_KNOBS->STORAGE_LOGGING_DELAY,
+	                                                               self.id.toString() + "/ClusterControllerMetrics"));
 	self.addActor.send(traceRole(Role::CLUSTER_CONTROLLER, interf.id()));
 	// printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 
@@ -3081,8 +2948,8 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 				endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Stop Received Signal", true);
 			}
 
-			// We shut down normally even if there was a serious error (so this fdbserver may be re-elected cluster
-			// controller)
+			// We shut down normally even if there was a serious error (so this fdbserver may be re-elected
+			// cluster controller)
 			return Void();
 		}
 		when(OpenDatabaseRequest req = waitNext(interf.clientInterface.openDatabase.getFuture())) {
@@ -3157,7 +3024,9 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 			CODE_PROBE(true, "Leader replaced");
 			return Void();
 		}
-		when(ReplyPromise<Void> ping = waitNext(interf.clientInterface.ping.getFuture())) { ping.send(Void()); }
+		when(ReplyPromise<Void> ping = waitNext(interf.clientInterface.ping.getFuture())) {
+			ping.send(Void());
+		}
 	}
 }
 
@@ -3177,7 +3046,6 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      LocalityData locality,
                                      ConfigDBType configDBType,
-                                     Future<Void> recoveredDiskFiles,
                                      Reference<AsyncVar<Optional<UID>>> clusterId) {
 	loop {
 		state ClusterControllerFullInterface cci;
@@ -3196,7 +3064,9 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 						ASSERT(false);
 						throw internal_error();
 					}
-					when(wait(shouldReplace)) { break; }
+					when(wait(shouldReplace)) {
+						break;
+					}
 				}
 			}
 			if (!shouldReplace.isReady()) {
@@ -3205,8 +3075,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 				startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
 				inRole = true;
 
-				wait(clusterControllerCore(
-				    cci, leaderFail, coordinators, locality, configDBType, recoveredDiskFiles, clusterId));
+				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, configDBType, clusterId));
 			}
 		} catch (Error& e) {
 			if (inRole)
@@ -3228,37 +3097,15 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRecord,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-                                     Future<Void> recoveredDiskFiles,
                                      LocalityData locality,
                                      ConfigDBType configDBType,
                                      Reference<AsyncVar<Optional<UID>>> clusterId) {
-
-	// Defer this wait optimization of cluster configuration has 'Encryption data at-rest' enabled.
-	// Encryption depends on available of EncryptKeyProxy (EKP) FDB role to enable fetch/refresh of encryption keys
-	// created and managed by external KeyManagementService (KMS).
-	//
-	// TODO: Wait optimization is to ensure the worker server on the same process gets registered with the new CC before
-	// recruitment. Unify the codepath for both Encryption enable vs disable scenarios.
-
-	if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
-		wait(recoveredDiskFiles);
-		TraceEvent("RecoveredDiskFiles").log();
-	} else {
-		TraceEvent("RecoveredDiskFiles_Deferred").log();
-	}
-
 	state bool hasConnected = false;
 	loop {
 		try {
 			ServerCoordinators coordinators(connRecord, configDBType);
-			wait(clusterController(coordinators,
-			                       currentCC,
-			                       hasConnected,
-			                       asyncPriorityInfo,
-			                       locality,
-			                       configDBType,
-			                       recoveredDiskFiles,
-			                       clusterId));
+			wait(clusterController(
+			    coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType, clusterId));
 			hasConnected = true;
 		} catch (Error& e) {
 			if (e.code() != error_code_coordinators_changed)
@@ -3269,8 +3116,8 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 
 namespace {
 
-// Tests `ClusterControllerData::updateWorkerHealth()` can update `ClusterControllerData::workerHealth` based on
-// `UpdateWorkerHealth` request correctly.
+// Tests `ClusterControllerData::updateWorkerHealth()` can update `ClusterControllerData::workerHealth`
+// based on `UpdateWorkerHealth` request correctly.
 TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
 	state ClusterControllerData data(ClusterControllerFullInterface(),
@@ -3283,8 +3130,8 @@ TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 	state NetworkAddress badPeer2(IPAddress(0x03030303), 1);
 	state NetworkAddress badPeer3(IPAddress(0x04040404), 1);
 
-	// Create a `UpdateWorkerHealthRequest` with two bad peers, and they should appear in the `workerAddress`'s
-	// degradedPeers.
+	// Create a `UpdateWorkerHealthRequest` with two bad peers, and they should appear in the
+	// `workerAddress`'s degradedPeers.
 	{
 		UpdateWorkerHealthRequest req;
 		req.address = workerAddress;
@@ -3345,8 +3192,8 @@ TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 		previousRefreshTime = health.degradedPeers[badPeer3].lastRefreshTime;
 	}
 
-	// Create a `UpdateWorkerHealthRequest` with empty `degradedPeers`, which should not remove the worker from
-	// `workerHealth`.
+	// Create a `UpdateWorkerHealthRequest` with empty `degradedPeers`, which should not remove the worker
+	// from `workerHealth`.
 	{
 		wait(delay(0.001));
 		UpdateWorkerHealthRequest req;
@@ -3430,8 +3277,8 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 	NetworkAddress badPeer3(IPAddress(0x04040404), 1);
 	NetworkAddress badPeer4(IPAddress(0x05050505), 1);
 
-	// Test that a reported degraded link should stay for sometime before being considered as a degraded link by
-	// cluster controller.
+	// Test that a reported degraded link should stay for sometime before being considered as a degraded
+	// link by cluster controller.
 	{
 		data.workerHealth[worker].degradedPeers[badPeer1] = { now(), now() };
 		data.workerHealth[worker].disconnectedPeers[badPeer2] = { now(), now() };
@@ -3463,7 +3310,8 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 		data.workerHealth.clear();
 	}
 
-	// Test that if both A complains B and B compalins A, only one of the server will be chosen as degraded server.
+	// Test that if both A complains B and B compalins A, only one of the server will be chosen as degraded
+	// server.
 	{
 		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
 			                                                  now() };
@@ -3544,8 +3392,8 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 		data.workerHealth.clear();
 	}
 
-	// Test that if the degradation is reported both ways between A and other 4 servers, no degraded server is
-	// returned.
+	// Test that if the degradation is reported both ways between A and other 4 servers, no degraded server
+	// is returned.
 	{
 		ASSERT(SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE < 4);
 		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
@@ -3683,8 +3531,10 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	data.degradationInfo.degradedServers.insert(satelliteTlog);
 	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
 	data.degradationInfo.degradedServers.clear();
+
+	// Trigger recovery when satellite Tlog is disconnected.
 	data.degradationInfo.disconnectedServers.insert(satelliteTlog);
-	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
+	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
 	data.degradationInfo.disconnectedServers.clear();
 
 	// No recovery when remote tlog is degraded.

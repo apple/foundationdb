@@ -344,7 +344,7 @@ struct ApiWorkload : TestWorkload {
 	virtual Future<Void> performTest(Database const& cx, Standalone<VectorRef<KeyValueRef>> const& data) = 0;
 
 	// Returns whether or not success is false
-	bool hasFailed();
+	bool hasFailed() const;
 
 	// Clears the keyspace used by this test
 	Future<Void> clearKeyspace();

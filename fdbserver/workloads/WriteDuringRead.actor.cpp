@@ -565,8 +565,12 @@ struct WriteDuringReadWorkload : TestWorkload {
 			self->finished.trigger();
 			self->dataWritten += txnSize;
 
-			if (readYourWritesDisabled)
-				tr->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+			// It's not legal to set readYourWritesDisabled after performing
+			// reads on a transaction, even if all those reads have completed
+			// and there are none in-flight.
+			// if (readYourWritesDisabled)
+			// 	tr->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+
 			if (snapshotRYWDisabled)
 				tr->setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
 			if (readAheadDisabled)

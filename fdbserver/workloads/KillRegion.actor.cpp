@@ -89,16 +89,16 @@ struct KillRegionWorkload : TestWorkload {
 		// FIXME: killDataCenter breaks simulation if forceKill=false, since some processes can survive and
 		// partially complete a recovery
 		g_simulator->killDataCenter("0"_sr,
-		                            deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
-		                                                                    : ISimulator::RebootAndDelete,
+		                            deterministicRandom()->random01() < 0.5 ? ISimulator::KillType::KillInstantly
+		                                                                    : ISimulator::KillType::RebootAndDelete,
 		                            true);
 		g_simulator->killDataCenter("2"_sr,
-		                            deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
-		                                                                    : ISimulator::RebootAndDelete,
+		                            deterministicRandom()->random01() < 0.5 ? ISimulator::KillType::KillInstantly
+		                                                                    : ISimulator::KillType::RebootAndDelete,
 		                            true);
 		g_simulator->killDataCenter("4"_sr,
-		                            deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
-		                                                                    : ISimulator::RebootAndDelete,
+		                            deterministicRandom()->random01() < 0.5 ? ISimulator::KillType::KillInstantly
+		                                                                    : ISimulator::KillType::RebootAndDelete,
 		                            true);
 
 		TraceEvent("ForceRecovery_Begin").log();
@@ -120,7 +120,9 @@ struct KillRegionWorkload : TestWorkload {
 				wait(success(ManagementAPI::changeConfig(
 				    cx.getReference(), g_simulator->disablePrimary + " repopulate_anti_quorum=1", true)));
 				choose {
-					when(wait(waitForStorageRecovered(self))) { break; }
+					when(wait(waitForStorageRecovered(self))) {
+						break;
+					}
 					when(wait(delay(300.0))) {}
 				}
 			}

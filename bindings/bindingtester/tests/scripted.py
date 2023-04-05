@@ -34,10 +34,9 @@ fdb.api_version(FDB_API_VERSION)
 
 
 class ScriptedTest(Test):
-    TEST_API_VERSION = 720
 
     def __init__(self, subspace):
-        super(ScriptedTest, self).__init__(subspace, ScriptedTest.TEST_API_VERSION, ScriptedTest.TEST_API_VERSION)
+        super(ScriptedTest, self).__init__(subspace, FDB_API_VERSION, FDB_API_VERSION)
         self.workspace = self.subspace['workspace']
         self.results_subspace = self.subspace['results']
         # self.thread_subspace = self.subspace['threads'] # TODO: update START_THREAD so that we can create threads in subspaces

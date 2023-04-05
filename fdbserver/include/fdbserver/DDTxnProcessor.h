@@ -26,7 +26,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/MockGlobalState.h"
 
-FDB_DECLARE_BOOLEAN_PARAM(SkipDDModeCheck);
+FDB_BOOLEAN_PARAM(SkipDDModeCheck);
 
 struct InitialDataDistribution;
 struct DDShardInfo;
@@ -117,6 +117,7 @@ public:
 
 	virtual Future<Void> moveKeys(const MoveKeysParams& params) = 0;
 
+	// metrics.second is the number of key-ranges (i.e., shards) in the 'keys' key-range
 	virtual Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
 	                                                                            StorageMetrics const& min,
 	                                                                            StorageMetrics const& max,
@@ -224,9 +225,10 @@ public:
 	Future<std::vector<ProcessData>> getWorkers() const override;
 
 protected:
-	Future<Void> rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
+	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
 
-	Future<Void> rawFinishMovement(MoveKeysParams& params, const std::map<UID, StorageServerInterface>& tssMapping);
+	Future<Void> rawFinishMovement(const MoveKeysParams& params,
+	                               const std::map<UID, StorageServerInterface>& tssMapping);
 };
 
 struct DDMockTxnProcessorImpl;
@@ -236,6 +238,7 @@ struct DDMockTxnProcessorImpl;
 class DDMockTxnProcessor : public IDDTxnProcessor {
 	friend struct DDMockTxnProcessorImpl;
 
+protected:
 	std::shared_ptr<MockGlobalState> mgs;
 
 	std::vector<DDShardInfo> getDDShardInfos() const;
@@ -291,9 +294,10 @@ public:
 	Future<std::vector<ProcessData>> getWorkers() const override;
 
 protected:
-	void rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
+	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
 
-	void rawFinishMovement(MoveKeysParams& params, const std::map<UID, StorageServerInterface>& tssMapping);
+	Future<Void> rawFinishMovement(const MoveKeysParams& params,
+	                               const std::map<UID, StorageServerInterface>& tssMapping);
 };
 
 #endif // FOUNDATIONDB_DDTXNPROCESSOR_H

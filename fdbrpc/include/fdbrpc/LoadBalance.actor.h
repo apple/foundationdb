@@ -240,8 +240,8 @@ Future<Void> tssComparison(Req req,
 	return Void();
 }
 
-FDB_DECLARE_BOOLEAN_PARAM(AtMostOnce);
-FDB_DECLARE_BOOLEAN_PARAM(TriedAllOptions);
+FDB_BOOLEAN_PARAM(AtMostOnce);
+FDB_BOOLEAN_PARAM(TriedAllOptions);
 
 // Stores state for a request made by the load balancer
 template <class Request, class Interface, class Multi, bool P>
@@ -299,14 +299,13 @@ struct RequestData : NonCopyable {
 		requestStarted = false;
 
 		if (backoff > 0) {
-			response = mapAsync<Void, std::function<Future<Reply>(Void)>, Reply>(
-			    delay(backoff), [this, stream, &request, model, alternatives, channel](Void _) {
-				    requestStarted = true;
-				    modelHolder = Reference<ModelHolder>(new ModelHolder(model, stream->getEndpoint().token.first()));
-				    Future<Reply> resp = stream->tryGetReply(request);
-				    maybeDuplicateTSSRequest(stream, request, model, resp, alternatives, channel);
-				    return resp;
-			    });
+			response = mapAsync(delay(backoff), [this, stream, &request, model, alternatives, channel](Void _) {
+				requestStarted = true;
+				modelHolder = Reference<ModelHolder>(new ModelHolder(model, stream->getEndpoint().token.first()));
+				Future<Reply> resp = stream->tryGetReply(request);
+				maybeDuplicateTSSRequest(stream, request, model, resp, alternatives, channel);
+				return resp;
+			});
 		} else {
 			requestStarted = true;
 			modelHolder = Reference<ModelHolder>(new ModelHolder(model, stream->getEndpoint().token.first()));
@@ -757,12 +756,18 @@ Optional<BasicLoadBalancedReply> getBasicLoadBalancedReply(const BasicLoadBalanc
 Optional<BasicLoadBalancedReply> getBasicLoadBalancedReply(const void*);
 
 // A simpler version of LoadBalance that does not send second requests where the list of servers are always fresh
+//
+// If |alternativeChosen| is not null, then atMostOnce must be True, and if the returned future completes successfully
+// then *alternativeChosen will be the alternative to which the message was sent. *alternativeChosen must outlive the
+// returned future.
 ACTOR template <class Interface, class Request, class Multi, bool P>
 Future<REPLY_TYPE(Request)> basicLoadBalance(Reference<ModelInterface<Multi>> alternatives,
                                              RequestStream<Request, P> Interface::*channel,
                                              Request request = Request(),
                                              TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
-                                             AtMostOnce atMostOnce = AtMostOnce::False) {
+                                             AtMostOnce atMostOnce = AtMostOnce::False,
+                                             int* alternativeChosen = nullptr) {
+	ASSERT(alternativeChosen == nullptr || atMostOnce == AtMostOnce::True);
 	setReplyPriority(request, taskID);
 	if (!alternatives)
 		return Never();
@@ -791,6 +796,9 @@ Future<REPLY_TYPE(Request)> basicLoadBalance(Reference<ModelInterface<Multi>> al
 				useAlt = (nextAlt + alternatives->size() - 1) % alternatives->size();
 
 			stream = &alternatives->get(useAlt, channel);
+			if (alternativeChosen != nullptr) {
+				*alternativeChosen = useAlt;
+			}
 			if (!IFailureMonitor::failureMonitor().getState(stream->getEndpoint()).failed)
 				break;
 			nextAlt = (nextAlt + 1) % alternatives->size();

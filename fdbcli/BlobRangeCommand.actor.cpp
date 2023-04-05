@@ -88,6 +88,21 @@ ACTOR Future<Void> doBlobCheck(Database db, Key startKey, Key endKey, Optional<V
 	return Void();
 }
 
+ACTOR Future<Void> doBlobFlush(Database db, Key startKey, Key endKey, Optional<Version> version, bool compact) {
+	state double elapsed = -timer_monotonic();
+	state KeyRange keyRange(KeyRangeRef(startKey, endKey));
+	bool result = wait(db->flushBlobRange(keyRange, compact, version));
+	elapsed += timer_monotonic();
+
+	fmt::print("Blob Flush [{0} - {1}) {2} in {3:.6f} seconds\n",
+	           startKey.printable(),
+	           endKey.printable(),
+	           result ? "succeeded" : "failed",
+	           elapsed);
+
+	return Void();
+}
+
 } // namespace
 
 namespace fdb_cli {
@@ -147,7 +162,8 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 				           tokens[3].printable());
 			}
 			return success;
-		} else if (tokencmp(tokens[1], "purge") || tokencmp(tokens[1], "forcepurge") || tokencmp(tokens[1], "check")) {
+		} else if (tokencmp(tokens[1], "purge") || tokencmp(tokens[1], "forcepurge") || tokencmp(tokens[1], "check") ||
+		           tokencmp(tokens[1], "flush") || tokencmp(tokens[1], "compact")) {
 			bool purge = tokencmp(tokens[1], "purge") || tokencmp(tokens[1], "forcepurge");
 			bool forcePurge = tokencmp(tokens[1], "forcepurge");
 
@@ -175,7 +191,15 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 			if (purge) {
 				wait(doBlobPurge(localDb, begin, end, version, forcePurge));
 			} else {
-				wait(doBlobCheck(localDb, begin, end, version));
+				if (tokencmp(tokens[1], "check")) {
+					wait(doBlobCheck(localDb, begin, end, version));
+				} else if (tokencmp(tokens[1], "flush")) {
+					wait(doBlobFlush(localDb, begin, end, version, false));
+				} else if (tokencmp(tokens[1], "compact")) {
+					wait(doBlobFlush(localDb, begin, end, version, true));
+				} else {
+					ASSERT(false);
+				}
 			}
 		} else {
 			printUsage(tokens[0]);
@@ -187,5 +211,5 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 
 CommandFactory blobRangeFactory(
     "blobrange",
-    CommandHelp("blobrange <start|stop|check|purge|forcepurge> <startkey> <endkey> [version]", "", ""));
+    CommandHelp("blobrange <start|stop|check|purge|forcepurge|flush|compact> <startkey> <endkey> [version]", "", ""));
 } // namespace fdb_cli

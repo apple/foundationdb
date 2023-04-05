@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -89,7 +88,6 @@ struct WatchAndWaitWorkload : TestWorkload {
 
 	ACTOR Future<Void> _start(Database cx, WatchAndWaitWorkload* self) {
 		state std::vector<Future<Void>> watches;
-		int watchCounter = 0;
 		uint64_t endNode = (self->nodeCount * (self->clientId + 1)) / self->clientCount;
 		uint64_t startNode = (self->nodeCount * self->clientId) / self->clientCount;
 		uint64_t NodesPerWatch = self->nodeCount / self->watchCount;
@@ -101,7 +99,6 @@ struct WatchAndWaitWorkload : TestWorkload {
 		    .detail("Npw", NodesPerWatch);
 		for (uint64_t i = startNode; i < endNode; i += NodesPerWatch) {
 			watches.push_back(self->watchAndWait(cx, self, i));
-			watchCounter++;
 		}
 		wait(delay(self->testDuration)); // || waitForAll( watches )
 		TraceEvent("WatchAndWaitEnd").detail("Duration", self->testDuration);

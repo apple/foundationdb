@@ -20,6 +20,7 @@
 
 import functools
 
+
 @functools.total_ordering
 class Priority:
     def __init__(self, priority_value, label):
@@ -34,6 +35,7 @@ class Priority:
 
     def __repr__(self):
         return repr(self.label)
+
 
 Priority.SYSTEM = Priority(0, "System")
 Priority.DEFAULT = Priority(1, "Default")

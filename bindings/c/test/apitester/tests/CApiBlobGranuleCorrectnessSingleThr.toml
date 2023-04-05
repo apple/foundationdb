@@ -1,0 +1,19 @@
+[[test]]
+title = 'Blob Granule API Correctness Single Threaded'
+minClients = 1
+maxClients = 3
+multiThreaded = false
+
+[[server]]
+blob_granules_enabled = true
+
+[[test.workload]]
+name = 'ApiBlobGranuleCorrectness'
+minKeyLength = 1
+maxKeyLength = 64
+minValueLength = 1
+maxValueLength = 1000
+maxKeysPerTransaction = 50
+# TODO - increase initialSize and/or buggify down BG_SNAPSHOT_FILE_TARGET_BYTES to force multiple granules
+initialSize = 100
+numRandomOperations = 100

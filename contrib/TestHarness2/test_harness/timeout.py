@@ -55,6 +55,6 @@ if __name__ == '__main__':
                     summary.summarize_files(files)
                     summary.out.dump(sys.stdout)
             else:
-                summary = Summary(Path('bin/fdbserver'), was_killed=True)
+                summary = Summary(Path('bin/fdbserver'), was_killed=True, long_running=config.long_running)
                 summary.summarize_files(files)
                 summary.out.dump(sys.stdout)

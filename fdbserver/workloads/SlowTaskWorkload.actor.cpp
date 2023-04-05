@@ -43,7 +43,7 @@ struct SlowTaskWorkload : TestWorkload {
 	ACTOR static Future<Void> go() {
 		wait(delay(1));
 		int64_t phc = dl_iterate_phdr_calls;
-		int64_t startProfilesDeferred = getNumProfilesDeferred();
+		int64_t startProfilesDisabled = getNumProfilesDisabled();
 		int64_t startProfilesOverflowed = getNumProfilesOverflowed();
 		int64_t startProfilesCaptured = getNumProfilesCaptured();
 		int64_t exc = 0;
@@ -57,10 +57,10 @@ struct SlowTaskWorkload : TestWorkload {
 		}
 		fmt::print(stderr,
 		           "Slow task complete: {0} exceptions; {1} calls to dl_iterate_phdr, {2}"
-		           " profiles deferred, {3} profiles overflowed, {4} profiles captured\n",
+		           " profiles disabled, {3} profiles overflowed, {4} profiles captured\n",
 		           exc,
 		           dl_iterate_phdr_calls - phc,
-		           getNumProfilesDeferred() - startProfilesDeferred,
+		           getNumProfilesDisabled() - startProfilesDisabled,
 		           getNumProfilesOverflowed() - startProfilesOverflowed,
 		           getNumProfilesCaptured() - startProfilesCaptured);
 

@@ -9,6 +9,7 @@ Release Notes
 
 Features
 --------
+- Read-aware Data Distribution feature is developed for balance the read bytes bandwidth among storage servers.
 
 Performance
 -----------

@@ -30,6 +30,7 @@
 #include "flow/Knobs.h"
 #include "flow/FileIdentifier.h"
 #include "flow/ObjectSerializerTraits.h"
+#include "flow/Traceable.h"
 
 enum { invalid_error_code = 0xffff };
 
@@ -97,10 +98,10 @@ enum { error_code_actor_cancelled = error_code_operation_cancelled };
 extern Error internal_error_impl(const char* file, int line);
 extern Error internal_error_impl(const char* msg, const char* file, int line);
 extern Error internal_error_impl(const char* a_nm,
-                                 long long a,
+                                 std::string const& a,
                                  const char* op_nm,
                                  const char* b_nm,
-                                 long long b,
+                                 std::string const& b,
                                  const char* file,
                                  int line);
 
@@ -108,7 +109,7 @@ extern Error internal_error_impl(const char* a_nm,
 #define internal_error_msg(msg) internal_error_impl(msg, __FILE__, __LINE__)
 
 extern bool isAssertDisabled(int line);
-//#define ASSERT( condition ) ((void)0)
+// #define ASSERT( condition ) ((void)0)
 #define ASSERT(condition)                                                                                              \
 	do {                                                                                                               \
 		if (!((condition) || isAssertDisabled(__LINE__))) {                                                            \
@@ -131,77 +132,74 @@ extern bool isAssertDisabled(int line);
 #define UNREACHABLE()                                                                                                  \
 	{ throw internal_error_impl("unreachable", __FILE__, __LINE__); }
 
-enum assert_op { EQ, NE, LT, GT, LE, GE };
-
 // TODO: magic so this works even if const-ness doesn't not match.
 template <typename T, typename U>
-void assert_num_impl(char const* a_nm,
-                     T const& a,
-                     assert_op op,
-                     char const* b_nm,
-                     U const& b,
-                     char const* file,
-                     int line) {
-	bool success;
-	char const* op_name;
-	switch (op) {
-	case EQ:
-		success = a == b;
-		op_name = "==";
-		break;
-	case NE:
-		success = a != b;
-		op_name = "!=";
-		break;
-	case LT:
-		success = a < b;
-		op_name = "<";
-		break;
-	case GT:
-		success = a > b;
-		op_name = ">";
-		break;
-	case LE:
-		success = a <= b;
-		op_name = "<=";
-		break;
-	case GE:
-		success = a >= b;
-		op_name = ">=";
-		break;
-	default:
-		success = false;
-		op_name = "UNKNOWN OP";
+void assert_impl(char const* a_nm,
+                 T const& a,
+                 const char* opName,
+                 char const* b_nm,
+                 U const& b,
+                 bool (*compare)(T const&, U const&),
+                 char const* file,
+                 int line) {
+	if (!compare(a, b)) {
+		throw internal_error_impl(a_nm, Traceable<T>::toString(a), opName, b_nm, Traceable<U>::toString(b), file, line);
 	}
+}
 
-	if (!success) {
-		throw internal_error_impl(a_nm, (long long)a, op_name, b_nm, (long long)b, file, line);
-	}
+template <typename T, typename U>
+bool assert_check_eq(T const& a, U const& b) {
+	return a == b;
+}
+
+template <typename T, typename U>
+bool assert_check_ne(T const& a, U const& b) {
+	return a != b;
+}
+
+template <typename T, typename U>
+bool assert_check_lt(T const& a, U const& b) {
+	return a < b;
+}
+
+template <typename T, typename U>
+bool assert_check_le(T const& a, U const& b) {
+	return a <= b;
+}
+
+template <typename T, typename U>
+bool assert_check_gt(T const& a, U const& b) {
+	return a > b;
+}
+
+template <typename T, typename U>
+bool assert_check_ge(T const& a, U const& b) {
+	return a >= b;
 }
 
 #define ASSERT_EQ(a, b)                                                                                                \
 	do {                                                                                                               \
-		assert_num_impl((#a), (a), assert_op::EQ, (#b), (b), __FILE__, __LINE__);                                      \
+		assert_impl((#a), (a), "==", (#b), (b), &assert_check_eq, __FILE__, __LINE__);                                 \
 	} while (0)
 #define ASSERT_NE(a, b)                                                                                                \
 	do {                                                                                                               \
-		assert_num_impl((#a), (a), assert_op::NE, (#b), (b), __FILE__, __LINE__);                                      \
+		assert_impl((#a), (a), "!=", (#b), (b), &assert_check_ne, __FILE__, __LINE__);                                 \
 	} while (0)
 #define ASSERT_LT(a, b)                                                                                                \
 	do {                                                                                                               \
-		assert_num_impl((#a), (a), assert_op::LT, (#b), (b), __FILE__, __LINE__);                                      \
+		assert_impl((#a), (a), "<", (#b), (b), &assert_check_lt, __FILE__, __LINE__);                                  \
 	} while (0)
 #define ASSERT_LE(a, b)                                                                                                \
 	do {                                                                                                               \
-		assert_num_impl((#a), (a), assert_op::LE, (#b), (b), __FILE__, __LINE__);                                      \
+		assert_impl((#a), (a), "<=", (#b), (b), &assert_check_le, __FILE__, __LINE__);                                 \
 	} while (0)
 #define ASSERT_GT(a, b)                                                                                                \
 	do {                                                                                                               \
-		assert_num_impl((#a), (a), assert_op::GT, (#b), (b), __FILE__, __LINE__);                                      \
+		assert_impl((#a), (a), ">", (#b), (b), &assert_check_gt, __FILE__, __LINE__);                                  \
 	} while (0)
 #define ASSERT_GE(a, b)                                                                                                \
 	do {                                                                                                               \
-		assert_num_impl((#a), (a), assert_op::GE, (#b), (b), __FILE__, __LINE__);                                      \
+		assert_impl((#a), (a), ">=", (#b), (b), &assert_check_ge, __FILE__, __LINE__);                                 \
 	} while (0)
 
 // ASSERT_WE_THINK() is to be used for assertions that we want to validate in testing, but which are judged too

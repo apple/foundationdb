@@ -28,6 +28,7 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/StatusClient.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/IKnobCollection.h"
@@ -244,8 +245,8 @@ private:
 		std::map<typename T::Option, Optional<Standalone<StringRef>>> options;
 		std::map<std::string, typename T::Option> legalOptions;
 
-		OptionGroup<T>() {}
-		OptionGroup<T>(OptionGroup<T>& base)
+		OptionGroup() {}
+		OptionGroup(OptionGroup<T>& base)
 		  : options(base.options.begin(), base.options.end()), legalOptions(base.legalOptions) {}
 
 		// Enable or disable an option. Returns true if option value changed
@@ -541,9 +542,11 @@ void initHelp() {
 	                "Fetch the current read version",
 	                "Displays the current read version of the database or currently running transaction.");
 	helpMap["quota"] = CommandHelp("quota",
-	                               "quota [get <tag> [reserved_throughput|total_throughput] | set <tag> "
-	                               "[reserved_throughput|total_throughput] <value> | clear <tag>]",
-	                               "Get, modify, or clear the throughput quota for the specified tag.");
+	                               "quota [get <tag> [reserved_throughput|total_throughput|storage] | "
+	                               "set <tag> [reserved_throughput|total_throughput|storage] <value> | "
+	                               "clear <tag>]",
+	                               "Get, modify, or clear the reserved/total throughput quota (in bytes/s) or "
+	                               "storage quota (in bytes) for the specified tag.");
 	helpMap["reset"] =
 	    CommandHelp("reset",
 	                "reset the current transaction",
@@ -685,7 +688,9 @@ ACTOR template <class T>
 Future<T> makeInterruptable(Future<T> f) {
 	Future<Void> interrupt = LineNoise::onKeyboardInterrupt();
 	choose {
-		when(T t = wait(f)) { return t; }
+		when(T t = wait(f)) {
+			return t;
+		}
 		when(wait(interrupt)) {
 			f.cancel();
 			throw operation_cancelled();
@@ -1086,6 +1091,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 	state bool writeMode = false;
 
 	state std::map<Key, std::pair<Value, ClientLeaderRegInterface>> address_interface;
+	state std::map<std::string, StorageServerInterface> storage_interface;
 
 	state FdbOptions globalOptions;
 	state FdbOptions activeOptions;
@@ -1416,6 +1422,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "blobrestore")) {
+					bool _result = wait(makeInterruptable(blobRestoreCommandActor(localDb, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "unlock")) {
 					if ((tokens.size() != 2) || (tokens[1].size() != 32) ||
 					    !std::all_of(tokens[1].begin(), tokens[1].end(), &isxdigit)) {
@@ -1480,6 +1493,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						if (isCommitDesc && tokens.size() == 1) {
 							// prompt for description and add to txn
 							state Optional<std::string> raw;
+							warn.cancel();
 							while (!raw.present() || raw.get().empty()) {
 								fprintf(stdout,
 								        "Please set a description for the change. Description must be non-empty.\n");
@@ -1490,6 +1504,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							std::string line = raw.get();
 							config_tr->set("\xff\xff/description"_sr, line);
 						}
+						warn =
+						    checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db, localDb);
 						if (transtype == TransType::Db) {
 							wait(commitTransaction(tr));
 						} else {
@@ -1618,6 +1634,24 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					bool _result = wait(makeInterruptable(suspendCommandActor(db, tr, tokens, &address_interface)));
 					if (!_result)
 						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "audit_storage")) {
+					UID auditId = wait(makeInterruptable(auditStorageCommandActor(ccf, tokens)));
+					if (!auditId.isValid()) {
+						is_error = true;
+					} else {
+						printf("Started audit: %s\n", auditId.toString().c_str());
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "get_audit_status")) {
+					bool _result = wait(makeInterruptable(getAuditStatusCommandActor(localDb, tokens)));
+					if (!_result) {
+						is_error = true;
+					}
 					continue;
 				}
 
@@ -1821,6 +1855,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						if (!intrans) {
 							// prompt for description and add to txn
 							state Optional<std::string> raw_desc;
+							warn.cancel();
 							while (!raw_desc.present() || raw_desc.get().empty()) {
 								fprintf(stdout,
 								        "Please set a description for the change. Description must be non-empty\n");
@@ -1830,6 +1865,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							}
 							std::string line = raw_desc.get();
 							config_tr->set("\xff\xff/description"_sr, line);
+							warn = checkStatus(
+							    timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db, localDb);
 							wait(commitTransaction(config_tr));
 						} else {
 							isCommitDesc = true;
@@ -2099,6 +2136,23 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					bool _result = wait(makeInterruptable(metaclusterCommand(db, tokens)));
 					if (!_result)
 						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "idempotencyids")) {
+					bool _result = wait(makeInterruptable(idempotencyIdsCommandActor(localDb, tokens)));
+					if (!_result) {
+						is_error = true;
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "hotrange")) {
+					bool _result =
+					    wait(makeInterruptable(hotRangeCommandActor(localDb, db, tokens, &storage_interface)));
+					if (!_result) {
+						is_error = true;
+					}
 					continue;
 				}
 

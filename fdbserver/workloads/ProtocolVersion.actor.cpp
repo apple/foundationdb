@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // This must be the last include
 
 struct ProtocolVersionWorkload : TestWorkload {

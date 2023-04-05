@@ -21,9 +21,20 @@
 #include "flow/IThreadPool.h"
 
 #include <algorithm>
+// The ifndef's allow us to compile with pre-built boost.  Otherwise, we get
+// errors about double-defines.  As of this writing, the automatically downloaded
+// build of boost doesn't define these, but the pre-built version does.  (The old
+// prebuilt version was being silently ignored by cmake, so it's unclear when the
+// compatibility divergence started)
+#ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
+#endif
+#ifndef BOOST_DATE_TIME_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
+#endif
+#ifndef BOOST_REGEX_NO_LIB
 #define BOOST_REGEX_NO_LIB
+#endif
 #include "boost/asio.hpp"
 
 class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool> {

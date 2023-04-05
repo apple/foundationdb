@@ -196,7 +196,7 @@ private:
 
 			Standalone<StringRef> e = wait(self->queue->readNext(payloadSize + 1));
 			if (e.size() != payloadSize + 1) {
-				CODE_PROBE(true, "Zero fill within payload");
+				CODE_PROBE(true, "Zero fill within payload", probe::decoration::rare);
 				zeroFillSize = payloadSize + 1 - e.size();
 				break;
 			}
@@ -210,7 +210,7 @@ private:
 			}
 		}
 		if (zeroFillSize) {
-			CODE_PROBE(true, "Fixing a partial commit at the end of the tlog queue");
+			CODE_PROBE(true, "Fixing a partial commit at the end of the tlog queue", probe::decoration::rare);
 			for (int i = 0; i < zeroFillSize; i++)
 				self->queue->push(StringRef((const uint8_t*)"", 1));
 		}
@@ -447,10 +447,10 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		          "Restored");
 		addActor.send(traceRole(Role::TRANSACTION_LOG, interf.id()));
 
-		persistentDataVersion.init("TLog.PersistentDataVersion"_sr, cc.id);
-		persistentDataDurableVersion.init("TLog.PersistentDataDurableVersion"_sr, cc.id);
-		version.initMetric("TLog.Version"_sr, cc.id);
-		queueCommittedVersion.initMetric("TLog.QueueCommittedVersion"_sr, cc.id);
+		persistentDataVersion.init("TLog.PersistentDataVersion"_sr, cc.getId());
+		persistentDataDurableVersion.init("TLog.PersistentDataDurableVersion"_sr, cc.getId());
+		version.initMetric("TLog.Version"_sr, cc.getId());
+		queueCommittedVersion.initMetric("TLog.QueueCommittedVersion"_sr, cc.getId());
 
 		specialCounter(cc, "Version", [this]() { return this->version.get(); });
 		specialCounter(cc, "SharedBytesInput", [tLogData]() { return tLogData->bytesInput; });
@@ -768,7 +768,9 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 ACTOR Future<Void> updateStorageLoop(TLogData* self) {
 	wait(delay(0, TaskPriority::UpdateStorage));
 
-	loop { wait(updateStorage(self)); }
+	loop {
+		wait(updateStorage(self));
+	}
 }
 
 void commitMessages(Reference<LogData> self,
@@ -1399,26 +1401,26 @@ ACTOR Future<Void> tLogCore(TLogData* self, Reference<LogData> logData) {
 	logData->addActor.send(waitFailureServer(logData->tli.waitFailure.getFuture()));
 	logData->addActor.send(logData->removed);
 	// FIXME: update tlogMetrics to include new information, or possibly only have one copy for the shared instance
-	logData->addActor.send(traceCounters("TLogMetrics",
-	                                     logData->logId,
-	                                     SERVER_KNOBS->STORAGE_LOGGING_DELAY,
-	                                     &logData->cc,
-	                                     logData->logId.toString() + "/TLogMetrics",
-	                                     [self = self](TraceEvent& te) {
-		                                     StorageBytes sbTlog = self->persistentData->getStorageBytes();
-		                                     te.detail("KvstoreBytesUsed", sbTlog.used);
-		                                     te.detail("KvstoreBytesFree", sbTlog.free);
-		                                     te.detail("KvstoreBytesAvailable", sbTlog.available);
-		                                     te.detail("KvstoreBytesTotal", sbTlog.total);
-		                                     te.detail("KvstoreBytesTemp", sbTlog.temp);
+	logData->addActor.send(logData->cc.traceCounters("TLogMetrics",
+	                                                 logData->logId,
+	                                                 SERVER_KNOBS->STORAGE_LOGGING_DELAY,
+	                                                 logData->logId.toString() + "/TLogMetrics",
+	                                                 [self = self](TraceEvent& te) {
+		                                                 StorageBytes sbTlog = self->persistentData->getStorageBytes();
+		                                                 te.detail("KvstoreBytesUsed", sbTlog.used);
+		                                                 te.detail("KvstoreBytesFree", sbTlog.free);
+		                                                 te.detail("KvstoreBytesAvailable", sbTlog.available);
+		                                                 te.detail("KvstoreBytesTotal", sbTlog.total);
+		                                                 te.detail("KvstoreBytesTemp", sbTlog.temp);
 
-		                                     StorageBytes sbQueue = self->rawPersistentQueue->getStorageBytes();
-		                                     te.detail("QueueDiskBytesUsed", sbQueue.used);
-		                                     te.detail("QueueDiskBytesFree", sbQueue.free);
-		                                     te.detail("QueueDiskBytesAvailable", sbQueue.available);
-		                                     te.detail("QueueDiskBytesTotal", sbQueue.total);
-		                                     te.detail("QueueDiskBytesTemp", sbQueue.temp);
-	                                     }));
+		                                                 StorageBytes sbQueue =
+		                                                     self->rawPersistentQueue->getStorageBytes();
+		                                                 te.detail("QueueDiskBytesUsed", sbQueue.used);
+		                                                 te.detail("QueueDiskBytesFree", sbQueue.free);
+		                                                 te.detail("QueueDiskBytesAvailable", sbQueue.available);
+		                                                 te.detail("QueueDiskBytesTotal", sbQueue.total);
+		                                                 te.detail("QueueDiskBytesTemp", sbQueue.temp);
+	                                                 }));
 
 	logData->addActor.send(serveTLogInterface(self, logData->tli, logData, warningCollectorInput));
 
@@ -1582,7 +1584,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 							logData->queueCommittedVersion.set(qe.version);
 
 							while (self->bytesInput - self->bytesDurable >= recoverMemoryLimit) {
-								CODE_PROBE(true, "Flush excess data during TLog queue recovery");
+								CODE_PROBE(
+								    true, "Flush excess data during TLog queue recovery", probe::decoration::rare);
 								TraceEvent("FlushLargeQueueDuringRecovery", self->dbgid)
 								    .detail("BytesInput", self->bytesInput)
 								    .detail("BytesDurable", self->bytesDurable)
@@ -1591,13 +1594,17 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 
 								choose {
 									when(wait(updateStorage(self))) {}
-									when(wait(allRemoved)) { throw worker_removed(); }
+									when(wait(allRemoved)) {
+										throw worker_removed();
+									}
 								}
 							}
 						}
 					}
 				}
-				when(wait(allRemoved)) { throw worker_removed(); }
+				when(wait(allRemoved)) {
+					throw worker_removed();
+				}
 			}
 		}
 	} catch (Error& e) {
@@ -1633,7 +1640,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 	TraceEvent("SharedTlog", tlogId).detail("Version", "4.6");
 
 	try {
-		wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+		wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION, "TLogInit"));
 		wait(restorePersistentState(&self, locality));
 
 		self.sharedActors.send(cleanupPeekTrackers(&self));

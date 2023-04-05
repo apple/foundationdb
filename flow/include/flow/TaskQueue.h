@@ -65,7 +65,7 @@ public:
 		return b;
 	}
 	// Returns a time interval a caller should sleep from now until the next timer.
-	double getSleepTime(double now) {
+	double getSleepTime(double now) const {
 		if (!timers.empty()) {
 			return timers.top().at - now;
 		}
@@ -74,7 +74,7 @@ public:
 
 	// Moves all timers that are scheduled to be executed at or before now to the ready queue.
 	void processReadyTimers(double now) {
-		int numTimers = 0;
+		[[maybe_unused]] int numTimers = 0;
 		while (!timers.empty() && timers.top().at <= now + INetwork::TIME_EPS) {
 			++numTimers;
 			++countTimers;
@@ -86,7 +86,7 @@ public:
 
 	// Moves all tasks scheduled from a different thread to the ready queue.
 	void processThreadReady() {
-		int numReady = 0;
+		[[maybe_unused]] int numReady = 0;
 		while (true) {
 			Optional<std::pair<TaskPriority, Task*>> t = threadReady.pop();
 			if (!t.present())
@@ -98,11 +98,11 @@ public:
 		FDB_TRACE_PROBE(run_loop_thread_ready, numReady);
 	}
 
-	bool hasReadyTask() { return !ready.empty(); }
-	size_t getNumReadyTasks() { return ready.size(); }
-	TaskPriority getReadyTaskID() { return ready.top().taskID; }
-	int64_t getReadyTaskPriority() { return ready.top().priority; }
-	Task* getReadyTask() { return ready.top().task; }
+	bool hasReadyTask() const { return !ready.empty(); }
+	size_t getNumReadyTasks() const { return ready.size(); }
+	TaskPriority getReadyTaskID() const { return ready.top().taskID; }
+	int64_t getReadyTaskPriority() const { return ready.top().priority; }
+	Task* getReadyTask() const { return ready.top().task; }
 	void popReadyTask() { ready.pop(); }
 
 	void initMetrics() {

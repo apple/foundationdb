@@ -270,7 +270,13 @@ function(stage_correctness_package)
     list(APPEND package_files "${out_file}")
   endforeach()
 
-  list(APPEND package_files ${test_files} ${external_files})
+  add_custom_command(
+    OUTPUT "${STAGE_OUT_DIR}/joshua_logtool.py"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/contrib/joshua_logtool.py" "${STAGE_OUT_DIR}/joshua_logtool.py"
+    DEPENDS "${CMAKE_SOURCE_DIR}/contrib/joshua_logtool.py"
+  )
+
+  list(APPEND package_files ${test_files} ${external_files} "${STAGE_OUT_DIR}/joshua_logtool.py")
   if(STAGE_OUT_FILES)
     set(${STAGE_OUT_FILES} ${package_files} PARENT_SCOPE)
   endif()
@@ -320,11 +326,11 @@ function(create_long_running_correctness_package)
   add_custom_command(
     OUTPUT ${tar_file}
     DEPENDS ${package_files}
-            ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTest.sh
-            ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTimeout.sh
-    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTest.sh
+            ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/longRunningCorrectnessTest.sh
+            ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/longRunningCorrectnessTimeout.sh
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/longRunningCorrectnessTest.sh
                                     ${out_dir}/joshua_test
-    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTimeout.sh
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/longRunningCorrectnessTimeout.sh
                                     ${out_dir}/joshua_timeout
     COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} ${package_files}
                                                     ${out_dir}/joshua_test
@@ -387,7 +393,7 @@ function(prepare_binding_test_files build_directory target_name target_dependenc
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_flow_tester> ${build_directory}/tests/flow/bin/fdb_flow_tester
     COMMENT "Copy Flow tester for bindingtester")
 
-  set(generated_binding_files python/fdb/fdboptions.py)
+  set(generated_binding_files python/fdb/fdboptions.py python/fdb/apiversion.py)
   if(WITH_JAVA_BINDING)
     set(not_fdb_release_string "")
     add_custom_command(
@@ -538,8 +544,77 @@ function(package_bindingtester)
     COMMAND ${CMAKE_COMMAND} -E tar czf ${tar_file} *
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/bindingtester
     COMMENT "Pack bindingtester")
-  add_custom_target(bindingtester ALL DEPENDS ${tar_file})
-  add_dependencies(bindingtester copy_bindingtester_binaries)
+  add_custom_target(bindingtester ALL DEPENDS ${tar_file} copy_bindingtester_binaries)
+endfunction()
+
+# Test for setting up Python venv for client tests.
+# Adding this test as a fixture to another test allows the use of non-native Python packages within client test scripts
+# by installing dependencies from requirements.txt
+set(test_venv_dir ${CMAKE_BINARY_DIR}/tests/test_venv)
+if (WIN32)
+  set(shell_cmd "cmd" CACHE INTERNAL "")
+  set(shell_opt "/c" CACHE INTERNAL "")
+  set(test_venv_activate "${test_venv_dir}/Scripts/activate.bat" CACHE INTERNAL "")
+else()
+  set(shell_cmd "bash" CACHE INTERNAL "")
+  set(shell_opt "-c" CACHE INTERNAL "")
+  set(test_venv_activate ". ${test_venv_dir}/bin/activate" CACHE INTERNAL "")
+endif()
+set(test_venv_cmd "")
+string(APPEND test_venv_cmd "${Python3_EXECUTABLE} -m venv ${test_venv_dir} ")
+string(APPEND test_venv_cmd "&& ${test_venv_activate} ")
+string(APPEND test_venv_cmd "&& pip install --upgrade pip ")
+string(APPEND test_venv_cmd "&& pip install -r ${CMAKE_SOURCE_DIR}/tests/TestRunner/requirements.txt")
+string(APPEND test_venv_cmd "&& (cd ${CMAKE_BINARY_DIR}/bindings/python && python3 setup.py install) ")
+add_test(
+  NAME test_venv_setup
+  COMMAND bash -c ${test_venv_cmd}
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(test_venv_setup PROPERTIES FIXTURES_SETUP test_virtual_env_setup TIMEOUT 120)
+set_tests_properties(test_venv_setup PROPERTIES RESOURCE_LOCK TEST_VENV_SETUP)
+
+# Run the test command under Python venv as a cmd (Windows) or bash (Linux/Apple) script, which allows && or || chaining.
+function(add_python_venv_test)
+  set(oneValueArgs NAME WORKING_DIRECTORY TEST_TIMEOUT)
+  set(multiValueArgs COMMAND)
+  cmake_parse_arguments(T "" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
+  if(OPEN_FOR_IDE)
+    return()
+  endif()
+  if(NOT T_NAME)
+    message(FATAL_ERROR "NAME is a required argument for add_fdbclient_test")
+  endif()
+  if(NOT T_COMMAND)
+    message(FATAL_ERROR "COMMAND is a required argument for add_fdbclient_test")
+  endif()
+  if(NOT T_WORKING_DIRECTORY)
+    set(T_WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+  endif()
+  if(NOT T_TEST_TIMEOUT)
+    if(USE_SANITIZER)
+      set(T_TEST_TIMEOUT 1200)
+    else()
+      set(T_TEST_TIMEOUT 300)
+    endif()
+  endif()
+  # expand list of command arguments to space-separated string so that we can pass to shell
+  string(REPLACE ";" " " T_COMMAND "${T_COMMAND}")
+  add_test(
+    NAME ${T_NAME}
+    WORKING_DIRECTORY ${T_WORKING_DIRECTORY}
+    COMMAND ${shell_cmd} ${shell_opt} "${test_venv_activate} && ${T_COMMAND}")
+  set_tests_properties(${T_NAME} PROPERTIES FIXTURES_REQUIRED test_virtual_env_setup TIMEOUT ${T_TEST_TIMEOUT})
+  set(test_env_vars "PYTHONPATH=${CMAKE_SOURCE_DIR}/tests/TestRunner:${CMAKE_BINARY_DIR}/tests/TestRunner")
+  if(APPLE)
+    set(ld_env_name "DYLD_LIBRARY_PATH")
+  else()
+    set(ld_env_name "LD_LIBRARY_PATH")
+  endif()
+  set(test_env_vars PROPERTIES ENVIRONMENT "${test_env_vars};${ld_env_name}=${CMAKE_BINARY_DIR}/lib:$ENV{${ld_env_name}}")
+  if(USE_SANITIZER)
+    set(test_env_vars "${test_env_vars};${SANITIZER_OPTIONS}")
+  endif()
+  set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT "${test_env_vars}")
 endfunction()
 
 # Creates a single cluster before running the specified command (usually a ctest test)
@@ -563,8 +638,7 @@ function(add_fdbclient_test)
   if(NOT T_COMMAND)
     message(FATAL_ERROR "COMMAND is a required argument for add_fdbclient_test")
   endif()
-  set(TMP_CLUSTER_CMD ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
-                      --build-dir ${CMAKE_BINARY_DIR})
+  set(TMP_CLUSTER_CMD python ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py --build-dir ${CMAKE_BINARY_DIR})
   if(T_PROCESS_NUMBER)
     list(APPEND TMP_CLUSTER_CMD --process-number ${T_PROCESS_NUMBER})
   endif()
@@ -580,23 +654,21 @@ function(add_fdbclient_test)
   if(T_TLS_ENABLED)
     list(APPEND TMP_CLUSTER_CMD --tls-enabled)
   endif()
+  list(APPEND TMP_CLUSTER_CMD -- ${T_COMMAND})
   message(STATUS "Adding Client test ${T_NAME}")
-  add_test(NAME "${T_NAME}"
-    WORKING_DIRECTORY ${T_WORKING_DIRECTORY}
-    COMMAND ${Python3_EXECUTABLE} ${TMP_CLUSTER_CMD}
-            --
-            ${T_COMMAND})
-  if (T_TEST_TIMEOUT)
-    set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT ${T_TEST_TIMEOUT})
-  else()
+  if (NOT T_TEST_TIMEOUT)
     # default timeout
     if(USE_SANITIZER)
-      set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 1200)
+      set(T_TEST_TIMEOUT 1200)
     else()
-      set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 300)
+      set(T_TEST_TIMEOUT 300)
     endif()
   endif()
-  set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
+  add_python_venv_test(
+    NAME ${T_NAME}
+    WORKING_DIRECTORY ${T_WORKING_DIRECTORY}
+    COMMAND ${TMP_CLUSTER_CMD}
+    TEST_TIMEOUT ${T_TEST_TIMEOUT})
 endfunction()
 
 # Creates a cluster file for a nonexistent cluster before running the specified command
@@ -618,19 +690,16 @@ function(add_unavailable_fdbclient_test)
   if(NOT T_COMMAND)
     message(FATAL_ERROR "COMMAND is a required argument for add_unavailable_fdbclient_test")
   endif()
-  message(STATUS "Adding unavailable client test ${T_NAME}")
-  add_test(NAME "${T_NAME}"
-  COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/fake_cluster.py
-          --output-dir ${CMAKE_BINARY_DIR}
-          --
-          ${T_COMMAND})
-  if (T_TEST_TIMEOUT)
-    set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT ${T_TEST_TIMEOUT})
-  else()
+  if (NOT T_TEST_TIMEOUT)
     # default timeout
-    set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 60)
+    set(T_TEST_TIMEOUT 60)
   endif()
-  set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
+  message(STATUS "Adding unavailable client test ${T_NAME}")
+  add_python_venv_test(
+    NAME ${T_NAME}
+    COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/fake_cluster.py
+            --output-dir ${CMAKE_BINARY_DIR} -- ${T_COMMAND}
+    TEST_TIMEOUT ${T_TEST_TIMEOUT})
 endfunction()
 
 # Creates 3 distinct clusters before running the specified command.
@@ -654,13 +723,12 @@ function(add_multi_fdbclient_test)
     message(FATAL_ERROR "COMMAND is a required argument for add_multi_fdbclient_test")
   endif()
   message(STATUS "Adding Client test ${T_NAME}")
-  add_test(NAME "${T_NAME}"
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_multi_cluster.py
+  add_python_venv_test(
+    NAME ${T_NAME}
+    COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_multi_cluster.py
             --build-dir ${CMAKE_BINARY_DIR}
-            --clusters 3
-            --
-            ${T_COMMAND})
-  set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 60)
+            --clusters 3 -- ${T_COMMAND}
+    TEST_TIMEOUT 60)
 endfunction()
 
 function(add_java_test)

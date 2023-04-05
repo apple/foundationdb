@@ -47,7 +47,7 @@ struct Hash {
 	struct _ht { /* the hash table */
 		int count; /* Number of entries with this hash */
 		HashElem* chain; /* Pointer to first entry with this hash */
-	} * ht;
+	}* ht;
 };
 
 /* Each element in the hash table is an instance of the following

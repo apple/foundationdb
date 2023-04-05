@@ -22,7 +22,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/Tuple.h"
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -291,6 +291,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 
 		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			Tuple rate = Tuple::makeTuple(sampleProbability);
 			Tuple size = Tuple::makeTuple(sizeLimit);

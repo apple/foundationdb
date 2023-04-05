@@ -20,7 +20,9 @@
 
 #include <cstdint>
 
+#include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -28,9 +30,15 @@
 struct CreateTenantWorkload : TestWorkload {
 	static constexpr auto NAME = "CreateTenant";
 	TenantName tenant;
+	Optional<TenantGroupName> tenantGroup;
+	bool blobbify;
 
 	CreateTenantWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		tenant = getOption(options, "name"_sr, "DefaultTenant"_sr);
+		if (hasOption(options, "group"_sr)) {
+			tenantGroup = getOption(options, "group"_sr, "DefaultGroup"_sr);
+		}
+		blobbify = getOption(options, "blobbify"_sr, false);
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -46,8 +54,18 @@ struct CreateTenantWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _setup(CreateTenantWorkload* self, Database db) {
 		try {
-			Optional<TenantMapEntry> entry = wait(TenantAPI::createTenant(db.getReference(), self->tenant));
+			TenantMapEntry givenEntry;
+			if (self->tenantGroup.present()) {
+				givenEntry.tenantGroup = self->tenantGroup.get();
+			}
+			Optional<TenantMapEntry> entry = wait(TenantAPI::createTenant(db.getReference(), self->tenant, givenEntry));
 			ASSERT(entry.present());
+
+			if (self->blobbify) {
+				// blobbify from db instead of within tenant so authz doesn't fail
+				bool success = wait(db->blobbifyRange(normalKeys.withPrefix(entry.get().prefix)));
+				ASSERT(success);
+			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "TenantCreationFailed").error(e);
 			if (e.code() == error_code_actor_cancelled) {

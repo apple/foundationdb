@@ -28,11 +28,11 @@
 
 // ALLOC_INSTRUMENTATION_STDOUT enables non-sampled logging of all allocations and deallocations to stdout to be
 // processed by tools/alloc_instrumentation.py
-//#define ALLOC_INSTRUMENTATION_STDOUT ENABLED(NOT_IN_CLEAN)
+// #define ALLOC_INSTRUMENTATION_STDOUT ENABLED(NOT_IN_CLEAN)
 
-//#define ALLOC_INSTRUMENTATION ENABLED(NOT_IN_CLEAN)
-// The form "(1==1)" in this context is used to satisfy both clang and vc++ with a single syntax.  Clang rejects "1" and
-// vc++ rejects "true".
+// #define ALLOC_INSTRUMENTATION ENABLED(NOT_IN_CLEAN)
+//  The form "(1==1)" in this context is used to satisfy both clang and vc++ with a single syntax.  Clang rejects "1"
+//  and vc++ rejects "true".
 #define FASTALLOC_THREAD_SAFE (FLOW_THREAD_SAFE || (1 == 1))
 
 #if VALGRIND
@@ -265,7 +265,7 @@ inline void freeFast(int size, void* ptr) {
 		return FastAllocator<128>::release(ptr);
 	if (size <= 256)
 		return FastAllocator<256>::release(ptr);
-	delete[](uint8_t*) ptr;
+	delete[] (uint8_t*)ptr;
 }
 
 // Allocate a block of memory aligned to 4096 bytes. Size must be a multiple of

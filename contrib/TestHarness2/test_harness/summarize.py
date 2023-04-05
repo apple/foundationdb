@@ -159,13 +159,20 @@ class Parser:
         pass
 
 
-class XmlParser(Parser, xml.sax.handler.ContentHandler):
+class XmlParser(Parser, xml.sax.handler.ContentHandler, xml.sax.handler.ErrorHandler):
     def __init__(self):
         super().__init__()
         self.handler: ParseHandler | None = None
 
     def parse(self, file: TextIO, handler: ParseHandler) -> None:
-        xml.sax.parse(file, self)
+        self.handler = handler
+        xml.sax.parse(file, self, errorHandler=self)
+
+    def error(self, exception):
+        pass
+
+    def fatalError(self, exception):
+        pass
 
     def startElement(self, name, attrs) -> None:
         attributes: Dict[str, str] = {}
@@ -186,16 +193,17 @@ class JsonParser(Parser):
 
 
 class Coverage:
-    def __init__(self, file: str, line: str | int, comment: str | None = None):
+    def __init__(self, file: str, line: str | int, comment: str | None = None, rare: bool = False):
         self.file = file
         self.line = int(line)
         self.comment = comment
+        self.rare = rare
 
     def to_tuple(self) -> Tuple[str, int, str | None]:
-        return self.file, self.line, self.comment
+        return self.file, self.line, self.comment, self.rare
 
     def __eq__(self, other) -> bool:
-        if isinstance(other, tuple) and len(other) == 3:
+        if isinstance(other, tuple) and len(other) == 4:
             return self.to_tuple() == other
         elif isinstance(other, Coverage):
             return self.to_tuple() == other.to_tuple()
@@ -203,7 +211,7 @@ class Coverage:
             return False
 
     def __lt__(self, other) -> bool:
-        if isinstance(other, tuple) and len(other) == 3:
+        if isinstance(other, tuple) and len(other) == 4:
             return self.to_tuple() < other
         elif isinstance(other, Coverage):
             return self.to_tuple() < other.to_tuple()
@@ -211,7 +219,7 @@ class Coverage:
             return False
 
     def __le__(self, other) -> bool:
-        if isinstance(other, tuple) and len(other) == 3:
+        if isinstance(other, tuple) and len(other) == 4:
             return self.to_tuple() <= other
         elif isinstance(other, Coverage):
             return self.to_tuple() <= other.to_tuple()
@@ -219,7 +227,7 @@ class Coverage:
             return False
 
     def __gt__(self, other: Coverage) -> bool:
-        if isinstance(other, tuple) and len(other) == 3:
+        if isinstance(other, tuple) and len(other) == 4:
             return self.to_tuple() > other
         elif isinstance(other, Coverage):
             return self.to_tuple() > other.to_tuple()
@@ -227,7 +235,7 @@ class Coverage:
             return False
 
     def __ge__(self, other):
-        if isinstance(other, tuple) and len(other) == 3:
+        if isinstance(other, tuple) and len(other) == 4:
             return self.to_tuple() >= other
         elif isinstance(other, Coverage):
             return self.to_tuple() >= other.to_tuple()
@@ -235,7 +243,7 @@ class Coverage:
             return False
 
     def __hash__(self):
-        return hash((self.file, self.line, self.comment))
+        return hash((self.file, self.line, self.comment, self.rare))
 
 
 class TraceFiles:
@@ -276,6 +284,7 @@ class TraceFiles:
                     raise StopIteration
                 self.current += 1
                 return self.trace_files[self.current - 1]
+
         return TraceFilesIterator(self)
 
 
@@ -283,11 +292,12 @@ class Summary:
     def __init__(self, binary: Path, runtime: float = 0, max_rss: int | None = None,
                  was_killed: bool = False, uid: uuid.UUID | None = None, expected_unseed: int | None = None,
                  exit_code: int = 0, valgrind_out_file: Path | None = None, stats: str | None = None,
-                 error_out: str = None, will_restart: bool = False):
+                 error_out: str = None, will_restart: bool = False, long_running: bool = False):
         self.binary = binary
         self.runtime: float = runtime
         self.max_rss: int | None = max_rss
         self.was_killed: bool = was_killed
+        self.long_running = long_running
         self.expected_unseed: int | None = expected_unseed
         self.exit_code: int = exit_code
         self.out: SummaryTree = SummaryTree('Test')
@@ -306,6 +316,10 @@ class Summary:
         self.stderr_severity: str = '40'
         self.will_restart: bool = will_restart
         self.test_dir: Path | None = None
+        self.is_negative_test = False
+        self.negative_test_success = False
+        self.max_trace_time = -1
+        self.max_trace_time_type = 'None'
 
         if uid is not None:
             self.out.attributes['TestUID'] = str(uid)
@@ -313,6 +327,7 @@ class Summary:
             self.out.attributes['Statistics'] = stats
         self.out.attributes['JoshuaSeed'] = str(config.joshua_seed)
         self.out.attributes['WillRestart'] = '1' if self.will_restart else '0'
+        self.out.attributes['NegativeTest'] = '1' if self.is_negative_test else '0'
 
         self.handler = ParseHandler(self.out)
         self.register_handlers()
@@ -361,7 +376,8 @@ class Summary:
         return res
 
     def ok(self):
-        return not self.error
+        # logical xor -- a test is successful if there was either no error or we expected errors (negative test)
+        return (not self.error) != self.is_negative_test
 
     def done(self):
         if config.print_coverage:
@@ -369,6 +385,7 @@ class Summary:
                 child = SummaryTree('CodeCoverage')
                 child.attributes['File'] = k.file
                 child.attributes['Line'] = str(k.line)
+                child.attributes['Rare'] = k.rare
                 if not v:
                     child.attributes['Covered'] = '0'
                 if k.comment is not None and len(k.comment):
@@ -384,9 +401,14 @@ class Summary:
             child.attributes['Severity'] = '40'
             child.attributes['ErrorCount'] = str(self.errors)
             self.out.append(child)
+            self.error = True
         if self.was_killed:
             child = SummaryTree('ExternalTimeout')
             child.attributes['Severity'] = '40'
+            if self.long_running:
+                # debugging info for long-running tests
+                child.attributes['LongRunning'] = '1'
+                child.attributes['Runtime'] = str(self.runtime)
             self.out.append(child)
             self.error = True
         if self.max_rss is not None:
@@ -419,12 +441,16 @@ class Summary:
         if not self.test_end_found:
             child = SummaryTree('TestUnexpectedlyNotFinished')
             child.attributes['Severity'] = '40'
+            child.attributes['LastTraceTime'] = str(self.max_trace_time)
+            child.attributes['LastTraceType'] = self.max_trace_time_type
             self.out.append(child)
+            self.error = True
         if self.error_out is not None and len(self.error_out) > 0:
             lines = self.error_out.splitlines()
             stderr_bytes = 0
             for line in lines:
-                if line.endswith("WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!"):
+                if line.endswith(
+                        "WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!"):
                     # When running ASAN we expect to see this message. Boost coroutine should be using the correct asan annotations so that it shouldn't produce any false positives.
                     continue
                 if line.endswith("Warning: unimplemented fcntl command: 1036"):
@@ -447,6 +473,7 @@ class Summary:
                 self.out.append(child)
 
         self.out.attributes['Ok'] = '1' if self.ok() else '0'
+        self.out.attributes['Runtime'] = str(self.runtime)
         if not self.ok():
             reason = 'Unknown'
             if self.error:
@@ -494,6 +521,17 @@ class Summary:
 
         self.handler.add_handler(('Severity', None), remap_event_severity)
 
+        def get_max_trace_time(attrs):
+            if 'Type' not in attrs:
+                return None
+            time = float(attrs['Time'])
+            if time >= self.max_trace_time:
+                self.max_trace_time = time
+                self.max_trace_time_type = attrs['Type']
+            return None
+
+        self.handler.add_handler(('Time', None), get_max_trace_time)
+
         def program_start(attrs: Dict[str, str]):
             if self.test_begin_found:
                 return
@@ -509,6 +547,22 @@ class Summary:
                 self.out.attributes['FaultInjectionEnabled'] = attrs['FaultInjectionEnabled']
 
         self.handler.add_handler(('Type', 'ProgramStart'), program_start)
+
+        def negative_test_success(attrs: Dict[str, str]):
+            self.negative_test_success = True
+            child = SummaryTree(attrs['Type'])
+            for k, v in attrs:
+                if k != 'Type':
+                    child.attributes[k] = v
+            self.out.append(child)
+            pass
+
+        self.handler.add_handler(('Type', 'NegativeTestSuccess'), negative_test_success)
+
+        def config_string(attrs: Dict[str, str]):
+            self.out.attributes['ConfigString'] = attrs['ConfigString']
+
+        self.handler.add_handler(('Type', 'SimulatorConfig'), config_string)
 
         def set_test_file(attrs: Dict[str, str]):
             test_file = Path(attrs['TestFile'])
@@ -558,6 +612,9 @@ class Summary:
         self.handler.add_handler(('Severity', '30'), parse_warning)
 
         def parse_error(attrs: Dict[str, str]):
+            if 'ErrorIsInjectedFault' in attrs and attrs['ErrorIsInjectedFault'].lower() in ['1', 'true']:
+                # ignore injected errors. In newer fdb versions these will have a lower severity
+                return
             self.errors += 1
             self.error = True
             if self.errors > config.max_errors:
@@ -576,7 +633,10 @@ class Summary:
             comment = ''
             if 'Comment' in attrs:
                 comment = attrs['Comment']
-            c = Coverage(attrs['File'], attrs['Line'], comment)
+            rare = False
+            if 'Rare' in attrs:
+                rare = bool(int(attrs['Rare']))
+            c = Coverage(attrs['File'], attrs['Line'], comment, rare)
             if covered or c not in self.coverage:
                 self.coverage[c] = covered
 
@@ -604,6 +664,7 @@ class Summary:
                 child.attributes['File'] = attrs['File']
                 child.attributes['Line'] = attrs['Line']
                 self.out.append(child)
+
         self.handler.add_handler(('Type', 'BuggifySection'), buggify_section)
         self.handler.add_handler(('Type', 'FaultInjected'), buggify_section)
 
@@ -612,9 +673,11 @@ class Summary:
             child.attributes['Name'] = attrs['Name']
             child.attributes['File'] = attrs['File']
             child.attributes['Line'] = attrs['Line']
+
         self.handler.add_handler(('Type', 'RunningUnitTest'), running_unit_test)
 
         def stderr_severity(attrs: Dict[str, str]):
             if 'NewSeverity' in attrs:
                 self.stderr_severity = attrs['NewSeverity']
+
         self.handler.add_handler(('Type', 'StderrSeverity'), stderr_severity)

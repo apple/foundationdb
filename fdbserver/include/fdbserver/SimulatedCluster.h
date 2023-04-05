@@ -22,6 +22,7 @@
 #define FDBSERVER_SIMULATEDCLUSTER_H
 #pragma once
 
+// The function at present is only called through "fdbserver -r simulation"
 void setupAndRun(std::string const& dataFolder,
                  const char* const& testFile,
                  bool const& rebooting,
@@ -36,6 +37,9 @@ public:
 	bool simpleConfig = false;
 	Optional<int> desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType, machineCount,
 	    coordinators;
+	// ASAN uses more memory, so adding too many machines can cause OOMs. Tests can set this if they need to lower
+	// machineCount specifically for ASAN. Only has an effect if `machineCount` is set and this is an ASAN build.
+	Optional<int> asanMachineCount;
 };
 
 DatabaseConfiguration generateNormalDatabaseConfiguration(const BasicTestConfig& testConfig);

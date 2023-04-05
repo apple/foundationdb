@@ -62,15 +62,15 @@ public:
 		LatencySample readLatencySample = { "AsyncFileKAIOReadLatency",
 			                                UID(),
 			                                FLOW_KNOBS->KAIO_LATENCY_LOGGING_INTERVAL,
-			                                FLOW_KNOBS->KAIO_LATENCY_SAMPLE_SIZE };
+			                                FLOW_KNOBS->KAIO_LATENCY_SKETCH_ACCURACY };
 		LatencySample writeLatencySample = { "AsyncFileKAIOWriteLatency",
 			                                 UID(),
 			                                 FLOW_KNOBS->KAIO_LATENCY_LOGGING_INTERVAL,
-			                                 FLOW_KNOBS->KAIO_LATENCY_SAMPLE_SIZE };
+			                                 FLOW_KNOBS->KAIO_LATENCY_SKETCH_ACCURACY };
 		LatencySample syncLatencySample = { "AsyncFileKAIOSyncLatency",
 			                                UID(),
 			                                FLOW_KNOBS->KAIO_LATENCY_LOGGING_INTERVAL,
-			                                FLOW_KNOBS->KAIO_LATENCY_SAMPLE_SIZE };
+			                                FLOW_KNOBS->KAIO_LATENCY_SKETCH_ACCURACY };
 	};
 
 	static AsyncFileKAIOMetrics& getMetrics() {

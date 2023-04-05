@@ -50,6 +50,7 @@ enum EMkCertOpt : int {
 	OPT_PRINT_CLIENT_CERT,
 	OPT_PRINT_ARGUMENTS,
 	OPT_ENABLE_TRACE,
+	OPT_NO_SHARED_SERVER_CLIENT_CA,
 };
 
 CSimpleOpt::SOption gOptions[] = { { OPT_HELP, "--help", SO_NONE },
@@ -70,10 +71,11 @@ CSimpleOpt::SOption gOptions[] = { { OPT_HELP, "--help", SO_NONE },
 	                               { OPT_PRINT_CLIENT_CERT, "--print-client-cert", SO_NONE },
 	                               { OPT_PRINT_ARGUMENTS, "--print-args", SO_NONE },
 	                               { OPT_ENABLE_TRACE, "--trace", SO_NONE },
+	                               { OPT_NO_SHARED_SERVER_CLIENT_CA, "--no-shared-server-client-ca", SO_NONE },
 	                               SO_END_OF_OPTIONS };
 
 template <size_t Len>
-void printOptionUsage(std::string_view option, const char*(&&optionDescLines)[Len]) {
+void printOptionUsage(std::string_view option, const char* (&&optionDescLines)[Len]) {
 	constexpr std::string_view optionIndent{ "  " };
 	constexpr std::string_view descIndent{ "                " };
 	fmt::print(stdout, "{}{}\n", optionIndent, option);
@@ -127,6 +129,8 @@ void printUsage(std::string_view binary) {
 	                   "Printed certificates are in leaf-to-CA order.",
 	                   "If --print-server-cert is also used, server chain precedes client's." });
 	printOptionUsage("--print-args (default: no)", { "Print chain generation arguments." });
+	printOptionUsage("--no-shared-server-client-ca (default: no)",
+	                 { "DISABLE the use of common root CA for client and server certificates." });
 }
 
 struct ChainSpec {
@@ -149,10 +153,10 @@ struct ChainSpec {
 		fmt::print(stdout, "  CA file: {}\n", caFile);
 		fmt::print(stdout, "  Expire cert: {}\n", expireLeaf);
 	}
-	mkcert::CertChainRef makeChain(Arena& arena);
+	mkcert::CertChainRef makeChain(Arena& arena, Optional<mkcert::CertAndKeyRef> rootCa = {});
 };
 
-mkcert::CertChainRef ChainSpec::makeChain(Arena& arena) {
+mkcert::CertChainRef ChainSpec::makeChain(Arena& arena, Optional<mkcert::CertAndKeyRef> rootCa) {
 	auto checkStream = [](std::ofstream& fs, std::string_view filename) {
 		if (!fs) {
 			throw std::runtime_error(fmt::format("cannot open '{}' for writing", filename));
@@ -171,7 +175,7 @@ mkcert::CertChainRef ChainSpec::makeChain(Arena& arena) {
 		specs[0].offsetNotBefore = -60l * 60 * 24 * 365;
 		specs[0].offsetNotAfter = -10l;
 	}
-	auto chain = mkcert::makeCertChain(arena, specs, {} /*generate root CA*/);
+	auto chain = mkcert::makeCertChain(arena, specs, rootCa);
 	auto ca = chain.back().certPem;
 	ofsCa.write(reinterpret_cast<char const*>(ca.begin()), ca.size());
 	auto chainMinusRoot = chain;
@@ -194,6 +198,7 @@ int main(int argc, char** argv) {
 	auto printClientCert = false;
 	auto printArguments = false;
 	auto enableTrace = false;
+	auto noSharedServerClientCa = false;
 	auto args = CSimpleOpt(argc, argv, gOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 	while (args.Next()) {
 		if (auto err = args.LastError()) {
@@ -223,6 +228,7 @@ int main(int argc, char** argv) {
 			case OPT_SERVER_CHAIN_LEN:
 				try {
 					serverArgs.length = std::stoul(args.OptionArg());
+					assert(serverArgs.length > 0);
 				} catch (std::exception const& ex) {
 					fmt::print(stderr, "ERROR: Invalid chain length ({})\n", ex.what());
 					return FDB_EXIT_ERROR;
@@ -231,6 +237,7 @@ int main(int argc, char** argv) {
 			case OPT_CLIENT_CHAIN_LEN:
 				try {
 					clientArgs.length = std::stoul(args.OptionArg());
+					assert(clientArgs.length > 0);
 				} catch (std::exception const& ex) {
 					fmt::print(stderr, "ERROR: Invalid chain length ({})\n", ex.what());
 					return FDB_EXIT_ERROR;
@@ -271,6 +278,10 @@ int main(int argc, char** argv) {
 				break;
 			case OPT_ENABLE_TRACE:
 				enableTrace = true;
+				break;
+			case OPT_NO_SHARED_SERVER_CLIENT_CA:
+				noSharedServerClientCa = true;
+				break;
 			default:
 				fmt::print(stderr, "ERROR: Unknown option {}\n", args.OptionText());
 				return FDB_EXIT_ERROR;
@@ -283,7 +294,7 @@ int main(int argc, char** argv) {
 		Error::init();
 		g_network = newNet2(TLSConfig());
 		if (enableTrace)
-			openTraceFile(NetworkAddress(), 10 << 20, 10 << 20, ".", "mkcert");
+			openTraceFile({}, 10 << 20, 10 << 20, ".", "mkcert");
 		auto thread = std::thread([]() { g_network->run(); });
 		auto cleanUpGuard = ScopeExit([&thread, enableTrace]() {
 			g_network->stop();
@@ -300,7 +311,9 @@ int main(int argc, char** argv) {
 		}
 		auto arena = Arena();
 		auto serverChain = serverArgs.makeChain(arena);
-		auto clientChain = clientArgs.makeChain(arena);
+		// IMPORTANT: By default, use same root CA for server and client, such that servers can trust other servers
+		auto clientChain = clientArgs.makeChain(
+		    arena, noSharedServerClientCa ? Optional<mkcert::CertAndKeyRef>() : serverChain.back());
 
 		if (printServerCert || printClientCert) {
 			if (printServerCert) {

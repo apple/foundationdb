@@ -22,7 +22,7 @@
 #define FDBCLIENT_BUILD_IDEMPOTENCY_ID_MUTATIONS_H
 
 #include "fdbclient/CommitProxyInterface.h"
-#include "fdbclient/IdempotencyId.h"
+#include "fdbclient/IdempotencyId.actor.h"
 
 #pragma once
 

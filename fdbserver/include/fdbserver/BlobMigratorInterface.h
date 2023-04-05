@@ -33,20 +33,28 @@ struct BlobMigratorInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	LocalityData locality;
 	UID uniqueID;
+	StorageServerInterface ssi;
 
 	BlobMigratorInterface() {}
-	BlobMigratorInterface(const struct LocalityData& l, UID id) : uniqueID(id), locality(l) {}
+	BlobMigratorInterface(const struct LocalityData& l, UID id) : uniqueID(id), locality(l) {
+		ssi.locality = l;
+		// The second 8 bytes of all blob migration interface id is fixed
+		ASSERT(id.second() == file_identifier);
+		ssi.uniqueID = uniqueID;
+	}
 
-	void initEndpoints() {}
+	void initEndpoints() { ssi.initEndpoints(); }
 	UID id() const { return uniqueID; }
-	NetworkAddress address() const { return waitFailure.getEndpoint().getPrimaryAddress(); }
+	NetworkAddress address() const { return haltBlobMigrator.getEndpoint().getPrimaryAddress(); }
 	bool operator==(const BlobMigratorInterface& r) const { return id() == r.id(); }
 	bool operator!=(const BlobMigratorInterface& r) const { return !(*this == r); }
 
+	static UID newId() { return UID(deterministicRandom()->randomUInt64(), file_identifier); }
+	static bool isBlobMigrator(UID id) { return id.second() == file_identifier; };
+
 	template <class Archive>
 	void serialize(Archive& ar) {
-		// StorageServerInterface::serialize(ar);
-		serializer(ar, waitFailure, haltBlobMigrator, locality, uniqueID);
+		serializer(ar, locality, uniqueID, haltBlobMigrator, waitFailure);
 	}
 };
 

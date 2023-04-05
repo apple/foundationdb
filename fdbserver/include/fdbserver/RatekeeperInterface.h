@@ -150,8 +150,9 @@ struct ReportCommitCostEstimationRequest {
 	ReplyPromise<Void> reply;
 
 	ReportCommitCostEstimationRequest() {}
-	ReportCommitCostEstimationRequest(UIDTransactionTagMap<TransactionCommitCostEstimation> ssTrTagCommitCost)
-	  : ssTrTagCommitCost(ssTrTagCommitCost) {}
+	explicit ReportCommitCostEstimationRequest(
+	    UIDTransactionTagMap<TransactionCommitCostEstimation>&& ssTrTagCommitCost)
+	  : ssTrTagCommitCost(std::move(ssTrTagCommitCost)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

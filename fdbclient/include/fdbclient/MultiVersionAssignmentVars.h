@@ -260,8 +260,15 @@ public:
 	}
 
 	void cancel() override {
-		source.getPtr()->addref(); // Cancel will delref our future, but we don't want to destroy it until this callback
-		                           // gets destroyed
+		// Break the cyclic reference between this and the source future
+		if (source.clearCallback(this)) {
+			// If we successfully cleared the callback, it was not fired yet.
+			// In that case, set operation_cancelled() as the result of the future
+			sendResult(mapValue(operation_cancelled()));
+			ThreadSingleAssignmentVar<T>::delref();
+		}
+		source.getPtr()->addref(); // Cancel will delref the source future, but we don't want
+		                           // to destroy it until this callback gets destroyed
 		source.getPtr()->cancel();
 		ThreadSingleAssignmentVar<T>::cancel();
 	}

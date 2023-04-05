@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -37,11 +37,11 @@ struct StreamingReadWorkload : TestWorkload {
 	std::vector<Future<Void>> clients;
 	PerfIntCounter transactions, readKeys;
 	PerfIntCounter readValueBytes;
-	ContinuousSample<double> latencies;
+	DDSketch<double> latencies;
 
 	StreamingReadWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), readKeys("Keys Read"), readValueBytes("Value Bytes Read"),
-	    latencies(2000) {
+	    latencies() {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		actorCount = getOption(options, "actorCount"_sr, 20);
 		readsPerTransaction = getOption(options, "readsPerTransaction"_sr, 10);

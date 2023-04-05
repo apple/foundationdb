@@ -56,7 +56,6 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 	std::unordered_map<CacheKey, StringRef, boost::hash<CacheKey>> cipherIdMap;
 	std::vector<CacheKey> cipherIds;
 	int numDomains;
-	std::vector<EKPGetLatestCipherKeysRequestInfo> domainInfos;
 	static std::atomic<int> seed;
 	bool enableTest;
 
@@ -74,15 +73,15 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 	ACTOR Future<Void> simEmptyDomainIdCache(EncryptKeyProxyTestWorkload* self) {
 		TraceEvent("SimEmptyDomainIdCacheStart").log();
 
-		state std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
+		state std::unordered_set<EncryptCipherDomainId> domainIds;
 		for (int i = 0; i < self->numDomains / 2; i++) {
 			const EncryptCipherDomainId domainId = self->minDomainId + i;
-			domains.emplace(domainId, StringRef(std::to_string(domainId)));
+			domainIds.emplace(domainId);
 		}
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> latestCiphers =
-		    wait(getLatestEncryptCipherKeys(self->dbInfo, domains, BlobCipherMetrics::UsageType::TEST));
+		    wait(getLatestEncryptCipherKeys(self->dbInfo, domainIds, BlobCipherMetrics::UsageType::TEST));
 
-		ASSERT_EQ(latestCiphers.size(), domains.size());
+		ASSERT_EQ(latestCiphers.size(), domainIds.size());
 
 		TraceEvent("SimEmptyDomainIdCacheDone").log();
 		return Void();
@@ -94,19 +93,19 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		// Construct a lookup set such that few ciphers are cached as well as few ciphers can never to cached (invalid
 		// keys)
 		state int expectedHits = deterministicRandom()->randomInt(1, self->numDomains / 2);
-		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
+		std::unordered_set<EncryptCipherDomainId> domainIds;
 		for (int i = 0; i < expectedHits; i++) {
 			const EncryptCipherDomainId domainId = self->minDomainId + i;
-			domains.emplace(domainId, StringRef(std::to_string(domainId)));
+			domainIds.emplace(domainId);
 		}
 
 		state int expectedMisses = deterministicRandom()->randomInt(1, self->numDomains / 2);
 		for (int i = 0; i < expectedMisses; i++) {
 			const EncryptCipherDomainId domainId = self->minDomainId + i + self->numDomains / 2 + 1;
-			domains.emplace(domainId, StringRef(std::to_string(domainId)));
+			domainIds.emplace(domainId);
 		}
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> latestCiphers =
-		    wait(getLatestEncryptCipherKeys(self->dbInfo, domains, BlobCipherMetrics::UsageType::TEST));
+		    wait(getLatestEncryptCipherKeys(self->dbInfo, domainIds, BlobCipherMetrics::UsageType::TEST));
 
 		TraceEvent("SimPartialDomainIdCacheEnd");
 		return Void();
@@ -116,14 +115,14 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		TraceEvent("SimRandomDomainIdCacheStart");
 
 		// Ensure BlobCipherCache is populated
-		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
+		std::unordered_set<EncryptCipherDomainId> domainIds;
 		for (int i = 0; i < self->numDomains; i++) {
 			const EncryptCipherDomainId domainId = self->minDomainId + i;
-			domains[domainId] = StringRef(std::to_string(domainId));
+			domainIds.emplace(domainId);
 		}
 
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> latestCiphers =
-		    wait(getLatestEncryptCipherKeys(self->dbInfo, domains, BlobCipherMetrics::UsageType::TEST));
+		    wait(getLatestEncryptCipherKeys(self->dbInfo, domainIds, BlobCipherMetrics::UsageType::TEST));
 		state std::vector<Reference<BlobCipherKey>> cipherKeysVec;
 		for (auto item : latestCiphers) {
 			cipherKeysVec.push_back(item.second);
@@ -176,15 +175,15 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 			// Prepare a lookup with valid and invalid keyIds - SimEncryptKmsProxy should throw
 			// encrypt_key_not_found()
-			std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
+			std::unordered_set<EncryptCipherDomainId> domainIds;
 			for (auto item : self->cipherIds) {
-				domains[item.second] = StringRef(std::to_string(item.first));
+				domainIds.emplace(item.second);
 				// Ensure the key is not 'cached'
 				cipherKeyCache->resetEncryptDomainId(item.second);
 			}
-			domains[FDB_DEFAULT_ENCRYPT_DOMAIN_ID - 1] = StringRef(std::to_string(1));
+			domainIds.emplace(FDB_DEFAULT_ENCRYPT_DOMAIN_ID - 1);
 			std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> res =
-			    wait(getLatestEncryptCipherKeys(self->dbInfo, domains, BlobCipherMetrics::UsageType::TEST));
+			    wait(getLatestEncryptCipherKeys(self->dbInfo, domainIds, BlobCipherMetrics::UsageType::TEST));
 			// BlobCipherKeyCache is 'empty'; fetching invalid cipher from KMS must through 'encrypt_key_not_found'
 			ASSERT(false);
 		} catch (Error& e) {

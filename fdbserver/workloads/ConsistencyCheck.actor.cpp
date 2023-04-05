@@ -22,7 +22,7 @@
 #include "boost/lexical_cast.hpp"
 
 #include "flow/IRandom.h"
-#include "fdbclient/Tracing.h"
+#include "flow/ProcessEvents.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -30,7 +30,7 @@
 #include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
@@ -38,6 +38,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/network.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -45,6 +46,18 @@
 #define SevCCheckInfo SevInfo
 
 struct ConsistencyCheckWorkload : TestWorkload {
+	struct OnTimeout {
+		ConsistencyCheckWorkload& self;
+		explicit OnTimeout(ConsistencyCheckWorkload& self) : self(self) {}
+		void operator()(StringRef name, std::any const& msg, Error const& e) {
+			TraceEvent(SevError, "ConsistencyCheckFailure")
+			    .error(e)
+			    .detail("EventName", name)
+			    .detail("EventMessage", std::any_cast<StringRef>(msg))
+			    .log();
+		}
+	};
+
 	static constexpr auto NAME = "ConsistencyCheck";
 	// Whether or not we should perform checks that will only pass if the database is in a quiescent state
 	bool performQuiescentChecks;
@@ -98,7 +111,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 	Future<Void> monitorConsistencyCheckSettingsActor;
 
-	ConsistencyCheckWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	OnTimeout onTimeout;
+	ProcessEvents::Event onTimeoutEvent;
+
+	ConsistencyCheckWorkload(WorkloadContext const& wcx)
+	  : TestWorkload(wcx), onTimeout(*this), onTimeoutEvent({ "Timeout"_sr, "TracedTooManyLines"_sr }, onTimeout) {
 		performQuiescentChecks = getOption(options, "performQuiescentChecks"_sr, false);
 		performCacheCheck = getOption(options, "performCacheCheck"_sr, false);
 		performTSSCheck = getOption(options, "performTSSCheck"_sr, true);
@@ -131,6 +148,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			try {
 				wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0),
 				                  self->quiescentWaitTimeout)); // FIXME: should be zero?
+				if (g_network->isSimulated()) {
+					g_simulator->quiesced = true;
+					TraceEvent("ConsistencyCheckQuiesced").detail("Quiesced", g_simulator->quiesced);
+				}
 			} catch (Error& e) {
 				TraceEvent("ConsistencyCheck_QuietDatabaseError").error(e);
 				self->testFailure("Unable to achieve a quiet database");
@@ -200,6 +221,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 				when(wait(self->suspendConsistencyCheck.onChange())) {}
 			}
+		}
+		if (self->firstClient && g_network->isSimulated() && self->performQuiescentChecks) {
+			g_simulator->quiesced = false;
+			TraceEvent("ConsistencyCheckQuiescedEnd").detail("Quiesced", g_simulator->quiesced);
 		}
 		return Void();
 	}
@@ -320,45 +345,50 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 				// Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
 				state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
-				bool keyServerResult =
-				    wait(getKeyServers(cx, keyServerPromise, keyServersKeys, self->performQuiescentChecks));
+				bool keyServerResult = wait(getKeyServers(cx,
+				                                          keyServerPromise,
+				                                          keyServersKeys,
+				                                          self->performQuiescentChecks,
+				                                          self->failureIsError,
+				                                          &self->success));
 				if (keyServerResult) {
 					state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
 					    keyServerPromise.getFuture().get();
 
 					// Get the locations of all the shards in the database
 					state Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise;
-					bool keyLocationResult =
-					    wait(getKeyLocations(cx, keyServers, keyLocationPromise, self->performQuiescentChecks));
+					bool keyLocationResult = wait(getKeyLocations(
+					    cx, keyServers, keyLocationPromise, self->performQuiescentChecks, &self->success));
 					if (keyLocationResult) {
 						state Standalone<VectorRef<KeyValueRef>> keyLocations = keyLocationPromise.getFuture().get();
 
 						// Check that each shard has the same data on all storage servers that it resides on
-						wait(::success(
-						    checkDataConsistency(cx,
-						                         keyLocations,
-						                         configuration,
-						                         tssMapping,
-						                         self->performQuiescentChecks,
-						                         self->performTSSCheck,
-						                         self->firstClient,
-						                         self->failureIsError,
-						                         self->clientId,
-						                         self->clientCount,
-						                         self->distributed,
-						                         self->shuffleShards,
-						                         self->shardSampleFactor,
-						                         self->sharedRandomNumber,
-						                         self->repetitions,
-						                         &(self->bytesReadInPreviousRound),
-						                         true,
-						                         self->rateLimitMax,
-						                         CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,
-						                         KeyRef())));
+						wait(checkDataConsistency(cx,
+						                          keyLocations,
+						                          configuration,
+						                          tssMapping,
+						                          self->performQuiescentChecks,
+						                          self->performTSSCheck,
+						                          self->firstClient,
+						                          self->failureIsError,
+						                          self->clientId,
+						                          self->clientCount,
+						                          self->distributed,
+						                          self->shuffleShards,
+						                          self->shardSampleFactor,
+						                          self->sharedRandomNumber,
+						                          self->repetitions,
+						                          &(self->bytesReadInPreviousRound),
+						                          true,
+						                          self->rateLimitMax,
+						                          CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,
+						                          KeyRef(),
+						                          &self->success));
 
 						// Cache consistency check
-						if (self->performCacheCheck)
-							wait(::success(self->checkCacheConsistency(cx, keyLocations, self)));
+						if (self->performCacheCheck) {
+							wait(self->checkCacheConsistency(cx, keyLocations, self));
+						}
 					}
 				}
 			} catch (Error& e) {
@@ -381,7 +411,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	// Check the data consistency between storage cache servers and storage servers
 	// keyLocations: all key/value pairs persisted in the database, reused from previous consistency check on all
 	// storage servers
-	ACTOR Future<bool> checkCacheConsistency(Database cx,
+	ACTOR Future<Void> checkCacheConsistency(Database cx,
 	                                         VectorRef<KeyValueRef> keyLocations,
 	                                         ConsistencyCheckWorkload* self) {
 		state Promise<Standalone<VectorRef<KeyValueRef>>> cacheKeyPromise;
@@ -414,7 +444,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			    .detail("CacheServerKey", boost::lexical_cast<std::string>(cacheResults[1]))
 			    .detail("ServerListKey", boost::lexical_cast<std::string>(cacheResults[2]))
 			    .detail("ServerTagKey", boost::lexical_cast<std::string>(cacheResults[3]));
-			return false;
+			self->success = false;
+			return Void();
 		}
 
 		state int rateLimitForThisRound =
@@ -557,6 +588,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 					req.version = version;
 					req.tags = TagSet();
+					req.options = ReadOptions(debugRandom()->randomUniqueID());
+					DisabledTraceEvent("CCD", req.options.get().debugID.get()).detail("Version", version);
 
 					// Try getting the entries in the specified range
 					state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
@@ -581,7 +614,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					for (j = 0; j < keyValueFutures.size(); j++) {
 						ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
 						// if (rangeResult.isError()) {
-						// 	throw rangeResult.getError();
+						//	throw rangeResult.getError();
 						// }
 
 						// Compare the results with other storage servers
@@ -709,7 +742,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 									    .detail("MatchingKVPairs", matchingKVPairs);
 
 									self->testFailure("Data inconsistent", true);
-									return false;
 								}
 							}
 						}
@@ -755,7 +787,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				    .detail("BytesRead", bytesReadInRange);
 			}
 		}
-		return true;
+		return Void();
 	}
 
 	// Directly fetch key/values from storage servers through GetKeyValuesRequest
@@ -769,7 +801,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	                                        bool removePrefix) {
 		// get shards paired with corresponding storage servers
 		state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
-		bool keyServerResult = wait(getKeyServers(cx, keyServerPromise, range, self->performQuiescentChecks));
+		bool keyServerResult = wait(getKeyServers(
+		    cx, keyServerPromise, range, self->performQuiescentChecks, self->failureIsError, &self->success));
 		if (!keyServerResult)
 			return false;
 		state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> shards =
@@ -1103,9 +1136,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("ReliableInfo", p->getReliableInfo())
 					    .detail("KillOrRebootProcess", p->address);
 					if (p->isReliable()) {
-						g_simulator->rebootProcess(p, ISimulator::RebootProcess);
+						g_simulator->rebootProcess(p, ISimulator::KillType::RebootProcess);
 					} else {
-						g_simulator->killProcess(p, ISimulator::KillInstantly);
+						g_simulator->killProcess(p, ISimulator::KillType::KillInstantly);
 					}
 				}
 
@@ -1114,7 +1147,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		if (foundExtraDataStore) {
-			wait(delay(10)); // let the cluster get to fully_recovered after the reboot before retrying
 			self->testFailure("Extra data stores present on workers");
 			return false;
 		}
@@ -1130,7 +1162,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	ACTOR Future<bool> checkBlobWorkers(Database cx,
 	                                    DatabaseConfiguration configuration,
 	                                    ConsistencyCheckWorkload* self) {
-		state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(cx));
+		state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(cx, true));
 		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 
 		// process addr -> num blob workers on that process
@@ -1190,6 +1222,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						return false;
 					}
 				}
+			} else if (blobWorkersByAddr[addr] > 0) {
+				TraceEvent("ConsistencyCheck_BWOnExcludedAddr").detail("Address", addr);
+				return false;
 			}
 		}
 		return numBlobWorkerProcesses > 0;
@@ -1554,7 +1589,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check EncryptKeyProxy
-		if (SERVER_KNOBS->ENABLE_ENCRYPTION && db.encryptKeyProxy.present() &&
+		if (config.encryptionAtRestMode.isEncryptionEnabled() && db.encryptKeyProxy.present() &&
 		    (!nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()].processClass.machineClassFitness(
 		         ProcessClass::EncryptKeyProxy) > fitnessLowerBound)) {

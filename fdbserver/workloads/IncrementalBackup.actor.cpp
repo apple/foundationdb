@@ -18,8 +18,10 @@
  * limitations under the License.
  */
 
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
@@ -114,14 +116,17 @@ struct IncrementalBackupWorkload : TestWorkload {
 			state int tries = 0;
 			loop {
 				tries++;
-				BackupDescription desc = wait(backupContainer->describeBackup(true));
+				state BackupDescription desc = wait(backupContainer->describeBackup(true));
 				TraceEvent("IBackupVersionGate")
 				    .detail("MaxLogEndVersion", desc.maxLogEnd.present() ? desc.maxLogEnd.get() : invalidVersion)
 				    .detail("ContiguousLogEndVersion",
 				            desc.contiguousLogEnd.present() ? desc.contiguousLogEnd.get() : invalidVersion)
 				    .detail("TargetVersion", v);
-				if (!desc.contiguousLogEnd.present())
+
+				if (!desc.contiguousLogEnd.present()) {
+					wait(delay(5.0));
 					continue;
+				}
 				if (desc.contiguousLogEnd.get() >= v)
 					break;
 				if (self->waitRetries != -1 && tries > self->waitRetries)
@@ -146,6 +151,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(Database cx, IncrementalBackupWorkload* self) {
 		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
+		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		addDefaultBackupRanges(backupRanges);
 
 		if (self->submitOnly) {
@@ -158,7 +164,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                    1e8,
 				                                    self->tag.toString(),
 				                                    backupRanges,
-				                                    SERVER_KNOBS->ENABLE_ENCRYPTION,
+				                                    true,
 				                                    StopWhenDone::False,
 				                                    UsePartitionedLog::False,
 				                                    IncrementalBackupOnly::True));
@@ -227,19 +233,56 @@ struct IncrementalBackupWorkload : TestWorkload {
 			    .detail("Size", containers.size())
 			    .detail("First", containers.front());
 			state Key backupURL = Key(containers.front());
+
+			state Standalone<VectorRef<KeyRangeRef>> restoreRange;
+			state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
+			for (auto r : backupRanges) {
+				if (config.tenantMode != TenantMode::REQUIRED || !r.intersects(getSystemBackupRanges())) {
+					restoreRange.push_back_deep(restoreRange.arena(), r);
+				} else {
+					KeyRangeRef normalKeyRange = r & normalKeys;
+					KeyRangeRef systemKeyRange = r & systemKeys;
+					if (!normalKeyRange.empty()) {
+						restoreRange.push_back_deep(restoreRange.arena(), normalKeyRange);
+					}
+					if (!systemKeyRange.empty()) {
+						systemRestoreRange.push_back_deep(systemRestoreRange.arena(), systemKeyRange);
+					}
+				}
+			}
+			if (!systemRestoreRange.empty()) {
+				TraceEvent("IBackupSystemRestoreAttempt").detail("BeginVersion", beginVersion);
+				wait(success(self->backupAgent.restore(cx,
+				                                       cx,
+				                                       "system_restore"_sr,
+				                                       backupURL,
+				                                       {},
+				                                       systemRestoreRange,
+				                                       WaitForComplete::True,
+				                                       invalidVersion,
+				                                       Verbose::True,
+				                                       Key(),
+				                                       Key(),
+				                                       LockDB::True,
+				                                       UnlockDB::True,
+				                                       OnlyApplyMutationLogs::True,
+				                                       InconsistentSnapshotOnly::False,
+				                                       beginVersion)));
+			}
 			TraceEvent("IBackupRestoreAttempt").detail("BeginVersion", beginVersion);
 			wait(success(self->backupAgent.restore(cx,
 			                                       cx,
 			                                       Key(self->tag.toString()),
 			                                       backupURL,
 			                                       {},
-			                                       backupRanges,
+			                                       restoreRange,
 			                                       WaitForComplete::True,
 			                                       invalidVersion,
 			                                       Verbose::True,
 			                                       Key(),
 			                                       Key(),
 			                                       LockDB::True,
+			                                       UnlockDB::True,
 			                                       OnlyApplyMutationLogs::True,
 			                                       InconsistentSnapshotOnly::False,
 			                                       beginVersion)));

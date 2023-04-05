@@ -34,14 +34,12 @@ import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncIterable;
 
 public class SerialIteration {
-	public static final int API_VERSION = 720;
-
 	private static final int ROWS = 1000000;
 	private static final int RUNS = 25;
 	private static final int THREAD_COUNT = 1;
 
 	public static void main(String[] args) throws InterruptedException {
-		FDB api = FDB.selectAPIVersion(API_VERSION);
+		FDB api = FDB.selectAPIVersion(TestApiVersion.CURRENT);
 		try(Database database = api.open(args[0])) {
 			for(int i = 1; i <= THREAD_COUNT; i++) {
 				runThreadedTest(database, i);

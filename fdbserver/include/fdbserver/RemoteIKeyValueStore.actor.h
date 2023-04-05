@@ -490,6 +490,10 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 		}
 		return Void();
 	}
+
+	Future<EncryptionAtRestMode> encryptionMode() override {
+		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
+	}
 };
 
 Future<Void> runFlowProcess(std::string const& name, Endpoint endpoint);

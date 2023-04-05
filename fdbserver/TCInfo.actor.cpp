@@ -51,7 +51,9 @@ public:
 					interfaceChanged = server->onInterfaceChanged;
 					resetRequest = Void();
 				}
-				when(wait(serverRemoved)) { return Void(); }
+				when(wait(serverRemoved)) {
+					return Void();
+				}
 				when(wait(resetRequest)) { // To prevent a tight spin loop
 					if (IFailureMonitor::failureMonitor().getState(ssi.getStorageMetrics.getEndpoint()).isFailed()) {
 						resetRequest = IFailureMonitor::failureMonitor().onStateEqual(

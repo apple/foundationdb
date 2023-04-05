@@ -247,6 +247,24 @@ public:
 		}
 	}
 
+	ACTOR static Future<bool> checkAnyBlobRanges(Database db) {
+		state Transaction tr(db);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				// FIXME: check if any active ranges. This still returns true if there are inactive ranges, but it
+				// mostly serves its purpose to allow setting blob_granules_enabled=1 on a cluster that has no blob
+				// workers currently.
+				RangeResult anyData = wait(tr.getRange(blobRangeKeys, 1));
+				return !anyData.empty();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR static Future<Void> monitorBlobWorkers(Ratekeeper* self, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		state std::vector<BlobWorkerInterface> blobWorkers;
 		state int workerFetchCount = 0;
@@ -257,6 +275,7 @@ public:
 
 		loop {
 			while (!self->configuration.blobGranulesEnabled) {
+				// FIXME: clear blob worker state if granules were previously enabled?
 				wait(delay(SERVER_KNOBS->SERVER_LIST_DELAY));
 			}
 
@@ -267,8 +286,9 @@ public:
 			                  (SERVER_KNOBS->METRIC_UPDATE_RATE * FLOW_KNOBS->DELAY_JITTER_OFFSET);
 			if (++workerFetchCount == fetchAmount || blobWorkerDead) {
 				workerFetchCount = 0;
-				std::vector<BlobWorkerInterface> _blobWorkers = wait(getBlobWorkers(self->db, true, &grv));
-				blobWorkers = _blobWorkers;
+				state Future<bool> anyBlobRangesCheck = checkAnyBlobRanges(self->db);
+				wait(store(blobWorkers, getBlobWorkers(self->db, true, &grv)));
+				wait(store(self->anyBlobRanges, anyBlobRangesCheck));
 			} else {
 				grv = self->maxVersion;
 			}
@@ -635,9 +655,9 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
                 SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH,
                 SERVER_KNOBS->TARGET_BW_LAG_BATCH),
-    maxVersion(0), blobWorkerTime(now()), unblockedAssignmentTime(now()) {
+    maxVersion(0), blobWorkerTime(now()), unblockedAssignmentTime(now()), anyBlobRanges(false) {
 	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
-		tagThrottler = std::make_unique<GlobalTagThrottler>(db, id);
+		tagThrottler = std::make_unique<GlobalTagThrottler>(db, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND);
 	} else {
 		tagThrottler = std::make_unique<TagThrottler>(db, id);
 	}
@@ -695,17 +715,16 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 
 		limitReason_t ssLimitReason = limitReason_t::unlimited;
 
-		int64_t minFreeSpace =
-		    std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE,
-		             (int64_t)(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * ss.smoothTotalSpace.smoothTotal()));
+		int64_t minFreeSpace = std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE,
+		                                (int64_t)(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * ss.getSmoothTotalSpace()));
 
 		worstFreeSpaceStorageServer =
-		    std::min(worstFreeSpaceStorageServer, (int64_t)ss.smoothFreeSpace.smoothTotal() - minFreeSpace);
+		    std::min(worstFreeSpaceStorageServer, (int64_t)ss.getSmoothFreeSpace() - minFreeSpace);
 
 		int64_t springBytes = std::max<int64_t>(
-		    1, std::min<int64_t>(limits->storageSpringBytes, (ss.smoothFreeSpace.smoothTotal() - minFreeSpace) * 0.2));
-		int64_t targetBytes = std::max<int64_t>(
-		    1, std::min(limits->storageTargetBytes, (int64_t)ss.smoothFreeSpace.smoothTotal() - minFreeSpace));
+		    1, std::min<int64_t>(limits->storageSpringBytes, (ss.getSmoothFreeSpace() - minFreeSpace) * 0.2));
+		int64_t targetBytes =
+		    std::max<int64_t>(1, std::min(limits->storageTargetBytes, (int64_t)ss.getSmoothFreeSpace() - minFreeSpace));
 		if (targetBytes != limits->storageTargetBytes) {
 			if (minFreeSpace == SERVER_KNOBS->MIN_AVAILABLE_SPACE) {
 				ssLimitReason = limitReason_t::storage_server_min_free_space;
@@ -716,8 +735,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 				TraceEvent("RatekeeperLimitReasonDetails")
 				    .detail("Reason", ssLimitReason)
 				    .detail("SSID", ss.id)
-				    .detail("SSSmoothTotalSpace", ss.smoothTotalSpace.smoothTotal())
-				    .detail("SSSmoothFreeSpace", ss.smoothFreeSpace.smoothTotal())
+				    .detail("SSSmoothTotalSpace", ss.getSmoothTotalSpace())
+				    .detail("SSSmoothFreeSpace", ss.getSmoothFreeSpace())
 				    .detail("TargetBytes", targetBytes)
 				    .detail("LimitsStorageTargetBytes", limits->storageTargetBytes)
 				    .detail("MinFreeSpace", minFreeSpace);
@@ -744,7 +763,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 			addActor.send(tagThrottler->tryUpdateAutoThrottling(ss));
 		}
 
-		double inputRate = ss.smoothInputBytes.smoothRate();
+		double inputRate = ss.getSmoothInputBytesRate();
 		// inputRate = std::max( inputRate, actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE );
 
 		/*if( deterministicRandom()->random01() < 0.1 ) {
@@ -753,15 +772,15 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		  .detail("MinFreeSpace", minFreeSpace)
 		  .detail("SpringBytes", springBytes)
 		  .detail("TargetBytes", targetBytes)
-		  .detail("SmoothTotalSpaceTotal", ss.smoothTotalSpace.smoothTotal())
-		  .detail("SmoothFreeSpaceTotal", ss.smoothFreeSpace.smoothTotal())
+		  .detail("SmoothTotalSpaceTotal", ss.getSmoothTotalSpace())
+		  .detail("SmoothFreeSpaceTotal", ss.getSmoothFreeSpace())
 		  .detail("LastReplyBytesInput", ss.lastReply.bytesInput)
-		  .detail("SmoothDurableBytesTotal", ss.smoothDurableBytes.smoothTotal())
+		  .detail("SmoothDurableBytesTotal", ss.getSmoothDurableBytes())
 		  .detail("TargetRateRatio", targetRateRatio)
-		  .detail("SmoothInputBytesRate", ss.smoothInputBytes.smoothRate())
+		  .detail("SmoothInputBytesRate", ss.getSmoothInputBytesRate())
 		  .detail("ActualTPS", actualTps)
 		  .detail("InputRate", inputRate)
-		  .detail("VerySmoothDurableBytesRate", ss.verySmoothDurableBytes.smoothRate())
+		  .detail("VerySmoothDurableBytesRate", ss.getVerySmoothDurableBytesRate())
 		  .detail("B", b);
 		  }*/
 
@@ -777,7 +796,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		if (targetRateRatio > 0 && inputRate > 0) {
 			ASSERT(inputRate != 0);
 			double smoothedRate =
-			    std::max(ss.verySmoothDurableBytes.smoothRate(), actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE);
+			    std::max(ss.getVerySmoothDurableBytesRate(), actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE);
 			double x = smoothedRate / (inputRate * targetRateRatio);
 			double lim = actualTps * x;
 			if (lim < limitTps) {
@@ -790,17 +809,17 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 						    .detail("Reason", limitReason_t::storage_server_write_queue_size)
 						    .detail("FromReason", ssLimitReason)
 						    .detail("SSID", ss.id)
-						    .detail("SSSmoothTotalSpace", ss.smoothTotalSpace.smoothTotal())
+						    .detail("SSSmoothTotalSpace", ss.getSmoothTotalSpace())
 						    .detail("LimitsStorageTargetBytes", limits->storageTargetBytes)
 						    .detail("LimitsStorageSpringBytes", limits->storageSpringBytes)
-						    .detail("SSSmoothFreeSpace", ss.smoothFreeSpace.smoothTotal())
+						    .detail("SSSmoothFreeSpace", ss.getSmoothFreeSpace())
 						    .detail("MinFreeSpace", minFreeSpace)
 						    .detail("SSLastReplyBytesInput", ss.lastReply.bytesInput)
-						    .detail("SSSmoothDurableBytes", ss.smoothDurableBytes.smoothTotal())
+						    .detail("SSSmoothDurableBytes", ss.getSmoothDurableBytes())
 						    .detail("StorageQueue", storageQueue)
 						    .detail("TargetBytes", targetBytes)
 						    .detail("SpringBytes", springBytes)
-						    .detail("SSVerySmoothDurableBytesSmoothRate", ss.verySmoothDurableBytes.smoothRate())
+						    .detail("SSVerySmoothDurableBytesRate", ss.getVerySmoothDurableBytesRate())
 						    .detail("SmoothedRate", smoothedRate)
 						    .detail("X", x)
 						    .detail("ActualTps", actualTps)
@@ -839,8 +858,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 			continue;
 		}
 
-		limitingStorageQueueStorageServer =
-		    ss->second->lastReply.bytesInput - ss->second->smoothDurableBytes.smoothTotal();
+		limitingStorageQueueStorageServer = ss->second->lastReply.bytesInput - ss->second->getSmoothDurableBytes();
 		limits->tpsLimit = ss->first;
 		reasonID = storageTpsLimitReverseIndex.begin()->second->id; // Although we aren't controlling based on the worst
 		// SS, we still report it as the limiting process
@@ -899,7 +917,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		break;
 	}
 
-	if (configuration.blobGranulesEnabled && SERVER_KNOBS->BW_THROTTLING_ENABLED) {
+	if (configuration.blobGranulesEnabled && SERVER_KNOBS->BW_THROTTLING_ENABLED && anyBlobRanges) {
 		Version lastBWVer = 0;
 		auto lastIter = version_transactions.end();
 		if (!blobWorkerVersionHistory.empty()) {
@@ -1086,16 +1104,15 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 
 		limitReason_t tlogLimitReason = limitReason_t::log_server_write_queue;
 
-		int64_t minFreeSpace =
-		    std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE,
-		             (int64_t)(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * tl.smoothTotalSpace.smoothTotal()));
+		int64_t minFreeSpace = std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE,
+		                                (int64_t)(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * tl.getSmoothTotalSpace()));
 
-		worstFreeSpaceTLog = std::min(worstFreeSpaceTLog, (int64_t)tl.smoothFreeSpace.smoothTotal() - minFreeSpace);
+		worstFreeSpaceTLog = std::min(worstFreeSpaceTLog, (int64_t)tl.getSmoothFreeSpace() - minFreeSpace);
 
 		int64_t springBytes = std::max<int64_t>(
-		    1, std::min<int64_t>(limits->logSpringBytes, (tl.smoothFreeSpace.smoothTotal() - minFreeSpace) * 0.2));
-		int64_t targetBytes = std::max<int64_t>(
-		    1, std::min(limits->logTargetBytes, (int64_t)tl.smoothFreeSpace.smoothTotal() - minFreeSpace));
+		    1, std::min<int64_t>(limits->logSpringBytes, (tl.getSmoothFreeSpace() - minFreeSpace) * 0.2));
+		int64_t targetBytes =
+		    std::max<int64_t>(1, std::min(limits->logTargetBytes, (int64_t)tl.getSmoothFreeSpace() - minFreeSpace));
 		if (targetBytes != limits->logTargetBytes) {
 			if (minFreeSpace == SERVER_KNOBS->MIN_AVAILABLE_SPACE) {
 				tlogLimitReason = limitReason_t::log_server_min_free_space;
@@ -1106,15 +1123,15 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 				TraceEvent("RatekeeperLimitReasonDetails")
 				    .detail("TLogID", tl.id)
 				    .detail("Reason", tlogLimitReason)
-				    .detail("TLSmoothFreeSpace", tl.smoothFreeSpace.smoothTotal())
-				    .detail("TLSmoothTotalSpace", tl.smoothTotalSpace.smoothTotal())
+				    .detail("TLSmoothFreeSpace", tl.getSmoothFreeSpace())
+				    .detail("TLSmoothTotalSpace", tl.getSmoothTotalSpace())
 				    .detail("LimitsLogTargetBytes", limits->logTargetBytes)
 				    .detail("TargetBytes", targetBytes)
 				    .detail("MinFreeSpace", minFreeSpace);
 			}
 		}
 
-		int64_t queue = tl.lastReply.bytesInput - tl.smoothDurableBytes.smoothTotal();
+		int64_t queue = tl.lastReply.bytesInput - tl.getSmoothDurableBytes();
 		healthMetrics.tLogQueue[tl.id] = queue;
 		int64_t b = queue - targetBytes;
 		worstStorageQueueTLog = std::max(worstStorageQueueTLog, queue);
@@ -1136,14 +1153,14 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 				TraceEvent("RatekeeperLimitReasonDetails")
 				    .detail("TLogID", tl.id)
 				    .detail("Reason", limitReason_t::storage_server_readable_behind)
-				    .detail("TLSmoothFreeSpace", tl.smoothFreeSpace.smoothTotal())
-				    .detail("TLSmoothTotalSpace", tl.smoothTotalSpace.smoothTotal())
+				    .detail("TLSmoothFreeSpace", tl.getSmoothFreeSpace())
+				    .detail("TLSmoothTotalSpace", tl.getSmoothTotalSpace())
 				    .detail("LimitsLogSpringBytes", limits->logSpringBytes)
 				    .detail("LimitsLogTargetBytes", limits->logTargetBytes)
 				    .detail("SpringBytes", springBytes)
 				    .detail("TargetBytes", targetBytes)
 				    .detail("TLLastReplyBytesInput", tl.lastReply.bytesInput)
-				    .detail("TLSmoothDurableBytes", tl.smoothDurableBytes.smoothTotal())
+				    .detail("TLSmoothDurableBytes", tl.getSmoothDurableBytes())
 				    .detail("Queue", queue)
 				    .detail("B", b)
 				    .detail("TargetRateRatio", targetRateRatio)
@@ -1155,11 +1172,11 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 			tlogLimitReason = limitReason_t::storage_server_readable_behind;
 		}
 
-		double inputRate = tl.smoothInputBytes.smoothRate();
+		double inputRate = tl.getSmoothInputBytesRate();
 
 		if (targetRateRatio > 0) {
 			double smoothedRate =
-			    std::max(tl.verySmoothDurableBytes.smoothRate(), actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE);
+			    std::max(tl.getVerySmoothDurableBytesRate(), actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE);
 			double x = smoothedRate / (inputRate * targetRateRatio);
 			if (targetRateRatio < .75) //< FIXME: KNOB for 2.0
 				x = std::max(x, 0.95);
@@ -1184,8 +1201,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 					    .detail("Reason", limitReason_t::log_server_mvcc_write_bandwidth)
 					    .detail("TLogID", tl.id)
 					    .detail("MinFreeSpace", minFreeSpace)
-					    .detail("TLSmoothFreeSpace", tl.smoothFreeSpace.smoothTotal())
-					    .detail("TLSmoothTotalSpace", tl.smoothTotalSpace.smoothTotal())
+					    .detail("TLSmoothFreeSpace", tl.getSmoothFreeSpace())
+					    .detail("TLSmoothTotalSpace", tl.getSmoothTotalSpace())
 					    .detail("LimitsLogSpringBytes", limits->logSpringBytes)
 					    .detail("LimitsLogTargetBytes", limits->logTargetBytes)
 					    .detail("SpringBytes", springBytes)
@@ -1366,7 +1383,7 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 	return updateCommitCostRequest;
 }
 
-Optional<double> StorageQueueInfo::getThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const {
+Optional<double> StorageQueueInfo::getTagThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const {
 	auto const storageQueue = getStorageQueueBytes();
 	if (storageQueue < storageTargetBytes - storageSpringBytes) {
 		return {};

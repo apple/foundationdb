@@ -111,6 +111,8 @@ class SimpleConfigConsumerImpl {
 				if (e.code() == error_code_version_already_compacted) {
 					CODE_PROBE(true, "SimpleConfigConsumer get version_already_compacted error");
 					wait(getSnapshotAndChanges(self, broadcaster));
+				} else if (e.code() == error_code_broken_promise) {
+					CODE_PROBE(true, "SimpleConfigConsumer::fetchChanges retrying on broken promise");
 				} else {
 					throw e;
 				}
@@ -166,8 +168,8 @@ public:
 	    successfulChangeRequest("SuccessfulChangeRequest", cc), failedChangeRequest("FailedChangeRequest", cc),
 	    snapshotRequest("SnapshotRequest", cc) {
 		cfi = getConfigFollowerInterface(configSource);
-		logger = traceCounters(
-		    "ConfigConsumerMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigConsumerMetrics");
+		logger = cc.traceCounters(
+		    "ConfigConsumerMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "ConfigConsumerMetrics");
 	}
 
 	Future<Void> consume(ConfigBroadcaster& broadcaster) {

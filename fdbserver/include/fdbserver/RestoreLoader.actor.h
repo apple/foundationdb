@@ -56,7 +56,7 @@ public:
 
 	void operator=(int newState) override { vbState = newState; }
 
-	int get() override { return vbState; }
+	int get() const override { return vbState; }
 };
 
 struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
@@ -93,11 +93,11 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 
 	explicit LoaderBatchData(UID nodeID, int batchIndex)
 	  : vbState(LoaderVersionBatchState::NOT_INIT), loadFileReqs(0), counters(this, nodeID, batchIndex) {
-		pollMetrics = traceCounters(format("FastRestoreLoaderMetrics%d", batchIndex),
-		                            nodeID,
-		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
-		                            &counters.cc,
-		                            nodeID.toString() + "/RestoreLoaderMetrics/" + std::to_string(batchIndex));
+		pollMetrics =
+		    counters.cc.traceCounters(format("FastRestoreLoaderMetrics%d", batchIndex),
+		                              nodeID,
+		                              SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
+		                              nodeID.toString() + "/RestoreLoaderMetrics/" + std::to_string(batchIndex));
 		TraceEvent("FastRestoreLoaderMetricsCreated").detail("Node", nodeID);
 	}
 
@@ -193,15 +193,15 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 
 	~RestoreLoaderData() override = default;
 
-	std::string describeNode() override {
+	std::string describeNode() const override {
 		std::stringstream ss;
 		ss << "[Role: Loader] [NodeID:" << nodeID.toString().c_str() << "] [NodeIndex:" << std::to_string(nodeIndex)
 		   << "]";
 		return ss.str();
 	}
 
-	int getVersionBatchState(int batchIndex) final {
-		std::map<int, Reference<LoaderBatchData>>::iterator item = batch.find(batchIndex);
+	int getVersionBatchState(int batchIndex) const final {
+		auto item = batch.find(batchIndex);
 		if (item == batch.end()) { // Batch has not been initialized when we blindly profile the state
 			return LoaderVersionBatchState::INVALID;
 		} else {

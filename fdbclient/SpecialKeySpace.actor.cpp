@@ -304,7 +304,9 @@ ACTOR Future<RangeResult> SpecialKeySpace::checkRYWValid(SpecialKeySpace* sks,
 		         wait(SpecialKeySpace::getRangeAggregationActor(sks, ryw, begin, end, limits, reverse))) {
 			return result;
 		}
-		when(wait(ryw->resetFuture())) { throw internal_error(); }
+		when(wait(ryw->resetFuture())) {
+			throw internal_error();
+		}
 	}
 }
 
@@ -971,9 +973,9 @@ ACTOR Future<bool> checkExclusion(Database db,
 	}
 	StatusObject status = wait(StatusClient::statusFetcher(db));
 	state std::string errorString =
-	    "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
+	    "ERROR: Could not calculate the impact of this exclude on the total available space in the cluster.\n"
 	    "Please try the exclude again in 30 seconds.\n"
-	    "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without checking free "
+	    "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without checking available "
 	    "space.\n";
 
 	StatusObjectReader statusObj(status);
@@ -995,8 +997,13 @@ ACTOR Future<bool> checkExclusion(Database db,
 
 	state std::unordered_set<std::string> diskLocalities;
 	state int64_t totalKvStoreFreeBytes = 0;
+	state int64_t totalKvStoreFreeBytesNotExcluded = 0;
 	state int64_t totalKvStoreUsedBytes = 0;
 	state int64_t totalKvStoreUsedBytesNonExcluded = 0;
+	state int64_t totalKvStoreAvailableBytes = 0;
+	// Keep track if we exclude any storage process with the provided adddresses
+	state bool excludedAddressesContainsStorageRole = false;
+
 	try {
 		for (auto proc : processesMap.obj()) {
 			StatusObjectReader process(proc.second);
@@ -1006,8 +1013,8 @@ ACTOR Future<bool> checkExclusion(Database db,
 				return false;
 			}
 			NetworkAddress addr = NetworkAddress::parse(addrStr);
-			bool excluded =
-			    (process.has("excluded") && process.last().get_bool()) || addressExcluded(*exclusions, addr);
+			bool includedInExclusion = addressExcluded(*exclusions, addr);
+			bool excluded = (process.has("excluded") && process.last().get_bool()) || includedInExclusion;
 
 			StatusObjectReader localityObj;
 			std::string disk_id;
@@ -1019,6 +1026,12 @@ ACTOR Future<bool> checkExclusion(Database db,
 			for (StatusObjectReader role : rolesArray) {
 				if (role["role"].get_str() == "storage") {
 					ssTotalCount++;
+
+					// Check if we are excluding a process that serves the storage role. We only have to check the free
+					// capacity if we are excluding at least one process that serves the storage role.
+					if (!excludedAddressesContainsStorageRole && includedInExclusion) {
+						excludedAddressesContainsStorageRole = true;
+					}
 
 					int64_t used_bytes;
 					if (!role.get("kvstore_used_bytes", used_bytes)) {
@@ -1034,13 +1047,22 @@ ACTOR Future<bool> checkExclusion(Database db,
 						return false;
 					}
 
+					int64_t available_bytes;
+					if (!role.get("kvstore_available_bytes", available_bytes)) {
+						*msg = ManagementAPIError::toJsonString(
+						    false, markFailed ? "exclude failed" : "exclude", errorString);
+						return false;
+					}
+
 					totalKvStoreUsedBytes += used_bytes;
+					totalKvStoreFreeBytes += free_bytes;
+					totalKvStoreAvailableBytes += available_bytes;
 
 					if (!excluded) {
 						totalKvStoreUsedBytesNonExcluded += used_bytes;
 
 						if (disk_id.empty() || diskLocalities.find(disk_id) == diskLocalities.end()) {
-							totalKvStoreFreeBytes += free_bytes;
+							totalKvStoreFreeBytesNotExcluded += free_bytes;
 							if (!disk_id.empty()) {
 								diskLocalities.insert(disk_id);
 							}
@@ -1059,11 +1081,23 @@ ACTOR Future<bool> checkExclusion(Database db,
 		return false;
 	}
 
-	double finalFreeRatio = 1 - (totalKvStoreUsedBytes / (totalKvStoreUsedBytesNonExcluded + totalKvStoreFreeBytes));
-	if (ssExcludedCount == ssTotalCount || finalFreeRatio <= 0.1) {
-		std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.\n"
+	// If the exclusion command only contains processes that serve a non storage role we can skip the free capacity
+	// check in order to not block those exclusions.
+	if (!excludedAddressesContainsStorageRole) {
+		return true;
+	}
+
+	// The numerator is the total space in use by FDB that is not immediately reusable.
+	// This is calculated as: used + free - available = used + free - (free - reusable) = used - reusable.
+	// The denominator is the total capacity usable by FDB (either used or unused currently).
+	double finalUnavailableRatio =
+	    (totalKvStoreUsedBytes + totalKvStoreFreeBytes - totalKvStoreAvailableBytes) /
+	    std::max((totalKvStoreUsedBytesNonExcluded + totalKvStoreFreeBytesNotExcluded), (int64_t)1);
+
+	if (ssExcludedCount == ssTotalCount || finalUnavailableRatio > 0.9) {
+		std::string temp = "ERROR: This exclude may cause the total available space in the cluster to drop below 10%.\n"
 		                   "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without "
-		                   "checking free space.\n";
+		                   "checking available space.\n";
 		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
 		return false;
 	}
@@ -1124,7 +1158,7 @@ ACTOR Future<Optional<std::string>> excludeCommitActor(ReadYourWritesTransaction
 		if (!safe)
 			return result;
 	}
-	excludeServers(ryw->getTransaction(), addresses, failed);
+	wait(excludeServers(&(ryw->getTransaction()), addresses, failed));
 	includeServers(ryw);
 
 	return result;
@@ -1169,7 +1203,7 @@ ACTOR Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ry
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE); // necessary?
 	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-	state std::vector<AddressExclusion> excl = wait((getExcludedServers(&tr)));
+	state std::vector<AddressExclusion> excl = wait((getAllExcludedServers(&tr)));
 	state std::set<AddressExclusion> exclusions(excl.begin(), excl.end());
 	state std::set<NetworkAddress> inProgressExclusion;
 	// Just getting a consistent read version proves that a set of tlogs satisfying the exclusions has completed
@@ -1233,6 +1267,12 @@ ACTOR Future<RangeResult> getProcessClassActor(ReadYourWritesTransaction* ryw, K
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
 		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);
 	});
+	// Note: ProcessData can contain duplicate workers in corner cases
+	auto last = std::unique(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
+		return formatIpPort(lhs.address.ip, lhs.address.port) == formatIpPort(rhs.address.ip, rhs.address.port);
+	});
+	// remove duplicates
+	workers.erase(last, workers.end());
 	RangeResult result;
 	for (auto& w : workers) {
 		// exclude :tls in keys even the network addresss is TLS
@@ -1350,6 +1390,12 @@ ACTOR Future<RangeResult> getProcessClassSourceActor(ReadYourWritesTransaction* 
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
 		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);
 	});
+	// Note: ProcessData can contain duplicate workers in corner cases
+	auto last = std::unique(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
+		return formatIpPort(lhs.address.ip, lhs.address.port) == formatIpPort(rhs.address.ip, rhs.address.port);
+	});
+	// remove duplicates
+	workers.erase(last, workers.end());
 	RangeResult result;
 	for (auto& w : workers) {
 		// exclude :tls in keys even the network addresss is TLS
@@ -2720,7 +2766,7 @@ ACTOR Future<Optional<std::string>> excludeLocalityCommitActor(ReadYourWritesTra
 			return result;
 	}
 
-	excludeLocalities(ryw->getTransaction(), localities, failed);
+	wait(excludeLocalities(&ryw->getTransaction(), localities, failed));
 	includeLocalities(ryw);
 
 	return result;

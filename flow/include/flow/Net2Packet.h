@@ -45,7 +45,7 @@ public:
 	UnsentPacketQueue()
 	  : unsent_first(0), unsent_last(0),
 	    sendQueueLatencyHistogram(
-	        Histogram::getHistogram("UnsentPacketQueue"_sr, "QueueWait"_sr, Histogram::Unit::microseconds)) {}
+	        Histogram::getHistogram("UnsentPacketQueue"_sr, "QueueWait"_sr, Histogram::Unit::milliseconds)) {}
 
 	~UnsentPacketQueue() {
 		discardAll();

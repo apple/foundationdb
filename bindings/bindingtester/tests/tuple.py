@@ -31,6 +31,7 @@ from bindingtester.tests import test_util
 
 fdb.api_version(FDB_API_VERSION)
 
+
 class TupleTest(Test):
     def __init__(self, subspace):
         super(TupleTest, self).__init__(subspace)
@@ -44,14 +45,14 @@ class TupleTest(Test):
     def generate(self, args, thread_number):
         instructions = InstructionSet()
 
-        min_value = -2**self.max_int_bits+1
-        max_value = 2**self.max_int_bits-1
+        min_value = -2**self.max_int_bits + 1
+        max_value = 2**self.max_int_bits - 1
 
         instructions.append('NEW_TRANSACTION')
 
         # Test integer encoding
         mutations = 0
-        for i in range(0, self.max_int_bits+1):
+        for i in range(0, self.max_int_bits + 1):
             for sign in [-1, 1]:
                 sign_str = '' if sign == 1 else '-'
                 for offset in range(-10, 11):

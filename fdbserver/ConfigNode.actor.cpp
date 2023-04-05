@@ -113,6 +113,7 @@ TEST_CASE("/fdbserver/ConfigDB/ConfigNode/Internal/versionedMutationKeyOrdering"
 
 class ConfigNodeImpl {
 	UID id;
+	FlowLock lock;
 	OnDemandStore kvStore;
 	CounterCollection cc;
 
@@ -218,6 +219,8 @@ class ConfigNodeImpl {
 	}
 
 	ACTOR static Future<Void> getChanges(ConfigNodeImpl* self, ConfigFollowerGetChangesRequest req) {
+		wait(self->lock.take());
+		state FlowLock::Releaser releaser(self->lock);
 		Version lastCompactedVersion = wait(getLastCompactedVersion(self));
 		if (req.lastSeenVersion < lastCompactedVersion) {
 			++self->failedChangeRequests;
@@ -234,10 +237,13 @@ class ConfigNodeImpl {
 			req.reply.sendError(process_behind()); // Reuse the process_behind error
 			return Void();
 		}
+		if (BUGGIFY) {
+			wait(delay(deterministicRandom()->random01() * 2));
+		}
 		state Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
-		    wait(getMutations(self, req.lastSeenVersion + 1, committedVersion));
+		    wait(getMutations(self, req.lastSeenVersion + 1, req.mostRecentVersion));
 		state Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> versionedAnnotations =
-		    wait(getAnnotations(self, req.lastSeenVersion + 1, committedVersion));
+		    wait(getAnnotations(self, req.lastSeenVersion + 1, req.mostRecentVersion));
 		TraceEvent(SevInfo, "ConfigNodeSendingChanges", self->id)
 		    .detail("ReqLastSeenVersion", req.lastSeenVersion)
 		    .detail("ReqMostRecentVersion", req.mostRecentVersion)
@@ -245,7 +251,7 @@ class ConfigNodeImpl {
 		    .detail("NumMutations", versionedMutations.size())
 		    .detail("NumCommits", versionedAnnotations.size());
 		++self->successfulChangeRequests;
-		req.reply.send(ConfigFollowerGetChangesReply{ committedVersion, versionedMutations, versionedAnnotations });
+		req.reply.send(ConfigFollowerGetChangesReply{ versionedMutations, versionedAnnotations });
 		return Void();
 	}
 
@@ -316,7 +322,7 @@ class ConfigNodeImpl {
 	ACTOR static Future<Void> getConfigClasses(ConfigNodeImpl* self, ConfigTransactionGetConfigClassesRequest req) {
 		state Optional<CoordinatorsHash> locked = wait(getLocked(self));
 		if (locked.present()) {
-			CODE_PROBE(true, "attempting to read config classes from locked ConfigNode");
+			CODE_PROBE(true, "attempting to read config classes from locked ConfigNode", probe::decoration::rare);
 			req.reply.sendError(coordinators_changed());
 			return Void();
 		}
@@ -360,7 +366,7 @@ class ConfigNodeImpl {
 	ACTOR static Future<Void> getKnobs(ConfigNodeImpl* self, ConfigTransactionGetKnobsRequest req) {
 		state Optional<CoordinatorsHash> locked = wait(getLocked(self));
 		if (locked.present()) {
-			CODE_PROBE(true, "attempting to read knobs from locked ConfigNode");
+			CODE_PROBE(true, "attempting to read knobs from locked ConfigNode", probe::decoration::rare);
 			req.reply.sendError(coordinators_changed());
 			return Void();
 		}
@@ -410,6 +416,8 @@ class ConfigNodeImpl {
 	                                          Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations,
 	                                          Version commitVersion,
 	                                          Version liveVersion = ::invalidVersion) {
+		wait(self->lock.take());
+		state FlowLock::Releaser releaser(self->lock);
 		Version latestVersion = 0;
 		int index = 0;
 		for (const auto& mutation : mutations) {
@@ -505,7 +513,9 @@ class ConfigNodeImpl {
 				when(ConfigTransactionGetKnobsRequest req = waitNext(cti->getKnobs.getFuture())) {
 					wait(getKnobs(self, req));
 				}
-				when(wait(self->kvStore->getError())) { ASSERT(false); }
+				when(wait(self->kvStore->getError())) {
+					ASSERT(false);
+				}
 			}
 		}
 	}
@@ -520,6 +530,18 @@ class ConfigNodeImpl {
 			    ObjectReader::fromStringRef<KnobValue>(kv.value, IncludeVersion());
 		}
 		wait(store(reply.snapshotVersion, getLastCompactedVersion(self)));
+		if (req.mostRecentVersion < reply.snapshotVersion) {
+			// The version in the request can be less than the last compacted
+			// version in certain circumstances where the coordinators are
+			// being changed and the consumer reads the latest committed
+			// version from a majority of ConfigNodes before they have received
+			// up to date snapshots. This should be fine, it just means the
+			// consumer needs to fetch the latest version and retry its
+			// request.
+			CODE_PROBE(true, "ConfigNode ahead of consumer", probe::decoration::rare);
+			req.reply.sendError(version_already_compacted());
+			return Void();
+		}
 		wait(store(reply.changes, getMutations(self, reply.snapshotVersion + 1, req.mostRecentVersion)));
 		wait(store(reply.annotations, getAnnotations(self, reply.snapshotVersion + 1, req.mostRecentVersion)));
 		TraceEvent(SevInfo, "ConfigNodeGettingSnapshot", self->id)
@@ -777,7 +799,9 @@ class ConfigNodeImpl {
 					}
 					req.reply.send(Void());
 				}
-				when(wait(self->kvStore->getError())) { ASSERT(false); }
+				when(wait(self->kvStore->getError())) {
+					ASSERT(false);
+				}
 			}
 		}
 	}
@@ -812,7 +836,7 @@ public:
 	    successfulCommits("SuccessfulCommits", cc), failedCommits("FailedCommits", cc),
 	    setMutations("SetMutations", cc), clearMutations("ClearMutations", cc),
 	    getValueRequests("GetValueRequests", cc), getGenerationRequests("GetGenerationRequests", cc) {
-		logger = traceCounters("ConfigNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigNode");
+		logger = cc.traceCounters("ConfigNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "ConfigNode");
 		TraceEvent(SevInfo, "StartingConfigNode", id).detail("KVStoreAlreadyExists", kvStore.exists());
 	}
 

@@ -63,7 +63,7 @@ struct MakoWorkload : TestWorkload {
 	// used for periodically tracing
 	std::vector<PerfMetric> periodicMetrics;
 	// store latency of each operation with sampling
-	std::vector<ContinuousSample<double>> opLatencies;
+	std::vector<DDSketch<double>> opLatencies;
 	// key used to store checkSum for given key range
 	std::vector<Key> csKeys;
 	// key prefix of for all generated keys
@@ -142,7 +142,7 @@ struct MakoWorkload : TestWorkload {
 		parseOperationsSpec();
 		for (int i = 0; i < MAX_OP; ++i) {
 			// initilize per-operation latency record
-			opLatencies.push_back(ContinuousSample<double>(rowCount / sampleSize));
+			opLatencies.push_back(DDSketch<double>());
 			// initialize per-operation counter
 			opCounters.push_back(PerfIntCounter(opNames[i]));
 		}
@@ -658,7 +658,7 @@ struct MakoWorkload : TestWorkload {
 		return Void();
 	}
 	ACTOR template <class T>
-	static Future<Void> logLatency(Future<T> f, ContinuousSample<double>* opLatencies) {
+	static Future<Void> logLatency(Future<T> f, DDSketch<double>* opLatencies) {
 		state double opBegin = timer();
 		wait(success(f));
 		opLatencies->addSample(timer() - opBegin);

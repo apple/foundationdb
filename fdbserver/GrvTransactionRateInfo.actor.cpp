@@ -35,7 +35,7 @@ bool GrvTransactionRateInfo::canStart(int64_t numAlreadyStarted, int64_t count) 
 	       std::min(limit + budget, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
 }
 
-void GrvTransactionRateInfo::endReleaseWindow(int64_t numStartedAtPriority, bool queueEmptyAtPriority, double elapsed) {
+void GrvTransactionRateInfo::endReleaseWindow(int64_t numStarted, bool queueEmpty, double elapsed) {
 	// Update the budget to accumulate any extra capacity available or remove any excess that was used.
 	// The actual delta is the portion of the limit we didn't use multiplied by the fraction of the rate window that
 	// elapsed.
@@ -52,16 +52,15 @@ void GrvTransactionRateInfo::endReleaseWindow(int64_t numStartedAtPriority, bool
 	//
 	// Note that "rate window" here indicates a period of SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW seconds,
 	// whereas "release window" is the period between wait statements, with duration indicated by "elapsed."
-	budget =
-	    std::max(0.0, budget + elapsed * (limit - numStartedAtPriority) / SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW);
+	budget = std::max(0.0, budget + elapsed * (limit - numStarted) / SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW);
 
 	// If we are emptying out the queue of requests, then we don't need to carry much budget forward
 	// If we did keep accumulating budget, then our responsiveness to changes in workflow could be compromised
-	if (queueEmptyAtPriority) {
+	if (queueEmpty) {
 		budget = std::min(budget, SERVER_KNOBS->START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET);
 	}
 
-	smoothReleased.addDelta(numStartedAtPriority);
+	smoothReleased.addDelta(numStarted);
 }
 
 void GrvTransactionRateInfo::disable() {

@@ -105,8 +105,8 @@ class RangeCounterTest(unittest.TestCase):
                 assert rc_count == v, "Counts for %s mismatch. Expected %d got %d" % (k, v, rc_count)
 
             for _ in range(0, 100):
-                i = random.randint(0, len(letters)-1)
-                j = random.randint(0, len(letters)-2)
+                i = random.randint(0, len(letters) - 1)
+                j = random.randint(0, len(letters) - 2)
                 if i == j:
                     j += 1
                 start_index = min(i, j)
@@ -123,4 +123,4 @@ class RangeCounterTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main() # run all tests
+    unittest.main()  # run all tests

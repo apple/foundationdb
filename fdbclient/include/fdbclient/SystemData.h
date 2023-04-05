@@ -34,8 +34,9 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-variable"
 
-FDB_DECLARE_BOOLEAN_PARAM(AssignEmptyRange);
-FDB_DECLARE_BOOLEAN_PARAM(UnassignShard);
+FDB_BOOLEAN_PARAM(AssignEmptyRange);
+FDB_BOOLEAN_PARAM(UnassignShard);
+FDB_BOOLEAN_PARAM(EnablePhysicalShardMove);
 
 struct RestoreLoaderInterface;
 struct RestoreApplierInterface;
@@ -91,11 +92,18 @@ void decodeKeyServersValue(RangeResult result,
                            UID& srcID,
                            UID& destID,
                            bool missingIsError = true);
+bool isSystemKey(KeyRef key);
 
-extern const KeyRangeRef auditRange;
+extern const KeyRangeRef auditKeys;
 extern const KeyRef auditPrefix;
-const Key auditRangeKey(const AuditType type, const UID& auditId, const KeyRef& key);
-const Key auditRangePrefix(const AuditType type, const UID& auditId);
+extern const KeyRangeRef auditRanges;
+extern const KeyRef auditRangePrefix;
+
+const Key auditKey(const AuditType type, const UID& auditId);
+const KeyRange auditKeyRange(const AuditType type);
+const Key auditRangeKey(const UID& auditId, const KeyRef& key);
+const Key auditRangePrefixFor(const UID& auditId);
+
 const Value auditStorageStateValue(const AuditStorageState& auditStorageState);
 AuditStorageState decodeAuditStorageState(const ValueRef& value);
 
@@ -138,16 +146,21 @@ void decodeStorageCacheValue(const ValueRef& value, std::vector<uint16_t>& serve
 extern const KeyRangeRef serverKeysRange;
 extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
-const UID newShardId(const uint64_t physicalShardId,
-                     AssignEmptyRange assignEmptyRange,
-                     UnassignShard unassignShard = UnassignShard::False);
+const UID newDataMoveId(const uint64_t physicalShardId,
+                        AssignEmptyRange assignEmptyRange,
+                        EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False,
+                        UnassignShard unassignShard = UnassignShard::False);
 const Key serverKeysKey(UID serverID, const KeyRef& keys);
 const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);
 std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key);
 bool serverHasKey(ValueRef storedValue);
 const Value serverKeysValue(const UID& id);
-void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRange, UID& id);
+void decodeServerKeysValue(const ValueRef& value,
+                           bool& assigned,
+                           bool& emptyRange,
+                           EnablePhysicalShardMove& enablePSM,
+                           UID& id);
 
 extern const KeyRangeRef conflictingKeysRange;
 extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;
@@ -277,12 +290,16 @@ extern const KeyRef perpetualStorageWiggleKey;
 extern const KeyRef perpetualStorageWiggleLocalityKey;
 extern const KeyRef perpetualStorageWiggleIDPrefix;
 extern const KeyRef perpetualStorageWiggleStatsPrefix;
+extern const KeyRef perpetualStorageWigglePrefix;
 
 // Change the value of this key to anything and that will trigger detailed data distribution team info log.
 extern const KeyRef triggerDDTeamInfoPrintKey;
 
 // Encryption data at-rest config key
 extern const KeyRef encryptionAtRestModeConfKey;
+
+// Tenant mode config key
+extern const KeyRef tenantModeConfKey;
 
 //	The differences between excluded and failed can be found in "command-line-interface.rst"
 //	and in the help message of the fdbcli command "exclude".
@@ -420,6 +437,8 @@ std::pair<std::vector<std::pair<UID, NetworkAddress>>, std::vector<std::pair<UID
 extern const KeyRef globalKeysPrefix;
 extern const KeyRef lastEpochEndKey;
 extern const KeyRef lastEpochEndPrivateKey;
+// Checks whether the mutation "m" is a SetValue for the key
+bool mutationForKey(const MutationRef& m, const KeyRef& key);
 extern const KeyRef killStorageKey;
 extern const KeyRef killStoragePrivateKey;
 extern const KeyRef rebootWhenDurableKey;
@@ -528,6 +547,8 @@ extern const KeyRef backupLatestVersionsPrefix;
 // Key range reserved by backup agent to storing mutations
 extern const KeyRangeRef backupLogKeys;
 extern const KeyRangeRef applyLogKeys;
+// Returns true if m is a blog (backup log) or alog (apply log) mutation
+bool isBackupLogMutation(const MutationRef& m);
 
 extern const KeyRef backupVersionKey;
 extern const ValueRef backupVersionValue;
@@ -656,8 +677,9 @@ const Value blobGranuleFileValueFor(
     int64_t offset,
     int64_t length,
     int64_t fullFileLength,
+    int64_t logicalSize,
     Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta = Optional<BlobGranuleCipherKeysMeta>());
-std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t, Optional<BlobGranuleCipherKeysMeta>>
+std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t, int64_t, Optional<BlobGranuleCipherKeysMeta>>
 decodeBlobGranuleFileValue(ValueRef const& value);
 
 const Value blobGranulePurgeValueFor(Version version, KeyRange range, bool force);
@@ -710,11 +732,27 @@ UID decodeBlobWorkerListKey(KeyRef const& key);
 const Value blobWorkerListValue(BlobWorkerInterface const& interface);
 BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 
-// Storage quota per tenant
-// "\xff/storageQuota/[[tenantName]]" := "[[quota]]"
-extern const KeyRangeRef storageQuotaKeys;
-extern const KeyRef storageQuotaPrefix;
-Key storageQuotaKey(StringRef tenantName);
+// \xff/bwa/[[BlobWorkerID]] = [[UID]]
+extern const KeyRangeRef blobWorkerAffinityKeys;
+
+const Key blobWorkerAffinityKeyFor(UID workerID);
+UID decodeBlobWorkerAffinityKey(KeyRef const& key);
+const Value blobWorkerAffinityValue(UID const& id);
+UID decodeBlobWorkerAffinityValue(ValueRef const& value);
+
+// Blob restore command
+extern const KeyRangeRef blobRestoreCommandKeys;
+const Value blobRestoreCommandKeyFor(const KeyRangeRef range);
+const KeyRange decodeBlobRestoreCommandKeyFor(const KeyRef key);
+const Value blobRestoreCommandValueFor(BlobRestoreState restoreState);
+Standalone<BlobRestoreState> decodeBlobRestoreState(ValueRef const& value);
+extern const KeyRangeRef blobRestoreArgKeys;
+const Value blobRestoreArgKeyFor(const KeyRangeRef range);
+const KeyRange decodeBlobRestoreArgKeyFor(const KeyRef key);
+const Value blobRestoreArgValueFor(BlobRestoreArg args);
+Standalone<BlobRestoreArg> decodeBlobRestoreArg(ValueRef const& value);
+extern const Key blobManifestVersionKey;
+extern const Key blobGranulesLastFlushKey;
 
 extern const KeyRangeRef idempotencyIdKeys;
 extern const KeyRef idempotencyIdsExpiredVersion;

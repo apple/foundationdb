@@ -18,12 +18,15 @@
  * limitations under the License.
  */
 
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -97,6 +100,7 @@ struct RestoreBackupWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.clear(normalKeys);
 				for (auto& r : getSystemBackupRanges()) {
 					tr.clear(r);
@@ -110,17 +114,43 @@ struct RestoreBackupWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> _start(RestoreBackupWorkload* self, Database cx) {
+		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		wait(delay(self->delayFor));
 		wait(waitOnBackup(self, cx));
 		wait(clearDatabase(cx));
-		wait(success(self->backupAgent.restore(cx,
-		                                       cx,
-		                                       self->tag,
-		                                       Key(self->backupContainer->getURL()),
-		                                       self->backupContainer->getProxy(),
-		                                       WaitForComplete::True,
-		                                       ::invalidVersion,
-		                                       Verbose::True)));
+
+		if (config.tenantMode == TenantMode::REQUIRED) {
+			// restore system keys
+			wait(success(self->backupAgent.restore(cx,
+			                                       cx,
+			                                       "system_restore"_sr,
+			                                       Key(self->backupContainer->getURL()),
+			                                       self->backupContainer->getProxy(),
+			                                       getSystemBackupRanges(),
+			                                       WaitForComplete::True,
+			                                       ::invalidVersion,
+			                                       Verbose::True)));
+			// restore user data
+			wait(success(self->backupAgent.restore(cx,
+			                                       cx,
+			                                       self->tag,
+			                                       Key(self->backupContainer->getURL()),
+			                                       self->backupContainer->getProxy(),
+			                                       WaitForComplete::True,
+			                                       ::invalidVersion,
+			                                       Verbose::True,
+			                                       normalKeys)));
+		} else {
+			wait(success(self->backupAgent.restore(cx,
+			                                       cx,
+			                                       self->tag,
+			                                       Key(self->backupContainer->getURL()),
+			                                       self->backupContainer->getProxy(),
+			                                       WaitForComplete::True,
+			                                       ::invalidVersion,
+			                                       Verbose::True)));
+		}
+
 		return Void();
 	}
 

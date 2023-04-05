@@ -30,6 +30,10 @@
 #include <cxxabi.h>
 #endif
 
+#ifdef ADDRESS_SANITIZER
+#include <sanitizer/asan_interface.h>
+#endif
+
 SystemMonitorMachineState machineState;
 
 void initializeSystemMonitorMachineState(SystemMonitorMachineState machineState) {
@@ -151,6 +155,7 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			    .detail("DCID", machineState.dcId)
 			    .detail("ZoneID", machineState.zoneId)
 			    .detail("MachineID", machineState.machineId)
+			    .detail("Version", machineState.fdbVersion)
 			    .detail("AIOSubmitCount", netData.countAIOSubmit - statState->networkState.countAIOSubmit)
 			    .detail("AIOCollectCount", netData.countAIOCollect - statState->networkState.countAIOCollect)
 			    .detail("AIOSubmitLag",
@@ -328,6 +333,7 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			    .detail("DCID", machineState.dcId)
 			    .detail("ZoneID", machineState.zoneId)
 			    .detail("MachineID", machineState.machineId)
+			    .detail("DatahallID", machineState.datahallId)
 			    .trackLatest("MachineMetrics");
 #ifdef __linux__
 			for (const auto& [k, v] : linux_os::reportCGroupCpuStat()) {
@@ -458,6 +464,9 @@ Future<Void> startMemoryUsageMonitor(uint64_t memLimit) {
 	}
 	auto checkMemoryUsage = [=]() {
 		if (getResidentMemoryUsage() > memLimit) {
+#if defined(ADDRESS_SANITIZER) && defined(__linux__)
+			__sanitizer_print_memory_profile(/*top percent*/ 100, /*max contexts*/ 10);
+#endif
 			platform::outOfMemory();
 		}
 	};

@@ -77,13 +77,11 @@ bool PolicyOne::selectReplicas(Reference<LocalitySet>& fromServers,
                                std::vector<LocalityEntry> const& alsoServers,
                                std::vector<LocalityEntry>& results) {
 	int totalUsed = 0;
-	int itemsUsed = 0;
 	if (alsoServers.size()) {
 		totalUsed++;
 	} else if (fromServers->size()) {
 		auto randomEntry = fromServers->random();
 		results.push_back(randomEntry);
-		itemsUsed++;
 		totalUsed++;
 	}
 	return (totalUsed > 0);

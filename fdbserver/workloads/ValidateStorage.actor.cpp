@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/Audit.h"
+#include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/simulator.h"
@@ -49,6 +50,11 @@ struct ValidateStorage : TestWorkload {
 	const bool enabled;
 	bool pass;
 
+	// We disable failure injection because there is an irrelevant issue:
+	// Remote tLog is failed to rejoin to CC
+	// Once this issue is fixed, we should be able to enable the failure injection
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.emplace("Attrition"); }
+
 	void validationFailed(ErrorOr<Optional<Value>> expectedValue, ErrorOr<Optional<Value>> actualValue) {
 		TraceEvent(SevError, "TestFailed")
 		    .detail("ExpectedValue", printValue(expectedValue))
@@ -75,24 +81,69 @@ struct ValidateStorage : TestWorkload {
 		                                 { "TestKeyD"_sr, "TestValueD"_sr },
 		                                 { "TestKeyE"_sr, "TestValueE"_sr },
 		                                 { "TestKeyF"_sr, "TestValueF"_sr } });
+		state UID auditId;
 
 		Version _ = wait(self->populateData(self, cx, &kvs));
 
 		TraceEvent("TestValueWritten");
+
+		if (g_network->isSimulated()) {
+			// NOTE: the value will be reset after consistency check
+			disableConnectionFailures("AuditStorage");
+		}
 
 		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
 		TraceEvent("TestValueVerified");
 
 		loop {
 			try {
-				UID auditId = wait(auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA));
+				Optional<UID> auditId_ = wait(timeout(
+				    auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA, /*async=*/true), 30));
+				if (!auditId_.present()) {
+					throw audit_storage_failed();
+				}
+				auditId = auditId_.get();
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId);
 				break;
 			} catch (Error& e) {
-				TraceEvent("AuditStorageError").errorUnsuppressed(e);
+				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
 				wait(delay(1));
 			}
 		}
+
+		loop {
+			try {
+				AuditStorageState auditState = wait(getAuditState(cx, AuditType::ValidateHA, auditId));
+				if (auditState.getPhase() != AuditPhase::Complete) {
+					ASSERT(auditState.getPhase() == AuditPhase::Running);
+					wait(delay(30));
+				} else {
+					ASSERT(auditState.getPhase() == AuditPhase::Complete);
+					break;
+				}
+			} catch (Error& e) {
+				TraceEvent("WaitAuditStorageError").errorUnsuppressed(e).detail("AuditID", auditId);
+				wait(delay(1));
+			}
+		}
+
+		loop {
+			try {
+				Optional<UID> auditId_ = wait(timeout(
+				    auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA, /*async=*/true), 30));
+				if (!auditId_.present()) {
+					throw audit_storage_failed();
+				}
+				ASSERT(auditId_ != auditId);
+				TraceEvent("TestValidateEnd").detail("AuditID", auditId_);
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
+				wait(delay(1));
+			}
+		}
+
+		TraceEvent("TestValidateEndAll");
 
 		return Void();
 	}
@@ -169,7 +220,7 @@ struct ValidateStorage : TestWorkload {
 				try {
 					wait(tr.onError(e));
 				} catch (Error& e) {
-					if (e.code() != error_code_audit_storage_failed) {
+					if (e.code() != error_code_audit_storage_failed && e.code() != error_code_broken_promise) {
 						throw e;
 					}
 				}

@@ -20,6 +20,7 @@
 
 #include "flow/DeterministicRandom.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -135,7 +136,6 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 			for (int i = 0; i < 10; i++)
 				self->clogRandomPair(t);
 
-			std::vector<Future<Void>> cloggers;
 			for (int i = 0; i < swizzled.size(); i++)
 				self->doClog(swizzled[i], ends[i] - starts[i], starts[i]);
 		}

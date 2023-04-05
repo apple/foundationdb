@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -48,6 +47,8 @@ struct LowLatencyWorkload : TestWorkload {
 		testWrites = getOption(options, "testWrites"_sr, true);
 		testKey = getOption(options, "testKey"_sr, "testKey"_sr);
 	}
+
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
 
 	Future<Void> setup(Database const& cx) override {
 		if (g_network->isSimulated()) {

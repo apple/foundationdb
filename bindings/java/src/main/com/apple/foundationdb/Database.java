@@ -162,11 +162,11 @@ public interface Database extends AutoCloseable, TransactionContext {
 	double getMainThreadBusyness();
 
 	/**
-	 * Runs {@link #purgeBlobGranules(Function)} on the default executor.
+	 * Runs {@link #purgeBlobGranules(byte[] beginKey, byte[] endKey, boolean force)} on the default executor.
 	 *
 	 * @param beginKey start of the key range
 	 * @param endKey end of the key range
-	 * @param force if true delete all data, if not keep data >= purgeVersion
+	 * @param force if true delete all data, if not keep data &gt;= purgeVersion
 	 *
 	 * @return the key to watch for purge complete
 	 */
@@ -175,12 +175,12 @@ public interface Database extends AutoCloseable, TransactionContext {
 	}
 
 	/**
-	 * Runs {@link #purgeBlobGranules(Function)} on the default executor.
+	 * Runs {@link #purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion, boolean force)} on the default executor.
 	 *
 	 * @param beginKey start of the key range
 	 * @param endKey end of the key range
 	 * @param purgeVersion version to purge at
-	 * @param force if true delete all data, if not keep data >= purgeVersion
+	 * @param force if true delete all data, if not keep data &gt;= purgeVersion
 	 *
 	 * @return the key to watch for purge complete
 	 */
@@ -194,7 +194,7 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 * @param beginKey start of the key range
 	 * @param endKey end of the key range
 	 * @param purgeVersion version to purge at
-	 * @param force if true delete all data, if not keep data >= purgeVersion
+	 * @param force if true delete all data, if not keep data &gt;= purgeVersion
 	 * @param e the {@link Executor} to use for asynchronous callbacks
 
 	 * @return the key to watch for purge complete
@@ -203,9 +203,11 @@ public interface Database extends AutoCloseable, TransactionContext {
 
 
 	/**
-	 * Runs {@link #waitPurgeGranulesComplete(Function)} on the default executor.
+	 * Runs {@link #waitPurgeGranulesComplete(byte[] purgeKey)} on the default executor.
 	 *
 	 * @param purgeKey key to watch
+	 *
+	 * @return void
 	 */
 	default CompletableFuture<Void> waitPurgeGranulesComplete(byte[] purgeKey) {
 		return waitPurgeGranulesComplete(purgeKey, getExecutor());
@@ -216,11 +218,13 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 *
 	 * @param purgeKey key to watch
 	 * @param e the {@link Executor} to use for asynchronous callbacks
+	 *
+	 * @return void
 	 */
 	CompletableFuture<Void> waitPurgeGranulesComplete(byte[] purgeKey, Executor e);
 
 	/**
-	 * Runs {@link #blobbifyRange(Function)} on the default executor.
+	 * Runs {@link #blobbifyRange(byte[] beginKey, byte[] endKey)} on the default executor.
 	 *
 	 * @param beginKey start of the key range
 	 * @param endKey end of the key range
@@ -243,7 +247,32 @@ public interface Database extends AutoCloseable, TransactionContext {
 	CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey, Executor e);
 
 	/**
-	 * Runs {@link #unblobbifyRange(Function)} on the default executor.
+	 * Runs {@link #blobbifyRange(byte[] beginKey, byte[] endKey, boolean wait)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param wait wait for blobbification to complete
+
+	 * @return if the recording of the range was successful
+	 */
+	default CompletableFuture<Boolean> blobbifyRangeBlocking(byte[] beginKey, byte[] endKey) {
+		return blobbifyRangeBlocking(beginKey, endKey, getExecutor());
+	}
+
+	/**
+	 * Sets a range to be blobbified in the database. Must be a completely unblobbified range.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param wait wait for blobbification to complete
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return if the recording of the range was successful
+	 */
+	CompletableFuture<Boolean> blobbifyRangeBlocking(byte[] beginKey, byte[] endKey, Executor e);
+
+	/**
+	 * Runs {@link #unblobbifyRange(byte[] beginKey, byte[] endKey)} on the default executor.
 	 *
 	 * @param beginKey start of the key range
 	 * @param endKey end of the key range
@@ -266,12 +295,11 @@ public interface Database extends AutoCloseable, TransactionContext {
 	CompletableFuture<Boolean> unblobbifyRange(byte[] beginKey, byte[] endKey, Executor e);
 
 	/**
-	 * Runs {@link #listBlobbifiedRanges(Function)} on the default executor.
+	 * Runs {@link #listBlobbifiedRanges(byte[] beginKey, byte[] endKey, int rangeLimit)} on the default executor.
 	 *
 	 * @param beginKey start of the key range
 	 * @param endKey end of the key range
 	 * @param rangeLimit batch size
-	 * @param e the {@link Executor} to use for asynchronous callbacks
 
 	 * @return a future with the list of blobbified ranges: [lastLessThan(beginKey), firstGreaterThanOrEqual(endKey)]
 	 */
@@ -292,7 +320,7 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 CompletableFuture<KeyRangeArrayResult> listBlobbifiedRanges(byte[] beginKey, byte[] endKey, int rangeLimit, Executor e);
 
 	/**
-	 * Runs {@link #verifyBlobRange(Function)} on the default executor.
+	 * Runs {@link #verifyBlobRange(byte[] beginKey, byte[] endKey)} on the default executor.
 	 *
 	 * @param beginKey start of the key range
 	 * @param endKey end of the key range
@@ -304,7 +332,7 @@ public interface Database extends AutoCloseable, TransactionContext {
 	}
 
 	/**
-	 * Runs {@link #verifyBlobRange(Function)} on the default executor.
+	 * Runs {@link #verifyBlobRange(byte[] beginKey, byte[] endKey, long version)} on the default executor.
 	 *
 	 * @param beginKey start of the key range
 	 * @param endKey end of the key range
@@ -322,10 +350,51 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 * @param beginKey start of the key range
 	 * @param endKey end of the key range
 	 * @param version version to read at
+	 * @param e the {@link Executor} to use for asynchronous callbacks
 	 *
 	 * @return a future with the version of the last blob granule.
 	 */
 	CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey, long version, Executor e);
+
+	/**
+	 * Runs {@link #flushBlobRange(byte[] beginKey, byte[] endKey)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param compact force compact or just flush
+	 *
+	 * @return a future with a boolean for success or failure
+	 */
+	default CompletableFuture<Boolean> flushBlobRange(byte[] beginKey, byte[] endKey, boolean compact) {
+		return flushBlobRange(beginKey, endKey, compact, -2, getExecutor());
+	}
+
+	/**
+	 * Runs {@link #flushBlobRange(byte[] beginKey, byte[] endKey, long version)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param compact force compact or just flush
+	 * @param version version to flush at
+	 *
+	 * @return a future with a boolean for success or failure
+	 */
+	default CompletableFuture<Boolean> flushBlobRange(byte[] beginKey, byte[] endKey, boolean compact, long version) {
+		return flushBlobRange(beginKey, endKey, compact, version, getExecutor());
+	}
+
+	/**
+	 * Checks if a blob range is blobbified.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param compact force compact or just flush
+	 * @param version version to flush at
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+	 *
+	 * @return a future with a boolean for success or failure
+	 */
+	CompletableFuture<Boolean> flushBlobRange(byte[] beginKey, byte[] endKey, boolean compact, long version, Executor e);
 
 	/**
 	 * Runs a read-only transactional function against this {@code Database} with retry logic.
@@ -503,4 +572,21 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 */
 	@Override
 	void close();
+
+	/**
+	 * Returns client-side status information
+	 *
+	 * @return a {@code CompletableFuture} containing a JSON string with client status health information
+	 */
+	default CompletableFuture<byte[]> getClientStatus() {
+		return getClientStatus(getExecutor());
+	}
+
+	/**
+	 * Returns client-side status information
+	 *
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+	 * @return a {@code CompletableFuture} containing a JSON string with client status health information
+	 */
+	CompletableFuture<byte[]> getClientStatus(Executor e);
 }

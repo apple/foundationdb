@@ -125,7 +125,10 @@ protected:
 	                     bool failOnError = true);
 
 	// Execute a non-transactional database operation within the workload
-	void execOperation(TOpStartFct startFct, TTaskFct cont, bool failOnError = true);
+	void execOperation(TOpStartFct startFct,
+	                   TTaskFct cont,
+	                   std::optional<fdb::BytesRef> tenant = std::optional<fdb::BytesRef>(),
+	                   bool failOnError = true);
 
 	// Log an error message, increase error counter
 	void error(const std::string& msg);

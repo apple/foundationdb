@@ -21,6 +21,6 @@
 #ifndef MAKO_PROCESS_HPP
 #define MAKO_PROCESS_HPP
 
-enum class ProcKind { MAIN, WORKER, STATS };
+enum class ProcKind { MAIN, WORKER, STATS, ADMIN };
 
 #endif /*MAKO_PROCESS_HPP*/
