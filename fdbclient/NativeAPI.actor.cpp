@@ -2693,6 +2693,11 @@ void stopNetwork() {
 		throw network_not_setup();
 
 	TraceEvent("ClientStopNetwork").log();
+
+	if (networkOptions.traceDirectory.present() && networkOptions.runLoopProfilingEnabled) {
+		stopRunLoopProfiler();
+	}
+
 	g_network->stop();
 }
 
@@ -9455,7 +9460,6 @@ struct ChangeFeedTSSValidationData {
 				}
 				rollbacks.push_back({ rollbackVersion, m.version });
 			}
-
 			return true;
 		} else {
 			return false;
@@ -9467,7 +9471,18 @@ struct ChangeFeedTSSValidationData {
 	}
 
 	bool isRolledBack(Version v) {
-		return !rollbacks.empty() && rollbacks.front().first < v && rollbacks.front().second > v;
+		if (rollbacks.empty()) {
+			return false;
+		}
+		for (int i = 0; i < rollbacks.size(); i++) {
+			if (v <= rollbacks[i].first) {
+				return false;
+			}
+			if (v < rollbacks[i].second) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	void send(const ChangeFeedStreamReply& ssReply) {

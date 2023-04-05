@@ -835,6 +835,20 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGE_DURABILITY_LAG_REJECT_THRESHOLD,              0.25 );
 	init( STORAGE_DURABILITY_LAG_MIN_RATE,                       0.1 );
 	init( STORAGE_COMMIT_INTERVAL,                               0.5 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_INTERVAL = 2.0;
+
+
+	// Constants which affect the fraction of data which is sampled
+	// by storage severs to estimate key-range sizes and splits.
+	//
+	// The rough goal is for the sample size to be a fixed fraction of the total
+	// size of all keys and values, 1/BYTE_SAMPLING_FACTOR, which defaults to 1/250.
+	// This includes an estimated overhead per entry of BYTE_SAMPLING_OVERHEAD,
+	// which defaults to 100 bytes.
+	//
+	// NOTE: This BYTE_SAMPLING_FACTOR and BYTE_SAMPLING_OVERHEAD knobs can't be
+	// changed after a database has been created. Data which has been already
+	// sampled can't be resampled, and the estimates of the size of key ranges
+	// implicitly includes these constants.
 	init( BYTE_SAMPLING_FACTOR,                                  250 ); //cannot buggify because of differences in restarting tests
 	init( BYTE_SAMPLING_OVERHEAD,                                100 );
 	init( MIN_BYTE_SAMPLING_PROBABILITY,                           0 ); // Adjustable only for test of PhysicalShardMove. should be always zero for other cases
@@ -1114,9 +1128,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REST_KMS_CONNECTOR_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT,  "");
 	init( REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT,           "");
 	// Details to fetch validation token from a localhost file
-	// acceptable format: "<token_name1>#<absolute_file_path1>,<token_name2>#<absolute_file_path2>,.."
-	// NOTE: 'token-name" can NOT contain '#' character
+	// acceptable format: "<token_name1>$<absolute_file_path1>,<token_name2>$<absolute_file_path2>,.."
+	// NOTE: 'token-name" can NOT contain '$' character
 	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS,             "");
+	init( REST_KMS_CONNECTOR_REMOVE_TRAILING_NEWLINE,          false );
 	init( REST_KMS_CURRENT_BLOB_METADATA_REQUEST_VERSION,           1);
 	init( REST_KMS_MAX_BLOB_METADATA_REQUEST_VERSION,               1);
 	init( REST_KMS_CURRENT_CIPHER_REQUEST_VERSION,                  1);

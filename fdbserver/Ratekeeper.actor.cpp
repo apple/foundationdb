@@ -99,6 +99,9 @@ public:
 		state Transaction tr(db);
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				// FIXME: check if any active ranges. This still returns true if there are inactive ranges, but it
 				// mostly serves its purpose to allow setting blob_granules_enabled=1 on a cluster that has no blob
 				// workers currently.

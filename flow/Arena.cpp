@@ -1050,6 +1050,6 @@ TEST_CASE("/flow/Arena/Secure") {
 		}
 	}
 	fmt::print("Total iterations: {}, # of times check passed: {}\n", totalIters, samePtrCount);
-#endif // !defined(USE_SANITIZER) && !defind(VALGRIND)
+#endif // !defined(USE_SANITIZER) && !defined(VALGRIND)
 	return Void();
 }

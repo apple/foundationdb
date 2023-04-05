@@ -38,6 +38,7 @@
 #include "flow/DebugTrace.h"
 #include "fdbserver/DDRelocationQueue.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "fdbserver/DDRelocationQueue.h"
 
 #define WORK_FULL_UTILIZATION 10000 // This is not a knob; it is a fixed point scaling factor!
 
@@ -401,6 +402,11 @@ bool canLaunchSrc(RelocateData& relocation,
 	ASSERT(relocation.src.size() != 0);
 	ASSERT(teamSize >= singleRegionTeamSize);
 
+	// Blob migrator is backed by s3 so it can allow unlimited data movements
+	if (relocation.src.size() == 1 && BlobMigratorInterface::isBlobMigrator(relocation.src.back())) {
+		return true;
+	}
+
 	// find the "workFactor" for this, were it launched now
 	int workFactor = getSrcWorkFactor(relocation, singleRegionTeamSize);
 	int neededServers = std::min<int>(relocation.src.size(), teamSize - singleRegionTeamSize + 1);
@@ -424,6 +430,7 @@ bool canLaunchSrc(RelocateData& relocation,
 				return true;
 		}
 	}
+
 	return false;
 }
 
