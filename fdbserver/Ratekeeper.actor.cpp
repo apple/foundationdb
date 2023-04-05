@@ -240,31 +240,6 @@ public:
 					}
 					self.actualTpsHistory.push_back(actualTps);
 
-					if (self.configurationMonitor->areBlobGranulesEnabled() && SERVER_KNOBS->BW_THROTTLING_ENABLED) {
-						Version maxVersion = 0;
-						int64_t totalReleased = 0;
-						int64_t batchReleased = 0;
-						for (auto& it : self.grvProxyInfo) {
-							maxVersion = std::max(maxVersion, it.second.version);
-							totalReleased += it.second.totalTransactions;
-							batchReleased += it.second.batchTransactions;
-						}
-						self.version_transactions[maxVersion] =
-						    Ratekeeper::VersionInfo(totalReleased, batchReleased, now());
-
-						loop {
-							auto secondEntry = self.version_transactions.begin();
-							++secondEntry;
-							if (secondEntry != self.version_transactions.end() &&
-							    secondEntry->second.created < now() - (2 * SERVER_KNOBS->TARGET_BW_LAG) &&
-							    (self.blobWorkerVersionHistory.empty() ||
-							     secondEntry->first < self.blobWorkerVersionHistory.front().second)) {
-								self.version_transactions.erase(self.version_transactions.begin());
-							} else {
-								break;
-							}
-						}
-					}
 					while (self.version_recovery.size() > CLIENT_KNOBS->MAX_GENERATIONS) {
 						self.version_recovery.erase(self.version_recovery.begin());
 					}
@@ -668,6 +643,31 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		}
 		limits->lastDurabilityLag = limitingDurabilityLag;
 		break;
+	}
+
+	// Update version_transactions
+	if (configurationMonitor->areBlobGranulesEnabled() && SERVER_KNOBS->BW_THROTTLING_ENABLED) {
+		Version maxVersion = 0;
+		int64_t totalReleased = 0;
+		int64_t batchReleased = 0;
+		for (auto& it : grvProxyInfo) {
+			maxVersion = std::max(maxVersion, it.second.version);
+			totalReleased += it.second.totalTransactions;
+			batchReleased += it.second.batchTransactions;
+		}
+		version_transactions[maxVersion] = Ratekeeper::VersionInfo(totalReleased, batchReleased, now());
+
+		loop {
+			auto secondEntry = version_transactions.begin();
+			++secondEntry;
+			if (secondEntry != version_transactions.end() &&
+			    secondEntry->second.created < now() - (2 * SERVER_KNOBS->TARGET_BW_LAG) &&
+			    (blobWorkerVersionHistory.empty() || secondEntry->first < blobWorkerVersionHistory.front().second)) {
+				version_transactions.erase(version_transactions.begin());
+			} else {
+				break;
+			}
+		}
 	}
 
 	if (configurationMonitor->areBlobGranulesEnabled() && SERVER_KNOBS->BW_THROTTLING_ENABLED && anyBlobRanges) {
