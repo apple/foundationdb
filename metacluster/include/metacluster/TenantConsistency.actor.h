@@ -1,4 +1,3 @@
-
 /*
  * TenantConsistency.actor.h
  *
@@ -23,22 +22,24 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
+#if defined(NO_INTELLISENSE) && !defined(METACLUSTER_TENANTCONSISTENCY_ACTOR_G_H)
+#define METACLUSTER_TENANTCONSISTENCY_ACTOR_G_H
+#include "metacluster/TenantConsistency.actor.g.h"
+#elif !defined(METACLUSTER_TENANTCONSISTENCY_ACTOR_H)
+#define METACLUSTER_TENANTCONSISTENCY_ACTOR_H
+
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "flow/BooleanParam.h"
-#if defined(NO_INTELLISENSE) && !defined(WORKLOADS_TENANT_CONSISTENCY_ACTOR_G_H)
-#define WORKLOADS_TENANT_CONSISTENCY_ACTOR_G_H
-#include "fdbserver/workloads/TenantConsistency.actor.g.h"
-#elif !defined(WORKLOADS_TENANT_CONSISTENCY_ACTOR_H)
-#define WORKLOADS_TENANT_CONSISTENCY_ACTOR_H
-
-#include "fdbclient/Metacluster.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/Tenant.h"
+#include "fdbclient/TenantData.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
-#include "fdbserver/workloads/TenantData.actor.h"
+
+#include "metacluster/MetaclusterTypes.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+namespace metacluster::util {
 template <class DB, class TenantTypes>
 class TenantConsistencyCheck {
 private:
@@ -101,19 +102,19 @@ private:
 				ASSERT(tenantMapEntry.assignedCluster == tenantGroupMapItr->second.assignedCluster);
 			}
 			if (tenantMapEntry.renameDestination.present()) {
-				ASSERT(tenantMapEntry.tenantState == MetaclusterAPI::TenantState::RENAMING ||
-				       tenantMapEntry.tenantState == MetaclusterAPI::TenantState::REMOVING);
+				ASSERT(tenantMapEntry.tenantState == TenantState::RENAMING ||
+				       tenantMapEntry.tenantState == TenantState::REMOVING);
 
 				auto nameIndexItr = tenantData.tenantNameIndex.find(tenantMapEntry.renameDestination.get());
 				ASSERT(nameIndexItr != tenantData.tenantNameIndex.end());
 				ASSERT_EQ(nameIndexItr->second, tenantMapEntry.id);
 				++renameCount;
 			} else {
-				ASSERT_NE(tenantMapEntry.tenantState, MetaclusterAPI::TenantState::RENAMING);
+				ASSERT_NE(tenantMapEntry.tenantState, TenantState::RENAMING);
 			}
 
 			// An error string should be set if and only if the tenant state is an error
-			ASSERT((tenantMapEntry.tenantState == MetaclusterAPI::TenantState::ERROR) != tenantMapEntry.error.empty());
+			ASSERT((tenantMapEntry.tenantState == TenantState::ERROR) != tenantMapEntry.error.empty());
 		}
 
 		ASSERT_EQ(tenantData.tenantCount + renameCount, tenantData.tenantNameIndex.size());
@@ -152,6 +153,7 @@ public:
 
 	Future<Void> run() { return run(this); }
 };
+} // namespace metacluster::util
 
 #include "flow/unactorcompiler.h"
 

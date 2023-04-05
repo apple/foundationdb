@@ -8102,9 +8102,7 @@ public:
 
 	Future<Void> getError() const override { return delayed(m_errorPromise.getFuture() || m_tree->getError()); };
 
-	void clear(KeyRangeRef range,
-	           const StorageServerMetrics* storageMetrics = nullptr,
-	           const Arena* arena = 0) override {
+	void clear(KeyRangeRef range, const Arena* arena = 0) override {
 		debug_printf("CLEAR %s\n", printable(range).c_str());
 		m_tree->clear(range);
 	}

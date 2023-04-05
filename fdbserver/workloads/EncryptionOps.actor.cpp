@@ -119,6 +119,8 @@ struct EncryptionOpsWorkload : TestWorkload {
 	int maxBufSize;
 	std::unique_ptr<uint8_t[]> buff;
 	int enableTTLTest;
+	int minBaseCipherLen;
+	int maxBaseCipherLen;
 
 	std::unique_ptr<WorkloadMetrics> metrics;
 
@@ -142,6 +144,11 @@ struct EncryptionOpsWorkload : TestWorkload {
 		headerBaseCipherId = wcx.clientId * 100 + 1;
 
 		metrics = std::make_unique<WorkloadMetrics>();
+
+		minBaseCipherLen = deterministicRandom()->randomInt(4, 11);
+		maxBaseCipherLen = deterministicRandom()->randomInt(AES_256_KEY_LENGTH, (4 * AES_256_KEY_LENGTH) + 1);
+
+		ASSERT_LT(minBaseCipherLen, maxBaseCipherLen);
 
 		if (wcx.clientId == 0 && mode == 1) {
 			enableTTLTest = true;
@@ -168,9 +175,9 @@ struct EncryptionOpsWorkload : TestWorkload {
 		throw internal_error();
 	}
 
-	static void generateRandomBaseCipher(const int maxLen, uint8_t* buff, int* retLen) {
+	static void generateRandomBaseCipher(const int minLen, const int maxLen, uint8_t* buff, int* retLen) {
 		memset(buff, 0, maxLen);
-		*retLen = deterministicRandom()->randomInt(maxLen / 2, maxLen);
+		*retLen = deterministicRandom()->randomInt(minLen, maxLen);
 		deterministicRandom()->randomBytes(buff, *retLen);
 	}
 
@@ -179,11 +186,12 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 		TraceEvent("SetupCipherEssentialsStart").detail("MinDomainId", minDomainId).detail("MaxDomainId", maxDomainId);
 
-		uint8_t buff[AES_256_KEY_LENGTH];
+		uint8_t buff[maxBaseCipherLen];
 		std::vector<Reference<BlobCipherKey>> cipherKeys;
 		int cipherLen = 0;
 		for (EncryptCipherDomainId id = minDomainId; id <= maxDomainId; id++) {
-			generateRandomBaseCipher(AES_256_KEY_LENGTH, &buff[0], &cipherLen);
+			generateRandomBaseCipher(minBaseCipherLen, maxBaseCipherLen, &buff[0], &cipherLen);
+
 			cipherKeyCache->insertCipherKey(id,
 			                                minBaseCipherId,
 			                                buff,
@@ -191,7 +199,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 			                                std::numeric_limits<int64_t>::max(),
 			                                std::numeric_limits<int64_t>::max());
 
-			ASSERT(cipherLen > 0 && cipherLen <= AES_256_KEY_LENGTH);
+			ASSERT(cipherLen > 0 && cipherLen <= maxBaseCipherLen);
 
 			cipherKeys = cipherKeyCache->getAllCiphers(id);
 			ASSERT_EQ(cipherKeys.size(), 1);
@@ -199,7 +207,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 		// insert the Encrypt Header cipherKey; record cipherDetails as getLatestCipher() may not work with multiple
 		// test clients
-		generateRandomBaseCipher(AES_256_KEY_LENGTH, &buff[0], &cipherLen);
+		generateRandomBaseCipher(minBaseCipherLen, maxBaseCipherLen, &buff[0], &cipherLen);
 		cipherKeyCache->insertCipherKey(ENCRYPT_HEADER_DOMAIN_ID,
 		                                headerBaseCipherId,
 		                                buff,
@@ -241,10 +249,15 @@ struct EncryptionOpsWorkload : TestWorkload {
 		Reference<BlobCipherKey> cipherKey = cipherKeyCache->getLatestCipherKey(encryptDomainId);
 		*nextBaseCipherId = cipherKey->getBaseCipherId() + 1;
 
-		generateRandomBaseCipher(AES_256_KEY_LENGTH, baseCipher, baseCipherLen);
+		generateRandomBaseCipher(minBaseCipherLen, maxBaseCipherLen, baseCipher, baseCipherLen);
 
-		ASSERT(*baseCipherLen > 0 && *baseCipherLen <= AES_256_KEY_LENGTH);
-		TraceEvent("UpdateBaseCipher").detail("DomainId", encryptDomainId).detail("BaseCipherId", *nextBaseCipherId);
+		ASSERT(*baseCipherLen > 0 && *baseCipherLen <= maxBaseCipherLen);
+		TraceEvent("UpdateBaseCipher")
+		    .detail("DomainId", encryptDomainId)
+		    .detail("BaseCipherId", *nextBaseCipherId)
+		    .detail("BaseCipherLen", *baseCipherLen)
+		    .detail("ExistingBaseCipherId", cipherKey->getBaseCipherId())
+		    .detail("ExistingBaseCipherLen", cipherKey->getBaseCipherLen());
 	}
 
 	Reference<BlobCipherKey> getEncryptionKey(const EncryptCipherDomainId& domainId,
@@ -431,7 +444,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 	}
 
 	void testBlobCipherKeyCacheOps() {
-		uint8_t baseCipher[AES_256_KEY_LENGTH];
+		uint8_t baseCipher[maxBaseCipherLen];
 		int baseCipherLen = 0;
 		EncryptCipherBaseKeyId nextBaseCipherId;
 

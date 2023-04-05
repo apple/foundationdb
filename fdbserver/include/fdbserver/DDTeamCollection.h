@@ -168,11 +168,11 @@ public:
 };
 typedef AsyncMap<UID, ServerStatus> ServerStatusMap;
 
-FDB_DECLARE_BOOLEAN_PARAM(IsPrimary);
-FDB_DECLARE_BOOLEAN_PARAM(IsInitialTeam);
-FDB_DECLARE_BOOLEAN_PARAM(IsRedundantTeam);
-FDB_DECLARE_BOOLEAN_PARAM(IsBadTeam);
-FDB_DECLARE_BOOLEAN_PARAM(WaitWiggle);
+FDB_BOOLEAN_PARAM(IsPrimary);
+FDB_BOOLEAN_PARAM(IsInitialTeam);
+FDB_BOOLEAN_PARAM(IsRedundantTeam);
+FDB_BOOLEAN_PARAM(IsBadTeam);
+FDB_BOOLEAN_PARAM(WaitWiggle);
 
 // send request/signal to DDTeamCollection through interface
 // call synchronous method from components outside DDTeamCollection
@@ -279,8 +279,8 @@ protected:
 
 	AsyncVar<Optional<Key>> healthyZone;
 	Future<bool> clearHealthyZoneFuture;
-	double medianAvailableSpace;
-	double lastMedianAvailableSpaceUpdate;
+	double pivotAvailableSpaceRatio;
+	double lastPivotAvailableSpaceUpdate;
 
 	int lowestUtilizationTeam;
 	int highestUtilizationTeam;
@@ -642,6 +642,9 @@ protected:
 	int maxLargeTeamSize() const;
 
 	Reference<TCTeamInfo> buildLargeTeam(int size);
+
+	// get the min available space ratio from every healthy team and update the pivot ratio `pivotAvailableSpaceRatio`
+	void updatePivotAvailableSpaceRatio();
 
 public:
 	Reference<IDDTxnProcessor> db;

@@ -29,6 +29,7 @@
 
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
+#include "flow/CodeProbe.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
@@ -42,6 +43,7 @@
 
 #include "fmt/format.h"
 
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <unordered_map>
@@ -49,12 +51,36 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+#define DEBUG_SIM_KEY_CIPHER DEBUG_ENCRYPT_KEY_CIPHER
+
 using SimEncryptKey = std::string;
 struct SimEncryptKeyCtx {
+	static const int minCipherLen = 4;
+	static const int maxCipherLen = 256;
+
 	EncryptCipherBaseKeyId id;
 	SimEncryptKey key;
+	int keyLen;
 
-	explicit SimEncryptKeyCtx(EncryptCipherBaseKeyId kId, const char* data) : id(kId), key(data, AES_256_KEY_LENGTH) {}
+	explicit SimEncryptKeyCtx(EncryptCipherBaseKeyId kId, const char* data, const int dataLen)
+	  : id(kId), key(data, dataLen), keyLen(dataLen) {
+		if (DEBUG_SIM_KEY_CIPHER) {
+			TraceEvent(SevDebug, "SimKmsKeyCtxInit").detail("BaseCipherId", kId).detail("BaseCipherLen", dataLen);
+		}
+	}
+
+	static int getKeyLen(const EncryptCipherBaseKeyId id) {
+		ASSERT_GT(id, INVALID_ENCRYPT_CIPHER_KEY_ID);
+
+		int ret = AES_256_KEY_LENGTH;
+		if ((id % 2) == 0) {
+			ret += (id % AES_256_KEY_LENGTH);
+		}
+		CODE_PROBE(ret == AES_256_KEY_LENGTH, "BaseCipherKeyLen AES_256_KEY_LENGTH");
+		CODE_PROBE(ret != AES_256_KEY_LENGTH, "BaseCipherKeyLen variable length");
+
+		return ret;
+	}
 };
 
 // The credentials may be allowed to change, but the storage locations and partitioning cannot change, even across
@@ -71,14 +97,26 @@ struct SimKmsConnectorContext : NonCopyable, ReferenceCounted<SimKmsConnectorCon
 		// Construct encryption keyStore.
 		// Note the keys generated must be the same after restart.
 		for (int i = 1; i <= maxEncryptionKeys; i++) {
+			const int keyLen = SimEncryptKeyCtx::getKeyLen(i);
+			uint8_t key[keyLen];
 			uint8_t digest[AUTH_TOKEN_HMAC_SHA_SIZE];
+
+			// TODO: Allow baseCipherKeyLen < AES_256_KEY_LENGTH
+			ASSERT_EQ(AES_256_KEY_LENGTH, AUTH_TOKEN_HMAC_SHA_SIZE);
 			computeAuthToken({ { reinterpret_cast<const uint8_t*>(&i), sizeof(i) } },
 			                 SHA_KEY,
 			                 AES_256_KEY_LENGTH,
 			                 &digest[0],
 			                 EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
 			                 AUTH_TOKEN_HMAC_SHA_SIZE);
-			simEncryptKeyStore[i] = std::make_unique<SimEncryptKeyCtx>(i, reinterpret_cast<const char*>(&digest[0]));
+			memcpy(&key[0], &digest[0], std::min(keyLen, AUTH_TOKEN_HMAC_SHA_SIZE));
+			// Simulate variable length 'baseCipher' returned by external KMS
+			if (keyLen > AUTH_TOKEN_HMAC_SHA_SIZE) {
+				// pad it with known value
+				memset(&key[AUTH_TOKEN_HMAC_SHA_SIZE], 'b', (keyLen - AUTH_TOKEN_HMAC_SHA_SIZE));
+			}
+			simEncryptKeyStore[i] =
+			    std::make_unique<SimEncryptKeyCtx>(i, reinterpret_cast<const char*>(&key[0]), keyLen);
 		}
 	}
 };
@@ -134,6 +172,14 @@ ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
 				dbgKIdTrace.get().detail(
 				    getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_RESULT_PREFIX, item.domainId.get(), itr->first), "");
 			}
+
+			if (DEBUG_SIM_KEY_CIPHER) {
+				TraceEvent("SimKmsEKLookupByKeyId")
+				    .detail("DomId", item.domainId.get())
+				    .detail("BaseCipherId", item.baseCipherId)
+				    .detail("BaseCipherLen", itr->second->keyLen)
+				    .detail("BaseCipherKeyLen", itr->second->keyLen);
+			}
 		} else {
 			TraceEvent("SimKmsEKLookupByIdsKeyNotFound")
 			    .detail("DomId", item.domainId)
@@ -185,6 +231,14 @@ ACTOR Future<Void> ekLookupByDomainIds(Reference<SimKmsConnectorContext> ctx,
 				// {encryptId, baseCipherId} forms a unique tuple across encryption domains
 				dbgDIdTrace.get().detail(getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_RESULT_PREFIX, domainId, keyId), "");
 			}
+			if (DEBUG_SIM_KEY_CIPHER) {
+				TraceEvent("SimKmsEKLookupByDomainId")
+				    .detail("DomId", domainId)
+				    .detail("BaseCipherId", itr->second->id)
+				    .detail("BaseCipherLen", itr->second->keyLen)
+				    .detail("BaseCipherKeyLen", itr->second->keyLen);
+			}
+
 		} else {
 			TraceEvent("SimKmsEKLookupByDomainIdKeyNotFound").detail("DomId", domainId);
 			success = false;
@@ -294,9 +348,10 @@ ACTOR Future<Void> testRunWorkload(KmsConnectorInterface inf, uint32_t nEncrypti
 		}
 		KmsConnLookupEKsByDomainIdsRep domainIdsRep = wait(inf.ekLookupByDomainIds.getReply(domainIdsReq));
 		for (auto& element : domainIdsRep.cipherKeyDetails) {
-			domainIdKeyMap.emplace(
-			    element.encryptDomainId,
-			    std::make_unique<SimEncryptKeyCtx>(element.encryptKeyId, element.encryptKey.toString().c_str()));
+			domainIdKeyMap.emplace(element.encryptDomainId,
+			                       std::make_unique<SimEncryptKeyCtx>(element.encryptKeyId,
+			                                                          element.encryptKey.toString().c_str(),
+			                                                          element.encryptKey.size()));
 		}
 
 		// randomly pick any domainId and validate if lookupByKeyId result matches
