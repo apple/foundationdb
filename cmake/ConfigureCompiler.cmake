@@ -314,12 +314,16 @@ else()
   # for more information.
   #add_compile_options(-fno-builtin-memcpy)
 
-<<<<<<< HEAD
-  if (CLANG OR ICX)
-    add_compile_options()
-    if (APPLE OR USE_LIBCXX)
-      add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
-      if (NOT APPLE)
+  if (USE_LIBCXX)
+    # Make sure that libc++ can be found be the platform's loader, so that thing's like cmake's "try_run" work.
+    find_library(LIBCXX_SO_PATH c++ /usr/local/lib)
+    if (LIBCXX_SO_PATH)
+      get_filename_component(LIBCXX_SO_DIR ${LIBCXX_SO_PATH} DIRECTORY)
+      if (APPLE)
+        set(ENV{DYLD_LIBRARY_PATH} "$ENV{DYLD_LIBRARY_PATH}:${LIBCXX_SO_DIR}")
+      else()
+        # NOT APPLE
+        set(ENV{LD_LIBRARY_PATH} "$ENV{LD_LIBRARY_PATH}:${LIBCXX_SO_DIR}")
         if (STATIC_LINK_LIBCXX)
           add_link_options(
             $<${is_cxx_link}:-static-libgcc>
@@ -335,17 +339,6 @@ else()
           $<${is_cxx_link}:-stdlib=libc++>
           "$<${is_cxx_link}:-Wl,-build-id=sha1>"
         )
-=======
-  if (USE_LIBCXX)
-    # Make sure that libc++ can be found be the platform's loader, so that thing's like cmake's "try_run" work.
-    find_library(LIBCXX_SO_PATH c++ /usr/local/lib)
-    if (LIBCXX_SO_PATH)
-      get_filename_component(LIBCXX_SO_DIR ${LIBCXX_SO_PATH} DIRECTORY)
-      if (APPLE)
-        set(ENV{DYLD_LIBRARY_PATH} "$ENV{DYLD_LIBRARY_PATH}:${LIBCXX_SO_DIR}")
-      else()
-        set(ENV{LD_LIBRARY_PATH} "$ENV{LD_LIBRARY_PATH}:${LIBCXX_SO_DIR}")
->>>>>>> 1d6908d3b
       endif()
     endif()
   endif()
@@ -371,23 +364,6 @@ else()
       add_compile_options($<${is_cxx_compile}:-Wno-unknown-attributes>)
     endif()
     add_compile_options(
-<<<<<<< HEAD
-      $<${is_cxx_compile}:-Wall>
-      $<${is_cxx_compile}:-Wextra>
-      $<${is_cxx_compile}:-Wredundant-move>
-      $<${is_cxx_compile}:-Wpessimizing-move>
-      $<${is_cxx_compile}:-Woverloaded-virtual>
-      $<${is_cxx_compile}:-Wshift-sign-overflow>
-    )
-
-    # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 11
-    add_compile_options(
-      $<${is_cxx_compile}:-Wno-sign-compare>
-      $<${is_cxx_compile}:-Wno-undefined-var-template>
-      $<${is_cxx_compile}:-Wno-unknown-warning-option>
-      $<${is_cxx_compile}:-Wno-unused-parameter>
-      $<${is_cxx_compile}:-Wno-constant-logical-operand>
-=======
       -Wall
       -Wextra
       -Wredundant-move
@@ -410,7 +386,6 @@ else()
       -Wno-unused-command-line-argument
       # Disable C++ 20 warning for ambiguous operator.
       -Wno-ambiguous-reversed-operator
->>>>>>> 1d6908d3b
       )
     # These need to be disabled for FDB's RocksDB storage server implementation
     add_compile_options(

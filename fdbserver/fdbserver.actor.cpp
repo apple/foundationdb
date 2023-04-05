@@ -2065,14 +2065,11 @@ int main(int argc, char* argv[]) {
 			// startOldSimulator();
 			opts.buildNetwork(argv[0]);
 			startNewSimulator(opts.printSimTime);
-<<<<<<< HEAD
+
 			printf("[c++][sim2:%p][%s:%d](%s) USING SIMULATOR! g_network = %p\n", g_network, __FILE_NAME__, __LINE__, __FUNCTION__, g_network);
 			installSwiftConcurrencyHooks(role == ServerRole::Simulation, g_network);
 
-			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
-=======
 			openTraceFile({}, opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
->>>>>>> 1d6908d3b
 			openTracer(TracerType(deterministicRandom()->randomInt(static_cast<int>(TracerType::DISABLED),
 			                                                       static_cast<int>(TracerType::SIM_END))));
 		} else {

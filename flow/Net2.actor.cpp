@@ -122,17 +122,6 @@ class Connection;
 // Outlives main
 Net2* g_net2 = nullptr;
 
-<<<<<<< HEAD
-template <class T>
-class ReadyQueue : public std::priority_queue<T, std::vector<T>> {
-public:
-	typedef typename std::priority_queue<T, std::vector<T>>::size_type size_type;
-	ReadyQueue(size_type capacity = 0) { reserve(capacity); };
-	void reserve(size_type capacity) { this->c.reserve(capacity); }
-};
-
-=======
->>>>>>> 1d6908d3b
 thread_local INetwork* thread_network = 0;
 
 class Net2 final : public INetwork, public INetworkConnections {
@@ -270,17 +259,18 @@ public:
 
 	NetworkMetrics::PriorityStats* lastPriorityStats;
 
-<<<<<<< HEAD
 	ReadyQueue<OrderedTask> ready;
 	ThreadSafeQueue<OrderedTask> threadReady; // "thread-safe ready", they get flushed into the ready queue
 
-	// TODO: Bridge the scheduled task from Swift into DelayedTask
-	struct DelayedTask : OrderedTask {
-		double at;
-		DelayedTask(double at, int64_t priority, TaskPriority taskID, Task* task)
-		  : OrderedTask(priority, taskID, task), at(at) {}
-		bool operator<(DelayedTask const& rhs) const { return at > rhs.at; } // Ordering is reversed for priority_queue
-=======
+	// // TODO: Bridge the scheduled task from Swift into DelayedTask
+	// // FIXME(swift): not used anymore?
+	// struct DelayedTask : OrderedTask {
+	// 	double at;
+	// 	DelayedTask(double at, int64_t priority, TaskPriority taskID, Task* task)
+	// 	  : OrderedTask(priority, taskID, task), at(at) {}
+	// 	bool operator<(DelayedTask const& rhs) const { return at > rhs.at; } // Ordering is reversed for priority_queue
+	// };
+
 	struct PromiseTask final : public FastAllocated<PromiseTask> {
 		Promise<Void> promise;
 		PromiseTask() {}
@@ -290,7 +280,6 @@ public:
 			promise.send(Void());
 			delete this;
 		}
->>>>>>> 1d6908d3b
 	};
 
 	TaskQueue<PromiseTask> taskQueue;
@@ -1488,20 +1477,7 @@ void Net2::run() {
 		}
 
 		double sleepTime = 0;
-<<<<<<< HEAD
-		bool b = ready.empty();
-		if (b) {
-			b = threadReady.canSleep();
-			if (!b) {
-				++countCantSleep;
-			}
-		} else {
-			++countWontSleep;
-		}
-		if (b) {
-=======
 		if (taskQueue.canSleep()) {
->>>>>>> 1d6908d3b
 			sleepTime = 1e99;
 			double sleepStart = timer_monotonic();
 			sleepTime = taskQueue.getSleepTime(sleepStart);

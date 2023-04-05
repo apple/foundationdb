@@ -46,7 +46,6 @@ class FutureStream;
 // These are for intellisense to do proper type inferring, etc. They are no included at build time.
 #ifndef NO_INTELLISENSE
 #define ACTOR
-#define SWIFT_ACTOR
 #define DESCR
 #define state
 #define UNCANCELLABLE

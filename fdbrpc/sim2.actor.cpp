@@ -1003,21 +1003,21 @@ public:
 		swift::Job* swiftJob = (swift::Job*)_swiftJob;
 
 		ISimulator::ProcessInfo* machine = currentProcess;
-		auto taskID = TaskPriority::DefaultDelay; // FIXME(swift): make a conversion
 
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 
-		mutex.enter();
-		auto taskTime = time + 0.01;
-		auto task = Sim2::Task(taskTime, taskID, taskCount++, machine, swiftJob);
-		tasks.push(task);
-		mutex.leave();
+		// mutex.enter();
+		// auto taskTime = time + 0.01;
+		// auto task = Sim2::Task(taskTime, taskID, taskCount++, machine, swiftJob);
+		// tasks.push(task);
+		auto swiftTask = new PromiseTask(machine, swiftJob);
+		taskQueue.addReady(taskID, swiftTask);
+		// mutex.leave();
 	}
 	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine, bool ordered = false) {
 		ASSERT(seconds >= -0.0001);
 
-		if (seconds >= 4e12) // Intervals that overflow an int64_t in microseconds (more than 100,000 years) are treated
-		                     // as infinite
+		if (seconds >= 4e12) // Intervals that overflow an int64_t in microseconds (more than 100,000 years) are treated as infinite
 			return Never();
 
 		PromiseTask* t = new PromiseTask(machine);
@@ -2416,64 +2416,11 @@ public:
 	struct PromiseTask final : public FastAllocated<PromiseTask> {
 		Promise<Void> promise;
 		ProcessInfo* machine;
-<<<<<<< HEAD
-		Promise<Void> action;
     	swift::Job* _Nullable swiftJob = nullptr;
 
-		Task(double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Promise<Void>&& action)
-		  : taskID(taskID), time(time), stable(stable), machine(machine),
-		    action(std::move(action)),
-			swiftJob(nullptr) {
-		}
-
-		// Swift entry point, ignore the action and do inline run of job instead.
-		Task(double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, swift::Job* _Nonnull swiftJob)
-		  : taskID(taskID), time(time), stable(stable), machine(machine),
-		    action(Promise<Void>()),
-			swiftJob(swiftJob) {
-		}
-
-		Task(double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Future<Void>& future)
-		  : taskID(taskID), time(time), stable(stable), machine(machine), swiftJob(nullptr) {
-			future = action.getFuture();
-		}
-		Task(Task&& rhs) noexcept
-		  : taskID(rhs.taskID), time(rhs.time), stable(rhs.stable), machine(rhs.machine),
-		    action(std::move(rhs.action)),
-		    swiftJob(rhs.swiftJob) { // <<<<<<<<< forgot this line
-		}
-		void operator=(Task const& rhs) {
-			taskID = rhs.taskID;
-			time = rhs.time;
-			stable = rhs.stable;
-			machine = rhs.machine;
-			action = rhs.action;
-			swiftJob = rhs.swiftJob;
-		}
-		Task(Task const& rhs)
-		  : taskID(rhs.taskID), time(rhs.time), stable(rhs.stable), machine(rhs.machine),
-		    action(rhs.action),
-		    swiftJob(rhs.swiftJob) {}
-
-		void operator=(Task&& rhs) noexcept {
-			time = rhs.time;
-			taskID = rhs.taskID;
-			stable = rhs.stable;
-			machine = rhs.machine;
-			action = std::move(rhs.action);
-			swiftJob = rhs.swiftJob;
-		}
-
-		bool operator<(Task const& rhs) const {
-			// Ordering is reversed for priority_queue
-			if (time != rhs.time)
-				return time > rhs.time;
-			return stable > rhs.stable;
-		}
-=======
-		explicit PromiseTask(ProcessInfo* machine) : machine(machine) {}
-		PromiseTask(ProcessInfo* machine, Promise<Void>&& promise) : machine(machine), promise(std::move(promise)) {}
->>>>>>> 1d6908d3b
+		explicit PromiseTask(ProcessInfo* machine) : machine(machine), swiftJob(nullptr) {}
+		explicit PromiseTask(ProcessInfo* machine, swift:Job* swiftJob) : machine(machine), swiftJob(swiftJob) {}
+		PromiseTask(ProcessInfo* machine, Promise<Void>&& promise) : machine(machine), promise(std::move(promise)), swiftJob(nullptr) {}
 	};
 
 	void execTask(struct PromiseTask& t) {
@@ -2482,15 +2429,11 @@ public:
 		} else {
 			this->currentProcess = t.machine;
 			try {
-<<<<<<< HEAD
 				if (t.swiftJob) {
 					swift_job_run(t.swiftJob, ExecutorRef::generic());
 				} else {
 					t.action.send(Void());
 				}
-=======
-				t.promise.send(Void());
->>>>>>> 1d6908d3b
 				ASSERT(this->currentProcess == t.machine);
 			} catch (Error& e) {
 				TraceEvent(SevError, "UnhandledSimulationEventError").errorUnsuppressed(e);
@@ -2511,15 +2454,9 @@ public:
 		// or a thread created with g_network->startThread
 		ASSERT(getCurrentProcess());
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
-<<<<<<< HEAD
-	    auto task = Task(time, taskID, taskCount++, getCurrentProcess(), std::move(signal));
-		tasks.push(task);
-		mutex.leave();
-=======
 
 		PromiseTask* p = new PromiseTask(getCurrentProcess(), std::move(signal));
 		taskQueue.addReadyThreadSafe(isOnMainThread(), taskID, p);
->>>>>>> 1d6908d3b
 	}
 	bool isOnMainThread() const override { return net2->isOnMainThread(); }
 	Future<Void> onProcess(ISimulator::ProcessInfo* process, TaskPriority taskID) override {

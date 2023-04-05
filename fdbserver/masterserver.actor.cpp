@@ -38,18 +38,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-<<<<<<< HEAD
-SWIFT_ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
-  auto future = self->swiftImpl->getVersion(self.getPtr(), req);
-  wait(future);
-  return Void();
-}
-
-SWIFT_ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-	auto future = self->swiftImpl->waitForPrev(self.getPtr(), req);
-	wait(future);
-=======
-// Instantiate MasterInterface related tempates
+// Instantiate MasterInterface related templates
 template class ReplyPromise<MasterInterface>;
 template struct NetSAV<MasterInterface>;
 
@@ -166,7 +155,14 @@ Version figureVersion(Version current,
 	return std::clamp(expected, current + toAdd - maxOffset, current + toAdd + maxOffset);
 }
 
+
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
+  auto future = self->swiftImpl->getVersion(self.getPtr(), req);
+  wait(future);
+  return Void();
+}
+
+ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionRequest req) {
 	state Span span("M:getVersion"_loc, req.spanContext);
 	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
 	    self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes
@@ -343,7 +339,7 @@ ACTOR Future<Void> provideVersionsCxx(Reference<MasterData> self) {
 	}
 }
 
-SWIFT_ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
+ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	auto future = self->swiftImpl->provideVersions(self.getPtr());
 	wait(future);
 	return Void();
@@ -379,13 +375,13 @@ void updateLiveCommittedVersion(MasterData & self, ReportRawCommittedVersionRequ
 }
 #endif
 
-SWIFT_ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
+ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 	auto future = self->swiftImpl->serveLiveCommittedVersion(self.getPtr());
 	wait(future);
 	return Void();
 }
 
-SWIFT_ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
+ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 	auto future = self->swiftImpl->serveUpdateRecoveryData(self.getPtr());
 	wait(future);
 	return Void();
@@ -412,7 +408,7 @@ static std::set<int> const& normalMasterErrors() {
 	return s;
 }
 
-SWIFT_ACTOR Future<Void> masterServer(MasterInterface mi,
+ACTOR Future<Void> masterServer(MasterInterface mi,
 									  Reference<AsyncVar<ServerDBInfo> const> db,
  									  Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
  									  ServerCoordinators coordinators,
@@ -437,9 +433,6 @@ SWIFT_ACTOR Future<Void> masterServer(MasterInterface mi,
 	state Reference<MasterData> self(new MasterData(
 	    db, mi, coordinators, db->get().clusterInterface, LiteralStringRef(""), addActor, forceRecovery));
 
-	// === ------
-
-	// state fdbserver_swift::MasterDataActor *swiftActor = self->swiftImpl.get();
 	auto promise = Promise<Void>();
 	fdbserver_swift::masterServerSwift(
 	    mi,
