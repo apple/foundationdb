@@ -262,15 +262,6 @@ public:
 	ReadyQueue<OrderedTask> ready;
 	ThreadSafeQueue<OrderedTask> threadReady; // "thread-safe ready", they get flushed into the ready queue
 
-	// // TODO: Bridge the scheduled task from Swift into DelayedTask
-	// // FIXME(swift): not used anymore?
-	// struct DelayedTask : OrderedTask {
-	// 	double at;
-	// 	DelayedTask(double at, int64_t priority, TaskPriority taskID, Task* task)
-	// 	  : OrderedTask(priority, taskID, task), at(at) {}
-	// 	bool operator<(DelayedTask const& rhs) const { return at > rhs.at; } // Ordering is reversed for priority_queue
-	// };
-
 	struct PromiseTask final : public FastAllocated<PromiseTask> {
 		Promise<Void> promise;
 		PromiseTask() {}

@@ -155,8 +155,7 @@ Version figureVersion(Version current,
 	return std::clamp(expected, current + toAdd - maxOffset, current + toAdd + maxOffset);
 }
 
-
-ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
+SWIFT_ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
   auto future = self->swiftImpl->getVersion(self.getPtr(), req);
   wait(future);
   return Void();
@@ -339,7 +338,7 @@ ACTOR Future<Void> provideVersionsCxx(Reference<MasterData> self) {
 	}
 }
 
-ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
+SWIFT_ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	auto future = self->swiftImpl->provideVersions(self.getPtr());
 	wait(future);
 	return Void();
@@ -375,13 +374,13 @@ void updateLiveCommittedVersion(MasterData & self, ReportRawCommittedVersionRequ
 }
 #endif
 
-ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
+SWIFT_ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 	auto future = self->swiftImpl->serveLiveCommittedVersion(self.getPtr());
 	wait(future);
 	return Void();
 }
 
-ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
+SWIFT_ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 	auto future = self->swiftImpl->serveUpdateRecoveryData(self.getPtr());
 	wait(future);
 	return Void();
@@ -408,7 +407,7 @@ static std::set<int> const& normalMasterErrors() {
 	return s;
 }
 
-ACTOR Future<Void> masterServer(MasterInterface mi,
+SWIFT_ACTOR Future<Void> masterServer(MasterInterface mi,
 									  Reference<AsyncVar<ServerDBInfo> const> db,
  									  Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
  									  ServerCoordinators coordinators,
