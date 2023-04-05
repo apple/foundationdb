@@ -1,7 +1,7 @@
 # RPM specifics
 if(CPACK_GENERATOR MATCHES "RPM")
   set(CPACK_PACKAGING_INSTALL_PREFIX "/")
-  set(CPACK_COMPONENTS_ALL clients-el8 server-el8 clients-versioned server-versioned)
+  set(CPACK_COMPONENTS_ALL clients-el7 server-el7 clients-versioned server-versioned)
 elseif(CPACK_GENERATOR MATCHES "DEB")
   set(CPACK_PACKAGING_INSTALL_PREFIX "/")
   set(CPACK_COMPONENTS_ALL clients-deb server-deb clients-versioned server-versioned)

@@ -180,9 +180,9 @@ set(WITH_LIBURING OFF CACHE BOOL "Build with liburing enabled") # Set this to ON
 # Clang.
 if (SSD_ROCKSDB_EXPERIMENTAL AND NOT WIN32)
   set(WITH_ROCKSDB_EXPERIMENTAL ON)
-#else()
-#  set(WITH_ROCKSDB_EXPERIMENTAL OFF)
-#endif()
+else()
+  set(WITH_ROCKSDB_EXPERIMENTAL OFF)
+endif()
 
 ################################################################################
 # TOML11

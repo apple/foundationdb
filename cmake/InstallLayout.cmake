@@ -238,10 +238,10 @@ endif()
 # Filenames #
 #############
 set(package_name                   "foundationdb")
-set(clients_package_name           "${package_basename}-clients")
-set(server_package_name            "${package_basename}-server")
-set(clients_versioned_package_name "${package_basename}-${FDB_VERSION}-clients-versioned")
-set(server_versioned_package_name  "${package_basename}-${FDB_VERSION}-server-versioned")
+set(clients_package_name           "${package_name}-clients")
+set(server_package_name            "${package_name}-server")
+set(clients_versioned_package_name "${package_name}-${FDB_VERSION}-clients-versioned")
+set(server_versioned_package_name  "${package_name}-${FDB_VERSION}-server-versioned")
 
 set(FDB_PACKAGE_VERSION ${FDB_VERSION})
 set(package_version_postfix "${not_fdb_release_string}")
@@ -330,7 +330,7 @@ endif()
 set(CPACK_DEBIAN_CLIENTS-DEB_FILE_NAME       "${clients_package_name}_${deb_filename_suffix}")
 set(CPACK_DEBIAN_SERVER-DEB_FILE_NAME        "${server_package_name}_${deb_filename_suffix}")
 set(CPACK_DEBIAN_CLIENTS-VERSIONED_FILE_NAME "${clients_versioned_package_name}_${deb_filename_suffix}")
-set(CPACK_DEBIAN_SERVER-VERSIONED_FILE_NAME  "${server_versioned_package_name}_${deb_filename_suffix})
+set(CPACK_DEBIAN_SERVER-VERSIONED_FILE_NAME  "${server_versioned_package_name}_${deb_filename_suffix}")
 
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_ENABLE_COMPONENT_DEPENDS ON)
